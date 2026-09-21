@@ -100,9 +100,7 @@ pub fn code_from(pending: &Pending, request_line: &str) -> Result<String, Callba
     if state != Some(pending.state.as_str()) {
         return Err(CallbackError::WrongState);
     }
-    code.filter(|c| !c.is_empty())
-        .map(str::to_owned)
-        .ok_or(CallbackError::NoCode)
+    code.filter(|c| !c.is_empty()).map(str::to_owned).ok_or(CallbackError::NoCode)
 }
 
 /// What the browser is left looking at.
@@ -159,10 +157,7 @@ impl Bound {
         std::thread::spawn(move || {
             let _ = sender.send(accept_one(&self.listener, &pending));
         });
-        Loopback {
-            port: self.port,
-            answer: Mutex::new(answer),
-        }
+        Loopback { port: self.port, answer: Mutex::new(answer) }
     }
 }
 
@@ -183,9 +178,7 @@ impl Loopback {
 }
 
 fn accept_one(listener: &TcpListener, pending: &Pending) -> Result<String, CallbackError> {
-    let Ok((mut stream, _)) = listener.accept() else {
-        return Err(CallbackError::NotOurs);
-    };
+    let Ok((mut stream, _)) = listener.accept() else { return Err(CallbackError::NotOurs) };
     let mut line = String::new();
     if BufReader::new(&stream).read_line(&mut line).is_err() {
         return Err(CallbackError::NotOurs);
@@ -269,9 +262,7 @@ impl std::fmt::Display for BrokerError {
             BrokerError::TooManyAttempts => {
                 f.write_str("too many attempts; wait a while and try again")
             }
-            BrokerError::Unreachable(why) => {
-                write!(f, "could not reach the sign-in service: {why}")
-            }
+            BrokerError::Unreachable(why) => write!(f, "could not reach the sign-in service: {why}"),
         }
     }
 }
@@ -323,10 +314,7 @@ mod tests {
         );
         // Order does not matter, and anything else in the query is ignored.
         assert_eq!(
-            code_from(
-                &pending,
-                "GET /return?state=NONCE1&extra=x&code=ABC123 HTTP/1.1"
-            ),
+            code_from(&pending, "GET /return?state=NONCE1&extra=x&code=ABC123 HTTP/1.1"),
             Ok("ABC123".into()),
         );
     }
@@ -342,11 +330,7 @@ mod tests {
             "GET /return?code=ABC123 HTTP/1.1",
             "GET /return?code=ABC123&state= HTTP/1.1",
         ] {
-            assert_eq!(
-                code_from(&pending, hostile),
-                Err(CallbackError::WrongState),
-                "{hostile}"
-            );
+            assert_eq!(code_from(&pending, hostile), Err(CallbackError::WrongState), "{hostile}");
         }
     }
 
@@ -359,11 +343,7 @@ mod tests {
             "GET /return?code=A%26state%3DX&state=NONCE1 HTTP/1.1",
             "GET /%72eturn?code=ABC&state=NONCE1 HTTP/1.1",
         ] {
-            assert_eq!(
-                code_from(&pending, hostile),
-                Err(CallbackError::NotOurs),
-                "{hostile}"
-            );
+            assert_eq!(code_from(&pending, hostile), Err(CallbackError::NotOurs), "{hostile}");
         }
     }
 
@@ -378,29 +358,20 @@ mod tests {
             "POST /return?code=A&state=NONCE1 HTTP/1.1",
             "",
         ] {
-            assert!(
-                code_from(&pending, other).is_err(),
-                "{other:?} was accepted"
-            );
+            assert!(code_from(&pending, other).is_err(), "{other:?} was accepted");
         }
         assert_eq!(
             code_from(&pending, "POST /return?code=A&state=NONCE1 HTTP/1.1"),
             Err(CallbackError::NotOurs),
         );
-        assert_eq!(
-            code_from(&pending, "GET /return HTTP/1.1"),
-            Err(CallbackError::NoCode)
-        );
+        assert_eq!(code_from(&pending, "GET /return HTTP/1.1"), Err(CallbackError::NoCode));
     }
 
     #[test]
     fn the_landing_page_says_which_way_it_went_and_frames_nothing() {
         let good = landing_page(true);
         assert!(good.contains("200 OK") && good.contains("Signed in"));
-        assert!(
-            good.contains("no-referrer"),
-            "the code is in the URL of this very page"
-        );
+        assert!(good.contains("no-referrer"), "the code is in the URL of this very page");
         assert!(landing_page(false).contains("did not complete"));
         // A correct Content-Length, or the browser waits for bytes that never come.
         let body = good.split("\r\n\r\n").nth(1).unwrap();
@@ -421,11 +392,7 @@ mod tests {
         let port = bound.port;
         assert!(port > 0, "the operating system chose nothing");
         let pending = begin("https://accounts.lightcone.example", port, "NONCE1");
-        assert!(
-            pending.open.contains(&format!("%3A{port}%2F")),
-            "{}",
-            pending.open
-        );
+        assert!(pending.open.contains(&format!("%3A{port}%2F")), "{}", pending.open);
 
         let loopback = bound.listen(pending);
         let mut browser = TcpStream::connect(("127.0.0.1", port)).expect("connected");
@@ -436,10 +403,7 @@ mod tests {
         // The browser is left looking at something, rather than at a connection reset.
         let mut said = String::new();
         browser.read_to_string(&mut said).unwrap();
-        assert!(
-            said.contains("200 OK") && said.contains("Signed in"),
-            "{said}"
-        );
+        assert!(said.contains("200 OK") && said.contains("Signed in"), "{said}");
 
         let answer = (0..200)
             .find_map(|_| {

@@ -72,10 +72,7 @@ async fn hear(link: &mut WebSocketLink, what: &str) -> Outbound {
     loop {
         // A ship's account follows its welcome and every order, and none of these tests is
         // about energy.
-        let heard = link
-            .poll()
-            .into_iter()
-            .find(|m| !matches!(m, Outbound::Fitted { .. }));
+        let heard = link.poll().into_iter().find(|m| !matches!(m, Outbound::Fitted { .. }));
         if let Some(message) = heard {
             return message;
         }
@@ -131,23 +128,14 @@ async fn an_order_is_answered_with_what_was_actually_done() {
     }));
 
     let said = hear(&mut link, "an acceptance").await;
-    let Outbound::Accepted {
-        ship_id: whose,
-        at_t,
-        order,
-        event_id,
-    } = said
-    else {
+    let Outbound::Accepted { ship_id: whose, at_t, order, event_id } = said else {
         panic!("an order was not accepted: {said:?}");
     };
     assert_eq!(whose, ship_id);
     assert_eq!(order, Order::Transmit { power_w: 1500.0 });
     assert!(event_id > 0, "an accepted order names no event");
     assert_ne!(at_t, i64::MAX, "the timestamp was taken at face value");
-    assert!(
-        at_t > 0,
-        "clamped to something before the world started: {at_t}"
-    );
+    assert!(at_t > 0, "clamped to something before the world started: {at_t}");
 }
 
 /// And an order that cannot stand comes back refused rather than silently ignored.
@@ -191,20 +179,12 @@ async fn a_crossing_names_a_star_the_server_also_holds() {
     link.send(Inbound::Act(Intent {
         ship_id,
         // More than any craft can pull, so the answer has to differ from the request.
-        order: Order::Cross {
-            star: destination,
-            accel_g: 1000.0,
-            max_beta: 0.999,
-        },
+        order: Order::Cross { star: destination, accel_g: 1000.0, max_beta: 0.999 },
         issued_at_client_t: 0,
     }));
 
     let said = hear(&mut link, "an acceptance").await;
-    let Outbound::Accepted {
-        order: Order::Cross { star, accel_g, .. },
-        ..
-    } = said
-    else {
+    let Outbound::Accepted { order: Order::Cross { star, accel_g, .. }, .. } = said else {
         panic!("a crossing was not accepted: {said:?}");
     };
     assert_eq!(star, destination, "it agreed to a different star");
@@ -226,11 +206,7 @@ async fn a_crossing_to_a_star_the_server_does_not_have_is_refused() {
 
     link.send(Inbound::Act(Intent {
         ship_id,
-        order: Order::Cross {
-            star: 0xdead_beef_dead_beef,
-            accel_g: 1.0,
-            max_beta: 0.999,
-        },
+        order: Order::Cross { star: 0xdead_beef_dead_beef, accel_g: 1.0, max_beta: 0.999 },
         issued_at_client_t: 0,
     }));
 
@@ -249,10 +225,7 @@ async fn the_server_says_what_time_it_is_without_being_asked() {
     let mut link = WebSocketLink::connect(&address);
 
     greet(&mut link, PROTOCOL_VERSION, "").await;
-    assert!(matches!(
-        hear(&mut link, "a welcome").await,
-        Outbound::Welcome { .. }
-    ));
+    assert!(matches!(hear(&mut link, "a welcome").await, Outbound::Welcome { .. }));
 
     // Nothing is sent from here: a clock statement is the server's own doing.
     let deadline = tokio::time::Instant::now() + PATIENCE;
@@ -265,10 +238,7 @@ async fn the_server_says_what_time_it_is_without_being_asked() {
             assert!(now_t > 0, "the clock it stated was {now_t}");
             return;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the server never stated its clock"
-        );
+        assert!(tokio::time::Instant::now() < deadline, "the server never stated its clock");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
@@ -301,22 +271,14 @@ async fn an_order_is_answered_within_a_few_ticks() {
 
     let deadline = tokio::time::Instant::now() + PATIENCE;
     let waited = loop {
-        if link
-            .poll()
-            .into_iter()
-            .any(|m| matches!(m, Outbound::Accepted { .. }))
-        {
+        if link.poll().into_iter().any(|m| matches!(m, Outbound::Accepted { .. })) {
             break sent.elapsed();
         }
         assert!(tokio::time::Instant::now() < deadline, "no answer at all");
         tokio::time::sleep(Duration::from_millis(1)).await;
     };
 
-    println!(
-        "order answered in {:.0} ms ({} ms ticks)",
-        waited.as_secs_f64() * 1e3,
-        TICK_MS
-    );
+    println!("order answered in {:.0} ms ({} ms ticks)", waited.as_secs_f64() * 1e3, TICK_MS);
     assert!(
         waited < Duration::from_millis(TICK_MS as u64 * 8),
         "an order took {:.0} ms, which is a stall and not a tick",

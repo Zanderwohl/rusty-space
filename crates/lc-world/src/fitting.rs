@@ -33,12 +33,7 @@ pub enum Module {
 }
 
 impl Module {
-    pub const ALL: [Module; 4] = [
-        Module::Storage,
-        Module::Drone,
-        Module::Living,
-        Module::Engine,
-    ];
+    pub const ALL: [Module; 4] = [Module::Storage, Module::Drone, Module::Living, Module::Engine];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -62,13 +57,7 @@ pub struct Loadout {
 
 impl Loadout {
     /// What a new ship is given, and what a ship saved before fittings existed comes back as.
-    pub const STARTING: Self = Self {
-        storage: 6,
-        drones: 2,
-        living: 2,
-        engines: 5,
-        slots: 20,
-    };
+    pub const STARTING: Self = Self { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 };
 
     pub fn count(&self, module: Module) -> u32 {
         match module {
@@ -156,7 +145,9 @@ impl Balance {
         // over what real starlight on the broadside of a 500 m hull would give.
         let wanted_w = storage_per_module * start.storage as f64 * module_kg * C2 / SOLAR_ANCHOR_S
             + start.living as f64 * living_drain_w;
-        let broadside_m2 = std::f64::consts::PI * 250.0 * (250.0 * crate::craft::BEAM_PER_LENGTH);
+        let broadside_m2 = std::f64::consts::PI
+            * 250.0
+            * (250.0 * crate::craft::BEAM_PER_LENGTH);
         let flux = crate::solar::SOLAR_CONSTANT_W_M2 / (SOLAR_ANCHOR_AU * SOLAR_ANCHOR_AU);
         Self {
             drive_efficiency: 1.0,
@@ -292,10 +283,7 @@ impl Fitting {
     /// Put an account back. A refit whose recipe no longer plans is dropped, which leaves the
     /// ship as the account says it was when the refit began.
     pub fn from_account(account: &Account, balance: Balance) -> Self {
-        let refit = account
-            .refit
-            .as_ref()
-            .and_then(|order| order.solve(&balance).ok());
+        let refit = account.refit.as_ref().and_then(|order| order.solve(&balance).ok());
         Self {
             loadout: account.loadout,
             balance,
@@ -392,10 +380,7 @@ impl Fitting {
         let (dry, in_hand) = match &self.refit {
             Some(refit) => {
                 let progress = refit.at(now_s);
-                (
-                    self.balance.dry_mass_kg(&progress.loadout),
-                    progress.in_hand_kg,
-                )
+                (self.balance.dry_mass_kg(&progress.loadout), progress.in_hand_kg)
             }
             None => (self.balance.dry_mass_kg(&self.loadout), 0.0),
         };
@@ -404,8 +389,7 @@ impl Fitting {
 
     /// The acceleration this ship's engines give it now, in g.
     pub fn rated_g_at(&self, motion: &ShipState, now_s: f64) -> f64 {
-        self.balance
-            .accel_g(&self.loadout_at(now_s), self.mass_kg_at(motion, now_s))
+        self.balance.accel_g(&self.loadout_at(now_s), self.mass_kg_at(motion, now_s))
     }
 
     /// Fold everything up to `now_s` into the settled terms, reading the burn off `motion` —
@@ -436,11 +420,7 @@ impl Fitting {
         self.rapidity_since = cost::lit_rapidity(motion, now_s);
         let remaining = cost::planned_rapidity(motion) - self.rapidity_since;
         self.committed_j = if remaining > 0.0 {
-            cost::energy_j(
-                self.settled_mass_kg(),
-                remaining,
-                self.balance.drive_efficiency,
-            )
+            cost::energy_j(self.settled_mass_kg(), remaining, self.balance.drive_efficiency)
         } else {
             0.0
         };
@@ -449,11 +429,7 @@ impl Fitting {
 
     /// Spend a change of rapidity at once, as a burn does. Settle first.
     pub fn spend(&mut self, rapidity: f64) {
-        let cost = cost::energy_j(
-            self.settled_mass_kg(),
-            rapidity,
-            self.balance.drive_efficiency,
-        );
+        let cost = cost::energy_j(self.settled_mass_kg(), rapidity, self.balance.drive_efficiency);
         self.stored_j = (self.stored_j - cost).max(0.0);
     }
 
@@ -470,9 +446,7 @@ impl Fitting {
 
     /// Stop a refit where it is. Settle first. The step in progress is reversed.
     pub fn cancel_refit(&mut self, now_s: f64) {
-        let Some(refit) = self.refit.take() else {
-            return;
-        };
+        let Some(refit) = self.refit.take() else { return };
         let progress = refit.at(now_s);
         self.loadout = progress.loadout;
         self.stored_j = (self.stored_j + progress.reversal_j).max(0.0);
@@ -481,25 +455,13 @@ impl Fitting {
 
 impl From<lc_proto::Loadout> for Loadout {
     fn from(l: lc_proto::Loadout) -> Self {
-        Self {
-            storage: l.storage,
-            drones: l.drones,
-            living: l.living,
-            engines: l.engines,
-            slots: l.slots,
-        }
+        Self { storage: l.storage, drones: l.drones, living: l.living, engines: l.engines, slots: l.slots }
     }
 }
 
 impl From<Loadout> for lc_proto::Loadout {
     fn from(l: Loadout) -> Self {
-        Self {
-            storage: l.storage,
-            drones: l.drones,
-            living: l.living,
-            engines: l.engines,
-            slots: l.slots,
-        }
+        Self { storage: l.storage, drones: l.drones, living: l.living, engines: l.engines, slots: l.slots }
     }
 }
 
@@ -613,11 +575,7 @@ mod tests {
     #[test]
     fn the_reference_hull_is_exactly_twenty_slots_and_five_hundred_meters() {
         let b = Balance::DEFAULT;
-        assert!(
-            (b.length_m(20) - 500.0).abs() < 1.0e-9,
-            "{}",
-            b.length_m(20)
-        );
+        assert!((b.length_m(20) - 500.0).abs() < 1.0e-9, "{}", b.length_m(20));
         let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
         craft.length_m = b.length_m(20);
         assert!((craft.volume_m3() / b.slot_volume_m3 - 20.0).abs() < 1.0e-9);
@@ -652,10 +610,7 @@ mod tests {
         let b = Balance::DEFAULT;
         let mass = full.mass_kg_at(&motion, 0.0);
         let expected = b.dry_mass_kg(&Loadout::STARTING) + 30.0 * b.module_mass_kg();
-        assert!(
-            (mass / expected - 1.0).abs() < 1.0e-12,
-            "{mass} vs {expected}"
-        );
+        assert!((mass / expected - 1.0).abs() < 1.0e-12, "{mass} vs {expected}");
     }
 
     #[test]
@@ -683,18 +638,13 @@ mod tests {
         fitting.settle(&motion, 20.0);
         let order = crate::refit::Order {
             from: fitting.loadout,
-            target: Loadout {
-                engines: 6,
-                ..Loadout::STARTING
-            },
+            target: Loadout { engines: 6, ..Loadout::STARTING },
             stored_j: fitting.stored_j_at(&motion, 20.0),
             start_s: 20.0,
         };
         fitting.begin_refit(order.solve(&b).unwrap());
         let wire = lc_proto::Fitting::from(&fitting);
-        let back = Fitting::from(
-            &lc_proto::decode::<lc_proto::Fitting>(&lc_proto::encode(&wire)).unwrap(),
-        );
+        let back = Fitting::from(&lc_proto::decode::<lc_proto::Fitting>(&lc_proto::encode(&wire)).unwrap());
         assert_eq!(back, fitting);
     }
 
@@ -704,9 +654,6 @@ mod tests {
         let motion = ShipState::at(DVec3::ZERO);
         let mut fitting = Fitting::full(Loadout::STARTING, b, 0.0);
         fitting.grant(1.0e30);
-        assert_eq!(
-            fitting.stored_j_at(&motion, 0.0),
-            b.capacity_j(&Loadout::STARTING)
-        );
+        assert_eq!(fitting.stored_j_at(&motion, 0.0), b.capacity_j(&Loadout::STARTING));
     }
 }

@@ -86,15 +86,7 @@ pub fn velocity_from_frame(u: DVec3, beta: DVec3) -> DVec3 {
 /// unchanged across it. The inverse of the contraction, because the world is the frame doing
 /// the contracting.
 pub fn separation_in_frame(separation: DVec3, beta: DVec3) -> f64 {
-    to_frame(
-        Event {
-            t: 0.0,
-            x: separation,
-        },
-        beta,
-    )
-    .x
-    .length()
+    to_frame(Event { t: 0.0, x: separation }, beta).x.length()
 }
 
 /// A displacement measured in the moving frame, as the world measures it at one world instant.
@@ -132,35 +124,18 @@ mod tests {
     /// The round trip, which is the identity everything else here leans on.
     #[test]
     fn a_boost_and_its_inverse_are_the_identity() {
-        for beta in [
-            DVec3::ZERO,
-            FAST,
-            DVec3::new(-0.4, 0.5, 0.3),
-            DVec3::new(0.0, 0.0, 0.99),
-        ] {
+        for beta in [DVec3::ZERO, FAST, DVec3::new(-0.4, 0.5, 0.3), DVec3::new(0.0, 0.0, 0.99)] {
             for event in [
-                Event {
-                    t: 0.0,
-                    x: DVec3::ZERO,
-                },
-                Event {
-                    t: 1_000.0,
-                    x: DVec3::new(3.0, -4.0, 5.0),
-                },
-                Event {
-                    t: -7.5e6,
-                    x: DVec3::new(1.0e7, 2.0e6, -3.0e6),
-                },
+                Event { t: 0.0, x: DVec3::ZERO },
+                Event { t: 1_000.0, x: DVec3::new(3.0, -4.0, 5.0) },
+                Event { t: -7.5e6, x: DVec3::new(1.0e7, 2.0e6, -3.0e6) },
             ] {
                 let there_and_back = from_frame(to_frame(event, beta), beta);
                 assert!(
                     (there_and_back.t - event.t).abs() <= 1.0e-9 * event.t.abs().max(1.0),
                     "{beta} took {event:?} to {there_and_back:?}",
                 );
-                assert!(
-                    close(there_and_back.x, event.x, 1.0e-9),
-                    "{beta}: {there_and_back:?}"
-                );
+                assert!(close(there_and_back.x, event.x, 1.0e-9), "{beta}: {there_and_back:?}");
             }
         }
     }
@@ -169,18 +144,12 @@ mod tests {
     /// boost rather than some other linear map that happens to invert.
     #[test]
     fn the_interval_survives() {
-        let event = Event {
-            t: 500.0,
-            x: DVec3::new(120.0, -80.0, 30.0),
-        };
+        let event = Event { t: 500.0, x: DVec3::new(120.0, -80.0, 30.0) };
         let interval = |e: Event| e.t * e.t - e.x.length_squared();
         for beta in [FAST, DVec3::new(0.1, -0.7, 0.2), DVec3::new(0.0, 0.95, 0.0)] {
             let moved = to_frame(event, beta);
             let (before, after) = (interval(event), interval(moved));
-            assert!(
-                (after - before).abs() < 1.0e-6 * before.abs(),
-                "{beta}: {before} to {after}"
-            );
+            assert!((after - before).abs() < 1.0e-6 * before.abs(), "{beta}: {before} to {after}");
         }
     }
 
@@ -203,11 +172,7 @@ mod tests {
         let relative = velocity_to_frame(other, fast);
         assert!(relative.length() < 1.0, "composed to {}", relative.length());
         // The textbook answer for this pair.
-        assert!(
-            (relative.length() - (1.8 / 1.81)).abs() < 1.0e-12,
-            "{}",
-            relative.length()
-        );
+        assert!((relative.length() - (1.8 / 1.81)).abs() < 1.0e-12, "{}", relative.length());
 
         for beta in [0.5, 0.9, 0.99, 0.999] {
             for u in [0.5, 0.9, 0.99, 0.999] {
@@ -225,15 +190,9 @@ mod tests {
         // length alone; the others must actually move.
         for direction in [DVec3::Y, DVec3::new(0.6, 0.8, 0.0), -DVec3::X] {
             let seen = velocity_to_frame(direction, FAST);
-            assert!(
-                (seen.length() - 1.0).abs() < 1.0e-12,
-                "{direction} became {seen}"
-            );
+            assert!((seen.length() - 1.0).abs() < 1.0e-12, "{direction} became {seen}");
             if direction.cross(FAST).length() > 0.0 {
-                assert!(
-                    seen.angle_between(direction) > 0.1,
-                    "{direction} barely swung"
-                );
+                assert!(seen.angle_between(direction) > 0.1, "{direction} barely swung");
             }
         }
     }
@@ -242,16 +201,8 @@ mod tests {
     #[test]
     fn a_velocity_and_its_inverse_are_the_identity() {
         for beta in [FAST, DVec3::new(-0.2, 0.9, 0.1)] {
-            for u in [
-                DVec3::ZERO,
-                DVec3::new(0.3, -0.4, 0.1),
-                DVec3::new(0.0, 0.0, -0.8),
-            ] {
-                assert!(close(
-                    velocity_from_frame(velocity_to_frame(u, beta), beta),
-                    u,
-                    1.0e-9
-                ));
+            for u in [DVec3::ZERO, DVec3::new(0.3, -0.4, 0.1), DVec3::new(0.0, 0.0, -0.8)] {
+                assert!(close(velocity_from_frame(velocity_to_frame(u, beta), beta), u, 1.0e-9));
             }
         }
     }
@@ -273,18 +224,12 @@ mod tests {
     /// same map as the honest round trip and not merely close to it.
     #[test]
     fn a_separation_goes_into_a_frame_and_back_out() {
-        for beta in [
-            DVec3::ZERO,
-            FAST,
-            DVec3::new(-0.3, 0.6, 0.5),
-            DVec3::new(0.0, 0.0, 0.999),
-        ] {
-            for gap in [
-                DVec3::X * 100.0,
-                DVec3::new(3.0, -4.0, 12.0),
-                DVec3::Y * 1.0e-5,
-            ] {
-                let out = separation_in_world(to_frame(Event { t: 0.0, x: gap }, beta).x, beta);
+        for beta in [DVec3::ZERO, FAST, DVec3::new(-0.3, 0.6, 0.5), DVec3::new(0.0, 0.0, 0.999)] {
+            for gap in [DVec3::X * 100.0, DVec3::new(3.0, -4.0, 12.0), DVec3::Y * 1.0e-5] {
+                let out = separation_in_world(
+                    to_frame(Event { t: 0.0, x: gap }, beta).x,
+                    beta,
+                );
                 assert!(close(out, gap, 1.0e-12), "{beta} took {gap} to {out}");
             }
         }
@@ -307,11 +252,7 @@ mod tests {
         let slow = DVec3::new(1.0e-5, -2.0e-6, 0.0);
         let u = DVec3::new(3.0e-6, 1.0e-6, -4.0e-7);
         let relative = velocity_to_frame(u, slow);
-        assert!(
-            close(relative, u - slow, 1.0e-8),
-            "{relative} against {}",
-            u - slow
-        );
+        assert!(close(relative, u - slow, 1.0e-8), "{relative} against {}", u - slow);
         let gap = separation_in_frame(DVec3::X * 1.0e4, slow);
         assert!((gap - 1.0e4).abs() < 1.0e-4, "{gap}");
     }

@@ -75,11 +75,7 @@ pub fn pursuit(
     pursuit: lc_proto::Pursuit,
     quarry: Option<&crate::uplink::Contact>,
 ) -> String {
-    let doing = match session
-        .ship
-        .motion
-        .still_closing(session.coordinate_time_s())
-    {
+    let doing = match session.ship.motion.still_closing(session.coordinate_time_s()) {
         true => "closing on",
         false => "alongside",
     };
@@ -93,11 +89,7 @@ pub fn pursuit(
     let centers_m =
         session.ship.motion.position_ly.distance(quarry.position_ly) * crate::system::M_PER_LY;
     let clear_m = (centers_m - 0.5 * (session.ship.length_m + quarry.length_m)).max(0.0);
-    format!(
-        "{doing} {} — {} between hulls — {how}",
-        quarry.name,
-        near(clear_m)
-    )
+    format!("{doing} {} — {} between hulls — {how}", quarry.name, near(clear_m))
 }
 
 /// A short distance, finely enough to see a kilometer-and-a-quarter wander.
@@ -110,10 +102,7 @@ fn near(meters: f64) -> String {
 }
 
 pub fn lines(session: &Session, ui: &UiState) -> Hud {
-    let name = presets::all()
-        .get(ui.preset)
-        .map(|(n, _)| *n)
-        .unwrap_or("custom");
+    let name = presets::all().get(ui.preset).map(|(n, _)| *n).unwrap_or("custom");
     Hud {
         clock: format!("T + {:.2} years", session.coordinate_time_s() / YEAR_S),
         ship_clock: format!("T' + {:.2} years", session.ship.motion.clock_s / YEAR_S),
@@ -155,10 +144,7 @@ fn energy(session: &Session) -> Option<Energy> {
     let ship = &session.ship;
     let fitting = ship.fitting()?;
     let module_j = fitting.balance.module_energy_j();
-    let (stored, capacity) = (
-        fitting.stored_j_at(&ship.motion, now),
-        fitting.capacity_j_at(now),
-    );
+    let (stored, capacity) = (fitting.stored_j_at(&ship.motion, now), fitting.capacity_j_at(now));
     let mut line = format!("{:.1} / {:.1} ME", stored / module_j, capacity / module_j);
     if fitting.solar_w() > 0.0 {
         let net = fitting.solar_w() - fitting.balance.drain_w(&fitting.loadout_at(now));
@@ -171,15 +157,8 @@ fn energy(session: &Session) -> Option<Energy> {
     if ship.is_refitting(now) {
         line += " — REFITTING";
     }
-    let fraction = if capacity > 0.0 {
-        (stored / capacity).clamp(0.0, 1.0) as f32
-    } else {
-        0.0
-    };
-    Some(Energy {
-        fraction,
-        amount: line,
-    })
+    let fraction = if capacity > 0.0 { (stored / capacity).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    Some(Energy { fraction, amount: line })
 }
 
 #[cfg(test)]
@@ -217,14 +196,8 @@ mod tests {
             },
             None,
         );
-        let close = lc_proto::Pursuit {
-            quarry: quarry.ship_id,
-            closeness: lc_proto::Closeness::Intimate,
-        };
-        assert_eq!(
-            pursuit(&s, close, Some(&quarry)),
-            "alongside Anvil — 1.0 km between hulls — close in"
-        );
+        let close = lc_proto::Pursuit { quarry: quarry.ship_id, closeness: lc_proto::Closeness::Intimate };
+        assert_eq!(pursuit(&s, close, Some(&quarry)), "alongside Anvil — 1.0 km between hulls — close in");
         assert_eq!(pursuit(&s, close, None), "alongside ship 7 — close in");
     }
 
@@ -246,31 +219,17 @@ mod tests {
         let target = lines(&s, &ui).target.expect("a target line");
         // The sample provider's nearest star is 4.2 light-years out, and a light-year of
         // distance is a year of staleness.
-        assert!(
-            target.contains("4.2") && target.ends_with(" ly"),
-            "{target}"
-        );
+        assert!(target.contains("4.2") && target.ends_with(" ly"), "{target}");
     }
 
     #[test]
     fn a_fitted_ship_shows_its_energy_as_a_bar_and_numbers() {
         use lc_world::fitting::{Balance, Fitting, Loadout};
         let (ui, mut s) = fixture();
-        assert!(
-            lines(&s, &ui).energy.is_none(),
-            "an unfitted ship has no energy readout"
-        );
-        s.ship.fit(Some(Fitting::full(
-            Loadout::STARTING,
-            Balance::DEFAULT,
-            s.coordinate_time_s(),
-        )));
+        assert!(lines(&s, &ui).energy.is_none(), "an unfitted ship has no energy readout");
+        s.ship.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, s.coordinate_time_s())));
         let energy = lines(&s, &ui).energy.expect("an energy readout");
-        assert!(
-            (energy.fraction - 1.0).abs() < 1.0e-6,
-            "{}",
-            energy.fraction
-        );
+        assert!((energy.fraction - 1.0).abs() < 1.0e-6, "{}", energy.fraction);
         assert_eq!(energy.amount, "30.0 / 30.0 ME");
     }
 
@@ -303,30 +262,18 @@ mod tests {
     #[test]
     fn a_non_canonical_clock_rate_is_announced() {
         let (mut ui, mut s) = fixture();
-        assert!(
-            lines(&s, &ui).warning.is_none(),
-            "the default is the world's own rate"
-        );
+        assert!(lines(&s, &ui).warning.is_none(), "the default is the world's own rate");
         apply(Action::SetTimeRate(60.0), &mut ui, &mut s);
-        assert_eq!(
-            lines(&s, &ui).warning.unwrap(),
-            "1 year / minute",
-            "a fast clock is flagged"
-        );
+        assert_eq!(lines(&s, &ui).warning.unwrap(), "1 year / minute", "a fast clock is flagged");
         apply(Action::SetTimeRate(64.0), &mut ui, &mut s);
-        let off_ladder = lines(&s, &ui)
-            .warning
-            .expect("one off the ladder must be flagged");
+        let off_ladder = lines(&s, &ui).warning.expect("one off the ladder must be flagged");
         assert_eq!(off_ladder, "1 year / 56 seconds");
         // And a rate *below* the design one is flagged just as loudly. A scene runs slowly so
         // an orbit can be looked at, and a slow clock is no more normal than a fast one.
         apply(Action::SetTimeRate(0.05), &mut ui, &mut s);
         assert_eq!(lines(&s, &ui).warning.unwrap(), "7 minutes / second");
         apply(Action::SetTimeRate(1.0), &mut ui, &mut s);
-        assert!(
-            lines(&s, &ui).warning.is_none(),
-            "the canonical rate needs no warning"
-        );
+        assert!(lines(&s, &ui).warning.is_none(), "the canonical rate needs no warning");
     }
 
     /// The readout's job during a crossing: the two clocks disagree and it has to show both.
@@ -340,22 +287,9 @@ mod tests {
         let l = lines(&s, &ui);
         let flight = l.flight.expect("a flight line");
         assert!(flight.contains('c') && flight.contains("to go"), "{flight}");
-        let coordinate: f64 = l
-            .clock
-            .trim_start_matches("T + ")
-            .trim_end_matches(" years")
-            .parse()
-            .unwrap();
-        let aboard: f64 = l
-            .ship_clock
-            .trim_start_matches("T' + ")
-            .trim_end_matches(" years")
-            .parse()
-            .unwrap();
-        assert!(
-            aboard < coordinate,
-            "ship {aboard} should be behind coordinate {coordinate}"
-        );
+        let coordinate: f64 = l.clock.trim_start_matches("T + ").trim_end_matches(" years").parse().unwrap();
+        let aboard: f64 = l.ship_clock.trim_start_matches("T' + ").trim_end_matches(" years").parse().unwrap();
+        assert!(aboard < coordinate, "ship {aboard} should be behind coordinate {coordinate}");
     }
 
     /// A star nobody has named still has something to call it: the designation its own

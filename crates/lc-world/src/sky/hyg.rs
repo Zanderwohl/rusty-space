@@ -57,10 +57,7 @@ impl HygProvider {
         let mut reader = csv::Reader::from_path(path).map_err(HygError::Csv)?;
         let headers = reader.headers().map_err(HygError::Csv)?.clone();
         let col = |name: &'static str| {
-            headers
-                .iter()
-                .position(|h| h == name)
-                .ok_or(HygError::MissingColumn(name))
+            headers.iter().position(|h| h == name).ok_or(HygError::MissingColumn(name))
         };
         let (c_id, c_dist, c_ci, c_lum) = (col("id")?, col("dist")?, col("ci")?, col("lum")?);
         let (c_x, c_y, c_z) = (col("x")?, col("y")?, col("z")?);
@@ -86,11 +83,8 @@ impl HygProvider {
                 continue;
             }
 
-            let equatorial_pc = DVec3::new(
-                num(c_x).unwrap_or(0.0),
-                num(c_y).unwrap_or(0.0),
-                num(c_z).unwrap_or(0.0),
-            );
+            let equatorial_pc =
+                DVec3::new(num(c_x).unwrap_or(0.0), num(c_y).unwrap_or(0.0), num(c_z).unwrap_or(0.0));
             let velocity_eq = DVec3::new(
                 num(c_vx).unwrap_or(0.0),
                 num(c_vy).unwrap_or(0.0),
@@ -130,10 +124,7 @@ mod tests {
     use crate::sky::{CatalogueStar, StarId};
 
     fn catalogue() -> Option<HygProvider> {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/catalogs/hygdata_v42.csv"
-        );
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/catalogs/hygdata_v42.csv");
         HygProvider::load(path).ok()
     }
 
@@ -153,11 +144,7 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), before, "synthetic ids collided");
         for s in p.stars().iter().take(5000) {
-            assert_ne!(
-                s.id.get(),
-                s.provenance.key,
-                "an id must not be the HYG number"
-            );
+            assert_ne!(s.id.get(), s.provenance.key, "an id must not be the HYG number");
             assert_eq!(s.id, StarId::synthesise(SOURCE, s.provenance.key));
         }
     }
@@ -171,11 +158,7 @@ mod tests {
             .find(|s| s.provenance.name.as_deref() == Some("Sol"))
             .expect("Sol");
         assert!((sol.luminosity_solar - 1.0).abs() < 0.01);
-        assert!(
-            (sol.star.teff_k - 5772.0).abs() < 30.0,
-            "Teff {}",
-            sol.star.teff_k
-        );
+        assert!((sol.star.teff_k - 5772.0).abs() < 30.0, "Teff {}", sol.star.teff_k);
         assert!((sol.star.radius_m / stellar::SOLAR_RADIUS - 1.0).abs() < 0.05);
         assert!((sol.mass_solar - 1.0).abs() < 0.02);
     }
@@ -193,43 +176,24 @@ mod tests {
         assert!((d - 8.6).abs() < 0.2, "Sirius is {d} ly away");
         // Rotating into the ecliptic must have moved it: its equatorial and ecliptic
         // latitudes differ by tens of degrees.
-        assert!(
-            sirius.position_ly.z.abs() / d > 0.4,
-            "Sirius should sit well south of the ecliptic"
-        );
+        assert!(sirius.position_ly.z.abs() / d > 0.4, "Sirius should sit well south of the ecliptic");
     }
 
     #[test]
     fn multiples_are_grouped_and_singles_are_not() {
         let Some(p) = catalogue() else { return };
-        let grouped: Vec<&CatalogueStar> = p
-            .stars()
-            .iter()
-            .filter(|s| s.component.group.is_some())
-            .collect();
-        assert!(
-            grouped.len() > 100,
-            "only {} components are in a multiple",
-            grouped.len()
-        );
-        assert!(
-            grouped.len() < p.len() / 10,
-            "multiples should be a minority"
-        );
+        let grouped: Vec<&CatalogueStar> =
+            p.stars().iter().filter(|s| s.component.group.is_some()).collect();
+        assert!(grouped.len() > 100, "only {} components are in a multiple", grouped.len());
+        assert!(grouped.len() < p.len() / 10, "multiples should be a minority");
 
         // Every grouped star shares its group with at least one other.
         let mut counts: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
         for s in &grouped {
             *counts.entry(s.component.group.unwrap()).or_default() += 1;
         }
-        assert!(
-            counts.values().all(|c| *c >= 2),
-            "a group of one is not a multiple"
-        );
-        assert!(
-            grouped.iter().any(|s| !s.component.is_primary()),
-            "no secondaries found"
-        );
+        assert!(counts.values().all(|c| *c >= 2), "a group of one is not a multiple");
+        assert!(grouped.iter().any(|s| !s.component.is_primary()), "no secondaries found");
     }
 
     #[test]

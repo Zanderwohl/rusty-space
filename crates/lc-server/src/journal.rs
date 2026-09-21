@@ -158,10 +158,7 @@ impl Journal for Memory {
             .iter()
             .filter(|d| d.observer == observer && d.arrive_t > after_t && d.arrive_t <= until_t)
             .filter_map(|d| {
-                self.events
-                    .iter()
-                    .find(|e| e.id == d.event)
-                    .map(|e| (*d, e.clone()))
+                self.events.iter().find(|e| e.id == d.event).map(|e| (*d, e.clone()))
             })
             .collect();
         out.sort_by_key(|(d, _)| d.arrive_t);
@@ -178,11 +175,7 @@ impl Journal for Memory {
         self.receipts.extend_from_slice(receipts);
         // First offer wins, as the keyring's primary key makes it in the real one.
         for key in keys {
-            if !self
-                .keys
-                .iter()
-                .any(|k| k.holder == key.holder && k.subject == key.subject)
-            {
+            if !self.keys.iter().any(|k| k.holder == key.holder && k.subject == key.subject) {
                 self.keys.push(*key);
             }
         }
@@ -198,12 +191,8 @@ impl Journal for Memory {
             .filter_map(|r| Some((find(r.event_id)?, r.arrive_t, r.strength)))
             .collect();
         heard.sort_by_key(|(_, arrive_t, _)| *arrive_t);
-        let mut sent: Vec<lc_store::chat::Message> = self
-            .messages
-            .iter()
-            .filter(|m| m.sender == ship.0)
-            .cloned()
-            .collect();
+        let mut sent: Vec<lc_store::chat::Message> =
+            self.messages.iter().filter(|m| m.sender == ship.0).cloned().collect();
         sent.sort_by_key(|m| m.sent_t);
         Ok(Transcript { sent, heard })
     }
@@ -215,28 +204,17 @@ impl Journal for Memory {
     async fn ack_window(&self) -> Result<Vec<(i64, i64, i64)>, JournalError> {
         let mut out = Vec::new();
         for receipt in &self.receipts {
-            let Some(message) = self
-                .messages
-                .iter()
-                .find(|m| m.event_id == receipt.event_id)
+            let Some(message) = self.messages.iter().find(|m| m.event_id == receipt.event_id)
             else {
                 continue;
             };
             if message.is_key {
                 continue;
             }
-            out.push((
-                receipt.observer,
-                message.sender,
-                receipt.event_id,
-                receipt.arrive_t,
-            ));
+            out.push((receipt.observer, message.sender, receipt.event_id, receipt.arrive_t));
         }
         out.sort_by_key(|(observer, sender, _, arrive_t)| (*observer, *sender, *arrive_t));
-        Ok(out
-            .into_iter()
-            .map(|(observer, sender, event, _)| (observer, sender, event))
-            .collect())
+        Ok(out.into_iter().map(|(observer, sender, event, _)| (observer, sender, event)).collect())
     }
 }
 
@@ -259,18 +237,12 @@ impl Postgres {
     pub async fn open() -> Result<Self, JournalError> {
         let client = lc_store::connect().await?;
         lc_store::migrate::apply(&client).await?;
-        Ok(Self {
-            client,
-            prepared: None,
-        })
+        Ok(Self { client, prepared: None })
     }
 
     /// The same, over a connection the caller already has.
     pub fn with(client: tokio_postgres::Client) -> Self {
-        Self {
-            client,
-            prepared: None,
-        }
+        Self { client, prepared: None }
     }
 
     pub fn client(&self) -> &tokio_postgres::Client {
@@ -281,11 +253,7 @@ impl Postgres {
 /// Light-microseconds are what the server works in and what the global grid counts, so the
 /// conversion is a rounding and nothing else.
 fn to_grid(at: DVec3) -> [i64; 3] {
-    [
-        at.x.round() as i64,
-        at.y.round() as i64,
-        at.z.round() as i64,
-    ]
+    [at.x.round() as i64, at.y.round() as i64, at.z.round() as i64]
 }
 
 fn from_grid(g: [i64; 3]) -> DVec3 {
@@ -367,9 +335,7 @@ impl Journal for Postgres {
             .await?;
         let mut out = Vec::with_capacity(rows.len());
         for delivery in rows {
-            let Some(row) = events
-                .iter()
-                .find(|r| r.get::<_, i64>(0) == delivery.event_id.get())
+            let Some(row) = events.iter().find(|r| r.get::<_, i64>(0) == delivery.event_id.get())
             else {
                 continue;
             };
@@ -498,15 +464,7 @@ mod tests {
     use super::*;
 
     fn event(id: i64, t: i64, at: DVec3) -> Event {
-        Event {
-            id,
-            source: ShipId(1),
-            t,
-            at,
-            kind: 1,
-            power_w: 1.0,
-            payload: "{}".into(),
-        }
+        Event { id, source: ShipId(1), t, at, kind: 1, power_w: 1.0, payload: "{}".into() }
     }
 
     #[tokio::test]
@@ -516,24 +474,9 @@ mod tests {
             .write(
                 &[event(1, 0, DVec3::ZERO), event(2, 0, DVec3::ZERO)],
                 &[
-                    Scheduled {
-                        observer: ShipId(9),
-                        event: 2,
-                        arrive_t: 300,
-                        strength: 1.0,
-                    },
-                    Scheduled {
-                        observer: ShipId(9),
-                        event: 1,
-                        arrive_t: 100,
-                        strength: 1.0,
-                    },
-                    Scheduled {
-                        observer: ShipId(8),
-                        event: 1,
-                        arrive_t: 150,
-                        strength: 1.0,
-                    },
+                    Scheduled { observer: ShipId(9), event: 2, arrive_t: 300, strength: 1.0 },
+                    Scheduled { observer: ShipId(9), event: 1, arrive_t: 100, strength: 1.0 },
+                    Scheduled { observer: ShipId(8), event: 1, arrive_t: 150, strength: 1.0 },
                 ],
             )
             .await
@@ -541,19 +484,12 @@ mod tests {
 
         let got = journal.due(ShipId(9), 0, 1_000).await.unwrap();
         assert_eq!(got.len(), 2, "the other observer's delivery came back");
-        assert!(
-            got[0].0.arrive_t < got[1].0.arrive_t,
-            "out of arrival order"
-        );
+        assert!(got[0].0.arrive_t < got[1].0.arrive_t, "out of arrival order");
 
         // Half-open: asking again from where the last answer ended repeats nothing.
         let next = journal.due(ShipId(9), 300, 1_000).await.unwrap();
         assert!(next.is_empty(), "the boundary was delivered twice");
-        assert_eq!(
-            journal.due(ShipId(9), 0, 100).await.unwrap().len(),
-            1,
-            "and is inclusive above"
-        );
+        assert_eq!(journal.due(ShipId(9), 0, 100).await.unwrap().len(), 1, "and is inclusive above");
     }
 
     /// A delivery whose event is missing yields nothing rather than half a sighting.
@@ -561,15 +497,7 @@ mod tests {
     async fn a_delivery_with_no_event_is_dropped() {
         let mut journal = Memory::default();
         journal
-            .write(
-                &[],
-                &[Scheduled {
-                    observer: ShipId(9),
-                    event: 404,
-                    arrive_t: 1,
-                    strength: 1.0,
-                }],
-            )
+            .write(&[], &[Scheduled { observer: ShipId(9), event: 404, arrive_t: 1, strength: 1.0 }])
             .await
             .unwrap();
         assert!(journal.due(ShipId(9), 0, 1_000).await.unwrap().is_empty());
@@ -579,10 +507,7 @@ mod tests {
     fn the_grid_round_trips_to_within_its_own_resolution() {
         let at = DVec3::new(1_234_567.4, -98.6, 0.5);
         let back = from_grid(to_grid(at));
-        assert!(
-            (back - at).abs().max_element() <= 0.5,
-            "{back:?} against {at:?}"
-        );
+        assert!((back - at).abs().max_element() <= 0.5, "{back:?} against {at:?}");
     }
 
     /// The whole stack against a real database: the server writes through the journal, the
@@ -603,24 +528,16 @@ mod tests {
         // Two light-hours, so the arrival is many ticks out and cannot be an accident.
         let far = DVec3::new(7_200.0 * 1_000_000.0, 0.0, 0.0);
 
-        let Ok(journal) = Postgres::open().await else {
-            return;
-        };
+        let Ok(journal) = Postgres::open().await else { return };
         // Own band, cleared first, so the suite can run twice against one database.
         journal
             .client()
-            .execute(
-                "DELETE FROM deliveries WHERE observer_id IN ($1, $2)",
-                &[&ACTOR, &WATCHER],
-            )
+            .execute("DELETE FROM deliveries WHERE observer_id IN ($1, $2)", &[&ACTOR, &WATCHER])
             .await
             .unwrap();
         journal
             .client()
-            .execute(
-                "DELETE FROM events WHERE source_id IN ($1, $2)",
-                &[&ACTOR, &WATCHER],
-            )
+            .execute("DELETE FROM events WHERE source_id IN ($1, $2)", &[&ACTOR, &WATCHER])
             .await
             .unwrap();
 
@@ -630,23 +547,18 @@ mod tests {
         server.admit(actor, still(ShipId(ACTOR), DVec3::ZERO), 0.0);
         server.admit(lc_proto::ClientId(2), still(ShipId(WATCHER), far), 0.0);
 
-        wire.client_says(
-            actor,
-            Inbound::Act(Intent {
-                ship_id: ShipId(ACTOR),
-                order: Order::Transmit { power_w: 1.0e20 },
-                issued_at_client_t: i64::MAX / 4,
-            }),
-        );
+        wire.client_says(actor, Inbound::Act(Intent {
+            ship_id: ShipId(ACTOR),
+            order: Order::Transmit { power_w: 1.0e20 },
+            issued_at_client_t: i64::MAX / 4,
+        }));
         server.tick(&mut wire).await.unwrap();
         let emitted = TICK_US;
         let arrives = emitted + far.x as i64;
         drop(server);
 
         // A new server, a new connection, and nothing carried over but the database.
-        let Ok(journal) = Postgres::open().await else {
-            return;
-        };
+        let Ok(journal) = Postgres::open().await else { return };
         let mut restarted = Server::new(journal, arrives - TICK_US, SHARD + 1);
         let watcher = lc_proto::ClientId(1);
         restarted.admit(watcher, still(ShipId(WATCHER), far), 0.0);
@@ -673,22 +585,14 @@ mod tests {
 
         // And the negative case still holds against the database: a server whose clock has not
         // reached the arrival is told the same thing by the same query, and releases nothing.
-        let Ok(journal) = Postgres::open().await else {
-            return;
-        };
+        let Ok(journal) = Postgres::open().await else { return };
         let mut early = Server::new(journal, arrives - TICK_US * 3, SHARD + 2);
         let watcher = lc_proto::ClientId(1);
         early.admit(watcher, still(ShipId(WATCHER), far), 0.0);
         let mut wire = Loopback::new();
         wire.client_says(watcher, Inbound::ResumeFrom { arrive_t: 0 });
         early.tick(&mut wire).await.unwrap();
-        assert!(
-            early.now_t() < arrives,
-            "the test never stayed before the arrival"
-        );
-        assert!(
-            wire.take(watcher).is_empty(),
-            "a sighting was released before its light landed"
-        );
+        assert!(early.now_t() < arrives, "the test never stayed before the arrival");
+        assert!(wire.take(watcher).is_empty(), "a sighting was released before its light landed");
     }
 }

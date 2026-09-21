@@ -97,10 +97,9 @@ impl Kind {
     pub fn drive(self) -> crate::flight::Drive {
         let base = match self {
             Kind::Ship => crate::flight::Drive::DEFAULT,
-            Kind::Probe => crate::flight::Drive {
-                accel_g: 30.0,
-                ..crate::flight::Drive::DEFAULT
-            },
+            Kind::Probe => {
+                crate::flight::Drive { accel_g: 30.0, ..crate::flight::Drive::DEFAULT }
+            }
             // Neither of these is going anywhere in a hurry once it is placed, and neither
             // carries a torch to do it with — a station-keeping thruster throws mass at a
             // few hundred kilometers a second, so a beacon correcting itself is a thing you
@@ -237,10 +236,7 @@ impl Craft {
         // because a ship does not snap back to where it was pointing when it was given a new
         // order — this is the one place the two motives are both in hand, so it is the only
         // place that hand-over can happen.
-        let began = self
-            .past
-            .last()
-            .map_or(f64::NEG_INFINITY, |entry| entry.until_s);
+        let began = self.past.last().map_or(f64::NEG_INFINITY, |entry| entry.until_s);
         let nose = self.facing_of(&before, began, at_s);
         // **The plan is made from where the nose is, not from where the last order left it.**
         // A plan holds its start attitude as a parameter and is re-planned from it on the far
@@ -263,10 +259,7 @@ impl Craft {
             }
             // A new motive may collect where the old one could not, or stop collecting.
             self.begin_solar_segment(at_s);
-            self.past.push(Past {
-                until_s: at_s,
-                motion: before,
-            });
+            self.past.push(Past { until_s: at_s, motion: before });
             self.forget_before(at_s);
         }
         out
@@ -275,11 +268,7 @@ impl Craft {
     /// Drop what is too old or too much to keep, and record how far back that leaves.
     fn forget_before(&mut self, now_s: f64) {
         let horizon = now_s - HISTORY_S;
-        let stale = self
-            .past
-            .iter()
-            .take_while(|entry| entry.until_s < horizon)
-            .count();
+        let stale = self.past.iter().take_while(|entry| entry.until_s < horizon).count();
         let excess = self.past.len().saturating_sub(HISTORY_STRETCHES);
         let drop = stale.max(excess);
         if drop == 0 {
@@ -311,11 +300,7 @@ impl Craft {
 
     /// What it was doing at a coordinate second, as far back as it remembers.
     pub fn motion_at(&self, s: f64) -> &ShipState {
-        self.past
-            .iter()
-            .find(|entry| s < entry.until_s)
-            .map(|entry| &entry.motion)
-            .unwrap_or(&self.motion)
+        self.past.iter().find(|entry| s < entry.until_s).map(|entry| &entry.motion).unwrap_or(&self.motion)
     }
 
     /// What it has done, oldest first: each motive with the coordinate second it stopped, and
@@ -329,12 +314,7 @@ impl Craft {
 
     /// The craft as something a light-delay solve can evaluate.
     pub fn worldline(&self) -> Flight<'_> {
-        Flight::with_past(
-            &self.motion,
-            self.system.as_deref(),
-            &self.past,
-            self.known_from_s,
-        )
+        Flight::with_past(&self.motion, self.system.as_deref(), &self.past, self.known_from_s)
     }
 
     /// How fast it can turn, radians a second. See [`crate::attitude`].
@@ -354,10 +334,7 @@ impl Craft {
     /// is the *ceiling*, which is what a new order is clamped against; `motion.drive` is what the
     /// ship is flying with now, which is what a standing policy should go on flying with.
     pub fn turning(&self, drive: crate::flight::Drive) -> crate::flight::Drive {
-        crate::flight::Drive {
-            slew_rate_rad_s: self.slew_rate_rad_s(),
-            ..drive
-        }
+        crate::flight::Drive { slew_rate_rad_s: self.slew_rate_rad_s(), ..drive }
     }
 
     /// How much hull there is, cubic meters.
@@ -402,17 +379,12 @@ impl Craft {
         if accel_g <= 0.0 {
             return 0.0;
         }
-        self.motion
-            .drive
-            .jet_power_w(self.mass_kg_at(now_s), accel_g)
+        self.motion.drive.jet_power_w(self.mass_kg_at(now_s), accel_g)
     }
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
     pub fn facing_at(&self, now_s: f64) -> Option<DVec3> {
-        let began = self
-            .past
-            .last()
-            .map_or(f64::NEG_INFINITY, |entry| entry.until_s);
+        let began = self.past.last().map_or(f64::NEG_INFINITY, |entry| entry.until_s);
         Some(self.facing_of(&self.motion, began, now_s))
     }
 
@@ -429,9 +401,7 @@ impl Craft {
             .flatten()
             .map(|to_star| broadside_nose(state.attitude, to_star));
         match broadside {
-            Some(to) => {
-                crate::attitude::turned(state.attitude, to, self.slew_rate_rad_s(), now_s - began_s)
-            }
+            Some(to) => crate::attitude::turned(state.attitude, to, self.slew_rate_rad_s(), now_s - began_s),
             None => motion::facing_at(state, self.length_m, now_s),
         }
     }
@@ -485,24 +455,15 @@ impl Craft {
         if self.motion.is_under_way() {
             return 0.0;
         }
-        let Some(distance_m) = self.star_distance_m_at(t) else {
-            return 0.0;
-        };
-        crate::solar::power_w(
-            &fitting.balance,
-            length_m,
-            system.star_luminosity_w(),
-            distance_m,
-        )
+        let Some(distance_m) = self.star_distance_m_at(t) else { return 0.0 };
+        crate::solar::power_w(&fitting.balance, length_m, system.star_luminosity_w(), distance_m)
     }
 
     /// Start the income segment that begins at `from_s`, at the power collected at its midpoint.
     /// Midpoint rather than start, so a distance that changes across the segment averages out to
     /// first order. Settles to `from_s` first, so the old power is not applied backwards.
     fn begin_solar_segment(&mut self, from_s: f64) {
-        let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else {
-            return;
-        };
+        let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else { return };
         let from_s = from_s.max(since);
         if let Some(fitting) = &mut self.fitting {
             fitting.settle(&self.motion, from_s);
@@ -516,9 +477,7 @@ impl Craft {
 
     /// Settle at every income boundary up to `now_s`, starting each new segment as it goes.
     fn collect_to(&mut self, now_s: f64) {
-        let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else {
-            return;
-        };
+        let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else { return };
         let step = crate::solar::step_for(since, now_s);
         let mut boundary = ((since / step).floor() + 1.0) * step;
         while boundary <= now_s {
@@ -570,10 +529,7 @@ impl Craft {
 
     /// Whether a refit is under way at `now_s`. Flying and refitting exclude each other.
     pub fn is_refitting(&self, now_s: f64) -> bool {
-        self.fitting
-            .as_ref()
-            .and_then(Fitting::refit)
-            .is_some_and(|r| !r.is_done(now_s))
+        self.fitting.as_ref().and_then(Fitting::refit).is_some_and(|r| !r.is_done(now_s))
     }
 
     /// What folding `event` would commit, joules, without folding it. Zero for an unfitted craft.
@@ -581,9 +537,7 @@ impl Craft {
     /// The plan's whole remaining rapidity at this craft's mass now. [`Craft::apply`] commits the
     /// same number, because it is the same arithmetic on the same state.
     pub fn cost_of(&self, event: &Event) -> Result<f64, Rejected> {
-        let Some(fitting) = &self.fitting else {
-            return Ok(0.0);
-        };
+        let Some(fitting) = &self.fitting else { return Ok(0.0) };
         let mut trial = self.motion.clone();
         motion::apply(&mut trial, self.system.as_deref(), event)?;
         let mut account = fitting.clone();
@@ -749,7 +703,9 @@ impl Craft {
     /// Solve for the next patch, for whoever is authoritative over this craft.
     fn solve_patch(&mut self, from_s: f64) {
         self.patch = match (&self.motion.motive, self.system.as_deref()) {
-            (Motive::Falling(_), Some(system)) => motion::repatch_at(&self.motion, system, from_s),
+            (Motive::Falling(_), Some(system)) => {
+                motion::repatch_at(&self.motion, system, from_s)
+            }
             // A prediction is about one conic. Anything else -- a course set, a station held,
             // a shell crossed -- makes it an answer to a question nobody is asking, and
             // folding it would cut the drive on a flight that is under way.
@@ -805,11 +761,7 @@ pub fn broadside_nose(attitude: DVec3, to_star: DVec3) -> DVec3 {
     if across.length_squared() > 1.0e-12 {
         return across.normalize();
     }
-    let reference = if s.z.abs() > 0.999 {
-        DVec3::X
-    } else {
-        DVec3::Z
-    };
+    let reference = if s.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
     (reference - s * reference.dot(s)).normalize_or_zero()
 }
 
@@ -888,11 +840,8 @@ mod tests {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .ok()?;
-        let sun: CatalogueStar = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() == Some("Sol"))?
-            .clone();
+        let sun: CatalogueStar =
+            provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some("Sol"))?.clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);
         Some(Arc::new(system))
@@ -932,15 +881,8 @@ mod tests {
             fleet.insert(craft);
         }
         for id in [1, 2] {
-            let event = Event {
-                ship: ShipId(id),
-                at_t: 0.0,
-                change: course.clone(),
-            };
-            fleet
-                .apply(CraftId(id), &event)
-                .expect("a craft")
-                .expect("a course");
+            let event = Event { ship: ShipId(id), at_t: 0.0, change: course.clone() };
+            fleet.apply(CraftId(id), &event).expect("a craft").expect("a course");
         }
         fleet.advance(30_000.0, 30_000.0);
 
@@ -969,21 +911,14 @@ mod tests {
             // primary, which has no elements, and cutting there leaves it drifting.
             craft.motion.beta = crate::coast::beta_of(velocity);
             craft
-                .apply(&Event {
-                    ship: ShipId(id),
-                    at_t: 0.0,
-                    change: Change::CutDrive,
-                })
+                .apply(&Event { ship: ShipId(id), at_t: 0.0, change: Change::CutDrive })
                 .expect("the engine cuts");
             fleet.insert(craft);
         }
 
         let due: Vec<Option<f64>> = fleet.iter().map(|c| c.patch_due_at()).collect();
         assert!(due.iter().all(|d| d.is_some()), "{due:?}");
-        assert!(
-            due.windows(2).all(|w| w[0] == w[1]),
-            "the same arc gave different answers"
-        );
+        assert!(due.windows(2).all(|w| w[0] == w[1]), "the same arc gave different answers");
 
         // Run past it: every one of them changes primary, and none needed telling.
         let patch = due[0].expect("a patch");
@@ -1004,25 +939,12 @@ mod tests {
         let mut craft = Craft::at(CraftId(1), Kind::Relay, at);
         craft.enter(Some(system.clone()), 0.0);
         craft.motion.beta = crate::coast::beta_of(velocity);
-        craft
-            .apply(&Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: Change::CutDrive,
-            })
-            .unwrap();
+        craft.apply(&Event { ship: ShipId(1), at_t: 0.0, change: Change::CutDrive }).unwrap();
         assert!(craft.patch_due_at().is_some());
 
         craft.enter(None, 0.0);
-        assert!(
-            craft.patch_due_at().is_none(),
-            "a patch about a system that is not there"
-        );
-        assert!(
-            matches!(craft.motion.motive, Motive::Drifting { .. }),
-            "{:?}",
-            craft.motion.motive
-        );
+        assert!(craft.patch_due_at().is_none(), "a patch about a system that is not there");
+        assert!(matches!(craft.motion.motive, Motive::Drifting { .. }), "{:?}", craft.motion.motive);
     }
 
     /// A fleet is a set: one entry per identifier, and inserting the same one twice replaces
@@ -1035,19 +957,12 @@ mod tests {
         assert_eq!(fleet.len(), 1);
         assert_eq!(fleet.get(CraftId(1)).unwrap().kind, Kind::Beacon);
         assert!(fleet.get(CraftId(2)).is_none());
-        assert!(
-            fleet
-                .apply(
-                    CraftId(2),
-                    &Event {
-                        ship: ShipId(2),
-                        at_t: 0.0,
-                        change: Change::CutDrive,
-                    }
-                )
-                .is_none(),
-            "an event for a craft nobody has heard of is not an error"
-        );
+        assert!(fleet.apply(CraftId(2), &Event {
+            ship: ShipId(2),
+            at_t: 0.0,
+            change: Change::CutDrive,
+        })
+        .is_none(), "an event for a craft nobody has heard of is not an error");
         assert_eq!(fleet.remove(CraftId(1)).map(|c| c.kind), Some(Kind::Beacon));
         assert!(fleet.is_empty());
     }
@@ -1068,11 +983,7 @@ mod tests {
     fn fitted() -> Craft {
         use crate::fitting::{Balance, Loadout};
         let mut craft = Craft::at(CraftId(9), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::full(
-            Loadout::STARTING,
-            Balance::DEFAULT,
-            0.0,
-        )));
+        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
         craft
     }
 
@@ -1080,10 +991,7 @@ mod tests {
         let event = Event {
             ship: ShipId(9),
             at_t,
-            change: Change::Cross {
-                to_ly,
-                drive: craft.rated_drive(at_t),
-            },
+            change: Change::Cross { to_ly, drive: craft.rated_drive(at_t) },
         };
         let quoted = craft.cost_of(&event).unwrap();
         craft.apply(&event).unwrap();
@@ -1097,9 +1005,7 @@ mod tests {
         let mass = craft.mass_kg_at(0.0);
         let quoted = cross(&mut craft, DVec3::X * 0.05, 0.0);
         assert!(quoted > 0.0 && quoted < free);
-        let Motive::Crossing(cruise) = &craft.motion.motive else {
-            panic!("not crossing")
-        };
+        let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("not crossing") };
         let (eta, end) = (cruise.planned_rapidity(), cruise.duration_s());
         assert!((quoted / crate::cost::energy_j(mass, eta, 1.0) - 1.0).abs() < 1.0e-12);
         // Committed at once, so what is free drops before anything is spent.
@@ -1116,19 +1022,10 @@ mod tests {
         craft.advance(end + 1.0, end + 1.0);
         assert!(!craft.motion.is_under_way(), "{:?}", craft.motion.motive);
         let drain = 2.0 * crate::fitting::Balance::DEFAULT.living_drain_w * (end + 1.0);
-        let stored = craft
-            .fitting()
-            .unwrap()
-            .stored_j_at(&craft.motion, end + 1.0);
+        let stored = craft.fitting().unwrap().stored_j_at(&craft.motion, end + 1.0);
         let expected = free - quoted - drain;
-        assert!(
-            stored >= expected * (1.0 - 1.0e-12),
-            "{stored} vs {expected}"
-        );
-        assert!(
-            stored - expected <= drain * quoted / (mass * crate::fitting::C2),
-            "{stored} vs {expected}"
-        );
+        assert!(stored >= expected * (1.0 - 1.0e-12), "{stored} vs {expected}");
+        assert!(stored - expected <= drain * quoted / (mass * crate::fitting::C2), "{stored} vs {expected}");
         assert!(craft.mass_kg_at(end + 1.0) < mass);
         // Lighter, so its engines pull harder.
         assert!(craft.rated_drive(end + 1.0).accel_g > 5.0);
@@ -1139,16 +1036,10 @@ mod tests {
         let mut flown = fitted();
         let free = flown.free_j_at(0.0);
         let quoted = cross(&mut flown, DVec3::X * 0.05, 0.0);
-        let Motive::Crossing(cruise) = &flown.motion.motive else {
-            panic!("not crossing")
-        };
+        let Motive::Crossing(cruise) = &flown.motion.motive else { panic!("not crossing") };
         let cut_at = cruise.duration_s() * 0.25;
         flown
-            .apply(&Event {
-                ship: ShipId(9),
-                at_t: cut_at,
-                change: Change::CutDrive,
-            })
+            .apply(&Event { ship: ShipId(9), at_t: cut_at, change: Change::CutDrive })
             .unwrap();
         let left = flown.free_j_at(cut_at);
         assert!(left > free - quoted, "nothing came back: {left}");
@@ -1164,10 +1055,7 @@ mod tests {
         let after = craft.fitting().unwrap().stored_j_at(&craft.motion, 0.0);
         let spent = before - after;
         let expected = crate::cost::energy_j(mass, 1.0e-4f64.atanh(), 1.0);
-        assert!(
-            (spent / expected - 1.0).abs() < 1.0e-9,
-            "{spent} vs {expected}"
-        );
+        assert!((spent / expected - 1.0).abs() < 1.0e-9, "{spent} vs {expected}");
     }
 
     /// An empty fitted ship at rest `au` from the Sun, or on a conic through there with `speed`
@@ -1178,23 +1066,14 @@ mod tests {
         let at = star + DVec3::X * au * crate::system::UNIT_M / crate::system::M_PER_LY;
         let mut craft = Craft::at(CraftId(9), Kind::Ship, at);
         let full = Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0);
-        let empty = Account {
-            stored_j: 0.0,
-            ..full.account()
-        };
+        let empty = Account { stored_j: 0.0, ..full.account() };
         craft.fit(Some(Fitting::from_account(&empty, Balance::DEFAULT)));
         craft.enter(Some(system.clone()), 0.0);
         if let Some(fraction) = speed {
             let mu = crate::star::Star::SOL.mu;
             let v = fraction * (mu / (au * crate::system::UNIT_M)).sqrt();
             craft.drift_from(at, DVec3::Y * v / crate::flight::C_M_S, 0.0);
-            craft
-                .apply(&Event {
-                    ship: ShipId(9),
-                    at_t: 0.0,
-                    change: Change::CutDrive,
-                })
-                .unwrap();
+            craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::CutDrive }).unwrap();
         }
         craft
     }
@@ -1230,13 +1109,7 @@ mod tests {
         let mut flying = near_the_sun(&system, 0.1, None);
         let to = flying.motion.position_ly + DVec3::X * 0.01;
         let drive = flying.rated_drive(0.0);
-        flying
-            .apply(&Event {
-                ship: ShipId(9),
-                at_t: 0.0,
-                change: Change::Cross { to_ly: to, drive },
-            })
-            .unwrap();
+        flying.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
         flying.advance(3.0 * day, 3.0 * day);
         assert!(flying.motion.is_under_way());
         assert_eq!(flying.fitting().unwrap().solar_w(), 0.0);
@@ -1257,11 +1130,7 @@ mod tests {
         let day = crate::solar::SOLAR_STEP_S;
         let span = 40.0 * day;
         let mut hourly = near_the_sun(&system, 0.3, Some(0.8));
-        assert!(
-            matches!(hourly.motion.motive, Motive::Falling(_)),
-            "{:?}",
-            hourly.motion.motive
-        );
+        assert!(matches!(hourly.motion.motive, Motive::Falling(_)), "{:?}", hourly.motion.motive);
         let mut weekly = hourly.clone();
         let reference = hourly.clone();
 
@@ -1276,16 +1145,9 @@ mod tests {
             weekly.advance(t, 7.0 * day);
         }
         let (by_hour, by_week) = (stored(&hourly, span), stored(&weekly, span));
-        assert!(
-            (by_hour / by_week - 1.0).abs() < 1.0e-9,
-            "{by_hour} vs {by_week}"
-        );
+        assert!((by_hour / by_week - 1.0).abs() < 1.0e-9, "{by_hour} vs {by_week}");
 
-        let drain = reference
-            .fitting()
-            .unwrap()
-            .balance
-            .drain_w(&crate::fitting::Loadout::STARTING);
+        let drain = reference.fitting().unwrap().balance.drain_w(&crate::fitting::Loadout::STARTING);
         let power = |t: f64| reference.solar_w_at(t) - drain;
         let (mut midpoint, mut start, mut exact) = (0.0, 0.0, 0.0);
         for k in 0..40 {
@@ -1296,15 +1158,9 @@ mod tests {
                 exact += power(t0 + (j as f64 + 0.5) * day / 200.0) * day / 200.0;
             }
         }
-        assert!(
-            (by_hour / midpoint - 1.0).abs() < 1.0e-9,
-            "{by_hour} vs {midpoint}"
-        );
+        assert!((by_hour / midpoint - 1.0).abs() < 1.0e-9, "{by_hour} vs {midpoint}");
         let (mid_err, start_err) = ((midpoint - exact).abs(), (start - exact).abs());
-        assert!(
-            mid_err * 10.0 < start_err,
-            "midpoint off by {mid_err}, start by {start_err}"
-        );
+        assert!(mid_err * 10.0 < start_err, "midpoint off by {mid_err}, start by {start_err}");
     }
 
     /// An idle fitted ship holds its nose perpendicular to the star, and after a flight it swings
@@ -1317,14 +1173,7 @@ mod tests {
             (system.star_position_at(t).unwrap() - craft.motion.position_ly).normalize()
         };
         // Idle since before anything: already round, with no turn left to make.
-        assert!(
-            craft
-                .facing_at(0.0)
-                .unwrap()
-                .dot(to_star(&craft, 0.0))
-                .abs()
-                < 1.0e-9
-        );
+        assert!(craft.facing_at(0.0).unwrap().dot(to_star(&craft, 0.0)).abs() < 1.0e-9);
 
         // Nothing unfitted turns: a probe keeps the attitude it was left with.
         let mut probe = Craft::at(CraftId(3), Kind::Probe, craft.motion.position_ly);
@@ -1335,45 +1184,21 @@ mod tests {
         let drive = craft.rated_drive(0.0);
         // Straight out from the star, so the plan's nose is along it and not broadside.
         let to = craft.motion.position_ly + DVec3::X * 0.05;
-        craft
-            .apply(&Event {
-                ship: ShipId(9),
-                at_t: 0.0,
-                change: Change::Cross { to_ly: to, drive },
-            })
-            .unwrap();
+        craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
         let flying = craft.facing_at(600.0).unwrap();
-        assert!(
-            flying.dot(to_star(&craft, 600.0)).abs() > 0.5,
-            "{flying} is still broadside"
-        );
+        assert!(flying.dot(to_star(&craft, 600.0)).abs() > 0.5, "{flying} is still broadside");
 
         // Drive cut: the turn back starts from the nose the crossing left, and takes a quarter
         // turn at the hull's rate to arrive.
         let cut_at = 600.0;
-        craft
-            .apply(&Event {
-                ship: ShipId(9),
-                at_t: cut_at,
-                change: Change::CutDrive,
-            })
-            .unwrap();
-        assert!(
-            (craft.facing_at(cut_at).unwrap() - flying).length() < 1.0e-9,
-            "the nose snapped"
-        );
+        craft.apply(&Event { ship: ShipId(9), at_t: cut_at, change: Change::CutDrive }).unwrap();
+        assert!((craft.facing_at(cut_at).unwrap() - flying).length() < 1.0e-9, "the nose snapped");
         let quarter = 0.5 * std::f64::consts::PI / craft.slew_rate_rad_s();
         let part_way = craft.facing_at(cut_at + 0.25 * quarter).unwrap();
         assert!(part_way.dot(flying) < 0.999, "it did not begin turning");
-        assert!(
-            part_way.dot(to_star(&craft, cut_at)).abs() > 1.0e-6,
-            "it arrived at once"
-        );
+        assert!(part_way.dot(to_star(&craft, cut_at)).abs() > 1.0e-6, "it arrived at once");
         let settled = craft.facing_at(cut_at + quarter * 1.01).unwrap();
-        assert!(
-            settled.dot(to_star(&craft, cut_at + quarter)).abs() < 1.0e-6,
-            "{settled}"
-        );
+        assert!(settled.dot(to_star(&craft, cut_at + quarter)).abs() < 1.0e-6, "{settled}");
         assert!(settled.is_normalized());
     }
 
@@ -1387,28 +1212,14 @@ mod tests {
         let mut craft = near_the_sun(&system, 0.5, None);
         // Broadside, so the nose is not the attitude the last order left it at.
         let nose = craft.facing_at(0.0).unwrap();
-        assert!(
-            (nose - craft.motion.attitude).length() > 0.1,
-            "premise: the nose has moved"
-        );
+        assert!((nose - craft.motion.attitude).length() > 0.1, "premise: the nose has moved");
 
         let drive = craft.rated_drive(0.0);
         let to = craft.motion.position_ly + DVec3::X * 0.05;
-        craft
-            .apply(&Event {
-                ship: ShipId(9),
-                at_t: 0.0,
-                change: Change::Cross { to_ly: to, drive },
-            })
-            .unwrap();
-        let Motive::Crossing(cruise) = &craft.motion.motive else {
-            panic!("not crossing")
-        };
+        craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
+        let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("not crossing") };
         assert_eq!(cruise.initial_attitude(), craft.motion.attitude);
-        assert_eq!(
-            craft.motion.attitude, nose,
-            "it planned from somewhere the nose had not been"
-        );
+        assert_eq!(craft.motion.attitude, nose, "it planned from somewhere the nose had not been");
     }
 
     #[test]
@@ -1417,10 +1228,7 @@ mod tests {
         assert_eq!(broadside_nose(DVec3::new(1.0, 1.0, 0.0), s), DVec3::Y);
         assert_eq!(broadside_nose(DVec3::Z, s), DVec3::Z);
         let head_on = broadside_nose(-DVec3::X, s);
-        assert!(
-            head_on.dot(s).abs() < 1.0e-12 && head_on.is_normalized(),
-            "{head_on}"
-        );
+        assert!(head_on.dot(s).abs() < 1.0e-12 && head_on.is_normalized(), "{head_on}");
     }
 
     #[test]
@@ -1428,15 +1236,7 @@ mod tests {
         use crate::fitting::Loadout;
         let mut craft = fitted();
         assert!((craft.length_m - 500.0).abs() < 1.0e-9);
-        craft
-            .begin_refit(
-                Loadout {
-                    slots: 22,
-                    ..Loadout::STARTING
-                },
-                0.0,
-            )
-            .unwrap();
+        craft.begin_refit(Loadout { slots: 22, ..Loadout::STARTING }, 0.0).unwrap();
         assert!(craft.is_refitting(1.0));
         let year = crate::flight::JULIAN_YEAR_S;
         craft.advance(year, year);
@@ -1468,29 +1268,20 @@ mod tests {
         assert_eq!(was_going, DVec3::ZERO, "premise: it was sitting still");
 
         // It lights the drive, now.
-        craft
-            .apply(&Event {
-                ship: motion::ShipId(1),
-                at_t: 0.0,
-                change: crate::motion::Change::Cross {
-                    to_ly: DVec3::X,
-                    drive: crate::flight::Drive::DEFAULT,
-                },
-            })
-            .expect("a crossing");
+        craft.apply(&Event {
+            ship: motion::ShipId(1),
+            at_t: 0.0,
+            change: crate::motion::Change::Cross {
+                to_ly: DVec3::X,
+                drive: crate::flight::Drive::DEFAULT,
+            },
+        })
+        .expect("a crossing");
         assert!(craft.motion.is_under_way(), "premise: it actually burned");
 
         let line = craft.worldline();
-        assert_eq!(
-            line.velocity_at(HOUR_AGO_US),
-            was_going,
-            "the burn reached back an hour"
-        );
-        assert_eq!(
-            line.position_at(HOUR_AGO_US),
-            was_at,
-            "and moved it there too"
-        );
+        assert_eq!(line.velocity_at(HOUR_AGO_US), was_going, "the burn reached back an hour");
+        assert_eq!(line.position_at(HOUR_AGO_US), was_at, "and moved it there too");
     }
 
     /// The same, for the motive that gets it worst: a drift read before it began runs the new
@@ -1518,12 +1309,7 @@ mod tests {
         for k in 1..500 {
             craft.advance(k as f64 * 10.0, 10.0);
         }
-        assert_eq!(
-            craft.remembered(),
-            0,
-            "a steady drift recorded {} stretches",
-            craft.remembered()
-        );
+        assert_eq!(craft.remembered(), 0, "a steady drift recorded {} stretches", craft.remembered());
     }
 
     /// The memory is bounded, and running off the end is answered by refusing rather than by
@@ -1538,15 +1324,8 @@ mod tests {
                 craft.motion.set_adrift(at);
             });
         }
-        assert_eq!(
-            craft.remembered(),
-            HISTORY_STRETCHES,
-            "the history is not bounded"
-        );
-        assert!(
-            craft.known_from_s() > 0.0,
-            "it forgot without saying how far back it can go"
-        );
+        assert_eq!(craft.remembered(), HISTORY_STRETCHES, "the history is not bounded");
+        assert!(craft.known_from_s() > 0.0, "it forgot without saying how far back it can go");
 
         // The solver's contract: a root before that is no root at all.
         let (from, to) = craft.worldline().defined_over();
@@ -1567,18 +1346,10 @@ mod tests {
             });
         }
         let at = |s: f64| craft.worldline().velocity_at(s * 1.0e6).x;
-        assert_eq!(
-            at(50.0),
-            0.0,
-            "before the first change it was still at rest"
-        );
+        assert_eq!(at(50.0), 0.0, "before the first change it was still at rest");
         assert_eq!(at(150.0), 1.0e-6);
         assert_eq!(at(250.0), 2.0e-6);
-        assert_eq!(
-            at(350.0),
-            3.0e-6,
-            "past the last change it is the current motive"
-        );
+        assert_eq!(at(350.0), 3.0e-6, "past the last change it is the current motive");
     }
 
     /// Mass follows size, and size is cubic — which is the fact to have in mind before being
@@ -1598,11 +1369,7 @@ mod tests {
             lengths.powi(3),
         );
         // And the small end is a number a person can hold: a few million tonnes.
-        assert!(
-            small.mass_kg() > 1.0e9 && small.mass_kg() < 1.0e10,
-            "{}",
-            small.mass_kg()
-        );
+        assert!(small.mass_kg() > 1.0e9 && small.mass_kg() < 1.0e10, "{}", small.mass_kg());
     }
 
     /// The ovoid's own volume, not a box or a sphere: five long by three across by one deep.
@@ -1636,6 +1403,7 @@ mod tests {
         assert!(at(Kind::Relay) > at(Kind::Beacon));
     }
 
+
     /// What a burn costs in light, and the shape of the dependence: everything about it scales
     /// with what is being pushed and how hard.
     #[test]
@@ -1650,10 +1418,7 @@ mod tests {
         let mut bigger = craft.clone();
         bigger.length_m = 1_000.0;
         let ratio = bigger.motion.drive.jet_power_w(bigger.mass_kg(), 5.0) / at(5.0);
-        assert!(
-            (ratio - 8.0).abs() < 1.0e-9,
-            "twice the ship is eight times the mass: {ratio}"
-        );
+        assert!((ratio - 8.0).abs() < 1.0e-9, "twice the ship is eight times the mass: {ratio}");
 
         // And the number itself is the one worth having seen: a fair fraction of a star.
         let full = at(Drive::DEFAULT.accel_g);
@@ -1665,21 +1430,14 @@ mod tests {
     #[test]
     fn a_coasting_ship_puts_nothing_out() {
         let craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
-        assert_eq!(
-            craft.jet_power_w(0.0),
-            0.0,
-            "a drifting ship has its engine off"
-        );
+        assert_eq!(craft.jet_power_w(0.0), 0.0, "a drifting ship has its engine off");
 
         let mut under_way = craft.clone();
         under_way.motion.begin_crossing(
             crate::flight::Cruise::plan(DVec3::ZERO, DVec3::X, 0.0, crate::flight::Drive::DEFAULT),
             None,
         );
-        assert!(
-            under_way.jet_power_w(1.0) > 0.0,
-            "a ship on a crossing is burning"
-        );
+        assert!(under_way.jet_power_w(1.0) > 0.0, "a ship on a crossing is burning");
     }
 
     /// A station-keeping thruster is not a torch, so a beacon correcting itself is not the
@@ -1690,16 +1448,8 @@ mod tests {
         let mut beacon = Craft::at(CraftId(2), Kind::Beacon, DVec3::ZERO);
         // The same size, so only what it is for is different.
         beacon.length_m = ship.length_m;
-        let power = |c: &Craft| {
-            c.motion
-                .drive
-                .jet_power_w(c.mass_kg(), c.motion.drive.accel_g)
-        };
-        assert!(
-            power(&beacon) < power(&ship) / 100.0,
-            "{} against {}",
-            power(&beacon),
-            power(&ship)
-        );
+        let power = |c: &Craft| c.motion.drive.jet_power_w(c.mass_kg(), c.motion.drive.accel_g);
+        assert!(power(&beacon) < power(&ship) / 100.0, "{} against {}", power(&beacon), power(&ship));
     }
+
 }

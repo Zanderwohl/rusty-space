@@ -49,10 +49,7 @@ const NAME_ENTRY_HEADER: usize = 4 + 2;
 pub enum ChunkError {
     NotAChunk,
     UnsupportedVersion(u16),
-    Truncated {
-        wanted: usize,
-        had: usize,
-    },
+    Truncated { wanted: usize, had: usize },
     BadUtf8,
     /// A key that does not fit the packed width. Encoding only.
     KeyTooLarge(u64),
@@ -66,10 +63,7 @@ impl std::fmt::Display for ChunkError {
                 write!(f, "sky chunk version {v}, this build reads {VERSION}")
             }
             Self::Truncated { wanted, had } => {
-                write!(
-                    f,
-                    "sky chunk is truncated: wanted {wanted} bytes, had {had}"
-                )
+                write!(f, "sky chunk is truncated: wanted {wanted} bytes, had {had}")
             }
             Self::BadUtf8 => write!(f, "a star name is not valid UTF-8"),
             Self::KeyTooLarge(k) => write!(f, "catalogue key {k} does not fit in 32 bits"),
@@ -87,11 +81,8 @@ impl std::error::Error for ChunkError {}
 ///
 /// Returns the bytes and the number of records dropped.
 pub fn pack(source: &str, records: &[StarRecord]) -> Result<(Vec<u8>, usize), ChunkError> {
-    let keep: Vec<StarRecord> = records
-        .iter()
-        .filter(|r| r.assemble(source).is_some())
-        .cloned()
-        .collect();
+    let keep: Vec<StarRecord> =
+        records.iter().filter(|r| r.assemble(source).is_some()).cloned().collect();
     let dropped = records.len() - keep.len();
     Ok((encode(source, &keep)?, dropped))
 }
@@ -124,17 +115,11 @@ pub fn encode(source: &str, records: &[StarRecord]) -> Result<Vec<u8>, ChunkErro
         for v in [r.velocity.x, r.velocity.y, r.velocity.z] {
             out.extend_from_slice(&(v as f32).to_le_bytes());
         }
-        let bv = (r.color_index * BV_SCALE)
-            .round()
-            .clamp(i16::MIN as f64, i16::MAX as f64);
+        let bv = (r.color_index * BV_SCALE).round().clamp(i16::MIN as f64, i16::MAX as f64);
         out.extend_from_slice(&(bv as i16).to_le_bytes());
         out.extend_from_slice(&(r.luminosity_solar as f32).to_le_bytes());
         let index = r.component_index & !HAS_GROUP;
-        out.push(if r.group.is_some() {
-            index | HAS_GROUP
-        } else {
-            index
-        });
+        out.push(if r.group.is_some() { index | HAS_GROUP } else { index });
         let group = match r.group {
             Some(g) => u32::try_from(g).map_err(|_| ChunkError::KeyTooLarge(g))?,
             None => 0,
@@ -222,10 +207,10 @@ impl<'a> Reader<'a> {
             wanted: usize::MAX,
             had: self.bytes.len(),
         })?;
-        let slice = self.bytes.get(self.at..end).ok_or(ChunkError::Truncated {
-            wanted: end,
-            had: self.bytes.len(),
-        })?;
+        let slice = self
+            .bytes
+            .get(self.at..end)
+            .ok_or(ChunkError::Truncated { wanted: end, had: self.bytes.len() })?;
         self.at = end;
         Ok(slice)
     }
@@ -235,27 +220,19 @@ impl<'a> Reader<'a> {
     }
 
     fn u16(&mut self) -> Result<u16, ChunkError> {
-        Ok(u16::from_le_bytes(
-            self.take(2)?.try_into().expect("2 bytes"),
-        ))
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().expect("2 bytes")))
     }
 
     fn u32(&mut self) -> Result<u32, ChunkError> {
-        Ok(u32::from_le_bytes(
-            self.take(4)?.try_into().expect("4 bytes"),
-        ))
+        Ok(u32::from_le_bytes(self.take(4)?.try_into().expect("4 bytes")))
     }
 
     fn i16(&mut self) -> Result<i16, ChunkError> {
-        Ok(i16::from_le_bytes(
-            self.take(2)?.try_into().expect("2 bytes"),
-        ))
+        Ok(i16::from_le_bytes(self.take(2)?.try_into().expect("2 bytes")))
     }
 
     fn f32(&mut self) -> Result<f32, ChunkError> {
-        Ok(f32::from_le_bytes(
-            self.take(4)?.try_into().expect("4 bytes"),
-        ))
+        Ok(f32::from_le_bytes(self.take(4)?.try_into().expect("4 bytes")))
     }
 }
 
@@ -271,11 +248,7 @@ impl ChunkProvider {
     pub fn decode(bytes: &[u8]) -> Result<Self, ChunkError> {
         let (source, records) = decode(bytes)?;
         let (stars, skipped) = assemble_all(&source, &records);
-        Ok(ChunkProvider {
-            source,
-            stars,
-            skipped,
-        })
+        Ok(ChunkProvider { source, stars, skipped })
     }
 }
 
@@ -341,10 +314,7 @@ mod tests {
         // f32 storage, so compare at the precision the format claims rather than exactly.
         assert!((back[1].position_ly - records()[1].position_ly).length() < 1e-4);
         assert!((back[1].luminosity_solar - 25.4).abs() < 1e-3);
-        assert!(
-            (back[1].color_index - 0.009).abs() < 1e-9,
-            "thousandths are exact"
-        );
+        assert!((back[1].color_index - 0.009).abs() < 1e-9, "thousandths are exact");
     }
 
     #[test]
@@ -359,10 +329,7 @@ mod tests {
             .find(|s| s.provenance.name.as_deref() == Some("Sol"))
             .unwrap();
         let direct = records()[0].assemble("hyg-v42").unwrap();
-        assert_eq!(
-            sol.id, direct.id,
-            "the chunk must not change a star's identity"
-        );
+        assert_eq!(sol.id, direct.id, "the chunk must not change a star's identity");
         assert!((sol.star.teff_k - direct.star.teff_k).abs() < 1.0);
     }
 
@@ -403,16 +370,10 @@ mod tests {
 
     #[test]
     fn a_foreign_or_future_chunk_is_refused() {
-        assert!(matches!(
-            decode(b"not a chunk at all"),
-            Err(ChunkError::NotAChunk)
-        ));
+        assert!(matches!(decode(b"not a chunk at all"), Err(ChunkError::NotAChunk)));
         let mut bytes = encode("hyg-v42", &records()).unwrap();
         bytes[6] = 99;
-        assert!(matches!(
-            decode(&bytes),
-            Err(ChunkError::UnsupportedVersion(99))
-        ));
+        assert!(matches!(decode(&bytes), Err(ChunkError::UnsupportedVersion(99))));
     }
 
     #[test]
@@ -434,10 +395,7 @@ mod equivalence {
     use super::*;
     use crate::sky::hyg::{self, HygProvider};
 
-    const CSV: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../assets/catalogs/hygdata_v42.csv"
-    );
+    const CSV: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/catalogs/hygdata_v42.csv");
 
     #[test]
     fn a_packed_catalogue_is_the_catalogue() {
@@ -451,23 +409,12 @@ mod equivalence {
         let packed = ChunkProvider::decode(&bytes).expect("decodes");
 
         assert_eq!(packed.name(), hyg::SOURCE);
-        assert_eq!(
-            dropped,
-            records.len() - direct.len(),
-            "pack and assemble disagreed"
-        );
+        assert_eq!(dropped, records.len() - direct.len(), "pack and assemble disagreed");
         // A chunk may never gain a star: `pack` decides with the source's f64 values.
-        assert!(
-            packed.len() <= direct.len(),
-            "the chunk gained stars the catalogue rejected"
-        );
+        assert!(packed.len() <= direct.len(), "the chunk gained stars the catalogue rejected");
         // Losing one is possible in principle — a record that assembles in f64 and not after
         // rounding — and this asserts it does not happen with the bundled catalogue.
-        assert_eq!(
-            packed.skipped, 0,
-            "{} packed records failed to assemble",
-            packed.skipped
-        );
+        assert_eq!(packed.skipped, 0, "{} packed records failed to assemble", packed.skipped);
         assert_eq!(packed.len(), direct.len());
 
         let mut worst_position = 0.0f64;
@@ -481,35 +428,23 @@ mod equivalence {
 
             // The numbers go through f32, so they come back close rather than equal. The
             // tolerance is f32's own: about seven significant digits.
-            worst_position = worst_position
-                .max((a.position_ly - b.position_ly).length() / a.position_ly.length().max(1.0));
+            worst_position =
+                worst_position.max((a.position_ly - b.position_ly).length() / a.position_ly.length().max(1.0));
             worst_teff = worst_teff.max((a.star.teff_k - b.star.teff_k).abs() / a.star.teff_k);
         }
-        assert!(
-            worst_position < 1e-6,
-            "position drifted by {worst_position:e} relative"
-        );
+        assert!(worst_position < 1e-6, "position drifted by {worst_position:e} relative");
         // Color index is quantised to a thousandth, and temperature follows from it. Near
         // the Sun that is about two kelvin, so the bound is the quantum and not a guess.
-        assert!(
-            worst_teff < 2e-3,
-            "temperature drifted by {worst_teff:e} relative"
-        );
+        assert!(worst_teff < 2e-3, "temperature drifted by {worst_teff:e} relative");
     }
 
     #[test]
     fn the_chunk_is_much_smaller_than_the_csv() {
-        let Ok(records) = HygProvider::read_records(CSV) else {
-            return;
-        };
+        let Ok(records) = HygProvider::read_records(CSV) else { return };
         let (bytes, _) = pack(hyg::SOURCE, &records).expect("packs");
         let csv = std::fs::metadata(CSV).expect("CSV present").len() as usize;
         // The point of the format. If this ever fails, the format grew a field it should not
         // have, and the browser build pays for it on every first visit.
-        assert!(
-            bytes.len() * 5 < csv,
-            "chunk is {} bytes against {csv} of CSV",
-            bytes.len()
-        );
+        assert!(bytes.len() * 5 < csv, "chunk is {} bytes against {csv} of CSV", bytes.len());
     }
 }

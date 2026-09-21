@@ -4,12 +4,12 @@
 //! presets already carry the solar system with its moons, and `lc-world::sky::generate` already
 //! emits a generated system in the form `em-sim` consumes. This is the join.
 
-use crate::sky::{CatalogueStar, StarId, generate};
-use em_foundations::time::Instant;
 use em_sim::id::BodyIndex;
 use em_sim::system::System;
 use em_sim::universe::UniverseFileContents;
+use em_foundations::time::Instant;
 use glam::DVec3;
+use crate::sky::{CatalogueStar, StarId, generate};
 
 /// Meters in a light-year.
 pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
@@ -120,11 +120,7 @@ impl LocalSystem {
             .max_by(|a, b| sim.info(*a).mass.total_cmp(&sim.info(*b).mass))?;
         let mut system = Self {
             star: star.id,
-            star_name: star
-                .provenance
-                .name
-                .clone()
-                .unwrap_or_else(|| format!("{:x}", star.id.get())),
+            star_name: star.provenance.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get())),
             populations,
             origin_ly: star.position_ly,
             sim,
@@ -200,8 +196,8 @@ impl LocalSystem {
                 // be a second chance to have it wrong.
                 let kind = crate::navigation::Kind::of(&self.sim.info(i).tags);
                 let pole = self.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
-                let rings =
-                    crate::rings::for_body(self.sim.name(i)).map(|system| Rings { system, pole });
+                let rings = crate::rings::for_body(self.sim.name(i))
+                    .map(|system| Rings { system, pole });
 
                 let equilibrium_k = equilibrium_temperature(self.star_luminosity_w, distance_m);
                 let surface = crate::surface::Surface::classify(
@@ -230,12 +226,7 @@ impl LocalSystem {
                 }
 
                 Some(Drawable {
-                    name: self
-                        .sim
-                        .info(i)
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| self.sim.name(i).into()),
+                    name: self.sim.info(i).name.clone().unwrap_or_else(|| self.sim.name(i).into()),
                     kind,
                     rings,
                     surface,
@@ -329,10 +320,7 @@ impl LocalSystem {
 
     /// A body's spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub fn body_pole(&self, index: BodyIndex) -> DVec3 {
-        self.sim
-            .rotation(index)
-            .and_then(pole_of)
-            .unwrap_or(DVec3::Z)
+        self.sim.rotation(index).and_then(pole_of).unwrap_or(DVec3::Z)
     }
 
     /// Coordinate seconds the system is currently propagated to.
@@ -370,13 +358,7 @@ impl LocalSystem {
         let populations = self
             .populations
             .iter()
-            .map(|p| {
-                p.semi_major
-                    .nodes()
-                    .iter()
-                    .map(|(a, _)| *a)
-                    .fold(0.0f64, f64::max)
-            })
+            .map(|p| p.semi_major.nodes().iter().map(|(a, _)| *a).fold(0.0f64, f64::max))
             .fold(0.0f64, f64::max);
         (bodies.max(populations) / M_PER_LY).max(LOCAL_SHELL_LY)
     }
@@ -453,10 +435,7 @@ pub fn name_seed(name: &str) -> u64 {
 pub fn pole_of(rotation: &em_sim::body::BodyRotation) -> Option<DVec3> {
     use em_sim::body::RotationMode;
     let pole = match &rotation.mode {
-        RotationMode::Spinning {
-            orientation_at_epoch,
-            ..
-        } => *orientation_at_epoch * DVec3::Z,
+        RotationMode::Spinning { orientation_at_epoch, .. } => *orientation_at_epoch * DVec3::Z,
         RotationMode::TidallyLocked { pole, .. } => *pole,
     };
     (pole.length_squared() > 0.0).then(|| pole.normalize())
@@ -535,12 +514,7 @@ fn build_inventory(
         let rank = seen_under.entry(parent).or_insert(0);
         *rank += 1;
         let info = sim.info(i);
-        let under = parent.map(|p| {
-            sim.info(p)
-                .name
-                .clone()
-                .unwrap_or_else(|| sim.name(p).into())
-        });
+        let under = parent.map(|p| sim.info(p).name.clone().unwrap_or_else(|| sim.name(p).into()));
         entries.push((
             chain.first().copied().unwrap_or(0.0),
             Entry {
@@ -554,12 +528,7 @@ fn build_inventory(
                 orbit_radius_m: chain.last().copied().unwrap_or(0.0),
                 depth: chain.len(),
                 major: sim.is_major(i),
-                target: Target::Body(
-                    sim.info(i)
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| sim.name(i).into()),
-                ),
+                target: Target::Body(sim.info(i).name.clone().unwrap_or_else(|| sim.name(i).into())),
             },
         ));
     }
@@ -607,11 +576,7 @@ mod tests {
     #[test]
     fn a_drawable_is_the_kind_the_inventory_says_it_is() {
         let Some(provider) = catalogue() else { return };
-        let Some(sun) = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() == Some(SOL))
-        else {
+        let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             panic!("the catalogue should carry Sol")
         };
         let system = LocalSystem::for_star(sun).expect("Sol loads");
@@ -620,58 +585,27 @@ mod tests {
 
         let mut checked = 0;
         for body in &drawn {
-            let Some(entry) = system
-                .inventory()
-                .iter()
-                .find(|e| e.designation == body.name)
-            else {
-                continue;
-            };
-            assert_eq!(
-                body.kind, entry.kind,
-                "{} is a {:?} in one place and a {:?} in the other",
-                body.name, body.kind, entry.kind
-            );
+            let Some(entry) = system.inventory().iter()
+                .find(|e| e.designation == body.name) else { continue };
+            assert_eq!(body.kind, entry.kind, "{} is a {:?} in one place and a {:?} in the other",
+                body.name, body.kind, entry.kind);
             checked += 1;
         }
         assert!(checked > 50, "only {checked} bodies matched by name at all");
-        assert!(
-            drawn
-                .iter()
-                .any(|b| b.kind == crate::navigation::Kind::Moon),
-            "no moons"
-        );
-        assert!(
-            drawn
-                .iter()
-                .any(|b| b.kind == crate::navigation::Kind::Planet),
-            "no planets"
-        );
+        assert!(drawn.iter().any(|b| b.kind == crate::navigation::Kind::Moon), "no moons");
+        assert!(drawn.iter().any(|b| b.kind == crate::navigation::Kind::Planet), "no planets");
     }
 
     #[test]
     fn the_solar_system_is_the_real_one_and_the_rest_are_generated() {
         let Some(provider) = catalogue() else { return };
-        let sun = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() == Some(SOL));
-        let Some(sun) = sun else {
-            panic!("the catalogue should carry Sol")
-        };
+        let sun = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL));
+        let Some(sun) = sun else { panic!("the catalogue should carry Sol") };
 
         let real = LocalSystem::for_star(sun).expect("Sol loads");
-        assert!(
-            real.len() > 100,
-            "the preset carries moons too, got {}",
-            real.len()
-        );
+        assert!(real.len() > 100, "the preset carries moons too, got {}", real.len());
 
-        let other = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() != Some(SOL))
-            .unwrap();
+        let other = provider.stars().iter().find(|s| s.provenance.name.as_deref() != Some(SOL)).unwrap();
         let made = LocalSystem::for_star(other).expect("a generated system loads");
         assert!(!made.is_empty() && made.len() < real.len());
     }
@@ -699,10 +633,7 @@ mod tests {
         let d_obs = 4.204 * AU;
         let ratio = (r_eff / r_sun).powi(2) * (AU / d_obs).powi(2);
         let magnitude = -26.74 - 2.5 * ratio.log10();
-        assert!(
-            (magnitude + 2.70).abs() < 0.1,
-            "Jupiter came out at {magnitude}"
-        );
+        assert!((magnitude + 2.70).abs() < 0.1, "Jupiter came out at {magnitude}");
     }
 
     #[test]
@@ -737,11 +668,7 @@ mod tests {
     #[test]
     fn propagating_moves_the_bodies() {
         let Some(provider) = catalogue() else { return };
-        let Some(sun) = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() == Some(SOL))
-        else {
+        let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
         let sys = LocalSystem::for_star(sun).unwrap();
@@ -752,20 +679,13 @@ mod tests {
         let after = sys.drawables_at(observer, 200.0 * 86_400.0);
 
         assert_eq!(before.len(), after.len());
-        assert!(
-            !before.is_empty(),
-            "the solar system should have something in it"
-        );
+        assert!(!before.is_empty(), "the solar system should have something in it");
         let moved = before
             .iter()
             .zip(&after)
             .filter(|(a, b)| a.position_ly.distance(b.position_ly) > 1e-9)
             .count();
-        assert!(
-            moved > before.len() / 2,
-            "only {moved} of {} moved",
-            before.len()
-        );
+        assert!(moved > before.len() / 2, "only {moved} of {} moved", before.len());
         assert!(after.iter().all(|d| d.position_ly.is_finite()));
     }
 
@@ -775,10 +695,7 @@ mod tests {
     fn a_body_further_out_reflects_far_less() {
         let near = effective_radius(6.957e8, 6.99e7, 0.5, AU);
         let far = effective_radius(6.957e8, 6.99e7, 0.5, 10.0 * AU);
-        assert!(
-            (near / far - 10.0).abs() < 1e-9,
-            "the effective radius goes as 1/d"
-        );
+        assert!((near / far - 10.0).abs() < 1e-9, "the effective radius goes as 1/d");
     }
 
     /// The end-to-end check: from where the Earth is, the brightest things in the solar system
@@ -786,11 +703,7 @@ mod tests {
     #[test]
     fn the_naked_eye_planets_are_the_brightest_things_in_the_sky() {
         let Some(provider) = catalogue() else { return };
-        let Some(sun) = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() == Some(SOL))
-        else {
+        let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
         let mut sys = LocalSystem::for_star(sun).unwrap();
@@ -815,10 +728,7 @@ mod tests {
         });
         let top: Vec<&str> = lit.iter().take(8).map(|d| d.name.as_str()).collect();
         for want in ["Venus", "Jupiter", "Mars", "Saturn"] {
-            assert!(
-                top.contains(&want),
-                "{want} should be among the brightest, got {top:?}"
-            );
+            assert!(top.contains(&want), "{want} should be among the brightest, got {top:?}");
         }
         // And the Moon, which is the brightest of all from here.
         assert!(top.contains(&"Luna") || top.contains(&"Moon"), "{top:?}");
@@ -829,11 +739,7 @@ mod tests {
     #[test]
     fn saturns_rings_brighten_it_and_the_tilt_decides_by_how_much() {
         let Some(provider) = catalogue() else { return };
-        let Some(sun) = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() == Some(SOL))
-        else {
+        let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
         let mut sys = LocalSystem::for_star(sun).unwrap();
@@ -849,19 +755,13 @@ mod tests {
 
         // Saturn's obliquity is 26.7 degrees, so its pole is well off the ecliptic.
         let tilt = rings.pole.dot(DVec3::Z).acos().to_degrees();
-        assert!(
-            (tilt - 26.7).abs() < 3.0,
-            "obliquity came out {tilt} degrees"
-        );
+        assert!((tilt - 26.7).abs() < 3.0, "obliquity came out {tilt} degrees");
 
         // Bare sphere against sphere plus rings, at the same place.
         let bare = effective_radius(6.957e8, saturn.radius_m, DEFAULT_ALBEDO, 9.583 * AU);
         assert!(saturn.effective_radius_m > bare, "rings should add light");
         let magnitudes = -2.5 * (saturn.effective_radius_m / bare).powi(2).log10();
-        assert!(
-            magnitudes < -0.3,
-            "rings should be worth real brightness: {magnitudes}"
-        );
+        assert!(magnitudes < -0.3, "rings should be worth real brightness: {magnitudes}");
     }
 
     #[test]
@@ -888,20 +788,12 @@ mod tests {
     #[test]
     fn a_body_without_rings_has_none_and_is_unaffected() {
         let Some(provider) = catalogue() else { return };
-        let Some(sun) = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() == Some(SOL))
-        else {
+        let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
         let mut sys = LocalSystem::for_star(sun).unwrap();
         sys.advance_to(0.0);
-        let earth = sys
-            .drawables_at(sun.position_ly, 0.0)
-            .into_iter()
-            .find(|d| d.name == "Earth")
-            .unwrap();
+        let earth = sys.drawables_at(sun.position_ly, 0.0).into_iter().find(|d| d.name == "Earth").unwrap();
         assert!(earth.rings.is_none());
     }
 }

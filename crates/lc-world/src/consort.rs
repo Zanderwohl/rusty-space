@@ -222,13 +222,9 @@ mod tests {
 
     /// A quarry holding low orbit of Jupiter, seen at `t`.
     fn holding(system: &LocalSystem, t: f64) -> (Waypoint, Sighting) {
-        let station = Course::Orbit {
-            body: "Jupiter".into(),
-            altitude_radii: 0.5,
-            plane: Plane::Equatorial,
-        }
-        .resolve(system, DVec3::ZERO, 0.0)
-        .expect("an orbit");
+        let station = Course::Orbit { body: "Jupiter".into(), altitude_radii: 0.5, plane: Plane::Equatorial }
+            .resolve(system, DVec3::ZERO, 0.0)
+            .expect("an orbit");
         let seen = sighting_of(system, &station, t);
         (station, seen)
     }
@@ -244,11 +240,7 @@ mod tests {
     }
 
     fn drive() -> Drive {
-        Drive {
-            accel_g: 5.0,
-            slew_rate_rad_s: 0.05,
-            ..Drive::DEFAULT
-        }
+        Drive { accel_g: 5.0, slew_rate_rad_s: 0.05, ..Drive::DEFAULT }
     }
 
     /// **The report this exists for.** A pursuer ten kilometers off a quarry in low orbit of
@@ -259,36 +251,25 @@ mod tests {
     fn it_closes_to_intimate_range_in_orbit_and_stays() {
         let system = sol();
         let (station, seen) = holding(&system, 0.0);
-        let mut pursuer =
-            ShipState::at(seen.position_ly + DVec3::new(6.0e3, -8.0e3, 0.0) / M_PER_LY);
+        let mut pursuer = ShipState::at(seen.position_ly + DVec3::new(6.0e3, -8.0e3, 0.0) / M_PER_LY);
         pursuer.beta = seen.beta;
         let standoff = Closeness::Intimate.standoff_m(500.0, 500.0);
         let plan = approach(&system, &pursuer, standoff, &seen, 0.0, drive()).expect("a plan");
 
         let end = plan.cruise.start_s + plan.cruise.duration_s();
         assert!(end < 3_600.0, "premise: a short hop, took {end} s");
-        let period = station
-            .period_s(&system, 0.0)
-            .expect("an orbit has a period");
+        let period = station.period_s(&system, 0.0).expect("an orbit has a period");
         for t in [end, end + 0.25 * period, end + period] {
             let (at, beta) = plan.state_at(&system, t).unwrap();
             // Against where the quarry really is, not against the plan's model of it.
             let quarry = station.place_at(&system, t).unwrap();
             let gap = at.distance(quarry) * M_PER_LY;
-            assert!(
-                (gap - standoff).abs() < 25.0,
-                "{gap} m off a {standoff} m standoff at {t} s"
-            );
-            let drift =
-                (beta - coast::beta_of(station.velocity_at(&system, t).unwrap())).length() * C_M_S;
+            assert!((gap - standoff).abs() < 25.0, "{gap} m off a {standoff} m standoff at {t} s");
+            let drift = (beta - coast::beta_of(station.velocity_at(&system, t).unwrap())).length() * C_M_S;
             assert!(drift < 5.0e-3, "drifting at {drift} m/s at {t} s");
         }
         assert!(plan.has_closed(end));
-        assert_eq!(
-            plan.thrust_at(end + 1.0),
-            DVec3::ZERO,
-            "nothing is lit once alongside"
-        );
+        assert_eq!(plan.thrust_at(end + 1.0), DVec3::ZERO, "nothing is lit once alongside");
     }
 
     /// A quarry holding its orbit stays on the conic reckoned for it, so a standing consort is
@@ -302,10 +283,7 @@ mod tests {
         let period = station.period_s(&system, 0.0).unwrap();
         let later = sighting_of(&system, &station, 10.0 * period);
         let off = plan.divergence_m(&system, &later).unwrap();
-        assert!(
-            off < Closeness::Intimate.replan_m(1_500.0),
-            "{off} m after ten orbits"
-        );
+        assert!(off < Closeness::Intimate.replan_m(1_500.0), "{off} m after ten orbits");
     }
 
     /// Put back from its arguments, it is the same plan.
@@ -323,10 +301,7 @@ mod tests {
     fn a_fast_quarry_is_not_reckoned_along_a_conic() {
         let system = sol();
         let (_, seen) = holding(&system, 0.0);
-        let fast = Sighting {
-            beta: DVec3::Y * 0.01,
-            ..seen
-        };
+        let fast = Sighting { beta: DVec3::Y * 0.01, ..seen };
         assert!(frame_for(&system, &fast).is_none());
     }
 }

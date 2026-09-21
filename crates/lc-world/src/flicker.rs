@@ -53,40 +53,24 @@ impl Flicker {
     }
 
     pub fn regime(&self) -> Regime {
-        if self.mean_count >= GAUSSIAN_THRESHOLD {
-            Regime::Gaussian
-        } else {
-            Regime::Sparse
-        }
+        if self.mean_count >= GAUSSIAN_THRESHOLD { Regime::Gaussian } else { Regime::Sparse }
     }
 
     /// `1/sqrt(m)`. Above about 1/3 the Gaussian description is no longer describing
     /// fluctuation about anything.
     pub fn relative_rms(&self) -> f64 {
-        if self.mean_count > 0.0 {
-            self.mean_count.sqrt().recip()
-        } else {
-            f64::INFINITY
-        }
+        if self.mean_count > 0.0 { self.mean_count.sqrt().recip() } else { f64::INFINITY }
     }
 
     /// Occultation events per second, in the sparse regime.
     pub fn event_rate(&self) -> f64 {
-        if self.crossing_time > 0.0 {
-            self.mean_count / self.crossing_time
-        } else {
-            0.0
-        }
+        if self.crossing_time > 0.0 { self.mean_count / self.crossing_time } else { 0.0 }
     }
 
     /// Frequency at which the power spectrum turns over. Fitting it gives the orbital
     /// velocity, and therefore the semi-major axis.
     pub fn knee_hz(&self) -> f64 {
-        if self.crossing_time > 0.0 {
-            1.0 / (TAU * self.crossing_time)
-        } else {
-            0.0
-        }
+        if self.crossing_time > 0.0 { 1.0 / (TAU * self.crossing_time) } else { 0.0 }
     }
 
     /// Fractional deficit at time `t`, seconds, in whichever regime applies.
@@ -118,11 +102,7 @@ impl Flicker {
             let f = rng::uniform_in(h, 0.0, f_max);
             // Power of a box of width t_cross goes as sinc^2, so amplitude as |sinc|.
             let x = PI * f * self.crossing_time;
-            let a = if x.abs() < 1e-9 {
-                1.0
-            } else {
-                (x.sin() / x).abs()
-            };
+            let a = if x.abs() < 1e-9 { 1.0 } else { (x.sin() / x).abs() };
             freqs[k] = f;
             amplitudes[k] = a;
             phases[k] = rng::uniform_in(rng::mix(h), 0.0, TAU);
@@ -132,9 +112,7 @@ impl Flicker {
             return 0.0;
         }
         let scale = power.sqrt().recip();
-        (0..TERMS)
-            .map(|k| amplitudes[k] * (TAU * freqs[k] * t + phases[k]).cos())
-            .sum::<f64>()
+        (0..TERMS).map(|k| amplitudes[k] * (TAU * freqs[k] * t + phases[k]).cos()).sum::<f64>()
             * scale
     }
 
@@ -204,11 +182,7 @@ mod tests {
         let f = reference_swarm();
         assert_eq!(f.regime(), Regime::Gaussian);
         assert!((f.mean_count - 8.11).abs() < 0.05);
-        assert!(
-            (f.relative_rms() - 0.351).abs() < 0.005,
-            "rms/mean is {}",
-            f.relative_rms()
-        );
+        assert!((f.relative_rms() - 0.351).abs() < 0.005, "rms/mean is {}", f.relative_rms());
         assert!((f.crossing_time / 3600.0 - 13.0).abs() < 0.2);
     }
 
@@ -220,11 +194,7 @@ mod tests {
         let vals: Vec<f64> = (0..n).map(|k| f.deficit_at(k as f64 * dt)).collect();
         let mean = vals.iter().sum::<f64>() / n as f64;
         let rms = (vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64).sqrt();
-        assert!(
-            (mean / f.mean_deficit - 1.0).abs() < 0.02,
-            "mean {mean} vs {}",
-            f.mean_deficit
-        );
+        assert!((mean / f.mean_deficit - 1.0).abs() < 0.02, "mean {mean} vs {}", f.mean_deficit);
         let want = f.mean_deficit * f.relative_rms();
         assert!((rms / want - 1.0).abs() < 0.15, "rms {rms} vs {want}");
     }
@@ -233,18 +203,10 @@ mod tests {
     fn the_sparse_branch_reports_events_not_the_mean() {
         let f = sparse_fragments();
         assert_eq!(f.regime(), Regime::Sparse);
-        assert!(
-            (f.mean_count / 1.35e-3 - 1.0).abs() < 0.05,
-            "m is {}",
-            f.mean_count
-        );
+        assert!((f.mean_count / 1.35e-3 - 1.0).abs() < 0.05, "m is {}", f.mean_count);
         // The mean is undetectable; a single event is three orders of magnitude deeper.
         assert!(f.mean_deficit < 5e-9, "mean deficit {}", f.mean_deficit);
-        assert!(
-            f.single_event_depth > 1e-6,
-            "event depth {}",
-            f.single_event_depth
-        );
+        assert!(f.single_event_depth > 1e-6, "event depth {}", f.single_event_depth);
         assert!(f.single_event_depth / f.mean_deficit > 500.0);
     }
 
@@ -258,25 +220,13 @@ mod tests {
         let dt = f.crossing_time / 2.0;
         let vals: Vec<f64> = (0..n).map(|k| f.deficit_at(k as f64 * dt)).collect();
 
-        let quiet = vals
-            .iter()
-            .filter(|v| **v < f.single_event_depth * 0.01)
-            .count();
-        assert!(
-            quiet as f64 / n as f64 > 0.9,
-            "should be quiet most of the time"
-        );
+        let quiet = vals.iter().filter(|v| **v < f.single_event_depth * 0.01).count();
+        assert!(quiet as f64 / n as f64 > 0.9, "should be quiet most of the time");
         let deepest = vals.iter().cloned().fold(0.0, f64::max);
-        assert!(
-            deepest > f.single_event_depth * 0.5,
-            "events must actually reach their depth"
-        );
+        assert!(deepest > f.single_event_depth * 0.5, "events must actually reach their depth");
 
         let expected_events = f.event_rate() * n as f64 * dt;
-        assert!(
-            expected_events > 400.0,
-            "test is undersampled: {expected_events} events"
-        );
+        assert!(expected_events > 400.0, "test is undersampled: {expected_events} events");
         let mean = vals.iter().sum::<f64>() / n as f64;
         assert!(
             (mean / f.mean_deficit - 1.0).abs() < 0.15,

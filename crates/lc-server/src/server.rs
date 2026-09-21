@@ -4,21 +4,21 @@ use std::collections::HashMap;
 
 use glam::DVec3;
 use lc_proto::{
-    Cleared, ClientId, Inbound, Intent, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId,
+    ClientId, Cleared, Inbound, Intent, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId,
     Sighting, Withheld,
 };
 use lc_store::id::Minter;
 
-use crate::chase::{self, Pursuit};
 use crate::journal::{Journal, JournalError, PREPARE_AHEAD_US};
 use crate::rate::Budget;
-use crate::ticket::{Spent, Trusted};
 use crate::transport::Transport;
+use crate::ticket::{Spent, Trusted};
 use crate::world::{Event, Scheduled, World, schedule};
 use lc_world::craft::{Craft, CraftId, Fleet, Kind};
 use lc_world::motion::{Change, Event as Change_, Rejected};
 use lc_world::navigation::Course;
 use lc_world::signal::Beam;
+use crate::chase::{self, Pursuit};
 use lc_world::system::LocalSystem;
 use std::sync::Arc;
 
@@ -197,11 +197,7 @@ impl<J: Journal> Server<J> {
     /// step never enters an integrator, so it cannot accumulate. What *does* depend on it is
     /// the clock the client runs between statements, which is why the rate is on the wire.
     pub fn set_rate(&mut self, rate: f64) {
-        self.rate = if rate.is_finite() && rate > 0.0 {
-            rate
-        } else {
-            1.0
-        };
+        self.rate = if rate.is_finite() && rate > 0.0 { rate } else { 1.0 };
     }
 
     pub fn rate(&self) -> f64 {
@@ -315,10 +311,7 @@ impl<J: Journal> Server<J> {
     fn flies(&self, client: ClientId, craft: CraftId) -> bool {
         self.owners.get(&craft) == Some(&client)
             && self.fleet.get(craft).is_some()
-            && self
-                .clients
-                .get(&client)
-                .is_some_and(|state| state.ship.0 == craft.0)
+            && self.clients.get(&client).is_some_and(|state| state.ship.0 == craft.0)
     }
 
     pub fn ship(&self, id: ShipId) -> Option<&Craft> {
@@ -341,28 +334,25 @@ impl<J: Journal> Server<J> {
         craft.noise_floor = noise_floor;
         self.owners.insert(craft.id, owner);
         self.fleet.insert(craft);
-        self.clients.insert(
-            owner,
-            Connected {
-                ship: ship_id,
-                // Admitted rather than signed in — a test, or a probe — so there is no account to
-                // keep a place in a book under.
-                account: String::new(),
-                // Nothing received yet, so nothing is provable: an intent may be stamped anywhere
-                // from the beginning of time up to now.
-                last_reception_t: i64::MIN,
-                // And nothing sent yet. Not `now_t`, which would mean "told everything up to this
-                // instant" and would swallow an event stamped at exactly this instant -- a ship's
-                // own act, on the tick it acts. The same start serves a brand-new client, which is
-                // the catch-up path run from the beginning.
-                cursor_t: i64::MIN,
-                had_contacts: false,
-                // Admitted, not ticketed: a test's client is a player, and `directing` is what lets it
-                // develop.
-                permission: crate::ability::Level::PLAYER,
-                backlog_sent: false,
-            },
-        );
+        self.clients.insert(owner, Connected {
+            ship: ship_id,
+            // Admitted rather than signed in — a test, or a probe — so there is no account to
+            // keep a place in a book under.
+            account: String::new(),
+            // Nothing received yet, so nothing is provable: an intent may be stamped anywhere
+            // from the beginning of time up to now.
+            last_reception_t: i64::MIN,
+            // And nothing sent yet. Not `now_t`, which would mean "told everything up to this
+            // instant" and would swallow an event stamped at exactly this instant -- a ship's
+            // own act, on the tick it acts. The same start serves a brand-new client, which is
+            // the catch-up path run from the beginning.
+            cursor_t: i64::MIN,
+            had_contacts: false,
+            // Admitted, not ticketed: a test's client is a player, and `directing` is what lets it
+            // develop.
+            permission: crate::ability::Level::PLAYER,
+            backlog_sent: false,
+        });
     }
 
     /// One tick. The order is the whole of it.
@@ -381,19 +371,14 @@ impl<J: Journal> Server<J> {
         self.fleet.advance(now_s, self.tick_us() as f64 * 1.0e-6);
         // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
         // the range it has already made and this is a comparison until the window moves.
-        self.journal
-            .prepare(self.now_t, self.now_t + PREPARE_AHEAD_US)
-            .await?;
+        self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
         // 2. Drain intents, validate, write events, schedule deliveries.
         let mut events = Vec::new();
         let mut deliveries = Vec::new();
         for (from, message) in wire.poll() {
             // Charged before the message is read, so a malformed one costs its sender as much
             // as a valid one and there is nothing to gain by sending rubbish quickly.
-            let budget = self
-                .budgets
-                .entry(from)
-                .or_insert_with(|| Budget::new(TICK_MS));
+            let budget = self.budgets.entry(from).or_insert_with(|| Budget::new(TICK_MS));
             if !budget.charge() {
                 let retry_after_ticks = budget.retry_after_ticks();
                 wire.send(from, Outbound::Throttled { retry_after_ticks });
@@ -432,23 +417,15 @@ impl<J: Journal> Server<J> {
         match message {
             Inbound::Hello { protocol, ticket } => {
                 if protocol != PROTOCOL_VERSION {
-                    wire.send(
-                        from,
-                        Outbound::WrongProtocol {
-                            server: PROTOCOL_VERSION,
-                        },
-                    );
+                    wire.send(from, Outbound::WrongProtocol { server: PROTOCOL_VERSION });
                     return;
                 }
                 match self.sign_in(from, &ticket) {
                     Some((ship_id, name, account)) => {
-                        let pursuing =
-                            self.pursuits
-                                .get(&CraftId(ship_id.0))
-                                .map(|p| lc_proto::Pursuit {
-                                    quarry: p.quarry,
-                                    closeness: p.closeness.into(),
-                                });
+                        let pursuing = self.pursuits.get(&CraftId(ship_id.0)).map(|p| lc_proto::Pursuit {
+                            quarry: p.quarry,
+                            closeness: p.closeness.into(),
+                        });
                         // What it is doing, not merely where it is: an account coming back
                         // finds its craft mid-orbit or mid-burn, and a welcome that said only
                         // the position put it back at rest there. See `lc_world::resume`.
@@ -456,18 +433,15 @@ impl<J: Journal> Server<J> {
                             .ship(ship_id)
                             .map(|craft| (&craft.motion.snapshot()).into())
                             .unwrap_or_else(adrift_at_the_origin);
-                        wire.send(
-                            from,
-                            Outbound::Welcome {
-                                client_id: from,
-                                protocol: PROTOCOL_VERSION,
-                                ship_id,
-                                now_t: self.now_t,
-                                name,
-                                rate: self.rate,
-                                ship,
-                            },
-                        );
+                        wire.send(from, Outbound::Welcome {
+                            client_id: from,
+                            protocol: PROTOCOL_VERSION,
+                            ship_id,
+                            now_t: self.now_t,
+                            name,
+                            rate: self.rate,
+                            ship,
+                        });
                         // After the welcome, which is the message a client has to have first.
                         if let Some(pursuit) = pursuing {
                             wire.send(from, Outbound::Pursuing { ship_id, pursuit });
@@ -476,13 +450,10 @@ impl<J: Journal> Server<J> {
                         // A shard with no shelf says nothing about one, and its clients show an
                         // empty bookcase rather than a broken one.
                         if !self.library.is_empty() {
-                            wire.send(
-                                from,
-                                Outbound::Library {
-                                    base: self.library.base.clone(),
-                                    books: self.library.books.clone(),
-                                },
-                            );
+                            wire.send(from, Outbound::Library {
+                                base: self.library.base.clone(),
+                                books: self.library.books.clone(),
+                            });
                             wire.send(from, Outbound::Reading(self.library.marks_for(&account)));
                         }
                     }
@@ -492,11 +463,7 @@ impl<J: Journal> Server<J> {
             Inbound::SetReading(mark) => {
                 // Silently ignored from a connection with no account, which is every anonymous
                 // one: there is nowhere to keep a place for somebody who will not be back.
-                let account = self
-                    .clients
-                    .get(&from)
-                    .map(|c| c.account.clone())
-                    .unwrap_or_default();
+                let account = self.clients.get(&from).map(|c| c.account.clone()).unwrap_or_default();
                 if account.is_empty() {
                     return;
                 }
@@ -513,15 +480,12 @@ impl<J: Journal> Server<J> {
                         if matches!(applied.order, Order::Intercept { .. }) {
                             self.tell_flying(wire, CraftId(ship_id.0));
                         }
-                        wire.send(
-                            from,
-                            Outbound::Accepted {
-                                ship_id,
-                                event_id: applied.event_id,
-                                at_t: applied.at_t,
-                                order: applied.order,
-                            },
-                        );
+                        wire.send(from, Outbound::Accepted {
+                            ship_id,
+                            event_id: applied.event_id,
+                            at_t: applied.at_t,
+                            order: applied.order,
+                        });
                         // Every accepted order may have committed, spent or refunded energy.
                         self.tell_fitted(wire, CraftId(ship_id.0));
                     }
@@ -569,23 +533,13 @@ impl<J: Journal> Server<J> {
         // transmission would vanish. The last reception is always at or behind the cursor, so
         // this floor implies the doc's and adds the part that keeps deliveries findable.
         let floor = state.cursor_t.saturating_add(1);
-        let at = intent
-            .issued_at_client_t
-            .clamp(floor.min(self.now_t), self.now_t);
+        let at = intent.issued_at_client_t.clamp(floor.min(self.now_t), self.now_t);
         let at_s = at as f64 * 1.0e-6;
         let lights_the_drive = matches!(
             intent.order,
-            Order::Burn { .. }
-                | Order::SetCourse { .. }
-                | Order::Cross { .. }
-                | Order::Intercept { .. }
+            Order::Burn { .. } | Order::SetCourse { .. } | Order::Cross { .. } | Order::Intercept { .. }
         );
-        if lights_the_drive
-            && self
-                .fleet
-                .get(id)
-                .is_some_and(|craft| craft.is_refitting(at_s))
-        {
+        if lights_the_drive && self.fleet.get(id).is_some_and(|craft| craft.is_refitting(at_s)) {
             return Err(Refusal::Refitting);
         }
 
@@ -630,16 +584,10 @@ impl<J: Journal> Server<J> {
                     KIND_BURN,
                     BURN_POWER_W,
                     format!("{{\"beta\":{beta:?}}}"),
-                    Order::Burn {
-                        beta: beta.to_array(),
-                    },
+                    Order::Burn { beta: beta.to_array() },
                 )
             }
-            Order::SetCourse {
-                course,
-                accel_g,
-                max_beta,
-            } => {
+            Order::SetCourse { course, accel_g, max_beta } => {
                 if !accel_g.is_finite() || *accel_g <= 0.0 || !(*max_beta > 0.0) {
                     return Err(Refusal::Impossible);
                 }
@@ -652,23 +600,14 @@ impl<J: Journal> Server<J> {
                 // Not shadowed: the proto course is wanted again below, to say back what was
                 // applied. Only the drive is clamped, never the course itself.
                 let flown: Course = course.clone().into();
-                let drive =
-                    crate::fitting::within_budget(craft, at_s, drive, |drive| Change::SetCourse {
-                        course: flown.clone(),
-                        drive,
-                    })?;
-                let change = Change::SetCourse {
-                    course: flown,
-                    drive,
-                };
+                let drive = crate::fitting::within_budget(craft, at_s, drive, |drive| {
+                    Change::SetCourse { course: flown.clone(), drive }
+                })?;
+                let change = Change::SetCourse { course: flown, drive };
                 // **The fold, not a second implementation.** The server works the crossing out
                 // from the order exactly as the client will, because it is the same function.
                 craft
-                    .apply(&Change_ {
-                        ship: motion_id(id),
-                        at_t: at as f64 * 1.0e-6,
-                        change,
-                    })
+                    .apply(&Change_ { ship: motion_id(id), at_t: at as f64 * 1.0e-6, change })
                     .map_err(refusal_for)?;
                 (
                     KIND_BURN,
@@ -683,11 +622,7 @@ impl<J: Journal> Server<J> {
                     },
                 )
             }
-            Order::Cross {
-                star,
-                accel_g,
-                max_beta,
-            } => {
+            Order::Cross { star, accel_g, max_beta } => {
                 if !accel_g.is_finite() || *accel_g <= 0.0 || !(*max_beta > 0.0) {
                     return Err(Refusal::Impossible);
                 }
@@ -712,11 +647,7 @@ impl<J: Journal> Server<J> {
                     KIND_BURN,
                     BURN_POWER_W,
                     format!("{{\"cross\":{star},\"accel_g\":{}}}", drive.accel_g),
-                    Order::Cross {
-                        star: *star,
-                        accel_g: drive.accel_g,
-                        max_beta: drive.max_beta,
-                    },
+                    Order::Cross { star: *star, accel_g: drive.accel_g, max_beta: drive.max_beta },
                 )
             }
             Order::CutDrive => {
@@ -738,24 +669,14 @@ impl<J: Journal> Server<J> {
                 // player who presses the button sees the ship move on the same round trip as
                 // any other order. What keeps it flying is the standing policy below.
                 let now_s = at as f64 * 1.0e-6;
-                let seen =
-                    chase::sighting(&self.fleet, id, quarry, at).ok_or(Refusal::NotInSight)?;
+                let seen = chase::sighting(&self.fleet, id, quarry, at)
+                    .ok_or(Refusal::NotInSight)?;
                 // Closing in on the quarry already being chased keeps what has been measured of
                 // it, so an escort does not lose its acceleration for a tick.
-                let last_seen = self
-                    .pursuits
-                    .get(&id)
-                    .filter(|p| p.quarry == quarry)
-                    .and_then(|p| p.last_seen);
+                let last_seen =
+                    self.pursuits.get(&id).filter(|p| p.quarry == quarry).and_then(|p| p.last_seen);
                 let craft = self.fleet.get(id).ok_or(Refusal::NotYours)?;
-                match chase::plan(
-                    &self.fleet,
-                    craft,
-                    &seen,
-                    last_seen.as_ref(),
-                    (*closeness).into(),
-                    now_s,
-                ) {
+                match chase::plan(&self.fleet, craft, &seen, last_seen.as_ref(), (*closeness).into(), now_s) {
                     Ok(plan) => {
                         let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
                         let before = craft.clone();
@@ -770,23 +691,17 @@ impl<J: Journal> Server<J> {
                     Err(lc_world::pursuit::Refused::AlreadyThere) => {}
                     Err(lc_world::pursuit::Refused::TooFast) => return Err(Refusal::TooFast),
                 }
-                self.pursuits.insert(
-                    id,
-                    Pursuit {
-                        quarry,
-                        closeness: (*closeness).into(),
-                        last_plan_t: at,
-                        last_seen,
-                    },
-                );
+                self.pursuits.insert(id, Pursuit {
+                    quarry,
+                    closeness: (*closeness).into(),
+                    last_plan_t: at,
+                    last_seen,
+                });
                 (
                     KIND_BURN,
                     BURN_POWER_W,
                     format!("{{\"intercept\":{}}}", quarry.0),
-                    Order::Intercept {
-                        ship_id: quarry,
-                        closeness: *closeness,
-                    },
+                    Order::Intercept { ship_id: quarry, closeness: *closeness },
                 )
             }
             Order::BreakOff => {
@@ -808,25 +723,12 @@ impl<J: Journal> Server<J> {
             Order::Refit { target } => {
                 self.refit(id, (*target).into(), at_s)?;
                 // Drones are quiet. Nothing about a refit is visible from outside the hull.
-                (
-                    KIND_CUT,
-                    0.0,
-                    "{\"refit\":true}".to_string(),
-                    Order::Refit { target: *target },
-                )
+                (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::Refit { target: *target })
             }
             Order::CancelRefit => {
-                self.fleet
-                    .get_mut(id)
-                    .ok_or(Refusal::NotYours)?
-                    .cancel_refit(at_s);
+                self.fleet.get_mut(id).ok_or(Refusal::NotYours)?.cancel_refit(at_s);
                 self.refitting.remove(&id);
-                (
-                    KIND_CUT,
-                    0.0,
-                    "{\"refit\":false}".to_string(),
-                    Order::CancelRefit,
-                )
+                (KIND_CUT, 0.0, "{\"refit\":false}".to_string(), Order::CancelRefit)
             }
             Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => {
                 // The whole of it in `crate::radio`, because everything a transmission needs
@@ -836,12 +738,7 @@ impl<J: Journal> Server<J> {
                 beam = spoken.beam;
                 transmitted = true;
                 utterance = spoken.said;
-                (
-                    spoken.kind,
-                    crate::radio::SIGNAL_POWER_W,
-                    spoken.payload,
-                    spoken.applied,
-                )
+                (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, spoken.applied)
             }
         };
 
@@ -854,11 +751,7 @@ impl<J: Journal> Server<J> {
             self.pursuits.remove(&id);
         }
 
-        let at_position = self
-            .fleet
-            .get(id)
-            .ok_or(Refusal::NotYours)?
-            .position_at(at as f64);
+        let at_position = self.fleet.get(id).ok_or(Refusal::NotYours)?.position_at(at as f64);
         let event = Event {
             id: self.minter.mint(at).ok_or(Refusal::Impossible)?.get(),
             source: intent.ship_id,
@@ -888,11 +781,7 @@ impl<J: Journal> Server<J> {
             self.remember(event_id, id, at, &said, &landings);
         }
         events.push(event);
-        Ok(Applied {
-            event_id,
-            at_t: at,
-            order: applied,
-        })
+        Ok(Applied { event_id, at_t: at, order: applied })
     }
 
     /// Verify a ticket and bind the connection to the account's craft.
@@ -905,9 +794,7 @@ impl<J: Journal> Server<J> {
             Ok(claims) => {
                 // Spent only after it verifies, or an invalid ticket could burn a valid one's
                 // identifier.
-                self.spent
-                    .claim(&claims, self.now_t / crate::world::MICROS_PER_SECOND)
-                    .ok()?;
+                self.spent.claim(&claims, self.now_t / crate::world::MICROS_PER_SECOND).ok()?;
                 claims
             }
             // No account to key an anonymous player by, so the connection is the account.
@@ -926,10 +813,7 @@ impl<J: Journal> Server<J> {
         // that would fail on the unique constraint -- so the shard would stop saving anything,
         // for everyone, quietly. Refusing one player loudly is the better failure.
         if let Some(why) = self.blocked.get(&claims.sub) {
-            eprintln!(
-                "refusing {}: its saved craft will not load: {why}",
-                claims.sub
-            );
+            eprintln!("refusing {}: its saved craft will not load: {why}", claims.sub);
             return None;
         }
 
@@ -954,18 +838,15 @@ impl<J: Journal> Server<J> {
         // A reconnection replaces the old connection's claim on the craft rather than sharing
         // it: two sockets acting for one ship is two clients predicting different futures.
         self.clients.retain(|_, state| state.ship != ship);
-        self.clients.insert(
-            from,
-            Connected {
-                ship,
-                account: claims.sub.clone(),
-                last_reception_t: i64::MIN,
-                cursor_t: i64::MIN,
-                had_contacts: false,
-                permission: crate::ability::Level::from_claim(claims.perm),
-                backlog_sent: false,
-            },
-        );
+        self.clients.insert(from, Connected {
+            ship,
+            account: claims.sub.clone(),
+            last_reception_t: i64::MIN,
+            cursor_t: i64::MIN,
+            had_contacts: false,
+            permission: crate::ability::Level::from_claim(claims.perm),
+            backlog_sent: false,
+        });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused
         // `NotYours` on every order it sends — which no in-process test caught, because the
@@ -985,20 +866,15 @@ impl<J: Journal> Server<J> {
         }
         // Positions first, then systems, then craft: the world and the fleet cannot both be
         // borrowed at once, and a craft's system is looked up from where it is.
-        let where_each: Vec<(CraftId, DVec3)> = self
-            .fleet
-            .iter()
-            .map(|craft| (craft.id, craft.motion.position_ly))
-            .collect();
+        let where_each: Vec<(CraftId, DVec3)> =
+            self.fleet.iter().map(|craft| (craft.id, craft.motion.position_ly)).collect();
         let placements: Vec<(CraftId, Option<Arc<LocalSystem>>)> = where_each
             .into_iter()
             .map(|(id, at)| (id, self.world.system_at(at)))
             .collect();
 
         for (id, system) in placements {
-            let Some(craft) = self.fleet.get_mut(id) else {
-                continue;
-            };
+            let Some(craft) = self.fleet.get_mut(id) else { continue };
             if craft.system.as_ref().map(|s| s.star) == system.as_ref().map(|s| s.star) {
                 continue;
             }
@@ -1023,24 +899,18 @@ impl<J: Journal> Server<J> {
         }
     }
 
+
     /// Tell a craft's owner what it is now flying.
     ///
     /// Only for changes the owner did not ask for — everything else it folded itself when its
     /// order came back accepted, and saying it twice would be a second copy of an answer.
     pub(crate) fn tell_flying(&self, wire: &mut impl Transport, id: CraftId) {
-        let Some(craft) = self.fleet.get(id) else {
-            return;
-        };
-        let Some(owner) = self.owners.get(&id).copied() else {
-            return;
-        };
-        wire.send(
-            owner,
-            Outbound::Flying {
-                ship_id: ShipId(id.0),
-                ship: (&craft.motion.snapshot()).into(),
-            },
-        );
+        let Some(craft) = self.fleet.get(id) else { return };
+        let Some(owner) = self.owners.get(&id).copied() else { return };
+        wire.send(owner, Outbound::Flying {
+            ship_id: ShipId(id.0),
+            ship: (&craft.motion.snapshot()).into(),
+        });
         // A new plan committed energy, and the client took the motion whole rather than folding
         // it, so its account is stale until told.
         self.tell_fitted(wire, id);
@@ -1063,20 +933,14 @@ impl<J: Journal> Server<J> {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
         for (id, plan) in chase::decide(&self.fleet, &mut self.pursuits, now) {
-            let Some(craft) = self.fleet.get_mut(id) else {
-                continue;
-            };
+            let Some(craft) = self.fleet.get_mut(id) else { continue };
             let Some(plan) = plan else {
                 self.pursuits.remove(&id);
                 // Given up, so nothing is steering: a station kept beside a quarry nobody can
                 // see is a ship holding formation with a guess. Silent, as cutting always is,
                 // and its owner is told what it is doing now.
                 if craft.motion.pursuing().is_some() {
-                    let cut = Change_ {
-                        ship: motion_id(id),
-                        at_t: now_s,
-                        change: Change::CutDrive,
-                    };
+                    let cut = Change_ { ship: motion_id(id), at_t: now_s, change: Change::CutDrive };
                     if craft.apply(&cut).is_ok() {
                         self.tell_flying(wire, id);
                     }
@@ -1089,15 +953,7 @@ impl<J: Journal> Server<J> {
             }
             // A burn, and burns are the loudest thing a ship does. Everyone in range learns
             // that this craft maneuvered, at light delay, exactly as they would for any other.
-            self.emit(
-                id,
-                KIND_BURN,
-                BURN_POWER_W,
-                "{}".into(),
-                now,
-                events,
-                deliveries,
-            );
+            self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events, deliveries);
             // Its owner learns *what* it is flying, at once and directly. Nobody else does:
             // this is a ship being told about itself.
             self.tell_flying(wire, id);
@@ -1115,12 +971,8 @@ impl<J: Journal> Server<J> {
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
     ) {
-        let Some(craft) = self.fleet.get(id) else {
-            return;
-        };
-        let Some(event_id) = self.minter.mint(at) else {
-            return;
-        };
+        let Some(craft) = self.fleet.get(id) else { return };
+        let Some(event_id) = self.minter.mint(at) else { return };
         let event = Event {
             id: event_id.get(),
             source: ShipId(id.0),
@@ -1149,11 +1001,8 @@ impl<J: Journal> Server<J> {
     async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
         // Cloned out first: the journal read borrows `self`, and the state update writes it.
-        let connections: Vec<(ClientId, Connected)> = self
-            .clients
-            .iter()
-            .map(|(id, state)| (*id, state.clone()))
-            .collect();
+        let connections: Vec<(ClientId, Connected)> =
+            self.clients.iter().map(|(id, state)| (*id, state.clone())).collect();
         let mut contacts = chase::contacts(&self.fleet, &self.clients, now);
 
         for (id, state) in connections {
@@ -1256,7 +1105,7 @@ pub const BURN_POWER_W: f64 = 1.0e12;
 mod tests {
     use super::*;
     use crate::journal::Memory;
-    use crate::transport::Loopback;
+use crate::transport::Loopback;
 
     /// Two light-hours, in light-microseconds. Far enough that the delay is many ticks.
     const TWO_LIGHT_HOURS: f64 = 7_200.0 * 1_000_000.0;
@@ -1290,17 +1139,9 @@ mod tests {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let (flier, watcher) = (ClientId(1), ClientId(2));
-        server.admit(
-            flier,
-            Craft::at(CraftId(1), lc_world::craft::Kind::Ship, DVec3::ZERO),
-            0.0,
-        );
+        server.admit(flier, Craft::at(CraftId(1), lc_world::craft::Kind::Ship, DVec3::ZERO), 0.0);
         let beside = DVec3::new(0.0, 1.0e6 / lc_world::system::M_PER_LY, 0.0);
-        server.admit(
-            watcher,
-            Craft::at(CraftId(2), lc_world::craft::Kind::Ship, beside),
-            0.0,
-        );
+        server.admit(watcher, Craft::at(CraftId(2), lc_world::craft::Kind::Ship, beside), 0.0);
 
         // Twenty thousand kilometers, past the standoff a crossing stops short of a star by.
         let trip_ly = 2.0e7 / lc_world::system::M_PER_LY;
@@ -1316,9 +1157,7 @@ mod tests {
                 change: lc_world::motion::Change::Cross { to_ly, drive },
             })
             .unwrap();
-        let lc_world::motion::Motive::Crossing(cruise) =
-            &server.ship(ShipId(1)).unwrap().motion.motive
-        else {
+        let lc_world::motion::Motive::Crossing(cruise) = &server.ship(ShipId(1)).unwrap().motion.motive else {
             panic!("premise: a crossing")
         };
         let arrive_t = ((cruise.start_s + cruise.duration_s()) * 1e6) as i64;
@@ -1345,11 +1184,7 @@ mod tests {
             coast_us > 0 && coast_us < server.tick_us(),
             "premise: a flip inside one tick, got {coast_us} us",
         );
-        assert!(
-            (drive[3].0 - arrive_t).abs() < 1_000,
-            "went out at {}, arrived at {arrive_t}",
-            drive[3].0
-        );
+        assert!((drive[3].0 - arrive_t).abs() < 1_000, "went out at {}, arrived at {arrive_t}", drive[3].0);
     }
 
     /// **The acceptance criterion.** Two clients, one acts, and the other learns about it at
@@ -1365,35 +1200,22 @@ mod tests {
         let actor = ClientId(1);
         server.admit(actor, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
         let watcher = ClientId(2);
-        server.admit(
-            watcher,
-            crate::world::still(ShipId(2), DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)),
-            0.0,
-        );
+        server
+            .admit(watcher, crate::world::still(ShipId(2), DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)), 0.0);
 
-        wire.client_says(
-            actor,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Transmit { power_w: 1.0e20 },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(actor, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1.0e20 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         let emitted = server.journal().events[0].t;
         let arrives = emitted + TWO_LIGHT_HOURS as i64;
-        assert!(
-            arrives > server.now_t() + TICK_US * 8,
-            "the delay is not worth testing"
-        );
+        assert!(arrives > server.now_t() + TICK_US * 8, "the delay is not worth testing");
 
         // The actor is standing where it happened, so it knows at once.
-        assert_eq!(
-            sightings(&wire.take(actor)).len(),
-            1,
-            "a ship cannot be late to its own act"
-        );
+        assert_eq!(sightings(&wire.take(actor)).len(), 1, "a ship cannot be late to its own act");
 
         let mut told_at = None;
         for _ in 0..2_000 {
@@ -1428,10 +1250,7 @@ mod tests {
         // And it is said once, not on every tick after.
         for _ in 0..5 {
             server.tick(&mut wire).await.unwrap();
-            assert!(
-                sightings(&wire.take(watcher)).is_empty(),
-                "the same sighting came twice"
-            );
+            assert!(sightings(&wire.take(watcher)).is_empty(), "the same sighting came twice");
         }
     }
 
@@ -1448,13 +1267,11 @@ mod tests {
         let client = ClientId(1);
         server.admit(client, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
-        let order = |t| {
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Transmit { power_w: 1.0 },
-                issued_at_client_t: t,
-            })
-        };
+        let order = |t| Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1.0 },
+            issued_at_client_t: t,
+        });
 
         // A burst a player could plausibly produce goes through untouched.
         for step in 0..crate::rate::BURST as i64 {
@@ -1463,9 +1280,7 @@ mod tests {
         server.tick(&mut wire).await.unwrap();
         let answered = wire.take(client);
         assert!(
-            !answered
-                .iter()
-                .any(|m| matches!(m, Outbound::Throttled { .. })),
+            !answered.iter().any(|m| matches!(m, Outbound::Throttled { .. })),
             "a burst inside the allowance was throttled",
         );
         assert_eq!(server.usage(client).unwrap().refused, 0);
@@ -1484,17 +1299,11 @@ mod tests {
             })
             .collect();
         assert!(!throttled.is_empty(), "a flood was not stopped");
-        assert!(
-            throttled.iter().all(|t| *t > 0),
-            "told to retry at once after being refused"
-        );
+        assert!(throttled.iter().all(|t| *t > 0), "told to retry at once after being refused");
 
         let usage = server.usage(client).unwrap();
         assert!(usage.refused > 0);
-        assert!(
-            usage.peak_per_tick >= crate::rate::BURST as u32 * 10,
-            "the attempt went unmeasured"
-        );
+        assert!(usage.peak_per_tick >= crate::rate::BURST as u32 * 10, "the attempt went unmeasured");
     }
 
     /// An unknown connection is limited too. A socket that has never been given a ship can
@@ -1505,19 +1314,13 @@ mod tests {
         let mut wire = Loopback::new();
         let stranger = ClientId(99);
         for _ in 0..(crate::rate::BURST as i64 * 3) {
-            wire.client_says(
-                stranger,
-                Inbound::Hello {
-                    protocol: PROTOCOL_VERSION,
-                    ticket: "not a ticket".into(),
-                },
-            );
+            wire.client_says(stranger, Inbound::Hello {
+                protocol: PROTOCOL_VERSION,
+                ticket: "not a ticket".into(),
+            });
         }
         server.tick(&mut wire).await.unwrap();
-        assert!(
-            server.usage(stranger).unwrap().refused > 0,
-            "an unadmitted flood was free"
-        );
+        assert!(server.usage(stranger).unwrap().refused > 0, "an unadmitted flood was free");
     }
 
     /// A ship may not act for a ship that is not its own, and may not be told that it tried.
@@ -1527,31 +1330,18 @@ mod tests {
         let mut wire = Loopback::new();
         let first = ClientId(1);
         server.admit(first, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
-        server.admit(
-            ClientId(2),
-            crate::world::still(ShipId(2), DVec3::ZERO),
-            0.0,
-        );
+        server.admit(ClientId(2), crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
 
-        wire.client_says(
-            first,
-            Inbound::Act(Intent {
-                ship_id: ShipId(2),
-                order: Order::Transmit { power_w: 1.0 },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(first, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: Order::Transmit { power_w: 1.0 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
-        assert!(
-            server.journal().events.is_empty(),
-            "an event was written for someone else's ship"
-        );
+        assert!(server.journal().events.is_empty(), "an event was written for someone else's ship");
         assert!(wire.take(first).iter().any(|m| matches!(
             m,
-            Outbound::Refused {
-                reason: Refusal::NotYours,
-                ..
-            }
+            Outbound::Refused { reason: Refusal::NotYours, .. }
         )));
     }
 
@@ -1566,20 +1356,13 @@ mod tests {
         server.admit(client, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
         // The future: clamped down to now.
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Transmit { power_w: 1.0 },
-                issued_at_client_t: i64::MAX / 4,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1.0 },
+            issued_at_client_t: i64::MAX / 4,
+        }));
         server.tick(&mut wire).await.unwrap();
-        assert_eq!(
-            server.journal().events[0].t,
-            server.now_t(),
-            "an intent was stamped in the future"
-        );
+        assert_eq!(server.journal().events[0].t, server.now_t(), "an intent was stamped in the future");
         let _ = wire.take(client);
 
         // Its own transmission is received at once, so the floor is now that arrival.
@@ -1587,14 +1370,11 @@ mod tests {
         let floor = server.journal().events[0].t;
 
         // The past: clamped up to what it can prove it knew.
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Transmit { power_w: 1.0 },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1.0 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let second = server.journal().events.last().unwrap();
         assert!(
@@ -1624,23 +1404,16 @@ mod tests {
         }
         let _ = wire.take(client);
 
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Transmit { power_w: 1.0e9 },
-                issued_at_client_t: i64::MIN,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1.0e9 },
+            issued_at_client_t: i64::MIN,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         let messages = wire.take(client);
         let told = sightings(&messages);
-        assert_eq!(
-            told.len(),
-            1,
-            "the act was written and then never looked at again"
-        );
+        assert_eq!(told.len(), 1, "the act was written and then never looked at again");
         // Clamped into this tick's window rather than into the past it asked for.
         assert!(
             told[0].emitted_t > server.now_t() - TICK_US,
@@ -1661,61 +1434,38 @@ mod tests {
         server.admit(client, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
         for order in [
-            Order::Burn {
-                beta: [1.0, 0.0, 0.0],
-            },
-            Order::Burn {
-                beta: [0.9, 0.9, 0.0],
-            },
-            Order::Burn {
-                beta: [f64::NAN, 0.0, 0.0],
-            },
+            Order::Burn { beta: [1.0, 0.0, 0.0] },
+            Order::Burn { beta: [0.9, 0.9, 0.0] },
+            Order::Burn { beta: [f64::NAN, 0.0, 0.0] },
             Order::Transmit { power_w: 0.0 },
             Order::Transmit { power_w: -5.0 },
         ] {
-            wire.client_says(
-                client,
-                Inbound::Act(Intent {
-                    ship_id: ShipId(1),
-                    order: order.clone(),
-                    issued_at_client_t: 0,
-                }),
-            );
+            wire.client_says(client, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: order.clone(),
+                issued_at_client_t: 0,
+            }));
             server.tick(&mut wire).await.unwrap();
-            assert!(
-                server.journal().events.is_empty(),
-                "{order:?} became an event"
-            );
+            assert!(server.journal().events.is_empty(), "{order:?} became an event");
             assert!(
                 matches!(
                     wire.take(client).as_slice(),
-                    [Outbound::Refused {
-                        reason: Refusal::Impossible,
-                        ..
-                    }]
+                    [Outbound::Refused { reason: Refusal::Impossible, .. }]
                 ),
                 "{order:?} was not refused",
             );
         }
         // And a burn just inside `c` is fine.
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Burn {
-                    beta: [0.99, 0.0, 0.0],
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Burn { beta: [0.99, 0.0, 0.0] },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         assert_eq!(server.journal().events.len(), 1);
         // And the burn left the ship moving, on the shared model's own terms.
         let after = &server.ship(ShipId(1)).unwrap().motion;
-        assert!(matches!(
-            after.motive,
-            lc_world::motion::Motive::Drifting { .. }
-        ));
+        assert!(matches!(after.motive, lc_world::motion::Motive::Drifting { .. }));
         assert!((after.beta.x - 0.99).abs() < 1.0e-12, "{}", after.beta.x);
     }
 
@@ -1728,20 +1478,13 @@ mod tests {
         let actor = ClientId(1);
         server.admit(actor, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
         let deaf = ClientId(2);
-        server.admit(
-            deaf,
-            crate::world::still(ShipId(2), DVec3::new(1_000_000.0, 0.0, 0.0)),
-            1.0e6,
-        );
+        server.admit(deaf, crate::world::still(ShipId(2), DVec3::new(1_000_000.0, 0.0, 0.0)), 1.0e6);
 
-        wire.client_says(
-            actor,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Transmit { power_w: 1.0 },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(actor, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1.0 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let _ = wire.take(actor);
 
@@ -1749,22 +1492,12 @@ mod tests {
         for _ in 0..4 {
             server.tick(&mut wire).await.unwrap();
         }
+        assert!(server.now_t() > 1_000_000, "the test never reached the arrival");
         assert!(
-            server.now_t() > 1_000_000,
-            "the test never reached the arrival"
-        );
-        assert!(
-            server
-                .journal()
-                .deliveries
-                .iter()
-                .any(|d| d.observer == ShipId(2)),
+            server.journal().deliveries.iter().any(|d| d.observer == ShipId(2)),
             "it was never even scheduled, so the floor is not what stopped it",
         );
-        assert!(
-            sightings(&wire.take(deaf)).is_empty(),
-            "a signal under the floor was sent"
-        );
+        assert!(sightings(&wire.take(deaf)).is_empty(), "a signal under the floor was sent");
     }
 
     /// Catch-up. A client that was away winds its cursor back and is told everything again,
@@ -1776,16 +1509,13 @@ mod tests {
         let actor = ClientId(1);
         server.admit(actor, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
 
-        wire.client_says(
-            actor,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Transmit { power_w: 1.0e9 },
-                // Stamped at "now", so the replay below can ask for everything after zero and
-                // mean it. A reception at zero is one the client already has.
-                issued_at_client_t: i64::MAX / 4,
-            }),
-        );
+        wire.client_says(actor, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1.0e9 },
+            // Stamped at "now", so the replay below can ask for everything after zero and
+            // mean it. A reception at zero is one the client already has.
+            issued_at_client_t: i64::MAX / 4,
+        }));
         server.tick(&mut wire).await.unwrap();
         let first = sightings(&wire.take(actor)).len();
         assert_eq!(first, 1);
@@ -1796,11 +1526,7 @@ mod tests {
 
         wire.client_says(actor, Inbound::ResumeFrom { arrive_t: 0 });
         server.tick(&mut wire).await.unwrap();
-        assert_eq!(
-            sightings(&wire.take(actor)).len(),
-            1,
-            "the replay did not come back"
-        );
+        assert_eq!(sightings(&wire.take(actor)).len(), 1, "the replay did not come back");
 
         // A resume past `now` cannot be used to ask for the future.
         wire.client_says(actor, Inbound::ResumeFrom { arrive_t: i64::MAX });
@@ -1821,31 +1547,19 @@ mod tests {
 
         // The version is checked before the ticket, so a stale client is told which problem it
         // has rather than being told it is not signed in.
-        wire.client_says(
-            client,
-            Inbound::Hello {
-                protocol: PROTOCOL_VERSION + 1,
-                ticket: broker.mint("acct-1", "shard-1", 60, "j1"),
-            },
-        );
+        wire.client_says(client, Inbound::Hello {
+            protocol: PROTOCOL_VERSION + 1,
+            ticket: broker.mint("acct-1", "shard-1", 60, "j1"),
+        });
         server.tick(&mut wire).await.unwrap();
-        assert!(matches!(
-            wire.take(client).as_slice(),
-            [Outbound::WrongProtocol { .. }]
-        ));
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::WrongProtocol { .. }]));
 
-        wire.client_says(
-            client,
-            Inbound::Hello {
-                protocol: PROTOCOL_VERSION,
-                ticket: broker.mint("acct-1", "shard-1", 60, "j2"),
-            },
-        );
+        wire.client_says(client, Inbound::Hello {
+            protocol: PROTOCOL_VERSION,
+            ticket: broker.mint("acct-1", "shard-1", 60, "j2"),
+        });
         server.tick(&mut wire).await.unwrap();
-        assert!(matches!(
-            wire.take(client).as_slice(),
-            [Outbound::Welcome { .. }, Outbound::Fitted { .. }]
-        ));
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }]));
     }
 
     /// **A faster world is the same world.** Its tick buys coarser event timestamps and
@@ -1858,12 +1572,10 @@ mod tests {
         let beta = DVec3::new(0.3, -0.1, 0.0);
 
         let mut slow = Server::new(Memory::default(), 0, 1);
-        slow.fleet_mut()
-            .insert(crate::world::coasting(ShipId(1), at, beta, 0));
+        slow.fleet_mut().insert(crate::world::coasting(ShipId(1), at, beta, 0));
         let mut fast = Server::new(Memory::default(), 0, 1);
         fast.set_rate(60.0);
-        fast.fleet_mut()
-            .insert(crate::world::coasting(ShipId(1), at, beta, 0));
+        fast.fleet_mut().insert(crate::world::coasting(ShipId(1), at, beta, 0));
 
         let mut wire = Loopback::new();
         for _ in 0..60 {
@@ -1871,11 +1583,7 @@ mod tests {
         }
         fast.tick(&mut wire).await.unwrap();
 
-        assert_eq!(
-            slow.now_t(),
-            fast.now_t(),
-            "sixty slow ticks is not one fast one"
-        );
+        assert_eq!(slow.now_t(), fast.now_t(), "sixty slow ticks is not one fast one");
         let there = |s: &Server<Memory>| s.ship(ShipId(1)).unwrap().motion.position_ly;
         assert_eq!(there(&slow), there(&fast), "the rate moved the ship");
     }
@@ -1953,10 +1661,7 @@ mod tests {
             (delay - crossed).abs() < 1.0,
             "light took {delay} microseconds to cross {crossed}",
         );
-        assert!(
-            delay > TWO_LIGHT_HOURS,
-            "and the separation is at least the two hours set up"
-        );
+        assert!(delay > TWO_LIGHT_HOURS, "and the separation is at least the two hours set up");
 
         // And the gap that delay opens up, against where the craft actually is now.
         let actually = server.ship(ShipId(1)).unwrap().motion.position_ly;
@@ -1966,10 +1671,7 @@ mod tests {
             (behind - expected).abs() < expected * 0.01,
             "reported {behind} light-years behind, expected {expected}",
         );
-        assert!(
-            behind > 0.0,
-            "a moving contact reported at its present position"
-        );
+        assert!(behind > 0.0, "a moving contact reported at its present position");
     }
 
     /// Nothing at all is said about craft in another system.
@@ -1999,15 +1701,13 @@ mod tests {
 
     /// Where a craft is at the server's present, light-years.
     fn at_now<J: Journal>(server: &Server<J>, ship: ShipId) -> DVec3 {
-        server
-            .ship(ship)
-            .unwrap()
-            .position_at(server.now_t() as f64)
+        server.ship(ship).unwrap().position_at(server.now_t() as f64)
             / lc_world::motion::LIGHT_US_PER_LY
     }
 
     fn gap<J: Journal>(server: &Server<J>) -> f64 {
-        at_now(server, ShipId(1)).distance(at_now(server, ShipId(2))) * lc_world::system::M_PER_LY
+        at_now(server, ShipId(1)).distance(at_now(server, ShipId(2)))
+            * lc_world::system::M_PER_LY
     }
 
     /// The pursuer's standing plan, if it is flying one.
@@ -2033,22 +1733,13 @@ mod tests {
         );
         let opening = gap(&server);
 
-        wire.client_says(
-            hunter,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Intercept {
-                    ship_id: ShipId(2),
-                    closeness: lc_proto::Closeness::Company,
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
-        assert!(
-            plan(&server, ShipId(1)).is_some(),
-            "the order did not put it on an approach"
-        );
+        assert!(plan(&server, ShipId(1)).is_some(), "the order did not put it on an approach");
 
         for _ in 0..200 {
             server.tick(&mut wire).await.unwrap();
@@ -2059,18 +1750,13 @@ mod tests {
             server.ship(ShipId(2)).unwrap().length_m,
         );
         let closed = gap(&server);
-        assert!(
-            closed < opening / 100.0,
-            "it barely closed: {opening} to {closed}"
-        );
+        assert!(closed < opening / 100.0, "it barely closed: {opening} to {closed}");
         assert!(
             closed < standoff * lc_world::pursuit::DRIFT_ALLOWANCE,
             "ended {closed} off, which is outside the deadband round {standoff}",
         );
         // And it is done flying rather than circling forever.
-        assert!(
-            plan(&server, ShipId(1)).is_none_or(|p| p.has_arrived(server.now_t() as f64 * 1e-6))
-        );
+        assert!(plan(&server, ShipId(1)).is_none_or(|p| p.has_arrived(server.now_t() as f64 * 1e-6)));
 
         // Station-keeping: hundreds of ticks later it is still there, and it has not spent
         // them re-planning against itself.
@@ -2092,38 +1778,22 @@ mod tests {
         let mut wire = Loopback::new();
         let hunter = ClientId(1);
         server.admit(hunter, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
-        server.admit(
-            ClientId(2),
-            crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)),
-            0.0,
-        );
-        wire.client_says(
-            hunter,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Intercept {
-                    ship_id: ShipId(2),
-                    closeness: lc_proto::Closeness::Company,
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        server.admit(ClientId(2), crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)), 0.0);
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+            issued_at_client_t: 0,
+        }));
         for _ in 0..3 {
             server.tick(&mut wire).await.unwrap();
         }
-        assert!(
-            server.ship(ShipId(1)).unwrap().motion.pursuing().is_some(),
-            "premise: under way"
-        );
+        assert!(server.ship(ShipId(1)).unwrap().motion.pursuing().is_some(), "premise: under way");
 
-        wire.client_says(
-            hunter,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::BreakOff,
-                issued_at_client_t: server.now_t(),
-            }),
-        );
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::BreakOff,
+            issued_at_client_t: server.now_t(),
+        }));
         server.tick(&mut wire).await.unwrap();
         let motion = &server.ship(ShipId(1)).unwrap().motion;
         assert!(
@@ -2135,10 +1805,7 @@ mod tests {
         for _ in 0..20 {
             server.tick(&mut wire).await.unwrap();
         }
-        assert!(
-            server.ship(ShipId(1)).unwrap().motion.pursuing().is_none(),
-            "it was steered again"
-        );
+        assert!(server.ship(ShipId(1)).unwrap().motion.pursuing().is_none(), "it was steered again");
     }
 
     /// **The rule the whole design turns on, applied to an autopilot.**
@@ -2163,12 +1830,7 @@ mod tests {
     async fn a_flight_order_cancels_a_standing_intercept() {
         let orders = [
             (Order::CutDrive, false),
-            (
-                Order::Burn {
-                    beta: [0.0, 1.0e-3, 0.0],
-                },
-                false,
-            ),
+            (Order::Burn { beta: [0.0, 1.0e-3, 0.0] }, false),
             (Order::Transmit { power_w: 1.0e6 }, true),
         ];
         for (order, keeps) in orders {
@@ -2176,46 +1838,26 @@ mod tests {
             let mut wire = Loopback::new();
             let hunter = ClientId(1);
             server.admit(hunter, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
-            server.admit(
-                ClientId(2),
-                crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)),
-                0.0,
-            );
-            wire.client_says(
-                hunter,
-                Inbound::Act(Intent {
-                    ship_id: ShipId(1),
-                    order: Order::Intercept {
-                        ship_id: ShipId(2),
-                        closeness: lc_proto::Closeness::Company,
-                    },
-                    issued_at_client_t: 0,
-                }),
-            );
+            server.admit(ClientId(2), crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)), 0.0);
+            wire.client_says(hunter, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+                issued_at_client_t: 0,
+            }));
             for _ in 0..3 {
                 server.tick(&mut wire).await.unwrap();
             }
-            assert!(
-                server.ship(ShipId(1)).unwrap().motion.pursuing().is_some(),
-                "premise: under way"
-            );
+            assert!(server.ship(ShipId(1)).unwrap().motion.pursuing().is_some(), "premise: under way");
 
-            wire.client_says(
-                hunter,
-                Inbound::Act(Intent {
-                    ship_id: ShipId(1),
-                    order: order.clone(),
-                    issued_at_client_t: server.now_t(),
-                }),
-            );
+            wire.client_says(hunter, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: order.clone(),
+                issued_at_client_t: server.now_t(),
+            }));
             for _ in 0..20 {
                 server.tick(&mut wire).await.unwrap();
             }
-            assert_eq!(
-                server.pursuits.contains_key(&CraftId(1)),
-                keeps,
-                "{order:?}"
-            );
+            assert_eq!(server.pursuits.contains_key(&CraftId(1)), keeps, "{order:?}");
             // Only for the orders that cancel it: a kept intercept against a still quarry has
             // arrived by now and is drifting alongside, which is the policy working.
             if !keeps {
@@ -2241,36 +1883,21 @@ mod tests {
             0.0,
         );
 
-        wire.client_says(
-            hunter,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Intercept {
-                    ship_id: ShipId(2),
-                    closeness: lc_proto::Closeness::Company,
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let first = plan(&server, ShipId(1)).expect("an approach");
-        assert_eq!(
-            first.frame_beta,
-            DVec3::ZERO,
-            "premise: it is chasing something at rest"
-        );
+        assert_eq!(first.frame_beta, DVec3::ZERO, "premise: it is chasing something at rest");
 
         // The quarry lights its drive and goes somewhere else.
-        wire.client_says(
-            prey,
-            Inbound::Act(Intent {
-                ship_id: ShipId(2),
-                order: Order::Burn {
-                    beta: [0.0, 1.0e-3, 0.0],
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(prey, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: Order::Burn { beta: [0.0, 1.0e-3, 0.0] },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let burn_t = server.now_t();
         assert_ne!(
@@ -2287,9 +1914,7 @@ mod tests {
         let mut reacted = None;
         for _ in 0..600 {
             server.tick(&mut wire).await.unwrap();
-            let Some(now) = plan(&server, ShipId(1)) else {
-                continue;
-            };
+            let Some(now) = plan(&server, ShipId(1)) else { continue };
             if now.frame_beta != DVec3::ZERO {
                 reacted = Some((server.now_t(), at_now(&server, ShipId(1))));
                 break;
@@ -2314,6 +1939,8 @@ mod tests {
         assert!(waited_us > 0.0, "it reacted on the tick of the burn itself");
     }
 
+
+
     /// **The same rule, on the channel a player actually watches.**
     ///
     /// A contact's reported velocity may not change until the light of the burn that changed
@@ -2335,16 +1962,11 @@ mod tests {
         server.tick(&mut wire).await.unwrap();
         wire.take(watcher);
 
-        wire.client_says(
-            mover,
-            Inbound::Act(Intent {
-                ship_id: ShipId(2),
-                order: Order::Burn {
-                    beta: [0.0, 1.0e-3, 0.0],
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(mover, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: Order::Burn { beta: [0.0, 1.0e-3, 0.0] },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let burn_t = server.now_t();
         let from = at_now(&server, ShipId(2));
@@ -2379,6 +2001,7 @@ mod tests {
         );
     }
 
+
     /// **A chase at relativistic closing speed, flown by the server.**
     ///
     /// The quarry is running at four fifths of `c` and the pursuer starts at rest, so the
@@ -2395,10 +2018,8 @@ mod tests {
         // A torch, so the test runs in seconds. Shedding four fifths of `c` at five gravities
         // is three months of coordinate time and a hundred thousand ticks; the physics is the
         // same either way, and what is being checked is the match and not the schedule.
-        chaser.motion.drive = lc_world::flight::Drive {
-            accel_g: 1_000.0,
-            ..Default::default()
-        };
+        chaser.motion.drive =
+            lc_world::flight::Drive { accel_g: 1_000.0, ..Default::default() };
         server.admit(hunter, chaser, 0.0);
         let running = DVec3::new(0.0, 0.8, 0.0);
         server.admit(
@@ -2412,22 +2033,13 @@ mod tests {
             0.0,
         );
 
-        wire.client_says(
-            hunter,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Intercept {
-                    ship_id: ShipId(2),
-                    closeness: lc_proto::Closeness::Company,
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
-        assert!(
-            plan(&server, ShipId(1)).is_some(),
-            "the order did not put it on an approach"
-        );
+        assert!(plan(&server, ShipId(1)).is_some(), "the order did not put it on an approach");
 
         // Long enough to shed four fifths of `c`, fly back, and stop.
         for _ in 0..20_000 {
@@ -2449,13 +2061,14 @@ mod tests {
         );
         let separation = (at_now(&server, ShipId(1)) - at_now(&server, ShipId(2)))
             * lc_world::flight::JULIAN_YEAR_S;
-        let gap =
-            lc_world::boost::separation_in_frame(separation, running) * lc_world::flight::C_M_S;
+        let gap = lc_world::boost::separation_in_frame(separation, running)
+            * lc_world::flight::C_M_S;
         assert!(
             gap < standoff * lc_world::pursuit::DRIFT_ALLOWANCE,
             "ended {gap} m off, outside the deadband round {standoff} m",
         );
     }
+
 }
 
 #[cfg(test)]
@@ -2478,13 +2091,10 @@ pub(crate) mod course_tests {
     }
 
     pub(crate) fn orbitable(system: &LocalSystem) -> Option<String> {
-        system
-            .inventory()
-            .iter()
-            .find_map(|entry| match &entry.target {
-                lc_world::navigation::Target::Body(name) => Some(name.clone()),
-                _ => None,
-            })
+        system.inventory().iter().find_map(|entry| match &entry.target {
+            lc_world::navigation::Target::Body(name) => Some(name.clone()),
+            _ => None,
+        })
     }
 
     /// The point of putting a course on the wire: the server works the crossing out *itself*,
@@ -2493,53 +2103,38 @@ pub(crate) mod course_tests {
     #[tokio::test]
     async fn a_course_on_the_wire_becomes_a_crossing_the_server_solved() {
         let Some(system) = a_system() else { return };
-        let Some(body) = orbitable(&system) else {
-            return;
-        };
+        let Some(body) = orbitable(&system) else { return };
 
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
         server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
-        server
-            .fleet_mut()
-            .get_mut(CraftId(1))
-            .expect("the craft")
-            .enter(Some(system), 0.0);
+        server.fleet_mut().get_mut(CraftId(1)).expect("the craft").enter(Some(system), 0.0);
 
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::SetCourse {
-                    course: lc_proto::Course::Orbit {
-                        body: body.clone(),
-                        altitude_radii: 2.0,
-                        plane: lc_proto::Plane::Equatorial,
-                    },
-                    accel_g: 5.0,
-                    max_beta: 0.999,
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body: body.clone(),
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
                 },
-                issued_at_client_t: 0,
-            }),
-        );
+                accel_g: 5.0,
+                max_beta: 0.999,
+            },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         assert!(
-            !wire
-                .take(client)
-                .iter()
-                .any(|out| matches!(out, Outbound::Refused { .. })),
+            !wire.take(client).iter().any(|out| matches!(out, Outbound::Refused { .. })),
             "the course was refused",
         );
         let craft = server.ship(ShipId(1)).expect("the craft");
         let Motive::Crossing(cruise) = &craft.motion.motive else {
             panic!("a course is a crossing, not {:?}", craft.motion.motive)
         };
-        assert!(
-            cruise.duration_s() > 0.0,
-            "a crossing that takes no time went nowhere"
-        );
+        assert!(cruise.duration_s() > 0.0, "a crossing that takes no time went nowhere");
         assert_eq!(server.journal().events.len(), 1, "and it is one event");
     }
 
@@ -2554,28 +2149,17 @@ pub(crate) mod course_tests {
 
         let beta = [0.4, 0.0, 0.0];
         for order in [Order::Burn { beta }, Order::CutDrive] {
-            wire.client_says(
-                client,
-                Inbound::Act(Intent {
-                    ship_id: ShipId(1),
-                    order,
-                    issued_at_client_t: 0,
-                }),
-            );
+            wire.client_says(client, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order,
+                issued_at_client_t: 0,
+            }));
             server.tick(&mut wire).await.unwrap();
         }
 
         let craft = server.ship(ShipId(1)).expect("the craft");
-        assert!(
-            matches!(craft.motion.motive, Motive::Drifting { .. }),
-            "{:?}",
-            craft.motion.motive
-        );
-        assert!(
-            (craft.motion.beta.x - 0.4).abs() < 1.0e-12,
-            "{}",
-            craft.motion.beta.x
-        );
+        assert!(matches!(craft.motion.motive, Motive::Drifting { .. }), "{:?}", craft.motion.motive);
+        assert!((craft.motion.beta.x - 0.4).abs() < 1.0e-12, "{}", craft.motion.beta.x);
     }
 
     /// A course with nowhere to resolve against is refused rather than silently dropped. The
@@ -2587,27 +2171,17 @@ pub(crate) mod course_tests {
         let client = ClientId(1);
         server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
 
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::SetCourse {
-                    course: lc_proto::Course::LeaveSystem,
-                    accel_g: 5.0,
-                    max_beta: 0.999,
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse { course: lc_proto::Course::LeaveSystem, accel_g: 5.0, max_beta: 0.999 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         assert!(
             wire.take(client).iter().any(|out| matches!(
                 out,
-                Outbound::Refused {
-                    reason: Refusal::Impossible,
-                    ..
-                }
+                Outbound::Refused { reason: Refusal::Impossible, .. }
             )),
             "a course that cannot be resolved should be refused",
         );
@@ -2619,64 +2193,43 @@ pub(crate) mod course_tests {
     #[tokio::test]
     async fn a_client_cannot_ask_for_a_better_ship_than_it_has() {
         let Some(system) = a_system() else { return };
-        let Some(body) = orbitable(&system) else {
-            return;
-        };
+        let Some(body) = orbitable(&system) else { return };
 
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
         server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
-        server
-            .fleet_mut()
-            .get_mut(CraftId(1))
-            .expect("the craft")
-            .enter(Some(system), 0.0);
+        server.fleet_mut().get_mut(CraftId(1)).expect("the craft").enter(Some(system), 0.0);
 
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::SetCourse {
-                    course: lc_proto::Course::Orbit {
-                        body,
-                        altitude_radii: 2.0,
-                        plane: lc_proto::Plane::Equatorial,
-                    },
-                    accel_g: 1000.0,
-                    max_beta: 0.999,
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
                 },
-                issued_at_client_t: 0,
-            }),
-        );
+                accel_g: 1000.0,
+                max_beta: 0.999,
+            },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         let ceiling = Kind::Ship.drive().accel_g;
         let written = &server.journal().events[0].payload;
-        assert!(
-            written.contains(&format!("{ceiling}")),
-            "{written} does not record {ceiling} g"
-        );
+        assert!(written.contains(&format!("{ceiling}")), "{written} does not record {ceiling} g");
 
         // And a nonsense acceleration is refused rather than clamped into something flyable.
         for accel_g in [0.0, -1.0, f64::NAN] {
-            wire.client_says(
-                client,
-                Inbound::Act(Intent {
-                    ship_id: ShipId(1),
-                    order: Order::SetCourse {
-                        course: lc_proto::Course::LeaveSystem,
-                        accel_g,
-                        max_beta: 0.999,
-                    },
-                    issued_at_client_t: 0,
-                }),
-            );
+            wire.client_says(client, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::SetCourse { course: lc_proto::Course::LeaveSystem, accel_g, max_beta: 0.999 },
+                issued_at_client_t: 0,
+            }));
             server.tick(&mut wire).await.unwrap();
             assert!(
-                wire.take(client)
-                    .iter()
-                    .any(|out| matches!(out, Outbound::Refused { .. })),
+                wire.take(client).iter().any(|out| matches!(out, Outbound::Refused { .. })),
                 "{accel_g} g was not refused",
             );
         }
@@ -2709,38 +2262,22 @@ mod world_tests {
         let mut wire = Loopback::new();
         let client = ClientId(1);
         server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
-        server
-            .fleet_mut()
-            .get_mut(CraftId(1))
-            .expect("the craft")
-            .enter(Some(system), 0.0);
+        server.fleet_mut().get_mut(CraftId(1)).expect("the craft").enter(Some(system), 0.0);
 
         let asked = lc_proto::Course::Orbit {
             body,
             altitude_radii: 2.0,
             plane: lc_proto::Plane::Equatorial,
         };
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::SetCourse {
-                    course: asked.clone(),
-                    accel_g: 1000.0,
-                    max_beta: 0.999,
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse { course: asked.clone(), accel_g: 1000.0, max_beta: 0.999 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         let said = wire.take(client);
-        let Some(Outbound::Accepted {
-            ship_id,
-            event_id,
-            order,
-            ..
-        }) = said
+        let Some(Outbound::Accepted { ship_id, event_id, order, .. }) = said
             .iter()
             .find(|out| matches!(out, Outbound::Accepted { .. }))
         else {
@@ -2748,14 +2285,7 @@ mod world_tests {
         };
         assert_eq!(*ship_id, ShipId(1));
         assert!(*event_id > 0, "an accepted order names no event");
-        let Order::SetCourse {
-            course,
-            accel_g,
-            max_beta: 0.999,
-        } = order
-        else {
-            panic!("{order:?}")
-        };
+        let Order::SetCourse { course, accel_g, max_beta: 0.999 } = order else { panic!("{order:?}") };
         assert_eq!(
             *accel_g,
             Kind::Ship.drive().accel_g,
@@ -2777,20 +2307,16 @@ mod world_tests {
         let _ = wire.take(client);
 
         // Far in the future, which is the direction that gets clamped to `now`.
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Transmit { power_w: 1000.0 },
-                issued_at_client_t: i64::MAX,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: 1000.0 },
+            issued_at_client_t: i64::MAX,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         let said = wire.take(client);
-        let Some(Outbound::Accepted { at_t, .. }) = said
-            .iter()
-            .find(|out| matches!(out, Outbound::Accepted { .. }))
+        let Some(Outbound::Accepted { at_t, .. }) =
+            said.iter().find(|out| matches!(out, Outbound::Accepted { .. }))
         else {
             panic!("no acceptance: {said:?}");
         };
@@ -2806,26 +2332,17 @@ mod world_tests {
         let client = ClientId(1);
         server.admit(client, Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO), 0.0);
 
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Transmit { power_w: -1.0 },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Transmit { power_w: -1.0 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         let said = wire.take(client);
+        assert!(said.iter().any(|out| matches!(out, Outbound::Refused { .. })), "{said:?}");
         assert!(
-            said.iter()
-                .any(|out| matches!(out, Outbound::Refused { .. })),
-            "{said:?}"
-        );
-        assert!(
-            !said
-                .iter()
-                .any(|out| matches!(out, Outbound::Accepted { .. })),
+            !said.iter().any(|out| matches!(out, Outbound::Accepted { .. })),
             "a refused order was also accepted: {said:?}",
         );
     }
@@ -2837,27 +2354,16 @@ mod world_tests {
         let mut wire = Loopback::new();
 
         // One at the star, one a good way outside its shell.
-        server.admit(
-            ClientId(1),
-            Craft::at(CraftId(1), Kind::Ship, star.position_ly),
-            0.0,
-        );
+        server.admit(ClientId(1), Craft::at(CraftId(1), Kind::Ship, star.position_ly), 0.0);
         let far = star.position_ly + DVec3::new(50.0, 0.0, 0.0);
         server.admit(ClientId(2), Craft::at(CraftId(2), Kind::Probe, far), 0.0);
         server.load_world(World::new(vec![star.clone()]));
 
-        assert!(
-            server.ship(ShipId(1)).unwrap().system.is_none(),
-            "nothing placed before a tick"
-        );
+        assert!(server.ship(ShipId(1)).unwrap().system.is_none(), "nothing placed before a tick");
         server.tick(&mut wire).await.unwrap();
 
         let inside = server.ship(ShipId(1)).expect("the ship");
-        assert_eq!(
-            inside.system.as_ref().map(|s| s.star),
-            Some(star.id),
-            "it is at the star"
-        );
+        assert_eq!(inside.system.as_ref().map(|s| s.star), Some(star.id), "it is at the star");
         assert!(
             server.ship(ShipId(2)).unwrap().system.is_none(),
             "fifty light-years out is not in anything",
@@ -2871,37 +2377,28 @@ mod world_tests {
     async fn a_crossing_the_server_flew_arrives_and_becomes_a_station() {
         let Some(star) = a_star() else { return };
         let Some(system) = a_system() else { return };
-        let Some(body) = orbitable(&system) else {
-            return;
-        };
+        let Some(body) = orbitable(&system) else { return };
 
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(
-            client,
-            Craft::at(CraftId(1), Kind::Ship, star.position_ly),
-            0.0,
-        );
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, star.position_ly), 0.0);
         server.load_world(World::new(vec![star]));
         server.tick(&mut wire).await.unwrap();
 
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::SetCourse {
-                    course: lc_proto::Course::Orbit {
-                        body,
-                        altitude_radii: 2.0,
-                        plane: lc_proto::Plane::Equatorial,
-                    },
-                    accel_g: 5.0,
-                    max_beta: 0.999,
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
                 },
-                issued_at_client_t: 0,
-            }),
-        );
+                accel_g: 5.0,
+                max_beta: 0.999,
+            },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let Motive::Crossing(cruise) = &server.ship(ShipId(1)).unwrap().motion.motive else {
             panic!("the course did not become a crossing")
@@ -2915,10 +2412,7 @@ mod world_tests {
             server.tick(&mut wire).await.unwrap();
         }
         assert!(
-            matches!(
-                server.ship(ShipId(1)).unwrap().motion.motive,
-                Motive::Holding(_)
-            ),
+            matches!(server.ship(ShipId(1)).unwrap().motion.motive, Motive::Holding(_)),
             "after {ticks} ticks it is {:?}",
             server.ship(ShipId(1)).unwrap().motion.motive,
         );
@@ -2935,18 +2429,12 @@ mod world_tests {
     async fn a_client_stepping_finely_agrees_with_the_server() {
         let Some(star) = a_star() else { return };
         let Some(system) = a_system() else { return };
-        let Some(body) = orbitable(&system) else {
-            return;
-        };
+        let Some(body) = orbitable(&system) else { return };
 
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut wire = Loopback::new();
         let client = ClientId(1);
-        server.admit(
-            client,
-            Craft::at(CraftId(1), Kind::Ship, star.position_ly),
-            0.0,
-        );
+        server.admit(client, Craft::at(CraftId(1), Kind::Ship, star.position_ly), 0.0);
         server.load_world(World::new(vec![star.clone()]));
         server.tick(&mut wire).await.unwrap();
 
@@ -2955,18 +2443,11 @@ mod world_tests {
             altitude_radii: 2.0,
             plane: lc_proto::Plane::Equatorial,
         };
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::SetCourse {
-                    course: course.clone(),
-                    accel_g: 5.0,
-                    max_beta: 0.999,
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::SetCourse { course: course.clone(), accel_g: 5.0, max_beta: 0.999 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         // What the server actually stamped it at. A client is told the coordinate; it does not
@@ -2984,10 +2465,7 @@ mod world_tests {
             .apply(&Change_ {
                 ship: lc_world::motion::ShipId(1),
                 at_t: stamped as f64 * 1.0e-6,
-                change: Change::SetCourse {
-                    course: course.into(),
-                    drive,
-                },
+                change: Change::SetCourse { course: course.into(), drive },
             })
             .expect("the same order the server took");
 
@@ -3004,18 +2482,14 @@ mod world_tests {
             mirror.advance(next, next - now);
             now = next;
         }
-        assert!(
-            (now - end_s).abs() < 1.0e-9,
-            "the mirror stopped at {now}, not {end_s}"
-        );
+        assert!((now - end_s).abs() < 1.0e-9, "the mirror stopped at {now}, not {end_s}");
 
         let flown = server.ship(ShipId(1)).expect("the ship");
         // To the bit. Anything less would mean the fold has a term that depends on how often
         // it is called, and a client predicting for a few seconds would slide off the server's
         // answer rather than track it.
         assert_eq!(
-            flown.motion.position_ly,
-            mirror.motion.position_ly,
+            flown.motion.position_ly, mirror.motion.position_ly,
             "they disagree by {:e} light-years",
             (flown.motion.position_ly - mirror.motion.position_ly).length(),
         );
@@ -3029,11 +2503,11 @@ mod hello_tests {
     use super::course_tests::{a_star, a_system, orbitable};
     use super::*;
     use crate::journal::Memory;
+    use crate::world::World;
+    use lc_world::motion::Motive;
     use crate::testing::Broker;
     use crate::ticket::Trusted;
     use crate::transport::Loopback;
-    use crate::world::World;
-    use lc_world::motion::Motive;
 
     const SHARD: &str = "shard-1";
 
@@ -3045,19 +2519,8 @@ mod hello_tests {
         server
     }
 
-    async fn says(
-        server: &mut Server<Memory>,
-        wire: &mut Loopback,
-        from: ClientId,
-        ticket: String,
-    ) {
-        wire.client_says(
-            from,
-            Inbound::Hello {
-                protocol: PROTOCOL_VERSION,
-                ticket,
-            },
-        );
+    async fn says(server: &mut Server<Memory>, wire: &mut Loopback, from: ClientId, ticket: String) {
+        wire.client_says(from, Inbound::Hello { protocol: PROTOCOL_VERSION, ticket });
         server.tick(wire).await.unwrap();
     }
 
@@ -3071,14 +2534,8 @@ mod hello_tests {
         let client = ClientId(1);
 
         says(&mut server, &mut wire, client, "not a ticket".into()).await;
-        assert!(matches!(
-            wire.take(client).as_slice(),
-            [Outbound::Unauthenticated]
-        ));
-        assert!(
-            server.ship(ShipId(1)).is_none(),
-            "a craft was handed out anyway"
-        );
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::Unauthenticated]));
+        assert!(server.ship(ShipId(1)).is_none(), "a craft was handed out anyway");
     }
 
     /// A server that has not been told whose word to take takes nobody's.
@@ -3089,17 +2546,8 @@ mod hello_tests {
         let mut wire = Loopback::new();
         let client = ClientId(1);
 
-        says(
-            &mut server,
-            &mut wire,
-            client,
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
-        assert!(matches!(
-            wire.take(client).as_slice(),
-            [Outbound::Unauthenticated]
-        ));
+        says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::Unauthenticated]));
     }
 
     /// A valid ticket gets a craft, and the client is never asked which one it wants.
@@ -3110,32 +2558,14 @@ mod hello_tests {
         let mut wire = Loopback::new();
         let client = ClientId(1);
 
-        says(
-            &mut server,
-            &mut wire,
-            client,
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
         let said = wire.take(client);
-        let [
-            Outbound::Welcome {
-                ship_id,
-                name,
-                client_id,
-                ..
-            },
-            Outbound::Fitted { .. },
-        ] = said.as_slice()
-        else {
+        let [Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }] = said.as_slice() else {
             panic!("no welcome: {said:?}")
         };
         assert_eq!(*client_id, client);
         assert_eq!(name, "Ada");
-        assert!(
-            server.ship(*ship_id).is_some(),
-            "the ship it was given does not exist"
-        );
+        assert!(server.ship(*ship_id).is_some(), "the ship it was given does not exist");
     }
 
     /// Signing in again reaches the same ship. A player who reconnects is not a new player.
@@ -3145,37 +2575,15 @@ mod hello_tests {
         let mut server = trusting(&broker);
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let first = welcomed(&mut wire, ClientId(1));
 
         // A different connection, a fresh ticket, the same account.
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-1", SHARD, 60, "j2"),
-        )
-        .await;
-        assert_eq!(
-            welcomed(&mut wire, ClientId(2)),
-            first,
-            "the account got a second ship"
-        );
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        assert_eq!(welcomed(&mut wire, ClientId(2)), first, "the account got a second ship");
 
         // And a different account does not.
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(3),
-            broker.mint("acct-2", SHARD, 60, "j3"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(3), broker.mint("acct-2", SHARD, 60, "j3")).await;
         assert_ne!(welcomed(&mut wire, ClientId(3)), first);
     }
 
@@ -3187,41 +2595,22 @@ mod hello_tests {
         let mut server = trusting(&broker);
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship = welcomed(&mut wire, ClientId(1));
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-1", SHARD, 60, "j2"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
         let _ = wire.take(ClientId(2));
 
         // The displaced connection can no longer act for it.
-        wire.client_says(
-            ClientId(1),
-            Inbound::Act(Intent {
-                ship_id: ship,
-                order: Order::Transmit { power_w: 1.0 },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::Transmit { power_w: 1.0 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         assert!(
-            wire.take(ClientId(1)).iter().any(|out| matches!(
-                out,
-                Outbound::Refused {
-                    reason: Refusal::NotYours,
-                    ..
-                }
-            )),
+            wire.take(ClientId(1))
+                .iter()
+                .any(|out| matches!(out, Outbound::Refused { reason: Refusal::NotYours, .. })),
             "the replaced connection still acted for the ship",
         );
     }
@@ -3235,16 +2624,10 @@ mod hello_tests {
         let ticket = broker.mint("acct-1", SHARD, 60, "only-once");
 
         says(&mut server, &mut wire, ClientId(1), ticket.clone()).await;
-        assert!(matches!(
-            wire.take(ClientId(1)).as_slice(),
-            [Outbound::Welcome { .. }, Outbound::Fitted { .. }]
-        ));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }]));
 
         says(&mut server, &mut wire, ClientId(2), ticket).await;
-        assert!(matches!(
-            wire.take(ClientId(2)).as_slice(),
-            [Outbound::Unauthenticated]
-        ));
+        assert!(matches!(wire.take(ClientId(2)).as_slice(), [Outbound::Unauthenticated]));
     }
 
     /// A ticket that does not verify must not burn the identifier of one that would. Otherwise
@@ -3256,30 +2639,12 @@ mod hello_tests {
         let mut server = trusting(&ours);
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(9),
-            stranger.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
-        assert!(matches!(
-            wire.take(ClientId(9)).as_slice(),
-            [Outbound::Unauthenticated]
-        ));
+        says(&mut server, &mut wire, ClientId(9), stranger.mint("acct-1", SHARD, 60, "j1")).await;
+        assert!(matches!(wire.take(ClientId(9)).as_slice(), [Outbound::Unauthenticated]));
 
         // The real one, with the same identifier, still works.
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            ours.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
-        assert!(matches!(
-            wire.take(ClientId(1)).as_slice(),
-            [Outbound::Welcome { .. }, Outbound::Fitted { .. }]
-        ));
+        says(&mut server, &mut wire, ClientId(1), ours.mint("acct-1", SHARD, 60, "j1")).await;
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }]));
     }
 
     /// A ticket minted for another shard is not a ticket here, however valid it is there.
@@ -3293,13 +2658,7 @@ mod hello_tests {
         server.load_world(World::new(vec![star.clone()]));
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship_id = welcomed(&mut wire, ClientId(1));
         // A tick, because membership is resolved by where a craft is rather than by being told.
         server.tick(&mut wire).await.unwrap();
@@ -3320,18 +2679,9 @@ mod hello_tests {
         let broker = Broker::new([1u8; 32]);
         let mut server = trusting(&broker);
         let mut wire = Loopback::new();
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship_id = welcomed(&mut wire, ClientId(1));
-        assert_eq!(
-            server.ship(ship_id).expect("the ship").motion.position_ly,
-            DVec3::ZERO
-        );
+        assert_eq!(server.ship(ship_id).expect("the ship").motion.position_ly, DVec3::ZERO);
     }
 
     /// The bug the seam test found. Being welcomed and owning the craft are two facts, and
@@ -3344,29 +2694,19 @@ mod hello_tests {
         let mut wire = Loopback::new();
         let client = ClientId(1);
 
-        says(
-            &mut server,
-            &mut wire,
-            client,
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship_id = welcomed(&mut wire, client);
 
-        wire.client_says(
-            client,
-            Inbound::Act(Intent {
-                ship_id,
-                order: Order::Transmit { power_w: 1000.0 },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id,
+            order: Order::Transmit { power_w: 1000.0 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         let said = wire.take(client);
         assert!(
-            said.iter()
-                .any(|out| matches!(out, Outbound::Accepted { .. })),
+            said.iter().any(|out| matches!(out, Outbound::Accepted { .. })),
             "a signed-in client could not act on its own ship: {said:?}",
         );
     }
@@ -3378,58 +2718,33 @@ mod hello_tests {
         let mut server = trusting(&broker);
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship_id = welcomed(&mut wire, ClientId(1));
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-1", SHARD, 60, "j2"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
         assert_eq!(welcomed(&mut wire, ClientId(2)), ship_id);
 
-        wire.client_says(
-            ClientId(2),
-            Inbound::Act(Intent {
-                ship_id,
-                order: Order::Transmit { power_w: 1000.0 },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ClientId(2), Inbound::Act(Intent {
+            ship_id,
+            order: Order::Transmit { power_w: 1000.0 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let said = wire.take(ClientId(2));
         assert!(
-            said.iter()
-                .any(|out| matches!(out, Outbound::Accepted { .. })),
+            said.iter().any(|out| matches!(out, Outbound::Accepted { .. })),
             "the reconnection could not act: {said:?}",
         );
 
         // And the displaced connection cannot act for it any more.
-        wire.client_says(
-            ClientId(1),
-            Inbound::Act(Intent {
-                ship_id,
-                order: Order::Transmit { power_w: 1000.0 },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id,
+            order: Order::Transmit { power_w: 1000.0 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let stale = wire.take(ClientId(1));
         assert!(
-            stale.iter().any(|out| matches!(
-                out,
-                Outbound::Refused {
-                    reason: Refusal::NotYours,
-                    ..
-                }
-            )),
+            stale.iter().any(|out| matches!(out, Outbound::Refused { reason: Refusal::NotYours, .. })),
             "a displaced connection still commanded the ship: {stale:?}",
         );
     }
@@ -3442,10 +2757,7 @@ mod hello_tests {
         let mut wire = Loopback::new();
         says(&mut server, &mut wire, ClientId(1), "not a ticket".into()).await;
         assert!(
-            matches!(
-                wire.take(ClientId(1)).as_slice(),
-                [Outbound::Unauthenticated]
-            ),
+            matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Unauthenticated]),
             "a bad ticket was admitted by a server that was never told to",
         );
     }
@@ -3463,14 +2775,8 @@ mod hello_tests {
             panic!("no welcome: {welcome:?}");
         };
         assert_eq!(*ship_id, ShipId(1));
-        assert!(
-            name.contains('7'),
-            "the name should say which connection it is: {name}"
-        );
-        assert!(
-            server.ship(ShipId(1)).is_some(),
-            "the ship was not put in the world"
-        );
+        assert!(name.contains('7'), "the name should say which connection it is: {name}");
+        assert!(server.ship(ShipId(1)).is_some(), "the ship was not put in the world");
     }
 
     /// Two anonymous connections are two players, not one. They are keyed by connection
@@ -3494,26 +2800,10 @@ mod hello_tests {
         let mut server = trusting(&broker);
         server.admit_without_tickets(true);
         let mut wire = Loopback::new();
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let first = welcomed(&mut wire, ClientId(1));
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-1", SHARD, 60, "j2"),
-        )
-        .await;
-        assert_eq!(
-            welcomed(&mut wire, ClientId(2)),
-            first,
-            "the account lost its ship"
-        );
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        assert_eq!(welcomed(&mut wire, ClientId(2)), first, "the account lost its ship");
     }
 
     #[tokio::test]
@@ -3522,17 +2812,8 @@ mod hello_tests {
         let mut server = trusting(&broker);
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", "shard-2", 60, "j1"),
-        )
-        .await;
-        assert!(matches!(
-            wire.take(ClientId(1)).as_slice(),
-            [Outbound::Unauthenticated]
-        ));
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", "shard-2", 60, "j1")).await;
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Unauthenticated]));
     }
 
     /// **What a reconnect is for.** A player who signs out of an orbit signs back into one.
@@ -3545,54 +2826,37 @@ mod hello_tests {
     async fn signing_back_in_finds_the_ship_still_holding_its_orbit() {
         let Some(star) = a_star() else { return };
         let Some(system) = a_system() else { return };
-        let Some(body) = orbitable(&system) else {
-            return;
-        };
+        let Some(body) = orbitable(&system) else { return };
 
         let broker = Broker::new([1u8; 32]);
         let mut server = trusting(&broker);
         server.load_world(World::new(vec![star.clone()]));
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship = welcomed(&mut wire, ClientId(1));
         // Put it where the system is, since a new craft starts a few au out along one axis.
-        server
-            .fleet_mut()
-            .get_mut(CraftId(ship.0))
-            .unwrap()
-            .motion
-            .position_ly = star.position_ly;
+        server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly = star.position_ly;
         server.tick(&mut wire).await.unwrap();
 
-        wire.client_says(
-            ClientId(1),
-            Inbound::Act(Intent {
-                ship_id: ship,
-                order: Order::SetCourse {
-                    course: lc_proto::Course::Orbit {
-                        body,
-                        altitude_radii: 2.0,
-                        plane: lc_proto::Plane::Equatorial,
-                    },
-                    accel_g: 5.0,
-                    max_beta: 0.999,
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
                 },
-                issued_at_client_t: 0,
-            }),
-        );
+                accel_g: 5.0,
+                max_beta: 0.999,
+            },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let Motive::Crossing(cruise) = &server.ship(ship).unwrap().motion.motive else {
             panic!("the course did not become a crossing")
         };
-        let ticks =
-            ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
+        let ticks = ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
         for _ in 0..ticks {
             server.tick(&mut wire).await.unwrap();
         }
@@ -3603,13 +2867,7 @@ mod hello_tests {
         // The socket drops, and the same account comes back on a new one.
         server.disconnected(ClientId(1));
         wire.take(ClientId(1));
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-1", SHARD, 60, "j2"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
         let welcome = wire
             .take(ClientId(2))
             .into_iter()
@@ -3638,63 +2896,43 @@ mod hello_tests {
     async fn a_course_set_before_signing_out_is_flown_while_signed_out() {
         let Some(star) = a_star() else { return };
         let Some(system) = a_system() else { return };
-        let Some(body) = orbitable(&system) else {
-            return;
-        };
+        let Some(body) = orbitable(&system) else { return };
 
         let broker = Broker::new([1u8; 32]);
         let mut server = trusting(&broker);
         server.load_world(World::new(vec![star.clone()]));
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship = welcomed(&mut wire, ClientId(1));
-        server
-            .fleet_mut()
-            .get_mut(CraftId(ship.0))
-            .unwrap()
-            .motion
-            .position_ly = star.position_ly;
+        server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly = star.position_ly;
         server.tick(&mut wire).await.unwrap();
 
-        wire.client_says(
-            ClientId(1),
-            Inbound::Act(Intent {
-                ship_id: ship,
-                order: Order::SetCourse {
-                    course: lc_proto::Course::Orbit {
-                        body,
-                        altitude_radii: 2.0,
-                        plane: lc_proto::Plane::Equatorial,
-                    },
-                    accel_g: 5.0,
-                    max_beta: 0.999,
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
                 },
-                issued_at_client_t: 0,
-            }),
-        );
+                accel_g: 5.0,
+                max_beta: 0.999,
+            },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let Motive::Crossing(cruise) = &server.ship(ship).unwrap().motion.motive else {
             panic!("the course did not become a crossing")
         };
-        let ticks =
-            ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
+        let ticks = ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
 
         // Sign out **under way**, a long way from arriving.
         for _ in 0..(ticks / 8) {
             server.tick(&mut wire).await.unwrap();
         }
         assert!(
-            matches!(
-                server.ship(ship).unwrap().motion.motive,
-                Motive::Crossing(_)
-            ),
+            matches!(server.ship(ship).unwrap().motion.motive, Motive::Crossing(_)),
             "the premise is a ship still in transit when the socket drops",
         );
         server.disconnected(ClientId(1));
@@ -3705,13 +2943,7 @@ mod hello_tests {
             server.tick(&mut wire).await.unwrap();
         }
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-1", SHARD, 60, "j2"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
         let welcome = wire
             .take(ClientId(2))
             .into_iter()
@@ -3749,43 +2981,22 @@ mod hello_tests {
         server.load_world(World::new(vec![here.clone(), there.clone()]));
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship = welcomed(&mut wire, ClientId(1));
-        server
-            .fleet_mut()
-            .get_mut(CraftId(ship.0))
-            .unwrap()
-            .motion
-            .position_ly = here.position_ly;
+        server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly = here.position_ly;
         server.tick(&mut wire).await.unwrap();
 
-        wire.client_says(
-            ClientId(1),
-            Inbound::Act(Intent {
-                ship_id: ship,
-                order: Order::Cross {
-                    star: there.id.get(),
-                    accel_g: 5.0,
-                    max_beta: 0.999,
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::Cross { star: there.id.get(), accel_g: 5.0, max_beta: 0.999 },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let Motive::Crossing(cruise) = &server.ship(ship).unwrap().motion.motive else {
             panic!("the crossing did not begin")
         };
         let ticks = (cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 4;
-        assert!(
-            ticks < 400_000,
-            "{ticks} ticks is too long to run in a test"
-        );
+        assert!(ticks < 400_000, "{ticks} ticks is too long to run in a test");
 
         server.disconnected(ClientId(1));
         for _ in 0..ticks {
@@ -3817,61 +3028,41 @@ mod hello_tests {
     async fn a_ship_survives_the_process_and_its_crossing_goes_on() {
         let Some(star) = a_star() else { return };
         let Some(system) = a_system() else { return };
-        let Some(body) = orbitable(&system) else {
-            return;
-        };
+        let Some(body) = orbitable(&system) else { return };
 
         let broker = Broker::new([1u8; 32]);
         let mut server = trusting(&broker);
         server.load_world(World::new(vec![star.clone()]));
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship = welcomed(&mut wire, ClientId(1));
-        server
-            .fleet_mut()
-            .get_mut(CraftId(ship.0))
-            .unwrap()
-            .motion
-            .position_ly = star.position_ly;
+        server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly = star.position_ly;
         server.tick(&mut wire).await.unwrap();
 
-        wire.client_says(
-            ClientId(1),
-            Inbound::Act(Intent {
-                ship_id: ship,
-                order: Order::SetCourse {
-                    course: lc_proto::Course::Orbit {
-                        body,
-                        altitude_radii: 2.0,
-                        plane: lc_proto::Plane::Equatorial,
-                    },
-                    accel_g: 5.0,
-                    max_beta: 0.999,
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::SetCourse {
+                course: lc_proto::Course::Orbit {
+                    body,
+                    altitude_radii: 2.0,
+                    plane: lc_proto::Plane::Equatorial,
                 },
-                issued_at_client_t: 0,
-            }),
-        );
+                accel_g: 5.0,
+                max_beta: 0.999,
+            },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         let Motive::Crossing(cruise) = &server.ship(ship).unwrap().motion.motive else {
             panic!("the course did not become a crossing")
         };
-        let ticks =
-            ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
+        let ticks = ((cruise.duration_s() * 1.0e6 / TICK_US as f64).ceil() as usize + 2).min(20_000);
         for _ in 0..(ticks / 8) {
             server.tick(&mut wire).await.unwrap();
         }
         assert!(
-            matches!(
-                server.ship(ship).unwrap().motion.motive,
-                Motive::Crossing(_)
-            ),
+            matches!(server.ship(ship).unwrap().motion.motive, Motive::Crossing(_)),
             "the premise is a ship in transit when the process ends",
         );
 
@@ -3884,16 +3075,9 @@ mod hello_tests {
         let mut server = trusting(&broker);
         server.load_world(World::new(vec![star]));
         assert!(server.adopt(checkpoint).is_empty(), "a row would not read");
-        let now = server
-            .ship(ship)
-            .expect("the ship came back")
-            .motion
-            .clone();
+        let now = server.ship(ship).expect("the ship came back").motion.clone();
         assert_eq!(now.motive, was.motive, "it came back on a different flight");
-        assert_eq!(
-            now.position_ly, was.position_ly,
-            "it came back somewhere else"
-        );
+        assert_eq!(now.position_ly, was.position_ly, "it came back somewhere else");
         assert_eq!(now.clock_s, was.clock_s, "the crew aged across a restart");
 
         let mut wire = Loopback::new();
@@ -3907,13 +3091,7 @@ mod hello_tests {
         );
 
         // And the account still finds it, rather than being handed a second ship.
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(9),
-            broker.mint("acct-1", SHARD, 60, "j9"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(9), broker.mint("acct-1", SHARD, 60, "j9")).await;
         let came_back = wire
             .take(ClientId(9))
             .into_iter()
@@ -3950,28 +3128,13 @@ mod hello_tests {
         assert_eq!(refused.len(), 1);
         assert_eq!(refused[0].account.as_deref(), Some("acct-1"));
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         assert!(
-            matches!(
-                wire.take(ClientId(1)).as_slice(),
-                [Outbound::Unauthenticated]
-            ),
+            matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Unauthenticated]),
             "it was given a ship anyway",
         );
         // A different account is unaffected: one bad row is one player's problem.
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-2", SHARD, 60, "j2"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-2", SHARD, 60, "j2")).await;
         welcomed(&mut wire, ClientId(2));
     }
 
@@ -3994,13 +3157,7 @@ mod hello_tests {
         assert_eq!(trusted.learn(&broker.jwks()), 1);
         server.trust(trusted);
         let mut wire = Loopback::new();
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         assert_eq!(welcomed(&mut wire, ClientId(1)), ShipId(17));
     }
 
@@ -4015,9 +3172,7 @@ mod hello_tests {
     async fn watching_a_flight_does_not_change_it() {
         let Some(star) = a_star() else { return };
         let Some(system) = a_system() else { return };
-        let Some(body) = orbitable(&system) else {
-            return;
-        };
+        let Some(body) = orbitable(&system) else { return };
 
         let course = |ship| {
             Inbound::Act(Intent {
@@ -4044,20 +3199,10 @@ mod hello_tests {
             server.load_world(World::new(vec![star.clone()]));
             let mut wire = Loopback::new();
 
-            says(
-                &mut server,
-                &mut wire,
-                ClientId(1),
-                broker.mint("acct-1", SHARD, 60, "j1"),
-            )
-            .await;
+            says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
             let ship = welcomed(&mut wire, ClientId(1));
-            server
-                .fleet_mut()
-                .get_mut(CraftId(ship.0))
-                .unwrap()
-                .motion
-                .position_ly = star.position_ly;
+            server.fleet_mut().get_mut(CraftId(ship.0)).unwrap().motion.position_ly =
+                star.position_ly;
             server.tick(&mut wire).await.unwrap();
 
             wire.client_says(ClientId(1), course(ship));
@@ -4082,14 +3227,8 @@ mod hello_tests {
         }
 
         let (watched, alone) = (&ends[0], &ends[1]);
-        assert_eq!(
-            watched.motive, alone.motive,
-            "the flights ended differently"
-        );
-        assert_eq!(
-            watched.position_ly, alone.position_ly,
-            "they ended in different places"
-        );
+        assert_eq!(watched.motive, alone.motive, "the flights ended differently");
+        assert_eq!(watched.position_ly, alone.position_ly, "they ended in different places");
         assert_eq!(watched.beta, alone.beta);
         assert_eq!(watched.clock_s, alone.clock_s, "the crews aged differently");
     }
@@ -4106,42 +3245,23 @@ mod hello_tests {
         let broker = Broker::new([1u8; 32]);
         let mut server = trusting(&broker);
         let mut wire = Loopback::new();
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let ship = welcomed(&mut wire, ClientId(1));
         let quarry = ShipId(500);
         // A light-second off, in the light-microseconds `still` places in.
-        let at = server
-            .ship(ship)
-            .unwrap()
-            .position_at(server.now_t() as f64);
-        server.admit(
-            ClientId(9),
-            crate::world::still(quarry, at + DVec3::X * 1.0e6),
-            0.0,
-        );
+        let at = server.ship(ship).unwrap().position_at(server.now_t() as f64);
+        server.admit(ClientId(9), crate::world::still(quarry, at + DVec3::X * 1.0e6), 0.0);
         let at_now = |server: &Server<Memory>, id: ShipId| {
             server.ship(id).unwrap().position_at(server.now_t() as f64)
                 / lc_world::motion::LIGHT_US_PER_LY
         };
         server.tick(&mut wire).await.unwrap();
 
-        wire.client_says(
-            ClientId(1),
-            Inbound::Act(Intent {
-                ship_id: ship,
-                order: Order::Intercept {
-                    ship_id: quarry,
-                    closeness: lc_proto::Closeness::Intimate,
-                },
-                issued_at_client_t: server.now_t(),
-            }),
-        );
+        wire.client_says(ClientId(1), Inbound::Act(Intent {
+            ship_id: ship,
+            order: Order::Intercept { ship_id: quarry, closeness: lc_proto::Closeness::Intimate },
+            issued_at_client_t: server.now_t(),
+        }));
         server.tick(&mut wire).await.unwrap();
         server.disconnected(ClientId(1));
         wire.take(ClientId(1));
@@ -4156,13 +3276,9 @@ mod hello_tests {
         for _ in 0..500 {
             server.tick(&mut wire).await.unwrap();
         }
-        let (mine, theirs) = (
-            server.ship(ship).unwrap().length_m,
-            server.ship(quarry).unwrap().length_m,
-        );
+        let (mine, theirs) = (server.ship(ship).unwrap().length_m, server.ship(quarry).unwrap().length_m);
         let standoff = lc_world::pursuit::Closeness::Intimate.standoff_m(mine, theirs);
-        let apart =
-            at_now(&server, ship).distance(at_now(&server, quarry)) * lc_world::system::M_PER_LY;
+        let apart = at_now(&server, ship).distance(at_now(&server, quarry)) * lc_world::system::M_PER_LY;
         assert!(
             (apart - standoff).abs() < lc_world::pursuit::INTIMATE_SLACK_M,
             "{apart} m off a {standoff} m standoff with nobody signed in",
@@ -4171,36 +3287,18 @@ mod hello_tests {
         // Restarted from a checkpoint, the policy comes back with the craft.
         let mut restarted = trusting(&broker);
         assert!(restarted.adopt(server.checkpoint()).is_empty());
-        let kept = restarted
-            .pursuits
-            .get(&CraftId(ship.0))
-            .expect("the pursuit was not saved");
-        assert_eq!(
-            (kept.quarry, kept.closeness),
-            (quarry, lc_world::pursuit::Closeness::Intimate)
-        );
+        let kept = restarted.pursuits.get(&CraftId(ship.0)).expect("the pursuit was not saved");
+        assert_eq!((kept.quarry, kept.closeness), (quarry, lc_world::pursuit::Closeness::Intimate));
 
         // And signing back in says so, straight after the welcome.
-        says(
-            &mut restarted,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-1", SHARD, 60, "j2"),
-        )
-        .await;
+        says(&mut restarted, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
         let said = wire.take(ClientId(2));
-        assert!(
-            matches!(said.first(), Some(Outbound::Welcome { .. })),
-            "{said:?}"
-        );
+        assert!(matches!(said.first(), Some(Outbound::Welcome { .. })), "{said:?}");
         assert_eq!(
             said.get(1),
             Some(&Outbound::Pursuing {
                 ship_id: ship,
-                pursuit: lc_proto::Pursuit {
-                    quarry,
-                    closeness: lc_proto::Closeness::Intimate
-                },
+                pursuit: lc_proto::Pursuit { quarry, closeness: lc_proto::Closeness::Intimate },
             }),
         );
     }
@@ -4229,54 +3327,30 @@ mod hello_tests {
         server.library = crate::library::Library::from_toml("https://cdn/library/", SHELF).unwrap();
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let said = wire.take(ClientId(1));
         let library = said.iter().find_map(|m| match m {
             Outbound::Library { base, books } => Some((base.clone(), books.len())),
             _ => None,
         });
-        assert_eq!(
-            library,
-            Some(("https://cdn/library/".to_owned(), 1)),
-            "{said:?}"
-        );
+        assert_eq!(library, Some(("https://cdn/library/".to_owned(), 1)), "{said:?}");
         assert!(
-            said.iter()
-                .any(|m| matches!(m, Outbound::Reading(marks) if marks.is_empty())),
+            said.iter().any(|m| matches!(m, Outbound::Reading(marks) if marks.is_empty())),
             "a new account has read nothing, and is told so rather than left guessing: {said:?}"
         );
 
-        wire.client_says(
-            ClientId(1),
-            Inbound::SetReading(mark("the-gilded-age", 4_096)),
-        );
+        wire.client_says(ClientId(1), Inbound::SetReading(mark("the-gilded-age", 4_096)));
         server.tick(&mut wire).await.unwrap();
         wire.take(ClientId(1));
 
         // The same account, on another socket, opens to the same sentence.
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-1", SHARD, 60, "j2"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-1", SHARD, 60, "j2")).await;
         let said = wire.take(ClientId(2));
         let marks = said.iter().find_map(|m| match m {
             Outbound::Reading(marks) => Some(marks.clone()),
             _ => None,
         });
-        assert_eq!(
-            marks.as_deref(),
-            Some([mark("the-gilded-age", 4_096)].as_slice()),
-            "{said:?}"
-        );
+        assert_eq!(marks.as_deref(), Some([mark("the-gilded-age", 4_096)].as_slice()), "{said:?}");
     }
 
     #[tokio::test]
@@ -4284,18 +3358,9 @@ mod hello_tests {
         let broker = Broker::new([1u8; 32]);
         let mut server = trusting(&broker);
         let mut wire = Loopback::new();
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let said = wire.take(ClientId(1));
-        assert!(
-            !said.iter().any(|m| matches!(m, Outbound::Library { .. })),
-            "{said:?}"
-        );
+        assert!(!said.iter().any(|m| matches!(m, Outbound::Library { .. })), "{said:?}");
     }
 
     #[tokio::test]
@@ -4305,31 +3370,15 @@ mod hello_tests {
         server.library = crate::library::Library::from_toml("https://cdn/library/", SHELF).unwrap();
         let mut wire = Loopback::new();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(1),
-            broker.mint("acct-1", SHARD, 60, "j1"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         wire.take(ClientId(1));
-        wire.client_says(
-            ClientId(1),
-            Inbound::SetReading(mark("the-gilded-age", 9_000)),
-        );
+        wire.client_says(ClientId(1), Inbound::SetReading(mark("the-gilded-age", 9_000)));
         server.tick(&mut wire).await.unwrap();
 
-        says(
-            &mut server,
-            &mut wire,
-            ClientId(2),
-            broker.mint("acct-2", SHARD, 60, "j2"),
-        )
-        .await;
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-2", SHARD, 60, "j2")).await;
         let said = wire.take(ClientId(2));
         assert!(
-            said.iter()
-                .any(|m| matches!(m, Outbound::Reading(marks) if marks.is_empty())),
+            said.iter().any(|m| matches!(m, Outbound::Reading(marks) if marks.is_empty())),
             "the second account was handed the first one's bookmark: {said:?}"
         );
     }

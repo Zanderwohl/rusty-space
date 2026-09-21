@@ -30,10 +30,7 @@ pub enum Action {
     ToggleView,
     // --- the map ----------------------------------------------------------------------
     /// Turn the map's camera by a relative amount, radians.
-    TurnMap {
-        azimuth: f64,
-        elevation: f64,
-    },
+    TurnMap { azimuth: f64, elevation: f64 },
     /// In or out, in notches. Positive is closer.
     ///
     /// Not [`Action::Zoom`], which is the ship's boom in hull lengths and is clamped by two
@@ -42,15 +39,9 @@ pub enum Action {
     ///
     /// `anchor_ly` is a place on the reference plane to hold still while the camera comes in —
     /// what the cursor is over. `None` zooms about the middle of the view.
-    ZoomMap {
-        notches: f64,
-        anchor_ly: Option<glam::DVec3>,
-    },
+    ZoomMap { notches: f64, anchor_ly: Option<glam::DVec3> },
     /// Slide the map's focus across the reference plane, in fractions of the stand-off.
-    PanMap {
-        right: f64,
-        ahead: f64,
-    },
+    PanMap { right: f64, ahead: f64 },
     SetMapPlane(em_map::Plane),
     ToggleMapPlane,
     /// What the map is centered on.
@@ -62,10 +53,7 @@ pub enum Action {
     /// Give up on one in progress.
     CancelSignIn,
     /// Sign in with the local password provider, from the modal's own form.
-    SignInWithPassword {
-        email: String,
-        password: String,
-    },
+    SignInWithPassword { email: String, password: String },
     /// Forget the device grant.
     SignOut,
 
@@ -113,10 +101,7 @@ pub enum Action {
 
     // --- looking ----------------------------------------------------------------------
     /// Turn by a relative amount, radians.
-    Look {
-        yaw: f64,
-        pitch: f64,
-    },
+    Look { yaw: f64, pitch: f64 },
     /// Move the orbit camera in or out, in notches. Positive is closer.
     Zoom(f64),
     LookAtSelected,
@@ -150,13 +135,8 @@ pub enum Action {
     // --- appearance -------------------------------------------------------------------
     /// Replace a starfield pass's drawing parameters. Carries the whole style rather than one
     /// field, so a slider being dragged is one action a frame and the panel stays stateless.
-    SetPointStyle {
-        which: Which,
-        style: PointStyle,
-    },
-    ResetPointStyle {
-        which: Which,
-    },
+    SetPointStyle { which: Which, style: PointStyle },
+    ResetPointStyle { which: Which },
     /// How far a population envelope's covering fraction is amplified for display.
     SetEnvelopeGain(f32),
 
@@ -202,15 +182,9 @@ pub enum Action {
     },
     /// Put this ship's public key on the air, so `to` — or anyone at all, for `None` — can
     /// encrypt messages back.
-    OfferKey {
-        to: Option<lc_proto::ShipId>,
-        aim: lc_proto::Aim,
-    },
+    OfferKey { to: Option<lc_proto::ShipId>, aim: lc_proto::Aim },
     /// Answer this craft automatically, or stop.
-    AutoAck {
-        with: lc_proto::ShipId,
-        on: bool,
-    },
+    AutoAck { with: lc_proto::ShipId, on: bool },
     // A resend is [`Action::Say`] with the original's `idem`, not an action of its own: it is
     // the same message, said again, and the only thing that makes it one is the key.
 }
@@ -226,17 +200,11 @@ pub enum Effect {
     /// belong in the action fold.
     SignIn,
     CancelSignIn,
-    SignInWithPassword {
-        email: String,
-        password: String,
-    },
+    SignInWithPassword { email: String, password: String },
     SignOut,
     /// Answer a craft automatically from now on, or stop. Reaches `crate::uplink`'s chat log,
     /// which `apply` cannot see.
-    AutoAck {
-        with: lc_proto::ShipId,
-        on: bool,
-    },
+    AutoAck { with: lc_proto::ShipId, on: bool },
     /// An order for the server. Emitted instead of a local change when a server is
     /// authoritative over the ship: see [`crate::session::Session::remote`].
     Send(lc_proto::Order),
@@ -300,10 +268,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 
         Action::OpenBook(file) => {
             if ui.reading.book.as_deref() != Some(file.as_str()) {
-                ui.reading = crate::ui::Reading {
-                    book: Some(file),
-                    ..Default::default()
-                };
+                ui.reading = crate::ui::Reading { book: Some(file), ..Default::default() };
             }
             ui.open(Panel::Reader);
         }
@@ -423,39 +388,37 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
 
-        Action::SetView(view) => ui.view = view,
-        Action::ToggleView => ui.view = ui.view.other(),
-        Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
-        Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
-            Some(anchor) => {
-                // Moving the focus is a pan by another name, so it gives up following — but only
-                // if it moved. The wheel over a locked center scales about the center itself,
-                // which changes nothing and must not cost the lock.
-                if ui.map.orbit.zoom_about(anchor, notches) {
-                    ui.map.focus = crate::ui::MapFocus::Free;
-                }
+    Action::SetView(view) => ui.view = view,
+    Action::ToggleView => ui.view = ui.view.other(),
+    Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
+    Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
+        Some(anchor) => {
+            // Moving the focus is a pan by another name, so it gives up following — but only
+            // if it moved. The wheel over a locked center scales about the center itself,
+            // which changes nothing and must not cost the lock.
+            if ui.map.orbit.zoom_about(anchor, notches) {
+                ui.map.focus = crate::ui::MapFocus::Free;
             }
-            None => ui.map.orbit.zoom(notches),
-        },
-        Action::PanMap { right, ahead } => {
-            let plane = ui.map.plane;
-            ui.map.orbit.pan(plane, right, ahead);
-            // A pan is a statement about where to look, so it gives up following anything.
-            ui.map.focus = crate::ui::MapFocus::Free;
         }
-        Action::SetMapPlane(plane) => ui.map.plane = plane,
-        Action::ToggleMapPlane => ui.map.plane = ui.map.plane.other(),
-        Action::FocusMap(key) => ui.map.focus = key,
-        Action::SetMapSource(source) => {
-            #[cfg(feature = "godview")]
-            if source == crate::map_source::Source::God && !ui.may_see_everything {
-                effects.push(Effect::Notify(
-                    "god view needs an administrative account".into(),
-                ));
-                return effects;
-            }
-            ui.map.source = source;
+        None => ui.map.orbit.zoom(notches),
+    },
+    Action::PanMap { right, ahead } => {
+        let plane = ui.map.plane;
+        ui.map.orbit.pan(plane, right, ahead);
+        // A pan is a statement about where to look, so it gives up following anything.
+        ui.map.focus = crate::ui::MapFocus::Free;
+    }
+    Action::SetMapPlane(plane) => ui.map.plane = plane,
+    Action::ToggleMapPlane => ui.map.plane = ui.map.plane.other(),
+    Action::FocusMap(key) => ui.map.focus = key,
+    Action::SetMapSource(source) => {
+        #[cfg(feature = "godview")]
+        if source == crate::map_source::Source::God && !ui.may_see_everything {
+            effects.push(Effect::Notify("god view needs an administrative account".into()));
+            return effects;
         }
+        ui.map.source = source;
+    }
 
         // Multiplicative, because the range is two and a half decades: a fixed step is either
         // imperceptible at the far end or the whole range in one notch at the near one. Left
@@ -517,10 +480,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // the past of, which is the one thing the design will not have.
         Action::Intercept(ship_id, closeness) => {
             if session.remote {
-                effects.push(Effect::Send(lc_proto::Order::Intercept {
-                    ship_id,
-                    closeness,
-                }));
+                effects.push(Effect::Send(lc_proto::Order::Intercept { ship_id, closeness }));
             } else {
                 effects.push(Effect::Notify("no server, so nobody to close on".into()));
             }
@@ -539,13 +499,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // Sent and never applied locally, for the same reason a course is: what a transmission
         // becomes is an event with an identifier, and the identifier is the server's to mint.
         // The client learns of its own message when the acceptance comes back.
-        Action::Say {
-            to,
-            aim,
-            secrecy,
-            body,
-            idem,
-        } => {
+        Action::Say { to, aim, secrecy, body, idem } => {
             let body = body.trim().to_string();
             // An empty body is a *bare acknowledgement* and is a real message — but only one
             // this client sends deliberately, by repeating a key. An empty draft with no key
@@ -567,20 +521,13 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                         to.map_or(0, |t| t.0 as u64),
                         (session.coordinate_time_s() * 1.0e6) as u64,
                         body.len() as u64,
-                        body.bytes()
-                            .fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64)),
+                        body.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64)),
                     ])
                     // Zero means "not keyed" to every reader, so it is the one value a real
                     // key may not take.
                     .max(1)
                 });
-                effects.push(Effect::Send(lc_proto::Order::Say {
-                    to,
-                    aim,
-                    secrecy,
-                    body,
-                    idem,
-                }));
+                effects.push(Effect::Send(lc_proto::Order::Say { to, aim, secrecy, body, idem }));
             }
         }
         Action::SendReport { to, aim, secrecy } => {
@@ -628,9 +575,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::OfferKey { to, aim }));
             } else {
-                effects.push(Effect::Notify(
-                    "no server, so nobody to give a key to".into(),
-                ));
+                effects.push(Effect::Notify("no server, so nobody to give a key to".into()));
             }
         }
         Action::SetCourse(course) => {
@@ -656,10 +601,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 
         Action::SetDriveAccel(g) => {
             session.ship.motion.drive.accel_g = g.clamp(MIN_ACCEL_G, MAX_ACCEL_G);
-            effects.push(Effect::Notify(format!(
-                "drive set to {:.0} g",
-                session.ship.motion.drive.accel_g
-            )));
+            effects.push(Effect::Notify(format!("drive set to {:.0} g", session.ship.motion.drive.accel_g)));
         }
 
         Action::SetPointStyle { which, style } => match which {
@@ -682,9 +624,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 ui.god_view = !ui.god_view;
             } else {
                 // Not merely hidden: the code is not in this build.
-                effects.push(Effect::Notify(
-                    "god view is not compiled into this build".into(),
-                ));
+                effects.push(Effect::Notify("god view is not compiled into this build".into()));
             }
         }
         // **The server owns the rate**, which `lightcone/docs/13-client-shell.md` calls dev
@@ -699,19 +639,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::SetTimeRate(rate) => ui.time_rate = rate.max(0.0),
         Action::TimeRateUp | Action::TimeRateDown => {
             ui.time_rate = crate::ui::rate_step(ui.time_rate, action == Action::TimeRateUp);
-            effects.push(Effect::Notify(format!(
-                "clock: {}",
-                crate::ui::rate_label(ui.time_rate)
-            )));
+            effects.push(Effect::Notify(format!("clock: {}", crate::ui::rate_label(ui.time_rate))));
         }
         Action::WriteSnapshot => effects.push(Effect::WriteSnapshot),
         // Only a shard can do this, and only one started for it will. Offline there is no
         // authority to ask and nothing that could honor the answer.
         Action::StageDemo(name) if !session.remote => {
             let _ = name;
-            effects.push(Effect::Notify(
-                "no server, so nowhere to stage a scene".into(),
-            ));
+            effects.push(Effect::Notify("no server, so nowhere to stage a scene".into()));
         }
         Action::StageDemo(name) => {
             // The scene says where to stand, so staging one moves the camera to wherever it is
@@ -738,16 +673,13 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::GrantEnergy(_) | Action::FillStorage | Action::ApplyRefit | Action::CancelRefit
             if !session.remote =>
         {
-            effects.push(Effect::Notify(
-                "no server, so nothing to refit or fill".into(),
-            ));
+            effects.push(Effect::Notify("no server, so nothing to refit or fill".into()));
         }
         Action::GrantEnergy(joules) => effects.push(Effect::Grant(joules)),
         Action::FillStorage => {
             let now = session.coordinate_time_s();
             if let Some(fitting) = session.ship.fitting() {
-                let room =
-                    fitting.capacity_j_at(now) - fitting.stored_j_at(&session.ship.motion, now);
+                let room = fitting.capacity_j_at(now) - fitting.stored_j_at(&session.ship.motion, now);
                 if room > 0.0 {
                     effects.push(Effect::Grant(room));
                 }
@@ -757,9 +689,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::ResetRefitDraft => ui.refit_draft = None,
         Action::ApplyRefit => {
             if let Some(target) = ui.refit_draft.take() {
-                effects.push(Effect::Send(lc_proto::Order::Refit {
-                    target: target.into(),
-                }));
+                effects.push(Effect::Send(lc_proto::Order::Refit { target: target.into() }));
             }
         }
         Action::CancelRefit => effects.push(Effect::Send(lc_proto::Order::CancelRefit)),
@@ -833,9 +763,7 @@ fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mu
         return;
     }
 
-    let Some(cruise) = session.fly_to(id) else {
-        return;
-    };
+    let Some(cruise) = session.fly_to(id) else { return };
     let (years, aboard) = (
         cruise.duration_s() / crate::flight::JULIAN_YEAR_S,
         cruise.proper_duration_s() / crate::flight::JULIAN_YEAR_S,
@@ -845,9 +773,7 @@ fn fly(ui: &mut UiState, session: &mut Session, id: Option<StarId>, effects: &mu
     if let Some(look) = Look::aimed_at(session.offset_to(session.star(id).unwrap())) {
         ui.look = look;
     }
-    effects.push(Effect::Notify(format!(
-        "{name}: {years:.2} years out, {aboard:.2} aboard"
-    )));
+    effects.push(Effect::Notify(format!("{name}: {years:.2} years out, {aboard:.2} aboard")));
 }
 
 fn set_preset(ui: &mut UiState, session: &mut Session, index: usize, effects: &mut Vec<Effect>) {
@@ -920,40 +846,11 @@ mod tests {
     #[test]
     fn switching_the_view_leaves_the_map_where_it_was() {
         let (mut ui, mut s) = fixture();
-        apply(
-            Action::SetMapPlane(em_map::Plane::Galactic),
-            &mut ui,
-            &mut s,
-        );
-        apply(
-            Action::TurnMap {
-                azimuth: 0.4,
-                elevation: 0.1,
-            },
-            &mut ui,
-            &mut s,
-        );
-        apply(
-            Action::ZoomMap {
-                notches: 2.0,
-                anchor_ly: None,
-            },
-            &mut ui,
-            &mut s,
-        );
-        apply(
-            Action::PanMap {
-                right: 0.3,
-                ahead: -0.2,
-            },
-            &mut ui,
-            &mut s,
-        );
-        assert_eq!(
-            ui.map.focus,
-            crate::ui::MapFocus::Free,
-            "a pan is the way into it"
-        );
+        apply(Action::SetMapPlane(em_map::Plane::Galactic), &mut ui, &mut s);
+        apply(Action::TurnMap { azimuth: 0.4, elevation: 0.1 }, &mut ui, &mut s);
+        apply(Action::ZoomMap { notches: 2.0, anchor_ly: None }, &mut ui, &mut s);
+        apply(Action::PanMap { right: 0.3, ahead: -0.2 }, &mut ui, &mut s);
+        assert_eq!(ui.map.focus, crate::ui::MapFocus::Free, "a pan is the way into it");
 
         // Both ways in, because either could be the one that forgets.
         let held = ui.map;
@@ -961,10 +858,7 @@ mod tests {
         assert_eq!(ui.map, held, "showing the map moved its camera");
         apply(Action::SetView(ViewMode::World), &mut ui, &mut s);
         assert_eq!(ui.view, ViewMode::World, "back where it started");
-        assert_eq!(
-            ui.map, held,
-            "the map's camera did not survive the round trip"
-        );
+        assert_eq!(ui.map, held, "the map's camera did not survive the round trip");
     }
 
     #[test]
@@ -988,10 +882,7 @@ mod tests {
         apply(Action::CloseTopPanel, &mut ui, &mut s);
         assert!(!ui.is_open(Panel::Telescope));
         apply(Action::CloseTopPanel, &mut ui, &mut s);
-        assert!(
-            ui.is_open(Panel::Escape),
-            "with nothing left, back means the menu"
-        );
+        assert!(ui.is_open(Panel::Escape), "with nothing left, back means the menu");
     }
 
     #[test]
@@ -1001,10 +892,7 @@ mod tests {
         let effects = apply(Action::SetBandPreset(2), &mut ui, &mut s);
         assert_eq!(ui.preset, 2);
         assert_eq!(s.mapping, presets::all()[2].1);
-        assert_ne!(
-            s.tone.reference, before,
-            "a different band is a different brightness"
-        );
+        assert_ne!(s.tone.reference, before, "a different band is a different brightness");
         assert!(matches!(effects.as_slice(), [Effect::Notify(_)]));
     }
 
@@ -1048,15 +936,9 @@ mod tests {
         let start = ui.boom_lengths;
         apply(Action::Zoom(1.0), &mut ui, &mut s);
         let closer = ui.boom_lengths;
-        assert!(
-            closer < start,
-            "a notch in must come closer: {start} to {closer}"
-        );
+        assert!(closer < start, "a notch in must come closer: {start} to {closer}");
         apply(Action::Zoom(-1.0), &mut ui, &mut s);
-        assert!(
-            (ui.boom_lengths - start).abs() < start * 1e-9,
-            "a notch back is where it began"
-        );
+        assert!((ui.boom_lengths - start).abs() < start * 1e-9, "a notch back is where it began");
 
         // Ten notches out is the same as one notch out ten times, which is what a wheel with a
         // pixel-precision device actually sends.
@@ -1099,9 +981,7 @@ mod tests {
             assert!(ui.god_view);
         } else {
             assert!(!ui.god_view);
-            assert!(
-                matches!(effects.as_slice(), [Effect::Notify(m)] if m.contains("not compiled"))
-            );
+            assert!(matches!(effects.as_slice(), [Effect::Notify(m)] if m.contains("not compiled")));
         }
     }
 
@@ -1109,14 +989,8 @@ mod tests {
     fn effects_are_returned_rather_than_performed() {
         let (mut ui, mut s) = fixture();
         assert_eq!(apply(Action::Quit, &mut ui, &mut s), vec![Effect::Quit]);
-        assert_eq!(
-            apply(Action::WriteSnapshot, &mut ui, &mut s),
-            vec![Effect::WriteSnapshot]
-        );
-        assert_eq!(
-            apply(Action::StartGame, &mut ui, &mut s),
-            vec![Effect::StartGame]
-        );
+        assert_eq!(apply(Action::WriteSnapshot, &mut ui, &mut s), vec![Effect::WriteSnapshot]);
+        assert_eq!(apply(Action::StartGame, &mut ui, &mut s), vec![Effect::StartGame]);
     }
 
     /// A session driven entirely by actions, which is what makes the UI testable.
@@ -1147,33 +1021,12 @@ mod tests {
     #[test]
     fn looking_accumulates_and_the_pitch_stops_at_the_pole() {
         let (mut ui, mut s) = fixture();
-        apply(
-            Action::Look {
-                yaw: 0.3,
-                pitch: 0.2,
-            },
-            &mut ui,
-            &mut s,
-        );
-        apply(
-            Action::Look {
-                yaw: 0.3,
-                pitch: 0.2,
-            },
-            &mut ui,
-            &mut s,
-        );
+        apply(Action::Look { yaw: 0.3, pitch: 0.2 }, &mut ui, &mut s);
+        apply(Action::Look { yaw: 0.3, pitch: 0.2 }, &mut ui, &mut s);
         assert!((ui.look.yaw - 0.6).abs() < 1e-12);
         assert!((ui.look.pitch - 0.4).abs() < 1e-12);
         for _ in 0..200 {
-            apply(
-                Action::Look {
-                    yaw: 0.0,
-                    pitch: 0.5,
-                },
-                &mut ui,
-                &mut s,
-            );
+            apply(Action::Look { yaw: 0.0, pitch: 0.5 }, &mut ui, &mut s);
         }
         assert!(ui.look.pitch <= Look::PITCH_LIMIT, "{}", ui.look.pitch);
         assert!(ui.look.forward().is_finite());
@@ -1183,39 +1036,20 @@ mod tests {
     fn yaw_wraps_rather_than_growing_without_bound() {
         let (mut ui, mut s) = fixture();
         for _ in 0..1000 {
-            apply(
-                Action::Look {
-                    yaw: 1.0,
-                    pitch: 0.0,
-                },
-                &mut ui,
-                &mut s,
-            );
+            apply(Action::Look { yaw: 1.0, pitch: 0.0 }, &mut ui, &mut s);
         }
-        assert!(
-            ui.look.yaw >= 0.0 && ui.look.yaw < std::f64::consts::TAU,
-            "{}",
-            ui.look.yaw
-        );
+        assert!(ui.look.yaw >= 0.0 && ui.look.yaw < std::f64::consts::TAU, "{}", ui.look.yaw);
     }
 
     #[test]
     fn looking_at_the_selection_points_the_camera_at_it() {
         let (mut ui, mut s) = fixture();
         let id = s.stars[0].id;
-        assert_eq!(
-            apply(Action::LookAtSelected, &mut ui, &mut s).len(),
-            1,
-            "nothing selected"
-        );
+        assert_eq!(apply(Action::LookAtSelected, &mut ui, &mut s).len(), 1, "nothing selected");
         apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
         apply(Action::LookAtSelected, &mut ui, &mut s);
         let want = s.offset_to(s.star(id).unwrap()).normalize();
-        assert!(
-            (ui.look.forward() - want).length() < 1e-12,
-            "{:?} vs {want:?}",
-            ui.look.forward()
-        );
+        assert!((ui.look.forward() - want).length() < 1e-12, "{:?} vs {want:?}", ui.look.forward());
     }
 
     #[test]
@@ -1247,14 +1081,7 @@ mod tests {
     fn starting_a_crossing_aims_the_camera_at_it() {
         let (mut ui, mut s) = fixture();
         let id = s.stars[0].id;
-        apply(
-            Action::Look {
-                yaw: 2.0,
-                pitch: -0.5,
-            },
-            &mut ui,
-            &mut s,
-        );
+        apply(Action::Look { yaw: 2.0, pitch: -0.5 }, &mut ui, &mut s);
         apply(Action::FlyTo(Some(id)), &mut ui, &mut s);
         let want = s.offset_to(s.star(id).unwrap()).normalize();
         assert!((ui.look.forward() - want).length() < 1e-12);
@@ -1296,18 +1123,11 @@ mod tests {
         let (mut ui, mut s) = fixture();
         apply(Action::SetTimeRate(RATE_LADDER[0].0), &mut ui, &mut s);
         apply(Action::TimeRateDown, &mut ui, &mut s);
-        assert_eq!(
-            ui.time_rate, RATE_LADDER[0].0,
-            "the bottom rung is the bottom"
-        );
+        assert_eq!(ui.time_rate, RATE_LADDER[0].0, "the bottom rung is the bottom");
         for _ in 0..20 {
             apply(Action::TimeRateUp, &mut ui, &mut s);
         }
-        assert_eq!(
-            ui.time_rate,
-            RATE_LADDER[RATE_LADDER.len() - 1].0,
-            "and the top is the top"
-        );
+        assert_eq!(ui.time_rate, RATE_LADDER[RATE_LADDER.len() - 1].0, "and the top is the top");
     }
 
     #[test]
@@ -1347,11 +1167,9 @@ mod tests {
     fn a_swarm_reads_as_a_deficit_in_the_visible_and_an_excess_in_the_thermal() {
         use lc_world::sky::{AuthoredStars, StarProvider};
         let provider = AuthoredStars::sample();
-        let Some(star) = provider
-            .stars()
-            .iter()
-            .find(|s| lc_world::sky::generate::swarm_for(s).is_some())
-        else {
+        let Some(star) = provider.stars().iter().find(|s| {
+            lc_world::sky::generate::swarm_for(s).is_some()
+        }) else {
             // The sample sky is three stars and may carry no swarm. The catalogue test covers
             // the populated case; this one has nothing to say.
             return;
@@ -1369,14 +1187,8 @@ mod tests {
             let samples = s.curve().samples().to_vec();
             samples.iter().map(|(_, d)| *d).sum::<f64>() / samples.len() as f64
         };
-        assert!(
-            watch(&mut s, &mut ui, Band::V) > 0.0,
-            "the visible must be a shadow"
-        );
-        assert!(
-            watch(&mut s, &mut ui, Band::ThermalIr) < 0.0,
-            "and the thermal a source"
-        );
+        assert!(watch(&mut s, &mut ui, Band::V) > 0.0, "the visible must be a shadow");
+        assert!(watch(&mut s, &mut ui, Band::ThermalIr) < 0.0, "and the thermal a source");
     }
 
     /// One exposure measures every band the sensor has, so choosing which to read is a choice
@@ -1415,10 +1227,7 @@ mod tests {
         let (mut ui, mut s) = fixture();
         let last = s.stars.last().unwrap().id;
         apply(Action::SelectTarget(Some(last)), &mut ui, &mut s);
-        assert!(
-            s.target(last).is_some(),
-            "pointing at a star should model it"
-        );
+        assert!(s.target(last).is_some(), "pointing at a star should model it");
         assert!(s.observe(1.0e4).is_some());
     }
 
@@ -1524,19 +1333,9 @@ mod tests {
         let (mut ui, mut s) = fixture();
         let mut style = ui.local;
         style.corona_frequency = 3.0;
-        apply(
-            Action::SetPointStyle {
-                which: Which::Local,
-                style,
-            },
-            &mut ui,
-            &mut s,
-        );
+        apply(Action::SetPointStyle { which: Which::Local, style }, &mut ui, &mut s);
         assert_eq!(ui.local.corona_frequency, 3.0);
-        assert_eq!(
-            ui.distant.corona_frequency,
-            crate::starfield::DISTANT.corona_frequency
-        );
+        assert_eq!(ui.distant.corona_frequency, crate::starfield::DISTANT.corona_frequency);
     }
 
     #[test]
@@ -1562,15 +1361,9 @@ mod tests {
         for (name, field, lo, hi) in crate::starfield::KNOBS {
             assert!(lo < hi, "{name} has an empty range");
             let at = field(&mut style);
-            assert!(
-                *at >= lo && *at <= hi,
-                "{name} ships at {at}, outside {lo}..{hi}"
-            );
+            assert!(*at >= lo && *at <= hi, "{name} ships at {at}, outside {lo}..{hi}");
             let ptr = at as *const f32;
-            assert!(
-                !seen.contains(&ptr),
-                "{name} is bound to a field another knob already has"
-            );
+            assert!(!seen.contains(&ptr), "{name} is bound to a field another knob already has");
             seen.push(ptr);
         }
         assert!(seen.len() >= 10, "only {} knobs reached", seen.len());
@@ -1600,9 +1393,7 @@ mod tests {
     #[test]
     fn leaving_for_another_star_gives_up_the_station() {
         let mut s = Session::new(&AuthoredStars::sample(), 3);
-        s.ship
-            .motion
-            .begin_holding(crate::navigation::Waypoint::Fixed(glam::DVec3::X));
+        s.ship.motion.begin_holding(crate::navigation::Waypoint::Fixed(glam::DVec3::X));
         s.fly_to(s.stars[0].id);
         assert!(s.station().is_none());
     }
@@ -1611,9 +1402,8 @@ mod tests {
     /// Nothing flies until Go, which is the point of arming it separately.
     #[test]
     fn focusing_arming_and_going_are_three_separate_steps() {
-        let provider = lc_world::sky::hyg::HygProvider::load(
-            "../../assets/catalogs/hygdata_v42_dist_sort.csv",
-        );
+        let provider =
+            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv");
         let Ok(provider) = provider else { return };
         let mut ui = UiState::default();
         let mut s = Session::new(&provider, 64);
@@ -1632,31 +1422,18 @@ mod tests {
 
         apply(Action::ChooseCourse(Some(course.clone())), &mut ui, &mut s);
         assert_eq!(ui.course, Some(course.clone()));
-        assert!(
-            s.cruise().is_none() && s.station().is_none(),
-            "arming flies nothing"
-        );
+        assert!(s.cruise().is_none() && s.station().is_none(), "arming flies nothing");
 
         let effects = apply(Action::SetCourse(course), &mut ui, &mut s);
         assert_eq!(effects.len(), 1, "Go says where it is going");
         // Crossing and holding are exclusive: the ship is flying *to* the station, and
         // arriving is what turns one into the other.
         assert!(s.cruise().is_some(), "Go did not begin a crossing");
-        assert!(
-            s.ship.motion.bound_for().is_some(),
-            "and the crossing is not for anywhere"
-        );
-        assert!(
-            s.station().is_none(),
-            "it cannot be holding a place it has not reached"
-        );
+        assert!(s.ship.motion.bound_for().is_some(), "and the crossing is not for anywhere");
+        assert!(s.station().is_none(), "it cannot be holding a place it has not reached");
 
         // Focusing something else drops the armed course: it belonged to the last one.
-        apply(
-            Action::FocusTarget(Some(crate::navigation::Target::Band(0))),
-            &mut ui,
-            &mut s,
-        );
+        apply(Action::FocusTarget(Some(crate::navigation::Target::Band(0))), &mut ui, &mut s);
         assert!(ui.course.is_none());
     }
     /// With a server answering, a flight order is **sent**, not applied. Applying it locally
@@ -1730,10 +1507,7 @@ mod tests {
             )),
             "{effects:?}",
         );
-        assert!(
-            s.cruise().is_none(),
-            "it flew a crossing the server has not agreed to"
-        );
+        assert!(s.cruise().is_none(), "it flew a crossing the server has not agreed to");
         assert_eq!(s.ship.motion.position_ly, before);
     }
 
@@ -1743,14 +1517,8 @@ mod tests {
         let mut ui = UiState::default();
         let mut s = Session::new(&AuthoredStars::sample(), 3);
         let effects = apply(Action::FlyTo(Some(s.stars[0].id)), &mut ui, &mut s);
-        assert!(
-            !effects.iter().any(|e| matches!(e, Effect::Send(_))),
-            "{effects:?}"
-        );
-        assert!(
-            s.cruise().is_some(),
-            "it sent an order to nobody instead of flying"
-        );
+        assert!(!effects.iter().any(|e| matches!(e, Effect::Send(_))), "{effects:?}");
+        assert!(s.cruise().is_some(), "it sent an order to nobody instead of flying");
     }
     /// The server owns the rate — doc 13 says so, and the client never enforced it. A client
     /// that warps runs its clock away from the server's, and then every order it sends comes
@@ -1762,17 +1530,11 @@ mod tests {
         s.remote = true;
         let before = ui.time_rate;
 
-        for action in [
-            Action::TimeRateUp,
-            Action::TimeRateDown,
-            Action::SetTimeRate(3600.0),
-        ] {
+        for action in [Action::TimeRateUp, Action::TimeRateDown, Action::SetTimeRate(3600.0)] {
             let effects = apply(action, &mut ui, &mut s);
             assert_eq!(ui.time_rate, before, "the client took the clock");
             assert!(
-                effects
-                    .iter()
-                    .any(|e| matches!(e, Effect::Notify(t) if t.contains("server"))),
+                effects.iter().any(|e| matches!(e, Effect::Notify(t) if t.contains("server"))),
                 "it changed nothing and said nothing: {effects:?}",
             );
         }
@@ -1817,14 +1579,12 @@ mod tests {
             ui.perspective,
             want.map(|id| crate::ui::CameraPerspective::Pov(lc_proto::ShipId(id))),
         );
-        assert!(
-            ui.perspective.is_some(),
-            "premise: closing is watched from its cast"
-        );
+        assert!(ui.perspective.is_some(), "premise: closing is watched from its cast");
 
         // And one watched from the player puts the camera back, rather than leaving it on
         // whoever the last scene was about.
         apply(Action::StageDemo("approach".into()), &mut ui, &mut s);
         assert_eq!(ui.perspective, None);
     }
+
 }

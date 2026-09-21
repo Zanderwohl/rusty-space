@@ -48,11 +48,7 @@ pub enum Course {
     /// Burn, flip and burn to a point, light-years from the world origin.
     To([f64; 3]),
     /// Circular orbit at an altitude given in radii above the surface.
-    Orbit {
-        body: String,
-        altitude_radii: f64,
-        plane: Plane,
-    },
+    Orbit { body: String, altitude_radii: f64, plane: Plane },
     /// The libration point itself.
     Lagrange { body: String, point: LagrangePoint },
     /// A libration orbit about the point, which is what a real mission flies.
@@ -114,16 +110,8 @@ pub enum Anchor {
 pub enum Waypoint {
     /// Light-years from the world origin.
     Fixed([f64; 3]),
-    Orbit {
-        about: Anchor,
-        radius_m: f64,
-        pole: [f64; 3],
-        phase_rad: f64,
-    },
-    Lagrange {
-        body: String,
-        point: LagrangePoint,
-    },
+    Orbit { about: Anchor, radius_m: f64, pole: [f64; 3], phase_rad: f64 },
+    Lagrange { body: String, point: LagrangePoint },
     /// The orbit *about* a collinear point, which is what a craft there actually flies.
     Libration {
         body: String,
@@ -309,11 +297,7 @@ pub enum Order {
     /// The acceleration is asked for, not stated: it is clamped to what the craft's own drive
     /// can do, so a client cannot ask for a better ship than it has. The speed cap likewise, to
     /// what its stored energy can pay for.
-    SetCourse {
-        course: Course,
-        accel_g: f64,
-        max_beta: f64,
-    },
+    SetCourse { course: Course, accel_g: f64, max_beta: f64 },
     /// Cross to another star, at this acceleration.
     ///
     /// The star is named by **catalogue id**, not by position. A position would let a client
@@ -324,11 +308,7 @@ pub enum Order {
     ///
     /// Separate from [`Order::SetCourse`] because a `Course` names somewhere inside the local
     /// system and this is the one thing a ship does that is not about one.
-    Cross {
-        star: u64,
-        accel_g: f64,
-        max_beta: f64,
-    },
+    Cross { star: u64, accel_g: f64, max_beta: f64 },
     /// Cut the engine. Not a stop — whatever velocity it had, it keeps, on whatever conic that
     /// puts it on.
     CutDrive,
@@ -346,10 +326,7 @@ pub enum Order {
     /// light has not arrived.
     ///
     /// Sent again for the same quarry with another closeness, it closes in or stands off.
-    Intercept {
-        ship_id: ShipId,
-        closeness: Closeness,
-    },
+    Intercept { ship_id: ShipId, closeness: Closeness },
     /// Give up a standing [`Order::Intercept`], with no further corrections: the drive is cut
     /// and the ship keeps whatever velocity the approach or the station left it with, on whatever
     /// conic that is.
@@ -373,13 +350,7 @@ pub enum Order {
     ///
     /// A broadcast cannot be sealed. There is nobody for it to be sealed *to*, and the server
     /// refuses the combination rather than quietly sending it in the open. Appended last.
-    Say {
-        to: Option<ShipId>,
-        aim: Aim,
-        secrecy: Secrecy,
-        body: String,
-        idem: MessageKey,
-    },
+    Say { to: Option<ShipId>, aim: Aim, secrecy: Secrecy, body: String, idem: MessageKey },
     /// Put your public key on the air, so `to` can seal messages to you.
     ///
     /// A message like any other, and that is the mechanic rather than an implementation note:
@@ -761,10 +732,7 @@ pub enum Outbound {
     /// It says nothing this ship is not entitled to: every message here either left it or
     /// landed on it, and a sealed one it is not the addressee of has no body, exactly as it had
     /// none when it arrived. Appended last.
-    Backlog {
-        messages: Vec<Said>,
-        keys: Vec<ShipId>,
-    },
+    Backlog { messages: Vec<Said>, keys: Vec<ShipId> },
     /// What there is to read, and where the shelf is.
     ///
     /// Appended last, like every variant added since: the discriminants above are what the
@@ -891,29 +859,20 @@ pub enum Inbound {
     /// server and worth sixty seconds. The server verifies it against a published key without
     /// calling the broker — see `lightcone/docs/16-identity.md`. A connection that sends
     /// anything else first is closed rather than refused: there is nobody to refuse.
-    Hello {
-        protocol: u32,
-        ticket: String,
-    },
+    Hello { protocol: u32, ticket: String },
     Act(Intent),
     /// Reconnecting: replay from the last reception this client actually has.
-    ResumeFrom {
-        arrive_t: i64,
-    },
+    ResumeFrom { arrive_t: i64 },
     /// Put a named scene in the world.
     ///
     /// Appended last on purpose: every other variant keeps the discriminant its golden was
     /// pinned at. Refused outright by a shard, which is not started for this — a client that
     /// could stage a scene could put a craft wherever it liked, which is the one thing no
     /// client may do. See `lc_server::director`.
-    Stage {
-        scenario: String,
-    },
+    Stage { scenario: String },
     /// Put energy in this client's ship. Development only, refused by a shard for the reason
     /// `Stage` is. Appended last.
-    Grant {
-        joules: f64,
-    },
+    Grant { joules: f64 },
     /// Where the player has got to. Debounced by the client: a page turn every few seconds must
     /// not be a message every few seconds.
     SetReading(Bookmark),
@@ -1045,11 +1004,7 @@ mod tests {
     fn cross() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
-            order: Order::Cross {
-                star: 0x0123_4567_89ab_cdef,
-                accel_g: 3.0,
-                max_beta: 0.5,
-            },
+            order: Order::Cross { star: 0x0123_4567_89ab_cdef, accel_g: 3.0, max_beta: 0.5 },
             issued_at_client_t: 1_000_000,
         })
     }
@@ -1119,15 +1074,8 @@ mod tests {
 
     /// A ship holding station on a quarry under thrust: the rendezvous numbers and one more.
     fn escort() -> Outbound {
-        let Outbound::Welcome {
-            client_id,
-            protocol,
-            ship_id,
-            now_t,
-            name,
-            rate,
-            ship,
-        } = rendezvous()
+        let Outbound::Welcome { client_id, protocol, ship_id, now_t, name, rate, ship } =
+            rendezvous()
         else {
             unreachable!("the rendezvous fixture is a welcome")
         };
@@ -1164,28 +1112,13 @@ mod tests {
 
     /// The rendezvous numbers again, in a frame that falls.
     fn consort() -> Outbound {
-        let Outbound::Welcome {
-            client_id,
-            protocol,
-            ship_id,
-            now_t,
-            name,
-            rate,
-            ship,
-        } = rendezvous()
+        let Outbound::Welcome { client_id, protocol, ship_id, now_t, name, rate, ship } =
+            rendezvous()
         else {
             unreachable!("the rendezvous fixture is a welcome")
         };
         let Motive::Rendezvous {
-            from_ly,
-            beta0,
-            to_ly,
-            start_s,
-            drive,
-            frame_from_ly,
-            frame_beta,
-            since_t,
-            target,
+            from_ly, beta0, to_ly, start_s, drive, frame_from_ly, frame_beta, since_t, target,
             clock_base_s,
         } = ship.motive.clone()
         else {
@@ -1200,16 +1133,8 @@ mod tests {
             rate,
             ship: Motion {
                 motive: Motive::Consort {
-                    from_ly,
-                    beta0,
-                    to_ly,
-                    start_s,
-                    drive,
-                    frame_from_ly,
-                    frame_beta,
-                    since_t,
-                    target,
-                    clock_base_s,
+                    from_ly, beta0, to_ly, start_s, drive, frame_from_ly, frame_beta, since_t,
+                    target, clock_base_s,
                 },
                 ..ship
             },
@@ -1217,13 +1142,7 @@ mod tests {
     }
 
     fn fitted() -> Outbound {
-        let loadout = Loadout {
-            storage: 6,
-            drones: 2,
-            living: 2,
-            engines: 5,
-            slots: 20,
-        };
+        let loadout = Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 };
         Outbound::Fitted {
             ship_id: ShipId(42),
             fitting: Fitting {
@@ -1248,10 +1167,7 @@ mod tests {
                 solar_w: 2.5e17,
                 refit: Some(RefitOrder {
                     from: loadout,
-                    target: Loadout {
-                        engines: 7,
-                        ..loadout
-                    },
+                    target: Loadout { engines: 7, ..loadout },
                     stored_j: 4.2e26,
                     start_s: 1.0e6,
                 }),
@@ -1311,10 +1227,7 @@ mod tests {
             "Inbound::Act changed shape at protocol version {PROTOCOL_VERSION}",
         );
         assert_eq!(
-            encode(&Inbound::Hello {
-                protocol: PROTOCOL_VERSION,
-                ticket: "a.b.c".into()
-            }),
+            encode(&Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: "a.b.c".into() }),
             golden::HELLO,
             "Inbound::Hello changed shape at protocol version {PROTOCOL_VERSION}",
         );
@@ -1424,28 +1337,16 @@ mod tests {
             rendezvous(),
             escort(),
             accepted(),
-            Outbound::Clock {
-                now_t: 1_000_000,
-                rate: 1.0,
-            },
-            Outbound::Refused {
-                ship_id: ShipId(-3),
-                reason: Refusal::NotYours,
-            },
+            Outbound::Clock { now_t: 1_000_000, rate: 1.0 },
+            Outbound::Refused { ship_id: ShipId(-3), reason: Refusal::NotYours },
             Outbound::WrongProtocol { server: 9 },
             Outbound::Pursuing {
                 ship_id: ShipId(42),
-                pursuit: Pursuit {
-                    quarry: ShipId(7),
-                    closeness: Closeness::Intimate,
-                },
+                pursuit: Pursuit { quarry: ShipId(7), closeness: Closeness::Intimate },
             },
             consort(),
             fitted(),
-            Outbound::Refused {
-                ship_id: ShipId(1),
-                reason: Refusal::Short(Shortfall::Capacity),
-            },
+            Outbound::Refused { ship_id: ShipId(1), reason: Refusal::Short(Shortfall::Capacity) },
             Outbound::Backlog {
                 messages: vec![Said {
                     event_id: 9,
@@ -1464,24 +1365,15 @@ mod tests {
                 }],
                 keys: vec![ShipId(7)],
             },
-            Outbound::Refused {
-                ship_id: ShipId(42),
-                reason: Refusal::NoKey,
-            },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
         ];
         for message in out {
             let bytes = encode(&message);
             assert_eq!(decode::<Outbound>(&bytes).unwrap(), message);
         }
         let inbound = [
-            Inbound::Hello {
-                protocol: PROTOCOL_VERSION,
-                ticket: "a.b.c".into(),
-            },
-            Inbound::Hello {
-                protocol: PROTOCOL_VERSION,
-                ticket: String::new(),
-            },
+            Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: "a.b.c".into() },
+            Inbound::Hello { protocol: PROTOCOL_VERSION, ticket: String::new() },
             act(),
             cross(),
             intercept(),
@@ -1492,31 +1384,17 @@ mod tests {
             }),
             Inbound::Act(Intent {
                 ship_id: ShipId(1),
-                order: Order::Burn {
-                    beta: [0.1, -0.2, 0.3],
-                },
+                order: Order::Burn { beta: [0.1, -0.2, 0.3] },
                 issued_at_client_t: i64::MIN,
             }),
             Inbound::ResumeFrom { arrive_t: -1 },
             Inbound::Grant { joules: 1.5e25 },
             Inbound::Act(Intent {
                 ship_id: ShipId(1),
-                order: Order::Refit {
-                    target: Loadout {
-                        storage: 6,
-                        drones: 2,
-                        living: 2,
-                        engines: 5,
-                        slots: 20,
-                    },
-                },
+                order: Order::Refit { target: Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 } },
                 issued_at_client_t: 0,
             }),
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::CancelRefit,
-                issued_at_client_t: 0,
-            }),
+            Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CancelRefit, issued_at_client_t: 0 }),
             say(),
             send_report(),
             Inbound::Act(Intent {
@@ -1543,10 +1421,7 @@ mod tests {
             }),
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
-                order: Order::OfferKey {
-                    to: Some(ShipId(7)),
-                    aim: Aim::Omni,
-                },
+                order: Order::OfferKey { to: Some(ShipId(7)), aim: Aim::Omni },
                 issued_at_client_t: 0,
             }),
         ];
@@ -1578,10 +1453,7 @@ mod tests {
             Cleared::<Presence>::clear(at(now + 1), now),
             Err(Withheld::StillInFlight),
         );
-        assert!(
-            Cleared::<Presence>::clear(at(now), now).is_ok(),
-            "exactly on the cone"
-        );
+        assert!(Cleared::<Presence>::clear(at(now), now).is_ok(), "exactly on the cone");
         assert!(Cleared::<Presence>::clear(at(now - 1), now).is_ok());
     }
 
@@ -1617,10 +1489,7 @@ mod tests {
             Cleared::<Sighting>::clear(sighting(now, 0.5), now, 1.0),
             Err(Withheld::BelowNoiseFloor),
         );
-        assert!(
-            Cleared::<Sighting>::clear(sighting(now, 1.0), now, 1.0).is_ok(),
-            "exactly at the floor"
-        );
+        assert!(Cleared::<Sighting>::clear(sighting(now, 1.0), now, 1.0).is_ok(), "exactly at the floor");
         // In flight *and* faint is reported as in flight: the causality test comes first and
         // is the one that may never be relaxed.
         assert_eq!(
@@ -1629,3 +1498,4 @@ mod tests {
         );
     }
 }
+

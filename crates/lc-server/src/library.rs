@@ -44,10 +44,7 @@ impl Library {
                 return Err(format!("the catalogue lists {} twice", book.id));
             }
             if book.file.contains('/') || book.file.contains('\\') || book.file.contains("..") {
-                return Err(format!(
-                    "{} names a file outside the shelf: {}",
-                    book.id, book.file
-                ));
+                return Err(format!("{} names a file outside the shelf: {}", book.id, book.file));
             }
         }
         Ok(Self {
@@ -61,10 +58,7 @@ impl Library {
                     authors: book
                         .authors
                         .into_iter()
-                        .map(|a| Writer {
-                            name: a.name,
-                            sort: a.sort,
-                        })
+                        .map(|a| Writer { name: a.name, sort: a.sort })
                         .collect(),
                     year: book.year,
                     subjects: book.subjects,
@@ -142,20 +136,12 @@ mod tests {
     "#;
 
     fn mark(book: &str, at: u32) -> Bookmark {
-        Bookmark {
-            book: book.to_owned(),
-            spine: 1,
-            char_offset: at,
-            location: at / 1024,
-            locations: 400,
-        }
+        Bookmark { book: book.to_owned(), spine: 1, char_offset: at, location: at / 1024, locations: 400 }
     }
 
     #[test]
     fn a_catalogue_with_one_id_twice_does_not_load() {
-        let doubled = format!(
-            "{SHELF}\n[[book]]\nid = \"the-gilded-age\"\ntitle = \"Again\"\nfile = \"b.epub\"\n"
-        );
+        let doubled = format!("{SHELF}\n[[book]]\nid = \"the-gilded-age\"\ntitle = \"Again\"\nfile = \"b.epub\"\n");
         assert!(Library::from_toml("https://cdn/", &doubled).is_err());
     }
 

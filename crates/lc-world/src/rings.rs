@@ -53,10 +53,7 @@ pub struct RingSystem {
 
 impl RingSystem {
     pub fn inner_m(&self) -> f64 {
-        self.bands
-            .iter()
-            .map(|b| b.inner_m)
-            .fold(f64::INFINITY, f64::min)
+        self.bands.iter().map(|b| b.inner_m).fold(f64::INFINITY, f64::min)
     }
 
     pub fn outer_m(&self) -> f64 {
@@ -105,127 +102,41 @@ impl RingSystem {
 /// The B ring is optically thick enough that its depth is a lower bound — Cassini found parts
 /// past 5 — and the Cassini Division is a gap only by comparison.
 pub const SATURN: &[Band] = &[
-    Band {
-        name: "C",
-        inner_m: 7.4658e7,
-        outer_m: 9.2000e7,
-        optical_depth: 0.10,
-    },
-    Band {
-        name: "B",
-        inner_m: 9.2000e7,
-        outer_m: 1.17580e8,
-        optical_depth: 1.50,
-    },
-    Band {
-        name: "Cassini Division",
-        inner_m: 1.17580e8,
-        outer_m: 1.22170e8,
-        optical_depth: 0.08,
-    },
-    Band {
-        name: "A",
-        inner_m: 1.22170e8,
-        outer_m: 1.36775e8,
-        optical_depth: 0.50,
-    },
+    Band { name: "C", inner_m: 7.4658e7, outer_m: 9.2000e7, optical_depth: 0.10 },
+    Band { name: "B", inner_m: 9.2000e7, outer_m: 1.17580e8, optical_depth: 1.50 },
+    Band { name: "Cassini Division", inner_m: 1.17580e8, outer_m: 1.22170e8, optical_depth: 0.08 },
+    Band { name: "A", inner_m: 1.22170e8, outer_m: 1.36775e8, optical_depth: 0.50 },
 ];
 
 /// Jupiter: dust, at an optical depth of parts per million. Not visible, and correctly so.
 pub const JUPITER: &[Band] = &[
-    Band {
-        name: "halo",
-        inner_m: 9.2000e7,
-        outer_m: 1.22500e8,
-        optical_depth: 1.0e-6,
-    },
-    Band {
-        name: "main",
-        inner_m: 1.22500e8,
-        outer_m: 1.29000e8,
-        optical_depth: 3.0e-6,
-    },
-    Band {
-        name: "Amalthea gossamer",
-        inner_m: 1.29000e8,
-        outer_m: 1.82000e8,
-        optical_depth: 1.0e-7,
-    },
-    Band {
-        name: "Thebe gossamer",
-        inner_m: 1.82000e8,
-        outer_m: 2.26000e8,
-        optical_depth: 1.0e-8,
-    },
+    Band { name: "halo", inner_m: 9.2000e7, outer_m: 1.22500e8, optical_depth: 1.0e-6 },
+    Band { name: "main", inner_m: 1.22500e8, outer_m: 1.29000e8, optical_depth: 3.0e-6 },
+    Band { name: "Amalthea gossamer", inner_m: 1.29000e8, outer_m: 1.82000e8, optical_depth: 1.0e-7 },
+    Band { name: "Thebe gossamer", inner_m: 1.82000e8, outer_m: 2.26000e8, optical_depth: 1.0e-8 },
 ];
 
 /// Uranus: narrow, dark and nearly empty between. The area average is far below any one ring's
 /// own depth, because most of the annulus is nothing.
 pub const URANUS: &[Band] = &[
-    Band {
-        name: "inner",
-        inner_m: 3.7850e7,
-        outer_m: 5.0000e7,
-        optical_depth: 4.0e-3,
-    },
-    Band {
-        name: "epsilon",
-        inner_m: 5.1100e7,
-        outer_m: 5.1200e7,
-        optical_depth: 1.0,
-    },
+    Band { name: "inner", inner_m: 3.7850e7, outer_m: 5.0000e7, optical_depth: 4.0e-3 },
+    Band { name: "epsilon", inner_m: 5.1100e7, outer_m: 5.1200e7, optical_depth: 1.0 },
 ];
 
 /// Neptune: arcs rather than rings, which this does not model. The depths are the arcs' own,
 /// spread over the whole circumference.
 pub const NEPTUNE: &[Band] = &[
-    Band {
-        name: "Galle",
-        inner_m: 4.1900e7,
-        outer_m: 4.2900e7,
-        optical_depth: 1.0e-4,
-    },
-    Band {
-        name: "Le Verrier",
-        inner_m: 5.3150e7,
-        outer_m: 5.3250e7,
-        optical_depth: 1.0e-2,
-    },
-    Band {
-        name: "Lassell",
-        inner_m: 5.3250e7,
-        outer_m: 5.7200e7,
-        optical_depth: 1.0e-4,
-    },
-    Band {
-        name: "Adams",
-        inner_m: 6.2900e7,
-        outer_m: 6.2970e7,
-        optical_depth: 3.0e-2,
-    },
+    Band { name: "Galle", inner_m: 4.1900e7, outer_m: 4.2900e7, optical_depth: 1.0e-4 },
+    Band { name: "Le Verrier", inner_m: 5.3150e7, outer_m: 5.3250e7, optical_depth: 1.0e-2 },
+    Band { name: "Lassell", inner_m: 5.3250e7, outer_m: 5.7200e7, optical_depth: 1.0e-4 },
+    Band { name: "Adams", inner_m: 6.2900e7, outer_m: 6.2970e7, optical_depth: 3.0e-2 },
 ];
 
 pub const ALL: [RingSystem; 4] = [
-    RingSystem {
-        body_id: "Saturn",
-        bands: SATURN,
-        albedo: 0.50,
-    },
-    RingSystem {
-        body_id: "Jupiter",
-        bands: JUPITER,
-        albedo: 0.05,
-    },
-    RingSystem {
-        body_id: "Uranus",
-        bands: URANUS,
-        albedo: 0.03,
-    },
-    RingSystem {
-        body_id: "Neptune",
-        bands: NEPTUNE,
-        albedo: 0.03,
-    },
+    RingSystem { body_id: "Saturn", bands: SATURN, albedo: 0.50 },
+    RingSystem { body_id: "Jupiter", bands: JUPITER, albedo: 0.05 },
+    RingSystem { body_id: "Uranus", bands: URANUS, albedo: 0.03 },
+    RingSystem { body_id: "Neptune", bands: NEPTUNE, albedo: 0.03 },
 ];
 
 pub fn for_body(id: &str) -> Option<&'static RingSystem> {
@@ -242,20 +153,9 @@ mod tests {
     fn saturns_rings_sit_where_they_are_measured_to() {
         let s = for_body("Saturn").unwrap();
         // 1.28 to 2.35 Saturn radii, which is where the C and A ring edges are.
-        assert!(
-            (s.inner_m() / R_SATURN - 1.282).abs() < 0.01,
-            "{}",
-            s.inner_m() / R_SATURN
-        );
-        assert!(
-            (s.outer_m() / R_SATURN - 2.349).abs() < 0.01,
-            "{}",
-            s.outer_m() / R_SATURN
-        );
-        assert!(
-            s.bands.windows(2).all(|w| w[0].outer_m <= w[1].inner_m),
-            "bands must not overlap"
-        );
+        assert!((s.inner_m() / R_SATURN - 1.282).abs() < 0.01, "{}", s.inner_m() / R_SATURN);
+        assert!((s.outer_m() / R_SATURN - 2.349).abs() < 0.01, "{}", s.outer_m() / R_SATURN);
+        assert!(s.bands.windows(2).all(|w| w[0].outer_m <= w[1].inner_m), "bands must not overlap");
     }
 
     /// The Cassini Division is a gap only by comparison, and the model should say so rather
@@ -265,17 +165,9 @@ mod tests {
         let s = for_body("Saturn").unwrap();
         let at = |r: f64| s.depth_at(r * R_SATURN);
         assert!(at(1.8) > 1.0, "the B ring is optically thick: {}", at(1.8));
-        assert!(
-            at(2.06) < at(1.8) / 10.0,
-            "the division is far thinner: {}",
-            at(2.06)
-        );
+        assert!(at(2.06) < at(1.8) / 10.0, "the division is far thinner: {}", at(2.06));
         assert!(at(2.06) > 0.0, "but it is not empty");
-        assert!(
-            at(2.2) > at(2.06) * 4.0,
-            "and the A ring is thicker again: {}",
-            at(2.2)
-        );
+        assert!(at(2.2) > at(2.06) * 4.0, "and the A ring is thicker again: {}", at(2.2));
         assert_eq!(at(3.0), 0.0, "outside the A ring there is nothing");
         assert_eq!(at(1.0), 0.0, "and nothing inside the C ring either");
     }
@@ -287,16 +179,9 @@ mod tests {
             let r = for_body(id).unwrap();
             r.cross_section_m2() / (std::f64::consts::PI * r.outer_m() * r.outer_m())
         };
-        let (saturn, uranus, neptune, jupiter) = (
-            covering("Saturn"),
-            covering("Uranus"),
-            covering("Neptune"),
-            covering("Jupiter"),
-        );
-        assert!(
-            saturn > 0.3,
-            "Saturn's rings fill most of their annulus: {saturn}"
-        );
+        let (saturn, uranus, neptune, jupiter) =
+            (covering("Saturn"), covering("Uranus"), covering("Neptune"), covering("Jupiter"));
+        assert!(saturn > 0.3, "Saturn's rings fill most of their annulus: {saturn}");
         assert!(uranus < saturn / 50.0, "Uranus's are threads: {uranus}");
         assert!(neptune < uranus, "Neptune's are fainter still: {neptune}");
         assert!(jupiter < 1.0e-5, "Jupiter's are dust: {jupiter}");

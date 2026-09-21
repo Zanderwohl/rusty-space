@@ -94,10 +94,7 @@ impl ShipState {
         Self {
             position_ly,
             beta: DVec3::ZERO,
-            motive: Motive::Drifting {
-                from_ly: position_ly,
-                since_t: 0.0,
-            },
+            motive: Motive::Drifting { from_ly: position_ly, since_t: 0.0 },
             drive: Drive::DEFAULT,
             attitude: DVec3::X,
             clock_s: 0.0,
@@ -291,10 +288,9 @@ impl ShipState {
                 },
                 Motive::Holding(waypoint) => Recipe::Holding(waypoint.clone()),
                 Motive::Falling(_) => Recipe::Falling,
-                Motive::Drifting { from_ly, since_t } => Recipe::Drifting {
-                    from_ly: *from_ly,
-                    since_t: *since_t,
-                },
+                Motive::Drifting { from_ly, since_t } => {
+                    Recipe::Drifting { from_ly: *from_ly, since_t: *since_t }
+                }
             },
         }
     }
@@ -334,10 +330,7 @@ impl ShipState {
 
     /// Stop holding and stop falling: whatever it has, in a straight line from here.
     pub fn set_adrift(&mut self, now_s: f64) {
-        self.motive = Motive::Drifting {
-            from_ly: self.position_ly,
-            since_t: now_s,
-        };
+        self.motive = Motive::Drifting { from_ly: self.position_ly, since_t: now_s };
         self.arrive_at = None;
     }
 
@@ -449,8 +442,8 @@ pub fn apply(
         // patch always is -- and taking the position from one time and the velocity from
         // another produces an orbit the ship was never on.
         Change::Repatch { .. } | Change::CutDrive => {
-            let (at, beta) =
-                state_at(state, system, event.at_t).unwrap_or((state.position_ly, state.beta));
+            let (at, beta) = state_at(state, system, event.at_t)
+                .unwrap_or((state.position_ly, state.beta));
             let velocity = beta * crate::flight::C_M_S;
             state.position_ly = at;
             state.beta = beta;
@@ -464,10 +457,7 @@ pub fn apply(
                 Some(arc) => Motive::Falling(arc),
                 // Between systems, or a radial state that has no conic at all. Either way it is
                 // a straight line at the velocity it has.
-                None => Motive::Drifting {
-                    from_ly: at,
-                    since_t: event.at_t,
-                },
+                None => Motive::Drifting { from_ly: at, since_t: event.at_t },
             };
             Ok(())
         }
@@ -518,9 +508,7 @@ pub fn apply(
             // somewhere the ship is not.
             let (at, beta) = state_at(state, Some(system), event.at_t)
                 .unwrap_or((state.position_ly, state.beta));
-            let waypoint = course
-                .resolve(system, at, event.at_t)
-                .ok_or(Rejected::NoSuchPlace)?;
+            let waypoint = course.resolve(system, at, event.at_t).ok_or(Rejected::NoSuchPlace)?;
             state.position_ly = at;
             state.beta = beta;
             state.drive = *drive;
@@ -546,16 +534,17 @@ pub fn apply(
                 state.begin_transfer(transfer, aimed);
                 return Ok(());
             }
-            let (cruise, aimed) = crate::navigation::plan(
-                system,
-                &waypoint,
-                at,
-                beta,
-                state.attitude,
-                event.at_t,
-                *drive,
-            )
-            .ok_or(Rejected::NoSuchPlace)?;
+            let (cruise, aimed) =
+                crate::navigation::plan(
+                    system,
+                    &waypoint,
+                    at,
+                    beta,
+                    state.attitude,
+                    event.at_t,
+                    *drive,
+                )
+                .ok_or(Rejected::NoSuchPlace)?;
             state.crossing_clock_base_s = state.clock_s;
             state.motive = Motive::Crossing(cruise);
             // Remembered so that arriving becomes holding rather than drifting away from the
@@ -609,10 +598,9 @@ pub fn state_at(
         // A light-year is a year of travel at `c` by definition, so a beta is already
         // light-years per year -- and it is read from the start of the line rather than
         // accumulated, so any two step sizes land on the same place.
-        Motive::Drifting { from_ly, since_t } => Some((
-            *from_ly + state.beta * (now_s - since_t) / JULIAN_YEAR_S,
-            state.beta,
-        )),
+        Motive::Drifting { from_ly, since_t } => {
+            Some((*from_ly + state.beta * (now_s - since_t) / JULIAN_YEAR_S, state.beta))
+        }
     }
 }
 
@@ -645,9 +633,7 @@ pub fn facing(state: &ShipState, hull_m: f64, now_s: f64) -> Option<DVec3> {
 /// happened to go.
 pub fn facing_at(state: &ShipState, hull_m: f64, now_s: f64) -> DVec3 {
     let rate = crate::attitude::rate_rad_s(hull_m);
-    let Some(aim) = aim_at(state, now_s) else {
-        return state.attitude;
-    };
+    let Some(aim) = aim_at(state, now_s) else { return state.attitude };
     let from = aim.from.unwrap_or(state.attitude);
     crate::attitude::turned(from, aim.to, rate, now_s - aim.since_s)
 }
@@ -734,10 +720,7 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                         }
                         Motive::Holding(waypoint)
                     }
-                    None => Motive::Drifting {
-                        from_ly: state.position_ly,
-                        since_t: now_s,
-                    },
+                    None => Motive::Drifting { from_ly: state.position_ly, since_t: now_s },
                 };
             }
         }
@@ -759,10 +742,7 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                         }
                         Motive::Holding(waypoint)
                     }
-                    None => Motive::Drifting {
-                        from_ly: state.position_ly,
-                        since_t: now_s,
-                    },
+                    None => Motive::Drifting { from_ly: state.position_ly, since_t: now_s },
                 };
             }
         }
@@ -791,13 +771,11 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                 state.position_ly = at;
                 state.beta = beta;
                 let velocity = beta * crate::flight::C_M_S;
-                state.motive = match system.and_then(|s| Coast::from_state(s, at, velocity, now_s))
+                state.motive = match system
+                    .and_then(|s| Coast::from_state(s, at, velocity, now_s))
                 {
                     Some(arc) => Motive::Falling(arc),
-                    None => Motive::Drifting {
-                        from_ly: at,
-                        since_t: now_s,
-                    },
+                    None => Motive::Drifting { from_ly: at, since_t: now_s },
                 };
             }
         }
@@ -805,10 +783,7 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
             // The system is gone, which means the ship has left it. Whatever the conic said,
             // out here it is a straight line.
             state.clock_s += elapsed_s;
-            state.motive = Motive::Drifting {
-                from_ly: state.position_ly,
-                since_t: now_s,
-            };
+            state.motive = Motive::Drifting { from_ly: state.position_ly, since_t: now_s };
         }
         _ => state.clock_s += elapsed_s,
     }
@@ -839,9 +814,7 @@ pub const OPEN_PATCH_HORIZON_S: f64 = JULIAN_YEAR_S;
 /// `None` when the arc meets nothing within the horizon, which is the ordinary case for an
 /// orbit that stays where it is.
 pub fn repatch_at(state: &ShipState, system: &LocalSystem, from_s: f64) -> Option<Event> {
-    let Motive::Falling(arc) = &state.motive else {
-        return None;
-    };
+    let Motive::Falling(arc) = &state.motive else { return None };
     let primary = system.body_named(&arc.primary)?;
     let candidates = em_sim::influence::spheres_within(system.sim(), primary);
     if candidates.is_empty() {
@@ -892,9 +865,7 @@ pub fn repatch_at(state: &ShipState, system: &LocalSystem, from_s: f64) -> Optio
     Some(Event {
         ship: ShipId(0),
         at_t: found.time.to_j2000_seconds(),
-        change: Change::Repatch {
-            about: system.sim().name(about).to_string(),
-        },
+        change: Change::Repatch { about: system.sim().name(about).to_string() },
     })
 }
 
@@ -905,18 +876,10 @@ pub fn repatch_at(state: &ShipState, system: &LocalSystem, from_s: f64) -> Optio
 /// has ended up somewhere the prediction did not cover. It fires at `now_s`, so it is the
 /// authority's clock that stamps it — everyone else folds that stamp.
 pub fn repatch_due(state: &ShipState, system: &LocalSystem, now_s: f64) -> Option<Event> {
-    let Motive::Falling(arc) = &state.motive else {
-        return None;
-    };
+    let Motive::Falling(arc) = &state.motive else { return None };
     let velocity = state.beta * crate::flight::C_M_S;
     let found = arc.repatched(system, state.position_ly, velocity, now_s)?;
-    Some(Event {
-        ship: ShipId(0),
-        at_t: now_s,
-        change: Change::Repatch {
-            about: found.primary,
-        },
-    })
+    Some(Event { ship: ShipId(0), at_t: now_s, change: Change::Repatch { about: found.primary } })
 }
 
 /// Light-microseconds in a light-year.
@@ -929,28 +892,23 @@ pub const LIGHT_US_PER_LY: f64 = JULIAN_YEAR_S * 1.0e6;
 
 /// How fast a ship is going, meters a second, world frame.
 pub fn velocity_m_s(state: &ShipState, system: Option<&LocalSystem>, now_s: f64) -> DVec3 {
-    let beta = state_at(state, system, now_s)
-        .map(|(_, beta)| beta)
-        .unwrap_or(state.beta);
+    let beta = state_at(state, system, now_s).map(|(_, beta)| beta).unwrap_or(state.beta);
     beta * crate::flight::C_M_S
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lc_spacetime::Worldline;
     use crate::navigation::Plane;
     use crate::sky::{CatalogueStar, StarProvider};
-    use lc_spacetime::Worldline;
 
     fn sol() -> Option<LocalSystem> {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .ok()?;
-        let sun: CatalogueStar = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() == Some("Sol"))?
-            .clone();
+        let sun: CatalogueStar =
+            provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some("Sol"))?.clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);
         Some(system)
@@ -975,29 +933,13 @@ mod tests {
     /// being worth anything — the two would agree because one was told the answer.
     #[test]
     fn two_sides_folding_the_same_events_agree_exactly() {
-        let Some(mut server_system) = sol() else {
-            return;
-        };
-        let Some(mut client_system) = sol() else {
-            return;
-        };
+        let Some(mut server_system) = sol() else { return };
+        let Some(mut client_system) = sol() else { return };
 
         let events = [
-            Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: orbit("Earth"),
-            },
-            Event {
-                ship: ShipId(1),
-                at_t: 40_000.0,
-                change: Change::Transmit { power_w: 1.0e9 },
-            },
-            Event {
-                ship: ShipId(1),
-                at_t: 90_000.0,
-                change: Change::CutDrive,
-            },
+            Event { ship: ShipId(1), at_t: 0.0, change: orbit("Earth") },
+            Event { ship: ShipId(1), at_t: 40_000.0, change: Change::Transmit { power_w: 1.0e9 } },
+            Event { ship: ShipId(1), at_t: 90_000.0, change: Change::CutDrive },
         ];
 
         let mut server = ShipState::at(DVec3::ZERO);
@@ -1009,16 +951,15 @@ mod tests {
         const END_T: f64 = 300_000.0;
         let run = |state: &mut ShipState, system: &mut LocalSystem, step: f64| {
             let mut now = 0.0;
-            let step_to =
-                |state: &mut ShipState, system: &mut LocalSystem, target: f64, now: &mut f64| {
-                    while *now < target {
-                        let next = (*now + step).min(target);
-                        let elapsed = next - *now;
-                        *now = next;
-                        system.advance_to(*now);
-                        advance(state, Some(system), *now, elapsed);
-                    }
-                };
+            let step_to = |state: &mut ShipState, system: &mut LocalSystem, target: f64, now: &mut f64| {
+                while *now < target {
+                    let next = (*now + step).min(target);
+                    let elapsed = next - *now;
+                    *now = next;
+                    system.advance_to(*now);
+                    advance(state, Some(system), *now, elapsed);
+                }
+            };
             for event in &events {
                 step_to(state, system, event.at_t, &mut now);
                 system.advance_to(now);
@@ -1030,11 +971,7 @@ mod tests {
         let server_end = run(&mut server, &mut server_system, 438.0);
         let client_end = run(&mut client, &mut client_system, 61.0);
 
-        assert_eq!(
-            server_end.round(),
-            client_end.round(),
-            "the runs ended at different times"
-        );
+        assert_eq!(server_end.round(), client_end.round(), "the runs ended at different times");
         assert_eq!(
             server.position_ly, client.position_ly,
             "the two sides disagree about where the ship is",
@@ -1055,15 +992,11 @@ mod tests {
     fn a_ship_can_be_asked_about_a_time_the_system_is_not_at() {
         let Some(mut system) = sol() else { return };
         let mut ship = ShipState::at(DVec3::ZERO);
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: orbit("Earth"),
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
         .expect("a course");
 
         // Fly it, cut the engine, and leave the ship on a conic about Earth.
@@ -1073,21 +1006,13 @@ mod tests {
         };
         system.advance_to(arrival);
         advance(&mut ship, Some(&system), arrival, arrival);
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: arrival,
-                change: Change::CutDrive,
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: arrival,
+            change: Change::CutDrive,
+        })
         .expect("the engine cuts");
-        assert!(
-            matches!(ship.motive, Motive::Falling(_)),
-            "{:?}",
-            ship.motive
-        );
+        assert!(matches!(ship.motive, Motive::Falling(_)), "{:?}", ship.motive);
 
         // A quarter of the orbit into the future, asked from three different presents.
         let ahead = arrival + 1_800.0;
@@ -1098,10 +1023,7 @@ mod tests {
         let from_now = asked(arrival);
         for present in [arrival - 100_000.0, ahead, ahead + 500_000.0] {
             let (at, beta) = asked(present);
-            assert_eq!(
-                at, from_now.0,
-                "the clock at {present} changed where the ship will be"
-            );
+            assert_eq!(at, from_now.0, "the clock at {present} changed where the ship will be");
             assert_eq!(beta, from_now.1);
         }
         // And it is not answering with the present: the ship has gone somewhere in the meantime.
@@ -1117,11 +1039,8 @@ mod tests {
     fn a_station_is_read_at_the_time_asked_for() {
         let Some(system) = sol() else { return };
         let mut ship = ShipState::at(DVec3::ZERO);
-        let course = Course::Orbit {
-            body: "Earth".into(),
-            altitude_radii: 2.0,
-            plane: Plane::Equatorial,
-        };
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
         let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).expect("a place");
         ship.begin_holding(waypoint);
 
@@ -1143,10 +1062,7 @@ mod tests {
         let ship = ShipState::at(DVec3::new(LIGHT_SECOND_LY, 0.0, 0.0));
         let line = Flight::new(&ship, None);
         let arrive = lc_spacetime::arrival_time_at(0.0, DVec3::ZERO, &line).expect("it arrives");
-        assert!(
-            (arrive - 1.0e6).abs() < 1.0,
-            "a light-second took {arrive} microseconds"
-        );
+        assert!((arrive - 1.0e6).abs() < 1.0, "a light-second took {arrive} microseconds");
     }
 
     /// And a moving ship is read along its own line, not held at where it started.
@@ -1159,11 +1075,7 @@ mod tests {
         // A Julian year of coordinate time at half light is half a light-year.
         let a_year_us = JULIAN_YEAR_S * 1.0e6;
         let at = line.position_at(a_year_us);
-        assert!(
-            (at.x / LIGHT_US_PER_LY - 0.5).abs() < 1.0e-12,
-            "{}",
-            at.x / LIGHT_US_PER_LY
-        );
+        assert!((at.x / LIGHT_US_PER_LY - 0.5).abs() < 1.0e-12, "{}", at.x / LIGHT_US_PER_LY);
         assert_eq!(line.velocity_at(a_year_us), ship.beta);
     }
 
@@ -1186,8 +1098,8 @@ mod tests {
         // is a hyperbola that leaves rather than an ellipse that comes back.
         let position_ly = system.origin_ly + (at_m + DVec3::X * radius) / crate::system::M_PER_LY;
         let velocity = carried + DVec3::Y * (mu / radius).sqrt() * 1.6;
-        let arc =
-            crate::coast::Coast::from_state(&system, position_ly, velocity, 0.0).expect("an arc");
+        let arc = crate::coast::Coast::from_state(&system, position_ly, velocity, 0.0)
+            .expect("an arc");
         assert_eq!(arc.primary, "Earth");
         assert!(arc.is_escaping(), "e = {}", arc.elements.eccentricity);
 
@@ -1196,11 +1108,7 @@ mod tests {
         ship.motive = Motive::Falling(arc.clone());
 
         let event = repatch_at(&ship, &system, 0.0).expect("an escape leaves");
-        assert!(
-            matches!(event.change, Change::Repatch { .. }),
-            "{:?}",
-            event.change
-        );
+        assert!(matches!(event.change, Change::Repatch { .. }), "{:?}", event.change);
 
         // On the boundary, not near it: inside a second either side of the answer, and the
         // sign flips across it.
@@ -1214,19 +1122,9 @@ mod tests {
             .expect("evaluable")
         };
         let speed = velocity.length();
-        assert!(
-            distance_at(event.at_t).abs() < speed,
-            "{} m off",
-            distance_at(event.at_t)
-        );
-        assert!(
-            distance_at(event.at_t - 60.0) < 0.0,
-            "it was already outside a minute before"
-        );
-        assert!(
-            distance_at(event.at_t + 60.0) > 0.0,
-            "it was still inside a minute after"
-        );
+        assert!(distance_at(event.at_t).abs() < speed, "{} m off", distance_at(event.at_t));
+        assert!(distance_at(event.at_t - 60.0) < 0.0, "it was already outside a minute before");
+        assert!(distance_at(event.at_t + 60.0) > 0.0, "it was still inside a minute after");
 
         // A few days, which is what an escape from Earth takes. Named so a change in the
         // sphere model or the escape speed shows up as a number rather than as a pass.
@@ -1291,18 +1189,14 @@ mod tests {
             ship
         };
 
-        let patch = repatch_at(
-            &ShipState {
-                motive: {
-                    let mut s = ShipState::at(position_ly);
-                    start(&mut s);
-                    s.motive
-                },
-                ..ShipState::at(position_ly)
+        let patch = repatch_at(&ShipState {
+            motive: {
+                let mut s = ShipState::at(position_ly);
+                start(&mut s);
+                s.motive
             },
-            &system,
-            0.0,
-        )
+            ..ShipState::at(position_ly)
+        }, &system, 0.0)
         .expect("it leaves");
         let until = patch.at_t + 86_400.0;
 
@@ -1310,19 +1204,11 @@ mod tests {
         let fine = run(61.0, until);
 
         // It really did change primary: out of Earth's sphere and into the Sun's.
-        let Motive::Falling(arc) = &coarse.motive else {
-            panic!("{:?}", coarse.motive)
-        };
+        let Motive::Falling(arc) = &coarse.motive else { panic!("{:?}", coarse.motive) };
         assert_ne!(arc.primary, "Earth", "it never left");
-        assert!(
-            (arc.epoch_s - patch.at_t).abs() < 1.0e-6,
-            "the arc began at the wrong instant"
-        );
+        assert!((arc.epoch_s - patch.at_t).abs() < 1.0e-6, "the arc began at the wrong instant");
 
-        assert_eq!(
-            coarse.motive, fine.motive,
-            "two step sizes, two different arcs"
-        );
+        assert_eq!(coarse.motive, fine.motive, "two step sizes, two different arcs");
         assert_eq!(coarse.position_ly, fine.position_ly);
         assert_eq!(coarse.beta, fine.beta);
     }
@@ -1333,36 +1219,25 @@ mod tests {
     fn an_orbit_that_goes_nowhere_has_no_patch() {
         let Some(system) = sol() else { return };
         let mut ship = ShipState::at(DVec3::ZERO);
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: orbit("Earth"),
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
         .expect("a course");
         let arrival = match &ship.motive {
             Motive::Crossing(cruise) => cruise.duration_s(),
             _ => unreachable!(),
         };
         advance(&mut ship, Some(&system), arrival, arrival);
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: arrival,
-                change: Change::CutDrive,
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: arrival,
+            change: Change::CutDrive,
+        })
         .expect("the engine cuts");
         assert!(matches!(ship.motive, Motive::Falling(_)));
-        assert!(
-            repatch_at(&ship, &system, arrival).is_none(),
-            "a circular orbit stays put"
-        );
+        assert!(repatch_at(&ship, &system, arrival).is_none(), "a circular orbit stays put");
     }
 
     /// **A ship pointing the wrong way pays for turning round before it can go anywhere.**
@@ -1376,19 +1251,13 @@ mod tests {
         let plan_facing = |attitude: DVec3| {
             let mut ship = ShipState::at(DVec3::ZERO);
             ship.attitude = attitude;
-            apply(
-                &mut ship,
-                Some(&system),
-                &Event {
-                    ship: ShipId(1),
-                    at_t: 0.0,
-                    change: orbit("Earth"),
-                },
-            )
+            apply(&mut ship, Some(&system), &Event {
+                ship: ShipId(1),
+                at_t: 0.0,
+                change: orbit("Earth"),
+            })
             .unwrap();
-            let Motive::Crossing(cruise) = ship.motive.clone() else {
-                panic!("a crossing")
-            };
+            let Motive::Crossing(cruise) = ship.motive.clone() else { panic!("a crossing") };
             cruise
         };
 
@@ -1451,21 +1320,14 @@ mod tests {
         ship.begin_holding(low.clone());
         ship.beta = crate::coast::beta_of(low.velocity_at(&system, 0.0).unwrap());
 
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: orbit("Earth"),
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
         .unwrap();
         let Motive::Transfer(transfer) = ship.motive.clone() else {
-            panic!(
-                "a course about the body the ship is falling with is a transfer, not {:?}",
-                ship.motive
-            )
+            panic!("a course about the body the ship is falling with is a transfer, not {:?}", ship.motive)
         };
         assert_eq!(transfer.about, "Earth");
 
@@ -1477,15 +1339,10 @@ mod tests {
             advance(&mut ship, Some(&system), now, 60.0);
         }
 
-        let Motive::Holding(station) = ship.motive.clone() else {
-            panic!("{:?}", ship.motive)
-        };
+        let Motive::Holding(station) = ship.motive.clone() else { panic!("{:?}", ship.motive) };
         let earth = system.body_position_ly("Earth").unwrap();
         let radii = ship.position_ly.distance(earth) * crate::system::M_PER_LY / 6.371e6;
-        assert!(
-            (radii - 3.0).abs() < 0.1,
-            "ended {radii} radii out, not the three asked for"
-        );
+        assert!((radii - 3.0).abs() < 0.1, "ended {radii} radii out, not the three asked for");
 
         // And it met the station: at the instant the transfer ends, in the same place and at the
         // same velocity. Asked of the transfer at *its* arrival rather than of the ship a step
@@ -1493,14 +1350,11 @@ mod tests {
         // is a meter a second.
         let (met_at, met_beta) = transfer.state_at(&system, arrival).expect("a place");
         let joining = crate::coast::beta_of(station.velocity_at(&system, arrival).unwrap());
-        let miss_m =
-            met_at.distance(station.place_at(&system, arrival).unwrap()) * crate::system::M_PER_LY;
+        let miss_m = met_at.distance(station.place_at(&system, arrival).unwrap())
+            * crate::system::M_PER_LY;
         let short_m_s = (met_beta - joining).length() * crate::flight::C_M_S;
         assert!(miss_m < 1.0, "arrived {miss_m:e} m off the station");
-        assert!(
-            short_m_s < 1.0e-3,
-            "arrived {short_m_s} m/s off the station"
-        );
+        assert!(short_m_s < 1.0e-3, "arrived {short_m_s} m/s off the station");
 
         // Earth ran further than the orbit is wide while this was flown, which is the premise:
         // planned in the world frame the destination is simply running away.
@@ -1513,21 +1367,15 @@ mod tests {
     fn arriving_becomes_holding() {
         let Some(mut system) = sol() else { return };
         let mut ship = ShipState::at(DVec3::ZERO);
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: orbit("Earth"),
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
         .unwrap();
         assert!(ship.is_under_way());
 
-        let Motive::Crossing(cruise) = ship.motive.clone() else {
-            panic!("a crossing")
-        };
+        let Motive::Crossing(cruise) = ship.motive.clone() else { panic!("a crossing") };
         let arrival = cruise.duration_s();
         let mut now = 0.0;
         while now < arrival + 1.0 {
@@ -1535,18 +1383,13 @@ mod tests {
             system.advance_to(now);
             advance(&mut ship, Some(&system), now, 500.0);
         }
-        let Motive::Holding(station) = ship.motive.clone() else {
-            panic!("{:?}", ship.motive)
-        };
+        let Motive::Holding(station) = ship.motive.clone() else { panic!("{:?}", ship.motive) };
         // **Arriving is not stopping.** The crossing ends *on* the station's velocity, which for
         // an orbit of Earth is most of Earth's twenty-nine kilometers a second round the sun. A
         // ship that braked to a dead halt here would have to find all of that from nowhere
         // between two samples, which is what the free injection used to be.
         let joining = crate::coast::beta_of(station.velocity_at(&system, now).unwrap());
-        assert!(
-            joining.length() > 1.0e-5,
-            "premise: the station is moving, at {joining:?}"
-        );
+        assert!(joining.length() > 1.0e-5, "premise: the station is moving, at {joining:?}");
         assert!(
             (ship.beta - joining).length() < 1.0e-6,
             "arrived at {:?} rather than on the station's {joining:?}",
@@ -1560,16 +1403,10 @@ mod tests {
             system.advance_to(now);
             advance(&mut ship, Some(&system), now, 500.0);
         }
-        assert_ne!(
-            ship.position_ly, before,
-            "a station does not stand still in the world"
-        );
+        assert_ne!(ship.position_ly, before, "a station does not stand still in the world");
         let earth = system.body_position_ly("Earth").unwrap();
         let radius = ship.position_ly.distance(earth) * crate::system::M_PER_LY / 6.371e6;
-        assert!(
-            (radius - 3.0).abs() < 0.05,
-            "drifted off station to {radius} radii"
-        );
+        assert!((radius - 3.0).abs() < 0.05, "drifted off station to {radius} radii");
     }
 
     /// Cutting the engine keeps the velocity, which inside a system is a conic.
@@ -1577,15 +1414,11 @@ mod tests {
     fn cutting_the_drive_leaves_a_conic() {
         let Some(system) = sol() else { return };
         let mut ship = ShipState::at(DVec3::ZERO);
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: orbit("Earth"),
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
         .unwrap();
         // Part-way through the burn, so it has real speed.
         let mut now = 0.0;
@@ -1596,25 +1429,14 @@ mod tests {
         let moving = ship.beta;
         assert!(moving.length() > 1.0e-6);
 
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: now,
-                change: Change::CutDrive,
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: now,
+            change: Change::CutDrive,
+        })
         .unwrap();
-        assert!(
-            matches!(ship.motive, Motive::Falling(_)),
-            "{:?}",
-            ship.motive
-        );
-        assert!(
-            (ship.beta - moving).length() < moving.length() * 1e-9,
-            "it braked"
-        );
+        assert!(matches!(ship.motive, Motive::Falling(_)), "{:?}", ship.motive);
+        assert!((ship.beta - moving).length() < moving.length() * 1e-9, "it braked");
     }
 
     /// Between systems there is no conic, and a cut engine is a straight line at whatever it
@@ -1624,33 +1446,14 @@ mod tests {
     fn with_no_system_a_cut_drive_is_a_straight_line() {
         let mut ship = ShipState::at(DVec3::ZERO);
         ship.beta = DVec3::new(0.5, 0.0, 0.0);
-        apply(
-            &mut ship,
-            None,
-            &Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: Change::CutDrive,
-            },
-        )
-        .unwrap();
-        assert!(
-            matches!(ship.motive, Motive::Drifting { .. }),
-            "{:?}",
-            ship.motive
-        );
+        apply(&mut ship, None, &Event { ship: ShipId(1), at_t: 0.0, change: Change::CutDrive })
+            .unwrap();
+        assert!(matches!(ship.motive, Motive::Drifting { .. }), "{:?}", ship.motive);
 
         let year = JULIAN_YEAR_S;
         advance(&mut ship, None, year, year);
-        assert!(
-            (ship.position_ly.x - 0.5).abs() < 1e-12,
-            "{}",
-            ship.position_ly.x
-        );
-        assert_eq!(
-            ship.clock_s, year,
-            "a drifting clock runs with coordinate time"
-        );
+        assert!((ship.position_ly.x - 0.5).abs() < 1e-12, "{}", ship.position_ly.x);
+        assert_eq!(ship.clock_s, year, "a drifting clock runs with coordinate time");
     }
 
     /// A course to nowhere is refused rather than applied as something else. Both sides have to
@@ -1667,19 +1470,13 @@ mod tests {
                 drive: Drive::DEFAULT,
             },
         };
-        assert_eq!(
-            apply(&mut ship, Some(&system), &nowhere),
-            Err(Rejected::NoSuchPlace)
-        );
+        assert_eq!(apply(&mut ship, Some(&system), &nowhere), Err(Rejected::NoSuchPlace));
         assert!(
             matches!(ship.motive, Motive::Drifting { .. }),
             "a refused course changed the ship anyway",
         );
 
-        assert_eq!(
-            apply(&mut ship, None, &nowhere),
-            Err(Rejected::NotInASystem)
-        );
+        assert_eq!(apply(&mut ship, None, &nowhere), Err(Rejected::NotInASystem));
     }
 
     /// A transmission changes nothing about the motion. It is in the fold because the fold is
@@ -1688,15 +1485,11 @@ mod tests {
     fn a_transmission_moves_nothing() {
         let mut ship = ShipState::at(DVec3::new(1.0, 2.0, 3.0));
         let before = ship.clone();
-        apply(
-            &mut ship,
-            None,
-            &Event {
-                ship: ShipId(1),
-                at_t: 5.0,
-                change: Change::Transmit { power_w: 1.0e9 },
-            },
-        )
+        apply(&mut ship, None, &Event {
+            ship: ShipId(1),
+            at_t: 5.0,
+            change: Change::Transmit { power_w: 1.0e9 },
+        })
         .unwrap();
         assert_eq!(ship, before);
     }
@@ -1714,15 +1507,13 @@ mod tests {
     #[test]
     fn a_crossing_flips_the_nose_over_while_the_ship_still_moves_forward() {
         let to = DVec3::X * 4.0;
-        let cruise =
-            crate::flight::Cruise::plan(DVec3::ZERO, to, 0.0, crate::flight::Drive::DEFAULT);
+        let cruise = crate::flight::Cruise::plan(DVec3::ZERO, to, 0.0, crate::flight::Drive::DEFAULT);
         let whole = cruise.duration_s();
         let mut state = ShipState::at(DVec3::ZERO);
         state.begin_crossing(cruise.clone(), None);
 
         let hull = 500.0;
-        let flip_s =
-            crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(hull));
+        let flip_s = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(hull));
         assert!(flip_s > 0.0, "premise: turning takes time");
 
         let (mut boosted, mut braked, mut coasted) = (false, false, false);
@@ -1736,24 +1527,15 @@ mod tests {
             match cruise.at(t).phase {
                 crate::flight::Phase::Boost => {
                     boosted = true;
-                    assert!(
-                        nose.x > 0.999,
-                        "boosting and not pointing along the line: {nose}"
-                    );
+                    assert!(nose.x > 0.999, "boosting and not pointing along the line: {nose}");
                 }
                 // Past the turn it is round; inside it, it is on the way and neither.
                 crate::flight::Phase::Brake if since_flip > flip_s => {
                     braked = true;
-                    assert!(
-                        nose.x < -0.999,
-                        "braking and not pointing back down it: {nose}"
-                    );
+                    assert!(nose.x < -0.999, "braking and not pointing back down it: {nose}");
                 }
                 crate::flight::Phase::Brake => {
-                    assert!(
-                        nose.x > -0.999,
-                        "it flipped faster than the hull can turn: {nose}"
-                    );
+                    assert!(nose.x > -0.999, "it flipped faster than the hull can turn: {nose}");
                 }
                 crate::flight::Phase::Coast => coasted = true,
                 _ => {}
@@ -1761,10 +1543,7 @@ mod tests {
         }
         let _ = coasted;
         assert!(boosted, "the crossing never boosted");
-        assert!(
-            braked,
-            "the crossing never braked, which is the half this test is about"
-        );
+        assert!(braked, "the crossing never braked, which is the half this test is about");
     }
 
     /// **The flip takes the time the hull says, and it happens where the drive is off.**
@@ -1773,12 +1552,8 @@ mod tests {
     /// for the changeover, so nothing is being thrust in a direction the ship is not facing.
     #[test]
     fn the_flip_is_ordered_when_the_boost_ends_and_takes_a_hulls_turning_time() {
-        let cruise = crate::flight::Cruise::plan(
-            DVec3::ZERO,
-            DVec3::X * 4.0,
-            0.0,
-            crate::flight::Drive::DEFAULT,
-        );
+        let cruise =
+            crate::flight::Cruise::plan(DVec3::ZERO, DVec3::X * 4.0, 0.0, crate::flight::Drive::DEFAULT);
         let mut state = ShipState::at(DVec3::ZERO);
         state.begin_crossing(cruise.clone(), None);
 
@@ -1788,27 +1563,13 @@ mod tests {
             let whole = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, rate);
             // At the order it has not moved; halfway it is square on; at the end it is round.
             let at = |dt: f64| facing(&state, hull, ordered + dt).unwrap();
-            assert!(
-                (at(0.0) - DVec3::X).length() < 1.0e-9,
-                "{hull} m had already turned"
-            );
-            assert!(
-                at(whole * 0.5).x.abs() < 1.0e-6,
-                "{hull} m was not square on halfway"
-            );
-            assert!(
-                (at(whole) + DVec3::X).length() < 1.0e-6,
-                "{hull} m had not finished"
-            );
+            assert!((at(0.0) - DVec3::X).length() < 1.0e-9, "{hull} m had already turned");
+            assert!(at(whole * 0.5).x.abs() < 1.0e-6, "{hull} m was not square on halfway");
+            assert!((at(whole) + DVec3::X).length() < 1.0e-6, "{hull} m had not finished");
         }
         // And the big hull takes a hundred times as long over it as the small one.
-        let small =
-            crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(500.0));
-        let large = crate::attitude::turn_time_s(
-            DVec3::X,
-            -DVec3::X,
-            crate::attitude::rate_rad_s(50_000.0),
-        );
+        let small = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(500.0));
+        let large = crate::attitude::turn_time_s(DVec3::X, -DVec3::X, crate::attitude::rate_rad_s(50_000.0));
         assert!((large / small - 100.0).abs() < 1.0e-9);
     }
 
@@ -1822,23 +1583,11 @@ mod tests {
         let Some(system) = sol() else { return };
         let mut state = ShipState::at(system.body_position_ly("Earth").unwrap());
         state.attitude = DVec3::new(0.0, 0.0, 1.0);
-        let event = Event {
-            ship: ShipId(1),
-            at_t: 0.0,
-            change: orbit("Earth"),
-        };
+        let event = Event { ship: ShipId(1), at_t: 0.0, change: orbit("Earth") };
         apply(&mut state, Some(&system), &event).unwrap();
         // Off the station and onto the conic it was already flying, which is what cutting does.
-        apply(
-            &mut state,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: Change::CutDrive,
-            },
-        )
-        .unwrap();
+        apply(&mut state, Some(&system), &Event { ship: ShipId(1), at_t: 0.0, change: Change::CutDrive })
+            .unwrap();
 
         for t in [0.0, 600.0, 3_600.0] {
             let nose = facing(&state, 500.0, t).expect("a ship always points somewhere");
@@ -1849,10 +1598,7 @@ mod tests {
         }
         // And emphatically not along the velocity, which is where it used to end up.
         let beta = state_at(&state, Some(&system), 600.0).unwrap().1;
-        assert!(
-            beta.normalize().dot(DVec3::Z).abs() < 0.99,
-            "premise: it is not going that way"
-        );
+        assert!(beta.normalize().dot(DVec3::Z).abs() < 0.99, "premise: it is not going that way");
     }
 
     /// A parked ship points where it was left. There is no "nowhere": a hull has an
@@ -1860,11 +1606,7 @@ mod tests {
     #[test]
     fn a_parked_ship_points_where_it_was_left() {
         let mut state = ShipState::at(DVec3::X);
-        assert_eq!(
-            facing(&state, 500.0, 0.0),
-            Some(DVec3::X),
-            "the vernal equinox by default"
-        );
+        assert_eq!(facing(&state, 500.0, 0.0), Some(DVec3::X), "the vernal equinox by default");
         state.attitude = DVec3::new(0.0, 1.0, 0.0);
         assert_eq!(facing(&state, 500.0, 1.0e6), Some(DVec3::Y));
     }

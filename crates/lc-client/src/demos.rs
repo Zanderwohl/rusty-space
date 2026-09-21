@@ -37,10 +37,7 @@ pub fn scenarios(
         if scene.rate != 1.0 {
             // The rate is the server's to state and it changes when a scene is staged, so what
             // the clock will do afterwards is part of what the button does.
-            ui.label(format!(
-                "Runs at {} — the shard will say so.",
-                crate::ui::rate_label(scene.rate)
-            ));
+            ui.label(format!("Runs at {} — the shard will say so.", crate::ui::rate_label(scene.rate)));
         }
         ui.separator();
     }
@@ -59,18 +56,12 @@ fn watch_from(
 ) {
     ui.label("Watch from");
     let aboard = perspective.is_none();
-    if ui
-        .add_enabled(!aboard, egui::Button::new("your own ship"))
-        .clicked()
-    {
+    if ui.add_enabled(!aboard, egui::Button::new("your own ship")).clicked() {
         super::panels::ask(out, Action::WatchFrom(None));
     }
     for contact in &uplink.contacts {
         let watching = perspective == Some(CameraPerspective::Pov(contact.ship_id));
-        if ui
-            .add_enabled(!watching, egui::Button::new(&contact.name))
-            .clicked()
-        {
+        if ui.add_enabled(!watching, egui::Button::new(&contact.name)).clicked() {
             super::panels::ask(out, Action::WatchFrom(Some(contact.ship_id)));
         }
     }

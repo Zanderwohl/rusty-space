@@ -100,9 +100,7 @@ impl AssetLoader for BookLoader {
     ) -> Result<Book, LoadError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
-        Epub::open(bytes)
-            .map(|epub| Book { epub })
-            .map_err(LoadError::Book)
+        Epub::open(bytes).map(|epub| Book { epub }).map_err(LoadError::Book)
     }
 
     fn extensions(&self) -> &[&str] {
@@ -127,9 +125,7 @@ impl AssetLoader for CatalogueLoader {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
         let text = String::from_utf8_lossy(&bytes);
-        Catalogue::from_toml(&text)
-            .map(Shelved)
-            .map_err(LoadError::Catalogue)
+        Catalogue::from_toml(&text).map(Shelved).map_err(LoadError::Catalogue)
     }
 
     fn extensions(&self) -> &[&str] {
@@ -259,18 +255,14 @@ pub fn keep_up(
         return;
     }
 
-    let Some(handle) = shelf.handle.clone() else {
-        return;
-    };
+    let Some(handle) = shelf.handle.clone() else { return };
     if shelf.trouble.is_none()
         && matches!(assets.get_load_state(&handle), Some(LoadState::Failed(_)))
     {
         shelf.trouble = Some("that book is not on the shelf".to_owned());
         return;
     }
-    let Some(mut book) = books.get_mut(&handle) else {
-        return;
-    };
+    let Some(mut book) = books.get_mut(&handle) else { return };
 
     // The catalogue's title wins over the book's own: it is the one a person checked.
     if shelf.title.is_empty() {
@@ -323,9 +315,7 @@ fn is_a_bare_name(file: &str) -> bool {
 fn plate_sizes(book: &mut Book, doc: &Document) -> HashMap<String, (u32, u32)> {
     let mut sizes = HashMap::new();
     for located in &doc.blocks {
-        let Block::Image { path, .. } = &located.block else {
-            continue;
-        };
+        let Block::Image { path, .. } = &located.block else { continue };
         if sizes.contains_key(path) {
             continue;
         }
@@ -412,11 +402,7 @@ impl Shelf {
 ///
 /// Not at load: resolving every entry means parsing every document it points into, and one book
 /// on the first shelf has seventy-three of them.
-pub fn chapter_start(
-    books: &mut Assets<Book>,
-    shelf: &Shelf,
-    entry: &TocEntry,
-) -> Option<(usize, usize)> {
+pub fn chapter_start(books: &mut Assets<Book>, shelf: &Shelf, entry: &TocEntry) -> Option<(usize, usize)> {
     let handle = shelf.handle.as_ref()?;
     let mut book = books.get_mut(handle)?;
     book.epub.locate(entry).map(|at| (at.spine, at.char_offset))
@@ -438,10 +424,7 @@ pub fn take_from_shard(mut shelf: ResMut<Shelf>, mut uplink: ResMut<crate::uplin
                     authors: b
                         .authors
                         .into_iter()
-                        .map(|a| lc_books::catalogue::Writer {
-                            name: a.name,
-                            sort: a.sort,
-                        })
+                        .map(|a| lc_books::catalogue::Writer { name: a.name, sort: a.sort })
                         .collect(),
                     year: b.year,
                     subjects: b.subjects,
@@ -597,10 +580,7 @@ impl Plugin for LibraryPlugin {
             .init_asset_loader::<FontLoader>()
             .init_asset_loader::<CatalogueLoader>()
             .init_resource::<Shelf>()
-            .add_systems(
-                Update,
-                (read_catalogue, take_from_shard, keep_up, report_place).chain(),
-            );
+            .add_systems(Update, (read_catalogue, take_from_shard, keep_up, report_place).chain());
     }
 }
 
@@ -609,27 +589,18 @@ mod tests {
     use super::*;
 
     fn shelf_with(base: &str) -> Shelf {
-        Shelf {
-            base: base.to_owned(),
-            ..Default::default()
-        }
+        Shelf { base: base.to_owned(), ..Default::default() }
     }
 
     #[test]
     fn with_no_base_a_book_comes_from_the_asset_directory() {
         let shelf = shelf_with("");
-        assert_eq!(
-            shelf.where_to_fetch("A Princess of Mars.epub").as_deref(),
-            Some("books/A Princess of Mars.epub")
-        );
+        assert_eq!(shelf.where_to_fetch("A Princess of Mars.epub").as_deref(), Some("books/A Princess of Mars.epub"));
     }
 
     #[test]
     fn a_base_is_a_prefix_whether_or_not_it_ends_in_a_slash() {
-        for base in [
-            "https://cdn.example/library",
-            "https://cdn.example/library/",
-        ] {
+        for base in ["https://cdn.example/library", "https://cdn.example/library/"] {
             assert_eq!(
                 shelf_with(base).where_to_fetch("gilded.epub").as_deref(),
                 Some("https://cdn.example/library/gilded.epub"),
@@ -651,22 +622,13 @@ mod tests {
     fn a_steady_reader_costs_one_message_an_interval() {
         let mut reporter = Reporter::default();
         // The first change goes at once; the reader has said something new and nothing is owed.
-        assert_eq!(
-            reporter.tick(0.016, Some("a"), Some(at("a", 10)), false),
-            Some(at("a", 10))
-        );
+        assert_eq!(reporter.tick(0.016, Some("a"), Some(at("a", 10)), false), Some(at("a", 10)));
         // Turning pages inside the interval says nothing.
         for page in 1..20 {
-            assert_eq!(
-                reporter.tick(0.2, Some("a"), Some(at("a", page * 1000)), false),
-                None
-            );
+            assert_eq!(reporter.tick(0.2, Some("a"), Some(at("a", page * 1000)), false), None);
         }
         // And then the latest of them, once.
-        assert_eq!(
-            reporter.tick(2.0, Some("a"), Some(at("a", 19_000)), false),
-            Some(at("a", 19_000))
-        );
+        assert_eq!(reporter.tick(2.0, Some("a"), Some(at("a", 19_000)), false), Some(at("a", 19_000)));
     }
 
     #[test]
@@ -690,10 +652,7 @@ mod tests {
         reporter.tick(0.016, Some("a"), Some(at("a", 10)), true);
         // A resize drag: the same sentence, landing a few characters along, every frame.
         for frame in 1..60 {
-            assert_eq!(
-                reporter.tick(0.016, Some("a"), Some(at("a", 10 + frame)), false),
-                None
-            );
+            assert_eq!(reporter.tick(0.016, Some("a"), Some(at("a", 10 + frame)), false), None);
         }
     }
 
@@ -702,20 +661,13 @@ mod tests {
         let mut reporter = Reporter::default();
         reporter.tick(0.016, Some("a"), Some(at("a", 10)), false);
         // A page turn, then the shelf button, well inside the interval.
-        assert_eq!(
-            reporter.tick(0.2, Some("a"), Some(at("a", 4_000)), false),
-            None
-        );
+        assert_eq!(reporter.tick(0.2, Some("a"), Some(at("a", 4_000)), false), None);
         assert_eq!(
             reporter.tick(0.2, None, None, false),
             Some(at("a", 4_000)),
             "the last page read was lost when the book was closed",
         );
-        assert_eq!(
-            reporter.tick(9.0, None, None, false),
-            None,
-            "and it is not sent twice"
-        );
+        assert_eq!(reporter.tick(9.0, None, None, false), None, "and it is not sent twice");
     }
 
     #[test]
@@ -723,10 +675,7 @@ mod tests {
         let mut reporter = Reporter::default();
         reporter.tick(0.016, Some("a"), Some(at("a", 10)), false);
         reporter.tick(0.2, Some("a"), Some(at("a", 5_000)), false);
-        assert_eq!(
-            reporter.tick(0.2, Some("b"), Some(at("b", 0)), false),
-            Some(at("a", 5_000))
-        );
+        assert_eq!(reporter.tick(0.2, Some("b"), Some(at("b", 0)), false), Some(at("a", 5_000)));
     }
 
     #[test]
@@ -742,13 +691,7 @@ mod tests {
     #[test]
     fn a_file_name_that_is_not_a_file_name_fetches_nothing() {
         let shelf = shelf_with("https://cdn.example/library/");
-        for name in [
-            "../../etc/passwd",
-            "sub/dir.epub",
-            "https://elsewhere/x.epub",
-            "",
-            ".hidden",
-        ] {
+        for name in ["../../etc/passwd", "sub/dir.epub", "https://elsewhere/x.epub", "", ".hidden"] {
             assert_eq!(shelf.where_to_fetch(name), None, "{name} was let through");
         }
     }

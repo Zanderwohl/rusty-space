@@ -9,10 +9,7 @@
 //! back, and `em-sim` finds the sphere of influence; this is the join, plus the patched-conic
 //! rule that when the ship crosses into another body's influence the arc is re-solved about it.
 
-use em_foundations::kepler::{
-    anomaly,
-    state::{self, Elements},
-};
+use em_foundations::kepler::{anomaly, state::{self, Elements}};
 use em_foundations::time::{Instant, TimeDelta};
 use glam::DVec3;
 
@@ -52,13 +49,7 @@ impl Coast {
         velocity_m_s: DVec3,
         now_s: f64,
     ) -> Option<Self> {
-        Self::about(
-            system,
-            system.holding(position_ly, now_s),
-            position_ly,
-            velocity_m_s,
-            now_s,
-        )
+        Self::about(system, system.holding(position_ly, now_s), position_ly, velocity_m_s, now_s)
     }
 
     /// Solve the arc about a *named* body, whether or not that body's sphere contains the ship.
@@ -121,10 +112,7 @@ impl Coast {
 
     /// The arc as something [`em_sim::crossing`] can search.
     pub fn path<'a>(&'a self, system: &'a LocalSystem) -> ConicPath<'a> {
-        ConicPath {
-            coast: self,
-            system,
-        }
+        ConicPath { coast: self, system }
     }
 
     /// Where round the conic the ship is, radians, at a coordinate time.
@@ -215,8 +203,7 @@ pub struct ConicPath<'a> {
 
 impl em_sim::crossing::Traveller for ConicPath<'_> {
     fn state_at(&self, time: Instant) -> Option<(DVec3, DVec3)> {
-        self.coast
-            .sim_state_at(self.system, time.to_j2000_seconds())
+        self.coast.sim_state_at(self.system, time.to_j2000_seconds())
     }
 
     fn local_state_at(&self, time: Instant) -> Option<(DVec3, DVec3)> {
@@ -298,15 +285,8 @@ mod tests {
         let system = sol();
         let (at, velocity) = circular(&system, "Earth", 2.0);
         let coast = Coast::from_state(&system, at, velocity, 0.0).expect("an arc");
-        assert_eq!(
-            coast.primary, "Earth",
-            "the ship is inside Earth's influence"
-        );
-        assert!(
-            coast.elements.eccentricity < 1e-6,
-            "e = {}",
-            coast.elements.eccentricity
-        );
+        assert_eq!(coast.primary, "Earth", "the ship is inside Earth's influence");
+        assert!(coast.elements.eccentricity < 1e-6, "e = {}", coast.elements.eccentricity);
         assert!(!coast.is_escaping());
         let radius = 6.371e6 * 3.0;
         assert!((coast.periapsis_m() / radius - 1.0).abs() < 1e-6);
@@ -331,10 +311,7 @@ mod tests {
             let (where_now, _) = coast.at(&system, now).expect("a place");
             let earth = system.body_position_ly("Earth").unwrap();
             let r = where_now.distance(earth) * M_PER_LY;
-            assert!(
-                (r / radius - 1.0).abs() < 1e-3,
-                "step {step}: {r:e} against {radius:e}"
-            );
+            assert!((r / radius - 1.0).abs() < 1e-3, "step {step}: {r:e} against {radius:e}");
             seen.push((where_now, earth));
         }
         // A full period comes back to the start -- relative to Earth, which has itself run
@@ -362,10 +339,7 @@ mod tests {
 
         let slow = Coast::from_state(&system, at, scaled(0.8), 0.0).expect("an arc");
         assert!(!slow.is_escaping());
-        assert!(
-            slow.periapsis_m() < 6.371e6 * 3.0,
-            "a slow orbit falls inward"
-        );
+        assert!(slow.periapsis_m() < 6.371e6 * 3.0, "a slow orbit falls inward");
         assert!(slow.apoapsis_m().unwrap() > slow.periapsis_m());
 
         // Above root two times circular is escape velocity, by definition.
@@ -381,12 +355,7 @@ mod tests {
     fn the_arc_is_about_whatever_holds_the_ship() {
         let system = sol();
         let (near_earth, v) = circular(&system, "Earth", 2.0);
-        assert_eq!(
-            Coast::from_state(&system, near_earth, v, 0.0)
-                .unwrap()
-                .primary,
-            "Earth"
-        );
+        assert_eq!(Coast::from_state(&system, near_earth, v, 0.0).unwrap().primary, "Earth");
 
         // Out between the planets, nothing but the star holds it.
         let star = system.star_position_ly();
@@ -419,16 +388,11 @@ mod tests {
         let system = sol();
         let (at, velocity) = circular(&system, "Earth", 2.0);
         let coast = Coast::from_state(&system, at, velocity, 0.0).expect("an arc");
-        assert!(
-            coast.repatched(&system, at, velocity, 0.0).is_none(),
-            "nothing has changed"
-        );
+        assert!(coast.repatched(&system, at, velocity, 0.0).is_none(), "nothing has changed");
 
         let star = system.star_position_ly();
         let far = star + (system.body_position_ly("Earth").unwrap() - star) * 0.6;
-        let moved = coast
-            .repatched(&system, far, velocity, 0.0)
-            .expect("a new arc");
+        let moved = coast.repatched(&system, far, velocity, 0.0).expect("a new arc");
         assert_eq!(moved.primary, system.sim().name(system.primary()));
     }
 
@@ -437,23 +401,14 @@ mod tests {
     #[test]
     fn canceling_a_held_orbit_leaves_that_orbit() {
         let system = sol();
-        let course = Course::Orbit {
-            body: "Earth".into(),
-            altitude_radii: 2.0,
-            plane: Plane::Equatorial,
-        };
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
         let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let at = waypoint.place_at(&system, 0.0).unwrap();
-        let velocity = waypoint
-            .velocity_at(&system, 0.0)
-            .expect("a station has a velocity");
+        let velocity = waypoint.velocity_at(&system, 0.0).expect("a station has a velocity");
         let coast = Coast::from_state(&system, at, velocity, system.time_s()).expect("an arc");
         assert_eq!(coast.primary, "Earth");
-        assert!(
-            coast.elements.eccentricity < 1e-3,
-            "e = {}",
-            coast.elements.eccentricity
-        );
+        assert!(coast.elements.eccentricity < 1e-3, "e = {}", coast.elements.eccentricity);
         let radius = 6.371e6 * 3.0;
         assert!((coast.periapsis_m() / radius - 1.0).abs() < 1e-3);
     }
@@ -474,10 +429,7 @@ mod tests {
     #[test]
     fn beta_is_a_fraction_of_light() {
         assert!((beta_of(DVec3::X * C_M_S).x - 1.0).abs() < 1e-12);
-        assert!(
-            beta_of(DVec3::X * 3.0e4).length() < 1.0e-3,
-            "orbital speeds are nothing"
-        );
+        assert!(beta_of(DVec3::X * 3.0e4).length() < 1.0e-3, "orbital speeds are nothing");
     }
 
     /// An astronomical unit is what it is; this is only here so the constant is used.

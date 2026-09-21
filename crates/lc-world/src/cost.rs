@@ -44,9 +44,9 @@ pub fn lit_rapidity(state: &ShipState, now_s: f64) -> f64 {
         Motive::Crossing(cruise) => cruise.lit_rapidity_at(now_s),
         Motive::Transfer(transfer) => transfer.cruise.lit_rapidity_at(now_s),
         Motive::Consort(plan) => plan.cruise.lit_rapidity_at(now_s),
-        Motive::Rendezvous(plan) => plan
-            .cruise
-            .lit_rapidity_at(plan.frame_time_at(now_s - plan.since_t)),
+        Motive::Rendezvous(plan) => {
+            plan.cruise.lit_rapidity_at(plan.frame_time_at(now_s - plan.since_t))
+        }
         Motive::Escort(plan) => {
             let tau = plan.quarry.tau_at(now_s);
             let keeping = plan.quarry.accel.length() * (tau - plan.cruise.start_s).max(0.0);
@@ -89,27 +89,17 @@ mod tests {
             left -= energy_j(left, eta / 100.0, 1.0) / C2;
         }
         let pieces = (m - left) * C2;
-        assert!(
-            (pieces / whole - 1.0).abs() < 1.0e-12,
-            "{pieces} vs {whole}"
-        );
+        assert!((pieces / whole - 1.0).abs() < 1.0e-12, "{pieces} vs {whole}");
     }
 
     #[test]
     fn at_low_speed_the_cost_is_linear_in_the_change_of_velocity() {
         let (m, dv) = (mass(), 30_000.0);
         for efficiency in [0.5, 1.0, 3.0] {
-            let cost = energy_j(
-                m,
-                rapidity_between(DVec3::ZERO, DVec3::X * dv / C_M_S),
-                efficiency,
-            );
+            let cost = energy_j(m, rapidity_between(DVec3::ZERO, DVec3::X * dv / C_M_S), efficiency);
             let linear = m * dv * C_M_S / efficiency;
             // Second order is `Δv / 2cε`, 1e-4 at the harshest of these.
-            assert!(
-                (cost / linear - 1.0).abs() < 1.1 * dv / C_M_S / efficiency,
-                "{cost} vs {linear}"
-            );
+            assert!((cost / linear - 1.0).abs() < 1.1 * dv / C_M_S / efficiency, "{cost} vs {linear}");
         }
     }
 
@@ -146,23 +136,14 @@ mod tests {
     /// Checked against the rest profile's own closed forms rather than against itself.
     #[test]
     fn a_crossing_from_rest_puts_in_its_boost_and_its_brake() {
-        let drive = Drive {
-            max_beta: 0.5,
-            ..Drive::DEFAULT
-        };
+        let drive = Drive { max_beta: 0.5, ..Drive::DEFAULT };
         let to = DVec3::X * 2.0;
         let cruise = Cruise::plan(DVec3::ZERO, to, 0.0, drive);
         let peak = cruise.peak_beta();
-        assert!(
-            (peak - 0.5).abs() < 1.0e-9,
-            "it never reached its cap: {peak}"
-        );
+        assert!((peak - 0.5).abs() < 1.0e-9, "it never reached its cap: {peak}");
         let expected = 2.0 * peak.atanh();
         let planned = cruise.planned_rapidity();
-        assert!(
-            (planned / expected - 1.0).abs() < 1.0e-9,
-            "{planned} vs {expected}"
-        );
+        assert!((planned / expected - 1.0).abs() < 1.0e-9, "{planned} vs {expected}");
 
         // Nothing is added across the coast, and half is spent by its end.
         let end = cruise.duration_s();
@@ -174,10 +155,7 @@ mod tests {
                 assert!((cruise.lit_rapidity_at(t) / peak.atanh() - 1.0).abs() < 1.0e-9);
             }
         }
-        assert!(
-            coasting.is_some(),
-            "a two light-year crossing at half c coasts"
-        );
+        assert!(coasting.is_some(), "a two light-year crossing at half c coasts");
         assert!(cruise.lit_rapidity_at(-1.0) == 0.0);
         assert!((cruise.lit_rapidity_at(end + JULIAN_YEAR_S) - planned).abs() < 1.0e-12);
         let _ = G0;

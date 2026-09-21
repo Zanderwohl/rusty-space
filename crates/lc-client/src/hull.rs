@@ -18,9 +18,9 @@ use bevy::prelude::*;
 use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use em_render::render_space::sim_to_render;
 use em_spectra::PerBand;
-use em_spectra::blackbody;
 use glam::DVec3;
 use lc_proto::ShipId;
+use em_spectra::blackbody;
 use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH, HULL_K};
 
 use crate::session::Session;
@@ -116,11 +116,7 @@ pub fn boom_limits(rad_per_px: f32, fov_x_rad: f32) -> (f64, f64) {
     } else {
         f64::from(u16::MAX)
     };
-    let near = if fov_x_rad > 0.0 {
-        boom_for(fov_x_rad as f64)
-    } else {
-        1.0
-    };
+    let near = if fov_x_rad > 0.0 { boom_for(fov_x_rad as f64) } else { 1.0 };
     (near, far.max(near))
 }
 
@@ -136,10 +132,7 @@ fn held_to(view: crate::ui::ViewMode, size: Option<Vec2>, fov_y: f32) -> Option<
     }
     let size = size?;
     let rad_per_px = crate::starfield::radians_per_pixel(fov_y, size.y);
-    Some(boom_limits(
-        rad_per_px,
-        fov_x(fov_y, size.x / size.y.max(1.0)),
-    ))
+    Some(boom_limits(rad_per_px, fov_x(fov_y, size.x / size.y.max(1.0))))
 }
 
 /// The horizontal field of view, radians, for a projection given its vertical one.
@@ -174,11 +167,7 @@ pub fn attitude(fore_sim: DVec3, to_star: Option<DVec3>) -> Quat {
             sim_to_render(fore).as_vec3(),
         ));
     }
-    let reference = if fore.z.abs() > 0.999 {
-        DVec3::X
-    } else {
-        DVec3::Z
-    };
+    let reference = if fore.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
     let up = (reference - fore * reference.dot(fore)).normalize_or_zero();
     // `right x up = fore`, so the basis is right-handed and survives the change of axes, which
     // is a proper rotation rather than a mirror.
@@ -241,9 +230,7 @@ fn anchor(
     uplink: &Uplink,
 ) -> (Option<ShipId>, DVec3, f64) {
     let own = (None, game.ship.motion.position_ly, game.ship.length_m);
-    let Some(crate::ui::CameraPerspective::Pov(ship_id)) = ui.perspective else {
-        return own;
-    };
+    let Some(crate::ui::CameraPerspective::Pov(ship_id)) = ui.perspective else { return own };
     if game.ship.id.0 == ship_id.0 {
         return own;
     }
@@ -271,22 +258,14 @@ fn shading(session: &Session, star_radius_m: f64, star_teff_k: f64, star_distanc
 /// uniformly unlit blob.
 fn lighting(session: &Session) -> Option<(DVec3, f64, f64)> {
     if let Some(system) = session.system.as_ref() {
-        return Some((
-            system.star_position_ly(),
-            system.star_radius_m(),
-            system.star_teff_k(),
-        ));
+        return Some((system.star_position_ly(), system.star_radius_m(), system.star_teff_k()));
     }
     let here = session.ship.motion.position_ly;
-    let nearest = session.stars.iter().min_by(|a, b| {
-        here.distance_squared(a.position_ly)
-            .total_cmp(&here.distance_squared(b.position_ly))
-    })?;
-    Some((
-        nearest.position_ly,
-        nearest.star.radius_m,
-        nearest.star.teff_k,
-    ))
+    let nearest = session
+        .stars
+        .iter()
+        .min_by(|a, b| here.distance_squared(a.position_ly).total_cmp(&here.distance_squared(b.position_ly)))?;
+    Some((nearest.position_ly, nearest.star.radius_m, nearest.star.teff_k))
 }
 
 /// What a hull radiates on its own account, as linear display light.
@@ -316,9 +295,7 @@ fn uniforms(
     BodySurfaceUniform {
         dark: GRAY,
         light: GRAY,
-        to_star: sim_to_render(to_star.normalize_or_zero())
-            .as_vec3()
-            .extend(NIGHT),
+        to_star: sim_to_render(to_star.normalize_or_zero()).as_vec3().extend(NIGHT),
         // A contrast of zero is what turns the generated surface off: the shader mixes the
         // palette at a half whatever the noise says, and the two ends are the same gray.
         params: Vec4::new(0.0, 0.0, 0.0, 0.0),
@@ -428,16 +405,12 @@ pub fn update_hulls(
 
     let star = lighting(&game.0);
     for (mut transform, material, marker) in placed.iter_mut() {
-        let Some((_, at)) = want.iter().find(|(id, _)| *id == marker.0) else {
-            continue;
-        };
+        let Some((_, at)) = want.iter().find(|(id, _)| *id == marker.0) else { continue };
         transform.translation = sim_to_render(at.offset_m / UNIT_M).as_vec3();
         transform.rotation = attitude(at.facing, star.map(|(star_ly, _, _)| star_ly - at.at_ly));
         transform.scale = half_extents(at.length_m);
 
-        let Some(mut asset) = materials.get_mut(&material.0) else {
-            continue;
-        };
+        let Some(mut asset) = materials.get_mut(&material.0) else { continue };
         let next = match star {
             Some((star_ly, radius, teff)) => {
                 let distance = star_ly.distance(at.at_ly) * M_PER_LY;
@@ -465,9 +438,7 @@ pub fn update_hulls(
 /// the band mapping rather than about the ship.
 pub fn radiance_at(session: &Session, at_ly: DVec3) -> PerBand<f32> {
     let own = hull_radiance();
-    let Some((star_ly, radius, teff)) = lighting(session) else {
-        return own;
-    };
+    let Some((star_ly, radius, teff)) = lighting(session) else { return own };
     let lit =
         crate::resolved::lit_radiance(ALBEDO, radius, teff, star_ly.distance(at_ly) * M_PER_LY);
     PerBand::new(std::array::from_fn(|i| {
@@ -488,6 +459,7 @@ pub fn solid_angle_sr(length_m: f64, distance_m: f64) -> f32 {
     (std::f64::consts::PI * (radius / distance_m).powi(2)) as f32
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,21 +475,12 @@ mod tests {
         let wide = Vec2::new(1280.0, 720.0);
         let square = Vec2::new(190.0, 190.0);
         let fov = std::f32::consts::FRAC_PI_4;
-        assert!(
-            held_to(ViewMode::Map, Some(square), fov).is_none(),
-            "the map clamped the boom"
-        );
-        assert!(
-            held_to(ViewMode::World, None, fov).is_none(),
-            "nothing measured yet"
-        );
+        assert!(held_to(ViewMode::Map, Some(square), fov).is_none(), "the map clamped the boom");
+        assert!(held_to(ViewMode::World, None, fov).is_none(), "nothing measured yet");
         let (_, wide_far) = held_to(ViewMode::World, Some(wide), fov).expect("a view to hold to");
         let (_, square_far) =
             held_to(ViewMode::World, Some(square), fov).expect("a view to hold to");
-        assert!(
-            square_far < wide_far,
-            "the corner is the tighter frame, which is the hazard"
-        );
+        assert!(square_far < wide_far, "the corner is the tighter frame, which is the hazard");
     }
 
     /// The two ends of the zoom, stated as what they are for: five pixels of hull at one end
@@ -535,16 +498,10 @@ mod tests {
         // At the far stop it is five pixels across, whatever size it is — the stops are pure
         // numbers, so one check covers the whole designed range of hulls.
         let px = subtends(far) / RAD_PER_PX as f64;
-        assert!(
-            (px - MIN_HULL_PX).abs() < 1e-6,
-            "the far stop came out {px} px"
-        );
+        assert!((px - MIN_HULL_PX).abs() < 1e-6, "the far stop came out {px} px");
         // And at the near stop, exactly the width of the window.
         let across = subtends(near);
-        assert!(
-            (across - fov_x as f64).abs() < 1e-9,
-            "the near stop spans {across} of {fov_x}"
-        );
+        assert!((across - fov_x as f64).abs() < 1e-9, "the near stop spans {across} of {fov_x}");
     }
 
     /// The default framing has to be inside the stops, or a ship is clamped the moment it is
@@ -570,21 +527,13 @@ mod tests {
     /// way through the change of axes.
     #[test]
     fn the_nose_points_along_the_facing_in_render_axes() {
-        for fore in [
-            DVec3::X,
-            DVec3::Y,
-            -DVec3::X,
-            DVec3::new(1.0, 2.0, -0.5).normalize(),
-        ] {
+        for fore in [DVec3::X, DVec3::Y, -DVec3::X, DVec3::new(1.0, 2.0, -0.5).normalize()] {
             let q = attitude(fore, None);
             let nose = q * Vec3::Z;
             assert!((nose - render(fore)).length() < 1e-5, "{fore} gave {nose}");
             // A rotation and not a reflection: the three axes stay right-handed.
             let (x, y, z) = (q * Vec3::X, q * Vec3::Y, q * Vec3::Z);
-            assert!(
-                (x.cross(y) - z).length() < 1e-5,
-                "handedness was lost on {fore}"
-            );
+            assert!((x.cross(y) - z).length() < 1e-5, "handedness was lost on {fore}");
         }
     }
 
@@ -632,11 +581,7 @@ mod tests {
             // Relative, because the numbers are billionths: a render unit is an astronomical
             // unit and a hull is meters, so `f32` carries seven digits of a very small one.
             let want = length * 0.5 / UNIT_M;
-            assert!(
-                (e.z as f64 - want).abs() < want * 1e-6,
-                "{length} m gave {}",
-                e.z
-            );
+            assert!((e.z as f64 - want).abs() < want * 1e-6, "{length} m gave {}", e.z);
             assert!((e.x / e.z - 0.6).abs() < 1e-5, "beam {e:?}");
             assert!((e.y / e.z - 0.2).abs() < 1e-5, "height {e:?}");
         }
@@ -650,9 +595,6 @@ mod tests {
         let length = lc_world::craft::LENGTH_RANGE_M.0;
         // Boom to the center, less the half-length the nose reaches back toward the camera.
         let clearance = (near - 0.5) * length / UNIT_M;
-        assert!(
-            clearance > crate::app::NEAR_PLANE as f64,
-            "{clearance} units of clearance"
-        );
+        assert!(clearance > crate::app::NEAR_PLANE as f64, "{clearance} units of clearance");
     }
 }

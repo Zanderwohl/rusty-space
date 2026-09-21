@@ -4,9 +4,9 @@
 //! building the mesh, generating the band table, and keeping the uniforms current.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::NoFrustumCulling;
 use bevy::image::ImageSampler;
 use bevy::prelude::*;
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_mesh::{Indices, PrimitiveTopology};
 use em_render::relativistic_starfield_material::{
@@ -240,11 +240,7 @@ pub fn partition(session: &Session) -> (Vec<Point>, Vec<Point>) {
     let mut distant = Vec::with_capacity(session.stars.len());
     let mut local = Vec::new();
     for star in &session.stars {
-        let target = if session.distance_to(star) < LOCAL_SHELL_LY {
-            &mut local
-        } else {
-            &mut distant
-        };
+        let target = if session.distance_to(star) < LOCAL_SHELL_LY { &mut local } else { &mut distant };
         target.push(Point::star(star));
     }
     (distant, local)
@@ -252,10 +248,7 @@ pub fn partition(session: &Session) -> (Vec<Point>, Vec<Point>) {
 
 /// Which star's system the ship is inside, if any.
 pub fn local_star(session: &Session) -> Option<&CatalogueStar> {
-    session
-        .stars
-        .iter()
-        .find(|s| session.distance_to(s) < LOCAL_SHELL_LY)
+    session.stars.iter().find(|s| session.distance_to(s) < LOCAL_SHELL_LY)
 }
 
 /// `log2` of band radiance against temperature: one column per sample, one row per band.
@@ -275,20 +268,12 @@ pub fn band_lut() -> Image {
             let log_t = LOG_T_MIN + (LOG_T_MAX - LOG_T_MIN) * i as f32 / (LUT_SAMPLES - 1) as f32;
             let radiance = blackbody::band_radiance(band, 2f64.powf(log_t as f64));
             // Far enough below anything representable to read as dark, and finite.
-            let value = if radiance > 0.0 {
-                radiance.log2() as f32
-            } else {
-                -300.0
-            };
+            let value = if radiance > 0.0 { radiance.log2() as f32 } else { -300.0 };
             data.extend_from_slice(&value.to_le_bytes());
         }
     }
     let mut image = Image::new(
-        Extent3d {
-            width: LUT_SAMPLES as u32,
-            height: BANDS as u32,
-            depth_or_array_layers: 1,
-        },
+        Extent3d { width: LUT_SAMPLES as u32, height: BANDS as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
         data,
         TextureFormat::R32Float,
@@ -357,9 +342,7 @@ pub fn build_mesh(points: &[Point], origin_ly: DVec3) -> Mesh {
 
     for point in points {
         // Differenced in f64 and narrowed after, which is the whole point of the bake origin.
-        let at = sim_to_render(point.position_ly - origin_ly)
-            .as_vec3()
-            .to_array();
+        let at = sim_to_render(point.position_ly - origin_ly).as_vec3().to_array();
         let physics = [point.teff_k, point.radius_m, point.seed, 0.0];
         let base = positions.len() as u32;
         for corner in QUAD {
@@ -371,10 +354,7 @@ pub fn build_mesh(points: &[Point], origin_ly: DVec3) -> Mesh {
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::RENDER_WORLD,
-    );
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(ATTRIBUTE_STAR_CORNER, corners);
     mesh.insert_attribute(ATTRIBUTE_STAR_PARAMS, params);
@@ -390,9 +370,7 @@ pub fn build_mesh(points: &[Point], origin_ly: DVec3) -> Mesh {
 /// also looks engineered. The swarm is separable from the rest of the system on purpose: this
 /// runs for every star in the sky, and generating a full planetary system for each would not.
 pub fn warm_params(star: &CatalogueStar) -> [f32; 4] {
-    let Some(swarm) = generate::swarm_for(star) else {
-        return [0.0; 4];
-    };
+    let Some(swarm) = generate::swarm_for(star) else { return [0.0; 4] };
     let r = star.star.radius_m;
     [
         swarm.equilibrium_temperature(&star.star) as f32,
@@ -415,19 +393,11 @@ pub fn uniforms(
     style: PointStyle,
 ) -> RelativisticStarfieldUniform {
     let defaults = RelativisticStarfieldUniform::default();
-    let radius = |px: f32, fallback: f32| {
-        if rad_per_px > 0.0 {
-            px * rad_per_px
-        } else {
-            fallback
-        }
-    };
+    let radius = |px: f32, fallback: f32| if rad_per_px > 0.0 { px * rad_per_px } else { fallback };
     let mapping = &session.mapping;
     RelativisticStarfieldUniform {
         band_to_display: band_columns(mapping),
-        beta: sim_to_render(session.ship.motion.beta)
-            .as_vec3()
-            .extend(0.0),
+        beta: sim_to_render(session.ship.motion.beta).as_vec3().extend(0.0),
         ship_offset_ly: sim_to_render(eye_ly - origin_ly).as_vec3().extend(0.0),
         reference: session.tone.reference,
         point_stops: POINT_STOPS,
@@ -463,12 +433,7 @@ pub fn band_columns(mapping: &BandMapping) -> [Vec4; BANDS] {
         if !mapping.available.contains(band) {
             return Vec4::ZERO;
         }
-        Vec4::new(
-            mapping.matrix[0][b],
-            mapping.matrix[1][b],
-            mapping.matrix[2][b],
-            0.0,
-        )
+        Vec4::new(mapping.matrix[0][b], mapping.matrix[1][b], mapping.matrix[2][b], 0.0)
     })
 }
 
@@ -479,12 +444,8 @@ pub fn lut_scale() -> f32 {
 
 /// Radians per pixel for the camera the sky is drawn for.
 pub fn camera_scale(camera: &Query<(&Projection, &Camera), With<crate::app::SkyCamera>>) -> f32 {
-    let Ok((projection, camera)) = camera.single() else {
-        return 0.0;
-    };
-    let Projection::Perspective(perspective) = projection else {
-        return 0.0;
-    };
+    let Ok((projection, camera)) = camera.single() else { return 0.0 };
+    let Projection::Perspective(perspective) = projection else { return 0.0 };
     let height = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
     radians_per_pixel(perspective.fov, height)
 }
@@ -512,14 +473,7 @@ pub fn spawn_sky(
         let style = style_for(&ui.0, which);
         // The ship's own position, not the eye's: this runs on entering the world, before
         // anything has placed one, and the boom is corrected on the very next frame anyway.
-        let uniform = uniforms(
-            &session.0,
-            origin_ly,
-            origin_ly,
-            lut_scale(),
-            rad_per_px,
-            style,
-        );
+        let uniform = uniforms(&session.0, origin_ly, origin_ly, lut_scale(), rad_per_px, style);
         let mesh = meshes.add(build_mesh(stars, origin_ly));
         let material = materials.add(RelativisticStarfieldMaterial {
             uniforms: uniform.clone(),
@@ -533,24 +487,13 @@ pub fn spawn_sky(
             NoFrustumCulling,
             SkyMesh,
         ));
-        Pass {
-            mesh,
-            material,
-            which,
-            count: stars.len(),
-            sent: uniform,
-        }
+        Pass { mesh, material, which, count: stars.len(), sent: uniform }
     };
 
     let distant = pass(&distant_stars, Which::Distant);
     let local = pass(&local_stars, Which::Local);
     let bodies = pass(&[], Which::Bodies);
-    commands.insert_resource(Starfield {
-        origin_ly,
-        distant,
-        local,
-        bodies,
-    });
+    commands.insert_resource(Starfield { origin_ly, distant, local, bodies });
 }
 
 /// This frame's view of the local system.
@@ -618,10 +561,9 @@ pub fn update_sky(
         sky.origin_ly = session.ship.motion.position_ly;
         sky.distant.count = distant_stars.len();
         sky.local.count = local_stars.len();
-        for (handle, stars) in [
-            (sky.distant.mesh.clone(), &distant_stars),
-            (sky.local.mesh.clone(), &local_stars),
-        ] {
+        for (handle, stars) in
+            [(sky.distant.mesh.clone(), &distant_stars), (sky.local.mesh.clone(), &local_stars)]
+        {
             if let Some(mut mesh) = meshes.get_mut(&handle) {
                 *mesh = build_mesh(stars, sky.origin_ly);
             }
@@ -632,14 +574,7 @@ pub fn update_sky(
     let origin = sky.origin_ly;
     for pass in sky.passes() {
         let style = style_for(&ui.0, pass.which);
-        let next = uniforms(
-            &session.0,
-            eye.at_ly,
-            origin,
-            lut_scale(),
-            rad_per_px,
-            style,
-        );
+        let next = uniforms(&session.0, eye.at_ly, origin, lut_scale(), rad_per_px, style);
         if next == pass.sent {
             continue;
         }
@@ -662,10 +597,7 @@ mod tests {
     fn lookup(lut: &Image, band: Band, teff: f64) -> f64 {
         let last = (LUT_SAMPLES - 1) as f32;
         let at = ((teff.log2() as f32 - LOG_T_MIN) * lut_scale()).clamp(0.0, last);
-        let (i, j) = (
-            at.floor() as usize,
-            (at.floor() as usize + 1).min(LUT_SAMPLES - 1),
-        );
+        let (i, j) = (at.floor() as usize, (at.floor() as usize + 1).min(LUT_SAMPLES - 1));
         let row = band.index() * LUT_SAMPLES;
         let texel = |k: usize| {
             let at = (row + k) * 4;
@@ -702,11 +634,7 @@ mod tests {
                 worst = worst.max((got - want).abs() / want);
             }
         }
-        assert!(
-            worst < 0.005,
-            "table is off the integral by {:.3}%",
-            worst * 100.0
-        );
+        assert!(worst < 0.005, "table is off the integral by {:.3}%", worst * 100.0);
     }
 
     /// Why the table holds log2 rather than the radiance: on the Wien side the value moves by
@@ -721,10 +649,7 @@ mod tests {
         let below = ((3000f64.log2() - LOG_T_MIN as f64) / step).floor();
         let teff = 2f64.powf(LOG_T_MIN as f64 + (below + 0.5) * step);
         let want = blackbody::band_radiance(band, teff);
-        assert!(
-            want > 0.0,
-            "the comparison needs a band that is actually emitting"
-        );
+        assert!(want > 0.0, "the comparison needs a band that is actually emitting");
 
         let lo = blackbody::band_radiance(band, 2f64.powf(LOG_T_MIN as f64 + below * step));
         let hi = blackbody::band_radiance(band, 2f64.powf(LOG_T_MIN as f64 + (below + 1.0) * step));
@@ -743,14 +668,8 @@ mod tests {
         let toward = gamma * (1.0 + max_beta);
         let coolest = 2000.0 / toward;
         let hottest = 50_000.0 * toward;
-        assert!(
-            2f64.powf(LOG_T_MIN as f64) < coolest,
-            "{coolest} K falls off the cold end"
-        );
-        assert!(
-            2f64.powf(LOG_T_MAX as f64) > hottest,
-            "{hottest} K falls off the hot end"
-        );
+        assert!(2f64.powf(LOG_T_MIN as f64) < coolest, "{coolest} K falls off the cold end");
+        assert!(2f64.powf(LOG_T_MAX as f64) > hottest, "{hottest} K falls off the hot end");
     }
 
     /// The columns the shader multiplies must reproduce what `BandMapping::apply` computes,
@@ -765,10 +684,7 @@ mod tests {
             for b in 0..BANDS {
                 got += columns[b].truncate() * radiance[Band::ALL[b]];
             }
-            assert!(
-                (got - Vec3::from_array(want)).length() < 1e-5,
-                "{got:?} vs {want:?}"
-            );
+            assert!((got - Vec3::from_array(want)).length() < 1e-5, "{got:?} vs {want:?}");
         }
     }
 
@@ -804,10 +720,7 @@ mod tests {
             _ => panic!("positions must be Float32x3"),
         };
         assert!((first(&far).length() as f64 - star.position_ly.length()).abs() < 1e-3);
-        assert!(
-            first(&near).length() < 1e-3,
-            "baking at the star puts it at the origin"
-        );
+        assert!(first(&near).length() < 1e-3, "baking at the star puts it at the origin");
     }
 
     #[test]
@@ -815,17 +728,11 @@ mod tests {
         let mut s = sky();
         let origin = s.ship.motion.position_ly;
         let eye = |s: &Session| s.ship.motion.position_ly;
-        assert_eq!(
-            uniforms(&s, eye(&s), origin, lut_scale(), 0.0, DISTANT).ship_offset_ly,
-            Vec4::ZERO
-        );
+        assert_eq!(uniforms(&s, eye(&s), origin, lut_scale(), 0.0, DISTANT).ship_offset_ly, Vec4::ZERO);
         s.fly_to(s.stars[0].id);
         s.advance(8_000.0);
         let u = uniforms(&s, eye(&s), origin, lut_scale(), 0.0, DISTANT);
-        assert!(
-            u.ship_offset_ly.truncate().length() > 0.0,
-            "the ship moved and the uniform did not"
-        );
+        assert!(u.ship_offset_ly.truncate().length() > 0.0, "the ship moved and the uniform did not");
         assert!(u.beta.truncate().length() > 0.5, "and it is moving fast");
         assert!(u.beta.truncate().length() < 1.0, "but not at or above c");
     }
@@ -851,9 +758,7 @@ mod tests {
     /// engineered and looks ordinary.
     #[test]
     fn the_warm_attribute_matches_what_the_emission_model_computes() {
-        let stars = lc_world::sky::hyg::HygProvider::load(
-            "../../assets/catalogs/hygdata_v42_dist_sort.csv",
-        );
+        let stars = lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv");
         let Ok(provider) = stars else { return };
         let swarmed: Vec<_> = provider
             .stars()
@@ -867,10 +772,7 @@ mod tests {
             let [teff, scale, deficit, _] = warm_params(star);
             let swarm = generate::swarm_for(star).unwrap();
             assert!(teff > 0.0 && scale > 0.0, "{teff} K, scale {scale}");
-            assert!(
-                (0.0..=1.0).contains(&deficit),
-                "a deficit must be a fraction: {deficit}"
-            );
+            assert!((0.0..=1.0).contains(&deficit), "a deficit must be a fraction: {deficit}");
 
             // The shader computes band_radiance(b, teff) * scale; the model computes the same
             // thing through reradiated_radiance. They must be one number.
@@ -899,10 +801,7 @@ mod tests {
             let rad_per_px = radians_per_pixel(fov, height);
             // The same star covers the same pixels whatever the window is.
             let drawn = DISTANT.min_px * rad_per_px * height / (2.0 * (fov * 0.5).tan());
-            assert!(
-                (drawn - DISTANT.min_px).abs() < 1e-3,
-                "{height}px window drew {drawn}"
-            );
+            assert!((drawn - DISTANT.min_px).abs() < 1e-3, "{height}px window drew {drawn}");
         }
         assert!(DISTANT.min_px >= 1.0, "anything under a pixel is invisible");
     }
@@ -911,14 +810,8 @@ mod tests {
     /// a star look like arriving is the size that makes a field of thousands unreadable.
     #[test]
     fn the_background_stays_small_and_a_local_star_is_allowed_to_dominate() {
-        assert!(
-            DISTANT.max_px < 4.0,
-            "a background star must not become a ball"
-        );
-        assert!(
-            LOCAL.min_px > DISTANT.max_px,
-            "the two ranges should not even overlap"
-        );
+        assert!(DISTANT.max_px < 4.0, "a background star must not become a ball");
+        assert!(LOCAL.min_px > DISTANT.max_px, "the two ranges should not even overlap");
         // Deliberately nothing here about which pass is brighter or glares more. An earlier
         // version asserted the local star carried more overflow, which was a belief about how
         // it would look rather than a requirement, and tuning against a live star overturned
@@ -937,21 +830,10 @@ mod tests {
         s.fly_to(id);
         s.advance(40_000.0);
         let (distant, local) = partition(&s);
-        assert_eq!(
-            local.len(),
-            1,
-            "arriving should put exactly the destination in the system"
-        );
+        assert_eq!(local.len(), 1, "arriving should put exactly the destination in the system");
         let want = s.star(id).unwrap().position_ly;
-        assert!(
-            local[0].position_ly.distance(want) < 1e-12,
-            "the wrong star went local"
-        );
-        assert_eq!(
-            distant.len() + local.len(),
-            s.stars.len(),
-            "no star may be in both or neither"
-        );
+        assert!(local[0].position_ly.distance(want) < 1e-12, "the wrong star went local");
+        assert_eq!(distant.len() + local.len(), s.stars.len(), "no star may be in both or neither");
     }
 
     #[test]
@@ -971,10 +853,7 @@ mod tests {
     fn a_narrower_field_of_view_makes_a_pixel_a_smaller_angle() {
         let wide = radians_per_pixel(std::f32::consts::FRAC_PI_2, 1080.0);
         let narrow = radians_per_pixel(std::f32::consts::FRAC_PI_8, 1080.0);
-        assert!(
-            narrow < wide,
-            "zooming in must not grow every star: {narrow} against {wide}"
-        );
+        assert!(narrow < wide, "zooming in must not grow every star: {narrow} against {wide}");
     }
 
     #[test]
@@ -1003,10 +882,7 @@ mod tests {
         s.advance(40_000.0);
         let near = flux(&s);
         let stops = (near / far).log2();
-        assert!(
-            stops > 20.0,
-            "arrival should be tens of stops brighter, got {stops}"
-        );
+        assert!(stops > 20.0, "arrival should be tens of stops brighter, got {stops}");
     }
 
     fn points_of(s: &Session) -> Vec<Point> {
@@ -1038,11 +914,7 @@ mod tests {
         let mut per_star: Vec<f32> = seeds(&build_mesh(&points_of(&s), DVec3::ZERO));
         // Four vertices per star carry the same seed; one per star is what must differ.
         per_star.dedup();
-        assert_eq!(
-            per_star.len(),
-            s.stars.len(),
-            "adjacent catalogue ids collided: {per_star:?}"
-        );
+        assert_eq!(per_star.len(), s.stars.len(), "adjacent catalogue ids collided: {per_star:?}");
     }
 
     /// A three-pixel dot has no room for structure, and noise at that size is a shimmer.
@@ -1056,12 +928,7 @@ mod tests {
     /// star it stops reading as a point and starts reading as a disc on a quad.
     #[test]
     fn a_lit_body_is_drawn_no_larger_than_a_bright_star() {
-        assert!(
-            BODIES.max_px <= DISTANT.max_px * 1.5,
-            "{} against {}",
-            BODIES.max_px,
-            DISTANT.max_px
-        );
+        assert!(BODIES.max_px <= DISTANT.max_px * 1.5, "{} against {}", BODIES.max_px, DISTANT.max_px);
         assert!(BODIES.min_px >= 1.0, "still at least a pixel");
         assert_eq!(BODIES.corona_strength, 0.0);
     }

@@ -17,11 +17,7 @@ const FRAMES: usize = 60;
 const STEP_S: f64 = 8766.0 / 60.0;
 
 fn a_craft_in_a_system() -> Craft {
-    let star = AuthoredStars::sample()
-        .stars()
-        .first()
-        .cloned()
-        .expect("a star");
+    let star = AuthoredStars::sample().stars().first().cloned().expect("a star");
     let system = LocalSystem::for_star(&star).expect("a system");
     let mut craft = Craft::at(CraftId(1), Kind::Ship, star.position_ly);
     craft.enter(Some(std::sync::Arc::new(system)), 0.0);
@@ -46,11 +42,7 @@ fn a_frame_after_a_cut_is_not_a_search() {
     let _ = motion::apply(
         &mut craft.motion,
         craft.system.as_deref(),
-        &Event {
-            ship: ShipId(0),
-            at_t: 0.0,
-            change: Change::CutDrive,
-        },
+        &Event { ship: ShipId(0), at_t: 0.0, change: Change::CutDrive },
     );
     assert!(
         matches!(craft.motion.motive, Motive::Falling(_)),
@@ -94,11 +86,7 @@ fn a_frame_after_a_cut_at_speed_is_not_a_search() {
     let _ = motion::apply(
         &mut craft.motion,
         craft.system.as_deref(),
-        &Event {
-            ship: ShipId(0),
-            at_t: 0.0,
-            change: Change::CutDrive,
-        },
+        &Event { ship: ShipId(0), at_t: 0.0, change: Change::CutDrive },
     );
 
     let started = Clock::now();
@@ -109,10 +97,8 @@ fn a_frame_after_a_cut_at_speed_is_not_a_search() {
     }
     let each = started.elapsed() / FRAMES as u32;
 
-    println!(
-        "a frame after a cut at 0.2c costs {each:?}  (motive {:?})",
-        std::mem::discriminant(&craft.motion.motive)
-    );
+    println!("a frame after a cut at 0.2c costs {each:?}  (motive {:?})", 
+        std::mem::discriminant(&craft.motion.motive));
     assert!(
         each < std::time::Duration::from_millis(4),
         "a frame after a cut at speed costs {each:?}, which is most of a frame",

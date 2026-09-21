@@ -39,7 +39,7 @@ impl ScaleTier {
     pub fn meters_per_unit(&self) -> f64 {
         match self {
             Self::Surface => 1.0,
-            Self::System => 1.496e11,           // one AU
+            Self::System => 1.496e11,          // one AU
             Self::Interstellar => 9.460_730e15, // one light-year
         }
     }
@@ -122,27 +122,17 @@ mod tests {
         };
 
         // A structure a kilometer away is simply gone.
-        assert_eq!(
-            narrow_first(1.0e3),
-            0.0,
-            "this is the failure the reduction avoids"
-        );
+        assert_eq!(narrow_first(1.0e3), 0.0, "this is the failure the reduction avoids");
         // A thousand kilometers survives, quantised to the 16 km grid.
         let coarse = narrow_first(1.0e6);
-        assert!(
-            coarse > 0.0 && (coarse - 1.0e6).abs() > 500.0,
-            "quantised to {coarse}"
-        );
+        assert!(coarse > 0.0 && (coarse - 1.0e6).abs() > 500.0, "quantised to {coarse}");
 
         // Subtracting in f64 first keeps both exactly.
         for offset in [1.0e3, 1.0e6] {
             let body = camera + DVec3::new(offset, 0.0, 0.0);
             let good = camera_relative(body, camera, ScaleTier::System).x as f64;
             // f32 carries about seven digits, so the tolerance is relative to it.
-            assert!(
-                (good - offset / AU).abs() < 1e-6 * (offset / AU),
-                "offset {offset}"
-            );
+            assert!((good - offset / AU).abs() < 1e-6 * (offset / AU), "offset {offset}");
         }
     }
 
@@ -163,11 +153,7 @@ mod tests {
     #[test]
     fn sampling_is_per_object_nearby_and_per_system_at_range() {
         assert_eq!(sampling_for(AU, false), Sampling::PerObject);
-        assert_eq!(
-            sampling_for(30.0 * LY, true),
-            Sampling::PerObject,
-            "own system is exact"
-        );
+        assert_eq!(sampling_for(30.0 * LY, true), Sampling::PerObject, "own system is exact");
         assert_eq!(sampling_for(30.0 * LY, false), Sampling::PerSystem);
     }
 
@@ -187,9 +173,6 @@ mod tests {
         // Which is why the observer's own system is sampled per object instead.
         let err = shared_sampling_error_rad(100.0 * AU, 30_000.0, 2.0 * AU);
         let pixel = (60.0f64).to_radians() / 1080.0;
-        assert!(
-            err > pixel,
-            "error {err} would be visible against a pixel of {pixel}"
-        );
+        assert!(err > pixel, "error {err} would be visible against a pixel of {pixel}");
     }
 }

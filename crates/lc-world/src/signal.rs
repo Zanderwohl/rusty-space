@@ -31,10 +31,7 @@ impl Transmitter {
     /// The numbers are the second row of the table in `lightcone/docs/05-observation.md`, and
     /// they are the ones that make the point: a milliradian across four light-years is a spot
     /// 250 AU wide. Aiming at somebody in another system illuminates their whole system.
-    pub const SHIP: Self = Self {
-        wavelength_m: 0.03,
-        aperture_m: 30.0,
-    };
+    pub const SHIP: Self = Self { wavelength_m: 0.03, aperture_m: 30.0 };
 
     /// Half the diffraction-limited beamwidth, radians.
     ///
@@ -68,10 +65,7 @@ pub struct Beam {
 impl Beam {
     /// In every direction. Cheap to send, heard by everyone in range, and it announces where
     /// you are to every one of them.
-    pub const OMNI: Self = Self {
-        axis: DVec3::X,
-        half_angle_rad: std::f64::consts::PI,
-    };
+    pub const OMNI: Self = Self { axis: DVec3::X, half_angle_rad: std::f64::consts::PI };
 
     pub fn along(axis: DVec3, half_angle_rad: f64) -> Self {
         Self {
@@ -89,9 +83,7 @@ impl Beam {
     /// A receiver at the transmitter itself is inside anything: the offset has no direction to
     /// compare, and a signal you are standing in is one you hear.
     pub fn covers(&self, offset: DVec3) -> bool {
-        let Some(toward) = offset.try_normalize() else {
-            return true;
-        };
+        let Some(toward) = offset.try_normalize() else { return true };
         toward.dot(self.axis) >= self.half_angle_rad.cos()
     }
 
@@ -119,13 +111,7 @@ impl Beam {
 /// Every position is light-microseconds and every time is microseconds, so `c = 1` and `beta`
 /// is light-microseconds per microsecond. `None` when the prediction cannot be closed on — a
 /// target the sender believes is receding at or past `c`, which nothing sub-luminal is.
-pub fn aim_at(
-    from: DVec3,
-    t_send_us: f64,
-    seen_at: DVec3,
-    beta: DVec3,
-    seen_t_us: f64,
-) -> Option<DVec3> {
+pub fn aim_at(from: DVec3, t_send_us: f64, seen_at: DVec3, beta: DVec3, seen_t_us: f64) -> Option<DVec3> {
     // Where the prediction puts the target at the instant of transmission, relative to here.
     let d0 = seen_at + beta * (t_send_us - seen_t_us) - from;
     let closing = d0.dot(beta);
@@ -162,24 +148,13 @@ mod tests {
     fn gain_is_four_over_theta_squared_for_a_narrow_beam_and_one_for_a_sphere() {
         assert_eq!(Beam::OMNI.gain(), 1.0);
         let narrow = Beam::along(DVec3::X, 1.0e-3);
-        assert!(
-            (narrow.gain() - 4.0e6).abs() / 4.0e6 < 1.0e-6,
-            "{}",
-            narrow.gain()
-        );
+        assert!((narrow.gain() - 4.0e6).abs() / 4.0e6 < 1.0e-6, "{}", narrow.gain());
         // An optical link is a microradian, and there the canceling form has lost four
         // decimal places. This is why the identity is spelled the way it is.
         let optical = Beam::along(DVec3::X, 1.0e-6);
-        assert!(
-            (optical.gain() - 4.0e12).abs() / 4.0e12 < 1.0e-9,
-            "{}",
-            optical.gain()
-        );
+        assert!((optical.gain() - 4.0e12).abs() / 4.0e12 < 1.0e-9, "{}", optical.gain());
         let naive = 2.0 / (1.0 - 1.0e-6_f64.cos());
-        assert!(
-            (naive - optical.gain()).abs() / optical.gain() > 1.0e-5,
-            "the trap is real"
-        );
+        assert!((naive - optical.gain()).abs() / optical.gain() > 1.0e-5, "the trap is real");
     }
 
     #[test]
@@ -220,10 +195,7 @@ mod tests {
         };
         let light = from + axis * tau;
         let target = seen_at + beta * tau;
-        assert!(
-            (light - target).length() < 1.0e-6,
-            "{light} against {target}"
-        );
+        assert!((light - target).length() < 1.0e-6, "{light} against {target}");
     }
 
     /// Aiming at a target running away faster than light is not a solve with a bad answer; it

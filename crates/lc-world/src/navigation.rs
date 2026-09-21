@@ -11,8 +11,8 @@
 //! was sent to. Orbital speeds are four orders below `c` and a hold is exact rather than
 //! integrated, so nothing here drifts and nothing here needs a fuel budget.
 
-use crate::population::Population;
 use glam::DVec3;
+use crate::population::Population;
 
 use crate::flight::{Cruise, Drive};
 use crate::system::{LocalSystem, M_PER_LY};
@@ -107,10 +107,7 @@ pub enum Waypoint {
     /// somewhere ends up, and where a ship that has left the system waits.
     Fixed(DVec3),
     Orbit(Orbit),
-    Lagrange {
-        body: String,
-        point: LagrangePoint,
-    },
+    Lagrange { body: String, point: LagrangePoint },
     /// A libration orbit *about* a collinear point, which is what a craft there actually
     /// flies. See [`crate::libration`].
     Libration(crate::libration::Libration),
@@ -126,21 +123,11 @@ pub enum Course {
     /// Burn, flip and burn to a point, light-years from the world origin.
     To(DVec3),
     /// Circular orbit at an altitude given in radii above the surface.
-    Orbit {
-        body: String,
-        altitude_radii: f64,
-        plane: Plane,
-    },
-    Lagrange {
-        body: String,
-        point: LagrangePoint,
-    },
+    Orbit { body: String, altitude_radii: f64, plane: Plane },
+    Lagrange { body: String, point: LagrangePoint },
     /// A libration orbit about L1 or L2, rather than the point itself. What a real mission
     /// flies, and somewhere you can see out from.
-    Hangout {
-        body: String,
-        point: LagrangePoint,
-    },
+    Hangout { body: String, point: LagrangePoint },
     /// Into the middle of a body's rings, in their own plane.
     Rings(String),
     /// Into a population's band, at the radius that carries its light.
@@ -162,29 +149,23 @@ impl From<&Course> for lc_proto::Course {
     fn from(course: &Course) -> Self {
         match course {
             Course::To(at) => lc_proto::Course::To(at.to_array()),
-            Course::Orbit {
-                body,
-                altitude_radii,
-                plane,
-            } => lc_proto::Course::Orbit {
+            Course::Orbit { body, altitude_radii, plane } => lc_proto::Course::Orbit {
                 body: body.clone(),
                 altitude_radii: *altitude_radii,
                 plane: (*plane).into(),
             },
-            Course::Lagrange { body, point } => lc_proto::Course::Lagrange {
-                body: body.clone(),
-                point: (*point).into(),
-            },
-            Course::Hangout { body, point } => lc_proto::Course::Hangout {
-                body: body.clone(),
-                point: (*point).into(),
-            },
+            Course::Lagrange { body, point } => {
+                lc_proto::Course::Lagrange { body: body.clone(), point: (*point).into() }
+            }
+            Course::Hangout { body, point } => {
+                lc_proto::Course::Hangout { body: body.clone(), point: (*point).into() }
+            }
             Course::Rings(body) => lc_proto::Course::Rings { body: body.clone() },
             // A system with four billion populations is not a system. Saturating rather than
             // wrapping, so a nonsense index refuses at `resolve` instead of naming a real band.
-            Course::Belt(index) => lc_proto::Course::Belt {
-                index: u32::try_from(*index).unwrap_or(u32::MAX),
-            },
+            Course::Belt(index) => {
+                lc_proto::Course::Belt { index: u32::try_from(*index).unwrap_or(u32::MAX) }
+            }
             Course::LeaveSystem => lc_proto::Course::LeaveSystem,
         }
     }
@@ -194,23 +175,15 @@ impl From<lc_proto::Course> for Course {
     fn from(course: lc_proto::Course) -> Self {
         match course {
             lc_proto::Course::To(at) => Course::To(DVec3::from_array(at)),
-            lc_proto::Course::Orbit {
-                body,
-                altitude_radii,
-                plane,
-            } => Course::Orbit {
-                body,
-                altitude_radii,
-                plane: plane.into(),
-            },
-            lc_proto::Course::Lagrange { body, point } => Course::Lagrange {
-                body,
-                point: point.into(),
-            },
-            lc_proto::Course::Hangout { body, point } => Course::Hangout {
-                body,
-                point: point.into(),
-            },
+            lc_proto::Course::Orbit { body, altitude_radii, plane } => {
+                Course::Orbit { body, altitude_radii, plane: plane.into() }
+            }
+            lc_proto::Course::Lagrange { body, point } => {
+                Course::Lagrange { body, point: point.into() }
+            }
+            lc_proto::Course::Hangout { body, point } => {
+                Course::Hangout { body, point: point.into() }
+            }
             lc_proto::Course::Rings { body } => Course::Rings(body),
             lc_proto::Course::Belt { index } => Course::Belt(index as usize),
             lc_proto::Course::LeaveSystem => Course::LeaveSystem,
@@ -355,11 +328,8 @@ impl Waypoint {
             Waypoint::Orbit(orbit) => return orbit.velocity_at(system, seconds),
             Waypoint::Lagrange { .. } | Waypoint::Libration(_) => {}
         }
-        let step = self
-            .period_s(system, seconds)
-            .map(|p| p / 4096.0)
-            .unwrap_or(1.0)
-            .clamp(1.0e-3, 60.0);
+        let step =
+            self.period_s(system, seconds).map(|p| p / 4096.0).unwrap_or(1.0).clamp(1.0e-3, 60.0);
         let before = self.place_at(system, seconds - step)?;
         let after = self.place_at(system, seconds + step)?;
         Some((after - before) * M_PER_LY / (2.0 * step))
@@ -375,12 +345,8 @@ impl Waypoint {
     /// `at_s` is the *arrival* time, not now: the phase is fixed against the clock, so the
     /// nearest point is the one the orbit will be presenting when the ship gets there.
     pub fn nearest_to(&self, from_ly: DVec3, system: &LocalSystem, at_s: f64) -> Self {
-        let Waypoint::Orbit(orbit) = self else {
-            return self.clone();
-        };
-        let Some((center, mu)) = orbit.center_of_at(system, at_s) else {
-            return self.clone();
-        };
+        let Waypoint::Orbit(orbit) = self else { return self.clone() };
+        let Some((center, mu)) = orbit.center_of_at(system, at_s) else { return self.clone() };
         let (u, v) = basis(orbit.pole);
         let approach = from_ly - center;
         // Dropping the component along the pole leaves the direction the circle can actually
@@ -413,9 +379,7 @@ impl Waypoint {
         if let Waypoint::Libration(libration) = self {
             return Some(libration.period_s());
         }
-        let Waypoint::Orbit(orbit) = self else {
-            return None;
-        };
+        let Waypoint::Orbit(orbit) = self else { return None };
         let (_, mu) = orbit.center_of_at(system, seconds)?;
         (mu > 0.0 && orbit.radius_m > 0.0)
             .then(|| std::f64::consts::TAU * (orbit.radius_m.powi(3) / mu).sqrt())
@@ -425,11 +389,7 @@ impl Waypoint {
 impl Orbit {
     /// Angular rate, radians per second.
     pub fn rate(&self, mu: f64) -> f64 {
-        if self.radius_m > 0.0 && mu > 0.0 {
-            (mu / self.radius_m.powi(3)).sqrt()
-        } else {
-            0.0
-        }
+        if self.radius_m > 0.0 && mu > 0.0 { (mu / self.radius_m.powi(3)).sqrt() } else { 0.0 }
     }
 
     /// Where round the circle the ship is at a coordinate time.
@@ -467,10 +427,7 @@ impl Orbit {
         let index = self.center_index(system)?;
         let (at_m, _) = system.body_state_at(index, seconds)?;
         let at = system.origin_ly + at_m / M_PER_LY;
-        Some((
-            at,
-            system.sim().gravitational_constant() * system.sim().mass(index),
-        ))
+        Some((at, system.sim().gravitational_constant() * system.sim().mass(index)))
     }
 }
 
@@ -504,11 +461,7 @@ impl Course {
     pub fn resolve(&self, system: &LocalSystem, from_ly: DVec3, now_s: f64) -> Option<Waypoint> {
         match self {
             Course::To(at) => Some(Waypoint::Fixed(*at)),
-            Course::Orbit {
-                body,
-                altitude_radii,
-                plane,
-            } => {
+            Course::Orbit { body, altitude_radii, plane } => {
                 let index = system.body_named(body)?;
                 let radius = system.sim().radius(index);
                 if radius <= 0.0 {
@@ -525,10 +478,7 @@ impl Course {
                 let index = system.body_named(body)?;
                 // A body with no parent has no libration points: there is no second mass.
                 system.sim().parent(index)?;
-                Some(Waypoint::Lagrange {
-                    body: body.clone(),
-                    point: *point,
-                })
+                Some(Waypoint::Lagrange { body: body.clone(), point: *point })
             }
             Course::Hangout { body, point } => Some(Waypoint::Libration(
                 crate::libration::Libration::about(system, body, *point, now_s)?,
@@ -560,9 +510,7 @@ impl Course {
                 // be the shortest way out of the system rather than a trip to the north pole.
                 // A ship exactly at the star has no radius to follow and gets the axis.
                 let out = (from_ly - star).normalize_or(system.axis());
-                Some(Waypoint::Fixed(
-                    star + out * system.reach_ly() * DEPARTURE_MARGIN,
-                ))
+                Some(Waypoint::Fixed(star + out * system.reach_ly() * DEPARTURE_MARGIN))
             }
         }
     }
@@ -593,22 +541,10 @@ impl Course {
             "leave" => Some(Course::LeaveSystem),
             "belt" => rest.parse().ok().map(Course::Belt),
             "rings" => Some(Course::Rings(rest.to_string())),
-            "hang1" => Some(Course::Hangout {
-                body: rest.into(),
-                point: LagrangePoint::L1,
-            }),
-            "hang2" => Some(Course::Hangout {
-                body: rest.into(),
-                point: LagrangePoint::L2,
-            }),
-            "l1" => Some(Course::Lagrange {
-                body: rest.into(),
-                point: LagrangePoint::L1,
-            }),
-            "l2" => Some(Course::Lagrange {
-                body: rest.into(),
-                point: LagrangePoint::L2,
-            }),
+            "hang1" => Some(Course::Hangout { body: rest.into(), point: LagrangePoint::L1 }),
+            "hang2" => Some(Course::Hangout { body: rest.into(), point: LagrangePoint::L2 }),
+            "l1" => Some(Course::Lagrange { body: rest.into(), point: LagrangePoint::L1 }),
+            "l2" => Some(Course::Lagrange { body: rest.into(), point: LagrangePoint::L2 }),
             "orbit" | "polar" => {
                 let named = fields.next();
                 let altitude = match named {
@@ -618,11 +554,7 @@ impl Course {
                 Some(Course::Orbit {
                     body: rest.into(),
                     altitude_radii: altitude,
-                    plane: if kind == "polar" {
-                        Plane::Polar
-                    } else {
-                        Plane::Equatorial
-                    },
+                    plane: if kind == "polar" { Plane::Polar } else { Plane::Equatorial },
                 })
             }
             _ => None,
@@ -741,19 +673,8 @@ pub fn designate(
 /// which is wrong-looking enough to be noticed rather than silently absurd.
 pub fn roman(n: usize) -> String {
     const TABLE: [(usize, &str); 13] = [
-        (1000, "M"),
-        (900, "CM"),
-        (500, "D"),
-        (400, "CD"),
-        (100, "C"),
-        (90, "XC"),
-        (50, "L"),
-        (40, "XL"),
-        (10, "X"),
-        (9, "IX"),
-        (5, "V"),
-        (4, "IV"),
-        (1, "I"),
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+        (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
     ];
     if n == 0 || n > 3999 {
         return n.to_string();
@@ -778,52 +699,30 @@ pub fn roman(n: usize) -> String {
 pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course)> {
     let mut out = Vec::new();
     let Target::Body(name) = target else {
-        let Target::Band(index) = target else {
-            return out;
-        };
+        let Target::Band(index) = target else { return out };
         out.push(("into the band".to_string(), Course::Belt(*index)));
         return out;
     };
-    let Some(index) = system.body_named(name) else {
-        return out;
-    };
+    let Some(index) = system.body_named(name) else { return out };
 
     for (plane, what) in [(Plane::Equatorial, "equatorial"), (Plane::Polar, "polar")] {
         for (altitude_radii, height) in ALTITUDES {
             out.push((
                 format!("{what} orbit, {height}"),
-                Course::Orbit {
-                    body: name.clone(),
-                    altitude_radii,
-                    plane,
-                },
+                Course::Orbit { body: name.clone(), altitude_radii, plane },
             ));
         }
     }
     if system.sim().parent(index).is_some() {
-        for (point, what) in [
-            (LagrangePoint::L1, "L1 companion"),
-            (LagrangePoint::L2, "L2 companion"),
-        ] {
-            out.push((
-                what.to_string(),
-                Course::Lagrange {
-                    body: name.clone(),
-                    point,
-                },
-            ));
+        for (point, what) in
+            [(LagrangePoint::L1, "L1 companion"), (LagrangePoint::L2, "L2 companion")]
+        {
+            out.push((what.to_string(), Course::Lagrange { body: name.clone(), point }));
         }
-        for (point, what) in [
-            (LagrangePoint::L1, "L1 hangout"),
-            (LagrangePoint::L2, "L2 hangout"),
-        ] {
-            out.push((
-                what.to_string(),
-                Course::Hangout {
-                    body: name.clone(),
-                    point,
-                },
-            ));
+        for (point, what) in
+            [(LagrangePoint::L1, "L1 hangout"), (LagrangePoint::L2, "L2 hangout")]
+        {
+            out.push((what.to_string(), Course::Hangout { body: name.clone(), point }));
         }
     }
     if crate::rings::for_body(system.sim().name(index)).is_some() {
@@ -886,17 +785,12 @@ pub fn plan(
     // Asking the waypoint how fast it is going costs two more propagations of it, so it is asked
     // once the arrival time has settled rather than once a round.
     let joining = |aimed: &Waypoint, arrival_s: f64| {
-        aimed
-            .velocity_at(system, arrival_s)
-            .map(crate::coast::beta_of)
-            .unwrap_or(DVec3::ZERO)
+        aimed.velocity_at(system, arrival_s).map(crate::coast::beta_of).unwrap_or(DVec3::ZERO)
     };
     for _ in 0..ARRIVAL_ROUNDS {
         let arrival_s = start_s + cruise.duration_s();
         aimed = waypoint.nearest_to(from_ly, system, arrival_s);
-        let Some(next) = aimed.place_at(system, arrival_s) else {
-            break;
-        };
+        let Some(next) = aimed.place_at(system, arrival_s) else { break };
         if next == target {
             break;
         }
@@ -949,23 +843,10 @@ mod tests {
                 altitude_radii: 2.0,
                 plane: Plane::Equatorial,
             },
-            Course::Orbit {
-                body: "Luna".into(),
-                altitude_radii: 0.2,
-                plane: Plane::Polar,
-            },
-            Course::Lagrange {
-                body: "Earth".into(),
-                point: LagrangePoint::L1,
-            },
-            Course::Lagrange {
-                body: "Earth".into(),
-                point: LagrangePoint::L2,
-            },
-            Course::Hangout {
-                body: "Earth".into(),
-                point: LagrangePoint::L2,
-            },
+            Course::Orbit { body: "Luna".into(), altitude_radii: 0.2, plane: Plane::Polar },
+            Course::Lagrange { body: "Earth".into(), point: LagrangePoint::L1 },
+            Course::Lagrange { body: "Earth".into(), point: LagrangePoint::L2 },
+            Course::Hangout { body: "Earth".into(), point: LagrangePoint::L2 },
             Course::Rings("Saturn".into()),
             Course::Belt(3),
             Course::LeaveSystem,
@@ -988,19 +869,9 @@ mod tests {
     fn the_round_trip_covers_every_variant() {
         let seen = [
             Course::To(DVec3::ZERO),
-            Course::Orbit {
-                body: String::new(),
-                altitude_radii: 0.0,
-                plane: Plane::default(),
-            },
-            Course::Lagrange {
-                body: String::new(),
-                point: LagrangePoint::L1,
-            },
-            Course::Hangout {
-                body: String::new(),
-                point: LagrangePoint::L1,
-            },
+            Course::Orbit { body: String::new(), altitude_radii: 0.0, plane: Plane::default() },
+            Course::Lagrange { body: String::new(), point: LagrangePoint::L1 },
+            Course::Hangout { body: String::new(), point: LagrangePoint::L1 },
             Course::Rings(String::new()),
             Course::Belt(0),
             Course::LeaveSystem,
@@ -1034,22 +905,14 @@ mod tests {
     #[test]
     fn an_orbit_sits_where_its_altitude_says() {
         let system = sol();
-        let course = Course::Orbit {
-            body: "Earth".into(),
-            altitude_radii: 2.0,
-            plane: Plane::Equatorial,
-        };
-        let waypoint = course
-            .resolve(&system, DVec3::ZERO, 0.0)
-            .expect("Earth has an orbit");
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
+        let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).expect("Earth has an orbit");
         let at = waypoint.place_at(&system, 0.0).expect("a position");
         let earth = system.body_position_ly("Earth").expect("Earth");
         let radius = at.distance(earth) * M_PER_LY;
         let expected = 6.371e6 * 3.0;
-        assert!(
-            (radius / expected - 1.0).abs() < 0.02,
-            "{radius:e} against {expected:e}"
-        );
+        assert!((radius / expected - 1.0).abs() < 0.02, "{radius:e} against {expected:e}");
     }
 
     /// A polar orbit puts the pole in the orbital plane; an equatorial one puts it normal to it.
@@ -1059,24 +922,12 @@ mod tests {
         let system = sol();
         let pole = system.body_pole(system.body_named("Earth").unwrap());
         let of = |plane| {
-            let course = Course::Orbit {
-                body: "Earth".into(),
-                altitude_radii: 2.0,
-                plane,
-            };
-            let Waypoint::Orbit(orbit) = course.resolve(&system, DVec3::ZERO, 0.0).unwrap() else {
-                panic!()
-            };
+            let course = Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane };
+            let Waypoint::Orbit(orbit) = course.resolve(&system, DVec3::ZERO, 0.0).unwrap() else { panic!() };
             orbit.pole.dot(pole).abs()
         };
-        assert!(
-            of(Plane::Equatorial) > 0.999,
-            "an equatorial normal is the pole"
-        );
-        assert!(
-            of(Plane::Polar) < 1.0e-9,
-            "a polar normal is perpendicular to it"
-        );
+        assert!(of(Plane::Equatorial) > 0.999, "an equatorial normal is the pole");
+        assert!(of(Plane::Polar) < 1.0e-9, "a polar normal is perpendicular to it");
     }
 
     /// An orbit is circular, so every sample of it is the same distance out and they are not
@@ -1084,11 +935,8 @@ mod tests {
     #[test]
     fn an_orbit_goes_round() {
         let system = sol();
-        let course = Course::Orbit {
-            body: "Earth".into(),
-            altitude_radii: 0.2,
-            plane: Plane::Equatorial,
-        };
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 0.2, plane: Plane::Equatorial };
         let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let period = waypoint.period_s(&system, 0.0).expect("a period");
         // Low Earth orbit is about ninety minutes; at 1.2 radii it is a little longer.
@@ -1101,7 +949,8 @@ mod tests {
         for step in 0..4 {
             let t = period * step as f64 / 4.0;
             let at = waypoint.place_at(&system, t).unwrap();
-            let center = system.origin_ly + system.body_state_at(earth, t).unwrap().0 / M_PER_LY;
+            let center =
+                system.origin_ly + system.body_state_at(earth, t).unwrap().0 / M_PER_LY;
             seen.push((at, at.distance(center) * M_PER_LY));
         }
         let radius = seen[0].1;
@@ -1109,10 +958,7 @@ mod tests {
             assert!((r / radius - 1.0).abs() < 1e-9, "{r} against {radius}");
         }
         let quarter = seen[0].0.distance(seen[1].0) * M_PER_LY;
-        assert!(
-            quarter > radius,
-            "a quarter turn moves further than the radius is long"
-        );
+        assert!(quarter > radius, "a quarter turn moves further than the radius is long");
     }
 
     /// L1 is sunward of the body and L2 is behind it, both at about the Hill radius. Earth's is
@@ -1123,12 +969,9 @@ mod tests {
         let earth = system.body_position_ly("Earth").unwrap();
         let star = system.star_position_ly();
         let at = |point| {
-            Waypoint::Lagrange {
-                body: "Earth".into(),
-                point,
-            }
-            .place_at(&system, 0.0)
-            .expect("a point")
+            Waypoint::Lagrange { body: "Earth".into(), point }
+                .place_at(&system, 0.0)
+                .expect("a point")
         };
         let (l1, l2) = (at(LagrangePoint::L1), at(LagrangePoint::L2));
         let out = (earth - star).normalize();
@@ -1136,10 +979,7 @@ mod tests {
         assert!((l2 - earth).dot(out) > 0.0, "L2 is on the far side");
         for point in [l1, l2] {
             let hill = point.distance(earth) * M_PER_LY;
-            assert!(
-                (hill / 1.5e9 - 1.0).abs() < 0.1,
-                "{hill:e} is not the Hill radius"
-            );
+            assert!((hill / 1.5e9 - 1.0).abs() < 0.1, "{hill:e} is not the Hill radius");
         }
     }
 
@@ -1148,39 +988,20 @@ mod tests {
     #[test]
     fn a_crossing_leads_a_moving_target() {
         let system = sol();
-        let course = Course::Orbit {
-            body: "Earth".into(),
-            altitude_radii: 2.0,
-            plane: Plane::Equatorial,
-        };
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
         let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let from = system.body_position_ly("Mars").expect("Mars");
-        let (cruise, waypoint) = plan(
-            &system,
-            &waypoint,
-            from,
-            DVec3::ZERO,
-            DVec3::ZERO,
-            0.0,
-            Drive::DEFAULT,
-        )
-        .expect("a crossing");
+        let (cruise, waypoint) =
+            plan(&system, &waypoint, from, DVec3::ZERO, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a crossing");
 
         let wanted = waypoint.place_at(&system, cruise.duration_s()).unwrap();
         let landed = cruise.at(cruise.duration_s()).position_ly;
         let miss = landed.distance(wanted) * M_PER_LY;
-        assert!(
-            miss < 6.371e6,
-            "missed by {miss:e} meters, more than a planetary radius"
-        );
+        assert!(miss < 6.371e6, "missed by {miss:e} meters, more than a planetary radius");
 
         // And the naive aim is far worse, which is why the rounds are there.
-        let naive = Cruise::plan(
-            from,
-            waypoint.place_at(&system, 0.0).unwrap(),
-            0.0,
-            Drive::DEFAULT,
-        );
+        let naive = Cruise::plan(from, waypoint.place_at(&system, 0.0).unwrap(), 0.0, Drive::DEFAULT);
         let naive_miss = naive.at(naive.duration_s()).position_ly.distance(wanted) * M_PER_LY;
         assert!(naive_miss > miss * 100.0, "{naive_miss:e} against {miss:e}");
     }
@@ -1197,29 +1018,17 @@ mod tests {
     fn a_transfer_between_two_orbits_of_one_body_arrives_moving_with_the_second() {
         let system = sol();
         let station = |altitude_radii: f64, plane: Plane| {
-            Course::Orbit {
-                body: "Neptune".into(),
-                altitude_radii,
-                plane,
-            }
-            .resolve(&system, DVec3::ZERO, 0.0)
-            .expect("an orbit of Neptune")
+            Course::Orbit { body: "Neptune".into(), altitude_radii, plane }
+                .resolve(&system, DVec3::ZERO, 0.0)
+                .expect("an orbit of Neptune")
         };
         let low = station(0.5, Plane::Equatorial);
         let high = station(4.0, Plane::Equatorial);
 
         let from = low.place_at(&system, 0.0).unwrap();
         let beta0 = crate::coast::beta_of(low.velocity_at(&system, 0.0).unwrap());
-        let (cruise, aimed) = plan(
-            &system,
-            &high,
-            from,
-            beta0,
-            DVec3::ZERO,
-            0.0,
-            Drive::DEFAULT,
-        )
-        .expect("a transfer");
+        let (cruise, aimed) =
+            plan(&system, &high, from, beta0, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a transfer");
 
         // A local transfer, so the injection is the honest form rather than the fallback.
         assert!(
@@ -1233,17 +1042,11 @@ mod tests {
         // It ends *on* the station, and *on* what the station is doing.
         let wanted = aimed.place_at(&system, arrival_s).unwrap();
         let miss = end.position_ly.distance(wanted) * M_PER_LY;
-        assert!(
-            miss < 2.4764e7,
-            "missed by {miss:e} m, more than a planetary radius"
-        );
+        assert!(miss < 2.4764e7, "missed by {miss:e} m, more than a planetary radius");
 
         let joining = crate::coast::beta_of(aimed.velocity_at(&system, arrival_s).unwrap());
         let short_m_s = (end.beta - joining).length() * crate::flight::C_M_S;
-        assert!(
-            short_m_s < 1.0,
-            "arrived {short_m_s} m/s away from the station's velocity"
-        );
+        assert!(short_m_s < 1.0, "arrived {short_m_s} m/s away from the station's velocity");
 
         // Which is a real amount of velocity, not a rounding: Neptune's own five kilometers a
         // second round the sun and the station's round Neptune. It used to appear out of nothing
@@ -1260,10 +1063,7 @@ mod tests {
             .aim_at(cruise.start_s + arrival_s)
             .from
             .expect("the boost pointed it somewhere");
-        assert!(
-            aim.dot(heading) < 0.0,
-            "it has to be braking: {aim} against {heading}"
-        );
+        assert!(aim.dot(heading) < 0.0, "it has to be braking: {aim} against {heading}");
         assert!(
             aim.dot(joining) > (-heading).dot(joining),
             "{aim} is no more aimed at {joining} than a plain brake would be",
@@ -1280,8 +1080,7 @@ mod tests {
         let system = sol();
         let star = system.star_position_ly();
         let leave = |from: DVec3| {
-            let Waypoint::Fixed(out) = Course::LeaveSystem.resolve(&system, from, 0.0).unwrap()
-            else {
+            let Waypoint::Fixed(out) = Course::LeaveSystem.resolve(&system, from, 0.0).unwrap() else {
                 panic!("leaving ends at a fixed point")
             };
             out - star
@@ -1290,23 +1089,14 @@ mod tests {
             let from = system.body_position_ly(body).unwrap();
             let offset = leave(from);
             let radius = (from - star).normalize();
-            assert!(
-                offset.normalize().dot(radius) > 0.999,
-                "{body} did not leave radially"
-            );
-            assert!(
-                offset.length() > crate::system::LOCAL_SHELL_LY,
-                "still inside the shell"
-            );
+            assert!(offset.normalize().dot(radius) > 0.999, "{body} did not leave radially");
+            assert!(offset.length() > crate::system::LOCAL_SHELL_LY, "still inside the shell");
         }
         // Two bodies on opposite sides of the star leave in opposite directions, which is the
         // whole difference from a fixed axis.
         let earth = leave(system.body_position_ly("Earth").unwrap()).normalize();
         let opposite = leave(star - (system.body_position_ly("Earth").unwrap() - star)).normalize();
-        assert!(
-            earth.dot(opposite) < -0.999,
-            "both departures went the same way"
-        );
+        assert!(earth.dot(opposite) < -0.999, "both departures went the same way");
 
         // A ship at the star itself has no radius to follow, and falls back to the axis.
         assert!(leave(star).normalize().dot(system.axis()) > 0.999);
@@ -1317,23 +1107,12 @@ mod tests {
     #[test]
     fn a_course_injects_at_the_nearest_point_of_the_orbit() {
         let system = sol();
-        let course = Course::Orbit {
-            body: "Earth".into(),
-            altitude_radii: 2.0,
-            plane: Plane::Equatorial,
-        };
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
         let waypoint = course.resolve(&system, DVec3::ZERO, 0.0).unwrap();
         let from = system.body_position_ly("Mars").expect("Mars");
-        let (cruise, aimed) = plan(
-            &system,
-            &waypoint,
-            from,
-            DVec3::ZERO,
-            DVec3::ZERO,
-            0.0,
-            Drive::DEFAULT,
-        )
-        .expect("a plan");
+        let (cruise, aimed) =
+            plan(&system, &waypoint, from, DVec3::ZERO, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a plan");
 
         let arrival_s = cruise.duration_s();
         let landed = aimed.place_at(&system, arrival_s).unwrap();
@@ -1341,35 +1120,22 @@ mod tests {
 
         // The nearest point, checked against the rest of the circle rather than against a
         // formula: no other phase of the same orbit is closer to where the ship started.
-        let Waypoint::Orbit(orbit) = &aimed else {
-            panic!("an orbit")
-        };
+        let Waypoint::Orbit(orbit) = &aimed else { panic!("an orbit") };
         let mut furthest: f64 = 0.0;
         for step in 1..36 {
             let mut elsewhere = orbit.clone();
             elsewhere.phase_rad += std::f64::consts::TAU * step as f64 / 36.0;
-            let other = Waypoint::Orbit(elsewhere)
-                .place_at(&system, arrival_s)
-                .unwrap();
+            let other = Waypoint::Orbit(elsewhere).place_at(&system, arrival_s).unwrap();
             let range = from.distance(other);
-            assert!(
-                range >= reach * (1.0 - 1e-9),
-                "{range:e} beats the chosen {reach:e}"
-            );
+            assert!(range >= reach * (1.0 - 1e-9), "{range:e} beats the chosen {reach:e}");
             furthest = furthest.max(range);
         }
         // And the far side is a whole diameter further, which is what injecting blind costs.
         let earth = system.origin_ly
-            + system
-                .body_state_at(system.body_named("Earth").unwrap(), arrival_s)
-                .unwrap()
-                .0
+            + system.body_state_at(system.body_named("Earth").unwrap(), arrival_s).unwrap().0
                 / M_PER_LY;
         let diameter = landed.distance(earth) * 2.0;
-        assert!(
-            furthest - reach > diameter * 0.9,
-            "the circle is not being crossed at all"
-        );
+        assert!(furthest - reach > diameter * 0.9, "the circle is not being crossed at all");
     }
 
     /// Aiming decides a phase, and the ship still goes round afterwards: the injection point
@@ -1377,11 +1143,8 @@ mod tests {
     #[test]
     fn an_aimed_orbit_still_turns() {
         let system = sol();
-        let course = Course::Orbit {
-            body: "Earth".into(),
-            altitude_radii: 2.0,
-            plane: Plane::Equatorial,
-        };
+        let course =
+            Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: Plane::Equatorial };
         let waypoint = course
             .resolve(&system, DVec3::ZERO, 0.0)
             .unwrap()
@@ -1403,17 +1166,12 @@ mod tests {
     #[test]
     fn a_ring_course_stands_outside_the_rings_and_out_of_their_plane() {
         let system = sol();
-        let Waypoint::Orbit(orbit) = Course::Rings("Saturn".into())
-            .resolve(&system, DVec3::ZERO, 0.0)
-            .unwrap()
+        let Waypoint::Orbit(orbit) = Course::Rings("Saturn".into()).resolve(&system, DVec3::ZERO, 0.0).unwrap()
         else {
             panic!("rings are an orbit")
         };
         let rings = crate::rings::for_body("Saturn").expect("Saturn has rings");
-        assert!(
-            orbit.radius_m > rings.outer_m(),
-            "inside the annulus is the degenerate case"
-        );
+        assert!(orbit.radius_m > rings.outer_m(), "inside the annulus is the degenerate case");
 
         // The orbit's own normal is tilted from the ring pole, so the station rises out of the
         // plane rather than running along it.
@@ -1423,44 +1181,20 @@ mod tests {
 
         // And the highest it gets is a real fraction of the way out of the plane.
         let highest = orbit.radius_m * RING_TILT_RAD.sin();
-        assert!(
-            highest > rings.outer_m() * 0.4,
-            "only {highest:e} above the rings"
-        );
+        assert!(highest > rings.outer_m() * 0.4, "only {highest:e} above the rings");
     }
 
     #[test]
     fn a_body_without_rings_or_a_parent_refuses_rather_than_guessing() {
         let system = sol();
-        assert!(
-            Course::Rings("Earth".into())
-                .resolve(&system, DVec3::ZERO, 0.0)
-                .is_none()
-        );
-        assert!(
-            Course::Rings("Nowhere".into())
-                .resolve(&system, DVec3::ZERO, 0.0)
-                .is_none()
-        );
-        assert!(
-            Course::Orbit {
-                body: "Nowhere".into(),
-                altitude_radii: 1.0,
-                plane: Plane::Polar
-            }
+        assert!(Course::Rings("Earth".into()).resolve(&system, DVec3::ZERO, 0.0).is_none());
+        assert!(Course::Rings("Nowhere".into()).resolve(&system, DVec3::ZERO, 0.0).is_none());
+        assert!(Course::Orbit { body: "Nowhere".into(), altitude_radii: 1.0, plane: Plane::Polar }
             .resolve(&system, DVec3::ZERO, 0.0)
-            .is_none()
-        );
+            .is_none());
         // The primary is the one body with nothing to librate against.
         let star = system.sim().name(system.primary()).to_string();
-        assert!(
-            Course::Lagrange {
-                body: star,
-                point: LagrangePoint::L1
-            }
-            .resolve(&system, DVec3::ZERO, 0.0)
-            .is_none()
-        );
+        assert!(Course::Lagrange { body: star, point: LagrangePoint::L1 }.resolve(&system, DVec3::ZERO, 0.0).is_none());
     }
 
     /// A generated system has no measured data in it at all, and every course still has to
@@ -1468,25 +1202,13 @@ mod tests {
     #[test]
     fn a_generated_system_navigates_too() {
         let system = generated();
-        assert!(
-            Course::LeaveSystem
-                .resolve(&system, DVec3::ZERO, 0.0)
-                .is_some()
-        );
+        assert!(Course::LeaveSystem.resolve(&system, DVec3::ZERO, 0.0).is_some());
         let belts = (0..system.populations.len())
             .filter_map(|i| Course::Belt(i).resolve(&system, DVec3::ZERO, 0.0))
             .count();
-        assert_eq!(
-            belts,
-            system.populations.len(),
-            "every population is somewhere to go"
-        );
+        assert_eq!(belts, system.populations.len(), "every population is somewhere to go");
         let flat = system.populations.iter().filter(|p| is_flat(p)).count();
-        assert_eq!(
-            flat,
-            system.populations.len() - 1,
-            "all but the cloud are flat"
-        );
+        assert_eq!(flat, system.populations.len() - 1, "all but the cloud are flat");
     }
 
     #[test]
@@ -1494,16 +1216,10 @@ mod tests {
         let system = sol();
         assert_eq!(Course::parse("leave"), Some(Course::LeaveSystem));
         assert_eq!(Course::parse("belt:1"), Some(Course::Belt(1)));
-        assert_eq!(
-            Course::parse("rings:Saturn"),
-            Some(Course::Rings("Saturn".into()))
-        );
+        assert_eq!(Course::parse("rings:Saturn"), Some(Course::Rings("Saturn".into())));
         assert!(matches!(
             Course::parse("l2:Earth"),
-            Some(Course::Lagrange {
-                point: LagrangePoint::L2,
-                ..
-            })
+            Some(Course::Lagrange { point: LagrangePoint::L2, .. })
         ));
         let Some(Course::Orbit { plane, .. }) = Course::parse("polar:Earth") else {
             panic!("polar is an orbit")
@@ -1515,18 +1231,8 @@ mod tests {
             panic!("an altitude may be named")
         };
         assert_eq!(altitude_radii, 20.0);
-        assert_eq!(
-            Course::parse("orbit:Earth:enormous"),
-            None,
-            "and only as the table names it"
-        );
-        assert!(
-            Course::parse("belt:9")
-                .unwrap()
-                .resolve(&system, DVec3::ZERO, 0.0)
-                .is_none(),
-            "and out of range"
-        );
+        assert_eq!(Course::parse("orbit:Earth:enormous"), None, "and only as the table names it");
+        assert!(Course::parse("belt:9").unwrap().resolve(&system, DVec3::ZERO, 0.0).is_none(), "and out of range");
     }
 
     /// The list a player reads: outward from the star, with each planet's moons behind it.
@@ -1535,20 +1241,14 @@ mod tests {
         let system = sol();
         let inventory = system.inventory();
         let named = |name: &str| {
-            inventory
-                .iter()
-                .position(|e| e.designation == name)
-                .unwrap_or_else(|| panic!("{name} is not in the inventory"))
+            inventory.iter().position(|e| e.designation == name).unwrap_or_else(|| {
+                panic!("{name} is not in the inventory")
+            })
         };
         // The primary comes first, then the planets by their own distance.
         assert_eq!(inventory[0].kind, Kind::Star);
         for pair in ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn"].windows(2) {
-            assert!(
-                named(pair[0]) < named(pair[1]),
-                "{} is not inside {}",
-                pair[0],
-                pair[1]
-            );
+            assert!(named(pair[0]) < named(pair[1]), "{} is not inside {}", pair[0], pair[1]);
         }
         // A moon sits behind its planet and before the next one out.
         assert!(named("Jupiter") < named("Io"));
@@ -1560,10 +1260,7 @@ mod tests {
             .iter()
             .position(|e| e.kind == Kind::Band && e.designation.starts_with("belt"))
             .expect("a belt");
-        assert!(
-            named("Mars") < belt && belt < named("Jupiter"),
-            "the belt is misplaced"
-        );
+        assert!(named("Mars") < belt && belt < named("Jupiter"), "the belt is misplaced");
         // And a moon is one step down from a planet, which is what indents it.
         assert_eq!(inventory[named("Jupiter")].depth, 1);
         assert_eq!(inventory[named("Io")].depth, 2);
@@ -1574,59 +1271,31 @@ mod tests {
     fn the_inventory_knows_what_each_thing_is() {
         let system = sol();
         let kind = |name: &str| {
-            system
-                .inventory()
-                .iter()
-                .find(|e| e.designation == name)
-                .map(|e| e.kind)
+            system.inventory().iter().find(|e| e.designation == name).map(|e| e.kind)
         };
         assert_eq!(kind("Sol"), Some(Kind::Star));
         assert_eq!(kind("Earth"), Some(Kind::Planet));
         assert_eq!(kind("Luna"), Some(Kind::Moon));
-        assert_eq!(
-            kind("Pluto"),
-            Some(Kind::Planet),
-            "a dwarf planet is still a planet to fly to"
-        );
+        assert_eq!(kind("Pluto"), Some(Kind::Planet), "a dwarf planet is still a planet to fly to");
         // Forty-one of the solar system's two hundred and thirty bodies are the ones it is
         // usually described by, and a list of all of them is unreadable without that.
         let major = system.inventory().iter().filter(|e| e.major).count();
-        assert!(
-            (30..80).contains(&major),
-            "{major} major bodies is not a system summary"
-        );
-        assert!(
-            system.inventory().len() > 200,
-            "and the rest are still there to be asked for"
-        );
+        assert!((30..80).contains(&major), "{major} major bodies is not a system summary");
+        assert!(system.inventory().len() > 200, "and the rest are still there to be asked for");
     }
 
     /// A body is called what it is called; only one with nothing at all gets invented a name.
     #[test]
     fn a_designation_prefers_the_name_then_the_catalogue_then_a_numeral() {
         assert_eq!(designate(Some("Titan"), Some("S VI"), "Saturn", 6), "Titan");
-        assert_eq!(
-            designate(None, Some("S/2004 S 13"), "Saturn", 40),
-            "S/2004 S 13"
-        );
+        assert_eq!(designate(None, Some("S/2004 S 13"), "Saturn", 40), "S/2004 S 13");
         assert_eq!(designate(None, None, "Saturn", 7), "Saturn VII");
-        assert_eq!(
-            designate(Some(""), None, "Kepler", 3),
-            "Kepler III",
-            "empty is not a name"
-        );
+        assert_eq!(designate(Some(""), None, "Kepler", 3), "Kepler III", "empty is not a name");
     }
 
     #[test]
     fn roman_numerals_are_roman() {
-        for (n, want) in [
-            (1, "I"),
-            (4, "IV"),
-            (9, "IX"),
-            (14, "XIV"),
-            (40, "XL"),
-            (1987, "MCMLXXXVII"),
-        ] {
+        for (n, want) in [(1, "I"), (4, "IV"), (9, "IX"), (14, "XIV"), (40, "XL"), (1987, "MCMLXXXVII")] {
             assert_eq!(roman(n), want);
         }
         // Out of range falls back to digits rather than to nonsense.
@@ -1655,18 +1324,12 @@ mod tests {
 
         let star = labels("Sol");
         assert!(star.contains(&"leave the system".to_string()));
-        assert!(
-            !star.iter().any(|l| l.contains("companion")),
-            "the primary has no parent"
-        );
+        assert!(!star.iter().any(|l| l.contains("companion")), "the primary has no parent");
 
         assert_eq!(labels("Nowhere"), Vec::<String>::new());
         let band = options_for(&system, &Target::Band(0));
         assert_eq!(band.len(), 1);
-        assert!(
-            band[0].1.resolve(&system, DVec3::ZERO, 0.0).is_some(),
-            "and it is a course that resolves"
-        );
+        assert!(band[0].1.resolve(&system, DVec3::ZERO, 0.0).is_some(), "and it is a course that resolves");
     }
 
     /// Every option the interface offers has to resolve, or a Go button lies.
@@ -1684,16 +1347,11 @@ mod tests {
         }
     }
 
+
     /// The basis has to be orthonormal whatever it is handed, including a degenerate pole.    /// The basis has to be orthonormal whatever it is handed, including a degenerate pole.
     #[test]
     fn the_orbital_basis_is_orthonormal_everywhere() {
-        for pole in [
-            DVec3::Z,
-            DVec3::X,
-            -DVec3::Z,
-            DVec3::ZERO,
-            DVec3::new(1.0, 1.0, 1.0),
-        ] {
+        for pole in [DVec3::Z, DVec3::X, -DVec3::Z, DVec3::ZERO, DVec3::new(1.0, 1.0, 1.0)] {
             let (u, v) = basis(pole);
             assert!((u.length() - 1.0).abs() < 1e-12, "{pole} gave {u}");
             assert!((v.length() - 1.0).abs() < 1e-12, "{pole} gave {v}");
@@ -1701,3 +1359,4 @@ mod tests {
         }
     }
 }
+

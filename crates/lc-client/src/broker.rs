@@ -24,10 +24,7 @@ pub struct Granted {
 
 impl Broker {
     pub fn new(base: &str, audience: &str) -> Self {
-        Self {
-            base: base.trim_end_matches('/').to_owned(),
-            audience: audience.to_owned(),
-        }
+        Self { base: base.trim_end_matches('/').to_owned(), audience: audience.to_owned() }
     }
 
     /// Trade a sign-in code for a device grant.
@@ -120,17 +117,11 @@ impl Broker {
 pub fn identity_in(ticket: &str) -> Option<Identity> {
     use base64::Engine;
     let payload = ticket.split('.').nth(1)?;
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .ok()?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload).ok()?;
     let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     Some(Identity {
         account_id: claims.get("sub")?.as_str()?.to_owned(),
-        display_name: claims
-            .get("name")
-            .and_then(|n| n.as_str())
-            .unwrap_or("")
-            .to_owned(),
+        display_name: claims.get("name").and_then(|n| n.as_str()).unwrap_or("").to_owned(),
     })
 }
 
@@ -148,24 +139,15 @@ mod tests {
 
     #[test]
     fn a_trailing_slash_does_not_become_a_double_one() {
-        assert_eq!(
-            Broker::new("https://accounts.example/", "shard-1").base,
-            "https://accounts.example"
-        );
-        assert_eq!(
-            Broker::new("https://accounts.example", "shard-1").base,
-            "https://accounts.example"
-        );
+        assert_eq!(Broker::new("https://accounts.example/", "shard-1").base, "https://accounts.example");
+        assert_eq!(Broker::new("https://accounts.example", "shard-1").base, "https://accounts.example");
     }
 
     #[test]
     fn a_missing_field_is_a_fault_and_not_a_refusal() {
         let answer = ureq::json!({ "grant": "g" });
         assert!(matches!(field(&answer, "grant"), Ok(value) if value == "g"));
-        assert!(matches!(
-            field(&answer, "account_id"),
-            Err(BrokerError::Unreachable(_))
-        ));
+        assert!(matches!(field(&answer, "account_id"), Err(BrokerError::Unreachable(_))));
     }
 
     /// The distinction the whole error type exists for. A refused credential should sign the

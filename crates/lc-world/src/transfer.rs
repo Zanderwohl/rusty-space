@@ -54,10 +54,7 @@ impl Transfer {
     pub fn frame_at(&self, system: &LocalSystem, now_s: f64) -> Option<(DVec3, DVec3)> {
         let index = system.body_named(&self.about)?;
         let (at_m, velocity) = system.body_state_at(index, now_s)?;
-        Some((
-            system.origin_ly + at_m / M_PER_LY,
-            crate::coast::beta_of(velocity),
-        ))
+        Some((system.origin_ly + at_m / M_PER_LY, crate::coast::beta_of(velocity)))
     }
 
     /// Where the ship is and how fast, in world coordinates.
@@ -113,20 +110,15 @@ pub fn primary_for(
     from_ly: DVec3,
     now_s: f64,
 ) -> Option<String> {
-    let Waypoint::Orbit(orbit) = waypoint else {
-        return None;
-    };
-    let Anchor::Body(name) = &orbit.about else {
-        return None;
-    };
+    let Waypoint::Orbit(orbit) = waypoint else { return None };
+    let Anchor::Body(name) = &orbit.about else { return None };
     let index = system.body_named(name)?;
     let soi = em_sim::influence::soi_at(
         system.sim(),
         index,
         em_foundations::time::Instant::from_seconds_since_j2000(now_s),
     )?;
-    soi.contains((from_ly - system.origin_ly) * M_PER_LY)
-        .then(|| name.clone())
+    soi.contains((from_ly - system.origin_ly) * M_PER_LY).then(|| name.clone())
 }
 
 /// Plan a transfer to where a station about `about` will be, in that body's frame.
@@ -166,20 +158,14 @@ pub fn plan(
         // has run out from under it and the near side of the orbit is on the wrong side.
         aimed = waypoint.nearest_to(body_ly + from_rel, system, arrival_s);
         let to_rel = aimed.place_at(system, arrival_s)? - body_ly;
-        let onto_rel = crate::coast::beta_of(aimed.velocity_at(system, arrival_s)?) - body_beta;
-        let next = Cruise::plan_onto(
-            from_rel, beta_rel, to_rel, onto_rel, attitude0, start_s, drive,
-        );
+        let onto_rel =
+            crate::coast::beta_of(aimed.velocity_at(system, arrival_s)?) - body_beta;
+        let next =
+            Cruise::plan_onto(from_rel, beta_rel, to_rel, onto_rel, attitude0, start_s, drive);
         arrival_s = start_s + next.duration_s();
         cruise = Some(next);
     }
-    Some((
-        Transfer {
-            cruise: cruise?,
-            about: about.to_string(),
-        },
-        aimed,
-    ))
+    Some((Transfer { cruise: cruise?, about: about.to_string() }, aimed))
 }
 
 #[cfg(test)]
@@ -203,13 +189,9 @@ mod tests {
     }
 
     fn station(system: &LocalSystem, body: &str, altitude_radii: f64) -> Waypoint {
-        Course::Orbit {
-            body: body.into(),
-            altitude_radii,
-            plane: Plane::Equatorial,
-        }
-        .resolve(system, DVec3::ZERO, 0.0)
-        .expect("an orbit")
+        Course::Orbit { body: body.into(), altitude_radii, plane: Plane::Equatorial }
+            .resolve(system, DVec3::ZERO, 0.0)
+            .expect("an orbit")
     }
 
     /// Where a transfer starts: on a station about the body, moving with it.
@@ -226,22 +208,10 @@ mod tests {
     #[test]
     fn a_transfer_about_earth_lands_where_the_world_frame_could_not() {
         let system = sol();
-        let (low, high) = (
-            station(&system, "Earth", 0.5),
-            station(&system, "Earth", 4.0),
-        );
+        let (low, high) = (station(&system, "Earth", 0.5), station(&system, "Earth", 4.0));
         let (from, beta0) = departing(&system, &low);
-        let (transfer, aimed) = plan(
-            &system,
-            "Earth",
-            &high,
-            from,
-            beta0,
-            DVec3::ZERO,
-            0.0,
-            Drive::DEFAULT,
-        )
-        .expect("a transfer");
+        let (transfer, aimed) =
+            plan(&system, "Earth", &high, from, beta0, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a transfer");
 
         let arrival_s = transfer.duration_s();
         let (at, beta) = transfer.state_at(&system, arrival_s).expect("a place");
@@ -257,18 +227,12 @@ mod tests {
             Waypoint::Orbit(orbit) => orbit.radius_m,
             _ => unreachable!("an orbit"),
         };
-        assert!(
-            ran_m > radius_m,
-            "premise: Earth ran {ran_m:e} m against a {radius_m:e} m orbit"
-        );
+        assert!(ran_m > radius_m, "premise: Earth ran {ran_m:e} m against a {radius_m:e} m orbit");
 
         // And it arrives *on* the station rather than beside it.
         let joining = crate::coast::beta_of(aimed.velocity_at(&system, arrival_s).unwrap());
         let short_m_s = (beta - joining).length() * C_M_S;
-        assert!(
-            short_m_s < 1.0e-3,
-            "arrived {short_m_s} m/s off the station's velocity"
-        );
+        assert!(short_m_s < 1.0e-3, "arrived {short_m_s} m/s off the station's velocity");
     }
 
     /// The frame is the body, so the ship is carried by it the whole way rather than watching it
@@ -276,22 +240,10 @@ mod tests {
     #[test]
     fn the_ship_is_carried_along_rather_than_left_behind() {
         let system = sol();
-        let (low, high) = (
-            station(&system, "Earth", 0.5),
-            station(&system, "Earth", 4.0),
-        );
+        let (low, high) = (station(&system, "Earth", 0.5), station(&system, "Earth", 4.0));
         let (from, beta0) = departing(&system, &low);
-        let (transfer, _) = plan(
-            &system,
-            "Earth",
-            &high,
-            from,
-            beta0,
-            DVec3::ZERO,
-            0.0,
-            Drive::DEFAULT,
-        )
-        .expect("a transfer");
+        let (transfer, _) =
+            plan(&system, "Earth", &high, from, beta0, DVec3::ZERO, 0.0, Drive::DEFAULT).expect("a transfer");
 
         let radius_m = match &high {
             Waypoint::Orbit(orbit) => orbit.radius_m,
@@ -312,20 +264,14 @@ mod tests {
         let system = sol();
         let low = station(&system, "Earth", 0.5);
         let earth = system.body_position_at("Earth", 0.0).unwrap();
-        assert_eq!(
-            primary_for(&system, &low, earth, 0.0).as_deref(),
-            Some("Earth")
-        );
+        assert_eq!(primary_for(&system, &low, earth, 0.0).as_deref(), Some("Earth"));
 
         // From Mars, Earth's frame is not one this ship is falling with.
         let mars = system.body_position_at("Mars", 0.0).unwrap();
         assert_eq!(primary_for(&system, &low, mars, 0.0), None);
 
         // And a fixed point in space is about nothing at all.
-        assert_eq!(
-            primary_for(&system, &Waypoint::Fixed(earth), earth, 0.0),
-            None
-        );
+        assert_eq!(primary_for(&system, &Waypoint::Fixed(earth), earth, 0.0), None);
 
         // Nor does the star get one. Its influence has no outer edge, so asking which body holds
         // a point names it wherever the point is — including four light-years out, where a
@@ -333,9 +279,6 @@ mod tests {
         let sun = station(&system, "Sol", 1.0);
         let far = system.star_position_ly() + DVec3::X * 4.2;
         assert_eq!(primary_for(&system, &sun, far, 0.0), None);
-        assert_eq!(
-            primary_for(&system, &sun, system.star_position_ly(), 0.0),
-            None
-        );
+        assert_eq!(primary_for(&system, &sun, system.star_position_ly(), 0.0), None);
     }
 }

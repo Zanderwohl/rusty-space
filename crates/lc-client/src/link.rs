@@ -310,9 +310,7 @@ mod browser {
                     // a page would let it probe the network it is on. There is nothing more to
                     // report than that it did.
                     let mut shared = shared.lock().unwrap();
-                    shared
-                        .closed
-                        .get_or_insert_with(|| "the connection failed".to_string());
+                    shared.closed.get_or_insert_with(|| "the connection failed".to_string());
                 })
             };
             socket.set_onerror(Some(on_error.as_ref().unchecked_ref()));
@@ -335,8 +333,7 @@ mod browser {
     }
 
     fn describe(why: &wasm_bindgen::JsValue) -> String {
-        why.as_string()
-            .unwrap_or_else(|| "the socket could not be opened".to_string())
+        why.as_string().unwrap_or_else(|| "the socket could not be opened".to_string())
     }
 
     impl Link for BrowserLink {
@@ -345,10 +342,7 @@ mod browser {
             // first open there is nowhere to put it but here.
             if self.is_open() && !self.queued.is_empty() {
                 for message in std::mem::take(&mut self.queued) {
-                    let _ = self
-                        .inner
-                        .socket
-                        .send_with_u8_array(&lc_proto::encode(&message));
+                    let _ = self.inner.socket.send_with_u8_array(&lc_proto::encode(&message));
                 }
             }
             std::mem::take(&mut self.shared.lock().unwrap().incoming)
@@ -356,10 +350,7 @@ mod browser {
 
         fn send(&mut self, message: Inbound) {
             if self.is_open() {
-                let _ = self
-                    .inner
-                    .socket
-                    .send_with_u8_array(&lc_proto::encode(&message));
+                let _ = self.inner.socket.send_with_u8_array(&lc_proto::encode(&message));
             } else {
                 self.queued.push(message);
             }

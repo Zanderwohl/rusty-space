@@ -191,9 +191,7 @@ impl Session {
 
     /// The star whose system the ship is inside, if it is inside one.
     pub fn local_star(&self) -> Option<&CatalogueStar> {
-        self.stars
-            .iter()
-            .find(|s| self.distance_to(s) < crate::starfield::LOCAL_SHELL_LY)
+        self.stars.iter().find(|s| self.distance_to(s) < crate::starfield::LOCAL_SHELL_LY)
     }
 
     /// Load or drop the local system, and propagate it to now.
@@ -250,11 +248,7 @@ impl Session {
 
     /// How fast the ship is going, meters a second, world frame.
     pub fn velocity_m_s(&self) -> DVec3 {
-        motion::velocity_m_s(
-            &self.ship.motion,
-            self.system.as_deref(),
-            self.coordinate_time_s(),
-        )
+        motion::velocity_m_s(&self.ship.motion, self.system.as_deref(), self.coordinate_time_s())
     }
 
     /// The crossing under way, if there is one.
@@ -345,12 +339,7 @@ impl Session {
     pub fn fly_to(&mut self, id: StarId) -> Option<&Cruise> {
         let to_ly = self.star(id)?.position_ly;
         let drive = self.ship.motion.drive;
-        self.cross_to_at(
-            self.coordinate_time_s(),
-            to_ly,
-            drive.accel_g,
-            drive.max_beta,
-        )
+        self.cross_to_at(self.coordinate_time_s(), to_ly, drive.accel_g, drive.max_beta)
     }
 
     /// Cross to a coordinate at a stated time and acceleration.
@@ -389,12 +378,7 @@ impl Session {
     /// star itself.
     pub fn set_course(&mut self, course: &crate::navigation::Course) -> Option<String> {
         let drive = self.ship.motion.drive;
-        self.set_course_at(
-            self.coordinate_time_s(),
-            course,
-            drive.accel_g,
-            drive.max_beta,
-        )
+        self.set_course_at(self.coordinate_time_s(), course, drive.accel_g, drive.max_beta)
     }
 
     /// Set a course at a stated time and acceleration.
@@ -416,14 +400,12 @@ impl Session {
         let event = motion::Event {
             ship: motion::ShipId(0),
             at_t: at_s,
-            change: motion::Change::SetCourse {
-                course: course.clone(),
-                drive,
-            },
+            change: motion::Change::SetCourse { course: course.clone(), drive },
         };
         self.ship.apply(&event).ok()?;
         self.ship.motion.bound_for().map(|w| w.label())
     }
+
 
     /// Put the ship back as the server has it — where, how fast, how old, and **what it is
     /// doing**.
@@ -516,7 +498,7 @@ impl Session {
             None => Duty::Idle,
         };
         self.aim(id);
-    }
+        }
 
     /// Aim without saying what the instrument is doing there, which a rotation needs: a watch
     /// points at each target in turn and is still a watch.
@@ -526,10 +508,10 @@ impl Session {
             && !self.targets.contains_key(&id)
             && let Some(star) = self.stars.iter().find(|s| s.id == id)
         {
-            let target = build_target(star);
-            self.targets.insert(id, target);
-        }
-    }
+                    let target = build_target(star);
+                    self.targets.insert(id, target);
+                }
+            }
 
     /// Put the telescope on a duty, starting its clock now.
     pub fn take_up(&mut self, duty: Duty) {
@@ -711,11 +693,8 @@ impl Session {
     /// a couple of hundred pixels across it outweighs six thousand stars together and takes
     /// the exposure with it, which is what a photograph of a planet looks like.
     pub fn expose_to_percentile(&mut self, fraction: f32) {
-        let point_sr = if self.scene.point_sr > 0.0 {
-            self.scene.point_sr
-        } else {
-            NOMINAL_POINT_SR
-        };
+        let point_sr =
+            if self.scene.point_sr > 0.0 { self.scene.point_sr } else { NOMINAL_POINT_SR };
         let mut samples: Vec<(f32, f32)> =
             Vec::with_capacity(self.stars.len() + self.scene.points.len() + self.scene.discs.len());
         let mut push = |brightness: f32, weight: f32| {
@@ -733,10 +712,7 @@ impl Session {
             // Floored at a point's weight: a body at the crossover is drawn at a pixel or two
             // whatever its true angle, and metering it at less than that would let a
             // just-resolved body count for nothing while being fully visible.
-            push(
-                luminance_of(&disc.radiance, &self.mapping),
-                disc.solid_angle_sr.max(point_sr),
-            );
+            push(luminance_of(&disc.radiance, &self.mapping), disc.solid_angle_sr.max(point_sr));
         }
         if samples.is_empty() {
             return;
@@ -843,22 +819,14 @@ fn spectrum_at(teff_k: f64) -> PerBand<f32> {
 /// a large shift the observer's V band samples what left the system somewhere else entirely.
 /// Correcting it needs the emission model evaluated at shifted band centers, which the world
 /// crate does not expose yet.
-fn received(
-    observation: &Observation,
-    teff_k: f64,
-    radius_m: f64,
-    distance_m: f64,
-) -> PerBand<f32> {
+fn received(observation: &Observation, teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
     let g = geometry(radius_m, distance_m);
     PerBand::new(std::array::from_fn(|i| {
         let band = Band::ALL[i];
         let full = blackbody::band_radiance(band, teff_k) * g;
         // Relative flux, not one minus the deficit: a warm population adds where a cold one
         // only subtracts, and in the thermal infrared the sum can exceed the bare star.
-        let relative = observation
-            .band(band)
-            .map(|m| m.relative_flux())
-            .unwrap_or(1.0);
+        let relative = observation.band(band).map(|m| m.relative_flux()).unwrap_or(1.0);
         (full * relative) as f32
     }))
 }
@@ -931,10 +899,7 @@ mod tests {
         let mut s = session();
         s.advance(3600.0);
         let years = s.coordinate_time_s() / 31_557_600.0;
-        assert!(
-            (years - 1.0).abs() < 1e-6,
-            "an hour should be {years} years"
-        );
+        assert!((years - 1.0).abs() < 1e-6, "an hour should be {years} years");
     }
 
     #[test]
@@ -976,28 +941,14 @@ mod tests {
         stars.insert(0, sun);
 
         let s = Session::new(&AuthoredStars::new("many", stars), 201);
-        let visible = s
-            .sky()
-            .iter()
-            .filter(|x| point_color(&x.shaded).length() > 0.0)
-            .count();
-        assert!(
-            visible > 150,
-            "only {visible} of 201 stars survived the exposure"
-        );
+        let visible = s.sky().iter().filter(|x| point_color(&x.shaded).length() > 0.0).count();
+        assert!(visible > 150, "only {visible} of 201 stars survived the exposure");
 
         // Exposing for the maximum instead is the failure: the field goes out.
         let mut naive = Session::new(&AuthoredStars::new("many", s.stars.clone()), 201);
         naive.expose_to_percentile(1.0);
-        let left = naive
-            .sky()
-            .iter()
-            .filter(|x| point_color(&x.shaded).length() > 0.0)
-            .count();
-        assert!(
-            left < 5,
-            "{left} stars should have survived exposing for the Sun"
-        );
+        let left = naive.sky().iter().filter(|x| point_color(&x.shaded).length() > 0.0).count();
+        assert!(left < 5, "{left} stars should have survived exposing for the Sun");
     }
 
     // The world model moved to `lc-world`; these two stayed, because what they check is the
@@ -1016,16 +967,10 @@ mod tests {
             64,
         );
         session.sync_system();
-        assert!(
-            session.system.is_some(),
-            "the ship starts inside the solar system"
-        );
+        assert!(session.system.is_some(), "the ship starts inside the solar system");
 
-        let course = lc_world::navigation::Course::Orbit {
-            body: "Earth".into(),
-            altitude_radii: 2.0,
-            plane: lc_world::navigation::Plane::Equatorial,
-        };
+        let course =
+            lc_world::navigation::Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: lc_world::navigation::Plane::Equatorial };
         let label = session.set_course(&course).expect("a course to Earth");
         assert_eq!(label, "orbit of Earth");
         assert!(session.cruise().is_some(), "and a crossing to fly it");
@@ -1042,46 +987,30 @@ mod tests {
         // Nothing holds it but itself: arriving turned the crossing into the station it was
         // flown for, and `advance` reads the place every step. This used to need a helper here
         // that did by hand what the model does.
-        assert!(
-            session.station().is_some(),
-            "arriving did not become holding"
-        );
+        assert!(session.station().is_some(), "arriving did not become holding");
         // Earth read at the same instant as the ship. Reading it out of the arena, which no
         // longer advances, put the "altitude" at six hundred planetary radii.
         let altitude = |session: &Session| {
             let now = session.coordinate_time_s();
-            let earth = session
-                .system
-                .as_ref()
-                .unwrap()
-                .body_position_at("Earth", now)
-                .unwrap();
+            let earth =
+                session.system.as_ref().unwrap().body_position_at("Earth", now).unwrap();
             session.ship.motion.position_ly.distance(earth) * lc_world::system::M_PER_LY / 6.371e6
         };
-        assert!(
-            (altitude(&session) - 3.0).abs() < 0.05,
-            "arrived at {}",
-            altitude(&session)
-        );
+        assert!((altitude(&session) - 3.0).abs() < 0.05, "arrived at {}", altitude(&session));
 
         // And an hour later, with Earth thirty thousand kilometers further round its year.
         for _ in 0..40 {
             session.advance(0.1);
         }
-        assert!(
-            (altitude(&session) - 3.0).abs() < 0.05,
-            "drifted to {}",
-            altitude(&session)
-        );
+        assert!((altitude(&session) - 3.0).abs() < 0.05, "drifted to {}", altitude(&session));
     }
 
-    /// The whole of it through the session: fly a course, cut the engine partway, and end up
+/// The whole of it through the session: fly a course, cut the engine partway, and end up
     /// on a real orbit that is then held without thrust.
     #[test]
     fn canceling_a_crossing_leaves_the_ship_on_a_conic() {
-        let provider = lc_world::sky::hyg::HygProvider::load(
-            "../../assets/catalogs/hygdata_v42_dist_sort.csv",
-        );
+        let provider =
+            lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv");
         let Ok(provider) = provider else { return };
         let mut session = Session::new(&provider, 64);
         session.sync_system();
@@ -1114,12 +1043,10 @@ mod tests {
         for _ in 0..20 {
             session.advance(0.05);
         }
-        assert!(
-            session.ship.motion.position_ly != before,
-            "a coasting ship is not parked"
-        );
+        assert!(session.ship.motion.position_ly != before, "a coasting ship is not parked");
         assert!(session.coast().is_some(), "and it is still on an arc");
     }
+
 
     /// A sky with nothing in it but stars must meter exactly as a count percentile did: every
     /// point carries the same weight, so the solid angle divides out of both the samples and
@@ -1132,10 +1059,7 @@ mod tests {
         let coarse = s.tone.reference;
         s.scene.point_sr = NOMINAL_POINT_SR * 1000.0;
         s.auto_expose();
-        assert_eq!(
-            s.tone.reference, coarse,
-            "a point reference cannot depend on the zoom"
-        );
+        assert_eq!(s.tone.reference, coarse, "a point reference cannot depend on the zoom");
         assert!(
             (s.tone.surface_reference * s.scene.point_sr / s.tone.reference - 1.0).abs() < 1e-5,
             "and the two references are one metering, a solid angle apart",
@@ -1155,10 +1079,7 @@ mod tests {
             s.scene = Scene {
                 point_sr: NOMINAL_POINT_SR,
                 points: vec![faint; crowd],
-                discs: vec![Disc {
-                    radiance: bright,
-                    solid_angle_sr: sr,
-                }],
+                discs: vec![Disc { radiance: bright, solid_angle_sr: sr }],
             };
             s.auto_expose();
             s.tone.surface_reference
@@ -1168,14 +1089,8 @@ mod tests {
         let edge = (crowd + s.stars.len()) as f32 * (1.0 / 0.98 - 1.0) * NOMINAL_POINT_SR;
         let small = meter(&mut s, edge * 0.5);
         let large = meter(&mut s, edge * 2.0);
-        assert!(
-            small < bright[Band::V],
-            "a body under the line leaves the field exposed"
-        );
-        assert!(
-            large > small * 1.0e6,
-            "and over it the body is what is exposed for"
-        );
+        assert!(small < bright[Band::V], "a body under the line leaves the field exposed");
+        assert!(large > small * 1.0e6, "and over it the body is what is exposed for");
     }
 
     /// Faint points are still points: a body that has not resolved yet is metered by the flux
@@ -1192,10 +1107,7 @@ mod tests {
         let one_bright_point = s.tone.reference;
         s.scene.points = vec![PerBand::splat(1.0e3f32); 3];
         s.auto_expose();
-        assert!(
-            s.tone.reference >= one_bright_point,
-            "more bright points, not a brighter one"
-        );
+        assert!(s.tone.reference >= one_bright_point, "more bright points, not a brighter one");
         assert!(s.tone.reference.is_finite() && s.tone.reference > 0.0);
     }
 
@@ -1203,18 +1115,12 @@ mod tests {
     fn auto_exposure_puts_the_brightest_star_at_the_top_of_the_window() {
         let s = session();
         let sky = s.sky();
-        assert!(
-            sky.iter().any(|x| x.shaded.color().length() > 0.0),
-            "something must be visible"
-        );
+        assert!(sky.iter().any(|x| x.shaded.color().length() > 0.0), "something must be visible");
         let brightest = sky
             .iter()
             .map(|x| x.shaded.color().max_element())
             .fold(0.0f32, f32::max);
-        assert!(
-            brightest > 0.99,
-            "the brightest should fill the window, got {brightest}"
-        );
+        assert!(brightest > 0.99, "the brightest should fill the window, got {brightest}");
     }
 
     /// The bug this exists for: a fixed reference of 1.0 is thirty stops above a star's
@@ -1256,10 +1162,7 @@ mod tests {
     #[test]
     fn a_modeled_system_accumulates_a_curve_over_time() {
         let mut s = session();
-        s.telescope = s
-            .telescope
-            .with_aperture(1e4)
-            .with_bands(em_spectra::BandMask::ALL);
+        s.telescope = s.telescope.with_aperture(1e4).with_bands(em_spectra::BandMask::ALL);
         s.point_at(Some(s.stars[0].id));
         for _ in 0..200 {
             s.advance(6.0);
@@ -1267,10 +1170,7 @@ mod tests {
         }
         assert_eq!(s.curve().len(), 200);
         let (first, last) = s.curve().span().unwrap();
-        assert!(
-            last > first,
-            "the curve should advance through emission time"
-        );
+        assert!(last > first, "the curve should advance through emission time");
     }
 
     /// Enough real seconds to finish any crossing in the sample sky.
@@ -1420,16 +1320,9 @@ mod tests {
         s.advance(LONG_ENOUGH);
         let after = s.distance_to(s.star(id).unwrap());
         assert!(after < before, "{before} -> {after} ly");
-        assert!(
-            (after - STANDOFF_LY).abs() < 1e-6,
-            "stopped {after} ly out, wanted {STANDOFF_LY}"
-        );
+        assert!((after - STANDOFF_LY).abs() < 1e-6, "stopped {after} ly out, wanted {STANDOFF_LY}");
         assert!(s.cruise().is_none(), "the crossing should have ended");
-        assert_eq!(
-            s.ship.motion.beta,
-            DVec3::ZERO,
-            "and the ship should be at rest"
-        );
+        assert_eq!(s.ship.motion.beta, DVec3::ZERO, "and the ship should be at rest");
     }
 
     /// The grid is what retarded time is solved against, so it has to follow the ship.
@@ -1439,11 +1332,7 @@ mod tests {
         assert_eq!((s.observer.x, s.observer.y, s.observer.z), (0, 0, 0));
         s.fly_to(s.stars[0].id);
         s.advance(LONG_ENOUGH);
-        let grid = DVec3::new(
-            s.observer.x as f64,
-            s.observer.y as f64,
-            s.observer.z as f64,
-        );
+        let grid = DVec3::new(s.observer.x as f64, s.observer.y as f64, s.observer.z as f64);
         let want = s.ship.motion.position_ly * LUS_PER_LY;
         // One light-microsecond of rounding, on a number of order 1e14.
         assert!((grid - want).max_element() < 2.0, "{grid:?} vs {want:?}");
@@ -1454,21 +1343,11 @@ mod tests {
     fn the_light_from_the_destination_gets_fresher() {
         let mut s = session();
         let id = s.stars[0].id;
-        let age = |s: &Session| {
-            s.sky()
-                .into_iter()
-                .find(|x| x.id == id)
-                .unwrap()
-                .light_age_s
-        };
+        let age = |s: &Session| s.sky().into_iter().find(|x| x.id == id).unwrap().light_age_s;
         let before = age(&s);
         s.fly_to(id);
         s.advance(LONG_ENOUGH);
-        assert!(
-            age(&s) < before / 100.0,
-            "{} should be far under {before}",
-            age(&s)
-        );
+        assert!(age(&s) < before / 100.0, "{} should be far under {before}", age(&s));
     }
 
     #[test]
@@ -1477,20 +1356,10 @@ mod tests {
         let (ahead, abeam) = (s.stars[0].id, s.stars[1].id);
         s.fly_to(ahead);
         s.advance(8_000.0);
-        assert!(
-            s.ship.motion.beta.length() > 0.5,
-            "should be moving fast, got {}",
-            s.ship.motion.beta.length()
-        );
-        let (front, side) = (
-            s.doppler_to(s.star(ahead).unwrap()),
-            s.doppler_to(s.star(abeam).unwrap()),
-        );
+        assert!(s.ship.motion.beta.length() > 0.5, "should be moving fast, got {}", s.ship.motion.beta.length());
+        let (front, side) = (s.doppler_to(s.star(ahead).unwrap()), s.doppler_to(s.star(abeam).unwrap()));
         assert!(front > 1.0, "the destination must blueshift, got {front}");
-        assert!(
-            side < front,
-            "a star abeam must shift less than one dead ahead: {side} vs {front}"
-        );
+        assert!(side < front, "a star abeam must shift less than one dead ahead: {side} vs {front}");
     }
 
     /// Pins the rule the shift is implemented by: a blackbody seen with Doppler factor D is
@@ -1516,10 +1385,7 @@ mod tests {
         // Closing the distance brightens it as well; divide that out first.
         let closing = (distance_before / s.distance_to(s.star(id).unwrap())).powi(2);
         let ratio = radio(&s) / (at_rest * closing);
-        assert!(
-            (ratio / d - 1.0).abs() < 1e-3,
-            "radio band rose {ratio}x, wanted D = {d}"
-        );
+        assert!((ratio / d - 1.0).abs() < 1e-3, "radio band rose {ratio}x, wanted D = {d}");
     }
 
     /// The sky compresses toward the bow. At speed a star abeam appears ahead of abeam.
@@ -1533,10 +1399,7 @@ mod tests {
         let star = s.sky().into_iter().find(|x| x.id == other).unwrap();
         let true_angle = star.offset_ly.normalize().dot(bow).acos();
         let seen_angle = star.apparent_dir.dot(bow).acos();
-        assert!(
-            seen_angle < true_angle,
-            "{seen_angle} should be inside {true_angle}"
-        );
+        assert!(seen_angle < true_angle, "{seen_angle} should be inside {true_angle}");
     }
 
     #[test]
@@ -1552,10 +1415,7 @@ mod tests {
         assert!(s.cruise().is_none() && s.station().is_none());
         // Not exactly: the velocity goes out through meters a second and comes back, and a
         // multiply by `c` followed by a divide by `c` is not the identity in binary.
-        assert!(
-            (s.ship.motion.beta - beta).length() < beta.length() * 1e-12,
-            "cutting the engine is a brake"
-        );
+        assert!((s.ship.motion.beta - beta).length() < beta.length() * 1e-12, "cutting the engine is a brake");
 
         // Between stars there is no conic to fall onto, so it is a straight line at the speed
         // it had. A light-year is a year at `c`, so the distance is the beta times the years.
@@ -1587,15 +1447,9 @@ mod tests {
         };
         let (coarse, want) = crossing(4);
         let (fine, _) = crossing(4000);
-        assert!(
-            (coarse - fine).abs() < 1.0,
-            "{coarse} against {fine} seconds"
-        );
+        assert!((coarse - fine).abs() < 1.0, "{coarse} against {fine} seconds");
         // And both must agree with the closed form, not merely with each other.
-        assert!(
-            (coarse - want).abs() / want < 1e-6,
-            "{coarse} against {want}"
-        );
+        assert!((coarse - want).abs() / want < 1e-6, "{coarse} against {want}");
     }
 
     #[test]
@@ -1607,10 +1461,7 @@ mod tests {
         assert!(after_one > 0.0);
         s.fly_to(s.stars[1].id);
         s.advance(LONG_ENOUGH);
-        assert!(
-            s.ship.motion.clock_s > after_one,
-            "the clock must not restart at zero"
-        );
+        assert!(s.ship.motion.clock_s > after_one, "the clock must not restart at zero");
     }
 
     #[test]
@@ -1623,10 +1474,7 @@ mod tests {
     #[test]
     fn flying_somewhere_that_is_not_in_the_sky_does_nothing() {
         let mut s = session();
-        assert!(
-            s.fly_to(lc_world::sky::StarId::synthesise("absent", 1))
-                .is_none()
-        );
+        assert!(s.fly_to(lc_world::sky::StarId::synthesise("absent", 1)).is_none());
         assert!(s.cruise().is_none());
     }
 

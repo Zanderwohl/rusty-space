@@ -157,8 +157,7 @@ mod tests {
                             Act::GrantEnergy | Act::Stage => directing.0 || level.is_admin(),
                         };
                         assert_eq!(
-                            got,
-                            want,
+                            got, want,
                             "{act:?} by {} ({standing:?}, directing {})",
                             level.name(),
                             directing.0,
@@ -183,11 +182,7 @@ mod tests {
                     );
                 }
                 // And the owner of the craft may, whoever they are.
-                assert!(allows(
-                    act,
-                    asking(level, Standing::Flies),
-                    Directing(false)
-                ));
+                assert!(allows(act, asking(level, Standing::Flies), Directing(false)));
             }
         }
     }
@@ -205,19 +200,11 @@ mod tests {
                 );
             }
             assert!(
-                !allows(
-                    act,
-                    asking(Level::PLAYER, Standing::Flies),
-                    Directing(false)
-                ),
+                !allows(act, asking(Level::PLAYER, Standing::Flies), Directing(false)),
                 "a player granted themselves {act:?}",
             );
             // Except on a shard that stages, where the population is whoever ran it.
-            assert!(allows(
-                act,
-                asking(Level::PLAYER, Standing::Flies),
-                Directing(true)
-            ));
+            assert!(allows(act, asking(Level::PLAYER, Standing::Flies), Directing(true)));
         }
     }
 
@@ -247,18 +234,11 @@ mod tests {
 
         let commands = [
             Order::Transmit { power_w: 1.0 },
-            Order::Burn {
-                beta: [0.1, 0.0, 0.0],
-            },
+            Order::Burn { beta: [0.1, 0.0, 0.0] },
             Order::CutDrive,
-            Order::Intercept {
-                ship_id: ShipId(1),
-                closeness: Closeness::Company,
-            },
+            Order::Intercept { ship_id: ShipId(1), closeness: Closeness::Company },
             Order::BreakOff,
-            Order::Refit {
-                target: Loadout::default(),
-            },
+            Order::Refit { target: Loadout::default() },
             Order::CancelRefit,
         ];
         for order in &commands {
@@ -273,10 +253,7 @@ mod tests {
                 body: "hello".into(),
                 idem: MessageKey::default(),
             },
-            Order::OfferKey {
-                to: None,
-                aim: Aim::Omni,
-            },
+            Order::OfferKey { to: None, aim: Aim::Omni },
         ];
         for order in &speech {
             assert_eq!(Act::of(order), Act::Speak, "{order:?}");
@@ -288,11 +265,7 @@ mod tests {
             let act = Act::of(order);
             assert!(act == Act::Command || act == Act::Speak);
             assert!(
-                !allows(
-                    act,
-                    asking(Level::SUPERADMIN, Standing::Otherwise),
-                    Directing(true)
-                ),
+                !allows(act, asking(Level::SUPERADMIN, Standing::Otherwise), Directing(true)),
                 "{order:?} was allowed on somebody else's craft",
             );
         }

@@ -11,12 +11,12 @@
 pub use lc_world::{coast, flight, navigation, system};
 
 pub mod action;
-pub mod app;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod auth;
-pub mod bookshelf;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod broker;
+pub mod app;
+pub mod bookshelf;
 pub mod chat;
 pub mod curve;
 pub mod demos;
@@ -29,17 +29,17 @@ pub mod hull;
 pub mod input;
 pub mod library;
 pub mod link;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod local;
 pub mod map;
 pub mod map_panel;
 pub mod map_pick;
 pub mod map_source;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod local;
 pub mod menu;
 pub mod panels;
 pub mod pick;
-pub mod plot;
 pub mod plume;
+pub mod plot;
 pub mod radio_panel;
 pub mod reader;
 pub mod refit_panel;

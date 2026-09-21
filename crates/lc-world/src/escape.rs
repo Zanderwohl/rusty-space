@@ -37,10 +37,7 @@ pub fn first_crossing(
 ) -> Option<Crossing> {
     let own_speed = speed_bound(arc, from_s, until_s)?;
     let path = arc.path(system);
-    let window = (
-        Instant::from_seconds_since_j2000(from_s),
-        Instant::from_seconds_since_j2000(until_s),
-    );
+    let window = (Instant::from_seconds_since_j2000(from_s), Instant::from_seconds_since_j2000(until_s));
     candidates
         .iter()
         .filter_map(|&body| {
@@ -54,11 +51,7 @@ pub fn first_crossing(
                 MAX_SAMPLES_PER_SPHERE,
             )
         })
-        .min_by(|a, b| {
-            a.time
-                .partial_cmp(&b.time)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        .min_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 /// The fastest an escape moves relative to its primary over `[from_s, until_s]`: vis-viva at
@@ -68,10 +61,7 @@ fn speed_bound(arc: &Coast, from_s: f64, until_s: f64) -> Option<f64> {
     if !arc.is_escaping() {
         return None;
     }
-    let (e, a) = (
-        arc.elements.eccentricity,
-        arc.elements.semi_major_axis.abs(),
-    );
+    let (e, a) = (arc.elements.eccentricity, arc.elements.semi_major_axis.abs());
     let rate = (arc.mu / (a * a * a)).sqrt();
     let at_epoch = anomaly::hyperbolic_from_true(arc.elements.true_anomaly, e)?;
     let periapsis_s = arc.epoch_s - anomaly::mean_from_hyperbolic(at_epoch, e) / rate;
@@ -154,12 +144,7 @@ mod tests {
     fn a_fast_escape_is_solved_quickly_and_meets_nothing() {
         let Some(system) = sol() else { return };
         let system = Arc::new(system);
-        let ship = falling(
-            &system,
-            "Sol",
-            DVec3::new(2.0e11, 1.0e11, 0.0),
-            DVec3::new(0.3, 0.1, 0.0),
-        );
+        let ship = falling(&system, "Sol", DVec3::new(2.0e11, 1.0e11, 0.0), DVec3::new(0.3, 0.1, 0.0));
 
         let mut craft = Craft::at(CraftId(1), Kind::Ship, ship.position_ly);
         craft.motion = ship;
@@ -168,15 +153,8 @@ mod tests {
         for tick in 1..=120 {
             craft.advance(tick as f64 * 0.25, 0.25);
         }
-        assert!(
-            started.elapsed().as_secs_f64() < 10.0,
-            "{:?} for 120 ticks",
-            started.elapsed()
-        );
-        assert!(
-            craft.patch_due_at().is_none(),
-            "a straight line out past the planets meets nothing"
-        );
+        assert!(started.elapsed().as_secs_f64() < 10.0, "{:?} for 120 ticks", started.elapsed());
+        assert!(craft.patch_due_at().is_none(), "a straight line out past the planets meets nothing");
         assert!(matches!(craft.motion.motive, Motive::Falling(_)));
     }
 
@@ -186,35 +164,18 @@ mod tests {
     fn a_fast_ship_aimed_at_earth_enters_its_sphere() {
         let Some(system) = sol() else { return };
         const APPROACH_M: f64 = 3.0e9;
-        let ship = falling(
-            &system,
-            "Earth",
-            DVec3::new(-APPROACH_M, 1.0e8, 0.0),
-            DVec3::X * 0.1,
-        );
-        let Motive::Falling(arc) = &ship.motive else {
-            unreachable!()
-        };
+        let ship = falling(&system, "Earth", DVec3::new(-APPROACH_M, 1.0e8, 0.0), DVec3::X * 0.1);
+        let Motive::Falling(arc) = &ship.motive else { unreachable!() };
         assert_eq!(arc.primary, "Sol");
 
         let event = repatch_at(&ship, &system, 0.0).expect("it meets Earth");
-        assert_eq!(
-            event.change,
-            Change::Repatch {
-                about: "Earth".into()
-            }
-        );
+        assert_eq!(event.change, Change::Repatch { about: "Earth".into() });
         let earth = system.body_named("Earth").unwrap();
-        let radius =
-            em_sim::influence::soi_at(system.sim(), earth, Instant::from_seconds_since_j2000(0.0))
-                .expect("a sphere")
-                .bounding_radius();
+        let radius = em_sim::influence::soi_at(system.sim(), earth, Instant::from_seconds_since_j2000(0.0))
+            .expect("a sphere")
+            .bounding_radius();
         let expected_s = (APPROACH_M - radius) / (0.1 * C_M_S);
-        assert!(
-            (event.at_t - expected_s).abs() < 0.2 * expected_s,
-            "{} s, not {expected_s}",
-            event.at_t
-        );
+        assert!((event.at_t - expected_s).abs() < 0.2 * expected_s, "{} s, not {expected_s}", event.at_t);
 
         let distance_at = |t: f64| {
             em_sim::crossing::boundary_distance_of(
@@ -225,11 +186,7 @@ mod tests {
             )
             .expect("evaluable")
         };
-        assert!(
-            distance_at(event.at_t).abs() < 0.1 * C_M_S * 1.0e-2,
-            "{} m off",
-            distance_at(event.at_t)
-        );
+        assert!(distance_at(event.at_t).abs() < 0.1 * C_M_S * 1.0e-2, "{} m off", distance_at(event.at_t));
         assert!(distance_at(event.at_t - 1.0) > 0.0 && distance_at(event.at_t + 1.0) < 0.0);
     }
 
@@ -239,12 +196,7 @@ mod tests {
     fn a_fast_flyby_folds_to_the_same_arc_at_any_step() {
         let Some(system) = sol() else { return };
         let system = Arc::new(system);
-        let ship = falling(
-            &system,
-            "Earth",
-            DVec3::new(-3.0e9, 1.0e8, 0.0),
-            DVec3::X * 0.1,
-        );
+        let ship = falling(&system, "Earth", DVec3::new(-3.0e9, 1.0e8, 0.0), DVec3::X * 0.1);
         let run = |step: f64| {
             let mut craft = Craft::at(CraftId(1), Kind::Ship, ship.position_ly);
             craft.motion = ship.clone();
@@ -258,15 +210,9 @@ mod tests {
             craft.motion
         };
         let (coarse, fine) = (run(7.3), run(0.25));
-        let Motive::Falling(arc) = &coarse.motive else {
-            panic!("{:?}", coarse.motive)
-        };
+        let Motive::Falling(arc) = &coarse.motive else { panic!("{:?}", coarse.motive) };
         assert_eq!(arc.primary, "Sol", "through Earth's sphere and out again");
-        assert!(
-            arc.epoch_s > 60.0,
-            "it never went in: the arc is from {} s",
-            arc.epoch_s
-        );
+        assert!(arc.epoch_s > 60.0, "it never went in: the arc is from {} s", arc.epoch_s);
         assert_eq!(coarse.motive, fine.motive);
         assert_eq!(coarse.position_ly, fine.position_ly);
     }

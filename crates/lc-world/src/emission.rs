@@ -61,13 +61,7 @@ pub struct EmissionModel {
 
 impl EmissionModel {
     pub fn new(star: Star, seed: u64) -> Self {
-        Self {
-            star,
-            bodies: Vec::new(),
-            populations: Vec::new(),
-            shell: None,
-            seed,
-        }
+        Self { star, bodies: Vec::new(), populations: Vec::new(), shell: None, seed }
     }
 
     /// Bake the populations at `level`, so later samples interpolate rather than integrate.
@@ -97,9 +91,7 @@ impl EmissionModel {
 
         let mut discrete = PerBand::splat(1.0f64);
         for body in &self.bodies {
-            let f = body
-                .occluder
-                .deficit(body.motion.position_at(t), direction, &self.star);
+            let f = body.occluder.deficit(body.motion.position_at(t), direction, &self.star);
             if f > 0.0 {
                 for b in Band::ALL {
                     discrete[b] *= 1.0 - f;
@@ -216,29 +208,13 @@ mod tests {
         let star = Star::SOL;
         let pop = reference_swarm();
         let f = Flicker::of(&pop, DVec3::X, &star, 1);
-        let inverted = invert_moments(
-            f.mean_deficit,
-            f.mean_deficit * f.relative_rms(),
-            f.crossing_time,
-            &star,
-        )
-        .unwrap();
+        let inverted =
+            invert_moments(f.mean_deficit, f.mean_deficit * f.relative_rms(), f.crossing_time, &star)
+                .unwrap();
 
-        assert!(
-            (inverted.element_area / 1e12 - 1.0).abs() < 1e-3,
-            "area {}",
-            inverted.element_area
-        );
-        assert!(
-            (inverted.element_count / 1.5e6 - 1.0).abs() < 1e-3,
-            "count {}",
-            inverted.element_count
-        );
-        assert!(
-            (inverted.semi_major / AU - 1.0).abs() < 1e-3,
-            "a {}",
-            inverted.semi_major
-        );
+        assert!((inverted.element_area / 1e12 - 1.0).abs() < 1e-3, "area {}", inverted.element_area);
+        assert!((inverted.element_count / 1.5e6 - 1.0).abs() < 1e-3, "count {}", inverted.element_count);
+        assert!((inverted.semi_major / AU - 1.0).abs() < 1e-3, "a {}", inverted.semi_major);
         assert!((inverted.mean_count - 8.11).abs() < 0.05);
     }
 
@@ -251,19 +227,11 @@ mod tests {
         // Same covering fraction, so the mean deficit alone cannot tell them apart.
         let a = Flicker::of(&reference_swarm(), DVec3::X, &star, 1);
         let b = Flicker::of(&few_large, DVec3::X, &star, 1);
-        assert!(
-            (a.mean_deficit / b.mean_deficit - 1.0).abs() < 1e-9,
-            "means must coincide"
-        );
+        assert!((a.mean_deficit / b.mean_deficit - 1.0).abs() < 1e-9, "means must coincide");
 
         let inv = |f: &Flicker| {
-            invert_moments(
-                f.mean_deficit,
-                f.mean_deficit * f.relative_rms(),
-                f.crossing_time,
-                &star,
-            )
-            .unwrap()
+            invert_moments(f.mean_deficit, f.mean_deficit * f.relative_rms(), f.crossing_time, &star)
+                .unwrap()
         };
         assert!((inv(&a).element_count / 1.5e6 - 1.0).abs() < 1e-3);
         assert!((inv(&b).element_count / 1.5e3 - 1.0).abs() < 1e-3);
@@ -294,28 +262,16 @@ mod tests {
         m.bodies.push(Body {
             occluder: Occluder::new(6.371e6),
             // Edge-on as seen from +X, so it transits once per orbit.
-            motion: Box::new(CircularOrbit {
-                radius_m: AU,
-                pole: DVec3::Z,
-                phase0: 0.0,
-                mu: star.mu,
-            }),
+            motion: Box::new(CircularOrbit { radius_m: AU, pole: DVec3::Z, phase0: 0.0, mu: star.mu }),
         });
 
         let n = 4000;
-        let deficits: Vec<f64> = (0..n)
-            .map(|k| m.deficit(DVec3::X, k as f64 * period / n as f64)[Band::V] as f64)
-            .collect();
+        let deficits: Vec<f64> =
+            (0..n).map(|k| m.deficit(DVec3::X, k as f64 * period / n as f64)[Band::V] as f64).collect();
         let deepest = deficits.iter().cloned().fold(0.0, f64::max);
-        assert!(
-            (deepest - 1.0186e-4).abs() < 5e-6,
-            "transit depth {deepest}"
-        );
+        assert!((deepest - 1.0186e-4).abs() < 5e-6, "transit depth {deepest}");
         let in_transit = deficits.iter().filter(|d| **d > 0.0).count();
-        assert!(
-            in_transit > 0 && (in_transit as f64 / n as f64) < 0.02,
-            "duty cycle too high"
-        );
+        assert!(in_transit > 0 && (in_transit as f64 / n as f64) < 0.02, "duty cycle too high");
     }
 
     #[test]
@@ -327,21 +283,13 @@ mod tests {
         m.populations.push(opaque);
         m.bodies.push(Body {
             occluder: Occluder::new(7.1e7),
-            motion: Box::new(CircularOrbit {
-                radius_m: AU,
-                pole: DVec3::Z,
-                phase0: 0.0,
-                mu: star.mu,
-            }),
+            motion: Box::new(CircularOrbit { radius_m: AU, pole: DVec3::Z, phase0: 0.0, mu: star.mu }),
         });
         for k in 0..200 {
             let d = m.deficit(DVec3::X, k as f64 * 1e5)[Band::V];
             assert!((0.0..=1.0).contains(&d), "deficit {d} left [0, 1]");
         }
-        assert!(
-            m.deficit(DVec3::X, 0.0)[Band::V] > 0.9,
-            "a near-complete swarm should be opaque"
-        );
+        assert!(m.deficit(DVec3::X, 0.0)[Band::V] > 0.9, "a near-complete swarm should be opaque");
     }
 
     #[test]
@@ -352,8 +300,6 @@ mod tests {
         m.bake(4);
         let baked = m.shell.as_ref().unwrap().sample(DVec3::new(1.0, 0.3, 0.2));
         assert!((baked.deficit[Band::V] as f64 / direct - 1.0).abs() < 1e-3);
-        assert!(
-            (baked.crossing_time / m.populations[0].crossing_time(&Star::SOL) - 1.0).abs() < 1e-3
-        );
+        assert!((baked.crossing_time / m.populations[0].crossing_time(&Star::SOL) - 1.0).abs() < 1e-3);
     }
 }

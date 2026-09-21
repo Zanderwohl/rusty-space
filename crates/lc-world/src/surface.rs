@@ -52,20 +52,12 @@ impl Surface {
     /// Classify a body from what the simulation already knows about it.
     pub fn classify(radius_m: f64, mass_kg: f64, equilibrium_k: f64) -> Self {
         let volume = 4.0 / 3.0 * std::f64::consts::PI * radius_m.powi(3);
-        let density = if volume > 0.0 {
-            mass_kg / volume
-        } else {
-            f64::INFINITY
-        };
+        let density = if volume > 0.0 { mass_kg / volume } else { f64::INFINITY };
 
         // Density first, because it is the one that cannot be faked: nothing rocky is that
         // light and nothing gaseous is that heavy.
         if density < GIANT_DENSITY && radius_m > 1.0e7 {
-            return if mass_kg >= GAS_GIANT_MASS {
-                Self::GasGiant
-            } else {
-                Self::IceGiant
-            };
+            return if mass_kg >= GAS_GIANT_MASS { Self::GasGiant } else { Self::IceGiant };
         }
         if equilibrium_k > SCORCHED_K {
             return Self::Scorched;
@@ -73,11 +65,7 @@ impl Surface {
         if equilibrium_k < ICE_LINE_K {
             // Below the ice line, density says whether it is a dirty snowball or a rock that
             // happens to be cold.
-            return if density < ICY_SURFACE_DENSITY {
-                Self::Ice
-            } else {
-                Self::Rock
-            };
+            return if density < ICY_SURFACE_DENSITY { Self::Ice } else { Self::Rock };
         }
         Self::Weathered
     }
@@ -209,14 +197,8 @@ mod tests {
         for (name, au, measured) in [("Uranus", 19.201, 59.1), ("Neptune", 30.047, 59.3)] {
             let sunlit = equilibrium(au) * (1.0 - Surface::IceGiant.bond_albedo()).powf(0.25);
             let got = Surface::IceGiant.effective_temperature(equilibrium(au));
-            assert!(
-                got > sunlit,
-                "{name} should be warmer than sunlight alone: {got:.1}"
-            );
-            assert!(
-                (got / measured).clamp(0.7, 1.3) == got / measured,
-                "{name}: {got:.1} K"
-            );
+            assert!(got > sunlit, "{name} should be warmer than sunlight alone: {got:.1}");
+            assert!((got / measured).clamp(0.7, 1.3) == got / measured, "{name}: {got:.1} K");
         }
     }
 
@@ -230,10 +212,7 @@ mod tests {
 
         // Earth: 278.6 K gray, Bond albedo near a third, and 254 K is the textbook answer.
         let earth = Surface::Weathered.effective_temperature(278.6);
-        assert!(
-            (earth - 254.0).abs() < 8.0,
-            "{earth:.1} K against a textbook 254 K"
-        );
+        assert!((earth - 254.0).abs() < 8.0, "{earth:.1} K against a textbook 254 K");
         assert_eq!(Surface::Rock.effective_temperature(0.0), 0.0);
     }
 
@@ -241,13 +220,9 @@ mod tests {
     #[test]
     fn bond_albedo_is_not_the_geometric_one() {
         assert!(Surface::GasGiant.bond_albedo() < Surface::GasGiant.albedo());
-        for surface in [
-            Surface::GasGiant,
-            Surface::IceGiant,
-            Surface::Ice,
-            Surface::Rock,
-            Surface::Weathered,
-        ] {
+        for surface in
+            [Surface::GasGiant, Surface::IceGiant, Surface::Ice, Surface::Rock, Surface::Weathered]
+        {
             assert!((0.0..1.0).contains(&surface.bond_albedo()), "{surface:?}");
         }
     }
@@ -280,14 +255,8 @@ mod tests {
     /// than some ice giants and looks nothing like one.
     #[test]
     fn saturn_and_neptune_land_on_opposite_sides() {
-        assert_eq!(
-            Surface::classify(5.8232e7, 5.683e26, 90.0),
-            Surface::GasGiant
-        );
-        assert_eq!(
-            Surface::classify(2.4764e7, 1.024e26, 51.0),
-            Surface::IceGiant
-        );
+        assert_eq!(Surface::classify(5.8232e7, 5.683e26, 90.0), Surface::GasGiant);
+        assert_eq!(Surface::classify(2.4764e7, 1.024e26, 51.0), Surface::IceGiant);
     }
 
     /// Europa and Io are the pair the ice threshold is set between: both cold, both moons of

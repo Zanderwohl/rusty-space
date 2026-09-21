@@ -99,9 +99,7 @@ pub(crate) fn nearest_within_shell(
     at: glam::DVec3,
     stars: &[CatalogueStar],
 ) -> Option<&CatalogueStar> {
-    nearest(at, stars)
-        .filter(|(_, ly)| *ly < LOCAL_SHELL_LY)
-        .map(|(star, _)| star)
+    nearest(at, stars).filter(|(_, ly)| *ly < LOCAL_SHELL_LY).map(|(star, _)| star)
 }
 
 fn whereabouts(at: glam::DVec3, stars: &[CatalogueStar]) -> Whereabouts {

@@ -4,12 +4,12 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
 use crate::action::{Action, MAX_ACCEL_G, MIN_ACCEL_G};
-use crate::app::{Game, Ui};
 use crate::flight::JULIAN_YEAR_S;
+use crate::app::{Game, Ui};
 use crate::hud;
 use crate::input::Requested;
-use crate::navigation::Target;
 use crate::plot::CurvePlot;
+use crate::navigation::Target;
 use crate::ui::Panel;
 
 pub(crate) fn ask(out: &mut MessageWriter<Requested>, action: Action) {
@@ -114,7 +114,9 @@ pub fn hud(
                 ui.separator();
                 ui.colored_label(egui::Color32::from_rgb(240, 170, 60), warning);
             }
-            if let Some((note, words)) = crate::uplink::note(&uplink.state, uplink.round_trip_s) {
+            if let Some((note, words)) =
+                crate::uplink::note(&uplink.state, uplink.round_trip_s)
+            {
                 ui.separator();
                 ui.colored_label(connection_color(note), words);
             }
@@ -131,11 +133,7 @@ pub fn hud(
                     egui::Color32::from_rgb(130, 200, 250),
                     hud::pursuit(&game.0, pursuit, quarry),
                 );
-                if ui
-                    .small_button("×")
-                    .on_hover_text("break off: no further corrections")
-                    .clicked()
-                {
+                if ui.small_button("×").on_hover_text("break off: no further corrections").clicked() {
                     ask(&mut out, Action::BreakOff);
                 }
                 let (label, hint, next) = closer(pursuit.closeness);
@@ -149,11 +147,7 @@ pub fn hud(
                 // than the mistake it prevents.
                 // U+00D7, not U+2715: egui's default font has no glyph for the latter and it
                 // came out as a tofu box.
-                if ui
-                    .small_button("×")
-                    .on_hover_text("cut the drive")
-                    .clicked()
-                {
+                if ui.small_button("×").on_hover_text("cut the drive").clicked() {
                     ask(&mut out, Action::AbortFlight);
                 }
             }
@@ -200,6 +194,7 @@ pub fn hud(
     }
 }
 
+
 /// How wide the events box is. See [`notice_link`] for why it is stated rather than measured.
 const NOTICE_WIDTH: f32 = 300.0;
 
@@ -232,8 +227,7 @@ fn notice_link(ui: &mut egui::Ui, text: &str) -> egui::Response {
                 ui.visuals().widgets.hovered.weak_bg_fill,
             );
         }
-        ui.painter()
-            .galley(rect.min + padding, galley, crate::radio_panel::RADIO);
+        ui.painter().galley(rect.min + padding, galley, crate::radio_panel::RADIO);
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -242,16 +236,12 @@ fn notice_link(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// for.
 fn closer(now: lc_proto::Closeness) -> (&'static str, &'static str, lc_proto::Closeness) {
     match now {
-        lc_proto::Closeness::Company => (
-            "close in",
-            "within sight: a kilometer between hulls",
-            lc_proto::Closeness::Intimate,
-        ),
-        lc_proto::Closeness::Intimate => (
-            "stand off",
-            "back to formation distance",
-            lc_proto::Closeness::Company,
-        ),
+        lc_proto::Closeness::Company => {
+            ("close in", "within sight: a kilometer between hulls", lc_proto::Closeness::Intimate)
+        }
+        lc_proto::Closeness::Intimate => {
+            ("stand off", "back to formation distance", lc_proto::Closeness::Company)
+        }
     }
 }
 
@@ -292,12 +282,10 @@ pub fn open_panels(
             continue;
         }
         let mut open = true;
-        egui::Window::new(panel.title())
-            .open(&mut open)
-            .show(ctx, |ui| match panel {
-                Panel::Escape => escape(ui, &mut out),
-                Panel::Settings => settings(ui, &ui_state),
-                Panel::Debug => debug(ui, &ui_state, &game, sky.as_deref(), &mut out),
+        egui::Window::new(panel.title()).open(&mut open).show(ctx, |ui| match panel {
+            Panel::Escape => escape(ui, &mut out),
+            Panel::Settings => settings(ui, &ui_state),
+            Panel::Debug => debug(ui, &ui_state, &game, sky.as_deref(), &mut out),
                 Panel::Telescope => crate::telescope_panel::telescope(
                     ui,
                     &ui_state,
@@ -306,28 +294,35 @@ pub fn open_panels(
                     &mut out,
                     &mut curve,
                 ),
-                Panel::System => system(
-                    ui,
-                    &ui_state,
-                    &game,
-                    &uplink,
-                    &mut tab,
-                    &mut show_all,
-                    &mut revealed,
-                    &mut out,
-                ),
-                Panel::Flight => flight(ui, &ui_state, &game, &mut out),
-                Panel::Tuning => tuning(ui, &ui_state, &mut out),
-                Panel::Scenarios => {
-                    crate::demos::scenarios(ui, &uplink, ui_state.0.perspective, &mut out)
-                }
-                Panel::Reader => unreachable!("drawn by crate::reader"),
-                Panel::Refit => crate::refit_panel::refit(ui, &ui_state.0, &game, &mut out),
-                Panel::DevActions => crate::refit_panel::dev_actions(ui, &game, &mut out),
-                Panel::Chat => crate::radio_panel::chat(
-                    ui, &ui_state, &game, &uplink, &mut draft, &mut aimed, &mut seal, &mut out,
-                ),
-            });
+            Panel::System => system(
+                ui,
+                &ui_state,
+                &game,
+                &uplink,
+                &mut tab,
+                &mut show_all,
+                &mut revealed,
+                &mut out,
+            ),
+            Panel::Flight => flight(ui, &ui_state, &game, &mut out),
+            Panel::Tuning => tuning(ui, &ui_state, &mut out),
+            Panel::Scenarios => {
+                crate::demos::scenarios(ui, &uplink, ui_state.0.perspective, &mut out)
+            }
+            Panel::Reader => unreachable!("drawn by crate::reader"),
+            Panel::Refit => crate::refit_panel::refit(ui, &ui_state.0, &game, &mut out),
+            Panel::DevActions => crate::refit_panel::dev_actions(ui, &game, &mut out),
+            Panel::Chat => crate::radio_panel::chat(
+                ui,
+                &ui_state,
+                &game,
+                &uplink,
+                &mut draft,
+                &mut aimed,
+                &mut seal,
+                &mut out,
+            ),
+        });
         if !open {
             ask(&mut out, Action::ClosePanel(panel));
         }
@@ -350,10 +345,7 @@ fn escape(ui: &mut egui::Ui, out: &mut MessageWriter<Requested>) {
 
 fn settings(ui: &mut egui::Ui, state: &Ui) {
     ui.label("Display");
-    ui.label(format!(
-        "tone window: {:.1} stops",
-        state.0.exposure_offset.abs().max(2.5)
-    ));
+    ui.label(format!("tone window: {:.1} stops", state.0.exposure_offset.abs().max(2.5)));
     ui.separator();
     ui.label("Settings apply immediately; there is no resume to apply them on.");
 }
@@ -373,19 +365,12 @@ fn debug(
         ));
     }
     match game.system.as_ref() {
-        Some(system) => ui.label(format!(
-            "in {} — {} bodies loaded",
-            system.star_name,
-            system.len()
-        )),
+        Some(system) => ui.label(format!("in {} — {} bodies loaded", system.star_name, system.len())),
         None => ui.label("between systems"),
     };
     ui.label(format!("stars detected: {}", game.knowledge.len()));
     ui.label(format!("curve samples: {}", game.curve().len()));
-    ui.label(format!(
-        "coordinate time: {:.3} s",
-        game.coordinate_time_s()
-    ));
+    ui.label(format!("coordinate time: {:.3} s", game.coordinate_time_s()));
     ui.separator();
 
     ui.label("clock rate (development only; the server owns this)");
@@ -415,41 +400,34 @@ fn debug(
 /// slider. Each drag emits one action per frame carrying the whole style; nothing here mutates.
 fn tuning(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
     use crate::starfield::Which;
-    for (which, label) in [
-        (Which::Local, "Local star"),
-        (Which::Bodies, "Planets and moons"),
-        (Which::Distant, "Background"),
-    ] {
+    for (which, label) in
+        [(Which::Local, "Local star"), (Which::Bodies, "Planets and moons"), (Which::Distant, "Background")]
+    {
         let current = crate::starfield::style_for(state, which);
         let corona_pass = which == Which::Local;
-        egui::CollapsingHeader::new(label)
-            .default_open(corona_pass)
-            .show(ui, |ui| {
-                let mut style = current;
-                let mut changed = false;
-                for (name, field, lo, hi) in crate::starfield::KNOBS {
-                    let corona = name.starts_with("corona")
-                        || name.starts_with("reach")
-                        || name.starts_with("tip");
-                    // A corona knob on a pass with no corona would do nothing.
-                    let live = corona_pass || !corona;
-                    let slider = egui::Slider::new(field(&mut style), lo..=hi).text(name);
-                    changed |= ui.add_enabled(live, slider).changed();
-                }
-                if changed {
-                    ask(out, Action::SetPointStyle { which, style });
-                }
-                if ui.button("Reset").clicked() {
-                    ask(out, Action::ResetPointStyle { which });
-                }
-            });
+        egui::CollapsingHeader::new(label).default_open(corona_pass).show(ui, |ui| {
+            let mut style = current;
+            let mut changed = false;
+            for (name, field, lo, hi) in crate::starfield::KNOBS {
+                let corona = name.starts_with("corona")
+                    || name.starts_with("reach")
+                    || name.starts_with("tip");
+                // A corona knob on a pass with no corona would do nothing.
+                let live = corona_pass || !corona;
+                let slider = egui::Slider::new(field(&mut style), lo..=hi).text(name);
+                changed |= ui.add_enabled(live, slider).changed();
+            }
+            if changed {
+                ask(out, Action::SetPointStyle { which, style });
+            }
+            if ui.button("Reset").clicked() {
+                ask(out, Action::ResetPointStyle { which });
+            }
+        });
     }
     ui.separator();
     let mut gain = state.envelope_gain;
-    if ui
-        .add(egui::Slider::new(&mut gain, 0.0..=60.0).text("envelope opacity"))
-        .changed()
-    {
+    if ui.add(egui::Slider::new(&mut gain, 0.0..=60.0).text("envelope opacity")).changed() {
         ask(out, Action::SetEnvelopeGain(gain));
     }
     ui.weak("How far a population's covering fraction is amplified. A belt really does block\nabout a millionth of a millionth of the light.");
@@ -458,19 +436,13 @@ fn tuning(ui: &mut egui::Ui, state: &Ui, out: &mut MessageWriter<Requested>) {
 }
 
 fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
-    ui.label(format!(
-        "drive: {:.0} g, cap {:.3}c",
-        game.ship.motion.drive.accel_g, game.ship.motion.drive.max_beta
-    ));
+    ui.label(format!("drive: {:.0} g, cap {:.3}c", game.ship.motion.drive.accel_g, game.ship.motion.drive.max_beta));
     let rated = game.ship.rated_drive(game.coordinate_time_s()).accel_g;
     if game.ship.fitting().is_some() {
         ui.weak(format!("engines rated for {rated:.1} g at this mass"));
     }
     ui.horizontal(|ui| {
-        for g in [1.0, 5.0, 20.0, 100.0]
-            .into_iter()
-            .filter(|g| *g <= rated.max(1.0))
-        {
+        for g in [1.0, 5.0, 20.0, 100.0].into_iter().filter(|g| *g <= rated.max(1.0)) {
             if ui.button(format!("{g:.0} g")).clicked() {
                 ask(out, Action::SetDriveAccel(g));
             }
@@ -547,15 +519,11 @@ fn system(
         ui.selectable_value(tab, SystemTab::Bodies, format!("{} bodies", system.len()));
         // Counted in the tab, because whether anyone is here at all is the first thing worth
         // knowing and opening the other list to find out would be one click too many.
-        ui.selectable_value(
-            tab,
-            SystemTab::Ships,
-            match uplink.contacts.len() {
-                0 => "no ships".to_string(),
-                1 => "1 ship".to_string(),
-                n => format!("{n} ships"),
-            },
-        );
+        ui.selectable_value(tab, SystemTab::Ships, match uplink.contacts.len() {
+            0 => "no ships".to_string(),
+            1 => "1 ship".to_string(),
+            n => format!("{n} ships"),
+        });
     });
     station(ui, state, game, out);
     ui.separator();
@@ -568,37 +536,33 @@ fn system(
         ui.checkbox(show_all, "all");
     });
 
-    egui::ScrollArea::vertical()
-        .max_height(220.0)
-        .show(ui, |ui| {
-            for entry in system.inventory().iter().filter(|e| *show_all || e.major) {
-                let picked = state.focus.as_ref() == Some(&entry.target);
-                ui.horizontal(|ui| {
-                    ui.add_space(entry.depth as f32 * 12.0);
-                    let row = ui.selectable_label(picked, &entry.designation);
-                    if row.clicked() {
-                        let next = (!picked).then(|| entry.target.clone());
-                        ask(out, Action::FocusTarget(next));
-                    }
-                    // Once, when the focus changes. Every frame would fight the player's own
-                    // scrolling, and never would hide a body picked from anywhere but this list.
-                    if picked && revealed.as_ref() != Some(&entry.target) {
-                        *revealed = Some(entry.target.clone());
-                        row.scroll_to_me(Some(egui::Align::Center));
-                    }
-                    ui.weak(span_m(entry.orbit_radius_m));
-                });
-            }
-        });
+    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+        for entry in system.inventory().iter().filter(|e| *show_all || e.major) {
+            let picked = state.focus.as_ref() == Some(&entry.target);
+            ui.horizontal(|ui| {
+                ui.add_space(entry.depth as f32 * 12.0);
+                let row = ui.selectable_label(picked, &entry.designation);
+                if row.clicked() {
+                    let next = (!picked).then(|| entry.target.clone());
+                    ask(out, Action::FocusTarget(next));
+                }
+                // Once, when the focus changes. Every frame would fight the player's own
+                // scrolling, and never would hide a body picked from anywhere but this list.
+                if picked && revealed.as_ref() != Some(&entry.target) {
+                    *revealed = Some(entry.target.clone());
+                    row.scroll_to_me(Some(egui::Align::Center));
+                }
+                ui.weak(span_m(entry.orbit_radius_m));
+            });
+        }
+    });
     ui.separator();
 
     let Some(target) = state.focus.as_ref() else {
         ui.label("Pick something to go to.");
         return;
     };
-    let Some(entry) = system.inventory().iter().find(|e| &e.target == target) else {
-        return;
-    };
+    let Some(entry) = system.inventory().iter().find(|e| &e.target == target) else { return };
     ui.heading(&entry.designation);
     ui.weak(match entry.orbit_radius_m {
         r if r > 0.0 => format!(
@@ -607,11 +571,7 @@ fn system(
             span_m(r),
             span(range_to(game, system, target)),
         ),
-        _ => format!(
-            "{} — {} away",
-            entry.kind.label(),
-            span(range_to(game, system, target))
-        ),
+        _ => format!("{} — {} away", entry.kind.label(), span(range_to(game, system, target))),
     });
 
     for (label, course) in crate::navigation::options_for(system, target) {
@@ -628,10 +588,7 @@ fn system(
                 ask(out, Action::SetCourse(course));
             }
         }
-        ui.weak(format!(
-            "brachistochrone at {:.0} g",
-            game.ship.motion.drive.accel_g
-        ));
+        ui.weak(format!("brachistochrone at {:.0} g", game.ship.motion.drive.accel_g));
     });
 }
 
@@ -657,80 +614,67 @@ fn ships(
     let here = game.ship.motion.position_ly;
     let mut rows: Vec<&crate::uplink::Contact> = uplink.contacts.iter().collect();
     rows.sort_by(|a, b| {
-        here.distance_squared(a.position_ly)
-            .total_cmp(&here.distance_squared(b.position_ly))
+        here.distance_squared(a.position_ly).total_cmp(&here.distance_squared(b.position_ly))
     });
 
-    egui::ScrollArea::vertical()
-        .max_height(260.0)
-        .show(ui, |ui| {
-            for contact in rows {
-                let range = here.distance(contact.position_ly);
-                let chasing = uplink.chasing.filter(|p| p.quarry == contact.ship_id);
-                ui.horizontal(|ui| {
-                    ui.label(&contact.name);
-                    ui.weak(span(range));
-                    // Inline rather than right-aligned: a right-to-left layout claims the whole
-                    // available width, and the panel grew to a third of the screen to hold one
-                    // button.
-                    match chasing {
-                        Some(pursuit) => {
-                            if ui.button("break off").clicked() {
-                                ask(out, Action::BreakOff);
-                            }
-                            let (label, hint, next) = closer(pursuit.closeness);
-                            if ui.button(label).on_hover_text(hint).clicked() {
-                                ask(out, Action::Intercept(contact.ship_id, next));
-                            }
+    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+        for contact in rows {
+            let range = here.distance(contact.position_ly);
+            let chasing = uplink.chasing.filter(|p| p.quarry == contact.ship_id);
+            ui.horizontal(|ui| {
+                ui.label(&contact.name);
+                ui.weak(span(range));
+                // Inline rather than right-aligned: a right-to-left layout claims the whole
+                // available width, and the panel grew to a third of the screen to hold one
+                // button.
+                match chasing {
+                    Some(pursuit) => {
+                        if ui.button("break off").clicked() {
+                            ask(out, Action::BreakOff);
                         }
-                        None => {
-                            if ui.button("intercept").clicked() {
-                                ask(
-                                    out,
-                                    Action::Intercept(
-                                        contact.ship_id,
-                                        lc_proto::Closeness::Company,
-                                    ),
-                                );
-                            }
+                        let (label, hint, next) = closer(pursuit.closeness);
+                        if ui.button(label).on_hover_text(hint).clicked() {
+                            ask(out, Action::Intercept(contact.ship_id, next));
                         }
                     }
-                });
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    if chasing.is_some() {
-                        // What the ship is *doing* rather than what was asked for: a standing
-                        // order and the approach it most recently produced are different facts,
-                        // and only the second one says where the ship will actually be.
-                        ui.weak(
-                            match game.ship.motion.still_closing(game.coordinate_time_s()) {
-                                true => "closing",
-                                false => "alongside",
-                            },
-                        );
+                    None => {
+                        if ui.button("intercept").clicked() {
+                            ask(out, Action::Intercept(contact.ship_id, lc_proto::Closeness::Company));
+                        }
                     }
-                    ui.weak(format!(
-                        "{} hull — {:.4}c — light is {} old",
-                        span_m(contact.length_m),
-                        contact.beta.length(),
-                        // From the range, not from the clock. A light-year is a year of travel by
-                        // definition, so the distance to where the light left *is* its age — and
-                        // taking it that way needs no agreement with the server about what time it
-                        // is. Differencing the timestamps instead measured the clock skew, which
-                        // at a frozen client rate put a ship eight kilometers away five minutes in
-                        // the past.
-                        duration(range * lc_world::flight::JULIAN_YEAR_S),
-                    ));
-                });
-            }
-        });
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                if chasing.is_some() {
+                    // What the ship is *doing* rather than what was asked for: a standing
+                    // order and the approach it most recently produced are different facts,
+                    // and only the second one says where the ship will actually be.
+                    ui.weak(match game.ship.motion.still_closing(game.coordinate_time_s()) {
+                        true => "closing",
+                        false => "alongside",
+                    });
+                }
+                ui.weak(format!(
+                    "{} hull — {:.4}c — light is {} old",
+                    span_m(contact.length_m),
+                    contact.beta.length(),
+                    // From the range, not from the clock. A light-year is a year of travel by
+                    // definition, so the distance to where the light left *is* its age — and
+                    // taking it that way needs no agreement with the server about what time it
+                    // is. Differencing the timestamps instead measured the clock skew, which
+                    // at a frozen client rate put a ship eight kilometers away five minutes in
+                    // the past.
+                    duration(range * lc_world::flight::JULIAN_YEAR_S),
+                ));
+            });
+        }
+    });
 }
 
 /// Where the ship is holding, if it is holding anywhere.
 fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
-    let Some(system) = game.system.as_ref() else {
-        return;
-    };
+    let Some(system) = game.system.as_ref() else { return };
     let Some(waypoint) = game.station() else {
         match game.coast() {
             // Not "adrift": the ship is on something, and which conic it is on is the first
@@ -779,9 +723,9 @@ fn range_to(game: &Game, system: &crate::system::LocalSystem, target: &Target) -
         Target::Body(name) => system.body_position_at(name, now),
         Target::Band(_) => system.star_position_at(now),
     };
-    at.map(|at| at.distance(game.ship.motion.position_ly))
-        .unwrap_or(0.0)
+    at.map(|at| at.distance(game.ship.motion.position_ly)).unwrap_or(0.0)
 }
+
 
 /// A duration in whatever unit makes it readable.
 pub(crate) fn duration(seconds: f64) -> String {

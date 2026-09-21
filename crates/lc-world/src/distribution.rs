@@ -13,9 +13,7 @@ pub struct Distribution {
 
 impl Distribution {
     pub fn delta(value: f64) -> Self {
-        Self {
-            nodes: vec![(value, 1.0)],
-        }
+        Self { nodes: vec![(value, 1.0)] }
     }
 
     /// Midpoint nodes across `[lo, hi]`.
@@ -24,9 +22,7 @@ impl Distribution {
         let w = 1.0 / nodes as f64;
         let step = (hi - lo) / nodes as f64;
         Self {
-            nodes: (0..nodes)
-                .map(|k| (lo + (k as f64 + 0.5) * step, w))
-                .collect(),
+            nodes: (0..nodes).map(|k| (lo + (k as f64 + 0.5) * step, w)).collect(),
         }
     }
 
@@ -94,9 +90,7 @@ pub struct Inclination {
 impl Inclination {
     /// Uniform in `cos(i)`: orbit poles uniform on the sphere.
     pub fn isotropic() -> Self {
-        Self {
-            bins: vec![(0.0, 1.0, 1.0)],
-        }
+        Self { bins: vec![(0.0, 1.0, 1.0)] }
     }
 
     /// Uniform in the angle `i` over `[lo, hi]` radians.
@@ -163,10 +157,7 @@ impl Inclination {
                 return u.clamp(-1.0, 1.0).acos();
             }
         }
-        self.bins
-            .last()
-            .map(|&(u, _, _)| u.clamp(-1.0, 1.0).acos())
-            .unwrap_or(0.0)
+        self.bins.last().map(|&(u, _, _)| u.clamp(-1.0, 1.0).acos()).unwrap_or(0.0)
     }
 
     /// The largest inclination with any weight, in radians. Beyond it the population casts
@@ -230,10 +221,7 @@ mod tests {
     fn confining_inclinations_concentrates_the_sky_density() {
         let iso = Inclination::isotropic().sky_density(0.0);
         let band = Inclination::uniform_angle(0.0, 0.1, 32).sky_density(0.0);
-        assert!(
-            band > iso * 5.0,
-            "a 0.1 rad band should be much denser in-plane"
-        );
+        assert!(band > iso * 5.0, "a 0.1 rad band should be much denser in-plane");
     }
 
     #[test]

@@ -7,13 +7,13 @@ use std::io::Read;
 use std::time::Duration;
 
 use lc_proto::ClientId;
+use tokio::signal::unix::{SignalKind, signal};
 use lc_server::journal::{Memory, Postgres, Store};
 use lc_server::server::{Server, TICK_MS};
 use lc_server::ticket::Trusted;
 use lc_server::websocket::WebSocketServer;
 use lc_server::world::World;
 use lc_world::sky::{AuthoredStars, StarProvider};
-use tokio::signal::unix::{SignalKind, signal};
 
 const USAGE: &str = "\
 lightcone-server — one shard
@@ -157,16 +157,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let text = std::fs::read_to_string(&path)
                 .map_err(|e| format!("cannot read the catalogue at {path}: {e}"))?;
             server.library = lc_server::library::Library::from_toml(&base, &text)?;
-            eprintln!(
-                "shelf: {} books from {path}, served from {base}",
-                server.library.books.len()
-            );
+            eprintln!("shelf: {} books from {path}, served from {base}", server.library.books.len());
         }
         (Some(_), None) => {
             // Loudly: a shelf nobody can fetch from is a list of titles that do nothing.
-            return Err(
-                "--library needs --shelf-base, or the client has nowhere to fetch from".into(),
-            );
+            return Err("--library needs --shelf-base, or the client has nowhere to fetch from".into());
         }
         (None, _) => eprintln!("no --library, so this shard has no books to lend"),
     }
@@ -202,16 +197,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         marks
                             .into_iter()
                             .map(|m| {
-                                (
-                                    m.account,
-                                    lc_proto::Bookmark {
-                                        book: m.book,
-                                        spine: m.spine.max(0) as u32,
-                                        char_offset: m.char_offset.max(0) as u32,
-                                        location: m.location.max(0) as u32,
-                                        locations: m.locations.max(0) as u32,
-                                    },
-                                )
+                                (m.account, lc_proto::Bookmark {
+                                    book: m.book,
+                                    spine: m.spine.max(0) as u32,
+                                    char_offset: m.char_offset.max(0) as u32,
+                                    location: m.location.max(0) as u32,
+                                    locations: m.locations.max(0) as u32,
+                                })
                             })
                             .collect(),
                     );
@@ -300,14 +292,10 @@ async fn checkpoint(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let taken = server.checkpoint();
     lc_store::ships::save_ships(client, &taken.ships).await?;
-    lc_store::ships::save_shard(
-        client,
-        shard_id,
-        lc_store::ships::Shard {
-            now_t: taken.now_t,
-            next_ship: taken.next_ship,
-        },
-    )
+    lc_store::ships::save_shard(client, shard_id, lc_store::ships::Shard {
+        now_t: taken.now_t,
+        next_ship: taken.next_ship,
+    })
     .await?;
     // Only what changed since the last one. A page turn is a row and a reader turns a page a
     // minute; writing every account's whole shelf every twenty seconds would be writing nothing

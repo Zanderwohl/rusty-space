@@ -135,16 +135,10 @@ mod tests {
         for k in 0..=10 {
             let part = k as f64 / 10.0;
             let nose = turned(from, to, RATE, whole * part);
-            assert!(
-                (nose.length() - 1.0).abs() < 1.0e-9,
-                "{nose} is not a direction"
-            );
+            assert!((nose.length() - 1.0).abs() < 1.0e-9, "{nose} is not a direction");
             let swept = angle_between(from, nose);
             let want = angle_between(from, to) * part;
-            assert!(
-                (swept - want).abs() < 1.0e-9,
-                "at {part} it had swept {swept}, wanted {want}"
-            );
+            assert!((swept - want).abs() < 1.0e-9, "at {part} it had swept {swept}, wanted {want}");
         }
     }
 
@@ -157,10 +151,7 @@ mod tests {
         let middle = turned(from, to, RATE, whole * 0.5);
         assert!((middle.length() - 1.0).abs() < 1.0e-9, "{middle}");
         // Square on to both ends, which is what halfway through a half-turn means.
-        assert!(
-            middle.dot(from).abs() < 1.0e-9,
-            "{middle} is not square to {from}"
-        );
+        assert!(middle.dot(from).abs() < 1.0e-9, "{middle} is not square to {from}");
         assert!((turned(from, to, RATE, whole) - to).length() < 1.0e-9);
     }
 
@@ -171,14 +162,8 @@ mod tests {
     fn a_longer_hull_turns_more_slowly() {
         let small = rate_rad_s(500.0);
         let large = rate_rad_s(50_000.0);
-        assert!(
-            (small / large - 100.0).abs() < 1.0e-9,
-            "{small} against {large}"
-        );
-        assert!(
-            (small - RATE_RAD_S).abs() < 1.0e-12,
-            "the reference hull turns at the rate"
-        );
+        assert!((small / large - 100.0).abs() < 1.0e-9, "{small} against {large}");
+        assert!((small - RATE_RAD_S).abs() < 1.0e-12, "the reference hull turns at the rate");
         // And the big one's flip is the better part of two hours.
         let flip = turn_time_s(DVec3::X, -DVec3::X, large);
         assert!(flip > 5_000.0 && flip < 7_200.0, "{flip} s");
@@ -190,10 +175,7 @@ mod tests {
         for length_m in [500.0, 5_000.0, 50_000.0] {
             let rate = rate_rad_s(length_m);
             let named = flip_time_s(rate);
-            assert!(
-                (named - turn_time_s(DVec3::X, -DVec3::X, rate)).abs() < 1.0e-9,
-                "{named} s"
-            );
+            assert!((named - turn_time_s(DVec3::X, -DVec3::X, rate)).abs() < 1.0e-9, "{named} s");
         }
         // A hull that cannot turn is not one that turns instantly, but nothing may divide by it.
         assert_eq!(flip_time_s(0.0), 0.0);

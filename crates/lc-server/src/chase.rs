@@ -15,8 +15,8 @@ use std::sync::Arc;
 use lc_proto::{Cleared, ClientId, Presence, ShipId, Withheld};
 use lc_spacetime::Worldline;
 use lc_spacetime::worldline::retarded_times_at;
-use lc_world::consort;
 use lc_world::craft::{Craft, CraftId, Fleet};
+use lc_world::consort;
 use lc_world::escort;
 use lc_world::motion::{LIGHT_US_PER_LY, Motive};
 use lc_world::pursuit::{self, Closeness, Refused};
@@ -115,23 +115,16 @@ pub const BURN_CHANGE_FRACTION: f64 = 0.25;
 
 /// The quarry's proper acceleration, when its plume was lit at the sighting and two sightings
 /// can measure it.
-fn burn_of(
-    fleet: &Fleet,
-    seen: &pursuit::Sighting,
-    previous: Option<&pursuit::Sighting>,
-) -> Option<glam::DVec3> {
+fn burn_of(fleet: &Fleet, seen: &pursuit::Sighting, previous: Option<&pursuit::Sighting>) -> Option<glam::DVec3> {
     let lit = fleet
         .get(CraftId(seen.target.0))
         .is_some_and(|quarry| quarry.jet_power_w(seen.emitted_s) > 0.0);
-    lit.then(|| previous.and_then(|p| escort::acceleration_of(p, seen)))
-        .flatten()
+    lit.then(|| previous.and_then(|p| escort::acceleration_of(p, seen))).flatten()
 }
 
 /// Whether the quarry is doing something other than what the pursuer's plan assumes of its drive.
 fn burn_changed(pursuer: &Craft, burn: Option<glam::DVec3>) -> bool {
-    let Motive::Escort(plan) = &pursuer.motion.motive else {
-        return burn.is_some();
-    };
+    let Motive::Escort(plan) = &pursuer.motion.motive else { return burn.is_some() };
     let drive = pursuer.turning(pursuer.motion.drive);
     let now = escort::followed(burn.unwrap_or_default(), drive);
     let off_g = (now - plan.quarry.accel).length() * lc_world::flight::C_M_S / lc_world::flight::G0;
@@ -152,11 +145,7 @@ pub fn in_sight(observer: &Craft, other: &Craft) -> bool {
     match (&observer.system, &other.system) {
         (Some(a), Some(b)) => Arc::ptr_eq(a, b),
         (None, None) => {
-            observer
-                .motion
-                .position_ly
-                .distance(other.motion.position_ly)
-                < LOCAL_SHELL_LY
+            observer.motion.position_ly.distance(other.motion.position_ly) < LOCAL_SHELL_LY
         }
         _ => false,
     }
@@ -178,9 +167,7 @@ pub fn sighting(
     let worldline = quarry.worldline();
     // No root means light that has not arrived or has already gone past; there is never more
     // than one for anything sub-luminal.
-    let emitted = retarded_times_at(now_t as f64, here, &worldline)
-        .first()
-        .copied()?;
+    let emitted = retarded_times_at(now_t as f64, here, &worldline).first().copied()?;
     Some(pursuit::Sighting {
         target: lc_world::motion::ShipId(quarry.id.0),
         position_ly: worldline.position_at(emitted) / LIGHT_US_PER_LY,
@@ -203,9 +190,7 @@ pub fn contacts(
 ) -> HashMap<ClientId, Vec<Cleared<Presence>>> {
     let mut out = HashMap::new();
     for (id, state) in clients {
-        let Some(observer) = fleet.get(CraftId(state.ship.0)) else {
-            continue;
-        };
+        let Some(observer) = fleet.get(CraftId(state.ship.0)) else { continue };
         let mut seen = Vec::new();
         for craft in fleet.iter() {
             let Some(sighted) = sighting(fleet, observer.id, ShipId(craft.id.0), now_t) else {
@@ -252,12 +237,7 @@ pub fn contacts(
 /// response, and which it cannot notice until the light of the maneuvere arrives — or whether
 /// the plan is for another closeness. A ship that has arrived, or is doing anything else, is
 /// asked whether it has drifted off station.
-pub fn should_close(
-    pursuer: &Craft,
-    seen: &pursuit::Sighting,
-    closeness: Closeness,
-    now_s: f64,
-) -> bool {
+pub fn should_close(pursuer: &Craft, seen: &pursuit::Sighting, closeness: Closeness, now_s: f64) -> bool {
     let standoff = closeness.standoff_m(pursuer.length_m, seen.length_m);
     let replan = closeness.replan_m(standoff);
     let motive = &pursuer.motion.motive;
@@ -271,10 +251,7 @@ pub fn should_close(
         // Never runs out and never drifts, so only the quarry leaving its conic, or a new
         // closeness, is a reason.
         Motive::Consort(plan) if plan.target == seen.target => {
-            let off = pursuer
-                .system
-                .as_deref()
-                .and_then(|system| plan.divergence_m(system, seen));
+            let off = pursuer.system.as_deref().and_then(|system| plan.divergence_m(system, seen));
             !pursuit::aims_for(plan.cruise.to_ly, standoff) || off.is_none_or(|off| off > replan)
         }
         _ => pursuit::wants_closing(&pursuer.motion, closeness.band_m(standoff), seen, now_s),
@@ -306,25 +283,18 @@ pub fn plan(
     let standoff = closeness.standoff_m(pursuer.length_m, seen.length_m);
     let drive = pursuer.turning(pursuer.motion.drive);
     if let Some(accel) = burn_of(fleet, seen, previous) {
-        return escort::escort(&pursuer.motion, standoff, seen, accel, now_s, drive)
-            .map(Plan::Escort);
+        return escort::escort(&pursuer.motion, standoff, seen, accel, now_s, drive).map(Plan::Escort);
     }
-    let falling = pursuer.system.as_deref().and_then(|system| {
-        consort::approach(system, &pursuer.motion, standoff, seen, now_s, drive)
-    });
+    let falling = pursuer
+        .system
+        .as_deref()
+        .and_then(|system| consort::approach(system, &pursuer.motion, standoff, seen, now_s, drive));
     if let Some(plan) = falling {
         return Ok(Plan::Consort(plan));
     }
     if matches!(pursuer.motion.motive, Motive::Escort(_)) {
-        return escort::escort(
-            &pursuer.motion,
-            standoff,
-            seen,
-            glam::DVec3::ZERO,
-            now_s,
-            drive,
-        )
-        .map(Plan::Escort);
+        return escort::escort(&pursuer.motion, standoff, seen, glam::DVec3::ZERO, now_s, drive)
+            .map(Plan::Escort);
     }
     pursuit::approach(&pursuer.motion, standoff, seen, now_s, drive).map(Plan::Rendezvous)
 }
@@ -342,9 +312,7 @@ pub fn decide(
     let now_s = now_t as f64 * 1.0e-6;
     let mut decided = Vec::new();
     for (id, pursuit) in pursuits.iter_mut() {
-        let Some(pursuer) = fleet.get(*id) else {
-            continue;
-        };
+        let Some(pursuer) = fleet.get(*id) else { continue };
         // Out of sight is the end of it. A policy that survived would be one waiting to act on
         // a craft this one is no longer entitled to know about.
         let Some(seen) = sighting(fleet, *id, pursuit.quarry, now_t) else {
@@ -362,14 +330,7 @@ pub fn decide(
         if waiting || !should_close(pursuer, &seen, pursuit.closeness, now_s) {
             continue;
         }
-        match plan(
-            fleet,
-            pursuer,
-            &seen,
-            previous.as_ref(),
-            pursuit.closeness,
-            now_s,
-        ) {
+        match plan(fleet, pursuer, &seen, previous.as_ref(), pursuit.closeness, now_s) {
             Ok(plan) => decided.push((*id, Some(plan))),
             // On station. Nothing to fly, and the policy stays: it is what will notice the
             // next time this craft has drifted.

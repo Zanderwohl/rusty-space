@@ -1,10 +1,10 @@
 //! The Bevy layer: states, resources, and the systems that carry actions.
 
-use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::math::DVec3;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
+use bevy::camera::Hdr;
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
 use lc_world::sky::{AuthoredStars, StarProvider};
 
@@ -117,157 +117,145 @@ impl Plugin for ClientPlugin {
             crate::faces::FacesPlugin,
             crate::map::MapPlugin,
         ))
-        // **Which camera egui draws on is not left to spawn order.**
-        //
-        // `bevy_egui` gives its primary context to the first camera an application
-        // creates, and `spawn_camera` and the map's own setup are two `Startup` systems
-        // with no order between them. Whichever won, the readout and every panel were
-        // drawn onto that camera's target — and when the map won, the whole interface
-        // went into a 512-pixel texture and the window showed the sky with nothing on it.
-        //
-        // The same lesson as `18-ui-style.md`'s Z-order note, one layer down: two systems
-        // spawning into one frame have no order, so say which one you meant.
-        .insert_resource(EguiGlobalSettings {
-            auto_create_primary_context: false,
-            ..default()
-        })
-        .init_state::<AppState>()
-        .add_message::<Requested>()
-        .insert_resource(Ui(UiState::default()))
-        .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
-        .init_resource::<Catalogue>()
-        .init_resource::<crate::dev::DevEntry>()
-        .init_resource::<Looking>()
-        .init_resource::<Bodies>()
-        .init_resource::<crate::envelope::Envelopes>()
-        .init_resource::<crate::hull::Eye>()
-        .init_resource::<crate::hull::Hulls>()
-        .init_resource::<crate::plume::Plumes>()
-        .init_resource::<crate::resolved::Resolved>()
-        .configure_sets(
-            Update,
-            (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain(),
-        )
-        .init_resource::<panels::HudFoot>()
-        .init_resource::<crate::map_panel::WorldInset>()
-        .add_systems(Startup, spawn_camera)
-        .add_systems(OnEnter(AppState::Loading), begin_load)
-        .add_systems(
-            OnExit(AppState::InGame),
-            crate::map_panel::release_world_frame,
-        )
-        .add_systems(OnEnter(AppState::InGame), spawn_sky)
-        .insert_resource(ClearColor(Color::BLACK))
-        .add_systems(
-            Update,
-            (
-                boot.run_if(in_state(AppState::Boot)),
-                finish_load.run_if(in_state(AppState::Loading)),
-                // Not gated on a state: `--menu --shot` photographs the menu, and the
-                // system does nothing unless a path was asked for.
-                crate::dev::photograph,
-                crate::dev::run_dev_actions.run_if(in_state(AppState::InGame)),
-                crate::dev::place_at_body.run_if(in_state(AppState::InGame)),
-                crate::dev::place_on_station.run_if(in_state(AppState::InGame)),
+            // **Which camera egui draws on is not left to spawn order.**
+            //
+            // `bevy_egui` gives its primary context to the first camera an application
+            // creates, and `spawn_camera` and the map's own setup are two `Startup` systems
+            // with no order between them. Whichever won, the readout and every panel were
+            // drawn onto that camera's target — and when the map won, the whole interface
+            // went into a 512-pixel texture and the window showed the sky with nothing on it.
+            //
+            // The same lesson as `18-ui-style.md`'s Z-order note, one layer down: two systems
+            // spawning into one frame have no order, so say which one you meant.
+            .insert_resource(EguiGlobalSettings {
+                auto_create_primary_context: false,
+                ..default()
+            })
+            .init_state::<AppState>()
+            .add_message::<Requested>()
+            .insert_resource(Ui(UiState::default()))
+            .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            .init_resource::<Catalogue>()
+            .init_resource::<crate::dev::DevEntry>()
+            .init_resource::<Looking>()
+            .init_resource::<Bodies>()
+            .init_resource::<crate::envelope::Envelopes>()
+            .init_resource::<crate::hull::Eye>()
+            .init_resource::<crate::hull::Hulls>()
+            .init_resource::<crate::plume::Plumes>()
+            .init_resource::<crate::resolved::Resolved>()
+            .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
+            .init_resource::<panels::HudFoot>()
+            .init_resource::<crate::map_panel::WorldInset>()
+            .add_systems(Startup, spawn_camera)
+            .add_systems(OnEnter(AppState::Loading), begin_load)
+            .add_systems(OnExit(AppState::InGame), crate::map_panel::release_world_frame)
+            .add_systems(OnEnter(AppState::InGame), spawn_sky)
+            .insert_resource(ClearColor(Color::BLACK))
+            .add_systems(
+                Update,
                 (
-                    read_keys,
-                    // Only while the world is the view being flown. In the map's mode the
-                    // world is a thumbnail in the corner, and a drag over the map turning
-                    // the ship behind it would be the two modes fighting over one pointer.
-                    (grab_cursor, look_around, crate::input::read_wheel)
+                    boot.run_if(in_state(AppState::Boot)),
+                    finish_load.run_if(in_state(AppState::Loading)),
+                    // Not gated on a state: `--menu --shot` photographs the menu, and the
+                    // system does nothing unless a path was asked for.
+                    crate::dev::photograph,
+                    crate::dev::run_dev_actions.run_if(in_state(AppState::InGame)),
+                    crate::dev::place_at_body.run_if(in_state(AppState::InGame)),
+                    crate::dev::place_on_station.run_if(in_state(AppState::InGame)),
+                    (
+                        read_keys,
+                        // Only while the world is the view being flown. In the map's mode the
+                        // world is a thumbnail in the corner, and a drag over the map turning
+                        // the ship behind it would be the two modes fighting over one pointer.
+                        (grab_cursor, look_around, crate::input::read_wheel).chain().run_if(flying),
+                    )
                         .chain()
-                        .run_if(flying),
+                        .run_if(in_state(AppState::InGame)),
+                    dispatch,
+                    // After the dispatcher and after the look, because those are what it is
+                    // overruling: a pin that ran before them would be undone by a hand on the
+                    // mouse or by a crossing aiming itself, on the same frame.
+                    crate::dev::frame_the_cast.run_if(in_state(AppState::InGame)),
+                    crate::dev::open_the_radio.run_if(in_state(AppState::InGame)),
+                    // After the framing, because a pin overrules everything including that.
+                    crate::dev::pin_camera.run_if(in_state(AppState::InGame)),
+                    crate::dev::pin_view.run_if(in_state(AppState::InGame)),
+                    crate::dev::pin_map_camera.run_if(in_state(AppState::InGame)),
+                    crate::dev::pin_map_focus.run_if(in_state(AppState::InGame)),
+                    // The clock is deliberately not gated on any panel or overlay. See
+                    // lightcone/docs/13-client-shell.md: the game does not pause.
+                    advance_clock.run_if(in_state(AppState::InGame)),
+                    // After the clock, so a contact is drawn at the same instant as the ship.
+                    crate::uplink::reckon_contacts.run_if(in_state(AppState::InGame)),
+                    observe.run_if(in_state(AppState::InGame)),
+                    hold_exposure.run_if(in_state(AppState::InGame)),
                 )
                     .chain()
-                    .run_if(in_state(AppState::InGame)),
-                dispatch,
-                // After the dispatcher and after the look, because those are what it is
-                // overruling: a pin that ran before them would be undone by a hand on the
-                // mouse or by a crossing aiming itself, on the same frame.
-                crate::dev::frame_the_cast.run_if(in_state(AppState::InGame)),
-                crate::dev::open_the_radio.run_if(in_state(AppState::InGame)),
-                // After the framing, because a pin overrules everything including that.
-                crate::dev::pin_camera.run_if(in_state(AppState::InGame)),
-                crate::dev::pin_view.run_if(in_state(AppState::InGame)),
-                crate::dev::pin_map_camera.run_if(in_state(AppState::InGame)),
-                crate::dev::pin_map_focus.run_if(in_state(AppState::InGame)),
-                // The clock is deliberately not gated on any panel or overlay. See
-                // lightcone/docs/13-client-shell.md: the game does not pause.
-                advance_clock.run_if(in_state(AppState::InGame)),
-                // After the clock, so a contact is drawn at the same instant as the ship.
-                crate::uplink::reckon_contacts.run_if(in_state(AppState::InGame)),
-                observe.run_if(in_state(AppState::InGame)),
-                hold_exposure.run_if(in_state(AppState::InGame)),
+                    .in_set(Stage::Act),
             )
-                .chain()
-                .in_set(Stage::Act),
-        )
-        .add_systems(
-            Update,
-            (
-                // Before anything is placed for it: how much of the window the world's
-                // camera has decides what a pixel of it is worth.
-                crate::map_panel::frame_world,
-                // Everything below is drawn relative to the eye, and one placed against
-                // last frame's would shear the whole scene against the ship every time the
-                // view turned.
-                crate::hull::place_eye,
-                aim_camera,
-                update_sky,
-                update_bodies,
-                // After the bodies, because it meters them; before the surfaces, because
-                // they are shaded against what it places.
-                crate::resolved::sample_scene,
-                crate::resolved::update_resolved,
-                crate::envelope::update_envelopes,
-                // Last, because a hull is metered as part of the scene the exposure was
-                // just placed for.
-                crate::hull::update_hulls,
-                // And the exhaust after the ship, so it is placed against the same frame.
-                crate::plume::update_plumes,
-            )
-                .chain()
-                .in_set(Stage::Scene)
-                .in_set(Placed)
-                .run_if(in_state(AppState::InGame)),
-        )
-        // The menu's backdrop is the same starfield pass, so it needs the same two
-        // systems. Nothing else: there are no bodies and nothing to resolve.
-        .add_systems(
-            Update,
-            (crate::hull::place_eye, aim_camera, update_sky)
-                .chain()
-                .in_set(Stage::Scene)
-                .run_if(in_state(AppState::MainMenu)),
-        )
-        // Absent unless something inserted one: the browser build reads it off the page
-        // before the app is built, and the desktop mints one from its device grant.
-        .init_resource::<crate::Ticket>()
-        .add_plugins(crate::pick::PickPlugin)
-        .add_plugins(crate::uplink::UplinkPlugin)
-        // Desktop only: a browser build arrives with a session.
-        .add_plugins(SigninPlugins)
-        .add_systems(
-            EguiPrimaryContextPass,
-            (
-                // Before anything is laid out: it changes how every glyph is
-                // rasterised, and a pass that ran first would be measured hinted.
-                crate::faces::unhint,
-                // First of the drawing, so a frame that has the faces is drawn in them
-                // rather than the frame after it.
-                crate::faces::settle,
-                panels::loading.run_if(in_state(AppState::Loading)),
+            .add_systems(
+                Update,
                 (
-                    panels::hud,
-                    crate::map_panel::draw,
-                    panels::open_panels,
-                    crate::reader::draw,
+                    // Before anything is placed for it: how much of the window the world's
+                    // camera has decides what a pixel of it is worth.
+                    crate::map_panel::frame_world,
+                    // Everything below is drawn relative to the eye, and one placed against
+                    // last frame's would shear the whole scene against the ship every time the
+                    // view turned.
+                    crate::hull::place_eye,
+                    aim_camera,
+                    update_sky,
+                    update_bodies,
+                    // After the bodies, because it meters them; before the surfaces, because
+                    // they are shaded against what it places.
+                    crate::resolved::sample_scene,
+                    crate::resolved::update_resolved,
+                    crate::envelope::update_envelopes,
+                    // Last, because a hull is metered as part of the scene the exposure was
+                    // just placed for.
+                    crate::hull::update_hulls,
+                    // And the exhaust after the ship, so it is placed against the same frame.
+                    crate::plume::update_plumes,
                 )
+                    .chain()
+                    .in_set(Stage::Scene)
+                    .in_set(Placed)
                     .run_if(in_state(AppState::InGame)),
-                panels::unreachable.run_if(in_state(AppState::Unreachable)),
             )
-                .chain(),
-        );
+            // The menu's backdrop is the same starfield pass, so it needs the same two
+            // systems. Nothing else: there are no bodies and nothing to resolve.
+            .add_systems(
+                Update,
+                (crate::hull::place_eye, aim_camera, update_sky)
+                    .chain()
+                    .in_set(Stage::Scene)
+                    .run_if(in_state(AppState::MainMenu)),
+            )
+            // Absent unless something inserted one: the browser build reads it off the page
+            // before the app is built, and the desktop mints one from its device grant.
+            .init_resource::<crate::Ticket>()
+            .add_plugins(crate::pick::PickPlugin)
+            .add_plugins(crate::uplink::UplinkPlugin)
+            // Desktop only: a browser build arrives with a session.
+            .add_plugins(SigninPlugins)
+            .add_systems(
+                EguiPrimaryContextPass,
+                (
+                    // Before anything is laid out: it changes how every glyph is
+                    // rasterised, and a pass that ran first would be measured hinted.
+                    crate::faces::unhint,
+                    // First of the drawing, so a frame that has the faces is drawn in them
+                    // rather than the frame after it.
+                    crate::faces::settle,
+                    panels::loading.run_if(in_state(AppState::Loading)),
+                    (panels::hud, crate::map_panel::draw, panels::open_panels,
+                        crate::reader::draw)
+                        .run_if(in_state(AppState::InGame)),
+                    panels::unreachable.run_if(in_state(AppState::Unreachable)),
+                )
+                    .chain(),
+            );
         if HAS_MAIN_MENU {
             app.add_plugins(crate::menu::MainMenuPlugin);
         } else {
@@ -364,9 +352,7 @@ fn spawn_camera(mut commands: Commands) {
 /// float holds that next to a render unit, so the ship stays at the render origin and the sky
 /// moves around it; what changes when the ship flies is the direction to each star.
 fn aim_camera(ui: Res<Ui>, mut camera: Query<&mut Transform, With<SkyCamera>>) {
-    let Ok(mut transform) = camera.single_mut() else {
-        return;
-    };
+    let Ok(mut transform) = camera.single_mut() else { return };
     let forward = sim_to_render(ui.look.forward()).as_vec3();
     let up = sim_to_render(DVec3::Z).as_vec3();
     transform.look_to(forward, up);
@@ -446,29 +432,19 @@ fn begin_load(
         // Packing is native tooling and reads a file directly; see `skypack`. Absent from a
         // browser build, where the feature is off and `csv` is not in the tree at all.
         #[cfg(feature = "hyg")]
-        Some(path) if path.ends_with(".csv") => match lc_world::sky::hyg::HygProvider::load(path) {
-            Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p, &uplink),
-            Err(e) => {
-                ui.notify(format!("catalogue: {e}"), 0.0);
-                enter_game(
-                    &mut game,
-                    &mut ui,
-                    &mut next,
-                    &AuthoredStars::sample(),
-                    &uplink,
-                );
+        Some(path) if path.ends_with(".csv") => {
+            match lc_world::sky::hyg::HygProvider::load(path) {
+                Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p, &uplink),
+                Err(e) => {
+                    ui.notify(format!("catalogue: {e}"), 0.0);
+                    enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink);
+                }
             }
-        },
+        }
         Some(path) => {
             commands.insert_resource(LoadingSky(assets.load(path.to_owned())));
         }
-        None => enter_game(
-            &mut game,
-            &mut ui,
-            &mut next,
-            &AuthoredStars::sample(),
-            &uplink,
-        ),
+        None => enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink),
     }
 }
 
@@ -499,13 +475,7 @@ fn finish_load(
         // A sky that will not load is worth saying out loud rather than silently becoming
         // three hand-written stars.
         ui.notify("sky failed to load; using the sample", 0.0);
-        enter_game(
-            &mut game,
-            &mut ui,
-            &mut next,
-            &AuthoredStars::sample(),
-            &uplink,
-        );
+        enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink);
         commands.remove_resource::<LoadingSky>();
     }
 }
@@ -554,10 +524,7 @@ fn dispatch(
                     next.set(AppState::Loading);
                 }
                 Effect::WriteSnapshot => {
-                    ui.notify(
-                        "snapshot is not wired to a path yet",
-                        game.coordinate_time_s(),
-                    );
+                    ui.notify("snapshot is not wired to a path yet", game.coordinate_time_s());
                 }
                 Effect::Notify(text) => {
                     let at = game.coordinate_time_s();
@@ -665,18 +632,14 @@ mod tests {
             app.update();
         }
         let after = app.world().resource::<Game>().coordinate_time_s();
-        assert!(
-            after > before,
-            "time stopped while panels were open: {before} -> {after}"
-        );
+        assert!(after > before, "time stopped while panels were open: {before} -> {after}");
     }
 
     #[test]
     fn a_request_reaches_the_session_through_the_dispatcher() {
         let mut app = harness();
         let id = app.world().resource::<Game>().stars[0].id;
-        app.world_mut()
-            .write_message(Requested(Action::SelectTarget(Some(id))));
+        app.world_mut().write_message(Requested(Action::SelectTarget(Some(id))));
         app.update();
         assert_eq!(app.world().resource::<Ui>().selected, Some(id));
         assert_eq!(app.world().resource::<Game>().pointing, Some(id));
@@ -702,32 +665,18 @@ mod tests {
             game.distance_to(game.star(id).unwrap())
         };
 
-        app.world_mut()
-            .write_message(Requested(Action::SelectTarget(Some(id))));
-        app.world_mut()
-            .write_message(Requested(Action::FlyTo(None)));
+        app.world_mut().write_message(Requested(Action::SelectTarget(Some(id))));
+        app.world_mut().write_message(Requested(Action::FlyTo(None)));
         app.update();
-        assert!(
-            app.world().resource::<Game>().cruise().is_some(),
-            "the crossing should have begun"
-        );
+        assert!(app.world().resource::<Game>().cruise().is_some(), "the crossing should have begun");
 
         for _ in 0..64 {
             app.update();
         }
         let game = app.world().resource::<Game>();
-        assert!(
-            game.distance_to(game.star(id).unwrap()) < before,
-            "the ship did not move"
-        );
-        assert!(
-            game.ship.motion.beta.length() > 0.0,
-            "and it is not under way"
-        );
-        assert!(
-            game.ship.motion.clock_s < game.coordinate_time_s(),
-            "the ship clock should lag"
-        );
+        assert!(game.distance_to(game.star(id).unwrap()) < before, "the ship did not move");
+        assert!(game.ship.motion.beta.length() > 0.0, "and it is not under way");
+        assert!(game.ship.motion.clock_s < game.coordinate_time_s(), "the ship clock should lag");
     }
 
     /// The camera turns; it does not travel. Everything drawn is at a fixed radius around it.
@@ -735,21 +684,11 @@ mod tests {
     fn the_camera_only_ever_rotates() {
         let mut app = harness();
         app.add_systems(Update, aim_camera);
-        let camera = app
-            .world_mut()
-            .spawn((Camera3d::default(), SkyCamera, Transform::default()))
-            .id();
-        app.world_mut().write_message(Requested(Action::Look {
-            yaw: 1.0,
-            pitch: 0.4,
-        }));
+        let camera = app.world_mut().spawn((Camera3d::default(), SkyCamera, Transform::default())).id();
+        app.world_mut().write_message(Requested(Action::Look { yaw: 1.0, pitch: 0.4 }));
         app.update();
         let transform = *app.world().entity(camera).get::<Transform>().unwrap();
-        assert_eq!(
-            transform.translation,
-            Vec3::ZERO,
-            "the camera must stay at the origin"
-        );
+        assert_eq!(transform.translation, Vec3::ZERO, "the camera must stay at the origin");
         assert!(transform.rotation.is_finite() && transform.rotation.length() > 0.5);
     }
 
@@ -766,25 +705,15 @@ mod tests {
     fn a_second_camera_does_not_stop_the_sky_turning() {
         let mut app = harness();
         app.add_systems(Update, aim_camera);
-        let sky = app
-            .world_mut()
-            .spawn((Camera3d::default(), SkyCamera, Transform::default()))
-            .id();
-        app.world_mut()
-            .spawn((Camera3d::default(), Transform::default()));
+        let sky = app.world_mut().spawn((Camera3d::default(), SkyCamera, Transform::default())).id();
+        app.world_mut().spawn((Camera3d::default(), Transform::default()));
 
         let before = *app.world().entity(sky).get::<Transform>().unwrap();
-        app.world_mut().write_message(Requested(Action::Look {
-            yaw: 1.0,
-            pitch: 0.4,
-        }));
+        app.world_mut().write_message(Requested(Action::Look { yaw: 1.0, pitch: 0.4 }));
         app.update();
 
         let after = *app.world().entity(sky).get::<Transform>().unwrap();
-        assert_ne!(
-            after.rotation, before.rotation,
-            "the turn never reached the sky camera"
-        );
+        assert_ne!(after.rotation, before.rotation, "the turn never reached the sky camera");
     }
 
     /// Where a mark placed in [`Stage::Mark`] found the camera.
@@ -812,43 +741,22 @@ mod tests {
             .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
             .init_resource::<crate::uplink::Uplink>()
             .init_resource::<Seen>()
-            .configure_sets(
-                Update,
-                (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain(),
-            )
+            .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .add_systems(Update, dispatch.in_set(Stage::Act))
             .add_systems(Update, aim_camera.in_set(Stage::Scene))
             .add_systems(Update, probe.in_set(Stage::Mark));
         app.insert_state(AppState::InGame);
-        let camera = app
-            .world_mut()
-            .spawn((Camera3d::default(), SkyCamera, Transform::default()))
-            .id();
+        let camera = app.world_mut().spawn((Camera3d::default(), SkyCamera, Transform::default())).id();
         app.update();
-        let before = app
-            .world()
-            .resource::<Seen>()
-            .0
-            .expect("the mark stage should have run");
+        let before = app.world().resource::<Seen>().0.expect("the mark stage should have run");
 
-        app.world_mut().write_message(Requested(Action::Look {
-            yaw: 1.2,
-            pitch: 0.3,
-        }));
+        app.world_mut().write_message(Requested(Action::Look { yaw: 1.2, pitch: 0.3 }));
         app.update();
 
-        let aimed = *app
-            .world()
-            .entity(camera)
-            .get::<Transform>()
-            .unwrap()
-            .forward();
+        let aimed = *app.world().entity(camera).get::<Transform>().unwrap().forward();
         let seen = app.world().resource::<Seen>().0.unwrap();
         assert_ne!(seen, before, "the turn never reached the camera at all");
-        assert_eq!(
-            seen, aimed,
-            "the mark was placed against last frame's camera"
-        );
+        assert_eq!(seen, aimed, "the mark was placed against last frame's camera");
     }
 
     #[test]
@@ -856,8 +764,7 @@ mod tests {
         // Setting the rate to zero does stop the clock -- that is what the control is for.
         // The distinction is that no *panel* does it.
         let mut app = harness();
-        app.world_mut()
-            .write_message(Requested(Action::SetTimeRate(0.0)));
+        app.world_mut().write_message(Requested(Action::SetTimeRate(0.0)));
         app.update();
         let before = app.world().resource::<Game>().coordinate_time_s();
         for _ in 0..4 {

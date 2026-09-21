@@ -46,6 +46,7 @@ pub struct Appearance {
 }
 
 impl Reckoning {
+
     /// `system` is the one the observer is in; a sighting outside its shell is not put on a
     /// conic about that system's bodies.
     pub fn new(system: Option<&LocalSystem>, seen: Sighting) -> Self {
@@ -88,11 +89,7 @@ fn along_conic(
         emitted_s = now_s - observer_ly.distance(at_ly) * JULIAN_YEAR_S;
     }
     let (position_ly, velocity) = frame.at(system, emitted_s)?;
-    Some(Appearance {
-        position_ly,
-        beta: coast::beta_of(velocity),
-        emitted_s,
-    })
+    Some(Appearance { position_ly, beta: coast::beta_of(velocity), emitted_s })
 }
 
 /// Seconds the light arriving at `now_s` has been in flight from a straight worldline, closed
@@ -123,13 +120,7 @@ mod tests {
     use crate::system::M_PER_LY;
 
     fn drifting(position_ly: DVec3, beta: DVec3) -> Sighting {
-        Sighting {
-            target: ShipId(2),
-            position_ly,
-            beta,
-            length_m: 500.0,
-            emitted_s: 100.0,
-        }
+        Sighting { target: ShipId(2), position_ly, beta, length_m: 500.0, emitted_s: 100.0 }
     }
 
     /// Between the stars, a light-hour off and doing a fifth of `c`: what is drawn is on the
@@ -144,10 +135,7 @@ mod tests {
 
         assert!(seen_now.emitted_s > seen.emitted_s && seen_now.emitted_s < now_s);
         let flight_s = seen_now.position_ly.length() * JULIAN_YEAR_S;
-        assert!(
-            (seen_now.emitted_s + flight_s - now_s).abs() < 1e-6,
-            "off the light cone"
-        );
+        assert!((seen_now.emitted_s + flight_s - now_s).abs() < 1e-6, "off the light cone");
         assert_eq!(seen_now.position_ly, seen.reckoned_at(seen_now.emitted_s));
     }
 
@@ -174,10 +162,6 @@ mod tests {
         let observer_ly = seen.reckoned_at(now_s) + DVec3::X * 1.5e3 / M_PER_LY;
         let seen_now = reckoning.appearance_at(None, observer_ly, now_s);
         assert!(seen_now.emitted_s <= now_s);
-        assert!(
-            now_s - seen_now.emitted_s < 1e-5,
-            "{} s of light over 1.5 km",
-            now_s - seen_now.emitted_s
-        );
+        assert!(now_s - seen_now.emitted_s < 1e-5, "{} s of light over 1.5 km", now_s - seen_now.emitted_s);
     }
 }

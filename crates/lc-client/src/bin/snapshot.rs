@@ -83,32 +83,15 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
     let mut layers: Vec<Primitives> = Vec::new();
 
     // --- all-sky map -----------------------------------------------------------------
-    let sky_area = Rect {
-        x: 90.0,
-        y: 60.0,
-        width: WIDTH as f32 - 130.0,
-        height: 440.0,
-    };
+    let sky_area = Rect { x: 90.0, y: 60.0, width: WIDTH as f32 - 130.0, height: 440.0 };
     let sky_chart = {
         let mut c = Chart::new(
             sky_area,
-            Axis {
-                scale: Scale::Linear,
-                range: (-180.0, 180.0),
-                ticks: 7,
-            },
-            Axis {
-                scale: Scale::Linear,
-                range: (-90.0, 90.0),
-                ticks: 5,
-            },
+            Axis { scale: Scale::Linear, range: (-180.0, 180.0), ticks: 7 },
+            Axis { scale: Scale::Linear, range: (-90.0, 90.0), ticks: 5 },
             &metrics,
         );
-        c.style = Style {
-            axis: FG,
-            text_size: 13.0,
-            ..Style::default()
-        };
+        c.style = Style { axis: FG, text_size: 13.0, ..Style::default() };
         c
     };
     layers.push(sky_chart.frame());
@@ -135,10 +118,7 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
             .iter()
             .map(|s| {
                 let p = s.apparent_dir;
-                (
-                    p.y.atan2(p.x).to_degrees(),
-                    p.z.clamp(-1.0, 1.0).asin().to_degrees(),
-                )
+                (p.y.atan2(p.x).to_degrees(), p.z.clamp(-1.0, 1.0).asin().to_degrees())
             })
             .collect();
         let colors: Vec<Rgba> = members
@@ -164,14 +144,13 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
     if samples.is_empty() {
         return Err("the telescope recorded nothing".into());
     }
-    let years: Vec<(f64, f64)> = samples
-        .iter()
-        .map(|(t, d)| (t / 31_557_600.0, 1.0 - d))
-        .collect();
-    let span = (years.first().unwrap().0, years.last().unwrap().0);
-    let flux_range = years
-        .iter()
-        .fold((f64::MAX, f64::MIN), |r, (_, f)| (r.0.min(*f), r.1.max(*f)));
+    let years: Vec<(f64, f64)> =
+        samples.iter().map(|(t, d)| (t / 31_557_600.0, 1.0 - d)).collect();
+    let span = (
+        years.first().unwrap().0,
+        years.last().unwrap().0,
+    );
+    let flux_range = years.iter().fold((f64::MAX, f64::MIN), |r, (_, f)| (r.0.min(*f), r.1.max(*f)));
 
     // Measure the y labels before placing the axis: a flux axis needs seven decimals, and a
     // fixed margin clips the leading digits off the left edge. The measurement has to use the
@@ -183,25 +162,14 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
         series: Rgba::opaque(0.35, 0.75, 1.0),
         ..Style::default()
     };
-    let x_axis = Axis {
-        scale: Scale::Linear,
-        range: span,
-        ticks: 8,
-    };
-    let y_axis = Axis {
-        scale: Scale::Linear,
-        range: Scale::Linear.pad(flux_range, 0.15),
-        ticks: 5,
-    };
+    let x_axis = Axis { scale: Scale::Linear, range: span, ticks: 8 };
+    let y_axis =
+        Axis { scale: Scale::Linear, range: Scale::Linear.pad(flux_range, 0.15), ticks: 5 };
 
     let mut curve_chart = Chart::new(curve_area, x_axis, y_axis, &metrics);
     curve_chart.style = style;
     let margin = curve_chart.y_label_width() + 14.0;
-    let curve_area = Rect {
-        x: margin,
-        width: WIDTH as f32 - margin - 40.0,
-        ..curve_area
-    };
+    let curve_area = Rect { x: margin, width: WIDTH as f32 - margin - 40.0, ..curve_area };
     curve_chart.area = curve_area;
     layers.push(curve_chart.frame());
     layers.push(curve_chart.series(&years));
@@ -210,49 +178,19 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
     // --- furniture -------------------------------------------------------------------
     let mut text = Primitives::default();
     let mut say = |x: f32, y: f32, s: String, size: f32, anchor, color| {
-        text.labels.push(Label {
-            at: Point::new(x, y),
-            text: s,
-            size,
-            anchor,
-            color,
-        });
+        text.labels.push(Label { at: Point::new(x, y), text: s, size, anchor, color });
     };
-    say(
-        WIDTH as f32 / 2.0,
-        34.0,
-        "LIGHTCONE FRONTIER - OBSERVER SNAPSHOT".into(),
-        20.0,
-        Anchor::Middle,
-        FG,
-    );
-    say(
-        90.0,
-        54.0,
-        format!("SKY - {} STARS", sky.len()),
-        13.0,
-        Anchor::Start,
-        FG,
-    );
+    say(WIDTH as f32 / 2.0, 34.0, "LIGHTCONE FRONTIER - OBSERVER SNAPSHOT".into(), 20.0, Anchor::Middle, FG);
+    say(90.0, 54.0, format!("SKY - {} STARS", sky.len()), 13.0, Anchor::Start, FG);
     say(
         WIDTH as f32 - 40.0,
         54.0,
-        format!(
-            "T + {:.2} YEARS",
-            session.coordinate_time_s() / 31_557_600.0
-        ),
+        format!("T + {:.2} YEARS", session.coordinate_time_s() / 31_557_600.0),
         13.0,
         Anchor::End,
         FG,
     );
-    say(
-        curve_area.x,
-        592.0,
-        format!("LIGHT CURVE - {}", name.to_uppercase()),
-        13.0,
-        Anchor::Start,
-        FG,
-    );
+    say(curve_area.x, 592.0, format!("LIGHT CURVE - {}", name.to_uppercase()), 13.0, Anchor::Start, FG);
     let age_years = sky
         .iter()
         .find(|s| s.id == target)
@@ -284,9 +222,7 @@ fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
 
     let refs: Vec<&Primitives> = layers.iter().collect();
     let pixmap = raster::render(&refs, WIDTH, HEIGHT, BG).ok_or("could not allocate the image")?;
-    pixmap
-        .save_png(output)
-        .map_err(|e| format!("{output}: {e}"))?;
+    pixmap.save_png(output).map_err(|e| format!("{output}: {e}"))?;
 
     let deepest = curve.deepest();
     Ok(format!(

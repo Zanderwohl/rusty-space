@@ -43,11 +43,7 @@ fn main() {
 
     // The first star that is actually interstellar: the catalogue puts the Sun about an
     // astronomical unit out and flying to it is not a crossing.
-    let Some(target) = session
-        .stars
-        .iter()
-        .find(|s| s.position_ly.length() > 1.0)
-        .map(|s| s.id)
+    let Some(target) = session.stars.iter().find(|s| s.position_ly.length() > 1.0).map(|s| s.id)
     else {
         eprintln!("crossing: nothing to fly to");
         std::process::exit(1);
@@ -82,10 +78,7 @@ fn main() {
     let mut title = Primitives::default();
     title.labels.push(Label {
         at: Point::new(24.0, 24.0),
-        text: format!(
-            "crossing to {name} — {distance:.2} ly at {:.0} g",
-            session.ship.motion.drive.accel_g
-        ),
+        text: format!("crossing to {name} — {distance:.2} ly at {:.0} g", session.ship.motion.drive.accel_g),
         size: 17.0,
         anchor: Anchor::Start,
         color: FG,
@@ -121,23 +114,11 @@ fn panel(
     };
     let mut chart = Chart::new(
         area,
-        Axis {
-            scale: Scale::Linear,
-            range: (-180.0, 180.0),
-            ticks: 5,
-        },
-        Axis {
-            scale: Scale::Linear,
-            range: (-90.0, 90.0),
-            ticks: 3,
-        },
+        Axis { scale: Scale::Linear, range: (-180.0, 180.0), ticks: 5 },
+        Axis { scale: Scale::Linear, range: (-90.0, 90.0), ticks: 3 },
         metrics,
     );
-    chart.style = Style {
-        axis: FG,
-        text_size: 11.0,
-        ..Style::default()
-    };
+    chart.style = Style { axis: FG, text_size: 11.0, ..Style::default() };
 
     let mut out = vec![chart.frame()];
     // Bucketed by brightness so the bright ones are drawn larger, the way a star chart does.
@@ -157,10 +138,7 @@ fn panel(
             .iter()
             .map(|s| {
                 let d = s.apparent_dir;
-                (
-                    d.y.atan2(d.x).to_degrees(),
-                    d.z.clamp(-1.0, 1.0).asin().to_degrees(),
-                )
+                (d.y.atan2(d.x).to_degrees(), d.z.clamp(-1.0, 1.0).asin().to_degrees())
             })
             .collect();
         let colors: Vec<Rgba> = members
@@ -176,10 +154,7 @@ fn panel(
     let beta = session.ship.motion.beta.length();
     let years = session.coordinate_time_s() / 31_557_600.0;
     let aboard = session.ship.motion.clock_s / 31_557_600.0;
-    let left = session
-        .star(target)
-        .map(|s| session.distance_to(s))
-        .unwrap_or(0.0);
+    let left = session.star(target).map(|s| session.distance_to(s)).unwrap_or(0.0);
 
     // Two lines, not one: at this panel width the single-line form runs into the next panel.
     let mut text = Primitives::default();

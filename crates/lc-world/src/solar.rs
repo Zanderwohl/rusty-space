@@ -53,12 +53,7 @@ pub fn flux_w_m2(luminosity_w: f64, distance_m: f64) -> f64 {
 }
 
 /// What a hull collects broadside, W: the balance's efficiency and gain times flux times shadow.
-pub fn power_w(
-    balance: &crate::fitting::Balance,
-    length_m: f64,
-    luminosity_w: f64,
-    distance_m: f64,
-) -> f64 {
+pub fn power_w(balance: &crate::fitting::Balance, length_m: f64, luminosity_w: f64, distance_m: f64) -> f64 {
     balance.solar_gain
         * balance.solar_efficiency
         * flux_w_m2(luminosity_w, distance_m)
@@ -82,8 +77,8 @@ mod tests {
     use super::*;
     use crate::fitting::{Balance, C2, Loadout};
     use crate::flight::JULIAN_YEAR_S;
-    use crate::star::Star;
     use crate::system::UNIT_M;
+    use crate::star::Star;
 
     /// **Checked against the integral it replaces**, not against itself: tessellate the ellipsoid
     /// and sum `max(0, n·ŝ) dA` over its faces.
@@ -91,23 +86,17 @@ mod tests {
     fn the_silhouette_is_the_integral_of_the_lit_surface() {
         let length = 500.0;
         let (a, b, c) = semi_axes(length);
-        let point =
-            |u: f64, v: f64| DVec3::new(a * u.cos() * v.sin(), b * u.sin() * v.sin(), c * v.cos());
+        let point = |u: f64, v: f64| {
+            DVec3::new(a * u.cos() * v.sin(), b * u.sin() * v.sin(), c * v.cos())
+        };
         let (nu, nv) = (720, 360);
         let lit = |s: DVec3| {
             let mut sum = 0.0;
             for i in 0..nu {
                 for j in 0..nv {
-                    let (u0, u1) = (
-                        i as f64 / nu as f64 * std::f64::consts::TAU,
-                        (i + 1) as f64 / nu as f64 * std::f64::consts::TAU,
-                    );
-                    let (v0, v1) = (
-                        j as f64 / nv as f64 * std::f64::consts::PI,
-                        (j + 1) as f64 / nv as f64 * std::f64::consts::PI,
-                    );
-                    let (p00, p10, p01, p11) =
-                        (point(u0, v0), point(u1, v0), point(u0, v1), point(u1, v1));
+                    let (u0, u1) = (i as f64 / nu as f64 * std::f64::consts::TAU, (i + 1) as f64 / nu as f64 * std::f64::consts::TAU);
+                    let (v0, v1) = (j as f64 / nv as f64 * std::f64::consts::PI, (j + 1) as f64 / nv as f64 * std::f64::consts::PI);
+                    let (p00, p10, p01, p11) = (point(u0, v0), point(u1, v0), point(u0, v1), point(u1, v1));
                     // Two triangles, each an area-weighted outward normal.
                     for (p, q, r) in [(p00, p01, p11), (p00, p11, p10)] {
                         let area_normal = 0.5 * (q - p).cross(r - p);
@@ -117,18 +106,9 @@ mod tests {
             }
             sum
         };
-        for s in [
-            DVec3::X,
-            DVec3::Y,
-            DVec3::Z,
-            DVec3::new(1.0, 2.0, 3.0).normalize(),
-            DVec3::new(-0.3, 0.1, 0.9).normalize(),
-        ] {
+        for s in [DVec3::X, DVec3::Y, DVec3::Z, DVec3::new(1.0, 2.0, 3.0).normalize(), DVec3::new(-0.3, 0.1, 0.9).normalize()] {
             let (numeric, closed) = (lit(s), silhouette_m2(length, s));
-            assert!(
-                (numeric / closed - 1.0).abs() < 1.0e-3,
-                "{s}: {numeric} vs {closed}"
-            );
+            assert!((numeric / closed - 1.0).abs() < 1.0e-3, "{s}: {numeric} vs {closed}");
         }
     }
 
@@ -138,8 +118,7 @@ mod tests {
         let length = 1_000.0;
         let (a, b, c) = semi_axes(length);
         let p = 1.6075_f64;
-        let surface = 4.0
-            * std::f64::consts::PI
+        let surface = 4.0 * std::f64::consts::PI
             * (((a * b).powf(p) + (a * c).powf(p) + (b * c).powf(p)) / 3.0).powf(1.0 / p);
         // A Fibonacci sphere, which covers directions evenly without randomness.
         let n = 20_000;
@@ -154,11 +133,7 @@ mod tests {
             .sum::<f64>()
             / n as f64;
         // Thomsen's surface formula is good to about a percent.
-        assert!(
-            (mean / (surface / 4.0) - 1.0).abs() < 0.015,
-            "{mean} vs {}",
-            surface / 4.0
-        );
+        assert!((mean / (surface / 4.0) - 1.0).abs() < 0.015, "{mean} vs {}", surface / 4.0);
         assert!((broadside_m2(length) / silhouette_m2(length, DVec3::X) - 5.0).abs() < 1.0e-9);
     }
 
@@ -174,12 +149,8 @@ mod tests {
     fn the_starting_ship_fills_in_a_year_at_a_tenth_of_an_au() {
         let b = Balance::DEFAULT;
         let start = Loadout::STARTING;
-        let net = power_w(
-            &b,
-            500.0,
-            SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * UNIT_M * UNIT_M,
-            0.1 * UNIT_M,
-        ) - b.drain_w(&start);
+        let net = power_w(&b, 500.0, SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * UNIT_M * UNIT_M, 0.1 * UNIT_M)
+            - b.drain_w(&start);
         let years = b.capacity_j(&start) / net / JULIAN_YEAR_S;
         assert!((years - 1.0).abs() < 1.0e-9, "{years}");
         let _ = C2;
@@ -195,10 +166,7 @@ mod tests {
             let drain = 0.1 * slots * b.living_drain_w;
             let at_one_au = power_w(&b, length, sol, UNIT_M);
             let au = (at_one_au / drain).sqrt();
-            assert!(
-                (au - expected_au).abs() < 0.01,
-                "{length} m breaks even at {au} AU"
-            );
+            assert!((au - expected_au).abs() < 0.01, "{length} m breaks even at {au} AU");
         }
     }
 

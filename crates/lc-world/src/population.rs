@@ -92,13 +92,7 @@ impl Population {
         let a_hi = axes.iter().map(|(v, _)| *v).fold(0.0, f64::max);
         // Short of one, or a near-parabolic cloud has an inner radius of zero and a tube that
         // swallows its own center.
-        let e_hi = self
-            .eccentricity
-            .nodes()
-            .iter()
-            .map(|(v, _)| *v)
-            .fold(0.0, f64::max)
-            .clamp(0.0, 0.95);
+        let e_hi = self.eccentricity.nodes().iter().map(|(v, _)| *v).fold(0.0, f64::max).clamp(0.0, 0.95);
         let inner_m = a_lo * (1.0 - e_hi);
         let outer_m = a_hi * (1.0 + e_hi);
         (inner_m > 0.0 && outer_m > inner_m).then_some(Extent {
@@ -180,19 +174,13 @@ impl Population {
     /// of the occultation integral needs no quadrature.
     pub fn inv_r2(&self) -> f64 {
         self.semi_major.expectation(|a| 1.0 / (a * a))
-            * self
-                .eccentricity
-                .expectation(|e| 1.0 / (1.0 - e * e).sqrt())
+            * self.eccentricity.expectation(|e| 1.0 / (1.0 - e * e).sqrt())
     }
 
     /// Latitude of a viewing direction relative to the population's plane, radians.
     #[inline]
     pub fn latitude(&self, direction: DVec3) -> f64 {
-        direction
-            .normalize()
-            .dot(self.pole.normalize())
-            .clamp(-1.0, 1.0)
-            .asin()
+        direction.normalize().dot(self.pole.normalize()).clamp(-1.0, 1.0).asin()
     }
 
     /// Elements per steradian as seen from the star, in `direction`.
@@ -332,21 +320,11 @@ mod tests {
         let pop = swarm(Inclination::isotropic(), 1.5e6, AU);
         let star = Star::SOL;
         let m = pop.mean_count_cone(DVec3::X, &star);
-        assert!(
-            (m - 8.11).abs() < 0.05,
-            "m on the disc is {m}, expected 8.11"
-        );
+        assert!((m - 8.11).abs() < 0.05, "m on the disc is {m}, expected 8.11");
         let d = pop.mean_deficit(DVec3::X, &star);
-        assert!(
-            (d - 5.33e-6).abs() < 0.05e-6,
-            "deficit is {d}, expected 5.33e-6"
-        );
+        assert!((d - 5.33e-6).abs() < 0.05e-6, "deficit is {d}, expected 5.33e-6");
         let t = pop.crossing_time(&star);
-        assert!(
-            (t / 3600.0 - 13.0).abs() < 0.2,
-            "crossing time is {} h",
-            t / 3600.0
-        );
+        assert!((t / 3600.0 - 13.0).abs() < 0.2, "crossing time is {} h", t / 3600.0);
     }
 
     #[test]
@@ -385,25 +363,15 @@ mod tests {
         // At the inclination limit the point-sampled density diverges; the observable does
         // not, because the stellar disc has finite angular size.
         let star = Star::SOL;
-        let pop = swarm(
-            Inclination::band(0.30, 0.0005, 1),
-            1.0,
-            star.radius_m / 0.05,
-        );
+        let pop = swarm(Inclination::band(0.30, 0.0005, 1), 1.0, star.radius_m / 0.05);
         let (c, si) = (0.30f64.cos(), 0.30f64.sin());
         let at_caustic = DVec3::new(c, 0.0, si);
         let point = pop.mean_count(at_caustic, &star);
         let cone = pop.mean_count_cone(at_caustic, &star);
         assert!(cone.is_finite() && cone > 0.0);
-        assert!(
-            cone < point || !point.is_finite(),
-            "cone {cone} must tame point {point}"
-        );
+        assert!(cone < point || !point.is_finite(), "cone {cone} must tame point {point}");
         let mc = mc_mean_count(&pop, at_caustic, &star, 800_000);
-        assert!(
-            (cone / mc - 1.0).abs() < 0.10,
-            "cone {cone:.4e} vs MC {mc:.4e}"
-        );
+        assert!((cone / mc - 1.0).abs() < 0.10, "cone {cone:.4e} vs MC {mc:.4e}");
     }
 
     #[test]
@@ -413,11 +381,7 @@ mod tests {
         let in_plane = pop.mean_deficit(DVec3::X, &star);
         let mid = pop.mean_deficit(DVec3::new(1.0, 0.0, 0.1), &star);
         assert!(in_plane > mid, "density must fall away from the plane");
-        assert_eq!(
-            pop.mean_deficit(DVec3::Z, &star),
-            0.0,
-            "nothing transits over the pole"
-        );
+        assert_eq!(pop.mean_deficit(DVec3::Z, &star), 0.0, "nothing transits over the pole");
     }
 
     #[test]
@@ -427,12 +391,8 @@ mod tests {
         let mut eccentric = circular.clone();
         eccentric.eccentricity = Distribution::delta(0.6);
         circular.eccentricity = Distribution::delta(0.0);
-        let ratio =
-            eccentric.mean_deficit(DVec3::X, &star) / circular.mean_deficit(DVec3::X, &star);
-        assert!(
-            (ratio - 1.25).abs() < 1e-6,
-            "1/sqrt(1-0.36) = 1.25, got {ratio}"
-        );
+        let ratio = eccentric.mean_deficit(DVec3::X, &star) / circular.mean_deficit(DVec3::X, &star);
+        assert!((ratio - 1.25).abs() < 1e-6, "1/sqrt(1-0.36) = 1.25, got {ratio}");
     }
 
     /// One astronomical unit from a sun-like star, which is the case the ten-micron band was
@@ -455,13 +415,8 @@ mod tests {
         let (lo, hi) = Band::ThermalIr.limits_m();
         for t in [sphere, panel] {
             let peak = em_spectra::blackbody::WIEN_B / t;
-            assert!(
-                peak > lo && peak < hi,
-                "{t} K peaks at {:.2} um, band is {:.1} to {:.1}",
-                peak * 1e6,
-                lo * 1e6,
-                hi * 1e6
-            );
+            assert!(peak > lo && peak < hi, "{t} K peaks at {:.2} um, band is {:.1} to {:.1}",
+                peak * 1e6, lo * 1e6, hi * 1e6);
         }
     }
 
@@ -487,10 +442,7 @@ mod tests {
             near.equilibrium_temperature(&Star::SOL),
             far.equilibrium_temperature(&Star::SOL),
         );
-        assert!(
-            (a / b - 2.0).abs() < 1e-6,
-            "four times out should be half as warm: {a} / {b}"
-        );
+        assert!((a / b - 2.0).abs() < 1e-6, "four times out should be half as warm: {a} / {b}");
     }
 
     /// The claim the whole re-emission model rests on: what is absorbed is what is radiated.
@@ -505,14 +457,10 @@ mod tests {
                 for radius in [0.2 * AU, AU, 30.0 * AU] {
                     let mut p = swarm(Inclination::isotropic(), count, radius);
                     p.radiating_ratio = ratio;
-                    let out = p.radiating_area()
-                        * em_spectra::blackbody::SIGMA
+                    let out = p.radiating_area() * em_spectra::blackbody::SIGMA
                         * p.equilibrium_temperature(&Star::SOL).powi(4);
                     let want = p.absorbed_fraction() * Star::SOL.luminosity();
-                    assert!(
-                        (out / want - 1.0).abs() < 1e-9,
-                        "{out} radiated against {want} absorbed"
-                    );
+                    assert!((out / want - 1.0).abs() < 1e-9, "{out} radiated against {want} absorbed");
                 }
             }
         }
@@ -529,22 +477,12 @@ mod tests {
         assert!((p.absorbed_fraction() - (1.0 - (-0.5f64).exp())).abs() < 1e-12);
 
         let r = p.reradiated_radiance(&Star::SOL);
-        let against_star =
-            |b: Band| r[b] / em_spectra::blackbody::band_radiance(b, Star::SOL.teff_k);
+        let against_star = |b: Band| r[b] / em_spectra::blackbody::band_radiance(b, Star::SOL.teff_k);
 
-        assert!(
-            against_star(Band::V) < 1e-20,
-            "a 331 K body emits no visible light at all"
-        );
-        assert!(
-            against_star(Band::K) < 1e-2,
-            "and next to nothing at two microns"
-        );
-        assert!(
-            against_star(Band::ThermalIr) > 50.0,
-            "but it should swamp the star at ten microns, got {}",
-            against_star(Band::ThermalIr)
-        );
+        assert!(against_star(Band::V) < 1e-20, "a 331 K body emits no visible light at all");
+        assert!(against_star(Band::K) < 1e-2, "and next to nothing at two microns");
+        assert!(against_star(Band::ThermalIr) > 50.0,
+            "but it should swamp the star at ten microns, got {}", against_star(Band::ThermalIr));
     }
 
     #[test]
@@ -554,10 +492,6 @@ mod tests {
         assert_eq!(p.radiating_area(), 0.0);
         p.radiating_ratio = 0.0;
         assert_eq!(p.equilibrium_temperature(&Star::SOL), 0.0);
-        assert!(
-            Band::ALL
-                .iter()
-                .all(|b| p.reradiated_radiance(&Star::SOL)[*b] == 0.0)
-        );
+        assert!(Band::ALL.iter().all(|b| p.reradiated_radiance(&Star::SOL)[*b] == 0.0));
     }
 }

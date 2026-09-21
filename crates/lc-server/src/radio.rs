@@ -26,11 +26,11 @@
 //! The geometry is `lc_world::signal` and the storage is `lc_store::chat`. See
 //! `lightcone/docs/05-observation.md`.
 
-use glam::DVec3;
 use lc_proto::{
     ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Reported, Said, Secrecy,
     ShipId, Spoken,
 };
+use glam::DVec3;
 use lc_world::craft::CraftId;
 use lc_world::motion::LIGHT_US_PER_LY;
 use lc_world::signal::{Beam, Transmitter};
@@ -92,13 +92,7 @@ impl<J: Journal> Server<J> {
         at: i64,
     ) -> Result<Transmission, Refusal> {
         match order {
-            Order::Say {
-                to,
-                aim,
-                secrecy,
-                body,
-                idem,
-            } => {
+            Order::Say { to, aim, secrecy, body, idem } => {
                 // An empty body is allowed and is how a bare acknowledgement is spelled: a
                 // message whose whole content is the identifiers riding in its payload.
                 if body.len() > MESSAGE_LIMIT || *to == Some(from) {
@@ -204,40 +198,40 @@ impl<J: Journal> Server<J> {
         acks: Vec<i64>,
     ) -> Result<Transmission, Refusal> {
         let beam = self.beam_for(id, aim, at)?;
-        let spoken = Spoken {
-            to: to.map(|t| t.0),
-            // What a receiver answers in when it answers automatically. The
-            // transmitter states it because nothing downstream can work it out: a
-            // beam and a shout of the same power are the same light.
-            beamed: !beam.is_omni(),
-            idem,
-            sealed,
-            body: Some(body.to_string()),
-            acks: acks.clone(),
-        };
-        Ok(Transmission {
-            kind: lc_proto::kind::MESSAGE,
-            payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
-            beam,
+                let spoken = Spoken {
+                    to: to.map(|t| t.0),
+                    // What a receiver answers in when it answers automatically. The
+                    // transmitter states it because nothing downstream can work it out: a
+                    // beam and a shout of the same power are the same light.
+                    beamed: !beam.is_omni(),
+                    idem,
+                    sealed,
+                    body: Some(body.to_string()),
+                    acks: acks.clone(),
+                };
+                Ok(Transmission {
+                    kind: lc_proto::kind::MESSAGE,
+                    payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
+                    beam,
             said: Some(Utterance {
-                to,
-                idem,
-                sealed,
-                key: false,
-                body: body.to_string(),
-                acks,
+                        to,
+                        idem,
+                        sealed,
+                        key: false,
+                        body: body.to_string(),
+                        acks,
             }),
-            applied: Order::Say {
-                to,
-                aim: *aim,
-                secrecy: match sealed {
-                    true => Secrecy::Sealed,
-                    false => Secrecy::Open,
-                },
-                body: body.to_string(),
-                idem,
-            },
-        })
+                    applied: Order::Say {
+                        to,
+                        aim: *aim,
+                        secrecy: match sealed {
+                            true => Secrecy::Sealed,
+                            false => Secrecy::Open,
+                        },
+                        body: body.to_string(),
+                        idem,
+                    },
+                })
     }
 
     /// Write a transmission into the conversations it belongs to, and schedule what it teaches.
@@ -323,14 +317,9 @@ impl<J: Journal> Server<J> {
     /// the acknowledged emission in its past light cone. There is nothing here a receiver
     /// learns sooner than it could have.
     pub(crate) fn acks_for(&self, sender: CraftId, to: ShipId, now: i64) -> Vec<i64> {
-        let Some(window) = self.heard.get(&(sender, to)) else {
-            return Vec::new();
-        };
+        let Some(window) = self.heard.get(&(sender, to)) else { return Vec::new() };
         let landed = window.partition_point(|(arrive_t, _)| *arrive_t <= now);
-        window[landed.saturating_sub(ACK_DEPTH)..landed]
-            .iter()
-            .map(|(_, id)| *id)
-            .collect()
+        window[landed.saturating_sub(ACK_DEPTH)..landed].iter().map(|(_, id)| *id).collect()
     }
 
     /// Which way a transmission is pointed, and how wide.
@@ -341,11 +330,7 @@ impl<J: Journal> Server<J> {
     /// that maneuveres in between is missed, and the message goes past it into empty space.
     pub(crate) fn beam_for(&self, sender: CraftId, aim: &Aim, at: i64) -> Result<Beam, Refusal> {
         let Aim::Omni = aim else {
-            let from = self
-                .fleet
-                .get(sender)
-                .ok_or(Refusal::NotYours)?
-                .position_at(at as f64);
+            let from = self.fleet.get(sender).ok_or(Refusal::NotYours)?.position_at(at as f64);
             let axis = match aim {
                 // Unreachable: the `let else` above is this arm.
                 Aim::Omni => return Ok(Beam::OMNI),
@@ -365,9 +350,7 @@ impl<J: Journal> Server<J> {
                 // everybody in the system, which is what it is for.
                 Aim::Star(star) => {
                     let to = self.world.star_at(*star).ok_or(Refusal::Impossible)?;
-                    (to * LIGHT_US_PER_LY - from)
-                        .try_normalize()
-                        .ok_or(Refusal::Impossible)?
+                    (to * LIGHT_US_PER_LY - from).try_normalize().ok_or(Refusal::Impossible)?
                 }
                 // Straight back down a bearing, with no sighting consulted and none needed —
                 // which is the point of it. A dish knows which way a signal came in without
@@ -423,10 +406,7 @@ impl<J: Journal> Server<J> {
         // by the query, and everything in it has landed or it would not be a receipt. What is
         // *not* in it is anything still in flight, which is exactly what must not be.
         for (observer, sender, event_id) in self.journal.ack_window().await? {
-            let window = self
-                .heard
-                .entry((CraftId(observer), ShipId(sender)))
-                .or_default();
+            let window = self.heard.entry((CraftId(observer), ShipId(sender))).or_default();
             // Stamped at the clock this shard came back on rather than at the arrival it
             // actually had. The window is read by [`Server::acks_for`], which asks only
             // whether a message has landed by now, and every one of these has.
@@ -475,11 +455,7 @@ impl<J: Journal> Server<J> {
     /// they arrived. [`redact`] is the rule and this is the second place it applies, because a
     /// backlog is a second path out — which is a thing worth being uneasy about, and the reason
     /// both paths call one function rather than each deciding for itself.
-    pub(crate) async fn backlog(
-        &self,
-        ship: ShipId,
-        now: i64,
-    ) -> Result<Option<Outbound>, JournalError> {
+    pub(crate) async fn backlog(&self, ship: ShipId, now: i64) -> Result<Option<Outbound>, JournalError> {
         let transcript = self.journal.transcript(ship).await?;
         let name_of = |id: i64| {
             self.fleet
@@ -628,13 +604,7 @@ mod tests {
 
     fn say(to: i64, aim: Aim, secrecy: Secrecy, body: &str) -> Order {
         // A fresh key per call, so two test messages are never taken for one.
-        Order::Say {
-            to: Some(ShipId(to)),
-            aim,
-            secrecy,
-            body: body.into(),
-            idem: next_key(),
-        }
+        Order::Say { to: Some(ShipId(to)), aim, secrecy, body: body.into(), idem: next_key() }
     }
 
     fn reports(messages: &[Outbound]) -> Vec<Reported> {
@@ -818,43 +788,27 @@ mod tests {
         server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
         server.admit(bry, crate::world::still(ShipId(2), far), 0.0);
         // A hundred light-seconds off the axis, so an omnidirectional shout reaches it.
-        server.admit(
-            nosy,
-            crate::world::still(ShipId(3), far + DVec3::new(0.0, 1.0e8, 0.0)),
-            0.0,
-        );
+        server.admit(nosy, crate::world::still(ShipId(3), far + DVec3::new(0.0, 1.0e8, 0.0)), 0.0);
 
         // Bry offers a key first, and the message waits for its light.
-        wire.client_says(
-            bry,
-            Inbound::Act(Intent {
-                ship_id: ShipId(2),
-                order: Order::OfferKey {
-                    to: Some(ShipId(1)),
-                    aim: Aim::Omni,
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(bry, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: Order::OfferKey { to: Some(ShipId(1)), aim: Aim::Omni },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
 
         // Sealing before the key has landed is refused, and that is the mechanic.
-        wire.client_says(
-            ada,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: say(2, Aim::Omni, Secrecy::Sealed, "too soon"),
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: say(2, Aim::Omni, Secrecy::Sealed, "too soon"),
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         assert!(
             wire.take(ada).iter().any(|m| matches!(
                 m,
-                Outbound::Refused {
-                    reason: Refusal::NoKey,
-                    ..
-                }
+                Outbound::Refused { reason: Refusal::NoKey, .. }
             )),
             "a key was usable before its light arrived",
         );
@@ -867,14 +821,11 @@ mod tests {
         wire.take(bry);
         wire.take(nosy);
 
-        wire.client_says(
-            ada,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: say(2, Aim::Omni, Secrecy::Sealed, "for you alone"),
-                issued_at_client_t: server.now_t(),
-            }),
-        );
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: say(2, Aim::Omni, Secrecy::Sealed, "for you alone"),
+            issued_at_client_t: server.now_t(),
+        }));
         server.tick(&mut wire).await.unwrap();
         let sealed_at = server.now_t();
         while server.now_t() < sealed_at + TWO_LIGHT_HOURS as i64 + TICK_US * 2 {
@@ -886,10 +837,7 @@ mod tests {
         assert_eq!(mine.body.as_deref(), Some("for you alone"));
 
         let to_nosy = spoken(&wire.take(nosy));
-        let (_, theirs) = to_nosy
-            .iter()
-            .find(|(_, s)| s.sealed)
-            .expect("the eavesdropper heard it");
+        let (_, theirs) = to_nosy.iter().find(|(_, s)| s.sealed).expect("the eavesdropper heard it");
         assert_eq!(theirs.body, None, "an eavesdropper read a sealed message");
         assert_eq!(theirs.to, Some(2), "and could still see who it was for");
     }
@@ -905,34 +853,20 @@ mod tests {
         server.admit(bry, crate::world::still(ShipId(2), far), 0.0);
         // Well outside a milliradian at this range: the beam's whole spot is 7200 light-
         // microseconds across and this is a hundred million off the axis.
-        server.admit(
-            nosy,
-            crate::world::still(ShipId(3), far + DVec3::new(0.0, 1.0e8, 0.0)),
-            0.0,
-        );
+        server.admit(nosy, crate::world::still(ShipId(3), far + DVec3::new(0.0, 1.0e8, 0.0)), 0.0);
 
-        wire.client_says(
-            ada,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: say(2, Aim::Ship(ShipId(2)), Secrecy::Open, "just for you"),
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: say(2, Aim::Ship(ShipId(2)), Secrecy::Open, "just for you"),
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         while server.now_t() < TWO_LIGHT_HOURS as i64 + TICK_US * 2 {
             server.tick(&mut wire).await.unwrap();
         }
 
-        assert_eq!(
-            spoken(&wire.take(bry)).len(),
-            1,
-            "the addressee did not hear the beam"
-        );
-        assert!(
-            spoken(&wire.take(nosy)).is_empty(),
-            "a bystander heard a beam it was not on"
-        );
+        assert_eq!(spoken(&wire.take(bry)).len(), 1, "the addressee did not hear the beam");
+        assert!(spoken(&wire.take(nosy)).is_empty(), "a bystander heard a beam it was not on");
     }
 
     /// The acknowledgement rides back with the reply, names the message by its identifier, and
@@ -948,14 +882,11 @@ mod tests {
 
         let mut sent = Vec::new();
         for k in 0..(ACK_DEPTH + 3) {
-            wire.client_says(
-                ada,
-                Inbound::Act(Intent {
-                    ship_id: ShipId(1),
-                    order: say(2, Aim::Omni, Secrecy::Open, &format!("message {k}")),
-                    issued_at_client_t: server.now_t(),
-                }),
-            );
+            wire.client_says(ada, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: say(2, Aim::Omni, Secrecy::Open, &format!("message {k}")),
+                issued_at_client_t: server.now_t(),
+            }));
             server.tick(&mut wire).await.unwrap();
             let accepted = wire
                 .take(ada)
@@ -973,14 +904,11 @@ mod tests {
         }
 
         // Bry replies before any of it has arrived: nothing to acknowledge.
-        wire.client_says(
-            bry,
-            Inbound::Act(Intent {
-                ship_id: ShipId(2),
-                order: say(1, Aim::Omni, Secrecy::Open, "crossed in flight"),
-                issued_at_client_t: server.now_t(),
-            }),
-        );
+        wire.client_says(bry, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: say(1, Aim::Omni, Secrecy::Open, "crossed in flight"),
+            issued_at_client_t: server.now_t(),
+        }));
         server.tick(&mut wire).await.unwrap();
         wire.take(ada);
         wire.take(bry);
@@ -990,20 +918,14 @@ mod tests {
         }
         let early = spoken(&wire.take(ada));
         let (_, crossed) = early.first().expect("the crossing reply arrived");
-        assert!(
-            crossed.acks.is_empty(),
-            "a reply acknowledged light still in flight"
-        );
+        assert!(crossed.acks.is_empty(), "a reply acknowledged light still in flight");
 
         // Now everything has landed, and the next reply says so.
-        wire.client_says(
-            bry,
-            Inbound::Act(Intent {
-                ship_id: ShipId(2),
-                order: say(1, Aim::Omni, Secrecy::Open, "all received"),
-                issued_at_client_t: server.now_t(),
-            }),
-        );
+        wire.client_says(bry, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: say(1, Aim::Omni, Secrecy::Open, "all received"),
+            issued_at_client_t: server.now_t(),
+        }));
         server.tick(&mut wire).await.unwrap();
         let at = server.now_t();
         while server.now_t() < at + TWO_LIGHT_HOURS as i64 + TICK_US * 2 {
@@ -1027,20 +949,13 @@ mod tests {
         let mut server = Server::new(Memory::default(), 0, 1);
         let (ada, bry) = (ClientId(1), ClientId(2));
         server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
-        server.admit(
-            bry,
-            crate::world::still(ShipId(2), DVec3::new(1.0e6, 0.0, 0.0)),
-            0.0,
-        );
+        server.admit(bry, crate::world::still(ShipId(2), DVec3::new(1.0e6, 0.0, 0.0)), 0.0);
 
-        wire.client_says(
-            ada,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: say(2, Aim::Omni, Secrecy::Open, "anyone there"),
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: say(2, Aim::Omni, Secrecy::Open, "anyone there"),
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         for _ in 0..4 {
             server.tick(&mut wire).await.unwrap();
@@ -1061,15 +976,9 @@ mod tests {
             })
             .expect("no transcript on reconnecting");
         assert_eq!(backlog.len(), 1);
-        assert!(
-            backlog[0].mine,
-            "its own message came back as somebody else's"
-        );
+        assert!(backlog[0].mine, "its own message came back as somebody else's");
         assert_eq!(backlog[0].body.as_deref(), Some("anyone there"));
-        assert_eq!(
-            backlog[0].arrive_t, None,
-            "a sender does not hear its own signal"
-        );
+        assert_eq!(backlog[0].arrive_t, None, "a sender does not hear its own signal");
     }
 
     /// Talking to yourself, an empty message and one past the limit are all refused, and none
@@ -1096,26 +1005,18 @@ mod tests {
                 idem: next_key(),
             },
         ] {
-            wire.client_says(
-                client,
-                Inbound::Act(Intent {
-                    ship_id: ShipId(1),
-                    order: order.clone(),
-                    issued_at_client_t: 0,
-                }),
-            );
+            wire.client_says(client, Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: order.clone(),
+                issued_at_client_t: 0,
+            }));
             server.tick(&mut wire).await.unwrap();
             assert!(
-                wire.take(client)
-                    .iter()
-                    .any(|m| matches!(m, Outbound::Refused { .. })),
+                wire.take(client).iter().any(|m| matches!(m, Outbound::Refused { .. })),
                 "{order:?} was not refused",
             );
         }
-        assert!(
-            server.journal().messages.is_empty(),
-            "a refused message was written down"
-        );
+        assert!(server.journal().messages.is_empty(), "a refused message was written down");
     }
 
     /// **An empty body is a message.** It is how a bare acknowledgement is spelled: nothing to
@@ -1126,50 +1027,32 @@ mod tests {
         let mut server = Server::new(Memory::default(), 0, 1);
         let (ada, bry) = (ClientId(1), ClientId(2));
         server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
-        server.admit(
-            bry,
-            crate::world::still(ShipId(2), DVec3::new(1.0e6, 0.0, 0.0)),
-            0.0,
-        );
+        server.admit(bry, crate::world::still(ShipId(2), DVec3::new(1.0e6, 0.0, 0.0)), 0.0);
 
         // Ada says something, it lands, and Bry answers with nothing at all.
-        wire.client_says(
-            ada,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: say(2, Aim::Omni, Secrecy::Open, "anyone there"),
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: say(2, Aim::Omni, Secrecy::Open, "anyone there"),
+            issued_at_client_t: 0,
+        }));
         for _ in 0..4 {
             server.tick(&mut wire).await.unwrap();
         }
         let heard = spoken(&wire.take(bry));
         let first = heard.first().expect("bry heard it").0;
 
-        wire.client_says(
-            bry,
-            Inbound::Act(Intent {
-                ship_id: ShipId(2),
-                order: say(1, Aim::Omni, Secrecy::Open, ""),
-                issued_at_client_t: server.now_t(),
-            }),
-        );
+        wire.client_says(bry, Inbound::Act(Intent {
+            ship_id: ShipId(2),
+            order: say(1, Aim::Omni, Secrecy::Open, ""),
+            issued_at_client_t: server.now_t(),
+        }));
         for _ in 0..4 {
             server.tick(&mut wire).await.unwrap();
         }
         let back = spoken(&wire.take(ada));
         let (_, ack) = back.last().expect("the acknowledgement arrived");
-        assert_eq!(
-            ack.body.as_deref(),
-            Some(""),
-            "an empty body is still a body"
-        );
-        assert_eq!(
-            ack.acks,
-            vec![first],
-            "an empty message is nothing but its acknowledgements"
-        );
+        assert_eq!(ack.body.as_deref(), Some(""), "an empty body is still a body");
+        assert_eq!(ack.acks, vec![first], "an empty message is nothing but its acknowledgements");
     }
 
     /// A broadcast is addressed to nobody, heard by everyone in range, and in no conversation.
@@ -1179,39 +1062,26 @@ mod tests {
         let mut server = Server::new(Memory::default(), 0, 1);
         let (ada, bry, cass) = (ClientId(1), ClientId(2), ClientId(3));
         server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
-        server.admit(
-            bry,
-            crate::world::still(ShipId(2), DVec3::new(1.0e6, 0.0, 0.0)),
-            0.0,
-        );
-        server.admit(
-            cass,
-            crate::world::still(ShipId(3), DVec3::new(0.0, 1.0e6, 0.0)),
-            0.0,
-        );
+        server.admit(bry, crate::world::still(ShipId(2), DVec3::new(1.0e6, 0.0, 0.0)), 0.0);
+        server.admit(cass, crate::world::still(ShipId(3), DVec3::new(0.0, 1.0e6, 0.0)), 0.0);
 
-        wire.client_says(
-            ada,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Say {
-                    to: None,
-                    aim: Aim::Omni,
-                    secrecy: Secrecy::Open,
-                    body: "to whoever is listening".into(),
-                    idem: next_key(),
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Say {
+                to: None,
+                aim: Aim::Omni,
+                secrecy: Secrecy::Open,
+                body: "to whoever is listening".into(),
+                idem: next_key(),
+            },
+            issued_at_client_t: 0,
+        }));
         for _ in 0..4 {
             server.tick(&mut wire).await.unwrap();
         }
         for (who, name) in [(bry, "bry"), (cass, "cass")] {
             let heard = spoken(&wire.take(who));
-            let (_, said) = heard
-                .first()
-                .unwrap_or_else(|| panic!("{name} heard nothing"));
+            let (_, said) = heard.first().unwrap_or_else(|| panic!("{name} heard nothing"));
             assert_eq!(said.body.as_deref(), Some("to whoever is listening"));
             assert_eq!(said.to, None, "a broadcast named an addressee");
         }
@@ -1227,39 +1097,27 @@ mod tests {
         let far = DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0);
         server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
         server.admit(bry, crate::world::still(ShipId(2), far), 0.0);
-        server.admit(
-            nosy,
-            crate::world::still(ShipId(3), far + DVec3::new(0.0, 1.0e8, 0.0)),
-            0.0,
-        );
+        server.admit(nosy, crate::world::still(ShipId(3), far + DVec3::new(0.0, 1.0e8, 0.0)), 0.0);
 
         // Straight along +x, which is where Bry is and where the bystander is not.
-        wire.client_says(
-            ada,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::Say {
-                    to: None,
-                    aim: Aim::Bearing([1.0, 0.0, 0.0]),
-                    secrecy: Secrecy::Open,
-                    body: "down this line".into(),
-                    idem: next_key(),
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        wire.client_says(ada, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Say {
+                to: None,
+                aim: Aim::Bearing([1.0, 0.0, 0.0]),
+                secrecy: Secrecy::Open,
+                body: "down this line".into(),
+                idem: next_key(),
+            },
+            issued_at_client_t: 0,
+        }));
         server.tick(&mut wire).await.unwrap();
         while server.now_t() < TWO_LIGHT_HOURS as i64 + TICK_US * 2 {
             server.tick(&mut wire).await.unwrap();
         }
         let to_bry = spoken(&wire.take(bry));
-        let (_, said) = to_bry
-            .first()
-            .expect("the bearing did not land on the craft it faced");
+        let (_, said) = to_bry.first().expect("the bearing did not land on the craft it faced");
         assert!(said.beamed, "a beam did not say that it was one");
-        assert!(
-            spoken(&wire.take(nosy)).is_empty(),
-            "a bystander heard a beam it was not on"
-        );
+        assert!(spoken(&wire.take(nosy)).is_empty(), "a bystander heard a beam it was not on");
     }
 }

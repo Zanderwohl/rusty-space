@@ -85,11 +85,7 @@ impl Instrument {
     /// wants to be beyond about 50 AU, or actively cooled.
     pub fn self_emission_counts(&self, band: Band, exposure_s: f64) -> f64 {
         let radiance = blackbody::band_radiance(band, self.temperature_k);
-        self.counts_from_flux(
-            band,
-            std::f64::consts::PI * radiance * self.emissivity,
-            exposure_s,
-        )
+        self.counts_from_flux(band, std::f64::consts::PI * radiance * self.emissivity, exposure_s)
     }
 }
 
@@ -142,10 +138,7 @@ mod tests {
     fn counts_scale_with_aperture_throughput_and_time() {
         let i = Instrument::BASELINE;
         let base = i.counts_from_flux(Band::V, 1e-12, 100.0);
-        assert!(
-            (i.with_aperture(4.0).counts_from_flux(Band::V, 1e-12, 100.0) / base - 4.0).abs()
-                < 1e-9
-        );
+        assert!((i.with_aperture(4.0).counts_from_flux(Band::V, 1e-12, 100.0) / base - 4.0).abs() < 1e-9);
         assert!((i.counts_from_flux(Band::V, 1e-12, 400.0) / base - 4.0).abs() < 1e-9);
         assert!((i.counts_from_flux(Band::V, 4e-12, 100.0) / base - 4.0).abs() < 1e-9);
     }
@@ -156,23 +149,12 @@ mod tests {
         let cold = warm.cooled_to(40.0);
         let thermal_warm = warm.self_emission_counts(Band::ThermalIr, 1.0);
         let thermal_cold = cold.self_emission_counts(Band::ThermalIr, 1.0);
-        assert!(
-            thermal_warm / thermal_cold > 1e6,
-            "cooling must matter: {thermal_warm} vs {thermal_cold}"
-        );
+        assert!(thermal_warm / thermal_cold > 1e6, "cooling must matter: {thermal_warm} vs {thermal_cold}");
         // The optical bands are untouched: at 290 K the Wien tail at 551 nm is thirty-three
         // orders of magnitude down on the thermal band, and under 1e-13 photons a second.
         let optical = warm.self_emission_counts(Band::V, 1.0);
-        assert!(
-            thermal_warm / optical > 1e30,
-            "ratio {}",
-            thermal_warm / optical
-        );
-        assert!(
-            optical * 3.156e7 < 1.0,
-            "{} photons a year in V",
-            optical * 3.156e7
-        );
+        assert!(thermal_warm / optical > 1e30, "ratio {}", thermal_warm / optical);
+        assert!(optical * 3.156e7 < 1.0, "{} photons a year in V", optical * 3.156e7);
     }
 
     #[test]
@@ -180,16 +162,9 @@ mod tests {
         // T_eq = 278.6 / sqrt(a_AU) for a black sphere around a Sun-like star.
         let at = |au: f64| 278.6 / au.sqrt();
         assert!((at(1.0) - 278.6).abs() < 1.0);
-        assert!(
-            at(50.0) < 40.0 && at(30.0) > 40.0,
-            "the 40 K line falls between 30 and 50 AU"
-        );
-        let near = Instrument::BASELINE
-            .cooled_to(at(1.0))
-            .self_emission_counts(Band::ThermalIr, 1.0);
-        let far = Instrument::BASELINE
-            .cooled_to(at(50.0))
-            .self_emission_counts(Band::ThermalIr, 1.0);
+        assert!(at(50.0) < 40.0 && at(30.0) > 40.0, "the 40 K line falls between 30 and 50 AU");
+        let near = Instrument::BASELINE.cooled_to(at(1.0)).self_emission_counts(Band::ThermalIr, 1.0);
+        let far = Instrument::BASELINE.cooled_to(at(50.0)).self_emission_counts(Band::ThermalIr, 1.0);
         assert!(near / far > 1e6, "distance buys darkness: {near} vs {far}");
     }
 

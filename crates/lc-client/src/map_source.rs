@@ -63,6 +63,7 @@ pub struct Picture {
     pub subjects: Vec<(ItemKey, Subject)>,
 }
 
+
 /// A picture under construction.
 #[derive(Default)]
 struct Build {
@@ -72,10 +73,7 @@ struct Build {
 
 impl Build {
     fn with_capacity(n: usize) -> Self {
-        Self {
-            items: Vec::with_capacity(n),
-            subjects: Vec::with_capacity(n),
-        }
+        Self { items: Vec::with_capacity(n), subjects: Vec::with_capacity(n) }
     }
 
     fn push(&mut self, item: MapItem, subject: Option<Subject>) {
@@ -86,10 +84,7 @@ impl Build {
     }
 
     fn into_picture(self, snapshot: impl FnOnce(Vec<MapItem>) -> MapSnapshot) -> Picture {
-        Picture {
-            snapshot: snapshot(self.items),
-            subjects: self.subjects,
-        }
+        Picture { snapshot: snapshot(self.items), subjects: self.subjects }
     }
 }
 
@@ -130,8 +125,7 @@ pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVe
                 // hang a marker on.
                 contact.length_m * 0.5,
                 contact.facing,
-            )
-            .weighing(f64::INFINITY),
+            ).weighing(f64::INFINITY),
             Some(Subject::Craft(contact.ship_id, contact.name.clone())),
         );
     }
@@ -229,6 +223,7 @@ fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
     .weighing(f64::INFINITY)
 }
 
+
 /// A body, and the target the rest of the interface names it by.
 ///
 /// The same name `pick.rs` builds a `Target::Body` from over the sky, so a click means the
@@ -259,10 +254,8 @@ fn push_drawable(build: &mut Build, body: &lc_world::system::Drawable) {
 /// [`key_of`].
 pub fn primary(session: &Session) -> Option<ItemKey> {
     let system = session.system.as_ref()?;
-    Some(key_of(
-        system,
-        system.holding(session.ship.motion.position_ly, session.coordinate_time_s()),
-    ))
+    Some(key_of(system, system.holding(session.ship.motion.position_ly,
+        session.coordinate_time_s())))
 }
 
 /// How a body of the local system is keyed.
@@ -282,9 +275,7 @@ fn push_bodies(build: &mut Build, bodies: &Bodies) {
 /// The local system's own star and its belts. `drawables_at` returns neither: the primary is
 /// excluded by construction and a population is not a body.
 fn push_local_system(build: &mut Build, session: &Session) {
-    let Some(system) = session.system.as_ref() else {
-        return;
-    };
+    let Some(system) = session.system.as_ref() else { return };
     build.push(
         MapItem::body(
             ItemKey::from_id("star", system.star.get()),
@@ -293,15 +284,12 @@ fn push_local_system(build: &mut Build, session: &Session) {
             system.star_position_ly(),
             system.star_radius_m(),
             DVec3::Z,
-        )
-        .weighing(system.star_mass_kg()),
+        ).weighing(system.star_mass_kg()),
         Some(Subject::Star(system.star, system.star_name.clone())),
     );
     let origin = system.star_position_ly();
     for (index, population) in system.populations.iter().enumerate() {
-        let Some(extent) = population.extent() else {
-            continue;
-        };
+        let Some(extent) = population.extent() else { continue };
         let name = lc_world::navigation::band_designation(population);
         build.push(
             MapItem::annulus(
@@ -390,16 +378,9 @@ mod tests {
     #[test]
     fn the_observer_is_in_every_snapshot() {
         let session = session();
-        let snapshot = observed(
-            &session,
-            &Bodies::default(),
-            &Uplink::default(),
-            DVec3::ZERO,
-        )
-        .snapshot;
-        let observer = snapshot
-            .observer()
-            .expect("the observer is not on their own map");
+        let snapshot = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
+        let observer = snapshot.observer().expect("the observer is not on their own map");
         assert_eq!(observer.position_ly, DVec3::ZERO);
         assert_eq!(snapshot.provenance, em_map::Provenance::Observed);
     }
@@ -485,11 +466,7 @@ mod tests {
         // At the star's, nothing closer does.
         let star_key = key_of(&system, system.holding(star.position_ly, 0.0));
         assert_eq!(star_key, ItemKey::from_id("star", system.star.get()));
-        assert_ne!(
-            star_key,
-            ItemKey::from_name(&system.star_name),
-            "the star is not by name"
-        );
+        assert_ne!(star_key, ItemKey::from_name(&system.star_name), "the star is not by name");
     }
 
     /// **This ship is named like any other.** A map that draws five ships and names four of
@@ -497,41 +474,22 @@ mod tests {
     /// rather than a word for "you".
     #[test]
     fn this_ship_is_named_and_weighed_like_a_ship() {
-        let snapshot = observed(
-            &session(),
-            &Bodies::default(),
-            &Uplink::default(),
-            DVec3::ZERO,
-        )
-        .snapshot;
-        let observer = snapshot
-            .observer()
-            .expect("the observer is not on their own map");
+        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
+        let observer = snapshot.observer().expect("the observer is not on their own map");
         assert!(!observer.label.is_empty(), "nothing to draw");
-        assert!(
-            observer.weight.is_infinite(),
-            "a ship sets no bar for the names"
-        );
+        assert!(observer.weight.is_infinite(), "a ship sets no bar for the names");
         // The literal, not the constant: comparing a constant to itself would pass whatever
         // the word was, and the point is that a nameless ship is named rather than described.
         assert_eq!(observer.label, "Anonymous Ship");
-        assert_eq!(
-            observer.label,
-            crate::uplink::ANONYMOUS,
-            "two answers to one question"
-        );
+        assert_eq!(observer.label, crate::uplink::ANONYMOUS, "two answers to one question");
     }
 
     /// Two things sharing a key share an entity and a selection.
     #[test]
     fn nothing_shares_a_key() {
-        let snapshot = observed(
-            &session(),
-            &Bodies::default(),
-            &Uplink::default(),
-            DVec3::ZERO,
-        )
-        .snapshot;
+        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
         let mut seen = keys(&snapshot);
         let before = seen.len();
         seen.sort_unstable();
@@ -545,20 +503,10 @@ mod tests {
     #[test]
     fn a_snapshot_is_stated_at_one_epoch() {
         let session = session();
-        let once = observed(
-            &session,
-            &Bodies::default(),
-            &Uplink::default(),
-            DVec3::ZERO,
-        )
-        .snapshot;
-        let twice = observed(
-            &session,
-            &Bodies::default(),
-            &Uplink::default(),
-            DVec3::ZERO,
-        )
-        .snapshot;
+        let once = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
+        let twice = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+            .snapshot;
         assert_eq!(once.epoch_s, session.coordinate_time_s());
         assert_eq!(once, twice);
     }
@@ -574,11 +522,7 @@ mod tests {
             let bytes = claims.as_bytes();
             let mut out = String::new();
             for chunk in bytes.chunks(3) {
-                let b = [
-                    chunk[0],
-                    *chunk.get(1).unwrap_or(&0),
-                    *chunk.get(2).unwrap_or(&0),
-                ];
+                let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
                 let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
                 for i in 0..chunk.len() + 1 {
                     out.push(ALPHABET[((n >> (18 - 6 * i)) & 0x3f) as usize] as char);
@@ -592,15 +536,8 @@ mod tests {
         /// `lc_server::ability::Level::from_claim` applies.
         #[test]
         fn only_an_administrative_level_may_see_everything() {
-            for (perm, want) in [
-                (0, false),
-                (1, true),
-                (2, true),
-                (3, true),
-                (4, false),
-                (-1, false),
-                (99, false),
-            ] {
+            for (perm, want) in [(0, false), (1, true), (2, true), (3, true), (4, false),
+                (-1, false), (99, false)] {
                 let t = ticket(&format!(r#"{{"sub":"acct-1","perm":{perm}}}"#));
                 assert_eq!(may_see_everything(Some(&t)), want, "perm {perm}");
             }
@@ -625,11 +562,7 @@ mod tests {
         #[test]
         fn base64url_decodes_what_a_ticket_carries() {
             assert_eq!(base64url("aGVsbG8").unwrap(), b"hello");
-            assert_eq!(
-                base64url("aGVsbG8=").unwrap(),
-                b"hello",
-                "padding is tolerated"
-            );
+            assert_eq!(base64url("aGVsbG8=").unwrap(), b"hello", "padding is tolerated");
             assert_eq!(base64url("-_8").unwrap(), vec![0xfb, 0xff]);
             assert!(base64url("not base64!").is_none());
         }

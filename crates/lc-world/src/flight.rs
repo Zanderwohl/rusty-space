@@ -312,15 +312,7 @@ impl Cruise {
         start_s: f64,
         drive: Drive,
     ) -> Self {
-        Self::solve(
-            from_ly,
-            beta0,
-            to_ly,
-            arrive_beta,
-            attitude0,
-            start_s,
-            drive,
-        )
+        Self::solve(from_ly, beta0, to_ly, arrive_beta, attitude0, start_s, drive)
     }
 
     /// Plan a crossing **from whatever velocity the ship already has**.
@@ -353,15 +345,7 @@ impl Cruise {
         start_s: f64,
         drive: Drive,
     ) -> Self {
-        Self::solve(
-            from_ly,
-            beta0,
-            to_ly,
-            DVec3::ZERO,
-            attitude0,
-            start_s,
-            drive,
-        )
+        Self::solve(from_ly, beta0, to_ly, DVec3::ZERO, attitude0, start_s, drive)
     }
 
     /// Time the turn-in, then fly the crossing that follows it.
@@ -401,11 +385,7 @@ impl Cruise {
             let across = beta0 - line * beta0.dot(line);
             // The match is the first thing lit when there is drift to shed, and it points against
             // that drift; otherwise the boost is, and it points down the line.
-            let first = if across.length() > 1.0e-12 {
-                -across.normalize_or_zero()
-            } else {
-                line
-            };
+            let first = if across.length() > 1.0e-12 { -across.normalize_or_zero() } else { line };
             crate::attitude::turn_time_s(attitude0, first, drive.slew_rate_rad_s)
         };
         // No turn to make — the nose is already round, or the caller did not say where it was —
@@ -413,14 +393,7 @@ impl Cruise {
         // and a crossing that turns for no time should be the crossing it was before this existed.
         if turn_for(0.0) <= 0.0 {
             return Self::with_turn(
-                from_ly,
-                beta0,
-                to_ly,
-                arrive_beta,
-                attitude0,
-                0.0,
-                start_s,
-                drive,
+                from_ly, beta0, to_ly, arrive_beta, attitude0, 0.0, start_s, drive,
             );
         }
         let (mut lo, mut hi) = (0.0, drive.flip_s());
@@ -433,33 +406,19 @@ impl Cruise {
             }
         }
         let mut turn_s = 0.5 * (lo + hi);
-        let mut out = Self::with_turn(
-            from_ly,
-            beta0,
-            to_ly,
-            arrive_beta,
-            attitude0,
-            turn_s,
-            start_s,
-            drive,
-        );
+        let mut out =
+            Self::with_turn(from_ly, beta0, to_ly, arrive_beta, attitude0, turn_s, start_s, drive);
         for _ in 0..TURN_CORRECTIONS {
             let heading = out.aim_at(start_s).to;
             let needed = crate::attitude::turn_time_s(attitude0, heading, drive.slew_rate_rad_s);
-            if needed == turn_s || (needed - turn_s).abs() > TURN_CORRECTION_LIMIT * drive.flip_s()
+            if needed == turn_s
+                || (needed - turn_s).abs() > TURN_CORRECTION_LIMIT * drive.flip_s()
             {
                 break;
             }
             turn_s = needed;
             out = Self::with_turn(
-                from_ly,
-                beta0,
-                to_ly,
-                arrive_beta,
-                attitude0,
-                turn_s,
-                start_s,
-                drive,
+                from_ly, beta0, to_ly, arrive_beta, attitude0, turn_s, start_s, drive,
             );
         }
         out
@@ -527,17 +486,7 @@ impl Cruise {
 
         let mut direction = reach_ls.normalize_or_zero();
         let aim = |direction| {
-            Self::along(
-                direction,
-                reach_ls,
-                beta0,
-                arrive_beta,
-                alpha,
-                cap,
-                cap_ls,
-                t_cap,
-                flip_s,
-            )
+            Self::along(direction, reach_ls, beta0, arrive_beta, alpha, cap, cap_ls, t_cap, flip_s)
         };
         let mut solved = aim(direction);
         for _ in 1..AIM_ROUNDS {
@@ -559,17 +508,8 @@ impl Cruise {
             direction = next;
             solved = aim(direction);
         }
-        let Solved {
-            distance_ls,
-            t0_s,
-            peak_s,
-            boost_s,
-            boost_ls,
-            coast_s,
-            coast_beta,
-            inject,
-            ..
-        } = solved;
+        let Solved { distance_ls, t0_s, peak_s, boost_s, boost_ls, coast_s, coast_beta, inject, .. } =
+            solved;
 
         // **The point asked for, not the point reached.** They differ, because the aiming above
         // stops after [`AIM_ROUNDS`] and leaves a couple of meters on a transfer of tens of
@@ -607,9 +547,7 @@ impl Cruise {
             // What the crossing *does*, not what was asked of it. A plan that fell back to the
             // exact brake ends at rest, and a recipe saying otherwise would re-plan into a
             // crossing its own sampler disagreed with — see `Cruise::along`.
-            arrive_beta: inject
-                .map(|inject| inject.arrive_beta())
-                .unwrap_or(DVec3::ZERO),
+            arrive_beta: inject.map(|inject| inject.arrive_beta()).unwrap_or(DVec3::ZERO),
             attitude0,
             start_s,
             drive,
@@ -676,17 +614,7 @@ impl Cruise {
             }
         };
         let give_up = || {
-            Self::along(
-                direction,
-                reach_ls,
-                beta0,
-                DVec3::ZERO,
-                alpha,
-                cap,
-                cap_ls,
-                t_cap,
-                flip_s,
-            )
+            Self::along(direction, reach_ls, beta0, DVec3::ZERO, alpha, cap, cap_ls, t_cap, flip_s)
         };
 
         // Too fast to stop in what is left: the shortest flight from here is to turn round and
@@ -698,20 +626,14 @@ impl Cruise {
         let clamped = t0_s > 0.0 && asked_ls < least_ls;
         let want_ls = if clamped { least_ls } else { asked_ls };
         if want_ls <= 0.0 {
-            return Solved {
-                t0_s,
-                ..Solved::default()
-            };
+            return Solved { t0_s, ..Solved::default() };
         }
 
         // The ship has to outrun what it is joining before any of this holds: below that speed
         // the last burn is an acceleration rather than a brake, and the equation stops rising
         // with the boost. Bisecting from there keeps it on the branch that is monotone.
-        let floor_s = if injecting {
-            joining / (1.0 - joining * joining).sqrt() / alpha
-        } else {
-            0.0
-        };
+        let floor_s =
+            if injecting { joining / (1.0 - joining * joining).sqrt() / alpha } else { 0.0 };
         let reach = |peak_s: f64| {
             distance_of(alpha, peak_s) + beta_of(alpha, peak_s) * flip_s + terminal(peak_s)
         };
@@ -765,13 +687,7 @@ impl Cruise {
     pub fn phase_changes_s(&self) -> [f64; 5] {
         let lit = self.start_s + self.turn_s;
         let line = lit + self.match_s;
-        [
-            lit,
-            line,
-            line + self.boost_s,
-            line + self.brake_s,
-            line + self.arrive_s,
-        ]
+        [lit, line, line + self.boost_s, line + self.brake_s, line + self.arrive_s]
     }
 
     /// Coordinate seconds the whole crossing takes, the turn-in and the match included.
@@ -853,11 +769,7 @@ impl Cruise {
             // Shedding the velocity across the line: the drive points against it, and this is
             // the first thing the crossing asks for.
             if since < self.turn_s + self.match_s {
-                return Aim {
-                    to: -self.match_dir,
-                    from: None,
-                    since_s: self.start_s,
-                };
+                return Aim { to: -self.match_dir, from: None, since_s: self.start_s };
             }
         }
         let after_match = self.start_s + self.turn_s + self.match_s;
@@ -867,16 +779,8 @@ impl Cruise {
         let before_boost = (self.match_s > 0.0).then_some(-self.match_dir);
         let t = since - self.turn_s - self.match_s;
         if t < self.boost_s {
-            let since_s = if self.match_s > 0.0 {
-                after_match
-            } else {
-                self.start_s
-            };
-            return Aim {
-                to: self.direction,
-                from: before_boost,
-                since_s,
-            };
+            let since_s = if self.match_s > 0.0 { after_match } else { self.start_s };
+            return Aim { to: self.direction, from: before_boost, since_s };
         }
         // Everything from the end of the boost onward is one order — turn around and brake —
         // so the turn is not restarted at the moment the drive relights.
@@ -939,8 +843,7 @@ impl Cruise {
             return FlightState {
                 position_ly: self.turned_ly
                     + (self.match_dir * across_ls + self.direction * along_ls) / JULIAN_YEAR_S,
-                beta: self.match_dir * beta_of(self.alpha, left)
-                    + self.direction * self.match_along,
+                beta: self.match_dir * beta_of(self.alpha, left) + self.direction * self.match_along,
                 proper_s: turned_proper + proper_of(self.alpha, self.match_s)
                     - proper_of(self.alpha, left),
                 phase: Phase::Match,
@@ -979,11 +882,7 @@ impl Cruise {
                 Phase::Coast,
             )
         } else {
-            let phase = if t >= self.arrive_s {
-                Phase::Arrived
-            } else {
-                Phase::Brake
-            };
+            let phase = if t >= self.arrive_s { Phase::Arrived } else { Phase::Brake };
             match &self.inject {
                 // One burn at one angle, off the end of the line. See [`Injection`].
                 Some(inject) => {
@@ -991,9 +890,7 @@ impl Cruise {
                     (
                         self.direction * self.distance_ls + offset_ls,
                         beta,
-                        self.boost_proper_s
-                            + self.coast_proper_s
-                            + inject.proper_s(t - self.brake_s),
+                        self.boost_proper_s + self.coast_proper_s + inject.proper_s(t - self.brake_s),
                         phase,
                     )
                 }
@@ -1103,17 +1000,9 @@ mod tests {
         let start = c.at(0.0);
         let end = c.at(c.duration_s());
         assert!(start.beta.length() < 1e-12, "{:?}", start.beta);
-        assert!(
-            end.beta.length() < 1e-9,
-            "the brake must finish, got {:?}",
-            end.beta
-        );
+        assert!(end.beta.length() < 1e-9, "the brake must finish, got {:?}", end.beta);
         assert!(start.position_ly.length() < 1e-9);
-        assert!(
-            (end.position_ly - DVec3::X * 4.0).length() < 1e-6,
-            "{:?}",
-            end.position_ly
-        );
+        assert!((end.position_ly - DVec3::X * 4.0).length() < 1e-6, "{:?}", end.position_ly);
         assert_eq!(end.phase, Phase::Arrived);
     }
 
@@ -1131,30 +1020,16 @@ mod tests {
         // halfway moment is somewhere in the turn.
         let middle = c.at(c.duration_s() / 2.0);
         assert_eq!(middle.phase, Phase::Coast);
-        assert!(
-            (middle.position_ly.x - 2.0).abs() < 1e-5,
-            "{:?}",
-            middle.position_ly
-        );
+        assert!((middle.position_ly.x - 2.0).abs() < 1e-5, "{:?}", middle.position_ly);
     }
 
     /// Five g never reaches the cap inside four light-years, so the only coast is the flip.
     #[test]
     fn a_short_crossing_is_flip_and_burn_and_the_flip_is_all_the_coast_there_is() {
         let c = to(4.0);
-        assert_eq!(
-            c.coast_s(),
-            Drive::DEFAULT.flip_s(),
-            "the coast is the flip and nothing more"
-        );
-        assert!(
-            c.peak_beta() > 0.99 && c.peak_beta() < Drive::DEFAULT.max_beta,
-            "{}",
-            c.peak_beta()
-        );
-        let phases: Vec<Phase> = (0..50)
-            .map(|k| c.at(c.duration_s() * k as f64 / 50.0).phase)
-            .collect();
+        assert_eq!(c.coast_s(), Drive::DEFAULT.flip_s(), "the coast is the flip and nothing more");
+        assert!(c.peak_beta() > 0.99 && c.peak_beta() < Drive::DEFAULT.max_beta, "{}", c.peak_beta());
+        let phases: Vec<Phase> = (0..50).map(|k| c.at(c.duration_s() * k as f64 / 50.0).phase).collect();
         assert!(phases.contains(&Phase::Boost) && phases.contains(&Phase::Brake));
     }
 
@@ -1170,11 +1045,7 @@ mod tests {
                 c.coast_s(),
                 Drive::DEFAULT.flip_s(),
             );
-            assert_eq!(
-                c.at(c.start_s + c.match_s + c.boost_s + c.coast_s() * 0.5)
-                    .phase,
-                Phase::Coast
-            );
+            assert_eq!(c.at(c.start_s + c.match_s + c.boost_s + c.coast_s() * 0.5).phase, Phase::Coast);
         }
     }
 
@@ -1190,10 +1061,7 @@ mod tests {
             let c = Cruise::plan(DVec3::ZERO, DVec3::X * 0.02, 0.0, drive);
             let lit = c.start_s + c.brake_s;
             let aim = c.aim_at(lit);
-            assert_eq!(
-                aim.to, -c.direction,
-                "the brake is a turn round, not a nudge"
-            );
+            assert_eq!(aim.to, -c.direction, "the brake is a turn round, not a nudge");
             let nose = crate::attitude::turned(
                 aim.from.expect("the boost pointed it somewhere"),
                 aim.to,
@@ -1215,15 +1083,10 @@ mod tests {
         // Three light-seconds: an in-system errand, and short enough that the flip dominates.
         let hop = DVec3::X * 1.0e-7;
         let plan = |length_m: f64| {
-            Cruise::plan(
-                DVec3::ZERO,
-                hop,
-                0.0,
-                Drive {
-                    slew_rate_rad_s: crate::attitude::rate_rad_s(length_m),
-                    ..Drive::DEFAULT
-                },
-            )
+            Cruise::plan(DVec3::ZERO, hop, 0.0, Drive {
+                slew_rate_rad_s: crate::attitude::rate_rad_s(length_m),
+                ..Drive::DEFAULT
+            })
         };
         let (nimble, ponderous) = (plan(500.0), plan(50_000.0));
         assert!(ponderous.duration_s() > nimble.duration_s());
@@ -1242,11 +1105,7 @@ mod tests {
     #[test]
     fn a_long_crossing_coasts_for_the_distance_rather_than_for_the_turn() {
         let c = to(100.0);
-        assert!(
-            c.coast_s() > Drive::DEFAULT.flip_s() * 1000.0,
-            "{} s",
-            c.coast_s()
-        );
+        assert!(c.coast_s() > Drive::DEFAULT.flip_s() * 1000.0, "{} s", c.coast_s());
         assert_eq!(c.peak_beta(), Drive::DEFAULT.max_beta);
     }
 
@@ -1256,14 +1115,7 @@ mod tests {
     #[test]
     fn the_phases_join_up_even_from_a_moving_start() {
         for along in [-0.5, -0.01, 0.0, 0.3, 0.9] {
-            let c = Cruise::plan_from(
-                DVec3::ZERO,
-                DVec3::X * along,
-                DVec3::X * 4.0,
-                DVec3::ZERO,
-                0.0,
-                Drive::DEFAULT,
-            );
+            let c = Cruise::plan_from(DVec3::ZERO, DVec3::X * along, DVec3::X * 4.0, DVec3::ZERO, 0.0, Drive::DEFAULT);
             let eps = 1.0e-3;
             for (name, t) in [("flip", c.boost_s), ("brake", c.brake_s)] {
                 let (before, after) = (c.at(t - eps), c.at(t + eps));
@@ -1274,11 +1126,7 @@ mod tests {
                 assert!(shear < 1.0e-6, "at beta {along} the {name} sheared {shear}");
             }
             let end = c.at(c.duration_s());
-            assert!(
-                (end.position_ly - DVec3::X * 4.0).length() < 1e-6,
-                "{:?}",
-                end.position_ly
-            );
+            assert!((end.position_ly - DVec3::X * 4.0).length() < 1e-6, "{:?}", end.position_ly);
             assert!(end.beta.length() < 1e-9, "{:?}", end.beta);
         }
     }
@@ -1291,38 +1139,23 @@ mod tests {
         let near = DVec3::X * 1.0e-6;
         let c = Cruise::plan_from(DVec3::ZERO, beta0, near, DVec3::ZERO, 0.0, Drive::DEFAULT);
         let end = c.at(c.duration_s());
-        assert!(
-            end.position_ly.x > near.x,
-            "it must overshoot, not stop short"
-        );
+        assert!(end.position_ly.x > near.x, "it must overshoot, not stop short");
         assert!(end.beta.length() < 1e-9, "but it does stop: {:?}", end.beta);
         // It cannot brake until it has turned, and it is still doing 0.9 c while it turns.
         let drifted = 0.9 * Drive::DEFAULT.flip_s() / JULIAN_YEAR_S;
-        assert!(
-            end.position_ly.x > drifted,
-            "{} ly is less than the {drifted} ly of the flip",
-            end.position_ly.x
-        );
-        assert_eq!(
-            c.boost_s, 0.0,
-            "there is nothing to boost: it is already past the cap it needs"
-        );
+        assert!(end.position_ly.x > drifted, "{} ly is less than the {drifted} ly of the flip", end.position_ly.x);
+        assert_eq!(c.boost_s, 0.0, "there is nothing to boost: it is already past the cap it needs");
     }
 
     #[test]
     fn a_long_crossing_levels_off_at_the_cap_and_coasts() {
         let c = to(100.0);
-        let phases: Vec<Phase> = (0..50)
-            .map(|k| c.at(c.duration_s() * k as f64 / 50.0).phase)
-            .collect();
+        let phases: Vec<Phase> = (0..50).map(|k| c.at(c.duration_s() * k as f64 / 50.0).phase).collect();
         assert!(phases.contains(&Phase::Coast), "{phases:?}");
         let fastest = (0..500)
             .map(|k| c.at(c.duration_s() * k as f64 / 500.0).beta.length())
             .fold(0.0f64, f64::max);
-        assert!(
-            (fastest - Drive::DEFAULT.max_beta).abs() < 1e-9,
-            "capped at {fastest}"
-        );
+        assert!((fastest - Drive::DEFAULT.max_beta).abs() < 1e-9, "capped at {fastest}");
     }
 
     /// A crossing takes slightly longer than light plus the cost of turning round.
@@ -1330,11 +1163,7 @@ mod tests {
     fn nothing_outruns_light() {
         for ly in [0.1, 1.0, 4.0, 100.0, 1000.0] {
             let c = to(ly);
-            assert!(
-                c.duration_s() > ly * LY,
-                "{ly} ly took {} s",
-                c.duration_s()
-            );
+            assert!(c.duration_s() > ly * LY, "{ly} ly took {} s", c.duration_s());
             assert!(c.at(c.duration_s() / 2.0).beta.length() < 1.0);
         }
     }
@@ -1348,10 +1177,7 @@ mod tests {
         }
         let short_ratio = short.proper_duration_s() / short.duration_s();
         let long_ratio = long.proper_duration_s() / long.duration_s();
-        assert!(
-            long_ratio < short_ratio,
-            "{long_ratio} should be under {short_ratio}"
-        );
+        assert!(long_ratio < short_ratio, "{long_ratio} should be under {short_ratio}");
     }
 
     /// Four light-years at five g: about 4.4 years coordinate, about 1.2 aboard.
@@ -1375,11 +1201,7 @@ mod tests {
             let t = c.duration_s() * k as f64 / 300.0;
             let s = c.at(t);
             assert!(s.proper_s >= last - 1e-6, "{last} -> {}", s.proper_s);
-            assert!(
-                s.proper_s <= t + 1e-6,
-                "aboard {} past coordinate {t}",
-                s.proper_s
-            );
+            assert!(s.proper_s <= t + 1e-6, "aboard {} past coordinate {t}", s.proper_s);
             last = s.proper_s;
         }
     }
@@ -1421,24 +1243,8 @@ mod tests {
 
     #[test]
     fn a_harder_burn_arrives_sooner() {
-        let mild = Cruise::plan(
-            DVec3::ZERO,
-            DVec3::X * 10.0,
-            0.0,
-            Drive {
-                accel_g: 1.0,
-                ..Drive::DEFAULT
-            },
-        );
-        let hard = Cruise::plan(
-            DVec3::ZERO,
-            DVec3::X * 10.0,
-            0.0,
-            Drive {
-                accel_g: 20.0,
-                ..Drive::DEFAULT
-            },
-        );
+        let mild = Cruise::plan(DVec3::ZERO, DVec3::X * 10.0, 0.0, Drive { accel_g: 1.0, ..Drive::DEFAULT });
+        let hard = Cruise::plan(DVec3::ZERO, DVec3::X * 10.0, 0.0, Drive { accel_g: 20.0, ..Drive::DEFAULT });
         assert!(hard.duration_s() < mild.duration_s());
         assert!(hard.proper_duration_s() < mild.proper_duration_s());
     }
@@ -1459,11 +1265,7 @@ mod tests {
             0.0,
             Drive::DEFAULT,
         );
-        assert!(
-            (c.turn_s() - 60.0).abs() < 1.0e-9,
-            "a flip in {} s",
-            c.turn_s()
-        );
+        assert!((c.turn_s() - 60.0).abs() < 1.0e-9, "a flip in {} s", c.turn_s());
         for t in [0.0, 15.0, 30.0, 59.9] {
             assert_eq!(c.at(t).phase, Phase::Turn, "at {t} s");
             assert_eq!(c.thrust_at(t), DVec3::ZERO, "the drive was lit at {t} s");
@@ -1480,18 +1282,8 @@ mod tests {
         let cases = [
             ("flip, at rest", DVec3::ZERO, DVec3::X, -DVec3::X * 4.0),
             ("square on, at rest", DVec3::ZERO, DVec3::Y, DVec3::X * 4.0),
-            (
-                "skew, at rest",
-                DVec3::ZERO,
-                DVec3::new(1.0, 1.0, 1.0).normalize(),
-                DVec3::X * 4.0,
-            ),
-            (
-                "into a match",
-                DVec3::Y * 1.0e-4,
-                -DVec3::X,
-                DVec3::X * 1.0e-7,
-            ),
+            ("skew, at rest", DVec3::ZERO, DVec3::new(1.0, 1.0, 1.0).normalize(), DVec3::X * 4.0),
+            ("into a match", DVec3::Y * 1.0e-4, -DVec3::X, DVec3::X * 1.0e-7),
         ];
         for length_m in [500.0, 5_000.0, 50_000.0] {
             let drive = Drive {
@@ -1537,11 +1329,7 @@ mod tests {
             let s = c.at(t);
             assert_eq!(s.beta, beta0, "it changed speed while coasting round");
             let want = beta0 * (t / JULIAN_YEAR_S);
-            assert!(
-                (s.position_ly - want).length() < 1.0e-18,
-                "at {t} s it was at {:?}",
-                s.position_ly
-            );
+            assert!((s.position_ly - want).length() < 1.0e-18, "at {t} s it was at {:?}", s.position_ly);
         }
         // And the crew aged through it, a shade slower than the clock.
         let aboard = c.at(c.turn_s()).proper_s;
@@ -1556,10 +1344,7 @@ mod tests {
         let beta0 = DVec3::Y * 1.0e-4;
         let c = Cruise::plan_from(DVec3::ZERO, beta0, to, -DVec3::X, 0.0, Drive::DEFAULT);
         let moved = c.at(c.turn_s()).position_ly.length() * 9.4607304725808e15;
-        assert!(
-            moved > 1.0e5,
-            "premise: it drifted {moved:e} m while turning"
-        );
+        assert!(moved > 1.0e5, "premise: it drifted {moved:e} m while turning");
         let miss = (c.at(c.duration_s()).position_ly - to).length() * 9.4607304725808e15;
         assert!(miss < 1.0, "landed {miss:e} m out");
     }
@@ -1571,22 +1356,13 @@ mod tests {
         let to = DVec3::X * 4.0;
         let ready = Cruise::plan_from(DVec3::ZERO, DVec3::ZERO, to, DVec3::X, 0.0, Drive::DEFAULT);
         assert_eq!(ready.turn_s(), 0.0);
-        let unknown = Cruise::plan_from(
-            DVec3::ZERO,
-            DVec3::ZERO,
-            to,
-            DVec3::ZERO,
-            0.0,
-            Drive::DEFAULT,
-        );
+        let unknown =
+            Cruise::plan_from(DVec3::ZERO, DVec3::ZERO, to, DVec3::ZERO, 0.0, Drive::DEFAULT);
         assert_eq!(unknown.turn_s(), 0.0);
         // Neither turned, so they fly the same trajectory — they differ only in remembering
         // which way the nose was, which is a parameter rather than a part of the path.
         assert_eq!(ready.duration_s(), unknown.duration_s());
-        assert_eq!(
-            ready.at(ready.duration_s()).position_ly,
-            unknown.at(unknown.duration_s()).position_ly
-        );
+        assert_eq!(ready.at(ready.duration_s()).position_ly, unknown.at(unknown.duration_s()).position_ly);
         assert_eq!(unknown, Cruise::plan(DVec3::ZERO, to, 0.0, Drive::DEFAULT));
     }
 
@@ -1605,19 +1381,12 @@ mod tests {
         );
         assert_eq!(c.at(c.turn_s() + 1.0e-6).phase, Phase::Match);
         let onto = c.aim_at(0.0).to;
-        assert!(
-            onto.dot(beta0) < 0.0,
-            "the match burns against the drift, not {onto}"
-        );
+        assert!(onto.dot(beta0) < 0.0, "the match burns against the drift, not {onto}");
         // A right angle from the nose, so half a flip.
         // The turn it charged for is the turn onto the heading it actually flies, not onto an
         // earlier guess at it. See `TURN_ROUNDS`.
         let want = crate::attitude::turn_time_s(DVec3::X, onto, RATE);
-        assert!(
-            (c.turn_s() - want).abs() < 1.0e-12,
-            "{} s against {want} s",
-            c.turn_s()
-        );
+        assert!((c.turn_s() - want).abs() < 1.0e-12, "{} s against {want} s", c.turn_s());
     }
 
     /// The crew's clock covers the whole thing, turn and match included. Summing the parts is
@@ -1640,10 +1409,7 @@ mod tests {
             c.proper_duration_s(),
             end.proper_s,
         );
-        assert!(
-            c.proper_duration_s() > c.turn_s(),
-            "the turn alone is not the whole crossing"
-        );
+        assert!(c.proper_duration_s() > c.turn_s(), "the turn alone is not the whole crossing");
         assert!(c.proper_duration_s() < c.duration_s());
     }
 
@@ -1652,19 +1418,7 @@ mod tests {
     fn transfer(span_m: f64, station_m_s: DVec3) -> (Cruise, DVec3, DVec3) {
         let to = DVec3::X * (span_m / M_PER_LY);
         let onto = station_m_s / C_M_S;
-        (
-            Cruise::plan_onto(
-                DVec3::ZERO,
-                DVec3::ZERO,
-                to,
-                onto,
-                DVec3::ZERO,
-                0.0,
-                Drive::DEFAULT,
-            ),
-            to,
-            onto,
-        )
+        (Cruise::plan_onto(DVec3::ZERO, DVec3::ZERO, to, onto, DVec3::ZERO, 0.0, Drive::DEFAULT), to, onto)
     }
 
     /// **The thing this is for.** A crossing planned onto a station ends alongside it *and
@@ -1674,15 +1428,9 @@ mod tests {
         let (c, to, onto) = transfer(35.0e6, DVec3::Y * 3000.0);
         let end = c.at(c.duration_s());
         assert_eq!(end.phase, Phase::Arrived);
-        assert_eq!(
-            end.beta, onto,
-            "it must end on the station's velocity exactly"
-        );
+        assert_eq!(end.beta, onto, "it must end on the station's velocity exactly");
         let miss_m = (end.position_ly - to).length() * M_PER_LY;
-        assert!(
-            miss_m < 10.0,
-            "{miss_m} m off a thirty-five-thousand-kilometer transfer"
-        );
+        assert!(miss_m < 10.0, "{miss_m} m off a thirty-five-thousand-kilometer transfer");
     }
 
     /// One burn, at one angle, doing both jobs: pointing back down the track to kill what the
@@ -1691,11 +1439,7 @@ mod tests {
     fn the_last_burn_is_one_angle_that_does_both_jobs() {
         let (c, _, onto) = transfer(35.0e6, DVec3::Y * 3000.0);
         let aim = c.last_aim();
-        assert!(
-            aim.dot(c.direction) < 0.0,
-            "it has to be braking: {aim} against {}",
-            c.direction
-        );
+        assert!(aim.dot(c.direction) < 0.0, "it has to be braking: {aim} against {}", c.direction);
         assert!(aim.dot(onto) > 0.0, "and imparting: {aim} against {onto}");
         // Which is the vector difference and nothing more: kill the one, add the other.
         let want = (onto - c.direction * c.peak_beta()).normalize();
@@ -1714,16 +1458,8 @@ mod tests {
     fn the_line_is_aimed_off_the_target_to_allow_for_the_injection() {
         let (c, to, _) = transfer(35.0e6, DVec3::Y * 3000.0);
         let straight = to.normalize();
-        let tilt = c
-            .direction
-            .dot(straight)
-            .clamp(-1.0, 1.0)
-            .acos()
-            .to_degrees();
-        assert!(
-            tilt > 1.0 && tilt < 10.0,
-            "the line was tilted {tilt} degrees"
-        );
+        let tilt = c.direction.dot(straight).clamp(-1.0, 1.0).acos().to_degrees();
+        assert!(tilt > 1.0 && tilt < 10.0, "the line was tilted {tilt} degrees");
         // And the tilt is *against* the station's drift, not with it.
         assert!(c.direction.y < 0.0, "aimed the wrong side: {}", c.direction);
     }
@@ -1744,11 +1480,7 @@ mod tests {
             let end = c.at(c.duration_s());
             let miss_m = (end.position_ly - to).length() * M_PER_LY;
             assert!(miss_m < 10.0, "{what} missed by {miss_m} m");
-            assert!(
-                (end.beta - onto).length() < 1.0e-15,
-                "{what} ended at {:?}",
-                end.beta
-            );
+            assert!((end.beta - onto).length() < 1.0e-15, "{what} ended at {:?}", end.beta);
         }
     }
 
@@ -1757,21 +1489,10 @@ mod tests {
     #[test]
     fn a_relativistic_crossing_will_not_take_the_newtonian_injection() {
         let (c, _, _) = transfer(4.0 * M_PER_LY, DVec3::Y * 30_000.0);
-        assert!(
-            c.peak_beta() > INJECTION_MAX_BETA,
-            "premise: {}",
-            c.peak_beta()
-        );
+        assert!(c.peak_beta() > INJECTION_MAX_BETA, "premise: {}", c.peak_beta());
         assert!(c.inject.is_none(), "it must fall back to the exact brake");
-        assert_eq!(
-            c.arrive_beta(),
-            DVec3::ZERO,
-            "and say so, rather than claim an arrival"
-        );
-        assert!(
-            c.at(c.duration_s()).beta.length() < 1.0e-9,
-            "which means it ends at rest"
-        );
+        assert_eq!(c.arrive_beta(), DVec3::ZERO, "and say so, rather than claim an arrival");
+        assert!(c.at(c.duration_s()).beta.length() < 1.0e-9, "which means it ends at rest");
     }
 
     /// And where the ship would never get ahead of what it is joining, there is no one angle
@@ -1779,10 +1500,7 @@ mod tests {
     #[test]
     fn a_hop_shorter_than_the_orbit_it_joins_will_not_take_one_either() {
         let (c, _, _) = transfer(1000.0, DVec3::Y * 3000.0);
-        assert!(
-            c.peak_beta() < 1.0e-5,
-            "premise: it never outruns the station"
-        );
+        assert!(c.peak_beta() < 1.0e-5, "premise: it never outruns the station");
         assert!(c.inject.is_none());
     }
 
@@ -1790,25 +1508,10 @@ mod tests {
     #[test]
     fn arriving_on_nothing_is_the_crossing_it_always_was() {
         let to = DVec3::X * 4.0;
-        let onto = Cruise::plan_onto(
-            DVec3::ZERO,
-            DVec3::ZERO,
-            to,
-            DVec3::ZERO,
-            DVec3::ZERO,
-            0.0,
-            Drive::DEFAULT,
-        );
+        let onto = Cruise::plan_onto(DVec3::ZERO, DVec3::ZERO, to, DVec3::ZERO, DVec3::ZERO, 0.0, Drive::DEFAULT);
         assert_eq!(
             onto,
-            Cruise::plan_from(
-                DVec3::ZERO,
-                DVec3::ZERO,
-                to,
-                DVec3::ZERO,
-                0.0,
-                Drive::DEFAULT
-            )
+            Cruise::plan_from(DVec3::ZERO, DVec3::ZERO, to, DVec3::ZERO, 0.0, Drive::DEFAULT)
         );
     }
 
@@ -1821,21 +1524,14 @@ mod tests {
         let (before, after) = (c.at(c.brake_s - eps), c.at(c.brake_s + eps));
         let jump_m = (after.position_ly - before.position_ly).length() * M_PER_LY;
         assert!(jump_m < 100.0, "the injection lit with a {jump_m} m jump");
-        assert!(
-            (after.beta - before.beta).length() < 1.0e-9,
-            "and a velocity step"
-        );
+        assert!((after.beta - before.beta).length() < 1.0e-9, "and a velocity step");
 
         let mut last = -1.0;
         for k in 0..=200 {
             let t = c.duration_s() * k as f64 / 200.0;
             let s = c.at(t);
             assert!(s.proper_s >= last - 1.0e-9, "{last} -> {}", s.proper_s);
-            assert!(
-                s.proper_s <= t + 1.0e-9,
-                "aboard {} past coordinate {t}",
-                s.proper_s
-            );
+            assert!(s.proper_s <= t + 1.0e-9, "aboard {} past coordinate {t}", s.proper_s);
             last = s.proper_s;
         }
     }
@@ -1846,10 +1542,7 @@ mod tests {
     fn the_nose_is_round_before_the_injection_lights() {
         let (c, _, _) = transfer(35.0e6, DVec3::Y * 3000.0);
         let swing = crate::attitude::angle_between(c.direction, c.last_aim());
-        assert!(
-            swing <= std::f64::consts::PI,
-            "{swing} rad is more than a flip"
-        );
+        assert!(swing <= std::f64::consts::PI, "{swing} rad is more than a flip");
         assert!(
             crate::attitude::turn_time_s(c.direction, c.last_aim(), Drive::DEFAULT.slew_rate_rad_s)
                 <= c.coast_s() + 1.0e-9,
@@ -1869,3 +1562,6 @@ mod tests {
         }
     }
 }
+
+
+

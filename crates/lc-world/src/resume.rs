@@ -131,13 +131,7 @@ impl Snapshot {
                 clock_base_s,
             } => {
                 let cruise = Cruise::plan_onto(
-                    from_ly,
-                    beta0,
-                    to_ly,
-                    arrive_beta,
-                    attitude0,
-                    start_s,
-                    drive,
+                    from_ly, beta0, to_ly, arrive_beta, attitude0, start_s, drive,
                 );
                 state.resume_crossing(cruise, arrive_at, clock_base_s);
             }
@@ -153,13 +147,7 @@ impl Snapshot {
                 clock_base_s,
             } => {
                 let cruise = Cruise::plan_onto(
-                    from_ly,
-                    beta0,
-                    to_ly,
-                    arrive_beta,
-                    attitude0,
-                    start_s,
-                    drive,
+                    from_ly, beta0, to_ly, arrive_beta, attitude0, start_s, drive,
                 );
                 state.resume_transfer(
                     crate::transfer::Transfer { cruise, about },
@@ -167,22 +155,13 @@ impl Snapshot {
                     clock_base_s,
                 );
             }
-            Recipe::Rendezvous {
-                approach,
-                clock_base_s,
-            } => {
+            Recipe::Rendezvous { approach, clock_base_s } => {
                 state.resume_rendezvous(approach.solve(attitude0), clock_base_s);
             }
-            Recipe::Escort {
-                station,
-                clock_base_s,
-            } => {
+            Recipe::Escort { station, clock_base_s } => {
                 state.resume_escort(station.solve(attitude0), clock_base_s);
             }
-            Recipe::Consort {
-                formation,
-                clock_base_s,
-            } => {
+            Recipe::Consort { formation, clock_base_s } => {
                 // Without its system the conic has nothing to be about, and the ship comes back
                 // drifting the way a falling one does.
                 match system.and_then(|system| formation.solve(system, attitude0)) {
@@ -266,10 +245,7 @@ impl From<&Snapshot> for lc_proto::Motion {
                     arrive_at: arrive_at.as_ref().map(waypoint_out),
                     clock_base_s: *clock_base_s,
                 },
-                Recipe::Rendezvous {
-                    approach,
-                    clock_base_s,
-                } => lc_proto::Motive::Rendezvous {
+                Recipe::Rendezvous { approach, clock_base_s } => lc_proto::Motive::Rendezvous {
                     from_ly: approach.from_ly.to_array(),
                     beta0: approach.beta0.to_array(),
                     to_ly: approach.to_ly.to_array(),
@@ -281,10 +257,7 @@ impl From<&Snapshot> for lc_proto::Motion {
                     target: lc_proto::ShipId(approach.target.0),
                     clock_base_s: *clock_base_s,
                 },
-                Recipe::Escort {
-                    station,
-                    clock_base_s,
-                } => lc_proto::Motive::Escort {
+                Recipe::Escort { station, clock_base_s } => lc_proto::Motive::Escort {
                     from_ly: station.from_ly.to_array(),
                     beta0: station.beta0.to_array(),
                     to_ly: station.to_ly.to_array(),
@@ -297,10 +270,7 @@ impl From<&Snapshot> for lc_proto::Motion {
                     target: lc_proto::ShipId(station.target.0),
                     clock_base_s: *clock_base_s,
                 },
-                Recipe::Consort {
-                    formation,
-                    clock_base_s,
-                } => lc_proto::Motive::Consort {
+                Recipe::Consort { formation, clock_base_s } => lc_proto::Motive::Consort {
                     from_ly: formation.from_ly.to_array(),
                     beta0: formation.beta0.to_array(),
                     to_ly: formation.to_ly.to_array(),
@@ -492,10 +462,9 @@ fn waypoint_out(waypoint: &Waypoint) -> lc_proto::Waypoint {
             pole: orbit.pole.to_array(),
             phase_rad: orbit.phase_rad,
         },
-        Waypoint::Lagrange { body, point } => lc_proto::Waypoint::Lagrange {
-            body: body.clone(),
-            point: point_out(*point),
-        },
+        Waypoint::Lagrange { body, point } => {
+            lc_proto::Waypoint::Lagrange { body: body.clone(), point: point_out(*point) }
+        }
         Waypoint::Libration(libration) => lc_proto::Waypoint::Libration {
             body: libration.body.clone(),
             point: point_out(libration.point),
@@ -515,12 +484,7 @@ fn waypoint_out(waypoint: &Waypoint) -> lc_proto::Waypoint {
 fn waypoint_in(waypoint: &lc_proto::Waypoint) -> Waypoint {
     match waypoint {
         lc_proto::Waypoint::Fixed(at) => Waypoint::Fixed(DVec3::from_array(*at)),
-        lc_proto::Waypoint::Orbit {
-            about,
-            radius_m,
-            pole,
-            phase_rad,
-        } => Waypoint::Orbit(Orbit {
+        lc_proto::Waypoint::Orbit { about, radius_m, pole, phase_rad } => Waypoint::Orbit(Orbit {
             about: match about {
                 lc_proto::Anchor::Star => Anchor::Star,
                 lc_proto::Anchor::Body(name) => Anchor::Body(name.clone()),
@@ -529,10 +493,9 @@ fn waypoint_in(waypoint: &lc_proto::Waypoint) -> Waypoint {
             pole: DVec3::from_array(*pole),
             phase_rad: *phase_rad,
         }),
-        lc_proto::Waypoint::Lagrange { body, point } => Waypoint::Lagrange {
-            body: body.clone(),
-            point: point_in(*point),
-        },
+        lc_proto::Waypoint::Lagrange { body, point } => {
+            Waypoint::Lagrange { body: body.clone(), point: point_in(*point) }
+        }
         lc_proto::Waypoint::Libration {
             body,
             point,
@@ -586,11 +549,8 @@ mod tests {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .ok()?;
-        let sun: CatalogueStar = provider
-            .stars()
-            .iter()
-            .find(|s| s.provenance.name.as_deref() == Some("Sol"))?
-            .clone();
+        let sun: CatalogueStar =
+            provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some("Sol"))?.clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);
         Some(system)
@@ -598,11 +558,7 @@ mod tests {
 
     fn orbit(body: &str) -> Change {
         Change::SetCourse {
-            course: Course::Orbit {
-                body: body.into(),
-                altitude_radii: 2.0,
-                plane: Plane::Equatorial,
-            },
+            course: Course::Orbit { body: body.into(), altitude_radii: 2.0, plane: Plane::Equatorial },
             drive: crate::flight::Drive::DEFAULT,
         }
     }
@@ -632,40 +588,27 @@ mod tests {
     fn holding_earth() -> Option<(LocalSystem, ShipState)> {
         let mut system = sol()?;
         let mut ship = ShipState::at(DVec3::ZERO);
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: 0.0,
-                change: orbit("Earth"),
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 0.0,
+            change: orbit("Earth"),
+        })
         .expect("a course");
         let arrival = match &ship.motive {
             Motive::Crossing(cruise) => cruise.duration_s(),
             _ => unreachable!("a course is a crossing"),
         };
         run(&mut ship, &mut system, 0.0, arrival + 1.0, 438.0);
-        assert!(
-            matches!(ship.motive, Motive::Holding(_)),
-            "it should have arrived: {:?}",
-            ship.motive
-        );
+        assert!(matches!(ship.motive, Motive::Holding(_)), "it should have arrived: {:?}", ship.motive);
         Some((system, ship))
     }
 
     /// The bug, stated plainly. A welcome that carried a position put this ship back at rest.
     #[test]
     fn a_ship_holding_an_orbit_comes_back_holding_it() {
-        let Some((system, ship)) = holding_earth() else {
-            return;
-        };
+        let Some((system, ship)) = holding_earth() else { return };
         let there = round_trip(&ship, Some(&system), system.time_s());
-        assert_eq!(
-            ship.motive, there.motive,
-            "it came back doing something else"
-        );
+        assert_eq!(ship.motive, there.motive, "it came back doing something else");
         assert!(matches!(there.motive, Motive::Holding(Waypoint::Orbit(_))));
     }
 
@@ -676,9 +619,7 @@ mod tests {
     /// determinism `lightcone/docs/17-reconciliation.md` rests on.
     #[test]
     fn a_restored_station_is_in_the_same_place_a_day_later() {
-        let Some((mut system, mut ship)) = holding_earth() else {
-            return;
-        };
+        let Some((mut system, mut ship)) = holding_earth() else { return };
         let now = system.time_s();
         let mut there = round_trip(&ship, Some(&system), now);
 
@@ -686,10 +627,7 @@ mod tests {
         let until = now + 86_400.0;
         run(&mut ship, &mut system, now, until, 438.0);
         run(&mut there, &mut other, now, until, 438.0);
-        assert_eq!(
-            ship.position_ly, there.position_ly,
-            "the restored ship is somewhere else"
-        );
+        assert_eq!(ship.position_ly, there.position_ly, "the restored ship is somewhere else");
         assert_eq!(ship.beta, there.beta);
     }
 
@@ -704,45 +642,27 @@ mod tests {
         // Under way first, so the crossing is planned from a velocity and not from rest.
         ship.beta = DVec3::new(0.0, 0.002, 0.0);
         ship.set_adrift(0.0);
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: 10.0,
-                change: orbit("Earth"),
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: 10.0,
+            change: orbit("Earth"),
+        })
         .expect("a course");
-        let Motive::Crossing(cruise) = &ship.motive else {
-            unreachable!()
-        };
-        assert!(
-            cruise.initial_beta().length() > 0.0,
-            "the plan should carry the velocity"
-        );
+        let Motive::Crossing(cruise) = &ship.motive else { unreachable!() };
+        assert!(cruise.initial_beta().length() > 0.0, "the plan should carry the velocity");
         let half = cruise.start_s + cruise.duration_s() * 0.5;
 
         run(&mut ship, &mut system, 10.0, half, 438.0);
-        assert!(
-            matches!(ship.motive, Motive::Crossing(_)),
-            "still under way"
-        );
+        assert!(matches!(ship.motive, Motive::Crossing(_)), "still under way");
         let mut there = round_trip(&ship, Some(&system), half);
-        assert_eq!(
-            ship.motive, there.motive,
-            "the re-plan is a different crossing"
-        );
+        assert_eq!(ship.motive, there.motive, "the re-plan is a different crossing");
         assert_eq!(ship.clock_s, there.clock_s, "the crew's clock moved");
 
         let mut other = system.clone();
         let until = half + 5_000.0;
         run(&mut ship, &mut system, half, until, 438.0);
         run(&mut there, &mut other, half, until, 438.0);
-        assert_eq!(
-            ship.position_ly, there.position_ly,
-            "the crossings diverged"
-        );
+        assert_eq!(ship.position_ly, there.position_ly, "the crossings diverged");
         assert_eq!(ship.clock_s, there.clock_s, "the crews aged differently");
     }
 
@@ -754,19 +674,13 @@ mod tests {
     /// solved orbit on the wire.
     #[test]
     fn a_ship_falling_on_a_conic_comes_back_on_the_same_conic() {
-        let Some((mut system, mut ship)) = holding_earth() else {
-            return;
-        };
+        let Some((mut system, mut ship)) = holding_earth() else { return };
         let now = system.time_s();
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: now,
-                change: Change::CutDrive,
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: now,
+            change: Change::CutDrive,
+        })
         .expect("the engine cuts");
         let Motive::Falling(before) = &ship.motive else {
             unreachable!("cutting in orbit is a conic, not {:?}", ship.motive)
@@ -785,10 +699,7 @@ mod tests {
         run(&mut there, &mut other, now, until, 438.0);
         // A meter, against an orbit twelve thousand kilometers across.
         let apart = (ship.position_ly - there.position_ly).length() * crate::system::M_PER_LY;
-        assert!(
-            apart < 1.0,
-            "the arcs are {apart} meters apart after an hour"
-        );
+        assert!(apart < 1.0, "the arcs are {apart} meters apart after an hour");
     }
 
     /// With no system there is nothing for a conic to be about, so it degrades to a line —
@@ -796,31 +707,18 @@ mod tests {
     /// are not there.
     #[test]
     fn a_conic_with_no_system_comes_back_as_a_drift() {
-        let Some((system, ship)) = holding_earth() else {
-            return;
-        };
+        let Some((system, ship)) = holding_earth() else { return };
         let mut ship = ship;
         let now = system.time_s();
-        apply(
-            &mut ship,
-            Some(&system),
-            &Event {
-                ship: ShipId(1),
-                at_t: now,
-                change: Change::CutDrive,
-            },
-        )
+        apply(&mut ship, Some(&system), &Event {
+            ship: ShipId(1),
+            at_t: now,
+            change: Change::CutDrive,
+        })
         .expect("the engine cuts");
         let adrift = round_trip(&ship, None, now);
-        assert!(
-            matches!(adrift.motive, Motive::Drifting { .. }),
-            "{:?}",
-            adrift.motive
-        );
-        assert_eq!(
-            adrift.position_ly, ship.position_ly,
-            "it should still be where it was"
-        );
+        assert!(matches!(adrift.motive, Motive::Drifting { .. }), "{:?}", adrift.motive);
+        assert_eq!(adrift.position_ly, ship.position_ly, "it should still be where it was");
         assert_eq!(adrift.beta, ship.beta, "and still moving");
     }
 
@@ -836,10 +734,7 @@ mod tests {
         advance(&mut ship, None, 4.0e7, 4.0e7);
 
         let there = round_trip(&ship, None, 4.0e7);
-        assert_eq!(
-            ship.motive, there.motive,
-            "the line was redrawn from somewhere else"
-        );
+        assert_eq!(ship.motive, there.motive, "the line was redrawn from somewhere else");
         match there.motive {
             Motive::Drifting { from_ly, since_t } => {
                 assert_eq!(from_ly, DVec3::new(1.5, 0.0, 0.0));
@@ -854,31 +749,18 @@ mod tests {
     #[test]
     fn re_planning_a_crossing_from_its_own_recipe_is_the_same_crossing() {
         let drive = crate::flight::Drive::DEFAULT;
-        for beta0 in [
-            DVec3::ZERO,
-            DVec3::new(0.0, 0.4, 0.0),
-            DVec3::new(-0.9, 0.0, 0.0),
-        ] {
-            let first = Cruise::plan_from(
-                DVec3::ZERO,
-                beta0,
-                DVec3::new(0.1, 0.0, 0.0),
-                DVec3::ZERO,
-                7.0,
-                drive,
-            );
-            let again = Cruise::plan_from(
-                first.from_ly,
-                first.initial_beta(),
-                first.to_ly,
-                first.initial_attitude(),
-                first.start_s,
-                drive,
-            );
-            assert_eq!(
-                first, again,
-                "re-planning changed the crossing, from {beta0}"
-            );
+        for beta0 in [DVec3::ZERO, DVec3::new(0.0, 0.4, 0.0), DVec3::new(-0.9, 0.0, 0.0)] {
+            let first = Cruise::plan_from(DVec3::ZERO, beta0, DVec3::new(0.1, 0.0, 0.0), DVec3::ZERO, 7.0, drive);
+            let again =
+                Cruise::plan_from(
+                    first.from_ly,
+                    first.initial_beta(),
+                    first.to_ly,
+                    first.initial_attitude(),
+                    first.start_s,
+                    drive,
+                );
+            assert_eq!(first, again, "re-planning changed the crossing, from {beta0}");
         }
     }
 }

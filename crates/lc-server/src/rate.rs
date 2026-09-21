@@ -86,7 +86,8 @@ impl Budget {
         self.usage.within_tick = 0;
         self.usage.ticks_this_second += 1;
         if self.usage.ticks_this_second >= ticks_per_second.max(1) {
-            self.usage.peak_per_second = self.usage.peak_per_second.max(self.usage.within_second);
+            self.usage.peak_per_second =
+                self.usage.peak_per_second.max(self.usage.within_second);
             self.usage.within_second = 0;
             self.usage.ticks_this_second = 0;
         }
@@ -137,10 +138,7 @@ mod tests {
         let every = TICKS_PER_SECOND / SUSTAINED_PER_SECOND as u32;
         for tick in 0..(TICKS_PER_SECOND * 300) {
             if tick % every == 0 {
-                assert!(
-                    budget.charge(),
-                    "refused at the sustained rate on tick {tick}"
-                );
+                assert!(budget.charge(), "refused at the sustained rate on tick {tick}");
             }
             budget.advance(TICKS_PER_SECOND);
         }
@@ -173,10 +171,7 @@ mod tests {
         for _ in 0..wait {
             budget.advance(TICKS_PER_SECOND);
         }
-        assert!(
-            budget.charge(),
-            "still refused after waiting the {wait} ticks it asked for"
-        );
+        assert!(budget.charge(), "still refused after waiting the {wait} ticks it asked for");
     }
 
     /// It refills, and never past the burst: an idle client banks a burst, not an hour.
@@ -189,11 +184,7 @@ mod tests {
         for _ in 0..(TICKS_PER_SECOND * 3600) {
             budget.advance(TICKS_PER_SECOND);
         }
-        assert_eq!(
-            budget.tokens(),
-            BURST,
-            "an hour idle banked more than a burst"
-        );
+        assert_eq!(budget.tokens(), BURST, "an hour idle banked more than a burst");
     }
 
     /// The measurement, which is the part that will make the ceiling stop being a guess.
@@ -211,10 +202,7 @@ mod tests {
             budget.advance(TICKS_PER_SECOND);
         }
         assert_eq!(budget.usage.peak_per_tick, 7, "the busiest tick was seven");
-        assert_eq!(
-            budget.usage.peak_per_second, 10,
-            "and the busiest second was ten"
-        );
+        assert_eq!(budget.usage.peak_per_second, 10, "and the busiest second was ten");
         assert_eq!(budget.usage.accepted, 10);
         assert_eq!(budget.usage.refused, 0);
     }
@@ -230,11 +218,7 @@ mod tests {
         budget.advance(TICKS_PER_SECOND);
         assert_eq!(budget.usage.accepted, BURST as u64);
         assert_eq!(budget.usage.refused, 5);
-        assert_eq!(
-            budget.usage.peak_per_tick,
-            BURST as u32 + 5,
-            "the attempt was not recorded"
-        );
+        assert_eq!(budget.usage.peak_per_tick, BURST as u32 + 5, "the attempt was not recorded");
     }
 
     /// A slower server takes less, which is the behavior wanted under load.
@@ -254,10 +238,6 @@ mod tests {
             fast.advance(20);
             slow.advance(10);
         }
-        assert_eq!(
-            fast.tokens(),
-            slow.tokens(),
-            "refill should follow ticks, not wall time"
-        );
+        assert_eq!(fast.tokens(), slow.tokens(), "refill should follow ticks, not wall time");
     }
 }

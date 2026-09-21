@@ -5,8 +5,8 @@
 //! and a second copy of this parsing would be a second set of flag names.
 
 use crate::action::Action;
-use crate::dev::DevEntry;
 use lc_world::scenario;
+use crate::dev::DevEntry;
 
 /// Where this build's assets are.
 ///
@@ -23,8 +23,9 @@ pub fn asset_root() -> std::path::PathBuf {
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("assets")))
         .filter(|path| path.is_dir());
-    beside_exe
-        .unwrap_or_else(|| std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets")))
+    beside_exe.unwrap_or_else(|| {
+        std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"))
+    })
 }
 
 /// What a request to start the client asked for.
@@ -47,10 +48,7 @@ pub struct Entry {
 pub fn parse(args: &[String]) -> Entry {
     let flag = |name: &str| args.iter().any(|a| a == name);
     let after = |name: &str| {
-        args.iter()
-            .position(|a| a == name)
-            .and_then(|i| args.get(i + 1))
-            .cloned()
+        args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
     };
     fn value<T: std::str::FromStr>(args: &[String], name: &str) -> Option<T> {
         let i = args.iter().position(|a| a == name)?;
@@ -60,10 +58,7 @@ pub fn parse(args: &[String]) -> Entry {
     let mut actions = Vec::new();
     // A scene says where to stand, so there is nothing to pass in. The identifiers are the
     // scene's own, which is why this needs no shard to have answered first.
-    if let Some(scene) = after("--demo")
-        .as_deref()
-        .and_then(scenario::Scenario::named)
-    {
+    if let Some(scene) = after("--demo").as_deref().and_then(scenario::Scenario::named) {
         if let Some(watch) = crate::action::watching(scene) {
             let crate::ui::CameraPerspective::Pov(ship_id) = watch;
             actions.push(Action::WatchFrom(Some(ship_id)));
@@ -111,30 +106,22 @@ pub fn parse(args: &[String]) -> Entry {
     // What is selected, as a click on either view would leave it. Everything else that aims is
     // a camera, so this is the only way to photograph a reticle.
     if let Some(name) = after("--focus") {
-        let target = match name
-            .strip_prefix("band:")
-            .and_then(|n| n.parse::<usize>().ok())
-        {
+        let target = match name.strip_prefix("band:").and_then(|n| n.parse::<usize>().ok()) {
             Some(index) => crate::navigation::Target::Band(index),
             None => crate::navigation::Target::Body(name),
         };
         actions.push(Action::FocusTarget(Some(target)));
     }
 
+
     // Last, and after anything that aims: `--turn` exists to put something off screen, and
     // `--fly` ends by pointing the view at what it is flying to. Pushed first, the aim undid
     // the turn and the two flags together were the same picture as the one on its own.
     if let Some(degrees) = value::<f64>(args, "--turn") {
-        actions.push(Action::Look {
-            yaw: degrees.to_radians(),
-            pitch: 0.0,
-        });
+        actions.push(Action::Look { yaw: degrees.to_radians(), pitch: 0.0 });
     }
     if let Some(degrees) = value::<f64>(args, "--pitch") {
-        actions.push(Action::Look {
-            yaw: 0.0,
-            pitch: degrees.to_radians(),
-        });
+        actions.push(Action::Look { yaw: 0.0, pitch: degrees.to_radians() });
     }
     // Both ends of the orbit camera's range are clamps, so the only way to photograph one is
     // to ask for far more than it will give and let it stop where it stops.
@@ -177,9 +164,7 @@ pub fn parse(args: &[String]) -> Entry {
                 _ => None,
             }
         }),
-        map_focus: after("--map-focus")
-            .as_deref()
-            .and_then(crate::dev::WantedFocus::named),
+        map_focus: after("--map-focus").as_deref().and_then(crate::dev::WantedFocus::named),
         // The map is a mode now rather than a window, and `--panel map` is the spelling every
         // shot list already has. A pin, not an action: see `DevEntry::view`.
         view: after("--panel")
@@ -230,11 +215,7 @@ pub fn parse(args: &[String]) -> Entry {
 #[cfg(target_arch = "wasm32")]
 pub fn from_query(query: &str) -> Vec<String> {
     let mut flags = Vec::new();
-    for pair in query
-        .trim_start_matches('?')
-        .split('&')
-        .filter(|p| !p.is_empty())
-    {
+    for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
         let (key, value) = match pair.split_once('=') {
             Some((k, v)) => (k, Some(decode(v))),
             None => (pair, None),
@@ -354,22 +335,13 @@ mod tests {
     #[test]
     fn menu_holds_the_entry_even_when_a_shot_was_asked_for() {
         let dev = parse(&args("--menu --shot menu.png")).dev;
-        assert!(
-            !dev.observe_immediately,
-            "--menu must not fall through to the sky"
-        );
+        assert!(!dev.observe_immediately, "--menu must not fall through to the sky");
         assert_eq!(dev.screenshot.as_deref(), Some("menu.png"));
     }
 
     #[test]
     fn nothing_at_all_is_a_plain_start() {
-        let Entry {
-            dev,
-            catalogue: cat,
-            server,
-            local,
-            demo,
-        } = parse(&[]);
+        let Entry { dev, catalogue: cat, server, local, demo } = parse(&[]);
         assert!(!dev.observe_immediately);
         assert!(dev.actions.is_empty());
         assert_eq!(cat, None);
@@ -400,10 +372,7 @@ mod tests {
     /// The camera pin is three numbers, and anything else is not a pin.
     #[test]
     fn a_pinned_camera_is_read_whole_or_not_at_all() {
-        assert_eq!(
-            parse(&args("--demo-cam 90:20:6")).dev.camera,
-            Some((90.0, 20.0, 6.0))
-        );
+        assert_eq!(parse(&args("--demo-cam 90:20:6")).dev.camera, Some((90.0, 20.0, 6.0)));
         assert_eq!(parse(&args("--demo-cam 90:20")).dev.camera, None);
         assert_eq!(parse(&args("--demo-cam what")).dev.camera, None);
     }
@@ -420,9 +389,7 @@ mod tests {
     #[test]
     fn a_server_is_taken_from_the_flag_and_not_guessed() {
         assert_eq!(
-            parse(&args("--server ws://127.0.0.1:8080"))
-                .server
-                .as_deref(),
+            parse(&args("--server ws://127.0.0.1:8080")).server.as_deref(),
             Some("ws://127.0.0.1:8080"),
         );
         // And it is not mistaken for the catalogue, which is the first positional argument.

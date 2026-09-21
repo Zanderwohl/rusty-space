@@ -56,10 +56,7 @@ pub struct Faces {
 
 impl Default for Faces {
     fn default() -> Self {
-        Self {
-            defs: egui::FontDefinitions::default(),
-            asked: Asked::Unasked,
-        }
+        Self { defs: egui::FontDefinitions::default(), asked: Asked::Unasked }
     }
 }
 
@@ -92,11 +89,7 @@ impl Faces {
         // same call falls back through the proportional list, and this is what puts the
         // interface face into it.
         for (name, _) in added.iter().filter(|(_, how)| matches!(how, As::Interface)) {
-            let list = self
-                .defs
-                .families
-                .entry(egui::FontFamily::Proportional)
-                .or_default();
+            let list = self.defs.families.entry(egui::FontFamily::Proportional).or_default();
             list.retain(|held| held != name);
             list.insert(0, name.clone());
         }
@@ -113,9 +106,7 @@ impl Faces {
                 }
                 As::Alone => {}
             }
-            self.defs
-                .families
-                .insert(egui::FontFamily::Name(name.as_str().into()), list);
+            self.defs.families.insert(egui::FontFamily::Name(name.as_str().into()), list);
         }
 
         ctx.set_fonts(self.defs.clone());
@@ -171,10 +162,7 @@ pub fn settle(
     match &faces.asked {
         Asked::Settled => return,
         Asked::Unasked => {
-            let asked = STARTUP
-                .iter()
-                .map(|(_, path, _)| assets.load(*path))
-                .collect();
+            let asked = STARTUP.iter().map(|(_, path, _)| assets.load(*path)).collect();
             faces.asked = Asked::Waiting(asked);
             return;
         }
@@ -193,16 +181,12 @@ pub fn settle(
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let ctx = ctx.clone();
 
-    let Asked::Waiting(asked) = &faces.asked else {
-        unreachable!()
-    };
+    let Asked::Waiting(asked) = &faces.asked else { unreachable!() };
     let ready: Vec<(String, Vec<u8>, As)> = STARTUP
         .iter()
         .zip(asked)
         .filter_map(|((name, _, how), handle)| {
-            loaded
-                .get(handle)
-                .map(|face| ((*name).to_owned(), face.0.clone(), *how))
+            loaded.get(handle).map(|face| ((*name).to_owned(), face.0.clone(), *how))
         })
         .collect();
     let names: Vec<String> = ready.iter().map(|(name, _, _)| name.clone()).collect();

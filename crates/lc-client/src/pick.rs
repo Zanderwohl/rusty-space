@@ -12,10 +12,10 @@
 //! [`crate::map_pick`] is the same job over the map's surface and shares this module's
 //! [`Subject`], [`Mark`] and [`paint`], so one click means one thing in either mode.
 
-use bevy::camera::CameraProjection;
 use bevy::math::Vec4;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy::camera::CameraProjection;
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{EguiContexts, egui};
 use em_render::render_space::sim_to_render;
@@ -170,9 +170,7 @@ fn survey(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Ok((Projection::Perspective(perspective), camera_at)) = camera.single() else {
-        return;
-    };
+    let Ok((Projection::Perspective(perspective), camera_at)) = camera.single() else { return };
     let viewport = Vec2::new(window.width(), window.height());
     if viewport.x <= 0.0 || viewport.y <= 0.0 {
         return;
@@ -180,22 +178,12 @@ fn survey(
 
     let clip_from_view = perspective.get_clip_from_view();
     let rad_per_px = radians_per_pixel(perspective.fov, viewport.y);
-    let sighted = sight(
-        &game,
-        &bodies,
-        &uplink,
-        eye.at_ly,
-        camera_at,
-        clip_from_view,
-        rad_per_px,
-    );
+    let sighted = sight(&game, &bodies, &uplink, eye.at_ly, camera_at, clip_from_view, rad_per_px);
 
     // Against the whole window, because that is where the cursor can be. A thing under a panel
     // is not pickable anyway: egui takes the pointer first, which is checked below.
     let whole = Frame::bare(reticle::safe_rect(viewport, 0.0));
-    let cursor = (!egui.wants_any_pointer_input())
-        .then(|| window.cursor_position())
-        .flatten();
+    let cursor = (!egui.wants_any_pointer_input()).then(|| window.cursor_position()).flatten();
 
     // Only what is actually on screen can be under the cursor. An off-screen thing is placed on
     // the border, and taking that as a position would make the edges pick whatever is out there.
@@ -217,12 +205,7 @@ fn survey(
         if let Some((at, radius_px)) = at
             && whole.safe.contains(at)
         {
-            candidates.push(Candidate {
-                id: index as u64,
-                at,
-                radius_px,
-                rank: seen.rank,
-            });
+            candidates.push(Candidate { id: index as u64, at, radius_px, rank: seen.rank });
         }
     }
 
@@ -244,12 +227,7 @@ fn survey(
     picked.contacts = sighted
         .iter()
         .filter(|seen| matches!(seen.subject, Subject::Craft(..)))
-        .filter(|seen| {
-            !picked
-                .hover
-                .as_ref()
-                .is_some_and(|m| m.label == label_of(seen))
-        })
+        .filter(|seen| !picked.hover.as_ref().is_some_and(|m| m.label == label_of(seen)))
         .map(|seen| mark(seen, viewport, viewport * 0.5))
         .collect();
 
@@ -308,10 +286,7 @@ fn nearest_sample(outline: &[Vec<Vec4>], viewport: Vec2, toward: Vec2) -> Option
         .filter(|clip| clip.w > 0.0)
         .map(|clip| {
             let ndc = Vec2::new(clip.x / clip.w, clip.y / clip.w);
-            let at = Vec2::new(
-                (ndc.x + 1.0) * 0.5 * viewport.x,
-                (1.0 - ndc.y) * 0.5 * viewport.y,
-            );
+            let at = Vec2::new((ndc.x + 1.0) * 0.5 * viewport.x, (1.0 - ndc.y) * 0.5 * viewport.y);
             (toward.distance(at), *clip)
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -345,8 +320,7 @@ fn sight(
     let ship = eye_ly;
     let mut out = Vec::with_capacity(bodies.drawn.len() + game.stars.len());
 
-    let project =
-        |direction: DVec3| project_direction(camera_at.rotation, clip_from_view, direction);
+    let project = |direction: DVec3| project_direction(camera_at.rotation, clip_from_view, direction);
 
     for contact in &uplink.contacts {
         let offset = contact.position_ly - eye_ly;
@@ -411,9 +385,7 @@ fn sight(
     // the same curve serves as the skeleton drawn on hover and as the thing the cursor is
     // measured against.
     if let Some(system) = game.system.as_ref() {
-        let star = system
-            .star_position_at(game.coordinate_time_s())
-            .unwrap_or(ship);
+        let star = system.star_position_at(game.coordinate_time_s()).unwrap_or(ship);
         for (index, population) in system.populations.iter().enumerate() {
             if !crate::envelope::visible(population) {
                 continue;
@@ -422,9 +394,7 @@ fn sight(
                 .into_iter()
                 .map(|curve| curve.into_iter().map(&project).collect())
                 .collect();
-            let Some(first) = outline.iter().flatten().next().copied() else {
-                continue;
-            };
+            let Some(first) = outline.iter().flatten().next().copied() else { continue };
             out.push(Sighted {
                 subject: Subject::Swarm(index, swarm_name(population)),
                 // Filled in against the cursor; a torus has no one place it is.
@@ -444,11 +414,7 @@ fn swarm_name(population: &lc_world::population::Population) -> String {
     let radius = population.thermal_radius();
     format!(
         "{} at {:.1} AU",
-        if lc_world::navigation::is_flat(population) {
-            "belt"
-        } else {
-            "cloud"
-        },
+        if lc_world::navigation::is_flat(population) { "belt" } else { "cloud" },
         radius / lc_world::navigation::AU,
     )
 }
@@ -463,9 +429,7 @@ fn swarm_outlines(
     ship_ly: DVec3,
     population: &lc_world::population::Population,
 ) -> Vec<Vec<DVec3>> {
-    let Some(extent) = population.extent() else {
-        return Vec::new();
-    };
+    let Some(extent) = population.extent() else { return Vec::new() };
     em_map::outline::torus(
         (star_ly - ship_ly) * M_PER_LY,
         population.pole,
@@ -479,21 +443,12 @@ fn swarm_outlines(
 
 /// Every curve of an outline, projected and cut at the camera plane.
 pub(crate) fn screen_runs(outline: &[Vec<Vec4>], viewport: Vec2) -> Vec<Vec<Vec2>> {
-    outline
-        .iter()
-        .flat_map(|curve| reticle::project_path(curve, viewport))
-        .collect()
+    outline.iter().flat_map(|curve| reticle::project_path(curve, viewport)).collect()
 }
 
 /// Paint the marks.
-fn draw(
-    mut contexts: EguiContexts,
-    picked: Res<Picked>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-) {
-    let Ok(context) = contexts.ctx_mut() else {
-        return;
-    };
+fn draw(mut contexts: EguiContexts, picked: Res<Picked>, windows: Query<&Window, With<PrimaryWindow>>) {
+    let Ok(context) = contexts.ctx_mut() else { return };
     let Ok(window) = windows.single() else { return };
     let viewport = Vec2::new(window.width(), window.height());
 
@@ -538,15 +493,7 @@ fn draw(
     .into_iter()
     .filter_map(|(mark, color, bracketed)| Some((mark?, color, bracketed)))
     {
-        paint(
-            &painter,
-            mark,
-            Vec2::ZERO,
-            viewport,
-            frame,
-            color,
-            bracketed,
-        );
+        paint(&painter, mark, Vec2::ZERO, viewport, frame, color, bracketed);
     }
 }
 
@@ -608,26 +555,21 @@ pub(crate) fn paint(
 
     let (anchor, radius_px, preferred) =
         match reticle::place(mark.clip, mark.radius_px, viewport, frame) {
-            Marker::On { at, radius_px } => {
-                let radius = radius_px.max(HOVER_RING_PX);
-                let segments = if bracketed {
-                    reticle::brackets(at, radius, BRACKET_ARM_PX)
-                } else {
-                    reticle::ring(at, radius, 40)
-                };
-                draw_segments(painter, &segments, origin, stroke);
-                (at, radius, None)
-            }
-            Marker::Off { at, direction } => {
-                draw_segments(
-                    painter,
-                    &reticle::arrow(at, direction, ARROW_PX),
-                    origin,
-                    stroke,
-                );
-                (at, ARROW_PX, Some(-direction))
-            }
-        };
+        Marker::On { at, radius_px } => {
+            let radius = radius_px.max(HOVER_RING_PX);
+            let segments = if bracketed {
+                reticle::brackets(at, radius, BRACKET_ARM_PX)
+            } else {
+                reticle::ring(at, radius, 40)
+            };
+            draw_segments(painter, &segments, origin, stroke);
+            (at, radius, None)
+        }
+        Marker::Off { at, direction } => {
+            draw_segments(painter, &reticle::arrow(at, direction, ARROW_PX), origin, stroke);
+            (at, ARROW_PX, Some(-direction))
+        }
+    };
 
     if mark.label.is_empty() {
         return;
@@ -636,14 +578,8 @@ pub(crate) fn paint(
     let font = egui::FontId::proportional(LABEL_SIZE);
     let galley = painter.layout_no_wrap(mark.label.clone(), font, color);
     let size = Vec2::new(galley.size().x, galley.size().y);
-    let center = reticle::place_label(
-        anchor,
-        radius_px,
-        size,
-        frame,
-        reticle::LABEL_GAP_PX,
-        preferred,
-    );
+    let center =
+        reticle::place_label(anchor, radius_px, size, frame, reticle::LABEL_GAP_PX, preferred);
     let at = origin + center - size * 0.5;
     painter.galley(egui::pos2(at.x, at.y), galley, color);
 }
@@ -686,10 +622,7 @@ mod tests {
     /// disagree about which way the swizzle goes.
     fn looking_along(direction: DVec3) -> (Quat, Mat4) {
         let mut transform = Transform::from_xyz(0.0, 0.0, 0.0);
-        transform.look_to(
-            sim_to_render(direction).as_vec3(),
-            sim_to_render(DVec3::Z).as_vec3(),
-        );
+        transform.look_to(sim_to_render(direction).as_vec3(), sim_to_render(DVec3::Z).as_vec3());
         let projection = PerspectiveProjection::default();
         (transform.rotation, projection.get_clip_from_view())
     }
@@ -699,22 +632,11 @@ mod tests {
     fn straight_ahead_is_the_middle_of_the_screen() {
         let (rotation, clip_from_view) = looking_along(DVec3::X);
         let clip = project_direction(rotation, clip_from_view, DVec3::X);
-        assert!(
-            clip.w > 0.0,
-            "ahead is in front of the camera: w = {}",
-            clip.w
-        );
+        assert!(clip.w > 0.0, "ahead is in front of the camera: w = {}", clip.w);
         assert!(clip.x.abs() < 1.0e-5 && clip.y.abs() < 1.0e-5, "{clip:?}");
 
-        let marker = reticle::place(
-            clip,
-            0.0,
-            Vec2::new(1280.0, 720.0),
-            Frame::bare(reticle::safe_rect(Vec2::new(1280.0, 720.0), 10.0)),
-        );
-        let Marker::On { at, .. } = marker else {
-            panic!("{marker:?}")
-        };
+        let marker = reticle::place(clip, 0.0, Vec2::new(1280.0, 720.0), Frame::bare(reticle::safe_rect(Vec2::new(1280.0, 720.0), 10.0)));
+        let Marker::On { at, .. } = marker else { panic!("{marker:?}") };
         assert!((at - Vec2::new(640.0, 360.0)).length() < 0.05, "{at}");
     }
 
@@ -738,19 +660,9 @@ mod tests {
         assert!(clip.y > 0.0, "clip y is up: {clip:?}");
 
         let viewport = Vec2::new(1280.0, 720.0);
-        let marker = reticle::place(
-            clip,
-            0.0,
-            viewport,
-            Frame::bare(reticle::safe_rect(viewport, 10.0)),
-        );
-        let Marker::On { at, .. } = marker else {
-            panic!("{marker:?}")
-        };
-        assert!(
-            at.y < 360.0,
-            "up in the world should be up the screen: {at}"
-        );
+        let marker = reticle::place(clip, 0.0, viewport, Frame::bare(reticle::safe_rect(viewport, 10.0)));
+        let Marker::On { at, .. } = marker else { panic!("{marker:?}") };
+        assert!(at.y < 360.0, "up in the world should be up the screen: {at}");
     }
 
     /// And left is left. The two together pin the whole basis.
@@ -766,9 +678,7 @@ mod tests {
             viewport,
             Frame::bare(reticle::safe_rect(viewport, 10.0)),
         );
-        let Marker::On { at, .. } = marker else {
-            panic!("{marker:?}")
-        };
+        let Marker::On { at, .. } = marker else { panic!("{marker:?}") };
         assert!(at.x < 640.0, "{at}");
     }
 
@@ -777,10 +687,7 @@ mod tests {
     #[test]
     fn a_click_sends_the_action_the_list_sends() {
         let body = Subject::Body("Earth".into());
-        assert_eq!(
-            body.select(),
-            Some(Action::FocusTarget(Some(Target::Body("Earth".into()))))
-        );
+        assert_eq!(body.select(), Some(Action::FocusTarget(Some(Target::Body("Earth".into())))));
 
         let id = StarId::synthesise("test", 7);
         let star = Subject::Star(id, "Sol".into());
@@ -791,10 +698,7 @@ mod tests {
     /// course can be plotted to, and there is no course to a ship.
     #[test]
     fn clicking_a_craft_asks_for_nothing() {
-        assert_eq!(
-            Subject::Craft(lc_proto::ShipId(3), "Ship 3".into()).select(),
-            None
-        );
+        assert_eq!(Subject::Craft(lc_proto::ShipId(3), "Ship 3".into()).select(), None);
     }
 
     /// A belt is a donut, and the model already says so: a spread of semi-major axes, a
@@ -816,20 +720,12 @@ mod tests {
 
         // The extreme node, not the extreme of the range: `Distribution::uniform` places
         // *midpoints*, so a spread asked for as `0.0..0.25` has a largest node of 0.225.
-        let e_hi = belt
-            .eccentricity
-            .nodes()
-            .iter()
-            .map(|(v, _)| *v)
-            .fold(0.0, f64::max);
+        let e_hi = belt.eccentricity.nodes().iter().map(|(v, _)| *v).fold(0.0, f64::max);
         assert!((e_hi - 0.225).abs() < 1.0e-9, "{e_hi}");
 
         assert!((inner / au - 1.0592).abs() < 1.0e-3, "{:.4} AU", inner / au);
         assert!((outer / au - 4.9408).abs() < 1.0e-3, "{:.4} AU", outer / au);
-        assert!(
-            inner < a_lo && outer > a_hi,
-            "the tube is wider than the axes alone"
-        );
+        assert!(inner < a_lo && outer > a_hi, "the tube is wider than the axes alone");
 
         // Half again as wide as the spread of `a` by itself.
         let widening = (outer - inner) / (a_hi - a_lo);
@@ -853,11 +749,7 @@ mod tests {
 
         let center = (star - DVec3::ZERO) * M_PER_LY;
         for (which, curve) in curves.iter().enumerate() {
-            assert_eq!(
-                curve.len(),
-                em_map::outline::SAMPLES + 1,
-                "curve {which} is not closed"
-            );
+            assert_eq!(curve.len(), em_map::outline::SAMPLES + 1, "curve {which} is not closed");
             assert!(
                 curve[0].distance(*curve.last().unwrap()) < 1.0e3,
                 "curve {which} has a seam",
@@ -877,19 +769,13 @@ mod tests {
                 // shader's own slab is set from.
                 let height = local.dot(belt.pole).abs();
                 let ceiling = outer * half_angle.sin();
-                assert!(
-                    height <= ceiling + 1.0e3,
-                    "curve {which} is {height:e} above the plane"
-                );
+                assert!(height <= ceiling + 1.0e3, "curve {which} is {height:e} above the plane");
             }
         }
 
         // The first two are flat: the edges of the plane.
         for edge in &curves[..2] {
-            assert!(
-                edge.iter()
-                    .all(|at| (*at - center).dot(belt.pole).abs() < 1.0e3)
-            );
+            assert!(edge.iter().all(|at| (*at - center).dot(belt.pole).abs() < 1.0e3));
         }
     }
 
@@ -903,10 +789,7 @@ mod tests {
         };
         let e = cloud.extent().unwrap();
         let (inner, outer, half_angle) = (e.inner_m, e.outer_m, e.half_angle_rad);
-        assert!(
-            (half_angle - std::f64::consts::FRAC_PI_2).abs() < 1.0e-9,
-            "{half_angle}"
-        );
+        assert!((half_angle - std::f64::consts::FRAC_PI_2).abs() < 1.0e-9, "{half_angle}");
 
         let curves = swarm_outlines(DVec3::ZERO, DVec3::ZERO, &cloud);
         let tallest = curves
@@ -916,10 +799,7 @@ mod tests {
             .fold(0.0f64, f64::max);
         // Right up to the outer radius on the pole: a shell, not a donut, and not the apple
         // core the tube degenerated into — that stopped at forty-five degrees of latitude.
-        assert!(
-            (tallest / outer - 1.0).abs() < 0.01,
-            "{tallest:e} against an outer {outer:e}"
-        );
+        assert!((tallest / outer - 1.0).abs() < 0.01, "{tallest:e} against an outer {outer:e}");
         let _ = inner;
     }
 
@@ -941,8 +821,7 @@ mod tests {
         assert!(Subject::Star(id, String::new()).is(&Subject::Star(id, "Sol".into())));
         assert!(!Subject::Star(id, "Sol".into()).is(&Subject::Body("Sol".into())));
         assert!(
-            !Subject::Star(id, "Sol".into())
-                .is(&Subject::Star(StarId::synthesise("test", 8), "Sol".into()))
+            !Subject::Star(id, "Sol".into()).is(&Subject::Star(StarId::synthesise("test", 8), "Sol".into()))
         );
     }
 }
