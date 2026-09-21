@@ -204,3 +204,28 @@ impl Plugin for ProceduralTexturesPlugin {
             .add_systems(Update, bake_population_grain);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use em_render::population_material::GRAIN_TILE;
+    use texture_graph_core::{LayerKind, NoiseKernel, NoiseRange};
+
+    use super::*;
+
+    /// What the shader assumes of the shipped grain, which an edit in the editor could break
+    /// without anything else noticing: the volume must tile on the unit cube, with as many
+    /// grains across it as the shader divides by, centred on half.
+    #[test]
+    fn the_shipped_grain_tiles_as_the_shader_assumes() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/textures/population_grain.tgraph");
+        let graph = load_from_str(&std::fs::read_to_string(path).unwrap()).unwrap().graph;
+        let layer = graph.get(graph.output.color.expect("an output layer")).unwrap();
+        let LayerKind::Noise(noise) = &layer.kind else {
+            panic!("the grain's output is a {}, not noise", layer.kind.category_label());
+        };
+        assert_eq!(noise.kernel, NoiseKernel::Value, "only the value kernel tiles");
+        assert_eq!(noise.range, NoiseRange::Unsigned, "the shader recentres on half itself");
+        assert_eq!(noise.frequency, GRAIN_TILE);
+        assert_eq!(noise.period, [GRAIN_TILE as u32; 3], "seamless on the cube is period == frequency");
+    }
+}

@@ -584,9 +584,17 @@ any sightline — so that is where the texture goes, and a band with a ragged ed
 of things where a soft gradient does not. The reference ray lies in the plane, where the warp
 cannot reach it, so the calibration is untouched by whatever the grain does.
 
-Still wanting: the fine structure is one octave of value noise evaluated per step, which is most
-of the shader's ALU. A tiling 3D noise texture would be one trilinear fetch instead of forty
-operations and would pay for a second octave. Where the baked emission shell exists, sampling
+**The grain is a baked texture, not a function.** It is authored as a texture graph,
+`assets/textures/population_grain.tgraph`, which the client bakes on its own GPU device at load
+into a tiling 128³ single-channel volume — one trilinear fetch per step where the march used to
+evaluate value noise, which was most of the shader's ALU. It has to tile, so the graph uses the
+value kernel with its period equal to its frequency, and a test holds the shipped file to that.
+Rings read the same volume for their speckle. Being data, the graph is edited in texture-graph's
+own editor and reaches a browser from the CDN like any other asset. `src/procedural.rs` is the
+bake.
+
+Still wanting: the grain's texture budget would now pay for a second octave, which is a change to
+the graph and not to the shader. Where the baked emission shell exists, sampling
 its `m` channel would make the visible density and the photometric deficit the same number.
 Single scattering — `exp(-tau)` to the star and a Henyey-Greenstein phase — is what would make a
 belt read as lit rather than as glowing, and the star's position is already known.
