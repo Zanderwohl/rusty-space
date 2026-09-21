@@ -120,7 +120,8 @@ comes out is a set of **conclusions**.
 
 Conclusions are knowledge records. They travel in reports, and they are far smaller than the
 logs they came from, which matters more than anything else about them: **a faction shares
-conclusions, not logs**, because a link has a data rate and a log does not fit through it.
+conclusions, not logs**, because a transmission costs stored energy in proportion to its size
+([23-factions.md](23-factions.md#cost)), and a log is enormous next to what was learnt from it.
 
 ### Probabilities, and where the priors come from
 
