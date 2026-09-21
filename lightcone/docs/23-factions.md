@@ -113,7 +113,9 @@ like a message and valid from the moment it lands.
 | *later*: `command` | order the faction's probes, swarms and structures |
 
 A certificate is honoured if its issuer held the capability it hands on, all the way back to
-the founder, and if it is **bound to a generation the checker holds**. Rotation re-issues the
+the founder, and if it is **bound to a generation the checker holds**. For an asset that means at
+or above its minimum: an order sealed to a new generation does not launder a certificate issued
+under an old one, so rotation re-issues authority and not only confidentiality. Rotation re-issues the
 certificates of the members kept, bound to the new generation; a certificate bound to an older
 one is the permission equivalent of an old key, and is shown the same way.
 
@@ -276,11 +278,41 @@ Knowledge today is keyed by star. It has to be keyed by **subject**:
 | planet | star + its place in the generated system | `{what we call the star} {letter}` |
 | small body, comet | star + its place in the generated system | discovery time, `{year}-{order}` |
 | population | star + population index | `{what we call the star} {belt / cloud} {n}` |
-| craft not ours | ship id | discovery time, until it names itself |
+| craft not ours | ship id | whatever it calls itself, from the first transmission heard; discovery time before that |
 
-**An assigned name is a rule, not a string.** "Kettle b" is stored as "the second planet of the
-star this ship calls the Kettle", so renaming the star renames its planets with it. A name
-somebody *chose* is a string and stays put.
+**An assigned name is a rule, not a string.** "Kettle b" is stored as "the planet in letter slot
+`b` of the star this ship calls the Kettle", so renaming the star renames its planets with it. A
+name somebody *chose* is a string and stays put.
+
+### Planet letters
+
+Letters go outward from the star, starting at `b` — `a` is the star — and **a letter is frozen
+once assigned**. Two craft that assigned letters at different times from different data can
+hold different letters for the same planet, and that is a disagreement between witnesses like
+any other.
+
+A letter is a guess at a planet's **place in the whole system**, not its rank among the planets
+found so far. The rule places a new planet by its orbit against the spacing the system is
+expected to have, and leaves gaps for the members it has not found:
+
+1. **Expected slots.** From the star's mass and luminosity, the generator's own spacing law gives
+   where the innermost planet is expected and the typical ratio between neighbours' orbits — the
+   same honest prior conclusions use ([24-standing-instruments.md](24-standing-instruments.md)).
+   Slot `n` is the `n`th expected orbit outward.
+2. **A planet takes the slot nearest its orbit**, in log-distance. A hot Jupiter at 0.05 AU found
+   first may well be `b`; a Neptune at 30 AU found first may be `h`, with five letters left open
+   inside it on the expectation that something is there.
+3. **Too many gaps is fine.** Letters are skipped where the system turned out emptier than
+   expected, and nobody has to fill them.
+4. **Too few is resolved by a second letter.** A planet whose nearest slot is taken is placed
+   between that slot's holder and its neighbour on the side it falls, with a letter appended:
+   between `b` and `c` go `ba`, `bb`, …, in order outward, and the rule recurses if it has to.
+   Alphabetical order is orbital order at every depth.
+5. **Inside `b`** is `ab`, `ac`, …, the same rule with `a` as the letter before `b`.
+
+A little silly, and real catalogues have been sillier. What matters is that the rule is
+deterministic given what the assigning craft knew, so two craft with the same data agree, and
+that no later discovery ever renames anything.
 
 **Everything about a system rides with its star.** A report entry for a star carries its bodies,
 populations, namings and notes. A report about a system is one entry, not thirty.
@@ -292,9 +324,18 @@ overridable like any other.
 ### Craft that are not ours
 
 A craft's name is information too. Today a contact arrives carrying its account's display name,
-straight from the server — which is the one place a name reaches a player without anybody having
-said it. It should become a claim the craft makes about itself, carried on its own transmissions,
-and heard like anything else. Until a craft has transmitted in range, it is a designation.
+straight from the server — the one place a name reaches a player without anybody having said it.
+
+Instead, **every transmission carries the name its sender calls itself**, and a receiver that
+has no name of its own for that craft takes the claim. It is a `Naming` with the craft as its own
+witness: overridden by any name this ship or its faction chose, and kept on file when it is.
+A craft seen but never heard is a designation — its discovery time — until it transmits in range.
+
+One language today, so a claimed name is always legible. When dictionaries arrive, a claim in a
+language the receiver cannot read is exactly the case they filter.
+
+`Presence` stops carrying names, and the chat log reads the sender's name from the message
+rather than from the server's account table. That is a protocol change, and it belongs to 11g.
 
 ### Later: dictionaries
 
@@ -329,17 +370,10 @@ content lives in the receiver's knowledge from the moment it lands.
 
 ## Open
 
-- **Letters for planets.** "Presumed order" read literally means letters by orbital order as the
-  observer understands it, so finding an inner planet later would re-letter every planet outside
-  it. Proposed: letters are assigned in presumed orbital order among what is known **at the time
-  of assignment**, and then frozen, so a late discovery takes the next free letter. That is also
-  what real astronomy does. Needs confirming.
-- **What an asset does with a certificate issued under a generation older than its minimum** but
-  presented with an order sealed to a newer one. Proposed: the certificate must itself be at or
-  above the minimum, so rotation genuinely re-issues authority rather than only confidentiality.
+- **The spacing law** behind planet letters: which of the generator's quantities define the
+  expected innermost orbit and the neighbour ratio, and whether small bodies and moons get a
+  scheme of their own beyond discovery time.
 - **Whether flooding should be the default at all**, or opt-in, given what it costs in power and
   in visibility. Measure it with twenty craft before deciding.
-- **Foreign craft names** change what `Presence` carries and what the chat log shows today. It is
-  a protocol change and wants its own pass.
 - **Key theft**, dictionaries, and commanding assets: deferred by decision, and each sits on top
   of the certificates above without changing them.

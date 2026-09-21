@@ -311,7 +311,8 @@ The reporting, naming and survey machinery these build on already exists and is 
 
 **Deliver:** a `Subject` key — star, planet, small body, population, craft — and knowledge keyed
 by it. Assigned names as **rules** evaluated against the craft's own namings, so "Kettle b"
-follows the star when the star is renamed. Report entries carry a star's bodies with it.
+follows the star when the star is renamed. Planet letters by expected slot, frozen once assigned,
+with gaps left and second letters appended when a slot is taken. Report entries carry a star's bodies with it.
 
 **Done when:** a report about a star carries its planets' namings and notes in the same entry, a
 receiver sees the planets named after *its* name for the star, and renaming the star renames
@@ -417,7 +418,8 @@ non-player craft to exist.
 
 **Deliver:** a subject card — name, notes thread, provenance — opened from a pick in the map, the
 sky, the telescope panel or the system panel, for every kind of subject including craft outside
-the faction. Transcript lines for reports: "Kestrel: told you about 64 stars".
+the faction. Transcript lines for reports: "Kestrel: told you about 64 stars". Every transmission
+carries the name its sender calls itself; `Presence` stops carrying account names.
 
 **Done when:** a player can click a planet on the map, rename it, leave a note, and a faction
 member elsewhere sees both arrive — at light speed — with the note marked as written before they
