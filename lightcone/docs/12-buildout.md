@@ -378,9 +378,12 @@ for what the signals look like, [24-standing-instruments.md](24-standing-instrum
 
 **Before:** 11c.
 
-**Deliver:** founding and naming a faction; key generations and rotation, each rotation sent per
-member sealed to their ship key; certificates for `invite`, `grant` and `rotate`; invitations in
-the chat log; the faction channel, redacted by generation held at arrival.
+**Deliver:** founding and naming a faction; membership of several at once, with a channel per
+faction held; key generations and rotation, each rotation sent per member sealed to their ship
+key; certificates for `invite`, `grant`, `rotate` and `generation`; invitations in the chat log;
+the faction channel, redacted by generation held at arrival. The minimum generation an asset
+accepts is modelled now, on the craft themselves, so that assets inherit it rather than
+retrofitting it.
 
 **Done when:** a traitor excluded by rotation can still read everything sealed to the old
 generation, cannot read anything sealed to the new one, and a loyal member far away is seen
@@ -402,7 +405,9 @@ light-time cost advertised in reports, aged as they travel.
 relays, exactly once — and the lineage on its records names every hop.
 
 **Do not:** build contact-graph routing from predicted trajectories until distance-vector has
-been measured and found wanting.
+been measured and found wanting. Do not relay across factions automatically, ever: a craft in
+two factions forwards each one's traffic only to that faction. Swarms as relay nodes wait for
+non-player craft to exist.
 
 **Read:** "Relays" in [23-factions.md](23-factions.md).
 

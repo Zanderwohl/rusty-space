@@ -24,6 +24,28 @@ invitation, and outsiders learn it only by overhearing open traffic that mention
 factions may call a third by different names, and a faction may not know what anybody else
 calls it.
 
+## Membership is not exclusive
+
+Nothing about holding one key stops a craft holding another. A craft can belong to as many
+factions as will have it, and the model does not distinguish the reasons:
+
+| arrangement | what it looks like in keys |
+|---|---|
+| overlapping goals | two factions with members in common, each channel read by the overlap |
+| a loose coalition — an EU, a UN | a faction whose members are the leading craft of other factions; the coalition's key says nothing about the members' own |
+| a double agent | a craft that holds both keys and tells each side what suits it |
+
+The consequence worth designing for is **what moves between factions**. Automatic relaying
+stays inside the faction a bundle is sealed to: a craft in two factions forwards A's traffic to A
+and B's to B, and never one to the other on its own. Carrying anything across is a manual relay —
+a choice somebody makes, recorded on every record it carries as a hop through their ship. A leak
+is therefore always somebody's act, and lineage says whose, to anybody who later holds the
+record. That is not protection against a double agent. It is evidence against one.
+
+The interface needs a channel per faction held, and a report or a note has to say which faction's
+key it goes out under. Getting that wrong is a real way to leak, and the interface should make it
+possible and visible rather than impossible.
+
 ## Keys and generations
 
 A faction key has a **generation**. Holding generation `g` of faction `F` means exactly one
@@ -87,6 +109,7 @@ like a message and valid from the moment it lands.
 | `invite` | send the current key and a membership certificate to somebody new |
 | `grant` | issue certificates carrying capabilities the holder has, including `grant` |
 | `rotate` | mint a new generation and decide who is sent it |
+| `generation` | tell an asset which generations it accepts |
 | *later*: `command` | order the faction's probes, swarms and structures |
 
 A certificate is honoured if its issuer held the capability it hands on, all the way back to
@@ -94,11 +117,29 @@ the founder, and if it is **bound to a generation the checker holds**. Rotation 
 certificates of the members kept, bound to the new generation; a certificate bound to an older
 one is the permission equivalent of an old key, and is shown the same way.
 
-This is also what control of assets will be when there are assets. A swarm obeys an order that
-carries a valid certificate and is sealed to a generation the swarm holds — so a swarm that has
-not heard of the latest rotation will still take orders from the traitor, for exactly as long as
-the new key takes to reach it. That window is the Excession mechanic and it needs no code of its
-own: it is light delay applied to the rules above.
+### Assets accept a generation
+
+A faction's telescopes, relays, swarms and structures each carry a **minimum generation**: the
+oldest key they will take an order under. An order is obeyed if it carries a valid certificate
+and is sealed to a generation at or above that minimum.
+
+Moving the minimum is itself an order, and needs the `generation` capability:
+
+| move | effect |
+|---|---|
+| **raise** it | security upgraded: everybody still on an old key, traitor included, is locked out of that asset — and so is every loyal member who has not heard of the rotation yet |
+| **lower** it | an older key lets somebody back in. That is what a rat does: one order, and a craft excluded two rotations ago commands a swarm again |
+
+Raising the minimum past a generation the asset has never been sent is refused: an asset cannot
+require a key it does not hold. So a rotation is complete for an asset only when the new key has
+reached it *and* an order raising its minimum has — two transmissions, both at `c`.
+
+Every piece of this is light-delayed, and that is the Excession mechanic without a line of code
+of its own. A swarm that has not heard of the latest rotation takes orders from the traitor for
+as long as the new key takes to reach it. An order lowering the minimum and an order raising it,
+sent from opposite sides of a sector, arrive in whichever order the geometry decides, and the
+asset obeys whichever landed last. The loyal side wins a race it may not know it is in by being
+**closer**.
 
 ### Invitations
 
@@ -182,6 +223,37 @@ else. A relay policy is therefore a budget as well as a rule: how much of its po
 willing to spend carrying other people's news. A faction that floods everything is loud,
 expensive and visible across the sky.
 
+### Swarms relay as populations
+
+A craft relays if it has a transmitter and a receiver fitted, and that is as true of a craft
+nobody flies as of one somebody does. Non-player craft will have modules the way a ship does
+([19-ship-fitting.md](19-ship-fitting.md)), so a swarm built with relay modules relays.
+
+A swarm is not a roster, though. It is a population — a distribution over orbits, a count and a
+cross-section — and [03-world-model.md](03-world-model.md#swarms-are-populations-not-entities)
+makes it a hard rule that nothing enumerates its members. Relaying follows the same rule: it is
+a property of the distribution, not of elements.
+
+| property of the population | what it gives the network |
+|---|---|
+| fraction of elements fitted with relays | how much of its count carries traffic |
+| the orbital distribution | a footprint: the region inside which a bundle can enter the swarm and leave it anywhere else |
+| element spacing, from count and footprint | hop length inside the swarm, and so its internal delay |
+| total transmitter power | how far outside its footprint the swarm can be heard, and its capacity |
+
+To the rest of the network a relay swarm is **one node with a size**: a bundle reaching any part
+of its footprint is inside it, and crosses it in the time light takes to cross the footprint —
+minutes for a swarm at an AU, not zero. No element is ever addressed.
+
+Its keys follow the same granularity. A swarm's accepted generation belongs to the population
+record, or — since sub-populations exist and nest — to each sub-population. A rotation reaching a
+swarm built in waves arrives at one wave before the next, and for the minutes between, the swarm
+is two things with two minimums. That is the smallest version of the race above, and it is free.
+
+A swarm is also one witness, not a million: what a telescope swarm sees is recorded as the
+population's observation through `Optics::joined`, with the collecting area and baseline its
+distribution implies.
+
 ### Manual relay
 
 Any received report can be passed on by hand: to one craft, to the channel, or shouted. The
@@ -262,8 +334,9 @@ content lives in the receiver's knowledge from the moment it lands.
   it. Proposed: letters are assigned in presumed orbital order among what is known **at the time
   of assignment**, and then frozen, so a late discovery takes the next free letter. That is also
   what real astronomy does. Needs confirming.
-- **What a faction checks when a certificate's generation is old.** Honoured, refused, or asked?
-  Probably a per-asset setting once assets exist.
+- **What an asset does with a certificate issued under a generation older than its minimum** but
+  presented with an order sealed to a newer one. Proposed: the certificate must itself be at or
+  above the minimum, so rotation genuinely re-issues authority rather than only confidentiality.
 - **Whether flooding should be the default at all**, or opt-in, given what it costs in power and
   in visibility. Measure it with twenty craft before deciding.
 - **Foreign craft names** change what `Presence` carries and what the chat log shows today. It is
