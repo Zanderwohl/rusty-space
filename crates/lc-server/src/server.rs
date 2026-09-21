@@ -71,6 +71,10 @@ pub struct Connected {
     /// sign-in is not allowed to be. One per connection: a reconnection is a fresh client with
     /// an empty log, and it needs the conversation back.
     pub backlog_sent: bool,
+    /// Learnt-time through which this client's copy of its craft's knowledge is current. See
+    /// [`crate::instruments`]. From the beginning for a new connection, which is what pages a
+    /// craft's whole knowledge to a client that has just signed in.
+    pub learnt_s: f64,
 }
 
 pub struct Server<J: Journal> {
@@ -144,6 +148,8 @@ pub struct Server<J: Journal> {
     pub(crate) said: Vec<lc_store::chat::Message>,
     pub(crate) receipts: Vec<lc_store::chat::Receipt>,
     pub(crate) taught: Vec<lc_store::chat::Held>,
+    /// What every craft knows and what its instruments are doing. See [`crate::instruments`].
+    pub(crate) instruments: crate::instruments::Instruments,
     /// The tunables every fitted ship is read under. See [`Server::set_balance`].
     pub(crate) balance: lc_world::fitting::Balance,
     /// Craft whose owner is to be told when their refit finishes.
@@ -175,6 +181,7 @@ impl<J: Journal> Server<J> {
             said: Vec::new(),
             receipts: Vec::new(),
             taught: Vec::new(),
+            instruments: Default::default(),
             rate: 1.0,
             directs: false,
             library: crate::library::Library::default(),
@@ -256,6 +263,8 @@ impl<J: Journal> Server<J> {
     /// into one.
     pub fn load_world(&mut self, world: World) {
         self.world = world;
+        // A sky cached from the last world would put this world's craft under the wrong stars.
+        self.instruments.forget_sky();
     }
 
     /// The fleet, for a caller putting a craft into a system.
@@ -352,7 +361,9 @@ impl<J: Journal> Server<J> {
             // develop.
             permission: crate::ability::Level::PLAYER,
             backlog_sent: false,
+            learnt_s: f64::NEG_INFINITY,
         });
+        self.aboard(CraftId(ship_id.0));
     }
 
     /// One tick. The order is the whole of it.
@@ -369,6 +380,8 @@ impl<J: Journal> Server<J> {
         // motive is a closed form — but the transitions do: a crossing that arrives becomes a
         // station, and a ballistic arc folds the patch it was solved for.
         self.fleet.advance(now_s, self.tick_us() as f64 * 1.0e-6);
+        // After motion, so every instrument looks from where its craft now is.
+        self.run_instruments();
         // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
         // the range it has already made and this is a comparison until the window moves.
         self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
@@ -398,10 +411,13 @@ impl<J: Journal> Server<J> {
         self.steer_pursuits(wire, &mut events, &mut deliveries);
         self.announce_drives(self.now_t - self.tick_us(), &mut events, &mut deliveries);
         self.keep_accounts(wire);
+        self.schedule_landings(&events, &deliveries);
+        self.land_reports();
         self.journal.write(&events, &deliveries).await?;
         self.write_conversations().await?;
         self.pending = events;
         self.state_the_clock(wire);
+        self.tell_learnt(wire);
         // 3 and 4. Everything that has arrived since the last tick, through the gate.
         self.flush(wire).await
     }
@@ -447,6 +463,7 @@ impl<J: Journal> Server<J> {
                             wire.send(from, Outbound::Pursuing { ship_id, pursuit });
                         }
                         self.tell_fitted(wire, CraftId(ship_id.0));
+                        self.tell_observing(wire, from, CraftId(ship_id.0));
                         // A shard with no shelf says nothing about one, and its clients show an
                         // empty bookcase rather than a broken one.
                         if !self.library.is_empty() {
@@ -535,6 +552,13 @@ impl<J: Journal> Server<J> {
         let floor = state.cursor_t.saturating_add(1);
         let at = intent.issued_at_client_t.clamp(floor.min(self.now_t), self.now_t);
         let at_s = at as f64 * 1.0e-6;
+        // Orders about what a craft knows or is watching put nothing on the air, so they are
+        // not events. They still get an identifier, so an acceptance looks like any other.
+        if matches!(intent.order, Order::SetDuty { .. } | Order::NameIt { .. }) {
+            let order = self.act_on_knowledge(id, &intent.order, at_s)?;
+            let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
+            return Ok(Applied { event_id, at_t: at, order });
+        }
         let lights_the_drive = matches!(
             intent.order,
             Order::Burn { .. } | Order::SetCourse { .. } | Order::Cross { .. } | Order::Intercept { .. }
@@ -730,6 +754,8 @@ impl<J: Journal> Server<J> {
                 self.refitting.remove(&id);
                 (KIND_CUT, 0.0, "{\"refit\":false}".to_string(), Order::CancelRefit)
             }
+            // Returned from above, before anything is put on the air.
+            Order::SetDuty { .. } | Order::NameIt { .. } => return Err(Refusal::Impossible),
             Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => {
                 // The whole of it in `crate::radio`, because everything a transmission needs
                 // to decide — the keyring, the aim, the acknowledgement window — is that
@@ -738,6 +764,9 @@ impl<J: Journal> Server<J> {
                 beam = spoken.beam;
                 transmitted = true;
                 utterance = spoken.said;
+                if let Some((to, through)) = spoken.reported {
+                    self.reported(id, to, through);
+                }
                 (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, spoken.applied)
             }
         };
@@ -846,6 +875,7 @@ impl<J: Journal> Server<J> {
             had_contacts: false,
             permission: crate::ability::Level::from_claim(claims.perm),
             backlog_sent: false,
+            learnt_s: f64::NEG_INFINITY,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused
@@ -1559,7 +1589,7 @@ use crate::transport::Loopback;
             ticket: broker.mint("acct-1", "shard-1", 60, "j2"),
         });
         server.tick(&mut wire).await.unwrap();
-        assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }]));
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }]));
     }
 
     /// **A faster world is the same world.** Its tick buys coarser event timestamps and
@@ -2560,7 +2590,9 @@ mod hello_tests {
 
         says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
         let said = wire.take(client);
-        let [Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }] = said.as_slice() else {
+        let [Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }] =
+            said.as_slice()
+        else {
             panic!("no welcome: {said:?}")
         };
         assert_eq!(*client_id, client);
@@ -2624,7 +2656,7 @@ mod hello_tests {
         let ticket = broker.mint("acct-1", SHARD, 60, "only-once");
 
         says(&mut server, &mut wire, ClientId(1), ticket.clone()).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }]));
 
         says(&mut server, &mut wire, ClientId(2), ticket).await;
         assert!(matches!(wire.take(ClientId(2)).as_slice(), [Outbound::Unauthenticated]));
@@ -2644,7 +2676,7 @@ mod hello_tests {
 
         // The real one, with the same identifier, still works.
         says(&mut server, &mut wire, ClientId(1), ours.mint("acct-1", SHARD, 60, "j1")).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }]));
     }
 
     /// A ticket minted for another shard is not a ticket here, however valid it is there.

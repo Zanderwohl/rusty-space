@@ -17,6 +17,7 @@ use crate::sky::StarId;
 
 pub mod astrometry;
 pub mod names;
+pub mod observatory;
 pub mod record;
 pub mod subject;
 pub mod survey;
@@ -228,12 +229,7 @@ impl File {
         let part = Part {
             subject,
             sightings: self.sightings.iter().filter(|s| s.learnt_s() > since_s).cloned().collect(),
-            series: self
-                .series
-                .iter()
-                .filter(|s| s.last().is_some_and(|x| fresh(&s.lineage, x.observed_s)))
-                .cloned()
-                .collect(),
+            series: self.series.iter().filter_map(|s| s.after(since_s)).collect(),
             claims: self.claims.iter().filter(|c| fresh(&c.lineage, c.stated_s)).cloned().collect(),
             names: self.names.iter().filter(|n| fresh(&n.lineage, n.stated_s)).cloned().collect(),
             orbits: self.orbits.iter().filter(|o| fresh(&o.lineage, o.stated_s)).cloned().collect(),
@@ -517,9 +513,21 @@ impl Knowledge {
     /// something already held by a shorter route is not taken twice.
     pub fn receive(&mut self, report: &Report, received_s: f64) {
         let hop = Hop { from: report.from, to: self.owner, sent_s: report.sent_s, received_s };
+        self.fold(report, Some(hop));
+    }
+
+    /// Take a copy of what this craft already knows, handed over by whoever holds the original.
+    ///
+    /// No hop: a client's replica of its own craft's knowledge is the same knowledge, not
+    /// something it was told. See `lightcone/docs/24-standing-instruments.md`.
+    pub fn absorb(&mut self, report: &Report) {
+        self.fold(report, None);
+    }
+
+    fn fold(&mut self, report: &Report, hop: Option<Hop>) {
         let heard = |lineage: &Lineage| {
             let mut lineage = lineage.clone();
-            lineage.push(hop);
+            lineage.extend(hop);
             lineage
         };
         for part in report.entries.iter().flat_map(|e| e.parts.iter()) {
@@ -546,7 +554,7 @@ impl Knowledge {
                     Some(held) => held.absorb(series),
                     None => {
                         let mut taken = series.clone();
-                        taken.lineage.push(hop);
+                        taken.lineage.extend(hop);
                         file.series.push(taken);
                     }
                 }
@@ -637,6 +645,29 @@ impl Entry {
     /// The most recent moment the sender learnt any of this.
     pub fn learnt_through(&self) -> f64 {
         self.parts.iter().map(Part::learnt_through).fold(f64::NEG_INFINITY, f64::max)
+    }
+}
+
+/// How far through its own backlog a craft has reported, per recipient.
+///
+/// Reports drain a backlog, so the sender has to remember how far it has got with each
+/// recipient. The key is the recipient's ship id, `0` for a broadcast — what was shouted to
+/// nobody in particular is its own backlog.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Reporting {
+    told: BTreeMap<i64, f64>,
+}
+
+impl Reporting {
+    /// What a report to this recipient should resume from.
+    pub fn since(&self, to: i64) -> f64 {
+        self.told.get(&to).copied().unwrap_or(f64::NEG_INFINITY)
+    }
+
+    /// A report to this recipient has gone out, carrying everything through `through`.
+    pub fn sent(&mut self, to: i64, through: f64) {
+        let mark = self.told.entry(to).or_insert(f64::NEG_INFINITY);
+        *mark = mark.max(through);
     }
 }
 
@@ -1192,6 +1223,41 @@ mod tests {
         assert_eq!(k.len(), 2, "the star and its planet");
         assert_eq!(k.stars().count(), 1);
         assert_eq!(k.members(star).map(|(s, _)| s).collect::<Vec<_>>(), vec![subject]);
+    }
+
+    /// A replica is kept current by reports from the craft itself, and those add no hop: the
+    /// copy is the same knowledge, not something it was told.
+    #[test]
+    fn a_replica_absorbs_without_a_hop_and_only_new_samples_travel() {
+        let star = star_id(60);
+        let mut held = Knowledge::new(Witness(3));
+        held.sighted(star, sighting(3, DVec3::ZERO, DVec3::X, 1.0));
+        for t in 1..=5 {
+            held.measured(star, Witness(3), Band::V, Sample { observed_s: t as f64, deficit: 0.0, sigma: 0.1 });
+        }
+        let mut copy = Knowledge::new(Witness(3));
+        let first = held.report(f64::NEG_INFINITY, 5.0);
+        copy.absorb(&first);
+        assert_eq!(copy.belief(star).unwrap().hops, 0, "its own, not relayed");
+        assert_eq!(copy.own_series(star, Band::V).unwrap().len(), 5);
+
+        held.measured(star, Witness(3), Band::V, Sample { observed_s: 6.0, deficit: 0.0, sigma: 0.1 });
+        let delta = held.report(first.learnt_through().unwrap(), 6.0);
+        let sent = &delta.entries[0].parts[0].series[0];
+        assert_eq!(sent.len(), 1, "one new sample, not the whole curve again");
+        copy.absorb(&delta);
+        assert_eq!(copy.own_series(star, Band::V).unwrap().len(), 6);
+        assert_eq!(copy, held, "and the copy is the original");
+    }
+
+    #[test]
+    fn reporting_remembers_how_far_it_got_with_each_recipient() {
+        let mut marks = Reporting::default();
+        assert_eq!(marks.since(7), f64::NEG_INFINITY);
+        marks.sent(7, 10.0);
+        marks.sent(7, 5.0);
+        assert_eq!(marks.since(7), 10.0, "a mark never moves back");
+        assert_eq!(marks.since(0), f64::NEG_INFINITY, "a broadcast is its own backlog");
     }
 
     #[test]

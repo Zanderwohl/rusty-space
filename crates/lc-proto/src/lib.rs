@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 29;
+pub const PROTOCOL_VERSION: u32 = 30;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -360,19 +360,20 @@ pub enum Order {
     /// `to` is `None` to offer it to **whoever hears it**, which is what the public channel
     /// does: anyone in range can answer in private from then on.
     OfferKey { to: Option<ShipId>, aim: Aim },
-    /// Send what this craft has learnt: a serialized `lc_world::knowledge::Report`.
+    /// Send what this craft has learnt since it last reported to `to`.
     ///
     /// A transmission like any other — aimed, sealed or not, and subject to the same light
     /// delay — but not a conversation. It is not filed in a transcript, it is never
     /// acknowledged automatically, and what it does at the far end is fold into the receiver's
-    /// knowledge. Appended last.
-    SendReport {
-        to: Option<ShipId>,
-        aim: Aim,
-        secrecy: Secrecy,
-        report: String,
-        idem: MessageKey,
-    },
+    /// knowledge.
+    ///
+    /// **The shard writes the report**, from the knowledge it holds for this craft. A client
+    /// that wrote its own could report anything it liked. Appended last.
+    SendReport { to: Option<ShipId>, aim: Aim, secrecy: Secrecy, idem: MessageKey },
+    /// Put the telescope on a duty. Appended last.
+    SetDuty { duty: Duty, integration_s: f64 },
+    /// Call something by a name of this craft's own. Appended last.
+    NameIt { subject: Subject, name: String },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -755,6 +756,14 @@ pub enum Outbound {
     /// which is what lets the shelf offer "recently read" without either end having to agree
     /// about whose clock a timestamp would be in.
     Reading(Vec<Bookmark>),
+    /// What this craft has learnt since the last of these: a serialized
+    /// `lc_world::knowledge::Report` from the craft itself, which the client folds into its
+    /// copy without adding a hop. The whole of a craft's knowledge arrives this way, in pages,
+    /// when it signs in. Appended last.
+    Learnt { report: String },
+    /// What the telescope is committed to, as the shard has it. Said on sign-in and whenever it
+    /// changes. Appended last.
+    Observing { duty: Duty, integration_s: f64 },
 }
 
 /// Why an intent was not acted on.
@@ -788,6 +797,9 @@ pub enum Refusal {
     /// Safe to say plainly, unlike most of these: it is a fact about the sender's own keyring,
     /// which the sender already has. Appended last.
     NoKey,
+    /// A report was asked for and this craft has learnt nothing since it last reported to that
+    /// recipient. Appended last.
+    NothingNew,
 }
 
 /// Why a refit cannot be done. Mirrors `lc_world::refit::Shortage`.
@@ -897,7 +909,10 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// a format that is not self-describing cannot notice a field that moved, so this is what
 /// notices.
 pub mod golden;
+mod knowing;
 mod radio;
+
+pub use knowing::{Duty, NAME_LIMIT, Subject};
 
 pub use radio::{
     ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
@@ -1193,7 +1208,6 @@ mod tests {
                 to: Some(ShipId(7)),
                 aim: Aim::Ship(ShipId(7)),
                 secrecy: Secrecy::Open,
-                report: "{}".into(),
                 idem: 0x0fed_cba9_8765_4321,
             },
             issued_at_client_t: 1_000_000,
@@ -1366,6 +1380,10 @@ mod tests {
                 keys: vec![ShipId(7)],
             },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NothingNew },
+            Outbound::Learnt { report: "{}".into() },
+            Outbound::Observing { duty: Duty::Stare { star: 3 }, integration_s: 1.0e4 },
+            Outbound::Observing { duty: Duty::Idle, integration_s: 0.0 },
         ];
         for message in out {
             let bytes = encode(&message);
@@ -1399,11 +1417,31 @@ mod tests {
             send_report(),
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
+                order: Order::SetDuty {
+                    duty: Duty::Sweep { center: [0.0, 0.0, 1.0], radius_rad: 0.35, dwell_s: 60.0, started_s: 0.0 },
+                    integration_s: 1.0e4,
+                },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::SetDuty {
+                    duty: Duty::Watch { stars: vec![1, 2, u64::MAX], dwell_s: 400.0, started_s: 9.0 },
+                    integration_s: 0.0,
+                },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::NameIt { subject: Subject::Body { star: 7, body: 9 }, name: "Kettle".into() },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
                 order: Order::SendReport {
                     to: None,
                     aim: Aim::Omni,
                     secrecy: Secrecy::Open,
-                    report: String::new(),
                     idem: 0,
                 },
                 issued_at_client_t: 0,

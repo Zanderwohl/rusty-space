@@ -8,6 +8,7 @@ use glam::{DVec3, Vec3};
 use lc_spacetime::{Coord, Micros, frame::SystemFrame, units::Span};
 use lc_world::craft::{Craft, CraftId, Fleet, Kind};
 use lc_world::instrument::Instrument;
+use lc_world::knowledge::observatory::{Observatory, Sky};
 use lc_world::knowledge::survey::Duty;
 use lc_world::knowledge::{Belief, Knowledge, Sample, Witness};
 use lc_world::motion::{self, Motive};
@@ -35,12 +36,7 @@ const LY_PER_LUS: f64 = 299.792458 / 9.460_730_472_580_8e15;
 /// with no eyes builds the sensor it needs.
 pub const SHIP_SENSOR: Instrument = Instrument::SHIP;
 
-/// Fractional error on a charted distance. One percent at the edge of the charted volume,
-/// which is a good office and still visible as a scatter on the map.
-pub const CHART_ERROR: f64 = 0.01;
-
-/// How far the charts a ship starts with reach, light-years. Past this, the sky is unsurveyed.
-pub const CHARTED_LY: f64 = 20.0;
+pub use lc_world::knowledge::observatory::{CHART_ERROR, CHARTED_LY};
 
 /// How many nearby stars get a generated system and a full emission model.
 ///
@@ -110,9 +106,10 @@ pub struct Session {
     /// absent from here is one nobody aboard has ever detected.
     pub knowledge: Knowledge,
     /// What the telescope is committed to doing.
-    pub duty: Duty,
-    /// How far through its own backlog this craft has reported, per recipient.
-    pub reporting: crate::watch::Reporting,
+    ///
+    /// Run here only when no shard is: with one, the shard runs it for this craft whether or
+    /// not anybody is signed in, and this is a copy of what the shard said it is doing.
+    pub observatory: Observatory,
     /// The ship: where it is, how fast, and which of the four ways it is moving.
     ///
     /// `lc-world`'s, not the client's. The server is authoritative over this and the client
@@ -138,16 +135,8 @@ pub struct Session {
     /// correcting is `lightcone/docs/17-reconciliation.md`, and is a later piece of work.
     pub remote: bool,
     pub(crate) targets: HashMap<StarId, Target>,
-    /// Coordinate time the last photometric sample was taken at, and the last time the sweep
-    /// was asked what it had covered. Both are how a duty turns elapsed time into exposure
-    /// rather than producing one measurement per rendered frame.
-    pub(crate) sampled_s: f64,
-    pub(crate) swept_s: f64,
-    /// Which turn of a watch rotation the last sample came from.
-    pub(crate) slot: i64,
-    /// Band luminosity per star, watts, in the survey band. A star's own output does not
-    /// change; only the distance to it does, so this is computed once and divided by `r^2`.
-    pub(crate) luminosity: HashMap<StarId, f64>,
+    /// The sky the observatory points at when this client runs it itself.
+    pub(crate) sky_model: Sky,
 }
 
 impl Session {
@@ -162,6 +151,7 @@ impl Session {
             targets.insert(star.id, build_target(star));
         }
 
+        let sky_model = Sky::new(Arc::new(stars.clone()));
         let mut session = Self {
             stars,
             observer: Coord::ORIGIN,
@@ -171,18 +161,14 @@ impl Session {
             curve_band: Band::V,
             pointing: None,
             knowledge: Knowledge::new(Witness(0)),
-            duty: Duty::Idle,
-            reporting: crate::watch::Reporting::default(),
+            observatory: Observatory::default(),
             ship: Craft::at(CraftId(0), Kind::Ship, DVec3::ZERO),
             scene: Scene::default(),
             system: None,
             fleet: Fleet::new(),
             remote: false,
             targets,
-            sampled_s: 0.0,
-            swept_s: 0.0,
-            slot: i64::MIN,
-            luminosity: HashMap::new(),
+            sky_model,
         };
         session.retune();
         session.auto_expose();
@@ -492,13 +478,13 @@ impl Session {
     /// scales with the field; the telescope looks at one star, and there is no reason a player
     /// should be unable to point it at the thirteenth-nearest.
     pub fn point_at(&mut self, id: Option<StarId>) {
-        self.sampled_s = self.coordinate_time_s();
-        self.duty = match id {
+        let duty = match id {
             Some(id) => Duty::Stare(id),
             None => Duty::Idle,
         };
+        self.take_up(duty);
         self.aim(id);
-        }
+    }
 
     /// Aim without saying what the instrument is doing there, which a rotation needs: a watch
     /// points at each target in turn and is still a watch.
@@ -508,21 +494,29 @@ impl Session {
             && !self.targets.contains_key(&id)
             && let Some(star) = self.stars.iter().find(|s| s.id == id)
         {
-                    let target = build_target(star);
-                    self.targets.insert(id, target);
-                }
-            }
+            let target = build_target(star);
+            self.targets.insert(id, target);
+        }
+    }
 
     /// Put the telescope on a duty, starting its clock now.
     pub fn take_up(&mut self, duty: Duty) {
         let now = self.coordinate_time_s();
-        self.sampled_s = now;
-        self.swept_s = now;
-        self.slot = i64::MIN;
-        if let Some(id) = duty.target_at(now) {
-            self.point_at(Some(id));
+        self.observatory.take_up(duty, now);
+        if let Some(id) = self.observatory.pointing() {
+            self.aim(Some(id));
         }
-        self.duty = duty;
+    }
+
+    /// Adopt what the shard says the telescope is doing. A copy, not a command: the shard is
+    /// running it.
+    pub fn adopt_duty(&mut self, duty: &lc_proto::Duty, integration_s: f64) {
+        self.observatory.duty = duty.into();
+        self.observatory.integration_s = integration_s;
+        let now = self.coordinate_time_s();
+        if let Some(id) = self.observatory.duty.target_at(now) {
+            self.aim(Some(id));
+        }
     }
 
     /// Take one measurement of whatever the telescope is on.
@@ -1233,7 +1227,7 @@ mod tests {
         assert!(s.knowledge.is_empty());
 
         // An all-sky pass at a minute a field is about a week of coordinate time.
-        let pass_s = match &s.duty {
+        let pass_s = match &s.observatory.duty {
             Duty::Sweep(sweep) => sweep.pass_s(),
             _ => unreachable!(),
         };

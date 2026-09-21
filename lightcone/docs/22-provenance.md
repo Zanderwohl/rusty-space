@@ -265,12 +265,12 @@ it has been told which ship it is gets filed under a placeholder; the welcome re
 Without that, two craft would both be witness zero and the first report between them would
 file one crew's bearings as the other's own.
 
-**Reports drain a backlog.** A sender keeps a mark per recipient — how far through its own
-learning it has told them — and each transmission carries the oldest
-[`ENTRIES_PER_REPORT`](../../crates/lc-world/src/knowledge/mod.rs) stars past that mark. The
-mark only moves when the shard says the transmission happened, so a refused report is one that
-is still owed. A craft with nothing new to say sends nothing, which is the correct amount of
-radio traffic for having learnt nothing.
+**Reports drain a backlog.** The shard keeps a mark per sender per recipient — how far through
+its own learning the sender has told them — and each transmission carries the oldest
+[`ENTRIES_PER_REPORT`](../../crates/lc-world/src/knowledge/mod.rs) systems past that mark.
+**The shard writes the report**, from the knowledge it holds for the sender; a client that wrote
+its own could report anything it liked. A craft with nothing new to say is refused with
+`NothingNew`, which is the correct amount of radio traffic for having learnt nothing.
 
 **The report itself is not filed as a conversation** — though the transcript gets a one-line
 summary of it; see [23-factions.md](23-factions.md#transcripts). A transcript is read long after everything in it has

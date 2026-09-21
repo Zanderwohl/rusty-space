@@ -90,7 +90,10 @@ impl Act {
             | Order::Intercept { .. }
             | Order::BreakOff
             | Order::Refit { .. }
-            | Order::CancelRefit => Act::Command,
+            | Order::CancelRefit
+            // What the telescope does and what the crew call things are the ship's business.
+            | Order::SetDuty { .. }
+            | Order::NameIt { .. } => Act::Command,
             // Separate from flying so a shard can silence somebody without grounding them.
             Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => Act::Speak,
         }

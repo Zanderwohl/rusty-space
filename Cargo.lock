@@ -5031,6 +5031,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "ed25519-dalek",
+ "em-spectra",
  "futures-util",
  "glam",
  "jsonwebtoken",

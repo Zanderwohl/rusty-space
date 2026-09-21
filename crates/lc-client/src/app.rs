@@ -6,6 +6,7 @@ use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::camera::Hdr;
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
+use lc_world::knowledge::{Knowledge, Witness};
 use lc_world::sky::{AuthoredStars, StarProvider};
 
 use em_render::body_surface_material::BodySurfaceMaterialPlugin;
@@ -488,14 +489,24 @@ fn enter_game(
     uplink: &crate::uplink::Uplink,
 ) {
     let count = provider.len();
+    // What the craft knows, and what its telescope is doing, survive the session being
+    // replaced. With a shard they are a copy of what it has already said, and it does not say
+    // a page twice: dropping them here would lose everything learnt before the sky loaded.
+    let knowledge = std::mem::replace(&mut game.0.knowledge, Knowledge::new(Witness(0)));
+    let observatory = game.0.observatory.clone();
     game.0 = Session::new(provider, SKY_LIMIT);
     // The session was just replaced, and with it everything the server had said about where
     // and when this ship is. Put it back, or the client flies locally from the origin while
     // the interface still says LINKED. See `uplink::Placement`.
     uplink.place(&mut game.0);
-    // Loaded is not known. The ship is issued the charts of the volume it launched from and
-    // has to find the rest of the sky itself — see `lightcone/docs/22-provenance.md`.
-    game.0.issue_charts(crate::session::CHARTED_LY);
+    if game.0.remote {
+        game.0.knowledge = knowledge;
+        game.0.observatory = observatory;
+    } else {
+        // Loaded is not known. With no shard to issue them, the ship is issued the charts of
+        // the volume it launched from here — see `lightcone/docs/22-provenance.md`.
+        game.0.issue_charts(crate::session::CHARTED_LY);
+    }
     let known = game.0.knowledge.len();
     ui.notify(format!("{count} stars loaded, {known} charted"), 0.0);
     ui.screen = Screen::InGame;
@@ -590,6 +601,10 @@ fn advance_clock(time: Res<Time>, ui: Res<Ui>, mut game: ResMut<Game>) {
 /// what is recorded is the same whether the client is drawing at ninety frames a second or
 /// ten. See [`Session::tick_instruments`](crate::session::Session::tick_instruments).
 fn observe(ui: Res<Ui>, mut game: ResMut<Game>) {
+    // With a shard the telescope is the shard's, and runs whether or not this client does.
+    if game.remote {
+        return;
+    }
     let integration = ui.integration_s;
     game.tick_instruments(integration);
 }

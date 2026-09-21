@@ -43,6 +43,13 @@ impl StarId {
     pub fn get(self) -> u64 {
         self.0
     }
+
+    /// The id a wire message carries. The wire holds only what `get` gave it, so this is the
+    /// inverse of that and never a way to invent an id.
+    #[inline]
+    pub fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
 }
 
 /// Where a star's data came from. Never an identity, and never what anybody calls it.

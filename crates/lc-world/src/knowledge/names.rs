@@ -134,10 +134,7 @@ fn between(lo: &str, hi: Option<&str>, preferred: u8) -> String {
             out.push(pick);
             break;
         }
-        let c = match lo_c {
-            Some(l) => l,
-            None => b'a',
-        };
+        let c = lo_c.unwrap_or(b'a');
         out.push(c);
         if lo_done || lo_c.is_some_and(|l| c > l) {
             lo_tight = false;

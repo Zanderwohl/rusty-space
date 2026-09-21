@@ -137,6 +137,23 @@ impl Series {
         }
     }
 
+    /// The part of this series learnt after `since_s`, or `None` if none of it was.
+    ///
+    /// A series this craft took itself is learnt sample by sample, so only the new samples go;
+    /// one it was handed was learnt all at once, when it arrived, and goes whole or not at all.
+    /// Sending a watched star's whole curve every time one sample was added would be most of
+    /// what a report carried.
+    pub fn after(&self, since_s: f64) -> Option<Series> {
+        let samples: Vec<Sample> = if self.lineage.is_empty() {
+            self.samples.iter().filter(|s| s.observed_s > since_s).copied().collect()
+        } else if learnt_s(&self.lineage, 0.0) > since_s {
+            self.samples.clone()
+        } else {
+            Vec::new()
+        };
+        (!samples.is_empty()).then(|| Series { samples, ..self.clone() })
+    }
+
     /// Emission times and deficits, for a plot.
     ///
     /// The x axis is when the light *left*, which needs a distance; without one the samples

@@ -32,6 +32,8 @@ futures-util = { version = "0.3", default-features = false, features = ["sink"] 
 ureq = { version = "2", features = ["json", "tls"] }
 
 [dev-dependencies]
+# For the band a test sighting is taken in; the server itself never names one.
+em-spectra = { path = "../em-spectra" }
 ed25519-dalek = { version = "2", features = ["pkcs8"] }
 base64 = "0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

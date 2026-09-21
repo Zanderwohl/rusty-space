@@ -73,7 +73,7 @@ pub fn telescope(
 /// What the telescope is committed to, and how to commit it to something else.
 fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let now = game.coordinate_time_s();
-    match &game.duty {
+    match &game.observatory.duty {
         Duty::Idle => {
             ui.label("Telescope idle — nothing is being learnt.");
         }

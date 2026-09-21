@@ -329,6 +329,9 @@ because every later step stores or sends it.
 
 ### 11b — Instruments on the server
 
+**Built.** Protocol version 30. Notes are still 11g; persistence is 11c, so a shard restart
+still loses every craft's knowledge.
+
 **Before:** 11a.
 
 **Deliver:** `Order::SetDuty`; duties advanced by the server for every craft each tick; each

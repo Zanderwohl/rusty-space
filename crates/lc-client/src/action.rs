@@ -311,6 +311,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::SelectTarget(id) => {
             ui.selected = id;
             session.point_at(id);
+            commit(ui, session, &mut effects);
             match id.filter(|i| session.knows(*i)).map(|i| session.name_of(i)) {
                 Some(name) => effects.push(Effect::Notify(format!("watching {name}"))),
                 None if id.is_some() => {
@@ -333,12 +334,19 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             };
             let hours = sweep.pass_s() / 3600.0;
             session.take_up(Duty::Sweep(sweep));
+            commit(ui, session, &mut effects);
             effects.push(Effect::Notify(format!(
                 "surveying: a pass every {hours:.1} hours"
             )));
         }
         Action::NameSelected(name) => match ui.selected {
-            Some(id) if session.name_star(id, &name) => {
+            // A name is the shard's to record, like a course: sent, and back in what the craft
+            // is told it knows.
+            Some(id) if session.remote && session.knows(id) => {
+                let name = name.trim().to_string();
+                effects.push(Effect::Send(lc_proto::Order::NameIt { subject: lc_proto::Subject::Star(id.get()), name }));
+            }
+            Some(id) if !session.remote && session.name_star(id, &name) => {
                 effects.push(Effect::Notify(format!("noted: {}", session.name_of(id))));
             }
             Some(_) => effects.push(Effect::Notify("nothing detected there to name".into())),
@@ -346,7 +354,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         },
         Action::WatchSelected => match ui.selected {
             Some(id) => {
-                let mut targets = match &session.duty {
+                let mut targets = match &session.observatory.duty {
                     Duty::Watch { targets, .. } => targets.clone(),
                     _ => Vec::new(),
                 };
@@ -368,12 +376,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                         started_s,
                     });
                 }
+                commit(ui, session, &mut effects);
                 effects.push(Effect::Notify(format!("watching {count} stars")));
             }
             None => effects.push(Effect::Notify("nothing selected to watch".into())),
         },
         Action::StopSurvey => {
             session.take_up(Duty::Idle);
+            commit(ui, session, &mut effects);
             ui.selected = None;
             effects.push(Effect::Notify("telescope idle".into()));
         }
@@ -531,41 +541,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             }
         }
         Action::SendReport { to, aim, secrecy } => {
-            let key = to.map_or(0, |t| t.0);
-            let since = session.reporting.since(key);
-            let now = session.coordinate_time_s();
-            let report =
-                session
-                    .knowledge
-                    .report_upto(since, now, lc_world::knowledge::ENTRIES_PER_REPORT);
-            let through = report.learnt_through();
-            let body = serde_json::to_string(&report).unwrap_or_default();
-            if !session.remote {
-                effects.push(Effect::Notify("no server, so nobody to report to".into()));
-            } else if report.is_empty() || through.is_none() {
-                effects.push(Effect::Notify("nothing new to report".into()));
-            } else if body.len() > lc_proto::REPORT_LIMIT {
-                // The slice is bounded by star count and a star's file is not, so a long
-                // enough watch on one of them can still overflow a transmission.
-                effects.push(Effect::Notify(
-                    "that report is too large to transmit".into(),
-                ));
+            if session.remote {
+                // The shard writes the report from what it holds for this craft, and says
+                // `NothingNew` if there is nothing to send: this client does not keep the marks.
+                let now_us = (session.coordinate_time_s() * 1.0e6) as u64;
+                let idem = lc_world::rng::hash(&[to.map_or(0, |t| t.0 as u64), now_us]).max(1);
+                effects.push(Effect::Send(lc_proto::Order::SendReport { to, aim, secrecy, idem }));
             } else {
-                let idem =
-                    lc_world::rng::hash(&[key as u64, (now * 1.0e6) as u64, report.stars() as u64])
-                        .max(1);
-                session.reporting.sent(idem, key, through.unwrap_or(now));
-                effects.push(Effect::Notify(format!(
-                    "reporting {} stars",
-                    report.stars()
-                )));
-                effects.push(Effect::Send(lc_proto::Order::SendReport {
-                    to,
-                    aim,
-                    secrecy,
-                    report: body,
-                    idem,
-                }));
+                effects.push(Effect::Notify("no server, so nobody to report to".into()));
             }
         }
         // An effect rather than a change to `UiState`, because what it sets lives on the
@@ -710,6 +693,19 @@ fn apply_to(ui: &mut UiState, session: &mut Session, action: Action, effects: &m
 ///
 /// Out of what is *known*: the key picks a target to watch, and a target nobody has detected
 /// is not one the ship could name, let alone point at.
+/// Hand the telescope's new duty to the shard, which is what runs it.
+///
+/// Taken up here too, so the panel shows it at once; the acceptance that comes back says when
+/// the shard actually started it, and replaces this.
+fn commit(ui: &UiState, session: &Session, effects: &mut Vec<Effect>) {
+    if session.remote {
+        effects.push(Effect::Send(lc_proto::Order::SetDuty {
+            duty: (&session.observatory.duty).into(),
+            integration_s: ui.integration_s,
+        }));
+    }
+}
+
 fn nearest_interstellar(session: &Session) -> Option<StarId> {
     let here = session.ship.motion.position_ly;
     session
@@ -1255,66 +1251,38 @@ mod tests {
         );
     }
 
-    /// A report is a slice of a backlog, and the mark only moves when the shard says the
-    /// transmission happened. Two reports in a row with nothing learnt in between is one
-    /// report and then nothing to say.
+    /// With a shard, the telescope and the knowledge are the shard's: selecting a star, surveying,
+    /// naming and reporting all become orders, and the client keeps no marks of its own.
     #[test]
-    fn reporting_drains_a_backlog_once_the_shard_accepts_it() {
+    fn with_a_shard_the_instruments_are_ordered_not_run() {
         let (mut ui, mut s) = fixture();
         s.remote = true;
-        let to = Some(lc_proto::ShipId(7));
-        let sent = |effects: &[Effect]| {
-            effects.iter().find_map(|e| match e {
-                Effect::Send(lc_proto::Order::SendReport { report, idem, .. }) => {
-                    Some((report.clone(), *idem))
-                }
-                _ => None,
-            })
+        let id = s.stars[0].id;
+        let orders = |effects: &[Effect]| {
+            effects
+                .iter()
+                .filter_map(|e| match e {
+                    Effect::Send(order) => Some(order.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
         };
-        let effects = apply(
-            Action::SendReport {
-                to,
-                aim: lc_proto::Aim::Omni,
-                secrecy: lc_proto::Secrecy::Open,
-            },
-            &mut ui,
-            &mut s,
+        let sent = orders(&apply(Action::SelectTarget(Some(id)), &mut ui, &mut s));
+        assert!(
+            matches!(sent.as_slice(), [lc_proto::Order::SetDuty { duty: lc_proto::Duty::Stare { star }, .. }] if *star == id.get()),
+            "{sent:?}",
         );
-        let (body, idem) = sent(&effects).expect("the charts are worth reporting");
-        let report: lc_world::knowledge::Report = serde_json::from_str(&body).unwrap();
-        assert!(report.stars() > 0);
-
-        // Nothing has been accepted yet, so the same backlog is still owed.
-        let again = apply(
-            Action::SendReport {
-                to,
-                aim: lc_proto::Aim::Omni,
-                secrecy: lc_proto::Secrecy::Open,
-            },
-            &mut ui,
-            &mut s,
-        );
-        let (repeat, _) = sent(&again).expect("still owed");
-        assert_eq!(
-            serde_json::from_str::<lc_world::knowledge::Report>(&repeat)
-                .unwrap()
-                .stars(),
-            report.stars(),
-        );
-
-        s.reporting.accepted(idem);
-        let after = apply(
-            Action::SendReport {
-                to,
-                aim: lc_proto::Aim::Omni,
-                secrecy: lc_proto::Secrecy::Open,
-            },
-            &mut ui,
-            &mut s,
-        );
-        assert!(sent(&after).is_none(), "nothing new since");
-        assert!(matches!(after.as_slice(), [Effect::Notify(t)] if t.contains("nothing new")));
+        let sent = orders(&apply(Action::SurveySky, &mut ui, &mut s));
+        assert!(matches!(sent.as_slice(), [lc_proto::Order::SetDuty { duty: lc_proto::Duty::Sweep { .. }, .. }]));
+        let sent = orders(&apply(Action::NameSelected("Kettle".into()), &mut ui, &mut s));
+        assert!(matches!(sent.as_slice(), [lc_proto::Order::NameIt { .. }]), "{sent:?}");
+        assert_ne!(s.name_of(id), "Kettle", "named when the shard says so, not before");
+        let to = Some(lc_proto::ShipId(7));
+        let report = Action::SendReport { to, aim: lc_proto::Aim::Omni, secrecy: lc_proto::Secrecy::Open };
+        let sent = orders(&apply(report, &mut ui, &mut s));
+        assert!(matches!(sent.as_slice(), [lc_proto::Order::SendReport { to: Some(_), .. }]));
     }
+
 
     /// The charts a ship launches with carry the charting office's names, with the office's
     /// name on them. Nothing reads a name off the catalogue.

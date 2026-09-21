@@ -350,6 +350,43 @@ pub enum Duty {
     },
 }
 
+impl From<&Duty> for lc_proto::Duty {
+    fn from(duty: &Duty) -> Self {
+        match duty {
+            Duty::Idle => Self::Idle,
+            Duty::Stare(star) => Self::Stare { star: star.get() },
+            Duty::Sweep(sweep) => Self::Sweep {
+                center: sweep.center.to_array(),
+                radius_rad: sweep.radius_rad,
+                dwell_s: sweep.dwell_s,
+                started_s: sweep.started_s,
+            },
+            Duty::Watch { targets, dwell_s, started_s } => Self::Watch {
+                stars: targets.iter().map(|s| s.get()).collect(),
+                dwell_s: *dwell_s,
+                started_s: *started_s,
+            },
+        }
+    }
+}
+
+impl From<&lc_proto::Duty> for Duty {
+    fn from(duty: &lc_proto::Duty) -> Self {
+        match duty {
+            lc_proto::Duty::Idle => Self::Idle,
+            lc_proto::Duty::Stare { star } => Self::Stare(StarId::from_raw(*star)),
+            lc_proto::Duty::Sweep { center, radius_rad, dwell_s, started_s } => {
+                Self::Sweep(Sweep::region(DVec3::from_array(*center), *radius_rad, *started_s).with_dwell(*dwell_s))
+            }
+            lc_proto::Duty::Watch { stars, dwell_s, started_s } => Self::Watch {
+                targets: stars.iter().map(|s| StarId::from_raw(*s)).collect(),
+                dwell_s: dwell_s.max(1.0),
+                started_s: *started_s,
+            },
+        }
+    }
+}
+
 impl Duty {
     /// Which star the instrument is on at this moment, if it is on one.
     pub fn target_at(&self, now_s: f64) -> Option<StarId> {

@@ -9,7 +9,7 @@
 
 /// `Outbound::Welcome { .., ship: Motion { at [4.2, 0, 0], holding a 12 Mm orbit of Earth } }`
 pub const WELCOME: &[u8] = &[
-    0, 7, 29, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+    0, 7, 30, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
     204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -35,7 +35,7 @@ pub const ACT: &[u8] = &[
 /// Pinned because it is now the message that decides whether anyone gets in at all. A
 /// field moving here is a server reading someone else's ticket as this one's.
 pub const HELLO: &[u8] = &[
-    0, 29, 5, 97, 46, 98, 46, 99,
+    0, 30, 5, 97, 46, 98, 46, 99,
 ];
 
 pub const SET_COURSE: &[u8] = &[
@@ -96,7 +96,7 @@ pub const SAY: &[u8] = &[
 /// Pinned beside the rendezvous for the same reason, and one more: its acceleration is the
 /// only number on this wire that is a *measurement* of somebody else's burn.
 pub const ESCORT: &[u8] = &[
-    0, 7, 29, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+    0, 7, 30, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
     204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -114,7 +114,7 @@ pub const ESCORT: &[u8] = &[
 ];
 
 pub const RENDEZVOUS: &[u8] = &[
-    0, 7, 29, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+    0, 7, 30, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
     204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -133,7 +133,7 @@ pub const RENDEZVOUS: &[u8] = &[
 ///
 /// The rendezvous numbers in a falling frame, pinned for the rendezvous's reason.
 pub const CONSORT: &[u8] = &[
-    0, 7, 29, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
+    0, 7, 30, 84, 128, 137, 122, 3, 65, 100, 97, 0, 0, 0, 0, 0, 0, 240, 63, 205, 204,
     204, 204, 204, 204, 16, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 252, 169, 241, 210, 77, 98, 80, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24,
@@ -192,12 +192,10 @@ pub const READING: &[u8] =
 pub const SET_READING: &[u8] =
     &[5, 14, 116, 104, 101, 45, 103, 105, 108, 100, 101, 100, 45, 97, 103, 101, 2, 236, 196, 2, 41, 238, 6];
 
-/// `Inbound::Act(Intent { ship_id: 42, order: SendReport { to 7, beamed at 7, open, "{}" }, .. })`
+/// `Inbound::Act(Intent { ship_id: 42, order: SendReport { to 7, beamed at 7, open }, .. })`
 ///
-/// Pinned because a report is the one thing on this wire carrying a payload a player never
-/// reads: a field that moved would fold somebody's survey into the wrong star, and nothing on
-/// screen would look wrong.
+/// Pinned because it is the order that hands a craft's knowledge to somebody else, and a field
+/// that moved would aim or seal it wrongly with nothing on screen to show it.
 pub const SEND_REPORT: &[u8] = &[
-    1, 84, 11, 1, 14, 1, 14, 0, 2, 123, 125, 161, 134, 149, 187, 152, 245, 242, 246, 15,
-    128, 137, 122,
+    1, 84, 11, 1, 14, 1, 14, 0, 161, 134, 149, 187, 152, 245, 242, 246, 15, 128, 137, 122,
 ];

@@ -64,7 +64,7 @@ fn a_sweep_finds_stars_the_charts_never_reached() {
     let charted = session.knowledge.len();
 
     session.take_up(Duty::Sweep(Sweep::all_sky(session.coordinate_time_s())));
-    let pass_s = match &session.duty {
+    let pass_s = match &session.observatory.duty {
         Duty::Sweep(sweep) => sweep.pass_s(),
         _ => unreachable!(),
     };

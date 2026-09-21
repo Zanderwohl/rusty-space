@@ -71,6 +71,8 @@ pub(crate) struct Transmission {
     /// The transcript line, for the kinds that make one. `None` for a survey report, which is
     /// a transmission and not something anybody said.
     pub said: Option<Utterance>,
+    /// For a report, who it went to and how far through its sender's backlog it reached.
+    pub reported: Option<(Option<ShipId>, f64)>,
     /// The order as applied, which for these two is the order as sent: there is nothing about
     /// a message the server clamps.
     pub applied: Order,
@@ -138,17 +140,12 @@ impl<J: Journal> Server<J> {
                         body: String::new(),
                         acks: Vec::new(),
                     }),
+                    reported: None,
                     applied: order.clone(),
                 })
             }
-            Order::SendReport {
-                to,
-                aim,
-                secrecy,
-                report,
-                idem,
-            } => {
-                if report.len() > lc_proto::REPORT_LIMIT || report.is_empty() || *to == Some(from) {
+            Order::SendReport { to, aim, secrecy, idem } => {
+                if *to == Some(from) {
                     return Err(Refusal::Impossible);
                 }
                 let sealed = matches!(secrecy, Secrecy::Sealed);
@@ -161,12 +158,15 @@ impl<J: Journal> Server<J> {
                     }
                     _ => {}
                 }
+                // Written here, from what the shard holds for this craft: see
+                // `crate::instruments::report_for`.
+                let (report, through) = self.report_for(id, *to, at as f64 * 1.0e-6)?;
                 let reported = Reported {
                     to: to.map(|t| t.0),
                     beamed: !beam.is_omni(),
                     idem: *idem,
                     sealed,
-                    body: Some(report.clone()),
+                    body: Some(report),
                 };
                 Ok(Transmission {
                     kind: lc_proto::kind::REPORT,
@@ -176,6 +176,7 @@ impl<J: Journal> Server<J> {
                     // transcript, nothing acknowledges it, and what it does at the far end is
                     // fold into what that craft knows. See `lightcone/docs/22-provenance.md`.
                     said: None,
+                    reported: Some((*to, through)),
                     applied: order.clone(),
                 })
             }
@@ -213,14 +214,15 @@ impl<J: Journal> Server<J> {
                     kind: lc_proto::kind::MESSAGE,
                     payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
                     beam,
-            said: Some(Utterance {
+                    said: Some(Utterance {
                         to,
                         idem,
                         sealed,
                         key: false,
                         body: body.to_string(),
                         acks,
-            }),
+                    }),
+                    reported: None,
                     applied: Order::Say {
                         to,
                         aim: *aim,
@@ -607,6 +609,26 @@ mod tests {
         Order::Say { to: Some(ShipId(to)), aim, secrecy, body: body.into(), idem: next_key() }
     }
 
+    /// Give a craft something to report: one bearing to one star.
+    fn teach<J: Journal>(server: &mut Server<J>, craft: i64, key: u64) -> lc_world::sky::StarId {
+        use lc_world::knowledge::{Bearing, Sighting, Witness};
+        let star = lc_world::sky::StarId::synthesise("radio", key);
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        server.aboard(CraftId(craft)).knowledge.sighted(
+            star,
+            Sighting {
+                witness: Witness(craft as u64),
+                observed_s: now_s,
+                bearing: Bearing { observer_ly: DVec3::ZERO, toward: DVec3::X, sigma_rad: 1e-9 },
+                band: em_spectra::Band::V,
+                flux: 1e-12,
+                flux_sigma: 1e-15,
+                lineage: Vec::new(),
+            },
+        );
+        star
+    }
+
     fn reports(messages: &[Outbound]) -> Vec<Reported> {
         sightings(messages)
             .into_iter()
@@ -635,9 +657,9 @@ mod tests {
             to: Some(ShipId(2)),
             aim: Aim::Omni,
             secrecy,
-            report: "{\"from\":{\"0\":1},\"sent_s\":0.0,\"entries\":[]}".into(),
             idem: next_key(),
         };
+        teach(&mut server, 1, 1);
         wire.client_says(
             ada,
             Inbound::Act(Intent {
@@ -709,6 +731,7 @@ mod tests {
             crate::world::still(ShipId(2), DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)),
             0.0,
         );
+        teach(&mut server, 1, 1);
         wire.client_says(
             ada,
             Inbound::Act(Intent {
@@ -717,8 +740,7 @@ mod tests {
                     to: Some(ShipId(2)),
                     aim: Aim::Omni,
                     secrecy: Secrecy::Open,
-                    report: "{\"from\":{\"0\":1},\"sent_s\":0.0,\"entries\":[]}".into(),
-                    idem: next_key(),
+                            idem: next_key(),
                 },
                 issued_at_client_t: 0,
             }),
@@ -738,40 +760,56 @@ mod tests {
         }
     }
 
-    /// An empty report and an oversized one are both refused, and neither is written.
+    /// A report is written by the shard from what the craft holds, so a craft that has
+    /// learnt nothing since it last reported to somebody has nothing to send them.
     #[tokio::test]
-    async fn a_report_has_to_fit_and_has_to_say_something() {
+    async fn a_craft_that_has_learnt_nothing_new_has_nothing_to_report() {
         let mut wire = Loopback::new();
         let mut server = Server::new(Memory::default(), 0, 1);
         let ada = ClientId(1);
         server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
-        for report in [String::new(), "x".repeat(lc_proto::REPORT_LIMIT + 1)] {
-            wire.client_says(
-                ada,
-                Inbound::Act(Intent {
-                    ship_id: ShipId(1),
-                    order: Order::SendReport {
-                        to: Some(ShipId(2)),
-                        aim: Aim::Omni,
-                        secrecy: Secrecy::Open,
-                        report,
-                        idem: next_key(),
-                    },
-                    issued_at_client_t: 0,
-                }),
-            );
-            server.tick(&mut wire).await.unwrap();
-            assert!(
-                wire.take(ada).iter().any(|m| matches!(
-                    m,
-                    Outbound::Refused {
-                        reason: Refusal::Impossible,
-                        ..
-                    }
-                )),
-                "that report should have been refused",
-            );
-        }
+        let report = || {
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::SendReport {
+                    to: Some(ShipId(2)),
+                    aim: Aim::Omni,
+                    secrecy: Secrecy::Open,
+                    idem: next_key(),
+                },
+                issued_at_client_t: 0,
+            })
+        };
+        let refused = |messages: &[Outbound]| {
+            messages.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::NothingNew, .. }))
+        };
+        wire.client_says(ada, report());
+        server.tick(&mut wire).await.unwrap();
+        assert!(refused(&wire.take(ada)), "nothing learnt, nothing to say");
+
+        teach(&mut server, 1, 1);
+        wire.client_says(ada, report());
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(ada);
+        assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { .. })), "{said:?}");
+
+        wire.client_says(ada, report());
+        server.tick(&mut wire).await.unwrap();
+        assert!(refused(&wire.take(ada)), "and it has told them already");
+        wire.client_says(
+            ada,
+            Inbound::Act(Intent {
+                ship_id: ShipId(1),
+                order: Order::SendReport { to: Some(ShipId(3)), aim: Aim::Omni, secrecy: Secrecy::Open, idem: next_key() },
+                issued_at_client_t: 0,
+            }),
+        );
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(ada);
+        assert!(
+            said.iter().any(|m| matches!(m, Outbound::Accepted { .. })),
+            "a different recipient has its own backlog: {said:?}",
+        );
     }
 
     /// Two ships a light-hour apart and a third beside the second. An open message is read by

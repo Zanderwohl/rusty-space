@@ -30,6 +30,12 @@ impl BodyId {
     pub fn get(self) -> u64 {
         self.0
     }
+
+    /// The id a wire message carries; see [`StarId::from_raw`].
+    #[inline]
+    pub fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
 }
 
 /// Anything a craft can know about.
@@ -74,6 +80,32 @@ impl Subject {
 impl From<StarId> for Subject {
     fn from(star: StarId) -> Self {
         Self::Star(star)
+    }
+}
+
+impl From<Subject> for lc_proto::Subject {
+    fn from(subject: Subject) -> Self {
+        match subject {
+            Subject::Star(star) => Self::Star(star.get()),
+            Subject::Body { star, body } => Self::Body { star: star.get(), body: body.get() },
+            Subject::Population { star, index } => Self::Population { star: star.get(), index },
+            Subject::Craft(id) => Self::Craft(id),
+        }
+    }
+}
+
+impl From<lc_proto::Subject> for Subject {
+    fn from(subject: lc_proto::Subject) -> Self {
+        match subject {
+            lc_proto::Subject::Star(star) => Self::Star(StarId::from_raw(star)),
+            lc_proto::Subject::Body { star, body } => {
+                Self::Body { star: StarId::from_raw(star), body: BodyId::from_raw(body) }
+            }
+            lc_proto::Subject::Population { star, index } => {
+                Self::Population { star: StarId::from_raw(star), index }
+            }
+            lc_proto::Subject::Craft(id) => Self::Craft(id),
+        }
     }
 }
 

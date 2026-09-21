@@ -8,18 +8,19 @@ So instruments run on the server, knowledge lives on the server, and the client 
 This document is that move, what gets stored, and how a star's raw log is turned into
 conclusions and then thrown away.
 
-## Where things run today, and where they go
+## Where things run
 
-| | now | after |
+| | before 11b | now |
 |---|---|---|
-| telescope duty | client `Session::tick_instruments`, per frame | server, per tick, for every craft with a duty |
-| detection and noise | client, from its copy of the catalogue | server, the same functions in `lc_world::knowledge::survey` |
-| a craft's knowledge | client `Session::knowledge`, lost on restart | server, per craft, persisted; the client holds a replica |
-| naming, notes, duties | client edits its own knowledge | orders, like a burn: sent, applied by the server, echoed |
-| reports sent and received | client builds and folds them | server, so relays work for craft nobody is flying |
+| telescope duty | client, per frame | server, per tick, for every craft with a duty — `lc_world::knowledge::observatory` |
+| detection and noise | client, from its copy of the catalogue | server, the same functions |
+| a craft's knowledge | client `Session::knowledge`, lost on restart | server, per craft (`lc-server`'s `instruments`); the client holds a replica. Persisted in 11c |
+| naming, duties | client edits its own knowledge | `Order::NameIt`, `Order::SetDuty`: applied by the server, echoed |
+| reports sent and received | client builds and folds them | server writes them from what it holds and folds them on landing, signed in or not |
+| charts at launch | client, at game entry | server, when a craft is first seen |
 
-The detection code does not change; where it is called from does. `lc-world` is engine-free
-precisely so the server can run it.
+A client with no shard — a test, the headless snapshot — runs the same observatory itself. With
+one, it runs nothing: two telescopes recording one sky would be worse than one.
 
 ## Duties are orders
 

@@ -537,11 +537,10 @@ fn fold(
             // Which craft this is, so a message addressed to it can be told from one that
             // merely reached it. See `crate::chat::Chat::me`.
             uplink.chat.i_am(ship_id);
-            // And which witness its measurements are by. Everything it looked at before the
-            // shard named it was filed under the placeholder; `rebrand` carries those over.
-            game.0
-                .knowledge
-                .rebrand(lc_world::knowledge::Witness(ship_id.0 as u64));
+            // What it knows is the shard's to say. Anything this client worked out before it was
+            // welcomed was a guess made without it; the craft's own knowledge arrives in pages
+            // of `Learnt` from here on.
+            game.0.knowledge = lc_world::knowledge::Knowledge::new(lc_world::knowledge::Witness(ship_id.0 as u64));
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,
@@ -645,27 +644,14 @@ fn fold(
                     ui.0.heard(from, format!("{who} sent a sealed report"), arrived_s);
                     continue;
                 };
-                let Ok(report) = serde_json::from_str::<lc_world::knowledge::Report>(body) else {
-                    ui.0.heard(
-                        from,
-                        format!("{who} sent a report that made no sense"),
-                        arrived_s,
-                    );
-                    continue;
+                // Only counted here. The shard folds it into this craft's knowledge when its light
+                // lands, signed in or not, and what it taught arrives in the next `Learnt`.
+                let stars = serde_json::from_str::<lc_world::knowledge::Report>(body).map(|r| r.stars());
+                let notice = match stars {
+                    Ok(n) => format!("{who}: told you about {n} stars"),
+                    Err(_) => format!("{who} sent a report that made no sense"),
                 };
-                let stars = report.stars();
-                // Counted as systems, which is what a report carries and what the line says.
-                let before = game.0.knowledge.stars().count();
-                game.0.knowledge.receive(&report, arrived_s);
-                let fresh = game.0.knowledge.stars().count().saturating_sub(before);
-                ui.0.heard(
-                    from,
-                    match fresh {
-                        0 => format!("{who}: a report on {stars} stars, nothing new"),
-                        n => format!("{who}: a report on {stars} stars, {n} of them new"),
-                    },
-                    arrived_s,
-                );
+                ui.0.heard(from, notice, arrived_s);
             }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
                 let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else {
@@ -696,19 +682,16 @@ fn fold(
                 uplink.chasing = None;
             }
             let said = match &order {
-                Order::SendReport {
-                    to, idem, report, ..
-                } => {
-                    game.0.reporting.accepted(*idem);
-                    let stars = serde_json::from_str::<lc_world::knowledge::Report>(report)
-                        .map(|r| r.stars())
-                        .unwrap_or(0);
-                    let who = to.map(|t| uplink.name_of(t));
-                    Some(match who {
-                        Some(who) => format!("reported {stars} stars to {who}"),
-                        None => format!("broadcast a report on {stars} stars"),
-                    })
+                Order::SendReport { to, .. } => Some(match to.map(|t| uplink.name_of(t)) {
+                    Some(who) => format!("report sent to {who}"),
+                    None => "report broadcast".to_string(),
+                }),
+                Order::SetDuty { duty, integration_s } => {
+                    game.0.adopt_duty(duty, *integration_s);
+                    None
                 }
+                // What it did arrives in the next `Learnt`, with everything else it knows.
+                Order::NameIt { .. } => None,
                 Order::SetCourse { course, accel_g, max_beta } => {
                     let course: lc_world::navigation::Course = course.clone().into();
                     match game.0.set_course_at(at_s, &course, *accel_g, *max_beta) {
@@ -839,6 +822,7 @@ fn fold(
                 // Their key has to arrive before it can be used, and asking for it is a
                 // message like any other — which is to say, it takes as long as the light does.
                 Refusal::NoKey => "no key for them yet; send yours and ask for theirs".into(),
+                Refusal::NothingNew => "nothing new to report since the last one".into(),
             });
         }
         Outbound::Throttled { retry_after_ticks } => {
@@ -853,6 +837,12 @@ fn fold(
         // about the world and a book is not part of it.
         Outbound::Library { base, books } => uplink.shelf = Some((base, books)),
         Outbound::Reading(marks) => uplink.bookmarks = Some(marks),
+        // A report from this craft itself: what it has learnt since the last one, with no hop.
+        Outbound::Learnt { report } => match serde_json::from_str::<lc_world::knowledge::Report>(&report) {
+            Ok(report) => game.0.knowledge.absorb(&report),
+            Err(why) => warn!(%why, "a knowledge page that would not parse"),
+        },
+        Outbound::Observing { duty, integration_s } => game.0.adopt_duty(&duty, integration_s),
         // Taken whole, like `Flying`: the authority's account, settled.
         Outbound::Fitted { ship_id, fitting } => {
             if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
@@ -1367,67 +1357,48 @@ mod tests {
         ])
     }
 
-    /// A craft files its own measurements under the placeholder until a shard names it. Two
-    /// ships both reporting as witness zero would each file the other's bearings as their own.
+    /// What a craft knows is the shard's. A welcome replaces whatever this client worked out on
+    /// its own with an empty copy owned by the craft, and `Learnt` fills it — a report from the
+    /// craft itself, folded with no hop.
     #[test]
-    fn a_welcome_tells_this_craft_whose_measurements_its_own_are() {
-        let (mut uplink, mut game, mut ui) = app();
-        let star = game.0.stars[0].id;
-        game.0.point_at(Some(star));
-        game.0.advance(1.0);
-        game.0.tick_instruments(1.0);
-        assert_eq!(game.0.knowledge.owner, lc_world::knowledge::Witness(0));
-
-        fold(&mut uplink, &mut game, &mut ui, welcome(0));
-        let me = uplink.joined().expect("welcomed").ship_id;
-        assert_eq!(
-            game.0.knowledge.owner,
-            lc_world::knowledge::Witness(me.0 as u64),
-        );
-        assert!(
-            game.0
-                .knowledge
-                .own_series(star, em_spectra::Band::V)
-                .is_some(),
-            "what it measured before it was named is still its own",
-        );
-    }
-
-    /// A report landing is not a line in a conversation. It is a fold into what this ship
-    /// knows, stamped with the moment its light arrived — and every record in it picks up the
-    /// hop that says whose it was.
-    #[test]
-    fn a_report_arriving_is_folded_into_what_this_ship_knows() {
+    fn a_welcome_hands_what_the_craft_knows_to_the_shard() {
         use lc_world::knowledge::{Bearing, Knowledge, Sighting as Seen, Witness};
 
         let (mut uplink, mut game, mut ui) = app();
+        game.0.issue_charts(30.0);
+        assert!(!game.0.knowledge.is_empty(), "a guess made before signing in");
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let me = uplink.joined().expect("welcomed").ship_id;
+        assert_eq!(game.0.knowledge.owner, Witness(me.0 as u64));
+        assert!(game.0.knowledge.is_empty(), "the shard says what it knows");
 
-        let star = lc_world::sky::StarId::synthesise("probe", 4);
-        let mut theirs = Knowledge::new(Witness(7));
-        for k in 0..6u64 {
-            let at = glam::DVec3::new(k as f64 * 0.3, 0.0, 0.0);
-            theirs.sighted(
-                star,
-                Seen {
-                    witness: Witness(7),
-                    observed_s: k as f64,
-                    bearing: Bearing {
-                        observer_ly: at,
-                        toward: (glam::DVec3::new(0.0, 12.0, 0.0) - at).normalize(),
-                        sigma_rad: 1e-9,
-                    },
-                    band: em_spectra::Band::V,
-                    flux: 1e-12,
-                    flux_sigma: 1e-15,
-                    lineage: Vec::new(),
-                },
-            );
-        }
-        theirs.name_it(star, "Hearthlight", 6.0);
-        let report = theirs.report(f64::NEG_INFINITY, 1.0);
+        let star = game.0.stars[0].id;
+        let mut held = Knowledge::new(Witness(me.0 as u64));
+        held.sighted(
+            star,
+            Seen {
+                witness: Witness(me.0 as u64),
+                observed_s: 1.0,
+                bearing: Bearing { observer_ly: glam::DVec3::ZERO, toward: glam::DVec3::X, sigma_rad: 1e-9 },
+                band: em_spectra::Band::V,
+                flux: 1e-12,
+                flux_sigma: 1e-15,
+                lineage: Vec::new(),
+            },
+        );
+        let report = serde_json::to_string(&held.report(f64::NEG_INFINITY, 1.0)).unwrap();
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Learnt { report });
+        assert_eq!(game.0.knowledge.belief(star).unwrap().hops, 0, "its own, not relayed");
+    }
 
-        assert!(!game.0.knowledge.knows(star), "nobody aboard has seen it");
+    /// A report landing is a line in the events box, counted — and nothing more here. The shard
+    /// folds it into the craft's knowledge when its light lands, signed in or not, and what it
+    /// taught arrives in the next `Learnt`.
+    #[test]
+    fn a_report_arriving_is_counted_and_its_content_comes_from_the_shard() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let report = lc_world::knowledge::Report { from: lc_world::knowledge::Witness(7), sent_s: 1.0, entries: Vec::new() };
         let reported = lc_proto::Reported {
             to: Some(0),
             beamed: false,
@@ -1449,28 +1420,14 @@ mod tests {
             &mut uplink,
             &mut game,
             &mut ui,
-            Outbound::Sightings(vec![
-                lc_proto::Cleared::<Sighting>::clear(sighting, 4_000_000, 0.0).unwrap(),
-            ]),
+            Outbound::Sightings(vec![lc_proto::Cleared::<Sighting>::clear(sighting, 4_000_000, 0.0).unwrap()]),
         );
-
-        let belief = game.0.belief(star).expect("the report taught it");
-        assert_eq!(belief.hops, 1, "second hand, and it says so");
         assert!(
-            belief.triangulated,
-            "their raw bearings came with it, so this ship can solve the parallax itself",
+            ui.0.notifications.iter().any(|n| n.text.contains("told you about 0 stars")),
+            "{:?}",
+            ui.0.notifications.iter().map(|n| n.text.clone()).collect::<Vec<_>>(),
         );
-        assert_eq!(belief.witnesses, 1, "and the witness is still the probe");
-        assert_eq!(
-            game.0.name_of(star),
-            "Hearthlight",
-            "including what they call it"
-        );
-        assert_eq!(belief.learnt_s, 4.0, "learnt when the light landed");
-        assert!(
-            ui.0.notifications.iter().any(|n| n.text.contains("report")),
-            "a report arriving is worth a line in the events box",
-        );
+        assert!(game.0.knowledge.is_empty(), "the shard folds it, not the client");
     }
 
     /// A sealed report for somebody else arrives as the fact of it. An eavesdropper learns
