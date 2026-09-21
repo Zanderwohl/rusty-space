@@ -61,6 +61,8 @@ struct PopulationUniform {
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: PopulationUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var profile: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var grain_volume: texture_3d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var grain_sampler: sampler;
 
 /// Bands carried from emission to display. Must match `em_spectra::BANDS`.
 const BANDS: u32 = 7u;
@@ -94,28 +96,22 @@ const STEPS: i32 = 32;
 /// ray, so a column of six is already several e-foldings in the deepest band.
 const OPAQUE: f32 = 6.0;
 
-fn hash31(p: vec3<f32>) -> f32 {
-    var q = fract(p * 0.1031);
-    q = q + dot(q, q.zyx + 31.32);
-    return fract((q.x + q.y) * q.z);
-}
+/// Grains in one repeat of `grain_volume`. Must match `em_render::population_material::GRAIN_TILE`.
+const GRAIN_TILE: f32 = 16.0;
 
-fn value_noise(p: vec3<f32>) -> f32 {
-    let i = floor(p);
-    let f = fract(p);
-    let w = f * f * (3.0 - 2.0 * f);
-    let x00 = mix(hash31(i), hash31(i + vec3<f32>(1.0, 0.0, 0.0)), w.x);
-    let x10 = mix(hash31(i + vec3<f32>(0.0, 1.0, 0.0)), hash31(i + vec3<f32>(1.0, 1.0, 0.0)), w.x);
-    let x01 = mix(hash31(i + vec3<f32>(0.0, 0.0, 1.0)), hash31(i + vec3<f32>(1.0, 0.0, 1.0)), w.x);
-    let x11 = mix(hash31(i + vec3<f32>(0.0, 1.0, 1.0)), hash31(i + vec3<f32>(1.0, 1.0, 1.0)), w.x);
-    return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z);
+/// The baked grain at `p`, in grains, in `0..1`. The volume tiles, so any seed offset is as good
+/// as any other.
+///
+/// Level zero, explicitly: the march samples inside a loop that can `break`, where an implicit
+/// derivative is not allowed, and the volume has no mips to choose between anyway.
+fn grain_at(p: vec3<f32>) -> f32 {
+    let seeded = p + vec3<f32>(material.seed, material.seed * 2.7, material.seed * 1.3);
+    return textureSampleLevel(grain_volume, grain_sampler, seeded / GRAIN_TILE, 0.0).r;
 }
 
 /// Granularity, in `-1..1` about zero.
 fn grain(at: vec3<f32>) -> f32 {
-    let p = at * material.grain_frequency
-        + vec3<f32>(material.seed, material.seed * 2.7, material.seed * 1.3);
-    return 2.0 * value_noise(p) - 1.0;
+    return 2.0 * grain_at(at * material.grain_frequency) - 1.0;
 }
 
 /// How far past the slab the grain can push the band's edge, so the march's own clip does not
@@ -256,8 +252,8 @@ fn surface(in: VertexOutput) -> vec4<f32> {
     let facing = abs(dot(in.normal, to_camera));
     let limb = 1.0 + material.limb_gain * (1.0 / max(facing, 0.08) - 1.0);
 
-    let speckle = mix(1.0, value_noise(normalize(in.local_position) * material.grain_frequency
-        + vec3<f32>(material.seed, material.seed * 2.7, material.seed * 1.3)), material.grain_strength);
+    let speckle = mix(1.0, grain_at(normalize(in.local_position) * material.grain_frequency),
+        material.grain_strength);
 
     // `1 - (1 - t)^limb`, not `t * limb`. A sightline running along a sheet has unbounded path
     // length, and under a linear law it paints unbounded light: edge-on, Saturn's rings came

@@ -558,6 +558,7 @@ pub fn spawn(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<PopulationMaterial>,
     images: &mut Assets<Image>,
+    grain: &Handle<Image>,
     populations: &[Population],
     gain: f32,
     lighting: Lighting,
@@ -571,6 +572,7 @@ pub fn spawn(
         let material = materials.add(PopulationMaterial {
             uniforms: uniforms(p, i as f32 * 7.31 + 1.0, gain, true, profile.field, lighting),
             profile: images.add(profile_image(&profile)),
+            grain: grain.clone(),
         });
         commands.spawn((
             Mesh3d(mesh.clone()),
@@ -602,6 +604,7 @@ fn spawn_rings(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<PopulationMaterial>,
     images: &mut Assets<Image>,
+    grain: &Handle<Image>,
     drawn: &[crate::system::Drawable],
     gain: f32,
 ) {
@@ -637,7 +640,11 @@ fn spawn_rings(
         commands.spawn((
             Mesh3d(meshes.add(build_ring(rings.system))),
             MeshMaterial3d(
-                materials.add(PopulationMaterial { uniforms: uniform, profile: unread.clone() }),
+                materials.add(PopulationMaterial {
+                    uniforms: uniform,
+                    profile: unread.clone(),
+                    grain: grain.clone(),
+                }),
             ),
             Transform::default(),
             NoFrustumCulling,
@@ -684,6 +691,7 @@ pub fn update_envelopes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PopulationMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    grain: Res<crate::procedural::PopulationGrain>,
     existing: Query<Entity, Or<(With<EnvelopeMesh>, With<RingMesh>)>>,
     mut placed: Query<(&mut Transform, &EnvelopeMesh), Without<RingMesh>>,
     mut ringed: Query<(&mut Transform, &RingMesh), Without<EnvelopeMesh>>,
@@ -702,6 +710,7 @@ pub fn update_envelopes(
                     &mut meshes,
                     &mut materials,
                     &mut images,
+                    &grain.image,
                     &bodies.drawn,
                     ui.envelope_gain,
                 );
@@ -710,6 +719,7 @@ pub fn update_envelopes(
                     &mut meshes,
                     &mut materials,
                     &mut images,
+                    &grain.image,
                     &system.populations,
                     ui.envelope_gain,
                     lighting_of(system, &session),

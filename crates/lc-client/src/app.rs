@@ -113,6 +113,7 @@ impl Plugin for ClientPlugin {
             em_render::plume_material::PlumeMaterialPlugin,
             BodySurfaceMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
+            crate::procedural::ProceduralTexturesPlugin,
             crate::library::LibraryPlugin,
             crate::faces::FacesPlugin,
             crate::map::MapPlugin,

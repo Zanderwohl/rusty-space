@@ -356,6 +356,7 @@ pub fn update_plumes(
     mut plumes: ResMut<Plumes>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PlumeMaterial>>,
+    churn: Res<crate::procedural::PlumeChurn>,
     existing: Query<(Entity, &Plume)>,
     mut placed: Query<(&mut Transform, &MeshMaterial3d<PlumeMaterial>, &Plume)>,
 ) {
@@ -381,7 +382,10 @@ pub fn update_plumes(
         for index in 0..want.len() {
             commands.spawn((
                 Mesh3d(proxy.clone()),
-                MeshMaterial3d(materials.add(PlumeMaterial::default())),
+                MeshMaterial3d(materials.add(PlumeMaterial {
+                    uniforms: PlumeUniform::default(),
+                    churn: churn.image.clone(),
+                })),
                 Transform::default(),
                 // Placed by hand at a scale where the mesh's own bounds say nothing about
                 // where it lands, exactly as a hull is.

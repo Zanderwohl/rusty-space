@@ -5,3 +5,8 @@
 # Native builds are unaffected: this section applies to the wasm target alone.
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+
+# texture-graph is a private GitHub repository, fetched over SSH. Cargo's built-in git cannot use
+# the SSH agent and keys the way the `git` binary does, so hand fetches to that.
+[net]
+git-fetch-with-cli = true

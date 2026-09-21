@@ -181,9 +181,18 @@ picks up at once. Sampling the length at half the frequency was worse again: it 
 streamers with half a dozen broad lobes, because the thing being varied was no longer a
 streamer.
 
-`corona_frequency` is streamers per radian and is the lever that matters — halving it halves
-their number and doubles their width. Three octaves of squared ridges, not four of cubed: the
-fine octaves read as fur, and every extra power narrows the crease.
+Both fields live in `assets/textures/corona.tgraph`, baked once at load onto two 512² cubemaps
+and shared by every star: each star turns them by a rotation drawn from its seed, which is as
+distinct as the seed offset the shader used to apply and still a function of seed and direction
+alone. The noise's frequency is streamers per radian and is the lever that matters — halving it
+halves their number and doubles their width — so it is tuned in the graph now, not by a slider.
+Three octaves of squared ridges, not four of cubed: the fine octaves read as fur, and every extra
+power narrows the crease. The threads bake at sixteen bits because their sum peaks past one.
+
+Measured against the shader it replaced, around rings of directions about a star, the baked
+field's spread is within three per cent. At 512² the creases come out about nine per cent softer
+than the graph evaluated exactly, 1024² four; 512² is the choice, at three megabytes rather
+than twelve.
 
 Two things that looked like tuning and are not:
 
@@ -450,10 +459,10 @@ wrong the moment a body has a shape. It is why Saturn's rings had nothing in the
 A resolved body is the only thing in this renderer that writes depth, which is what puts the far
 half of a ring behind its planet and the near half in front.
 
-**No textures and no authored appearance.** What a body looks like follows from its radius, mass
-and equilibrium temperature, which every body in every system already carries, and everything
-past that is a seed. `lc_world::surface` sorts the solar system the way a person would, and two
-of its thresholds are set between specific pairs rather than chosen:
+**A body's class comes from what it is.** Its radius, mass and equilibrium temperature, which
+every body in every system already carries, choose its class, and the class chooses its palette
+and its pattern. `lc_world::surface` sorts the solar system the way a person would, and two of
+its thresholds are set between specific pairs rather than chosen:
 
 | | | |
 |---|---|---|
@@ -466,6 +475,16 @@ Uranus. True about its temperature and wrong about everything a person would rec
 Two families of surface cover it: latitude bands for anything gaseous, mottling for everything
 solid. The band warp has to stay well under the band spacing — at a quarter of a period it stops
 perturbing the bands and starts destroying them, and the planet reads as blobs.
+
+**The pattern is a texture graph, baked onto a cubemap.** `assets/textures/surfaces.lcsurfaces`
+routes each class to a graph under `textures/surfaces/`, and a body named there to a graph of its
+own — so an Earth that looks like Earth, without being a map of it, is a file and a line. The
+client bakes a body's graph the first time the body is resolved, with the body's name as the
+seed, into six 512² single-channel faces, and keeps it for the session. The graph is sampled on
+the sphere, so what it may use is limited to what means the same thing there: Color, Noise,
+Coordinate, Mix, MinMax and Wave. The shipped class graphs are the two families above expressed
+as graphs, and a test holds each to the formula the shader used to evaluate, so only the noise
+underneath them is new. `src/surfaces.rs` is the routing; `src/procedural.rs` the bake.
 
 The classification also supplies a per-body albedo, which replaces the flat 0.3 the photometry
 had been using. Ice reflects six times what bare rock does.
@@ -584,9 +603,17 @@ any sightline — so that is where the texture goes, and a band with a ragged ed
 of things where a soft gradient does not. The reference ray lies in the plane, where the warp
 cannot reach it, so the calibration is untouched by whatever the grain does.
 
-Still wanting: the fine structure is one octave of value noise evaluated per step, which is most
-of the shader's ALU. A tiling 3D noise texture would be one trilinear fetch instead of forty
-operations and would pay for a second octave. Where the baked emission shell exists, sampling
+**The grain is a baked texture, not a function.** It is authored as a texture graph,
+`assets/textures/population_grain.tgraph`, which the client bakes on its own GPU device at load
+into a tiling 128³ single-channel volume — one trilinear fetch per step where the march used to
+evaluate value noise, which was most of the shader's ALU. It has to tile, so the graph uses the
+value kernel with its period equal to its frequency, and a test holds the shipped file to that.
+Rings read the same volume for their speckle. Being data, the graph is edited in texture-graph's
+own editor and reaches a browser from the CDN like any other asset. `src/procedural.rs` is the
+bake.
+
+Still wanting: the grain's texture budget would now pay for a second octave, which is a change to
+the graph and not to the shader. Where the baked emission shell exists, sampling
 its `m` channel would make the visible density and the photometric deficit the same number.
 Single scattering — `exp(-tau)` to the star and a Henyey-Greenstein phase — is what would make a
 belt read as lit rather than as glowing, and the star's position is already known.
@@ -829,6 +856,14 @@ a graybody, at some emissivity below one. That emissivity is also what makes the
 at all. Above about ten thousand kelvin the visible band is on the Rayleigh-Jeans side of the
 peak, where radiance goes as `T` and not as `T⁴`, and a streak six per cent down is a plume with
 no streaks in it.
+
+The noise is `assets/textures/plume.tgraph`, baked once at load into a 192³ volume that repeats
+on every axis and is shared by every plume; each craft's own streaks come from its phase. Its
+period is 32 cells on every axis, where the host wraps the phase: one repeating cube is what
+texture-graph bakes, and across the plume 32 cells is wider than the lanes reach. It was 64
+along the flow when the shader hashed it per sample, which only moves how often the streaks
+repeat, from every forty-odd plume lengths of flow to every twenty. Measured against the graph
+evaluated exactly, the bake keeps the lanes within about one per cent.
 
 Two things about the noise, both found the hard way:
 

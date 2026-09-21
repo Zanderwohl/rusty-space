@@ -1093,10 +1093,10 @@ mod tests {
     fn a_tuning_change_reaches_the_pass_it_names_and_not_the_other() {
         let (mut ui, mut s) = fixture();
         let mut style = ui.local;
-        style.corona_frequency = 3.0;
+        style.corona_gain = 3.0;
         apply(Action::SetPointStyle { which: Which::Local, style }, &mut ui, &mut s);
-        assert_eq!(ui.local.corona_frequency, 3.0);
-        assert_eq!(ui.distant.corona_frequency, crate::starfield::DISTANT.corona_frequency);
+        assert_eq!(ui.local.corona_gain, 3.0);
+        assert_eq!(ui.distant.corona_gain, crate::starfield::DISTANT.corona_gain);
     }
 
     #[test]

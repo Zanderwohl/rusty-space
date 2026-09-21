@@ -40,6 +40,7 @@ pub mod panels;
 pub mod pick;
 pub mod plume;
 pub mod plot;
+pub mod procedural;
 pub mod radio_panel;
 pub mod reader;
 pub mod refit_panel;
@@ -48,6 +49,7 @@ pub mod session;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod signin_ui;
 pub mod sky_asset;
+pub mod surfaces;
 pub mod starfield;
 pub mod tonemap;
 pub mod ui;

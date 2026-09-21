@@ -1,0 +1,48 @@
+TextureGraphFile(
+    format_version: 3,
+    metadata: FileMetadata(
+        name: "Plume churn",
+        description: Some("How fuel-rich a drive\'s exhaust is, before the client\'s lane window. Baked as a volume that repeats, and sampled at (across the cone × lanes, along × stretch − phase) over 32. It must tile on the unit cube with 32 cells on every axis: period == frequency == em_render::plume_material::CHURN_PERIOD. Octaves keep the period exact only at a whole-number lacunarity."),
+        authors: [
+            "Alexander Lowry",
+        ],
+        modified: "2026-09-21T00:00:00Z",
+        written_by: "texture-graph-core 36960c5",
+    ),
+    graph: Graph(
+        layers: [
+            Layer(
+                id: 2,
+                name: "churn",
+                kind: Noise(Noise(
+                    dims: D3,
+                    seed_offset: 0,
+                    frequency: 32.0,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (32, 32, 32),
+                    fractal: Fractal(
+                        octaves: 2,
+                        lacunarity: 2.0,
+                        gain: 0.5,
+                        mode: Standard,
+                        normalize: true,
+                    ),
+                )),
+            ),
+        ],
+        list_order: [
+            2,
+        ],
+        canvases: {},
+        output: Output(
+            color: Some(2),
+            roughness: Const(0.5),
+            metallic: Const(0.0),
+            normal: None,
+        ),
+        params: {},
+        next_id: 3,
+    ),
+)

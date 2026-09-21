@@ -1,8 +1,5 @@
-//! A resolved body's surface, generated rather than stored.
-//!
-//! No textures. What a body looks like follows from its radius, mass and temperature, which
-//! every body in every system already has; everything past that is a seed. The host supplies
-//! `shaders/body_surface.wgsl`.
+//! A resolved body's surface: a pattern the host bakes, colored by a palette the body's class
+//! gives. The host supplies `shaders/body_surface.wgsl`.
 
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
@@ -14,7 +11,7 @@ pub struct BodySurfaceUniform {
     pub light: Vec4,
     /// World direction to the star; `w` is the ambient floor on the night side.
     pub to_star: Vec4,
-    /// `(unused, contrast, seed, banded)`.
+    /// `(unused, contrast, unused, unused)`.
     pub params: Vec4,
     /// Starlight the surface reflects, as linear display light before the tone map. `w` unused.
     pub reflected: Vec4,
@@ -52,6 +49,11 @@ impl Default for BodySurfaceUniform {
 pub struct BodySurfaceMaterial {
     #[uniform(0, visibility(vertex, fragment))]
     pub uniforms: BodySurfaceUniform,
+    /// Where on the palette each direction of the body sits, `[0, 1]`: a single-channel cubemap
+    /// sampled at the body-fixed direction, so the pattern turns with the body.
+    #[texture(1, dimension = "cube", visibility(fragment))]
+    #[sampler(2, visibility(fragment))]
+    pub pattern: Handle<Image>,
 }
 
 impl Material for BodySurfaceMaterial {
