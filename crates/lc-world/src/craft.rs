@@ -1021,7 +1021,8 @@ mod tests {
         // of the burn. That remainder is the drain's mass times the burn's own fraction.
         craft.advance(end + 1.0, end + 1.0);
         assert!(!craft.motion.is_under_way(), "{:?}", craft.motion.motive);
-        let drain = 2.0 * crate::fitting::Balance::DEFAULT.living_drain_w * (end + 1.0);
+        let living = crate::fitting::Loadout::STARTING.living as f64;
+        let drain = living * crate::fitting::Balance::DEFAULT.living_drain_w * (end + 1.0);
         let stored = craft.fitting().unwrap().stored_j_at(&craft.motion, end + 1.0);
         let expected = free - quoted - drain;
         assert!(stored >= expected * (1.0 - 1.0e-12), "{stored} vs {expected}");

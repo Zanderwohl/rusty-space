@@ -372,7 +372,7 @@ for how `lc-store` applies and tests its schema.
 are *nothing transiting*, *rocky planet* and *giant planet*, because a transit is the one thing
 the generator places that photometry sees on a period. Swarms and belts, which it also places,
 are the next hypotheses; their first two moments are already what `emission::invert_moments`
-inverts. The starting ship carries no data module, so the balance it was tuned to is unchanged.
+inverts. The starting ship's data module took a living module's slot, so its mass is unchanged.
 
 **Before:** 11c.
 

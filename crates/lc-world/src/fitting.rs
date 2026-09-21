@@ -60,7 +60,7 @@ pub struct Loadout {
 
 impl Loadout {
     /// What a new ship is given, and what a ship saved before fittings existed comes back as.
-    pub const STARTING: Self = Self { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 };
+    pub const STARTING: Self = Self { storage: 6, drones: 2, living: 1, engines: 5, slots: 20, data: 1 };
 
     pub fn count(&self, module: Module) -> u32 {
         match module {
@@ -647,7 +647,7 @@ mod tests {
         let mut fitting = Fitting::full(Loadout::STARTING, b, 0.0);
         let year = crate::flight::JULIAN_YEAR_S;
         let lost = fitting.stored_j_at(&motion, 0.0) - fitting.stored_j_at(&motion, year);
-        assert!((lost / (2.0 * b.living_drain_w * year) - 1.0).abs() < 1.0e-9);
+        assert!((lost / (Loadout::STARTING.living as f64 * b.living_drain_w * year) - 1.0).abs() < 1.0e-9);
         // Settling part-way changes nothing about the answer.
         let before = fitting.stored_j_at(&motion, 3.0 * year);
         fitting.settle(&motion, year);

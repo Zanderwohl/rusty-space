@@ -256,7 +256,7 @@ mod tests {
     async fn a_refit_is_refused_under_way_and_flying_is_refused_while_refitting() {
         let (mut server, mut wire, from, _) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
-        let target = lc_proto::Loadout { storage: 6, drones: 2, living: 2, engines: 6, slots: 20, data: 0 };
+        let target = lc_proto::Loadout { storage: 6, drones: 2, living: 1, engines: 6, slots: 20, data: 1 };
         wire.client_says(from, act(Order::Refit { target }));
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
@@ -303,7 +303,7 @@ mod tests {
         let (mut server, mut wire, from, _) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
         // Full, so taking apart storage has nowhere to put the refund.
-        let target = lc_proto::Loadout { storage: 5, drones: 2, living: 2, engines: 5, slots: 20, data: 0 };
+        let target = lc_proto::Loadout { storage: 5, drones: 2, living: 1, engines: 5, slots: 20, data: 1 };
         wire.client_says(from, act(Order::Refit { target }));
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);

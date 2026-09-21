@@ -24,8 +24,9 @@ A hull is divided into **slots**, and each module fills one. There are four kind
 | **engine** | a fixed thrust each; acceleration is total thrust over mass |
 | **data** | holds a craft's knowledge — files and raw logs — up to `data_per_module` each, with a fullness exactly as storage has; see [24-standing-instruments.md](24-standing-instruments.md) |
 
-A `Loadout` is five counts and a slot total. The starting ship has no data module: it watches on
-the onboard store, and building one is a refit like any other. It belongs to a `Craft`, not to its `ShipState`:
+A `Loadout` is five counts and a slot total. The starting ship has one data module, in
+the slot a second living module used to fill: living space does nothing yet but drain, and a swap
+keeps the module count, so the ship's mass and every acceleration tuned to it are unchanged. It belongs to a `Craft`, not to its `ShipState`:
 `motion::apply` is pure motion and stays that way. Only a player's ship gets a loadout. Craft a
 scene stages have none and keep flying on `Kind::drive()`, so the director and every demo work
 as they do now.
@@ -227,7 +228,7 @@ keeps the welcome's shape and puts the numbers next to what they govern.
 
 ### What the defaults give
 
-The starting ship: 5 engines, 6 storage, 2 drones, 2 living, 5 slots empty, 20 slots, storage full.
+The starting ship: 5 engines, 6 storage, 2 drones, 1 living, 1 data, 5 slots empty, 20 slots, storage full.
 
 | | |
 |---|---|

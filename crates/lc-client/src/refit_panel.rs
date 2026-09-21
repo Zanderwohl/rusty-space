@@ -383,13 +383,13 @@ mod tests {
         craft.fit(Some(Fitting::from_account(&account, b)));
         let draft = Loadout { living: 0, engines: 6, ..Loadout::STARTING };
         let view = preview(&craft, draft, true, 0.0).unwrap();
-        let expected = view.stored_j + 2.0 * 0.95 * b.module_energy_j() - b.module_energy_j();
+        let expected = view.stored_j + 0.95 * b.module_energy_j() - b.module_energy_j();
         assert!((view.available_j / expected - 1.0).abs() < 1.0e-12);
-        assert!(matches!(view.planned, Ok((3, _))), "{:?}", view.planned);
-        // Two taken apart and one built: the ship is lighter by the 5% of two modules radiated.
+        assert!(matches!(view.planned, Ok((2, _))), "{:?}", view.planned);
+        // One taken apart and one built: the ship is lighter by the 5% of a module radiated.
         let mass_before = b.dry_mass_kg(&Loadout::STARTING) + view.stored_j / lc_world::fitting::C2;
         let lost = mass_before - view.mass_after_kg;
-        assert!((lost / (2.0 * 0.05 * b.module_mass_kg()) - 1.0).abs() < 1.0e-9, "{lost}");
+        assert!((lost / (0.05 * b.module_mass_kg()) - 1.0).abs() < 1.0e-9, "{lost}");
         assert_eq!(view.blocked, None);
     }
 
@@ -425,7 +425,7 @@ mod tests {
         // Full, so living space cannot be taken apart — its refund has nowhere to go — but the
         // five free slots can all be filled.
         let living = Knob::Module(Module::Living);
-        assert_eq!(reach(&b, start, start, 30.0 * me, living, 0..=20), 2..=7);
+        assert_eq!(reach(&b, start, start, 30.0 * me, living, 0..=20), 1..=6);
 
         // And the hull cannot shrink below its modules, or grow past what it can pay for.
         let slots = reach(&b, start, start, 0.5 * me, Knob::Slots, 1..=40);

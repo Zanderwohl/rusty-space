@@ -261,6 +261,10 @@ mod tests {
         order(from, target, stored_me).solve(&B)
     }
 
+    /// The loadout these were worked out by hand against, which was the starting one until a
+    /// data module took a living module's slot.
+    const WORKED: Loadout = Loadout { living: 2, data: 0, ..Loadout::STARTING };
+
     #[test]
     fn nothing_to_do_is_done_at_once() {
         let refit = plan(Loadout::STARTING, Loadout::STARTING, 30.0).unwrap();
@@ -270,7 +274,7 @@ mod tests {
 
     #[test]
     fn short_of_energy_it_takes_apart_before_it_builds() {
-        let from = Loadout::STARTING;
+        let from = WORKED;
         let target = Loadout { living: 0, engines: 6, ..from };
         let refit = plan(from, target, 0.0).unwrap();
         let steps: Vec<_> = refit.steps().collect();
@@ -283,7 +287,7 @@ mod tests {
 
     #[test]
     fn with_energy_to_spare_it_builds_first() {
-        let from = Loadout::STARTING;
+        let from = WORKED;
         let target = Loadout { living: 1, engines: 6, ..from };
         let steps: Vec<_> = plan(from, target, 30.0).unwrap().steps().collect();
         assert_eq!(steps, [Step::Build(Module::Engine), Step::Dismantle(Module::Living)]);
@@ -299,7 +303,7 @@ mod tests {
 
     #[test]
     fn drones_come_first_and_go_last() {
-        let from = Loadout::STARTING;
+        let from = WORKED;
         let more = plan(from, Loadout { drones: 4, engines: 7, ..from }, 30.0).unwrap();
         let steps: Vec<_> = more.steps().collect();
         assert_eq!(&steps[..2], [Step::Build(Module::Drone); 2]);
@@ -315,7 +319,7 @@ mod tests {
     #[test]
     fn no_refund_overflows_storage() {
         // Full, and asked to take apart engines: the refund has nowhere to go.
-        let from = Loadout::STARTING;
+        let from = WORKED;
         let refused = plan(from, Loadout { engines: 3, ..from }, 30.0);
         assert_eq!(refused.unwrap_err(), Shortage::Capacity);
         // With a little room it goes through.
@@ -326,7 +330,7 @@ mod tests {
 
     #[test]
     fn an_impossible_target_says_what_it_is_short_of() {
-        let from = Loadout::STARTING;
+        let from = WORKED;
         assert_eq!(
             plan(from, Loadout { engines: 20, ..from }, 30.0).unwrap_err(),
             Shortage::Unbuildable
@@ -338,7 +342,7 @@ mod tests {
 
     #[test]
     fn the_hull_grows_before_it_is_filled_and_shrinks_once_emptied() {
-        let from = Loadout::STARTING;
+        let from = WORKED;
         let bigger = Loadout { engines: 12, slots: 22, ..from };
         let steps: Vec<_> = plan(from, bigger, 30.0).unwrap().steps().collect();
         assert_eq!(&steps[..2], [Step::Grow, Step::Grow]);
@@ -349,7 +353,7 @@ mod tests {
 
     #[test]
     fn the_timing_adds_up() {
-        let from = Loadout::STARTING;
+        let from = WORKED;
         let refit = plan(from, Loadout { engines: 6, living: 3, ..from }, 30.0).unwrap();
         let week = 7.0 * 86_400.0;
         // Two drones, two modules: a week in all.
@@ -366,7 +370,7 @@ mod tests {
 
     #[test]
     fn canceling_keeps_what_finished_and_returns_most_of_what_did_not() {
-        let from = Loadout::STARTING;
+        let from = WORKED;
         let refit = plan(from, Loadout { engines: 7, ..from }, 30.0).unwrap();
         let half_week = 3.5 * 86_400.0;
         let at = refit.at(100.0 + half_week * 1.5);

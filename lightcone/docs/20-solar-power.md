@@ -70,7 +70,8 @@ the star's own luminosity — and chooses the scale.
 
 A game year is a real hour at the design rate, so every time below is also real time.
 
-Starting ship: 20 slots, 30 ME of storage, 2 living modules. For the larger hulls the loadout
+Starting ship: 20 slots, 30 ME of storage, 1 living module (2 when this was written; the tables
+below assume 2). For the larger hulls the loadout
 is scaled: 10% of slots living, 30% storage at 5 ME each.
 
 | | 500 m (30 ME) | 1 km (240 ME) | 5 km (30 000 ME) |
@@ -234,8 +235,8 @@ storage, in which case the excess is lost, the same rule as any full ship.
 ### Client
 
 - **HUD:** net income beside the energy bar while collecting — `+4.20 ME/yr` — and nothing
-  while under way. A new ship on the local shard starts 5 AU out and reads `-0.008 ME/yr`: it
-  collects, but not enough to cover two living modules that far from the Sun.
+  while under way. A new ship on the local shard starts 5 AU out and reads `+0.002 ME/yr`: that far
+  from the Sun it collects barely more than its one living module drains.
 - **Refit panel:** `solar` and `net` rows in both tables. The top table shows the segment in
   force. After shows what the draft's hull would collect holding still where the ship is now, so
   growing a hull or adding living space shows its effect on break-even before it is built.

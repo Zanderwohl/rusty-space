@@ -756,7 +756,7 @@ mod tests {
         };
         let back = load(&row, None).expect("a format 4 row reads");
         let fitting = back.fitting().expect("fitted");
-        assert_eq!(fitting.loadout, Loadout { data: 0, ..Loadout::STARTING }, "and no data module");
+        assert_eq!(fitting.loadout, Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 }, "and no data module");
         assert_eq!(fitting.account().stored_j, 1.25e26);
         assert_eq!(fitting.solar_w(), 0.0);
     }
