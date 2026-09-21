@@ -13,8 +13,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::sky::CatalogueStar;
-use crate::sky::generate::{AU, ladder};
+use super::prior::Prior;
+use crate::sky::generate::AU;
 
 const DAY_S: f64 = 86_400.0;
 
@@ -33,9 +33,6 @@ pub const PERIOD_MIN_S: f64 = 0.2 * DAY_S;
 
 /// Transits a log has to be able to hold before a period counts as searched.
 pub const TRANSITS_NEEDED: f64 = 2.0;
-
-/// Catalogue stars the prior is measured over, at most.
-const PRIOR_STARS: usize = 4000;
 
 /// One brightness measurement, bands already combined: arrival time, deficit, and weight
 /// `1 / sigma^2`.
@@ -156,203 +153,6 @@ pub fn posterior(prior: f64, ln_bayes: f64) -> f64 {
     }
     let ln_odds = (prior / (1.0 - prior)).ln() + ln_bayes;
     1.0 / (1.0 + (-ln_odds).exp())
-}
-
-/// One planet as the generator placed it: its period, how deep its transit would be, and the
-/// chance a random observer sees it transit.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Drawn {
-    ln_period: f64,
-    ln_depth: f64,
-    rocky: bool,
-    /// `R* / a`. A system's planets share a plane, so from a random direction the planets that
-    /// transit are always the innermost few: all those with `R* / a` above the observer's
-    /// `|sin latitude|`.
-    reach: f64,
-}
-
-/// The generator's planets, as a population to take priors from.
-///
-/// Orientation is integrated exactly rather than sampled: a star's planets are sorted by
-/// `reach`, and each slice of `|sin latitude|` between two of them is a set of transiting
-/// planets with a known probability.
-#[derive(Clone, Debug, Default)]
-pub struct Prior {
-    systems: Vec<Vec<Drawn>>,
-}
-
-impl Prior {
-    /// Measure the prior over a set of stars, each with its own generated ladder.
-    ///
-    /// Pass the stars a craft cannot tell this one apart from. With nothing known but that the
-    /// star exists, that is the catalogue.
-    pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogueStar>) -> Self {
-        let stars: Vec<&CatalogueStar> = stars.into_iter().collect();
-        let stride = stars.len().div_ceil(PRIOR_STARS).max(1);
-        let systems = stars
-            .iter()
-            .step_by(stride)
-            .map(|star| {
-                let radius = star.star.radius_m;
-                ladder(star.seed(), star.luminosity_solar, star.metallicity)
-                    .iter()
-                    .map(|rung| {
-                        let period = std::f64::consts::TAU * (rung.semi_major_m.powi(3) / star.star.mu).sqrt();
-                        let ratio = rung.radius_earths * 6.371e6 / radius;
-                        Drawn {
-                            ln_period: period.ln(),
-                            ln_depth: (ratio * ratio).min(1.0).ln(),
-                            rocky: rung.rocky,
-                            reach: (radius / rung.semi_major_m).min(1.0),
-                        }
-                    })
-                    .collect()
-            })
-            .collect();
-        Prior { systems }
-    }
-
-    /// Chance a star has at least one transiting planet in the periods: its widest-reaching
-    /// planet there transits.
-    pub fn planet_prior(&self, periods_s: (f64, f64)) -> f64 {
-        if self.systems.is_empty() {
-            return 0.0;
-        }
-        let (lo, hi) = (periods_s.0.ln(), periods_s.1.ln());
-        let total: f64 = self
-            .systems
-            .iter()
-            .map(|planets| {
-                planets
-                    .iter()
-                    .filter(|d| (lo..hi).contains(&d.ln_period))
-                    .map(|d| d.reach)
-                    .fold(0.0, f64::max)
-            })
-            .sum();
-        total / self.systems.len() as f64
-    }
-
-    /// Density of (ln period, ln depth) of the planet a detection would be, over the periods.
-    fn density(&self, periods_s: (f64, f64)) -> Density {
-        let (lo, hi) = (periods_s.0.ln(), periods_s.1.ln());
-        let mut weighted = Vec::new();
-        for planets in &self.systems {
-            let mut sorted: Vec<Drawn> = planets.clone();
-            sorted.sort_by(|a, b| b.reach.total_cmp(&a.reach));
-            // Slice j: the first j+1 planets transit. Whichever of them are in range, a detection
-            // is one of them, equally likely.
-            for j in 0..sorted.len() {
-                let next = sorted.get(j + 1).map_or(0.0, |d| d.reach);
-                let slice = sorted[j].reach - next;
-                let within: Vec<&Drawn> =
-                    sorted[..=j].iter().filter(|d| (lo..hi).contains(&d.ln_period)).collect();
-                for d in &within {
-                    weighted.push((d.ln_period, d.ln_depth, slice / within.len() as f64));
-                }
-            }
-        }
-        Density::of(&weighted, lo, hi)
-    }
-
-    /// Chance a transit of this period and depth is of a rocky planet rather than a giant.
-    ///
-    /// `None` when the generator makes nothing like it, which the search's probability will
-    /// already have said.
-    pub fn rocky_given(&self, period_s: f64, depth: f64, depth_sigma: f64) -> Option<f64> {
-        let lp = period_s.ln();
-        let (mut rocky, mut all) = (0.0, 0.0);
-        for d in self.systems.iter().flatten() {
-            let near = (d.ln_period - lp) / 0.15;
-            if near.abs() > 4.0 {
-                continue;
-            }
-            let miss = (d.ln_depth.exp() - depth) / depth_sigma.max(depth * 0.05);
-            let w = d.reach * (-0.5 * (near * near + miss * miss)).exp();
-            all += w;
-            if d.rocky {
-                rocky += w;
-            }
-        }
-        (all > 0.0).then(|| rocky / all)
-    }
-}
-
-/// A smoothed histogram over (ln period, ln depth), normalized as a density.
-struct Density {
-    lp0: f64,
-    ld0: f64,
-    np: usize,
-    values: Vec<f64>,
-}
-
-const DENSITY_LP: f64 = 0.05;
-const DENSITY_LD: f64 = 0.1;
-const DENSITY_LD_MIN: f64 = -18.4; // ln 1e-8
-const DENSITY_ND: usize = 185;
-
-impl Density {
-    fn of(weighted: &[(f64, f64, f64)], lo: f64, hi: f64) -> Self {
-        let np = (((hi - lo) / DENSITY_LP).ceil() as usize).max(1);
-        let mut values = vec![0.0; np * DENSITY_ND];
-        for &(lp, ld, w) in weighted {
-            let ip = (((lp - lo) / DENSITY_LP) as usize).min(np - 1);
-            let id = ((ld - DENSITY_LD_MIN) / DENSITY_LD).clamp(0.0, (DENSITY_ND - 1) as f64) as usize;
-            values[ip * DENSITY_ND + id] += w;
-        }
-        let values = smooth(&values, np, DENSITY_ND, 3.0, 3.0);
-        let total: f64 = values.iter().sum::<f64>() * DENSITY_LP * DENSITY_LD;
-        let values = if total > 0.0 { values.iter().map(|v| v / total).collect() } else { values };
-        Density { lp0: lo, ld0: DENSITY_LD_MIN, np, values }
-    }
-
-    fn ln_at(&self, ln_period: f64, ln_depth: f64) -> f64 {
-        let ip = (((ln_period - self.lp0) / DENSITY_LP).max(0.0) as usize).min(self.np - 1);
-        let id = ((ln_depth - self.ld0) / DENSITY_LD).clamp(0.0, (DENSITY_ND - 1) as f64) as usize;
-        let v = self.values[ip * DENSITY_ND + id];
-        if v > 0.0 { v.ln() } else { f64::NEG_INFINITY }
-    }
-}
-
-/// Separable Gaussian blur, in bins.
-fn smooth(values: &[f64], rows: usize, cols: usize, sigma_r: f64, sigma_c: f64) -> Vec<f64> {
-    let kernel = |sigma: f64| -> Vec<f64> {
-        let reach = (3.0 * sigma).ceil() as i64;
-        (-reach..=reach).map(|k| (-0.5 * (k as f64 / sigma).powi(2)).exp()).collect()
-    };
-    let (kr, kc) = (kernel(sigma_r), kernel(sigma_c));
-    let (hr, hc) = ((kr.len() / 2) as i64, (kc.len() / 2) as i64);
-    let mut across = vec![0.0; values.len()];
-    for r in 0..rows {
-        for c in 0..cols {
-            let v = values[r * cols + c];
-            if v == 0.0 {
-                continue;
-            }
-            for (k, w) in kc.iter().enumerate() {
-                let cc = c as i64 + k as i64 - hc;
-                if (0..cols as i64).contains(&cc) {
-                    across[r * cols + cc as usize] += v * w;
-                }
-            }
-        }
-    }
-    let mut out = vec![0.0; values.len()];
-    for r in 0..rows {
-        for c in 0..cols {
-            let v = across[r * cols + c];
-            if v == 0.0 {
-                continue;
-            }
-            for (k, w) in kr.iter().enumerate() {
-                let rr = r as i64 + k as i64 - hr;
-                if (0..rows as i64).contains(&rr) {
-                    out[rr as usize * cols + c] += v * w;
-                }
-            }
-        }
-    }
-    out
 }
 
 /// Search a log for a transiting planet. `None` when the log is too short to hold two transits
@@ -871,7 +671,6 @@ pub fn semi_major_au(period_s: f64, mu: f64) -> f64 {
 mod tests {
     use super::*;
     use crate::rng;
-    use crate::sky::{AuthoredStars, StarProvider};
 
     fn gaussian(seed: u64, n: u64) -> f64 {
         rng::gaussian(rng::hash(&[seed, n]))
@@ -888,10 +687,6 @@ mod tests {
                 Point { t, x: dip + sigma * gaussian(11, k), w: 1.0 / (sigma * sigma) }
             })
             .collect()
-    }
-
-    fn prior() -> Prior {
-        Prior::measure(AuthoredStars::sample().stars())
     }
 
     #[test]
@@ -912,14 +707,5 @@ mod tests {
         let best = fold.best().unwrap();
         assert!((best.depth - 0.01).abs() < 0.001, "{best:?}");
         assert!(best.delta_chi2 > 1000.0);
-    }
-
-    #[test]
-    fn the_prior_has_planets_and_they_are_where_the_generator_puts_them() {
-        let prior = prior();
-        assert!(!prior.systems.is_empty());
-        let near = prior.planet_prior((PERIOD_MIN_S, 30.0 * DAY_S));
-        let all = prior.planet_prior((PERIOD_MIN_S, 1.0e6 * DAY_S));
-        assert!(near <= all && all > 0.0 && all < 1.0, "{near} of {all}");
     }
 }

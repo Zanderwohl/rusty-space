@@ -17,7 +17,8 @@ const ORBIT_BYTES: f64 = 40.0;
 const SERIES_BYTES: f64 = 32.0;
 const HOP_BYTES: f64 = 32.0;
 const CONCLUSION_BYTES: f64 = 320.0;
-const DIGEST_BYTES: f64 = 96.0;
+/// A digest's header and its population moments.
+const DIGEST_BYTES: f64 = 1024.0;
 const FOLD_BYTES: f64 = BINS as f64 * 16.0 + 48.0;
 
 impl File {
@@ -34,7 +35,11 @@ impl File {
             .map(|s| SERIES_BYTES + hops(s.lineage.len()) + s.len() as f64 * SAMPLE_BYTES)
             .sum();
         let conclusions: f64 = self.conclusions.iter().map(|c| CONCLUSION_BYTES + hops(c.lineage.len())).sum();
-        let digests: f64 = self.digests.iter().map(|d| DIGEST_BYTES + d.folds.len() as f64 * FOLD_BYTES).sum();
+        let digests: f64 = self
+            .digests
+            .iter()
+            .map(|d| DIGEST_BYTES + d.planet.as_ref().map_or(0, |p| p.folds.len()) as f64 * FOLD_BYTES)
+            .sum();
         FILE_BYTES + sightings + names + claims + orbits + series + conclusions + digests
     }
 }

@@ -13,7 +13,7 @@ use lc_world::craft::CraftId;
 use lc_world::fitting::ONBOARD_DATA_BYTES;
 use lc_world::knowledge::observatory::{self, CHARTED_LY, Observatory, Sky, Station};
 use lc_world::knowledge::survey::Duty;
-use lc_world::knowledge::transit::Prior;
+use lc_world::knowledge::prior::Prior;
 use lc_world::knowledge::{ENTRIES_PER_REPORT, Knowledge, Report, Reporting, Subject, Witness};
 use lc_world::motion::LIGHT_US_PER_LY;
 

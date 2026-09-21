@@ -23,7 +23,7 @@ use crate::server::Server;
 /// positional and cannot notice an older shape, so a file in any other format is refused.
 ///
 /// **Bump it when [`File`], or anything inside it, changes shape.**
-pub const KNOWLEDGE_FORMAT: i32 = 2;
+pub const KNOWLEDGE_FORMAT: i32 = 3;
 
 /// One craft's files and log, read back.
 type Written = (Vec<(Subject, File)>, Vec<Logged>);
@@ -333,8 +333,8 @@ mod tests {
         let knowledge = server.knowledge_of(SHIP).unwrap();
         let conclusion = knowledge.conclusion(target.id).expect("the log was read");
         let leading = conclusion.leading().unwrap();
-        let Kind::Planet { transit, .. } = leading.kind else { panic!("{:?}", conclusion.hypotheses) };
-        assert!(leading.probability > SETTLED, "{:?}", conclusion.hypotheses);
+        let Kind::Planet { transit, .. } = leading.kind else { panic!("{:?}", conclusion.transits) };
+        assert!(leading.probability > SETTLED, "{:?}", conclusion.transits);
         let off = periods.iter().map(|p| (transit.period_s - p).abs()).fold(f64::INFINITY, f64::min);
         assert!(off < 3.0 * transit.period_sigma_s, "{} against {periods:?}", transit.period_s);
 

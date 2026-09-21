@@ -368,11 +368,10 @@ for how `lc-store` applies and tests its schema.
 
 ### 11d — Conclusions
 
-**Built.** Protocol 31, save format 7, knowledge format 2. Transits only, for now: the hypotheses
-are *nothing transiting*, *rocky planet* and *giant planet*, because a transit is the one thing
-the generator places that photometry sees on a period. Swarms and belts, which it also places,
-are the next hypotheses; their first two moments are already what `emission::invert_moments`
-inverts. The starting ship's data module took a living module's slot, so its mass is unchanged.
+**Built.** Protocol 32, save format 7, knowledge format 3. Two questions per log, each with
+hypotheses summing to one: *transiting* — a rocky or giant planet, nothing transiting, or a
+planet the log could not yet have found — and *in orbit* — a swarm, or only the belts every
+system has. The starting ship's data module took a living module's slot, so its mass is unchanged.
 
 **Before:** 11c.
 

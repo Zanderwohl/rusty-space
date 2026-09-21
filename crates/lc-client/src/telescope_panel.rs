@@ -73,6 +73,34 @@ pub fn telescope(
     curve(ui, state, game, out, plot);
 }
 
+/// One hypothesis, in words.
+fn describe(kind: &Kind) -> String {
+    let day = 86_400.0;
+    match kind {
+        Kind::Quiet => "nothing transiting".into(),
+        Kind::Unsearched => "a planet this log could not have found yet".into(),
+        Kind::Planet { class, transit } => format!(
+            "{}, P = {:.4} ± {:.4} d, depth {:.1e}",
+            class.name(),
+            transit.period_s / day,
+            transit.period_sigma_s / day,
+            transit.depth,
+        ),
+        Kind::Swarm(swarm) => {
+            let mut text = format!("a swarm covering {:.2e} ± {:.1e}", swarm.coverage.0, swarm.coverage.1);
+            if let Some(t) = swarm.crossing_s {
+                text += &format!(", crossings of {:.1} h", t / 3600.0);
+            }
+            if let (Some(area), Some(au)) = (swarm.element_m2, swarm.semi_major_au) {
+                text += &format!(", elements of {:.1e} m² at {au:.2} AU", area);
+            }
+            text
+        }
+        Kind::Belts { excess: Some((e, sigma)) } => format!("belts only; thermal glow {e:.1e} ± {sigma:.1e}"),
+        Kind::Belts { excess: None } => "belts only".into(),
+    }
+}
+
 /// How much of the room aboard what this ship knows takes.
 fn room(ui: &mut egui::Ui, game: &Game) {
     let now = game.coordinate_time_s();
@@ -103,26 +131,26 @@ fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>
             ui.weak("The log has not been read yet.");
         }
         Some(c) => {
-            for h in c.hypotheses.iter().filter(|h| h.probability >= 0.005) {
-                let percent = h.probability * 100.0;
-                match h.kind {
-                    Kind::Quiet => ui.label(format!("nothing transiting — {percent:.0}%")),
-                    Kind::Planet { class, transit } => ui.label(format!(
-                        "{}, P = {:.4} ± {:.4} d, depth {:.1e} — {percent:.0}%",
-                        class.name(),
-                        transit.period_s / day,
-                        transit.period_sigma_s / day,
-                        transit.depth,
-                    )),
-                };
+            ui.label("Transiting:");
+            for h in c.transits.iter().filter(|h| h.probability >= 0.005) {
+                ui.label(format!("  {} — {:.0}%", describe(&h.kind), h.probability * 100.0));
+            }
+            if !c.populations.is_empty() {
+                ui.label("In orbit:");
+                for h in c.populations.iter().filter(|h| h.probability >= 0.005) {
+                    ui.label(format!("  {} — {:.0}%", describe(&h.kind), h.probability * 100.0));
+                }
             }
             let whose = if c.observer == game.knowledge.owner { "this ship's" } else { "another craft's" };
+            let searched = match c.evidence.periods_s {
+                Some((lo, hi)) => format!("periods {:.1} to {:.1} d searched", lo / day, hi / day),
+                None => "too short to search for a period yet".into(),
+            };
             ui.weak(format!(
-                "From {} of {whose} samples in {} bands, periods {:.1} to {:.1} d searched.",
+                "From {} of {whose} samples in {} bands; {searched}; it would have found {:.0}% of the transiting planets the galaxy makes.",
                 c.evidence.samples,
                 c.evidence.bands.count_ones(),
-                c.evidence.periods_s.0 / day,
-                c.evidence.periods_s.1 / day,
+                c.evidence.completeness * 100.0,
             ));
             if c.discarded_s.is_some() {
                 ui.weak("The log behind it has been thrown away; only the conclusion is left.");

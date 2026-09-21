@@ -17,8 +17,10 @@ use crate::sky::StarId;
 
 pub mod astrometry;
 pub mod conclusion;
+pub mod moments;
 pub mod names;
 pub mod observatory;
+pub mod prior;
 pub mod record;
 pub mod room;
 pub mod subject;

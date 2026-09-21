@@ -181,8 +181,11 @@ custody of. A shard that restarts resumes all of it.
 | the probability | a marginal likelihood — the box's likelihood ratio averaged over every period, phase, duration and depth, weighted by a prior measured from the generator's own ladder (`sky::generate::ladder`) over the world's stars, with orientation integrated exactly. A planet the generator cannot make has zero prior and cannot be concluded |
 | a lone deep dip | a planet too wide to transit twice in the log fits under a box at almost any period, and would win. Dips far out of the noise that no period repeats are set aside before the search, and a period is only believed if every transit it predicts that the log covers is there |
 | when it is read | `Knowledge::due`: after 96 new samples and half as many again as last time, so all the reads of a long watch cost a few times the last. A shard reads one log a tick, taking craft in turn |
-| settled | the leading hypothesis at 99%: a planet after three transits; *nothing transiting* only when the data argue against a planet twentyfold **and** the log is long enough that one at periods it could not yet search is unlikely too — thrown away sooner, a log could never find a planet wider than itself |
-| what is kept | `Digest`: the settled search's odds and folds at the planet's period and two either side at its error, so later samples refine it. The samples go, from memory and, at the next checkpoint, from `lc_samples` |
+| nothing transiting | absence of evidence, not evidence of absence. Its probability is the chance of no planet times the log's **completeness** — the share of the transiting planets the generator makes, at every period, that the log would have found — and the rest is *a planet this log could not have found yet*. Two months on a red dwarf is a few percent; it takes a log as long as the generator's widest orbits to say much more |
+| swarm or belts | from moments, which survive consumption whole: the mean dimming across the visible bands, the thermal-infrared glow beyond the star's own, the flicker's covariance at the shortest lag and the lag at which it has halved, which is half a crossing. The probability is a likelihood against the generator's systems seen from spread directions; a swarm's element size and orbit come from `emission::invert_moments`, against the catalogued star most like this one's brightness when there is a distance |
+| settled | the leading transit hypothesis at 99%: a planet after three transits, or nothing transiting once completeness allows it |
+| consumed | when settled, or when the craft is full — reading is how a full craft keeps watching — unless the subject is retained. Consumed for room with nothing settled, the transit search is lost and the next log is searched afresh |
+| what is kept | `Digest`: the moments, the best completeness any log of the star reached, and for a settled planet the search's odds and folds at its period and two either side at its error. The samples go, from memory and, at the next checkpoint, from `lc_samples` |
 | what travels | `Conclusion`, in a report's part, with its evidence, its covering and `discarded_s`. A replica drops its copy of the log when it hears its original did |
 
 ### As built: room
@@ -197,18 +200,19 @@ decides what was kept.
 
 ## Open
 
-- **Reading is on the tick thread.** A read is a search over thousands of periods, well under a
-  second in a release build and one log a tick, but it is the first thing on the shard whose cost
-  grows with how long a player has been watching. It belongs on a worker once shards are busy.
+- **Reading is on the tick thread, deliberately for now.** A read is a search over thousands of
+  periods, one log a tick. It is the first thing on the shard whose cost grows with how long a
+  player has watched, and analyses will get more expensive; when they do it moves to a worker.
 - **A craft with no shard does not read its logs.** The offline client runs the instruments but
   not the pipeline.
 
 - **How often processing runs**, and whether it costs anything. Compute is free on the server
   but it need not be free in the game; a probe with no processor might only be able to forward
   logs, not conclude from them.
-- **The hypothesis set.** Start with what the generator can produce — planets by size class,
-  eclipsing binaries, belts, swarms by structure, dust — and nothing it cannot. A hypothesis for
-  something that does not exist is a probability permanently near zero.
+- **The hypothesis set.** Built: planets by size class, swarms, belts. Still to come as the
+  generator makes them: eclipsing binaries (a binary's companion does not yet occult in the
+  photometry) and swarms by structure (the generator makes only isotropic shells). A hypothesis
+  for something that does not exist is a probability permanently near zero.
 - **The catalogue in the client.** The client still holds every star's true position, because the
   sky view draws the light that arrives. A modified client can read it. That was true before this
   document and is not made worse by it, but it is the next thing to fix once knowledge is
