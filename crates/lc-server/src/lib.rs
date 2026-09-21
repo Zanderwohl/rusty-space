@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 
 pub mod ability;
+pub mod archive;
 pub mod admin;
 pub mod chase;
 pub mod director;

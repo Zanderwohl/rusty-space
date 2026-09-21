@@ -1,0 +1,277 @@
+//! What craft know, as it is written down and read back.
+//!
+//! The same split as [`crate::persist`]: everything here is pure — what to write and how to
+//! read it — and where it goes is [`lc_store::knowledge`], joined only in the binary. A craft's
+//! knowledge is its files, rewritten when they change, and its photometric log, appended; see
+//! `lightcone/docs/24-standing-instruments.md`.
+//!
+//! Postcard for the same reason as a craft's checkpoint: a bearing that moved one place in the
+//! last digit every restart would be a parallax that drifted.
+
+use std::collections::HashMap;
+
+use em_spectra::Band;
+use lc_store::knowledge::{Filed, LogRow};
+use lc_world::craft::CraftId;
+use lc_world::knowledge::{File, Knowledge, Logged, Sample, Subject, Witness};
+
+use crate::instruments::witness;
+use crate::journal::Journal;
+use crate::server::Server;
+
+/// What wrote a file's bytes. A contract, like [`crate::persist::SAVE_FORMAT`]: postcard is
+/// positional and cannot notice an older shape, so a file in any other format is refused.
+///
+/// **Bump it when [`File`], or anything inside it, changes shape.**
+pub const KNOWLEDGE_FORMAT: i32 = 1;
+
+/// One craft's files and log, read back.
+type Written = (Vec<(Subject, File)>, Vec<Logged>);
+
+/// Everything written since the last time, for the store.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Remembered {
+    pub files: Vec<Filed>,
+    pub samples: Vec<LogRow>,
+}
+
+pub fn file_row(ship: CraftId, subject: Subject, file: &File, saved_t: i64) -> Filed {
+    Filed {
+        ship_id: ship.0,
+        subject: lc_proto::encode(&subject),
+        format: KNOWLEDGE_FORMAT,
+        file: lc_proto::encode(file),
+        saved_t,
+    }
+}
+
+pub fn log_row(ship: CraftId, logged: &Logged) -> LogRow {
+    LogRow {
+        ship_id: ship.0,
+        subject: lc_proto::encode(&logged.subject),
+        // The bit pattern: the charting office is u64::MAX.
+        witness: logged.witness.0 as i64,
+        band: logged.band.index() as i16,
+        observed_s: logged.sample.observed_s,
+        learnt_t: (logged.learnt_s * 1.0e6).round() as i64,
+        deficit: logged.sample.deficit,
+        sigma: logged.sample.sigma,
+    }
+}
+
+/// A file row back into a subject and a file, or why not.
+pub fn read_file(row: &Filed) -> Result<(Subject, File), String> {
+    if row.format != KNOWLEDGE_FORMAT {
+        return Err(format!("knowledge format {} is not {KNOWLEDGE_FORMAT}", row.format));
+    }
+    let subject = lc_proto::decode(&row.subject).map_err(|why| why.to_string())?;
+    let file = lc_proto::decode(&row.file).map_err(|why| why.to_string())?;
+    Ok((subject, file))
+}
+
+pub fn read_log(row: &LogRow) -> Result<Logged, String> {
+    let band = *Band::ALL.get(row.band as usize).ok_or_else(|| format!("no band {}", row.band))?;
+    Ok(Logged {
+        subject: lc_proto::decode(&row.subject).map_err(|why| why.to_string())?,
+        witness: Witness(row.witness as u64),
+        band,
+        sample: Sample { observed_s: row.observed_s, deficit: row.deficit, sigma: row.sigma },
+        learnt_s: row.learnt_t as f64 * 1.0e-6,
+    })
+}
+
+impl<J: Journal> Server<J> {
+    /// What a craft knows, as the shard holds it. For the console, and for tests that restart
+    /// a shard and need to compare before with after.
+    pub fn knowledge_of(&self, ship: lc_proto::ShipId) -> Option<&Knowledge> {
+        self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.knowledge)
+    }
+
+    /// What a craft's telescope is doing, as the shard holds it.
+    pub fn duty_of(&self, ship: lc_proto::ShipId) -> Option<&lc_world::knowledge::survey::Duty> {
+        self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.observatory.duty)
+    }
+
+    /// Everything every craft has learnt since this was last called, ready to write.
+    pub fn take_knowledge(&mut self) -> Remembered {
+        let saved_t = self.now_t;
+        let mut remembered = Remembered::default();
+        for (id, aboard) in &mut self.instruments.aboard {
+            let (files, logs) = aboard.knowledge.take_changes();
+            remembered.files.extend(files.iter().map(|(subject, file)| file_row(*id, *subject, file, saved_t)));
+            remembered.samples.extend(logs.iter().map(|logged| log_row(*id, logged)));
+        }
+        remembered
+    }
+
+    /// Put back what craft knew. After [`Server::adopt`], which is what put the craft and their
+    /// instruments back; a craft whose knowledge was written down is not issued charts again.
+    ///
+    /// A row that will not read is reported and skipped, not fatal: losing one file is losing
+    /// what one craft knew about one star, which is recoverable by looking again.
+    pub fn adopt_knowledge(&mut self, files: &[Filed], samples: &[LogRow]) -> Vec<String> {
+        let mut problems = Vec::new();
+        let mut by_craft: HashMap<CraftId, Written> = HashMap::new();
+        for row in files {
+            match read_file(row) {
+                Ok(file) => by_craft.entry(CraftId(row.ship_id)).or_default().0.push(file),
+                Err(why) => problems.push(format!("craft {}: {why}", row.ship_id)),
+            }
+        }
+        for row in samples {
+            match read_log(row) {
+                Ok(logged) => by_craft.entry(CraftId(row.ship_id)).or_default().1.push(logged),
+                Err(why) => problems.push(format!("craft {}: {why}", row.ship_id)),
+            }
+        }
+        for (id, (files, logs)) in by_craft {
+            // The store holds every craft ever saved; this shard only has the ones it adopted.
+            if self.fleet.get(id).is_none() {
+                continue;
+            }
+            let knowledge = Knowledge::restore(witness(id), files, logs);
+            match self.instruments.aboard.get_mut(&id) {
+                Some(aboard) => aboard.knowledge = knowledge,
+                None => {
+                    self.instruments.aboard.insert(id, crate::instruments::Aboard {
+                        knowledge,
+                        observatory: Default::default(),
+                        reporting: Default::default(),
+                    });
+                }
+            }
+        }
+        problems
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::DVec3;
+    use lc_proto::{ClientId, Inbound, Intent, Order, ShipId};
+    use lc_world::sky::{AuthoredStars, CatalogueStar, StarId, StarProvider};
+
+    use super::*;
+    use crate::journal::Memory;
+    use crate::transport::Loopback;
+    use crate::world::World;
+
+    /// A home star, and three more thirty light-years out that the charts do not reach and a
+    /// sweep has to find — see `crate::instruments`' tests for why these directions.
+    fn sky() -> Vec<CatalogueStar> {
+        let template = AuthoredStars::sample().stars()[1].clone();
+        [DVec3::ZERO, DVec3::X * 30.0, DVec3::Y * 30.0, DVec3::Z * 30.0]
+            .into_iter()
+            .enumerate()
+            .map(|(k, at)| {
+                let mut star = template.clone();
+                star.id = StarId::synthesise("archive", k as u64);
+                star.position_ly = at;
+                star
+            })
+            .collect()
+    }
+
+    fn a_shard() -> Server<Memory> {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.load_world(World::new(sky()));
+        server
+    }
+
+    const SHIP: ShipId = ShipId(3);
+
+    /// A shard with one craft sweeping, a stare's worth of photometry in its log, and part of a
+    /// pass done.
+    async fn running() -> (Server<Memory>, Loopback) {
+        let mut server = a_shard();
+        let mut wire = Loopback::new();
+        let at = server.world.start().unwrap() * lc_world::motion::LIGHT_US_PER_LY;
+        server.admit(ClientId(1), crate::world::still(SHIP, at), 0.0);
+        let order = |duty| Inbound::Act(Intent { ship_id: SHIP, order: Order::SetDuty { duty, integration_s: 1.0e4 }, issued_at_client_t: i64::MAX });
+        // A stare on the home star first, so there is a log to keep.
+        wire.client_says(ClientId(1), order(lc_proto::Duty::Stare { star: sky()[0].id.get() }));
+        for _ in 0..200 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let sweep = lc_proto::Duty::Sweep { center: [0.0, 0.0, 1.0], radius_rad: std::f64::consts::PI, dwell_s: 60.0, started_s: 0.0 };
+        wire.client_says(ClientId(1), order(sweep));
+        // About a third of a pass.
+        for _ in 0..500 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        wire.take(ClientId(1));
+        (server, wire)
+    }
+
+    /// Everything the binary does, without the database: checkpoint, write down what was
+    /// learnt, and bring both back in a new shard.
+    fn restart(old: &mut Server<Memory>) -> Server<Memory> {
+        let checkpoint = old.checkpoint();
+        let remembered = old.take_knowledge();
+        let mut new = a_shard();
+        assert!(new.adopt(checkpoint).is_empty(), "every craft reads back");
+        assert!(new.adopt_knowledge(&remembered.files, &remembered.samples).is_empty());
+        new
+    }
+
+    /// The whole of 11c. A shard restarted mid-sweep comes back with the same map for every
+    /// craft and the same sweep under way, and the sweep carries on finding what it had not yet.
+    #[tokio::test]
+    async fn a_shard_restarted_mid_sweep_resumes_it_with_the_same_map() {
+        let (mut old, _) = running().await;
+        let before = old.knowledge_of(SHIP).unwrap().clone();
+        assert!(before.own_series(sky()[0].id, Band::V).is_some_and(|s| s.len() > 3), "a log to keep");
+        let found_before = before.stars().count();
+        assert!(found_before < sky().len(), "part of a pass: {found_before} of {}", sky().len());
+
+        let mut new = restart(&mut old);
+        assert_eq!(new.knowledge_of(SHIP), Some(&before), "the map after is the map before");
+        assert_eq!(new.duty_of(SHIP), old.duty_of(SHIP), "and the sweep, with its start");
+
+        let mut wire = Loopback::new();
+        for _ in 0..3000 {
+            new.tick(&mut wire).await.unwrap();
+        }
+        let after = new.knowledge_of(SHIP).unwrap();
+        assert_eq!(after.stars().count(), sky().len(), "the sweep carried on and finished the pass");
+        let home = sky()[0].id;
+        let charts = after.file(home).unwrap().claims().len();
+        assert_eq!(charts, 1, "a restored craft is not issued its charts a second time");
+    }
+
+    /// A second checkpoint writes only what changed since the first.
+    #[tokio::test]
+    async fn a_checkpoint_writes_only_what_changed() {
+        let (mut server, mut wire) = running().await;
+        let first = server.take_knowledge();
+        assert!(!first.files.is_empty() && !first.samples.is_empty());
+        let nothing = server.take_knowledge();
+        assert!(nothing.files.is_empty() && nothing.samples.is_empty(), "nothing new");
+        for _ in 0..10 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let next = server.take_knowledge();
+        assert!(next.files.len() < first.files.len(), "{} files, then {}", first.files.len(), next.files.len());
+    }
+
+    #[test]
+    fn a_file_in_another_format_is_refused_rather_than_misread() {
+        let star = Subject::Star(StarId::synthesise("archive", 1));
+        let mut row = file_row(CraftId(1), star, &File::default(), 0);
+        assert!(read_file(&row).is_ok());
+        row.format = KNOWLEDGE_FORMAT + 1;
+        assert!(read_file(&row).is_err());
+    }
+
+    #[test]
+    fn a_log_row_reads_back_to_the_bit() {
+        let logged = Logged {
+            subject: Subject::Star(StarId::synthesise("archive", 1)),
+            witness: lc_world::knowledge::observatory::CHARTS,
+            band: Band::K,
+            sample: Sample { observed_s: 1_234.567_891_23, deficit: -1.8149592025296526e-22, sigma: 1e-5 },
+            learnt_s: 1_300.0,
+        };
+        assert_eq!(read_log(&log_row(CraftId(1), &logged)).unwrap(), logged);
+    }
+}

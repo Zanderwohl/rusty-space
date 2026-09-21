@@ -12,6 +12,7 @@ pub mod bvh;
 pub mod chat;
 pub mod cursor;
 pub mod id;
+pub mod knowledge;
 pub mod migrate;
 pub mod reading;
 pub mod retention;

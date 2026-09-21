@@ -50,6 +50,29 @@ pub struct Saved {
     /// Modules and energy, settled when saved. The balance in it is not read back: a shard
     /// stamps its own. Appended in format 4.
     pub fitting: Option<lc_proto::Fitting>,
+    /// What its telescope is committed to and how far it has reported to whom, so a sweep
+    /// resumes where it was rather than starting again. What it *knows* is written beside the
+    /// craft, in [`crate::archive`]. Appended in format 6.
+    pub instruments: Option<SavedInstruments>,
+}
+
+/// A craft's instruments, as a checkpoint carries them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedInstruments {
+    pub observatory: lc_world::knowledge::observatory::Observatory,
+    pub reporting: lc_world::knowledge::Reporting,
+}
+
+/// [`Saved`] as format 5 wrote it, before a craft's instruments were kept.
+#[derive(Deserialize)]
+struct SavedV5 {
+    kind: u8,
+    name: Option<String>,
+    noise_floor: f32,
+    length_m: f64,
+    motion: lc_proto::Motion,
+    pursuit: Option<lc_proto::Pursuit>,
+    fitting: Option<lc_proto::Fitting>,
 }
 
 /// [`Saved`] as format 4 wrote it, before a fitting carried starlight.
@@ -124,7 +147,7 @@ struct SavedV2 {
 /// otherwise** — deliberately not [`lc_proto::PROTOCOL_VERSION`], which moves for reasons that
 /// have nothing to do with how a craft is stored. Bumping it makes every existing row
 /// unreadable, which is the point and is also the cost.
-pub const SAVE_FORMAT: i32 = 5;
+pub const SAVE_FORMAT: i32 = 6;
 
 /// The oldest format still read. See [`decode`].
 pub const OLDEST_FORMAT: i32 = 2;
@@ -157,6 +180,7 @@ pub fn save(
     craft: &Craft,
     account: Option<&str>,
     pursuit: Option<lc_proto::Pursuit>,
+    instruments: Option<SavedInstruments>,
     saved_t: i64,
 ) -> Ship {
     let saved = Saved {
@@ -167,6 +191,7 @@ pub fn save(
         motion: (&craft.motion.snapshot()).into(),
         pursuit,
         fitting: craft.fitting().map(Into::into),
+        instruments,
     };
     Ship {
         ship_id: craft.id.0,
@@ -218,6 +243,19 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
 pub fn decode(row: &Ship) -> Result<Saved, String> {
     match row.format {
         SAVE_FORMAT => lc_proto::decode(&row.state).map_err(|why| why.to_string()),
+        5 => {
+            let old: SavedV5 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
+            Ok(Saved {
+                kind: old.kind,
+                name: old.name,
+                noise_floor: old.noise_floor,
+                length_m: old.length_m,
+                motion: old.motion,
+                pursuit: old.pursuit,
+                fitting: old.fitting,
+                instruments: None,
+            })
+        }
         OLDEST_FORMAT => {
             let old: SavedV2 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
             Ok(Saved {
@@ -228,6 +266,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 motion: old.motion,
                 pursuit: None,
                 fitting: None,
+                instruments: None,
             })
         }
         4 => {
@@ -240,6 +279,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 motion: old.motion,
                 pursuit: old.pursuit,
                 fitting: old.fitting.map(Into::into),
+                instruments: None,
             })
         }
         3 => {
@@ -252,6 +292,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 motion: old.motion,
                 pursuit: old.pursuit,
                 fitting: None,
+                instruments: None,
             })
         }
         other => Err(format!("format {other} is not {OLDEST_FORMAT} to {SAVE_FORMAT}")),
@@ -301,7 +342,11 @@ impl<J: Journal> Server<J> {
                         quarry: p.quarry,
                         closeness: p.closeness.into(),
                     });
-                    save(craft, account, pursuit, self.now_t)
+                    let instruments = self.instruments.aboard.get(&craft.id).map(|a| SavedInstruments {
+                        observatory: a.observatory.clone(),
+                        reporting: a.reporting.clone(),
+                    });
+                    save(craft, account, pursuit, instruments, self.now_t)
                 })
                 .collect(),
         }
@@ -346,6 +391,16 @@ impl<J: Journal> Server<J> {
                             closeness: pursuit.closeness.into(),
                             last_plan_t: i64::MIN,
                             last_seen: None,
+                        });
+                    }
+                    // Its knowledge comes back in `adopt_knowledge`; what its telescope was doing
+                    // comes back here, with the craft. Put in place directly rather than through
+                    // `aboard`, which would issue a restored craft fresh charts.
+                    if let Some(saved) = decode(row).ok().and_then(|saved| saved.instruments) {
+                        self.instruments.aboard.insert(craft.id, crate::instruments::Aboard {
+                            knowledge: lc_world::knowledge::Knowledge::new(crate::instruments::witness(craft.id)),
+                            observatory: saved.observatory,
+                            reporting: saved.reporting,
                         });
                     }
                     self.next_ship = self.next_ship.max(craft.id.0 + 1);
@@ -419,7 +474,7 @@ mod tests {
     #[test]
     fn a_craft_saved_and_read_back_is_the_same_craft() {
         let craft = a_craft();
-        let row = save(&craft, Some("acct-1"), None, 7_000_000);
+        let row = save(&craft, Some("acct-1"), None, None, 7_000_000);
         assert_eq!(row.ship_id, 5);
         assert_eq!(row.account.as_deref(), Some("acct-1"));
 
@@ -461,7 +516,7 @@ mod tests {
         craft.motion.position_ly = DVec3::new(4.200079062537049, awkward, 0.0);
         craft.motion.beta = DVec3::new(awkward, 0.0, 1.0e-9);
 
-        let back = load(&save(&craft, None, None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, None, None, 0), None).expect("it reads");
         assert_eq!(back.motion.position_ly, craft.motion.position_ly);
         assert_eq!(back.motion.beta, craft.motion.beta);
         assert_eq!(
@@ -481,7 +536,7 @@ mod tests {
     /// would happily read the wrong fields out of the right bytes.
     #[test]
     fn a_row_from_another_format_is_refused() {
-        let mut row = save(&a_craft(), None, None, 0);
+        let mut row = save(&a_craft(), None, None, None, 0);
         row.format = OLDEST_FORMAT - 1;
         let why = load(&row, None).expect_err("it should refuse");
         assert!(why.contains("format"), "{why}");
@@ -495,7 +550,7 @@ mod tests {
             quarry: lc_proto::ShipId(9),
             closeness: lc_proto::Closeness::Intimate,
         };
-        let row = save(&a_craft(), None, Some(pursuit), 0);
+        let row = save(&a_craft(), None, Some(pursuit), None, 0);
         assert_eq!(decode(&row).expect("it reads").pursuit, Some(pursuit));
     }
 
@@ -617,7 +672,7 @@ mod tests {
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
         craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
         craft.begin_refit(Loadout { engines: 7, ..Loadout::STARTING }, 10.0).unwrap();
-        let back = load(&save(&craft, Some("acct"), None, 20_000_000), None).expect("it reads");
+        let back = load(&save(&craft, Some("acct"), None, None, 20_000_000), None).expect("it reads");
         assert_eq!(back.fitting(), craft.fitting());
         assert!(back.is_refitting(20.0));
     }
@@ -677,7 +732,7 @@ mod tests {
     fn the_crews_clock_survives_the_round_trip() {
         let mut craft = a_craft();
         craft.motion.clock_s = 86_400.0 * 365.0;
-        let back = load(&save(&craft, None, None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, None, None, 0), None).expect("it reads");
         assert_eq!(back.motion.clock_s, craft.motion.clock_s);
     }
 
@@ -686,7 +741,7 @@ mod tests {
         let mut craft = a_craft();
         craft.motion.beta = DVec3::new(0.0, 0.1, 0.0);
         craft.motion.resume_drifting(DVec3::new(9.0, 0.0, 0.0), 1_234.0);
-        let back = load(&save(&craft, None, None, 5_000_000), None).expect("it reads");
+        let back = load(&save(&craft, None, None, None, 5_000_000), None).expect("it reads");
         match back.motion.motive {
             Motive::Drifting { from_ly, since_t } => {
                 assert_eq!(from_ly, DVec3::new(9.0, 0.0, 0.0));

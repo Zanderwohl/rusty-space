@@ -107,18 +107,20 @@ impl Series {
         self.samples.last()
     }
 
-    pub fn push(&mut self, sample: Sample) {
+    /// Add a sample at the end. False if it was older than the last one held, and so not added.
+    pub fn push(&mut self, sample: Sample) -> bool {
         if self
             .samples
             .last()
             .is_some_and(|s| sample.observed_s < s.observed_s)
         {
-            return;
+            return false;
         }
         if self.samples.len() >= SAMPLES_KEPT {
             self.samples.remove(0);
         }
         self.samples.push(sample);
+        true
     }
 
     /// Take whatever `other` has that this does not.
@@ -126,15 +128,25 @@ impl Series {
     /// Arrival order is the witness's own, so "later than the last held" is the whole test: a
     /// series only ever grows at its end, and the same run arriving twice by two routes adds
     /// nothing the second time.
-    pub fn absorb(&mut self, other: &Series) {
+    ///
+    /// Returns the samples it took, which is what has to be written down.
+    pub fn absorb(&mut self, other: &Series) -> Vec<Sample> {
         let from = self
             .samples
             .last()
             .map(|s| s.observed_s)
             .unwrap_or(f64::NEG_INFINITY);
-        for sample in other.samples.iter().filter(|s| s.observed_s > from) {
+        let taken: Vec<Sample> = other.samples.iter().filter(|s| s.observed_s > from).copied().collect();
+        for sample in &taken {
             self.push(*sample);
         }
+        taken
+    }
+
+    /// The series with its samples taken out: what a stored file holds, the samples being
+    /// written to a log of their own. See `lightcone/docs/24-standing-instruments.md`.
+    pub fn emptied(&self) -> Series {
+        Series { samples: Vec::new(), ..self.clone() }
     }
 
     /// The part of this series learnt after `since_s`, or `None` if none of it was.

@@ -144,6 +144,11 @@ impl File {
         self.series.iter().find(|s| s.band == band)
     }
 
+    /// The file as it is written down: everything but the samples, which are logged apart.
+    pub fn header(&self) -> File {
+        File { series: self.series.iter().map(Series::emptied).collect(), ..self.clone() }
+    }
+
     fn naming(&self, owner: Witness) -> Option<&Naming> {
         let mut name: Option<&Naming> = None;
         for naming in &self.names {
@@ -238,17 +243,94 @@ impl File {
     }
 }
 
+/// One photometric sample, as a log row: what it is of, whose it is, and when this craft learnt
+/// it — which for a relayed series is when it arrived, not when it was measured.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Logged {
+    pub subject: Subject,
+    pub witness: Witness,
+    pub band: Band,
+    pub sample: Sample,
+    pub learnt_s: f64,
+}
+
 /// One craft's view of the sky.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Knowledge {
     pub owner: Witness,
     files: BTreeMap<Subject, File>,
     beliefs: BTreeMap<Subject, Belief>,
+    /// Files changed since they were last written down, and samples taken since then. Not part
+    /// of what a craft knows — two copies that differ only in what has been saved are the same
+    /// knowledge — so equality ignores them.
+    changed: std::collections::BTreeSet<Subject>,
+    unsaved: Vec<Logged>,
+}
+
+impl PartialEq for Knowledge {
+    fn eq(&self, other: &Self) -> bool {
+        self.owner == other.owner && self.files == other.files && self.beliefs == other.beliefs
+    }
 }
 
 impl Knowledge {
     pub fn new(owner: Witness) -> Self {
-        Self { owner, files: BTreeMap::new(), beliefs: BTreeMap::new() }
+        Self {
+            owner,
+            files: BTreeMap::new(),
+            beliefs: BTreeMap::new(),
+            changed: Default::default(),
+            unsaved: Vec::new(),
+        }
+    }
+
+    /// What has changed since the last call: every file touched, with its samples taken out,
+    /// and every sample added, as log rows. Clears both.
+    ///
+    /// Files and samples are stored apart because they grow apart. A file is bounded and is
+    /// rewritten whole when it changes; a watched star's samples are appended every integration
+    /// and would make rewriting its file the most expensive thing a shard did.
+    pub fn take_changes(&mut self) -> (Vec<(Subject, File)>, Vec<Logged>) {
+        let files = std::mem::take(&mut self.changed)
+            .into_iter()
+            .filter_map(|s| Some((s, self.files.get(&s)?.header())))
+            .collect();
+        (files, std::mem::take(&mut self.unsaved))
+    }
+
+    /// Every file as it would be written, for a first save.
+    pub fn files(&self) -> impl Iterator<Item = (Subject, File)> + '_ {
+        self.files.iter().map(|(s, f)| (*s, f.header()))
+    }
+
+    /// Rebuild a craft's knowledge from what was written down: its files, then its samples in the
+    /// order they were taken. Nothing restored counts as changed.
+    pub fn restore(
+        owner: Witness,
+        files: impl IntoIterator<Item = (Subject, File)>,
+        logs: impl IntoIterator<Item = Logged>,
+    ) -> Self {
+        let mut knowledge = Self::new(owner);
+        knowledge.files = files.into_iter().collect();
+        for log in logs {
+            let file = knowledge.files.entry(log.subject).or_default();
+            match file.series.iter_mut().find(|s| s.witness == log.witness && s.band == log.band) {
+                Some(series) => {
+                    series.push(log.sample);
+                }
+                None => {
+                    let mut series = Series::new(log.witness, log.band);
+                    series.push(log.sample);
+                    file.series.push(series);
+                }
+            }
+        }
+        let subjects: Vec<Subject> = knowledge.files.keys().copied().collect();
+        for subject in subjects {
+            knowledge.refresh(subject);
+        }
+        knowledge.changed.clear();
+        knowledge
     }
 
     /// Take a new identity, carrying this craft's own records over to it.
@@ -372,7 +454,9 @@ impl Knowledge {
 
     /// File where somebody says a body orbits. One statement per witness, the later winning.
     pub fn orbits(&mut self, subject: impl Into<Subject>, orbit: Orbit) {
-        let file = self.files.entry(subject.into()).or_default();
+        let subject = subject.into();
+        self.changed.insert(subject);
+        let file = self.files.entry(subject).or_default();
         match file.orbits.iter_mut().find(|o| o.witness == orbit.witness) {
             Some(held) if held.stated_s >= orbit.stated_s => {}
             Some(held) => *held = orbit,
@@ -458,14 +542,22 @@ impl Knowledge {
 
     /// File a photometric sample this craft measured itself.
     pub fn measured(&mut self, subject: impl Into<Subject>, witness: Witness, band: Band, sample: Sample) {
-        let file = self.files.entry(subject.into()).or_default();
-        match file.series.iter_mut().find(|s| s.witness == witness && s.band == band) {
+        let subject = subject.into();
+        let file = self.files.entry(subject).or_default();
+        let added = match file.series.iter_mut().find(|s| s.witness == witness && s.band == band) {
             Some(series) => series.push(sample),
             None => {
                 let mut series = Series::new(witness, band);
                 series.push(sample);
                 file.series.push(series);
+                // A new series is a new header in the file, as well as a sample in the log.
+                self.changed.insert(subject);
+                true
             }
+        };
+        if added {
+            let learnt_s = sample.observed_s;
+            self.unsaved.push(Logged { subject, witness, band, sample, learnt_s });
         }
     }
 
@@ -550,13 +642,20 @@ impl Knowledge {
             }
             for series in &part.series {
                 let file = self.files.entry(subject).or_default();
-                match file.series.iter_mut().find(|s| s.witness == series.witness && s.band == series.band) {
-                    Some(held) => held.absorb(series),
-                    None => {
-                        let mut taken = series.clone();
-                        taken.lineage.extend(hop);
-                        file.series.push(taken);
-                    }
+                let (taken, lineage) =
+                    match file.series.iter_mut().find(|s| s.witness == series.witness && s.band == series.band) {
+                        Some(held) => (held.absorb(series), held.lineage.clone()),
+                        None => {
+                            let mut taken = series.clone();
+                            taken.lineage.extend(hop);
+                            let lineage = taken.lineage.clone();
+                            file.series.push(taken);
+                            (series.samples().to_vec(), lineage)
+                        }
+                    };
+                for sample in taken {
+                    let learnt_s = learnt_s(&lineage, sample.observed_s);
+                    self.unsaved.push(Logged { subject, witness: series.witness, band: series.band, sample, learnt_s });
                 }
             }
             self.refresh(subject);
@@ -588,6 +687,7 @@ impl Knowledge {
     }
 
     fn refresh(&mut self, subject: Subject) {
+        self.changed.insert(subject);
         if let Some(belief) = self.files.get(&subject).and_then(|f| f.believe(subject, self.owner)) {
             self.beliefs.insert(subject, belief);
         }
@@ -653,7 +753,7 @@ impl Entry {
 /// Reports drain a backlog, so the sender has to remember how far it has got with each
 /// recipient. The key is the recipient's ship id, `0` for a broadcast — what was shouted to
 /// nobody in particular is its own backlog.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Reporting {
     told: BTreeMap<i64, f64>,
 }
@@ -1248,6 +1348,47 @@ mod tests {
         copy.absorb(&delta);
         assert_eq!(copy.own_series(star, Band::V).unwrap().len(), 6);
         assert_eq!(copy, held, "and the copy is the original");
+    }
+
+    /// What is written down is files without their samples and samples as log rows, and the two
+    /// together rebuild the same knowledge — the map after a restart is the map before it.
+    #[test]
+    fn what_is_written_down_rebuilds_the_same_knowledge() {
+        let star = star_id(70);
+        let mut probe = Knowledge::new(Witness(2));
+        for t in 1..=3 {
+            probe.measured(star, Witness(2), Band::V, Sample { observed_s: t as f64, deficit: 0.1, sigma: 0.01 });
+        }
+        let mut k = Knowledge::new(Witness(1));
+        for s in looks(1, DVec3::new(0.0, 0.0, 6.0), 6, 0.0) {
+            k.sighted(star, s);
+        }
+        k.name_it(star, "Kettle", 1.0);
+        let (body, _) = planet(star, "one");
+        k.found_planet(star, body, 0.7, 1.0, 2.0);
+        for t in 10..=14 {
+            k.measured(star, Witness(1), Band::K, Sample { observed_s: t as f64, deficit: 0.0, sigma: 0.01 });
+        }
+        k.receive(&probe.report(f64::NEG_INFINITY, 4.0), 9.0);
+
+        let (files, logs) = k.take_changes();
+        assert_eq!(files.len(), 2, "the star and its planet");
+        assert!(files.iter().all(|(_, f)| f.series().iter().all(|s| s.is_empty())), "samples are logged apart");
+        assert_eq!(logs.len(), 5 + 3, "our five, and the probe's three");
+        let relayed = logs.iter().find(|l| l.witness == Witness(2)).unwrap();
+        assert_eq!(relayed.learnt_s, 9.0, "a relayed sample is learnt when it arrived");
+
+        let back = Knowledge::restore(Witness(1), files, logs);
+        assert_eq!(back, k, "the same knowledge");
+        assert_eq!(back.name_of(star).as_deref(), Some("Kettle"));
+
+        let mut back = back;
+        let (files, logs) = back.take_changes();
+        assert!(files.is_empty() && logs.is_empty(), "nothing restored counts as changed");
+        back.measured(star, Witness(1), Band::K, Sample { observed_s: 20.0, deficit: 0.0, sigma: 0.01 });
+        let (files, logs) = back.take_changes();
+        assert!(files.is_empty(), "a sample on an existing series changes only the log");
+        assert_eq!(logs.len(), 1);
     }
 
     #[test]

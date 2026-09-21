@@ -43,14 +43,14 @@ pub struct Delivery {
     pub strength: f32,
 }
 
-/// Create whatever partitions the range needs, on both partitioned tables.
+/// Create whatever partitions the range needs, on every partitioned table.
 ///
 /// Has to run ahead of any write into the range: a row with no partition is an error, not a
 /// table that grows one. At the design rate a partition is four and a half real days, so this
 /// belongs on a schedule rather than at install.
 pub async fn ensure_partitions(client: &Client, from_t: i64, to_t: i64) -> Result<i32, Error> {
     let mut made = 0;
-    for table in ["events", "deliveries"] {
+    for table in ["events", "deliveries", "lc_samples"] {
         let row = client
             .query_one("SELECT lc_ensure_partitions($1, $2, $3)", &[&table, &from_t, &to_t])
             .await?;

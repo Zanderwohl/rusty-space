@@ -189,6 +189,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             craft.why,
                         );
                     }
+                    // After the craft, whose instruments `adopt` has just put back: this fills in
+                    // what each of them knew.
+                    let files = lc_store::knowledge::load_files(&client).await?;
+                    let samples = lc_store::knowledge::load_samples(&client).await?;
+                    for problem in server.adopt_knowledge(&files, &samples) {
+                        eprintln!("WARNING: knowledge not restored: {problem}");
+                    }
+                    eprintln!("resumed {} files and {} samples of knowledge", files.len(), samples.len());
                     let marks = lc_store::reading::load(&client).await?;
                     if !marks.is_empty() {
                         eprintln!("resumed {} bookmarks", marks.len());
@@ -292,6 +300,13 @@ async fn checkpoint(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let taken = server.checkpoint();
     lc_store::ships::save_ships(client, &taken.ships).await?;
+    // What changed since the last checkpoint: files touched, samples taken. The partitions the
+    // samples land in exist, because the journal keeps them ready ahead of the clock every tick
+    // and nothing is learnt in the future. Drained before it is written, so a failed write loses
+    // what was learnt in these twenty seconds; the files come back the next time they change.
+    let remembered = server.take_knowledge();
+    lc_store::knowledge::save_files(client, &remembered.files).await?;
+    lc_store::knowledge::save_samples(client, &remembered.samples).await?;
     lc_store::ships::save_shard(client, shard_id, lc_store::ships::Shard {
         now_t: taken.now_t,
         next_ship: taken.next_ship,

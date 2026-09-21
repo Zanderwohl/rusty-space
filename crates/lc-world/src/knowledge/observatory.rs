@@ -137,7 +137,7 @@ impl Station {
 }
 
 /// What one instrument is committed to, and how far through it it is.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct Observatory {
     pub duty: Duty,
     /// Coordinate seconds a stare integrates for before it records a sample.

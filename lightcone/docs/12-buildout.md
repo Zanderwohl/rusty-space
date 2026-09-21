@@ -350,6 +350,8 @@ for how an order becomes an event.
 
 ### 11c — Persistence
 
+**Built.** Save format 6; schema step `0010_knowledge`. A checkpoint writes only what changed.
+
 **Before:** 11b.
 
 **Deliver:** a row per `(craft, subject)` holding the file as a versioned blob; an append-only,

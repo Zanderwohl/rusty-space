@@ -74,6 +74,20 @@ A blob rather than columns because the file is what is read and written, whole, 
 shape will keep changing for a while; a format version on the row lets old files be read after
 it does, exactly as `lc_ships` does for motion.
 
+### As built
+
+| what | where |
+|---|---|
+| files | `lc_knowledge`, one row per craft per subject, postcard with `archive::KNOWLEDGE_FORMAT` — `sql/0010_knowledge.sql` |
+| samples | `lc_samples`, partitioned by **learnt** time, kept ready by the journal beside events and deliveries. Observation time is stored as the exact f64 it was stamped with: a sweep finishes a field at an instant that is not a whole microsecond |
+| duty and report marks | the ship checkpoint, `persist::Saved::instruments`, save format 6 |
+| what is written | only what changed since the last checkpoint: `Knowledge::take_changes` hands over the files touched, without their samples, and the samples taken |
+
+Two things are true for now and will not stay true. **Every sample is loaded at start**, because
+nothing consumes them yet; 11d is what bounds that. And **the store is not partitioned by shard**:
+a shard loads every craft's knowledge and keeps what belongs to the craft it adopted, the same way
+it already loads every ship.
+
 ### Data modules, and fullness
 
 What a craft knows takes room aboard. A **data module** ([19-ship-fitting.md](19-ship-fitting.md))
