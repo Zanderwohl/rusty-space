@@ -181,9 +181,18 @@ picks up at once. Sampling the length at half the frequency was worse again: it 
 streamers with half a dozen broad lobes, because the thing being varied was no longer a
 streamer.
 
-`corona_frequency` is streamers per radian and is the lever that matters — halving it halves
-their number and doubles their width. Three octaves of squared ridges, not four of cubed: the
-fine octaves read as fur, and every extra power narrows the crease.
+Both fields live in `assets/textures/corona.tgraph`, baked once at load onto two 512² cubemaps
+and shared by every star: each star turns them by a rotation drawn from its seed, which is as
+distinct as the seed offset the shader used to apply and still a function of seed and direction
+alone. The noise's frequency is streamers per radian and is the lever that matters — halving it
+halves their number and doubles their width — so it is tuned in the graph now, not by a slider.
+Three octaves of squared ridges, not four of cubed: the fine octaves read as fur, and every extra
+power narrows the crease. The threads bake at sixteen bits because their sum peaks past one.
+
+Measured against the shader it replaced, around rings of directions about a star, the baked
+field's spread is within three per cent. At 512² the creases come out about nine per cent softer
+than the graph evaluated exactly, 1024² four; 512² is the choice, at three megabytes rather
+than twelve.
 
 Two things that looked like tuning and are not:
 

@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use lc_world::surface::Surface;
 use serde::Deserialize;
 
-use crate::procedural::{Bakes, Shape, placeholder};
+use crate::procedural::{Bakes, Shape, Target, placeholder};
 
 const MANIFEST: &str = "textures/surfaces.lcsurfaces";
 
@@ -102,7 +102,7 @@ impl FromWorld for Surfaces {
         let manifest = world.resource::<AssetServer>().load(MANIFEST);
         let flat = world
             .resource_mut::<Assets<Image>>()
-            .add(placeholder(Shape::Cube(1)));
+            .add(placeholder(Target::new(Shape::Cube(1))));
         Self {
             manifest,
             flat,
@@ -123,7 +123,7 @@ impl Surfaces {
         if let Some(image) = self.by_body.get(name) {
             return image.clone();
         }
-        let image = images.add(placeholder(Shape::Cube(FACE)));
+        let image = images.add(placeholder(Target::new(Shape::Cube(FACE))));
         self.by_body.insert(name.to_owned(), image.clone());
         self.unrouted.push((name.to_owned(), class, image.clone()));
         image
@@ -156,7 +156,7 @@ fn route(
         match manifest.graph_for(&name, class) {
             Some(path) => {
                 let graph = assets.load(format!("textures/{path}"));
-                bakes.request(graph, seed_of(&name), Shape::Cube(FACE), image);
+                bakes.request(graph, seed_of(&name), Target::new(Shape::Cube(FACE)), image);
             }
             None => warn!("no surface graph for {name} or its class, {class:?}"),
         }

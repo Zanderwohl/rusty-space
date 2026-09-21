@@ -26,19 +26,23 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderAdapter, RenderDevice, RenderQueue};
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::population_material::PopulationMaterial;
+use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use texture_graph_core::{CUBE_FACES, EvalCtx, Graph, LoadError, load_from_str};
 use texture_graph_gpu::{Baker, DeviceCtx, ScalarFormat, ScalarImage, read_scalar_volume_async};
 
 /// Where the population grain graph lives under the asset root.
 const POPULATION_GRAIN: &str = "textures/population_grain.tgraph";
 
+const CORONA: &str = "textures/corona.tgraph";
+
+/// Texels along a corona cubemap face's edge. A corona samples a band about the great circle
+/// facing the viewer, about two thousand texels round, with its finest octave some five texels
+/// a cycle.
+const CORONA_FACE: u32 = 512;
+
 /// Texels along each edge of the grain volume: eight per grain across
 /// [`em_render::population_material::GRAIN_TILE`] grains. Two megabytes at one byte a texel.
 const GRAIN_TEXELS: u32 = 128;
-
-/// One byte a texel for every bake. Every field here is a pattern in `[0, 1]`; the population
-/// grain was compared at sixteen bits and came out identical.
-const FORMAT: ScalarFormat = ScalarFormat::R8Unorm;
 
 /// A texture graph, as the asset server delivers it.
 #[derive(Asset, TypePath, Debug)]
@@ -100,10 +104,43 @@ pub enum Shape {
     Cube(u32),
 }
 
-/// A flat image of `shape`'s kind, half-way everywhere, which every pattern here reads as no
+/// What a bake fills, and from which layer of the graph.
+#[derive(Copy, Clone, Debug)]
+pub struct Target {
+    pub shape: Shape,
+    /// One byte a texel unless a field leaves `[0, 1]`: the population grain was compared at
+    /// sixteen bits and came out identical.
+    pub format: ScalarFormat,
+    /// `None` is the graph's output. A graph can carry several fields side by side, and each is
+    /// baked on its own.
+    pub layer: Option<&'static str>,
+}
+
+impl Target {
+    pub const fn new(shape: Shape) -> Self {
+        Self {
+            shape,
+            format: ScalarFormat::R8Unorm,
+            layer: None,
+        }
+    }
+
+    pub const fn layer(self, name: &'static str) -> Self {
+        Self {
+            layer: Some(name),
+            ..self
+        }
+    }
+
+    pub const fn format(self, format: ScalarFormat) -> Self {
+        Self { format, ..self }
+    }
+}
+
+/// A flat image of `target`'s kind, half-way everywhere, which every pattern here reads as no
 /// pattern at all. What a material binds until its bake lands.
-pub fn placeholder(shape: Shape) -> Image {
-    let shape = match shape {
+pub fn placeholder(target: Target) -> Image {
+    let shape = match target.shape {
         Shape::Volume(_) => Shape::Volume(1),
         Shape::Cube(_) => Shape::Cube(1),
     };
@@ -111,10 +148,16 @@ pub fn placeholder(shape: Shape) -> Image {
         Shape::Volume(_) => 1,
         Shape::Cube(_) => CUBE_FACES as usize,
     };
-    image_of(shape, vec![128; texels])
+    let half: &[u8] = match target.format {
+        ScalarFormat::R8Unorm => &[128],
+        ScalarFormat::R16Float => &0x3800u16.to_le_bytes(),
+        ScalarFormat::R32Float => &0.5f32.to_le_bytes(),
+    };
+    image_of(Target { shape, ..target }, half.repeat(texels))
 }
 
-fn image_of(shape: Shape, bytes: Vec<u8>) -> Image {
+fn image_of(target: Target, bytes: Vec<u8>) -> Image {
+    let shape = target.shape;
     let (size, dimension) = match shape {
         Shape::Volume(n) => (
             Extent3d {
@@ -137,7 +180,11 @@ fn image_of(shape: Shape, bytes: Vec<u8>) -> Image {
         size,
         dimension,
         bytes,
-        TextureFormat::R8Unorm,
+        match target.format {
+            ScalarFormat::R8Unorm => TextureFormat::R8Unorm,
+            ScalarFormat::R16Float => TextureFormat::R16Float,
+            ScalarFormat::R32Float => TextureFormat::R32Float,
+        },
         RenderAssetUsages::RENDER_WORLD,
     );
     // A volume repeats, which the population grain depends on. A cube has no edge to repeat.
@@ -167,14 +214,14 @@ type Readback = Pin<Box<dyn Future<Output = ScalarImage> + Send>>;
 struct Request {
     graph: Handle<TextureGraph>,
     seed: u32,
-    shape: Shape,
+    target: Target,
     image: Handle<Image>,
 }
 
 struct Reading {
     /// Behind a mutex only because a resource must be `Sync` and a boxed future is not.
     readback: Mutex<Readback>,
-    shape: Shape,
+    target: Target,
     image: Handle<Image>,
 }
 
@@ -188,19 +235,18 @@ pub struct Bakes {
 }
 
 impl Bakes {
-    /// Bake `graph`'s output layer into the image behind `image`, with `seed` as the graph's
-    /// global seed.
+    /// Bake `graph` into the image behind `image`, with `seed` as the graph's global seed.
     pub fn request(
         &mut self,
         graph: Handle<TextureGraph>,
         seed: u32,
-        shape: Shape,
+        target: Target,
         image: Handle<Image>,
     ) {
         self.waiting.push(Request {
             graph,
             seed,
-            shape,
+            target,
             image,
         });
     }
@@ -220,6 +266,7 @@ fn run_bakes(
     mut images: ResMut<Assets<Image>>,
     mut populations: ResMut<Assets<PopulationMaterial>>,
     mut surfaces: ResMut<Assets<BodySurfaceMaterial>>,
+    mut skies: ResMut<Assets<RelativisticStarfieldMaterial>>,
 ) {
     let bakes = &mut *bakes;
     if bakes.baker.is_none() {
@@ -245,10 +292,10 @@ fn run_bakes(
             bakes.waiting.push(request);
             continue;
         };
-        match start(baker, graph, request.seed, request.shape) {
+        match start(baker, graph, request.seed, request.target) {
             Ok(readback) => bakes.reading.push(Reading {
                 readback: Mutex::new(readback),
-                shape: request.shape,
+                target: request.target,
                 image: request.image,
             }),
             Err(e) => warn!("a procedural texture did not bake, drawing without it: {e}"),
@@ -272,8 +319,8 @@ fn run_bakes(
         let Poll::Ready(field) = polled else {
             return true;
         };
-        debug!("baked a procedural texture: {:?}", reading.shape);
-        let _ = images.insert(&reading.image, image_of(reading.shape, field.bytes));
+        debug!("baked a procedural texture: {:?}", reading.target);
+        let _ = images.insert(&reading.image, image_of(reading.target, field.bytes));
         landed = true;
         false
     });
@@ -282,35 +329,45 @@ fn run_bakes(
         // groups that still hold a placeholder's view.
         for _ in populations.iter_mut() {}
         for _ in surfaces.iter_mut() {}
+        for _ in skies.iter_mut() {}
     }
 }
 
-fn start(baker: &mut Baker, graph: &Graph, seed: u32, shape: Shape) -> Result<Readback, String> {
-    let layer = graph
-        .output
-        .color
-        .ok_or("the graph's output has no color layer")?;
+fn start(baker: &mut Baker, graph: &Graph, seed: u32, target: Target) -> Result<Readback, String> {
+    let layer = match target.layer {
+        Some(name) => graph
+            .layers
+            .iter()
+            .find(|l| l.name == name)
+            .map(|l| l.id)
+            .ok_or(format!("the graph has no layer named {name:?}"))?,
+        None => graph
+            .output
+            .color
+            .ok_or("the graph's output has no color layer")?,
+    };
+    let format = target.format;
     let eval = EvalCtx {
         seed,
         ..EvalCtx::default()
     };
     let ctx = baker.ctx().clone();
-    let (texture, size) = match shape {
+    let (texture, size) = match target.shape {
         Shape::Volume(n) => {
             let volume = baker
-                .bake_scalar_volume(graph, layer, n, n, FORMAT, &eval)
+                .bake_scalar_volume(graph, layer, n, n, format, &eval)
                 .map_err(|e| e.to_string())?;
             (volume.texture, volume.size)
         }
         Shape::Cube(n) => {
             let cube = baker
-                .bake_scalar_cube(graph, layer, n, FORMAT, &eval)
+                .bake_scalar_cube(graph, layer, n, format, &eval)
                 .map_err(|e| e.to_string())?;
             (cube.texture, (n, n, CUBE_FACES))
         }
     };
     Ok(Box::pin(async move {
-        read_scalar_volume_async(&ctx, &texture, size, FORMAT).await
+        read_scalar_volume_async(&ctx, &texture, size, format).await
     }))
 }
 
@@ -323,14 +380,46 @@ pub struct PopulationGrain {
 impl FromWorld for PopulationGrain {
     fn from_world(world: &mut World) -> Self {
         let graph = world.resource::<AssetServer>().load(POPULATION_GRAIN);
-        let shape = Shape::Volume(GRAIN_TEXELS);
+        let target = Target::new(Shape::Volume(GRAIN_TEXELS));
         let image = world
             .resource_mut::<Assets<Image>>()
-            .add(placeholder(shape));
-        world
-            .resource_mut::<Bakes>()
-            .request(graph, EvalCtx::default().seed, shape, image.clone());
+            .add(placeholder(target));
+        world.resource_mut::<Bakes>().request(
+            graph,
+            EvalCtx::default().seed,
+            target,
+            image.clone(),
+        );
         Self { image }
+    }
+}
+
+/// The corona's two fields, baked once and shared by every star.
+#[derive(Resource)]
+pub struct Corona {
+    pub filaments: Handle<Image>,
+    pub reach: Handle<Image>,
+}
+
+impl FromWorld for Corona {
+    fn from_world(world: &mut World) -> Self {
+        let graph: Handle<TextureGraph> = world.resource::<AssetServer>().load(CORONA);
+        let cube = Target::new(Shape::Cube(CORONA_FACE));
+        // Sixteen bits for the threads: their sum peaks past one, where a byte would clip.
+        let filaments = cube.layer("filaments").format(ScalarFormat::R16Float);
+        let reach = cube.layer("reach");
+        let mut images = world.resource_mut::<Assets<Image>>();
+        let corona = Self {
+            filaments: images.add(placeholder(filaments)),
+            reach: images.add(placeholder(reach)),
+        };
+        // One seed for the bake; each star turns the result by its own. See `spin_of` in
+        // starfield.wgsl.
+        let seed = EvalCtx::default().seed;
+        let mut bakes = world.resource_mut::<Bakes>();
+        bakes.request(graph.clone(), seed, filaments, corona.filaments.clone());
+        bakes.request(graph, seed, reach, corona.reach.clone());
+        corona
     }
 }
 
@@ -342,6 +431,7 @@ impl Plugin for ProceduralTexturesPlugin {
             .init_asset_loader::<TextureGraphLoader>()
             .init_resource::<Bakes>()
             .init_resource::<PopulationGrain>()
+            .init_resource::<Corona>()
             .add_plugins(crate::surfaces::SurfacesPlugin)
             .add_systems(Update, run_bakes);
     }
@@ -350,9 +440,95 @@ impl Plugin for ProceduralTexturesPlugin {
 #[cfg(test)]
 mod tests {
     use em_render::population_material::GRAIN_TILE;
-    use texture_graph_core::{LayerKind, NoiseKernel, NoiseRange};
+    use texture_graph_core::{
+        BlendMode, FractalMode, LayerKind, Noise, NoiseDims, NoiseKernel, NoiseRange, cube_sample,
+        eval,
+    };
 
     use super::*;
+
+    fn shipped(path: &str) -> Graph {
+        let full = format!("{}/assets/{path}", env!("CARGO_MANIFEST_DIR"));
+        load_from_str(&std::fs::read_to_string(&full).unwrap())
+            .unwrap()
+            .graph
+    }
+
+    fn layer<'g>(g: &'g Graph, name: &str) -> &'g LayerKind {
+        &g.layers
+            .iter()
+            .find(|l| l.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+            .kind
+    }
+
+    fn noise<'g>(g: &'g Graph, name: &str) -> &'g Noise {
+        let LayerKind::Noise(n) = layer(g, name) else {
+            panic!("{name} is not noise")
+        };
+        n
+    }
+
+    /// starfield.wgsl's corona as it stood, which `corona.tgraph` has to stay: three octaves of
+    /// squared ridges at lacunarity 2.4 and gain 0.42, from amplitude 0.66, and a reach field on
+    /// the same scale with its own seed. Frequency 24 in graph space is the shader's 12 per
+    /// radian, because the graph samples at `dir / 2 + 1/2`.
+    #[test]
+    fn the_shipped_corona_is_the_shaders_corona() {
+        let g = shipped(CORONA);
+        let ridges = noise(&g, "ridges");
+        assert_eq!(
+            (ridges.dims, ridges.kernel, ridges.range),
+            (NoiseDims::D3, NoiseKernel::Value, NoiseRange::Unsigned)
+        );
+        assert_eq!(ridges.frequency, 24.0);
+        let f = ridges.fractal;
+        assert_eq!(
+            (f.octaves, f.lacunarity, f.gain, f.mode, f.normalize),
+            (3, 2.4, 0.42, FractalMode::Ridged, false)
+        );
+
+        let reach = noise(&g, "reach");
+        assert_eq!(
+            (
+                reach.kernel,
+                reach.range,
+                reach.frequency,
+                reach.fractal.octaves
+            ),
+            (NoiseKernel::Value, NoiseRange::Unsigned, 24.0, 1)
+        );
+        assert_ne!(
+            reach.seed_offset, ridges.seed_offset,
+            "length and brightness must not be one field"
+        );
+
+        let LayerKind::Mix(m) = layer(&g, "filaments") else {
+            panic!("filaments is not a mix")
+        };
+        assert_eq!(m.mode, BlendMode::Blend);
+        let ridges_id = g.layers.iter().find(|l| l.name == "ridges").unwrap().id;
+        let filaments_id = g.layers.iter().find(|l| l.name == "filaments").unwrap().id;
+        let ctx = EvalCtx::default();
+        let mut peak = 0.0f32;
+        for face in 0..CUBE_FACES {
+            for k in 0..64 {
+                let s = cube_sample(face, (k % 8) as f32 / 7.0, (k / 8) as f32 / 7.0);
+                let r = eval::evaluate(&g, ridges_id, s, &ctx).l;
+                let got = eval::evaluate(&g, filaments_id, s, &ctx).l;
+                assert!(
+                    (got - 0.66 * r).abs() < 1e-4,
+                    "filaments at {s:?}: {got}, against 0.66 × {r}"
+                );
+                peak = peak.max(got);
+            }
+        }
+        // Why the threads bake at sixteen bits.
+        assert!(
+            peak <= 0.66 * (1.0 + 0.42 + 0.42 * 0.42) + 1e-4,
+            "filaments peak at {peak}"
+        );
+    }
 
     /// What the shader assumes of the shipped grain, which an edit in the editor could break
     /// without anything else noticing: the volume must tile on the unit cube, with as many

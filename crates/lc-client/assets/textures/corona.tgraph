@@ -1,0 +1,92 @@
+TextureGraphFile(
+    format_version: 3,
+    metadata: FileMetadata(
+        name: "Star corona",
+        description: Some("Two fields, baked one at a time: `filaments`, the brightness of the radial threads, which peaks near 1.05; and `reach`, in [0, 1], how far each streamer goes. The client samples both on the direction out from the star, turned by a rotation drawn from the star\'s seed, so one bake serves every star. Baked on a sphere, so only Color, Noise, Coordinate, Mix, MinMax and Wave may appear."),
+        authors: [
+            "Alexander Lowry",
+        ],
+        modified: "2026-09-21T00:00:00Z",
+        written_by: "texture-graph-core 36960c5",
+    ),
+    graph: Graph(
+        layers: [
+            Layer(
+                id: 2,
+                name: "ridges",
+                kind: Noise(Noise(
+                    dims: D3,
+                    seed_offset: 1,
+                    frequency: 24.0,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (0, 0, 0),
+                    fractal: Fractal(
+                        octaves: 3,
+                        lacunarity: 2.4,
+                        gain: 0.42,
+                        mode: Ridged,
+                        normalize: false,
+                    ),
+                )),
+            ),
+            Layer(
+                id: 3,
+                name: "black",
+                kind: Color(Oklch(
+                    l: 0.0,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 4,
+                name: "filaments",
+                kind: Mix(Mix(
+                    a: Some(3),
+                    b: Some(2),
+                    mode: Blend,
+                    factor: Const(0.66),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 5,
+                name: "reach",
+                kind: Noise(Noise(
+                    dims: D3,
+                    seed_offset: 2,
+                    frequency: 24.0,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (0, 0, 0),
+                    fractal: Fractal(
+                        octaves: 1,
+                        lacunarity: 2.0,
+                        gain: 0.5,
+                        mode: Standard,
+                        normalize: true,
+                    ),
+                )),
+            ),
+        ],
+        list_order: [
+            2,
+            3,
+            4,
+            5,
+        ],
+        canvases: {},
+        output: Output(
+            color: Some(4),
+            roughness: Const(0.5),
+            metallic: Const(0.0),
+            normal: None,
+        ),
+        params: {},
+        next_id: 6,
+    ),
+)
