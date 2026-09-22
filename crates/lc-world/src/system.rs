@@ -95,6 +95,12 @@ pub struct LocalSystem {
     pub populations: Vec<crate::population::Population>,
     /// Where the system's barycenter sits, light-years from the world origin.
     pub origin_ly: DVec3,
+    /// The normal of the plane the planets and belts orbit in. What a player means by this
+    /// system's ecliptic, and what the map's plane option measures against.
+    pub pole: DVec3,
+    /// Which way the star spins, a few degrees off [`LocalSystem::pole`]. Only the star's own
+    /// orientation: the plane is the planets'.
+    pub star_spin: DVec3,
     sim: System,
     primary: BodyIndex,
     /// Everything here a ship can be sent to, ordered outward. Built once: the order comes
@@ -123,6 +129,8 @@ impl LocalSystem {
             star_name: star.provenance.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get())),
             populations,
             origin_ly: star.position_ly,
+            pole: star.system_pole(),
+            star_spin: star.spin_axis(),
             sim,
             primary,
             inventory: Vec::new(),

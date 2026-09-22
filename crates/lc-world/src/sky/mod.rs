@@ -106,6 +106,23 @@ impl CatalogueStar {
     pub fn seed(&self) -> u64 {
         rng::hash(&[self.id.get(), 0x5147_4e59])
     }
+
+    /// The normal of the plane this system's planets and belts orbit in.
+    ///
+    /// `+Z` for Sol, whose bodies are fitted against JPL in the ecliptic of J2000, and the
+    /// generated pole for everything else. The one place that difference is decided: reading
+    /// `generate::pole_for` directly gives Sol a random plane its planets do not lie in.
+    pub fn system_pole(&self) -> DVec3 {
+        match self.provenance.name.as_deref() {
+            Some(crate::system::SOL) => DVec3::Z,
+            _ => generate::pole_for(self.seed()),
+        }
+    }
+
+    /// Which way the star itself spins: [`CatalogueStar::system_pole`] tilted a few degrees.
+    pub fn spin_axis(&self) -> DVec3 {
+        generate::spin_axis_for(self.system_pole(), self.seed())
+    }
 }
 
 /// A source of stars.

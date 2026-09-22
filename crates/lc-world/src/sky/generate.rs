@@ -76,6 +76,28 @@ pub fn pole_for(seed: u64) -> DVec3 {
     DVec3::new(r * phi.cos(), r * phi.sin(), z)
 }
 
+/// How far a star's spin axis can lie from the plane its planets orbit in.
+///
+/// The Sun's is 7.25 degrees off the ecliptic, so a star spinning exactly with its planets
+/// would be the odd one out. Not a measured distribution: one solar system's worth of evidence
+/// does not have a spread in it.
+pub const SPIN_TILT_MAX_RAD: f64 = 12.0 * std::f64::consts::PI / 180.0;
+
+/// A star's own spin axis: its system's pole, tilted by a few degrees.
+///
+/// Deterministic from the seed, because this is where a star's surface features sit and a spin
+/// axis that moved between loads would take its sunspots with it.
+pub fn spin_axis_for(system_pole: DVec3, seed: u64) -> DVec3 {
+    let h = rng::hash(&[seed, 0x5891]);
+    // Uniform over the cap rather than over the angle: the latter crowds the pole.
+    let cos_max = SPIN_TILT_MAX_RAD.cos();
+    let cos_tilt = cos_max + rng::uniform(h) * (1.0 - cos_max);
+    let sin_tilt = (1.0 - cos_tilt * cos_tilt).max(0.0).sqrt();
+    let phi = rng::uniform(rng::mix(h)) * std::f64::consts::TAU;
+    let (u, v) = system_pole.any_orthonormal_pair();
+    (system_pole * cos_tilt + (u * phi.cos() + v * phi.sin()) * sin_tilt).normalize_or(system_pole)
+}
+
 /// Generate the system around one catalogue star.
 pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
     let seed = star.seed();
@@ -424,6 +446,38 @@ mod tests {
 
     fn build(system: &GeneratedSystem) -> System {
         System::from_contents(&system.to_universe()).expect("generated system must load")
+    }
+
+    /// Sol's planets are fitted against JPL in the ecliptic of J2000, so its plane is `+Z` and
+    /// not the pole its seed would have given it.
+    #[test]
+    fn sol_orbits_the_ecliptic_and_everything_else_orbits_its_own_pole() {
+        let mut sol = sun_like();
+        sol.provenance.name = Some(crate::system::SOL.to_string());
+        assert_eq!(sol.system_pole(), DVec3::Z);
+
+        let other = sun_like();
+        assert_eq!(other.system_pole(), pole_for(other.seed()));
+        assert!(other.system_pole().dot(DVec3::Z).abs() < 0.999, "a generated pole that is +Z");
+    }
+
+    /// A star spins near its planets' plane but not exactly in it, and the same star always
+    /// spins the same way -- its surface features are pinned to this.
+    #[test]
+    fn a_star_spins_near_its_planets_plane_but_not_in_it() {
+        let mut tilted = 0;
+        for key in 0..200u64 {
+            let pole = pole_for(key);
+            let axis = spin_axis_for(pole, key);
+            assert!((axis.length() - 1.0).abs() < 1.0e-12, "{key}: not a unit vector");
+            let tilt = axis.dot(pole).clamp(-1.0, 1.0).acos();
+            assert!(tilt <= SPIN_TILT_MAX_RAD + 1.0e-12, "{key}: {}° off", tilt.to_degrees());
+            if tilt > 1.0e-6 {
+                tilted += 1;
+            }
+            assert_eq!(axis, spin_axis_for(pole, key), "{key}: not reproducible");
+        }
+        assert!(tilted > 190, "only {tilted} of 200 stars are tilted at all");
     }
 
     #[test]
