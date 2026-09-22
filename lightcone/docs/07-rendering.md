@@ -444,8 +444,13 @@ actually sees, would be the obvious first one.
 
 **Cost: 0.076 ms per march step per frame**, measured on an M3 Pro at 1280x720 with two
 populations each covering the sky. Thirty-two steps is about 2.4 ms and is within a mean of one
-level in 255 of a ninety-six-step render. It scales with pixels and nothing else, so the same
-view at 4K wants a half-resolution pass rather than a smaller step count.
+level in 255 of a ninety-six-step render. It scales with pixels and nothing else, so the shells
+are marched at **half resolution** by a camera of their own and added back into the sky before
+bloom and the tone map (`lc-client/src/haze.rs`). The shape is soft by construction and the
+bilinear upsample is invisible; a Metal trace put the pass at 1.25 ms full size and 0.56 ms at
+half, composite included. The composite sits at the stars' depth with the depth test on, so a
+body in front still hides the haze behind it. Rings are sheets and stay full size in the sky
+pass.
 
 ### Resolved bodies
 

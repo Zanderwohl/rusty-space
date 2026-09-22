@@ -25,6 +25,7 @@ pub mod dev;
 pub mod entry;
 pub mod envelope;
 pub mod faces;
+pub mod haze;
 pub mod hud;
 pub mod hull;
 pub mod input;

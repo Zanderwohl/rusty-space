@@ -581,6 +581,8 @@ pub fn spawn(
             // An Oort shell is a hundred thousand units across and the ship is inside it;
             // its bounds say nothing useful about whether it is on screen.
             NoFrustumCulling,
+            // Marched at half resolution by its own camera and added back in. See `haze`.
+            bevy::camera::visibility::RenderLayers::layer(crate::haze::HAZE_LAYER),
             EnvelopeMesh(shells.len()),
         ));
         shells.push(Shell {
