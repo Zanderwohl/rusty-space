@@ -76,6 +76,9 @@ pub struct DevEntry {
     pub after_frames: u32,
     /// How many consecutive frames to photograph. More than one for diagnosing a flicker.
     pub burst: u32,
+    /// Frames to time after [`DevEntry::after_frames`] of warm-up, printing percentiles and
+    /// quitting. Presents without vsync, or every frame would measure the display.
+    pub bench: Option<u32>,
     /// A menu page to open on arrival. The only way to photograph one that draws over the
     /// root, which an action running on entering the sky cannot reach.
     pub menu_page: Option<crate::ui::MenuPage>,
@@ -395,7 +398,6 @@ pub(crate) fn pin_map_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
     ui.map.orbit.set_distance_m(au * em_map::snapshot::M_PER_AU);
 }
 
-/// Photograph the sky through the real pipeline, then quit.
 /// `shot.png` and 2 becomes `shot.2.png`.
 fn numbered(path: &str, index: u32) -> String {
     match path.rsplit_once('.') {
@@ -404,6 +406,7 @@ fn numbered(path: &str, index: u32) -> String {
     }
 }
 
+/// Photograph the sky through the real pipeline, then quit.
 pub(crate) fn photograph(
     mut commands: Commands,
     dev: Res<DevEntry>,
@@ -429,6 +432,47 @@ pub(crate) fn photograph(
     }
 }
 
+
+/// Take the display's refresh out of the frame time, for `--bench`.
+pub(crate) fn unlock_present(dev: Res<DevEntry>, mut window: Single<&mut Window>) {
+    if dev.bench.is_some() {
+        window.present_mode = bevy::window::PresentMode::AutoNoVsync;
+    }
+}
+
+/// Time frames through the real pipeline, then quit.
+///
+/// Real time rather than virtual, which Bevy clamps. Rendering is pipelined, so a frame is as
+/// long as the slower of the main world and the render world.
+pub(crate) fn bench(
+    dev: Res<DevEntry>,
+    time: Res<Time<Real>>,
+    mut frames: Local<u32>,
+    mut samples: Local<Vec<f64>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let Some(wanted) = dev.bench else { return };
+    *frames += 1;
+    if *frames <= dev.after_frames {
+        return;
+    }
+    samples.push(time.delta_secs_f64() * 1e3);
+    if samples.len() < wanted as usize {
+        return;
+    }
+    samples.sort_by(f64::total_cmp);
+    let at = |q: f64| samples[((samples.len() - 1) as f64 * q).round() as usize];
+    let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+    println!(
+        "bench: {} frames  mean {mean:.2} ms  p50 {:.2}  p95 {:.2}  p99 {:.2}  max {:.2}",
+        samples.len(),
+        at(0.5),
+        at(0.95),
+        at(0.99),
+        at(1.0),
+    );
+    exit.write(AppExit::Success);
+}
 
 #[cfg(test)]
 mod tests {

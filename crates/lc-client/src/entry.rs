@@ -150,6 +150,7 @@ pub fn parse(args: &[String]) -> Entry {
         observe_immediately: !stay_in_menu
             && (flag("--observe")
                 || flag("--shot")
+                || flag("--bench")
                 || flag("--at")
                 || flag("--station")
                 || flag("--demo")),
@@ -183,6 +184,7 @@ pub fn parse(args: &[String]) -> Entry {
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),
+        bench: value(args, "--bench"),
         menu_page,
         // The password form is the one egui surface in the menu, and it is opened by a button
         // rather than by a page, so it needs its own way in to be photographed.

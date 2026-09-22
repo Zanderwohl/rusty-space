@@ -282,8 +282,12 @@ impl Plugin for MapPlugin {
             // whenever the ship was under way.
             .add_systems(
                 Update,
-                (survey, resize, place).chain().in_set(Stage::Scene).after(crate::app::Placed),
-            );
+                (survey, resize, place, switch_camera)
+                    .chain()
+                    .in_set(Stage::Scene)
+                    .after(crate::app::Placed),
+            )
+            .add_systems(OnExit(crate::app::AppState::InGame), hide);
     }
 }
 
@@ -336,6 +340,8 @@ fn setup(
         Camera {
             // Before the window camera, whose frame shows what this one drew.
             order: -1,
+            // Until something shows it: see `switch_camera`.
+            is_active: false,
             clear_color: ClearColorConfig::Custom(Color::BLACK),
             ..default()
         },
@@ -344,6 +350,19 @@ fn setup(
         Tonemapping::None,
         Transform::default(),
     ));
+}
+
+/// Render the map only while something shows it. Only the game does, and `shown` is set from
+/// its interface pass, so the menu and the loading screen used to render one nobody saw.
+fn switch_camera(map: Res<Map>, mut camera: Single<&mut Camera, With<MapCamera>>) {
+    if camera.is_active != map.shown {
+        camera.is_active = map.shown;
+    }
+}
+
+/// `shown` is only ever set, by the game's interface pass, so leaving the game clears it.
+fn hide(mut map: ResMut<Map>) {
+    map.shown = false;
 }
 
 fn target_image(size: UVec2) -> Image {
@@ -769,6 +788,11 @@ pub fn tube_target(scale: f32, rad_per_px: f32, distance: f32, max_fraction: f32
     }
 }
 
+/// How far a line's width may drift before its material is rewritten: a few hundredths of a
+/// pixel on a line a pixel or two wide. Every write re-prepares the material and re-specializes
+/// its entity, and writing all of them every frame was half of a 21 ms frame.
+const THICKNESS_TOLERANCE: f32 = 0.03;
+
 #[allow(clippy::too_many_arguments)]
 fn set_thickness(
     materials: &mut Assets<BodyWireframeMaterial>,
@@ -779,8 +803,14 @@ fn set_thickness(
     max_fraction: f32,
     width_px: f32,
 ) {
+    let target = tube_target(scale, rad_per_px, distance, max_fraction, width_px);
+    if materials.get(&material.0).is_none_or(|m| {
+        (m.target_tube_radius - target).abs() <= m.target_tube_radius * THICKNESS_TOLERANCE
+    }) {
+        return;
+    }
     let Some(mut asset) = materials.get_mut(&material.0) else { return };
-    asset.target_tube_radius = tube_target(scale, rad_per_px, distance, max_fraction, width_px);
+    asset.target_tube_radius = target;
 }
 
 fn spawn_scene(
