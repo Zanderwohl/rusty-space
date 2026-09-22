@@ -500,14 +500,25 @@ solid. The band warp has to stay well under the band spacing — at a quarter of
 perturbing the bands and starts destroying them, and the planet reads as blobs.
 
 **The pattern is a texture graph, baked onto a cubemap.** `assets/textures/surfaces.lcsurfaces`
-routes each class to a graph under `textures/surfaces/`, and a body named there to a graph of its
-own — so an Earth that looks like Earth, without being a map of it, is a file and a line. The
-client bakes a body's graph the first time the body is resolved, with the body's name as the
-seed, into six 512² single-channel faces, and keeps it for the session. The graph is sampled on
-the sphere, so what it may use is limited to what means the same thing there: Color, Noise,
-Coordinate, Mix, MinMax and Wave. The shipped class graphs are the two families above expressed
-as graphs, and a test holds each to the formula the shader used to evaluate, so only the noise
-underneath them is new. `src/surfaces.rs` is the routing; `src/procedural.rs` the bake.
+routes each class to a graph under `textures/surfaces/`. The client bakes a body's graph the
+first time the body is resolved, with the body's name as the seed, into six 512² single-channel
+faces, and keeps it for the session. The shipped class graphs are the two families above
+expressed as graphs, and a test holds each to the formula the shader used to evaluate, so only
+the noise underneath them is new. `src/surfaces.rs` is the routing; `src/procedural.rs` the bake.
+
+**A body can have a world of its own.** One named under `[bodies]` takes that graph in color, and
+its color replaces the class's pattern and palette; one named under `[clouds]` has a second
+graph's color drawn over the surface with its alpha as the cover. Both bake into six 1024² sRGB
+faces. The graphs under `textures/worlds/` are types of planet — an earthlike, a marslike and an
+earthlike cloud deck — rather than maps, and the bundled system's Earth and Mars wear them until
+something generates surfaces of its own. The clouds are painted on the surface, not a shell above
+it, and turn with it.
+
+Any graph here is sampled on the sphere, so it may use only what means the same thing there:
+Color, Noise, Coordinate, Mix, MinMax and Wave; a Map, whose palette texture-graph bakes on a
+plane beside the faces because it is looked up by value; and a passthrough Transform set to
+Extend, whose map texture-graph pushes down onto the noise beneath it. A normal output is not
+baked.
 
 The classification also supplies a per-body albedo, which replaces the flat 0.3 the photometry
 had been using. Ice reflects six times what bare rock does.
@@ -1072,8 +1083,11 @@ Two things that only became clear once it was implemented:
   than the rest — the catalogue puts the Sun about an astronomical unit away, and it outshines
   a star four light-years off by some thirty-six stops. Letting the brightest couple of percent
   clip is what a star map does anyway, and it is why daylight hides the sky.
+- **A resolved surface has a window of its own, five stops wide.** At a point's two and a
+  half, an ocean four stops under the clouds over it was black, and so were Mars's dark
+  provinces. The width is a look, not a measurement.
 - **Below the window, a point source is small rather than black.** The two-or-three-stop
-  window is for surface brightness. A star field spans far more than that, so a shaded value
+  window is for a point's brightness. A star field spans far more than that, so a shaded value
   carries its true signed offset from the reference, and the renderer maps that to size across
   about fourteen stops while color stays inside the window.
 

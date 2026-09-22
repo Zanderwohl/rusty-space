@@ -1,9 +1,10 @@
 // A resolved body's surface.
 //
 // The pattern is a texture graph baked onto a cubemap -- see lc-client's surfaces module for
-// which graph -- and the palette is the body's class's, from lc_world::surface. The cubemap is
+// which graph -- and the palette is the body's class's, from lc_world::surface. A body with a
+// graph of its own has a color cubemap instead, and may have a cloud deck. Every cubemap is
 // sampled on the body-fixed direction, which is what the mesh's local position already is, so
-// the pattern turns with the body and does not swim with the camera.
+// the surface turns with the body and does not swim with the camera.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -29,7 +30,7 @@ struct BodySurfaceUniform {
     light: vec4<f32>,
     /// World direction to the star. `w` is the ambient floor on the night side.
     to_star: vec4<f32>,
-    /// `(unused, contrast, unused, unused)`.
+    /// `(color, contrast, clouds, unused)`: whether the color and cloud cubemaps are drawn.
     params: vec4<f32>,
     /// Starlight the surface reflects, as linear display light before the tone map.
     reflected: vec4<f32>,
@@ -45,6 +46,8 @@ const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: BodySurfaceUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var pattern: texture_cube<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var pattern_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var color: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var clouds: texture_cube<f32>;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -64,7 +67,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let contrast = material.params.y;
     let surface = textureSample(pattern, pattern_sampler, in.local_direction).r;
     let t = mix(0.5, surface, contrast);
-    let albedo = mix(material.dark.rgb, material.light.rgb, t);
+    var albedo = mix(material.dark.rgb, material.light.rgb, t);
+    let own = textureSample(color, pattern_sampler, in.local_direction).rgb;
+    let deck = textureSample(clouds, pattern_sampler, in.local_direction);
+    albedo = mix(albedo, own, material.params.x);
+    albedo = mix(albedo, deck.rgb, deck.a * material.params.z);
 
     // Lambert, with a soft terminator. A hard one is a straight line across the disc and reads
     // as a cut rather than as a horizon.

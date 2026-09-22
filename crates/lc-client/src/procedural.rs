@@ -29,7 +29,9 @@ use em_render::plume_material::PlumeMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use texture_graph_core::{CUBE_FACES, EvalCtx, Graph, LoadError, load_from_str};
-use texture_graph_gpu::{Baker, DeviceCtx, ScalarFormat, ScalarImage, read_scalar_volume_async};
+use texture_graph_gpu::{
+    Baker, DeviceCtx, ScalarFormat, read_rgba8_layers_async, read_scalar_volume_async,
+};
 
 /// Where the population grain graph lives under the asset root.
 const POPULATION_GRAIN: &str = "textures/population_grain.tgraph";
@@ -113,13 +115,21 @@ pub enum Shape {
     Cube(u32),
 }
 
+/// What each texel holds.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Format {
+    /// One byte a texel unless a field leaves `[0, 1]`: the population grain was compared at
+    /// sixteen bits and came out identical.
+    Scalar(ScalarFormat),
+    /// The graph's color output, sRGB with straight alpha. On a sphere only.
+    Color,
+}
+
 /// What a bake fills, and from which layer of the graph.
 #[derive(Copy, Clone, Debug)]
 pub struct Target {
     pub shape: Shape,
-    /// One byte a texel unless a field leaves `[0, 1]`: the population grain was compared at
-    /// sixteen bits and came out identical.
-    pub format: ScalarFormat,
+    pub format: Format,
     /// `None` is the graph's output. A graph can carry several fields side by side, and each is
     /// baked on its own.
     pub layer: Option<&'static str>,
@@ -129,7 +139,7 @@ impl Target {
     pub const fn new(shape: Shape) -> Self {
         Self {
             shape,
-            format: ScalarFormat::R8Unorm,
+            format: Format::Scalar(ScalarFormat::R8Unorm),
             layer: None,
         }
     }
@@ -142,12 +152,22 @@ impl Target {
     }
 
     pub const fn format(self, format: ScalarFormat) -> Self {
-        Self { format, ..self }
+        Self {
+            format: Format::Scalar(format),
+            ..self
+        }
+    }
+
+    pub const fn color(self) -> Self {
+        Self {
+            format: Format::Color,
+            ..self
+        }
     }
 }
 
 /// A flat image of `target`'s kind, half-way everywhere, which every pattern here reads as no
-/// pattern at all. What a material binds until its bake lands.
+/// pattern at all; a color is a transparent gray. What a material binds until its bake lands.
 pub fn placeholder(target: Target) -> Image {
     let shape = match target.shape {
         Shape::Volume(_) => Shape::Volume(1),
@@ -158,9 +178,10 @@ pub fn placeholder(target: Target) -> Image {
         Shape::Cube(_) => CUBE_FACES as usize,
     };
     let half: &[u8] = match target.format {
-        ScalarFormat::R8Unorm => &[128],
-        ScalarFormat::R16Float => &0x3800u16.to_le_bytes(),
-        ScalarFormat::R32Float => &0.5f32.to_le_bytes(),
+        Format::Scalar(ScalarFormat::R8Unorm) => &[128],
+        Format::Scalar(ScalarFormat::R16Float) => &0x3800u16.to_le_bytes(),
+        Format::Scalar(ScalarFormat::R32Float) => &0.5f32.to_le_bytes(),
+        Format::Color => &[128, 128, 128, 0],
     };
     image_of(Target { shape, ..target }, half.repeat(texels))
 }
@@ -190,9 +211,11 @@ fn image_of(target: Target, bytes: Vec<u8>) -> Image {
         dimension,
         bytes,
         match target.format {
-            ScalarFormat::R8Unorm => TextureFormat::R8Unorm,
-            ScalarFormat::R16Float => TextureFormat::R16Float,
-            ScalarFormat::R32Float => TextureFormat::R32Float,
+            Format::Scalar(ScalarFormat::R8Unorm) => TextureFormat::R8Unorm,
+            Format::Scalar(ScalarFormat::R16Float) => TextureFormat::R16Float,
+            Format::Scalar(ScalarFormat::R32Float) => TextureFormat::R32Float,
+            // The bake encodes sRGB itself, so the sampler decodes to linear.
+            Format::Color => TextureFormat::Rgba8UnormSrgb,
         },
         RenderAssetUsages::RENDER_WORLD,
     );
@@ -218,7 +241,8 @@ fn image_of(target: Target, bytes: Vec<u8>) -> Image {
     image
 }
 
-type Readback = Pin<Box<dyn Future<Output = ScalarImage> + Send>>;
+/// The texels, in the target's format.
+type Readback = Pin<Box<dyn Future<Output = Vec<u8>> + Send>>;
 
 struct Request {
     graph: Handle<TextureGraph>,
@@ -326,11 +350,11 @@ fn run_bakes(
             .unwrap()
             .as_mut()
             .poll(&mut Context::from_waker(Waker::noop()));
-        let Poll::Ready(field) = polled else {
+        let Poll::Ready(bytes) = polled else {
             return true;
         };
         debug!("baked a procedural texture: {:?}", reading.target);
-        let _ = images.insert(&reading.image, image_of(reading.target, field.bytes));
+        let _ = images.insert(&reading.image, image_of(reading.target, bytes));
         landed = true;
         false
     });
@@ -345,6 +369,27 @@ fn run_bakes(
 }
 
 fn start(baker: &mut Baker, graph: &Graph, seed: u32, target: Target) -> Result<Readback, String> {
+    let eval = EvalCtx {
+        seed,
+        ..EvalCtx::default()
+    };
+    let format = match target.format {
+        Format::Scalar(format) => format,
+        Format::Color => {
+            let (Shape::Cube(n), None) = (target.shape, target.layer) else {
+                return Err("a color bake is of a graph's output, on a sphere".into());
+            };
+            let cube = baker
+                .bake_color_cube(graph, n, &eval)
+                .map_err(|e| e.to_string())?;
+            let ctx = baker.ctx().clone();
+            return Ok(Box::pin(async move {
+                read_rgba8_layers_async(&ctx, &cube.texture, (n, n, CUBE_FACES))
+                    .await
+                    .pixels
+            }));
+        }
+    };
     let layer = match target.layer {
         Some(name) => graph
             .layers
@@ -356,11 +401,6 @@ fn start(baker: &mut Baker, graph: &Graph, seed: u32, target: Target) -> Result<
             .output
             .color
             .ok_or("the graph's output has no color layer")?,
-    };
-    let format = target.format;
-    let eval = EvalCtx {
-        seed,
-        ..EvalCtx::default()
     };
     let ctx = baker.ctx().clone();
     let (texture, size) = match target.shape {
@@ -378,7 +418,9 @@ fn start(baker: &mut Baker, graph: &Graph, seed: u32, target: Target) -> Result<
         }
     };
     Ok(Box::pin(async move {
-        read_scalar_volume_async(&ctx, &texture, size, format).await
+        read_scalar_volume_async(&ctx, &texture, size, format)
+            .await
+            .bytes
     }))
 }
 
