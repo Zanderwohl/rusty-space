@@ -216,7 +216,9 @@ anyone has identified its source — and the telescope is what turns it from a l
 **Superseded (2026-09-22):** a new ship is issued nothing at all, not even charts. It knows only
 what it looks at or is told by another craft. See
 [25-system-knowledge.md](25-system-knowledge.md). What follows is the charting office as it was
-designed and is still built, until phase 2 there removes it.
+designed and is still built, until phase 6 there removes it — the same phase that builds the
+survey which replaces it, so that a new ship is never left with neither. The office survives as a
+test and photograph fixture even then.
 
 A new ship is not issued the sky. It is issued the **charts of the volume it launched from**:
 claims from a charting office it will never meet, one hop of lineage, error growing with range,

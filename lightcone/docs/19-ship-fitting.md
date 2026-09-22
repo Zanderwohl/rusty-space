@@ -220,7 +220,7 @@ keeps the welcome's shape and puts the numbers next to what they govern.
 | `engine_thrust_n` | 7.24 × 10¹⁰ N | 1 g of the starting ship, full, per engine, so five engines give today's 5 g |
 | `drone_power_w` | 2.31 × 10¹⁹ W | one drone builds one module in a week of proper time — about 69 s of real time at the design rate |
 | `living_drain_w` | 4.43 × 10¹⁵ W | one living module drains 1 ME a century |
-| `data_per_module` | 2.1 MB | a year of a thirty-minute stare in every band: a surveyed sky's files fit several times over, and raw logs are what fill it. A craft with none still has a 1 MiB onboard store |
+| `data_per_module` | 2.95 MB | a year of a thirty-minute stare in every band: a surveyed sky's files fit several times over, and raw logs are what fill it. A craft with none still has a 1 MiB onboard store. It tracks `Band::ALL.len()`, so adding a band grows it — this was 2.1 MB when there were five |
 | `transmit_gain` | *anchored* | physical link-budget energy to stored energy; see [23-factions.md](23-factions.md#cost) |
 | `hull_density` | 50 kg/m³ | frame mass per slot, and so what growing the hull costs |
 | `slot_volume_m3` | 392 699 | |

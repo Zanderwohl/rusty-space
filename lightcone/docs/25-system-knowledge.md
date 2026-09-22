@@ -6,7 +6,10 @@ a system reads the generator. This extends the transit search in
 [24-standing-instruments.md](24-standing-instruments.md) from "there is probably a planet" to a
 body with a name, an orbit and a place in a plane that was itself worked out.
 
-Status: **design**. Nothing below is built except where it says so.
+Status: **design**. Nothing below is built except where it says so. Every claim about what exists
+was checked against the code on 2026-09-22, and the symbols named are real; where a draft of this
+document guessed wrong, the correction is in the text rather than quietly removed, because the
+wrong guess was usually "that already exists" about something that does not.
 
 ## Where it is today
 
@@ -20,6 +23,8 @@ Status: **design**. Nothing below is built except where it says so.
   generated system's planets and belts lie on `generate::pole_for(seed)`, and its star is given
   no spin axis, so the star spins about `+Z`, the map's default. The map is showing the star's
   equator, and the planets are tilted out of it. That is the bug that started this.
+- Truth already holds a good deal of what the survey below wants to measure. See *What the truth
+  has to hold first*, which lists it against the four things that are genuinely absent.
 
 ## The rule, for systems
 
@@ -35,7 +40,8 @@ Status: **design**. Nothing below is built except where it says so.
 ## Records
 
 On `Subject::Body { star, body }`, keyed by the `BodyId` the generator's key hashes to, which
-never reaches a player.
+never reaches a player — except for a body no generator made, which is *Which body a transit is*
+below.
 
 | record | holds | from |
 |---|---|---|
@@ -66,12 +72,25 @@ pub enum Orientation {
     /// Seen to transit from `toward`: the orbit's pole is perpendicular to that line of sight,
     /// somewhere on a great circle, and the body was on that line at `epoch_s`.
     EdgeOnTo { toward: DVec3 },
+    /// `pole` and `node` are in **simulation axes**, never in the system plane. Longitude
+    /// measured from the system plane's zero is a display quantity, derived at read time: the
+    /// plane is a belief drawn from these orbits, so storing a longitude in it would define
+    /// each orbit against a frame that its own value helps determine, and refining one orbit
+    /// would silently move every other one's stored number.
     Known { pole: DVec3, sigma_rad: f64, node: f64, periapsis: f64 },
 }
 ```
 
-The format bump is knowledge format 5, with a reader for the old one-number `Orbit`, and report
-format 3.
+**Frames.** Every direction in a record is in simulation axes, which is what truth and
+`position_ly` already use: right-handed, Z-up, the ecliptic of J2000. That is a storage
+convention and not a claim that a craft knows where J2000's ecliptic is — a craft knows its own
+attitude, and the axes are the arena's. Display longitudes are computed from the plane belief
+when the panel asks, which is also what keeps them stable as the plane refines.
+
+`Orbit` is changed in place. The old one-number shape gets no back-reader: the game has no
+players, so a stored knowledge file is worth less than the ceremony of keeping it, and
+`formats.rs`' readers V1 to V4 embed `Orbit` by name and would otherwise each need an `OrbitV4`
+frozen beside them. Delete those readers with the shape they read.
 
 ## How each thing is learned
 
@@ -92,6 +111,59 @@ called with it, the planet gets its letter, and the conclusion's class moves ont
   They cross at the pole, up to its sign, and the direction of motion settles the sign. A
   planet's orientation from outside is a **cooperative** measurement, which suits reports.
 
+### Which body a transit is
+
+`BodyId::of(star, key)` hashes the generator's key for the body, and a settled `Candidate` has no
+key: it has a period, a depth and an epoch found in a light curve. Nothing in the search can mint
+the `BodyId` the imaging path would use for the same planet, and a settled false positive has no
+true body at all. So:
+
+- **At settle time the shard matches the candidate's period to the system's planets** and, on a
+  match within the period's sigma, uses that planet's `BodyId`. This is a truth lookup through
+  `generate::system_for`, it happens shard-side where truth already lives, and it is the same
+  kind of read the transit search already does to generate a light curve.
+- **A candidate that matches nothing gets a `BodyId` derived from `(star, witness, period
+  bucket)`.** It is a body this craft believes in, drawn on its map, and nobody else can confirm
+  it. Two craft with the same false positive get different ids and never merge, which is correct:
+  they have no shared object to agree about.
+- The period bucket, rather than the raw period, is what makes a craft's own later transits of
+  its own false positive land on the same id.
+
+**Cross-identification** — imaging later finding the real body and having to be recognized as the
+same thing — is 22-provenance's open question, and this is where it stops being theoretical. The
+truth match above is what avoids it in the normal case. A craft that imaged a planet before
+anyone's transit settled still merges by `BodyId`, because both paths went through the truth
+lookup. The case with no answer yet is two craft merging catalogues where one holds a false
+positive at the same period as the other's real planet, and the honest outcome is that they hold
+two bodies.
+
+### The star's mass, and the ship's distance to it
+
+Everything above and in the next section needs the star's `mu` with an error, and **nothing holds
+a believed mass today**. Kepler's third law turns a period into a radius with it; the angles-only
+fit needs it as a parameter; a moon's orbit measures it. It cannot come from truth. Needed:
+
+- **A mass record on the star's subject,** with a sigma and a lineage, like a distance. First from
+  the luminosity prior, then refined once two orbits are held, then again from any moon.
+- **The ship's distance to its own star as a belief,** because without it the mass prior cannot
+  run at all. The whole chain is visible in one line, `conclusion.rs:359`:
+
+  ```rust
+  let host = belief.and_then(|b| prior.host_like(b.band, b.luminosity_w()?));
+  ```
+
+  `Belief::luminosity_w` is `Option` only because of the distance, and `Distance::from` returns
+  `Some` only for `Distance::Measured` — `Unknown` and `AtLeast` both give `None`. So no measured
+  distance means no luminosity, no `host_like`, no host mass, no Kepler radius. For a ship that
+  knows nothing, that chain is broken at the first link about its own sun.
+
+  Inside a system the distance is a parallax against the ship's own motion, short-baseline but
+  very close, and `astrometry::triangulate` already computes exactly that from bearings. It is the
+  **first** thing a new ship measures, because every other number in the system hangs off it.
+- **A transit `Conclusion` records the host mass it used.** Otherwise a craft receiving a relayed
+  period cannot turn it into the same radius the sender did, and two craft would disagree about a
+  planet's distance for a reason neither could see.
+
 ### From inside: surveying a system
 
 **The target: a few months in a system tells you what its planets are, beyond doubt.** The shard
@@ -107,13 +179,40 @@ runs at 8766 times real time (`server::TICK_US`), so a game year is a real hour:
 
 A player who parks and surveys for a quarter of an hour of real time should get tremendous
 returns, and the instrument allows it. Inside a system the major planets are the brightest things
-in the sky after the star, and a four-meter mirror resolves them outright. From 5 AU, Venus is a
-disc of about 3 arcseconds and Jupiter about 40, against a diffraction limit of 0.035. So this is
-not the transit search's statistics at the noise floor. It is looking.
+in the sky after the star, and the ship's telescope resolves them outright. The ship sensor's
+`aperture_m2` is 4.0, which `astrometry::diameter_m` makes a 2.26 m mirror, so the Rayleigh limit
+at 550 nm is 0.06 arcseconds. From 5 AU, Venus is a disc of about 3 arcseconds and Jupiter about
+40. So this is not the transit search's statistics at the noise floor. It is looking.
 
 **The duty.** A new duty, **Survey system**, revisits each body it holds about once a game hour,
 every eight ticks or so, and spends the rest of its time sweeping the space around the star for
-new ones, against the star's glare (`survey::glare` exists).
+new ones, against the star's glare (`survey::glare_radius_rad` and `survey::hidden_by` exist).
+
+**The local star is in the way, and today it hides the system.** The sweep has no special case for
+the craft's host star: `Sky::sources` iterates the whole catalogue and gives each star a flux of
+`L / 4πd²`, and at `START_OFFSET_AU` — 5 AU, about 7.9e-5 ly — the host's flux is enormous.
+`survey::hidden_by` then drops any source within `glare_radius_rad` of something brighter, which
+is `resolution_rad * sqrt(SCATTER * bright / faint)` with `SCATTER` at 1e-3, and whose own doc
+says what that means: "arcseconds around a comparable star, tens of degrees around the local sun."
+Nothing clamps brightness anywhere — `survey::look` has a detection floor at `DETECTION_SNR` and
+no ceiling, and `Instrument::counts_from_flux` is unbounded above.
+
+So a ship inside a system is currently blind across tens of degrees around exactly the point its
+planets orbit. Three things are needed, and they are the first work of the survey duty, not a
+detail of it:
+
+- **A saturation ceiling,** so the host star's counts are what a real detector would give rather
+  than an unbounded number that scales the glare radius without limit.
+- **A bearing to the host star regardless.** It is the one source that must always be measurable,
+  because the ship's distance to it is the prior for everything else. A saturated star still gives
+  a centroid; it is its flux that is lost, not its position.
+- **A glare hole sized for planets, not for stars behind them.** The current radius answers "can I
+  see a faint star next to a bright one", where the contrast is astronomical. A planet at 5 AU is
+  far brighter than a background star and much closer in, so the useful exclusion is a small inner
+  radius plus a floor that falls off with separation, not one hard disc.
+
+Mercury and Venus at inner elongations stay hidden, which is correct and is the same reason they
+are hard from Earth. What is not correct is Jupiter being hidden.
 
 **What one visit measures,** per body:
 
@@ -142,7 +241,10 @@ from everything else.
 
 **What the readings conclude** is a hypothesis set, as the transit search's is: *airless rock*,
 *rock with a thin atmosphere*, *rock under a thick atmosphere*, *temperate rock with oceans and
-cloud*, *ice giant*, *gas giant*. With its evidence, as for Sol after 15 minutes:
+cloud*, *ice giant*, *gas giant*. With its evidence, as for Sol after 15 minutes. Every number
+below is a reading of the **authored** Sol table: `Surface::classify` puts Venus, Mars and Titan
+in one class and cannot tell them apart, so without that table these six hypotheses collapse to
+the three the class already names.
 
 | | size | evidence | leading reading |
 |---|---|---|---|
@@ -152,30 +254,144 @@ cloud*, *ice giant*, *gas giant*. With its evidence, as for Sol after 15 minutes
 | Jupiter | 11.2 | density 1.3 from the Galilean moons; 6.5% oblate; emits 1.7 times what it absorbs; radio | gas giant |
 | Saturn | 9.4 | density 0.69 from Titan; rings resolved; 10% oblate; a heat excess | gas giant |
 
-**Room.** A body's measurements are logs like a star's photometry and count against room. A
-visit an hour in eight bands, for eight planets, is about 3 MB in three months, which is the
-starting ship's whole store. So a body's log is read and consumed often, into a digest that keeps
-what the fit needs: the least-squares normal equations for its orbit, per-band flux means, and
-the rotation periodogram's bins. Reading a body is a small least-squares problem, not a period
-search over thousands of trials, so it has its own budget per tick, apart from the one read a
-tick the transit search gets.
+**Room,** and it does not fit. A body's measurements are logs like a star's photometry and count
+against room, which since the logs-only rebalance is all that room is. There are `BANDS` = 7
+bands, and `SAMPLE_BYTES` is 24. Three game months is 2192 game hours, so at one visit an hour:
+
+| | bytes |
+|---|---|
+| a starting ship's capacity: `ONBOARD_DATA_BYTES` 1 MiB, plus one data module at `DATA_ANCHOR_S / 1800 * 7 * 24` | 1.05 + 2.95 = **4.0 MB** |
+| Sol's eight planets, hourly, 7 bands, three game months | **2.95 MB** |
+| the same plus the seven moons the masses need — Luna, Phobos, the Galileans, Titan | **5.5 MB** |
+
+So the planets alone leave a quarter of the store free, and the moons the design depends on for
+every mass overflow it half again. A done-when that ends in "Data full." is not a demo.
+
+So the cadence is part of the design, not an afterthought:
+
+- **A body's log is digested every visit**, not when full. One visit is one row: a bearing, an
+  angular diameter, seven fluxes. Reading it folds the row into the digest and frees it.
+- **The digest is fixed-size per body:** the accumulated orbit fit — a symmetric matrix and a
+  vector over the element set with `mu` as a parameter, on the order of a kilobyte — plus per-band
+  flux means and variances and the rotation periodogram's bins. Fixed-size means eight planets
+  cost the same in month three as in month one, which is the property that makes the fifteen
+  minutes work. **Whether that accumulated form survives `f64` is the open question** under
+  *Fitting the orbit*: if it has to be a square-root factor it is the same size, and if it has to
+  be a decimated arc of bearings then the budget above needs redoing.
+- **Raw rows are kept only until the first fit converges.** Gauss initial orbit determination
+  needs the raw arc, so the rows cannot be folded from the first visit; after convergence the
+  normal equations carry everything and the arc is dropped. `retain_raw` is the existing override
+  for a player who wants the arc kept anyway.
+- Reading a body is a small least-squares solve, not a period search over thousands of trials, so
+  it gets its own budget per tick, apart from the one read a tick the transit search gets
+  (`READS_PER_TICK`).
+
+**Fitting the orbit,** which does not exist anywhere in the code today. The only fits in Rust are
+`astrometry::triangulate` and the transit search's box least squares; there is no orbit
+determination of any kind. What to build, and where:
+
+- **Initial orbit determination from three bearings,** by Gauss's method. Three lines of sight
+  from known observer positions and an assumed `mu` give a state vector, and
+  `kepler::state::from_state` turns that into elements. Gauss is the right choice over Laplace
+  here because the observer moves very little between visits an hour apart, which is the case
+  Laplace's derivative form handles worst.
+- **Then batch least squares** over every bearing held, with `mu` as a free parameter once two
+  bodies are held — two orbits about one star over-determine its mass. `docs/scratch/fitlib.py`
+  is the precedent and nearly the same problem: a Levenberg-damped `gauss_newton` fitting nine
+  mean elements, `[n, a, e, i, raan0, argp0, M0, argp_rate, raan_rate]`, against a position series
+  and matching `em-sim`'s propagation exactly. `em-sim`'s bundled Solar System elements came out
+  of it.
+- **Where it lives.** The math goes in `em-foundations`, radians only, beside
+  `kepler::state::from_state` — osculating elements from a state vector, which is the natural seed
+  — `kepler::semi_major_axis::third_law`, `kepler::angular_motion::mean` and the anomaly solvers.
+  Exotic Matters can use an orbit fit as readily as Lightcone can. The records, the digest and the
+  per-tick budget go in `lc-world::knowledge`. Note the public third-law functions are named for
+  their output, and there is no `kepler::third_law` or `mean_motion` to call.
+- **The digest follows the fit, not the reverse.** Normal equations cannot be the digest from the
+  first visit, because Gauss needs the raw arc and there is nothing to accumulate into yet. Raw
+  bearings are kept until the first fit converges, and the normal equations take over after.
+- **The normal equations are a numerical hazard, and the code already knows it.**
+  `astrometry::triangulate` deliberately does *not* solve its 3×3 normal-equation system, and its
+  doc says why: the smallest eigenvalue is about 1e-12 of the largest, so inverting it in `f64`
+  returns noise, and it regresses transverse position on slope instead. An orbit fit's normal
+  matrix is worse conditioned than that one, not better — a short arc leaves `a` and `e` nearly
+  degenerate. So accumulating normal equations as the digest cannot be done naively. Either keep
+  the digest in a square-root form, as a QR or Cholesky factor updated per visit, which is the
+  standard answer and is what keeps the condition number squared out of the stored state; or keep
+  a decimated arc of bearings and re-fit. **This is the open question in the room budget**, since
+  the whole fixed-size claim rests on the accumulated form being usable.
+
+**Which point is which body.** A visit produces bearings to moving points, and nothing yet says
+which detection belongs to which body. This is the linking problem and it is load-bearing: the
+"existence and position within the first real second" claim is made or broken here, because a
+survey that cannot keep a body's points together has a thousand one-point tracks and no orbits.
+
+Each visit, in order:
+
+1. **Predict** every held body from its current orbit belief to the visit's instant, with the
+   belief's sigma grown by how long since it was last seen.
+2. **Gate and assign**: a detection within a few sigma of a prediction is that body's. Where two
+   predictions compete for one detection, the nearer in normalized distance takes it — a system's
+   planets are far apart in the sky compared to their position errors, so the ambiguous case is
+   rare and does not need a full assignment algorithm.
+3. **Open a candidate track** for anything unassigned. A track with three visits is enough for an
+   initial orbit; a track that never gets a second detection expires.
+4. **Points that move with a body** rather than with the star are its **moons**, which is the same
+   gate run in the body's frame, and is what gives the mass.
+
+Confusion has a real cost and should: two planets that pass close together in the sky can have
+their tracks swapped, which puts both orbits wrong until more visits separate them. That is an
+observing hazard, not a bug, and the fit's residuals are what reveal it.
 
 **Combining.** A body found by imaging and one found by transit are the same `BodyId`. The records
 combine, and an `EdgeOnTo` constraint tightens an imaged pole.
 
-**What the truth has to hold first.** A telescope cannot find what the model lacks. Today a body
-has a mass, a radius, an orbit and, for Sol, a display color. Each body needs:
+**What the truth has to hold first.** A telescope cannot find what the model lacks. Most of this
+is already there, and an earlier draft of this section underestimated it badly. What `Drawable`
+(`lc-world/src/system.rs`) carries per body today:
 
-- a geometric albedo per band;
-- an atmosphere (none, thin, thick, or envelope) and what shows at the top of it (rock, ice,
-  ocean, cloud);
-- a rotation period and axis;
-- internal heat;
-- rings, with their radii and optical depth.
+| held | where |
+|---|---|
+| a class: gas giant, ice giant, ice, rock, weathered, scorched | `surface::Surface::classify`, from radius, mass and equilibrium temperature |
+| geometric **and** Bond albedo, per class | `Surface::albedo`, `Surface::bond_albedo` |
+| spin axis | `Drawable::pole`, from `em-sim`'s IAU rotations |
+| internal heat, as a per-class ratio | `Surface::internal_heat_ratio`, feeding `Surface::effective_temperature`; `effective_k` against `equilibrium_k`, the gray balance |
+| rings, with real radii, optical depths and particle albedo | `lc-world/src/rings.rs`, IAU and Cassini values — **Sol only**: `rings::for_body` is keyed on real body names, so no generated body has rings |
+| rotation period and pole, for Sol | `em-sim/src/presets.rs`, 48 bodies with `BodyRotation::spinning` or `tidally_locked` |
+| eccentricity, for generated planets | `sky/generate.rs:162`, `uniform_in(0.0, 0.12)`; belts have their own |
 
-Sol's major planets and large moons get an authored table of their real values. A generated
-system's come from rules on mass, radius and the starlight falling on it. The generator also
-needs moons, where it does not already make them, or no generated planet has a mass to find.
+`em_spectra::Band` already runs `B, V, R, I, K, ThermalIr, Radio`, and the starfield shader
+already evaluates every one of them and adds a second, thermal blackbody on top
+(`starfield.wgsl:225-230`). So every channel the survey table wants exists and is computed. What
+is actually missing is four things:
+
+- **Albedo per band.** There is one geometric albedo per class, and it is collapsed into a single
+  `effective_radius_m` — a gray reflector. `effective_radius`' own doc says the consequence: a
+  strongly colored body like Mars "comes out the star's color rather than its own." The bands are
+  not the gap; per-band reflectance is. "Albedo 0.17, red" needs it, and `Surface::palette` is
+  display-only and cannot serve.
+- **An atmosphere.** Nothing models one; the only mentions in the codebase are two comments saying
+  there isn't one. `Surface::Weathered` is Mars, Venus and Titan together, and the module says
+  outright why it cannot do better: "a body's cloud deck is not derivable from its radius, mass
+  and temperature, which is the whole basis of this module." Venus is the case it names, 0.76
+  Bond albedo where its class gives 0.25. So the survey's Venus result — albedo 0.7, cloud tops
+  at 230 K, a 700 K surface under them — **cannot** come from the classifier. It has to be
+  authored, which is what the Sol table below is for, and generated systems need an atmosphere
+  drawn from mass and insolation rather than inferred from the class.
+- **Rotation for generated bodies.** Every one is `rotation: None` (`sky/generate.rs:341, 364,
+  374, 395`). Sol has rotation and generated systems have none, so the rotation-period row of the
+  survey table works for Sol and finds nothing anywhere else. Generated rings are absent the same
+  way, and for the same reason.
+- **The star's own spin axis.** `Star` is `{radius_m, teff_k, mu, limb_darkening}` and has no
+  pole, which is the bug at the top of this document. Truth already holds the system's plane, as
+  `GeneratedSystem::pole` (`sky/generate.rs:51`), so what phase 1 needs is for a star to spin
+  about its system's pole rather than about `+Z` by default.
+
+Sol's major planets and large moons get an authored table of per-band reflectance, atmosphere and
+what shows at its top. It lives in `lc-world`, beside `rings.rs`, which is already exactly this:
+authored real values for Sol with a documented reason for each. A generated system's come from
+rules on mass, radius and insolation. The generator also needs moons, where it does not already
+make them, or no generated planet has a mass to find.
 
 ### Nothing on creation
 
@@ -186,6 +402,39 @@ issued a new ship twenty light-years of star distances and would have issued its
 
 So the first minutes of a new ship are looking: its own star is a bright bearing with no
 distance, and the survey from inside is what turns it into a system.
+
+**The frontier argument this reverses.** 22-provenance argued that "a player who starts with
+nothing has no reason to fly anywhere", and issued twenty light-years of charts to put an edge on
+the map. The survey from inside is the answer: a ship that knows nothing is not idle, it is in a
+system full of unexamined planets that pay out within the first real minute, and the edge of the
+map is then wherever its own telescope has reached. The reason to fly is that the next system's
+planets need the same fifteen minutes, and somebody else's relayed orbit is worth checking.
+Charts made the frontier by drawing a boundary; looking makes it by leaving everything past the
+first system dark.
+
+**What a ship knows about itself exactly.** A ship's own inertial state is truth, not knowledge:
+dead reckoning is free, and `station()` handing the observatory the craft's true `position_ly`
+(`lc-server/src/instruments.rs:104`) stays correct. What is believed is the *star's* position
+relative to the ship. Without that split, an orbit fit's observer positions would quietly be
+reading the generator, and a fit against known observer positions is the real problem anyway.
+
+**Where charts are issued today,** all of which phase 6 removes:
+
+| site | what it is |
+|---|---|
+| `lc-server/src/instruments.rs:117` | the shard, on a craft's first tick. The one that matters |
+| `lc-client/src/watch.rs:36` `Session::issue_charts` | the offline client's own call |
+| `lc-client/src/app.rs:510` | the offline client's startup |
+| `lc-client/src/bin/snapshot.rs:69` | photographs |
+| `lc-client/examples/crossing.rs:52` | the crossing example |
+| `lc-client/tests/knows.rs:19,62` | two integration tests |
+
+`observatory::issue_charts`, `CHARTS` and `CHART_ERROR` stay: tests and photographs need a way to
+seed knowledge from truth, and the `CHARTS` witness is what `range.rs` renders as "the charts".
+Seven client unit tests across `session.rs`, `action.rs`, `map_source.rs`, `hud.rs` and
+`uplink.rs` call it as a fixture, plus two in `observatory.rs` itself, and all of them keep doing
+so. What goes away is any call on a path a player reaches. `range.rs`' "Distance on the charts'
+word" note goes quiet on its own once nothing issues them.
 
 ### From other craft
 
@@ -266,8 +515,8 @@ A header row for the star gives the **system plane**: `solved from 3 orbits, ± 
 ### The map
 
 - Only believed bodies are drawn.
-- A body with `Placed::Known` is drawn where it is believed to be, and its orbit ring lies in its
-  own believed plane.
+- A body with `Placed::Known` is drawn where it is believed to be, with an **orbit ring in its own
+  believed plane**.
 - A body with `Shell` is a dashed circle facing the camera at its radius: a sphere seen edge-on,
   saying "somewhere at this distance".
 - **Unconfirmed transit candidates are drawn,** in a fainter green than a settled body, at the
@@ -276,6 +525,23 @@ A header row for the star gives the **system plane**: `solved from 3 orbits, ± 
   presumed plane: the believed system plane when there is one, otherwise the plane that contains
   the line of sight the transit was seen along. A candidate's bar is usually wide, because its
   period may still be an alias and the star's mass is a prior; it shrinks as the belief does.
+
+What that needs from `em-map`, which has no concept of any of it — grep it for dash, faint or
+confidence and nothing comes back:
+
+- **A per-body orbit ring** is a new primitive. `em_map::rings::decades` draws observer-centered
+  scale rings only, and `frame.rs` is explicit that rings are measured from the observer and not
+  from whatever the camera sits on.
+- **Fainter-for-less-certain** needs a variant or a field. `ItemKind` is eight body types —
+  `Star, Planet, Moon, Minor, Station, Ship, Population, Observer` — with no confidence on it.
+- **The error bar already exists.** `MapItem::spread_ly`, an `Option<(DVec3, DVec3)>` built from
+  `Distance::Measured`'s sigma along the line of sight, and already drawn as a segment
+  (`map.rs:856`). A body's radial bar reuses it directly.
+- **Dashes exist, but in the client.** `map.rs` has a dash ladder, `map.drops[dashes - 1]`, used
+  for drop lines, where drifting further off the plane gains more dashes rather than longer ones.
+  The spread segment is deliberately the solid member of that same ladder. So a dashed shell
+  circle is a client change reusing existing meshes, not new machinery — it is only `em-map` that
+  would need a way to ask for it.
 - The reference plane option becomes **System plane**, the believed one, with zero longitude as
   above. When the plane is unknown the option is disabled and says why; Galactic is always
   available. `em_map::Plane` gains a variant carrying a basis rather than hard-wiring `+Z`. Only
@@ -311,34 +577,115 @@ error. That is the mechanic, not a flaw in it:
 - Crossings between stars follow the same rule. That is the approach of 22-provenance.md's
   *Navigation on beliefs*, and it is scheduled with the rest of this rather than deferred.
 
+**What this costs on the server.** All of it is shard work, because the shard holds the
+knowledge. Today:
+
+- A `Course` carries a body **name string** (`Course::Orbit`, `Lagrange`, `Hangout`, `Rings`),
+  resolved by `Course::resolve` against the simulation through `system.body_named`. A
+  belief-driven course carries a `Subject` instead and is planned from the craft's own knowledge,
+  refused with `Refusal::Impossible` when the craft does not `knows` it — which is the gate
+  `Order::NameIt` and `Order::RetainRaw` already use (`instruments.rs:344`, `:355`).
+- **Crossing between stars is `Order::Cross { star, accel_g, max_beta }`,** not a `Course`, and it
+  resolves the catalogue id through `World::star_at` — the *shard's* catalogue, not the craft's
+  knowledge. That is the one to gate first: it is the only order that names a place a craft may
+  never have seen.
+- **Body-relative courses already track moving bodies.** `Course::Orbit` and `Rings` resolve to a
+  `Waypoint::Orbit` about `Anchor::Body`, placed every instant by `center_of_at`; `Lagrange` and
+  `Hangout` are recomputed the same way. So "fly against a believed position" does not need a new
+  tracking mechanism, only a believed center in place of a true one.
+- What is missing is **an arbitrary standoff from a moving body.** Every body-relative course is
+  an orbit, a ring plane or a libration point, and "hold station at altitude" — what a body with
+  no known mass gets — is none of those. `Order::Intercept` holds station alongside a moving
+  *craft* and is the closest existing shape.
+- **Re-planning** has a precedent in `chase::decide`, which runs per pursuer each tick and gives
+  a pursuit up when `chase::sighting` returns nothing. Note what that gate reads: light-delayed
+  **truth**, refused as `Refusal::NotInSight`, not knowledge. A belief-driven course needs its own
+  cadence and its own outcome for "you arrived and nothing is here".
+- The gate matters because a modified client can already fly to truth by name today. The fix is
+  that the shard plans the course, so the name never has to be trusted.
+
 ## Phases
 
-1. **Fix the plane now, on truth.** Generated stars spin about their system's pole, give or take
-   a few degrees. The map's plane option uses the system's true pole, with zero longitude at the
-   galactic node. That is a stopgap which reads the generator, as the System panel already does,
-   and it is replaced in phase 3.
-2. **Records and beliefs.** The full `Orbit` with `Orientation` and `Method`, knowledge format 5,
-   `BodyBelief` and `SystemPlane`. New ships stop being issued charts.
+1. **Fix the plane now, on truth.** `Star` gains a spin axis, and a generated star spins about
+   its system's pole give or take a few degrees; truth already holds that pole as
+   `GeneratedSystem::pole`. The map's plane option uses it, with zero longitude at the galactic
+   node. A stopgap which reads the generator, as the System panel already does, replaced in
+   phase 3.
+2. **Records only.** The full `Orbit` with `Orientation` and `Method`, `BodyBelief` and
+   `SystemPlane`, and the readers that embedded the old `Orbit` deleted. **Charts stay** — see
+   the note on ordering below.
 3. **The panel and the map read beliefs.** Known bodies only, candidates in fainter green,
    shells, distance error bars along the presumed plane, the System plane option from belief, and
-   the detail section with sources.
+   the detail section with sources. `em_map::Plane` gains a fieldless `System` variant, and
+   `Plane::other()` becomes a cycle.
 4. **Transits make bodies.** A settled transit calls `found_planet`, the period gives a distance
    through the mass prior, and the result is `EdgeOnTo`, crossed with other craft's.
-5. **What a body is, in the truth.** Albedo per band, atmosphere, rotation, internal heat, rings,
-   an authored table for Sol, generator rules for everything else, and moons for generated
-   planets.
-6. **Surveying a system from inside.** The Survey system duty, the visit's measurements, the
-   orbit fit, size, rotation, mass from moons, the type hypotheses, and body logs digested often.
+5. **What a body is, in the truth.** The four absent things: reflectance per band, an atmosphere
+   and what shows at the top of it, rotation for generated bodies, and the authored Sol table,
+   which lives in `lc-world` beside `rings.rs`. Generator rules for everything else, and moons
+   for generated planets. Rings, internal heat and spin axes are already held.
+6. **Surveying a system from inside,** and charts go away. First the local star: a saturation
+   ceiling, a bearing to the host regardless, a glare hole sized for planets, and the ship's
+   parallax distance to its own sun, without which no mass prior runs. Then the Survey system
+   duty, the visit's measurements, track association, the orbit fit, size, rotation, mass from
+   moons, the type hypotheses, and a body's log digested every visit into a fixed-size digest.
+   Only once this
+   works does a new ship stop being issued charts, on every path listed under *Nothing on
+   creation*, together with the photograph flag that replaces them.
    **Done when:** a ship parked 5 AU from Sol, surveying for three game months (15 real minutes
    at the design rate), believes Venus, Earth, Mars, Jupiter and Saturn with periods to 0.1%
    (Saturn's to 1%), radii to 1%, masses to 1% where a moon gives one, the leading type above
    99% and matching the table above, and the system plane to 0.1°. Every one of them has a
-   position within the first real second.
+   position within the first real second, and **the ship is not full at the end of it.** Run it
+   against the in-process shard (`local.rs`), not the offline client, which does not read logs.
 7. **Courses from beliefs.** Options gated by what is known, courses aimed at believed positions
    and re-planned as the belief improves, station-keeping where no mass is held, and crossings
-   between stars aimed the same way.
+   between stars aimed the same way. This is server work: a course has to carry a subject and be
+   planned from the knowledge the shard holds.
 8. **The rest of what a body is.** Belt planes from thermal imaging, and spectra finer than the
    bands, if a later instrument adds them.
+
+**On the order of 2 and 6.** An earlier draft removed charts in phase 2, which would have left a
+window of four phases in which a new ship had no star distances, no home planets and no way to
+get either, because the survey that replaces charts is not built until 6. Charts are how the game
+is playable in the meantime, so they are removed in the same phase as their replacement. The
+records of phase 2 do not need them gone.
+
+## Photographs, tests and the dev flags
+
+A ship that knows nothing photographs nothing, and every existing body screenshot goes empty in
+phase 6. Two flags break in a way worth naming:
+
+- **`--focus <body>`** (`entry.rs:108`) takes a name straight into `Target::Body(String)`, and
+  the inventory's key is the sim body's name falling back to its **generator key**
+  (`system.rs:531`). Under beliefs the panel's `inventory().find(|e| &e.target == target)` matches
+  nothing.
+- **`--station rings:Saturn`** still resolves, because `Course::parse` and `Course::resolve` go
+  through truth, but it leaves `ui.focus` on a row the panel no longer lists.
+
+So phase 6 needs a dev flag that seeds a craft's knowledge from truth, and the mechanism already
+exists: `observatory::issue_charts` is exactly that, which is the second reason it survives the
+phase that stops calling it on player paths. The flag is the charting office kept as a dev tool.
+It goes in AGENTS.md's table under **Checking your work**, beside `--at`, `--station` and
+`--focus`.
+
+Note that `observe_immediately` is not this. Despite the name it only skips the main menu
+(`app.rs:401`); its user-facing spelling is `--observe` and it is not in the AGENTS.md table
+either.
+
+## Wire and storage changes
+
+Collected, because they are spread across the phases. There is no compatibility to keep — the
+game has no players — so each of these is a change in place, not a versioned addition:
+
+| phase | change |
+|---|---|
+| 1 | `Star` gains a spin axis. Save shape changes; `SAVE_FORMAT` is 9 today |
+| 2 | `Orbit` grows, `Orientation` and `Method` are new, `formats.rs`' V1–V4 readers are deleted rather than repointed at a frozen `OrbitV4` |
+| 2 | `REPORT_FORMAT`, 2 today (`radio.rs:115`), carries the new `Orbit` |
+| 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
+| 6 | a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
+| 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |
 
 ## Decided
 

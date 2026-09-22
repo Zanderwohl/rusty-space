@@ -204,7 +204,8 @@ custody of. A shard that restarts resumes all of it.
 
 A sample is a game unit, `SAMPLE_BYTES` (24), near what postcard writes, so counting is cheap and
 does not move with an encoding; nothing else is counted. `data_per_module` is one year of a
-thirty-minute stare in every band, about 2.1 MB; a craft with no data modules has
+thirty-minute stare in every band, about 2.95 MB across the seven of them; a craft with no data
+modules has
 `ONBOARD_DATA_BYTES`, 1 MiB, a couple of months of one star. The shard recounts a craft's
 room when its loadout changes, after its log is read, and otherwise one craft a tick; samples keep
 the count between recounts. The client shows the room and never enforces it: the shard is what
