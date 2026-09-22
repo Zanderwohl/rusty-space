@@ -56,7 +56,7 @@ async fn a_craft_written_to_the_store_comes_back_bit_for_bit() {
     clear(&client, band).await;
 
     let craft = under_way(band);
-    let row = save(&craft, Some("acct-checkpoint"), None, None, 900_000_000);
+    let row = save(&craft, Some("acct-checkpoint"), None, None, Default::default(), 900_000_000);
     assert_eq!(row.format, SAVE_FORMAT);
     save_ships(&client, &[row]).await.unwrap();
 
@@ -96,9 +96,9 @@ async fn the_newest_checkpoint_is_the_one_that_comes_back() {
     clear(&client, band).await;
 
     let mut craft = under_way(band);
-    save_ships(&client, &[save(&craft, Some("acct-again"), None, None, 1)]).await.unwrap();
+    save_ships(&client, &[save(&craft, Some("acct-again"), None, None, Default::default(), 1)]).await.unwrap();
     craft.motion.clock_s = 999_999.0;
-    save_ships(&client, &[save(&craft, Some("acct-again"), None, None, 2)]).await.unwrap();
+    save_ships(&client, &[save(&craft, Some("acct-again"), None, None, Default::default(), 2)]).await.unwrap();
 
     let read = load_ships(&client).await.unwrap().into_iter().find(|s| s.ship_id == band).unwrap();
     assert_eq!(read.saved_t, 2);

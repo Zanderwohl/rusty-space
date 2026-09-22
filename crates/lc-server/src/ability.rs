@@ -96,7 +96,7 @@ impl Act {
             | Order::NameIt { .. }
             | Order::RetainRaw { .. } => Act::Command,
             // Separate from flying so a shard can silence somebody without grounding them.
-            Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => Act::Speak,
+            Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } | Order::AutoAck { .. } => Act::Speak,
         }
     }
 }

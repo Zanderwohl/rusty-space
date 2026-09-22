@@ -350,7 +350,7 @@ for how an order becomes an event.
 
 ### 11c — Persistence
 
-**Built.** Save format 6; schema step `0010_knowledge`. A checkpoint writes only what changed.
+**Built.** Save format 9; schema step `0010_knowledge`. A checkpoint writes only what changed.
 
 **Before:** 11b.
 

@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chase::Pursuit;
 use crate::journal::Journal;
+use crate::radio::Owed;
 use crate::server::{Server, TICK_US};
 
 /// A craft, as JSON in [`Ship::state`].
@@ -52,8 +53,30 @@ pub struct Saved {
     pub fitting: Option<lc_proto::Fitting>,
     /// What its telescope is committed to and how far it has reported to whom, so a sweep
     /// resumes where it was rather than starting again. What it *knows* is written beside the
-    /// craft, in [`crate::archive`]. Appended in format 6.
+    /// craft, in [`crate::archive`]. Appended in format 7.
     pub instruments: Option<SavedInstruments>,
+    /// Who it answers automatically, and what has yet to land on it. Appended in format 9.
+    pub radio: Radio,
+}
+
+/// A craft's standing radio orders, which outlive the pilot's connection and the process.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Radio {
+    pub auto_ack: Vec<ShipId>,
+    pub owed: Vec<Owed>,
+}
+
+/// [`Saved`] as format 8 wrote it, before auto-ack was kept by the server.
+#[derive(Deserialize)]
+struct SavedV8 {
+    kind: u8,
+    name: Option<String>,
+    noise_floor: f32,
+    length_m: f64,
+    motion: lc_proto::Motion,
+    pursuit: Option<lc_proto::Pursuit>,
+    fitting: Option<lc_proto::Fitting>,
+    instruments: Option<SavedInstruments>,
 }
 
 /// A craft's instruments, as a checkpoint carries them.
@@ -63,7 +86,7 @@ pub struct SavedInstruments {
     pub reporting: lc_world::knowledge::Reporting,
 }
 
-/// [`SavedInstruments`] as formats 6 and 7 wrote it, when a reporting mark was a time alone.
+/// [`SavedInstruments`] as format 7 wrote it, when a reporting mark was a time alone.
 #[derive(Deserialize)]
 struct InstrumentsV7 {
     observatory: lc_world::knowledge::observatory::Observatory,
@@ -89,7 +112,8 @@ struct SavedV7 {
     instruments: Option<InstrumentsV7>,
 }
 
-/// [`Saved`] as format 6 wrote it, before ships had data modules.
+/// [`Saved`] as format 6 wrote it: auto-ack kept by the server, before ships had data modules
+/// or their instruments were kept.
 #[derive(Deserialize)]
 struct SavedV6 {
     kind: u8,
@@ -99,7 +123,7 @@ struct SavedV6 {
     motion: lc_proto::Motion,
     pursuit: Option<lc_proto::Pursuit>,
     fitting: Option<FittingV6>,
-    instruments: Option<InstrumentsV7>,
+    radio: Radio,
 }
 
 /// `lc_proto::Loadout` before data modules. A ship from then has none: modules do not appear
@@ -246,7 +270,7 @@ struct SavedV2 {
 /// otherwise** — deliberately not [`lc_proto::PROTOCOL_VERSION`], which moves for reasons that
 /// have nothing to do with how a craft is stored. Bumping it makes every existing row
 /// unreadable, which is the point and is also the cost.
-pub const SAVE_FORMAT: i32 = 8;
+pub const SAVE_FORMAT: i32 = 9;
 
 /// The oldest format still read. See [`decode`].
 pub const OLDEST_FORMAT: i32 = 2;
@@ -274,12 +298,13 @@ pub struct Unreadable {
     pub why: String,
 }
 
-/// Turn a craft, its account and its standing intercept into a row.
+/// Turn a craft, its account and its standing orders into a row.
 pub fn save(
     craft: &Craft,
     account: Option<&str>,
     pursuit: Option<lc_proto::Pursuit>,
     instruments: Option<SavedInstruments>,
+    radio: Radio,
     saved_t: i64,
 ) -> Ship {
     let saved = Saved {
@@ -291,6 +316,7 @@ pub fn save(
         pursuit,
         fitting: craft.fitting().map(Into::into),
         instruments,
+        radio,
     };
     Ship {
         ship_id: craft.id.0,
@@ -342,6 +368,20 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
 pub fn decode(row: &Ship) -> Result<Saved, String> {
     match row.format {
         SAVE_FORMAT => lc_proto::decode(&row.state).map_err(|why| why.to_string()),
+        8 => {
+            let old: SavedV8 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
+            Ok(Saved {
+                kind: old.kind,
+                name: old.name,
+                noise_floor: old.noise_floor,
+                length_m: old.length_m,
+                motion: old.motion,
+                pursuit: old.pursuit,
+                fitting: old.fitting,
+                instruments: old.instruments,
+                radio: Radio::default(),
+            })
+        }
         7 => {
             let old: SavedV7 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
             Ok(Saved {
@@ -353,6 +393,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 pursuit: old.pursuit,
                 fitting: old.fitting,
                 instruments: old.instruments.map(Into::into),
+                radio: Radio::default(),
             })
         }
         6 => {
@@ -365,7 +406,8 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 motion: old.motion,
                 pursuit: old.pursuit,
                 fitting: old.fitting.map(Into::into),
-                instruments: old.instruments.map(Into::into),
+                instruments: None,
+                radio: old.radio,
             })
         }
         5 => {
@@ -379,6 +421,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 pursuit: old.pursuit,
                 fitting: old.fitting.map(Into::into),
                 instruments: None,
+                radio: Radio::default(),
             })
         }
         OLDEST_FORMAT => {
@@ -392,6 +435,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 pursuit: None,
                 fitting: None,
                 instruments: None,
+                radio: Radio::default(),
             })
         }
         4 => {
@@ -405,6 +449,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 pursuit: old.pursuit,
                 fitting: old.fitting.map(Into::into),
                 instruments: None,
+                radio: Radio::default(),
             })
         }
         3 => {
@@ -418,6 +463,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 pursuit: old.pursuit,
                 fitting: None,
                 instruments: None,
+                radio: Radio::default(),
             })
         }
         other => Err(format!("format {other} is not {OLDEST_FORMAT} to {SAVE_FORMAT}")),
@@ -471,7 +517,15 @@ impl<J: Journal> Server<J> {
                         observatory: a.observatory.clone(),
                         reporting: a.reporting.clone(),
                     });
-                    save(craft, account, pursuit, instruments, self.now_t)
+                    let radio = Radio {
+                        auto_ack: self
+                            .auto_ack
+                            .get(&craft.id)
+                            .map(|with| with.iter().copied().collect())
+                            .unwrap_or_default(),
+                        owed: self.owed.get(&craft.id).cloned().unwrap_or_default(),
+                    };
+                    save(craft, account, pursuit, instruments, radio, self.now_t)
                 })
                 .collect(),
         }
@@ -508,9 +562,17 @@ impl<J: Journal> Server<J> {
                     if let Some(account) = &row.account {
                         self.by_account.insert(account.clone(), ShipId(craft.id.0));
                     }
+                    let saved = decode(row).ok();
+                    if let Some(radio) = saved.as_ref().map(|saved| saved.radio.clone()) {
+                        if !radio.auto_ack.is_empty() {
+                            self.auto_ack.insert(craft.id, radio.auto_ack.into_iter().collect());
+                        }
+                        if !radio.owed.is_empty() {
+                            self.owed.insert(craft.id, radio.owed);
+                        }
+                    }
                     // Taken up again on the next tick, which plans as for a fresh order.
-                    let pursuit = decode(row).ok().and_then(|saved| saved.pursuit);
-                    if let Some(pursuit) = pursuit {
+                    if let Some(pursuit) = saved.as_ref().and_then(|saved| saved.pursuit) {
                         self.pursuits.insert(craft.id, Pursuit {
                             quarry: pursuit.quarry,
                             closeness: pursuit.closeness.into(),
@@ -521,7 +583,7 @@ impl<J: Journal> Server<J> {
                     // Its knowledge comes back in `adopt_knowledge`; what its telescope was doing
                     // comes back here, with the craft. Put in place directly rather than through
                     // `aboard`, which would issue a restored craft fresh charts.
-                    if let Some(saved) = decode(row).ok().and_then(|saved| saved.instruments) {
+                    if let Some(saved) = saved.and_then(|saved| saved.instruments) {
                         self.instruments.aboard.insert(craft.id, crate::instruments::Aboard {
                             knowledge: lc_world::knowledge::Knowledge::new(crate::instruments::witness(craft.id)),
                             observatory: saved.observatory,
@@ -599,7 +661,7 @@ mod tests {
     #[test]
     fn a_craft_saved_and_read_back_is_the_same_craft() {
         let craft = a_craft();
-        let row = save(&craft, Some("acct-1"), None, None, 7_000_000);
+        let row = save(&craft, Some("acct-1"), None, None, Radio::default(), 7_000_000);
         assert_eq!(row.ship_id, 5);
         assert_eq!(row.account.as_deref(), Some("acct-1"));
 
@@ -641,7 +703,7 @@ mod tests {
         craft.motion.position_ly = DVec3::new(4.200079062537049, awkward, 0.0);
         craft.motion.beta = DVec3::new(awkward, 0.0, 1.0e-9);
 
-        let back = load(&save(&craft, None, None, None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, None, None, Radio::default(), 0), None).expect("it reads");
         assert_eq!(back.motion.position_ly, craft.motion.position_ly);
         assert_eq!(back.motion.beta, craft.motion.beta);
         assert_eq!(
@@ -662,7 +724,7 @@ mod tests {
     /// would happily read the wrong fields out of the right bytes.
     #[test]
     fn a_row_from_another_format_is_refused() {
-        let mut row = save(&a_craft(), None, None, None, 0);
+        let mut row = save(&a_craft(), None, None, None, Radio::default(), 0);
         row.format = OLDEST_FORMAT - 1;
         let why = load(&row, None).expect_err("it should refuse");
         assert!(why.contains("format"), "{why}");
@@ -676,7 +738,7 @@ mod tests {
             quarry: lc_proto::ShipId(9),
             closeness: lc_proto::Closeness::Intimate,
         };
-        let row = save(&a_craft(), None, Some(pursuit), None, 0);
+        let row = save(&a_craft(), None, Some(pursuit), None, Radio::default(), 0);
         assert_eq!(decode(&row).expect("it reads").pursuit, Some(pursuit));
     }
 
@@ -801,7 +863,7 @@ mod tests {
         assert_eq!(fitting.solar_w(), 0.0);
     }
 
-    /// The shapes formats 5, 6 and 7 wrote, spelled out field by field rather than borrowed from
+    /// The shapes formats 5 to 8 wrote, spelled out field by field rather than borrowed from
     /// the readers, so a test cannot agree with a reader by construction.
     mod written {
         use serde::Serialize;
@@ -845,6 +907,21 @@ mod tests {
         }
 
         #[derive(Serialize)]
+        pub struct Owed {
+            pub due_t: i64,
+            pub from: i64,
+            pub idem: u64,
+            pub beamed: bool,
+            pub source_at: [f64; 3],
+        }
+
+        #[derive(Serialize)]
+        pub struct Radio {
+            pub auto_ack: Vec<i64>,
+            pub owed: Vec<Owed>,
+        }
+
+        #[derive(Serialize)]
         pub struct V6 {
             pub kind: u8,
             pub name: Option<String>,
@@ -853,7 +930,19 @@ mod tests {
             pub motion: lc_proto::Motion,
             pub pursuit: Option<lc_proto::Pursuit>,
             pub fitting: Option<Fitting>,
-            pub instruments: Option<Instruments>,
+            pub radio: Radio,
+        }
+
+        #[derive(Serialize)]
+        pub struct V8 {
+            pub kind: u8,
+            pub name: Option<String>,
+            pub noise_floor: f32,
+            pub length_m: f64,
+            pub motion: lc_proto::Motion,
+            pub pursuit: Option<lc_proto::Pursuit>,
+            pub fitting: Option<lc_proto::Fitting>,
+            pub instruments: Option<super::SavedInstruments>,
         }
 
         #[derive(Serialize)]
@@ -908,8 +997,9 @@ mod tests {
         assert!(saved.instruments.is_none());
     }
 
+    /// Format 6 is what master's shard wrote, with its standing radio orders and no instruments.
     #[test]
-    fn format_6_reads_with_its_reporting_marks() {
+    fn format_6_reads_with_its_radio_orders() {
         let craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
         let old = written::V6 {
             kind: 0,
@@ -919,11 +1009,18 @@ mod tests {
             motion: (&craft.motion.snapshot()).into(),
             pursuit: None,
             fitting: Some(old_fitting()),
-            instruments: Some(old_instruments()),
+            radio: written::Radio {
+                auto_ack: vec![7],
+                owed: vec![written::Owed { due_t: 9, from: 7, idem: 3, beamed: true, source_at: [1.0, 2.0, 3.0] }],
+            },
         };
         let saved = decode(&row(lc_proto::encode(&old), 6)).expect("format 6 reads");
-        let marks = saved.instruments.expect("instruments").reporting;
-        assert_eq!(marks.since(7), lc_world::knowledge::Mark::through(40.0), "a time meant everything through it");
+        assert_eq!(saved.fitting.map(|f| (f.loadout.living, f.loadout.data)), Some((2, 0)));
+        assert!(saved.instruments.is_none());
+        assert_eq!(saved.radio, Radio {
+            auto_ack: vec![ShipId(7)],
+            owed: vec![Owed { due_t: 9, from: ShipId(7), idem: 3, beamed: true, source_at: [1.0, 2.0, 3.0] }],
+        });
     }
 
     #[test]
@@ -946,11 +1043,41 @@ mod tests {
     }
 
     #[test]
+    fn format_8_reads_with_no_radio_orders() {
+        let craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        let instruments =
+            SavedInstruments { observatory: Default::default(), reporting: Default::default() };
+        let old = written::V8 {
+            kind: 0,
+            name: None,
+            noise_floor: 0.0,
+            length_m: 500.0,
+            motion: (&craft.motion.snapshot()).into(),
+            pursuit: None,
+            fitting: None,
+            instruments: Some(instruments.clone()),
+        };
+        let saved = decode(&row(lc_proto::encode(&old), 8)).expect("format 8 reads");
+        assert_eq!(saved.instruments, Some(instruments));
+        assert_eq!(saved.radio, Radio::default());
+    }
+
+    #[test]
+    fn standing_radio_orders_survive_the_round_trip() {
+        let radio = Radio {
+            auto_ack: vec![ShipId(7)],
+            owed: vec![Owed { due_t: 9, from: ShipId(7), idem: 3, beamed: true, source_at: [1.0, 2.0, 3.0] }],
+        };
+        let row = save(&a_craft(), None, None, None, radio.clone(), 0);
+        assert_eq!(decode(&row).expect("it reads").radio, radio);
+    }
+
+    #[test]
     fn a_ships_modules_and_energy_survive_the_round_trip() {
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
         craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
         craft.begin_refit(Loadout { engines: 7, ..Loadout::STARTING }, 10.0).unwrap();
-        let back = load(&save(&craft, Some("acct"), None, None, 20_000_000), None).expect("it reads");
+        let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), 20_000_000), None).expect("it reads");
         assert_eq!(back.fitting(), craft.fitting());
         assert!(back.is_refitting(20.0));
     }
@@ -1010,7 +1137,7 @@ mod tests {
     fn the_crews_clock_survives_the_round_trip() {
         let mut craft = a_craft();
         craft.motion.clock_s = 86_400.0 * 365.0;
-        let back = load(&save(&craft, None, None, None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, None, None, Radio::default(), 0), None).expect("it reads");
         assert_eq!(back.motion.clock_s, craft.motion.clock_s);
     }
 
@@ -1019,7 +1146,7 @@ mod tests {
         let mut craft = a_craft();
         craft.motion.beta = DVec3::new(0.0, 0.1, 0.0);
         craft.motion.resume_drifting(DVec3::new(9.0, 0.0, 0.0), 1_234.0);
-        let back = load(&save(&craft, None, None, None, 5_000_000), None).expect("it reads");
+        let back = load(&save(&craft, None, None, None, Radio::default(), 5_000_000), None).expect("it reads");
         match back.motion.motive {
             Motive::Drifting { from_ly, since_t } => {
                 assert_eq!(from_ly, DVec3::new(9.0, 0.0, 0.0));

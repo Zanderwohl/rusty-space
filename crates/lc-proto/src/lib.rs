@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 34;
+pub const PROTOCOL_VERSION: u32 = 35;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -377,6 +377,12 @@ pub enum Order {
     /// Keep a subject's raw logs whatever the shard concludes from them, or stop keeping them.
     /// Appended last.
     RetainRaw { subject: Subject, keep: bool },
+    /// Answer `with` automatically from now on, or stop.
+    ///
+    /// A standing order kept by the server, so it answers whether or not anyone is flying the
+    /// ship. It puts nothing on the air and is answered by [`Outbound::AutoAcking`], not
+    /// `Accepted`. Appended last.
+    AutoAck { with: ShipId, on: bool },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -401,15 +407,15 @@ pub mod kind {
     /// [`super::DriveChange`] as JSON.
     pub const DRIVE: i16 = 4;
     /// Somebody said something. The payload is a [`super::Spoken`] as JSON, **redacted per
-    /// receiver**: a sealed message reaches an eavesdropper with no body at all.
+    /// receiver**: a sealed message reaches an eavesdropper as [`super::Body::Unreadable`].
     pub const MESSAGE: i16 = 5;
     /// Somebody sent what they have learned. The payload is a [`super::Reported`] as JSON,
     /// **redacted per receiver** exactly as a message is: a sealed report reaches an
     /// eavesdropper as the fact that a report went out, with nothing in it.
     pub const REPORT: i16 = 7;
     /// Somebody put their public key on the air. The payload is a [`super::Spoken`] too, with
-    /// an empty body — it lands in the same conversation, because that is where a player looks
-    /// for it. Receiving one is what puts the source in the receiver's keyring.
+    /// [`super::Body::Key`] — it lands in the same conversation, because that is where a player
+    /// looks for it. Receiving one is what puts the source in the receiver's keyring.
     pub const KEY: i16 = 6;
 }
 
@@ -771,6 +777,9 @@ pub enum Outbound {
     /// `lc_world::knowledge::Logs`, with the subjects it keeps raw. A report never carries logs, so a client's copy of its
     /// own curves arrives this way, in pages. Appended last.
     Logged { logs: String },
+    /// Every craft this ship answers automatically, whole. Sent on signing in and after each
+    /// [`Order::AutoAck`]. Appended last.
+    AutoAcking { ship_id: ShipId, with: Vec<ShipId> },
 }
 
 /// The largest frame and message either end of a connection accepts, bytes. Stated rather than
@@ -929,7 +938,7 @@ mod radio;
 pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
 
 pub use radio::{
-    ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
+    ACK_DEPTH, Aim, Body, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
 };
 
 #[cfg(test)]
@@ -1420,9 +1429,8 @@ mod tests {
                     to: Some(ShipId(42)),
                     with_name: "Ada".into(),
                     mine: false,
-                    key: false,
                     sealed: true,
-                    body: Some("well?".into()),
+                    body: Body::Text("well?".into()),
                     acks: vec![3, 5],
                     sent_t: 500_000,
                     arrive_t: Some(1_000_000),
@@ -1435,6 +1443,8 @@ mod tests {
             Outbound::Learned { report: "{}".into() },
             Outbound::Observing { duty: Duty::Stare { star: 3 }, integration_s: 1.0e4 },
             Outbound::Observing { duty: Duty::Idle, integration_s: 0.0 },
+            Outbound::AutoAcking { ship_id: ShipId(42), with: vec![ShipId(7), ShipId(9)] },
+            Outbound::AutoAcking { ship_id: ShipId(42), with: Vec::new() },
         ];
         for message in out {
             let bytes = encode(&message);
@@ -1511,6 +1521,11 @@ mod tests {
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
                 order: Order::OfferKey { to: Some(ShipId(7)), aim: Aim::Omni },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::AutoAck { with: ShipId(7), on: true },
                 issued_at_client_t: 0,
             }),
         ];

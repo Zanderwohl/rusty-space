@@ -81,7 +81,7 @@ shape will keep changing for a while. A format version on the row says which sha
 |---|---|
 | files | `lc_knowledge`, one row per craft per subject, postcard with `archive::KNOWLEDGE_FORMAT` — `sql/0010_knowledge.sql` |
 | samples | `lc_samples`, partitioned by **learned** time, kept ready by the journal beside events and deliveries. Observation time is stored as the exact f64 it was stamped with: a sweep finishes a field at an instant that is not a whole microsecond |
-| duty and report marks | the ship checkpoint, `persist::Saved::instruments`, save format 8 |
+| duty and report marks | the ship checkpoint, `persist::Saved::instruments`, save format 9 |
 | what is written | only what changed since the last checkpoint: `Knowledge::take_changes` hands over the files touched, without their samples, the samples taken, and the samples consumed to delete. All of it, the ships and the bookmarks go in one transaction, and a failed one hands everything back to be written next time |
 | what a client is sent | its craft's knowledge in byte-bounded pages, as `Learned` reports and `Logged` pages of its own samples, each under `lc_proto::FRAME_LIMIT`, which both ends of the websocket state |
 

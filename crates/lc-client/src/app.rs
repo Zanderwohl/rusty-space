@@ -543,7 +543,6 @@ fn dispatch(
                     let at = game.coordinate_time_s();
                     ui.notify(text, at);
                 }
-                Effect::AutoAck { with, on } => uplink.chat.set_auto_ack(with, on),
                 Effect::Stage(scenario) => {
                     uplink.say(lc_proto::Inbound::Stage { scenario });
                     uplink.asked(time.elapsed_secs_f64());

@@ -11,6 +11,7 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 
+use lc_proto::Body;
 use lc_world::sky::StarId;
 
 use crate::action::Action;
@@ -282,13 +283,17 @@ fn overheard_log(
             );
             ui.horizontal_wrapped(|ui| {
                 ui.add_space(12.0);
-                match loose.line.body.as_deref() {
-                    Some(body) => {
+                match &loose.line.body {
+                    Body::Text(body) => {
                         ui.label(egui::RichText::new(body).font(face.clone()));
                     }
+                    Body::Key => {
+                        ui.label(egui::RichText::new("offered its key").font(face.clone()).weak());
+                    }
+                    Body::Ack => {}
                     // Fixed-length noise, and the same noise every frame. There is nothing in
                     // it to decode because there is nothing in it.
-                    None => {
+                    Body::Unreadable => {
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(loose.line.ciphertext())
@@ -338,7 +343,7 @@ fn conversation(
                 // a thing anyone acknowledges — the server keeps it out of the window on
                 // purpose — so marking one unacknowledged would be a warning that can never
                 // clear.
-                if line.mine && !line.key {
+                if let (true, Body::Text(text)) = (line.mine, &line.body) {
                     // The only delivery report there is. Silence is not a failure — it is a
                     // reply that has not been composed yet, or one still crossing.
                     match conversation.delivered(line) {
@@ -357,7 +362,7 @@ fn conversation(
                                     true => lc_proto::Secrecy::Sealed,
                                     false => lc_proto::Secrecy::Open,
                                 },
-                                body: line.body.clone().unwrap_or_default(),
+                                body: text.clone(),
                                 // What makes this the same message rather than a second one.
                                 idem: Some(line.idem),
                             });
@@ -451,19 +456,22 @@ fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool, to: Option<&
     };
     let face = logged(ui);
     let said = |text: String| egui::RichText::new(text).font(face.clone());
-    match (&line.body, line.key) {
-        (_, true) if mine => ui.label(
+    match &line.body {
+        Body::Key if mine => ui.label(
             said(match to {
                 Some(to) => format!("sent key to {to}"),
                 None => "sent key".to_string(),
             })
             .weak(),
         ),
-        (_, true) => ui.label(said("sent this ship its key".to_string()).color(RADIO)),
-        (Some(body), _) => ui.label(said(body.clone()).color(color)),
+        Body::Key => ui.label(said("sent this ship its key".to_string()).color(RADIO)),
+        Body::Text(body) => ui.label(said(body.clone()).color(color)),
+        Body::Ack => ui.label(said("(acknowledgement)".to_string()).weak()),
         // Heard and unreadable, which is worth showing rather than hiding: a player can see
         // that somebody in earshot is talking in private.
-        (None, _) => ui.label(said("(encrypted, and not for this ship)".to_string()).weak()),
+        Body::Unreadable => {
+            ui.label(said("(encrypted, and not for this ship)".to_string()).weak())
+        }
     }
     .on_hover_text(reception(line));
 }

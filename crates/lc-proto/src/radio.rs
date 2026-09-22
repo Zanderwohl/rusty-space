@@ -85,6 +85,32 @@ pub const MESSAGE_LIMIT: usize = 512;
 /// across as many transmissions as it takes. See `lightcone/docs/22-provenance.md`.
 pub const REPORT_LIMIT: usize = 64 * 1024;
 
+/// What a message holds, as one receiver has it.
+///
+/// An enum rather than a string whose emptiness means something: an acknowledgement and a key
+/// offer both used to be an empty body, and every place that showed messages had to remember
+/// to test for that.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Body {
+    /// Something somebody typed. Never empty.
+    Text(String),
+    /// Nothing but its acknowledgements: a ship's automatic answer. Nothing to show.
+    Ack,
+    /// A public key handed over.
+    Key,
+    /// Sealed to somebody else. That it was said is all this receiver may know.
+    Unreadable,
+}
+
+impl Body {
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Body::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+}
+
 /// What a [`kind::MESSAGE`] or [`kind::KEY`] event carries, as JSON in the payload.
 ///
 /// **Written once and redacted on the way out.** The event stored is the whole message; the
@@ -92,7 +118,7 @@ pub const REPORT_LIMIT: usize = 64 * 1024;
 /// at release rather than at write is what keeps one event one event — a sealed message
 /// duplicated per receiver would be several events with one emission time, and the whole model
 /// rests on an event being a point.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Spoken {
     /// Who it was addressed to, or `None` for a broadcast. Everyone else in earshot is an
     /// eavesdropper.
@@ -109,11 +135,9 @@ pub struct Spoken {
     /// [`MessageKey`]; a receiver that has this one already shows one line, not two.
     #[serde(default)]
     pub idem: MessageKey,
-    /// Whether it was sealed. True on a copy with no body is somebody else's mail; true on one
-    /// *with* a body means you are the addressee.
+    /// Whether it was sealed. With a [`Body::Text`], you are the addressee.
     pub sealed: bool,
-    /// `None` when this receiver may not read it.
-    pub body: Option<String>,
+    pub body: Body,
     /// Event ids of the addressee's last messages that the sender had received when this went
     /// out, newest last.
     ///
@@ -172,9 +196,6 @@ pub struct Said {
     pub event_id: i64,
     /// Which message this is. A backlog carries one entry per *transmission*, so a message
     /// sent three times is three entries sharing this and the client folds them into one.
-    ///
-    /// Named apart from [`Said::key`], which is a different thing entirely: that one says the
-    /// message *is* a public key being handed over.
     pub idem: MessageKey,
     /// The other craft in this conversation: who it went to, or who it came from. `None` for a
     /// broadcast this ship sent, which is in nobody's conversation and only in the public log.
@@ -191,11 +212,8 @@ pub struct Said {
     pub with_name: String,
     /// True when this ship sent it.
     pub mine: bool,
-    /// True when it was a key offer rather than something somebody typed.
-    pub key: bool,
     pub sealed: bool,
-    /// `None` when this ship may not read it.
-    pub body: Option<String>,
+    pub body: Body,
     pub acks: Vec<i64>,
     /// Coordinate microseconds it was transmitted.
     pub sent_t: i64,
