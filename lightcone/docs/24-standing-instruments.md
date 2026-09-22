@@ -143,9 +143,16 @@ A probability needs a prior. The game has an honest one available: the distribut
 generator draws planets and populations from *are* the population statistics of this galaxy. A
 conclusion is a likelihood from the data times that prior, normalized over the hypotheses.
 
-That makes conclusions well calibrated — a 70% hot Jupiter is a hot Jupiter seven times in ten —
-which is a design choice worth making on purpose. The alternative, deliberately miscalibrated
-priors, is a way to make some instruments or some analyses better than others later.
+The goal is conclusions that are well calibrated — a 70% hot Jupiter a hot Jupiter seven times
+in ten — which is a design choice worth making on purpose. The alternative, deliberately
+miscalibrated priors, is a way to make some instruments or some analyses better than others
+later.
+
+It is a goal and not yet a fact. The planet generator the priors are measured from is a
+placeholder the shipped game will not run on, so planet readings are marked provisional in the
+code and beside each one in the panel. What is true today is that the prior and the world agree
+on orientation: every generated system has a pole of its own, uniform over the sky, shared by its
+planets and belts, and the prior integrates over exactly that.
 
 This keeps the rule [05-observation.md](05-observation.md#survey-regimes) sets: the client
 reports a measurement and its uncertainty, and the player decides what to believe. A conclusion

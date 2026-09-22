@@ -82,6 +82,7 @@ pub enum Kind {
     /// No transiting planet. Absence of evidence, weighed by how much the log could have seen:
     /// its probability is only ever as high as the log's [`Evidence::completeness`].
     Quiet,
+    /// Provisional until the planet generator exists: see [`super::transit`].
     Planet { class: Class, transit: Candidate },
     /// A transiting planet this log could not have found yet: too wide for its span, or too
     /// small for its precision.
@@ -621,13 +622,15 @@ mod tests {
             .collect()
     }
 
-    /// A red dwarf five light-years out along `toward`, with the periods of the planets the
-    /// generator gave it, of which the innermost goes round in under five days. They orbit in the
-    /// ecliptic, so seen along X they transit and seen along Z they never do.
-    fn red_dwarf(toward: DVec3) -> (CatalogueStar, Vec<f64>) {
+    /// A red dwarf five light-years out, with the periods of the planets the generator gave it,
+    /// of which the innermost goes round in under five days. They share the system's pole, so
+    /// placed edge-on to the origin they transit and placed along the pole they never do.
+    fn red_dwarf(edge_on: bool) -> (CatalogueStar, Vec<f64>) {
         (100_000..)
             .find_map(|key| {
-                let s = star(key, 0.01, toward * 5.0);
+                let mut s = star(key, 0.01, DVec3::ZERO);
+                let pole = crate::sky::generate::pole_for(s.seed());
+                s.position_ly = if edge_on { pole.any_orthonormal_vector() } else { pole } * 5.0;
                 let periods: Vec<f64> = ladder(s.seed(), s.luminosity_solar, s.metallicity)
                     .iter()
                     .map(|r| std::f64::consts::TAU * (r.semi_major_m.powi(3) / s.star.mu).sqrt())
@@ -654,7 +657,7 @@ mod tests {
     /// probable hypothesis, with its period within error, and the log that found it is gone.
     #[test]
     fn a_generated_planet_is_the_most_probable_reading_of_its_transits() {
-        let (target, periods) = red_dwarf(DVec3::X);
+        let (target, periods) = red_dwarf(true);
         let (mut knowledge, now) = stare(&target, 60.0);
         let mut replica = Knowledge::new(Witness(1));
         replica.absorb(&knowledge.report(crate::knowledge::Mark::default(), now));
@@ -714,7 +717,7 @@ mod tests {
     /// nothing there: it is only as much evidence of absence as the log could have seen.
     #[test]
     fn a_star_seen_along_its_pole_is_quiet_only_as_far_as_the_log_could_see() {
-        let (target, _) = red_dwarf(DVec3::Z);
+        let (target, _) = red_dwarf(false);
         let (mut knowledge, now) = stare(&target, 60.0);
         let prior = Prior::measure(&neighborhood());
         let conclusion = knowledge.read_log(Subject::Star(target.id), Witness(1), &prior, now).unwrap();
@@ -733,7 +736,7 @@ mod tests {
     /// what survives is the moments and how much the log could have seen.
     #[test]
     fn a_full_craft_consumes_what_it_could_not_settle() {
-        let (target, _) = red_dwarf(DVec3::Z);
+        let (target, _) = red_dwarf(false);
         let (mut knowledge, now) = stare(&target, 20.0);
         knowledge.fit_to(f64::INFINITY);
         let capacity = knowledge.occupied_bytes();

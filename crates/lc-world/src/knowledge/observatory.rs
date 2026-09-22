@@ -105,7 +105,7 @@ pub fn build_target(star: &CatalogueStar) -> Target {
             occluder: crate::occluder::Occluder::new(planet.radius_m),
             motion: Box::new(crate::emission::CircularOrbit {
                 radius_m: planet.semi_major_m,
-                pole: DVec3::Z,
+                pole: system.pole,
                 phase0: planet.mean_anomaly_deg.to_radians(),
                 mu: star.star.mu,
             }),

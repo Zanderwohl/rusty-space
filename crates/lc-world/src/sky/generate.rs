@@ -48,6 +48,8 @@ pub struct GeneratedSystem {
     pub separation_m: f64,
     pub planets: Vec<Planet>,
     pub populations: Vec<Population>,
+    /// The normal of the plane every planet and belt orbits in: see [`pole_for`].
+    pub pole: DVec3,
 }
 
 impl GeneratedSystem {
@@ -61,6 +63,19 @@ impl GeneratedSystem {
     }
 }
 
+/// The normal of a system's orbital plane: a direction uniform over the sky, from its seed.
+///
+/// Every planet and belt shares it, so from most directions nothing transits and from a few
+/// the whole system does — the orientation the photometry's priors integrate over. See
+/// `lightcone/docs/24-standing-instruments.md`.
+pub fn pole_for(seed: u64) -> DVec3 {
+    let h = rng::hash(&[seed, 0x9013]);
+    let z = rng::uniform(h) * 2.0 - 1.0;
+    let phi = rng::uniform(rng::mix(h)) * std::f64::consts::TAU;
+    let r = (1.0 - z * z).max(0.0).sqrt();
+    DVec3::new(r * phi.cos(), r * phi.sin(), z)
+}
+
 /// Generate the system around one catalogue star.
 pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
     let seed = star.seed();
@@ -70,6 +85,7 @@ pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
         separation_m: 0.0,
         planets: planets(seed, star),
         populations: Vec::new(),
+        pole: pole_for(seed),
         name,
     };
     system.populations = populations(seed, star, &system.planets);
@@ -159,6 +175,7 @@ fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
 /// cloud is photometrically invisible and earns its record by defining the shell radius and
 /// holding the volatiles.
 fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Population> {
+    let pole = pole_for(seed);
     let factor = metallicity::solid_mass_factor(star.metallicity);
     let scale = AU * star.luminosity_solar.max(1e-4).sqrt();
     let outer = planets.last().map(|p| p.semi_major_m).unwrap_or(5.0 * scale);
@@ -171,7 +188,7 @@ fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Popul
     vec![
         // Asteroid belt: narrow, low inclination, mildly eccentric.
         Population {
-            pole: DVec3::Z,
+            pole,
             semi_major: Distribution::normal(outer * 0.4, outer * 0.08, 9),
             eccentricity: Distribution::uniform(0.0, 0.25, 5),
             inclination: Inclination::uniform_angle(0.0, 0.2, 12),
@@ -182,7 +199,7 @@ fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Popul
         },
         // Kuiper analogue: wide, cold, many small bodies.
         Population {
-            pole: DVec3::Z,
+            pole,
             semi_major: Distribution::uniform(outer * 1.2, outer * 3.0, 9),
             eccentricity: Distribution::uniform(0.0, 0.2, 5),
             inclination: Inclination::uniform_angle(0.0, 0.35, 12),
@@ -359,15 +376,18 @@ impl GeneratedSystem {
             star_name.clone()
         };
 
-        for (k, p) in self.planets.iter().enumerate() {
+        // The system's plane as Euler angles: a normal (sin i sin O, -sin i cos O, cos i).
+        let tilt_deg = self.pole.z.clamp(-1.0, 1.0).acos().to_degrees();
+        let node_deg = self.pole.x.atan2(-self.pole.y).to_degrees();
+        for p in &self.planets {
             bodies.push(SomeBody::KeplerEntry(KeplerEntry {
                 info: info(&p.name, p.mass_kg, false, &["Planet"]),
                 params: kepler(
                     &center,
                     p.semi_major_m,
                     p.eccentricity,
-                    p.inclination_deg,
-                    (k as f64 * 37.0) % 360.0,
+                    tilt_deg + p.inclination_deg,
+                    node_deg,
                     p.mean_anomaly_deg,
                     None,
                 ),

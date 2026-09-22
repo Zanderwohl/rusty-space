@@ -4,8 +4,12 @@
 //! `lightcone/docs/05-observation.md` describes. The probability is a marginal likelihood: the
 //! box's likelihood ratio averaged over every period, phase, duration and depth a planet could
 //! have, weighted by how often the generator actually makes one there. So the only planets
-//! this can find are ones the generator can place, and a 70% detection is right seven times in
-//! ten. See `lightcone/docs/24-standing-instruments.md`.
+//! this can find are ones the generator can place, and a 70% detection is meant to be right
+//! seven times in ten. See `lightcone/docs/24-standing-instruments.md`.
+//!
+//! **Provisional.** The planet generator this is measured against is a placeholder — the shipped
+//! game will not run on it — so every planet probability is only as good as the stand-in, and the
+//! client says so beside each one.
 //!
 //! Times are coordinate seconds of arrival at the observer. That is the right clock for a period
 //! while the observer is still; a moving one sees periods Doppler-shifted, which at the speeds

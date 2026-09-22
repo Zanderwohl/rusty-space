@@ -289,9 +289,8 @@ mod tests {
         assert!(next.files.len() < first.files.len(), "{} files, then {}", first.files.len(), next.files.len());
     }
 
-    /// A red dwarf five light-years along X whose innermost generated planet goes round in
-    /// under five days, and the periods of all its planets. They orbit in the ecliptic, so from
-    /// the origin they transit.
+    /// A red dwarf five light-years out whose innermost generated planet goes round in under five
+    /// days, and the periods of all its planets, placed where they transit as seen from the origin.
     fn red_dwarf() -> (CatalogueStar, Vec<f64>) {
         let template = AuthoredStars::sample().stars()[0].clone();
         let luminosity: f64 = 0.01;
@@ -301,7 +300,9 @@ mod tests {
             .find_map(|key| {
                 let mut star = template.clone();
                 star.id = StarId::synthesise("archive-planet", key);
-                star.position_ly = DVec3::X * 5.0;
+                // Edge-on to the origin, where the system's shared plane puts every planet across
+                // its star.
+                star.position_ly = lc_world::sky::generate::pole_for(star.seed()).any_orthonormal_vector() * 5.0;
                 star.luminosity_solar = luminosity;
                 star.mass_solar = mass;
                 star.metallicity = 0.0;
