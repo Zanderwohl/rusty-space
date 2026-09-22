@@ -132,6 +132,11 @@ python3 gen_rust.py        # -> generated_bodies.rs
   nor the SBDB API carries a diameter for Eris, Makemake, Haumea, Quaoar, Orcus or Gonggong
   — only H and a rotation period. Radii for those are estimated from absolute magnitude at an
   assumed albedo and are flagged in the generated file.
+- **A hyperbola's mean anomaly is not an angle.** It never repeats, so it must not be
+  wrapped into `[0, 360)`: wrapped, 'Oumuamua's J2000 phase landed near perihelion instead of
+  ~105 AU out. Its `a` is negative, too, so the `mu` implied by the fitted mean motion is
+  `n² |a|³`; with a signed cube it came out negative and every velocity was NaN.
+  `fitlib.wrap_mean_anomaly` handles the first; the generators handle the second.
 
 ## Merging an existing save
 

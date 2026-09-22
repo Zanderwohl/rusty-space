@@ -113,6 +113,50 @@ fn velocity_is_the_derivative_of_position() {
     }
 }
 
+/// A NaN velocity alongside a finite position is invisible on screen: position is driven by
+/// the anomalistic period, velocity by `mu`. Both interstellar objects once had a negative
+/// `mu`.
+#[test]
+fn every_body_has_a_finite_state() {
+    let s = built();
+    for i in s.indices() {
+        let Some((position, velocity)) = propagate::state_at(&s, i, Instant::J2000) else { continue };
+        assert!(position.is_finite() && velocity.is_finite(),
+            "{}: position {position:?}, velocity {velocity:?}", s.name(i));
+    }
+}
+
+/// Hyperbolic orbits against JPL Horizons at J2000: heliocentric, ecliptic of J2000, km and
+/// km/s. A hyperbolic mean anomaly is not periodic, and wrapped into [0, 360) it once put
+/// 'Oumuamua near perihelion rather than ~105 AU out.
+#[test]
+fn interstellar_objects_match_jpl() {
+    let references = [
+        ("1I-Oumuamua",
+            [2.006215258754297E+09, -8.245762066581257E+09, 1.294806409205434E+10],
+            [-3.668802116680989E+00, 1.416501923571565E+01, -2.236062357119771E+01]),
+        ("2I-Borisov",
+            [8.581673281982978E+09, 1.263868413412574E+10, 1.407364656170834E+10],
+            [-1.388849078322837E+01, -1.932262656031367E+01, -2.210335413107646E+01]),
+    ];
+    let s = built();
+    let sol = s.by_name("Sol").unwrap();
+    for (name, km, km_s) in references {
+        let i = s.by_name(name).unwrap();
+        let (position, velocity) = propagate::state_at(&s, i, Instant::J2000).unwrap();
+        let (sol_position, sol_velocity) = propagate::state_at(&s, sol, Instant::J2000).unwrap();
+        let (position, velocity) = (position - sol_position, velocity - sol_velocity);
+
+        let truth_position = glam::DVec3::from_array(km) * 1e3;
+        let truth_velocity = glam::DVec3::from_array(km_s) * 1e3;
+        // Fit residuals are ~4e-4 of the radius and ~8e-4 of the speed.
+        let position_error = (position - truth_position).length() / truth_position.length();
+        let velocity_error = (velocity - truth_velocity).length() / truth_velocity.length();
+        assert!(position_error < 1e-3, "{name}: position {position:?} vs JPL {truth_position:?}, {position_error:.2e}");
+        assert!(velocity_error < 2e-3, "{name}: velocity {velocity:?} vs JPL {truth_velocity:?}, {velocity_error:.2e}");
+    }
+}
+
 /// Keplerian bodies are evaluated, not integrated, so specific energy is exact.
 #[test]
 fn keplerian_energy_is_exactly_conserved() {

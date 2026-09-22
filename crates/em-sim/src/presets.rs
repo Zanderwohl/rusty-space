@@ -8448,11 +8448,11 @@ pub fn solar_system() -> UniverseFileContents {
                             argument_of_periapsis: 241.834986,
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-                            mean_anomaly: 241.6135848,
+                            mean_anomaly: -4438.386415,
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(524.0334581)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(-1.326412797e+20),
+                        gravitational_parameter: Some(1.326412797e+20),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 84.99115488,
@@ -8485,11 +8485,11 @@ pub fn solar_system() -> UniverseFileContents {
                             argument_of_periapsis: 209.1134777,
                         }),
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {
-                            mean_anomaly: 216.9368322,
+                            mean_anomaly: -9143.063168,
                         }),
                         anomalistic_period: Some(TimeDelta::from_days(286.6915309)),
                         // mu implied by the fitted period and semi-major axis.
-                        gravitational_parameter: Some(-1.326034157e+20),
+                        gravitational_parameter: Some(1.326034157e+20),
                     },
                     appearance: Appearance::DebugBall(DebugBall {
                         radius: 1000.0,

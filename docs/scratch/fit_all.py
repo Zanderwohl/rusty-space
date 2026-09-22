@@ -23,7 +23,7 @@ def seed(slug):
     # N is deg/sec in Horizons ELEMENTS output; convert to deg/day.
     ndeg = e["N"] * DAY
     m0 = e["MA"] - ndeg * (epoch - J2000)      # shift the mean anomaly back to J2000
-    return [ndeg, a_m, ec, e["IN"], e["OM"], e["W"], m0 % 360.0, 0.0, 0.0]
+    return [ndeg, a_m, ec, e["IN"], e["OM"], e["W"], F.wrap_mean_anomaly(m0, ec), 0.0, 0.0]
 
 def fit_one(slug):
   try:
