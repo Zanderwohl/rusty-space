@@ -6,10 +6,11 @@ a system reads the generator. This extends the transit search in
 [24-standing-instruments.md](24-standing-instruments.md) from "there is probably a planet" to a
 body with a name, an orbit and a place in a plane that was itself worked out.
 
-Status: **design**. Nothing below is built except where it says so. Every claim about what exists
-was checked against the code on 2026-09-22, and the symbols named are real; where a draft of this
-document guessed wrong, the correction is in the text rather than quietly removed, because the
-wrong guess was usually "that already exists" about something that does not.
+Status: **design**, with phase 1 built. Nothing below is built except where it says so, and what
+is carries a mark. Every claim about what exists was checked against the code on 2026-09-22, and
+the symbols named are real; where a draft of this document guessed wrong, the correction is in
+the text rather than quietly removed, because the wrong guess was usually "that already exists"
+about something that does not.
 
 ## Where it is today
 
@@ -18,13 +19,14 @@ wrong guess was usually "that already exists" about something that does not.
 - The transit search concludes *a rocky or giant planet on a P-day orbit* about a **star**. No
   body is ever created from it: `Knowledge::found_planet` exists, letters a planet, and has no
   caller outside tests, not one. `Orbit` carries a single element, `semi_major_au`.
-- The map's **Ecliptic** plane is `+Z`, the ecliptic of J2000, in every system
-  (`em_map::Plane::normal`). Sol's planets lie in it because Sol is fitted against JPL. A
-  generated system's planets and belts lie on `generate::pole_for(seed)`, and its star is given
-  no spin axis, so the star spins about `+Z`, the map's default. The map is showing the star's
-  equator, and the planets are tilted out of it. That is the bug that started this.
+- ~~The map's **Ecliptic** plane is `+Z`, the ecliptic of J2000, in every system~~ **Fixed,
+  phase 1.** It was `+Z` in `normal()`, `basis()` and a comment, so a generated system's planets
+  and belts — which orbit `generate::pole_for(seed)` — were tilted out of the plane drawn under
+  them, and the star's map sphere was pinned to `+Z` besides. That is the bug that started this.
+  `Plane` is now a selector and `Plane::about(system_pole)` yields a `Datum` carrying the
+  resolved basis; see phase 1 below for what it changed.
 - Truth already holds a good deal of what the survey below wants to measure. See *What the truth
-  has to hold first*, which lists it against the four things that are genuinely absent.
+  has to hold first*, which lists it against the three things still genuinely absent.
 
 ## The rule, for systems
 
@@ -364,7 +366,8 @@ is already there, and an earlier draft of this section underestimated it badly. 
 `em_spectra::Band` already runs `B, V, R, I, K, ThermalIr, Radio`, and the starfield shader
 already evaluates every one of them and adds a second, thermal blackbody on top
 (`starfield.wgsl:225-230`). So every channel the survey table wants exists and is computed. What
-is actually missing is four things:
+is actually missing is three things, the fourth having been the star's own pole,
+which phase 1 built:
 
 - **Albedo per band.** There is one geometric albedo per class, and it is collapsed into a single
   `effective_radius_m` — a gray reflector. `effective_radius`' own doc says the consequence: a
@@ -383,10 +386,11 @@ is actually missing is four things:
   374, 395`). Sol has rotation and generated systems have none, so the rotation-period row of the
   survey table works for Sol and finds nothing anywhere else. Generated rings are absent the same
   way, and for the same reason.
-- **The star's own spin axis.** `Star` is `{radius_m, teff_k, mu, limb_darkening}` and has no
-  pole, which is the bug at the top of this document. Truth already holds the system's plane, as
-  `GeneratedSystem::pole` (`sky/generate.rs:52`), so what phase 1 needs is for a star to spin
-  about its system's pole rather than about `+Z` by default.
+- ~~**The star's own spin axis.**~~ **Done in phase 1:** `CatalogueStar::spin_axis`, its
+  system's pole tilted up to 12°. It went on `CatalogueStar` rather than on `Star`, which is also
+  a template for `Prior::host_like` and has no business carrying an orientation. Nothing reads it
+  visibly yet — the star's map sphere is featureless — but it is where surface features will sit,
+  and it is no longer `+Z` for every star in the galaxy.
 
 Sol's major planets and large moons get an authored table of per-band reflectance, atmosphere and
 what shows at its top. It lives in `lc-world`, beside `rings.rs`, which is already exactly this:
@@ -848,12 +852,31 @@ knowledge. Today:
 
 ## Phases
 
-1. **Fix the plane now, on truth.** `Star` gains a spin axis, and a generated star spins about
-   its system's pole give or take a few degrees; truth already holds that pole as
-   `GeneratedSystem::pole`. The existing **Ecliptic** option keeps its name and stops hard-wiring
-   `+Z`: the client supplies the local system's true pole, with zero longitude at the galactic
-   node. No new `Plane` variant — that is phase 3, when the pole becomes a belief and the option
-   is renamed. A stopgap which reads the generator, as the System panel already does.
+1. **Fix the plane now, on truth.** ✅ **Built** (2026-09-22). The **Ecliptic** option keeps its
+   name and stops hard-wiring `+Z`: the client supplies the local system's true pole, with zero
+   longitude at the galactic node. No new `Plane` variant — that is phase 3, when the pole
+   becomes a belief and the option is renamed. A stopgap which reads the generator, as the
+   System panel already does. What it came to:
+
+   - `CatalogueStar::system_pole` and `::spin_axis`, both derived rather than stored, so the
+     `.lcsky` format is untouched. `system_pole` is where Sol's `+Z` is decided; reading
+     `generate::pole_for` directly would hand Sol a random plane its JPL-fitted planets are not
+     in. `spin_axis` is that pole tilted up to `SPIN_TILT_MAX_RAD`, 12°, uniform over the cap.
+   - `LocalSystem` carries both as `pole` and `star_spin`. **They are kept apart on purpose:**
+     the plane option is the planets' plane, and the star's map sphere is the star's own spin.
+     The Sun's axis is 7.25° off the ecliptic, so a star spinning exactly with its planets would
+     be the odd one out.
+   - `em_map::Plane` stays the stored selector; `Plane::about(system_pole)` yields a `Datum`
+     carrying `(u, v, n)`, which now owns `normal`, `basis`, `height_m`, `intersect`, `bearing`
+     and `foot_ly`. The camera and `compose` take a `Datum`, so a plane and a basis that
+     disagree is unrepresentable — and phase 3 hands that same seam a believed pole instead of a
+     true one, which is the whole reason it is a seam.
+   - `MapView` holds the resolved pole beside the camera, for the reason the rest of that struct
+     is held together: its angles are measured against this basis, so the two cannot be a frame
+     apart. `survey` writes it each frame; `ZERO` between the stars reads as `+Z`.
+   - **Changed from the plan:** the spin axis went on `CatalogueStar`, not on `Star`. `Star` is
+     also used as a *template* by `Prior::host_like`, and a template has no business carrying an
+     orientation. Nothing else about phase 1 moved.
 2. **Records only.** The full `Orbit` with `Orientation` and `Method`, `BodyBelief` and
    `SystemPlane`, and the readers that embedded the old `Orbit` deleted. **Charts stay** — see
    the note on ordering below.
@@ -863,7 +886,7 @@ knowledge. Today:
    `Plane::other()` becomes a cycle.
 4. **Transits make bodies.** A settled transit calls `found_planet`, the period gives a distance
    through the mass prior, and the result is `EdgeOnTo`, crossed with other craft's.
-5. **What a body is, in the truth.** Three of the four absent things, the star's own pole being
+5. **What a body is, in the truth.** The three still absent, the star's own pole having been
    phase 1's: reflectance per band, an atmosphere and what shows at the top of it, and rotation
    for generated bodies. Then the authored Sol table, which lives in `lc-world` beside `rings.rs`,
    generator rules for everything else, rings for generated planets — `rings::for_body` is keyed
@@ -945,7 +968,7 @@ game has no players — so each of these is a change in place, not a versioned a
 
 | phase | change |
 |---|---|
-| 1 | `Star` gains a spin axis. Save shape changes; `SAVE_FORMAT` is 9 today |
+| 1 | ✅ **None.** `CatalogueStar::system_pole` and `::spin_axis` are derived, not stored, so neither the `.lcsky` catalogue nor the checkpoint changed. `SAVE_FORMAT` stays 9 |
 | 2 | `Orbit` grows, `Orientation` and `Method` are new, and `formats.rs`' three back-readers `FileV3`/`FileV2`/`FileV1` are deleted rather than repointed at a frozen `OrbitV4`. `FILE_FORMAT` and `OLDEST_FILE_FORMAT` both become the new number |
 | 2 | `REPORT_FORMAT`, 2 today (`radio.rs:115`), carries the new `Orbit` |
 | 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
