@@ -6,9 +6,9 @@ a system reads the generator. This extends the transit search in
 [24-standing-instruments.md](24-standing-instruments.md) from "there is probably a planet" to a
 body with a name, an orbit and a place in a plane that was itself worked out.
 
-Status: **design**, with phase 1 built. Nothing below is built except where it says so, and what
-is carries a mark. Every claim about what exists was checked against the code on 2026-09-22, and
-the symbols named are real; where a draft of this document guessed wrong, the correction is in
+Status: **design**, with phases 1 and 2 built. Nothing below is built except where it says so,
+and what is carries a mark. Every claim about what exists was checked against the code on
+2026-09-22, and the symbols named are real; where a draft of this document guessed wrong, the correction is in
 the text rather than quietly removed, because the wrong guess was usually "that already exists"
 about something that does not.
 
@@ -52,7 +52,8 @@ below.
 | `Naming` | as now: a planet letter from `found_planet`, and any given name | the crew, other craft |
 | `Conclusion` | what kind of body: rocky or giant, and later temperature and albedo | transit depth, reflected and thermal flux |
 
-`Orbit` grows from one number to what a fit actually yields:
+`Orbit` grew from one number to what a fit actually yields — this is the built shape, in
+`knowledge/record.rs`:
 
 ```rust
 pub struct Orbit {
@@ -877,9 +878,27 @@ knowledge. Today:
    - **Changed from the plan:** the spin axis went on `CatalogueStar`, not on `Star`. `Star` is
      also used as a *template* by `Prior::host_like`, and a template has no business carrying an
      orientation. Nothing else about phase 1 moved.
-2. **Records only.** The full `Orbit` with `Orientation` and `Method`, `BodyBelief` and
-   `SystemPlane`, and the readers that embedded the old `Orbit` deleted. **Charts stay** — see
-   the note on ordering below.
+2. **Records only.** ✅ **Built** (2026-09-22). The full `Orbit` with `Orientation` and `Method`,
+   `BodyBelief` and `SystemPlane`, and the readers that embedded the old `Orbit` deleted.
+   **Charts stay** — see the note on ordering below. What it came to:
+
+   - `Orbit` carries a period and an axis with their own sigmas, because they are not measured
+     together. `Orbit::from_period` holds the one relationship every producer would otherwise
+     re-derive: a third of the host mass's fractional error, since the period goes as `mu^-1/2`
+     and the axis as `mu^1/3`.
+   - `formats.rs` went from 410 lines to 47. `FILE_FORMAT` is 5 and `OLDEST_FILE_FORMAT` equals
+     it, so an older file is refused loudly rather than read wrong quietly.
+   - `knowledge/body.rs` holds both beliefs. `Placed::Known` turned out to be buildable now
+     rather than in phase 6: a full orientation plus an epoch propagates through Kepler's
+     equation, and the pole's own error carries the body along its ring. Without both it is a
+     `Shell`.
+   - Two details in the plane fold earn their code. A pole's sign is the direction of travel,
+     which an edge-on reading does not settle, so poles are folded onto one half before
+     averaging — otherwise one retrograde orbit cancels a prograde one into no plane at all. And
+     poles more than `PLANE_SCATTER_LIMIT_RAD` apart report `Unknown` rather than averaging into
+     a plane nothing lies in.
+   - **Changed from the plan:** nothing in the shape, but `found_planet` now takes an `Orbit` and
+     still stamps the witness itself, since it records what *this* craft found.
 3. **The panel and the map read beliefs.** Known bodies only, candidates in fainter green,
    shells, distance error bars along the presumed plane, the System plane option from belief, and
    the detail section with sources. `em_map::Plane` gains a fieldless `System` variant, and
@@ -969,8 +988,8 @@ game has no players — so each of these is a change in place, not a versioned a
 | phase | change |
 |---|---|
 | 1 | ✅ **None.** `CatalogueStar::system_pole` and `::spin_axis` are derived, not stored, so neither the `.lcsky` catalogue nor the checkpoint changed. `SAVE_FORMAT` stays 9 |
-| 2 | `Orbit` grows, `Orientation` and `Method` are new, and `formats.rs`' three back-readers `FileV3`/`FileV2`/`FileV1` are deleted rather than repointed at a frozen `OrbitV4`. `FILE_FORMAT` and `OLDEST_FILE_FORMAT` both become the new number |
-| 2 | `REPORT_FORMAT`, 2 today (`radio.rs:115`), carries the new `Orbit` |
+| 2 | ✅ **Done.** `Orbit` grew, `Orientation` and `Method` are new, and `formats.rs`' three back-readers `FileV3`/`FileV2`/`FileV1` were deleted rather than repointed at a frozen `OrbitV4`. `FILE_FORMAT` and `OLDEST_FILE_FORMAT` are both 5 |
+| 2 | `REPORT_FORMAT` stays 2. It carries the new `Orbit` by carrying `Part`, whose shape is unchanged, and the one shard is redeployed whole — a bump would only drop reports already in flight |
 | 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
 | 6 | a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
 | 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |
