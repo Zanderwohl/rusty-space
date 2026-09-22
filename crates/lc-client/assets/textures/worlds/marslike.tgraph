@@ -280,7 +280,7 @@ TextureGraphFile(
                         ColorStop(
                             t: 0.0,
                             color: Const(Oklch(
-                                l: 0.4,
+                                l: 0.46,
                                 chroma: 0.07,
                                 hue: OklabHue(38.0),
                                 alpha: 1.0,
@@ -433,7 +433,7 @@ TextureGraphFile(
                 id: 31,
                 name: "basalt",
                 kind: Color(Oklch(
-                    l: 0.36,
+                    l: 0.43,
                     chroma: 0.045,
                     hue: OklabHue(38.0),
                     alpha: 1.0,
@@ -465,7 +465,7 @@ TextureGraphFile(
                 id: 34,
                 name: "canyon floor",
                 kind: Color(Oklch(
-                    l: 0.33,
+                    l: 0.4,
                     chroma: 0.07,
                     hue: OklabHue(32.0),
                     alpha: 1.0,
