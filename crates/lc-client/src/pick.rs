@@ -178,12 +178,21 @@ fn survey(
 
     let clip_from_view = perspective.get_clip_from_view();
     let rad_per_px = radians_per_pixel(perspective.fov, viewport.y);
-    let sighted = sight(&game, &bodies, &uplink, eye.at_ly, camera_at, clip_from_view, rad_per_px);
 
     // Against the whole window, because that is where the cursor can be. A thing under a panel
     // is not pickable anyway: egui takes the pointer first, which is checked below.
     let whole = Frame::bare(reticle::safe_rect(viewport, 0.0));
     let cursor = (!egui.wants_any_pointer_input()).then(|| window.cursor_position()).flatten();
+
+    let stars = StarsWanted {
+        near: cursor.map(|at| {
+            (cursor_direction(at, viewport, camera_at.rotation, clip_from_view),
+                (picking::SLACK_PX * rad_per_px * STAR_CONE_MARGIN) as f64)
+        }),
+        selected: ui.selected.filter(|_| ui.focus.is_none()),
+    };
+    let sighted =
+        sight(&game, &bodies, &uplink, eye.at_ly, camera_at, clip_from_view, rad_per_px, stars);
 
     // Only what is actually on screen can be under the cursor. An off-screen thing is placed on
     // the border, and taking that as a position would make the edges pick whatever is out there.
@@ -308,7 +317,31 @@ pub fn project_direction(camera_rotation: Quat, clip_from_view: Mat4, direction:
     clip_from_view * Vec4::new(view.x, view.y, view.z, 0.0)
 }
 
+/// Which stars to sight: those the cursor could be on, and the selected one.
+///
+/// A star has no radius, so [`picking::pick`] cannot choose one further than the slack from the
+/// cursor, and the rest of the eight thousand can be skipped before any work is done on them.
+struct StarsWanted {
+    /// The cursor's direction in simulation space, and the widest angle from it a pickable star
+    /// can be.
+    near: Option<(DVec3, f64)>,
+    /// Marked even off screen, where its arrow is the only way to find it.
+    selected: Option<StarId>,
+}
+
+/// Slack for rounding. The cone itself is exact: a gnomonic projection is nowhere denser than at
+/// its center, so a star `a` radians off the cursor is at least `a / rad_per_px` pixels away.
+const STAR_CONE_MARGIN: f32 = 1.05;
+
+fn cursor_direction(cursor: Vec2, viewport: Vec2, camera_rotation: Quat, clip_from_view: Mat4)
+    -> DVec3 {
+    let ndc = Vec2::new(cursor.x / viewport.x * 2.0 - 1.0, 1.0 - cursor.y / viewport.y * 2.0);
+    let view = Vec3::new(ndc.x / clip_from_view.x_axis.x, ndc.y / clip_from_view.y_axis.y, -1.0);
+    em_render::render_space::render_to_sim((camera_rotation * view).as_dvec3()).normalize_or_zero()
+}
+
 /// Everything drawn, reduced to where it was drawn.
+#[allow(clippy::too_many_arguments)]
 fn sight(
     game: &Game,
     bodies: &Bodies,
@@ -317,11 +350,12 @@ fn sight(
     camera_at: &Transform,
     clip_from_view: Mat4,
     rad_per_px: f32,
+    stars: StarsWanted,
 ) -> Vec<Sighted> {
     // The eye and not the ship: a mark is measured against the image, and the image is taken
     // from a boom's length behind the hull.
     let ship = eye_ly;
-    let mut out = Vec::with_capacity(bodies.drawn.len() + game.stars.len());
+    let mut out = Vec::with_capacity(bodies.drawn.len() + uplink.contacts.len() + 8);
 
     let project = |direction: DVec3| project_direction(camera_at.rotation, clip_from_view, direction);
 
@@ -362,11 +396,16 @@ fn sight(
         });
     }
 
+    let near_cos = stars.near.map(|(toward, cone_rad)| (toward, cone_rad.cos()));
     for star in &game.stars {
         // Where the sky pass draws it, aberration and all. Picking what you see rather than
         // what is there is the whole point of reading this and not the offset.
         let direction = game.apparent_dir(star);
         if direction == DVec3::ZERO {
+            continue;
+        }
+        let near = near_cos.is_some_and(|(toward, cos)| direction.dot(toward) >= cos);
+        if !near && stars.selected != Some(star.id) {
             continue;
         }
         let name =
@@ -629,6 +668,42 @@ mod tests {
         transform.look_to(sim_to_render(direction).as_vec3(), sim_to_render(DVec3::Z).as_vec3());
         let projection = PerspectiveProjection::default();
         (transform.rotation, projection.get_clip_from_view())
+    }
+
+    /// The star filter is only exact if the cursor's direction projects back onto the cursor.
+    #[test]
+    fn the_cursor_direction_projects_back_onto_the_cursor() {
+        let (rotation, clip_from_view) = looking_along(DVec3::new(0.3, -1.0, 0.4).normalize());
+        let viewport = Vec2::new(1280.0, 720.0);
+        for cursor in [Vec2::new(640.0, 360.0), Vec2::new(3.0, 5.0), Vec2::new(1270.0, 700.0)] {
+            let direction = cursor_direction(cursor, viewport, rotation, clip_from_view);
+            let clip = project_direction(rotation, clip_from_view, direction);
+            let Marker::On { at, .. } =
+                reticle::place(clip, 0.0, viewport, Frame::bare(reticle::safe_rect(viewport, 0.0)))
+            else {
+                panic!("{cursor} came back off screen");
+            };
+            assert!(at.distance(cursor) < 0.05, "{cursor} came back at {at}");
+        }
+    }
+
+    /// No pickable star is outside the cone, even in a corner, where a pixel covers the least sky.
+    #[test]
+    fn a_star_just_inside_the_slack_is_inside_the_cone() {
+        let (rotation, clip_from_view) = looking_along(DVec3::X);
+        let viewport = Vec2::new(1280.0, 720.0);
+        let fov = PerspectiveProjection::default().fov;
+        let cone = picking::SLACK_PX * radians_per_pixel(fov, viewport.y) * STAR_CONE_MARGIN;
+        for cursor in [Vec2::new(640.0, 360.0), Vec2::new(8.0, 8.0), Vec2::new(1272.0, 8.0)] {
+            let toward = cursor_direction(cursor, viewport, rotation, clip_from_view);
+            for step in 0..16 {
+                let turn = std::f32::consts::TAU * step as f32 / 16.0;
+                let offset = Vec2::from_angle(turn) * (picking::SLACK_PX - 0.01);
+                let star = cursor_direction(cursor + offset, viewport, rotation, clip_from_view);
+                let angle = star.dot(toward).clamp(-1.0, 1.0).acos() as f32;
+                assert!(angle <= cone, "{angle} rad off at {cursor}, cone {cone}");
+            }
+        }
     }
 
     /// What the camera is pointed at lands in the middle of the screen, and in front.

@@ -88,6 +88,8 @@ pub struct System {
     time: Instant,
     generation: u32,
     dirty: bool,
+    /// See `memo`.
+    memo: crate::memo::StateMemo,
 }
 
 impl System {
@@ -100,6 +102,7 @@ impl System {
             parent: Vec::new(), mu: Vec::new(), topo_order: Vec::new(),
             newtonian: Vec::new(), major: Vec::new(), unresolved: Vec::new(),
             gravitational_constant, time: Instant::J2000, generation: 0, dirty: true,
+            memo: Default::default(),
         }
     }
 
@@ -297,6 +300,7 @@ impl System {
     }
     pub(crate) fn set_time(&mut self, t: Instant) { self.time = t; }
 
+    pub(crate) fn memo(&self) -> &crate::memo::StateMemo { &self.memo }
     pub(crate) fn topo_order(&self) -> &[BodyIndex] { &self.topo_order }
     pub(crate) fn newtonian_indices(&self) -> &[BodyIndex] { &self.newtonian }
     pub(crate) fn major_indices(&self) -> &[BodyIndex] { &self.major }

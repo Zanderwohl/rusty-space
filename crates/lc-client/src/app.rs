@@ -117,6 +117,8 @@ impl Plugin for ClientPlugin {
             crate::library::LibraryPlugin,
             crate::faces::FacesPlugin,
             crate::map::MapPlugin,
+            crate::bench::BenchPlugin,
+            crate::haze::HazePlugin,
         ))
             // **Which camera egui draws on is not left to spawn order.**
             //

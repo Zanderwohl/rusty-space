@@ -454,11 +454,12 @@ fn telescope(
         }
     });
     let width = ui.available_width().max(220.0);
-    let samples = game.curve.samples().to_vec();
-    plot.show(ui, &samples, egui::vec2(width, 190.0));
+    let samples = game.curve.samples();
+    plot.show(ui, samples, egui::vec2(width, 190.0));
+    let last = samples.last().copied();
     ui.weak(crate::plot::caption(band));
 
-    if let Some((_, last)) = samples.last() {
+    if let Some((_, last)) = &last {
         // The picture is the readout, but a number is the one form of it that survives being
         // read aloud, screenshotted, or looked at by someone who cannot see the color.
         let (label, value) = if *last >= 0.0 {
