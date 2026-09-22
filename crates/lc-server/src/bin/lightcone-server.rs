@@ -193,8 +193,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // what each of them knew.
                     let files = lc_store::knowledge::load_files(&client).await?;
                     let samples = lc_store::knowledge::load_samples(&client).await?;
+                    // Counted rather than listed: a format bump refuses every file a craft
+                    // holds, and thousands of identical lines bury the rest of the boot.
+                    let mut problems: std::collections::BTreeMap<String, usize> =
+                        std::collections::BTreeMap::new();
                     for problem in server.adopt_knowledge(&files, &samples) {
-                        eprintln!("WARNING: knowledge not restored: {problem}");
+                        *problems.entry(problem).or_default() += 1;
+                    }
+                    for (problem, count) in problems {
+                        eprintln!("WARNING: knowledge not restored ({count}x): {problem}");
                     }
                     eprintln!("resumed {} files and {} samples of knowledge", files.len(), samples.len());
                     let marks = lc_store::reading::load(&client).await?;
