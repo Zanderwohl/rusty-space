@@ -26,7 +26,7 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::ShaderRef;
 use em_render::body_material::BASE_TUBE_RADIUS;
-use em_render::wire_mesh::{ATTRIBUTE_CENTER_AFTER, ATTRIBUTE_CENTER_BEFORE};
+use em_render::wire_mesh::{ATTRIBUTE_ARC_LENGTH, ATTRIBUTE_CENTER_AFTER, ATTRIBUTE_CENTER_BEFORE};
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone, PartialEq)]
 pub struct MapLineMaterial {
@@ -44,6 +44,10 @@ pub struct MapLineMaterial {
     pub max_fraction: f32,
     #[uniform(0)]
     pub width_px: f32,
+    /// Dash length on screen, with gaps as long; zero for a solid line. Held near this all
+    /// along the line, perspective or not: see `map_line.wgsl`.
+    #[uniform(0)]
+    pub dash_px: f32,
 }
 
 impl Default for MapLineMaterial {
@@ -54,6 +58,7 @@ impl Default for MapLineMaterial {
             base_tube_radius: BASE_TUBE_RADIUS,
             max_fraction: 1.0,
             width_px: 1.0,
+            dash_px: 0.0,
         }
     }
 }
@@ -79,6 +84,7 @@ impl Material for MapLineMaterial {
             Mesh::ATTRIBUTE_COLOR.at_shader_location(5),
             ATTRIBUTE_CENTER_BEFORE.at_shader_location(6),
             ATTRIBUTE_CENTER_AFTER.at_shader_location(7),
+            ATTRIBUTE_ARC_LENGTH.at_shader_location(8),
         ])?];
         Ok(())
     }
@@ -118,6 +124,14 @@ pub fn nearest(from: Vec3, a: Vec3, b: Vec3) -> f32 {
     from.distance(a + span * along)
 }
 
+/// The two dash periods `map_line.wgsl` fades between, in arc length, and how far across.
+/// `per_px` is how much arc one pixel of screen covers there.
+pub fn dash_period(dash_px: f32, per_px: f32) -> (f32, f32, f32) {
+    let level = (2.0 * dash_px * per_px).log2();
+    let period = level.floor().exp2();
+    (period, 2.0 * period, level.fract())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +152,24 @@ mod tests {
             assert!(radius <= nearest_px * 1.0001, "an end drew {radius:e} for {nearest_px:e}");
             let by_the_end = tube_radius(1.0, rad_per_px, eye.distance(end), fraction, width);
             assert!(by_the_end > radius * 100.0, "premise: the ends alone would be a band");
+        }
+    }
+
+    /// The two periods bracket the dash asked for, at any scale — the shorter lights half to
+    /// all of it, the longer one to two times it — so a big shape gets more dashes rather than
+    /// stretched ones.
+    #[test]
+    fn a_dash_stays_near_its_length_on_screen() {
+        let dash_px = 5.0;
+        for exponent in -40..40 {
+            let per_px = 1.37f32.powi(exponent);
+            let (short, long, _) = dash_period(dash_px, per_px);
+            // Half a period is lit, in pixels.
+            let (short_px, long_px) = (short * 0.5 / per_px, long * 0.5 / per_px);
+            assert!(short_px > dash_px * 0.5 - 1.0e-3 && short_px <= dash_px * 1.0001,
+                "{short_px} px at {per_px:e}");
+            assert!(long_px > dash_px * 0.9999 && long_px <= dash_px * 2.0001,
+                "{long_px} px at {per_px:e}");
         }
     }
 

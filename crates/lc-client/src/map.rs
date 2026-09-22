@@ -57,6 +57,9 @@ const DOT_TUBE_FRACTION: f32 = BASE_TUBE_RADIUS;
 /// its brightness. It is the ruler, not what is being measured.
 const SCALE_PX: f32 = LINE_PX * 0.5;
 const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
+/// A population's outline, dashed and at an eighth of a line's brightness. Held at full width
+/// all the way round, a shell's six curves were the brightest thing on the map.
+const POPULATION_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
 
 /// How much of the palette color a line is drawn at.
 ///
@@ -766,8 +769,10 @@ fn spawn_scene(
     // them differs but where they are.
     let ring = materials.add(line_material(RING, LINE_TUBE_FRACTION, SCALE_PX, SCALE_COLOR_SCALE));
     let drop = materials.add(line_material(DROP, LINE_TUBE_FRACTION, SCALE_PX, SCALE_COLOR_SCALE));
-    let population =
-        materials.add(line_material(POPULATION, LINE_TUBE_FRACTION, LINE_PX, LINE_COLOR_SCALE));
+    let population = materials.add(MapLineMaterial {
+        dash_px: DASH_PX,
+        ..line_material(POPULATION, LINE_TUBE_FRACTION, LINE_PX, POPULATION_COLOR_SCALE)
+    });
 
     for (index, placed) in frame.rings.iter().enumerate() {
         commands.spawn((
@@ -851,6 +856,7 @@ fn line_material(color: Color, max_fraction: f32, width_px: f32, color_scale: f3
         base_tube_radius: BASE_TUBE_RADIUS,
         max_fraction,
         width_px,
+        dash_px: 0.0,
     }
 }
 

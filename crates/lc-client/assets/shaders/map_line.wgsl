@@ -14,11 +14,13 @@ struct Vertex {
     @location(5) color: vec4<f32>,
     @location(6) center_before: vec3<f32>,
     @location(7) center_after: vec3<f32>,
+    @location(8) arc: f32,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(5) color: vec4<f32>,
+    @location(6) arc: f32,
 }
 
 struct MapLineMaterial {
@@ -27,6 +29,7 @@ struct MapLineMaterial {
     base_tube_radius: f32,
     max_fraction: f32,
     width_px: f32,
+    dash_px: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: MapLineMaterial;
@@ -72,10 +75,44 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let world = world_from_local * vec4(center + vertex.normal * radius, 1.0);
     out.clip_position = position_world_to_clip(world.xyz);
     out.color = vertex.color;
+    out.arc = vertex.arc;
     return out;
+}
+
+/// Lit for the first half of each period of `arc`, dark for the second.
+fn lit_in(arc: f32, period: f32) -> f32 {
+    return select(0.0, 1.0, fract(arc / period) < 0.5);
+}
+
+/// How much of a dash this fragment is in, `0..1`, for dashes about `dash_px` long on screen.
+///
+/// The pattern is laid along the mesh's own arc length, so it stays put on the line as the
+/// camera moves. How much arc a pixel covers comes from the derivative, and it varies along a
+/// line seen in perspective, so the pattern is two power-of-two periods either side of the one
+/// wanted, faded by which is nearer: as one gives way every other gap fills in, so nothing
+/// pops. The shorter lights dashes between half and all of `dash_px`, the longer between one
+/// and two, and a bigger shape on screen has more dashes rather than longer ones.
+fn dash(arc: f32) -> f32 {
+    if (material.dash_px <= 0.0) {
+        return 1.0;
+    }
+    let per_px = length(vec2<f32>(dpdx(arc), dpdy(arc)));
+    if (per_px <= 0.0) {
+        return 1.0;
+    }
+    // `map_line::dash_period`.
+    let level = log2(2.0 * material.dash_px * per_px);
+    let period = exp2(floor(level));
+    return mix(lit_in(arc, period), lit_in(arc, 2.0 * period), fract(level));
 }
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4(material.base_color.rgb * (1.0 + in.color.a * material.emission_strength), 1.0);
+    // Before any branch: derivatives want every fragment of the quad still running.
+    let lit = dash(in.arc);
+    if (lit <= 0.0) {
+        discard;
+    }
+    let color = material.base_color.rgb * (1.0 + in.color.a * material.emission_strength);
+    return vec4(color * lit, 1.0);
 }
