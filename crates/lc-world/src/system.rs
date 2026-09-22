@@ -574,6 +574,32 @@ mod tests {
         crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv").ok()
     }
 
+    /// **The plane a map draws has to be the one the planets are actually in.** This is the
+    /// claim `LocalSystem::pole` exists to make, and the whole of phase 1 of
+    /// `lightcone/docs/25-system-knowledge.md` rests on it: `+Z` was drawn under systems whose
+    /// planets orbit somewhere else, which put every planet out of the plane beneath it.
+    ///
+    /// Generated inclinations are gaussian with a two-degree sigma, so ten is four sigma and
+    /// the same figure catches a pole that is ignored outright -- a random pole is 60 degrees
+    /// out on average.
+    #[test]
+    fn a_generated_systems_planets_lie_in_its_own_pole() {
+        let stars = AuthoredStars::sample();
+        // The third authored star is the one whose generated system has planets.
+        let star = &StarProvider::stars(&stars)[2];
+        let system = LocalSystem::for_star(star).expect("a generated system");
+        let drawn = system.drawables_at(star.position_ly, 0.0);
+        assert!(!drawn.is_empty(), "nothing to measure");
+
+        for body in &drawn {
+            let offset = body.position_ly - system.star_position_ly();
+            let out = offset.normalize().dot(system.pole).abs().asin().to_degrees();
+            assert!(out < 10.0, "{} is {out:.1}° out of its own system's plane", body.name);
+        }
+        // And the pole is not simply +Z, or this would pass without measuring anything.
+        assert!(system.pole.dot(DVec3::Z).abs() < 0.999, "the generated pole is +Z");
+    }
+
     /// A drawable's kind is the same answer the inventory gives, for every body in the solar
     /// system that appears in both.
     ///
