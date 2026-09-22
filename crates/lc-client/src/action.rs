@@ -185,9 +185,6 @@ pub enum Effect {
     CancelSignIn,
     SignInWithPassword { email: String, password: String },
     SignOut,
-    /// Answer a craft automatically from now on, or stop. Reaches `crate::uplink`'s chat log,
-    /// which `apply` cannot see.
-    AutoAck { with: lc_proto::ShipId, on: bool },
     /// An order for the server. Emitted instead of a local change when a server is
     /// authoritative over the ship: see [`crate::session::Session::remote`].
     Send(lc_proto::Order),
@@ -454,9 +451,15 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Send(lc_proto::Order::Say { to, aim, secrecy, body, idem }));
             }
         }
-        // An effect rather than a change to `UiState`, because what it sets lives on the
-        // conversation — which is the connection's, not the interface's.
-        Action::AutoAck { with, on } => effects.push(Effect::AutoAck { with, on }),
+        // A standing order the server keeps, so it answers with nobody flying the ship. The
+        // checkbox shows what the server says back, not what was clicked.
+        Action::AutoAck { with, on } => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::AutoAck { with, on }));
+            } else {
+                effects.push(Effect::Notify("no server, so nobody to answer".into()));
+            }
+        }
         Action::OfferKey { to, aim } => {
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::OfferKey { to, aim }));

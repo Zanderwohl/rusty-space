@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 27;
+pub const PROTOCOL_VERSION: u32 = 28;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -427,6 +427,12 @@ pub enum Order {
     /// `to` is `None` to offer it to **whoever hears it**, which is what the public channel
     /// does: anyone in range can answer in private from then on.
     OfferKey { to: Option<ShipId>, aim: Aim },
+    /// Answer `with` automatically from now on, or stop.
+    ///
+    /// A standing order kept by the server, so it answers whether or not anyone is flying the
+    /// ship. It puts nothing on the air and is answered by [`Outbound::AutoAcking`], not
+    /// `Accepted`. Appended last.
+    AutoAck { with: ShipId, on: bool },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -896,6 +902,9 @@ pub enum Outbound {
     /// which is what lets the shelf offer "recently read" without either end having to agree
     /// about whose clock a timestamp would be in.
     Reading(Vec<Bookmark>),
+    /// Every craft this ship answers automatically, whole. Sent on signing in and after each
+    /// [`Order::AutoAck`]. Appended last.
+    AutoAcking { ship_id: ShipId, with: Vec<ShipId> },
 }
 
 /// Why an intent was not acted on.
@@ -1480,6 +1489,8 @@ mod tests {
                 keys: vec![ShipId(7)],
             },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
+            Outbound::AutoAcking { ship_id: ShipId(42), with: vec![ShipId(7), ShipId(9)] },
+            Outbound::AutoAcking { ship_id: ShipId(42), with: Vec::new() },
         ];
         for message in out {
             let bytes = encode(&message);
@@ -1524,6 +1535,11 @@ mod tests {
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
                 order: Order::OfferKey { to: Some(ShipId(7)), aim: Aim::Omni },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::AutoAck { with: ShipId(7), on: true },
                 issued_at_client_t: 0,
             }),
         ];

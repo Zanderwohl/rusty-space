@@ -144,6 +144,14 @@ pub struct Server<J: Journal> {
     pub(crate) said: Vec<lc_store::chat::Message>,
     pub(crate) receipts: Vec<lc_store::chat::Receipt>,
     pub(crate) taught: Vec<lc_store::chat::Held>,
+    /// Who each craft answers automatically. Standing state, like `pursuits`, and for the same
+    /// reason: it goes on answering with nobody flying the ship. See [`crate::radio::Owed`].
+    pub(crate) auto_ack: HashMap<CraftId, std::collections::BTreeSet<ShipId>>,
+    /// Messages addressed to each craft that have not landed yet, each a possible answer.
+    pub(crate) owed: HashMap<CraftId, Vec<crate::radio::Owed>>,
+    /// The messages each craft has lately answered, so a resend is not answered again. In memory
+    /// only: after a restart a resend of something already answered is answered once more.
+    pub(crate) answered: HashMap<CraftId, std::collections::VecDeque<(ShipId, lc_proto::MessageKey)>>,
     /// The tunables every fitted ship is read under. See [`Server::set_balance`].
     pub(crate) balance: lc_world::fitting::Balance,
     /// Craft whose owner is to be told when their refit finishes.
@@ -175,6 +183,9 @@ impl<J: Journal> Server<J> {
             said: Vec::new(),
             receipts: Vec::new(),
             taught: Vec::new(),
+            auto_ack: HashMap::new(),
+            owed: HashMap::new(),
+            answered: HashMap::new(),
             rate: 1.0,
             directs: false,
             library: crate::library::Library::default(),
@@ -396,6 +407,8 @@ impl<J: Journal> Server<J> {
         // After the intents, so an intercept ordered this tick is not immediately re-solved
         // against the plan it just made.
         self.steer_pursuits(wire, &mut events, &mut deliveries);
+        // After the intents, so an auto-ack switched off this tick answers nothing more.
+        self.answer_owed(self.now_t - self.tick_us(), &mut events, &mut deliveries);
         self.announce_drives(self.now_t - self.tick_us(), &mut events, &mut deliveries);
         self.keep_accounts(wire);
         self.journal.write(&events, &deliveries).await?;
@@ -447,6 +460,9 @@ impl<J: Journal> Server<J> {
                             wire.send(from, Outbound::Pursuing { ship_id, pursuit });
                         }
                         self.tell_fitted(wire, CraftId(ship_id.0));
+                        if self.auto_ack.contains_key(&CraftId(ship_id.0)) {
+                            self.tell_auto_acking(wire, from, ship_id);
+                        }
                         // A shard with no shelf says nothing about one, and its clients show an
                         // empty bookcase rather than a broken one.
                         if !self.library.is_empty() {
@@ -470,6 +486,13 @@ impl<J: Journal> Server<J> {
                 // Nothing is said back. A bookmark is not an order and there is no outcome to
                 // report; the client already knows where it is, because it is the one reading.
                 self.library.set(&account, mark);
+            }
+            Inbound::Act(Intent { ship_id, order: Order::AutoAck { with, on }, .. }) => {
+                if self.set_auto_ack(from, ship_id, with, on) {
+                    self.tell_auto_acking(wire, from, ship_id);
+                } else {
+                    wire.send(from, Outbound::Refused { ship_id, reason: Refusal::NotYours });
+                }
             }
             Inbound::Act(intent) => {
                 let ship_id = intent.ship_id;
@@ -735,6 +758,8 @@ impl<J: Journal> Server<J> {
                 utterance = Some(spoken.said);
                 (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, spoken.applied)
             }
+            // Unreachable: `handle` takes it before it gets here, because it makes no event.
+            Order::AutoAck { .. } => return Err(Refusal::Impossible),
         };
 
         // A flight order replaces whatever the ship was doing, the standing intercept included.
@@ -746,10 +771,30 @@ impl<J: Journal> Server<J> {
             self.pursuits.remove(&id);
         }
 
+        let event_id =
+            self.put_on_air(id, at, kind, power_w, payload, &beam, utterance, events, deliveries)?;
+        Ok(Applied { event_id, at_t: at, order: applied })
+    }
+
+    /// Write an event and schedule it to everyone it reaches, and file it as a conversation
+    /// when it is one.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn put_on_air(
+        &mut self,
+        id: CraftId,
+        at: i64,
+        kind: i16,
+        power_w: f64,
+        payload: String,
+        beam: &Beam,
+        utterance: Option<crate::radio::Utterance>,
+        events: &mut Vec<Event>,
+        deliveries: &mut Vec<Scheduled>,
+    ) -> Result<i64, Refusal> {
         let at_position = self.fleet.get(id).ok_or(Refusal::NotYours)?.position_at(at as f64);
         let event = Event {
             id: self.minter.mint(at).ok_or(Refusal::Impossible)?.get(),
-            source: intent.ship_id,
+            source: ShipId(id.0),
             t: at,
             at: at_position,
             kind,
@@ -766,7 +811,7 @@ impl<J: Journal> Server<J> {
             if utterance.is_some() && observer.id == id {
                 continue;
             }
-            if let Some(scheduled) = schedule(&event, &beam, observer) {
+            if let Some(scheduled) = schedule(&event, beam, observer) {
                 landings.push((observer.id, scheduled.arrive_t, scheduled.strength));
                 deliveries.push(scheduled);
             }
@@ -774,9 +819,10 @@ impl<J: Journal> Server<J> {
         let event_id = event.id;
         if let Some(said) = utterance {
             self.remember(event_id, id, at, &said, &landings);
+            self.owe(id, event.at, !beam.is_omni(), &said, &landings);
         }
         events.push(event);
-        Ok(Applied { event_id, at_t: at, order: applied })
+        Ok(event_id)
     }
 
     /// Verify a ticket and bind the connection to the account's craft.
