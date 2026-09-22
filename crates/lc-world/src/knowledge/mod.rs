@@ -35,7 +35,8 @@ pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;
 pub use report::{ENTRIES_PER_REPORT, Entry, Log, Logs, Mark, Part, Report, Reporting};
 pub use record::{
-    Claim, Hop, Lineage, NameKind, Naming, Orbit, Sample, Series, Sighting, Witness,
+    Claim, Hop, Lineage, Method, NameKind, Naming, Orbit, Orientation, Sample, Series, Sighting,
+    Witness,
     learned_s,
 };
 pub use subject::{BodyId, Subject};
@@ -518,16 +519,16 @@ impl Knowledge {
         &mut self,
         star: StarId,
         body: BodyId,
-        semi_major_au: f64,
+        orbit: Orbit,
         luminosity_solar: f64,
         now_s: f64,
     ) -> String {
         let subject = Subject::Body { star, body };
         let owner = self.owner;
-        self.orbits(
-            subject,
-            Orbit { witness: owner, semi_major_au, stated_s: now_s, lineage: Lineage::new() },
-        );
+        let semi_major_au = orbit.semi_major_au.0;
+        // Stamped here rather than trusted from the caller: this records what *this* craft
+        // found, and one witness per statement is what `orbits` files by.
+        self.orbits(subject, Orbit { witness: owner, ..orbit });
         if let Some(held) = self
             .files
             .get(&subject)
@@ -543,7 +544,7 @@ impl Knowledge {
             .filter_map(|(_, file)| {
                 // The letter, not whatever name wins: a renamed planet still holds its place.
                 let letter = file.names.iter().find(|n| n.witness == owner && n.kind == NameKind::Relative)?;
-                Some((letter.name.clone(), file.orbit(owner)?.semi_major_au))
+                Some((letter.name.clone(), file.orbit(owner)?.semi_major_au.0))
             })
             .collect();
         let letter = names::planet_letter(&placed, semi_major_au, luminosity_solar, names::SPACING);
@@ -638,6 +639,24 @@ mod tests {
 
     fn star_id(key: u64) -> StarId {
         StarId::synthesise("test", key)
+    }
+
+    /// An orbit stated at `au`, with the period a Sun-like host gives it. Nothing here is
+    /// testing the elements, only what the letters do with the distance.
+    fn at_au(au: f64, stated_s: f64) -> Orbit {
+        let a_m = au * crate::navigation::AU;
+        let period = em_foundations::kepler::period::third_law(a_m, crate::star::Star::SOL.mu);
+        Orbit {
+            witness: Witness(0),
+            period_s: (period, period * 1.0e-3),
+            semi_major_au: (au, au * 1.0e-2),
+            eccentricity: None,
+            orientation: Orientation::Unknown,
+            epoch_s: None,
+            method: Method::Transit,
+            stated_s,
+            lineage: Lineage::new(),
+        }
     }
 
     fn sighting(witness: u64, at: DVec3, toward: DVec3, observed_s: f64) -> Sighting {
@@ -1006,7 +1025,7 @@ mod tests {
         let mut k = Knowledge::new(Witness(1));
         k.name_it(star, "Kettle", 0.0);
         let (body, subject) = planet(star, "one");
-        assert_eq!(k.found_planet(star, body, 0.7, 1.0, 1.0), "b");
+        assert_eq!(k.found_planet(star, body, at_au(0.7, 1.0), 1.0, 1.0), "b");
         assert_eq!(k.name_of(subject).as_deref(), Some("Kettle b"));
 
         k.name_it(star, "The Kettle", 2.0);
@@ -1021,9 +1040,9 @@ mod tests {
         let star = star_id(41);
         let mut k = Knowledge::new(Witness(1));
         let (body, subject) = planet(star, "one");
-        assert_eq!(k.found_planet(star, body, 0.7, 1.0, 0.0), "b");
-        assert_eq!(k.found_planet(star, body, 4.3, 1.0, 5.0), "b");
-        assert_eq!(k.file(subject).unwrap().orbits()[0].semi_major_au, 4.3, "the orbit is updated");
+        assert_eq!(k.found_planet(star, body, at_au(0.7, 0.0), 1.0, 0.0), "b");
+        assert_eq!(k.found_planet(star, body, at_au(4.3, 5.0), 1.0, 5.0), "b");
+        assert_eq!(k.file(subject).unwrap().orbits()[0].semi_major_au.0, 4.3, "the orbit is updated");
     }
 
     #[test]
@@ -1033,9 +1052,9 @@ mod tests {
         let (outer, _) = planet(star, "outer");
         let (inner, _) = planet(star, "inner");
         let (between, _) = planet(star, "between");
-        assert_eq!(k.found_planet(star, outer, 1.28, 1.0, 0.0), "c");
-        assert_eq!(k.found_planet(star, inner, 0.7, 1.0, 1.0), "b");
-        assert_eq!(k.found_planet(star, between, 0.9, 1.0, 2.0), "bb", "no single letter left");
+        assert_eq!(k.found_planet(star, outer, at_au(1.28, 0.0), 1.0, 0.0), "c");
+        assert_eq!(k.found_planet(star, inner, at_au(0.7, 1.0), 1.0, 1.0), "b");
+        assert_eq!(k.found_planet(star, between, at_au(0.9, 2.0), 1.0, 2.0), "bb", "no single letter left");
     }
 
     #[test]
@@ -1046,7 +1065,7 @@ mod tests {
         probe.name_it(star, "Kettle", 1.0);
         for (key, a) in [("one", 0.7), ("two", 1.28), ("three", 2.35)] {
             let (body, _) = planet(star, key);
-            probe.found_planet(star, body, a, 1.0, 2.0);
+            probe.found_planet(star, body, at_au(a, 2.0), 1.0, 2.0);
         }
         let report = probe.report(Mark::default(), 3.0);
         assert_eq!(report.stars(), 1, "one system, not four entries");
@@ -1068,7 +1087,7 @@ mod tests {
         probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 0.0));
         probe.name_it(star, "Kettle", 1.0);
         let (body, subject) = planet(star, "one");
-        probe.found_planet(star, body, 1.28, 1.0, 2.0);
+        probe.found_planet(star, body, at_au(1.28, 2.0), 1.0, 2.0);
         assert_eq!(probe.name_of(subject).as_deref(), Some("Kettle c"));
 
         let mut ship = Knowledge::new(Witness(1));
@@ -1087,7 +1106,7 @@ mod tests {
 
         // And its own later find is lettered around the letter it was told.
         let (inner, inner_subject) = planet(star, "inner");
-        assert_eq!(ship.found_planet(star, inner, 0.7, 1.0, 12.0), "b");
+        assert_eq!(ship.found_planet(star, inner, at_au(0.7, 12.0), 1.0, 12.0), "b");
         assert_eq!(ship.name_of(inner_subject).as_deref(), Some("Home b"));
     }
 
@@ -1096,7 +1115,7 @@ mod tests {
         let star = star_id(46);
         let mut k = Knowledge::new(Witness(1));
         let (body, subject) = planet(star, "one");
-        k.found_planet(star, body, 0.7, 1.0, 0.0);
+        k.found_planet(star, body, at_au(0.7, 0.0), 1.0, 0.0);
         assert_eq!(k.name_of(subject).as_deref(), Some("? b"), "its star is not written down");
         k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 1.0));
         let designation = designation(DVec3::X);
@@ -1109,7 +1128,7 @@ mod tests {
         let mut k = Knowledge::new(Witness(1));
         k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 0.0));
         let (body, subject) = planet(star, "one");
-        k.found_planet(star, body, 0.7, 1.0, 1.0);
+        k.found_planet(star, body, at_au(0.7, 1.0), 1.0, 1.0);
         assert_eq!(k.len(), 2, "the star and its planet");
         assert_eq!(k.stars().count(), 1);
         assert_eq!(k.members(star).map(|(s, _)| s).collect::<Vec<_>>(), vec![subject]);
@@ -1155,7 +1174,7 @@ mod tests {
         }
         k.name_it(star, "Kettle", 1.0);
         let (body, _) = planet(star, "one");
-        k.found_planet(star, body, 0.7, 1.0, 2.0);
+        k.found_planet(star, body, at_au(0.7, 2.0), 1.0, 2.0);
         for t in 10..=14 {
             k.measured(star, Witness(1), Band::K, Sample { observed_s: t as f64, deficit: 0.0, sigma: 0.01 });
         }
@@ -1306,11 +1325,11 @@ mod tests {
         let mut k = Knowledge::new(Witness(1));
         k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 0.0));
         let (inner, _) = planet(star, "inner");
-        assert_eq!(k.found_planet(star, inner, 0.7, 1.0, 1.0), "b");
+        assert_eq!(k.found_planet(star, inner, at_au(0.7, 1.0), 1.0, 1.0), "b");
         k.name_it(Subject::Body { star, body: inner }, "Spout", 2.0);
-        assert_eq!(k.found_planet(star, inner, 0.71, 1.0, 3.0), "b", "the letter is frozen");
+        assert_eq!(k.found_planet(star, inner, at_au(0.71, 3.0), 1.0, 3.0), "b", "the letter is frozen");
         assert_eq!(k.name_of(Subject::Body { star, body: inner }).as_deref(), Some("Spout"), "and the name still wins");
         let (next, _) = planet(star, "next");
-        assert_eq!(k.found_planet(star, next, 0.72, 1.0, 4.0), "bb", "b is still taken");
+        assert_eq!(k.found_planet(star, next, at_au(0.72, 4.0), 1.0, 4.0), "bb", "b is still taken");
     }
 }

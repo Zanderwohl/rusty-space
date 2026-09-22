@@ -4,6 +4,7 @@
 //! `lightcone/docs/22-provenance.md`.
 
 use em_spectra::Band;
+use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 use super::astrometry::{Bearing, Distance};
@@ -185,14 +186,97 @@ pub struct Claim {
     pub lineage: Lineage,
 }
 
-/// Where somebody says a body orbits: a semi-major axis about its star.
+/// How much of an orbit's orientation is known.
+///
+/// `pole` and `node` are in **simulation axes**, never in the system's own plane. A longitude
+/// measured from the plane's zero is a display quantity, derived when a panel asks: the plane is
+/// itself a belief drawn from these orbits, so storing a longitude in it would define each orbit
+/// against a frame its own value helps determine, and refining one orbit would silently move
+/// every other one's stored number. See
+/// `lightcone/docs/25-system-knowledge.md#the-systems-plane`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum Orientation {
+    Unknown,
+    /// Seen to transit from `toward`: the pole lies somewhere on the great circle perpendicular
+    /// to that line of sight, and the body was on the line at the orbit's epoch.
+    ///
+    /// Two craft that watched the same planet transit from different directions have two great
+    /// circles, which cross at the pole up to its sign. Orientation from outside a system is a
+    /// cooperative measurement.
+    EdgeOnTo { toward: DVec3 },
+    Known { pole: DVec3, sigma_rad: f64, node: f64, periapsis: f64 },
+}
+
+/// How an orbit was arrived at.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Method {
+    /// From a settled transit: a period measured directly, and a distance through the host's
+    /// mass. The error is mostly the mass's.
+    Transit,
+    /// Fitted to bearings taken from inside the system.
+    Astrometric,
+    /// Stated by a craft that sent no raw data. Cannot be re-solved or checked, exactly as a
+    /// [`Claim`] cannot.
+    Claim,
+}
+
+/// Where somebody says a body orbits, as much of it as they have.
 ///
 /// A statement, like a [`Claim`], because a craft outside a system infers an orbit from a period
 /// or is told one. Letters are assigned against these.
+///
+/// Each element carries its own sigma, because they are not measured together: a transit gives a
+/// period to a fraction of a percent and a distance only as well as it knows the star's mass.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Orbit {
     pub witness: Witness,
-    pub semi_major_au: f64,
+    /// Seconds, and one sigma.
+    pub period_s: (f64, f64),
+    /// AU, and one sigma.
+    pub semi_major_au: (f64, f64),
+    /// `None` when nothing has constrained it, which a circle is not the same as.
+    pub eccentricity: Option<(f64, f64)>,
+    pub orientation: Orientation,
+    /// A time the body was at a known place on the orbit: a transit's mid-time, or a fit's
+    /// epoch. With a full orientation this is what places the body now.
+    pub epoch_s: Option<f64>,
+    pub method: Method,
+    /// Coordinate seconds the witness stated it.
     pub stated_s: f64,
     pub lineage: Lineage,
+}
+
+impl Orbit {
+    /// Kepler's third law, `P = 2 pi sqrt(a^3 / mu)`, with the fractional error the host mass
+    /// carries into it.
+    ///
+    /// A third of the mass's fractional error, since the period goes as `mu^-1/2` and the axis
+    /// as `mu^1/3`. The distance from a transit is never better than the mass prior, and saying
+    /// so here keeps every producer from having to remember it.
+    pub fn from_period(
+        witness: Witness,
+        period_s: (f64, f64),
+        mu: f64,
+        mu_fraction: f64,
+        orientation: Orientation,
+        epoch_s: Option<f64>,
+        method: Method,
+        stated_s: f64,
+    ) -> Self {
+        let a_m = em_foundations::kepler::semi_major_axis::third_law(mu, period_s.0);
+        let a_au = a_m / crate::navigation::AU;
+        let spread = (period_s.1 / period_s.0.max(f64::MIN_POSITIVE)).abs() * 2.0 / 3.0
+            + mu_fraction.abs() / 3.0;
+        Self {
+            witness,
+            period_s,
+            semi_major_au: (a_au, a_au * spread),
+            eccentricity: None,
+            orientation,
+            epoch_s,
+            method,
+            stated_s,
+            lineage: Lineage::new(),
+        }
+    }
 }
