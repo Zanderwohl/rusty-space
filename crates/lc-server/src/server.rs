@@ -756,7 +756,7 @@ impl<J: Journal> Server<J> {
                 let spoken = self.compose(id, intent.ship_id, &intent.order, at)?;
                 beam = spoken.beam;
                 utterance = Some(spoken.said);
-                (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, spoken.applied)
+                (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, intent.order.clone())
             }
             // Unreachable: `handle` takes it before it gets here, because it makes no event.
             Order::AutoAck { .. } => return Err(Refusal::Impossible),

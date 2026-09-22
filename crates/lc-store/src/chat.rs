@@ -5,13 +5,42 @@
 //! been told", which is a question about who was talking and is asked once, when somebody signs
 //! in. The two want different tables and `sql/0005_chat.sql` says why at length.
 //!
-//! No opinion here about what a message *means*. A body is text this crate never reads, sealing
+//! No opinion here about what a message *means*. Text is text this crate never reads, sealing
 //! is a boolean it never acts on, and redacting one for a receiver who may not read it is the
 //! server's business — by the time a row reaches here it is a record, not a decision.
 
 use tokio_postgres::{Client, Error};
 
-/// One transmission, whole. The body is never redacted in the store.
+/// What a transmission holds. Never redacted in the store.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Content {
+    Text(String),
+    /// Nothing but its acknowledgements.
+    Ack,
+    /// A key offer, kept in the same transcript because that is where a player looks for it.
+    Key,
+}
+
+impl Content {
+    fn column(&self) -> (&'static str, Option<&str>) {
+        match self {
+            Content::Text(text) => ("text", Some(text)),
+            Content::Ack => ("ack", None),
+            Content::Key => ("key", None),
+        }
+    }
+
+    /// The table's CHECK admits no other combination.
+    fn from_column(content: &str, body: Option<String>) -> Self {
+        match (content, body) {
+            ("text", Some(text)) => Content::Text(text),
+            ("key", _) => Content::Key,
+            _ => Content::Ack,
+        }
+    }
+}
+
+/// One transmission, whole.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Message {
     pub event_id: i64,
@@ -20,10 +49,7 @@ pub struct Message {
     /// said to nobody in particular, which everyone in range hears.
     pub addressee: Option<i64>,
     pub sealed: bool,
-    /// A key offer: a message with nothing in it, kept in the same transcript because that is
-    /// where a player looks for it.
-    pub is_key: bool,
-    pub body: String,
+    pub content: Content,
     /// Event ids of the addressee's messages the sender had received when this went out.
     pub acks: Vec<i64>,
     pub sent_t: i64,
@@ -64,10 +90,11 @@ pub const BACKLOG_LIMIT: i64 = 500;
 pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64, Error> {
     let mut written = 0;
     for m in messages {
+        let (content, body) = m.content.column();
         written += client
             .execute(
                 "INSERT INTO lc_messages
-                     (event_id, sender, addressee, sealed, is_key, body, acks, sent_t, idem)
+                     (event_id, sender, addressee, sealed, content, body, acks, sent_t, idem)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                  ON CONFLICT (event_id) DO NOTHING",
                 &[
@@ -75,8 +102,8 @@ pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64,
                     &m.sender,
                     &m.addressee,
                     &m.sealed,
-                    &m.is_key,
-                    &m.body,
+                    &content,
+                    &body,
                     &m.acks,
                     &m.sent_t,
                     &m.idem,
@@ -131,15 +158,14 @@ fn message_from(row: &tokio_postgres::Row) -> Message {
         sender: row.get(1),
         addressee: row.get(2),
         sealed: row.get(3),
-        is_key: row.get(4),
-        body: row.get(5),
+        content: Content::from_column(row.get(4), row.get(5)),
         acks: row.get(6),
         sent_t: row.get(7),
         idem: row.get(8),
     }
 }
 
-const COLUMNS: &str = "event_id, sender, addressee, sealed, is_key, body, acks, sent_t, idem";
+const COLUMNS: &str = "event_id, sender, addressee, sealed, content, body, acks, sent_t, idem";
 
 /// Everything this ship transmitted, oldest first.
 pub async fn sent_by(client: &Client, ship: i64) -> Result<Vec<Message>, Error> {
@@ -217,7 +243,7 @@ pub async fn recent_heard(client: &Client, depth: i64) -> Result<Vec<(i64, i64, 
                         row_number() OVER (PARTITION BY r.observer, m.sender
                                            ORDER BY r.arrive_t DESC) AS n
                    FROM lc_message_receipts r JOIN lc_messages m USING (event_id)
-                  WHERE m.is_key = false
+                  WHERE m.content <> 'key'
              ) ranked
               WHERE n <= $1
               ORDER BY observer, sender, arrive_t",
@@ -261,8 +287,7 @@ mod tests {
             sender: from,
             addressee: Some(to),
             sealed: false,
-            is_key: false,
-            body: body.into(),
+            content: Content::Text(body.into()),
             acks: Vec::new(),
             sent_t,
             idem: Some(event_id),
@@ -287,11 +312,11 @@ mod tests {
 
         let mine = sent_by(&client, ada).await.unwrap();
         assert_eq!(mine.len(), 1);
-        assert_eq!(mine[0].body, "are you there");
+        assert_eq!(mine[0].content, Content::Text("are you there".into()));
 
         let heard = heard_by(&client, ada).await.unwrap();
         assert_eq!(heard.len(), 1, "a sender does not hear its own signal");
-        assert_eq!(heard[0].0.body, "here");
+        assert_eq!(heard[0].0.content, Content::Text("here".into()));
         assert_eq!(heard[0].0.acks, vec![910_001], "the acknowledgement survived the array");
         assert_eq!(heard[0].1, 6_000);
 
@@ -341,7 +366,7 @@ mod tests {
             });
         }
         // A key offer in the middle: it is in the transcript and never in the ack window.
-        messages.push(Message { is_key: true, ..message(930_100, bry, ada, "", 1_500) });
+        messages.push(Message { content: Content::Key, ..message(930_100, bry, ada, "", 1_500) });
         receipts.push(Receipt { event_id: 930_100, observer: ada, arrive_t: 2_500, strength: Some(1.0) });
         save_messages(&client, &messages).await.unwrap();
         save_receipts(&client, &receipts).await.unwrap();

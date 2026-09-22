@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use lc_proto::{Said, ShipId, Spoken};
+use lc_proto::{Body, Said, ShipId, Spoken};
 
 /// One message, from either end.
 #[derive(Clone, Debug, PartialEq)]
@@ -26,12 +26,11 @@ pub struct Line {
     /// Which message this is, across those transmissions. See [`lc_proto::MessageKey`].
     pub idem: lc_proto::MessageKey,
     pub mine: bool,
-    /// A key offer rather than something somebody typed.
-    pub key: bool,
     pub sealed: bool,
-    /// `None` for a sealed message this ship is not the addressee of. It was heard and cannot
-    /// be read, which is a different thing from not having been heard.
-    pub body: Option<String>,
+    /// Never [`Body::Ack`]: an acknowledgement is absorbed into [`Conversation::acked`] and is
+    /// not a line. [`Body::Unreadable`] was heard and cannot be read, which is a different
+    /// thing from not having been heard.
+    pub body: Body,
     /// What this message said it had received, newest last.
     pub acks: Vec<i64>,
     /// Coordinate seconds it was transmitted.
@@ -121,14 +120,13 @@ pub struct Conversation {
     /// In the order this ship learnt of them, which for a conversation across light delay is
     /// not the order they were sent in: a reply can be composed before the message it crosses.
     ///
-    /// **Not everything that arrived.** A message with nothing in it is an acknowledgement and
-    /// nothing else, and it is absorbed into [`Conversation::acked`] rather than shown: there
-    /// is nothing to read, and a log of empty lines is a log nobody can read either.
+    /// **Not everything that arrived.** An acknowledgement is absorbed into
+    /// [`Conversation::acked`] rather than shown: there is nothing in it to read.
     pub lines: Vec<Line>,
     /// Every event identifier the other end has named, from any message they sent.
     ///
     /// Kept here rather than read back off the lines because the message that carries an
-    /// acknowledgement is usually one with nothing else in it — and that one is not a line.
+    /// acknowledgement is usually a [`Body::Ack`] — and that one is not a line.
     /// Losing the evidence along with the clutter would make every message look unanswered for
     /// ever.
     acked: std::collections::BTreeSet<i64>,
@@ -297,7 +295,7 @@ impl Chat {
             let for_us =
                 said.mine || self.filing(said.to.map(|to| to.0)) == Filing::Conversation;
             let Some(with) = said.with.filter(|_| for_us) else {
-                if bare_acknowledgement(said.key, said.body.as_deref()) {
+                if said.body == Body::Ack {
                     continue;
                 }
                 let from = said.with.filter(|_| !said.mine);
@@ -333,12 +331,11 @@ impl Chat {
         name: Option<&str>,
         event_id: i64,
         spoken: Spoken,
-        key: bool,
         sent_s: f64,
         arrive_s: f64,
         strength: f32,
     ) {
-        if key {
+        if spoken.body == Body::Key {
             self.keys.insert(from.0);
         }
         // **Who it was addressed to decides where it is filed**, not who sent it. Only a
@@ -349,7 +346,7 @@ impl Chat {
         // Until a welcome says which craft this is, everything is a conversation: better to
         // show a message in the wrong tab than to decide it was somebody else's on no evidence.
         if self.filing(spoken.to) != Filing::Conversation {
-            self.overhear(from, name, event_id, spoken, key, sent_s, arrive_s, strength);
+            self.overhear(from, name, event_id, spoken, sent_s, arrive_s, strength);
             return;
         }
         let conversation = self.conversations.entry(from.0).or_default();
@@ -359,8 +356,8 @@ impl Chat {
             conversation.name = format!("ship {}", from.0);
         }
         // **What it acknowledges is kept whatever becomes of the message itself.** Absorbed
-        // first, because the usual carrier of an acknowledgement is a message that is about to
-        // be dropped for having nothing in it.
+        // first, because the usual carrier of an acknowledgement is a `Body::Ack`, which is
+        // about to be dropped.
         conversation.acked.extend(spoken.acks.iter().copied());
         // Idempotent twice over. A reconnection replays — `ResumeFrom` winds the delivery
         // cursor back and everything since arrives again — and a sender may have *resent*,
@@ -368,21 +365,17 @@ impl Chat {
         if conversation.lines.iter().any(|line| line.event_ids.contains(&event_id)) {
             return;
         }
-        if !key
-            && let Some(line) = same_message(&mut conversation.lines, spoken.idem, false)
-        {
+        if let Some(line) = same_message(&mut conversation.lines, spoken.idem, false) {
             line.event_ids.push(event_id);
             return;
         }
-        // Nothing to read, so nothing to show. Its acknowledgements are already kept.
-        if bare_acknowledgement(key, spoken.body.as_deref()) {
+        if spoken.body == Body::Ack {
             return;
         }
         conversation.lines.push(Line {
             event_ids: vec![event_id],
             idem: spoken.idem,
             mine: false,
-            key,
             sealed: spoken.sealed,
             body: spoken.body,
             acks: spoken.acks,
@@ -400,7 +393,6 @@ impl Chat {
         name: Option<&str>,
         event_id: i64,
         spoken: Spoken,
-        key: bool,
         sent_s: f64,
         arrive_s: f64,
         strength: f32,
@@ -408,15 +400,14 @@ impl Chat {
         if self.loose.iter().any(|l| l.line.event_ids.contains(&event_id)) {
             return;
         }
-        if !key
+        if spoken.idem != 0
             && let Some(loose) =
                 self.loose.iter_mut().find(|l| l.from == Some(from) && l.line.idem == spoken.idem)
-            && spoken.idem != 0
         {
             loose.line.event_ids.push(event_id);
             return;
         }
-        if bare_acknowledgement(key, spoken.body.as_deref()) {
+        if spoken.body == Body::Ack {
             return;
         }
         // The name it is known by, or its number. There may be no conversation to borrow one
@@ -435,7 +426,6 @@ impl Chat {
                 event_ids: vec![event_id],
                 idem: spoken.idem,
                 mine: false,
-                key,
                 sealed: spoken.sealed,
                 body: spoken.body,
                 acks: spoken.acks,
@@ -455,9 +445,8 @@ impl Chat {
         name: Option<&str>,
         event_id: i64,
         idem: lc_proto::MessageKey,
-        body: Option<String>,
+        body: Body,
         sealed: bool,
-        key: bool,
         sent_s: f64,
     ) {
         // Something said to nobody in particular belongs to nobody in particular: it is in the
@@ -483,7 +472,6 @@ impl Chat {
                         event_ids: vec![event_id],
                         idem,
                         mine: true,
-                        key,
                         sealed,
                         body,
                         acks: Vec::new(),
@@ -498,16 +486,12 @@ impl Chat {
         if lines.iter().any(|line| line.event_ids.contains(&event_id)) {
             return;
         }
-        // This ship's own acknowledgements are as empty as anybody's. Shown, a conversation
-        // with auto-ack on would be half blank lines from this end.
-        if bare_acknowledgement(key, body.as_deref()) {
+        if body == Body::Ack {
             return;
         }
         // A resend joins the line it repeats. The line keeps the time it was *first* said,
         // because that is when the thing was said; the resends are how hard it was tried.
-        if !key
-            && let Some(line) = same_message(lines, idem, true)
-        {
+        if let Some(line) = same_message(lines, idem, true) {
             line.event_ids.push(event_id);
             return;
         }
@@ -515,7 +499,6 @@ impl Chat {
             event_ids: vec![event_id],
             idem,
             mine: true,
-            key,
             sealed,
             body,
             acks: Vec::new(),
@@ -532,7 +515,7 @@ impl Chat {
 /// several times and is one line with several events behind it — the same rule that applies
 /// when it is live, in the one other place a line can be made.
 fn restore_into(lines: &mut Vec<Line>, said: Said) {
-    if bare_acknowledgement(said.key, said.body.as_deref()) {
+    if said.body == Body::Ack {
         return;
     }
     if let Some(line) = same_message(lines, said.idem, said.mine) {
@@ -555,7 +538,6 @@ fn line_of(said: Said) -> Line {
         event_ids: vec![said.event_id],
         idem: said.idem,
         mine: said.mine,
-        key: said.key,
         sealed: said.sealed,
         body: said.body,
         acks: said.acks,
@@ -567,19 +549,6 @@ fn line_of(said: Said) -> Line {
         // it a reconnection, which is the normal case, lost the reading on everything.
         strength: said.strength,
     }
-}
-
-/// Whether a message is an acknowledgement and nothing else.
-///
-/// An empty body with no key offer behind it: its whole content is the identifiers riding in
-/// its payload, which are kept on the conversation. There is nothing to read, so there is
-/// nothing to show, and nothing to answer either — this is the end of an exchange rather than
-/// the middle of one.
-///
-/// A message this ship cannot read is **not** this. Its body is `None` rather than empty, and
-/// that somebody in earshot is talking in private is exactly the kind of thing worth showing.
-fn bare_acknowledgement(key: bool, body: Option<&str>) -> bool {
-    !key && body == Some("")
 }
 
 /// When this ship learnt of a line: the arrival for something heard, the sending for its own.
@@ -596,23 +565,27 @@ fn same_message(lines: &mut [Line], idem: lc_proto::MessageKey, mine: bool) -> O
     if idem == 0 {
         return None;
     }
-    lines.iter_mut().find(|line| line.mine == mine && line.idem == idem && !line.key)
+    lines.iter_mut().find(|line| line.mine == mine && line.idem == idem && line.body != Body::Key)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn spoken(to: i64, body: Option<&str>, sealed: bool, acks: Vec<i64>) -> Spoken {
-        Spoken { to: Some(to), beamed: false, idem: 0, sealed, body: body.map(Into::into), acks }
+    fn text(body: &str) -> Body {
+        Body::Text(body.into())
+    }
+
+    fn spoken(to: i64, body: Body, sealed: bool, acks: Vec<i64>) -> Spoken {
+        Spoken { to: Some(to), beamed: false, idem: 0, sealed, body, acks }
     }
 
     fn broadcast(body: &str) -> Spoken {
-        Spoken { to: None, beamed: false, idem: 0, sealed: false, body: Some(body.into()), acks: vec![] }
+        Spoken { to: None, beamed: false, idem: 0, sealed: false, body: text(body), acks: vec![] }
     }
 
     fn keyed(to: i64, body: &str, idem: u64, acks: Vec<i64>) -> Spoken {
-        Spoken { to: Some(to), beamed: false, idem, sealed: false, body: Some(body.into()), acks }
+        Spoken { to: Some(to), beamed: false, idem, sealed: false, body: text(body), acks }
     }
 
     /// A line by its position, for a test that wants to talk about one.
@@ -624,12 +597,12 @@ mod tests {
     #[test]
     fn a_message_is_delivered_only_when_the_far_end_names_it() {
         let mut chat = Chat::default();
-        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 1, Some("first".into()), false, false, 1.0);
-        chat.sent(Some(ShipId(7)), Some("Ada"), 101, 2, Some("second".into()), false, false, 2.0);
+        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 1, text("first"), false, 1.0);
+        chat.sent(Some(ShipId(7)), Some("Ada"), 101, 2, text("second"), false, 2.0);
         let (first, second) = (line(&chat, 7, 0), line(&chat, 7, 1));
         assert!(!chat.get(ShipId(7)).unwrap().delivered(&first));
 
-        chat.received(ShipId(7), Some("Ada"), 200, spoken(1, Some("got it"), false, vec![100]), false, 9.0, 12.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 200, spoken(1, text("got it"), false, vec![100]), 9.0, 12.0, 1.0);
         let conversation = chat.get(ShipId(7)).unwrap();
         assert!(conversation.delivered(&first));
         assert!(!conversation.delivered(&second), "an unnamed message was reported delivered");
@@ -640,8 +613,8 @@ mod tests {
     #[test]
     fn a_resend_joins_the_line_it_repeats_rather_than_making_a_second() {
         let mut chat = Chat::default();
-        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 42, Some("are you there".into()), false, false, 1.0);
-        chat.sent(Some(ShipId(7)), Some("Ada"), 108, 42, Some("are you there".into()), false, false, 9.0);
+        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 42, text("are you there"), false, 1.0);
+        chat.sent(Some(ShipId(7)), Some("Ada"), 108, 42, text("are you there"), false, 9.0);
 
         let conversation = chat.get(ShipId(7)).unwrap();
         assert_eq!(conversation.lines.len(), 1, "a resend became a second message");
@@ -656,9 +629,9 @@ mod tests {
     #[test]
     fn acknowledging_the_second_copy_acknowledges_the_message() {
         let mut chat = Chat::default();
-        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 42, Some("again".into()), false, false, 1.0);
-        chat.sent(Some(ShipId(7)), Some("Ada"), 108, 42, Some("again".into()), false, false, 9.0);
-        chat.received(ShipId(7), Some("Ada"), 200, keyed(1, "heard the second one", 5, vec![108]), false, 10.0, 12.0, 1.0);
+        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 42, text("again"), false, 1.0);
+        chat.sent(Some(ShipId(7)), Some("Ada"), 108, 42, text("again"), false, 9.0);
+        chat.received(ShipId(7), Some("Ada"), 200, keyed(1, "heard the second one", 5, vec![108]), 10.0, 12.0, 1.0);
 
         let sent = line(&chat, 7, 0);
         assert!(chat.get(ShipId(7)).unwrap().delivered(&sent));
@@ -668,8 +641,8 @@ mod tests {
     #[test]
     fn a_message_heard_twice_is_shown_once() {
         let mut chat = Chat::default();
-        chat.received(ShipId(7), Some("Ada"), 200, keyed(1, "hello", 77, vec![]), false, 1.0, 4.0, 1.0);
-        chat.received(ShipId(7), Some("Ada"), 209, keyed(1, "hello", 77, vec![]), false, 6.0, 9.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 200, keyed(1, "hello", 77, vec![]), 1.0, 4.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 209, keyed(1, "hello", 77, vec![]), 6.0, 9.0, 1.0);
         let conversation = chat.get(ShipId(7)).unwrap();
         assert_eq!(conversation.lines.len(), 1, "a resend was shown twice");
         assert_eq!(conversation.lines[0].event_ids, vec![200, 209]);
@@ -680,8 +653,8 @@ mod tests {
     #[test]
     fn unkeyed_messages_never_fold_into_each_other() {
         let mut chat = Chat::default();
-        chat.received(ShipId(7), None, 200, spoken(1, Some("one"), false, vec![]), false, 1.0, 2.0, 1.0);
-        chat.received(ShipId(7), None, 201, spoken(1, Some("two"), false, vec![]), false, 3.0, 4.0, 1.0);
+        chat.received(ShipId(7), None, 200, spoken(1, text("one"), false, vec![]), 1.0, 2.0, 1.0);
+        chat.received(ShipId(7), None, 201, spoken(1, text("two"), false, vec![]), 3.0, 4.0, 1.0);
         assert_eq!(chat.get(ShipId(7)).unwrap().lines.len(), 2);
     }
 
@@ -690,9 +663,9 @@ mod tests {
     #[test]
     fn the_same_arrival_folded_twice_is_one_line() {
         let mut chat = Chat::default();
-        let said = spoken(1, Some("hello"), false, Vec::new());
-        chat.received(ShipId(7), Some("Ada"), 200, said.clone(), false, 1.0, 4.0, 1.0);
-        chat.received(ShipId(7), Some("Ada"), 200, said, false, 1.0, 4.0, 1.0);
+        let said = spoken(1, text("hello"), false, Vec::new());
+        chat.received(ShipId(7), Some("Ada"), 200, said.clone(), 1.0, 4.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 200, said, 1.0, 4.0, 1.0);
         assert_eq!(chat.get(ShipId(7)).unwrap().lines.len(), 1);
     }
 
@@ -702,10 +675,10 @@ mod tests {
     fn a_key_offer_arriving_is_what_puts_a_key_in_the_ring() {
         let mut chat = Chat::default();
         assert!(!chat.holds_key(ShipId(7)));
-        chat.received(ShipId(7), None, 300, spoken(1, Some(""), false, Vec::new()), true, 1.0, 5.0, 1.0);
+        chat.received(ShipId(7), None, 300, spoken(1, Body::Key, false, Vec::new()), 1.0, 5.0, 1.0);
         assert!(chat.holds_key(ShipId(7)));
         // And sending one away teaches this ship nothing about anybody.
-        chat.sent(Some(ShipId(8)), None, 301, 0, None, false, true, 6.0);
+        chat.sent(Some(ShipId(8)), None, 301, 0, Body::Key, false, 6.0);
         assert!(!chat.holds_key(ShipId(8)), "offering a key taught the offerer something");
     }
 
@@ -713,10 +686,10 @@ mod tests {
     #[test]
     fn a_sealed_message_for_somebody_else_is_a_line_with_nothing_in_it() {
         let mut chat = Chat::default();
-        chat.received(ShipId(7), None, 400, spoken(99, None, true, Vec::new()), false, 1.0, 3.0, 1.0);
+        chat.received(ShipId(7), None, 400, spoken(99, Body::Unreadable, true, Vec::new()), 1.0, 3.0, 1.0);
         let line = &chat.get(ShipId(7)).unwrap().lines[0];
         assert!(line.sealed);
-        assert_eq!(line.body, None);
+        assert_eq!(line.body, Body::Unreadable);
         assert_eq!(line.arrive_s, Some(3.0), "it still arrived");
     }
 
@@ -725,8 +698,8 @@ mod tests {
     #[test]
     fn a_name_survives_the_contact_that_supplied_it() {
         let mut chat = Chat::default();
-        chat.received(ShipId(7), Some("Ada"), 500, spoken(1, Some("here"), false, vec![]), false, 1.0, 2.0, 1.0);
-        chat.received(ShipId(7), None, 501, spoken(1, Some("still here"), false, vec![]), false, 3.0, 9.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 500, spoken(1, text("here"), false, vec![]), 1.0, 2.0, 1.0);
+        chat.received(ShipId(7), None, 501, spoken(1, text("still here"), false, vec![]), 3.0, 9.0, 1.0);
         assert_eq!(chat.get(ShipId(7)).unwrap().name, "Ada");
     }
 
@@ -753,17 +726,17 @@ mod tests {
         let mut chat = Chat::default();
         chat.i_am(ShipId(1));
         // Heard, addressed to nobody: a broadcast.
-        chat.received(ShipId(7), Some("Ada"), 200, broadcast("to whoever"), false, 1.0, 2.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 200, broadcast("to whoever"), 1.0, 2.0, 1.0);
         // Heard, addressed to this ship: a conversation.
-        chat.received(ShipId(7), Some("Ada"), 201, spoken(1, Some("for you"), false, vec![]), false, 3.0, 4.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 201, spoken(1, text("for you"), false, vec![]), 3.0, 4.0, 1.0);
         // Heard, addressed to somebody else: overheard.
-        chat.received(ShipId(7), Some("Ada"), 202, spoken(9, Some("for Bry"), false, vec![]), false, 5.0, 6.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 202, spoken(9, text("for Bry"), false, vec![]), 5.0, 6.0, 1.0);
         // Sent by this ship, to one craft and to nobody.
-        chat.sent(Some(ShipId(8)), Some("Bry"), 300, 5, Some("mine, to Bry".into()), false, false, 7.0);
-        chat.sent(None, None, 301, 6, Some("mine, to nobody".into()), false, false, 8.0);
+        chat.sent(Some(ShipId(8)), Some("Bry"), 300, 5, text("mine, to Bry"), false, 7.0);
+        chat.sent(None, None, 301, 6, text("mine, to nobody"), false, 8.0);
 
         let bodies = |v: Vec<&Loose>| -> Vec<String> {
-            v.iter().filter_map(|l| l.line.body.clone()).collect()
+            v.iter().filter_map(|l| l.line.body.text().map(str::to_string)).collect()
         };
         assert_eq!(bodies(chat.public()), vec!["to whoever", "mine, to nobody"]);
         assert_eq!(bodies(chat.overheard()), vec!["for Bry"]);
@@ -772,7 +745,7 @@ mod tests {
             1,
             "the conversation held something that was not between us",
         );
-        assert_eq!(chat.get(ShipId(7)).unwrap().lines[0].body.as_deref(), Some("for you"));
+        assert_eq!(chat.get(ShipId(7)).unwrap().lines[0].body, text("for you"));
     }
 
     /// An encrypted message meant for somebody else is *heard* and cannot be read. Both halves
@@ -781,12 +754,12 @@ mod tests {
     fn an_encrypted_message_for_somebody_else_is_overheard_as_noise() {
         let mut chat = Chat::default();
         chat.i_am(ShipId(1));
-        chat.received(ShipId(7), Some("Ada"), 400, spoken(9, None, true, vec![]), false, 1.0, 3.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 400, spoken(9, Body::Unreadable, true, vec![]), 1.0, 3.0, 1.0);
 
         let overheard = chat.overheard();
         assert_eq!(overheard.len(), 1);
         assert_eq!(overheard[0].to, Some(ShipId(9)), "it kept who it was for");
-        assert_eq!(overheard[0].line.body, None);
+        assert_eq!(overheard[0].line.body, Body::Unreadable);
         assert!(chat.get(ShipId(7)).is_none(), "it became a conversation with the sender");
     }
 
@@ -796,8 +769,8 @@ mod tests {
     fn unreadable_messages_are_the_same_length_and_the_same_noise_every_time() {
         let mut chat = Chat::default();
         chat.i_am(ShipId(1));
-        chat.received(ShipId(7), None, 400, spoken(9, None, true, vec![]), false, 1.0, 3.0, 1.0);
-        chat.received(ShipId(7), None, 401, spoken(9, None, true, vec![]), false, 4.0, 6.0, 1.0);
+        chat.received(ShipId(7), None, 400, spoken(9, Body::Unreadable, true, vec![]), 1.0, 3.0, 1.0);
+        chat.received(ShipId(7), None, 401, spoken(9, Body::Unreadable, true, vec![]), 4.0, 6.0, 1.0);
 
         let overheard = chat.overheard();
         let first = overheard[0].line.ciphertext();
@@ -815,10 +788,10 @@ mod tests {
         let mut chat = Chat::default();
         chat.i_am(ShipId(1));
         // Sent early, heard late: a long crossing.
-        chat.received(ShipId(7), Some("Ada"), 200, broadcast("slow"), false, 1.0, 90.0, 1.0);
-        chat.sent(None, None, 300, 5, Some("quick".into()), false, false, 50.0);
+        chat.received(ShipId(7), Some("Ada"), 200, broadcast("slow"), 1.0, 90.0, 1.0);
+        chat.sent(None, None, 300, 5, text("quick"), false, 50.0);
         let order: Vec<String> =
-            chat.public().iter().filter_map(|l| l.line.body.clone()).collect();
+            chat.public().iter().filter_map(|l| l.line.body.text().map(str::to_string)).collect();
         assert_eq!(order, vec!["quick", "slow"], "ordered by sending, not by learning");
     }
 
@@ -827,24 +800,24 @@ mod tests {
     #[test]
     fn conversations_are_listed_most_recently_heard_first() {
         let mut chat = Chat::default();
-        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 1, Some("early".into()), false, false, 1.0);
-        chat.sent(Some(ShipId(8)), Some("Bry"), 200, 2, Some("later".into()), false, false, 5.0);
+        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 1, text("early"), false, 1.0);
+        chat.sent(Some(ShipId(8)), Some("Bry"), 200, 2, text("later"), false, 5.0);
         let order: Vec<ShipId> = chat.conversations().into_iter().map(|(id, _)| id).collect();
         assert_eq!(order, vec![ShipId(8), ShipId(7)]);
 
         // And it moves when something lands.
-        chat.received(ShipId(7), Some("Ada"), 300, spoken(1, Some("back"), false, vec![]), false, 6.0, 9.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 300, spoken(1, text("back"), false, vec![]), 6.0, 9.0, 1.0);
         let order: Vec<ShipId> = chat.conversations().into_iter().map(|(id, _)| id).collect();
         assert_eq!(order, vec![ShipId(7), ShipId(8)]);
     }
 
-    /// **The quiet half of an acknowledgement.** A message with nothing in it is not shown —
-    /// there is nothing to read — and what it acknowledges is kept anyway. Dropping both would
+    /// **The quiet half of an acknowledgement.** It is not shown — there is nothing to read —
+    /// and what it acknowledges is kept anyway. Dropping both would
     /// make every message look unanswered for ever, which is the failure worth guarding.
     #[test]
-    fn a_bare_acknowledgement_is_not_shown_and_still_marks_the_message_delivered() {
+    fn an_acknowledgement_is_not_shown_and_still_marks_the_message_delivered() {
         let mut chat = Chat::default();
-        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 1, Some("are you there".into()), false, false, 1.0);
+        chat.sent(Some(ShipId(7)), Some("Ada"), 100, 1, text("are you there"), false, 1.0);
         let sent = line(&chat, 7, 0);
         assert!(!chat.get(ShipId(7)).unwrap().delivered(&sent));
 
@@ -853,27 +826,26 @@ mod tests {
             beamed: false,
             idem: 5,
             sealed: false,
-            body: Some(String::new()),
+            body: Body::Ack,
             acks: vec![100],
         };
-        chat.received(ShipId(7), Some("Ada"), 200, bare, false, 9.0, 12.0, 1.0);
+        chat.received(ShipId(7), Some("Ada"), 200, bare, 9.0, 12.0, 1.0);
 
         let conversation = chat.get(ShipId(7)).unwrap();
-        assert_eq!(conversation.lines.len(), 1, "an empty acknowledgement was shown as a line");
+        assert_eq!(conversation.lines.len(), 1, "an acknowledgement was shown as a line");
         assert!(conversation.delivered(&sent), "the acknowledgement was dropped with the line");
     }
 
-    /// This ship's own empty acknowledgements are as quiet as anybody's. With auto-ack on, a
-    /// conversation would otherwise be half blank lines from this end.
+    /// This ship's own acknowledgements are as quiet as anybody's.
     #[test]
-    fn this_ships_own_bare_acknowledgements_are_not_shown_either() {
+    fn this_ships_own_acknowledgements_are_not_shown_either() {
         let mut chat = Chat::default();
-        chat.sent(Some(ShipId(7)), Some("Ada"), 300, 9, Some(String::new()), false, false, 1.0);
+        chat.sent(Some(ShipId(7)), Some("Ada"), 300, 9, Body::Ack, false, 1.0);
         assert!(chat.get(ShipId(7)).is_none_or(|c| c.lines.is_empty()));
     }
 
-    /// A message this ship cannot *read* is not a message with nothing in it. That somebody in
-    /// earshot is talking in private is exactly the kind of thing worth showing.
+    /// A message this ship cannot *read* is still shown. That somebody in earshot is talking in
+    /// private is exactly the kind of thing worth showing.
     #[test]
     fn an_unreadable_message_is_not_mistaken_for_an_acknowledgement() {
         let mut chat = Chat::default();
@@ -882,29 +854,28 @@ mod tests {
             beamed: false,
             idem: 3,
             sealed: true,
-            body: None,
+            body: Body::Unreadable,
             acks: vec![],
         };
-        chat.received(ShipId(7), None, 400, sealed, false, 1.0, 3.0, 1.0);
+        chat.received(ShipId(7), None, 400, sealed, 1.0, 3.0, 1.0);
         assert_eq!(chat.get(ShipId(7)).unwrap().lines.len(), 1);
     }
 
-    /// A key offer's body is empty too, and it is not an acknowledgement.
     #[test]
-    fn a_key_offer_is_shown_despite_having_no_body() {
+    fn a_key_offer_is_shown() {
         let mut chat = Chat::default();
         let offer = Spoken {
             to: Some(1),
             beamed: false,
             idem: 0,
             sealed: false,
-            body: Some(String::new()),
+            body: Body::Key,
             acks: vec![],
         };
-        chat.received(ShipId(7), None, 500, offer, true, 1.0, 3.0, 1.0);
+        chat.received(ShipId(7), None, 500, offer, 1.0, 3.0, 1.0);
         let conversation = chat.get(ShipId(7)).unwrap();
         assert_eq!(conversation.lines.len(), 1);
-        assert!(conversation.lines[0].key);
+        assert_eq!(conversation.lines[0].body, Body::Key);
     }
 
     /// A broadcast this ship sent is in the public log and in nobody's conversation, because
@@ -912,13 +883,13 @@ mod tests {
     #[test]
     fn a_broadcast_is_in_the_public_log_and_in_no_conversation() {
         let mut chat = Chat::default();
-        chat.sent(None, None, 300, 9, Some("to whoever is listening".into()), false, false, 1.0);
+        chat.sent(None, None, 300, 9, text("to whoever is listening"), false, 1.0);
         assert!(chat.conversations().is_empty(), "a broadcast opened a conversation");
         let public = chat.public();
         assert_eq!(public.len(), 1);
         assert_eq!(public[0].from, None, "a broadcast this ship sent named a transmitter");
         assert_eq!(public[0].to, None, "a broadcast named an addressee");
-        assert_eq!(public[0].line.body.as_deref(), Some("to whoever is listening"));
+        assert_eq!(public[0].line.body, text("to whoever is listening"));
     }
 
     /// The reading a tooltip shows, and the one case where there is none.
@@ -930,15 +901,15 @@ mod tests {
             beamed: false,
             idem: 1,
             sealed: false,
-            body: Some("loud".into()),
+            body: text("loud"),
             acks: vec![],
         };
-        chat.received(ShipId(7), None, 200, said, false, 1.0, 2.0, 100.0);
+        chat.received(ShipId(7), None, 200, said, 1.0, 2.0, 100.0);
         let heard = &chat.get(ShipId(7)).unwrap().lines[0];
         assert!((heard.decibels().unwrap() - 20.0).abs() < 1.0e-4, "{:?}", heard.decibels());
 
         // Nothing this ship sent has a reading: it never heard it.
-        chat.sent(Some(ShipId(7)), None, 301, 2, Some("mine".into()), false, false, 3.0);
+        chat.sent(Some(ShipId(7)), None, 301, 2, text("mine"), false, 3.0);
         let mine = chat.get(ShipId(7)).unwrap().lines.last().unwrap();
         assert_eq!(mine.decibels(), None);
     }
@@ -946,7 +917,7 @@ mod tests {
     #[test]
     fn a_restored_transcript_replaces_rather_than_merges() {
         let mut chat = Chat::default();
-        chat.sent(Some(ShipId(7)), None, 1, 9, Some("stale".into()), false, false, 0.0);
+        chat.sent(Some(ShipId(7)), None, 1, 9, text("stale"), false, 0.0);
         chat.restore(
             vec![Said {
                 event_id: 9,
@@ -955,9 +926,8 @@ mod tests {
                 to: Some(ShipId(1)),
                 with_name: "Ada".into(),
                 mine: false,
-                key: false,
                 sealed: false,
-                body: Some("from the store".into()),
+                body: text("from the store"),
                 acks: vec![1],
                 sent_t: 1_000_000,
                 arrive_t: Some(4_000_000),
@@ -986,9 +956,8 @@ mod tests {
                 to: Some(ShipId(1)),
                 with_name: "Ada".into(),
                 mine: false,
-                key: false,
                 sealed: false,
-                body: Some("from the store".into()),
+                body: text("from the store"),
                 acks: vec![],
                 sent_t: 1_000_000,
                 arrive_t: Some(4_000_000),
@@ -1012,9 +981,8 @@ mod tests {
             to: Some(ShipId(7)),
             with_name: "Ada".into(),
             mine: true,
-            key: false,
             sealed: false,
-            body: Some("are you there".into()),
+            body: text("are you there"),
             acks: Vec::new(),
             sent_t,
             arrive_t: None,

@@ -457,11 +457,11 @@ pub mod kind {
     /// [`super::DriveChange`] as JSON.
     pub const DRIVE: i16 = 4;
     /// Somebody said something. The payload is a [`super::Spoken`] as JSON, **redacted per
-    /// receiver**: a sealed message reaches an eavesdropper with no body at all.
+    /// receiver**: a sealed message reaches an eavesdropper as [`super::Body::Unreadable`].
     pub const MESSAGE: i16 = 5;
     /// Somebody put their public key on the air. The payload is a [`super::Spoken`] too, with
-    /// an empty body — it lands in the same conversation, because that is where a player looks
-    /// for it. Receiving one is what puts the source in the receiver's keyring.
+    /// [`super::Body::Key`] — it lands in the same conversation, because that is where a player
+    /// looks for it. Receiving one is what puts the source in the receiver's keyring.
     pub const KEY: i16 = 6;
 }
 
@@ -474,6 +474,32 @@ pub struct DriveChange {
     pub facing: [f64; 3],
 }
 
+/// What a message holds, as one receiver has it.
+///
+/// An enum rather than a string whose emptiness means something: an acknowledgement and a key
+/// offer both used to be an empty body, and every place that showed messages had to remember
+/// to test for that.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Body {
+    /// Something somebody typed. Never empty.
+    Text(String),
+    /// Nothing but its acknowledgements: a ship's automatic answer. Nothing to show.
+    Ack,
+    /// A public key handed over.
+    Key,
+    /// Sealed to somebody else. That it was said is all this receiver may know.
+    Unreadable,
+}
+
+impl Body {
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Body::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+}
+
 /// What a [`kind::MESSAGE`] or [`kind::KEY`] event carries, as JSON in the payload.
 ///
 /// **Written once and redacted on the way out.** The event stored is the whole message; the
@@ -481,7 +507,7 @@ pub struct DriveChange {
 /// at release rather than at write is what keeps one event one event — a sealed message
 /// duplicated per receiver would be several events with one emission time, and the whole model
 /// rests on an event being a point.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Spoken {
     /// Who it was addressed to, or `None` for a broadcast. Everyone else in earshot is an
     /// eavesdropper.
@@ -498,11 +524,9 @@ pub struct Spoken {
     /// [`MessageKey`]; a receiver that has this one already shows one line, not two.
     #[serde(default)]
     pub idem: MessageKey,
-    /// Whether it was sealed. True on a copy with no body is somebody else's mail; true on one
-    /// *with* a body means you are the addressee.
+    /// Whether it was sealed. With a [`Body::Text`], you are the addressee.
     pub sealed: bool,
-    /// `None` when this receiver may not read it.
-    pub body: Option<String>,
+    pub body: Body,
     /// Event ids of the addressee's last messages that the sender had received when this went
     /// out, newest last.
     ///
@@ -549,11 +573,8 @@ pub struct Said {
     pub with_name: String,
     /// True when this ship sent it.
     pub mine: bool,
-    /// True when it was a key offer rather than something somebody typed.
-    pub key: bool,
     pub sealed: bool,
-    /// `None` when this ship may not read it.
-    pub body: Option<String>,
+    pub body: Body,
     pub acks: Vec<i64>,
     /// Coordinate microseconds it was transmitted.
     pub sent_t: i64,
@@ -1478,9 +1499,8 @@ mod tests {
                     to: Some(ShipId(42)),
                     with_name: "Ada".into(),
                     mine: false,
-                    key: false,
                     sealed: true,
-                    body: Some("well?".into()),
+                    body: Body::Text("well?".into()),
                     acks: vec![3, 5],
                     sent_t: 500_000,
                     arrive_t: Some(1_000_000),

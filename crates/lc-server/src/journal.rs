@@ -208,7 +208,7 @@ impl Journal for Memory {
             else {
                 continue;
             };
-            if message.is_key {
+            if message.content == lc_store::chat::Content::Key {
                 continue;
             }
             out.push((receipt.observer, message.sender, receipt.event_id, receipt.arrive_t));
