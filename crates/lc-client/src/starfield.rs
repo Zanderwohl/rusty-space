@@ -105,7 +105,7 @@ pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 15] = [
     ("corona floor", |s| &mut s.corona_floor, 0.0, 1.5),
     ("corona contrast", |s| &mut s.corona_gain, 0.0, 4.0),
     ("corona radii", |s| &mut s.corona_radii, 1.0, 40.0),
-    ("corona flow", |s| &mut s.corona_flow, 0.0, 8.0),
+    ("corona flow", |s| &mut s.corona_flow, 0.0, 40.0),
 ];
 
 /// The background. Small, tight, and it must stay readable as a field of thousands.
@@ -173,10 +173,10 @@ pub const LOCAL: PointStyle = PointStyle {
     corona_flow: DEFAULT_CORONA_FLOW,
 };
 
-/// A stellar radius a day: for the Sun, eight thousand kilometers a second. Faster than any
-/// real outflow, which would take months to cross a corona this size; at this rate a thread
-/// moves an eighth of the way out in a day, which is the point of drawing it.
-pub const DEFAULT_CORONA_FLOW: f32 = 1.0;
+/// Ten stellar radii a day: for the Sun, eighty thousand kilometers a second, a quarter of `c`.
+/// Absurd as a wind, which would take months to cross a corona this size; at this rate a
+/// thread crosses it in under a day, which is what makes the motion readable.
+pub const DEFAULT_CORONA_FLOW: f32 = 10.0;
 
 /// How far through its cycle the corona's drift is at `now_s`, coordinate seconds.
 ///

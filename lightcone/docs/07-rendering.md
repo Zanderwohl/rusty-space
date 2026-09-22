@@ -184,9 +184,9 @@ corona's own reach, not the quad's, because the quad is sized by the glare and t
 exposure.
 
 The threads drift outward, at a speed stated in the world: `corona flow`, stellar radii per day
-of coordinate time, one by default. That is eight thousand kilometers a second for the Sun and
-several times any real outflow, which would take months to cross a corona this deep. At this
-speed a thread moves an eighth of the way out in a day. A thread's pattern changes with distance
+of coordinate time, ten by default. That is eighty thousand kilometers a second for the Sun, a
+quarter of `c`, and absurd as a wind: a real outflow would take months to cross a corona this
+deep. At this speed a thread crosses it in under a day, which is what makes the motion read. A thread's pattern changes with distance
 out only through the lean, so sliding the lean back as time runs is what carries it outward. A
 slide has to jump back when its cycle ends, so two copies run half a cycle apart and each is
 faded to nothing at its own jump. The phase is reduced on the CPU in f64, because coordinate
