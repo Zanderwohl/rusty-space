@@ -19,11 +19,9 @@ use crate::instruments::witness;
 use crate::journal::Journal;
 use crate::server::Server;
 
-/// What wrote a file's bytes. A contract, like [`crate::persist::SAVE_FORMAT`]: postcard is
-/// positional and cannot notice an older shape, so a file in any other format is refused.
-///
-/// **Bump it when [`File`], or anything inside it, changes shape.**
-pub const KNOWLEDGE_FORMAT: i32 = 3;
+/// What writes a file's bytes today. Older formats are read, not refused: see
+/// [`lc_world::knowledge::formats`], where the shapes and the rule for bumping live.
+pub const KNOWLEDGE_FORMAT: i32 = lc_world::knowledge::formats::FILE_FORMAT;
 
 /// One craft's files and log, read back.
 type Written = (Vec<(Subject, File)>, Vec<Logged>);
@@ -74,11 +72,8 @@ pub fn log_row(ship: CraftId, logged: &Logged) -> LogRow {
 
 /// A file row back into a subject and a file, or why not.
 pub fn read_file(row: &Filed) -> Result<(Subject, File), String> {
-    if row.format != KNOWLEDGE_FORMAT {
-        return Err(format!("knowledge format {} is not {KNOWLEDGE_FORMAT}", row.format));
-    }
     let subject = lc_proto::decode(&row.subject).map_err(|why| why.to_string())?;
-    let file = lc_proto::decode(&row.file).map_err(|why| why.to_string())?;
+    let file = lc_world::knowledge::formats::decode(row.format, &row.file)?;
     Ok((subject, file))
 }
 
@@ -363,12 +358,12 @@ mod tests {
     }
 
     #[test]
-    fn a_file_in_another_format_is_refused_rather_than_misread() {
+    fn a_file_from_the_future_is_refused_rather_than_misread() {
         let star = Subject::Star(StarId::synthesise("archive", 1));
         let mut row = file_row(CraftId(1), star, &File::default(), 0);
         assert!(read_file(&row).is_ok());
         row.format = KNOWLEDGE_FORMAT + 1;
-        assert!(read_file(&row).is_err());
+        assert!(read_file(&row).is_err(), "a newer shard's file, which this one cannot know the shape of");
     }
 
     #[test]

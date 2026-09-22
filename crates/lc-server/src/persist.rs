@@ -801,6 +801,150 @@ mod tests {
         assert_eq!(fitting.solar_w(), 0.0);
     }
 
+    /// The shapes formats 5, 6 and 7 wrote, spelled out field by field rather than borrowed from
+    /// the readers, so a test cannot agree with a reader by construction.
+    mod written {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        pub struct Loadout {
+            pub storage: u32,
+            pub drones: u32,
+            pub living: u32,
+            pub engines: u32,
+            pub slots: u32,
+        }
+
+        #[derive(Serialize)]
+        pub struct Fitting {
+            pub balance: [f64; 11],
+            pub loadout: Loadout,
+            pub stored_j: f64,
+            pub since_s: f64,
+            pub rapidity_since: f64,
+            pub committed_j: f64,
+            pub solar_w: f64,
+            pub refit: Option<()>,
+        }
+
+        #[derive(Serialize)]
+        pub struct Instruments {
+            pub observatory: lc_world::knowledge::observatory::Observatory,
+            pub told: std::collections::BTreeMap<i64, f64>,
+        }
+
+        #[derive(Serialize)]
+        pub struct V5 {
+            pub kind: u8,
+            pub name: Option<String>,
+            pub noise_floor: f32,
+            pub length_m: f64,
+            pub motion: lc_proto::Motion,
+            pub pursuit: Option<lc_proto::Pursuit>,
+            pub fitting: Option<Fitting>,
+        }
+
+        #[derive(Serialize)]
+        pub struct V6 {
+            pub kind: u8,
+            pub name: Option<String>,
+            pub noise_floor: f32,
+            pub length_m: f64,
+            pub motion: lc_proto::Motion,
+            pub pursuit: Option<lc_proto::Pursuit>,
+            pub fitting: Option<Fitting>,
+            pub instruments: Option<Instruments>,
+        }
+
+        #[derive(Serialize)]
+        pub struct V7 {
+            pub kind: u8,
+            pub name: Option<String>,
+            pub noise_floor: f32,
+            pub length_m: f64,
+            pub motion: lc_proto::Motion,
+            pub pursuit: Option<lc_proto::Pursuit>,
+            pub fitting: Option<lc_proto::Fitting>,
+            pub instruments: Option<Instruments>,
+        }
+    }
+
+    fn old_fitting() -> written::Fitting {
+        written::Fitting {
+            balance: [0.0; 11],
+            loadout: written::Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20 },
+            stored_j: 1.25e26,
+            since_s: 3.0,
+            rapidity_since: 0.0,
+            committed_j: 0.0,
+            solar_w: 12.0,
+            refit: None,
+        }
+    }
+
+    fn old_instruments() -> written::Instruments {
+        written::Instruments { observatory: Default::default(), told: [(7, 40.0)].into_iter().collect() }
+    }
+
+    fn row(state: Vec<u8>, format: i32) -> Ship {
+        Ship { ship_id: 5, account: Some("acct".into()), saved_t: 3_000_000, state, format }
+    }
+
+    #[test]
+    fn format_5_reads() {
+        let craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        let old = written::V5 {
+            kind: 0,
+            name: Some("Ada".into()),
+            noise_floor: 0.0,
+            length_m: 500.0,
+            motion: (&craft.motion.snapshot()).into(),
+            pursuit: None,
+            fitting: Some(old_fitting()),
+        };
+        let saved = decode(&row(lc_proto::encode(&old), 5)).expect("format 5 reads");
+        let fitting = saved.fitting.expect("fitted");
+        assert_eq!((fitting.loadout.living, fitting.loadout.data, fitting.solar_w), (2, 0, 12.0));
+        assert!(saved.instruments.is_none());
+    }
+
+    #[test]
+    fn format_6_reads_with_its_reporting_marks() {
+        let craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        let old = written::V6 {
+            kind: 0,
+            name: None,
+            noise_floor: 0.0,
+            length_m: 500.0,
+            motion: (&craft.motion.snapshot()).into(),
+            pursuit: None,
+            fitting: Some(old_fitting()),
+            instruments: Some(old_instruments()),
+        };
+        let saved = decode(&row(lc_proto::encode(&old), 6)).expect("format 6 reads");
+        let marks = saved.instruments.expect("instruments").reporting;
+        assert_eq!(marks.since(7), lc_world::knowledge::Mark::through(40.0), "a time meant everything through it");
+    }
+
+    #[test]
+    fn format_7_reads_with_its_reporting_marks() {
+        let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
+        let old = written::V7 {
+            kind: 0,
+            name: None,
+            noise_floor: 0.0,
+            length_m: 500.0,
+            motion: (&craft.motion.snapshot()).into(),
+            pursuit: None,
+            fitting: craft.fitting().map(Into::into),
+            instruments: Some(old_instruments()),
+        };
+        let saved = decode(&row(lc_proto::encode(&old), 7)).expect("format 7 reads");
+        assert_eq!(saved.fitting.map(|f| f.loadout), craft.fitting().map(|f| f.loadout.into()));
+        assert_eq!(saved.instruments.unwrap().reporting.since(7), lc_world::knowledge::Mark::through(40.0));
+    }
+
     #[test]
     fn a_ships_modules_and_energy_survive_the_round_trip() {
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);

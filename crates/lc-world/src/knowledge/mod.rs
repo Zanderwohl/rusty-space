@@ -17,6 +17,7 @@ use crate::sky::StarId;
 
 pub mod astrometry;
 pub mod conclusion;
+pub mod formats;
 pub mod moments;
 pub mod names;
 pub mod observatory;
