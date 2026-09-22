@@ -174,6 +174,14 @@ impl Frame {
 pub struct MapView {
     pub orbit: em_map::Orbit,
     pub plane: em_map::Plane,
+    /// The pole [`em_map::Plane::Ecliptic`] resolves against: the plane the local system's
+    /// planets orbit in, refreshed as the ship moves between systems.
+    ///
+    /// Held beside the camera for the reason the rest of this struct is held together — the
+    /// angles are measured against this basis, so the two cannot be a frame apart. `ZERO`
+    /// between the stars, where there is no system and no ecliptic;
+    /// [`em_map::Plane::about`] reads that as `+Z`.
+    pub system_pole: glam::DVec3,
     /// A key rather than a position: Saturn moves, and a camera pointed at where it was is a
     /// camera that drifts off it over an afternoon.
     pub focus: MapFocus,
@@ -187,6 +195,16 @@ pub struct MapView {
     /// leaving it leaves the camera where it is.
     pub bearing: Option<f64>,
     pub source: crate::map_source::Source,
+}
+
+impl MapView {
+    /// The reference plane as the geometry needs it: resolved against the system in view.
+    ///
+    /// Everything that casts a ray, measures a height or reads a bearing goes through this, so
+    /// the camera and the plane it is angled against cannot disagree.
+    pub fn datum(&self) -> em_map::Datum {
+        self.plane.about(self.system_pole)
+    }
 }
 
 /// Which craft the camera is behind.

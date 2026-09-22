@@ -435,8 +435,8 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         None => ui.map.orbit.zoom(notches),
     },
     Action::PanMap { right, ahead } => {
-        let plane = ui.map.plane;
-        ui.map.orbit.pan(plane, right, ahead);
+        let datum = ui.map.datum();
+        ui.map.orbit.pan(datum, right, ahead);
         // A pan is a statement about where to look, so it gives up following anything.
         ui.map.focus = crate::ui::MapFocus::Free;
     }

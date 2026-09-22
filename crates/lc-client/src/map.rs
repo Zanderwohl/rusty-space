@@ -405,7 +405,7 @@ fn resize(mut map: ResMut<Map>, mut images: ResMut<Assets<Image>>) {
 /// Build this frame's snapshot from whichever source the interface is showing.
 fn survey(
     game: Res<Game>,
-    ui: Res<Ui>,
+    mut ui: ResMut<Ui>,
     bodies: Res<crate::starfield::Bodies>,
     uplink: Res<crate::uplink::Uplink>,
     eye: Res<crate::hull::Eye>,
@@ -414,6 +414,9 @@ fn survey(
     if !map.shown {
         return;
     }
+    // Before anything is composed: the plane the camera's angles are measured against is the
+    // local system's, and a ship that crossed to another star is in another one.
+    ui.map.system_pole = game.0.system.as_ref().map_or(DVec3::ZERO, |system| system.pole);
     let picture = match ui.map.source {
         Source::Observed => crate::map_source::observed(&game.0, &bodies, &uplink, eye.at_ly),
         #[cfg(feature = "godview")]
@@ -484,7 +487,7 @@ fn place(
     let view = ui.map;
     let meters_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
         .meters_per_unit();
-    let frame = compose(&map.snapshot, &view.orbit, view.plane, meters_per_unit);
+    let frame = compose(&map.snapshot, &view.orbit, view.datum(), meters_per_unit);
 
     // The depth range is written from the stand-off every frame rather than fixed. The sky's
     // camera spans 1e-10 to 1e9 because it has to cover everything at once; the map's distance
@@ -496,7 +499,7 @@ fn place(
     }
 
     // The eye is the render origin, and the map looks back at its focus.
-    let (forward, up) = view.orbit.orientation(view.plane);
+    let (forward, up) = view.orbit.orientation(view.datum());
     transform.translation = Vec3::ZERO;
     transform.look_to(render(forward), render(up));
 
@@ -610,7 +613,7 @@ pub fn spin(view: &mut crate::ui::MapView, snapshot: &MapSnapshot, primary: Opti
         crate::ui::MapFocus::Primary(crate::ui::Frame::Local) => reference_line(snapshot, primary),
         _ => None,
     };
-    let Some(bearing) = line.and_then(|line| view.plane.bearing(line)) else {
+    let Some(bearing) = line.and_then(|line| view.datum().bearing(line)) else {
         // Nothing to hold onto: the camera stays where it is and starts again from whatever
         // the line reads next.
         view.bearing = None;
@@ -965,7 +968,7 @@ mod tests {
         assert_eq!(orbit.focus_ly, ship, "following did not reach the interface's copy");
 
         // Now the drag. A small pan has to leave the camera near the ship, not near zero.
-        orbit.pan(em_map::Plane::Ecliptic, 0.05, 0.0);
+        orbit.pan(em_map::Plane::Ecliptic.about(DVec3::Z), 0.05, 0.0);
         let moved = orbit.focus_ly.distance(ship);
         assert!(moved > 0.0, "the pan moved nothing");
         assert!(

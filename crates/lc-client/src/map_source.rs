@@ -291,7 +291,9 @@ fn push_local_system(build: &mut Build, session: &Session) {
             ItemKind::Star,
             system.star_position_ly(),
             system.star_radius_m(),
-            DVec3::Z,
+            // The star's own spin, not its planets' plane: a few degrees apart, and this is
+            // where its surface features will sit.
+            system.star_spin,
         ).weighing(system.star_mass_kg()),
         Some(Subject::Star(system.star, name)),
     );
@@ -485,6 +487,35 @@ mod tests {
         let star_key = key_of(&system, system.holding(star.position_ly, 0.0));
         assert_eq!(star_key, ItemKey::from_id("star", system.star.get()));
         assert_ne!(star_key, ItemKey::from_name(&system.star_name), "the star is not by name");
+    }
+
+    /// The star is drawn about its own spin axis, not about `+Z`.
+    ///
+    /// It was `DVec3::Z` for every system, which drew a generated star lying in the ecliptic of
+    /// J2000 while its planets orbited somewhere else entirely. See
+    /// `lightcone/docs/25-system-knowledge.md`.
+    #[test]
+    fn the_star_is_drawn_about_its_own_axis() {
+        // The third authored star is the one whose generated system has planets, and a local
+        // system is loaded from where the ship is rather than set.
+        let mut session = session();
+        let star = lc_world::sky::StarProvider::stars(&AuthoredStars::sample())[2].clone();
+        session.ship.motion.position_ly = star.position_ly;
+        session.sync_system();
+        let system = session.system.clone().expect("the ship is at a star");
+        let snapshot =
+            observed(&session, &Bodies::default(), &Uplink::default(), star.position_ly).snapshot;
+        let star = snapshot
+            .items
+            .iter()
+            .find(|i| i.key == ItemKey::from_id("star", system.star.get()))
+            .expect("the local star is on the map");
+
+        assert_eq!(star.pole, system.star_spin);
+        assert!(star.pole.dot(DVec3::Z).abs() < 0.999, "the star is back on +Z");
+        // Near its planets' plane but not in it: the spin is the star's own.
+        let tilt = star.pole.dot(system.pole).clamp(-1.0, 1.0).acos();
+        assert!(tilt <= lc_world::sky::generate::SPIN_TILT_MAX_RAD + 1.0e-12, "{tilt} rad off");
     }
 
     /// **This ship is named like any other.** A map that draws five ships and names four of

@@ -216,7 +216,7 @@ fn labels(
             continue;
         }
         let Some(ndc) =
-            view.orbit.project(view.plane, placement.at.as_dvec3(), crate::map::MAP_FOV as f64,
+            view.orbit.project(view.datum(), placement.at.as_dvec3(), crate::map::MAP_FOV as f64,
                 aspect)
         else {
             continue;
@@ -487,13 +487,13 @@ fn meters_per_point(rect: egui::Rect, view: crate::ui::MapView) -> Option<f32> {
         return None;
     }
     let rad_per_point = 2.0 * (crate::map::MAP_FOV * 0.5).tan() / rect.height();
-    let (forward, ..) = view.orbit.view_basis(view.plane);
-    let eye = view.orbit.eye_ly(view.plane);
+    let (forward, ..) = view.orbit.view_basis(view.datum());
+    let eye = view.orbit.eye_ly(view.datum());
     let aspect = (rect.width() / rect.height()) as f64;
     let direction =
-        view.orbit.ray(view.plane, glam::DVec2::new(0.0, RULE_SAMPLE_NDC_Y),
+        view.orbit.ray(view.datum(), glam::DVec2::new(0.0, RULE_SAMPLE_NDC_Y),
             crate::map::MAP_FOV as f64, aspect);
-    let depth_m = match view.plane.intersect(eye, direction, view.orbit.focus_ly) {
+    let depth_m = match view.datum().intersect(eye, direction, view.orbit.focus_ly) {
         Some(hit) => (hit - eye).dot(forward) * em_map::snapshot::M_PER_LY,
         None => view.orbit.distance_m(),
     };
@@ -726,9 +726,9 @@ fn under_cursor(
         (1.0 - (at.y - rect.min.y) / rect.height() * 2.0) as f64,
     );
     let aspect = (rect.width() / rect.height()) as f64;
-    let direction = view.orbit.ray(view.plane, ndc, crate::map::MAP_FOV as f64, aspect);
-    view.plane.intersect(
-        view.orbit.eye_ly(view.plane),
+    let direction = view.orbit.ray(view.datum(), ndc, crate::map::MAP_FOV as f64, aspect);
+    view.datum().intersect(
+        view.orbit.eye_ly(view.datum()),
         direction,
         map.plane_origin_ly(view.orbit.focus_ly),
     )
