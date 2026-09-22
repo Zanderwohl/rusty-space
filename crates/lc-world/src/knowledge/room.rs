@@ -11,7 +11,13 @@ use super::{File, Knowledge, SAMPLE_BYTES};
 impl File {
     /// Room this file takes aboard: its raw samples, whoever took them.
     pub fn bytes(&self) -> f64 {
-        self.series.iter().map(|s| s.len() as f64 * SAMPLE_BYTES).sum()
+        self.samples() as f64 * SAMPLE_BYTES
+    }
+
+    /// Raw samples held, whoever took them. Counted, not summed as bytes: a float `sum` of
+    /// nothing is -0.0, which a display shows as "-0.00".
+    fn samples(&self) -> usize {
+        self.series.iter().map(|s| s.len()).sum()
     }
 }
 
@@ -21,13 +27,13 @@ impl Knowledge {
     /// changed or a log may have been consumed — a shard does, every tick it runs the craft.
     pub fn fit_to(&mut self, capacity_bytes: f64) {
         self.capacity_bytes = capacity_bytes;
-        self.occupied_bytes = self.files.values().map(File::bytes).sum();
+        self.occupied_bytes = self.bytes();
     }
 
     /// Room everything held takes, counted now. What a display shows; [`Knowledge::fit_to`] is
     /// what enforces it.
     pub fn bytes(&self) -> f64 {
-        self.files.values().map(File::bytes).sum()
+        self.files.values().map(File::samples).sum::<usize>() as f64 * SAMPLE_BYTES
     }
 
     pub fn capacity_bytes(&self) -> f64 {
@@ -61,6 +67,12 @@ mod tests {
     use super::*;
     use crate::knowledge::{Sample, Subject, Witness};
     use crate::sky::StarId;
+
+    #[test]
+    fn nothing_held_is_positive_zero() {
+        let k = Knowledge::new(Witness(1));
+        assert_eq!(k.bytes().to_bits(), 0.0f64.to_bits());
+    }
 
     #[test]
     fn a_full_craft_stops_keeping_samples_and_keeps_everything_else() {
