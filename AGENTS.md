@@ -128,6 +128,12 @@ Each of these cost real time. None of them are visible from the code that hits t
   a windowed surface. On a 75 Hz display every frame is 13.3 or 26.7 ms, so a saving smaller
   than an interval cannot show in it. `--bench` prints main-world CPU as well, which is not
   quantized — compare that, and compare only runs at the same printed window size.
+- **GPU time is `tools/gpu_passes.py`**, from a Metal System Trace; its docstring has the
+  commands. It needs Xcode rather than the command-line tools. At 1280x720 the GPU is busy
+  about 2 ms a frame, so a frame that takes 13 ms is waiting on the display, not the GPU.
+- **zsh does not split `$args` on spaces.** A loop over `"--station rings:Saturn --rate 0"`
+  hands the client one argument that is no flag at all, and every run photographs and times
+  the default view while saying otherwise. Write `${=args}`.
 - Two runs stopped at frame `n` and frame `n+1` are **not** consecutive frames. They have
   accumulated different wall time. Use `--burst`.
 - `--turn` and `--pitch` **do not always land**. Three runs of one `--pitch 60 --frames 200`
