@@ -298,7 +298,7 @@ impl<J: Journal> Server<J> {
             // A connection is told what its craft keeps raw once, logs or none; after that each
             // log page says so again, and an accepted order says when it changes.
             let logs = match logs {
-                None if !retained_sent => serde_json::to_string(&lc_world::knowledge::Logs { logs: Vec::new(), retained })
+                None if !retained_sent && !retained.is_empty() => serde_json::to_string(&lc_world::knowledge::Logs { logs: Vec::new(), retained })
                     .ok()
                     .map(|body| (Some(body), logged)),
                 other => other,

@@ -76,7 +76,12 @@ async fn hear(link: &mut WebSocketLink, what: &str) -> Outbound {
         let heard = link
             .poll()
             .into_iter()
-            .find(|m| !matches!(m, Outbound::Fitted { .. } | Outbound::Learned { .. } | Outbound::Observing { .. }));
+            .find(|m| {
+                !matches!(
+                    m,
+                    Outbound::Fitted { .. } | Outbound::Learned { .. } | Outbound::Logged { .. } | Outbound::Observing { .. }
+                )
+            });
         if let Some(message) = heard {
             return message;
         }
