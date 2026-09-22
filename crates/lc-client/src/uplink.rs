@@ -563,6 +563,7 @@ fn fold(
                 let from = ShipId(sighting.source_id);
                 let name = uplink.contacts.iter().find(|c| c.ship_id == from).map(|c| c.name.clone());
                 let key = sighting.kind == lc_proto::kind::KEY;
+                let bare = crate::chat::bare_acknowledgement(key, spoken.body.as_deref());
                 // Said before it is folded, because what the box shows is what this craft can
                 // read — which for somebody else's sealed mail is the fact of it and no more.
                 let who = name.clone().unwrap_or_else(|| uplink.name_of(from));
@@ -583,7 +584,11 @@ fn fold(
                         format!("{who}: {said}")
                     }
                 };
-                ui.0.heard(from, notice, sighting.arrive_t as f64 * 1e-6);
+                // An acknowledgement is news to the transcript, which marks a line delivered,
+                // and to nobody reading the box: it would be a name and a colon.
+                if !bare {
+                    ui.0.heard(from, notice, sighting.arrive_t as f64 * 1e-6);
+                }
                 uplink.chat.received(
                     from,
                     name.as_deref(),
@@ -1312,6 +1317,41 @@ mod tests {
         let note = ui.0.notifications.last().expect("nothing in the events box");
         assert_eq!(note.from, Some(ShipId(2)), "the notice does not open anything");
         assert!(note.text.contains("are you there"));
+    }
+
+    /// A bare acknowledgement marks a line delivered and puts nothing in the events box,
+    /// whether it was meant for this ship or overheard on its way to somebody else.
+    #[test]
+    fn a_bare_acknowledgement_is_not_a_notice() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Accepted {
+            ship_id: ShipId(7),
+            event_id: 4242,
+            at_t: 2_000_000,
+            order: Order::Say {
+                to: Some(ShipId(2)),
+                aim: lc_proto::Aim::Omni,
+                secrecy: lc_proto::Secrecy::Open,
+                body: "hello".into(),
+                idem: 4242,
+            },
+        });
+        let before = ui.0.notifications.len();
+        let ack = |to| lc_proto::Spoken {
+            to: Some(to),
+            beamed: false,
+            idem: 14,
+            sealed: false,
+            body: Some(String::new()),
+            acks: vec![4242],
+        };
+        fold(&mut uplink, &mut game, &mut ui, heard(44, 2, ack(7), lc_proto::kind::MESSAGE));
+        fold(&mut uplink, &mut game, &mut ui, heard(45, 3, ack(99), lc_proto::kind::MESSAGE));
+
+        let conversation = uplink.chat.get(ShipId(2)).unwrap();
+        assert!(conversation.delivered(&conversation.lines[0].clone()), "the ack was lost");
+        assert_eq!(ui.0.notifications.len(), before, "{:?}", ui.0.notifications.last());
     }
 
     /// Somebody else's sealed mail is heard and not read, and the box says exactly that rather

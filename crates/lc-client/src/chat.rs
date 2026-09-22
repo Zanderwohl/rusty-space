@@ -578,7 +578,7 @@ fn line_of(said: Said) -> Line {
 ///
 /// A message this ship cannot read is **not** this. Its body is `None` rather than empty, and
 /// that somebody in earshot is talking in private is exactly the kind of thing worth showing.
-fn bare_acknowledgement(key: bool, body: Option<&str>) -> bool {
+pub(crate) fn bare_acknowledgement(key: bool, body: Option<&str>) -> bool {
     !key && body == Some("")
 }
 
