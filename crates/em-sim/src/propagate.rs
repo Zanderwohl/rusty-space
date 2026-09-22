@@ -55,8 +55,7 @@ pub fn position_at(system: &System, i: BodyIndex, time: Instant) -> Option<DVec3
 /// Position and velocity at `time`, without touching the arena. `None` on the same terms
 /// as [`position_at`].
 ///
-/// Remembered per instant once an instant has been asked about twice, so a frame placing every
-/// body solves each primary once. The sums run root first either way, so a remembered answer
+/// Remembered per instant (see `memo`). Sums run root first either way, so a remembered answer
 /// is the same bits as a fresh one.
 pub fn state_at(system: &System, i: BodyIndex, time: Instant) -> Option<(DVec3, DVec3)> {
     let generation = system.generation();
@@ -113,7 +112,6 @@ pub fn state_at(system: &System, i: BodyIndex, time: Instant) -> Option<(DVec3, 
     answers.last().and_then(|(_, state)| *state)
 }
 
-/// [`state_at`] without the memo: the whole chain, solved fresh.
 fn solve_chain(system: &System, i: BodyIndex, time: Instant) -> Option<(DVec3, DVec3)> {
     // Root-most first, so each body can be placed relative to one already placed.
     let mut chain = Vec::with_capacity(4);
@@ -441,13 +439,12 @@ mod non_mutating_tests {
             "a body parented to an integrated one is just as unpredictable");
     }
 
-    /// Bits, so that a `NaN` compares equal to itself: 1I/'Oumuamua's velocity is one at J2000.
+    /// Bits, so a `NaN` equals itself: 1I/'Oumuamua's velocity is one at J2000.
     fn bits(state: Option<(DVec3, DVec3)>) -> Option<[u64; 6]> {
         state.map(|(p, v)| [p.x, p.y, p.z, v.x, v.y, v.z].map(f64::to_bits))
     }
 
-    /// A remembered answer is the same bits as a fresh one, for every body, whichever order
-    /// they are asked in: parents first, children first, or each twice.
+    /// Remembered answers are the same bits as fresh ones, whichever order bodies are asked in.
     #[test]
     fn a_remembered_answer_is_the_answer() {
         let day = TimeDelta::from_seconds(86_400.0);
@@ -466,7 +463,6 @@ mod non_mutating_tests {
         }
     }
 
-    /// An edit advances the generation, and nothing remembered from before it is used after.
     #[test]
     fn an_edit_forgets_what_was_remembered() {
         let time = Instant::J2000 + TimeDelta::from_seconds(5.0e6);

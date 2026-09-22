@@ -1,17 +1,12 @@
 //! The swarms' haze, marched at half resolution and added back into the sky.
 //!
-//! The volumetric shells cost thirty-two texture-heavy steps per covered pixel, and from inside
-//! the Oort cloud every pixel is covered: 2.4 ms at 1280x720 and about four times that on a
-//! Retina display, which made it the one GPU pass that pushed frames onto a second refresh.
-//! The shape is deliberately soft, so a quarter of the pixels is enough.
+//! The volumetric shells cost 2.4 ms at 1280x720 from inside the Oort cloud, and four times
+//! that on a Retina display. The shape is soft, so a quarter of the pixels is enough.
 //!
 //! A camera of its own draws only the shells, on [`HAZE_LAYER`], into a half-size float target
-//! with the sky camera's pose, lens and viewport copied each frame. A full-screen triangle in
-//! the sky pass adds it back before bloom and the tone map, where the shells used to land.
-//! It sits at the stars' depth with the depth test on, so a planet or a hull still hides the
-//! haze behind it, as the shells' own depth test did.
-//!
-//! Rings stay in the sky pass. They are sheets, cheap, and sharp-edged.
+//! that copies the sky camera's pose, lens and viewport. A full-screen triangle in the sky pass
+//! adds it back before bloom and the tone map. It sits at the stars' depth with the depth test
+//! on, so a body in front still hides the haze. Rings are cheap sheets and stay in the sky pass.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -30,7 +25,6 @@ use bevy_mesh::{Indices, PrimitiveTopology};
 
 use crate::app::{AppState, SkyCamera, Stage};
 
-/// The layer the volumetric shells are drawn on, and only the haze camera sees.
 pub const HAZE_LAYER: usize = 2;
 
 /// Pixels of the sky's viewport per haze pixel, along each axis.
@@ -57,7 +51,6 @@ impl Plugin for HazePlugin {
 #[derive(Component)]
 struct HazeCamera;
 
-/// What the haze target is, and the composite reading it.
 #[derive(Resource)]
 struct Haze {
     image: Handle<Image>,
@@ -81,7 +74,7 @@ impl Material for HazeComposite {
         "shaders/haze_composite.wgsl".into()
     }
 
-    /// Additive, alpha zero out of the shader: see the shells' own material.
+    /// The shader returns alpha zero: `Add` is premultiplied.
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Add
     }
@@ -103,18 +96,16 @@ impl Material for HazeComposite {
 }
 
 fn target(size: UVec2) -> Image {
-    // Float, because the haze is scene light and is added before the tone map.
+    // Float: the haze is scene light, added before the tone map.
     let mut image =
         Image::new_target_texture(size.x.max(1), size.y.max(1), TextureFormat::Rgba16Float, None);
     image.asset_usage = RenderAssetUsages::RENDER_WORLD;
     image.texture_descriptor.usage |= TextureUsages::TEXTURE_BINDING;
-    // Bilinear: the upsample is the whole of the smoothing.
     image.sampler = ImageSampler::linear();
     image
 }
 
-/// One triangle that covers the view. The shader places it in clip space and ignores the
-/// transform, so the positions only have to say which corner is which.
+/// A triangle covering the view, in clip space; the shader ignores the transform.
 fn covering_triangle() -> Mesh {
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
         .with_inserted_attribute(
@@ -140,14 +131,13 @@ fn setup(
         RenderLayers::layer(HAZE_LAYER),
         RenderTarget::Image(image.clone().into()),
         Camera {
-            // Before the sky, which reads what this drew.
             order: -2,
             clear_color: ClearColorConfig::Custom(Color::NONE),
             is_active: false,
             ..default()
         },
         Hdr,
-        // Linear light out, untouched: the sky's own tone map and bloom see it once, added in.
+        // The sky's tone map and bloom apply once, after the composite.
         Tonemapping::None,
         DebandDither::Disabled,
         Msaa::Off,
@@ -169,7 +159,6 @@ fn switch(on: bool) -> impl FnMut(Single<&mut Camera, With<HazeCamera>>) {
     move |mut camera| camera.is_active = on
 }
 
-/// Stand the haze camera where the sky's is, and keep its target a fixed fraction of the sky's.
 #[allow(clippy::type_complexity)]
 fn follow_the_sky(
     sky: Single<(&Camera, &Transform, &Projection), (With<SkyCamera>, Without<HazeCamera>)>,
@@ -183,7 +172,7 @@ fn follow_the_sky(
     if *at != *sky_at {
         *at = *sky_at;
     }
-    // The aspect ratio is the target's own and Bevy keeps it; everything else is copied.
+    // Not the aspect ratio, which Bevy sets from the target.
     if let (Projection::Perspective(from), Projection::Perspective(to)) = (sky_lens, &mut *lens)
         && (from.fov, from.near, from.far) != (to.fov, to.near, to.far)
     {
@@ -200,8 +189,7 @@ fn follow_the_sky(
     if let Some(mut image) = images.get_mut(&haze.image) {
         *image = target(wanted);
     }
-    // A material's bind group holds the texture it was prepared with, and the target was just
-    // reallocated under it.
+    // The bind group still holds the texture that was just replaced.
     if let Some(mut composite) = composites.get_mut(&haze.composite) {
         composite.haze = haze.image.clone();
     }

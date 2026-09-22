@@ -81,10 +81,9 @@ const PROFILE_RADIAL: i32 = 1;
 ///
 /// Measured on an M3 Pro at 1280x720, with two populations each covering the sky: **0.076 ms
 /// per step per frame**, so thirty-two of them is about 2.4 ms. It is the whole of the cost —
-/// everything else in this shader happens once. That scales with pixels and nothing else, which
-/// is why the shells are marched at half resolution by `haze.rs` rather than with fewer steps
-/// here: a Metal trace of the default view put the pass at 1.25 ms full size and 0.56 ms at
-/// half, composite included.
+/// everything else in this shader happens once. It scales with pixels, so `haze.rs` marches at
+/// half resolution rather than with fewer steps: 1.25 ms full size, 0.56 ms at half, by a Metal
+/// trace of the default view.
 ///
 /// Against a ninety-six-step render, thirty-two is within a mean of one level in 255 and
 /// twenty-four within one and a half. Eight is within five and a half, which shows.

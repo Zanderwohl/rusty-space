@@ -57,8 +57,7 @@ const DOT_TUBE_FRACTION: f32 = BASE_TUBE_RADIUS;
 /// its brightness. It is the ruler, not what is being measured.
 const SCALE_PX: f32 = LINE_PX * 0.5;
 const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
-/// A population's outline, dashed and at an eighth of a line's brightness. Held at full width
-/// all the way round, a shell's six curves were the brightest thing on the map.
+/// A population's outline, dashed. At full brightness a shell's six curves outshine the map.
 const POPULATION_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
 
 /// How much of the palette color a line is drawn at.
@@ -357,15 +356,14 @@ fn setup(
     ));
 }
 
-/// Render the map only while something shows it. Only the game does, and `shown` is set from
-/// its interface pass, so the menu and the loading screen used to render one nobody saw.
+/// Render the map only while something shows it: in the menu and the loading screen nothing does.
 fn switch_camera(map: Res<Map>, mut camera: Single<&mut Camera, With<MapCamera>>) {
     if camera.is_active != map.shown {
         camera.is_active = map.shown;
     }
 }
 
-/// `shown` is only ever set, by the game's interface pass, so leaving the game clears it.
+/// Only the game's interface pass sets `shown`, so leaving the game has to clear it.
 fn hide(mut map: ResMut<Map>) {
     map.shown = false;
 }
@@ -517,8 +515,7 @@ fn place(
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
         }
-        // The one constant that moves: a mark's cap follows its form, and a circle's follows
-        // the surface's size. Compared first, because a write re-prepares the material.
+        // A mark's cap follows its form. Compared first: a write re-prepares the material.
         if materials.get(&material.0).is_some_and(|m| m.max_fraction != fraction)
             && let Some(mut asset) = materials.get_mut(&material.0)
         {
@@ -765,8 +762,6 @@ fn spawn_scene(
     materials: &mut Assets<MapLineMaterial>,
 ) {
     let layer = RenderLayers::layer(MAP_LAYER);
-    // The reference scale is one material, and every drop line another: nothing about any of
-    // them differs but where they are.
     let ring = materials.add(line_material(RING, LINE_TUBE_FRACTION, SCALE_PX, SCALE_COLOR_SCALE));
     let drop = materials.add(line_material(DROP, LINE_TUBE_FRACTION, SCALE_PX, SCALE_COLOR_SCALE));
     let population = materials.add(MapLineMaterial {
@@ -802,7 +797,7 @@ fn spawn_scene(
         let (mesh, fraction) = mesh_for(form_of(placement, view), placement, map, view);
         commands.spawn((
             Mesh3d(mesh.clone()),
-            // Its own: the cap follows the form, which changes without a respawn.
+            // Its own, because its cap changes with its form.
             MeshMaterial3d(materials.add(line_material(
                 color_of(placement.kind),
                 fraction,
@@ -1113,13 +1108,7 @@ mod tests {
         );
     }
 
-    /// No tube can contain the camera, whatever it is and however it is scaled.
-    ///
-    /// A tube's radius at a vertex is at most that vertex's distance times a line's angular
-    /// width, so the camera is always further from the center line than the tube reaches. The
-    /// per-entity rules this replaced had to be argued family by family — spokes against the
-    /// camera's clearance over the plane, shells against their near edge — and each one was a
-    /// bug first.
+    /// No tube can contain the camera, at any scale or distance. The inside of a tube is opaque.
     #[test]
     fn no_tube_can_reach_the_camera() {
         for height in [64.0f32, 410.0, 2160.0] {

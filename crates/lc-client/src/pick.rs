@@ -317,25 +317,22 @@ pub fn project_direction(camera_rotation: Quat, clip_from_view: Mat4, direction:
     clip_from_view * Vec4::new(view.x, view.y, view.z, 0.0)
 }
 
-/// Which stars are worth sighting: those the cursor could be on, and the selected one.
+/// Which stars to sight: those the cursor could be on, and the selected one.
 ///
-/// Eight thousand stars were projected, named and ranked every frame to find the one or two
-/// near the cursor. A star has no radius, so the rule in [`picking::pick`] cannot choose one
-/// further than the slack from the cursor, and every other star can be skipped unseen.
+/// A star has no radius, so [`picking::pick`] cannot choose one further than the slack from the
+/// cursor, and the rest of the eight thousand can be skipped before any work is done on them.
 struct StarsWanted {
-    /// The cursor's direction in simulation space, and the widest angle a pickable star can
-    /// lie from it.
+    /// The cursor's direction in simulation space, and the widest angle from it a pickable star
+    /// can be.
     near: Option<(DVec3, f64)>,
-    /// Marked wherever it is, including off screen: its arrow is the only way to find it.
+    /// Marked even off screen, where its arrow is the only way to find it.
     selected: Option<StarId>,
 }
 
-/// Slack on the cone, for rounding. The bound itself is exact: a gnomonic projection is
-/// nowhere denser than at its center, so a star `a` radians off the cursor is at least
-/// `a / rad_per_px` pixels from it on screen.
+/// Slack for rounding. The cone itself is exact: a gnomonic projection is nowhere denser than at
+/// its center, so a star `a` radians off the cursor is at least `a / rad_per_px` pixels away.
 const STAR_CONE_MARGIN: f32 = 1.05;
 
-/// The simulation-space direction under a window position.
 fn cursor_direction(cursor: Vec2, viewport: Vec2, camera_rotation: Quat, clip_from_view: Mat4)
     -> DVec3 {
     let ndc = Vec2::new(cursor.x / viewport.x * 2.0 - 1.0, 1.0 - cursor.y / viewport.y * 2.0);
@@ -673,8 +670,7 @@ mod tests {
         (transform.rotation, projection.get_clip_from_view())
     }
 
-    /// The cursor's direction is the one that projects back onto the cursor, anywhere in the
-    /// window: the star filter is only exact if the two agree.
+    /// The star filter is only exact if the cursor's direction projects back onto the cursor.
     #[test]
     fn the_cursor_direction_projects_back_onto_the_cursor() {
         let (rotation, clip_from_view) = looking_along(DVec3::new(0.3, -1.0, 0.4).normalize());
@@ -691,8 +687,7 @@ mod tests {
         }
     }
 
-    /// No star the rule could pick is outside the cone, even in a corner, where a pixel covers
-    /// the least sky.
+    /// No pickable star is outside the cone, even in a corner, where a pixel covers the least sky.
     #[test]
     fn a_star_just_inside_the_slack_is_inside_the_cone() {
         let (rotation, clip_from_view) = looking_along(DVec3::X);

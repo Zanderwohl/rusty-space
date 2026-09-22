@@ -24,7 +24,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Within the sky's own viewport, which is the corner square while the map is the view.
+    // The sky's viewport is the corner square while the map is the view.
     let uv = (in.clip_position.xy - view.viewport.xy) / view.viewport.zw;
     let rgb = textureSampleLevel(haze, haze_sampler, uv, 0.0).rgb;
     // Additive is premultiplied: alpha zero, or it overwrites what is under it.

@@ -488,8 +488,7 @@ pub(crate) fn key(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response 
 pub struct Counted {
     key: Option<(usize, u32, u32)>,
     pages: usize,
-    /// Which page `at` is, under the same key. Counting it means paginating from the top of the
-    /// chapter, which is the work the page count is cached to avoid.
+    /// Which page `at` is, under the same key: counting it paginates from the chapter's start.
     folio: Option<(Cursor, usize)>,
 }
 

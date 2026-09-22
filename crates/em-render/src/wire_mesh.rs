@@ -18,22 +18,19 @@ use bevy::prelude::*;
 use bevy::render::render_resource::VertexFormat;
 use bevy_mesh::{Indices, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues};
 
-/// The center line's previous point, beside every vertex of the ring about the next one; the
-/// vertex's own center at an open end. With [`ATTRIBUTE_CENTER_AFTER`], what lets a shader size
-/// a tube by the nearest point of the segments meeting at a vertex rather than by the vertex,
-/// which on a long straight segment is nowhere near the part the camera is closest to.
+/// The previous point on the center line, for every vertex of a ring; the ring's own center at
+/// an open end. With [`ATTRIBUTE_CENTER_AFTER`], lets a shader size a tube by the nearest point
+/// of its segments rather than by the vertex, which on a long segment is far from it.
 pub const ATTRIBUTE_CENTER_BEFORE: MeshVertexAttribute =
     MeshVertexAttribute::new("TubeCenterBefore", 0x5455_4245_4246_0001, VertexFormat::Float32x3);
-/// The center line's next point. See [`ATTRIBUTE_CENTER_BEFORE`].
+/// The next point on the center line. See [`ATTRIBUTE_CENTER_BEFORE`].
 pub const ATTRIBUTE_CENTER_AFTER: MeshVertexAttribute =
     MeshVertexAttribute::new("TubeCenterAfter", 0x5455_4245_4146_0001, VertexFormat::Float32x3);
-/// How far along its own center line a vertex is, in mesh units from the line's first point.
-/// What a shader dashes a line by.
+/// Distance along the center line from its first point, in mesh units.
 pub const ATTRIBUTE_ARC_LENGTH: MeshVertexAttribute =
     MeshVertexAttribute::new("TubeArcLength", 0x5455_4245_4152_0001, VertexFormat::Float32);
 
-/// The center line beside every vertex of a tube: [`ATTRIBUTE_CENTER_BEFORE`],
-/// [`ATTRIBUTE_CENTER_AFTER`] and [`ATTRIBUTE_ARC_LENGTH`], in vertex order.
+/// The three center-line attributes, in vertex order.
 #[derive(Default)]
 pub struct CenterLine {
     pub before: Vec<[f32; 3]>,
@@ -48,7 +45,6 @@ impl CenterLine {
         self.arc.extend(other.arc);
     }
 
-    /// For geometry with no line through it, where each vertex is its own.
     fn points(positions: &[[f32; 3]]) -> Self {
         Self { before: positions.to_vec(), after: positions.to_vec(), arc: vec![0.0; positions.len()] }
     }
@@ -180,7 +176,7 @@ pub fn build_tube_from_points(
     (positions, normals, colors, indices)
 }
 
-/// The center line beside every vertex [`build_tube_from_points`] makes, in the same order.
+/// The center-line attributes for the vertices [`build_tube_from_points`] makes.
 pub fn center_line(points: &[Vec3], tube_sides: u32, closed: bool) -> CenterLine {
     if points.len() < 2 {
         return CenterLine::default();
@@ -217,8 +213,7 @@ pub fn center_line(points: &[Vec3], tube_sides: u32, closed: bool) -> CenterLine
 }
 
 /// Build an empty mesh that still declares the vertex layout required by
-/// `body_wireframe.wgsl` (`position`, `normal`, `color`) and by a material reading the center
-/// line either side.
+/// `body_wireframe.wgsl` (`position`, `normal`, `color`) and the center-line attributes.
 fn empty_wireframe_mesh() -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,

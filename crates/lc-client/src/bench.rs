@@ -1,13 +1,10 @@
 //! `--bench <frames>`: time the real pipeline, print percentiles, and quit.
 //!
-//! Three numbers, because no one of them says where a frame went:
-//!
-//! - **frame**, wall time between frames. macOS paces a windowed surface to the display even
-//!   without vsync, so this comes in whole refresh intervals and a small saving cannot move it.
-//! - **main**, the main world's CPU time, `First` to `Last`. Rendering is pipelined, so this is
-//!   the CPU side of the critical path and is not quantized.
-//! - **render**, per pass, from Bevy's render diagnostics: CPU time on Metal, and GPU time too
-//!   where the backend has timestamp queries.
+//! - **frame**: wall time between frames. macOS paces a window to the display even without
+//!   vsync, so this comes in whole refresh intervals.
+//! - **main**: the main world's CPU time, `First` to `Last`. Not quantized.
+//! - **render**: per pass, from Bevy's render diagnostics; CPU only on Metal. For GPU time use
+//!   `tools/gpu_passes.py`.
 
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::platform::time::Instant;
@@ -20,8 +17,7 @@ pub struct BenchPlugin;
 
 impl Plugin for BenchPlugin {
     fn build(&self, app: &mut App) {
-        // The entry is inserted before the client plugin is, so this is known at build time and
-        // a run that is not a bench pays nothing for the diagnostics.
+        // The entry is inserted before this plugin, so a run that is not a bench adds nothing.
         if app.world().get_resource::<DevEntry>().is_none_or(|dev| dev.bench.is_none()) {
             return;
         }
@@ -71,8 +67,7 @@ fn record(
         return;
     }
 
-    // The window lands on whichever display it lands on, and one at twice the scale has four
-    // times the pixels: two runs are only comparable at the same size.
+    // A window on a Retina display has four times the pixels; compare runs at the same size.
     println!(
         "bench: {}x{}  {} frames",
         window.physical_width(),

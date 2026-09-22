@@ -76,8 +76,7 @@ pub struct DevEntry {
     pub after_frames: u32,
     /// How many consecutive frames to photograph. More than one for diagnosing a flicker.
     pub burst: u32,
-    /// Frames to time after [`DevEntry::after_frames`] of warm-up, printing percentiles and
-    /// quitting. Presents without vsync, or every frame would measure the display.
+    /// Frames to time after [`DevEntry::after_frames`] of warm-up. See `bench`.
     pub bench: Option<u32>,
     /// A menu page to open on arrival. The only way to photograph one that draws over the
     /// root, which an action running on entering the sky cannot reach.

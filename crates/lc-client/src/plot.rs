@@ -31,17 +31,14 @@ struct Drawn {
 impl Drawn {
     /// Whether `now` differs from this drawing by as much as a pixel.
     ///
-    /// A sample arrives every frame and each one moves the whole curve, so redrawing on any
-    /// change rasterized up to four thousand points and uploaded the texture every frame the
-    /// telescope was open. Once the window is full a new sample moves the picture by a fraction
-    /// of a pixel; waiting until it has moved by one keeps the cost near one pixel column's
-    /// worth of work a frame, and no drawn pixel is ever more than one out of date.
+    /// A sample arrives every frame and moves the whole curve by a fraction of a pixel, and a
+    /// redraw rasterizes up to four thousand points and uploads a texture.
     fn stale(&self, now: &Drawn) -> bool {
         if now.size != self.size || now.samples < self.samples || now.span.0 < self.span.0 {
             return true;
         }
         let columns = f64::from(now.size.0.max(1));
-        // At a frozen clock every sample lands at the same instant, so time alone never moves.
+        // At a frozen clock every sample lands at the same instant.
         let arrived = (now.samples - self.samples) as f64 >= (now.samples as f64 / columns).max(1.0);
         let per_column = (now.span.1 - now.span.0) / columns;
         let advanced = now.span.1 - self.span.1 >= per_column && now.span.1 > self.span.1;

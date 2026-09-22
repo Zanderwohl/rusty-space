@@ -1,22 +1,11 @@
-//! The map's lines: a tube mesh whose width the vertex shader holds in pixels.
+//! The map's lines: tube meshes whose width the vertex shader holds in pixels.
 //!
-//! The width used to be a uniform the map wrote per entity per frame, from the entity's
-//! distance and scale. Every write re-prepares a material and re-specializes its entity, and a
-//! few hundred of them every frame was half of a 21 ms frame. The shader has the view in front
-//! of it, so it sizes each vertex from that vertex's own distance and the material holds only
-//! constants.
-//!
-//! Per segment rather than per entity, which is what the per-entity versions were
-//! approximating: a ring or a shell spans a range of distances, and sizing it at one of them
-//! was either too thick at the near edge — the camera ended up inside the tube — or too thin at
-//! the far one, where the Oort cloud's outline broke up into dots.
-//!
-//! Each vertex is sized by the camera's distance to the nearer of the two center-line segments
-//! meeting there, not to the vertex: a spoke is one segment forty stand-offs long, and sized by
-//! its end points the part passing under the camera came out a band. Interpolated between two
-//! such vertices a tube is nowhere wider than its segment's nearest point asks for, and at
-//! `d · rad_per_px · width_px` that is about a three-hundredth of the distance, so a tube
-//! cannot reach the camera at all.
+//! The width is worked out per vertex from the view, so the materials hold only constants and
+//! are never written per frame; writing a few hundred of them every frame was half a 21 ms
+//! frame. A vertex is sized by the camera's distance to the nearer of the two center-line
+//! segments meeting there, not to the vertex itself: a spoke is one long segment, and sized by
+//! its ends the part passing under the camera draws as a band. A tube is then never wider than
+//! `d · rad_per_px · width_px`, so it cannot contain the camera.
 
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
@@ -32,11 +21,9 @@ use em_render::wire_mesh::{ATTRIBUTE_ARC_LENGTH, ATTRIBUTE_CENTER_AFTER, ATTRIBU
 pub struct MapLineMaterial {
     #[uniform(0)]
     pub base_color: LinearRgba,
-    /// `base_color * (1 + weight * emission_strength)`, where the weight is the mesh's vertex
-    /// alpha: grid lines and equators differ by it.
+    /// Scaled by the mesh's vertex alpha, which is how grid lines and equators differ.
     #[uniform(0)]
     pub emission_strength: f32,
-    /// The tube radius baked into the mesh, which the shader displaces from.
     #[uniform(0)]
     pub base_tube_radius: f32,
     /// The most of its own unit mesh a tube may take. See [`tube_radius`].
@@ -44,8 +31,7 @@ pub struct MapLineMaterial {
     pub max_fraction: f32,
     #[uniform(0)]
     pub width_px: f32,
-    /// Dash length on screen, with gaps as long; zero for a solid line. Held near this all
-    /// along the line, perspective or not: see `map_line.wgsl`.
+    /// Dash length on screen, with gaps as long; zero for a solid line.
     #[uniform(0)]
     pub dash_px: f32,
 }
@@ -98,12 +84,11 @@ impl Plugin for MapLinePlugin {
     }
 }
 
-/// The tube radius at one vertex, in the mesh's own units. **`map_line.wgsl` is this function**;
-/// the two must change together, and this one is what the tests hold to. So is [`nearest`].
+/// The tube radius at one vertex, in mesh units. `map_line.wgsl` repeats this, [`nearest`] and
+/// [`dash_period`]; change them together.
 ///
-/// `distance` is from the camera to the nearer of the center-line segments either side of the
-/// vertex, `scale` how many render units one mesh unit is across the tube. The cap stops a mark far smaller than a
-/// pixel's worth of line from becoming a blob of its own tube.
+/// `scale` is render units per mesh unit across the tube. The cap keeps a mark smaller than a
+/// line's width from turning into a blob of tube.
 pub fn tube_radius(scale: f32, rad_per_px: f32, distance: f32, max_fraction: f32, width_px: f32)
     -> f32 {
     let world = (distance * rad_per_px * width_px).max(f32::MIN_POSITIVE);
@@ -113,8 +98,7 @@ pub fn tube_radius(scale: f32, rad_per_px: f32, distance: f32, max_fraction: f32
     }
 }
 
-/// How far `from` is from the segment `a`-`b`: the distance a vertex between two segments is
-/// sized by, taken to each and the smaller kept.
+/// Distance from `from` to the segment `a`-`b`.
 pub fn nearest(from: Vec3, a: Vec3, b: Vec3) -> f32 {
     let span = b - a;
     let along = match span.length_squared() > f32::MIN_POSITIVE {
@@ -124,8 +108,8 @@ pub fn nearest(from: Vec3, a: Vec3, b: Vec3) -> f32 {
     from.distance(a + span * along)
 }
 
-/// The two dash periods `map_line.wgsl` fades between, in arc length, and how far across.
-/// `per_px` is how much arc one pixel of screen covers there.
+/// The two dash periods the shader fades between, in arc length, and the fade. `per_px` is arc
+/// length per screen pixel.
 pub fn dash_period(dash_px: f32, per_px: f32) -> (f32, f32, f32) {
     let level = (2.0 * dash_px * per_px).log2();
     let period = level.floor().exp2();
@@ -136,8 +120,7 @@ pub fn dash_period(dash_px: f32, per_px: f32) -> (f32, f32, f32) {
 mod tests {
     use super::*;
 
-    /// A spoke forty units long passing a hair under the camera: sized by its ends it was a band
-    /// across the view, and sized by its nearest point it is the line it should be.
+    /// A long segment passing just under the camera: sized by its ends it would be a band.
     #[test]
     fn a_long_segment_is_sized_by_the_part_nearest_the_camera() {
         let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
@@ -155,16 +138,14 @@ mod tests {
         }
     }
 
-    /// The two periods bracket the dash asked for, at any scale — the shorter lights half to
-    /// all of it, the longer one to two times it — so a big shape gets more dashes rather than
-    /// stretched ones.
+    /// At any scale the shorter period lights half to all of the dash asked for, the longer one
+    /// to two times it.
     #[test]
     fn a_dash_stays_near_its_length_on_screen() {
         let dash_px = 5.0;
         for exponent in -40..40 {
             let per_px = 1.37f32.powi(exponent);
             let (short, long, _) = dash_period(dash_px, per_px);
-            // Half a period is lit, in pixels.
             let (short_px, long_px) = (short * 0.5 / per_px, long * 0.5 / per_px);
             assert!(short_px > dash_px * 0.5 - 1.0e-3 && short_px <= dash_px * 1.0001,
                 "{short_px} px at {per_px:e}");

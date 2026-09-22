@@ -88,7 +88,7 @@ pub struct System {
     time: Instant,
     generation: u32,
     dirty: bool,
-    /// Answers `propagate::state_at` has given, by generation and instant. See `memo`.
+    /// See `memo`.
     memo: crate::memo::StateMemo,
 }
 
