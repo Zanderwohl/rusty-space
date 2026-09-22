@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::sky::StarId;
 
 pub mod astrometry;
+pub mod body;
 pub mod conclusion;
 pub mod formats;
 pub mod moments;
@@ -31,6 +32,7 @@ pub mod survey;
 pub mod transit;
 
 pub use astrometry::{Bearing, Distance};
+pub use body::{BodyBelief, Placed, SystemPlane};
 pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;
 pub use report::{ENTRIES_PER_REPORT, Entry, Log, Logs, Mark, Part, Report, Reporting};
