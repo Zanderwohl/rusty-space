@@ -444,6 +444,184 @@ word" note goes quiet on its own once nothing issues them.
 Body files travel in reports exactly as star files do: a report's entry for a system already
 carries its members. A relayed orbit keeps its method and its lineage.
 
+That is not an accident of this design — it is already the shape of the code.
+`report::Entry` is documented as "everything one report carries about **one system**: the star and
+whatever belongs to it", `report_upto`'s doc says "a planet rides with its star", and `Part`
+holds exactly `sightings, claims, names, orbits, conclusions` and no logs. So a system is already
+the unit a report is paged by. What is missing is a way for a player to *choose* one.
+
+## Reporting one system on purpose
+
+A player can send everything they know about one system to one craft, or to nobody in particular,
+with the aim and the seal they choose.
+
+**Most of this is built.** `Order::SendReport { to, aim, secrecy, idem }` exists, the radio
+panel already has a **send survey** button beside its aim row and encrypt checkbox
+(`radio_panel.rs:585`), `Server::compose` validates it, `Server::report_for` mints the body, and
+`Knowledge::receive` folds it. Sealing already refuses correctly: a sealed broadcast is
+`Refusal::Impossible` and a seal to a craft whose key is not held is `Refusal::NoKey`
+(`radio.rs:151-158`). What is missing is only that a report has **no scope** — and the picker
+that would give it one.
+
+**Today a report is a backlog drain, and its content cannot be chosen.** `Reporting` keeps a
+`Mark` per recipient — `{ at_s, after: Option<Subject> }`, keyed by ship id with `0` for the
+broadcast — and `report_for` calls `report_upto`, which walks `self.backlog.after(since, sent_s)`
+and takes the **oldest** systems first, up to `ENTRIES_PER_REPORT` (64), then moves the mark.
+There is no `Subject` anywhere in the chain from `Order::SendReport` through `report_for` to
+`report_upto`, so there is nowhere to say "tell Kestrel about Sol". Worse for this purpose, a
+craft with nothing new is refused with `NothingNew` — right for a backlog, wrong for a deliberate
+send, where the whole point may be that you think they did not hear you the first time.
+
+So a **targeted report** sits beside the backlog rather than inside it:
+
+| | backlog report | targeted report |
+|---|---|---|
+| what goes | the oldest 64 systems past the mark | one system, everything held about it |
+| the mark | moves | **untouched** |
+| nothing new | refused, `NothingNew` | sent anyway |
+| who asks | a standing order, or a relay | a player, once |
+
+The mark staying put is the part to get right. A mark means "how far through my own learning I
+have told you", and a targeted report does not answer that question — it re-sends one system's
+worth, most of which the recipient may already hold. Moving the mark would silently drop every
+*other* system learned before it, which is the one outcome nobody would connect to the button
+they pressed. Folding is idempotent ([22-provenance.md](22-provenance.md#moving-records-between-craft)),
+so re-sending costs light and energy and nothing else.
+
+In the code it is three small changes and no new wire shape:
+
+1. **`Order::SendReport` gains `about: Option<Subject>`.** `None` keeps today's backlog behavior,
+   so the existing button and any future relay order are unchanged. `lc_proto::Subject` is already
+   on the wire — `Order::NameIt` and `Order::RetainRaw` both carry one.
+2. **A sibling of `report_upto`**: gather every subject whose `Subject::system()` is this star,
+   take each one's whole `Part` rather than the slice after a mark, and return a `Report` of
+   exactly one `Entry`. `Entry` is already documented as "everything one report carries about one
+   system", so the type does not change.
+3. **`report_for` skips `Reporting::sent`** when the order was scoped, and does not map an empty
+   result to `NothingNew`.
+
+**The shard still writes it**, as it writes every report, because a client that composed its own
+could report anything it liked. And the receive path needs nothing at all: `Knowledge::fold`
+iterates parts and keys off `part.subject`, which is already any `Subject` including
+`Body { star, body }`, so `Entry::system` is only a grouping key.
+
+**It must fit `REPORT_LIMIT`,** 64 KiB, which is the one place a scoped report can still fail.
+`report_for` currently halves its system limit until the JSON fits; a one-system report has
+nothing to halve. A system with many bodies and a long tail of sightings can exceed it, so the
+scoped path needs its own answer — drop the oldest sightings per body first, since a fitted orbit
+makes its own input arcs redundant, and say in the send window that it was trimmed.
+
+### The three choices, which are already independent
+
+[05-observation.md](05-observation.md#saying-something) settles this and the send window only has
+to keep it: **addressed to**, **aimed** and **sealed** are three independent choices, and an
+interface that conflates them is how a player broadcasts a private message in clear.
+
+All three are already separate fields on the order, so nothing has to be invented:
+
+| choice | field | for a system report |
+|---|---|---|
+| **addressed to** | `to: Option<ShipId>` | one craft, or `None` for a broadcast. A report is never acknowledged either way, so this decides who may decrypt it and nothing else |
+| **aimed** | `aim: Aim` | `Omni`, `Ship(id)`, or `Star(id)`. A beam can miss, and a missed report is light that went past — nothing resends it |
+| **sealed** | `secrecy: Secrecy` | `Open` or `Sealed`. Offered only when this ship holds that key, and the control says why when it does not |
+
+Note `Aim::Ship` is refused with `NotInSight` for a craft never seen, and `Aim::Star` beams at a
+whole system — the same aim the radio panel's "beam star" already sends, which is the one way to
+report to somebody whose position you do not have.
+
+The rules that already exist all apply unchanged, and the send surface is where they become
+visible rather than inferred:
+
+- **A broadcast cannot be sealed.** There is nobody to seal it to, and `compose` refuses it with
+  `Impossible` rather than quietly sending it in the open.
+- **An open report is read by everyone in earshot,** and this is where a report differs sharply
+  from a message. A sealed report never lands on an eavesdropper at all — `redact` sets
+  `Reported::body` to `None` and the landing is skipped — whereas an eavesdropper on an *open*
+  report reads it and folds it into their own knowledge. Broadcasting a survey in clear is not
+  leaking that you said something, it is giving away the survey. The surface says so plainly next
+  to the seal, because it is the one choice here whose consequence a player cannot see afterwards.
+- **A sealed message and a sealed report are hidden differently,** and both are deliberate: a
+  message becomes `Body::Unreadable` and shows as fixed-length noise in Overheard, a report simply
+  does not arrive. The report needs no length-hiding because it was never going in a transcript.
+
+### What is in it, and what is not
+
+The send window states the payload before it goes, because a report's size is real: a full survey
+is megabytes, a beam has a data rate, and every transmission is to cost stored energy
+([23-factions.md](23-factions.md#cost)). Scoping a report to one system is the answer to the
+bandwidth question 22-provenance raised and left open.
+
+- **Records, never logs.** `Part` carries sightings, claims, names, orbits and conclusions. A
+  craft's photometric samples never travel, which is also why a report cannot overrun the
+  recipient's room the way the survey overruns the sender's.
+- **The star and every body under it,** as much as is held. Three of eight planets known is three
+  planets sent.
+- **Unsettled transit candidates go too,** as the conclusions they are, with their probabilities.
+  A candidate somebody else can confirm from another angle is worth more than a settled one they
+  cannot, since two great circles cross at a pole.
+- **The system plane is not sent, and cannot be.** It is a belief recomputed from the orbits and
+  never stored. The receiver recomputes it from the orbits they now hold, which is why two craft
+  holding the same orbits agree about the plane and why nobody can claim a better plane than
+  their own orbits support. A craft that wants to improve somebody's plane sends orbits.
+- **Nothing loses its witness.** Every record keeps the observer who measured it and gains a hop,
+  so the recipient's Sources section reads *on craft 12's word, relayed once* rather than
+  presenting a stranger's astrometry as their own.
+
+### The surface
+
+**One surface, two ways in,** differing only in which field arrives filled. Two send dialogs that
+drift apart is the failure worth designing against.
+
+| from | arrives with |
+|---|---|
+| the System window (`Y`), or a star in the telescope list | the system fixed, the recipient to pick |
+| a conversation in the communications window (`C`) | the recipient fixed, the system to pick |
+
+**It is a window, not a modal, and that is a constraint rather than a preference.** The client
+says outright in three places that nothing is modal (`ui.rs:6`, `app.rs:25`, `action.rs:896` —
+"opening one does not close another"), and there is no popup, popover or `egui::Modal` anywhere
+in `lc-client`. The only true modal in the codebase is the sign-in password panel, which is Bevy
+UI in the menu and not in the game at all. So this is a new arm of `Panel` in
+`panels::open_panels`, drawn in the same shared `egui::Window` every other panel uses, and it
+opens and closes like one. It behaves like a popover in the ways that matter — it opens with its
+context filled in and it closes when the report goes — without inventing a second kind of
+surface.
+
+It is **opaque**, because doc 18's rule is that anything over another panel is opaque: two
+translucent surfaces at the same place blend into one object with both sets of text. Not being
+modal is also right on its own terms — the clock never stops, and a player deciding who to tell
+about Sol should still be able to watch the sky.
+
+Its fields, top to bottom: the system and what would go, the recipient, the aim, the seal, and one
+button that **says what it will do** — *Beam to Kestrel, sealed*, or *Shout to anyone listening,
+open* — rather than **Send**. The button naming the act is what makes the three independent
+choices legible at the moment they take effect, which is the entire reason for keeping them
+independent, and it is where a player catches themselves about to give a survey away.
+
+Two pieces of the client can be reused rather than rebuilt:
+
+- **The recipient picker is the channel list.** Today a report's addressee is whichever
+  conversation is open, and there is no way to report to a craft without opening its conversation.
+  The same party list the radio panel draws is the picker.
+- **The system picker is the star list**, and `Ui::selected` is already "one selection, whichever
+  view you are looking at" — the telescope list, the sky and the map all send
+  `Action::SelectTarget`. Opening this from the System window means the system is simply the
+  selected one.
+
+The client's own `Aimed` enum — `Omni`, `AtThem`, `AtTheSelectedStar` — is the existing mirror of
+`Aim` and already encodes "at whatever star the telescope is on" as an interface fact rather than
+a protocol one. It is what the aim row should use here too.
+
+**What comes back: nothing, and the surface has to say so.** A report is not a conversation and
+writes no transcript row ([22-provenance.md](22-provenance.md#reports-on-the-air)). The sender
+gets the shard's acceptance and no more; the recipient gets a notification — today
+`"{who}: told you about {n} stars"` (`uplink.rs:629`) — and the knowledge arrives in their next
+`Learned`. So the window closes on acceptance and leaves no thread to watch, because there is
+nothing to watch: a report is **sent, not delivered**, no acknowledgement is coming, and the
+amber unacknowledged triangle a message gets would be a lie here. A player who wants to be sure
+sends it again. That notification should name the system for a scoped report rather than counting
+stars, since "told you about 1 star" is a poor description of a survey of Sol.
+
 ## The system's plane
 
 A belief on the **star's** subject, recomputed whenever an orbit changes, never stored:
@@ -654,6 +832,22 @@ knowledge. Today:
    planned from the knowledge the shard holds.
 8. **The rest of what a body is.** Belt planes from thermal imaging, and spectra finer than the
    bands, if a later instrument adds them.
+9. **Reporting one system on purpose.** `about` on the order, the scoped gather beside
+   `report_upto`, the mark left alone, the `REPORT_LIMIT` trim, and the send window with its three
+   choices and both ways in. **Done when:** a craft can send everything it knows about one system
+   to a named craft or to nobody, beamed or shouted, sealed or open; the mark to that recipient is
+   unchanged afterwards; a scoped send with nothing new is not refused; a broadcast refuses a
+   seal; an open one folds into an eavesdropper's knowledge as well as the addressee's; a sealed
+   one does not land on the eavesdropper at all; and the recipient's Sources section names the
+   sender with a hop.
+
+**On the order of 9.** It is the smallest phase here — most of the machinery is already built and
+the scoped path is a parameter, a gather and a picker. It needs only phase 3, since a report
+carries records and a player has to see what they are sending. It is numbered last because
+nothing depends on it, not because it should wait: it is worth pulling forward as soon as a system
+holds anything worth telling somebody about, and phase 4 is the first point where that is a planet
+rather than a distance. Sending a *body's* orbit is also what makes phase 4's cooperative
+`EdgeOnTo` crossing actually reachable between two players.
 
 **On the order of 2 and 6.** An earlier draft removed charts in phase 2, which would have left a
 window of four phases in which a new ship had no star distances, no home planets and no way to
@@ -696,6 +890,7 @@ game has no players — so each of these is a change in place, not a versioned a
 | 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
 | 6 | a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
 | 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |
+| 9 | `Order::SendReport` gains `about: Option<Subject>`, refused with `Impossible` when the craft does not `knows` that system. One new `Knowledge` method beside `report_upto`. **`REPORT_FORMAT` does not move**: `Report`, `Entry` and `Part` are unchanged, which is the point — and it must not move, because `Reported::format` is checked strictly on landing (`instruments.rs:215`), so a bump would make every report already in flight fail to land |
 
 ## Decided
 
@@ -703,3 +898,6 @@ game has no players — so each of these is a change in place, not a versioned a
 - **Unconfirmed candidates are drawn,** fainter, with distance error bars along the presumed plane
   (2026-09-22).
 - **Courses fly against believed positions,** and re-plan as the belief improves (2026-09-22).
+- **A player can report one system on purpose,** to a craft or to nobody, beamed or shouted,
+  sealed or open, from one send window with two ways into it. A targeted report does not move the
+  recipient's mark and is not refused for having nothing new (2026-09-22).

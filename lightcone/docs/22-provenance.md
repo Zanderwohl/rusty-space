@@ -248,7 +248,9 @@ automatically, which is what a faction needs:
 Automatic forwarding — a faction's relays passing on whatever they receive — needs no further
 mechanism than a rule about when to call `report` and who to aim it at. The bandwidth question
 is real and is not answered here: a full report of a surveyed sky is megabytes, and a beam has a
-data rate. Sending conclusions instead of measurements is what a claim is for.
+data rate. Sending conclusions instead of measurements is what a claim is for. Scoping a report
+to **one system** is the other half of the answer, and it is designed in
+[25-system-knowledge.md](25-system-knowledge.md#reporting-one-system-on-purpose).
 
 ## Reports on the air
 

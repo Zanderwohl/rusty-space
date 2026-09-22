@@ -238,6 +238,13 @@ Sealing is offered only for a craft whose key this ship holds, and the checkbox 
 is not. The client's copy of that rule is an interface courtesy; the server refuses the order
 either way.
 
+A conversation also offers **sending a report on one system**, which opens the send window with
+this craft as the recipient and a system to pick. The same window opens from the System window
+with the system already fixed, and it is the only surface either route uses. See
+[25-system-knowledge.md](25-system-knowledge.md#reporting-one-system-on-purpose). A report is not
+a message: it writes no transcript row and is never acknowledged, so nothing about it appears in
+this log at either end — the recipient learns of it from a notification.
+
 **The communications window is why `read_keys` consults egui.** Every binding in the table below is a
 bare letter, and nothing in the game had a text field until there was something to say into one
 — so typing a message used to open the telescope, cut the drive and fly somewhere, one keystroke
