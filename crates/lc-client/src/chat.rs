@@ -118,7 +118,7 @@ pub struct Loose {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Conversation {
     pub name: String,
-    /// In the order this ship learnt of them, which for a conversation across light delay is
+    /// In the order this ship learned of them, which for a conversation across light delay is
     /// not the order they were sent in: a reply can be composed before the message it crosses.
     ///
     /// **Not everything that arrived.** A message with nothing in it is an acknowledgement and
@@ -147,7 +147,7 @@ impl Conversation {
         line.event_ids.iter().any(|id| self.acked.contains(id))
     }
 
-    /// When this ship last learnt anything here, coordinate seconds. What the list sorts on.
+    /// When this ship last learned anything here, coordinate seconds. What the list sorts on.
     pub fn last_at(&self) -> f64 {
         self.lines.last().map_or(f64::NEG_INFINITY, |line| line.arrive_s.unwrap_or(line.sent_s))
     }
@@ -180,7 +180,7 @@ pub struct Chat {
     auto_ack: std::collections::BTreeSet<i64>,
     /// Whose public keys this ship holds, and can therefore encrypt a message to.
     ///
-    /// Learnt when a key offer's **light arrives**, never when it is sent. The client's copy of
+    /// Learned when a key offer's **light arrives**, never when it is sent. The client's copy of
     /// the server's rule; the server refuses a sealed message either way, and this is what stops
     /// the interface from offering one it knows would be refused.
     keys: std::collections::BTreeSet<i64>,
@@ -610,7 +610,7 @@ fn bare_acknowledgement(key: bool, body: Option<&str>) -> bool {
     !key && body == Some("")
 }
 
-/// When this ship learnt of a line: the arrival for something heard, the sending for its own.
+/// When this ship learned of a line: the arrival for something heard, the sending for its own.
 fn when(line: &Line) -> f64 {
     line.arrive_s.unwrap_or(line.sent_s)
 }
@@ -858,10 +858,10 @@ mod tests {
         assert!(chat.received(ShipId(7), None, 202, spoken(1, Some("hello you"), false, vec![]), false, 5.0, 6.0, 1.0, [1.0, 0.0, 0.0]).is_some());
     }
 
-    /// Oldest first, by when *this ship* learnt of each — which for a conversation across light
+    /// Oldest first, by when *this ship* learned of each — which for a conversation across light
     /// delay is not the order they were sent in.
     #[test]
-    fn the_public_log_is_ordered_by_when_this_ship_learnt_of_each() {
+    fn the_public_log_is_ordered_by_when_this_ship_learned_of_each() {
         let mut chat = Chat::default();
         chat.i_am(ShipId(1));
         // Sent early, heard late: a long crossing.

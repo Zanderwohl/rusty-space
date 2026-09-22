@@ -76,7 +76,7 @@ async fn hear(link: &mut WebSocketLink, what: &str) -> Outbound {
         let heard = link
             .poll()
             .into_iter()
-            .find(|m| !matches!(m, Outbound::Fitted { .. } | Outbound::Learnt { .. } | Outbound::Observing { .. }));
+            .find(|m| !matches!(m, Outbound::Fitted { .. } | Outbound::Learned { .. } | Outbound::Observing { .. }));
         if let Some(message) = heard {
             return message;
         }
@@ -367,9 +367,9 @@ async fn a_link_to_nothing_closes_with_a_reason() {
 /// receiver cannot already have, since both were issued the same charts on the same tick — the
 /// sender's shard writes the report from what it holds, the bytes go through a kernel, the shard
 /// folds it into the receiver's knowledge when its light lands, and the receiver's client is
-/// told what it learnt: the sender's name for the star, with a hop on it.
+/// told what it learned: the sender's name for the star, with a hop on it.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_report_crosses_the_seam_and_is_learnt_at_the_far_end() {
+async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
     use lc_world::knowledge::{Knowledge, Witness};
 
     let address = shard(true).await;
@@ -427,7 +427,7 @@ async fn a_report_crosses_the_seam_and_is_learnt_at_the_far_end() {
     while !(relayed(&copy) && told_of_it) {
         for message in receiver.poll() {
             match message {
-                Outbound::Learnt { report } => copy.absorb(&serde_json::from_str(&report).expect("a report")),
+                Outbound::Learned { report } => copy.absorb(&serde_json::from_str(&report).expect("a report")),
                 Outbound::Sightings(cleared) => {
                     told_of_it |= cleared.iter().any(|c| c.get().kind == lc_proto::kind::REPORT);
                 }

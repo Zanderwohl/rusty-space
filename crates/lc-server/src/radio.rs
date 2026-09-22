@@ -282,13 +282,13 @@ impl<J: Journal> Server<J> {
                 self.taught.push(lc_store::chat::Held {
                     holder: observer.0,
                     subject: sender.0,
-                    learnt_t: *arrive_t,
+                    learned_t: *arrive_t,
                 });
                 self.keys
                     .entry(*observer)
                     .or_default()
                     .entry(ShipId(sender.0))
-                    .and_modify(|learnt| *learnt = (*learnt).min(*arrive_t))
+                    .and_modify(|learned| *learned = (*learned).min(*arrive_t))
                     .or_insert(*arrive_t);
             } else {
                 let window = self.heard.entry((*observer, ShipId(sender.0))).or_default();
@@ -307,7 +307,7 @@ impl<J: Journal> Server<J> {
         self.keys
             .get(&holder)
             .and_then(|held| held.get(&subject))
-            .is_some_and(|learnt| *learnt <= now)
+            .is_some_and(|learned| *learned <= now)
     }
 
     /// The identifiers a message from `sender` to `to` acknowledges: the newest of the
@@ -401,8 +401,8 @@ impl<J: Journal> Server<J> {
                 .entry(CraftId(held.holder))
                 .or_default()
                 .entry(ShipId(held.subject))
-                .and_modify(|learnt| *learnt = (*learnt).min(held.learnt_t))
-                .or_insert(held.learnt_t);
+                .and_modify(|learned| *learned = (*learned).min(held.learned_t))
+                .or_insert(held.learned_t);
         }
         // Arrival times are not read back: the window is already ordered oldest-arrival-first
         // by the query, and everything in it has landed or it would not be a receipt. What is
@@ -521,7 +521,7 @@ impl<J: Journal> Server<J> {
             .get(&CraftId(ship.0))
             .into_iter()
             .flatten()
-            .filter(|(_, learnt)| **learnt <= now)
+            .filter(|(_, learned)| **learned <= now)
             .map(|(subject, _)| *subject)
             .collect::<Vec<_>>();
         if messages.is_empty() && keys.is_empty() {
@@ -761,9 +761,9 @@ mod tests {
     }
 
     /// A report is written by the shard from what the craft holds, so a craft that has
-    /// learnt nothing since it last reported to somebody has nothing to send them.
+    /// learned nothing since it last reported to somebody has nothing to send them.
     #[tokio::test]
-    async fn a_craft_that_has_learnt_nothing_new_has_nothing_to_report() {
+    async fn a_craft_that_has_learned_nothing_new_has_nothing_to_report() {
         let mut wire = Loopback::new();
         let mut server = Server::new(Memory::default(), 0, 1);
         let ada = ClientId(1);
@@ -785,7 +785,7 @@ mod tests {
         };
         wire.client_says(ada, report());
         server.tick(&mut wire).await.unwrap();
-        assert!(refused(&wire.take(ada)), "nothing learnt, nothing to say");
+        assert!(refused(&wire.take(ada)), "nothing learned, nothing to say");
 
         teach(&mut server, 1, 1);
         wire.client_says(ada, report());

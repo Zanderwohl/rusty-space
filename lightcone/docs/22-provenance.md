@@ -14,7 +14,7 @@ it, which is nothing.
 
 ## The rule
 
-**A star nobody aboard has detected is absent.** Not dimmed, not greyed out, not listed
+**A star nobody aboard has detected is absent.** Not dimmed, not grayed out, not listed
 without a distance: absent. The catalogue is the world; it is not what anyone knows of the
 world, and the client must never read it where a player can see the answer.
 
@@ -109,7 +109,7 @@ and the same formula covers both cases that matter:
 
 | geometry | ratio | blind radius, 4 m^2 mirror |
 |---|---|---|
-| a neighbouring star, 4 ly off, against one at 100 ly | 6e2 | under a milliarcsecond — a close pair, not a blind spot |
+| a neighboring star, 4 ly off, against one at 100 ly | 6e2 | under a milliarcsecond — a close pair, not a blind spot |
 | the sun the telescope is orbiting, at 1 AU, against a star at 100 ly | 4e13 | a few degrees |
 | the same sun against something genuinely faint | 1e16+ | tens of degrees |
 
@@ -146,7 +146,7 @@ coordinate time, which is an unevenly sampled series with holes in it — which 
 finders in [05-observation.md](05-observation.md) are Lomb-Scargle and BLS rather than an FFT.
 
 Exposure is **elapsed coordinate time**, never a number typed into a panel and never one sample
-per rendered frame. A measurement labelled with an integration it did not get is a lie about its
+per rendered frame. A measurement labeled with an integration it did not get is a lie about its
 own error bars, and at the design rate a frame is two minutes of in-game time, so the difference
 is not subtle.
 
@@ -193,7 +193,7 @@ Two things this leaves open, and both belong with factions rather than here:
 
 A belief is a fold over one star's records: the latest bearing, the best distance, how bright,
 how many sightings by how many witnesses, the shortest route any of it took, and when this craft
-learnt of it.
+learned of it.
 
 Two rules about which distance wins.
 
@@ -220,12 +220,12 @@ about.
 
 This is a game decision as much as a physical one. A player who starts with 6000 stars has
 nothing to do with a telescope; a player who starts with nothing has no reason to fly anywhere.
-Twenty light-years of somebody else's parallax programme is a map with an edge on it, and an
+Twenty light-years of somebody else's parallax program is a map with an edge on it, and an
 edge is the thing that makes a frontier.
 
 ## Moving records between craft
 
-A report is what one craft sends another: everything it has **learnt** since some time, by its
+A report is what one craft sends another: everything it has **learned** since some time, by its
 own clock, rather than everything measured since then — a decade-old sighting relayed yesterday
 is news to whoever is hearing it now.
 
@@ -251,7 +251,7 @@ behaves.
 | | a message | a report |
 |---|---|---|
 | event kind | `MESSAGE` | `REPORT` |
-| what it is | something somebody said | what somebody has learnt |
+| what it is | something somebody said | what somebody has learned |
 | filed as | a line in a transcript, kept for ever | records folded into the receiver's knowledge |
 | acknowledged | yes, and automatically if asked | never — two craft reporting to each other would trade surveys for ever |
 | sealed | to one addressee | the same rule, the same keyring |
@@ -270,7 +270,7 @@ its own learning the sender has told them — and each transmission carries the 
 [`ENTRIES_PER_REPORT`](../../crates/lc-world/src/knowledge/mod.rs) systems past that mark.
 **The shard writes the report**, from the knowledge it holds for the sender; a client that wrote
 its own could report anything it liked. A craft with nothing new to say is refused with
-`NothingNew`, which is the correct amount of radio traffic for having learnt nothing.
+`NothingNew`, which is the correct amount of radio traffic for having learned nothing.
 
 **The report itself is not filed as a conversation** — though the transcript gets a one-line
 summary of it; see [23-factions.md](23-factions.md#transcripts). A transcript is read long after everything in it has

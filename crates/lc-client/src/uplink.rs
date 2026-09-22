@@ -539,7 +539,7 @@ fn fold(
             uplink.chat.i_am(ship_id);
             // What it knows is the shard's to say. Anything this client worked out before it was
             // welcomed was a guess made without it; the craft's own knowledge arrives in pages
-            // of `Learnt` from here on.
+            // of `Learned` from here on.
             game.0.knowledge = lc_world::knowledge::Knowledge::new(lc_world::knowledge::Witness(ship_id.0 as u64));
             uplink.state = State::Joined(Joined {
                 client_id,
@@ -645,7 +645,7 @@ fn fold(
                     continue;
                 };
                 // Only counted here. The shard folds it into this craft's knowledge when its light
-                // lands, signed in or not, and what it taught arrives in the next `Learnt`.
+                // lands, signed in or not, and what it taught arrives in the next `Learned`.
                 let stars = serde_json::from_str::<lc_world::knowledge::Report>(body).map(|r| r.stars());
                 let notice = match stars {
                     Ok(n) => format!("{who}: told you about {n} stars"),
@@ -690,7 +690,7 @@ fn fold(
                     game.0.adopt_duty(duty, *integration_s);
                     None
                 }
-                // What it did arrives in the next `Learnt`, with everything else it knows.
+                // What it did arrives in the next `Learned`, with everything else it knows.
                 Order::NameIt { .. } => None,
                 Order::RetainRaw { subject, keep } => {
                     game.0.knowledge.retain_raw(lc_world::knowledge::Subject::from(*subject), *keep);
@@ -841,8 +841,8 @@ fn fold(
         // about the world and a book is not part of it.
         Outbound::Library { base, books } => uplink.shelf = Some((base, books)),
         Outbound::Reading(marks) => uplink.bookmarks = Some(marks),
-        // A report from this craft itself: what it has learnt since the last one, with no hop.
-        Outbound::Learnt { report } => match serde_json::from_str::<lc_world::knowledge::Report>(&report) {
+        // A report from this craft itself: what it has learned since the last one, with no hop.
+        Outbound::Learned { report } => match serde_json::from_str::<lc_world::knowledge::Report>(&report) {
             Ok(report) => game.0.knowledge.absorb(&report),
             Err(why) => warn!(%why, "a knowledge page that would not parse"),
         },
@@ -1362,7 +1362,7 @@ mod tests {
     }
 
     /// What a craft knows is the shard's. A welcome replaces whatever this client worked out on
-    /// its own with an empty copy owned by the craft, and `Learnt` fills it — a report from the
+    /// its own with an empty copy owned by the craft, and `Learned` fills it — a report from the
     /// craft itself, folded with no hop.
     #[test]
     fn a_welcome_hands_what_the_craft_knows_to_the_shard() {
@@ -1391,13 +1391,13 @@ mod tests {
             },
         );
         let report = serde_json::to_string(&held.report(f64::NEG_INFINITY, 1.0)).unwrap();
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Learnt { report });
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Learned { report });
         assert_eq!(game.0.knowledge.belief(star).unwrap().hops, 0, "its own, not relayed");
     }
 
     /// A report landing is a line in the events box, counted — and nothing more here. The shard
     /// folds it into the craft's knowledge when its light lands, signed in or not, and what it
-    /// taught arrives in the next `Learnt`.
+    /// taught arrives in the next `Learned`.
     #[test]
     fn a_report_arriving_is_counted_and_its_content_comes_from_the_shard() {
         let (mut uplink, mut game, mut ui) = app();
@@ -1465,7 +1465,7 @@ mod tests {
                 lc_proto::Cleared::<Sighting>::clear(sighting, 4_000_000, 0.0).unwrap(),
             ]),
         );
-        assert!(game.0.knowledge.is_empty(), "nothing was learnt from it");
+        assert!(game.0.knowledge.is_empty(), "nothing was learned from it");
         assert!(
             ui.0.notifications
                 .iter()

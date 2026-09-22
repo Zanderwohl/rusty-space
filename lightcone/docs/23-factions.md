@@ -55,7 +55,7 @@ there are no keys, only the fact of having been told one — with a generation n
 
 | fact the server keeps | written when | readable when |
 |---|---|---|
-| `holds(ship, F, g)` | the key is transmitted | its light lands: `learnt_t <= now` |
+| `holds(ship, F, g)` | the key is transmitted | its light lands: `learned_t <= now` |
 | `granted(issuer, subject, F, g, capabilities)` | the grant is transmitted | the same |
 
 Both are rows written at transmission and gated on arrival, like `lc_keyring` and
@@ -64,7 +64,7 @@ Both are rows written at transmission and gated on arrival, like `lc_keyring` an
 ### Rotation, and why removal is hard
 
 A member who turns out to be a traitor still holds every generation they were ever sent. No
-message can take it back. The only defence is to **rotate**: mint generation `g + 1` and give it
+message can take it back. The only defense is to **rotate**: mint generation `g + 1` and give it
 to everyone except the traitor.
 
 The detail that makes this a mechanic rather than a button: **the new key cannot be sent sealed
@@ -112,7 +112,7 @@ like a message and valid from the moment it lands.
 | `generation` | tell an asset which generations it accepts |
 | *later*: `command` | order the faction's probes, swarms and structures |
 
-A certificate is honoured if its issuer held the capability it hands on, all the way back to
+A certificate is honored if its issuer held the capability it hands on, all the way back to
 the founder, and if it is **bound to a generation the checker holds**. For an asset that means at
 or above its minimum: an order sealed to a new generation does not launder a certificate issued
 under an old one, so rotation re-issues authority and not only confidentiality. Rotation re-issues the
@@ -179,7 +179,7 @@ A channel is a conversation sealed to `(F, g)`, shouted or beamed like any messa
 A relay is a craft that passes on what it received. Radio and the internet solved this problem
 already, and the useful part of their answers carries over — with one difference that dominates:
 **the network moves**. Every link's length is a light-time between two craft that are both in
-motion, and every route a craft knows was computed from where its neighbours *were*.
+motion, and every route a craft knows was computed from where its neighbors *were*.
 
 The closest real analogue is not the internet. It is **delay-tolerant networking** — the
 Bundle Protocol (RFC 9171) and the contact-graph routing NASA flies between spacecraft — which
@@ -332,7 +332,7 @@ found so far. The rule places a new planet by its orbit against the spacing the 
 expected to have, and leaves gaps for the members it has not found:
 
 1. **Expected slots.** From the star's mass and luminosity, the generator's own spacing law gives
-   where the innermost planet is expected and the typical ratio between neighbours' orbits — the
+   where the innermost planet is expected and the typical ratio between neighbors' orbits — the
    same honest prior conclusions use ([24-standing-instruments.md](24-standing-instruments.md)).
    Slot `n` is the `n`th expected orbit outward.
 2. **A planet takes the slot nearest its orbit**, in log-distance. A hot Jupiter at 0.05 AU found
@@ -341,7 +341,7 @@ expected to have, and leaves gaps for the members it has not found:
 3. **Too many gaps is fine.** Letters are skipped where the system turned out emptier than
    expected, and nobody has to fill them.
 4. **Too few is resolved by a second letter.** A planet whose nearest slot is taken is placed
-   between that slot's holder and its neighbour on the side it falls, with a letter appended:
+   between that slot's holder and its neighbor on the side it falls, with a letter appended:
    between `b` and `c` go `bb`, `bc`, …, in order outward, and the rule recurses if it has to
    — between `b` and `bb` is `bab`. Alphabetical order is orbital order at every depth.
 5. **Inside `b`** is `ab`, `ac`, …, the same rule with `a` as the letter before `b`.
@@ -351,7 +351,7 @@ free at every depth to mean "inside the first", the way it means the star at the
 it, nothing could ever be inserted between `b` and `ba`.
 
 The spacing lives in `lc_world::knowledge::names::SPACING`, a table by luminosity. Its one row
-today is measured from the generator — innermost orbit `0.70 sqrt(L)` AU, neighbours `1.83`
+today is measured from the generator — innermost orbit `0.70 sqrt(L)` AU, neighbors `1.83`
 apart — and lettering eight thousand generated planets in random discovery order needs a second
 letter for about one in fifteen.
 
@@ -416,7 +416,7 @@ content lives in the receiver's knowledge from the moment it lands.
 ## Open
 
 - **The spacing law** behind planet letters: which of the generator's quantities define the
-  expected innermost orbit and the neighbour ratio, and whether small bodies and moons get a
+  expected innermost orbit and the neighbor ratio, and whether small bodies and moons get a
   scheme of their own beyond discovery time.
 - **Whether flooding should be the default at all**, or opt-in, given what it costs in stored
   energy and in visibility. Measure it with twenty craft, with transmission costing, before

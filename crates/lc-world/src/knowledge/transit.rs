@@ -84,8 +84,8 @@ impl Fold {
             return None;
         }
         let mean = total_x / total_w;
-        let centred: Vec<f64> = self.sum.iter().zip(&self.weight).map(|(x, w)| x - w * mean).collect();
-        let (cw, cy) = prefix(&self.weight, &centred);
+        let centered: Vec<f64> = self.sum.iter().zip(&self.weight).map(|(x, w)| x - w * mean).collect();
+        let (cw, cy) = prefix(&self.weight, &centered);
         let mut best: Option<Box> = None;
         for k in durations_in_bins(self.period_s) {
             for s in 0..BINS {
@@ -330,10 +330,10 @@ fn search_once(points: &[Point], prior: &Prior) -> Option<Search> {
     }
     let total_w: f64 = points.iter().map(|p| p.w).sum();
     let mean = points.iter().map(|p| p.w * p.x).sum::<f64>() / total_w;
-    let centred: Vec<Point> = points.iter().map(|p| Point { x: p.x - mean, ..*p }).collect();
-    let dt: Vec<f64> = centred.iter().map(|p| p.t - first).collect();
-    let w: Vec<f64> = centred.iter().map(|p| p.w).collect();
-    let wy: Vec<f64> = centred.iter().map(|p| p.w * p.x).collect();
+    let centered: Vec<Point> = points.iter().map(|p| Point { x: p.x - mean, ..*p }).collect();
+    let dt: Vec<f64> = centered.iter().map(|p| p.t - first).collect();
+    let w: Vec<f64> = centered.iter().map(|p| p.w).collect();
+    let wy: Vec<f64> = centered.iter().map(|p| p.w * p.x).collect();
 
     let density = prior.density(periods);
     let mut ln_bayes = Lse::default();
@@ -420,7 +420,7 @@ fn search_once(points: &[Point], prior: &Prior) -> Option<Search> {
         }
         ln_f += step;
     }
-    let best = best.map(|(period, step, b)| refine(&centred, total_w, first, last, period, step, b));
+    let best = best.map(|(period, step, b)| refine(&centered, total_w, first, last, period, step, b));
     Some(Search {
         ln_bayes: ln_bayes.value(),
         planet_prior: prior.planet_prior(periods),
@@ -438,8 +438,8 @@ fn refine(points: &[Point], total_w: f64, first: f64, last: f64, period: f64, st
         let p = period * (k as f64 * step / FINE as f64 * 2.0).exp();
         let mut fold = Fold::new(p, first);
         fold.add(points);
-        let centred: Vec<f64> = fold.sum.clone();
-        let (cw, cy) = prefix(&fold.weight, &centred);
+        let centered: Vec<f64> = fold.sum.clone();
+        let (cw, cy) = prefix(&fold.weight, &centered);
         let mut top = None::<Box>;
         for kk in durations_in_bins(p) {
             for s in 0..BINS {

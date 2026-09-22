@@ -360,7 +360,7 @@ pub enum Order {
     /// `to` is `None` to offer it to **whoever hears it**, which is what the public channel
     /// does: anyone in range can answer in private from then on.
     OfferKey { to: Option<ShipId>, aim: Aim },
-    /// Send what this craft has learnt since it last reported to `to`.
+    /// Send what this craft has learned since it last reported to `to`.
     ///
     /// A transmission like any other — aimed, sealed or not, and subject to the same light
     /// delay — but not a conversation. It is not filed in a transcript, it is never
@@ -403,7 +403,7 @@ pub mod kind {
     /// Somebody said something. The payload is a [`super::Spoken`] as JSON, **redacted per
     /// receiver**: a sealed message reaches an eavesdropper with no body at all.
     pub const MESSAGE: i16 = 5;
-    /// Somebody sent what they have learnt. The payload is a [`super::Reported`] as JSON,
+    /// Somebody sent what they have learned. The payload is a [`super::Reported`] as JSON,
     /// **redacted per receiver** exactly as a message is: a sealed report reaches an
     /// eavesdropper as the fact that a report went out, with nothing in it.
     pub const REPORT: i16 = 7;
@@ -759,11 +759,11 @@ pub enum Outbound {
     /// which is what lets the shelf offer "recently read" without either end having to agree
     /// about whose clock a timestamp would be in.
     Reading(Vec<Bookmark>),
-    /// What this craft has learnt since the last of these: a serialized
+    /// What this craft has learned since the last of these: a serialized
     /// `lc_world::knowledge::Report` from the craft itself, which the client folds into its
     /// copy without adding a hop. The whole of a craft's knowledge arrives this way, in pages,
     /// when it signs in. Appended last.
-    Learnt { report: String },
+    Learned { report: String },
     /// What the telescope is committed to, as the shard has it. Said on sign-in and whenever it
     /// changes. Appended last.
     Observing { duty: Duty, integration_s: f64 },
@@ -800,7 +800,7 @@ pub enum Refusal {
     /// Safe to say plainly, unlike most of these: it is a fact about the sender's own keyring,
     /// which the sender already has. Appended last.
     NoKey,
-    /// A report was asked for and this craft has learnt nothing since it last reported to that
+    /// A report was asked for and this craft has learned nothing since it last reported to that
     /// recipient. Appended last.
     NothingNew,
 }
@@ -1387,7 +1387,7 @@ mod tests {
             },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NothingNew },
-            Outbound::Learnt { report: "{}".into() },
+            Outbound::Learned { report: "{}".into() },
             Outbound::Observing { duty: Duty::Stare { star: 3 }, integration_s: 1.0e4 },
             Outbound::Observing { duty: Duty::Idle, integration_s: 0.0 },
         ];

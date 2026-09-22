@@ -1,10 +1,10 @@
 //! When a path meets the edge of a sphere of influence.
 //!
 //! [`influence`](crate::influence) says which attractor owns a point. This says *when* a
-//! traveller stops being owned by one and starts being owned by another — the join a patched
+//! traveler stops being owned by one and starts being owned by another — the join a patched
 //! conic chain is made of.
 //!
-//! The traveller is a [`Traveller`], not a body index. A body in the system is one
+//! The traveler is a [`Traveler`], not a body index. A body in the system is one
 //! ([`BodyPath`]), but so is a spacecraft the system has never heard of, whose arc is held
 //! somewhere else entirely. The search needs exactly two things from it: where it is at an
 //! arbitrary instant, and how fast it turns. Requiring a `BodyIndex` for those meant a craft
@@ -24,10 +24,10 @@ use crate::system::System;
 /// A path through the system, evaluable at an arbitrary instant.
 ///
 /// Arbitrary is the whole requirement: the search visits times out of order and bisects
-/// between them, so a state that is stepped rather than solved cannot be a traveller. That is
+/// between them, so a state that is stepped rather than solved cannot be a traveler. That is
 /// the same constraint [`propagate::position_at`] states by returning `None` for an integrated
 /// body, and the same one `lc_spacetime::Worldline` states for the light-delay solve.
-pub trait Traveller {
+pub trait Traveler {
     /// Position and velocity in simulation space, meters and meters a second.
     fn state_at(&self, time: Instant) -> Option<(DVec3, DVec3)>;
 
@@ -53,7 +53,7 @@ pub trait Traveller {
     }
 }
 
-/// A body of the system, as a traveller.
+/// A body of the system, as a traveler.
 #[derive(Clone, Copy)]
 pub struct BodyPath<'a> {
     pub system: &'a System,
@@ -83,7 +83,7 @@ impl<'a> BodyPath<'a> {
     }
 }
 
-impl Traveller for BodyPath<'_> {
+impl Traveler for BodyPath<'_> {
     fn state_at(&self, time: Instant) -> Option<(DVec3, DVec3)> {
         propagate::state_at(self.system, self.body, time)
     }
@@ -111,13 +111,13 @@ impl Traveller for BodyPath<'_> {
     }
 }
 
-/// A moment at which a traveller's path meets the edge of a sphere of influence.
+/// A moment at which a traveler's path meets the edge of a sphere of influence.
 #[derive(Debug, Clone, Copy)]
 pub struct Crossing {
     /// Whose sphere was crossed.
     pub body: BodyIndex,
     pub time: Instant,
-    /// The traveller's position in simulation space, on the boundary.
+    /// The traveler's position in simulation space, on the boundary.
     pub position: DVec3,
     /// The same point measured from whatever the path is anchored on.
     ///
@@ -129,7 +129,7 @@ pub struct Crossing {
     /// Its velocity there. A marker drawn at the crossing faces along this, so the craft
     /// meets it square on.
     pub velocity: DVec3,
-    /// Normal of the traveller's orbital plane at the crossing, from `r x v` about its own
+    /// Normal of the traveler's orbital plane at the crossing, from `r x v` about its own
     /// anchor. Together with [`velocity`](Self::velocity) this orients a marker.
     /// [`DVec3::ZERO`] for a degenerate orbit.
     pub plane_normal: DVec3,
@@ -161,16 +161,16 @@ const SEARCH_CHUNK_REVOLUTIONS: f64 = 0.25;
 
 /// Signed distance from the boundary of `target`'s sphere, in meters: negative inside.
 ///
-/// `None` when the traveller or the target is not analytic at `time`, or `target` has no
+/// `None` when the traveler or the target is not analytic at `time`, or `target` has no
 /// sphere. This is the scalar every search below is a root of.
 pub fn boundary_distance_of(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     target: BodyIndex,
     time: Instant,
 ) -> Option<f64> {
     let soi = soi_at(system, target, time)?;
-    let (position, _) = traveller.state_at(time)?;
+    let (position, _) = traveler.state_at(time)?;
     let offset = position - soi.center;
     Some(offset.length() - soi.radius_toward(offset))
 }
@@ -187,7 +187,7 @@ pub fn boundary_distance_of(
 /// anyway.
 pub fn crossings_of(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     target: BodyIndex,
     window: (Instant, Instant),
 ) -> Vec<Crossing> {
@@ -197,7 +197,7 @@ pub fn crossings_of(
         return Vec::new();
     }
 
-    let steps = bracketing_steps(traveller, start, span);
+    let steps = bracketing_steps(traveler, start, span);
     let step = span / steps as f64;
 
     let mut found = Vec::new();
@@ -205,7 +205,7 @@ pub fn crossings_of(
 
     for i in 0..=steps {
         let time = start + step * i as f64;
-        let Some(distance) = boundary_distance_of(system, traveller, target, time) else {
+        let Some(distance) = boundary_distance_of(system, traveler, target, time) else {
             // A gap in what can be evaluated is not a crossing; do not bracket across it.
             previous = None;
             continue;
@@ -216,7 +216,7 @@ pub fn crossings_of(
             // up by the neighboring interval instead of counting twice.
             if (previous_distance < 0.0) != (distance < 0.0) {
                 if let Some(crossing) = refine(
-                    system, traveller, target,
+                    system, traveler, target,
                     (previous_time, previous_distance), (time, distance),
                 ) {
                     found.push(crossing);
@@ -232,17 +232,17 @@ pub fn crossings_of(
 /// The first crossing strictly after `from`, within `horizon`.
 pub fn next_crossing_of(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     target: BodyIndex,
     from: Instant,
     horizon: TimeDelta,
 ) -> Option<Crossing> {
-    let chunk = search_chunk(traveller, from, horizon);
+    let chunk = search_chunk(traveler, from, horizon);
     let end = from + horizon;
     let mut cursor = from;
     while cursor < end {
         let stop = (cursor + chunk).min(end);
-        if let Some(found) = crossings_of(system, traveller, target, (cursor, stop)).into_iter().next()
+        if let Some(found) = crossings_of(system, traveler, target, (cursor, stop)).into_iter().next()
         {
             return Some(found);
         }
@@ -251,13 +251,13 @@ pub fn next_crossing_of(
     None
 }
 
-/// The first crossing of `target`'s sphere within `window`, for a traveller whose speed
+/// The first crossing of `target`'s sphere within `window`, for a traveler whose speed
 /// relative to the sphere's center never exceeds `speed_bound`.
 ///
-/// Conservative advancement rather than a grid keyed on the traveller's time constant, which
+/// Conservative advancement rather than a grid keyed on the traveler's time constant, which
 /// for a near-straight hyperbola at a fraction of `c` is milliseconds. Outside the bounding
 /// radius, or inside the smallest, the boundary cannot be reached sooner than the gap over
-/// `speed_bound`, so that is the step; in the band between, a step moves the traveller a
+/// `speed_bound`, so that is the step; in the band between, a step moves the traveler a
 /// quarter of the smallest radius. So the cost follows how close the path comes to the sphere
 /// rather than how long the window is.
 ///
@@ -266,7 +266,7 @@ pub fn next_crossing_of(
 /// stops after `max_samples`, and one that runs out reports nothing.
 pub fn next_crossing_bounded(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     target: BodyIndex,
     window: (Instant, Instant),
     speed_bound: f64,
@@ -281,7 +281,7 @@ pub fn next_crossing_bounded(
     let mut time = start;
     let mut previous: Option<(Instant, f64)> = None;
     for _ in 0..max_samples {
-        let sample = soi_at(system, target, time).zip(traveller.state_at(time));
+        let sample = soi_at(system, target, time).zip(traveler.state_at(time));
         let step_s = match sample {
             None => {
                 // A gap in what can be evaluated is not a crossing; do not bracket across it.
@@ -295,7 +295,7 @@ pub fn next_crossing_bounded(
                 if let Some(before) = previous
                     && (before.1 < 0.0) != (distance < 0.0)
                 {
-                    return refine(system, traveller, target, before, (time, distance));
+                    return refine(system, traveler, target, before, (time, distance));
                 }
                 previous = Some((time, distance));
                 let (inner, outer) = (soi.min_radius(), soi.bounding_radius());
@@ -314,18 +314,18 @@ pub fn next_crossing_bounded(
 /// The last crossing strictly before `from`, within `horizon`.
 pub fn previous_crossing_of(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     target: BodyIndex,
     from: Instant,
     horizon: TimeDelta,
 ) -> Option<Crossing> {
-    let chunk = search_chunk(traveller, from, horizon);
+    let chunk = search_chunk(traveler, from, horizon);
     let start = from - horizon;
     let mut cursor = from;
     while cursor > start {
         let stop = (cursor - chunk).max(start);
         if let Some(found) =
-            crossings_of(system, traveller, target, (stop, cursor)).into_iter().next_back()
+            crossings_of(system, traveler, target, (stop, cursor)).into_iter().next_back()
         {
             return Some(found);
         }
@@ -341,33 +341,33 @@ pub fn previous_crossing_of(
 /// is the only answer that does not depend on the order the candidates came in.
 pub fn first_crossing_of(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     targets: &[BodyIndex],
     from: Instant,
     horizon: TimeDelta,
 ) -> Option<Crossing> {
     targets
         .iter()
-        .filter_map(|&target| next_crossing_of(system, traveller, target, from, horizon))
+        .filter_map(|&target| next_crossing_of(system, traveler, target, from, horizon))
         .min_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal))
 }
 
-/// A reasonable window for "the next crossing": three of the traveller's revolutions.
+/// A reasonable window for "the next crossing": three of the traveler's revolutions.
 ///
 /// Three rather than one because an orbit can sit wholly inside a sphere for a revolution
 /// and still meet a moon on the next.
-pub fn default_horizon_of(traveller: &dyn Traveller, from: Instant) -> TimeDelta {
-    traveller.period_at(from).map(|p| p * 3.0).unwrap_or(TimeDelta::from_days(365.0))
+pub fn default_horizon_of(traveler: &dyn Traveler, from: Instant) -> TimeDelta {
+    traveler.period_at(from).map(|p| p * 3.0).unwrap_or(TimeDelta::from_days(365.0))
 }
 
-/// A quarter of the traveller's revolution, or the whole horizon if it has no period.
-fn search_chunk(traveller: &dyn Traveller, from: Instant, horizon: TimeDelta) -> TimeDelta {
-    traveller.period_at(from).map(|p| p * SEARCH_CHUNK_REVOLUTIONS).unwrap_or(horizon)
+/// A quarter of the traveler's revolution, or the whole horizon if it has no period.
+fn search_chunk(traveler: &dyn Traveler, from: Instant, horizon: TimeDelta) -> TimeDelta {
+    traveler.period_at(from).map(|p| p * SEARCH_CHUNK_REVOLUTIONS).unwrap_or(horizon)
 }
 
-/// How many samples to bracket `span` with, from the traveller's own time constant.
-fn bracketing_steps(traveller: &dyn Traveller, start: Instant, span: TimeDelta) -> usize {
-    let revolutions = match traveller.timescale_at(start) {
+/// How many samples to bracket `span` with, from the traveler's own time constant.
+fn bracketing_steps(traveler: &dyn Traveler, start: Instant, span: TimeDelta) -> usize {
+    let revolutions = match traveler.timescale_at(start) {
         Some(scale) if scale.to_seconds() > 0.0 => span.to_seconds().abs() / scale.to_seconds(),
         // Nothing periodic to key on; a fixed budget still brackets a smooth function.
         _ => 1.0,
@@ -378,7 +378,7 @@ fn bracketing_steps(traveller: &dyn Traveller, start: Instant, span: TimeDelta) 
 /// Bisect a bracketed sign change down to [`CROSSING_TOLERANCE_SECONDS`].
 fn refine(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     target: BodyIndex,
     mut low: (Instant, f64),
     mut high: (Instant, f64),
@@ -389,7 +389,7 @@ fn refine(
 
     while (high.0 - low.0).to_seconds().abs() > CROSSING_TOLERANCE_SECONDS {
         let middle = low.0 + (high.0 - low.0) / 2.0;
-        let Some(distance) = boundary_distance_of(system, traveller, target, middle) else {
+        let Some(distance) = boundary_distance_of(system, traveler, target, middle) else {
             return None;
         };
         if (distance < 0.0) == (low.1 < 0.0) {
@@ -400,11 +400,11 @@ fn refine(
     }
 
     let time = low.0 + (high.0 - low.0) / 2.0;
-    let (position, velocity) = traveller.state_at(time)?;
+    let (position, velocity) = traveler.state_at(time)?;
     let (local_position, local_velocity) =
-        traveller.local_state_at(time).unwrap_or((DVec3::ZERO, DVec3::ZERO));
+        traveler.local_state_at(time).unwrap_or((DVec3::ZERO, DVec3::ZERO));
 
-    // The orbital plane is taken about the traveller's own anchor, not about whichever
+    // The orbital plane is taken about the traveler's own anchor, not about whichever
     // sphere is being crossed, so a marker lies flat in the drawn trajectory whether the
     // boundary belongs to that anchor or to a sibling moon.
     let normal = local_position.cross(local_velocity);
@@ -415,51 +415,51 @@ fn refine(
 
 // === The body-indexed forms ===
 //
-// What every caller used before the traveller was a trait. Kept because a body of the system
-// is by far the commonest traveller, and writing out the adaptor at each call site would say
+// What every caller used before the traveler was a trait. Kept because a body of the system
+// is by far the commonest traveler, and writing out the adaptor at each call site would say
 // nothing.
 
 pub fn boundary_distance(
     system: &System,
-    traveller: BodyIndex,
+    traveler: BodyIndex,
     target: BodyIndex,
     time: Instant,
 ) -> Option<f64> {
-    boundary_distance_of(system, &BodyPath::new(system, traveller), target, time)
+    boundary_distance_of(system, &BodyPath::new(system, traveler), target, time)
 }
 
 pub fn crossings(
     system: &System,
-    traveller: BodyIndex,
+    traveler: BodyIndex,
     target: BodyIndex,
     window: (Instant, Instant),
 ) -> Vec<Crossing> {
-    crossings_of(system, &BodyPath::new(system, traveller), target, window)
+    crossings_of(system, &BodyPath::new(system, traveler), target, window)
 }
 
 pub fn next_crossing(
     system: &System,
-    traveller: BodyIndex,
+    traveler: BodyIndex,
     target: BodyIndex,
     from: Instant,
     horizon: TimeDelta,
 ) -> Option<Crossing> {
-    next_crossing_of(system, &BodyPath::new(system, traveller), target, from, horizon)
+    next_crossing_of(system, &BodyPath::new(system, traveler), target, from, horizon)
 }
 
 pub fn previous_crossing(
     system: &System,
-    traveller: BodyIndex,
+    traveler: BodyIndex,
     target: BodyIndex,
     from: Instant,
     horizon: TimeDelta,
 ) -> Option<Crossing> {
-    previous_crossing_of(system, &BodyPath::new(system, traveller), target, from, horizon)
+    previous_crossing_of(system, &BodyPath::new(system, traveler), target, from, horizon)
 }
 
-pub fn default_horizon(system: &System, traveller: BodyIndex) -> TimeDelta {
+pub fn default_horizon(system: &System, traveler: BodyIndex) -> TimeDelta {
     let now = system.time();
-    default_horizon_of(&BodyPath::new(system, traveller), now)
+    default_horizon_of(&BodyPath::new(system, traveler), now)
 }
 
 #[cfg(test)]
@@ -478,7 +478,7 @@ mod tests {
         system.indices().find(|&i| system.name(i) == name).expect("a body by that name")
     }
 
-    /// A traveller the system has never heard of: a straight line, held nowhere but here.
+    /// A traveler the system has never heard of: a straight line, held nowhere but here.
     ///
     /// This is the whole point of the trait. Before it, giving a spacecraft a predicted
     /// crossing meant inserting it into the arena as a body first.
@@ -506,7 +506,7 @@ mod tests {
         Line { from: at + from, velocity: velocity + relative, epoch: Instant::J2000 }
     }
 
-    impl Traveller for Line {
+    impl Traveler for Line {
         fn state_at(&self, time: Instant) -> Option<(DVec3, DVec3)> {
             let dt = (time - self.epoch).to_seconds();
             Some((self.from + self.velocity * dt, self.velocity))

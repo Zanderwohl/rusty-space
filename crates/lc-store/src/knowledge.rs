@@ -24,7 +24,7 @@ pub struct LogRow {
     pub witness: i64,
     pub band: i16,
     pub observed_s: f64,
-    pub learnt_t: i64,
+    pub learned_t: i64,
     pub deficit: f64,
     pub sigma: f64,
 }
@@ -87,7 +87,7 @@ pub async fn load_files(client: &Client) -> Result<Vec<Filed>, Error> {
 /// instants — is skipped rather than refused, so a checkpoint that is retried after a failure
 /// does not fail again on what it wrote the first time.
 ///
-/// **The partitions for their learnt times must exist**: see [`crate::store::ensure_partitions`].
+/// **The partitions for their learned times must exist**: see [`crate::store::ensure_partitions`].
 pub async fn save_samples(client: &Client, rows: &[LogRow]) -> Result<u64, Error> {
     if rows.is_empty() {
         return Ok(0);
@@ -97,16 +97,16 @@ pub async fn save_samples(client: &Client, rows: &[LogRow]) -> Result<u64, Error
     let witnesses: Vec<i64> = rows.iter().map(|r| r.witness).collect();
     let bands: Vec<i16> = rows.iter().map(|r| r.band).collect();
     let observed: Vec<f64> = rows.iter().map(|r| r.observed_s).collect();
-    let learnt: Vec<i64> = rows.iter().map(|r| r.learnt_t).collect();
+    let learned: Vec<i64> = rows.iter().map(|r| r.learned_t).collect();
     let deficits: Vec<f64> = rows.iter().map(|r| r.deficit).collect();
     let sigmas: Vec<f64> = rows.iter().map(|r| r.sigma).collect();
     client
         .execute(
-            "INSERT INTO lc_samples (ship_id, subject, witness, band, observed_s, learnt_t, deficit, sigma)
+            "INSERT INTO lc_samples (ship_id, subject, witness, band, observed_s, learned_t, deficit, sigma)
              SELECT * FROM unnest($1::bigint[], $2::bytea[], $3::bigint[], $4::smallint[],
                                   $5::float8[], $6::bigint[], $7::float8[], $8::float8[])
              ON CONFLICT DO NOTHING",
-            &[&ships, &subjects, &witnesses, &bands, &observed, &learnt, &deficits, &sigmas],
+            &[&ships, &subjects, &witnesses, &bands, &observed, &learned, &deficits, &sigmas],
         )
         .await
 }
@@ -137,7 +137,7 @@ pub async fn delete_samples(client: &Client, discarded: &[Discarded]) -> Result<
 pub async fn load_samples(client: &Client) -> Result<Vec<LogRow>, Error> {
     let rows = client
         .query(
-            "SELECT ship_id, subject, witness, band, observed_s, learnt_t, deficit, sigma
+            "SELECT ship_id, subject, witness, band, observed_s, learned_t, deficit, sigma
              FROM lc_samples ORDER BY ship_id, subject, witness, band, observed_s",
             &[],
         )
@@ -150,7 +150,7 @@ pub async fn load_samples(client: &Client) -> Result<Vec<LogRow>, Error> {
             witness: row.get(2),
             band: row.get(3),
             observed_s: row.get(4),
-            learnt_t: row.get(5),
+            learned_t: row.get(5),
             deficit: row.get(6),
             sigma: row.get(7),
         })
@@ -208,7 +208,7 @@ mod tests {
             witness: u64::MAX as i64,
             band: 1,
             observed_s,
-            learnt_t: now,
+            learned_t: now,
             deficit,
             sigma: 1.0e-5,
         };

@@ -123,14 +123,14 @@ pub fn update_chain_legs(
     let scale = view_settings.distance_factor();
     let now = system.0.time();
 
-    let traveller = focused
+    let traveler = focused
         .current_body_id
         .as_deref()
         .and_then(|id| system.0.by_name(id));
 
     // Every event starts a leg. The one in force is already drawn by the ordinary
     // trajectory renderer, in full, so it is skipped here rather than drawn twice.
-    let wanted: Vec<Instant> = match traveller {
+    let wanted: Vec<Instant> = match traveler {
         Some(t) => {
             let current = system.0.motive(t).active_segment_range(now).0;
             system
@@ -156,11 +156,11 @@ pub fn update_chain_legs(
             leg.extent = 0.0;
             continue;
         };
-        let Some(traveller) = traveller else { continue };
+        let Some(traveler) = traveler else { continue };
 
         let Some(primary) = system
             .0
-            .motive(traveller)
+            .motive(traveler)
             .motive_at(start)
             .1
             .primary_id()
@@ -174,7 +174,7 @@ pub fn update_chain_legs(
         // changes. The primary's motion is a transform, not new geometry.
         let key = (system.0.generation(), scale);
         if leg.built != Some(key) || leg.baked_start != Some(start) {
-            let Some(path) = trajectory::sample_segment(&system.0, traveller, start, LEG_RESOLUTION)
+            let Some(path) = trajectory::sample_segment(&system.0, traveler, start, LEG_RESOLUTION)
             else {
                 *visibility = Visibility::Hidden;
                 continue;
@@ -225,9 +225,9 @@ pub fn update_chain_leg_thickness(
     }
 }
 
-fn is_first_event(system: &System, traveller: BodyIndex, time: Instant) -> bool {
+fn is_first_event(system: &System, traveler: BodyIndex, time: Instant) -> bool {
     system
-        .motive(traveller)
+        .motive(traveler)
         .iter_events()
         .next()
         .is_some_and(|(first, _, _)| first == time)

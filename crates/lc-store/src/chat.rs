@@ -48,7 +48,7 @@ pub struct Receipt {
 pub struct Held {
     pub holder: i64,
     pub subject: i64,
-    pub learnt_t: i64,
+    pub learned_t: i64,
 }
 
 /// How much of a transcript a sign-in is handed.
@@ -107,20 +107,20 @@ pub async fn save_receipts(client: &Client, receipts: &[Receipt]) -> Result<u64,
 }
 
 /// Write keyring rows. The first offer to arrive is the one that counts: a second copy of a key
-/// somebody already holds teaches them nothing, and would move the date they learnt it.
+/// somebody already holds teaches them nothing, and would move the date they learned it.
 pub async fn save_keys(client: &Client, keys: &[Held]) -> Result<u64, Error> {
     if keys.is_empty() {
         return Ok(0);
     }
     let holders: Vec<i64> = keys.iter().map(|k| k.holder).collect();
     let subjects: Vec<i64> = keys.iter().map(|k| k.subject).collect();
-    let learnt: Vec<i64> = keys.iter().map(|k| k.learnt_t).collect();
+    let learned: Vec<i64> = keys.iter().map(|k| k.learned_t).collect();
     client
         .execute(
-            "INSERT INTO lc_keyring (holder, subject, learnt_t)
+            "INSERT INTO lc_keyring (holder, subject, learned_t)
              SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::bigint[])
              ON CONFLICT (holder, subject) DO NOTHING",
-            &[&holders, &subjects, &learnt],
+            &[&holders, &subjects, &learned],
         )
         .await
 }
@@ -184,7 +184,7 @@ pub async fn heard_by(
 /// Whose keys this ship holds.
 pub async fn keys_of(client: &Client, ship: i64) -> Result<Vec<i64>, Error> {
     let rows = client
-        .query("SELECT subject FROM lc_keyring WHERE holder = $1 ORDER BY learnt_t", &[&ship])
+        .query("SELECT subject FROM lc_keyring WHERE holder = $1 ORDER BY learned_t", &[&ship])
         .await?;
     Ok(rows.iter().map(|row| row.get(0)).collect())
 }
@@ -196,11 +196,11 @@ pub async fn keys_of(client: &Client, ship: i64) -> Result<Vec<i64>, Error> {
 /// messages that carried them.
 pub async fn all_keys(client: &Client) -> Result<Vec<Held>, Error> {
     let rows = client
-        .query("SELECT holder, subject, learnt_t FROM lc_keyring", &[])
+        .query("SELECT holder, subject, learned_t FROM lc_keyring", &[])
         .await?;
     Ok(rows
         .iter()
-        .map(|row| Held { holder: row.get(0), subject: row.get(1), learnt_t: row.get(2) })
+        .map(|row| Held { holder: row.get(0), subject: row.get(1), learned_t: row.get(2) })
         .collect())
 }
 
@@ -362,16 +362,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_key_is_learnt_once_and_the_date_does_not_move() {
+    async fn a_key_is_learned_once_and_the_date_does_not_move() {
         let Some(client) = store().await else { return };
         let (ada, bry) = scratch(4);
         clear(&client, (ada, bry)).await;
 
-        save_keys(&client, &[Held { holder: ada, subject: bry, learnt_t: 100 }]).await.unwrap();
-        save_keys(&client, &[Held { holder: ada, subject: bry, learnt_t: 900 }]).await.unwrap();
+        save_keys(&client, &[Held { holder: ada, subject: bry, learned_t: 100 }]).await.unwrap();
+        save_keys(&client, &[Held { holder: ada, subject: bry, learned_t: 900 }]).await.unwrap();
         let held: Vec<Held> =
             all_keys(&client).await.unwrap().into_iter().filter(|k| k.holder == ada).collect();
-        assert_eq!(held, vec![Held { holder: ada, subject: bry, learnt_t: 100 }]);
+        assert_eq!(held, vec![Held { holder: ada, subject: bry, learned_t: 100 }]);
 
         clear(&client, (ada, bry)).await;
     }

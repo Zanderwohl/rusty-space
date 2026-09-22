@@ -425,7 +425,7 @@ fn speaker(ui: &mut egui::Ui, name: &str, mine: bool) {
     ui.label(egui::RichText::new(format!("{name}:")).color(color).font(face));
 }
 
-/// What a message's tooltip says: when this ship learnt of it, and how loud it was.
+/// What a message's tooltip says: when this ship learned of it, and how loud it was.
 ///
 /// Two facts and no more. Both are about the *reception* rather than the message — a signal is
 /// something that arrived somewhere at some strength, and everything else on the line is what
@@ -577,7 +577,7 @@ fn compose(
         if ui
             .button("send survey")
             .on_hover_text(
-                "everything learnt since the last report to them, oldest first; \
+                "everything learned since the last report to them, oldest first; \
                  what it teaches is theirs from the moment the light lands",
             )
             .clicked()

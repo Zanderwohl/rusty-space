@@ -2,7 +2,7 @@
 //!
 //! Bytes here are a game unit: a fixed size per record, near enough what postcard writes, so
 //! the count is cheap and does not move when a record's encoding does. Files are never dropped
-//! for room — losing what you know because you learnt something else would be a worse
+//! for room — losing what you know because you learned something else would be a worse
 //! mechanic than refusing to learn more — so what stops when a craft is full is its logs. See
 //! `lightcone/docs/24-standing-instruments.md`.
 

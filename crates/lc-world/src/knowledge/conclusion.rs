@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::moments::Moments;
 use super::prior::Prior;
 use super::transit::{self, Candidate, Fold, Point};
-use super::{Knowledge, Lineage, Subject, Witness, learnt_s};
+use super::{Knowledge, Lineage, Subject, Witness, learned_s};
 
 /// Probability at which the leading hypothesis is taken as settled and its log consumed.
 pub const SETTLED: f64 = 0.99;
@@ -33,7 +33,7 @@ pub const READ_GROWTH: f64 = 0.5;
 
 /// Folds kept for a settled planet: its period and two either side at the period's error, so
 /// later samples can still move the period.
-const NEIGHBOURS: i32 = 2;
+const NEIGHBORS: i32 = 2;
 
 /// What somebody concluded from somebody's photometry of one subject.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -61,8 +61,8 @@ impl Conclusion {
         self.transits.first()
     }
 
-    pub fn learnt_s(&self) -> f64 {
-        learnt_s(&self.lineage, self.stated_s)
+    pub fn learned_s(&self) -> f64 {
+        learned_s(&self.lineage, self.stated_s)
     }
 }
 
@@ -145,7 +145,7 @@ pub struct Evidence {
 pub struct Covering {
     /// When the light read arrived, at the observer.
     pub observed_s: (f64, f64),
-    /// How long it had travelled, if the reader had a distance. Without one a conclusion is
+    /// How long it had traveled, if the reader had a distance. Without one a conclusion is
     /// about some stretch of the star's past it cannot place.
     pub light_age_s: Option<f64>,
 }
@@ -415,7 +415,7 @@ impl Knowledge {
                     delta_chi2,
                     prior: prior_p,
                     periods_s: periods.expect("a planet was searched for"),
-                    folds: neighbours(&transit, &points),
+                    folds: neighbors(&transit, &points),
                 }),
                 // Consumed for room with nothing settled: what the search had is lost, and
                 // the next log is searched afresh.
@@ -489,8 +489,8 @@ fn typical_sigma(points: &[Point]) -> f64 {
 }
 
 /// Folds at a planet's period and either side of it at its error.
-fn neighbours(transit: &Candidate, points: &[Point]) -> Vec<Fold> {
-    (-NEIGHBOURS..=NEIGHBOURS)
+fn neighbors(transit: &Candidate, points: &[Point]) -> Vec<Fold> {
+    (-NEIGHBORS..=NEIGHBORS)
         .map(|k| {
             let mut fold = Fold::new(transit.period_s + k as f64 * transit.period_sigma_s, transit.epoch_s);
             fold.add(points);
@@ -543,8 +543,8 @@ mod tests {
         }
     }
 
-    /// A neighbourhood like the real one: mostly red dwarfs, a few like the Sun, fewer brighter.
-    fn neighbourhood() -> Vec<CatalogueStar> {
+    /// A neighborhood like the real one: mostly red dwarfs, a few like the Sun, fewer brighter.
+    fn neighborhood() -> Vec<CatalogueStar> {
         (0..1500)
             .map(|k| {
                 let u = rng::uniform(rng::hash(&[k, 0x6e]));
@@ -590,7 +590,7 @@ mod tests {
         let (mut knowledge, now) = stare(&target, 60.0);
         let mut replica = Knowledge::new(Witness(1));
         replica.absorb(&knowledge.report(f64::NEG_INFINITY, now));
-        let prior = Prior::measure(&neighbourhood());
+        let prior = Prior::measure(&neighborhood());
         let subject = Subject::Star(target.id);
         assert_eq!(knowledge.due(), vec![(subject, Witness(1))]);
 
@@ -627,7 +627,7 @@ mod tests {
     fn a_star_seen_along_its_pole_is_quiet_only_as_far_as_the_log_could_see() {
         let (target, _) = red_dwarf(DVec3::Z);
         let (mut knowledge, now) = stare(&target, 60.0);
-        let prior = Prior::measure(&neighbourhood());
+        let prior = Prior::measure(&neighborhood());
         let conclusion = knowledge.read_log(Subject::Star(target.id), Witness(1), &prior, now).unwrap();
         let chance = |f: fn(&Kind) -> bool| -> f64 {
             conclusion.transits.iter().filter(|h| f(&h.kind)).map(|h| h.probability).sum()
@@ -650,7 +650,7 @@ mod tests {
         let capacity = knowledge.occupied_bytes();
         knowledge.fit_to(capacity);
         assert!(knowledge.is_full());
-        let prior = Prior::measure(&neighbourhood());
+        let prior = Prior::measure(&neighborhood());
         let read = knowledge.read_log(Subject::Star(target.id), Witness(1), &prior, now).unwrap();
         assert!(read.discarded_s.is_some());
         let file = knowledge.file(target.id).unwrap();
@@ -676,7 +676,7 @@ mod tests {
             })
             .unwrap();
         let without = (300_000..).map(|key| star(key, 0.01, DVec3::Z * 5.0)).find(|s| has_swarm(s).is_none()).unwrap();
-        let prior = Prior::measure(&neighbourhood());
+        let prior = Prior::measure(&neighborhood());
 
         let (mut knowledge, now) = stare(&with, 20.0);
         let read = knowledge.read_log(Subject::Star(with.id), Witness(1), &prior, now).unwrap();

@@ -110,7 +110,7 @@ def emit(slug, name, cmd, prim, tags, center):
     if f["rel_rms"] > 0.05:
         notes.append("// A two-body model is a poor fit here; treat its position as indicative.")
     if slug in BARYCENTRIC:
-        notes.append("// Orbits the Pluto-Charon barycentre; modelled about Pluto, so it carries")
+        notes.append("// Orbits the Pluto-Charon barycenter; modeled about Pluto, so it carries")
         notes.append("// a further ~2100 km offset the fit cannot remove.")
     if r_note: notes.append(f"// radius: {r_note}")
     if m_note: notes.append(f"// mass: {m_note}")

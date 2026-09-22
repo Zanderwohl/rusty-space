@@ -18,7 +18,7 @@
 //!
 //! Every arc must be evaluable at an arbitrary instant, so an integrated body has no place
 //! in a chain — [`propagate::position_at`] says as much by returning `None`. A Newtonian
-//! traveller stops the walk rather than being approximated.
+//! traveler stops the walk rather than being approximated.
 
 use em_foundations::kepler::state;
 use em_foundations::time::{Instant, TimeDelta};
@@ -48,7 +48,7 @@ const SEARCH_REVOLUTIONS: f64 = 6.0;
 
 /// How far to step past a join before looking for the next one.
 ///
-/// At a join the traveller is exactly on a boundary, so a search starting there would find
+/// At a join the traveler is exactly on a boundary, so a search starting there would find
 /// that same crossing again and the walk would not advance. A second of flight puts it
 /// about a kilometer clear — far outside the meter-scale tolerance the root was found to,
 /// and far inside any arc.
@@ -73,7 +73,7 @@ pub enum PatchOutcome {
     BudgetSpent,
 }
 
-/// Work on the traveller's chain for at most `sample_budget` boundary evaluations, then
+/// Work on the traveler's chain for at most `sample_budget` boundary evaluations, then
 /// stop wherever it got to.
 ///
 /// This is the whole point of keeping the frontier in the timeline: a chain reaching years
@@ -84,8 +84,8 @@ pub enum PatchOutcome {
 ///
 /// Returns the frontier as it now stands; [`Frontier::is_complete`] means there is no more
 /// work to hand out.
-pub fn advance(system: &mut System, traveller: BodyIndex, sample_budget: usize) -> Frontier {
-    let mut frontier = system.motive(traveller).frontier();
+pub fn advance(system: &mut System, traveler: BodyIndex, sample_budget: usize) -> Frontier {
+    let mut frontier = system.motive(traveler).frontier();
     if frontier.is_complete() {
         return frontier;
     }
@@ -94,23 +94,23 @@ pub fn advance(system: &mut System, traveller: BodyIndex, sample_budget: usize) 
         Some(time) => time,
         // Never started: clear whatever an earlier solve left and begin at the epoch.
         None => {
-            let start = first_event(system, traveller);
-            system.motive_mut(traveller).remove_derived_events_after(start);
+            let start = first_event(system, traveler);
+            system.motive_mut(traveler).remove_derived_events_after(start);
             start
         }
     };
 
     let mut spent = 0usize;
     while spent < sample_budget {
-        let joins = system.motive(traveller).soi_changes().count();
+        let joins = system.motive(traveler).soi_changes().count();
         if joins >= DEFAULT_PATCH_BUDGET {
             frontier = Frontier::Complete;
             break;
         }
 
-        match step(system, traveller, cursor, sample_budget - spent) {
+        match step(system, traveler, cursor, sample_budget - spent) {
             Step::Joined { time, arc, cost } => {
-                system.motive_mut(traveller).insert_event(
+                system.motive_mut(traveler).insert_event(
                     time,
                     TransitionEvent::SOIChange,
                     MotiveSelection::Keplerian(arc),
@@ -131,7 +131,7 @@ pub fn advance(system: &mut System, traveller: BodyIndex, sample_budget: usize) 
         }
     }
 
-    system.motive_mut(traveller).set_frontier(frontier);
+    system.motive_mut(traveler).set_frontier(frontier);
     frontier
 }
 
@@ -139,19 +139,19 @@ pub fn advance(system: &mut System, traveller: BodyIndex, sample_budget: usize) 
 ///
 /// The batch form, for tests and tools. Interactive callers want [`advance`], which will
 /// not stall a frame.
-pub fn solve(system: &mut System, traveller: BodyIndex, budget: usize) -> PatchReport {
-    system.motive_mut(traveller).set_frontier(Frontier::Unsolved);
+pub fn solve(system: &mut System, traveler: BodyIndex, budget: usize) -> PatchReport {
+    system.motive_mut(traveler).set_frontier(Frontier::Unsolved);
 
     // Generous enough that each call makes real progress, small enough that a runaway
     // cannot hang: the loop below bounds the total regardless.
     const SLICE: usize = 50_000;
     for _ in 0..(budget.max(1) * 64) {
-        if advance(system, traveller, SLICE).is_complete() {
+        if advance(system, traveler, SLICE).is_complete() {
             break;
         }
     }
 
-    let joins: Vec<Instant> = system.motive(traveller).soi_changes().map(|(t, _)| t).collect();
+    let joins: Vec<Instant> = system.motive(traveler).soi_changes().map(|(t, _)| t).collect();
     let outcome = if joins.len() >= DEFAULT_PATCH_BUDGET {
         PatchOutcome::BudgetSpent
     } else {
@@ -177,11 +177,11 @@ enum Step {
 /// Search a bounded slice of the arc in force at `cursor`.
 fn step(
     system: &System,
-    traveller: BodyIndex,
+    traveler: BodyIndex,
     cursor: Instant,
     sample_budget: usize,
 ) -> Step {
-    let (_, selection) = system.motive(traveller).motive_at(cursor);
+    let (_, selection) = system.motive(traveler).motive_at(cursor);
     let MotiveSelection::Keplerian(arc) = selection else {
         return Step::Exhausted;
     };
@@ -192,7 +192,7 @@ fn step(
     // Not `System::mu`: that column holds one value per body, for the arena's last rebuild
     // time. Reading it for an arc the clock is not in dresses a heliocentric orbit in
     // Earth's mass and inflates its period from a year to six centuries.
-    let mu = propagate::gravitational_parameter_at(system, traveller, cursor);
+    let mu = propagate::gravitational_parameter_at(system, traveler, cursor);
     let revolution = std::f64::consts::TAU * conic_timescale(arc, mu);
     if !revolution.is_finite() || revolution <= 0.0 {
         return Step::Exhausted;
@@ -200,8 +200,8 @@ fn step(
 
     // Anchor the span at the arc's own start, not at the cursor, or searching an arc in
     // slices would push its horizon ahead of itself and it would never be used up.
-    let (segment_start, authored_end) = system.motive(traveller).active_segment_range(cursor);
-    let arc_start = segment_start.unwrap_or_else(|| first_event(system, traveller));
+    let (segment_start, authored_end) = system.motive(traveler).active_segment_range(cursor);
+    let arc_start = segment_start.unwrap_or_else(|| first_event(system, traveler));
     let horizon = arc_start + TimeDelta::from_seconds(revolution * SEARCH_REVOLUTIONS);
     let arc_end = authored_end.map_or(horizon, |end| end.min(horizon));
 
@@ -225,19 +225,19 @@ fn step(
     // Every candidate sphere is searched over the same window, so the window is sampled
     // once per candidate. Charging for one would let a planet with forty moons quietly
     // spend forty times its slice.
-    let candidates = influence::crossing_candidates_about(system, traveller, primary);
+    let candidates = influence::crossing_candidates_about(system, traveler, primary);
     let per_candidate =
         ((window_end - cursor).to_seconds() / revolution * influence::SAMPLES_PER_REVOLUTION)
             .ceil()
             .max(1.0) as usize;
     let cost = per_candidate.saturating_mul(candidates.len().max(1));
 
-    let Some(crossing) = earliest_crossing(system, traveller, &candidates, cursor, window_end)
+    let Some(crossing) = earliest_crossing(system, traveler, &candidates, cursor, window_end)
     else {
         return Step::Searched { to: window_end, cost };
     };
 
-    // Leaving the sphere it is in hands the traveller up to the next primary out; entering
+    // Leaving the sphere it is in hands the traveler up to the next primary out; entering
     // a sibling's hands it down to that sibling.
     let new_primary = if crossing.body == primary {
         if crossing.entering {
@@ -254,7 +254,7 @@ fn step(
         return Step::Searched { to: window_end, cost };
     };
 
-    match arc_about(system, traveller, new_primary, crossing.time) {
+    match arc_about(system, traveler, new_primary, crossing.time) {
         Some(arc) => Step::Joined { time: crossing.time, arc, cost },
         None => Step::Searched { to: window_end, cost },
     }
@@ -275,7 +275,7 @@ fn conic_timescale(arc: &KeplerMotive, gravitational_parameter: f64) -> f64 {
 /// The first crossing of any of `candidates` in `(cursor, end)`.
 fn earliest_crossing(
     system: &System,
-    traveller: BodyIndex,
+    traveler: BodyIndex,
     candidates: &[BodyIndex],
     cursor: Instant,
     end: Instant,
@@ -284,28 +284,28 @@ fn earliest_crossing(
         .iter()
         .copied()
         .filter_map(|target| {
-            influence::crossings(system, traveller, target, (cursor, end))
+            influence::crossings(system, traveler, target, (cursor, end))
                 .into_iter()
                 .next()
         })
         .min_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal))
 }
 
-/// The orbit the traveller is on about `primary`, taken from its state at `time`.
+/// The orbit the traveler is on about `primary`, taken from its state at `time`.
 ///
 /// This is the join itself: the same instant described in a new frame. Position and
 /// velocity are continuous across it by construction, which is what lets the two arcs be
 /// evaluated interchangeably at the join.
 fn arc_about(
     system: &System,
-    traveller: BodyIndex,
+    traveler: BodyIndex,
     primary: BodyIndex,
     time: Instant,
 ) -> Option<KeplerMotive> {
-    let (position, velocity) = propagate::state_at(system, traveller, time)?;
+    let (position, velocity) = propagate::state_at(system, traveler, time)?;
     let (primary_position, primary_velocity) = propagate::state_at(system, primary, time)?;
 
-    let mu = system.gravitational_constant() * (system.mass(primary) + system.mass(traveller));
+    let mu = system.gravitational_constant() * (system.mass(primary) + system.mass(traveler));
     let elements = state::from_state(mu, position - primary_position, velocity - primary_velocity)?;
     if !elements.semi_major_axis.is_finite() || !elements.eccentricity.is_finite() {
         return None;
@@ -336,10 +336,10 @@ fn arc_about(
     })
 }
 
-/// The earliest event on the traveller's timeline, which is where its history starts.
-fn first_event(system: &System, traveller: BodyIndex) -> Instant {
+/// The earliest event on the traveler's timeline, which is where its history starts.
+fn first_event(system: &System, traveler: BodyIndex) -> Instant {
     system
-        .motive(traveller)
+        .motive(traveler)
         .iter_events()
         .next()
         .map(|(time, _, _)| time)

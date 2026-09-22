@@ -193,7 +193,7 @@ font draws a tofu box for it, which is the trap that has already cost this inter
 button and a pair of arrows.
 
 Hovering a message gives two lines and no more, both about the *reception* rather than the
-message: when this ship learnt of it, and how loud it was in dB. The strength is referred to one
+message: when this ship learned of it, and how loud it was in dB. The strength is referred to one
 strength unit — the same arbitrary scale the noise floor is quoted in — so it means something
 compared to another signal, which is how anybody reads a dB figure anyway. A message read back
 from a transcript has no reading at all, because how loudly a signal landed is a fact about one
@@ -895,7 +895,7 @@ cream.
 edge names something the reader cannot see and spends the pixels of something they can.
 
 A label sits at one anchor and gets no second try on the other side of its symbol. A name that
-hops when a neighbour drifts past reads as a twitch, and a map of moving things would twitch
+hops when a neighbor drifts past reads as a twitch, and a map of moving things would twitch
 constantly. Ties are broken by key for the same reason: two bodies of equal mass must not trade
 places between frames.
 

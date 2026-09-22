@@ -168,7 +168,7 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let now = game.coordinate_time_s();
     match &game.observatory.duty {
         Duty::Idle => {
-            ui.label("Telescope idle — nothing is being learnt.");
+            ui.label("Telescope idle — nothing is being learned.");
         }
         Duty::Stare(_) => {
             ui.label("Staring: the whole exposure on one star.");

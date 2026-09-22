@@ -82,7 +82,7 @@ pub fn advance_flight_plan(
     focused: Res<FocusedBodyState>,
     mut plans: ResMut<FlightPlans>,
 ) {
-    let Some(traveller) = focused
+    let Some(traveler) = focused
         .current_body_id
         .as_deref()
         .and_then(|id| system.0.by_name(id))
@@ -93,10 +93,10 @@ pub fn advance_flight_plan(
     // A structural edit moves the bodies an arc was measured against, so the chain has to
     // be worked out again from the epoch.
     if plans.generation != system.0.generation() {
-        system.0.motive_mut(traveller).set_frontier(Frontier::Unsolved);
+        system.0.motive_mut(traveler).set_frontier(Frontier::Unsolved);
     }
 
-    patch::advance(&mut system.0, traveller, SOLVE_SAMPLES_PER_FRAME);
+    patch::advance(&mut system.0, traveler, SOLVE_SAMPLES_PER_FRAME);
 
     // Advancing edits the motive, which bumps the generation; record where that left it, or
     // the next frame would read this solve as invalidating itself and start over forever.
@@ -191,7 +191,7 @@ pub fn spawn_encounter_markers(
 /// Only the joins bounding the arc in force are shown: a target marks where *this* orbit
 /// begins and ends, so it has no meaning while a different arc is being flown.
 ///
-/// No search: the chain was solved when the plan changed, so this reads the traveller's own
+/// No search: the chain was solved when the plan changed, so this reads the traveler's own
 /// event list and evaluates two instants.
 pub fn update_encounter_markers(
     system: Res<SimSystem>,
@@ -210,19 +210,19 @@ pub fn update_encounter_markers(
     let scale = view_settings.distance_factor();
     let now = system.0.time();
 
-    let traveller = focused
+    let traveler = focused
         .current_body_id
         .as_deref()
         .and_then(|id| system.0.by_name(id));
 
     // The arc in force now is the one the trajectory is drawn from, so it is the frame
     // every marker is anchored in — whichever arc the crossing itself belongs to.
-    let anchor = traveller.and_then(|t| system.0.parent(t));
+    let anchor = traveler.and_then(|t| system.0.parent(t));
 
     // Only the two joins that bound the arc actually being flown. A join further along the
     // chain belongs to an arc that is not happening yet, and one further back to an arc
     // already left; drawing either puts a target on a trajectory that is not on screen.
-    let (previous, next) = traveller
+    let (previous, next) = traveler
         .map(|t| system.0.motive(t).bounding_soi_changes(now))
         .unwrap_or((None, None));
 
@@ -234,9 +234,9 @@ pub fn update_encounter_markers(
         marker.time = time;
 
         let placed = time
-            .zip(traveller)
+            .zip(traveler)
             .zip(anchor)
-            .and_then(|((time, traveller), anchor)| place(&system.0, traveller, anchor, time));
+            .and_then(|((time, traveler), anchor)| place(&system.0, traveler, anchor, time));
 
         let Some((offset, plane_x, plane_y)) = placed else {
             *visibility = Visibility::Hidden;
@@ -271,11 +271,11 @@ pub fn update_encounter_markers(
 /// matter — the state is evaluated in absolute terms and then measured from the anchor.
 fn place(
     system: &em_sim::system::System,
-    traveller: em_sim::id::BodyIndex,
+    traveler: em_sim::id::BodyIndex,
     anchor: em_sim::id::BodyIndex,
     time: Instant,
 ) -> Option<(DVec3, Vec4, Vec4)> {
-    let (position, velocity) = propagate::state_at(system, traveller, time)?;
+    let (position, velocity) = propagate::state_at(system, traveler, time)?;
     let (anchor_position, anchor_velocity) = propagate::state_at(system, anchor, time)?;
 
     let local_position = position - anchor_position;

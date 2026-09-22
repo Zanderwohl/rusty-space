@@ -66,7 +66,7 @@ pub fn log_row(ship: CraftId, logged: &Logged) -> LogRow {
         witness: logged.witness.0 as i64,
         band: logged.band.index() as i16,
         observed_s: logged.sample.observed_s,
-        learnt_t: (logged.learnt_s * 1.0e6).round() as i64,
+        learned_t: (logged.learned_s * 1.0e6).round() as i64,
         deficit: logged.sample.deficit,
         sigma: logged.sample.sigma,
     }
@@ -89,7 +89,7 @@ pub fn read_log(row: &LogRow) -> Result<Logged, String> {
         witness: Witness(row.witness as u64),
         band,
         sample: Sample { observed_s: row.observed_s, deficit: row.deficit, sigma: row.sigma },
-        learnt_s: row.learnt_t as f64 * 1.0e-6,
+        learned_s: row.learned_t as f64 * 1.0e-6,
     })
 }
 
@@ -105,7 +105,7 @@ impl<J: Journal> Server<J> {
         self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.observatory.duty)
     }
 
-    /// Everything every craft has learnt since this was last called, ready to write.
+    /// Everything every craft has learned since this was last called, ready to write.
     pub fn take_knowledge(&mut self) -> Remembered {
         let saved_t = self.now_t;
         let mut remembered = Remembered::default();
@@ -219,7 +219,7 @@ mod tests {
     }
 
     /// Everything the binary does, without the database: checkpoint, write down what was
-    /// learnt, and bring both back in a new shard.
+    /// learned, and bring both back in a new shard.
     fn restart(old: &mut Server<Memory>) -> Server<Memory> {
         let checkpoint = old.checkpoint();
         let remembered = old.take_knowledge();
@@ -378,7 +378,7 @@ mod tests {
             witness: lc_world::knowledge::observatory::CHARTS,
             band: Band::K,
             sample: Sample { observed_s: 1_234.567_891_23, deficit: -1.8149592025296526e-22, sigma: 1e-5 },
-            learnt_s: 1_300.0,
+            learned_s: 1_300.0,
         };
         assert_eq!(read_log(&log_row(CraftId(1), &logged)).unwrap(), logged);
     }

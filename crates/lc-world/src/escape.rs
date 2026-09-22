@@ -1,6 +1,6 @@
 //! When an escape meets a sphere of influence.
 //!
-//! [`em_sim::crossing::first_crossing_of`] keys its sampling on the traveller's time constant,
+//! [`em_sim::crossing::first_crossing_of`] keys its sampling on the traveler's time constant,
 //! `2 pi sqrt(|a|^3 / mu)`. For a hyperbola at a fraction of `c` that is milliseconds — the arc
 //! is a straight line and `|a|` is meters — so every candidate was sampled at that search's
 //! ceiling across a whole year: most of a minute a solve, on both client and server, and at a

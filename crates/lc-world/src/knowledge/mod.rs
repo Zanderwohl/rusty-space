@@ -32,7 +32,7 @@ pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;
 pub use record::{
     Claim, Hop, Lineage, NameKind, Naming, Orbit, SAMPLES_KEPT, Sample, Series, Sighting, Witness,
-    learnt_s,
+    learned_s,
 };
 pub use subject::{BodyId, Subject};
 
@@ -85,8 +85,8 @@ pub struct Belief {
     pub flux: f64,
     /// Coordinate seconds the most recent light held arrived — at its witness, not here.
     pub observed_s: f64,
-    /// Coordinate seconds this craft learnt of it.
-    pub learnt_s: f64,
+    /// Coordinate seconds this craft learned of it.
+    pub learned_s: f64,
     pub sightings: usize,
     pub witnesses: usize,
     /// Hops on the shortest route any of it took here. Zero for something seen directly.
@@ -99,7 +99,7 @@ impl Belief {
         self.subject.as_star()
     }
 
-    /// Seconds the light had been travelling, once there is a distance to say so.
+    /// Seconds the light had been traveling, once there is a distance to say so.
     pub fn light_age_s(&self) -> Option<f64> {
         self.distance
             .from(self.bearing.observer_ly)
@@ -215,7 +215,7 @@ impl File {
             band: latest.band,
             flux: latest.flux,
             observed_s: latest.observed_s,
-            learnt_s: self.sightings.iter().map(Sighting::learnt_s).fold(f64::INFINITY, f64::min),
+            learned_s: self.sightings.iter().map(Sighting::learned_s).fold(f64::INFINITY, f64::min),
             sightings: self.sightings.len(),
             witnesses: witnesses.len(),
             hops: self.sightings.iter().map(|s| s.lineage.len()).min().unwrap_or(0),
@@ -250,23 +250,23 @@ impl File {
         }
     }
 
-    /// Everything here learnt after `since_s`, or `None` if nothing was.
+    /// Everything here learned after `since_s`, or `None` if nothing was.
     fn since(&self, subject: Subject, since_s: f64) -> Option<Part> {
-        let fresh = |lineage: &Lineage, at: f64| learnt_s(lineage, at) > since_s;
+        let fresh = |lineage: &Lineage, at: f64| learned_s(lineage, at) > since_s;
         let part = Part {
             subject,
-            sightings: self.sightings.iter().filter(|s| s.learnt_s() > since_s).cloned().collect(),
+            sightings: self.sightings.iter().filter(|s| s.learned_s() > since_s).cloned().collect(),
             series: self.series.iter().filter_map(|s| s.after(since_s)).collect(),
             claims: self.claims.iter().filter(|c| fresh(&c.lineage, c.stated_s)).cloned().collect(),
             names: self.names.iter().filter(|n| fresh(&n.lineage, n.stated_s)).cloned().collect(),
             orbits: self.orbits.iter().filter(|o| fresh(&o.lineage, o.stated_s)).cloned().collect(),
-            conclusions: self.conclusions.iter().filter(|c| c.learnt_s() > since_s).cloned().collect(),
+            conclusions: self.conclusions.iter().filter(|c| c.learned_s() > since_s).cloned().collect(),
         };
         (!part.is_empty()).then_some(part)
     }
 }
 
-/// One photometric sample, as a log row: what it is of, whose it is, and when this craft learnt
+/// One photometric sample, as a log row: what it is of, whose it is, and when this craft learned
 /// it — which for a relayed series is when it arrived, not when it was measured.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Logged {
@@ -274,7 +274,7 @@ pub struct Logged {
     pub witness: Witness,
     pub band: Band,
     pub sample: Sample,
-    pub learnt_s: f64,
+    pub learned_s: f64,
 }
 
 /// One craft's view of the sky.
@@ -416,7 +416,7 @@ impl Knowledge {
         }
     }
 
-    /// Subjects held: stars, and whatever else has been learnt about.
+    /// Subjects held: stars, and whatever else has been learned about.
     pub fn len(&self) -> usize {
         self.files.len()
     }
@@ -597,8 +597,8 @@ impl Knowledge {
             }
         };
         if added {
-            let learnt_s = sample.observed_s;
-            self.unsaved.push(Logged { subject, witness, band, sample, learnt_s });
+            let learned_s = sample.observed_s;
+            self.unsaved.push(Logged { subject, witness, band, sample, learned_s });
         }
     }
 
@@ -608,9 +608,9 @@ impl Knowledge {
         file.series.iter().find(|s| s.witness == self.owner && s.band == band)
     }
 
-    /// Everything learnt after `since_s`, ready to transmit.
+    /// Everything learned after `since_s`, ready to transmit.
     ///
-    /// By what this craft *learnt* rather than by when it was measured: a report is a statement
+    /// By what this craft *learned* rather than by when it was measured: a report is a statement
     /// about what the sender has, and a decade-old sighting relayed yesterday is news.
     pub fn report(&self, since_s: f64, sent_s: f64) -> Report {
         self.report_upto(since_s, sent_s, usize::MAX)
@@ -619,7 +619,7 @@ impl Knowledge {
     /// The same, as much of it as `limit` systems will carry.
     ///
     /// A surveyed sky does not fit in one transmission, so a report is a piece of a backlog:
-    /// oldest first, and the sender resumes from [`Report::learnt_through`] next time. A system
+    /// oldest first, and the sender resumes from [`Report::learned_through`] next time. A system
     /// is never split — its planets ride with its star — and ties at the cut all go in the same
     /// report, because the sender has only one number to resume from and anything on the wrong
     /// side of it would never be sent at all.
@@ -632,10 +632,10 @@ impl Knowledge {
         }
         let mut entries: Vec<Entry> =
             systems.into_iter().map(|(system, parts)| Entry { system, parts }).collect();
-        entries.sort_by(|a, b| a.learnt_through().total_cmp(&b.learnt_through()));
+        entries.sort_by(|a, b| a.learned_through().total_cmp(&b.learned_through()));
         if entries.len() > limit {
-            let cut = entries[limit.saturating_sub(1)].learnt_through();
-            entries.retain(|e| e.learnt_through() <= cut);
+            let cut = entries[limit.saturating_sub(1)].learned_through();
+            entries.retain(|e| e.learned_through() <= cut);
         }
         Report { from: self.owner, sent_s, entries }
     }
@@ -717,8 +717,8 @@ impl Knowledge {
                     };
                 self.occupied_bytes += taken.len() as f64 * SAMPLE_BYTES;
                 for sample in taken {
-                    let learnt_s = learnt_s(&lineage, sample.observed_s);
-                    self.unsaved.push(Logged { subject, witness: series.witness, band: series.band, sample, learnt_s });
+                    let learned_s = learned_s(&lineage, sample.observed_s);
+                    self.unsaved.push(Logged { subject, witness: series.witness, band: series.band, sample, learned_s });
                 }
             }
             self.refresh(subject);
@@ -787,14 +787,14 @@ impl Part {
             && self.orbits.is_empty()
     }
 
-    fn learnt_through(&self) -> f64 {
-        let sightings = self.sightings.iter().map(Sighting::learnt_s);
-        let claims = self.claims.iter().map(|c| learnt_s(&c.lineage, c.stated_s));
-        let names = self.names.iter().map(|n| learnt_s(&n.lineage, n.stated_s));
-        let orbits = self.orbits.iter().map(|o| learnt_s(&o.lineage, o.stated_s));
-        let conclusions = self.conclusions.iter().map(Conclusion::learnt_s);
+    fn learned_through(&self) -> f64 {
+        let sightings = self.sightings.iter().map(Sighting::learned_s);
+        let claims = self.claims.iter().map(|c| learned_s(&c.lineage, c.stated_s));
+        let names = self.names.iter().map(|n| learned_s(&n.lineage, n.stated_s));
+        let orbits = self.orbits.iter().map(|o| learned_s(&o.lineage, o.stated_s));
+        let conclusions = self.conclusions.iter().map(Conclusion::learned_s);
         let series =
-            self.series.iter().filter_map(|s| s.last().map(|x| learnt_s(&s.lineage, x.observed_s)));
+            self.series.iter().filter_map(|s| s.last().map(|x| learned_s(&s.lineage, x.observed_s)));
         sightings.chain(claims).chain(names).chain(orbits).chain(conclusions).chain(series).fold(f64::NEG_INFINITY, f64::max)
     }
 }
@@ -808,9 +808,9 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// The most recent moment the sender learnt any of this.
-    pub fn learnt_through(&self) -> f64 {
-        self.parts.iter().map(Part::learnt_through).fold(f64::NEG_INFINITY, f64::max)
+    /// The most recent moment the sender learned any of this.
+    pub fn learned_through(&self) -> f64 {
+        self.parts.iter().map(Part::learned_through).fold(f64::NEG_INFINITY, f64::max)
     }
 }
 
@@ -851,10 +851,10 @@ impl Report {
     }
 
     /// What the sender should resume from next time. `None` for a report of nothing.
-    pub fn learnt_through(&self) -> Option<f64> {
+    pub fn learned_through(&self) -> Option<f64> {
         self.entries
             .iter()
-            .map(Entry::learnt_through)
+            .map(Entry::learned_through)
             .fold(None, |best: Option<f64>, t| Some(best.map_or(t, |b| b.max(t))))
     }
 
@@ -972,7 +972,7 @@ mod tests {
     }
 
     #[test]
-    fn a_report_carries_what_was_learnt_and_gains_a_hop() {
+    fn a_report_carries_what_was_learned_and_gains_a_hop() {
         let star = star_id(7);
         let mut probe = Knowledge::new(Witness(2));
         for s in looks(2, DVec3::new(0.0, 0.0, 6.0), 4, 0.0) {
@@ -1001,8 +1001,8 @@ mod tests {
             "the probe did the looking, not the ship"
         );
         assert_eq!(
-            belief.learnt_s, 1.2e8,
-            "learnt when the light landed, not when taken"
+            belief.learned_s, 1.2e8,
+            "learned when the light landed, not when taken"
         );
         assert!(matches!(belief.distance, Distance::Measured { .. }));
         assert_eq!(
@@ -1408,7 +1408,7 @@ mod tests {
         assert_eq!(copy.own_series(star, Band::V).unwrap().len(), 5);
 
         held.measured(star, Witness(3), Band::V, Sample { observed_s: 6.0, deficit: 0.0, sigma: 0.1 });
-        let delta = held.report(first.learnt_through().unwrap(), 6.0);
+        let delta = held.report(first.learned_through().unwrap(), 6.0);
         let sent = &delta.entries[0].parts[0].series[0];
         assert_eq!(sent.len(), 1, "one new sample, not the whole curve again");
         copy.absorb(&delta);
@@ -1442,7 +1442,7 @@ mod tests {
         assert!(files.iter().all(|(_, f)| f.series().iter().all(|s| s.is_empty())), "samples are logged apart");
         assert_eq!(logs.len(), 5 + 3, "our five, and the probe's three");
         let relayed = logs.iter().find(|l| l.witness == Witness(2)).unwrap();
-        assert_eq!(relayed.learnt_s, 9.0, "a relayed sample is learnt when it arrived");
+        assert_eq!(relayed.learned_s, 9.0, "a relayed sample is learned when it arrived");
 
         let back = Knowledge::restore(Witness(1), files, logs);
         assert_eq!(back, k, "the same knowledge");
@@ -1486,15 +1486,15 @@ mod tests {
         }
         let first = probe.report_upto(f64::NEG_INFINITY, 100.0, 4);
         assert_eq!(first.stars(), 4);
-        let through = first.learnt_through().unwrap();
+        let through = first.learned_through().unwrap();
         assert_eq!(through, 3.0, "the four oldest");
 
         let second = probe.report_upto(through, 200.0, 4);
         assert_eq!(second.stars(), 4);
-        assert_eq!(second.learnt_through(), Some(7.0));
+        assert_eq!(second.learned_through(), Some(7.0));
         assert_eq!(probe.report_upto(7.0, 300.0, 4).stars(), 2, "and the rest");
 
-        // Everything learnt at the same instant rides in the same report; the sender has one
+        // Everything learned at the same instant rides in the same report; the sender has one
         // number to resume from and anything left on the far side of it would never be sent.
         let mut tied = Knowledge::new(Witness(2));
         for k in 0..10u64 {

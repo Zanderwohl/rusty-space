@@ -45,7 +45,7 @@ optimizing anything else.
 The client never writes its own knowledge. It receives it:
 
 - on joining, the craft's whole knowledge, in pages;
-- every tick after, what was learnt that tick.
+- every tick after, what was learned that tick.
 
 Both are the same shape as a report, because they are one: **a report from yourself**, with no
 hop added. `Knowledge::receive` already folds it idempotently, so a replayed page or a
@@ -79,7 +79,7 @@ it does, exactly as `lc_ships` does for motion.
 | what | where |
 |---|---|
 | files | `lc_knowledge`, one row per craft per subject, postcard with `archive::KNOWLEDGE_FORMAT` — `sql/0010_knowledge.sql` |
-| samples | `lc_samples`, partitioned by **learnt** time, kept ready by the journal beside events and deliveries. Observation time is stored as the exact f64 it was stamped with: a sweep finishes a field at an instant that is not a whole microsecond |
+| samples | `lc_samples`, partitioned by **learned** time, kept ready by the journal beside events and deliveries. Observation time is stored as the exact f64 it was stamped with: a sweep finishes a field at an instant that is not a whole microsecond |
 | duty and report marks | the ship checkpoint, `persist::Saved::instruments`, save format 6 |
 | what is written | only what changed since the last checkpoint: `Knowledge::take_changes` hands over the files touched, without their samples, and the samples taken |
 
@@ -94,12 +94,12 @@ holds `data_per_module`, and a craft's knowledge has a fullness against its tota
 stored energy does against storage.
 
 The capacity is anchored so that the *files* — bearings, names, notes, conclusions — of a
-thoroughly surveyed neighbourhood fit comfortably, and the *logs* are what fill it. That puts the
+thoroughly surveyed neighborhood fit comfortably, and the *logs* are what fill it. That puts the
 pressure where the design wants it:
 
 - **full, a craft stops recording raw samples**: the telescope keeps measuring and nothing keeps
   the lines, and the panel says so. Files are never dropped for room — losing what you know
-  because you learnt something else would be a worse mechanic than refusing to learn more;
+  because you learned something else would be a worse mechanic than refusing to learn more;
 - **consuming a log into a conclusion frees its room**, so processing is how a craft keeps
   watching;
 - **"retain raw" costs room for as long as it is set**, which is what makes keeping a log a
@@ -135,7 +135,7 @@ comes out is a set of **conclusions**.
 Conclusions are knowledge records. They travel in reports, and they are far smaller than the
 logs they came from, which matters more than anything else about them: **a faction shares
 conclusions, not logs**, because a transmission costs stored energy in proportion to its size
-([23-factions.md](23-factions.md#cost)), and a log is enormous next to what was learnt from it.
+([23-factions.md](23-factions.md#cost)), and a log is enormous next to what was learned from it.
 
 ### Probabilities, and where the priors come from
 
@@ -182,7 +182,7 @@ custody of. A shard that restarts resumes all of it.
 | a lone deep dip | a planet too wide to transit twice in the log fits under a box at almost any period, and would win. Dips far out of the noise that no period repeats are set aside before the search, and a period is only believed if every transit it predicts that the log covers is there |
 | when it is read | `Knowledge::due`: after 96 new samples and half as many again as last time, so all the reads of a long watch cost a few times the last. A shard reads one log a tick, taking craft in turn |
 | nothing transiting | absence of evidence, not evidence of absence. Its probability is the chance of no planet times the log's **completeness** — the share of the transiting planets the generator makes, at every period, that the log would have found — and the rest is *a planet this log could not have found yet*. Two months on a red dwarf is a few percent; it takes a log as long as the generator's widest orbits to say much more |
-| swarm or belts | from moments, which survive consumption whole: the mean dimming across the visible bands, the thermal-infrared glow beyond the star's own, the flicker's covariance at the shortest lag and the lag at which it has halved, which is half a crossing. The probability is a likelihood against the generator's systems seen from spread directions; a swarm's element size and orbit come from `emission::invert_moments`, against the catalogued star most like this one's brightness when there is a distance |
+| swarm or belts | from moments, which survive consumption whole: the mean dimming across the visible bands, the thermal-infrared glow beyond the star's own, the flicker's covariance at the shortest lag and the lag at which it has halved, which is half a crossing. The probability is a likelihood against the generator's systems seen from spread directions; a swarm's element size and orbit come from `emission::invert_moments`, against the cataloged star most like this one's brightness when there is a distance |
 | settled | the leading transit hypothesis at 99%: a planet after three transits, or nothing transiting once completeness allows it |
 | consumed | when settled, or when the craft is full — reading is how a full craft keeps watching — unless the subject is retained. Consumed for room with nothing settled, the transit search is lost and the next log is searched afresh |
 | what is kept | `Digest`: the moments, the best completeness any log of the star reached, and for a settled planet the search's odds and folds at its period and two either side at its error. The samples go, from memory and, at the next checkpoint, from `lc_samples` |

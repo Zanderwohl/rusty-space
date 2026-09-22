@@ -491,7 +491,7 @@ fn enter_game(
     let count = provider.len();
     // What the craft knows, and what its telescope is doing, survive the session being
     // replaced. With a shard they are a copy of what it has already said, and it does not say
-    // a page twice: dropping them here would lose everything learnt before the sky loaded.
+    // a page twice: dropping them here would lose everything learned before the sky loaded.
     let knowledge = std::mem::replace(&mut game.0.knowledge, Knowledge::new(Witness(0)));
     let observatory = game.0.observatory.clone();
     game.0 = Session::new(provider, SKY_LIMIT);

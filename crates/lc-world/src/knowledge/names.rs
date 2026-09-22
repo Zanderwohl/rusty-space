@@ -31,7 +31,7 @@ pub fn discovery_designation(discovered_s: f64, order: u32) -> String {
 ///
 /// Slot `n` sits at `innermost_au_per_sqrt_l * sqrt(L) * ratio^n`: the innermost orbit moves out
 /// with the square root of luminosity, because that is where a given temperature is, and
-/// neighbours sit a roughly constant ratio apart.
+/// neighbors sit a roughly constant ratio apart.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpacingRow {
     pub up_to_luminosity_solar: f64,
@@ -99,7 +99,7 @@ pub fn planet_letter(
     let preferred = b'b' + slot.min((b'z' - b'b') as usize) as u8;
     let lo = inside.unwrap_or("a");
     // Letters received from other craft may not agree with this craft's orbits. Where the
-    // neighbours are out of order the outer bound is dropped rather than looping on an
+    // neighbors are out of order the outer bound is dropped rather than looping on an
     // impossible gap.
     let hi = outside.filter(|hi| lo < *hi);
     between(lo, hi, preferred)
@@ -178,7 +178,7 @@ mod tests {
         assert!(planet_letter(&[], 7.0, 1.0, SPACING).as_str() > "e");
     }
 
-    /// Where the slot is taken or on the wrong side of a neighbour, the nearest single letter
+    /// Where the slot is taken or on the wrong side of a neighbor, the nearest single letter
     /// that keeps alphabetical order orbital order.
     #[test]
     fn a_taken_slot_moves_to_the_nearest_letter_that_keeps_the_order() {
@@ -188,7 +188,7 @@ mod tests {
         assert_eq!(planet_letter(&placed(&[("e", 1.0)]), 2.35, 1.0, SPACING), "f");
     }
 
-    /// No single letter left between two neighbours: a second one, never starting at `a`.
+    /// No single letter left between two neighbors: a second one, never starting at `a`.
     #[test]
     fn too_few_gaps_add_a_second_letter() {
         let pair = placed(&[("b", 0.7), ("c", 1.28)]);

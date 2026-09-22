@@ -92,7 +92,7 @@ pub enum Action {
     NameSelected(String),
     /// Keep a star's raw log whatever is concluded from it, or let it go once it has been read.
     RetainRaw(StarId, bool),
-    /// Send what this ship has learnt since it last reported to `to`.
+    /// Send what this ship has learned since it last reported to `to`.
     SendReport {
         to: Option<lc_proto::ShipId>,
         aim: lc_proto::Aim,

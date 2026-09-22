@@ -193,9 +193,9 @@ fn true_and_eccentric_anomaly_round_trip() {
     }
 }
 
-/// The equation of the centre matches a converged Kepler solve for small `e`.
+/// The equation of the center matches a converged Kepler solve for small `e`.
 #[test]
-fn equation_of_the_centre_matches_exact_solve_for_small_e() {
+fn equation_of_the_center_matches_exact_solve_for_small_e() {
     for e in [0.0, 0.0067, 0.0167, 0.05] {
         for m in true_anomalies() {
             let approx = true_anomaly::from_mean_anomaly(m, e);
@@ -204,7 +204,7 @@ fn equation_of_the_centre_matches_exact_solve_for_small_e() {
                 - std::f64::consts::PI;
             // Series truncated at e^3, so the tolerance scales with e^4.
             let tol = 50.0 * e.powi(4) + 1e-12;
-            assert!(diff.abs() < tol, "eq. of centre at e={e} M={m}: err {diff:e} > {tol:e}");
+            assert!(diff.abs() < tol, "eq. of center at e={e} M={m}: err {diff:e} > {tol:e}");
         }
     }
 }

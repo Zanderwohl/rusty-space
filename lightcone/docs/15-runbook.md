@@ -155,7 +155,7 @@ already has. A title that needs different bytes gets a new file name and a new r
 
 The check is worth running on its own. It hashes every file the catalogue names and compares it
 against the `sha256` recorded there, so a book edited in place — or dropped into the directory
-without being catalogued — is caught before anyone is reading it.
+without being cataloged — is caught before anyone is reading it.
 
 A shard is told where the shelf is, and a client is told by its shard:
 

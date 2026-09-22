@@ -42,7 +42,7 @@ const REFERENCES: &[Reference] = &[
 ];
 
 /// Model position of `body` relative to its primary, in metres, from the bundled preset.
-fn modelled_position(body_id: &str, jd: f64) -> Option<DVec3> {
+fn modeled_position(body_id: &str, jd: f64) -> Option<DVec3> {
     let contents = solar_system();
     let g = contents.physics.gravitational_constant;
 
@@ -92,7 +92,7 @@ fn tolerance(body: &str) -> f64 {
 fn bundled_bodies_match_jpl_within_budget() {
     let mut failures = Vec::new();
     for r in REFERENCES {
-        let Some(model) = modelled_position(r.body, r.julian_day) else {
+        let Some(model) = modeled_position(r.body, r.julian_day) else {
             failures.push(format!("{} at JD {}: no Keplerian entry found", r.body, r.julian_day));
             continue;
         };
@@ -116,7 +116,7 @@ fn bundled_bodies_match_jpl_within_budget() {
 fn error_does_not_grow_wildly_between_epochs() {
     for body in ["Earth", "Venus", "Neptune"] {
         let at: Vec<f64> = REFERENCES.iter().filter(|r| r.body == body).map(|r| {
-            let model = modelled_position(r.body, r.julian_day).unwrap();
+            let model = modeled_position(r.body, r.julian_day).unwrap();
             let truth = DVec3::new(r.position_km[0], r.position_km[1], r.position_km[2]) * KM;
             (model - truth).length() / truth.length()
         }).collect();
@@ -137,7 +137,7 @@ fn error_does_not_grow_wildly_between_epochs() {
 fn report_ephemeris_error() {
     println!("\n{:<9} {:>12} {:>14} {:>12} {:>10}", "body", "JD", "|error| (m)", "as AU", "rel");
     for r in REFERENCES {
-        let Some(model) = modelled_position(r.body, r.julian_day) else {
+        let Some(model) = modeled_position(r.body, r.julian_day) else {
             println!("{:<9} {:>12} {:>14}", r.body, r.julian_day, "NO MODEL");
             continue;
         };

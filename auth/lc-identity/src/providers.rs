@@ -148,7 +148,7 @@ impl Enabled {
     }
 }
 
-/// Why a provider list could not be honoured.
+/// Why a provider list could not be honored.
 ///
 /// Every one of these stops the process. An auth service that starts with a provider quietly
 /// missing is worse than one that does not start.

@@ -192,7 +192,7 @@ impl Coast {
     }
 }
 
-/// A [`Coast`] as a traveller, so the crossing search can be asked when it leaves.
+/// A [`Coast`] as a traveler, so the crossing search can be asked when it leaves.
 ///
 /// Borrowed rather than owned: the arc is the truth and the system places its primary, and a
 /// copy of either in another shape is a copy that can be stale.
@@ -201,7 +201,7 @@ pub struct ConicPath<'a> {
     system: &'a LocalSystem,
 }
 
-impl em_sim::crossing::Traveller for ConicPath<'_> {
+impl em_sim::crossing::Traveler for ConicPath<'_> {
     fn state_at(&self, time: Instant) -> Option<(DVec3, DVec3)> {
         self.coast.sim_state_at(self.system, time.to_j2000_seconds())
     }

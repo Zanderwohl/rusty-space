@@ -317,7 +317,7 @@ fn password_submit(signin: &mut Signin) {
     let Some(form) = signin.form.take() else { return };
     let register_as = form.registering.then(|| {
         let typed = form.display_name.trim();
-        if typed.is_empty() { "Traveller".to_string() } else { typed.to_string() }
+        if typed.is_empty() { "Traveler".to_string() } else { typed.to_string() }
     });
     let label = machine_name();
     let to_main = signin.to_main.clone();

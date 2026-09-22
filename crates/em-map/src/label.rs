@@ -55,7 +55,7 @@ pub struct Layout {
 /// Lay out as many as fit, heaviest first.
 ///
 /// One anchor and no second try, because a label that hops to the other side of its symbol
-/// when a neighbour drifts past would do so constantly on a map of moving things.
+/// when a neighbor drifts past would do so constantly on a map of moving things.
 pub fn lay_out(candidates: Vec<Candidate>, viewport: Vec2, layout: Layout) -> Vec<Placed> {
     // The bar is what the reader can see, so it is taken after clipping: pan the star off the
     // edge and the question becomes what is worth naming beside what is left.

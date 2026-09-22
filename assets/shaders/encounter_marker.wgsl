@@ -8,7 +8,7 @@
 //   NORMAL   : (cos c,   sin c,   0)         — c is the angle around the tube
 //
 // The face of the target is spanned by `plane_x` and `plane_y`, both square to the
-// traveller's velocity, so the craft flies into the target rather than along it.
+// traveler's velocity, so the craft flies into the target rather than along it.
 
 #import bevy_pbr::{
     mesh_functions,

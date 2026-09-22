@@ -4,7 +4,7 @@
 #   tools/publish-books.sh [--check] [--force]
 #
 # `--check` stops after verifying the shelf against its catalogue and needs no CDN, which is what
-# CI runs: a book edited in place, or added to the directory without being catalogued, is a
+# CI runs: a book edited in place, or added to the directory without being cataloged, is a
 # broken shelf whether or not anyone is publishing today.
 #
 # The books are in the repository — see lightcone/docs/21-library.md — so there is nothing to
@@ -42,7 +42,7 @@ FILES=$(sed -n 's/^file *= *"\(.*\)"/\1/p' "$CATALOGUE")
 [ -n "$FILES" ] || { echo "the catalogue lists no files" >&2; exit 1; }
 
 # The hash in the catalogue is the hash of the file every player reads. Checking it here is what
-# makes that true rather than aspirational: a book edited in place after it was catalogued is
+# makes that true rather than aspirational: a book edited in place after it was cataloged is
 # caught before it reaches anyone.
 echo "==> checking the catalogue against the shelf"
 FAILED=

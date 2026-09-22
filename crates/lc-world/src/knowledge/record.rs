@@ -30,8 +30,8 @@ pub struct Hop {
 /// The route a measurement took, oldest hop first. Empty for one this craft made itself.
 pub type Lineage = Vec<Hop>;
 
-/// When the holder learnt something measured at `observed_s`.
-pub fn learnt_s(lineage: &Lineage, observed_s: f64) -> f64 {
+/// When the holder learned something measured at `observed_s`.
+pub fn learned_s(lineage: &Lineage, observed_s: f64) -> f64 {
     lineage.last().map(|h| h.received_s).unwrap_or(observed_s)
 }
 
@@ -51,8 +51,8 @@ pub struct Sighting {
 }
 
 impl Sighting {
-    pub fn learnt_s(&self) -> f64 {
-        learnt_s(&self.lineage, self.observed_s)
+    pub fn learned_s(&self) -> f64 {
+        learned_s(&self.lineage, self.observed_s)
     }
 
     pub(crate) fn same_as(&self, other: &Self) -> bool {
@@ -165,16 +165,16 @@ impl Series {
         Series { samples: Vec::new(), ..self.clone() }
     }
 
-    /// The part of this series learnt after `since_s`, or `None` if none of it was.
+    /// The part of this series learned after `since_s`, or `None` if none of it was.
     ///
-    /// A series this craft took itself is learnt sample by sample, so only the new samples go;
-    /// one it was handed was learnt all at once, when it arrived, and goes whole or not at all.
+    /// A series this craft took itself is learned sample by sample, so only the new samples go;
+    /// one it was handed was learned all at once, when it arrived, and goes whole or not at all.
     /// Sending a watched star's whole curve every time one sample was added would be most of
     /// what a report carried.
     pub fn after(&self, since_s: f64) -> Option<Series> {
         let samples: Vec<Sample> = if self.lineage.is_empty() {
             self.samples.iter().filter(|s| s.observed_s > since_s).copied().collect()
-        } else if learnt_s(&self.lineage, 0.0) > since_s {
+        } else if learned_s(&self.lineage, 0.0) > since_s {
             self.samples.clone()
         } else {
             Vec::new()
@@ -234,7 +234,7 @@ impl NameKind {
 /// A distance somebody states, as opposed to bearings this craft can triangulate itself.
 ///
 /// This is how a conclusion travels when the measurements behind it do not — a charting
-/// office's parallax programme, a faction's shared catalogue, a probe with more data than
+/// office's parallax program, a faction's shared catalogue, a probe with more data than
 /// bandwidth. It is believed because of who said it, which is the honest way to hold it, and
 /// a craft's own triangulation overrides it the moment it has one.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

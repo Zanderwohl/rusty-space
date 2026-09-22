@@ -176,7 +176,7 @@ async fn complete(
             &broker.store,
             &form.email,
             &form.password,
-            form.display_name.as_deref().unwrap_or("Traveller"),
+            form.display_name.as_deref().unwrap_or("Traveler"),
         )
         .await
     } else {
@@ -286,7 +286,7 @@ async fn native(
             &broker.store,
             &form.email,
             &form.password,
-            form.display_name.as_deref().unwrap_or("Traveller"),
+            form.display_name.as_deref().unwrap_or("Traveler"),
         )
         .await
     } else {

@@ -5,7 +5,7 @@ Books, to read while you are waiting for something.
 A crossing takes real minutes and a build takes real minutes, and both are time the player is
 sitting in front of a window with nothing to do. This is what they can do instead of tabbing
 away. The books are DRM-free public-domain epubs — Project Gutenberg, mostly — served from the
-CDN, catalogued by the shard, and read in a window inside the game.
+CDN, cataloged by the shard, and read in a window inside the game.
 
 ## Decided: it does nothing
 

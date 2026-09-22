@@ -183,10 +183,10 @@ impl Moments {
         let crossing_s = flicker.and_then(|(k0, cov0)| {
             (k0 + 1..LAGS).find_map(|k| {
                 let (cov, _) = self.covariance(k)?;
-                (cov < 0.5 * cov0).then(|| 2.0 * lag_centre(k))
+                (cov < 0.5 * cov0).then(|| 2.0 * lag_center(k))
             })
         });
-        // Flicker makes neighbouring samples one measurement, not many: the mean is only as
+        // Flicker makes neighboring samples one measurement, not many: the mean is only as
         // good as the number of crossings the log spans.
         let span = self.span_s.map_or(0.0, |(a, b)| b - a);
         let independent = crossing_s.map_or(f64::INFINITY, |t| (span / t).max(1.0));
@@ -206,7 +206,7 @@ fn lag_edge(k: usize) -> f64 {
     LAG_MIN_S * std::f64::consts::SQRT_2.powi(k as i32)
 }
 
-fn lag_centre(k: usize) -> f64 {
+fn lag_center(k: usize) -> f64 {
     (lag_edge(k) * lag_edge(k + 1)).sqrt()
 }
 

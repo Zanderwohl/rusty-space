@@ -16,7 +16,7 @@ use bevy_mesh::MeshVertexBufferLayoutRef;
 #[derive(Clone, Debug, ShaderType)]
 pub struct EncounterMarkerUniform {
     /// The face of the target, render space: two perpendicular axes, both square to the
-    /// traveller's velocity, so the craft flies into the face rather than along it.
+    /// traveler's velocity, so the craft flies into the face rather than along it.
     pub plane_x: Vec4,
     pub plane_y: Vec4,
     pub base_color: Vec4,

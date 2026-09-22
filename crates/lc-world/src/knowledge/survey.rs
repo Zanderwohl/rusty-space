@@ -593,13 +593,13 @@ mod tests {
             "{} degrees of blind spot",
             blind.to_degrees()
         );
-        let neighbour = glare_radius_rad(
+        let neighbor = glare_radius_rad(
             optics.resolution_rad(Band::V),
             flux_from(&sun(), Band::V, 4.0 * M_PER_LY),
             far,
         );
         assert!(
-            neighbour.to_degrees() < 1e-3,
+            neighbor.to_degrees() < 1e-3,
             "a star is not a sun in the eyepiece"
         );
 

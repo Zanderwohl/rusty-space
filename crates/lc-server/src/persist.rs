@@ -77,7 +77,7 @@ struct SavedV6 {
 }
 
 /// `lc_proto::Loadout` before data modules. A ship from then has none: modules do not appear
-/// in a hull because the game learnt about a new kind.
+/// in a hull because the game learned about a new kind.
 #[derive(Deserialize)]
 struct LoadoutV6 {
     storage: u32,

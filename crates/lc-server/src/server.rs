@@ -71,10 +71,10 @@ pub struct Connected {
     /// sign-in is not allowed to be. One per connection: a reconnection is a fresh client with
     /// an empty log, and it needs the conversation back.
     pub backlog_sent: bool,
-    /// Learnt-time through which this client's copy of its craft's knowledge is current. See
+    /// Learned-time through which this client's copy of its craft's knowledge is current. See
     /// [`crate::instruments`]. From the beginning for a new connection, which is what pages a
     /// craft's whole knowledge to a client that has just signed in.
-    pub learnt_s: f64,
+    pub learned_s: f64,
 }
 
 pub struct Server<J: Journal> {
@@ -361,7 +361,7 @@ impl<J: Journal> Server<J> {
             // develop.
             permission: crate::ability::Level::PLAYER,
             backlog_sent: false,
-            learnt_s: f64::NEG_INFINITY,
+            learned_s: f64::NEG_INFINITY,
         });
         self.aboard(CraftId(ship_id.0));
     }
@@ -417,7 +417,7 @@ impl<J: Journal> Server<J> {
         self.write_conversations().await?;
         self.pending = events;
         self.state_the_clock(wire);
-        self.tell_learnt(wire);
+        self.tell_learned(wire);
         // 3 and 4. Everything that has arrived since the last tick, through the gate.
         self.flush(wire).await
     }
@@ -829,7 +829,7 @@ impl<J: Journal> Server<J> {
             // No account to key an anonymous player by, so the connection is the account.
             Err(_) if self.open => crate::ticket::Claims {
                 sub: format!("anonymous:{}", from.0),
-                name: format!("Traveller {}", from.0),
+                name: format!("Traveler {}", from.0),
                 exp: i64::MAX,
                 jti: format!("anonymous:{}", from.0),
                 perm: 0,
@@ -875,7 +875,7 @@ impl<J: Journal> Server<J> {
             had_contacts: false,
             permission: crate::ability::Level::from_claim(claims.perm),
             backlog_sent: false,
-            learnt_s: f64::NEG_INFINITY,
+            learned_s: f64::NEG_INFINITY,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused

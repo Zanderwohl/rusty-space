@@ -3,7 +3,7 @@
 //! Every craft's knowledge lives here, not in its client. A duty is advanced every tick for
 //! every craft that has one, a report landing on a craft is folded in when its light arrives
 //! whether or not anybody is signed in to it, and a connected client is sent what its craft
-//! learnt — a report from itself, which it folds into its copy. See
+//! learned — a report from itself, which it folds into its copy. See
 //! `lightcone/docs/24-standing-instruments.md`.
 
 use std::collections::HashMap;
@@ -228,18 +228,18 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Send every connected client what its craft has learnt since the last time.
-    pub(crate) fn tell_learnt(&mut self, wire: &mut impl Transport) {
+    /// Send every connected client what its craft has learned since the last time.
+    pub(crate) fn tell_learned(&mut self, wire: &mut impl Transport) {
         let now_s = self.now_t as f64 * 1.0e-6;
         let connected: Vec<(lc_proto::ClientId, ShipId, f64)> =
-            self.clients.iter().map(|(c, state)| (*c, state.ship, state.learnt_s)).collect();
+            self.clients.iter().map(|(c, state)| (*c, state.ship, state.learned_s)).collect();
         for (client, ship, since) in connected {
             let report = self.aboard(CraftId(ship.0)).knowledge.report_upto(since, now_s, PAGE);
-            let Some(through) = report.learnt_through() else { continue };
+            let Some(through) = report.learned_through() else { continue };
             let Ok(body) = serde_json::to_string(&report) else { continue };
-            wire.send(client, Outbound::Learnt { report: body });
+            wire.send(client, Outbound::Learned { report: body });
             if let Some(state) = self.clients.get_mut(&client) {
-                state.learnt_s = through;
+                state.learned_s = through;
             }
         }
     }
@@ -308,7 +308,7 @@ impl<J: Journal> Server<J> {
         let mut limit = ENTRIES_PER_REPORT;
         loop {
             let report = aboard.knowledge.report_upto(since, at_s, limit);
-            let through = report.learnt_through().ok_or(Refusal::NothingNew)?;
+            let through = report.learned_through().ok_or(Refusal::NothingNew)?;
             let body = serde_json::to_string(&report).map_err(|_| Refusal::Impossible)?;
             if body.len() <= lc_proto::REPORT_LIMIT {
                 return Ok((body, through));
@@ -395,7 +395,7 @@ mod tests {
     fn replica(ship: ShipId, messages: &[Outbound]) -> Knowledge {
         let mut copy = Knowledge::new(witness(CraftId(ship.0)));
         for message in messages {
-            if let Outbound::Learnt { report } = message {
+            if let Outbound::Learned { report } = message {
                 copy.absorb(&serde_json::from_str(report).expect("a report"));
             }
         }
@@ -479,7 +479,7 @@ mod tests {
         let heard = copy.belief(secret).expect("the report landed while nobody was signed in");
         assert_eq!(heard.hops, 1);
         assert_eq!(heard.bearing.observer_ly, DVec3::ZERO);
-        assert!(heard.learnt_s > now_s + 3_000.0, "learnt when its light landed, an hour on: {} vs {now_s}", heard.learnt_s);
+        assert!(heard.learned_s > now_s + 3_000.0, "learned when its light landed, an hour on: {} vs {now_s}", heard.learned_s);
         assert!(
             told.iter().any(|m| matches!(m, Outbound::Observing { duty: lc_proto::Duty::Sweep { .. }, .. })),
             "and it is told what its telescope is still doing",

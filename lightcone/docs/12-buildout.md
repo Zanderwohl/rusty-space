@@ -397,7 +397,7 @@ for what the signals look like, [24-standing-instruments.md](24-standing-instrum
 faction held; key generations and rotation, each rotation sent per member sealed to their ship
 key; certificates for `invite`, `grant`, `rotate` and `generation`; invitations in the chat log;
 the faction channel, redacted by generation held at arrival. The minimum generation an asset
-accepts is modelled now, on the craft themselves, so that assets inherit it rather than
+accepts is modeled now, on the craft themselves, so that assets inherit it rather than
 retrofitting it.
 
 **Done when:** a traitor excluded by rotation can still read everything sealed to the old

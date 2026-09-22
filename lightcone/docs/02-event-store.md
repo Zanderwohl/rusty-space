@@ -245,7 +245,7 @@ be the whole of a game mechanic rather than an optimization:
 | row | written | readable |
 |---|---|---|
 | `lc_message_receipts` | when the message is transmitted | `arrive_t <= now` |
-| `lc_keyring` | when the key offer is transmitted | `learnt_t <= now`, which is what makes a key take four years to cross four light-years |
+| `lc_keyring` | when the key offer is transmitted | `learned_t <= now`, which is what makes a key take four years to cross four light-years |
 
 Writing them at transmission rather than at arrival is also what makes them work for a craft
 nobody is flying. Arrivals are only walked for connected clients, because there is nobody to tell

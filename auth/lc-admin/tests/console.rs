@@ -344,7 +344,7 @@ async fn signing_out_ends_the_session() {
 /// The session cookie is `SameSite=Lax`, which sends it on a cross-site top-level navigation
 /// when the method is safe — so as a GET this was a link on any page anywhere that signed you
 /// out of the console, and anything that follows links on its own did the same. Lax never
-/// sends a cookie on a cross-site POST, so the method is the whole of the defence and no token
+/// sends a cookie on a cross-site POST, so the method is the whole of the defense and no token
 /// is needed.
 #[tokio::test]
 async fn signing_out_refuses_a_get() {

@@ -301,9 +301,9 @@ pub fn containment_chain(system: &System, point: DVec3, time: Instant) -> Vec<Bo
 
 /// The crossing search used to live here, and every caller still spells it
 /// `influence::crossings`. It is [`crate::crossing`] now — the same functions, with the
-/// traveller generalised from a body index to anything evaluable.
+/// traveler generalised from a body index to anything evaluable.
 pub use crate::crossing::{
-    BodyPath, Crossing, SAMPLES_PER_REVOLUTION, Traveller, boundary_distance, boundary_distance_of,
+    BodyPath, Crossing, SAMPLES_PER_REVOLUTION, Traveler, boundary_distance, boundary_distance_of,
     crossings, crossings_of, default_horizon, default_horizon_of, first_crossing_of, next_crossing,
     next_crossing_of, previous_crossing, previous_crossing_of,
 };
@@ -312,9 +312,9 @@ pub use crate::crossing::{
 ///
 /// That is the set a body can actually reach without first leaving its primary — the
 /// primary's own boundary on the way out, and a sibling moon's on the way past.
-pub fn crossing_candidates(system: &System, traveller: BodyIndex) -> Vec<BodyIndex> {
-    let Some(primary) = system.parent(traveller) else { return Vec::new() };
-    crossing_candidates_about(system, traveller, primary)
+pub fn crossing_candidates(system: &System, traveler: BodyIndex) -> Vec<BodyIndex> {
+    let Some(primary) = system.parent(traveler) else { return Vec::new() };
+    crossing_candidates_about(system, traveler, primary)
 }
 
 /// As [`crossing_candidates`], with the primary given rather than read from the derived
@@ -325,16 +325,16 @@ pub fn crossing_candidates(system: &System, traveller: BodyIndex) -> Vec<BodyInd
 /// currently in.
 pub fn crossing_candidates_about(
     system: &System,
-    traveller: BodyIndex,
+    traveler: BodyIndex,
     primary: BodyIndex,
 ) -> Vec<BodyIndex> {
-    spheres_within(system, primary).into_iter().filter(|&i| i != traveller).collect()
+    spheres_within(system, primary).into_iter().filter(|&i| i != traveler).collect()
 }
 
 /// Spheres something inside `primary`'s influence can reach without first leaving it:
 /// `primary`'s own boundary on the way out, and each of its children on the way past.
 ///
-/// The same set as [`crossing_candidates_about`] without a body to leave out, for a traveller
+/// The same set as [`crossing_candidates_about`] without a body to leave out, for a traveler
 /// the system has no index for — a spacecraft, which is most of them.
 pub fn spheres_within(system: &System, primary: BodyIndex) -> Vec<BodyIndex> {
     let mut candidates = Vec::new();

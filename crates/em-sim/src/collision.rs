@@ -6,7 +6,7 @@
 //! year needs some ten million samples, and one that is not dense enough does not report a
 //! miss: it reports nothing, and the craft flies through the planet.
 //!
-//! So this marches rather than samples. From any instant it advances by the time the traveller
+//! So this marches rather than samples. From any instant it advances by the time the traveler
 //! would need to close the gap at its greatest possible speed, which cannot skip over contact.
 //! For a two-body arc about the body in question that speed bound is exact — the vis-viva
 //! speed at the surface — and elsewhere it is padded. See [`STEP_SAFETY`].
@@ -19,7 +19,7 @@
 use em_foundations::time::{Instant, TimeDelta};
 use glam::DVec3;
 
-use crate::crossing::Traveller;
+use crate::crossing::Traveler;
 use crate::id::BodyIndex;
 use crate::propagate;
 use crate::system::System;
@@ -63,7 +63,7 @@ pub const STEP_SAFETY: f64 = 0.5;
 
 /// Floor on a march step, seconds.
 ///
-/// Without one, a traveller asymptotically approaching a surface it never reaches takes ever
+/// Without one, a traveler asymptotically approaching a surface it never reaches takes ever
 /// smaller steps and the march does not terminate. A millisecond is far below any contact
 /// anyone cares to time.
 const MIN_STEP_SECONDS: f64 = 1.0e-3;
@@ -76,26 +76,26 @@ const CONTACT_TOLERANCE_SECONDS: f64 = 1.0e-3;
 
 /// Height above `body`'s surface, meters: negative below it.
 ///
-/// `None` when either the traveller or the body is not analytic at `time`.
+/// `None` when either the traveler or the body is not analytic at `time`.
 pub fn surface_distance(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     body: BodyIndex,
     time: Instant,
 ) -> Option<f64> {
-    let (at, _) = traveller.state_at(time)?;
+    let (at, _) = traveler.state_at(time)?;
     let (center, _) = propagate::state_at(system, body, time)?;
     Some((at - center).length() - system.radius(body))
 }
 
 /// The first contact with `body` inside `window`, if there is one.
 ///
-/// `window` is `(start, end)` with `start < end`. A traveller that begins below the surface
+/// `window` is `(start, end)` with `start < end`. A traveler that begins below the surface
 /// is reported as a contact at `start`: it is already there, and saying "no impact" because
 /// the boundary was never crossed inside the window would be worse than useless.
 pub fn impact_with(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     body: BodyIndex,
     window: (Instant, Instant),
 ) -> Option<Impact> {
@@ -112,22 +112,22 @@ pub fn impact_with(
     let mu = system.gravitational_constant() * system.mass(body);
 
     let mut cursor = start;
-    let mut above = surface_distance(system, traveller, body, cursor)?;
+    let mut above = surface_distance(system, traveler, body, cursor)?;
     if above <= 0.0 {
-        return contact(system, traveller, body, cursor);
+        return contact(system, traveler, body, cursor);
     }
 
     for _ in 0..MAX_STEPS {
-        let step = safe_step(system, traveller, body, cursor, above, radius, mu)?;
+        let step = safe_step(system, traveler, body, cursor, above, radius, mu)?;
         let next = (cursor + step).min(end);
-        let Some(distance) = surface_distance(system, traveller, body, next) else {
+        let Some(distance) = surface_distance(system, traveler, body, next) else {
             // A gap in what can be evaluated is not a contact, and it is not something to
             // march across either.
             return None;
         };
         if distance <= 0.0 {
-            let time = refine(system, traveller, body, (cursor, above), (next, distance))?;
-            return contact(system, traveller, body, time);
+            let time = refine(system, traveler, body, (cursor, above), (next, distance))?;
+            return contact(system, traveler, body, time);
         }
         if next >= end {
             return None;
@@ -144,42 +144,42 @@ pub fn impact_with(
 /// not depend on the order they came in.
 pub fn first_impact(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     bodies: &[BodyIndex],
     window: (Instant, Instant),
 ) -> Option<Impact> {
     bodies
         .iter()
-        .filter_map(|&body| impact_with(system, traveller, body, window))
+        .filter_map(|&body| impact_with(system, traveler, body, window))
         .min_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal))
 }
 
-/// Bodies worth testing a traveller against: those whose spheres of influence it could be in.
+/// Bodies worth testing a traveler against: those whose spheres of influence it could be in.
 ///
-/// A body whose sphere does not reach the traveller cannot be hit before the traveller first
+/// A body whose sphere does not reach the traveler cannot be hit before the traveler first
 /// enters that sphere, and that is a crossing, not a collision. Pairing this with
 /// [`crossing::first_crossing_of`](crate::crossing::first_crossing_of) covers the rest.
-pub fn candidates_at(system: &System, traveller: &dyn Traveller, time: Instant) -> Vec<BodyIndex> {
-    let Some((at, _)) = traveller.state_at(time) else { return Vec::new() };
+pub fn candidates_at(system: &System, traveler: &dyn Traveler, time: Instant) -> Vec<BodyIndex> {
+    let Some((at, _)) = traveler.state_at(time) else { return Vec::new() };
     crate::influence::containment_chain(system, at, time)
 }
 
 /// How far the march may advance without risking stepping over contact.
 ///
-/// The traveller cannot reach the surface before it has covered `above` meters, and it cannot
+/// The traveler cannot reach the surface before it has covered `above` meters, and it cannot
 /// cover them faster than its greatest possible speed. That speed is bounded by energy: a
 /// two-body arc about this body trades height for speed at `v^2 = v0^2 + 2 mu (1/r - 1/r0)`,
 /// which is largest at the surface.
 fn safe_step(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     body: BodyIndex,
     time: Instant,
     above: f64,
     radius: f64,
     mu: f64,
 ) -> Option<TimeDelta> {
-    let (at, velocity) = traveller.state_at(time)?;
+    let (at, velocity) = traveler.state_at(time)?;
     let (center, carried) = propagate::state_at(system, body, time)?;
     let separation = (at - center).length().max(radius);
     let closing = (velocity - carried).length();
@@ -194,32 +194,32 @@ fn safe_step(
 /// Bisect a bracketed contact down to [`CONTACT_TOLERANCE_SECONDS`].
 fn refine(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     body: BodyIndex,
     mut outside: (Instant, f64),
     mut inside: (Instant, f64),
 ) -> Option<Instant> {
     while (inside.0 - outside.0).to_seconds().abs() > CONTACT_TOLERANCE_SECONDS {
         let middle = outside.0 + (inside.0 - outside.0) / 2.0;
-        let distance = surface_distance(system, traveller, body, middle)?;
+        let distance = surface_distance(system, traveler, body, middle)?;
         if distance > 0.0 {
             outside = (middle, distance);
         } else {
             inside = (middle, distance);
         }
     }
-    // The outside end, so a reported contact is never one the traveller has already passed
+    // The outside end, so a reported contact is never one the traveler has already passed
     // through. The same choice `crossing` makes about rounding an arrival upward.
     Some(outside.0)
 }
 
 fn contact(
     system: &System,
-    traveller: &dyn Traveller,
+    traveler: &dyn Traveler,
     body: BodyIndex,
     time: Instant,
 ) -> Option<Impact> {
-    let (position, velocity) = traveller.state_at(time)?;
+    let (position, velocity) = traveler.state_at(time)?;
     let (center, carried) = propagate::state_at(system, body, time)?;
     Some(Impact {
         body,
@@ -260,7 +260,7 @@ mod tests {
         velocity: DVec3,
     }
 
-    impl Traveller for Line {
+    impl Traveler for Line {
         fn state_at(&self, time: Instant) -> Option<(DVec3, DVec3)> {
             let dt = (time - Instant::J2000).to_seconds();
             Some((self.from + self.velocity * dt, self.velocity))
@@ -327,7 +327,7 @@ mod tests {
     /// steps further than the traverse of a planet takes, so it walks straight over it and
     /// reports nothing. The march cannot, because it never advances further than the gap.
     #[test]
-    fn a_long_window_does_not_let_the_traveller_through_the_planet() {
+    fn a_long_window_does_not_let_the_traveler_through_the_planet() {
         let system = built();
         let earth = named(&system, "Earth");
         let line = aimed(&system, earth, STANDOFF_M, 0.0);
@@ -396,10 +396,10 @@ mod tests {
         assert_eq!(hit.time, same.time, "the order of the candidates changed the answer");
     }
 
-    /// The candidate set is what holds the traveller, so a craft in low orbit is tested
+    /// The candidate set is what holds the traveler, so a craft in low orbit is tested
     /// against the thing it is about to hit.
     #[test]
-    fn the_candidates_are_whatever_holds_the_traveller() {
+    fn the_candidates_are_whatever_holds_the_traveler() {
         let system = built();
         let earth = named(&system, "Earth");
         let line = aimed(&system, earth, EARTH_RADIUS_M * 2.0, 0.0);

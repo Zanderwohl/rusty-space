@@ -118,7 +118,7 @@ impl Claims {
     pub fn display_name(&self) -> String {
         match self.name.as_deref().map(str::trim) {
             Some(name) if !name.is_empty() => name.to_owned(),
-            _ => "Traveller".to_owned(),
+            _ => "Traveler".to_owned(),
         }
     }
 }
@@ -583,7 +583,7 @@ mod tests {
         let mut nameless = google_claims();
         nameless["name"] = serde_json::Value::Null;
         let claims = claims_from(&id_token(nameless), &google()).unwrap();
-        assert_eq!(claims.display_name(), "Traveller");
+        assert_eq!(claims.display_name(), "Traveler");
         // And specifically not the address, which other players would see.
         assert!(!claims.display_name().contains('@'));
     }

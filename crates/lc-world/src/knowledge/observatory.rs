@@ -189,7 +189,7 @@ impl Observatory {
     /// Run the duty for however much coordinate time has passed since the last call.
     ///
     /// Exposure is elapsed coordinate time, not a number typed into a panel: a measurement
-    /// labelled with an integration it did not get is a lie about its own error bars.
+    /// labeled with an integration it did not get is a lie about its own error bars.
     pub fn tick(&mut self, sky: &mut Sky, knowledge: &mut Knowledge, at: Station, now_s: f64) {
         match self.duty.clone() {
             Duty::Idle => {}
@@ -305,7 +305,7 @@ pub fn sweep_between(
 
 /// Issue the charts a ship leaves port with.
 ///
-/// A craft does not start from nothing — it starts from somebody else's parallax programme,
+/// A craft does not start from nothing — it starts from somebody else's parallax program,
 /// which is exactly as good as whoever ran it and does not extend past where they were looking.
 /// So the nearby sky arrives as claims from a charting office the ship has never met, held on
 /// that office's word until the ship measures one for itself, and everything beyond `reach_ly`

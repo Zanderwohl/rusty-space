@@ -302,8 +302,8 @@ async fn checkpoint(
     lc_store::ships::save_ships(client, &taken.ships).await?;
     // What changed since the last checkpoint: files touched, samples taken. The partitions the
     // samples land in exist, because the journal keeps them ready ahead of the clock every tick
-    // and nothing is learnt in the future. Drained before it is written, so a failed write loses
-    // what was learnt in these twenty seconds; the files come back the next time they change.
+    // and nothing is learned in the future. Drained before it is written, so a failed write loses
+    // what was learned in these twenty seconds; the files come back the next time they change.
     let remembered = server.take_knowledge();
     lc_store::knowledge::save_files(client, &remembered.files).await?;
     lc_store::knowledge::save_samples(client, &remembered.samples).await?;
