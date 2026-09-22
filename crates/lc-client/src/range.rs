@@ -19,26 +19,8 @@ pub fn who(witness: Witness, owner: Witness) -> String {
     }
 }
 
-/// The range to a believed star from `here_ly`, with its error and where it came from, or what
-/// is known instead. `None` for something this ship has never detected.
-pub fn describe(belief: Option<&Belief>, owner: Witness, here_ly: glam::DVec3) -> String {
-    let mut text = short(belief, here_ly);
-    let Some(belief) = belief else { return text };
-    if matches!(belief.distance, Distance::Measured { .. }) {
-        let whence = match (belief.claimed_by, belief.baseline_rad) {
-            (Some(whose), _) => format!("on {} word", possessive(&who(whose, owner))),
-            (None, Some(angle)) => format!("from bearings a {} baseline apart", angle_text(angle)),
-            (None, None) => "from bearings".into(),
-        };
-        text += &format!(", {whence}");
-        if let Some(floor) = belief.floor_ly {
-            text += &format!(" — though this ship's own bearings put it beyond {floor:.1} ly");
-        }
-    }
-    text
-}
-
-/// The range alone, with its error: where it came from is [`sources`].
+/// The range to a believed star from `here_ly`, with its error, or what is known instead.
+/// `None` for something this ship has never detected. Where it came from is [`sources`].
 pub fn short(belief: Option<&Belief>, here_ly: glam::DVec3) -> String {
     let Some(belief) = belief else { return "not detected".into() };
     match belief.distance {
@@ -119,17 +101,17 @@ mod tests {
         let id = StarId::synthesise("range", 1);
         let star = DVec3::new(0.0, 0.0, 4.0);
         let mut k = Knowledge::new(Witness(1));
-        assert_eq!(describe(k.belief(id), Witness(1), DVec3::ZERO), "not detected");
+        assert_eq!(short(k.belief(id), DVec3::ZERO), "not detected");
 
         k.sighted(id, look(DVec3::ZERO, star, 0.0));
-        assert_eq!(describe(k.belief(id), Witness(1), DVec3::ZERO), "bearing only");
-
-        k.told(id, Claim { witness: CHARTS, distance: Distance::Measured { position_ly: star, sigma_ly: 0.04 }, stated_s: 0.0, lineage: Vec::new() });
-        assert!(describe(k.belief(id), Witness(1), DVec3::ZERO).contains("on the charts' word"));
+        assert_eq!(short(k.belief(id), DVec3::ZERO), "bearing only");
 
         k.sighted(id, look(DVec3::X * 1.0e-3, star, 1.0));
-        let text = describe(k.belief(id), Witness(1), DVec3::ZERO);
-        assert!(text.starts_with("4.00") && text.contains("baseline apart"), "{text}");
+        let belief = k.belief(id).unwrap();
+        assert!(short(Some(belief), DVec3::ZERO).starts_with("4.00"));
+        let notes = sources(belief, Witness(1));
+        assert!(notes.iter().any(|n| n.starts_with("Bearings ") && n.ends_with(" apart")), "{notes:?}");
+        assert!(notes.iter().any(|n| n == "Distance solved from bearings held here"), "{notes:?}");
     }
 
     /// The short form is a number and nothing else; where it came from goes to the sources.

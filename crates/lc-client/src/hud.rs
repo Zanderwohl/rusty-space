@@ -110,11 +110,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
         // What this ship believes, never the catalogue: a click on any light in the sky is not
         // a range to it.
         target: ui.selected.map(|id| {
-            let range = crate::range::describe(
-                session.knowledge.belief(id),
-                session.knowledge.owner,
-                session.ship.motion.position_ly,
-            );
+            let range = crate::range::short(session.knowledge.belief(id), session.ship.motion.position_ly);
             format!("{} — {range}", session.name_of(id))
         }),
         mapping: name.to_uppercase(),
@@ -211,17 +207,17 @@ mod tests {
         assert!(lines(&s, &ui).clock.contains("T + 1.00 years"));
     }
 
-    /// The one thing the readout exists for, and only as far as this ship knows it: the
-    /// charts' range, on the charts' word.
+    /// The one thing the readout exists for, and only as far as this ship knows it: the range
+    /// and its error. Whose word it is on is the telescope panel's to say.
     #[test]
-    fn a_selected_target_says_how_far_it_is_and_on_whose_word() {
+    fn a_selected_target_says_how_far_it_is() {
         let (mut ui, mut s) = fixture();
         let id = s.stars[0].id;
         assert!(lines(&s, &ui).target.is_none());
         apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
         let target = lines(&s, &ui).target.expect("a target line");
         // The sample provider's nearest star is 4.2 light-years out, charted to a percent.
-        assert!(target.contains(" ± ") && target.contains("on the charts' word"), "{target}");
+        assert!(target.contains(" ± ") && target.ends_with(" ly"), "{target}");
     }
 
     #[test]

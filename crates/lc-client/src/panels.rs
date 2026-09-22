@@ -479,11 +479,7 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
             match state.selected.and_then(|id| game.star(id)) {
                 Some(star) => {
                     let name = game.name_of(star.id);
-                    let range = crate::range::describe(
-                        game.knowledge.belief(star.id),
-                        game.knowledge.owner,
-                        game.ship.motion.position_ly,
-                    );
+                    let range = crate::range::short(game.knowledge.belief(star.id), game.ship.motion.position_ly);
                     ui.label(format!("{name} — {range}"));
                     if ui.button("Fly there").clicked() {
                         ask(out, Action::FlyTo(None));
