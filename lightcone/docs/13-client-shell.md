@@ -211,7 +211,9 @@ An acknowledgement is also never answered. It is the end of an exchange, not the
 [05-observation.md](05-observation.md#answering-automatically-and-the-bearing-a-dish-answers-on)
 for the bearing a beam is answered on and for why an acknowledgement is never itself
 acknowledged. It is per craft and never on the public channel: a ship that answered every
-broadcast it heard would announce its position to everything in range.
+broadcast it heard would announce its position to everything in range. The checkbox sends an
+order and shows what the server says back; the answering is done by the server, so it goes on
+while the player is signed out.
 
 A resend keeps the original's encryption and takes the panel's **current aim**. That asymmetry is
 the point of the button: the usual reason a message went unacknowledged is a beam aimed where a

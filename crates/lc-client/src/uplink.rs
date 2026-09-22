@@ -248,12 +248,6 @@ pub struct Uplink {
     pub fitting: Option<lc_proto::Fitting>,
     /// Every conversation this ship is in. See [`crate::chat`].
     pub chat: crate::chat::Chat,
-    /// Automatic acknowledgements this ship owes, drained by [`pump`] into orders.
-    ///
-    /// Collected rather than sent where they are decided, because folding the wire is not
-    /// allowed to reach the wire: an answer is an order like any other and goes out through
-    /// the one dispatcher every order does.
-    owed: Vec<(ShipId, lc_proto::Aim)>,
 }
 
 /// The rate a shard runs at, and what a server that says nothing is taken to mean.
@@ -448,7 +442,6 @@ pub fn pump(
     time: Res<bevy::prelude::Time>,
     mut game: ResMut<crate::app::Game>,
     mut ui: ResMut<crate::app::Ui>,
-    mut out: MessageWriter<crate::input::Requested>,
 ) {
     let greet_now = {
         let link = uplink.link.get_mut().unwrap();
@@ -466,7 +459,10 @@ pub fn pump(
     let now_s = time.elapsed_secs_f64();
     for message in uplink.take() {
         // An answer to an order stops the clock on it, whether the answer was yes or no.
-        if matches!(message, Outbound::Accepted { .. } | Outbound::Refused { .. })
+        if matches!(
+            message,
+            Outbound::Accepted { .. } | Outbound::Refused { .. } | Outbound::AutoAcking { .. }
+        )
             && let Some(asked_at) = uplink.asked_at.take()
         {
             uplink.round_trip_s = Some((now_s - asked_at).max(0.0));
@@ -479,27 +475,6 @@ pub fn pump(
     if let Some(said) = uplink.applied.take() {
         let at = game.0.coordinate_time_s();
         ui.0.notify(said, at);
-    }
-
-    // What arrived and is owed an answer. Through the ordinary request channel, so an automatic
-    // acknowledgement is the same kind of thing as one a player sent, and is clamped, rate
-    // limited and recorded exactly as one.
-    for (to, aim) in std::mem::take(&mut uplink.owed) {
-        out.write(crate::input::Requested(crate::action::Action::Say {
-            to: Some(to),
-            aim,
-            // Never encrypted. There is nothing in it to protect — an acknowledgement is its
-            // identifiers and no body — and encrypting one would mean holding a key this ship
-            // may not have.
-            secrecy: lc_proto::Secrecy::Open,
-            body: String::new(),
-            // Its own message, and a real one: it is minted a key so that a resend of *it*
-            // would be the same message rather than another.
-            idem: Some(
-                lc_world::rng::hash(&[to.0 as u64, (game.0.coordinate_time_s() * 1.0e6) as u64])
-                    .max(1),
-            ),
-        }));
     }
 }
 
@@ -537,6 +512,8 @@ fn fold(
             // Which craft this is, so a message addressed to it can be told from one that
             // merely reached it. See `crate::chat::Chat::me`.
             uplink.chat.i_am(ship_id);
+            // Nobody, until the server says otherwise straight after this.
+            uplink.chat.auto_acking(Vec::new());
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,
@@ -607,9 +584,7 @@ fn fold(
                     }
                 };
                 ui.0.heard(from, notice, sighting.arrive_t as f64 * 1e-6);
-                // The bearing the signal came in on, which is what a dish answers down. Not
-                // where they are now, and not where they will be: where the light left them.
-                if let Some(aim) = uplink.chat.received(
+                uplink.chat.received(
                     from,
                     name.as_deref(),
                     sighting.event_id,
@@ -618,10 +593,7 @@ fn fold(
                     sighting.emitted_t as f64 * 1e-6,
                     sighting.arrive_t as f64 * 1e-6,
                     sighting.strength,
-                    sighting.direction,
-                ) {
-                    uplink.owed.push((from, aim));
-                }
+                );
             }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
                 let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else {
@@ -745,6 +717,8 @@ fn fold(
                     uplink.chat.sent(*to, name.as_deref(), event_id, 0, None, false, true, at_s);
                     None
                 }
+                // Answered by `AutoAcking`, never accepted.
+                Order::AutoAck { .. } => None,
             };
             info!(?ship_id, at_t, ?order, "accepted");
             uplink.applied = said;
@@ -801,6 +775,11 @@ fn fold(
             if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
                 uplink.fitting = Some(fitting);
                 game.0.ship.fit(Some((&fitting).into()));
+            }
+        }
+        Outbound::AutoAcking { ship_id, with } => {
+            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+                uplink.chat.auto_acking(with);
             }
         }
         Outbound::Backlog { messages, keys } => {

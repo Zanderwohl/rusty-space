@@ -405,6 +405,11 @@ second round of it.
 It is off for every craft until it is asked for. A ship that answered everything it heard would
 announce its position to everything in range the moment anybody pinged it.
 
+**It is the server's, not the client's.** Like a standing intercept, it is an order the shard keeps
+and checkpoints, so a ship answers whether or not anyone is flying it. A message addressed to a
+craft is scheduled on it when sent, like a receipt, and the setting is read when the light lands:
+switched on in flight, the message is answered; switched off, it is not.
+
 ### Saying it to nobody
 
 A message need not be addressed to anyone. A broadcast is something said to no one in

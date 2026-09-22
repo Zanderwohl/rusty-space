@@ -35,10 +35,12 @@ use lc_world::craft::CraftId;
 use lc_world::motion::LIGHT_US_PER_LY;
 use lc_world::signal::{Beam, Transmitter};
 
+use serde::{Deserialize, Serialize};
+
 use crate::chase;
 use crate::journal::{Journal, JournalError};
 use crate::server::Server;
-use crate::world::MICROS_PER_SECOND;
+use crate::world::{Event, MICROS_PER_SECOND, Scheduled};
 
 /// What a transmitter puts out, until a ship has a radio to specify.
 ///
@@ -62,6 +64,30 @@ pub(crate) struct Utterance {
     body: String,
     acks: Vec<i64>,
 }
+
+/// A message addressed to a craft, due to land on it: what answering it automatically would
+/// take, if auto-ack is on for its sender when it lands.
+///
+/// Scheduled when the message is sent, as receipts are, and decided when it lands, because
+/// that is when the receiving radio would act. Switching auto-ack on while a message is in
+/// flight answers it; switching it off stops an answer that has not gone yet.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Owed {
+    /// When the light lands, coordinate microseconds.
+    pub due_t: i64,
+    pub from: ShipId,
+    /// The message's key, so a resend is answered once rather than once per copy.
+    pub idem: MessageKey,
+    /// Answered in the mode it was spoken in: a beam down its bearing, a shout omnidirectionally.
+    pub beamed: bool,
+    /// Where it was emitted, light-microseconds. The bearing is worked out from here when it
+    /// lands, against where the receiver actually is then.
+    pub source_at: [f64; 3],
+}
+
+/// How many answered messages a craft remembers per sender for [`Server::answered`]. A resend
+/// of anything older is answered again, which costs one empty message.
+const ANSWERED_DEPTH: usize = 64;
 
 /// What a transmission order becomes: an event to write, and a line for the transcript.
 pub(crate) struct Transmission {
@@ -254,6 +280,142 @@ impl<J: Journal> Server<J> {
                 window.insert(place, (*arrive_t, event_id));
             }
         }
+    }
+
+    /// Schedule the possible automatic answer to a message, on the addressee, if it reaches them.
+    ///
+    /// Every craft and not only connected ones, and deciding nothing yet: whether auto-ack is
+    /// on is read when the light lands. See [`Owed`].
+    pub(crate) fn owe(
+        &mut self,
+        sender: CraftId,
+        source_at: DVec3,
+        beamed: bool,
+        said: &Utterance,
+        landings: &[(CraftId, i64, f32)],
+    ) {
+        // Only something with content is answered. A bare acknowledgement answered in turn
+        // would have two auto-acking ships trade light for ever.
+        let Some(to) = said.to.filter(|_| !said.key && !said.body.is_empty()) else { return };
+        let Some((addressee, due_t, _)) = landings.iter().find(|(craft, ..)| craft.0 == to.0) else {
+            return;
+        };
+        let owed = self.owed.entry(*addressee).or_default();
+        let from = ShipId(sender.0);
+        if said.idem != 0 && owed.iter().any(|o| o.from == from && o.idem == said.idem) {
+            return;
+        }
+        owed.push(Owed { due_t: *due_t, from, idem: said.idem, beamed, source_at: source_at.to_array() });
+    }
+
+    /// Send every automatic answer whose message has landed by now.
+    ///
+    /// Stamped at the landing, but never earlier than `after_t + 1`, where every connection's
+    /// cursor already stands: an event behind the cursor would be written and never delivered.
+    pub(crate) fn answer_owed(
+        &mut self,
+        after_t: i64,
+        events: &mut Vec<Event>,
+        deliveries: &mut Vec<Scheduled>,
+    ) {
+        let now = self.now_t;
+        let mut landed = Vec::new();
+        for (craft, owed) in &mut self.owed {
+            owed.retain(|o| {
+                let due = o.due_t <= now;
+                if due {
+                    landed.push((*craft, *o));
+                }
+                !due
+            });
+        }
+        self.owed.retain(|_, owed| !owed.is_empty());
+        landed.sort_by_key(|(craft, o)| (o.due_t, craft.0));
+        for (id, owed) in landed {
+            if !self.auto_ack.get(&id).is_some_and(|with| with.contains(&owed.from)) {
+                continue;
+            }
+            let answered = self.answered.entry(id).or_default();
+            if owed.idem != 0 && answered.contains(&(owed.from, owed.idem)) {
+                continue;
+            }
+            let Some(here) = self.fleet.get(id).map(|craft| craft.position_at(owed.due_t as f64))
+            else {
+                continue;
+            };
+            let at = owed.due_t.clamp(after_t + 1, now);
+            let aim = match owed.beamed {
+                // Down the bearing it came in on: where the sender was when the light left.
+                true => Aim::Bearing((DVec3::from_array(owed.source_at) - here).to_array()),
+                false => Aim::Omni,
+            };
+            let order = Order::Say {
+                to: Some(owed.from),
+                aim,
+                secrecy: Secrecy::Open,
+                body: String::new(),
+                idem: lc_world::rng::hash(&[id.0 as u64, owed.from.0 as u64, at as u64]).max(1),
+            };
+            let Ok(spoken) = self.compose(id, ShipId(id.0), &order, at) else { continue };
+            let sent = self.put_on_air(
+                id,
+                at,
+                spoken.kind,
+                SIGNAL_POWER_W,
+                spoken.payload,
+                &spoken.beam,
+                Some(spoken.said),
+                events,
+                deliveries,
+            );
+            if sent.is_ok() {
+                let answered = self.answered.entry(id).or_default();
+                answered.push_back((owed.from, owed.idem));
+                if answered.len() > ANSWERED_DEPTH {
+                    answered.pop_front();
+                }
+            }
+        }
+    }
+
+    /// Answer `with` automatically from `ship`, or stop. False when `from` may not.
+    pub(crate) fn set_auto_ack(
+        &mut self,
+        from: lc_proto::ClientId,
+        ship: ShipId,
+        with: ShipId,
+        on: bool,
+    ) -> bool {
+        let id = CraftId(ship.0);
+        let order = Order::AutoAck { with, on };
+        if !self.may(from, crate::ability::Act::of(&order), Some(id)) || with == ship {
+            return false;
+        }
+        let set = self.auto_ack.entry(id).or_default();
+        match on {
+            true => set.insert(with),
+            false => set.remove(&with),
+        };
+        if set.is_empty() {
+            self.auto_ack.remove(&id);
+        }
+        true
+    }
+
+    /// Everyone `ship` answers automatically, to `client`. On signing in only when there is
+    /// anyone: a welcome already means the empty set, as it means no pursuit.
+    pub(crate) fn tell_auto_acking(
+        &self,
+        wire: &mut impl crate::transport::Transport,
+        client: lc_proto::ClientId,
+        ship: ShipId,
+    ) {
+        let with = self
+            .auto_ack
+            .get(&CraftId(ship.0))
+            .map(|set| set.iter().copied().collect())
+            .unwrap_or_default();
+        wire.send(client, Outbound::AutoAcking { ship_id: ship, with });
     }
 
     /// Whether `holder` may seal a message to `subject` at coordinate time `now`.
@@ -901,5 +1063,152 @@ mod tests {
         let (_, said) = to_bry.first().expect("the bearing did not land on the craft it faced");
         assert!(said.beamed, "a beam did not say that it was one");
         assert!(spoken(&wire.take(nosy)).is_empty(), "a bystander heard a beam it was not on");
+    }
+
+    fn auto_ack(wire: &mut Loopback, client: ClientId, ship: i64, with: i64, on: bool) {
+        wire.client_says(client, Inbound::Act(Intent {
+            ship_id: ShipId(ship),
+            order: Order::AutoAck { with: ShipId(with), on },
+            issued_at_client_t: 0,
+        }));
+    }
+
+    fn tell(wire: &mut Loopback, client: ClientId, ship: i64, order: Order, at: i64) {
+        wire.client_says(client, Inbound::Act(Intent { ship_id: ShipId(ship), order, issued_at_client_t: at }));
+    }
+
+    async fn run_until<J: Journal>(server: &mut Server<J>, wire: &mut Loopback, t: i64) {
+        while server.now_t() < t {
+            server.tick(wire).await.unwrap();
+        }
+    }
+
+    /// Two ships two light-hours apart on the x axis, and a bystander off that axis beside Bry.
+    fn two_far_apart() -> (Server<Memory>, Loopback) {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let far = DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0);
+        server.admit(ClientId(1), crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(ClientId(2), crate::world::still(ShipId(2), far), 0.0);
+        server.admit(ClientId(3), crate::world::still(ShipId(3), DVec3::new(0.0, TWO_LIGHT_HOURS, 0.0)), 0.0);
+        (server, Loopback::new())
+    }
+
+    /// Bare messages from `from` that reached a client.
+    fn bare_from(messages: &[Outbound], from: i64) -> Vec<Spoken> {
+        sightings(messages)
+            .into_iter()
+            .filter(|s| s.kind == lc_proto::kind::MESSAGE && s.source_id == from)
+            .filter_map(|s| serde_json::from_str::<Spoken>(&s.payload).ok())
+            .filter(|said| said.body.as_deref() == Some(""))
+            .collect()
+    }
+
+    /// **The bug this exists for.** A ship answers what it auto-acks with nobody signed in to
+    /// fly it, down the bearing the message came in on.
+    #[tokio::test]
+    async fn a_ship_nobody_is_flying_still_answers_what_it_auto_acks() {
+        let (mut server, mut wire) = two_far_apart();
+        auto_ack(&mut wire, ClientId(2), 2, 1, true);
+        server.tick(&mut wire).await.unwrap();
+        assert!(
+            wire.take(ClientId(2)).contains(&Outbound::AutoAcking { ship_id: ShipId(2), with: vec![ShipId(1)] }),
+            "the setting was not confirmed",
+        );
+        server.disconnected(ClientId(2));
+
+        tell(&mut wire, ClientId(1), 1, say(2, Aim::Bearing([1.0, 0.0, 0.0]), Secrecy::Open, "anyone home"), server.now_t());
+        server.tick(&mut wire).await.unwrap();
+        let sent = wire
+            .take(ClientId(1))
+            .into_iter()
+            .find_map(|m| match m {
+                Outbound::Accepted { event_id, order: Order::Say { .. }, .. } => Some(event_id),
+                _ => None,
+            })
+            .expect("the message was accepted");
+
+        run_until(&mut server, &mut wire, 2 * TWO_LIGHT_HOURS as i64 + TICK_US * 4).await;
+        let answers = bare_from(&wire.take(ClientId(1)), 2);
+        assert_eq!(answers.len(), 1, "{answers:?}");
+        assert!(answers[0].acks.contains(&sent), "the answer did not acknowledge it");
+        assert!(answers[0].beamed, "a beam was not answered as one");
+        assert!(bare_from(&wire.take(ClientId(3)), 2).is_empty(), "a bystander off the bearing heard it");
+    }
+
+    /// Decided when the light lands, as a radio would: switched off in flight, nothing goes
+    /// back; switched on in flight, the answer does.
+    #[tokio::test]
+    async fn auto_ack_is_read_when_the_message_lands() {
+        let (mut server, mut wire) = two_far_apart();
+        let light = TWO_LIGHT_HOURS as i64;
+        // Sent while on, lands while off.
+        auto_ack(&mut wire, ClientId(2), 2, 1, true);
+        tell(&mut wire, ClientId(1), 1, say(2, Aim::Omni, Secrecy::Open, "one"), 0);
+        server.tick(&mut wire).await.unwrap();
+        auto_ack(&mut wire, ClientId(2), 2, 1, false);
+        server.tick(&mut wire).await.unwrap();
+        // Sent while off, lands while on, with nobody signed in.
+        run_until(&mut server, &mut wire, light / 2).await;
+        tell(&mut wire, ClientId(1), 1, say(2, Aim::Omni, Secrecy::Open, "two"), server.now_t());
+        run_until(&mut server, &mut wire, light + TICK_US * 4).await;
+        auto_ack(&mut wire, ClientId(2), 2, 1, true);
+        server.tick(&mut wire).await.unwrap();
+        server.disconnected(ClientId(2));
+        run_until(&mut server, &mut wire, 3 * light).await;
+        let answers = bare_from(&wire.take(ClientId(1)), 2);
+        assert_eq!(answers.len(), 1, "{answers:?}");
+        assert_eq!(answers[0].acks.len(), 2, "both had landed when the answer went");
+    }
+
+    /// Only a message addressed to the ship, with something in it, and only once however many
+    /// times it is resent. Two ships auto-acking each other exchange one answer, not an
+    /// endless volley.
+    #[tokio::test]
+    async fn only_mail_with_content_is_answered_and_only_once() {
+        let (mut server, mut wire) = two_far_apart();
+        auto_ack(&mut wire, ClientId(1), 1, 2, true);
+        auto_ack(&mut wire, ClientId(2), 2, 1, true);
+        auto_ack(&mut wire, ClientId(3), 3, 1, true);
+        let resent = say(2, Aim::Omni, Secrecy::Open, "hello");
+        tell(&mut wire, ClientId(1), 1, resent.clone(), 0);
+        tell(&mut wire, ClientId(1), 1, Order::Say {
+            to: None,
+            aim: Aim::Omni,
+            secrecy: Secrecy::Open,
+            body: "hello all".into(),
+            idem: next_key(),
+        }, 0);
+        tell(&mut wire, ClientId(1), 1, Order::OfferKey { to: Some(ShipId(2)), aim: Aim::Omni }, 0);
+        server.tick(&mut wire).await.unwrap();
+        tell(&mut wire, ClientId(1), 1, resent, server.now_t());
+        server.tick(&mut wire).await.unwrap();
+
+        // Long enough for several round trips, had anything answered an answer.
+        run_until(&mut server, &mut wire, 6 * TWO_LIGHT_HOURS as i64).await;
+        let (to_ada, to_bry) = (wire.take(ClientId(1)), wire.take(ClientId(2)));
+        assert_eq!(bare_from(&to_ada, 2).len(), 1, "Bry answered other than once");
+        assert!(bare_from(&to_bry, 1).is_empty(), "an acknowledgement was acknowledged");
+        assert!(bare_from(&to_ada, 3).is_empty(), "a broadcast or somebody else's mail was answered");
+    }
+
+    /// The setting and what is still in flight outlive the process, as a pursuit does.
+    #[tokio::test]
+    async fn auto_ack_outlives_a_restart() {
+        let (mut server, mut wire) = two_far_apart();
+        auto_ack(&mut wire, ClientId(2), 2, 1, true);
+        tell(&mut wire, ClientId(1), 1, say(2, Aim::Omni, Secrecy::Open, "still there?"), 0);
+        server.tick(&mut wire).await.unwrap();
+
+        let mut restarted = Server::new(Memory::default(), 0, 1);
+        assert!(restarted.adopt(server.checkpoint()).is_empty());
+        assert!(restarted.auto_ack[&CraftId(2)].contains(&ShipId(1)));
+        restarted.admit(ClientId(1), restarted.fleet.get(CraftId(1)).unwrap().clone(), 0.0);
+        let mut wire = Loopback::new();
+        run_until(&mut restarted, &mut wire, 2 * TWO_LIGHT_HOURS as i64 + TICK_US * 4).await;
+        assert_eq!(
+            bare_from(&wire.take(ClientId(1)), 2).len(),
+            1,
+            "the answer in flight was lost with the process",
+        );
     }
 }
