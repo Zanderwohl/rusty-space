@@ -80,13 +80,15 @@ pub struct PointStyle {
     pub corona_gain: f32,
     /// How far the corona reaches, in **stellar radii** — a world size, not a screen one.
     pub corona_radii: f32,
+    /// How fast its threads drift outward, in stellar radii per day of coordinate time.
+    pub corona_flow: f32,
 }
 
 /// Every knob, with the range a slider should offer and whether it is a corona setting.
 ///
 /// A table rather than a hand-written panel: a knob that exists and has no slider is a knob
 /// nobody finds, and the two drift apart the moment one is added.
-pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 14] = [
+pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 15] = [
     ("min radius px", |s| &mut s.min_px, 0.5, 40.0),
     ("max radius px", |s| &mut s.max_px, 1.0, 120.0),
     ("glare per stop", |s| &mut s.glow_radius_gain, 0.0, 4.0),
@@ -103,6 +105,7 @@ pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 14] = [
     ("corona floor", |s| &mut s.corona_floor, 0.0, 1.5),
     ("corona contrast", |s| &mut s.corona_gain, 0.0, 4.0),
     ("corona radii", |s| &mut s.corona_radii, 1.0, 40.0),
+    ("corona flow", |s| &mut s.corona_flow, 0.0, 40.0),
 ];
 
 /// The background. Small, tight, and it must stay readable as a field of thousands.
@@ -122,6 +125,7 @@ pub const DISTANT: PointStyle = PointStyle {
     corona_floor: 0.22,
     corona_gain: 1.45,
     corona_radii: em_render::relativistic_starfield_material::DEFAULT_CORONA_RADII,
+    corona_flow: DEFAULT_CORONA_FLOW,
 };
 
 /// Lit bodies: planets, moons, anything reflecting.
@@ -145,6 +149,7 @@ pub const BODIES: PointStyle = PointStyle {
     corona_floor: 0.22,
     corona_gain: 1.45,
     corona_radii: em_render::relativistic_starfield_material::DEFAULT_CORONA_RADII,
+    corona_flow: DEFAULT_CORONA_FLOW,
 };
 
 /// A star whose system the ship is inside. Allowed to dominate the screen, because it does.
@@ -165,7 +170,23 @@ pub const LOCAL: PointStyle = PointStyle {
     corona_floor: 0.22,
     corona_gain: 1.45,
     corona_radii: em_render::relativistic_starfield_material::DEFAULT_CORONA_RADII,
+    corona_flow: DEFAULT_CORONA_FLOW,
 };
+
+/// For the Sun, 80,000 km/s. A real wind would take months to cross the corona; this crosses
+/// it in under a day, fast enough to see.
+pub const DEFAULT_CORONA_FLOW: f32 = 10.0;
+
+/// In f64 because coordinate time is around 1e8 s, where an f32 steps in tens of seconds.
+pub fn corona_flow_phase(now_s: f64, style: &PointStyle) -> f32 {
+    use em_render::relativistic_starfield_material::CORONA_FLOW_CYCLE;
+    let cycle_radii = f64::from(CORONA_FLOW_CYCLE) * f64::from(style.corona_radii);
+    let radii_per_s = f64::from(style.corona_flow) / 86_400.0;
+    if radii_per_s <= 0.0 || cycle_radii <= 0.0 {
+        return 0.0;
+    }
+    (now_s * radii_per_s / cycle_radii).rem_euclid(1.0) as f32
+}
 
 /// Where the local shell is, re-exported so the drawing code reads the same as the world code.
 pub use lc_world::system::LOCAL_SHELL_LY;
@@ -416,6 +437,7 @@ pub fn uniforms(
         corona_floor: style.corona_floor,
         corona_gain: style.corona_gain,
         corona_radii: style.corona_radii,
+        corona_flow_phase: corona_flow_phase(session.coordinate_time_s(), &style),
         log_t_min: LOG_T_MIN,
         log_t_scale: lut_scale,
         lut_samples: LUT_SAMPLES as f32,
@@ -935,5 +957,20 @@ mod tests {
         assert!(BODIES.max_px <= DISTANT.max_px * 1.5, "{} against {}", BODIES.max_px, DISTANT.max_px);
         assert!(BODIES.min_px >= 1.0, "still at least a pixel");
         assert_eq!(BODIES.corona_strength, 0.0);
+    }
+
+    /// One radius a day through a 7.8-radius corona with a half-reach cycle repeats every 3.9
+    /// days.
+    #[test]
+    fn the_corona_drifts_at_its_stated_speed() {
+        let style = PointStyle { corona_flow: 1.0, corona_radii: 7.8, ..LOCAL };
+        let day = 86_400.0;
+        let epoch = 8.0e8;
+        let at = |days: f64| corona_flow_phase(epoch + days * day, &style);
+        let quarter = (at(3.9 / 4.0) - at(0.0)).rem_euclid(1.0);
+        assert!((quarter - 0.25).abs() < 1e-4, "{quarter}");
+        assert!((at(3.9) - at(0.0)).abs() < 1e-4 || (at(3.9) - at(0.0)).abs() > 1.0 - 1e-4);
+        let still = PointStyle { corona_flow: 0.0, ..style };
+        assert_eq!(corona_flow_phase(epoch, &still), 0.0);
     }
 }
