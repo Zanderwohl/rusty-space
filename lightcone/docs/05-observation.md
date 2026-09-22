@@ -383,8 +383,8 @@ need reconciling against something that is not there.
 ### Answering automatically, and the bearing a dish answers on
 
 A ship can be set to acknowledge one craft automatically: anything that craft says comes back
-answered, with an empty body whose whole content is the identifiers riding in its payload. An
-empty message is a real message here, and this is what it is for.
+answered with an acknowledgement: a message whose body is `Body::Ack`, and whose whole content is
+the identifiers riding in its payload. Only the shard sends one; a client cannot.
 
 **In the mode it was spoken in.** Every transmission states whether it went out as a beam — one
 byte, set by the transmitter, because nothing downstream can work it out: a beam and a shout of
@@ -396,9 +396,9 @@ It is a bearing and not a target, and the difference is the mechanic: it points 
 *was* when the light left, not where they will be when the answer lands. A craft under thrust in
 between is missed, and by more the further away it is.
 
-**A bare acknowledgement is never itself acknowledged.** Two ships each answering the other
+**An acknowledgement is never itself acknowledged.** Two ships each answering the other
 automatically would trade light for ever, at whatever the round trip between them is, with no
-pilot present at either end. Only a message with something in it earns an answer, and a resend
+pilot present at either end. Only text earns an answer, and a resend
 earns one answer rather than one per attempt. One acknowledgement ends the exchange; there is no
 second round of it.
 

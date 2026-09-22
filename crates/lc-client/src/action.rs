@@ -422,10 +422,8 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // The client learns of its own message when the acceptance comes back.
         Action::Say { to, aim, secrecy, body, idem } => {
             let body = body.trim().to_string();
-            // An empty body is a *bare acknowledgement* and is a real message — but only one
-            // this client sends deliberately, by repeating a key. An empty draft with no key
-            // is somebody pressing send on an empty field, which is a keystroke, not a message.
-            if body.is_empty() && idem.is_none() {
+            // Somebody pressing send on an empty field. Acknowledging is the server's, not this.
+            if body.is_empty() {
             } else if !session.remote {
                 effects.push(Effect::Notify("no server, so nobody to talk to".into()));
             } else if body.len() > lc_proto::MESSAGE_LIMIT {
