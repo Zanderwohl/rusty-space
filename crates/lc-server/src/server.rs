@@ -237,6 +237,15 @@ impl<J: Journal> Server<J> {
         self.now_t
     }
 
+    /// Mint past every identifier the store already holds.
+    ///
+    /// Called at boot with what the journal has, for the reason in
+    /// [`lc_store::id::Minter::resume_from`]: the clock comes back from a checkpoint that may
+    /// be behind where the shard got to, and identifiers are minted from it.
+    pub fn resume_ids(&mut self, last: lc_store::id::EventId) {
+        self.minter.resume_from(last);
+    }
+
     pub fn journal(&self) -> &J {
         &self.journal
     }
@@ -643,7 +652,10 @@ impl<J: Journal> Server<J> {
                 (
                     KIND_BURN,
                     BURN_POWER_W,
-                    format!("{{\"beta\":{beta:?}}}"),
+                    // Serialized, not formatted: `DVec3`'s `Debug` writes `DVec3(x, y, z)`,
+                    // which the payload column will not take, and a store that refuses a row
+                    // stops the shard.
+                    serde_json::json!({ "beta": beta.to_array() }).to_string(),
                     Order::Burn { beta: beta.to_array() },
                 )
             }

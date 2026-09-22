@@ -151,6 +151,17 @@ impl Journal for Memory {
         events: &[Event],
         deliveries: &[Scheduled],
     ) -> Result<(), JournalError> {
+        // The payload column is `jsonb`, so a payload that is not JSON is a row the real
+        // journal refuses. A fake that took it let a burn built with `format!` out of a
+        // `DVec3` past four hundred tests and fail on the shard.
+        for event in events {
+            if serde_json::from_str::<serde_json::Value>(&event.payload).is_err() {
+                return Err(JournalError(format!(
+                    "event {} carries a payload that is not JSON: {}",
+                    event.id, event.payload,
+                )));
+            }
+        }
         self.events.extend_from_slice(events);
         self.deliveries.extend_from_slice(deliveries);
         Ok(())
@@ -243,13 +254,16 @@ impl Journal for Memory {
 /// One span is thirty days of coordinate time, about four and a half real days at the design
 /// rate. Two of them is enough that a server has to be down for a week before a write finds no
 /// room.
-pub const PREPARE_AHEAD_US: i64 = 2 * 2_592_000_000_000;
+pub const PREPARE_AHEAD_US: i64 = 2 * lc_store::store::PARTITION_SPAN_US;
 
 /// The real one.
 pub struct Postgres {
     client: tokio_postgres::Client,
     /// The range already made ready, so the tick is one comparison rather than a round trip.
     prepared: Option<(i64, i64)>,
+    /// Partitions made outside that range, for arrivals beyond it. Kept so a system talking to
+    /// itself asks once rather than every tick.
+    distant: std::collections::HashSet<i64>,
 }
 
 impl Postgres {
@@ -257,16 +271,41 @@ impl Postgres {
     pub async fn open() -> Result<Self, JournalError> {
         let client = lc_store::connect().await?;
         lc_store::migrate::apply(&client).await?;
-        Ok(Self { client, prepared: None })
+        Ok(Self::with(client))
     }
 
     /// The same, over a connection the caller already has.
     pub fn with(client: tokio_postgres::Client) -> Self {
-        Self { client, prepared: None }
+        Self { client, prepared: None, distant: std::collections::HashSet::new() }
     }
 
     pub fn client(&self) -> &tokio_postgres::Client {
         &self.client
+    }
+
+    /// Make room for rows landing outside the window [`Journal::prepare`] keeps.
+    ///
+    /// **A delivery's `arrive_t` is years out, not a time near now**, because that is how long
+    /// the light takes — so the first thing said within earshot of another system lands past
+    /// any rolling window, and a row with no partition is an error.
+    ///
+    /// One partition per arrival rather than the range up to it: every thirty-day slot between
+    /// here and a star would be thousands of empty tables.
+    async fn make_room(&mut self, times: impl Iterator<Item = i64>) -> Result<(), JournalError> {
+        // Nothing prepared yet is an empty range, which every time falls outside.
+        let (lo, hi) = self.prepared.unwrap_or((i64::MAX, i64::MIN));
+        let wanted: std::collections::BTreeSet<i64> = times
+            .filter(|t| *t < lo || *t > hi)
+            .map(lc_store::store::partition_of)
+            .filter(|slot| !self.distant.contains(slot))
+            .collect();
+        for slot in wanted {
+            // The slot's own start, so the call makes exactly the one partition.
+            let at = slot.saturating_mul(lc_store::store::PARTITION_SPAN_US);
+            lc_store::store::ensure_partitions(&self.client, at, at).await?;
+            self.distant.insert(slot);
+        }
+        Ok(())
     }
 }
 
@@ -317,6 +356,12 @@ impl Journal for Postgres {
                 payload: e.payload.clone(),
             })
             .collect();
+        // Both tables at once, and before either insert: an event is always inside the tick's
+        // window, but the deliveries it schedules reach as far as the light does.
+        self.make_room(
+            events.iter().map(|e| e.t).chain(deliveries.iter().map(|d| d.arrive_t)),
+        )
+        .await?;
         lc_store::store::insert_events(&self.client, &rows).await?;
 
         let scheduled: Vec<lc_store::store::Delivery> = deliveries

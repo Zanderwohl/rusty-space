@@ -171,6 +171,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut store = match db {
         Some(url) => {
             let client = connect(&url).await?;
+            // Before anything can be journalled. The clock below comes back from the last
+            // checkpoint, which may be behind the last event written, and an identifier minted
+            // from a clock that has gone back is one the store already has.
+            if let Some(last) = lc_store::store::last_event_id(&client).await? {
+                server.resume_ids(last);
+            }
             match lc_store::ships::load_shard(&client, shard_id).await? {
                 Some(shard) => {
                     let rows = lc_store::ships::load_ships(&client).await?;
@@ -248,6 +254,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
     let mut since_save = 0u32;
+    // Consecutive ticks whose journal write failed, so a store that has gone away is reported
+    // rather than repeated twenty times a second.
+    let mut failing = 0u32;
 
     loop {
         tokio::select! {
@@ -262,7 +271,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("connection {} closed", client.0);
             server.disconnected(client);
         }
-        server.tick(&mut wire).await?;
+        // **Not `?`.** A tick the store would not take is one tick's events lost; ending the
+        // process here lost every connected player instead, socket closed with no close frame,
+        // and came back on the next order anyone gave.
+        match server.tick(&mut wire).await {
+            Ok(()) => failing = 0,
+            Err(why) => {
+                if failing.is_multiple_of(COMPLAIN_EVERY_TICKS) {
+                    eprintln!("ERROR: the tick could not be journalled: {why}");
+                }
+                failing += 1;
+            }
+        }
 
         since_save += 1;
         if since_save >= SAVE_EVERY_TICKS
@@ -291,6 +311,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// is stamped in absolute coordinate time, so a stale checkpoint replayed forward puts a ship
 /// exactly where it would have been. What does not survive is an order given in the gap.
 const SAVE_EVERY_TICKS: u32 = 400;
+
+/// Ticks between repeats of the same journal complaint. Twenty seconds of real time: often
+/// enough that an operator sees a store outage going on, rarely enough to read.
+const COMPLAIN_EVERY_TICKS: u32 = 400;
 
 async fn checkpoint(
     client: &mut tokio_postgres::Client,
