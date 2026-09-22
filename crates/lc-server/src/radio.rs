@@ -416,6 +416,14 @@ impl<J: Journal> Server<J> {
             let excess = window.len().saturating_sub(ACK_DEPTH);
             window.drain(..excess);
         }
+        // Reports whose light had not landed when the last shard stopped. The sender's mark
+        // moved when it sent them, so nothing would ever send them again.
+        let flying = self.journal.in_flight(lc_proto::kind::REPORT, self.now_t).await?;
+        let (mut events, deliveries): (Vec<_>, Vec<_>) = flying.into_iter().map(|(d, e)| (e, d)).unzip();
+        // One row per delivery, so an event heard by several craft comes back several times.
+        events.sort_by_key(|e| e.id);
+        events.dedup_by_key(|e| e.id);
+        self.schedule_landings(&events, &deliveries);
         Ok(())
     }
 

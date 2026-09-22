@@ -669,4 +669,46 @@ mod tests {
             assert_eq!(server.duty_of(ship), Some(&Duty::Idle), "and the telescope did not take it up");
         }
     }
+
+    /// Review item 8. A report a light-hour out when its shard stops still lands, at the time
+    /// its light gets there, on the shard that comes back: the journal still holds its delivery.
+    #[tokio::test]
+    async fn a_report_in_flight_across_a_restart_still_lands() {
+        let mut old = Server::new(Memory::default(), 0, 1);
+        old.load_world(World::new(sky()));
+        let mut wire = Loopback::new();
+        let (near, far) = (ShipId(40), ShipId(41));
+        old.admit(ClientId(1), crate::world::still(near, DVec3::ZERO), 0.0);
+        old.admit(ClientId(2), crate::world::still(far, DVec3::X * 3_600.0 * 1.0e6), 0.0);
+        let secret = StarId::synthesise("instruments", 77);
+        let now_s = old.now_t() as f64 * 1.0e-6;
+        old.aboard(CraftId(far.0)).knowledge.sighted(
+            secret,
+            Sighting {
+                witness: witness(CraftId(far.0)),
+                observed_s: now_s,
+                bearing: Bearing { observer_ly: DVec3::X, toward: DVec3::Y, sigma_rad: 1e-9 },
+                band: em_spectra::Band::V,
+                flux: 1e-12,
+                flux_sigma: 1e-15,
+                lineage: Vec::new(),
+            },
+        );
+        let report = Order::SendReport { to: Some(near), aim: lc_proto::Aim::Omni, secrecy: lc_proto::Secrecy::Open, idem: 3 };
+        wire.client_says(ClientId(2), act(far, report));
+        old.tick(&mut wire).await.unwrap();
+        assert!(!old.knowledge_of(near).is_some_and(|k| k.knows(secret)), "an hour from landing");
+
+        let checkpoint = old.checkpoint();
+        let mut new = Server::new(std::mem::take(&mut old.journal), 0, 1);
+        new.load_world(World::new(sky()));
+        assert!(new.adopt(checkpoint).is_empty());
+        new.resume_conversations().await.unwrap();
+        let until = new.now_t() + 2 * 3_600 * 1_000_000;
+        while new.now_t() < until {
+            new.tick(&mut wire).await.unwrap();
+        }
+        let belief = new.knowledge_of(near).and_then(|k| k.belief(secret).cloned()).expect("it landed after the restart");
+        assert!(belief.learned_s > now_s + 3_000.0, "when its light got there: {}", belief.learned_s);
+    }
 }

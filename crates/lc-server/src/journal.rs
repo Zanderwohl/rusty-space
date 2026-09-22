@@ -67,6 +67,15 @@ pub trait Journal {
         until_t: i64,
     ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
 
+    /// Every delivery of an event of `kind` that lands after `after_t`, with its event: what is
+    /// still in flight. Read once, when a shard comes back, for whatever it acts on when light
+    /// lands rather than merely shows.
+    fn in_flight(
+        &self,
+        kind: i16,
+        after_t: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
+
     /// Append what was said, where it landed, and what keys that taught.
     ///
     /// Separate from [`Journal::write`] and deliberately so. An event and its deliveries are
@@ -160,6 +169,17 @@ impl Journal for Memory {
             .filter_map(|d| {
                 self.events.iter().find(|e| e.id == d.event).map(|e| (*d, e.clone()))
             })
+            .collect();
+        out.sort_by_key(|(d, _)| d.arrive_t);
+        Ok(out)
+    }
+
+    async fn in_flight(&self, kind: i16, after_t: i64) -> Result<Vec<(Scheduled, Event)>, JournalError> {
+        let mut out: Vec<(Scheduled, Event)> = self
+            .deliveries
+            .iter()
+            .filter(|d| d.arrive_t > after_t)
+            .filter_map(|d| self.events.iter().find(|e| e.id == d.event && e.kind == kind).map(|e| (*d, e.clone())))
             .collect();
         out.sort_by_key(|(d, _)| d.arrive_t);
         Ok(out)
@@ -362,6 +382,42 @@ impl Journal for Postgres {
         Ok(out)
     }
 
+    async fn in_flight(&self, kind: i16, after_t: i64) -> Result<Vec<(Scheduled, Event)>, JournalError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT d.observer_id, d.arrive_t, d.event_id, d.strength,
+                        e.source_id, e.t, e.gx, e.gy, e.gz, e.kind, e.payload::text
+                   FROM deliveries d JOIN events e ON e.event_id = d.event_id
+                  WHERE e.kind = $1 AND d.arrive_t > $2
+               ORDER BY d.arrive_t",
+                &[&kind, &after_t],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                (
+                    Scheduled {
+                        observer: ShipId(row.get(0)),
+                        arrive_t: row.get(1),
+                        event: row.get(2),
+                        strength: row.get(3),
+                    },
+                    Event {
+                        id: row.get(2),
+                        source: ShipId(row.get(4)),
+                        t: row.get(5),
+                        at: from_grid([row.get(6), row.get(7), row.get(8)]),
+                        kind: row.get(9),
+                        power_w: 0.0,
+                        payload: row.get(10),
+                    },
+                )
+            })
+            .collect())
+    }
+
     async fn record(
         &mut self,
         messages: &[lc_store::chat::Message],
@@ -435,6 +491,10 @@ impl Journal for Store {
         until_t: i64,
     ) -> Result<Vec<(Scheduled, Event)>, JournalError> {
         either!(self, due(observer, after_t, until_t))
+    }
+
+    async fn in_flight(&self, kind: i16, after_t: i64) -> Result<Vec<(Scheduled, Event)>, JournalError> {
+        either!(self, in_flight(kind, after_t))
     }
 
     async fn record(
