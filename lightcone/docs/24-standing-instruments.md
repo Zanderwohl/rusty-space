@@ -63,7 +63,7 @@ storage.
 | kind | size | lifetime | store |
 |---|---|---|---|
 | **files**: bearings, claims, namings, notes, conclusions — per subject | bounded: bearings are a reservoir of sixteen per witness | as long as the craft exists | one row per `(craft, subject)`, the file as a blob, rewritten when it changes |
-| **logs**: photometric samples | unbounded while a star is watched | until consumed into a conclusion | append-only rows, partitioned by time |
+| **logs**: photometric samples | bounded only by the room aboard: a craft's data modules | until consumed into a conclusion | append-only rows, partitioned by time |
 | **routes and keys** | small | as long as they are true | beside the keyring |
 
 A row per craft per subject is about 1e7 rows for a thousand craft that have each surveyed ten
@@ -71,8 +71,9 @@ thousand stars, which Postgres holds without noticing. The logs are the only thi
 grow without bound, and the next section is why they do not.
 
 A blob rather than columns because the file is what is read and written, whole, and because its
-shape will keep changing for a while; a format version on the row lets old files be read after
-it does, exactly as `lc_ships` does for motion.
+shape will keep changing for a while. A format version on the row says which shape wrote it, and
+`knowledge::formats` reads every retired one up to the current shape, with a test each, exactly as
+`lc_ships` does for motion; only a file from a newer shard is refused.
 
 ### As built
 
@@ -80,8 +81,9 @@ it does, exactly as `lc_ships` does for motion.
 |---|---|
 | files | `lc_knowledge`, one row per craft per subject, postcard with `archive::KNOWLEDGE_FORMAT` — `sql/0010_knowledge.sql` |
 | samples | `lc_samples`, partitioned by **learned** time, kept ready by the journal beside events and deliveries. Observation time is stored as the exact f64 it was stamped with: a sweep finishes a field at an instant that is not a whole microsecond |
-| duty and report marks | the ship checkpoint, `persist::Saved::instruments`, save format 6 |
-| what is written | only what changed since the last checkpoint: `Knowledge::take_changes` hands over the files touched, without their samples, and the samples taken |
+| duty and report marks | the ship checkpoint, `persist::Saved::instruments`, save format 8 |
+| what is written | only what changed since the last checkpoint: `Knowledge::take_changes` hands over the files touched, without their samples, the samples taken, and the samples consumed to delete. All of it, the ships and the bookmarks go in one transaction, and a failed one hands everything back to be written next time |
+| what a client is sent | its craft's knowledge in byte-bounded pages, as `Learned` reports and `Logged` pages of its own samples, each under `lc_proto::FRAME_LIMIT`, which both ends of the websocket state |
 
 One thing is true for now and will not stay true: **the store is not partitioned by shard**:
 a shard loads every craft's knowledge and keeps what belongs to the craft it adopted, the same way
@@ -130,7 +132,7 @@ comes out is a set of **conclusions**.
 | hypotheses | each with a probability and its parameters: period, depth, element size, element count |
 | evidence | the statistics it was drawn from: significance, number of transits seen, band mask |
 | covering | the span of **emission** time the data describe, which needs the distance and says so if it does not have one |
-| witness and instrument | whose data, through what — a conclusion is a record, and it carries provenance like one |
+| witness and observer | who read the log and whose log it was, and where the observer looked from — a conclusion is a record, and it carries provenance like one. Which instrument is not recorded yet: every craft carries the one telescope |
 
 Conclusions are knowledge records. They travel in reports, and they are far smaller than the
 logs they came from, which matters more than anything else about them: **a faction shares

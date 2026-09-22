@@ -704,10 +704,6 @@ fn apply_to(ui: &mut UiState, session: &mut Session, action: Action, effects: &m
 ///
 /// Not simply the first: the catalogue carries the Sun at about an astronomical unit, and
 /// "nearest star" has to mean one that is somewhere else.
-/// The nearest star this ship has a position for, other than the one it is sitting in.
-///
-/// Out of what is *known*: the key picks a target to watch, and a target nobody has detected
-/// is not one the ship could name, let alone point at.
 /// Put the telescope on a duty.
 ///
 /// With a shard the duty is the shard's to take up, and nothing is taken up here: the
@@ -725,6 +721,10 @@ fn set_duty(ui: &UiState, session: &mut Session, duty: Duty, effects: &mut Vec<E
     }
 }
 
+/// The nearest star this ship has a position for, other than the one it is sitting in.
+///
+/// Out of what is *known*: the key picks a target to watch, and a target nobody has detected
+/// is not one the ship could name, let alone point at.
 fn nearest_interstellar(session: &Session) -> Option<StarId> {
     let here = session.ship.motion.position_ly;
     session

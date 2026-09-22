@@ -230,7 +230,9 @@ in range at the same time.
 
 ### Cost
 
-**Every transmission costs stored energy**, relayed or not, by real physics scaled by one
+**Not built yet: this is phase 11f.** Today a transmission costs nothing.
+
+**Every transmission is to cost stored energy**, relayed or not, by real physics scaled by one
 constant — the same arrangement solar income uses
 ([20-solar-power.md](20-solar-power.md#balance)).
 
@@ -408,14 +410,16 @@ A note is a comment on a subject: author, text, when written, and a scope.
 
 ## Transcripts
 
-A report is not a conversation, but it is an event in one. The transcript gets a line:
+A report is not a conversation, but it is an event in one. **As built**, the receiving client
+says so in a notification, not a transcript row:
 
 > **Kestrel:** told you about 64 stars
-> **Kestrel:** relayed Osprey's survey of 12 stars
 
-Stored as a row in `lc_messages` with a summary body and a flag. The report itself is never
-stored there, for the reason [22-provenance.md](22-provenance.md#reports-on-the-air) gives: its
-content lives in the receiver's knowledge from the moment it lands.
+Nothing is written to `lc_messages`, and a test holds it there, for the reason
+[22-provenance.md](22-provenance.md#reports-on-the-air) gives: its content lives in the
+receiver's knowledge from the moment it lands. A transcript line — a row with a summary body and
+a flag, "relayed Osprey's survey of 12 stars" among them — is the plan once relays make it worth
+reading back, and is 11g's to build.
 
 ## Open
 
@@ -425,7 +429,7 @@ content lives in the receiver's knowledge from the moment it lands.
 - **Whether flooding should be the default at all**, or opt-in, given what it costs in stored
   energy and in visibility. Measure it with twenty craft, with transmission costing, before
   deciding.
-- **The anchors** for `transmit_gain` and `data_per_module`: one sentence each, chosen when the
-  steps that use them are built, and written down beside the solar anchor.
+- **The anchor** for `transmit_gain`: one sentence, chosen when 11f builds it, and written down
+  beside the solar anchor. `data_per_module`'s is in [19-ship-fitting.md](19-ship-fitting.md).
 - **Key theft**, dictionaries, and commanding assets: deferred by decision, and each sits on top
   of the certificates above without changing them.

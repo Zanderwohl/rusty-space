@@ -368,7 +368,8 @@ for how `lc-store` applies and tests its schema.
 
 ### 11d — Conclusions
 
-**Built.** Protocol 32, save format 7, knowledge format 3. Two questions per log, each with
+**Built.** Protocol 32, save format 7, knowledge format 3 — and after the review of phase 11,
+protocol 34, save format 8, knowledge format 4, with every older knowledge format still read. Two questions per log, each with
 hypotheses summing to one: *transiting* — a rocky or giant planet, nothing transiting, or a
 planet the log could not yet have found — and *in orbit* — a swarm, or only the belts every
 system has. The starting ship's data module took a living module's slot, so its mass is unchanged.

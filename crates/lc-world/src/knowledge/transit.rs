@@ -12,8 +12,9 @@
 //! client says so beside each one.
 //!
 //! Times are coordinate seconds of arrival at the observer. That is the right clock for a period
-//! while the observer is still; a moving one sees periods Doppler-shifted, which at the speeds
-//! in play is below what a log resolves.
+//! only while the observer is still. A moving one sees every period Doppler-shifted — by a fifth
+//! at a fifth of `c`, far past a period's error — and a log taken under way is folded here as
+//! though it were not; correcting arrival times for the craft's motion is not done yet.
 
 use serde::{Deserialize, Serialize};
 

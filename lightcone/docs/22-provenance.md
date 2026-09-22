@@ -260,27 +260,38 @@ behaves.
 Everything else it inherits: it is aimed or shouted, it crosses at `c`, the shard schedules it
 to whoever the beam covers, and it arrives when its light does.
 
-**A craft is named by its shard, and its records follow.** Everything a ship measures before
-it has been told which ship it is gets filed under a placeholder; the welcome rebrands it.
-Without that, two craft would both be witness zero and the first report between them would
-file one crew's bearings as the other's own.
+**A report carries conclusions, not logs.** Its parts hold sightings, claims, names, orbits and
+conclusions — never a craft's photometric samples, which are enormous next to what was learned
+from them and cost energy to send in proportion. A conclusion keeps the name of the observer
+whose log it came from, and a receiver holds each observer's separately, with where it looked
+from: a transit seen from one direction may be invisible from another, so two can disagree and
+both be right. What a craft believes is a fold over them.
 
 **Reports drain a backlog.** The shard keeps a mark per sender per recipient — how far through
 its own learning the sender has told them — and each transmission carries the oldest
-[`ENTRIES_PER_REPORT`](../../crates/lc-world/src/knowledge/mod.rs) systems past that mark.
+[`ENTRIES_PER_REPORT`](../../crates/lc-world/src/knowledge/report.rs) systems past that mark.
+The mark is a time and a system, so a volume of charts issued at one instant still pages, and
+nothing learned after a report was sent goes in it. The mark moves only once the transmission
+exists.
+
+**A report is sent, not delivered.** It is not acknowledged, and the mark says what was sent: a
+beamed report that lands under its recipient's noise floor is light that went past, and nothing
+resends it. That is the game working — radio is lossy and a sender cannot know — and resending
+is a player's decision, made by sending again after marking the recipient as needing it.
 **The shard writes the report**, from the knowledge it holds for the sender; a client that wrote
 its own could report anything it liked. A craft with nothing new to say is refused with
 `NothingNew`, which is the correct amount of radio traffic for having learned nothing.
 
-**The report itself is not filed as a conversation** — though the transcript gets a one-line
-summary of it; see [23-factions.md](23-factions.md#transcripts). A transcript is read long after everything in it has
-arrived; a report is folded the moment it lands and its content lives in the receiver's
-knowledge from then on. Putting surveys in `lc_messages` would hand every sign-in a backlog of
-megabytes of somebody else's astrometry. The cost of that decision is honest and worth naming:
-**a report that lands while its receiver is offline is replayed from the delivery table on
-reconnect and folded then** — and if the receiver's knowledge is not persisted, a report that
-arrived before the last snapshot is gone. That is the persistence item below, not a separate
-problem.
+**The report itself is not filed as a conversation**, and no transcript row is written for it:
+the receiving client says in a notification who told it about how many stars. A transcript is
+read long after everything in it has arrived; a report is folded the moment it lands and its
+content lives in the receiver's knowledge from then on. Putting surveys in `lc_messages` would
+hand every sign-in a backlog of somebody else's astrometry.
+
+A report lands on the shard, whether or not anybody is signed in to the craft it lands on, and
+is written down with the rest of that craft's knowledge. **A report still in flight when a shard
+stops is replayed on boot** from the journal's deliveries, which are kept until their light has
+passed everyone, so it lands on time on the shard that comes back.
 
 ## What is built
 
@@ -295,11 +306,15 @@ In `lc-world::knowledge`, engine-free and tested:
 | `knowledge::astrometry` | bearings, centroid precision, the triangulation, `Distance` |
 | `knowledge::survey` | `Optics`, detection and glare, the `Sweep` and its field order, `Duty` |
 
-In `lc-client`: the session carries a `Knowledge` and a `Duty`; the telescope records into it
-per star, per band and per witness; the map and the target list read out of it; a ship is issued
-charts on entering the game; and noise is seeded from `(witness, star, arrival time)` so a
-server can recompute exactly what an instrument saw, which is what
-[05-observation.md](05-observation.md) asks for and what nothing implemented before.
+On the shard, since phase 11b: every craft's `Knowledge` and telescope live in
+`lc-server::instruments` and run whether or not anybody is flying them, and a report lands there.
+A client holds a copy, paged to it as `Outbound::Learned` and, for its own logs, `Outbound::Logged`;
+it names, points and reports by order. Noise is seeded from `(witness, star, arrival time)` on both
+sides, so a shard recomputes exactly what an instrument saw, which is what
+[05-observation.md](05-observation.md) asks for. The client reads a distance only from belief —
+measured with its error and the angle its baseline subtended, stated on somebody's word, a floor,
+or a bearing only — and names the home system from the crew's namings; nothing a player sees
+reads a catalogue name.
 
 ## What is not, and in what order
 
