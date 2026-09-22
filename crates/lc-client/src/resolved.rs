@@ -329,7 +329,7 @@ fn uniforms(
         reflected: reflected.extend(0.0),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
         emitted: emitted.extend(if body.surface.is_banded() { INVERSION } else { 0.0 }),
-        exposure: Vec4::new(tone.surface_reference, tone.stops, 0.0, 0.0),
+        exposure: Vec4::new(tone.surface_reference, tone.surface_stops, 0.0, 0.0),
     }
 }
 
@@ -615,7 +615,7 @@ mod tests {
         assert_eq!(by_proxy, by_spectrum);
     }
 
-    /// The displayed window is two and a half stops wide and a lit surface's range is tens, so
+    /// The displayed window is five stops wide and a lit surface's range is tens, so
     /// the level clips. Which end it clips at is the exposure's business, not this function's.
     #[test]
     fn the_level_is_a_window_and_a_close_surface_fills_it() {

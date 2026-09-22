@@ -1083,8 +1083,11 @@ Two things that only became clear once it was implemented:
   than the rest — the catalogue puts the Sun about an astronomical unit away, and it outshines
   a star four light-years off by some thirty-six stops. Letting the brightest couple of percent
   clip is what a star map does anyway, and it is why daylight hides the sky.
+- **A resolved surface has a window of its own, five stops wide.** At a point's two and a
+  half, an ocean four stops under the clouds over it was black, and so were Mars's dark
+  provinces. The width is a look, not a measurement.
 - **Below the window, a point source is small rather than black.** The two-or-three-stop
-  window is for surface brightness. A star field spans far more than that, so a shaded value
+  window is for a point's brightness. A star field spans far more than that, so a shaded value
   carries its true signed offset from the reference, and the renderer maps that to size across
   about fourteen stops while color stays inside the window.
 

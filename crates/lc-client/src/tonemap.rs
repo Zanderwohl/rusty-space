@@ -71,11 +71,15 @@ pub struct ToneMap {
     pub surface_reference: f32,
     /// Width of the window, in stops.
     pub stops: f32,
+    /// Width of a resolved surface's window, in stops. Wider than a point's so a surface keeps
+    /// its darks: an ocean sits four stops under the clouds over it, and at the points' width it
+    /// was black.
+    pub surface_stops: f32,
 }
 
 impl Default for ToneMap {
     fn default() -> Self {
-        Self { reference: 1.0, surface_reference: 1.0, stops: 2.5 }
+        Self { reference: 1.0, surface_reference: 1.0, stops: 2.5, surface_stops: 5.0 }
     }
 }
 
@@ -91,18 +95,24 @@ impl ToneMap {
 
     /// Shade a point source, whose brightness is the flux it delivers.
     pub fn shade(&self, radiance: &PerBand<f32>, mapping: &BandMapping) -> Shaded {
-        self.against(self.reference, radiance, mapping)
+        self.against(self.reference, self.stops, radiance, mapping)
     }
 
     /// Shade a resolved surface, whose brightness is its radiance.
     pub fn shade_surface(&self, radiance: &PerBand<f32>, mapping: &BandMapping) -> Shaded {
-        self.against(self.surface_reference, radiance, mapping)
+        self.against(self.surface_reference, self.surface_stops, radiance, mapping)
     }
 
-    fn against(&self, reference: f32, radiance: &PerBand<f32>, mapping: &BandMapping) -> Shaded {
+    fn against(
+        &self,
+        reference: f32,
+        stops: f32,
+        radiance: &PerBand<f32>,
+        mapping: &BandMapping,
+    ) -> Shaded {
         let linear = Vec3::from_array(mapping.apply(radiance));
         let luminance = linear.dot(LUMA);
-        if !(luminance > 0.0) || reference <= 0.0 || self.stops <= 0.0 {
+        if !(luminance > 0.0) || reference <= 0.0 || stops <= 0.0 {
             return Shaded::default();
         }
         // Stops relative to the top of the window: 0 at the reference, negative below.
@@ -110,7 +120,7 @@ impl ToneMap {
         let peak = linear.max_element();
         Shaded {
             chroma: if peak > 0.0 { linear / peak } else { Vec3::ONE },
-            value: (above / self.stops + 1.0).clamp(0.0, 1.0),
+            value: (above / stops + 1.0).clamp(0.0, 1.0),
             glow: above.max(0.0),
             stops: above,
         }
@@ -130,7 +140,7 @@ mod tests {
     #[test]
     fn a_source_at_the_reference_fills_the_window_without_glowing() {
         let m = presets::natural();
-        let tone = ToneMap { reference: 1.0, surface_reference: 1.0, stops: 2.5 };
+        let tone = ToneMap { reference: 1.0, surface_reference: 1.0, stops: 2.5, surface_stops: 5.0 };
         // The radiance whose luminance is exactly the reference.
         let scale = 1.0 / Vec3::from_array(m.apply(&flat(1.0))).dot(LUMA);
         let at_reference = tone.shade(&flat(scale), &m);
@@ -151,7 +161,7 @@ mod tests {
     #[test]
     fn the_window_is_logarithmic_and_only_as_wide_as_it_says() {
         let m = presets::natural();
-        let tone = ToneMap { reference: 1.0, surface_reference: 1.0, stops: 2.0 };
+        let tone = ToneMap { reference: 1.0, surface_reference: 1.0, stops: 2.0, surface_stops: 5.0 };
         let l = |v: f32| tone.shade(&flat(v), &m).color().max_element();
         let top = 1.0 / Vec3::from_array(m.apply(&flat(1.0))).dot(LUMA);
         // Two stops down is the bottom of the window; anything below is black.
@@ -172,7 +182,7 @@ mod tests {
     #[test]
     fn darkness_and_degenerate_settings_give_black_rather_than_nan() {
         let m = presets::natural();
-        for tone in [ToneMap::default(), ToneMap { reference: 0.0, surface_reference: 0.0, stops: 2.0 }, ToneMap { reference: 1.0, surface_reference: 1.0, stops: 0.0 }] {
+        for tone in [ToneMap::default(), ToneMap { reference: 0.0, surface_reference: 0.0, stops: 2.0, surface_stops: 5.0 }, ToneMap { reference: 1.0, surface_reference: 1.0, stops: 0.0, surface_stops: 0.0 }] {
             let s = tone.shade(&flat(0.0), &m);
             assert!(s.color().is_finite() && s.glow.is_finite() && s.stops.is_finite());
         }
@@ -184,7 +194,7 @@ mod tests {
     #[test]
     fn a_point_source_stays_visible_below_the_window() {
         let m = presets::natural();
-        let tone = ToneMap { reference: 1.0, surface_reference: 1.0, stops: 2.5 };
+        let tone = ToneMap { reference: 1.0, surface_reference: 1.0, stops: 2.5, surface_stops: 5.0 };
         let faint = tone.shade(&flat(1e-2), &m);
         assert_eq!(faint.value, 0.0, "six stops down is outside a 2.5 stop window");
         assert!(faint.color() == Vec3::ZERO);
@@ -195,6 +205,17 @@ mod tests {
         assert!(fainter.point_brightness(12.0) < faint.point_brightness(12.0));
         // Past the visible range it does go out.
         assert_eq!(tone.shade(&flat(1e-9), &m).point_brightness(12.0), 0.0);
+    }
+
+    /// Four stops is an ocean under cloud: gone from a point's window, kept in a surface's.
+    #[test]
+    fn a_surface_has_the_wider_window() {
+        let m = presets::natural();
+        let tone = ToneMap::default();
+        let top = 1.0 / Vec3::from_array(m.apply(&flat(1.0))).dot(LUMA);
+        let four_down = flat(top / 16.0);
+        assert_eq!(tone.shade(&four_down, &m).value, 0.0);
+        assert!((tone.shade_surface(&four_down, &m).value - 0.2).abs() < 0.01);
     }
 
     #[test]

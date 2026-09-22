@@ -315,7 +315,7 @@ fn uniforms(
         // `w` is how far the pattern inverts in the body's own light, and a hull has no
         // pattern: its two palette ends are the same gray.
         emitted: emitted.extend(0.0),
-        exposure: Vec4::new(tone.surface_reference, tone.stops, 0.0, 0.0),
+        exposure: Vec4::new(tone.surface_reference, tone.surface_stops, 0.0, 0.0),
     }
 }
 
