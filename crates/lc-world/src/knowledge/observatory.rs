@@ -31,6 +31,9 @@ pub const CHART_ERROR: f64 = 0.01;
 /// How far the charts a ship starts with reach, light-years. Past this, the sky is unsurveyed.
 pub const CHARTED_LY: f64 = 20.0;
 
+/// Watch turns measured in one tick at most.
+const TURNS_PER_TICK: i64 = 64;
+
 /// Light-microseconds per light-year, for putting an observer on the grid.
 const LUS_PER_LY: f64 = M_PER_LY / 299.792458;
 
@@ -203,17 +206,21 @@ impl Observatory {
                 }
             }
             duty @ Duty::Watch { .. } => {
-                let Duty::Watch { dwell_s, .. } = duty else { return };
+                let Duty::Watch { dwell_s, started_s, .. } = duty else { return };
+                let dwell = dwell_s.max(1.0);
                 let Some(slot) = duty.slot_at(now_s) else { return };
                 let previous = std::mem::replace(&mut self.slot, slot);
-                // The turn that just ended is the only one with a full dwell behind it, and on
-                // the first tick there is no such turn.
-                if previous != slot
-                    && previous != i64::MIN
-                    && let Some(id) = duty.target_at(now_s - dwell_s.max(1.0))
-                {
-                    photometry(sky, knowledge, at, id, dwell_s, now_s);
-                    fix(sky, knowledge, at, id, dwell_s, now_s);
+                // Every turn that ended since the last tick, each measured when it ended; on the
+                // first tick no turn has a full dwell behind it. Capped, so a long gap costs a
+                // bounded amount.
+                if previous != i64::MIN {
+                    for turn in previous.max(slot - TURNS_PER_TICK)..slot {
+                        let ended_s = started_s + (turn + 1) as f64 * dwell;
+                        if let Some(id) = duty.target_at(ended_s - dwell * 0.5) {
+                            photometry(sky, knowledge, at, id, dwell, ended_s);
+                            fix(sky, knowledge, at, id, dwell, ended_s);
+                        }
+                    }
                 }
                 self.pointing = duty.target_at(now_s);
             }
@@ -286,8 +293,10 @@ pub fn sweep_between(
         .enumerate()
         .filter_map(|(i, star)| {
             let toward = (star.position_ly - at.position_ly).normalize_or_zero();
-            plan.observed_between(toward, from_s, to_s).map(|when| (i, when))
+            let passes = plan.observed_between(toward, from_s, to_s);
+            (!passes.is_empty()).then(|| passes.into_iter().map(move |when| (i, when)))
         })
+        .flatten()
         .collect();
     if due.is_empty() {
         return;
@@ -475,6 +484,25 @@ mod tests {
         }
         for id in &ids {
             assert!(k.own_series(*id, Band::V).is_some_and(|s| !s.is_empty()));
+        }
+    }
+
+    /// Ticked once after nine turns, a watch measures every turn that ended, each stamped when
+    /// it ended rather than when the tick came.
+    #[test]
+    fn a_watch_measures_every_turn_that_ended_across_a_gap() {
+        let mut sky = spread();
+        let ids: Vec<StarId> = sky.stars().iter().map(|s| s.id).collect();
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let dwell = 4000.0;
+        o.take_up(Duty::Watch { targets: ids.clone(), dwell_s: dwell, started_s: YEAR_S }, YEAR_S);
+        o.tick(&mut sky, &mut k, at(DVec3::ZERO), YEAR_S + 1.0);
+        o.tick(&mut sky, &mut k, at(DVec3::ZERO), YEAR_S + 9.5 * dwell);
+        for (n, id) in ids.iter().enumerate() {
+            let times: Vec<f64> = k.own_series(*id, Band::V).unwrap().samples().iter().map(|s| s.observed_s).collect();
+            let expected: Vec<f64> = (0..9).filter(|t| t % 3 == n).map(|t| YEAR_S + (t + 1) as f64 * dwell).collect();
+            assert_eq!(times, expected, "target {n}");
         }
     }
 

@@ -258,9 +258,9 @@ impl Sweep {
         self.plan().field_of(toward)
     }
 
-    /// When a direction's field was last finished inside `(from_s, to_s]`, if it was.
+    /// When a direction's field was first finished inside `(from_s, to_s]`, if it was.
     pub fn observed_between(&self, toward: DVec3, from_s: f64, to_s: f64) -> Option<f64> {
-        self.plan().observed_between(toward, from_s, to_s)
+        self.plan().observed_between(toward, from_s, to_s).first().copied()
     }
 
     /// Completed passes, and how far through the current one the sweep is.
@@ -306,28 +306,28 @@ impl Plan {
         Some(offset + i.min(n - 1))
     }
 
-    /// When a direction's field was last finished inside `(from_s, to_s]`, if it was.
+    /// Every time a direction's field was finished inside `(from_s, to_s]`, oldest first, at most
+    /// [`PASSES_PER_CALL`] of them.
     ///
     /// A field's measurement is stamped at the end of its dwell, because that is when the
-    /// exposure it reports actually exists.
-    pub fn observed_between(&self, toward: DVec3, from_s: f64, to_s: f64) -> Option<f64> {
-        let field = self.field_of(toward)?;
+    /// exposure it reports actually exists. Several passes can end inside one window across a gap
+    /// in the ticks, and each is a bearing from wherever the craft was.
+    pub fn observed_between(&self, toward: DVec3, from_s: f64, to_s: f64) -> Vec<f64> {
+        let Some(field) = self.field_of(toward) else { return Vec::new() };
         let per_pass = self.fields as f64;
         let elapsed = (from_s - self.sweep.started_s) / self.sweep.dwell_s;
-        let first = ((elapsed - field as f64 - 1.0) / per_pass).floor();
-        for pass in [first - 1.0, first, first + 1.0] {
-            if pass < 0.0 {
-                continue;
-            }
-            let at =
-                self.sweep.started_s + (pass * per_pass + field as f64 + 1.0) * self.sweep.dwell_s;
-            if at > from_s {
-                return (at <= to_s).then_some(at);
-            }
-        }
-        None
+        let first = ((elapsed - field as f64 - 1.0) / per_pass).floor().max(0.0);
+        let finished = |pass: f64| self.sweep.started_s + (pass * per_pass + field as f64 + 1.0) * self.sweep.dwell_s;
+        (0..PASSES_PER_CALL + 2)
+            .map(|k| finished(first - 1.0 + k as f64))
+            .filter(|at| *at > from_s && *at <= to_s)
+            .take(PASSES_PER_CALL)
+            .collect()
     }
 }
+
+/// Passes of one field recorded from one window at most: a long gap costs a bounded amount.
+pub const PASSES_PER_CALL: usize = 8;
 
 /// What a telescope is committed to.
 ///

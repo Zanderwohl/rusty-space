@@ -119,8 +119,9 @@ pub struct Candidate {
     pub depth_sigma: f64,
     /// How much better a box fits than a flat line.
     pub delta_chi2: f64,
-    /// Transits the log spans at this period. An upper bound on how many were seen: a gap in
-    /// the log can fall across one.
+    /// Transits seen: how many of the transits this period predicts inside the log have at
+    /// least one sample in them. A fold's reading, which has no samples to look at, counts those
+    /// its span holds instead.
     pub transits: u32,
 }
 
@@ -482,7 +483,21 @@ fn refine(points: &[Point], total_w: f64, first: f64, last: f64, period: f64, st
     let misfit = misfit(points, &found).max(1.0);
     let binned = p_best / BINS as f64 / 12f64.sqrt() / f64::from(found.transits.saturating_sub(1).max(1));
     let sigma = (statistical * statistical * misfit + binned * binned).sqrt();
-    Candidate { period_sigma_s: sigma, ..found }
+    Candidate { period_sigma_s: sigma, transits: seen(points, &found), ..found }
+}
+
+/// How many transits a candidate predicts that have a sample inside them. A gap in the log can
+/// fall across one, and a transit nobody watched was not seen.
+fn seen(points: &[Point], c: &Candidate) -> u32 {
+    let mut epochs: Vec<i64> = points
+        .iter()
+        .filter_map(|p| {
+            let n = ((p.t - c.epoch_s) / c.period_s).round();
+            ((p.t - c.epoch_s - n * c.period_s).abs() < c.duration_s / 2.0).then_some(n as i64)
+        })
+        .collect();
+    epochs.dedup();
+    epochs.len() as u32
 }
 
 /// Reduced chi-squared of the points inside a candidate's transits about their own mean.

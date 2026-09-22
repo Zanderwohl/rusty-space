@@ -176,6 +176,18 @@ impl<J: Journal> Server<J> {
                 }
             }
         }
+        // A craft that came back with no knowledge written down — rows lost, or never checkpointed
+        // since it launched — is issued its charts as a new craft is, rather than left knowing
+        // nothing at all.
+        let empty: Vec<CraftId> =
+            self.instruments.aboard.iter().filter(|(_, a)| a.knowledge.is_empty()).map(|(id, _)| *id).collect();
+        for id in empty {
+            let Some(restored) = self.instruments.aboard.remove(&id) else { continue };
+            // A fresh one is issued charts; the duty and the reporting marks are the checkpoint's.
+            let aboard = self.aboard(id);
+            aboard.observatory = restored.observatory;
+            aboard.reporting = restored.reporting;
+        }
         problems
     }
 }
@@ -397,6 +409,19 @@ mod tests {
             assert!(retried.files.iter().any(|f| f.subject == file.subject), "a file was lost");
         }
         assert!(retried.samples.starts_with(&failed.samples), "and every sample, in order");
+    }
+
+    /// A craft whose knowledge rows are missing comes back with its charts, not knowing nothing.
+    #[tokio::test]
+    async fn a_craft_restored_without_knowledge_is_issued_its_charts() {
+        let (mut old, _) = running().await;
+        let checkpoint = old.checkpoint();
+        let mut new = a_shard();
+        assert!(new.adopt(checkpoint).is_empty());
+        assert!(new.adopt_knowledge(&[], &[]).is_empty());
+        let knowledge = new.knowledge_of(SHIP).expect("aboard");
+        assert!(knowledge.knows(sky()[0].id), "the charts were issued");
+        assert_eq!(new.duty_of(SHIP), old.duty_of(SHIP), "and the duty kept");
     }
 
     #[test]
