@@ -50,7 +50,7 @@ pub fn telescope(
         .max_height(160.0)
         .show_rows(ui, row_height, order.len(), |ui, rows| {
             for &(_, id) in order.get(rows).unwrap_or_default() {
-                if ui.selectable_label(state.selected == Some(id), label(game, id)).clicked() {
+                if row(ui, game, id, state.selected == Some(id), row_height).clicked() {
                     ask(out, Action::SelectTarget(Some(id)));
                 }
             }
@@ -66,11 +66,11 @@ pub fn telescope(
             ask(out, Action::WatchSelected);
         }
     });
-    naming(ui, state, game, draft, out);
     ui.separator();
 
-    provenance(ui, game);
+    details(ui, state, game, draft, out);
     conclusion(ui, game, out);
+    ui.separator();
     curve(ui, game, out, plot);
 }
 
@@ -129,9 +129,6 @@ fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>
     let day = 86_400.0;
     let owner = game.knowledge.owner;
     let all = game.knowledge.conclusions(id);
-    if all.is_empty() {
-        ui.weak("No log of it has been read yet.");
-    }
     let believed = game.knowledge.believed(id);
     if let Some(planet) = believed.planet.filter(|p| p.probability >= 0.5) {
         ui.label(format!(
@@ -142,8 +139,6 @@ fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>
             crate::range::who(planet.observer, owner),
         ));
     }
-    // Planets are read against a stand-in for the generator the game will ship with.
-    ui.weak("Planet readings are provisional until the planet generator exists.");
     for c in all {
         let whose = crate::range::who(c.observer, owner);
         let from = c.from_ly.map_or(String::new(), |p| format!(" from {:.2}, {:.2}, {:.2} ly", p.x, p.y, p.z));
@@ -181,10 +176,11 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let now = game.coordinate_time_s();
     match &game.observatory.duty {
         Duty::Idle => {
-            ui.label("Telescope idle — nothing is being learned.");
+            ui.label("Telescope idle").on_hover_text("Nothing is being learned.");
         }
         Duty::Stare(id) => {
-            ui.label(format!("Staring at {}: the whole exposure on one star.", game.name_of(*id)));
+            ui.label(format!("Observing {}", game.name_of(*id)))
+                .on_hover_text("The whole exposure on one star.");
         }
         Duty::Sweep(sweep) => {
             let (passes, fraction) = sweep.progress(now);
@@ -219,16 +215,16 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
         ui.weak(format!("The telescope is on {}; the panel below describes {}.", game.name_of(on), game.name_of(looking)));
     }
     ui.horizontal(|ui| {
-        if ui.button("Stare").clicked() {
+        if ui.button("Observe").on_hover_text("Observe a single star for a period of time").clicked() {
             ask(out, Action::StareSelected);
         }
-        if ui.button("Survey the sky").clicked() {
+        if ui.button("Survey Sky").on_hover_text("Sweep sky to discover stars").clicked() {
             ask(out, Action::SurveySky);
         }
-        if ui.button("Survey ahead").clicked() {
+        if ui.button("Survey ahead").on_hover_text("Survey cone in direction of travel to discover stars").clicked() {
             ask(out, Action::SurveyAhead);
         }
-        if ui.button("Stop").clicked() {
+        if ui.button("Stop").on_hover_text("Stop all observations").clicked() {
             ask(out, Action::StopSurvey);
         }
     });
@@ -254,97 +250,88 @@ fn known(game: &Game) -> Vec<(f64, StarId)> {
     order
 }
 
-/// One row of the list: the name, and the range as far as this ship knows it.
-fn label(game: &Game, id: StarId) -> String {
-    let range = crate::range::describe(game.knowledge.belief(id), game.knowledge.owner, game.ship.motion.position_ly);
-    format!("{} — {range}", game.name_of(id))
+/// One row of the list, the full width of it: the name on the left and the range as far as this
+/// ship knows it on the right. Where the range came from is the details' business, not the list's.
+fn row(ui: &mut egui::Ui, game: &Game, id: StarId, selected: bool, height: f32) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact_selectable(&response, selected);
+        if selected || response.hovered() {
+            ui.painter().rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+        }
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let inset = egui::vec2(ui.spacing().button_padding.x, 0.0);
+        let range = crate::range::short(game.knowledge.belief(id), game.ship.motion.position_ly);
+        let right = ui.painter().text(
+            rect.right_center() - inset,
+            egui::Align2::RIGHT_CENTER,
+            range,
+            font.clone(),
+            visuals.text_color(),
+        );
+        // Clipped short of the range, so a long name never runs under it.
+        let left = rect.with_max_x(right.left() - inset.x);
+        ui.painter().with_clip_rect(left).text(
+            left.left_center() + inset,
+            egui::Align2::LEFT_CENTER,
+            game.name_of(id),
+            font,
+            visuals.text_color(),
+        );
+    }
+    response
 }
 
-/// The field that calls a star something.
-///
-/// A name is a record like any other: this ship's, stamped with when it said so, and carried
-/// to anyone it reports to. Nothing has a name before somebody gives it one — what a row shows
-/// until then is the designation its own discovery wrote down.
-fn naming(
+/// What the selected star is called, how far it is, and where each of those came from.
+fn details(
     ui: &mut egui::Ui,
     state: &Ui,
     game: &Game,
     draft: &mut String,
     out: &mut MessageWriter<Requested>,
 ) {
-    let Some(id) = state.selected.filter(|id| game.knows(*id)) else {
+    let Some(id) = described(game).filter(|id| game.knows(*id)) else {
+        ui.weak("Nothing detected under the crosshair yet.");
         return;
     };
-    ui.horizontal(|ui| {
-        ui.label("Call it");
-        let field = ui.add(
-            egui::TextEdit::singleline(draft)
-                .hint_text(game.name_of(id))
-                .desired_width(150.0),
-        );
+    for name in names(game, id) {
+        ui.strong(name);
+    }
+    // A name is a record like any other: this ship's, stamped with when it said so, and carried
+    // to anyone it reports to.
+    if state.selected == Some(id) {
+        let field = ui.add(egui::TextEdit::singleline(draft).hint_text("Add Name").desired_width(150.0));
         let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if (entered || ui.button("Name it").clicked()) && !draft.trim().is_empty() {
+        if entered && !draft.trim().is_empty() {
             ask(out, Action::NameSelected(std::mem::take(draft)));
+        }
+    }
+    let Some(belief) = game.belief(id) else { return };
+    let here = game.ship.motion.position_ly;
+    ui.label(format!("Estimated range: {}", crate::range::short(Some(belief), here)));
+    egui::CollapsingHeader::new("Sources").default_open(true).show(ui, |ui| {
+        for note in crate::range::sources(belief, game.knowledge.owner) {
+            ui.small(note);
         }
     });
 }
 
-/// Where the belief about the selected star came from, and how old it is.
-fn provenance(ui: &mut egui::Ui, game: &Game) {
-    let Some(belief) = described(game).and_then(|id| game.belief(id)) else {
-        ui.weak("Nothing detected under the crosshair yet.");
-        return;
-    };
-    let owner = game.knowledge.owner;
-    match belief.name.as_ref() {
-        Some(naming) => {
-            ui.label(format!("Called {} by {}.", naming.name, crate::range::who(naming.witness, owner)));
-        }
-        None => {
-            ui.weak("Nobody has called it anything.");
+/// Every name this ship holds for a star, chosen ones first, each once. What it goes by when
+/// nobody has named it is its own discovery's designation, which is one of these.
+fn names(game: &Game, id: StarId) -> Vec<String> {
+    let mut held: Vec<_> = game.knowledge.file(id).map(|f| f.names().to_vec()).unwrap_or_default();
+    held.sort_by_key(|n| !n.kind.chosen());
+    let mut names: Vec<String> = Vec::new();
+    for naming in held {
+        if !names.contains(&naming.name) {
+            names.push(naming.name);
         }
     }
-    ui.label(format!("Range: {}", crate::range::describe(Some(belief), owner, game.ship.motion.position_ly)));
-    ui.label(format!(
-        "{} bearings from {} {}",
-        belief.sightings,
-        belief.witnesses,
-        if belief.witnesses == 1 {
-            "instrument"
-        } else {
-            "instruments"
-        }
-    ));
-    match belief.hops {
-        0 => ui.label("Seen from this ship."),
-        1 => ui.label("Relayed once; somebody else did the looking."),
-        n => ui.label(format!("Relayed {n} times.")),
-    };
-    // A distance worked out from bearings is one this ship can check. A stated one is not,
-    // however narrow the error bars on it are.
-    match (&belief.distance, belief.triangulated) {
-        (Distance::Unknown, _) => ui.weak("No parallax yet: this is a direction."),
-        (Distance::AtLeast(ly), _) => ui.weak(format!(
-            "No parallax over the baseline so far, so it is past {ly:.1} ly."
-        )),
-        (Distance::Measured { .. }, true) => ui.weak("Distance solved from bearings held here."),
-        (Distance::Measured { .. }, false) => ui.weak("Distance on somebody else's word."),
-    };
-    // The age is the distance, so a star without a parallax has no age either: what is on the
-    // screen is old by an unknown amount, and saying so is more honest than a number.
-    match belief.light_age_s() {
-        Some(age) => ui.label(format!(
-            "The light left {:.2} years ago. Everything below describes the system then.",
-            age / crate::flight::JULIAN_YEAR_S
-        )),
-        None => ui.label("No distance yet, so no light age: this is a direction and a brightness."),
-    };
-    if let Some(watts) = belief.luminosity_w() {
-        ui.weak(format!(
-            "implied {:?}-band output: {watts:.2e} W",
-            belief.band
-        ));
+    if names.is_empty() {
+        names.push(game.name_of(id));
     }
+    names
 }
 
 /// The light curve of whatever the panel describes, in the selected band.

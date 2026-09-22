@@ -22,24 +22,59 @@ pub fn who(witness: Witness, owner: Witness) -> String {
 /// The range to a believed star from `here_ly`, with its error and where it came from, or what
 /// is known instead. `None` for something this ship has never detected.
 pub fn describe(belief: Option<&Belief>, owner: Witness, here_ly: glam::DVec3) -> String {
+    let mut text = short(belief, here_ly);
+    let Some(belief) = belief else { return text };
+    if matches!(belief.distance, Distance::Measured { .. }) {
+        let whence = match (belief.claimed_by, belief.baseline_rad) {
+            (Some(whose), _) => format!("on {} word", possessive(&who(whose, owner))),
+            (None, Some(angle)) => format!("from bearings a {} baseline apart", angle_text(angle)),
+            (None, None) => "from bearings".into(),
+        };
+        text += &format!(", {whence}");
+        if let Some(floor) = belief.floor_ly {
+            text += &format!(" — though this ship's own bearings put it beyond {floor:.1} ly");
+        }
+    }
+    text
+}
+
+/// The range alone, with its error: where it came from is [`sources`].
+pub fn short(belief: Option<&Belief>, here_ly: glam::DVec3) -> String {
     let Some(belief) = belief else { return "not detected".into() };
     match belief.distance {
         Distance::Unknown => "bearing only".into(),
         Distance::AtLeast(ly) => format!("beyond {ly:.1} ly"),
         Distance::Measured { position_ly, sigma_ly } => {
-            let range = position_ly.distance(here_ly);
-            let whence = match (belief.claimed_by, belief.baseline_rad) {
-                (Some(whose), _) => format!("on {} word", possessive(&who(whose, owner))),
-                (None, Some(angle)) => format!("from bearings a {} baseline apart", angle_text(angle)),
-                (None, None) => "from bearings".into(),
-            };
-            let mut text = format!("{range:.2} ± {sigma_ly:.2} ly, {whence}");
-            if let Some(floor) = belief.floor_ly {
-                text += &format!(" — though this ship's own bearings put it beyond {floor:.1} ly");
-            }
-            text
+            format!("{:.2} ± {sigma_ly:.2} ly", position_ly.distance(here_ly))
         }
     }
+}
+
+/// Where a belief came from, one note per line.
+pub fn sources(belief: &Belief, owner: Witness) -> Vec<String> {
+    let instruments = if belief.witnesses == 1 { "instrument" } else { "instruments" };
+    let mut notes = vec![format!("{} bearings from {} {instruments}", belief.sightings, belief.witnesses)];
+    if let Some(angle) = belief.baseline_rad {
+        notes.push(format!("Bearings {} apart", angle_text(angle)));
+    }
+    notes.push(match belief.hops {
+        0 => "Seen from this ship".into(),
+        1 => "Relayed once; somebody else did the looking".into(),
+        n => format!("Relayed {n} times"),
+    });
+    // A distance worked out from bearings is one this ship can check. A stated one is not,
+    // however narrow its error.
+    notes.push(match (belief.distance, belief.claimed_by) {
+        (Distance::Unknown, _) => "No parallax yet".into(),
+        (Distance::AtLeast(ly), _) => format!("No parallax over the baseline, so past {ly:.1} ly"),
+        (Distance::Measured { .. }, Some(whose)) => format!("Distance on {} word", possessive(&who(whose, owner))),
+        (Distance::Measured { .. }, None) if belief.triangulated => "Distance solved from bearings held here".into(),
+        (Distance::Measured { .. }, None) => "Distance on somebody else's word".into(),
+    });
+    if let Some(floor) = belief.floor_ly {
+        notes.push(format!("This ship's own bearings put it beyond {floor:.1} ly"));
+    }
+    notes
 }
 
 fn possessive(name: &str) -> String {
@@ -95,5 +130,20 @@ mod tests {
         k.sighted(id, look(DVec3::X * 1.0e-3, star, 1.0));
         let text = describe(k.belief(id), Witness(1), DVec3::ZERO);
         assert!(text.starts_with("4.00") && text.contains("baseline apart"), "{text}");
+    }
+
+    /// The short form is a number and nothing else; where it came from goes to the sources.
+    #[test]
+    fn a_short_range_leaves_its_sources_apart() {
+        let id = StarId::synthesise("range", 2);
+        let star = DVec3::new(0.0, 0.0, 4.0);
+        let mut k = Knowledge::new(Witness(1));
+        k.sighted(id, look(DVec3::ZERO, star, 0.0));
+        k.told(id, Claim { witness: CHARTS, distance: Distance::Measured { position_ly: star, sigma_ly: 0.04 }, stated_s: 0.0, lineage: Vec::new() });
+        let belief = k.belief(id).unwrap();
+        assert_eq!(short(Some(belief), DVec3::ZERO), "4.00 ± 0.04 ly");
+        let notes = sources(belief, Witness(1));
+        assert!(notes.iter().any(|n| n == "Distance on the charts' word"), "{notes:?}");
+        assert!(notes.iter().any(|n| n == "Seen from this ship"), "{notes:?}");
     }
 }
