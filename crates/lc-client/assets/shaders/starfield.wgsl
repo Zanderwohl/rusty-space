@@ -157,12 +157,8 @@ fn spin_of(seed: f32) -> mat3x3<f32> {
     );
 }
 
-/// The corona's threads, carried outward as the drift phase advances.
-///
-/// A thread's pattern changes with distance out only through the lean along the line of sight,
-/// so sliding the lean back as time runs moves every feature outward along its thread. A single
-/// slide has to jump back at the end of its cycle; two copies half a cycle apart, each faded to
-/// nothing at its own jump, hide it. The weights sum to one.
+/// Sliding the lean back moves the threads outward. Two copies half a cycle apart, each faded
+/// out at its own wrap, hide the jump; the weights sum to one.
 fn drifting_threads(spin: mat3x3<f32>, around: vec3<f32>, axis: vec3<f32>, out_by: f32) -> f32 {
     var sum = 0.0;
     for (var k = 0u; k < 2u; k = k + 1u) {
@@ -278,11 +274,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // distance out and leaves only the angle around the star, which is what makes every
     // feature a radial thread instead of a blob.
     //
-    // The quad lies in the *screen* plane, which is square to the line of sight only for a star
-    // dead ahead. Off center the camera's right and up carry a component along the line to the
-    // star, and the lean in the fragment turned that into a different corona wherever the star
-    // sat in the frame: orbiting the camera a few hundred meters round the ship reshaped it.
-    // With that component removed the pattern depends on the line from star to ship alone.
+    // Off center, the camera's right and up have a component along the line to the star, and
+    // the lean turns it into a pattern that changes as the camera turns. Project it out.
     let right_world = (view.world_from_view * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz;
     let up_world = (view.world_from_view * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
     let across = right_world * vertex.corner.x + up_world * vertex.corner.y;
@@ -339,14 +332,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (material.corona_strength > 0.0 && length(in.sky) > 1e-6) {
         // Structure in the glare, not in the disc: the photosphere is smooth and the corona is
         // not. The sample direction leans along the line of sight as it goes out, so threads
-        // evolve with distance instead of being perfectly straight spokes. The lean is measured
-        // in the corona's own reach rather than the quad's, which the glare sizes by exposure.
+        // evolve with distance instead of being perfectly straight spokes. The lean is in
+        // corona reaches, not quad fractions: the glare sizes the quad, and it follows exposure.
         let around = normalize(in.sky);
         let out_by = r / max(in.corona, 1e-6);
         let spin = mat3x3<f32>(in.spin_x, in.spin_y, in.spin_z);
         let dir = spin * normalize(around + in.axis * (out_by * 0.5));
-        // The threads drift and the silhouette does not: a streamer's tips flickering as two
-        // copies crossfade would read as noise rather than gas going somewhere.
+        // Only the threads drift: tips crossfading between two copies flicker.
         let threads = drifting_threads(spin, around, in.axis, out_by);
         // How far this streamer goes, which is ragged rather than a circle. The fade has to
         // *finish* inside the quad: run it past r = 1 and the discard at the edge cuts it into

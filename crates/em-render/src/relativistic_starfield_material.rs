@@ -109,11 +109,8 @@ pub struct RelativisticStarfieldUniform {
 /// a piece with a corona drawn at all: see the note in `starfield.wgsl`.
 pub const DEFAULT_CORONA_RADII: f32 = 7.8;
 
-/// How far the corona's threads drift outward before the drift repeats, in units of the
-/// corona's reach. Must match `CORONA_FLOW_CYCLE` in `starfield.wgsl`.
-///
-/// The shader crossfades two copies half a cycle apart, so no copy is ever seen jumping back.
-/// Longer cycles smear the threads, since each copy spends longer blended with the other.
+/// How far the threads drift before the drift repeats, in corona reaches. Must match
+/// `CORONA_FLOW_CYCLE` in `starfield.wgsl`. Longer smears the threads.
 pub const CORONA_FLOW_CYCLE: f32 = 0.5;
 
 impl Default for RelativisticStarfieldUniform {

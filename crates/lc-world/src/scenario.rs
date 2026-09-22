@@ -380,17 +380,12 @@ pub const CHASE: Scenario = Scenario {
     ],
 };
 
-/// Once round the Sun, close enough that its corona fills a third of the sky.
-///
-/// The corona is a pattern fixed to the star and read along the line from the star to the
-/// ship, so a camera swung about the ship leaves it alone and going round the star turns it.
-/// This is the scene that shows both: look around and nothing moves, wait and it comes round.
+/// Turning the camera should leave the corona still; going round the Sun should turn it.
 pub const CORONA: Scenario = Scenario {
     name: "corona",
     blurb: "You orbit the Sun at twenty radii. Its corona turns as you go round.",
     star: "Sol",
-    // Twenty-one radii out is an eleven-day orbit, a little under two minutes at the design
-    // rate.
+    // Twenty-one radii out is an eleven-day orbit: under two minutes at this rate.
     rate: 1.0,
     watch: Slot::Pov,
     pov: Member {

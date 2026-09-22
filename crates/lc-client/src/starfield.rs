@@ -173,15 +173,11 @@ pub const LOCAL: PointStyle = PointStyle {
     corona_flow: DEFAULT_CORONA_FLOW,
 };
 
-/// Ten stellar radii a day: for the Sun, eighty thousand kilometers a second, a quarter of `c`.
-/// Absurd as a wind, which would take months to cross a corona this size; at this rate a
-/// thread crosses it in under a day, which is what makes the motion readable.
+/// For the Sun, 80,000 km/s. A real wind would take months to cross the corona; this crosses
+/// it in under a day, fast enough to see.
 pub const DEFAULT_CORONA_FLOW: f32 = 10.0;
 
-/// How far through its cycle the corona's drift is at `now_s`, coordinate seconds.
-///
-/// Reduced here in f64 because the shader cannot: coordinate time is hundreds of millions of
-/// seconds, where an f32 steps in tens of them.
+/// In f64 because coordinate time is around 1e8 s, where an f32 steps in tens of seconds.
 pub fn corona_flow_phase(now_s: f64, style: &PointStyle) -> f32 {
     use em_render::relativistic_starfield_material::CORONA_FLOW_CYCLE;
     let cycle_radii = f64::from(CORONA_FLOW_CYCLE) * f64::from(style.corona_radii);
@@ -963,8 +959,8 @@ mod tests {
         assert_eq!(BODIES.corona_strength, 0.0);
     }
 
-    /// The drift is a speed in the world: at one radius a day, a corona 7.8 radii deep with a
-    /// half-reach cycle comes round every 3.9 days, whatever the coordinate time is.
+    /// One radius a day through a 7.8-radius corona with a half-reach cycle repeats every 3.9
+    /// days.
     #[test]
     fn the_corona_drifts_at_its_stated_speed() {
         let style = PointStyle { corona_flow: 1.0, corona_radii: 7.8, ..LOCAL };
