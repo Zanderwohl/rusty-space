@@ -350,6 +350,16 @@ impl Knowledge {
         (files, std::mem::take(&mut self.unsaved))
     }
 
+    /// Put back what [`Knowledge::take_changes`] and [`Knowledge::take_consumed`] handed over,
+    /// because it was never written down. Anything changed since goes after it, in order.
+    pub fn untake(&mut self, files: impl IntoIterator<Item = Subject>, logs: Vec<Logged>, consumed: Vec<Consumed>) {
+        self.changed.extend(files);
+        let later = std::mem::replace(&mut self.unsaved, logs);
+        self.unsaved.extend(later);
+        let later = std::mem::replace(&mut self.consumed, consumed);
+        self.consumed.extend(later);
+    }
+
     /// Every file as it would be written, for a first save.
     pub fn files(&self) -> impl Iterator<Item = (Subject, File)> + '_ {
         self.files.iter().map(|(s, f)| (*s, f.header()))

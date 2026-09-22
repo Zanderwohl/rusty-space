@@ -34,6 +34,17 @@ pub struct Remembered {
     /// Samples read and thrown away, to delete. After `samples`: a sample taken and consumed
     /// between two checkpoints is in neither.
     pub discarded: Vec<Discarded>,
+    /// The same, as each craft's knowledge handed it over, for [`Server::untake_knowledge`] to
+    /// put back if the write fails.
+    drained: Vec<Drained>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Drained {
+    craft: CraftId,
+    files: Vec<Subject>,
+    logs: Vec<Logged>,
+    consumed: Vec<Consumed>,
 }
 
 pub fn file_row(ship: CraftId, subject: Subject, file: &File, saved_t: i64) -> Filed {
@@ -110,8 +121,22 @@ impl<J: Journal> Server<J> {
             remembered.samples.extend(logs.iter().map(|logged| log_row(*id, logged)));
             let consumed = aboard.knowledge.take_consumed();
             remembered.discarded.extend(consumed.iter().map(|c| discarded_row(*id, c)));
+            if !(files.is_empty() && logs.is_empty() && consumed.is_empty()) {
+                let files = files.into_iter().map(|(subject, _)| subject).collect();
+                remembered.drained.push(Drained { craft: *id, files, logs, consumed });
+            }
         }
         remembered
+    }
+
+    /// Hand back what [`Server::take_knowledge`] took, because writing it failed. The next
+    /// checkpoint writes it again, with whatever changed in between.
+    pub fn untake_knowledge(&mut self, remembered: Remembered) {
+        for drained in remembered.drained {
+            if let Some(aboard) = self.instruments.aboard.get_mut(&drained.craft) {
+                aboard.knowledge.untake(drained.files, drained.logs, drained.consumed);
+            }
+        }
     }
 
     /// Put back what craft knew. After [`Server::adopt`], which is what put the craft and their
@@ -355,6 +380,22 @@ mod tests {
         assert_eq!(knowledge.capacity_bytes(), lc_world::fitting::ONBOARD_DATA_BYTES);
         assert!(knowledge.occupied_bytes() < knowledge.capacity_bytes() / 2.0);
         assert_eq!(knowledge.unkept(), 0);
+    }
+
+    /// Review item 20. A checkpoint whose write failed hands everything back, and the next one
+    /// writes it all — nothing drained is lost to the failure.
+    #[tokio::test]
+    async fn a_failed_checkpoint_loses_nothing() {
+        let (mut server, mut wire) = running().await;
+        let failed = server.take_knowledge();
+        assert!(!failed.files.is_empty() && !failed.samples.is_empty());
+        server.untake_knowledge(failed.clone());
+        server.tick(&mut wire).await.unwrap();
+        let retried = server.take_knowledge();
+        for file in &failed.files {
+            assert!(retried.files.iter().any(|f| f.subject == file.subject), "a file was lost");
+        }
+        assert!(retried.samples.starts_with(&failed.samples), "and every sample, in order");
     }
 
     #[test]

@@ -111,6 +111,16 @@ impl Library {
         out
     }
 
+    /// Mark these accounts' shelves as needing writing again, because the write failed.
+    pub fn redirty(&mut self, marks: &[(String, Bookmark)]) {
+        for (account, _) in marks {
+            // Once each: two rows for one shelf in a single upsert is an error.
+            if !self.dirty.contains(account) {
+                self.dirty.push(account.clone());
+            }
+        }
+    }
+
     /// Adopt what was saved. Rows arrive most recently read first, which is the order kept.
     pub fn adopt(&mut self, marks: Vec<(String, Bookmark)>) {
         for (account, mark) in marks {

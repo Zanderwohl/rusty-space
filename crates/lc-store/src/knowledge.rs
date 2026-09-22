@@ -4,7 +4,7 @@
 //! the server encodes both. See `sql/0010_knowledge.sql` and
 //! `lightcone/docs/24-standing-instruments.md`.
 
-use tokio_postgres::{Client, Error};
+use tokio_postgres::{Client, Error, GenericClient};
 
 /// One craft's file about one subject.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,7 +41,7 @@ pub struct Discarded {
 
 /// Write files, replacing whatever each craft had for each subject. One statement whatever the
 /// count.
-pub async fn save_files(client: &Client, files: &[Filed]) -> Result<u64, Error> {
+pub async fn save_files(client: &impl GenericClient, files: &[Filed]) -> Result<u64, Error> {
     if files.is_empty() {
         return Ok(0);
     }
@@ -88,7 +88,7 @@ pub async fn load_files(client: &Client) -> Result<Vec<Filed>, Error> {
 /// does not fail again on what it wrote the first time.
 ///
 /// **The partitions for their learned times must exist**: see [`crate::store::ensure_partitions`].
-pub async fn save_samples(client: &Client, rows: &[LogRow]) -> Result<u64, Error> {
+pub async fn save_samples(client: &impl GenericClient, rows: &[LogRow]) -> Result<u64, Error> {
     if rows.is_empty() {
         return Ok(0);
     }
@@ -112,7 +112,7 @@ pub async fn save_samples(client: &Client, rows: &[LogRow]) -> Result<u64, Error
 }
 
 /// Delete samples that have been read into conclusions. One statement whatever the count.
-pub async fn delete_samples(client: &Client, discarded: &[Discarded]) -> Result<u64, Error> {
+pub async fn delete_samples(client: &impl GenericClient, discarded: &[Discarded]) -> Result<u64, Error> {
     if discarded.is_empty() {
         return Ok(0);
     }

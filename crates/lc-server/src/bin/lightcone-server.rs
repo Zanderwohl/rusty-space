@@ -168,7 +168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // After the world, because a ballistic arc is re-solved against the system it is in and a
     // shard with no stars would bring every coasting craft back as a straight line.
-    let store = match db {
+    let mut store = match db {
         Some(url) => {
             let client = connect(&url).await?;
             match lc_store::ships::load_shard(&client, shard_id).await? {
@@ -266,7 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         since_save += 1;
         if since_save >= SAVE_EVERY_TICKS
-            && let Some(client) = &store
+            && let Some(client) = &mut store
         {
             since_save = 0;
             // A failed checkpoint is not a reason to stop the world. It is a reason to say so
@@ -278,7 +278,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if let Some(client) = &store {
+    if let Some(client) = &mut store {
         eprintln!("stopping; writing a last checkpoint");
         checkpoint(client, shard_id, &mut server).await?;
     }
@@ -293,43 +293,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 const SAVE_EVERY_TICKS: u32 = 400;
 
 async fn checkpoint(
-    client: &tokio_postgres::Client,
+    client: &mut tokio_postgres::Client,
     shard_id: i64,
-    // `&mut` because a checkpoint drains the bookmarks written since the last one.
+    // `&mut` because a checkpoint drains what changed since the last one.
     server: &mut Server<Store>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let taken = server.checkpoint();
-    lc_store::ships::save_ships(client, &taken.ships).await?;
-    // What changed since the last checkpoint: files touched, samples taken. The partitions the
-    // samples land in exist, because the journal keeps them ready ahead of the clock every tick
-    // and nothing is learned in the future. Drained before it is written, so a failed write loses
-    // what was learned in these twenty seconds; the files come back the next time they change.
+    // What changed since the last checkpoint: files touched, samples taken and consumed, shelves
+    // read. Drained here and handed back if the write fails, so nothing is lost to a failure but
+    // time: a file that never changes again would otherwise never be written.
     let remembered = server.take_knowledge();
-    lc_store::knowledge::save_files(client, &remembered.files).await?;
-    lc_store::knowledge::save_samples(client, &remembered.samples).await?;
-    lc_store::knowledge::delete_samples(client, &remembered.discarded).await?;
-    lc_store::ships::save_shard(client, shard_id, lc_store::ships::Shard {
-        now_t: taken.now_t,
-        next_ship: taken.next_ship,
-    })
-    .await?;
-    // Only what changed since the last one. A page turn is a row and a reader turns a page a
-    // minute; writing every account's whole shelf every twenty seconds would be writing nothing
-    // new, forever.
-    let marks: Vec<lc_store::reading::Bookmark> = server
-        .library
-        .take_dirty()
-        .into_iter()
+    let marks: Vec<(String, lc_proto::Bookmark)> = server.library.take_dirty();
+    let rows: Vec<lc_store::reading::Bookmark> = marks
+        .iter()
         .map(|(account, mark)| lc_store::reading::Bookmark {
-            account,
-            book: mark.book,
+            account: account.clone(),
+            book: mark.book.clone(),
             spine: mark.spine as i32,
             char_offset: mark.char_offset as i32,
             location: mark.location as i32,
             locations: mark.locations as i32,
         })
         .collect();
-    lc_store::reading::save(client, &marks).await?;
+    // One transaction: a checkpoint is the shard's state at one tick, and half of one — samples
+    // written and their deletions not, say — would be reloaded as something that never was.
+    let written = async {
+        let transaction = client.transaction().await?;
+        lc_store::ships::save_ships(&transaction, &taken.ships).await?;
+        // The partitions the samples land in exist, because the journal keeps them ready ahead of
+        // the clock every tick and nothing is learned in the future.
+        lc_store::knowledge::save_files(&transaction, &remembered.files).await?;
+        lc_store::knowledge::save_samples(&transaction, &remembered.samples).await?;
+        lc_store::knowledge::delete_samples(&transaction, &remembered.discarded).await?;
+        lc_store::ships::save_shard(&transaction, shard_id, lc_store::ships::Shard {
+            now_t: taken.now_t,
+            next_ship: taken.next_ship,
+        })
+        .await?;
+        lc_store::reading::save(&transaction, &rows).await?;
+        transaction.commit().await
+    }
+    .await;
+    if let Err(why) = written {
+        server.untake_knowledge(remembered);
+        server.library.redirty(&marks);
+        return Err(why.into());
+    }
     Ok(())
 }
 

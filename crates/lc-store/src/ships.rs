@@ -10,7 +10,7 @@
 //! round-trip every f64, and a checkpoint that moves a coordinate by one place every restart is
 //! not a checkpoint. See the column comment in `0004_ships.sql`.
 
-use tokio_postgres::{Client, Error};
+use tokio_postgres::{Client, Error, GenericClient};
 
 /// One craft, saved.
 #[derive(Clone, Debug, PartialEq)]
@@ -36,7 +36,7 @@ pub struct Shard {
 ///
 /// One statement whatever the count, and an upsert rather than a delete and re-insert: a
 /// checkpoint that briefly has no ships in it is a checkpoint a crash can land inside.
-pub async fn save_ships(client: &Client, ships: &[Ship]) -> Result<u64, Error> {
+pub async fn save_ships(client: &impl GenericClient, ships: &[Ship]) -> Result<u64, Error> {
     if ships.is_empty() {
         return Ok(0);
     }
@@ -99,7 +99,7 @@ pub async fn delete_ship(client: &Client, ship_id: i64) -> Result<u64, Error> {
     client.execute("DELETE FROM ships WHERE ship_id = $1", &[&ship_id]).await
 }
 
-pub async fn save_shard(client: &Client, shard_id: i64, shard: Shard) -> Result<(), Error> {
+pub async fn save_shard(client: &impl GenericClient, shard_id: i64, shard: Shard) -> Result<(), Error> {
     client
         .execute(
             "INSERT INTO shard_state (shard_id, now_t, next_ship) VALUES ($1, $2, $3)

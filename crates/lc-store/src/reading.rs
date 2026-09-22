@@ -2,7 +2,7 @@
 //!
 //! The one table here that no rule depends on. See `lightcone/docs/21-library.md`.
 
-use tokio_postgres::{Client, Error};
+use tokio_postgres::{Client, Error, GenericClient};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bookmark {
@@ -18,7 +18,7 @@ pub struct Bookmark {
 ///
 /// `read_at` moves to now on every write, which is what makes "recently read" mean recently
 /// *read* rather than recently started.
-pub async fn save(client: &Client, marks: &[Bookmark]) -> Result<u64, Error> {
+pub async fn save(client: &impl GenericClient, marks: &[Bookmark]) -> Result<u64, Error> {
     if marks.is_empty() {
         return Ok(0);
     }

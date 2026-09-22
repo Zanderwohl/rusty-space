@@ -383,8 +383,6 @@ impl<J: Journal> Server<J> {
         // motive is a closed form — but the transitions do: a crossing that arrives becomes a
         // station, and a ballistic arc folds the patch it was solved for.
         self.fleet.advance(now_s, self.tick_us() as f64 * 1.0e-6);
-        // After motion, so every instrument looks from where its craft now is.
-        self.run_instruments();
         // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
         // the range it has already made and this is a comparison until the window moves.
         self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
@@ -405,6 +403,9 @@ impl<J: Journal> Server<J> {
         for budget in self.budgets.values_mut() {
             budget.advance(TICKS_PER_SECOND);
         }
+        // After motion, so every instrument looks from where its craft now is, and after the
+        // intents, so a report composed this tick carries nothing its craft learns in it.
+        self.run_instruments();
         // 3. A staged scene, if one is running. Before the pursuits and after the intents for
         // the same reason they are after the intents: a chase a beat ordered is not re-solved
         // against the plan it has only just made.
