@@ -38,8 +38,10 @@ def main(trace):
         cells = [resolve(c) for c in row]
         if cells[5].get('fmt') != '0':
             continue  # nested intervals are inside a top-level one already counted
-        label = cells[12] if len(cells) > 12 and cells[12].tag != 'sentinel' else cells[6]
-        name = (label.get('fmt') or '').split(' (')[0].split(':')[0].strip()
+        # The encoder's label is the channel subtitle when there is one, and in the label else.
+        subtitle = cells[12].get('fmt') if len(cells) > 12 and cells[12].tag != 'sentinel' else ''
+        label = subtitle or cells[6].get('fmt') or ''
+        name = label.split(' (')[0].split(':')[0].strip()
         per_pass[f"{cells[2].get('fmt'):9} {name}"] += int(cells[1].text)
         frames.add(cells[3].get('fmt'))
 
