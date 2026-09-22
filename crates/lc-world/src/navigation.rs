@@ -456,9 +456,23 @@ pub fn basis(pole: DVec3) -> (DVec3, DVec3) {
 impl Course {
     /// Turn a request into a place, against the system the ship is in and where it is in it.
     ///
-    /// `from_ly` matters for exactly one course — leaving goes straight out from the star,
-    /// which is a different direction depending on where you start.
+    /// `from_ly` matters for two courses: leaving goes straight out from the star, and a polar
+    /// orbit is the one through the ship — see [`Course::resolve_moving`], which this is with
+    /// the ship at rest.
     pub fn resolve(&self, system: &LocalSystem, from_ly: DVec3, now_s: f64) -> Option<Waypoint> {
+        self.resolve_moving(system, from_ly, DVec3::ZERO, now_s)
+    }
+
+    /// [`Course::resolve`] for a ship moving at `beta`, which only a polar orbit reads: it runs
+    /// the way the ship is already going round the body, so a ship on a polar orbit that asks
+    /// for one again is already there.
+    pub fn resolve_moving(
+        &self,
+        system: &LocalSystem,
+        from_ly: DVec3,
+        beta: DVec3,
+        now_s: f64,
+    ) -> Option<Waypoint> {
         match self {
             Course::To(at) => Some(Waypoint::Fixed(*at)),
             Course::Orbit { body, altitude_radii, plane } => {
@@ -467,10 +481,13 @@ impl Course {
                 if radius <= 0.0 {
                     return None;
                 }
+                let (at_m, velocity) = system.body_state_at(index, now_s)?;
+                let relative = from_ly - (system.origin_ly + at_m / M_PER_LY);
+                let moving = beta - crate::coast::beta_of(velocity);
                 Some(Waypoint::Orbit(Orbit {
                     about: Anchor::Body(body.clone()),
                     radius_m: radius * (1.0 + altitude_radii.max(0.0)),
-                    pole: plane.pole_of(system.body_pole(index)),
+                    pole: plane.pole_of(system.body_pole(index), relative, moving),
                     phase_rad: 0.0,
                 }))
             }
@@ -563,13 +580,22 @@ impl Course {
 }
 
 impl Plane {
-    /// The orbit normal for this plane about a body whose own pole is `pole`.
-    pub fn pole_of(&self, pole: DVec3) -> DVec3 {
+    /// The orbit normal for this plane about a body whose own pole is `pole`, for a ship at
+    /// `relative` to the body and moving at `moving` against it, in any units.
+    ///
+    /// Any normal perpendicular to the pole makes an orbit polar, so the node is free, and a
+    /// polar orbit is the one through the ship: it is entered where the ship already is, with
+    /// one burn, rather than after a wait for a node or a crossing to one. Of its two
+    /// directions, the one that keeps what the ship is doing round the body is the cheaper.
+    pub fn pole_of(&self, pole: DVec3, relative: DVec3, moving: DVec3) -> DVec3 {
+        let pole = pole.normalize_or(DVec3::Z);
         match self {
             Plane::Equatorial => pole,
-            // Any normal perpendicular to the pole puts the pole in the orbital plane, which
-            // is what makes the orbit polar.
-            Plane::Polar => basis(pole).0,
+            Plane::Polar => {
+                // Straight over the pole every polar plane passes through the ship.
+                let normal = pole.cross(relative).try_normalize().unwrap_or(basis(pole).0);
+                if relative.cross(moving).dot(normal) < 0.0 { -normal } else { normal }
+            }
         }
     }
 }

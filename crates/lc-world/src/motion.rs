@@ -508,7 +508,8 @@ pub fn apply(
             // somewhere the ship is not.
             let (at, beta) = state_at(state, Some(system), event.at_t)
                 .unwrap_or((state.position_ly, state.beta));
-            let waypoint = course.resolve(system, at, event.at_t).ok_or(Rejected::NoSuchPlace)?;
+            let waypoint =
+                course.resolve_moving(system, at, beta, event.at_t).ok_or(Rejected::NoSuchPlace)?;
             state.position_ly = at;
             state.beta = beta;
             state.drive = *drive;
