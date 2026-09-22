@@ -21,6 +21,8 @@
 const PI: f32 = 3.14159265;
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 const BANDS: u32 = 7u;
+/// In the corona's reach. Must match `CORONA_FLOW_CYCLE` in em-render.
+const CORONA_FLOW_CYCLE: f32 = 0.5;
 
 struct StarfieldUniform {
     // Rows of the band-to-display matrix, one entry per band: (r, g, b, unused).
@@ -57,6 +59,8 @@ struct StarfieldUniform {
     /// it, and does not grow as you approach. A corona is a thing that is *there*, so its
     /// angular size has to fall off with distance like the disc it surrounds.
     corona_radii: f32,
+    /// How far through its cycle the outward drift is, in [0, 1).
+    corona_flow_phase: f32,
     // Lookup domain: index = (log2(T) - log_t_min) * log_t_scale.
     log_t_min: f32,
     log_t_scale: f32,
@@ -151,6 +155,21 @@ fn spin_of(seed: f32) -> mat3x3<f32> {
         vec3<f32>(t * k.x * k.y - n * k.z, c + t * k.y * k.y, t * k.y * k.z + n * k.x),
         vec3<f32>(t * k.x * k.z + n * k.y, t * k.y * k.z - n * k.x, c + t * k.z * k.z),
     );
+}
+
+/// Sliding the lean back moves the threads outward. Two copies half a cycle apart, each faded
+/// out at its own wrap, hide the jump; the weights sum to one.
+fn drifting_threads(spin: mat3x3<f32>, around: vec3<f32>, axis: vec3<f32>, out_by: f32) -> f32 {
+    var sum = 0.0;
+    for (var k = 0u; k < 2u; k = k + 1u) {
+        let phase = fract(material.corona_flow_phase + 0.5 * f32(k));
+        let weight = 1.0 - abs(2.0 * phase - 1.0);
+        let lean = out_by - phase * CORONA_FLOW_CYCLE;
+        let dir = spin * normalize(around + axis * (lean * 0.5));
+        // Level zero: the caller's branch is not uniform control flow, so no implicit derivative.
+        sum = sum + weight * textureSampleLevel(corona_filaments, filaments_sampler, dir, 0.0).r;
+    }
+    return sum;
 }
 
 /// Band radiance of a blackbody at `teff`, from the table em-spectra generated.
@@ -254,9 +273,13 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // to the star rather than to the camera. Normalising this in the fragment discards the
     // distance out and leaves only the angle around the star, which is what makes every
     // feature a radial thread instead of a blob.
+    //
+    // Off center, the camera's right and up have a component along the line to the star, and
+    // the lean turns it into a pattern that changes as the camera turns. Project it out.
     let right_world = (view.world_from_view * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz;
     let up_world = (view.world_from_view * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
-    out.sky = right_world * vertex.corner.x + up_world * vertex.corner.y;
+    let across = right_world * vertex.corner.x + up_world * vertex.corner.y;
+    out.sky = across - seen * dot(across, seen);
     out.axis = seen;
     let spin = spin_of(vertex.params.z);
     out.spin_x = spin[0];
@@ -309,12 +332,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (material.corona_strength > 0.0 && length(in.sky) > 1e-6) {
         // Structure in the glare, not in the disc: the photosphere is smooth and the corona is
         // not. The sample direction leans along the line of sight as it goes out, so threads
-        // evolve with distance instead of being perfectly straight spokes.
+        // evolve with distance instead of being perfectly straight spokes. The lean is in
+        // corona reaches, not quad fractions: the glare sizes the quad, and it follows exposure.
         let around = normalize(in.sky);
-        let dir = mat3x3<f32>(in.spin_x, in.spin_y, in.spin_z)
-            * normalize(around + in.axis * (r * 0.5));
-        // Level zero: this branch is not uniform control flow, so no implicit derivative.
-        let threads = textureSampleLevel(corona_filaments, filaments_sampler, dir, 0.0).r;
+        let out_by = r / max(in.corona, 1e-6);
+        let spin = mat3x3<f32>(in.spin_x, in.spin_y, in.spin_z);
+        let dir = spin * normalize(around + in.axis * (out_by * 0.5));
+        // Only the threads drift: tips crossfading between two copies flicker.
+        let threads = drifting_threads(spin, around, in.axis, out_by);
         // How far this streamer goes, which is ragged rather than a circle. The fade has to
         // *finish* inside the quad: run it past r = 1 and the discard at the edge cuts it into
         // a hard disc, which is the circle this was meant to avoid, only sharper.

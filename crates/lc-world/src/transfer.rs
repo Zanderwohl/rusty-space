@@ -281,4 +281,37 @@ mod tests {
         assert_eq!(primary_for(&system, &sun, far, 0.0), None);
         assert_eq!(primary_for(&system, &sun, system.star_position_ly(), 0.0), None);
     }
+
+    /// **Equatorial to polar is one burn where the ship already is.** Any polar orbit will do,
+    /// so the one chosen passes through the ship and nothing waits for a node or flies to one.
+    #[test]
+    fn going_polar_turns_the_ship_where_it_stands() {
+        let system = sol();
+        let (from, beta0) = departing(&system, &station(&system, "Earth", 0.2));
+        let polar = Course::Orbit { body: "Earth".into(), altitude_radii: 0.2, plane: Plane::Polar }
+            .resolve_moving(&system, from, beta0, 0.0)
+            .expect("an orbit");
+        let Waypoint::Orbit(orbit) = &polar else { unreachable!("an orbit") };
+        let earth = system.body_position_at("Earth", 0.0).unwrap();
+        let pole = system.body_pole(system.body_named("Earth").unwrap());
+        assert!(orbit.pole.dot(pole).abs() < 1.0e-9, "polar");
+        assert!(orbit.pole.dot((from - earth).normalize()).abs() < 1.0e-9, "through the ship");
+
+        let (transfer, _) =
+            plan(&system, "Earth", &polar, from, beta0, DVec3::ZERO, 0.0, Drive::DEFAULT)
+                .expect("a transfer");
+        // A low orbit's worth of speed turned through a right angle. The crossing is flip-and-burn
+        // and does not know about gravity, so it takes a few times the bare burn; a plane chosen
+        // a quarter turn from the ship took twice as long again, flying out to its node.
+        let speed_m_s = orbit.radius_m * orbit.rate(3.986e14);
+        let burn_s = std::f64::consts::SQRT_2 * speed_m_s / (Drive::DEFAULT.accel_g * 9.81);
+        assert!(transfer.duration_s() < burn_s * 3.0, "{} s against {burn_s} s", transfer.duration_s());
+        for k in 0..=20 {
+            let t = transfer.duration_s() * k as f64 / 20.0;
+            let (at, _) = transfer.state_at(&system, t).unwrap();
+            let out_m = at.distance(system.body_position_at("Earth", t).unwrap()) * M_PER_LY;
+            let drift = (out_m / orbit.radius_m - 1.0).abs();
+            assert!(drift < 0.02, "{out_m:e} m from Earth at {t} s");
+        }
+    }
 }
