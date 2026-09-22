@@ -17,7 +17,7 @@ wrong guess was usually "that already exists" about something that does not.
   orbit radius. The map draws the same truth, and courses resolve against it.
 - The transit search concludes *a rocky or giant planet on a P-day orbit* about a **star**. No
   body is ever created from it: `Knowledge::found_planet` exists, letters a planet, and has no
-  caller outside tests. `Orbit` holds only `semi_major_au`.
+  caller outside tests, not one. `Orbit` carries a single element, `semi_major_au`.
 - The map's **Ecliptic** plane is `+Z`, the ecliptic of J2000, in every system
   (`em_map::Plane::normal`). Sol's planets lie in it because Sol is fitted against JPL. A
   generated system's planets and belts lie on `generate::pole_for(seed)`, and its star is given
@@ -87,10 +87,11 @@ convention and not a claim that a craft knows where J2000's ecliptic is — a cr
 attitude, and the axes are the arena's. Display longitudes are computed from the plane belief
 when the panel asks, which is also what keeps them stable as the plane refines.
 
-`Orbit` is changed in place. The old one-number shape gets no back-reader: the game has no
-players, so a stored knowledge file is worth less than the ceremony of keeping it, and
-`formats.rs`' readers V1 to V4 embed `Orbit` by name and would otherwise each need an `OrbitV4`
-frozen beside them. Delete those readers with the shape they read.
+`Orbit` is changed in place. The old shape gets no back-reader: the game has no players, so a
+stored knowledge file is worth less than the ceremony of keeping it. `FILE_FORMAT` is 4, decoded
+natively, and its three back-readers `FileV3`, `FileV2` and `FileV1` each embed `Orbit` by name,
+so keeping them would mean freezing an `OrbitV4` beside them and repointing all three. Delete
+those readers with the shape they read, and `OLDEST_FILE_FORMAT` becomes the new one.
 
 ## How each thing is learned
 
@@ -192,8 +193,9 @@ new ones, against the star's glare (`survey::glare_radius_rad` and `survey::hidd
 the craft's host star: `Sky::sources` iterates the whole catalogue and gives each star a flux of
 `L / 4πd²`, and at `START_OFFSET_AU` — 5 AU, about 7.9e-5 ly — the host's flux is enormous.
 `survey::hidden_by` then drops any source within `glare_radius_rad` of something brighter, which
-is `resolution_rad * sqrt(SCATTER * bright / faint)` with `SCATTER` at 1e-3, and whose own doc
-says what that means: "arcseconds around a comparable star, tens of degrees around the local sun."
+is `resolution_rad * (SCATTER * bright / faint).sqrt().max(1.0)` — floored at the resolution, so
+it can only ever widen the blind spot — with `SCATTER` at 1e-3, whose doc says what that comes to:
+"arcseconds around a comparable star, tens of degrees around the local sun."
 Nothing clamps brightness anywhere — `survey::look` has a detection floor at `DETECTION_SNR` and
 no ceiling, and `Instrument::counts_from_flux` is unbounded above.
 
@@ -254,18 +256,22 @@ the three the class already names.
 | Jupiter | 11.2 | density 1.3 from the Galilean moons; 6.5% oblate; emits 1.7 times what it absorbs; radio | gas giant |
 | Saturn | 9.4 | density 0.69 from Titan; rings resolved; 10% oblate; a heat excess | gas giant |
 
-**Room,** and it does not fit. A body's measurements are logs like a star's photometry and count
-against room, which since the logs-only rebalance is all that room is. There are `BANDS` = 7
-bands, and `SAMPLE_BYTES` is 24. Three game months is 2192 game hours, so at one visit an hour:
+**Room,** which the demo only just survives. A body's measurements are logs like a star's
+photometry and count against room, which since the logs-only rebalance is all that room is. There
+are `BANDS` = 7 bands and `SAMPLE_BYTES` is 24. Three game months is 2192 game hours, so at one
+visit an hour:
 
-| | bytes |
+| | |
 |---|---|
 | a starting ship's capacity: `ONBOARD_DATA_BYTES` 1 MiB, plus one data module at `DATA_ANCHOR_S / 1800 * 7 * 24` | 1.05 + 2.95 = **4.0 MB** |
-| Sol's eight planets, hourly, 7 bands, three game months | **2.95 MB** |
+| Sol's eight planets, hourly, three game months | **2.95 MB** |
 | the same plus the seven moons the masses need — Luna, Phobos, the Galileans, Titan | **5.5 MB** |
 
-So the planets alone leave a quarter of the store free, and the moons the design depends on for
-every mass overflow it half again. A done-when that ends in "Data full." is not a demo.
+The planets alone fit, with a quarter of the store spare. But the moons every mass in the table
+above comes from overflow it half again, and the thirty-minute row of the timeline overflows on
+planets alone. So the store is not the constraint at fifteen minutes and is the constraint at
+thirty, which is too fine a margin to leave to chance: a done-when that ends in "Data full."
+is not a demo.
 
 So the cadence is part of the design, not an afterthought:
 
@@ -275,13 +281,10 @@ So the cadence is part of the design, not an afterthought:
   vector over the element set with `mu` as a parameter, on the order of a kilobyte — plus per-band
   flux means and variances and the rotation periodogram's bins. Fixed-size means eight planets
   cost the same in month three as in month one, which is the property that makes the fifteen
-  minutes work. **Whether that accumulated form survives `f64` is the open question** under
-  *Fitting the orbit*: if it has to be a square-root factor it is the same size, and if it has to
-  be a decimated arc of bearings then the budget above needs redoing.
-- **Raw rows are kept only until the first fit converges.** Gauss initial orbit determination
-  needs the raw arc, so the rows cannot be folded from the first visit; after convergence the
-  normal equations carry everything and the arc is dropped. `retain_raw` is the existing override
-  for a player who wants the arc kept anyway.
+  minutes work, and whether the accumulated form survives `f64` at all is the open question under
+  *Fitting the orbit* below.
+- **Raw rows are kept only until the first fit converges,** because initial orbit determination
+  needs the raw arc. `retain_raw` is the existing override for a player who wants it kept anyway.
 - Reading a body is a small least-squares solve, not a period search over thousands of trials, so
   it gets its own budget per tick, apart from the one read a tick the transit search gets
   (`READS_PER_TICK`).
@@ -306,10 +309,8 @@ determination of any kind. What to build, and where:
   — `kepler::semi_major_axis::third_law`, `kepler::angular_motion::mean` and the anomaly solvers.
   Exotic Matters can use an orbit fit as readily as Lightcone can. The records, the digest and the
   per-tick budget go in `lc-world::knowledge`. Note the public third-law functions are named for
-  their output, and there is no `kepler::third_law` or `mean_motion` to call.
-- **The digest follows the fit, not the reverse.** Normal equations cannot be the digest from the
-  first visit, because Gauss needs the raw arc and there is nothing to accumulate into yet. Raw
-  bearings are kept until the first fit converges, and the normal equations take over after.
+  their output: `kepler::third_law` is a private module of shared constants, not a
+  function, and there is no `mean_motion` at all.
 - **The normal equations are a numerical hazard, and the code already knows it.**
   `astrometry::triangulate` deliberately does *not* solve its 3×3 normal-equation system, and its
   doc says why: the smallest eigenvalue is about 1e-12 of the largest, so inverting it in `f64`
@@ -384,7 +385,7 @@ is actually missing is four things:
   way, and for the same reason.
 - **The star's own spin axis.** `Star` is `{radius_m, teff_k, mu, limb_darkening}` and has no
   pole, which is the bug at the top of this document. Truth already holds the system's plane, as
-  `GeneratedSystem::pole` (`sky/generate.rs:51`), so what phase 1 needs is for a star to spin
+  `GeneratedSystem::pole` (`sky/generate.rs:52`), so what phase 1 needs is for a star to spin
   about its system's pole rather than about `+Z` by default.
 
 Sol's major planets and large moons get an authored table of per-band reflectance, atmosphere and
@@ -418,16 +419,18 @@ dead reckoning is free, and `station()` handing the observatory the craft's true
 relative to the ship. Without that split, an orbit fit's observer positions would quietly be
 reading the generator, and a fit against known observer positions is the real problem anyway.
 
-**Where charts are issued today,** all of which phase 6 removes:
+**Where charts are issued today,** and what happens to each in phase 6:
 
-| site | what it is |
-|---|---|
-| `lc-server/src/instruments.rs:117` | the shard, on a craft's first tick. The one that matters |
-| `lc-client/src/watch.rs:36` `Session::issue_charts` | the offline client's own call |
-| `lc-client/src/app.rs:510` | the offline client's startup |
-| `lc-client/src/bin/snapshot.rs:69` | photographs |
-| `lc-client/examples/crossing.rs:52` | the crossing example |
-| `lc-client/tests/knows.rs:19,62` | two integration tests |
+| site | what it is | phase 6 |
+|---|---|---|
+| `lc-server/src/instruments.rs:117` | the shard, on a craft's first tick | **removed.** The one that matters |
+| `lc-client/src/watch.rs:36` `Session::issue_charts` | the offline client's own call | **removed** |
+| `lc-client/src/app.rs:510` | the offline client's startup | **removed** |
+| `lc-client/src/bin/snapshot.rs:69` | photographs | kept, behind the dev flag |
+| `lc-client/examples/crossing.rs:52` | the crossing example | kept |
+| `lc-client/tests/knows.rs:19,62` | two integration tests | kept |
+
+Only the first three are paths a player reaches, and only those three go.
 
 `observatory::issue_charts`, `CHARTS` and `CHART_ERROR` stay: tests and photographs need a way to
 seed knowledge from truth, and the `CHARTS` witness is what `range.rs` renders as "the charts".
@@ -544,8 +547,8 @@ confidence and nothing comes back:
   would need a way to ask for it.
 - The reference plane option becomes **System plane**, the believed one, with zero longitude as
   above. When the plane is unknown the option is disabled and says why; Galactic is always
-  available. `em_map::Plane` gains a variant carrying a basis rather than hard-wiring `+Z`. Only
-  `lc-client` uses `em-map`.
+  available. `em_map::Plane` gains a **fieldless** `System` variant, with the basis passed in
+  rather than held on it — see the wire table for why a basis-carrying variant is not possible.
 
 ### Courses
 
@@ -584,7 +587,7 @@ knowledge. Today:
   resolved by `Course::resolve` against the simulation through `system.body_named`. A
   belief-driven course carries a `Subject` instead and is planned from the craft's own knowledge,
   refused with `Refusal::Impossible` when the craft does not `knows` it — which is the gate
-  `Order::NameIt` and `Order::RetainRaw` already use (`instruments.rs:344`, `:355`).
+  `Order::NameIt` and `Order::RetainRaw` already use (`instruments.rs:342`, `:350`).
 - **Crossing between stars is `Order::Cross { star, accel_g, max_beta }`,** not a `Course`, and it
   resolves the catalogue id through `World::star_at` — the *shard's* catalogue, not the craft's
   knowledge. That is the one to gate first: it is the only order that names a place a craft may
@@ -608,9 +611,10 @@ knowledge. Today:
 
 1. **Fix the plane now, on truth.** `Star` gains a spin axis, and a generated star spins about
    its system's pole give or take a few degrees; truth already holds that pole as
-   `GeneratedSystem::pole`. The map's plane option uses it, with zero longitude at the galactic
-   node. A stopgap which reads the generator, as the System panel already does, replaced in
-   phase 3.
+   `GeneratedSystem::pole`. The existing **Ecliptic** option keeps its name and stops hard-wiring
+   `+Z`: the client supplies the local system's true pole, with zero longitude at the galactic
+   node. No new `Plane` variant — that is phase 3, when the pole becomes a belief and the option
+   is renamed. A stopgap which reads the generator, as the System panel already does.
 2. **Records only.** The full `Orbit` with `Orientation` and `Method`, `BodyBelief` and
    `SystemPlane`, and the readers that embedded the old `Orbit` deleted. **Charts stay** — see
    the note on ordering below.
@@ -620,10 +624,13 @@ knowledge. Today:
    `Plane::other()` becomes a cycle.
 4. **Transits make bodies.** A settled transit calls `found_planet`, the period gives a distance
    through the mass prior, and the result is `EdgeOnTo`, crossed with other craft's.
-5. **What a body is, in the truth.** The four absent things: reflectance per band, an atmosphere
-   and what shows at the top of it, rotation for generated bodies, and the authored Sol table,
-   which lives in `lc-world` beside `rings.rs`. Generator rules for everything else, and moons
-   for generated planets. Rings, internal heat and spin axes are already held.
+5. **What a body is, in the truth.** Three of the four absent things, the star's own pole being
+   phase 1's: reflectance per band, an atmosphere and what shows at the top of it, and rotation
+   for generated bodies. Then the authored Sol table, which lives in `lc-world` beside `rings.rs`,
+   generator rules for everything else, rings for generated planets — `rings::for_body` is keyed
+   on real body names, so today only Sol has any — and moons for generated planets, without which
+   no generated planet has a mass to find. Internal heat, Sol's rotations and body spin axes are
+   already held.
 6. **Surveying a system from inside,** and charts go away. First the local star: a saturation
    ceiling, a bearing to the host regardless, a glare hole sized for planets, and the ship's
    parallax distance to its own sun, without which no mass prior runs. Then the Survey system
@@ -636,8 +643,11 @@ knowledge. Today:
    at the design rate), believes Venus, Earth, Mars, Jupiter and Saturn with periods to 0.1%
    (Saturn's to 1%), radii to 1%, masses to 1% where a moon gives one, the leading type above
    99% and matching the table above, and the system plane to 0.1°. Every one of them has a
-   position within the first real second, and **the ship is not full at the end of it.** Run it
-   against the in-process shard (`local.rs`), not the offline client, which does not read logs.
+   position within the first real second. Run it against the in-process shard (`local.rs`), not
+   the offline client, which does not read logs. **Let it run to thirty minutes and check the
+   ship is still not full** — fifteen minutes on the planets alone fits inside the starting store
+   without any digest at all, so the shorter run does not test the cadence, and the moons and the
+   thirty-minute mark are what do.
 7. **Courses from beliefs.** Options gated by what is known, courses aimed at believed positions
    and re-planned as the belief improves, station-keeping where no mass is held, and crossings
    between stars aimed the same way. This is server work: a course has to carry a subject and be
@@ -681,7 +691,7 @@ game has no players — so each of these is a change in place, not a versioned a
 | phase | change |
 |---|---|
 | 1 | `Star` gains a spin axis. Save shape changes; `SAVE_FORMAT` is 9 today |
-| 2 | `Orbit` grows, `Orientation` and `Method` are new, `formats.rs`' V1–V4 readers are deleted rather than repointed at a frozen `OrbitV4` |
+| 2 | `Orbit` grows, `Orientation` and `Method` are new, and `formats.rs`' three back-readers `FileV3`/`FileV2`/`FileV1` are deleted rather than repointed at a frozen `OrbitV4`. `FILE_FORMAT` and `OLDEST_FILE_FORMAT` both become the new number |
 | 2 | `REPORT_FORMAT`, 2 today (`radio.rs:115`), carries the new `Orbit` |
 | 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
 | 6 | a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
