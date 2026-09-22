@@ -2,7 +2,7 @@
 
 use glam::DVec3;
 
-use crate::plane::Plane;
+use crate::plane::Datum;
 use crate::snapshot::{M_PER_AU, M_PER_LY};
 
 /// Elevation stops just short of the pole, where the azimuth stops being defined.
@@ -131,7 +131,7 @@ impl Orbit {
     ///
     /// `ndc` is `[-1, 1]` across the viewport with `+y` up, which is the frame a renderer hands
     /// out; `aspect` is width over height.
-    pub fn ray(&self, plane: Plane, ndc: glam::DVec2, fov_y: f64, aspect: f64) -> DVec3 {
+    pub fn ray(&self, plane: Datum, ndc: glam::DVec2, fov_y: f64, aspect: f64) -> DVec3 {
         let (forward, right, up) = self.view_basis(plane);
         let tan_half = (fov_y * 0.5).tan();
         (forward + right * (ndc.x * tan_half * aspect) + up * (ndc.y * tan_half))
@@ -143,7 +143,7 @@ impl Orbit {
     ///
     /// `offset` is in simulation axes from the eye. `None` for anything at or behind the plane
     /// of the eye; [`Orbit::clip`] is the form that can still answer for those.
-    pub fn project(&self, plane: Plane, offset: DVec3, fov_y: f64, aspect: f64)
+    pub fn project(&self, plane: Datum, offset: DVec3, fov_y: f64, aspect: f64)
         -> Option<glam::DVec2> {
         let clip = self.clip(plane, offset, fov_y, aspect);
         if !(clip.w > 0.0) || !clip.w.is_finite() {
@@ -157,7 +157,7 @@ impl Orbit {
     /// `w` is the depth along the view direction, so behind the eye it is negative while `x`
     /// and `y` keep their signs. Dividing anyway mirrors the point through the middle of the
     /// view, and an edge marker built from that points away from what it marks. `z` is unused.
-    pub fn clip(&self, plane: Plane, offset: DVec3, fov_y: f64, aspect: f64) -> glam::DVec4 {
+    pub fn clip(&self, plane: Datum, offset: DVec3, fov_y: f64, aspect: f64) -> glam::DVec4 {
         let (forward, right, up) = self.view_basis(plane);
         let tan_half = (fov_y * 0.5).tan();
         glam::DVec4::new(
@@ -173,7 +173,7 @@ impl Orbit {
     /// Not the plane's normal for up. [`Orbit::orientation`] hands out the normal because
     /// `look_to` wants it and orthonormalizes it; at any elevation but zero the normal is not
     /// perpendicular to forward, so anything casting rays has to orthonormalize too.
-    pub fn view_basis(&self, plane: Plane) -> (DVec3, DVec3, DVec3) {
+    pub fn view_basis(&self, plane: Datum) -> (DVec3, DVec3, DVec3) {
         let (forward, normal) = self.orientation(plane);
         let right = forward.cross(normal).normalize_or(DVec3::X);
         (forward, right, right.cross(forward).normalize_or(normal))
@@ -181,7 +181,7 @@ impl Orbit {
 
     /// Slide the focus across the plane, in fractions of the stand-off. Fractions rather than
     /// meters, so a drag moves the view by the same part of itself at every zoom.
-    pub fn pan(&mut self, plane: Plane, right: f64, ahead: f64) {
+    pub fn pan(&mut self, plane: Datum, right: f64, ahead: f64) {
         let normal = plane.normal();
         let screen_right = (-self.offset_direction(plane)).cross(normal).normalize_or_zero();
         if screen_right == DVec3::ZERO {
@@ -193,7 +193,7 @@ impl Orbit {
     }
 
     /// Unit vector from the focus toward the eye, simulation axes.
-    pub fn offset_direction(&self, plane: Plane) -> DVec3 {
+    pub fn offset_direction(&self, plane: Datum) -> DVec3 {
         let (u, v, n) = plane.basis();
         let (sin_az, cos_az) = self.azimuth.sin_cos();
         let (sin_el, cos_el) = self.elevation.sin_cos();
@@ -201,7 +201,7 @@ impl Orbit {
     }
 
     /// Light-years from the world origin, simulation axes.
-    pub fn eye_ly(&self, plane: Plane) -> DVec3 {
+    pub fn eye_ly(&self, plane: Datum) -> DVec3 {
         self.focus_ly + self.offset_direction(plane) * (self.distance_m() / M_PER_LY)
     }
 
@@ -209,7 +209,7 @@ impl Orbit {
     ///
     /// Up is the plane's normal, not `+Z`, which is what makes the plane toggle tilt the whole
     /// view. Well conditioned because [`ELEVATION_LIMIT`] keeps forward off the normal.
-    pub fn orientation(&self, plane: Plane) -> (DVec3, DVec3) {
+    pub fn orientation(&self, plane: Datum) -> (DVec3, DVec3) {
         (-self.offset_direction(plane), plane.normal())
     }
 }
@@ -217,13 +217,21 @@ impl Orbit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plane::Plane;
+
+    /// Both planes resolved against one system, with a pole that is neither `+Z` nor either
+    /// plane's normal, so nothing passes by agreeing with a hard-wired axis.
+    fn datums() -> [Datum; 2] {
+        let pole = DVec3::new(0.3, -0.5, 0.81).normalize();
+        [Plane::Ecliptic.about(pole), Plane::Galactic.about(pole)]
+    }
 
     /// Projecting must be the exact inverse of casting, or a label lands away from the body
     /// the cursor picks.
     #[test]
     fn a_projected_ray_lands_where_it_was_cast_from() {
         let fov = std::f64::consts::FRAC_PI_4;
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             for aspect in [0.5, 1.0, 1.77] {
                 let orbit = Orbit {
                     focus_ly: DVec3::new(0.3, -0.2, 0.05),
@@ -260,15 +268,15 @@ mod tests {
     fn the_undivided_form_still_says_which_way_a_thing_lies() {
         let fov = std::f64::consts::FRAC_PI_4;
         let orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
-        let (forward, right, up) = orbit.view_basis(Plane::Ecliptic);
+        let (forward, right, up) = orbit.view_basis(Plane::Ecliptic.about(DVec3::Z));
 
         // Behind and to the right: `w` negative, `x` positive, which is the pair a caller
         // reads.
         let behind = -forward * 2.0 + right * 0.5 + up * 0.25;
-        let clip = orbit.clip(Plane::Ecliptic, behind, fov, 1.6);
+        let clip = orbit.clip(Plane::Ecliptic.about(DVec3::Z), behind, fov, 1.6);
         assert!(clip.w < 0.0, "{clip:?}");
         assert!(clip.x > 0.0 && clip.y > 0.0, "{clip:?}");
-        assert!(orbit.project(Plane::Ecliptic, behind, fov, 1.6).is_none());
+        assert!(orbit.project(Plane::Ecliptic.about(DVec3::Z), behind, fov, 1.6).is_none());
     }
 
     /// In front it is the projection exactly. The labels project and the marks clip over one
@@ -278,7 +286,7 @@ mod tests {
         let fov = std::f64::consts::FRAC_PI_4;
         let orbit = Orbit { focus_ly: DVec3::new(0.3, -0.2, 0.05), azimuth: 0.9,
             elevation: 0.4, log_distance_m: 12.0 };
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             for ndc in [glam::DVec2::ZERO, glam::DVec2::new(0.9, -0.4)] {
                 let offset = orbit.ray(plane, ndc, fov, 1.6) * 3.0;
                 let clip = orbit.clip(plane, offset, fov, 1.6);
@@ -326,7 +334,7 @@ mod tests {
     /// does. A sweep of arbitrary deltas never lands on the floor and so tests nothing.
     #[test]
     fn the_camera_is_never_in_the_plane() {
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             for start in [0.4, -0.4] {
                 let mut orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
                 orbit.elevation = start;
@@ -379,7 +387,7 @@ mod tests {
             orbit.turn(0.0, 1.0);
         }
         assert!(orbit.elevation <= ELEVATION_LIMIT);
-        let (forward, up) = orbit.orientation(Plane::Ecliptic);
+        let (forward, up) = orbit.orientation(Plane::Ecliptic.about(DVec3::Z));
         assert!(forward.cross(up).length() > 1e-4, "forward and up have become parallel");
     }
 
@@ -388,8 +396,8 @@ mod tests {
     #[test]
     fn the_plane_decides_where_the_camera_stands() {
         let orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
-        let ecliptic = orbit.eye_ly(Plane::Ecliptic);
-        let galactic = orbit.eye_ly(Plane::Galactic);
+        let ecliptic = orbit.eye_ly(Plane::Ecliptic.about(DVec3::Z));
+        let galactic = orbit.eye_ly(Plane::Galactic.about(DVec3::Z));
         assert!(ecliptic.distance(galactic) > 1e-9, "the two planes put the eye in one place");
         // And the stand-off is the plane's business only in direction, never in distance.
         assert!((ecliptic.length() - galactic.length()).abs() < 1e-12);
@@ -400,7 +408,7 @@ mod tests {
     fn a_pan_is_a_fraction_of_the_view() {
         let moved_at = |meters| {
             let mut orbit = Orbit::framing(DVec3::ZERO, meters);
-            orbit.pan(Plane::Ecliptic, 0.25, 0.0);
+            orbit.pan(Plane::Ecliptic.about(DVec3::Z), 0.25, 0.0);
             orbit.focus_ly.length() * M_PER_LY / meters
         };
         assert!((moved_at(M_PER_AU) - moved_at(1.0e4 * M_PER_AU)).abs() < 1e-9);
@@ -414,7 +422,7 @@ mod tests {
     /// a test written about distances.
     #[test]
     fn a_zoom_holds_its_anchor_on_screen() {
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             let mut orbit = Orbit::framing(DVec3::ZERO, 40.0 * M_PER_AU);
             orbit.turn(0.7, -0.2);
             // Somewhere off-center, in the plane, a quarter of the view away.
@@ -443,7 +451,7 @@ mod tests {
     fn a_cursor_ray_lands_where_the_cursor_is() {
         let fov_y = std::f32::consts::FRAC_PI_4 as f64;
         let tan_half = (fov_y * 0.5).tan();
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             for aspect in [1.0, 16.0 / 9.0, 0.6] {
                 let mut orbit = Orbit::framing(DVec3::ZERO, 40.0 * M_PER_AU);
                 // Steeply enough that every sampled ray still meets the plane: from low down,
@@ -474,7 +482,7 @@ mod tests {
     /// without trusting any of the projection at all.
     #[test]
     fn the_middle_of_the_view_is_the_focus() {
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             let mut orbit = Orbit::framing(DVec3::new(0.5, -0.25, 0.0), 12.0 * M_PER_AU);
             orbit.turn(1.1, 0.15);
             let direction = orbit.ray(plane, glam::DVec2::ZERO, 0.8, 1.5);
@@ -488,7 +496,7 @@ mod tests {
     #[test]
     fn a_ray_that_meets_nothing_says_so() {
         let orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
-        let plane = Plane::Ecliptic;
+        let plane = Plane::Ecliptic.about(DVec3::Z);
         let eye = orbit.eye_ly(plane);
         assert!(plane.intersect(eye, DVec3::Z, orbit.focus_ly).is_none(), "away from the plane");
         assert!(plane.intersect(eye, DVec3::X, orbit.focus_ly).is_none(), "along the plane");
@@ -507,7 +515,7 @@ mod tests {
 
     /// Where a point lands on screen, as a fraction of the viewport. Perspective divide and no
     /// more, which is all the assertion above needs.
-    fn screen_of(orbit: &Orbit, plane: Plane, at_ly: DVec3) -> glam::DVec2 {
+    fn screen_of(orbit: &Orbit, plane: Datum, at_ly: DVec3) -> glam::DVec2 {
         let (forward, right, up) = orbit.view_basis(plane);
         let offset = at_ly - orbit.eye_ly(plane);
         let depth = offset.dot(forward);
@@ -518,7 +526,7 @@ mod tests {
     /// its own rings are drawn on.
     #[test]
     fn a_pan_stays_in_the_plane() {
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             let mut orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
             orbit.turn(1.1, 0.2);
             let before = orbit.focus_ly;
@@ -532,7 +540,7 @@ mod tests {
     #[test]
     fn the_eye_stands_off_by_the_distance() {
         let orbit = Orbit::framing(DVec3::new(2.0, -1.0, 0.5), 3.0 * M_PER_AU);
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             let eye = orbit.eye_ly(plane);
             let span = eye.distance(orbit.focus_ly) * M_PER_LY;
             assert!((span / (3.0 * M_PER_AU) - 1.0).abs() < 1e-9, "{span} m");
