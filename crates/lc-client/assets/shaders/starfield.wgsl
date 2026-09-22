@@ -254,9 +254,16 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // to the star rather than to the camera. Normalising this in the fragment discards the
     // distance out and leaves only the angle around the star, which is what makes every
     // feature a radial thread instead of a blob.
+    //
+    // The quad lies in the *screen* plane, which is square to the line of sight only for a star
+    // dead ahead. Off center the camera's right and up carry a component along the line to the
+    // star, and the lean in the fragment turned that into a different corona wherever the star
+    // sat in the frame: orbiting the camera a few hundred meters round the ship reshaped it.
+    // With that component removed the pattern depends on the line from star to ship alone.
     let right_world = (view.world_from_view * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz;
     let up_world = (view.world_from_view * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
-    out.sky = right_world * vertex.corner.x + up_world * vertex.corner.y;
+    let across = right_world * vertex.corner.x + up_world * vertex.corner.y;
+    out.sky = across - seen * dot(across, seen);
     out.axis = seen;
     let spin = spin_of(vertex.params.z);
     out.spin_x = spin[0];
@@ -309,10 +316,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (material.corona_strength > 0.0 && length(in.sky) > 1e-6) {
         // Structure in the glare, not in the disc: the photosphere is smooth and the corona is
         // not. The sample direction leans along the line of sight as it goes out, so threads
-        // evolve with distance instead of being perfectly straight spokes.
+        // evolve with distance instead of being perfectly straight spokes. The lean is measured
+        // in the corona's own reach rather than the quad's, which the glare sizes by exposure.
         let around = normalize(in.sky);
+        let out_by = r / max(in.corona, 1e-6);
         let dir = mat3x3<f32>(in.spin_x, in.spin_y, in.spin_z)
-            * normalize(around + in.axis * (r * 0.5));
+            * normalize(around + in.axis * (out_by * 0.5));
         // Level zero: this branch is not uniform control flow, so no implicit derivative.
         let threads = textureSampleLevel(corona_filaments, filaments_sampler, dir, 0.0).r;
         // How far this streamer goes, which is ragged rather than a circle. The fade has to

@@ -145,7 +145,7 @@ pub struct Scenario {
 
 impl Scenario {
     /// Every scene there is.
-    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, CLOSING, CHASE];
+    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, CLOSING, CHASE, CORONA];
 
     /// The one whose name starts with `prefix`, if exactly one does.
     ///
@@ -378,6 +378,30 @@ pub const CHASE: Scenario = Scenario {
         // minutes rather than hours away.
         Beat { after_s: 3_600.0, actor: Slot::Pov, act: Act::Chase(Slot::Cast(0)) },
     ],
+};
+
+/// Once round the Sun, close enough that its corona fills a third of the sky.
+///
+/// The corona is a pattern fixed to the star and read along the line from the star to the
+/// ship, so a camera swung about the ship leaves it alone and going round the star turns it.
+/// This is the scene that shows both: look around and nothing moves, wait and it comes round.
+pub const CORONA: Scenario = Scenario {
+    name: "corona",
+    blurb: "You orbit the Sun at twenty radii. Its corona turns as you go round.",
+    star: "Sol",
+    // Twenty-one radii out is an eleven-day orbit, a little under two minutes at the design
+    // rate.
+    rate: 1.0,
+    watch: Slot::Pov,
+    pov: Member {
+        name: "Kestrel",
+        kind: Kind::Ship,
+        length_m: 500.0,
+        accel_g: 5.0,
+        start: Start::Holding("orbit:Sol:distant"),
+    },
+    cast: &[],
+    beats: &[],
 };
 
 #[cfg(test)]

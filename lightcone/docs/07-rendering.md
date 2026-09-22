@@ -171,9 +171,17 @@ only the angle around the star, so the field is constant along every ray and eve
 comes out radial without being asked for. The sample direction leans along the line of sight as
 it goes out, so threads evolve rather than being straight spokes.
 
-It is a function of a per-star seed and a world-space direction and of nothing else. So it does
-not swim when the camera turns, it is identical for every client, and flying around a star shows
-its other side.
+It is a function of a per-star seed and the line from the star to the ship and of nothing else.
+So it does not swim when the camera turns, it is identical for every client, and flying around a
+star shows its other side — `--demo corona` goes once round the Sun to show it.
+
+That took two corrections. The quad is laid out in the screen plane, which is square to the line
+of sight only for a star in the middle of the frame; off center, the camera's axes carry a
+component along that line, and the lean turned it into a different corona wherever the star sat
+in the frame. Swinging the camera a few hundred meters about the ship reshaped the whole thing.
+The offset is now projected square to the line of sight first. And the lean is measured in the
+corona's own reach, not the quad's, because the quad is sized by the glare and the glare by the
+exposure.
 
 Length and brightness come from two fields, not one, on the same angular scale and different
 seeds. Driving both from one field made every long streamer also the brightest, which the eye
