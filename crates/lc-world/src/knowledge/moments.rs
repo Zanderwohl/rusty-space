@@ -77,6 +77,7 @@ pub struct Reading {
 
 impl Moments {
     /// Add every sample of these series, and the visible points they combine to.
+    #[allow(clippy::indexing_slicing)] // band indices come from `Band::index`, below seven, and lag bins from `lag_bin`, below `LAGS`
     pub fn add(&mut self, series: &[&Series]) {
         let mut visible: BTreeMap<u64, (f64, f64, f64)> = Default::default();
         for s in series {
@@ -160,6 +161,7 @@ impl Moments {
 
     /// Mean and error of one band. The error is the larger of the photon noise and the scatter
     /// the samples actually show, which is what flicker is.
+    #[allow(clippy::indexing_slicing)] // band indices come from `Band::index`, below seven, and lag bins from `lag_bin`, below `LAGS`
     fn mean(&self, band: Band) -> Option<(f64, f64)> {
         let s = self.bands[band.index()];
         if s.n < 2.0 || s.w <= 0.0 {

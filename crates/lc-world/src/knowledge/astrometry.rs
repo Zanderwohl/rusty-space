@@ -92,6 +92,7 @@ pub fn baseline_rad(bearings: &[Bearing], star_ly: DVec3) -> f64 {
     widest
 }
 
+#[allow(clippy::indexing_slicing)] // axes are 0 and 1 of two-element arrays and a vector
 pub fn triangulate(bearings: &[Bearing]) -> Distance {
     let weight = |b: &Bearing| 1.0 / (b.sigma_rad * b.sigma_rad).max(f64::MIN_POSITIVE);
     let total: f64 = bearings.iter().map(weight).sum();

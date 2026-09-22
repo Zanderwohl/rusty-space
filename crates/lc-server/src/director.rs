@@ -124,7 +124,8 @@ impl<J: Journal> Server<J> {
             self.open_scene(&mut director, wire);
         }
         if let Some(started_t) = director.started_t {
-            let due: Vec<(CraftId, &'static Act)> = director.scenario.beats[director.next..]
+            let left = director.scenario.beats.get(director.next..).unwrap_or_default();
+            let due: Vec<(CraftId, &'static Act)> = left
                 .iter()
                 .take_while(|beat| {
                     started_t + (beat.after_s * 1.0e6) as i64 <= self.now_t()
@@ -133,7 +134,7 @@ impl<J: Journal> Server<J> {
                 .collect();
             // Counted against the beats, not against what was found: a beat about a craft that
             // is no longer there is spent, or it would be retried for ever.
-            director.next += director.scenario.beats[director.next..]
+            director.next += left
                 .iter()
                 .take_while(|beat| started_t + (beat.after_s * 1.0e6) as i64 <= self.now_t())
                 .count();

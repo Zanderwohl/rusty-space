@@ -8,6 +8,9 @@
 //! Nothing here is optimized. The filter's correctness is what is being built.
 
 #![forbid(unsafe_code)]
+// Nothing in the game loop panics: startup may, and past it a wire message, a row or another
+// craft's report is data. Every exception carries an `allow` with its reason.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic))]
 
 pub mod ability;
 pub mod archive;

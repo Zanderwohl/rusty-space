@@ -71,6 +71,7 @@ impl Fold {
         }
     }
 
+    #[allow(clippy::indexing_slicing)] // bin indices are below the fold's bin count by construction and prefix sums hold 2 * bins + 1 entries
     pub fn add(&mut self, points: &[Point]) {
         for p in points {
             let b = bin_of(p.t, self.epoch_s, self.period_s);
@@ -264,6 +265,7 @@ fn baseline(points: &[Point]) -> f64 {
 }
 
 /// Every dip at least `z_min` deep, strongest first, none overlapping another.
+#[allow(clippy::indexing_slicing)] // bin indices are below the fold's bin count by construction and prefix sums hold 2 * bins + 1 entries
 fn events(points: &[Point], mean: f64, z_min: f64) -> Vec<Event> {
     let mut found: Vec<Event> = Vec::new();
     for hours in DURATIONS_H {
@@ -326,6 +328,7 @@ fn repeats(points: &[Point], c: &Candidate) -> Result<(), f64> {
     if depths.iter().all(|(_, d, s)| *d > mean_depth / 3.0 - 3.0 * s) { Ok(()) } else { Err(lone) }
 }
 
+#[allow(clippy::indexing_slicing)] // bin indices are below the fold's bin count by construction and prefix sums hold 2 * bins + 1 entries
 fn search_once(points: &[Point], prior: &Prior) -> Option<Search> {
     let (first, last) = (points.first()?.t, points.last()?.t);
     let span = last - first;
@@ -535,6 +538,7 @@ impl Box {
     }
 }
 
+#[allow(clippy::indexing_slicing)] // bin indices are below the fold's bin count by construction and prefix sums hold 2 * bins + 1 entries
 fn box_at(cw: &[f64], cy: &[f64], total_w: f64, s: usize, k: usize) -> Option<Box> {
     let w_in = cw[s + k] - cw[s];
     let y_in = cy[s + k] - cy[s];
@@ -549,6 +553,7 @@ fn box_at(cw: &[f64], cy: &[f64], total_w: f64, s: usize, k: usize) -> Option<Bo
 }
 
 /// Prefix sums over the fold laid out twice, so a box can wrap past phase one.
+#[allow(clippy::indexing_slicing)] // bin indices are below the fold's bin count by construction and prefix sums hold 2 * bins + 1 entries
 fn prefix(weight: &[f64], sum: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let mut cw = Vec::with_capacity(2 * BINS + 1);
     let mut cy = Vec::with_capacity(2 * BINS + 1);
@@ -626,6 +631,7 @@ const Z_TABLE_STEPS: usize = 12_000;
 
 /// `exp(z^2 / 2) Phi(z)`, the likelihood ratio of one box integrated over positive depths up to
 /// the depth prior's factor, interpolated from a table over `[Z_TABLE_MIN, Z_TABLE_MAX)`.
+#[allow(clippy::indexing_slicing)] // bin indices are below the fold's bin count by construction and prefix sums hold 2 * bins + 1 entries
 fn ratio_table(z: f64) -> f64 {
     static TABLE: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
     let table = TABLE.get_or_init(|| {

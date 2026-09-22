@@ -298,10 +298,13 @@ impl Journal for Postgres {
         events: &[Event],
         deliveries: &[Scheduled],
     ) -> Result<(), JournalError> {
+        // Every id here was minted, so `from_raw` cannot refuse one; if it somehow did, the event
+        // is not written rather than the shard stopping.
         let rows: Vec<lc_store::store::Event> = events
             .iter()
-            .map(|e| lc_store::store::Event {
-                id: lc_store::id::EventId::from_raw(e.id).expect("a minted identifier"),
+            .filter_map(|e| Some((e, lc_store::id::EventId::from_raw(e.id)?)))
+            .map(|(e, id)| lc_store::store::Event {
+                id,
                 source_id: e.source.0,
                 t: e.t,
                 // Rounded onto the grid, which is what the grid is for. The 150 m it resolves

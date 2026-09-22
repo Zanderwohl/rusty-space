@@ -172,6 +172,8 @@ impl<J: Journal> Server<J> {
             owners: HashMap::new(),
             clients: HashMap::new(),
             journal,
+            // Startup, which may panic: a shard number outside the field is a misconfiguration.
+            #[allow(clippy::expect_used)]
             minter: Minter::new(shard).expect("a shard inside the identifier's field"),
             pending: Vec::new(),
             budgets: HashMap::new(),

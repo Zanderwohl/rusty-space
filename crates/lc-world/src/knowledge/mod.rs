@@ -8,6 +8,10 @@
 //! [`survey`](crate::knowledge::survey) or through a [`Report`] from another witness, and a
 //! star nobody has seen is simply absent. See `lightcone/docs/22-provenance.md`.
 
+// Nothing in the game loop panics: startup may, and past it a wire message, a row or another
+// craft's report is data. Every exception carries an `allow` with its reason.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic))]
+
 use std::collections::BTreeMap;
 
 use em_spectra::Band;
@@ -198,9 +202,9 @@ impl File {
     /// The orbit this craft goes by: its own statement if it has made one, otherwise the most
     /// recent anybody made.
     fn orbit(&self, owner: Witness) -> Option<&Orbit> {
-        self.orbits.iter().max_by(|a, b| {
-            (a.witness == owner, a.stated_s).partial_cmp(&(b.witness == owner, b.stated_s)).unwrap()
-        })
+        self.orbits
+            .iter()
+            .max_by(|a, b| (a.witness == owner).cmp(&(b.witness == owner)).then(a.stated_s.total_cmp(&b.stated_s)))
     }
 
     fn believe(&self, subject: Subject, owner: Witness) -> Option<Belief> {
@@ -250,22 +254,20 @@ impl File {
     /// Keep the bearings that are farthest apart, which is what a parallax is made of.
     fn decimate(&mut self, witness: Witness) {
         while self.sightings.iter().filter(|s| s.witness == witness).count() > BEARINGS_KEPT {
-            let held: Vec<usize> =
-                (0..self.sightings.len()).filter(|i| self.sightings[*i].witness == witness).collect();
+            let held: Vec<(usize, &Sighting)> =
+                self.sightings.iter().enumerate().filter(|(_, s)| s.witness == witness).collect();
             // Never the newest: it is what the display reads, and a curve of one stale
             // bearing is worse than a slightly narrower baseline.
-            let newest = *held
-                .iter()
-                .max_by(|a, b| self.sightings[**a].observed_s.total_cmp(&self.sightings[**b].observed_s))
-                .unwrap();
-            let mut drop = (f64::INFINITY, held[0]);
-            for (n, i) in held.iter().enumerate() {
-                for j in held.iter().skip(n + 1) {
-                    let gap =
-                        self.sightings[*i].bearing.observer_ly.distance(self.sightings[*j].bearing.observer_ly);
-                    let older =
-                        if self.sightings[*i].observed_s < self.sightings[*j].observed_s { *i } else { *j };
-                    let loser = if older == newest { if *i == newest { *j } else { *i } } else { older };
+            let Some(&(newest, _)) = held.iter().max_by(|a, b| a.1.observed_s.total_cmp(&b.1.observed_s)) else {
+                return;
+            };
+            let Some(&(first, _)) = held.first() else { return };
+            let mut drop = (f64::INFINITY, first);
+            for (n, &(i, a)) in held.iter().enumerate() {
+                for &(j, b) in held.iter().skip(n + 1) {
+                    let gap = a.bearing.observer_ly.distance(b.bearing.observer_ly);
+                    let older = if a.observed_s < b.observed_s { i } else { j };
+                    let loser = if older == newest { if i == newest { j } else { i } } else { older };
                     if gap < drop.0 {
                         drop = (gap, loser);
                     }
@@ -553,9 +555,11 @@ impl Knowledge {
             subject,
             Orbit { witness: owner, semi_major_au, stated_s: now_s, lineage: Lineage::new() },
         );
-        if let Some(held) = self.files[&subject]
-            .names
-            .iter()
+        if let Some(held) = self
+            .files
+            .get(&subject)
+            .into_iter()
+            .flat_map(|f| f.names.iter())
             .find(|n| n.witness == owner && n.kind == NameKind::Relative)
         {
             return held.name.clone();

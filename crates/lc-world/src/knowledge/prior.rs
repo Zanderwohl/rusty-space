@@ -125,6 +125,7 @@ impl Prior {
     ///
     /// What turns "nothing seen" into "nothing there", and only as far as it goes: a short or
     /// noisy log has found nothing because it could not have.
+    #[allow(clippy::indexing_slicing)] // grid indices are clamped into the grid before they index it
     pub fn completeness(&self, periods_s: (f64, f64), sigma: f64, points: usize) -> f64 {
         let (lo, hi) = (periods_s.0.ln(), periods_s.1.ln());
         let (mut found, mut all) = (0.0, 0.0);
@@ -183,6 +184,7 @@ impl Prior {
     /// The star the prior was measured over that is most like one of this luminosity in this
     /// band. What a swarm's elements are sized against when the star itself is only a brightness
     /// and a distance.
+    #[allow(clippy::indexing_slicing)] // grid indices are clamped into the grid before they index it
     pub fn host_like(&self, band: Band, luminosity_w: f64) -> Option<Star> {
         if !(luminosity_w > 0.0) {
             return None;
@@ -218,6 +220,7 @@ impl Prior {
     }
 
     /// Density of (ln period, ln depth) of the planet a detection would be, over the periods.
+    #[allow(clippy::indexing_slicing)] // grid indices are clamped into the grid before they index it
     pub(super) fn density(&self, periods_s: (f64, f64)) -> Density {
         let (lo, hi) = (periods_s.0.ln(), periods_s.1.ln());
         let mut weighted = Vec::new();
@@ -276,6 +279,7 @@ const DENSITY_LD_MIN: f64 = -18.4; // ln 1e-8
 const DENSITY_ND: usize = 185;
 
 impl Density {
+    #[allow(clippy::indexing_slicing)] // grid indices are clamped into the grid before they index it
     fn of(weighted: &[(f64, f64, f64)], lo: f64, hi: f64) -> Self {
         let np = (((hi - lo) / DENSITY_LP).ceil() as usize).max(1);
         let mut values = vec![0.0; np * DENSITY_ND];
@@ -290,6 +294,7 @@ impl Density {
         Density { lp0: lo, ld0: DENSITY_LD_MIN, np, values }
     }
 
+    #[allow(clippy::indexing_slicing)] // grid indices are clamped into the grid before they index it
     pub(super) fn ln_at(&self, ln_period: f64, ln_depth: f64) -> f64 {
         let ip = (((ln_period - self.lp0) / DENSITY_LP).max(0.0) as usize).min(self.np - 1);
         let id = ((ln_depth - self.ld0) / DENSITY_LD).clamp(0.0, (DENSITY_ND - 1) as f64) as usize;
@@ -299,6 +304,7 @@ impl Density {
 }
 
 /// Separable Gaussian blur, in bins.
+#[allow(clippy::indexing_slicing)] // grid indices are clamped into the grid before they index it
 fn smooth(values: &[f64], rows: usize, cols: usize, sigma_r: f64, sigma_c: f64) -> Vec<f64> {
     let kernel = |sigma: f64| -> Vec<f64> {
         let reach = (3.0 * sigma).ceil() as i64;

@@ -122,18 +122,19 @@ impl<J: Journal> Server<J> {
     /// charting office's word, overridden the moment it measures anything itself — and has to
     /// find the rest. See `lightcone/docs/22-provenance.md`.
     pub(crate) fn aboard(&mut self, id: CraftId) -> &mut Aboard {
-        if !self.instruments.aboard.contains_key(&id) {
+        let fresh = (!self.instruments.aboard.contains_key(&id)).then(|| {
             let mut knowledge = Knowledge::new(witness(id));
             if let Some(at) = self.station(id) {
                 let now_s = self.now_t as f64 * 1.0e-6;
                 observatory::issue_charts(self.sky(), &mut knowledge, at, CHARTED_LY, now_s);
             }
-            self.instruments.aboard.insert(
-                id,
-                Aboard { knowledge, observatory: Observatory::default(), reporting: Reporting::default() },
-            );
-        }
-        self.instruments.aboard.get_mut(&id).expect("just inserted")
+            Aboard { knowledge, observatory: Observatory::default(), reporting: Reporting::default() }
+        });
+        self.instruments.aboard.entry(id).or_insert_with(|| fresh.unwrap_or_else(|| Aboard {
+            knowledge: Knowledge::new(witness(id)),
+            observatory: Observatory::default(),
+            reporting: Reporting::default(),
+        }))
     }
 
     /// Room for knowledge aboard a craft now: its data modules and the onboard store.
@@ -199,7 +200,11 @@ impl<J: Journal> Server<J> {
             if reads == READS_PER_TICK {
                 break;
             }
-            let Some(&(subject, observer)) = self.instruments.aboard[&id].knowledge.due().first() else { continue };
+            let Some((subject, observer)) =
+                self.instruments.aboard.get(&id).and_then(|a| a.knowledge.due().first().copied())
+            else {
+                continue;
+            };
             let stars = self.world.stars();
             let instruments = &mut self.instruments;
             let prior = instruments.prior.get_or_insert_with(|| Prior::measure(stars.iter()));

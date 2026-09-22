@@ -297,8 +297,9 @@ pub fn sweep_between(
     for (index, when) in due {
         if let Some(seen) =
             survey::look(&optics, &sources, index, sweep.exposure_s(), at.position_ly, when, witness)
+            && let Some(source) = sources.get(index)
         {
-            knowledge.sighted(sources[index].star, seen);
+            knowledge.sighted(source.star, seen);
         }
     }
 }

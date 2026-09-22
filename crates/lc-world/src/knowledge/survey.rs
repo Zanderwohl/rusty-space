@@ -113,7 +113,7 @@ pub fn glare_radius_rad(resolution_rad: f64, bright: f64, faint: f64) -> f64 {
 
 /// Whether anything in `sky` hides `sky[index]`.
 pub fn hidden_by(sky: &[Source], index: usize, resolution_rad: f64) -> Option<StarId> {
-    let target = sky[index];
+    let target = *sky.get(index)?;
     sky.iter()
         .enumerate()
         .filter(|(i, s)| *i != index && s.flux_w_m2 > target.flux_w_m2)
@@ -295,8 +295,8 @@ impl Plan {
         if polar > self.sweep.radius_rad {
             return None;
         }
-        let j = ((polar / self.sweep.field_rad) as usize).min(self.rings.len() - 1);
-        let (offset, n) = self.rings[j];
+        let j = ((polar / self.sweep.field_rad) as usize).min(self.rings.len().saturating_sub(1));
+        let &(offset, n) = self.rings.get(j)?;
         let (x, y) = self.basis;
         let azimuth = toward
             .dot(y)

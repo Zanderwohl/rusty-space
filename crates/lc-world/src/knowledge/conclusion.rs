@@ -246,16 +246,18 @@ fn jitter_of(points: &[Point]) -> f64 {
     if points.len() < 8 {
         return 0.0;
     }
-    let mut x: Vec<f64> = points.iter().map(|p| p.x).collect();
-    x.sort_by(f64::total_cmp);
-    let median = x[x.len() / 2];
-    let mut dev: Vec<f64> = x.iter().map(|v| (v - median).abs()).collect();
-    dev.sort_by(f64::total_cmp);
-    let scale = 1.4826 * dev[dev.len() / 2];
-    let mut var: Vec<f64> = points.iter().map(|p| 1.0 / p.w).collect();
-    var.sort_by(f64::total_cmp);
-    (scale * scale - var[var.len() / 2]).max(0.0).sqrt()
+    let median = median_of(points.iter().map(|p| p.x).collect());
+    let scale = 1.4826 * median_of(points.iter().map(|p| (p.x - median).abs()).collect());
+    let var = median_of(points.iter().map(|p| 1.0 / p.w).collect());
+    (scale * scale - var).max(0.0).sqrt()
 }
+
+/// The middle of some numbers; zero for none.
+fn median_of(mut values: Vec<f64>) -> f64 {
+    values.sort_by(f64::total_cmp);
+    values.get(values.len() / 2).copied().unwrap_or(0.0)
+}
+
 
 impl Knowledge {
     /// Mark a subject's logs to be kept whatever the pipeline concludes, or not.
@@ -431,7 +433,9 @@ impl Knowledge {
         } else if planet > 0.0 {
             // Odds for a planet with no box to show for them: nothing to name, so it is folded
             // back into what the log has not yet found.
-            transits[1].probability += planet;
+            if let Some(unsearched) = transits.iter_mut().find(|h| h.kind == Kind::Unsearched) {
+                unsearched.probability += planet;
+            }
         }
         transits.sort_by(|a, b| b.probability.total_cmp(&a.probability));
         let populations = populations(&moments, prior, host);
@@ -466,7 +470,10 @@ impl Knowledge {
             covering: Covering { observed_s, light_age_s },
             transits,
             populations,
-            discarded_s: digest.as_ref().and_then(|_| self.files[&subject].series.iter().find(|s| s.witness == observer).map(|s| s.consumed_s())).filter(|t| t.is_finite()),
+            discarded_s: digest
+                .as_ref()
+                .and_then(|_| self.files.get(&subject)?.series.iter().find(|s| s.witness == observer).map(|s| s.consumed_s()))
+                .filter(|t| t.is_finite()),
         };
 
         let leading = conclusion.leading().map(|h| (h.probability, h.kind));
@@ -475,15 +482,15 @@ impl Knowledge {
             _ => false,
         };
         let quiet_settled = matches!(leading, Some((p, Kind::Quiet)) if p >= SETTLED);
-        let retained = self.files[&subject].retained;
+        let retained = self.files.get(&subject).is_some_and(|f| f.retained);
         if (planet_settled || quiet_settled || self.is_full()) && !retained && !points.is_empty() {
             let planet = match (&settled, planet_settled, leading) {
                 (Some(held), _, _) => Some(Settled { folds, ln_bayes, delta_chi2, ..held.clone() }),
-                (None, true, Some((_, Kind::Planet { transit, .. }))) => Some(Settled {
+                (None, true, Some((_, Kind::Planet { transit, .. }))) => periods.map(|periods_s| Settled {
                     ln_bayes,
                     delta_chi2,
                     prior: prior_p,
-                    periods_s: periods.expect("a planet was searched for"),
+                    periods_s,
                     folds: neighbors(&transit, &points),
                 }),
                 // Consumed for room with nothing settled: what the search had is lost, and
@@ -552,9 +559,7 @@ fn populations(moments: &Moments, prior: &Prior, host: Option<crate::star::Star>
 
 /// The error of a typical point, for what the log could have seen.
 fn typical_sigma(points: &[Point]) -> f64 {
-    let mut sigma: Vec<f64> = points.iter().map(|p| p.w.recip().sqrt()).collect();
-    sigma.sort_by(f64::total_cmp);
-    sigma[sigma.len() / 2]
+    median_of(points.iter().map(|p| p.w.recip().sqrt()).collect())
 }
 
 /// Folds at a planet's period and either side of it at its error.
@@ -570,7 +575,7 @@ fn neighbors(transit: &Candidate, points: &[Point]) -> Vec<Fold> {
 
 /// The period step between kept folds: what they can still resolve.
 fn spacing(folds: &[Fold]) -> f64 {
-    folds.windows(2).map(|w| (w[1].period_s - w[0].period_s).abs()).fold(0.0, f64::max)
+    folds.iter().zip(folds.iter().skip(1)).map(|(a, b)| (b.period_s - a.period_s).abs()).fold(0.0, f64::max)
 }
 
 #[cfg(test)]

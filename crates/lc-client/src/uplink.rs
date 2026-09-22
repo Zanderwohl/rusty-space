@@ -9,6 +9,10 @@
 //! authoritative only where they disagree. What arrives instead is [`Sighting`]s: events, at
 //! light delay. See `lightcone/docs/08-networking.md`.
 
+// Nothing in the game loop panics: startup may, and past it a wire message, a row or another
+// craft's report is data. Every exception carries an `allow` with its reason.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic))]
+
 use std::sync::Mutex;
 
 use bevy::prelude::*;
@@ -301,9 +305,12 @@ fn lc_server_tick_us(rate: f64) -> i64 {
 const REMEMBERED: usize = 256;
 
 impl Uplink {
+    // The link's lock is only ever held within one call, so a poisoned one means a panic
+    // elsewhere already; the link it guards is still the link, and is taken as it is.
+
     /// Take a link and start greeting over it. Replaces whatever was there.
     pub fn open(&mut self, link: Box<dyn Link + Send>) {
-        *self.link.get_mut().unwrap() = Some(link);
+        *self.link.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(link);
         self.greeted = false;
         self.seen.clear();
         self.state = State::Connecting;
@@ -364,7 +371,7 @@ impl Uplink {
     /// Say something to the server. Silently does nothing with no link, which is the offline
     /// build and is not an error there.
     pub fn say(&mut self, message: Inbound) {
-        if let Some(link) = self.link.get_mut().unwrap() {
+        if let Some(link) = self.link.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner) {
             link.send(message);
         }
     }
@@ -379,7 +386,7 @@ impl Uplink {
     }
 
     fn take(&mut self) -> Vec<Outbound> {
-        let Some(link) = self.link.get_mut().unwrap() else {
+        let Some(link) = self.link.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner) else {
             return Vec::new();
         };
         let status = link.status();
@@ -451,7 +458,7 @@ pub fn pump(
     mut out: MessageWriter<crate::input::Requested>,
 ) {
     let greet_now = {
-        let link = uplink.link.get_mut().unwrap();
+        let link = uplink.link.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
         link.as_ref().is_some_and(|l| l.status().is_open()) && !uplink.greeted
     };
     if greet_now {

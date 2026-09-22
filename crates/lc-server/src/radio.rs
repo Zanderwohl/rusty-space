@@ -321,7 +321,8 @@ impl<J: Journal> Server<J> {
     pub(crate) fn acks_for(&self, sender: CraftId, to: ShipId, now: i64) -> Vec<i64> {
         let Some(window) = self.heard.get(&(sender, to)) else { return Vec::new() };
         let landed = window.partition_point(|(arrive_t, _)| *arrive_t <= now);
-        window[landed.saturating_sub(ACK_DEPTH)..landed].iter().map(|(_, id)| *id).collect()
+        let recent = window.get(landed.saturating_sub(ACK_DEPTH)..landed).unwrap_or_default();
+        recent.iter().map(|(_, id)| *id).collect()
     }
 
     /// Which way a transmission is pointed, and how wide.
