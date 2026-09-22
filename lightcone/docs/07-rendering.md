@@ -183,6 +183,16 @@ The offset is now projected square to the line of sight first. And the lean is m
 corona's own reach, not the quad's, because the quad is sized by the glare and the glare by the
 exposure.
 
+The threads drift outward, at a speed stated in the world: `corona flow`, stellar radii per day
+of coordinate time, one by default. That is eight thousand kilometers a second for the Sun and
+several times any real outflow, which would take months to cross a corona this deep. At this
+speed a thread moves an eighth of the way out in a day. A thread's pattern changes with distance
+out only through the lean, so sliding the lean back as time runs is what carries it outward. A
+slide has to jump back when its cycle ends, so two copies run half a cycle apart and each is
+faded to nothing at its own jump. The phase is reduced on the CPU in f64, because coordinate
+time in an f32 steps in tens of seconds. Only the threads drift. The streamers' reach stays put,
+because tips flickering as the copies crossfade read as noise rather than as gas going anywhere.
+
 Length and brightness come from two fields, not one, on the same angular scale and different
 seeds. Driving both from one field made every long streamer also the brightest, which the eye
 picks up at once. Sampling the length at half the frequency was worse again: it replaced the

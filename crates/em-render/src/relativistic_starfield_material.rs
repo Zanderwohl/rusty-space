@@ -92,6 +92,8 @@ pub struct RelativisticStarfieldUniform {
     /// declaration, so a field inserted here and appended there silently shifts every value
     /// after it, and the failure is a rendering that looks merely wrong.
     pub corona_radii: f32,
+    /// How far through its cycle the outward drift is, in `[0, 1)`. See [`CORONA_FLOW_CYCLE`].
+    pub corona_flow_phase: f32,
     /// Lookup domain: `index = (log2(T) - log_t_min) * log_t_scale`.
     pub log_t_min: f32,
     pub log_t_scale: f32,
@@ -106,6 +108,13 @@ pub struct RelativisticStarfieldUniform {
 /// screen. A real eclipse corona reaches a few radii and this reaches rather more, which is of
 /// a piece with a corona drawn at all: see the note in `starfield.wgsl`.
 pub const DEFAULT_CORONA_RADII: f32 = 7.8;
+
+/// How far the corona's threads drift outward before the drift repeats, in units of the
+/// corona's reach. Must match `CORONA_FLOW_CYCLE` in `starfield.wgsl`.
+///
+/// The shader crossfades two copies half a cycle apart, so no copy is ever seen jumping back.
+/// Longer cycles smear the threads, since each copy spends longer blended with the other.
+pub const CORONA_FLOW_CYCLE: f32 = 0.5;
 
 impl Default for RelativisticStarfieldUniform {
     fn default() -> Self {
@@ -131,6 +140,7 @@ impl Default for RelativisticStarfieldUniform {
             corona_floor: 0.22,
             corona_gain: 1.45,
             corona_radii: DEFAULT_CORONA_RADII,
+            corona_flow_phase: 0.0,
             log_t_min: 0.0,
             log_t_scale: 1.0,
             lut_samples: 1.0,

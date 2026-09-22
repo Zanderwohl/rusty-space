@@ -21,6 +21,8 @@
 const PI: f32 = 3.14159265;
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 const BANDS: u32 = 7u;
+/// In the corona's reach. Must match `CORONA_FLOW_CYCLE` in em-render.
+const CORONA_FLOW_CYCLE: f32 = 0.5;
 
 struct StarfieldUniform {
     // Rows of the band-to-display matrix, one entry per band: (r, g, b, unused).
@@ -57,6 +59,8 @@ struct StarfieldUniform {
     /// it, and does not grow as you approach. A corona is a thing that is *there*, so its
     /// angular size has to fall off with distance like the disc it surrounds.
     corona_radii: f32,
+    /// How far through its cycle the outward drift is, in [0, 1).
+    corona_flow_phase: f32,
     // Lookup domain: index = (log2(T) - log_t_min) * log_t_scale.
     log_t_min: f32,
     log_t_scale: f32,
@@ -151,6 +155,25 @@ fn spin_of(seed: f32) -> mat3x3<f32> {
         vec3<f32>(t * k.x * k.y - n * k.z, c + t * k.y * k.y, t * k.y * k.z + n * k.x),
         vec3<f32>(t * k.x * k.z + n * k.y, t * k.y * k.z - n * k.x, c + t * k.z * k.z),
     );
+}
+
+/// The corona's threads, carried outward as the drift phase advances.
+///
+/// A thread's pattern changes with distance out only through the lean along the line of sight,
+/// so sliding the lean back as time runs moves every feature outward along its thread. A single
+/// slide has to jump back at the end of its cycle; two copies half a cycle apart, each faded to
+/// nothing at its own jump, hide it. The weights sum to one.
+fn drifting_threads(spin: mat3x3<f32>, around: vec3<f32>, axis: vec3<f32>, out_by: f32) -> f32 {
+    var sum = 0.0;
+    for (var k = 0u; k < 2u; k = k + 1u) {
+        let phase = fract(material.corona_flow_phase + 0.5 * f32(k));
+        let weight = 1.0 - abs(2.0 * phase - 1.0);
+        let lean = out_by - phase * CORONA_FLOW_CYCLE;
+        let dir = spin * normalize(around + axis * (lean * 0.5));
+        // Level zero: the caller's branch is not uniform control flow, so no implicit derivative.
+        sum = sum + weight * textureSampleLevel(corona_filaments, filaments_sampler, dir, 0.0).r;
+    }
+    return sum;
 }
 
 /// Band radiance of a blackbody at `teff`, from the table em-spectra generated.
@@ -320,10 +343,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // in the corona's own reach rather than the quad's, which the glare sizes by exposure.
         let around = normalize(in.sky);
         let out_by = r / max(in.corona, 1e-6);
-        let dir = mat3x3<f32>(in.spin_x, in.spin_y, in.spin_z)
-            * normalize(around + in.axis * (out_by * 0.5));
-        // Level zero: this branch is not uniform control flow, so no implicit derivative.
-        let threads = textureSampleLevel(corona_filaments, filaments_sampler, dir, 0.0).r;
+        let spin = mat3x3<f32>(in.spin_x, in.spin_y, in.spin_z);
+        let dir = spin * normalize(around + in.axis * (out_by * 0.5));
+        // The threads drift and the silhouette does not: a streamer's tips flickering as two
+        // copies crossfade would read as noise rather than gas going somewhere.
+        let threads = drifting_threads(spin, around, in.axis, out_by);
         // How far this streamer goes, which is ragged rather than a circle. The fade has to
         // *finish* inside the quad: run it past r = 1 and the discard at the edge cuts it into
         // a hard disc, which is the circle this was meant to avoid, only sharper.
