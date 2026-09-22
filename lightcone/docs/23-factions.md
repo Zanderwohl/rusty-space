@@ -353,7 +353,11 @@ it, nothing could ever be inserted between `b` and `ba`.
 The spacing lives in `lc_world::knowledge::names::SPACING`, a table by luminosity. Its one row
 today is measured from the generator — innermost orbit `0.70 sqrt(L)` AU, neighbors `1.83`
 apart — and lettering eight thousand generated planets in random discovery order needs a second
-letter for about one in fifteen.
+letter for about one in nine.
+
+A craft holds one chosen name and one assigned name for anything, side by side. Naming a planet
+"Spout" is shown in place of its letter and never unassigns it: the letter stays frozen, holds its
+place among the letters, and a refined orbit cannot bring it back over the name.
 
 A little silly, and real catalogues have been sillier. What matters is that the rule is
 deterministic given what the assigning craft knew, so two craft with the same data agree, and

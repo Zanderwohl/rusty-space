@@ -73,9 +73,10 @@ pub fn expected_slot(semi_major_au: f64, luminosity_solar: f64, table: &[Spacing
 /// `placed` is the letters this craft already goes by for planets of the same star, with the
 /// orbit each was placed at. Letters run `b` outward (`a` is the star) and alphabetical order
 /// is orbital order, so the new letter has to sort between whatever orbits just inside and just
-/// outside it. It takes its expected slot's letter when that fits; the nearest free single
-/// letter when it does not; and a second letter when there is no single one left — `bb`, `bc`
-/// between `b` and `c`, and `ab` inside `b`.
+/// outside it. It takes its expected slot's letter when that fits. When it does not — the slot
+/// is taken, or on the wrong side of a neighbor — it takes a second letter after the neighbor
+/// inside it, `cb` after `c`, `bb` and `bc` between `b` and `c`, and `ab` inside `b`, leaving
+/// every single letter for the slot it names.
 ///
 /// A second letter never starts at `a`. `a` is kept free at every depth to mean "inside the
 /// first", the way it means the star at the top, so there is always room to insert.
@@ -96,20 +97,40 @@ pub fn planet_letter(
         .min_by(|x, y| x.1.total_cmp(&y.1))
         .map(|(letter, _)| letter.as_str());
     let slot = expected_slot(semi_major_au, luminosity_solar, table);
-    let preferred = b'b' + slot.min((b'z' - b'b') as usize) as u8;
+    let preferred = char::from(b'b' + slot.min((b'z' - b'b') as usize) as u8).to_string();
     let lo = inside.unwrap_or("a");
     // Letters received from other craft may not agree with this craft's orbits. Where the
     // neighbors are out of order the outer bound is dropped rather than looping on an
     // impossible gap.
     let hi = outside.filter(|hi| lo < *hi);
-    between(lo, hi, preferred)
+    let taken = placed.iter().any(|(letter, _)| *letter == preferred);
+    if !taken && lo < preferred.as_str() && hi.is_none_or(|hi| preferred.as_str() < hi) {
+        return preferred;
+    }
+    // A second letter after the neighbor inside, within its slot: bounded above by the next
+    // single letter, so no single letter is ever spent on a planet out of its slot.
+    let next = successor(lo.get(..1).unwrap_or("a"));
+    let bound = match (hi, next.as_deref()) {
+        (Some(hi), Some(next)) => Some(if hi < next { hi } else { next }),
+        (hi, next) => hi.or(next),
+    };
+    between(lo, bound)
 }
 
-/// The shortest string strictly between `lo` and `hi`, over `a`–`z`, that does not end in `a`.
-///
-/// At the first letter it takes the allowed letter nearest `preferred`; below that, the smallest,
-/// so planets found outward in order are lettered in order.
-fn between(lo: &str, hi: Option<&str>, preferred: u8) -> String {
+/// The string just after `s` at its own length: its last letter moved on one. `None` past `z`.
+fn successor(s: &str) -> Option<String> {
+    let mut bytes = s.as_bytes().to_vec();
+    let last = bytes.last_mut()?;
+    if *last >= b'z' {
+        return None;
+    }
+    *last += 1;
+    String::from_utf8(bytes).ok()
+}
+
+/// The shortest string strictly between `lo` and `hi`, over `a`–`z`, that does not end in `a`,
+/// and the smallest of those, so planets found outward in order are lettered in order.
+fn between(lo: &str, hi: Option<&str>) -> String {
     let lo = lo.as_bytes();
     let mut out = Vec::new();
     let mut lo_tight = true;
@@ -125,12 +146,7 @@ fn between(lo: &str, hi: Option<&str>, preferred: u8) -> String {
         let above = |c: u8| !lo_tight || lo_done || lo_c.is_some_and(|l| c > l);
         let below = |c: u8| !hi_tight || hi_c.is_some_and(|h| c < h);
         let stops: Vec<u8> = (b'b'..=b'z').filter(|&c| above(c) && below(c)).collect();
-        if !stops.is_empty() {
-            let pick = if i == 0 {
-                *stops.iter().min_by_key(|&&c| (c as i16 - preferred as i16).abs()).unwrap()
-            } else {
-                stops[0]
-            };
+        if let Some(&pick) = stops.first() {
             out.push(pick);
             break;
         }
@@ -143,7 +159,8 @@ fn between(lo: &str, hi: Option<&str>, preferred: u8) -> String {
             hi_tight = false;
         }
     }
-    String::from_utf8(out).expect("letters are ASCII")
+    // Every byte pushed is in `a`..=`z`.
+    out.into_iter().map(char::from).collect()
 }
 
 #[cfg(test)]
@@ -178,14 +195,18 @@ mod tests {
         assert!(planet_letter(&[], 7.0, 1.0, SPACING).as_str() > "e");
     }
 
-    /// Where the slot is taken or on the wrong side of a neighbor, the nearest single letter
-    /// that keeps alphabetical order orbital order.
+    /// Where the slot is taken or on the wrong side of a neighbor, a second letter after the
+    /// neighbor inside it: doc 23's rule 4. No single letter is spent on a planet out of its
+    /// slot, so the one that belongs there can still have it.
     #[test]
-    fn a_taken_slot_moves_to_the_nearest_letter_that_keeps_the_order() {
+    fn a_taken_slot_takes_a_second_letter_and_leaves_the_next_slot_free() {
         // Something at c's orbit is already "c"; a planet just outside it is still in c's slot.
-        assert_eq!(planet_letter(&placed(&[("c", 1.28)]), 1.4, 1.0, SPACING), "d");
+        let one = placed(&[("c", 1.28)]);
+        assert_eq!(planet_letter(&one, 1.4, 1.0, SPACING), "cb");
+        let two = placed(&[("c", 1.28), ("cb", 1.4)]);
+        assert_eq!(planet_letter(&two, 2.35, 1.0, SPACING), "d", "and d is still d's");
         // Something mis-slotted: "e" holds 1.0 AU, and a planet at 2.35 AU (slot d) is outside it.
-        assert_eq!(planet_letter(&placed(&[("e", 1.0)]), 2.35, 1.0, SPACING), "f");
+        assert_eq!(planet_letter(&placed(&[("e", 1.0)]), 2.35, 1.0, SPACING), "eb");
     }
 
     /// No single letter left between two neighbors: a second one, never starting at `a`.

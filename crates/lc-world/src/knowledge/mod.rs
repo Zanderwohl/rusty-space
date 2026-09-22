@@ -502,15 +502,19 @@ impl Knowledge {
         self.refresh(subject);
     }
 
-    /// File what somebody calls something. One name per witness: renaming is stating a new
-    /// one, and the later statement is what that witness calls it now.
+    /// File what somebody calls something.
+    ///
+    /// Each witness holds one chosen name and one a rule assigned, side by side: renaming a
+    /// planet "Spout" does not unassign its letter, which stays frozen and keeps its place among
+    /// the letters, and the chosen name is what is shown. Renaming is stating a new chosen name,
+    /// and the later statement is what that witness calls it now.
     pub fn named(&mut self, subject: impl Into<Subject>, naming: Naming) {
         let subject = subject.into();
         let file = self.files.entry(subject).or_default();
-        match file.names.iter_mut().find(|n| n.witness == naming.witness) {
+        match file.names.iter_mut().find(|n| n.witness == naming.witness && n.kind.chosen() == naming.kind.chosen()) {
             Some(held) if held.stated_s > naming.stated_s => {}
-            // A rule's assignment is frozen; only a chosen name replaces it.
-            Some(held) if !held.kind.chosen() && !naming.kind.chosen() && held.witness == naming.witness => {}
+            // A rule's assignment is frozen.
+            Some(held) if !held.kind.chosen() => {}
             Some(held) => *held = naming,
             None => file.names.push(naming),
         }
@@ -560,8 +564,10 @@ impl Knowledge {
             .members(star)
             .filter(|(s, _)| *s != subject && matches!(s, Subject::Body { .. }))
             .filter_map(|(_, file)| {
-                let naming = file.naming(owner).filter(|n| n.kind == NameKind::Relative)?;
-                Some((naming.name.clone(), file.orbit(owner)?.semi_major_au))
+                // This craft's letter, not whatever name wins: a planet renamed "Spout" still holds
+                // its letter's place.
+                let letter = file.names.iter().find(|n| n.witness == owner && n.kind == NameKind::Relative)?;
+                Some((letter.name.clone(), file.orbit(owner)?.semi_major_au))
             })
             .collect();
         let letter = names::planet_letter(&placed, semi_major_au, luminosity_solar, names::SPACING);
@@ -983,7 +989,8 @@ mod tests {
             ours.belief(star).unwrap().name.as_ref().unwrap().name,
             "The Kettle"
         );
-        assert_eq!(ours.file(star).unwrap().names().len(), 2);
+        // Each crew's designation and each crew's chosen name.
+        assert_eq!(ours.file(star).unwrap().names().len(), 4);
     }
 
     #[test]
@@ -1312,5 +1319,21 @@ mod tests {
         ship.receive(&hostile, 3.0);
         let name = ship.name_of(star).expect("a name");
         assert_eq!(name.matches(" b").count(), NAME_DEPTH, "{name}");
+    }
+
+    /// Review item 14. A planet renamed keeps its letter: a refined orbit does not bring the
+    /// letter back over the chosen name, and the next planet is placed against the letter.
+    #[test]
+    fn a_chosen_name_always_wins_and_keeps_its_letter() {
+        let star = star_id(46);
+        let mut k = Knowledge::new(Witness(1));
+        k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 0.0));
+        let (inner, _) = planet(star, "inner");
+        assert_eq!(k.found_planet(star, inner, 0.7, 1.0, 1.0), "b");
+        k.name_it(Subject::Body { star, body: inner }, "Spout", 2.0);
+        assert_eq!(k.found_planet(star, inner, 0.71, 1.0, 3.0), "b", "the letter is frozen");
+        assert_eq!(k.name_of(Subject::Body { star, body: inner }).as_deref(), Some("Spout"), "and the name still wins");
+        let (next, _) = planet(star, "next");
+        assert_eq!(k.found_planet(star, next, 0.72, 1.0, 4.0), "bb", "b is still taken");
     }
 }
