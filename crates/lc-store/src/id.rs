@@ -93,6 +93,21 @@ impl Minter {
         Some(id)
     }
 
+    /// Start again past `last`, the highest identifier the store already holds.
+    ///
+    /// **A restart is not a new world.** The clock comes back from a checkpoint that may be
+    /// behind the last event written, and identifiers are minted from it — so a shard that
+    /// started counting again wrote a duplicate `(event_id, t)` the first time anyone acted.
+    ///
+    /// Past the whole of `last`'s second rather than the next sequence in it, because `last`
+    /// may be another shard's and its sequence then says nothing about this one's.
+    pub fn resume_from(&mut self, last: EventId) {
+        if last.second() >= self.second {
+            self.second = last.second();
+            self.sequence = MAX_SEQUENCE + 1;
+        }
+    }
+
     pub fn shard(&self) -> u64 {
         self.shard
     }
