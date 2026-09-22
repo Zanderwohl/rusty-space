@@ -74,7 +74,9 @@ pub struct Connected {
     /// Learned-time through which this client's copy of its craft's knowledge is current. See
     /// [`crate::instruments`]. From the beginning for a new connection, which is what pages a
     /// craft's whole knowledge to a client that has just signed in.
-    pub learned_s: f64,
+    pub learned: lc_world::knowledge::Mark,
+    /// The same for the craft's own samples, which come separately. See [`crate::instruments`].
+    pub logged_s: f64,
 }
 
 pub struct Server<J: Journal> {
@@ -361,7 +363,8 @@ impl<J: Journal> Server<J> {
             // develop.
             permission: crate::ability::Level::PLAYER,
             backlog_sent: false,
-            learned_s: f64::NEG_INFINITY,
+            learned: Default::default(),
+            logged_s: f64::NEG_INFINITY,
         });
         self.aboard(CraftId(ship_id.0));
     }
@@ -575,6 +578,10 @@ impl<J: Journal> Server<J> {
         // report is a transmission with no transcript line, and a transmitter still does not
         // hear itself.
         let mut transmitted = false;
+        // How far a report has told its recipient. Held until the event exists: anything below
+        // can still refuse, and a mark moved for a report that was never sent loses that slice
+        // for that recipient for good.
+        let mut reported = None;
 
         let (kind, power_w, payload, applied) = match &intent.order {
             Order::Transmit { power_w } => {
@@ -764,9 +771,7 @@ impl<J: Journal> Server<J> {
                 beam = spoken.beam;
                 transmitted = true;
                 utterance = spoken.said;
-                if let Some((to, through)) = spoken.reported {
-                    self.reported(id, to, through);
-                }
+                reported = spoken.reported;
                 (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, spoken.applied)
             }
         };
@@ -810,6 +815,9 @@ impl<J: Journal> Server<J> {
             self.remember(event_id, id, at, &said, &landings);
         }
         events.push(event);
+        if let Some((to, through)) = reported {
+            self.reported(id, to, through);
+        }
         Ok(Applied { event_id, at_t: at, order: applied })
     }
 
@@ -875,7 +883,8 @@ impl<J: Journal> Server<J> {
             had_contacts: false,
             permission: crate::ability::Level::from_claim(claims.perm),
             backlog_sent: false,
-            learned_s: f64::NEG_INFINITY,
+            learned: Default::default(),
+            logged_s: f64::NEG_INFINITY,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused

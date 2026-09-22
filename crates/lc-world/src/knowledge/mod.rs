@@ -22,6 +22,7 @@ pub mod names;
 pub mod observatory;
 pub mod prior;
 pub mod record;
+pub mod report;
 pub mod room;
 pub mod subject;
 pub mod survey;
@@ -30,8 +31,9 @@ pub mod transit;
 pub use astrometry::{Bearing, Distance};
 pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;
+pub use report::{ENTRIES_PER_REPORT, Entry, Log, Mark, Part, Report, Reporting};
 pub use record::{
-    Claim, Hop, Lineage, NameKind, Naming, Orbit, SAMPLES_KEPT, Sample, Series, Sighting, Witness,
+    Claim, Hop, Lineage, NameKind, Naming, Orbit, Sample, Series, Sighting, Witness,
     learned_s,
 };
 pub use subject::{BodyId, Subject};
@@ -250,20 +252,6 @@ impl File {
         }
     }
 
-    /// Everything here learned after `since_s`, or `None` if nothing was.
-    fn since(&self, subject: Subject, since_s: f64) -> Option<Part> {
-        let fresh = |lineage: &Lineage, at: f64| learned_s(lineage, at) > since_s;
-        let part = Part {
-            subject,
-            sightings: self.sightings.iter().filter(|s| s.learned_s() > since_s).cloned().collect(),
-            series: self.series.iter().filter_map(|s| s.after(since_s)).collect(),
-            claims: self.claims.iter().filter(|c| fresh(&c.lineage, c.stated_s)).cloned().collect(),
-            names: self.names.iter().filter(|n| fresh(&n.lineage, n.stated_s)).cloned().collect(),
-            orbits: self.orbits.iter().filter(|o| fresh(&o.lineage, o.stated_s)).cloned().collect(),
-            conclusions: self.conclusions.iter().filter(|c| c.learned_s() > since_s).cloned().collect(),
-        };
-        (!part.is_empty()).then_some(part)
-    }
 }
 
 /// One photometric sample, as a log row: what it is of, whose it is, and when this craft learned
@@ -289,6 +277,12 @@ pub struct Knowledge {
     changed: std::collections::BTreeSet<Subject>,
     unsaved: Vec<Logged>,
     consumed: Vec<Consumed>,
+    /// What changed when, so that what is new since a mark is read without walking every file:
+    /// anything a report carries, and this craft's own samples.
+    backlog: report::Backlog,
+    sampled: report::Recent,
+    /// Subjects with samples added since their log was last read.
+    unread: std::collections::BTreeSet<Subject>,
     /// Room aboard, and how much of it is in use: see [`room`]. Not part of what a craft knows.
     capacity_bytes: f64,
     occupied_bytes: f64,
@@ -310,6 +304,9 @@ impl Knowledge {
             changed: Default::default(),
             unsaved: Vec::new(),
             consumed: Vec::new(),
+            backlog: Default::default(),
+            sampled: Default::default(),
+            unread: Default::default(),
             capacity_bytes: f64::INFINITY,
             occupied_bytes: 0.0,
             unkept: 0,
@@ -360,60 +357,16 @@ impl Knowledge {
         let subjects: Vec<Subject> = knowledge.files.keys().copied().collect();
         for subject in subjects {
             knowledge.refresh(subject);
+            let last = knowledge.files.get(&subject).and_then(|f| {
+                f.series.iter().filter(|s| s.witness == owner).filter_map(|s| s.last()).map(|s| s.observed_s).reduce(f64::max)
+            });
+            if let Some(last) = last {
+                knowledge.sampled.touch(subject, last);
+                knowledge.unread.insert(subject);
+            }
         }
         knowledge.changed.clear();
         knowledge
-    }
-
-    /// Take a new identity, carrying this craft's own records over to it.
-    ///
-    /// A ship does not know what it is called until a shard tells it, and everything it
-    /// measured before then is stamped with the placeholder. Left alone, two craft would both
-    /// be witness zero and their records would collide the first time either reported to the
-    /// other — one ship's bearings filed as the other's own, and a dedup that threw away real
-    /// measurements because they shared a witness and an instant.
-    pub fn rebrand(&mut self, owner: Witness) {
-        let was = self.owner;
-        if was == owner {
-            return;
-        }
-        self.owner = owner;
-        let swap = |w: &mut Witness| {
-            if *w == was {
-                *w = owner;
-            }
-        };
-        for file in self.files.values_mut() {
-            file.sightings.iter_mut().for_each(|s| swap(&mut s.witness));
-            file.series.iter_mut().for_each(|s| swap(&mut s.witness));
-            file.names.iter_mut().for_each(|n| swap(&mut n.witness));
-            file.claims.iter_mut().for_each(|c| swap(&mut c.witness));
-            file.orbits.iter_mut().for_each(|o| swap(&mut o.witness));
-            for c in &mut file.conclusions {
-                swap(&mut c.witness);
-                swap(&mut c.observer);
-            }
-            file.digests.iter_mut().for_each(|d| swap(&mut d.observer));
-            // Hops name the ends of a handover, so a craft that has renamed itself must not
-            // keep telling people its old name.
-            for hop in file
-                .sightings
-                .iter_mut()
-                .flat_map(|s| s.lineage.iter_mut())
-                .chain(file.series.iter_mut().flat_map(|s| s.lineage.iter_mut()))
-                .chain(file.names.iter_mut().flat_map(|n| n.lineage.iter_mut()))
-                .chain(file.claims.iter_mut().flat_map(|c| c.lineage.iter_mut()))
-                .chain(file.orbits.iter_mut().flat_map(|o| o.lineage.iter_mut()))
-                .chain(file.conclusions.iter_mut().flat_map(|c| c.lineage.iter_mut()))
-            {
-                swap(&mut hop.from);
-                swap(&mut hop.to);
-            }
-        }
-        let subjects: Vec<Subject> = self.files.keys().copied().collect();
-        for subject in subjects {
-            self.refresh(subject);
-        }
     }
 
     /// Subjects held: stars, and whatever else has been learned about.
@@ -493,13 +446,13 @@ impl Knowledge {
     /// File where somebody says a body orbits. One statement per witness, the later winning.
     pub fn orbits(&mut self, subject: impl Into<Subject>, orbit: Orbit) {
         let subject = subject.into();
-        self.changed.insert(subject);
         let file = self.files.entry(subject).or_default();
         match file.orbits.iter_mut().find(|o| o.witness == orbit.witness) {
             Some(held) if held.stated_s >= orbit.stated_s => {}
             Some(held) => *held = orbit,
             None => file.orbits.push(orbit),
         }
+        self.refresh(subject);
     }
 
     /// File what somebody calls something. One name per witness: renaming is stating a new
@@ -581,7 +534,8 @@ impl Knowledge {
     /// File a photometric sample this craft measured itself.
     pub fn measured(&mut self, subject: impl Into<Subject>, witness: Witness, band: Band, sample: Sample) {
         let subject = subject.into();
-        if !self.make_room() {
+        if self.is_full() {
+            self.unkept += 1;
             return;
         }
         let file = self.files.entry(subject).or_default();
@@ -589,14 +543,18 @@ impl Knowledge {
             Some(series) => series.push(sample),
             None => {
                 let mut series = Series::new(witness, band);
-                series.push(sample);
+                let added = series.push(sample);
                 file.series.push(series);
                 // A new series is a new header in the file, as well as a sample in the log.
                 self.changed.insert(subject);
-                true
+                added
             }
         };
+        // Room is charged for what was kept, and a sample out of order is not.
         if added {
+            self.charge_sample();
+            self.sampled.touch(subject, sample.observed_s);
+            self.unread.insert(subject);
             let learned_s = sample.observed_s;
             self.unsaved.push(Logged { subject, witness, band, sample, learned_s });
         }
@@ -606,123 +564,6 @@ impl Knowledge {
     pub fn own_series(&self, subject: impl Into<Subject>, band: Band) -> Option<&Series> {
         let file = self.files.get(&subject.into())?;
         file.series.iter().find(|s| s.witness == self.owner && s.band == band)
-    }
-
-    /// Everything learned after `since_s`, ready to transmit.
-    ///
-    /// By what this craft *learned* rather than by when it was measured: a report is a statement
-    /// about what the sender has, and a decade-old sighting relayed yesterday is news.
-    pub fn report(&self, since_s: f64, sent_s: f64) -> Report {
-        self.report_upto(since_s, sent_s, usize::MAX)
-    }
-
-    /// The same, as much of it as `limit` systems will carry.
-    ///
-    /// A surveyed sky does not fit in one transmission, so a report is a piece of a backlog:
-    /// oldest first, and the sender resumes from [`Report::learned_through`] next time. A system
-    /// is never split — its planets ride with its star — and ties at the cut all go in the same
-    /// report, because the sender has only one number to resume from and anything on the wrong
-    /// side of it would never be sent at all.
-    pub fn report_upto(&self, since_s: f64, sent_s: f64, limit: usize) -> Report {
-        let mut systems: BTreeMap<Subject, Vec<Part>> = BTreeMap::new();
-        for (subject, file) in &self.files {
-            if let Some(part) = file.since(*subject, since_s) {
-                systems.entry(subject.system()).or_default().push(part);
-            }
-        }
-        let mut entries: Vec<Entry> =
-            systems.into_iter().map(|(system, parts)| Entry { system, parts }).collect();
-        entries.sort_by(|a, b| a.learned_through().total_cmp(&b.learned_through()));
-        if entries.len() > limit {
-            let cut = entries[limit.saturating_sub(1)].learned_through();
-            entries.retain(|e| e.learned_through() <= cut);
-        }
-        Report { from: self.owner, sent_s, entries }
-    }
-
-    /// Fold in what somebody else sent, as of the moment its light landed.
-    ///
-    /// Every item gains a hop, so where it came from survives however far it is passed on, and
-    /// something already held by a shorter route is not taken twice.
-    pub fn receive(&mut self, report: &Report, received_s: f64) {
-        let hop = Hop { from: report.from, to: self.owner, sent_s: report.sent_s, received_s };
-        self.fold(report, Some(hop));
-    }
-
-    /// Take a copy of what this craft already knows, handed over by whoever holds the original.
-    ///
-    /// No hop: a client's replica of its own craft's knowledge is the same knowledge, not
-    /// something it was told. See `lightcone/docs/24-standing-instruments.md`.
-    pub fn absorb(&mut self, report: &Report) {
-        self.fold(report, None);
-    }
-
-    fn fold(&mut self, report: &Report, hop: Option<Hop>) {
-        let heard = |lineage: &Lineage| {
-            let mut lineage = lineage.clone();
-            lineage.extend(hop);
-            lineage
-        };
-        for part in report.entries.iter().flat_map(|e| e.parts.iter()) {
-            let subject = part.subject;
-            for sighting in &part.sightings {
-                let lineage = heard(&sighting.lineage);
-                self.file_sighting(subject, Sighting { lineage, ..sighting.clone() });
-            }
-            for naming in &part.names {
-                let lineage = heard(&naming.lineage);
-                self.named(subject, Naming { lineage, ..naming.clone() });
-            }
-            for claim in &part.claims {
-                let lineage = heard(&claim.lineage);
-                self.told(subject, Claim { lineage, ..claim.clone() });
-            }
-            for orbit in &part.orbits {
-                let lineage = heard(&orbit.lineage);
-                self.orbits(subject, Orbit { lineage, ..orbit.clone() });
-            }
-            for conclusion in &part.conclusions {
-                // A replica follows its original in throwing a log away, so that it does not
-                // hold samples the craft itself no longer has.
-                if hop.is_none()
-                    && let Some(through_s) = conclusion.discarded_s
-                    && let Some(file) = self.files.get_mut(&subject)
-                {
-                    file.series
-                        .iter_mut()
-                        .filter(|s| s.witness == conclusion.observer)
-                        .for_each(|s| s.consume_through(through_s));
-                }
-                let lineage = heard(&conclusion.lineage);
-                self.concluded(subject, Conclusion { lineage, ..conclusion.clone() });
-            }
-            for series in &part.series {
-                // A relayed log is a log: a full craft does not keep it. Checked per series
-                // rather than per sample, so one report can take a craft a little over.
-                if self.is_full() {
-                    self.unkept += series.len() as u64;
-                    continue;
-                }
-                let file = self.files.entry(subject).or_default();
-                let (taken, lineage) =
-                    match file.series.iter_mut().find(|s| s.witness == series.witness && s.band == series.band) {
-                        Some(held) => (held.absorb(series), held.lineage.clone()),
-                        None => {
-                            let mut taken = series.clone();
-                            taken.lineage.extend(hop);
-                            let lineage = taken.lineage.clone();
-                            file.series.push(taken);
-                            (series.samples().to_vec(), lineage)
-                        }
-                    };
-                self.occupied_bytes += taken.len() as f64 * SAMPLE_BYTES;
-                for sample in taken {
-                    let learned_s = learned_s(&lineage, sample.observed_s);
-                    self.unsaved.push(Logged { subject, witness: series.witness, band: series.band, sample, learned_s });
-                }
-            }
-            self.refresh(subject);
-        }
     }
 
     fn file_sighting(&mut self, subject: Subject, sighting: Sighting) {
@@ -751,116 +592,12 @@ impl Knowledge {
 
     fn refresh(&mut self, subject: Subject) {
         self.changed.insert(subject);
+        if let Some(file) = self.files.get(&subject) {
+            self.backlog.file(subject, file);
+        }
         if let Some(belief) = self.files.get(&subject).and_then(|f| f.believe(subject, self.owner)) {
             self.beliefs.insert(subject, belief);
         }
-    }
-}
-
-/// How many systems one transmission carries.
-///
-/// A surveyed sky has thousands of entries, so a report is a slice of a backlog rather than a
-/// snapshot. Sixty-four systems is a few tens of kilobytes.
-pub const ENTRIES_PER_REPORT: usize = 64;
-
-/// Everything one report carries about one subject.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Part {
-    pub subject: Subject,
-    pub sightings: Vec<Sighting>,
-    pub series: Vec<Series>,
-    /// Conclusions rather than measurements: see [`Claim`].
-    pub claims: Vec<Claim>,
-    /// What the sender and whoever told them call it: see [`Naming`].
-    pub names: Vec<Naming>,
-    pub orbits: Vec<Orbit>,
-    pub conclusions: Vec<Conclusion>,
-}
-
-impl Part {
-    fn is_empty(&self) -> bool {
-        self.conclusions.is_empty()
-            && self.sightings.is_empty()
-            && self.series.is_empty()
-            && self.claims.is_empty()
-            && self.names.is_empty()
-            && self.orbits.is_empty()
-    }
-
-    fn learned_through(&self) -> f64 {
-        let sightings = self.sightings.iter().map(Sighting::learned_s);
-        let claims = self.claims.iter().map(|c| learned_s(&c.lineage, c.stated_s));
-        let names = self.names.iter().map(|n| learned_s(&n.lineage, n.stated_s));
-        let orbits = self.orbits.iter().map(|o| learned_s(&o.lineage, o.stated_s));
-        let conclusions = self.conclusions.iter().map(Conclusion::learned_s);
-        let series =
-            self.series.iter().filter_map(|s| s.last().map(|x| learned_s(&s.lineage, x.observed_s)));
-        sightings.chain(claims).chain(names).chain(orbits).chain(conclusions).chain(series).fold(f64::NEG_INFINITY, f64::max)
-    }
-}
-
-/// Everything one report carries about one system: the star and whatever belongs to it.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Entry {
-    /// The star, or a craft, that the parts are grouped under.
-    pub system: Subject,
-    pub parts: Vec<Part>,
-}
-
-impl Entry {
-    /// The most recent moment the sender learned any of this.
-    pub fn learned_through(&self) -> f64 {
-        self.parts.iter().map(Part::learned_through).fold(f64::NEG_INFINITY, f64::max)
-    }
-}
-
-/// How far through its own backlog a craft has reported, per recipient.
-///
-/// Reports drain a backlog, so the sender has to remember how far it has got with each
-/// recipient. The key is the recipient's ship id, `0` for a broadcast — what was shouted to
-/// nobody in particular is its own backlog.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub struct Reporting {
-    told: BTreeMap<i64, f64>,
-}
-
-impl Reporting {
-    /// What a report to this recipient should resume from.
-    pub fn since(&self, to: i64) -> f64 {
-        self.told.get(&to).copied().unwrap_or(f64::NEG_INFINITY)
-    }
-
-    /// A report to this recipient has gone out, carrying everything through `through`.
-    pub fn sent(&mut self, to: i64, through: f64) {
-        let mark = self.told.entry(to).or_insert(f64::NEG_INFINITY);
-        *mark = mark.max(through);
-    }
-}
-
-/// What one craft sends another. A message like any other: emitted somewhere, arriving later.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Report {
-    pub from: Witness,
-    pub sent_s: f64,
-    pub entries: Vec<Entry>,
-}
-
-impl Report {
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    /// What the sender should resume from next time. `None` for a report of nothing.
-    pub fn learned_through(&self) -> Option<f64> {
-        self.entries
-            .iter()
-            .map(Entry::learned_through)
-            .fold(None, |best: Option<f64>, t| Some(best.map_or(t, |b| b.max(t))))
-    }
-
-    /// Systems it carries, which is what a transcript line counts.
-    pub fn stars(&self) -> usize {
-        self.entries.len()
     }
 }
 
@@ -989,7 +726,7 @@ mod tests {
             },
         );
 
-        let report = probe.report(f64::NEG_INFINITY, 1.0e7);
+        let report = probe.report(Mark::default(), 1.0e7);
         assert_eq!(report.stars(), 1);
 
         let mut ship = Knowledge::new(Witness(1));
@@ -1005,10 +742,7 @@ mod tests {
             "learned when the light landed, not when taken"
         );
         assert!(matches!(belief.distance, Distance::Measured { .. }));
-        assert_eq!(
-            ship.file(star).unwrap().series_in(Band::V).unwrap().len(),
-            1
-        );
+        assert!(ship.file(star).unwrap().series_in(Band::V).is_none(), "and none of its log");
     }
 
     #[test]
@@ -1028,17 +762,16 @@ mod tests {
                 sigma: 1e-5,
             },
         );
-        let report = probe.report(f64::NEG_INFINITY, 1.0e7);
+        let report = probe.report(Mark::default(), 1.0e7);
 
         let mut relay = Knowledge::new(Witness(3));
         relay.receive(&report, 2.0e7);
         let mut ship = Knowledge::new(Witness(1));
         ship.receive(&report, 3.0e7);
-        ship.receive(&relay.report(f64::NEG_INFINITY, 2.5e7), 4.0e7);
+        ship.receive(&relay.report(Mark::default(), 2.5e7), 4.0e7);
 
         let file = ship.file(star).unwrap();
         assert_eq!(file.sightings().len(), 4, "not eight");
-        assert_eq!(file.series_in(Band::V).unwrap().len(), 1);
         assert_eq!(
             ship.belief(star).unwrap().hops,
             1,
@@ -1058,7 +791,7 @@ mod tests {
         let far = DVec3::X * 4.0;
         let mut there = Knowledge::new(Witness(2));
         there.sighted(star, sighting(2, far, truth - far, 1.0));
-        here.receive(&there.report(f64::NEG_INFINITY, 2.0), 3.0);
+        here.receive(&there.report(Mark::default(), 2.0), 3.0);
 
         let belief = here.belief(star).unwrap();
         assert_eq!(belief.witnesses, 2);
@@ -1129,7 +862,7 @@ mod tests {
             },
         );
         let mut ship = Knowledge::new(Witness(1));
-        ship.receive(&office.report(f64::NEG_INFINITY, 10.0), 20.0);
+        ship.receive(&office.report(Mark::default(), 10.0), 20.0);
         let file = ship.file(star).unwrap();
         assert_eq!(file.claims().len(), 1);
         assert_eq!(
@@ -1184,7 +917,7 @@ mod tests {
 
         let mut ours = Knowledge::new(Witness(1));
         ours.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 5.0));
-        ours.receive(&theirs.report(f64::NEG_INFINITY, 20.0), 30.0);
+        ours.receive(&theirs.report(Mark::default(), 20.0), 30.0);
 
         // Theirs is a chosen name and ours is only a designation, so theirs is what we go by.
         let belief = ours.belief(star).unwrap();
@@ -1217,54 +950,6 @@ mod tests {
             along_x,
             "a direction, not a distance"
         );
-    }
-
-    /// A craft is issued its name by a shard, after it has already measured things. Both
-    /// ships starting as witness zero is what would make two crews' records collide.
-    #[test]
-    fn taking_a_name_carries_this_craft_own_records_over() {
-        let star = star_id(31);
-        let mut k = Knowledge::new(Witness(0));
-        for s in looks(0, DVec3::new(0.0, 0.0, 6.0), 4, 0.0) {
-            k.sighted(star, s);
-        }
-        k.name_it(star, "Ours", 5.0);
-        k.measured(
-            star,
-            Witness(0),
-            Band::V,
-            Sample {
-                observed_s: 1.0,
-                deficit: 0.0,
-                sigma: 0.1,
-            },
-        );
-        // Somebody else's record, which must not be touched.
-        k.told(
-            star,
-            Claim {
-                witness: Witness(9),
-                distance: Distance::AtLeast(1.0),
-                stated_s: 0.0,
-                lineage: Lineage::new(),
-            },
-        );
-
-        k.rebrand(Witness(42));
-        assert_eq!(k.owner, Witness(42));
-        let file = k.file(star).unwrap();
-        assert!(file.sightings().iter().all(|s| s.witness == Witness(42)));
-        assert_eq!(file.names()[0].witness, Witness(42));
-        assert_eq!(
-            file.claims()[0].witness,
-            Witness(9),
-            "somebody else's stays theirs"
-        );
-        assert!(
-            k.own_series(star, Band::V).is_some(),
-            "its own photometry follows it"
-        );
-        assert_eq!(k.belief(star).unwrap().witnesses, 1);
     }
 
     fn planet(star: StarId, key: &str) -> (BodyId, Subject) {
@@ -1323,14 +1008,14 @@ mod tests {
             let (body, _) = planet(star, key);
             probe.found_planet(star, body, a, 1.0, 2.0);
         }
-        let report = probe.report(f64::NEG_INFINITY, 3.0);
+        let report = probe.report(Mark::default(), 3.0);
         assert_eq!(report.stars(), 1, "one system, not four entries");
         assert_eq!(report.entries[0].parts.len(), 4, "the star and its three planets");
 
         // Capped by systems: a second star's system does not split the first.
         let other = star_id(44);
         probe.sighted(other, sighting(2, DVec3::ZERO, DVec3::Y, 10.0));
-        let first = probe.report_upto(f64::NEG_INFINITY, 11.0, 1);
+        let (first, _) = probe.report_upto(Mark::default(), 11.0, 1);
         assert_eq!(first.stars(), 1);
         assert_eq!(first.entries[0].parts.len(), 4);
     }
@@ -1350,7 +1035,7 @@ mod tests {
         let mut ship = Knowledge::new(Witness(1));
         ship.sighted(star, sighting(1, DVec3::Y * 0.1, DVec3::X, 0.5));
         ship.name_it(star, "Hearthlight", 0.6);
-        ship.receive(&probe.report(f64::NEG_INFINITY, 3.0), 10.0);
+        ship.receive(&probe.report(Mark::default(), 3.0), 10.0);
 
         assert_eq!(ship.name_of(star).as_deref(), Some("Hearthlight"), "ours, not theirs");
         assert_eq!(ship.name_of(subject).as_deref(), Some("Hearthlight c"));
@@ -1392,7 +1077,8 @@ mod tests {
     }
 
     /// A replica is kept current by reports from the craft itself, and those add no hop: the
-    /// copy is the same knowledge, not something it was told.
+    /// copy is the same knowledge, not something it was told. Its own samples come separately,
+    /// only the new ones each time, and a report never carries them.
     #[test]
     fn a_replica_absorbs_without_a_hop_and_only_new_samples_travel() {
         let star = star_id(60);
@@ -1402,18 +1088,20 @@ mod tests {
             held.measured(star, Witness(3), Band::V, Sample { observed_s: t as f64, deficit: 0.0, sigma: 0.1 });
         }
         let mut copy = Knowledge::new(Witness(3));
-        let first = held.report(f64::NEG_INFINITY, 5.0);
+        let first = held.report(Mark::default(), 5.0);
         copy.absorb(&first);
         assert_eq!(copy.belief(star).unwrap().hops, 0, "its own, not relayed");
+        assert!(copy.own_series(star, Band::V).is_none(), "a report carries no samples");
+        let (logs, through) = held.logs_upto(f64::NEG_INFINITY, usize::MAX);
+        copy.copy_logs(&logs);
         assert_eq!(copy.own_series(star, Band::V).unwrap().len(), 5);
 
         held.measured(star, Witness(3), Band::V, Sample { observed_s: 6.0, deficit: 0.0, sigma: 0.1 });
-        let delta = held.report(first.learned_through().unwrap(), 6.0);
-        let sent = &delta.entries[0].parts[0].series[0];
-        assert_eq!(sent.len(), 1, "one new sample, not the whole curve again");
-        copy.absorb(&delta);
+        let (delta, _) = held.logs_upto(through.unwrap(), usize::MAX);
+        assert_eq!(delta.iter().map(|l| l.samples.len()).sum::<usize>(), 1, "one new sample, not the whole curve again");
+        copy.copy_logs(&delta);
         assert_eq!(copy.own_series(star, Band::V).unwrap().len(), 6);
-        assert_eq!(copy, held, "and the copy is the original");
+        assert_eq!(copy.file(star), held.file(star), "and the copy is the original");
     }
 
     /// What is written down is files without their samples and samples as log rows, and the two
@@ -1435,14 +1123,12 @@ mod tests {
         for t in 10..=14 {
             k.measured(star, Witness(1), Band::K, Sample { observed_s: t as f64, deficit: 0.0, sigma: 0.01 });
         }
-        k.receive(&probe.report(f64::NEG_INFINITY, 4.0), 9.0);
+        k.receive(&probe.report(Mark::default(), 4.0), 9.0);
 
         let (files, logs) = k.take_changes();
         assert_eq!(files.len(), 2, "the star and its planet");
         assert!(files.iter().all(|(_, f)| f.series().iter().all(|s| s.is_empty())), "samples are logged apart");
-        assert_eq!(logs.len(), 5 + 3, "our five, and the probe's three");
-        let relayed = logs.iter().find(|l| l.witness == Witness(2)).unwrap();
-        assert_eq!(relayed.learned_s, 9.0, "a relayed sample is learned when it arrived");
+        assert_eq!(logs.len(), 5, "our five; the probe's log stayed with the probe");
 
         let back = Knowledge::restore(Witness(1), files, logs);
         assert_eq!(back, k, "the same knowledge");
@@ -1460,11 +1146,11 @@ mod tests {
     #[test]
     fn reporting_remembers_how_far_it_got_with_each_recipient() {
         let mut marks = Reporting::default();
-        assert_eq!(marks.since(7), f64::NEG_INFINITY);
-        marks.sent(7, 10.0);
-        marks.sent(7, 5.0);
-        assert_eq!(marks.since(7), 10.0, "a mark never moves back");
-        assert_eq!(marks.since(0), f64::NEG_INFINITY, "a broadcast is its own backlog");
+        assert_eq!(marks.since(7), Mark::default());
+        marks.sent(7, Mark::through(10.0));
+        marks.sent(7, Mark::through(5.0));
+        assert_eq!(marks.since(7), Mark::through(10.0), "a mark never moves back");
+        assert_eq!(marks.since(0), Mark::default(), "a broadcast is its own backlog");
     }
 
     #[test]
@@ -1472,8 +1158,9 @@ mod tests {
         let star = star_id(3);
         let mut probe = Knowledge::new(Witness(2));
         probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 100.0));
-        assert!(probe.report(200.0, 300.0).is_empty(), "nothing since then");
-        assert_eq!(probe.report(50.0, 300.0).stars(), 1);
+        assert!(probe.report(Mark::through(200.0), 300.0).is_empty(), "nothing since then");
+        assert_eq!(probe.report(Mark::through(50.0), 300.0).stars(), 1);
+        assert!(probe.report(Mark::default(), 99.0).is_empty(), "nor anything learned after it was sent");
     }
 
     /// A report is a slice of a backlog: oldest first, resumed from where the last one ended,
@@ -1484,23 +1171,31 @@ mod tests {
         for k in 0..10u64 {
             probe.sighted(star_id(k), sighting(2, DVec3::ZERO, DVec3::X, k as f64));
         }
-        let first = probe.report_upto(f64::NEG_INFINITY, 100.0, 4);
+        let (first, through) = probe.report_upto(Mark::default(), 100.0, 4);
         assert_eq!(first.stars(), 4);
-        let through = first.learned_through().unwrap();
-        assert_eq!(through, 3.0, "the four oldest");
+        assert_eq!(first.learned_through(), Some(3.0), "the four oldest");
 
-        let second = probe.report_upto(through, 200.0, 4);
+        let (second, through) = probe.report_upto(through.unwrap(), 200.0, 4);
         assert_eq!(second.stars(), 4);
         assert_eq!(second.learned_through(), Some(7.0));
-        assert_eq!(probe.report_upto(7.0, 300.0, 4).stars(), 2, "and the rest");
+        assert_eq!(probe.report_upto(through.unwrap(), 300.0, 4).0.stars(), 2, "and the rest");
 
-        // Everything learned at the same instant rides in the same report; the sender has one
-        // number to resume from and anything left on the far side of it would never be sent.
+        // Everything learned at one instant — a sweep's tick, a set of charts — still pages: the
+        // mark carries the system it stopped at as well as the time.
         let mut tied = Knowledge::new(Witness(2));
         for k in 0..10u64 {
             tied.sighted(star_id(k), sighting(2, DVec3::ZERO, DVec3::X, 5.0));
         }
-        assert_eq!(tied.report_upto(f64::NEG_INFINITY, 100.0, 4).stars(), 10);
+        let mut mark = Mark::default();
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..3 {
+            let (page, next) = tied.report_upto(mark, 100.0, 4);
+            assert!(page.stars() <= 4);
+            seen.extend(page.entries.iter().map(|e| e.system));
+            mark = next.unwrap();
+        }
+        assert_eq!(seen.len(), 10, "all ten, over three pages");
+        assert!(tied.report_upto(mark, 100.0, 4).1.is_none(), "and then nothing");
     }
 
     #[test]

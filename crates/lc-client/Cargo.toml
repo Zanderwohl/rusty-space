@@ -27,7 +27,9 @@ bevy_egui = "0.42.0"
 bevy_mesh = "0.19"
 glam = { version = "0.32", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Exact: a report or a knowledge page that moved a bearing by one place in the last digit
+# would be a different measurement, and deduplication is by the bits.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 # Plates. Every image on the first shelf is a JPEG; the other two are insurance, and the
 # formats this does not name are ones an epub is not allowed to carry anyway.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif"] }

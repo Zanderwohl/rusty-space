@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 32;
+pub const PROTOCOL_VERSION: u32 = 33;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -767,7 +767,16 @@ pub enum Outbound {
     /// What the telescope is committed to, as the shard has it. Said on sign-in and whenever it
     /// changes. Appended last.
     Observing { duty: Duty, integration_s: f64 },
+    /// This craft's own photometry since the last of these: a serialized
+    /// `Vec<lc_world::knowledge::Log>`. A report never carries logs, so a client's copy of its
+    /// own curves arrives this way, in pages. Appended last.
+    Logged { logs: String },
 }
+
+/// The largest frame and message either end of a connection accepts, bytes. Stated rather than
+/// left to the library's default, so that the shard's pages can be bounded against the same
+/// number the client enforces.
+pub const FRAME_LIMIT: usize = 16 << 20;
 
 /// Why an intent was not acted on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

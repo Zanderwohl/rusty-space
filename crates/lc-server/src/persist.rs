@@ -63,6 +63,32 @@ pub struct SavedInstruments {
     pub reporting: lc_world::knowledge::Reporting,
 }
 
+/// [`SavedInstruments`] as formats 6 and 7 wrote it, when a reporting mark was a time alone.
+#[derive(Deserialize)]
+struct InstrumentsV7 {
+    observatory: lc_world::knowledge::observatory::Observatory,
+    told: std::collections::BTreeMap<i64, f64>,
+}
+
+impl From<InstrumentsV7> for SavedInstruments {
+    fn from(old: InstrumentsV7) -> Self {
+        Self { observatory: old.observatory, reporting: lc_world::knowledge::Reporting::from_times(old.told) }
+    }
+}
+
+/// [`Saved`] as format 7 wrote it, before a reporting mark carried a system.
+#[derive(Deserialize)]
+struct SavedV7 {
+    kind: u8,
+    name: Option<String>,
+    noise_floor: f32,
+    length_m: f64,
+    motion: lc_proto::Motion,
+    pursuit: Option<lc_proto::Pursuit>,
+    fitting: Option<lc_proto::Fitting>,
+    instruments: Option<InstrumentsV7>,
+}
+
 /// [`Saved`] as format 6 wrote it, before ships had data modules.
 #[derive(Deserialize)]
 struct SavedV6 {
@@ -73,7 +99,7 @@ struct SavedV6 {
     motion: lc_proto::Motion,
     pursuit: Option<lc_proto::Pursuit>,
     fitting: Option<FittingV6>,
-    instruments: Option<SavedInstruments>,
+    instruments: Option<InstrumentsV7>,
 }
 
 /// `lc_proto::Loadout` before data modules. A ship from then has none: modules do not appear
@@ -220,7 +246,7 @@ struct SavedV2 {
 /// otherwise** — deliberately not [`lc_proto::PROTOCOL_VERSION`], which moves for reasons that
 /// have nothing to do with how a craft is stored. Bumping it makes every existing row
 /// unreadable, which is the point and is also the cost.
-pub const SAVE_FORMAT: i32 = 7;
+pub const SAVE_FORMAT: i32 = 8;
 
 /// The oldest format still read. See [`decode`].
 pub const OLDEST_FORMAT: i32 = 2;
@@ -316,6 +342,19 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
 pub fn decode(row: &Ship) -> Result<Saved, String> {
     match row.format {
         SAVE_FORMAT => lc_proto::decode(&row.state).map_err(|why| why.to_string()),
+        7 => {
+            let old: SavedV7 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
+            Ok(Saved {
+                kind: old.kind,
+                name: old.name,
+                noise_floor: old.noise_floor,
+                length_m: old.length_m,
+                motion: old.motion,
+                pursuit: old.pursuit,
+                fitting: old.fitting,
+                instruments: old.instruments.map(Into::into),
+            })
+        }
         6 => {
             let old: SavedV6 = lc_proto::decode(&row.state).map_err(|why| why.to_string())?;
             Ok(Saved {
@@ -326,7 +365,7 @@ pub fn decode(row: &Ship) -> Result<Saved, String> {
                 motion: old.motion,
                 pursuit: old.pursuit,
                 fitting: old.fitting.map(Into::into),
-                instruments: old.instruments,
+                instruments: old.instruments.map(Into::into),
             })
         }
         5 => {
@@ -611,11 +650,12 @@ mod tests {
             "the stored form is not exact",
         );
 
-        // And the fact behind the choice, stated where it will be read if anyone proposes JSON
-        // again.
+        // serde_json's default parser does not round this trip; its `float_roundtrip` feature
+        // does, and reports and knowledge pages travel as JSON and are deduplicated by the bits,
+        // so the workspace turns it on. Pinned here, where losing it would be noticed.
         let text = serde_json::to_string(&awkward).expect("it writes");
         let json: f64 = serde_json::from_str(&text).expect("it reads");
-        assert_ne!(json.to_bits(), awkward.to_bits(), "serde_json round-trips this now; check why");
+        assert_eq!(json.to_bits(), awkward.to_bits(), "serde_json lost float_roundtrip");
     }
 
     /// A row written by an older shape is refused, not misread. Postcard is positional and

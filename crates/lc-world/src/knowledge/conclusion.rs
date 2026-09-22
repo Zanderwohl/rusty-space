@@ -42,6 +42,9 @@ pub struct Conclusion {
     pub witness: Witness,
     /// Whose log it was.
     pub observer: Witness,
+    /// Where the observer was when it last looked, light-years. A transit is seen only from
+    /// near its orbit's plane, so two observers in different places can both be right.
+    pub from_ly: Option<glam::DVec3>,
     pub stated_s: f64,
     pub lineage: Lineage,
     /// Whether anything transits. Most probable first; the probabilities sum to one.
@@ -184,6 +187,25 @@ pub struct Settled {
     pub folds: Vec<Fold>,
 }
 
+/// A fold over every conclusion held about one subject.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Believed {
+    pub planet: Option<Planet>,
+    /// Chance of a swarm, and whose log said so.
+    pub swarm: Option<(f64, Witness)>,
+    /// How many conclusions it was folded from.
+    pub readers: usize,
+}
+
+/// The strongest planet any conclusion names, and whose log it came from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Planet {
+    pub probability: f64,
+    pub class: Class,
+    pub transit: Candidate,
+    pub observer: Witness,
+}
+
 /// Samples consumed from one series, for the store to delete.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Consumed {
@@ -249,13 +271,47 @@ impl Knowledge {
         self.files.get(&subject.into()).is_some_and(|f| f.retained)
     }
 
-    /// The conclusion this craft goes by about a subject: its own if it has drawn one, else the
-    /// most recently stated.
+    /// This craft's own conclusion about a subject, if it has drawn one.
     pub fn conclusion(&self, subject: impl Into<Subject>) -> Option<&Conclusion> {
         let owner = self.owner;
-        self.files.get(&subject.into())?.conclusions.iter().max_by(|a, b| {
-            (a.witness == owner, a.stated_s).partial_cmp(&(b.witness == owner, b.stated_s)).unwrap()
-        })
+        self.files.get(&subject.into())?.conclusions.iter().find(|c| c.witness == owner && c.observer == owner)
+    }
+
+    /// Every conclusion held about a subject, each on its observer's name: this craft's own
+    /// first, then the most recently stated.
+    pub fn conclusions(&self, subject: impl Into<Subject>) -> Vec<&Conclusion> {
+        let owner = self.owner;
+        let mut all: Vec<&Conclusion> =
+            self.files.get(&subject.into()).map(|f| f.conclusions.iter().collect()).unwrap_or_default();
+        all.sort_by(|a, b| {
+            (b.observer == owner).cmp(&(a.observer == owner)).then(b.stated_s.total_cmp(&a.stated_s))
+        });
+        all
+    }
+
+    /// What this craft believes from every conclusion it holds about a subject.
+    ///
+    /// A planet seen transiting from anywhere is there, whatever observers elsewhere saw, so the
+    /// strongest planet stands. A swarm is a shell and looks the same from everywhere, so the
+    /// observer with the longest log is believed.
+    pub fn believed(&self, subject: impl Into<Subject>) -> Believed {
+        let all = self.conclusions(subject);
+        let planet = all
+            .iter()
+            .filter_map(|c| {
+                let p: f64 = c.transits.iter().filter(|h| matches!(h.kind, Kind::Planet { .. })).map(|h| h.probability).sum();
+                let best = c.transits.iter().find_map(|h| match h.kind {
+                    Kind::Planet { class, transit } => Some((class, transit)),
+                    _ => None,
+                })?;
+                Some(Planet { probability: p, class: best.0, transit: best.1, observer: c.observer })
+            })
+            .max_by(|a, b| a.probability.total_cmp(&b.probability));
+        let swarm = all.iter().filter(|c| !c.populations.is_empty()).max_by_key(|c| c.evidence.samples).map(|c| {
+            let p = c.populations.iter().filter(|h| matches!(h.kind, Kind::Swarm(_))).map(|h| h.probability).sum();
+            (p, c.observer)
+        });
+        Believed { planet, swarm, readers: all.len() }
     }
 
     /// File a conclusion. One per reader per observer, the later winning.
@@ -271,7 +327,7 @@ impl Knowledge {
             Some(held) => *held = conclusion,
             None => file.conclusions.push(conclusion),
         }
-        self.changed.insert(subject);
+        self.refresh(subject);
     }
 
     /// Samples consumed since the last call, for the store to delete. Clears them.
@@ -280,27 +336,30 @@ impl Knowledge {
     }
 
     /// Logs this craft holds that have grown enough since last read to be worth reading again.
+    ///
+    /// Only this craft's own logs are ever read: nobody else's travel. Kept as a queue of
+    /// subjects that have had samples since their last read, so asking costs what is waiting
+    /// rather than every file held.
     pub fn due(&self) -> Vec<(Subject, Witness)> {
-        let mut out = Vec::new();
-        for (subject, file) in &self.files {
-            let mut observers: Vec<Witness> = file.series.iter().map(|s| s.witness).collect();
-            observers.sort_unstable();
-            observers.dedup();
-            for observer in observers {
-                let held = file.series.iter().filter(|s| s.witness == observer).map(|s| s.len()).max().unwrap_or(0);
+        let owner = self.owner;
+        let full = self.is_full();
+        self.unread
+            .iter()
+            .filter(|subject| {
+                let Some(file) = self.files.get(subject) else { return false };
+                let held = file.series.iter().filter(|s| s.witness == owner).map(|s| s.len()).max().unwrap_or(0);
                 let read = file
                     .conclusions
                     .iter()
-                    .find(|c| c.witness == self.owner && c.observer == observer)
+                    .find(|c| c.witness == owner && c.observer == owner)
                     .map_or(0, |c| c.evidence.samples as usize);
-                let digested = file.digests.iter().find(|d| d.observer == observer).map_or(0, |d| d.samples as usize);
+                let digested = file.digests.iter().find(|d| d.observer == owner).map_or(0, |d| d.samples as usize);
                 let next = (read + READ_EVERY).max((read as f64 * (1.0 + READ_GROWTH)) as usize);
-                if held + digested >= next {
-                    out.push((*subject, observer));
-                }
-            }
-        }
-        out
+                // A full craft reads whatever it holds: reading is how it makes room.
+                (full && held > 0) || held + digested >= next
+            })
+            .map(|subject| (*subject, owner))
+            .collect()
     }
 
     /// Read one observer's log of one subject and state what it says.
@@ -309,6 +368,7 @@ impl Knowledge {
     /// reading is how a full craft keeps watching — unless the subject is retained. Returns the
     /// conclusion drawn, or `None` if there was nothing to read.
     pub fn read_log(&mut self, subject: Subject, observer: Witness, prior: &Prior, now_s: f64) -> Option<Conclusion> {
+        self.unread.remove(&subject);
         let belief = self.belief(subject);
         let light_age_s = belief.and_then(|b| b.light_age_s());
         let host = belief.and_then(|b| prior.host_like(b.band, b.luminosity_w()?));
@@ -380,9 +440,17 @@ impl Knowledge {
             Some(d) => (d.observed_s.0.min(first), d.observed_s.1.max(last)),
             None => (first, last),
         };
+        let from_ly = self.files.get(&subject).and_then(|f| {
+            f.sightings
+                .iter()
+                .filter(|s| s.witness == observer)
+                .max_by(|a, b| a.observed_s.total_cmp(&b.observed_s))
+                .map(|s| s.bearing.observer_ly)
+        });
         let mut conclusion = Conclusion {
             witness: self.owner,
             observer,
+            from_ly,
             stated_s: now_s,
             lineage: Lineage::new(),
             evidence: Evidence {
@@ -589,7 +657,9 @@ mod tests {
         let (target, periods) = red_dwarf(DVec3::X);
         let (mut knowledge, now) = stare(&target, 60.0);
         let mut replica = Knowledge::new(Witness(1));
-        replica.absorb(&knowledge.report(f64::NEG_INFINITY, now));
+        replica.absorb(&knowledge.report(crate::knowledge::Mark::default(), now));
+        replica.copy_logs(&knowledge.logs_upto(f64::NEG_INFINITY, usize::MAX).0);
+        assert!(replica.file(target.id).unwrap().series().iter().any(|s| !s.is_empty()));
         let prior = Prior::measure(&neighborhood());
         let subject = Subject::Star(target.id);
         assert_eq!(knowledge.due(), vec![(subject, Witness(1))]);
@@ -612,13 +682,32 @@ mod tests {
 
         // The conclusion travels; a replica drops the log with its original, and anyone else
         // holds the conclusion as something it was told.
-        let report = knowledge.report(now - 1.0, now);
+        let report = knowledge.report(crate::knowledge::Mark::through(now - 1.0), now);
         replica.absorb(&report);
         assert!(replica.file(target.id).unwrap().series().iter().all(|s| s.is_empty()));
         assert_eq!(replica.conclusion(target.id), Some(&conclusion));
         let mut other = Knowledge::new(Witness(2));
         other.receive(&report, now + 10.0);
-        assert_eq!(other.conclusion(target.id).unwrap().lineage.len(), 1);
+        let told = other.conclusions(target.id);
+        assert_eq!(told.len(), 1);
+        assert_eq!((told[0].observer, told[0].lineage.len()), (Witness(1), 1), "on the observer's name, a hop away");
+        assert!(other.conclusion(target.id).is_none(), "and not the receiver's own");
+        let believed = other.believed(target.id);
+        assert_eq!(believed.planet.map(|p| p.observer), Some(Witness(1)));
+
+        // Somebody watching from where the orbit never crosses the star saw nothing. Both are
+        // held, each on its own name, and the planet one of them saw still stands.
+        let elsewhere = Conclusion {
+            witness: Witness(5),
+            observer: Witness(5),
+            transits: vec![Hypothesis { probability: 1.0, kind: Kind::Quiet }],
+            stated_s: now + 20.0,
+            ..conclusion.clone()
+        };
+        other.concluded(target.id, elsewhere);
+        assert_eq!(other.conclusions(target.id).len(), 2);
+        let believed = other.believed(target.id);
+        assert_eq!((believed.readers, believed.planet.map(|p| p.observer)), (2, Some(Witness(1))));
     }
 
     /// Seen along the pole the same planets never transit. Two months of nothing is not

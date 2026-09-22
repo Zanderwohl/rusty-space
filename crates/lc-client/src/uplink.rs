@@ -846,6 +846,11 @@ fn fold(
             Ok(report) => game.0.knowledge.absorb(&report),
             Err(why) => warn!(%why, "a knowledge page that would not parse"),
         },
+        // Its own photometry, which no report carries.
+        Outbound::Logged { logs } => match serde_json::from_str::<Vec<lc_world::knowledge::Log>>(&logs) {
+            Ok(logs) => game.0.knowledge.copy_logs(&logs),
+            Err(why) => warn!(%why, "a log page that would not parse"),
+        },
         Outbound::Observing { duty, integration_s } => game.0.adopt_duty(&duty, integration_s),
         // Taken whole, like `Flying`: the authority's account, settled.
         Outbound::Fitted { ship_id, fitting } => {
@@ -1390,7 +1395,7 @@ mod tests {
                 lineage: Vec::new(),
             },
         );
-        let report = serde_json::to_string(&held.report(f64::NEG_INFINITY, 1.0)).unwrap();
+        let report = serde_json::to_string(&held.report(lc_world::knowledge::Mark::default(), 1.0)).unwrap();
         fold(&mut uplink, &mut game, &mut ui, Outbound::Learned { report });
         assert_eq!(game.0.knowledge.belief(star).unwrap().hops, 0, "its own, not relayed");
     }

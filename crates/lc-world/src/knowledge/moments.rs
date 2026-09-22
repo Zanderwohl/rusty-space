@@ -7,6 +7,8 @@
 //! lose nothing when the samples behind them are thrown away. See
 //! `lightcone/docs/05-observation.md`.
 
+use std::collections::BTreeMap;
+
 use em_spectra::Band;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +22,9 @@ const VISIBLE: [Band; 4] = [Band::B, Band::V, Band::R, Band::I];
 /// two days at a hot star's.
 const LAG_MIN_S: f64 = 900.0;
 const LAGS: usize = 19;
+
+/// Width of the bins points are averaged into before they are paired: half the shortest lag.
+const BIN_S: f64 = LAG_MIN_S / 2.0;
 
 /// Significance flicker needs before it is reported: its covariance at the shortest lag this
 /// many errors above zero.
@@ -73,7 +78,7 @@ pub struct Reading {
 impl Moments {
     /// Add every sample of these series, and the visible points they combine to.
     pub fn add(&mut self, series: &[&Series]) {
-        let mut visible: std::collections::BTreeMap<u64, (f64, f64, f64)> = Default::default();
+        let mut visible: BTreeMap<u64, (f64, f64, f64)> = Default::default();
         for s in series {
             let sums = &mut self.bands[s.band.index()];
             for sample in s.samples() {
@@ -93,6 +98,16 @@ impl Moments {
             }
         }
         let points: Vec<(f64, f64)> = visible.into_values().map(|(t, w, wx)| (t, wx / w)).collect();
+        // Paired as bins, not as points: a dense log pairs every sample with every other inside
+        // five days, which is quadratic, and nothing shorter than the shortest lag is asked of it.
+        let mut binned: BTreeMap<i64, (f64, f64, f64)> = BTreeMap::new();
+        for &(t, x) in &points {
+            let bin = binned.entry((t / BIN_S).floor() as i64).or_insert((0.0, 0.0, 0.0));
+            bin.0 += t;
+            bin.1 += x;
+            bin.2 += 1.0;
+        }
+        let bins: Vec<(f64, f64)> = binned.into_values().map(|(t, x, n)| (t / n, x / n)).collect();
         if let (Some(first), Some(last)) = (points.first(), points.last()) {
             self.span_s = Some(match self.span_s {
                 Some((a, b)) => (a.min(first.0), b.max(last.0)),
@@ -103,8 +118,8 @@ impl Moments {
             self.lags = vec![Pairs::default(); LAGS];
         }
         let reach = lag_edge(LAGS);
-        for (i, &(t, x)) in points.iter().enumerate() {
-            for &(u, y) in &points[i + 1..] {
+        for (i, &(t, x)) in bins.iter().enumerate() {
+            for &(u, y) in bins.iter().skip(i + 1) {
                 let lag = u - t;
                 if lag >= reach {
                     break;

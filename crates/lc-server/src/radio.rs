@@ -72,7 +72,7 @@ pub(crate) struct Transmission {
     /// a transmission and not something anybody said.
     pub said: Option<Utterance>,
     /// For a report, who it went to and how far through its sender's backlog it reached.
-    pub reported: Option<(Option<ShipId>, f64)>,
+    pub reported: Option<(Option<ShipId>, lc_world::knowledge::Mark)>,
     /// The order as applied, which for these two is the order as sent: there is nothing about
     /// a message the server clamps.
     pub applied: Order,

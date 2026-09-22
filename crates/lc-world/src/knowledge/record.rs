@@ -8,9 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use super::astrometry::{Bearing, Distance};
 
-/// Photometric samples kept per star, per witness, per band.
-pub const SAMPLES_KEPT: usize = 4000;
-
 /// Whoever took a measurement: a ship, a probe, a telescope.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Witness(pub u64);
@@ -72,12 +69,12 @@ pub struct Sample {
 /// A run of photometry on one star, in one band, by one witness.
 ///
 /// Kept per witness because merging two observers' curves would splice series taken at
-/// different distances — and therefore of different epochs of the same star.
+/// different distances — and therefore of different epochs of the same star. Never sent to
+/// another craft: what a log says travels as a conclusion. Nothing bounds it but the room aboard.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Series {
     pub witness: Witness,
     pub band: Band,
-    pub lineage: Lineage,
     samples: Vec<Sample>,
     /// Everything observed at or before this was read and thrown away, and is not taken back
     /// however it arrives.
@@ -89,7 +86,6 @@ impl Series {
         Self {
             witness,
             band,
-            lineage: Lineage::new(),
             samples: Vec::new(),
             consumed_s: f64::NEG_INFINITY,
         }
@@ -111,7 +107,8 @@ impl Series {
         self.samples.last()
     }
 
-    /// Add a sample at the end. False if it was older than the last one held, and so not added.
+    /// Add a sample at the end. False if it was not kept: older than the last one held, or
+    /// from a stretch already read and thrown away.
     pub fn push(&mut self, sample: Sample) -> bool {
         if sample.observed_s <= self.consumed_s
             || self
@@ -121,32 +118,8 @@ impl Series {
         {
             return false;
         }
-        if self.samples.len() >= SAMPLES_KEPT {
-            self.samples.remove(0);
-        }
         self.samples.push(sample);
         true
-    }
-
-    /// Take whatever `other` has that this does not.
-    ///
-    /// Arrival order is the witness's own, so "later than the last held" is the whole test: a
-    /// series only ever grows at its end, and the same run arriving twice by two routes adds
-    /// nothing the second time.
-    ///
-    /// Returns the samples it took, which is what has to be written down.
-    pub fn absorb(&mut self, other: &Series) -> Vec<Sample> {
-        let from = self
-            .samples
-            .last()
-            .map(|s| s.observed_s)
-            .unwrap_or(f64::NEG_INFINITY)
-            .max(self.consumed_s);
-        let taken: Vec<Sample> = other.samples.iter().filter(|s| s.observed_s > from).copied().collect();
-        for sample in &taken {
-            self.push(*sample);
-        }
-        taken
     }
 
     /// Drop every sample observed at or before `through_s`, for good.
@@ -163,23 +136,6 @@ impl Series {
     /// written to a log of their own. See `lightcone/docs/24-standing-instruments.md`.
     pub fn emptied(&self) -> Series {
         Series { samples: Vec::new(), ..self.clone() }
-    }
-
-    /// The part of this series learned after `since_s`, or `None` if none of it was.
-    ///
-    /// A series this craft took itself is learned sample by sample, so only the new samples go;
-    /// one it was handed was learned all at once, when it arrived, and goes whole or not at all.
-    /// Sending a watched star's whole curve every time one sample was added would be most of
-    /// what a report carried.
-    pub fn after(&self, since_s: f64) -> Option<Series> {
-        let samples: Vec<Sample> = if self.lineage.is_empty() {
-            self.samples.iter().filter(|s| s.observed_s > since_s).copied().collect()
-        } else if learned_s(&self.lineage, 0.0) > since_s {
-            self.samples.clone()
-        } else {
-            Vec::new()
-        };
-        (!samples.is_empty()).then(|| Series { samples, ..self.clone() })
     }
 
     /// Emission times and deficits, for a plot.

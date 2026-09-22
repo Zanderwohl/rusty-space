@@ -32,7 +32,7 @@ impl File {
         let series: f64 = self
             .series
             .iter()
-            .map(|s| SERIES_BYTES + hops(s.lineage.len()) + s.len() as f64 * SAMPLE_BYTES)
+            .map(|s| SERIES_BYTES + s.len() as f64 * SAMPLE_BYTES)
             .sum();
         let conclusions: f64 = self.conclusions.iter().map(|c| CONCLUSION_BYTES + hops(c.lineage.len())).sum();
         let digests: f64 = self
@@ -77,14 +77,9 @@ impl Knowledge {
         self.unkept
     }
 
-    /// Take room for one sample, or say there is none.
-    pub(super) fn make_room(&mut self) -> bool {
-        if self.is_full() {
-            self.unkept += 1;
-            return false;
-        }
+    /// Count one kept sample against the room.
+    pub(super) fn charge_sample(&mut self) {
         self.occupied_bytes += SAMPLE_BYTES;
-        true
     }
 }
 

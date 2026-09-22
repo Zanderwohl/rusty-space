@@ -83,6 +83,16 @@ fn drain<T>(channel: &mut UnboundedReceiver<T>) -> Vec<T> {
     out
 }
 
+/// The frame and message limits, stated so they are [`lc_proto::FRAME_LIMIT`] on both ends
+/// rather than whatever each library defaults to.
+pub fn config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+        max_message_size: Some(lc_proto::FRAME_LIMIT),
+        max_frame_size: Some(lc_proto::FRAME_LIMIT),
+        ..Default::default()
+    }
+}
+
 async fn serve(
     id: ClientId,
     stream: TcpStream,
@@ -93,7 +103,7 @@ async fn serve(
 ) {
     use futures_util::{SinkExt, StreamExt};
 
-    let Ok(socket) = tokio_tungstenite::accept_async(stream).await else { return };
+    let Ok(socket) = tokio_tungstenite::accept_async_with_config(stream, Some(config())).await else { return };
     let (mut writer, mut reader) = socket.split();
     let (to_client, mut outbox) = unbounded_channel::<Outbound>();
     outboxes.lock().await.insert(id, to_client);
@@ -261,6 +271,28 @@ mod tests {
             }
         }
         panic!("the sighting never came back");
+    }
+
+    /// The frame limit is the one the protocol states, on both ends: a page as large as the
+    /// shard ever sends arrives whole, and a message past the limit is refused rather than
+    /// taken. What the shard's page bound is measured against.
+    #[tokio::test]
+    async fn the_frame_limit_is_the_protocols_on_both_ends() {
+        assert!(crate::instruments::PAGE_BYTES * 8 <= lc_proto::FRAME_LIMIT);
+        let mut wire = WebSocketServer::bind("127.0.0.1:0").await.expect("a port");
+        let url = format!("ws://{}", wire.local_addr);
+        let (mut client, _) =
+            tokio_tungstenite::connect_async_with_config(&url, Some(config()), false).await.expect("connected");
+        let id = until(|| wire.accepted()).await[0];
+        let under = "x".repeat(lc_proto::FRAME_LIMIT - 1024);
+        wire.send(id, Outbound::Learned { report: under.clone() });
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(5), client.next()).await;
+        let Ok(Some(Ok(Message::Binary(bytes)))) = frame else { panic!("a frame under the limit did not arrive") };
+        assert!(matches!(lc_proto::decode(&bytes), Ok(Outbound::Learned { report }) if report == under));
+
+        wire.send(id, Outbound::Learned { report: "x".repeat(lc_proto::FRAME_LIMIT + 1024) });
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(5), client.next()).await;
+        assert!(!matches!(frame, Ok(Some(Ok(Message::Binary(_))))), "a frame over the limit was taken");
     }
 
     /// A departing client is noticed, so the world can stop holding a ship for it.

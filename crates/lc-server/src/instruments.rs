@@ -14,7 +14,7 @@ use lc_world::fitting::ONBOARD_DATA_BYTES;
 use lc_world::knowledge::observatory::{self, CHARTED_LY, Observatory, Sky, Station};
 use lc_world::knowledge::survey::Duty;
 use lc_world::knowledge::prior::Prior;
-use lc_world::knowledge::{ENTRIES_PER_REPORT, Knowledge, Report, Reporting, Subject, Witness};
+use lc_world::knowledge::{ENTRIES_PER_REPORT, Knowledge, Mark, Report, Reporting, Subject, Witness};
 use lc_world::motion::LIGHT_US_PER_LY;
 
 use crate::journal::Journal;
@@ -26,6 +26,13 @@ use crate::world::{Event, Scheduled};
 /// thoroughly surveyed sky is thousands, so it arrives over a few ticks rather than as one
 /// message the size of the catalogue.
 const PAGE: usize = 256;
+
+/// Samples per page of a craft's own logs, before the byte bound shrinks it.
+const LOG_PAGE: usize = 20_000;
+
+/// Bytes a page may take, whichever stream. Far inside [`lc_proto::FRAME_LIMIT`]: a page over
+/// that is one the client refuses, and it would reconnect and be sent the same page again.
+pub(crate) const PAGE_BYTES: usize = 1 << 20;
 
 /// Logs read per tick across the whole shard. Reading one is a search over thousands of
 /// periods, so the shard takes them in turn rather than all at once.
@@ -74,6 +81,26 @@ impl Instruments {
 
 pub(crate) fn witness(id: CraftId) -> Witness {
     Witness(id.0 as u64)
+}
+
+/// The largest page `build` makes that fits [`PAGE_BYTES`], halving `limit` until it does, and
+/// what to resume from. `None` when there is nothing new.
+///
+/// A single item larger than a page is sent alone as long as it fits a frame. One that does not
+/// is skipped — the body is `None` and the mark still moves past it — because sending it would
+/// close the connection, and so would every reconnection after.
+fn page<T>(mut limit: usize, build: impl Fn(usize) -> (Option<String>, Option<T>)) -> Option<(Option<String>, T)> {
+    loop {
+        let (body, through) = build(limit);
+        let (body, through) = (body?, through?);
+        if body.len() <= PAGE_BYTES || (limit == 1 && body.len() < lc_proto::FRAME_LIMIT / 2) {
+            return Some((Some(body), through));
+        }
+        if limit == 1 {
+            return Some((None, through));
+        }
+        limit /= 2;
+    }
 }
 
 impl<J: Journal> Server<J> {
@@ -228,18 +255,38 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Send every connected client what its craft has learned since the last time.
+    /// Send every connected client what its craft has learned since the last time, and its own
+    /// samples, a page of each at most. Paging carries on over the ticks that follow until the
+    /// copy is caught up.
     pub(crate) fn tell_learned(&mut self, wire: &mut impl Transport) {
         let now_s = self.now_t as f64 * 1.0e-6;
-        let connected: Vec<(lc_proto::ClientId, ShipId, f64)> =
-            self.clients.iter().map(|(c, state)| (*c, state.ship, state.learned_s)).collect();
-        for (client, ship, since) in connected {
-            let report = self.aboard(CraftId(ship.0)).knowledge.report_upto(since, now_s, PAGE);
-            let Some(through) = report.learned_through() else { continue };
-            let Ok(body) = serde_json::to_string(&report) else { continue };
-            wire.send(client, Outbound::Learned { report: body });
-            if let Some(state) = self.clients.get_mut(&client) {
-                state.learned_s = through;
+        let connected: Vec<(lc_proto::ClientId, ShipId, Mark, f64)> =
+            self.clients.iter().map(|(c, state)| (*c, state.ship, state.learned, state.logged_s)).collect();
+        for (client, ship, since, logged) in connected {
+            let knowledge = &self.aboard(CraftId(ship.0)).knowledge;
+            let learned = page(PAGE, |limit| {
+                let (report, through) = knowledge.report_upto(since, now_s, limit);
+                (serde_json::to_string(&report).ok(), through)
+            });
+            let logs = page(LOG_PAGE, |limit| {
+                let (logs, through) = knowledge.logs_upto(logged, limit);
+                (serde_json::to_string(&logs).ok(), through)
+            });
+            if let Some((body, through)) = learned {
+                if let Some(report) = body {
+                    wire.send(client, Outbound::Learned { report });
+                }
+                if let Some(state) = self.clients.get_mut(&client) {
+                    state.learned = through;
+                }
+            }
+            if let Some((body, through)) = logs {
+                if let Some(logs) = body {
+                    wire.send(client, Outbound::Logged { logs });
+                }
+                if let Some(state) = self.clients.get_mut(&client) {
+                    state.logged_s = through;
+                }
             }
         }
     }
@@ -302,13 +349,13 @@ impl<J: Journal> Server<J> {
     /// Written here, from the knowledge the shard holds, never taken from the client. Shrunk
     /// until it fits a transmission: the slice is bounded by systems and a system's file is
     /// not, so a long watch on one star can make even a few of them too large.
-    pub(crate) fn report_for(&self, id: CraftId, to: Option<ShipId>, at_s: f64) -> Result<(String, f64), Refusal> {
+    pub(crate) fn report_for(&self, id: CraftId, to: Option<ShipId>, at_s: f64) -> Result<(String, Mark), Refusal> {
         let aboard = self.instruments.aboard.get(&id).ok_or(Refusal::NothingNew)?;
         let since = aboard.reporting.since(to.map_or(0, |t| t.0));
         let mut limit = ENTRIES_PER_REPORT;
         loop {
-            let report = aboard.knowledge.report_upto(since, at_s, limit);
-            let through = report.learned_through().ok_or(Refusal::NothingNew)?;
+            let (report, through) = aboard.knowledge.report_upto(since, at_s, limit);
+            let through = through.ok_or(Refusal::NothingNew)?;
             let body = serde_json::to_string(&report).map_err(|_| Refusal::Impossible)?;
             if body.len() <= lc_proto::REPORT_LIMIT {
                 return Ok((body, through));
@@ -321,7 +368,7 @@ impl<J: Journal> Server<J> {
     }
 
     /// A report went out: this craft has now told `to` everything through `through`.
-    pub(crate) fn reported(&mut self, id: CraftId, to: Option<ShipId>, through: f64) {
+    pub(crate) fn reported(&mut self, id: CraftId, to: Option<ShipId>, through: Mark) {
         self.aboard(id).reporting.sent(to.map_or(0, |t| t.0), through);
     }
 }
@@ -522,5 +569,70 @@ mod tests {
         let mut all = said;
         all.extend(wire.take(ClientId(1)));
         assert_eq!(replica(ship, &all).name_of(sky()[0].id).as_deref(), Some("Hearth"));
+    }
+
+    /// The whole of review item 7. A craft that knows more than one frame can carry — a sky of
+    /// files and a long log — signs in, and is paged all of it over the ticks that follow, every
+    /// page inside the bound, until its copy is the original.
+    #[tokio::test]
+    async fn a_craft_that_knows_more_than_a_frame_is_paged_all_of_it() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, mut said) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let id = CraftId(ship.0);
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let knowledge = &mut server.aboard(id).knowledge;
+        for k in 0..40_000u64 {
+            let toward = DVec3::new((k as f64).sin(), (k as f64).cos(), 0.1).normalize();
+            let sighting = Sighting {
+                witness: witness(id),
+                // After the page the sign-in already sent, and all at one instant, as a sweep's
+                // tick or a set of charts is.
+                observed_s: now_s + 1.0,
+                bearing: Bearing { observer_ly: DVec3::ZERO, toward, sigma_rad: 1e-6 },
+                band: em_spectra::Band::V,
+                flux: 1e-12,
+                flux_sigma: 1e-15,
+                lineage: Vec::new(),
+            };
+            knowledge.sighted(StarId::synthesise("paging", k), sighting);
+        }
+        let watched = StarId::synthesise("paging", 0);
+        // Kept raw, so the shard does not read it into a conclusion while it is being paged.
+        knowledge.retain_raw(watched, true);
+        for n in 0..200_000u64 {
+            let sample = lc_world::knowledge::Sample { observed_s: now_s + n as f64 * 1e-3, deficit: 1e-4, sigma: 1e-5 };
+            knowledge.measured(watched, witness(id), em_spectra::Band::V, sample);
+        }
+        let whole = serde_json::to_string(&knowledge.report(Mark::default(), now_s + 2.0)).unwrap().len();
+        assert!(whole > lc_proto::FRAME_LIMIT, "the test needs more than a frame of files: {whole}");
+
+        for _ in 0..200 {
+            server.tick(&mut wire).await.unwrap();
+            said.extend(wire.take(ClientId(1)));
+        }
+        let mut copy = Knowledge::new(witness(id));
+        let mut pages = 0;
+        for message in &said {
+            let body = match message {
+                Outbound::Learned { report } => {
+                    copy.absorb(&serde_json::from_str(report).unwrap());
+                    report
+                }
+                Outbound::Logged { logs } => {
+                    copy.copy_logs(&serde_json::from_str::<Vec<lc_world::knowledge::Log>>(logs).unwrap());
+                    logs
+                }
+                _ => continue,
+            };
+            pages += 1;
+            assert!(body.len() <= PAGE_BYTES, "a page of {} bytes", body.len());
+        }
+        assert!(pages > 16, "it took pages, not one message: {pages}");
+        let original = server.knowledge_of(ship).unwrap();
+        assert!(original.own_series(watched, em_spectra::Band::V).unwrap().len() > 40_000, "a log longer than a page");
+        assert_eq!(copy.len(), original.len(), "every file arrived");
+        assert_eq!(copy.own_series(watched, em_spectra::Band::V), original.own_series(watched, em_spectra::Band::V), "and the whole log");
     }
 }

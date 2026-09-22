@@ -98,7 +98,13 @@ mod native {
         to_app: &Sender<Outbound>,
         status: &Arc<Mutex<Status>>,
     ) {
-        let mut socket = match tungstenite::connect(url) {
+        // The same limits the shard states, so a page it bounded to fit is one this end takes.
+        let config = tungstenite::protocol::WebSocketConfig {
+            max_message_size: Some(lc_proto::FRAME_LIMIT),
+            max_frame_size: Some(lc_proto::FRAME_LIMIT),
+            ..Default::default()
+        };
+        let mut socket = match tungstenite::client::connect_with_config(url, Some(config), 3) {
             Ok((socket, _)) => socket,
             Err(why) => {
                 *status.lock().unwrap() = Status::Closed(why.to_string());
