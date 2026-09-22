@@ -447,6 +447,11 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
                 ask(out, Action::SetDriveAccel(g));
             }
         }
+        // The rating rarely lands on a preset, so without this a drive set lower had no way back
+        // to all of it.
+        if ui.button("Max").on_hover_text(format!("All the engines are rated for: {rated:.1} g")).clicked() {
+            ask(out, Action::SetDriveAccel(rated));
+        }
     });
     ui.weak(format!("between {MIN_ACCEL_G} and {MAX_ACCEL_G} g"));
     ui.separator();
