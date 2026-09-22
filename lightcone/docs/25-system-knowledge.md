@@ -509,12 +509,12 @@ iterates parts and keys off `part.subject`, which is already any `Subject` inclu
 `report_for` currently halves its system limit until the JSON fits; a one-system report has
 nothing to halve. A system with many bodies and a long tail of sightings can exceed it, so the
 scoped path needs its own answer — drop the oldest sightings per body first, since a fitted orbit
-makes its own input arcs redundant, and say in the send window that it was trimmed.
+makes its own input arcs redundant, and say in the popover that it was trimmed.
 
 ### The three choices, which are already independent
 
-[05-observation.md](05-observation.md#saying-something) settles this and the send window only has
-to keep it: **addressed to**, **aimed** and **sealed** are three independent choices, and an
+[05-observation.md](05-observation.md#saying-something) settles this and the popover only has to
+keep it: **addressed to**, **aimed** and **sealed** are three independent choices, and an
 interface that conflates them is how a player broadcasts a private message in clear.
 
 All three are already separate fields on the order, so nothing has to be invented:
@@ -546,7 +546,7 @@ visible rather than inferred:
 
 ### What is in it, and what is not
 
-The send window states the payload before it goes, because a report's size is real: a full survey
+The popover states the payload before it goes, because a report's size is real: a full survey
 is megabytes, a beam has a data rate, and every transmission is to cost stored energy
 ([23-factions.md](23-factions.md#cost)). Scoping a report to one system is the answer to the
 bandwidth question 22-provenance raised and left open.
@@ -577,20 +577,30 @@ drift apart is the failure worth designing against.
 | the System window (`Y`), or a star in the telescope list | the system fixed, the recipient to pick |
 | a conversation in the communications window (`C`) | the recipient fixed, the system to pick |
 
-**It is a window, not a modal, and that is a constraint rather than a preference.** The client
-says outright in three places that nothing is modal (`ui.rs:6`, `app.rs:25`, `action.rs:896` —
-"opening one does not close another"), and there is no popup, popover or `egui::Modal` anywhere
-in `lc-client`. The only true modal in the codebase is the sign-in password panel, which is Bevy
-UI in the menu and not in the game at all. So this is a new arm of `Panel` in
-`panels::open_panels`, drawn in the same shared `egui::Window` every other panel uses, and it
-opens and closes like one. It behaves like a popover in the ways that matter — it opens with its
-context filled in and it closes when the report goes — without inventing a second kind of
-surface.
+**It is a popover: a small transient surface over the panel that opened it.** Two rules bear on
+it and neither forbids it:
 
-It is **opaque**, because doc 18's rule is that anything over another panel is opaque: two
-translucent surfaces at the same place blend into one object with both sets of text. Not being
-modal is also right on its own terms — the clock never stops, and a player deciding who to tell
-about Sol should still be able to watch the sky.
+- [13-client-shell.md](13-client-shell.md#states)'s **"nothing is modal"** is an argument about
+  *pausing*, not about transient surfaces. Its reason is that the clock never stops, so an
+  overlay that blocks the world behind it claims something untrue, and its subject is `Overlay`
+  not being an `AppState` — the escape menu, settings and the debug window. A send popover blocks
+  nothing and claims nothing; the rule is satisfied by the clock still running behind it.
+- [18-ui-style.md](18-ui-style.md#one-surface-at-a-time)'s **"one surface at a time"** is the rule
+  that actually applies, and it is a positive one: when something is modal, what is behind it
+  **stands down** — gone, not dimmed and still readable — because two panels of similar size at
+  the same place read as one muddled object. The sign-in modal is the worked precedent.
+
+So the popover is **opaque**, per doc 18's rule that anything over another panel is opaque, and
+the open question it raises is how far "stands down" goes here. The sign-in case is a modal the
+size of its parent. This one is small over something large, which is the case doc 18's argument
+does not quite cover: the muddle it warns about comes from *similar* sizes. Worth deciding when it
+is built, and the options are honest ones — leave the parent drawn, dim it, or have it build
+nothing while the popover is up.
+
+In implementation it is still a `Panel` arm in `panels::open_panels`, since that is where every
+surface in the client is drawn and a second mechanism would be the real cost. Nothing about
+living there makes it less of a popover: it opens with its context filled in, it sits over its
+parent, and it closes when the report goes.
 
 Its fields, top to bottom: the system and what would go, the recipient, the aim, the seal, and one
 button that **says what it will do** — *Beam to Kestrel, sealed*, or *Shout to anyone listening,
@@ -833,7 +843,7 @@ knowledge. Today:
 8. **The rest of what a body is.** Belt planes from thermal imaging, and spectra finer than the
    bands, if a later instrument adds them.
 9. **Reporting one system on purpose.** `about` on the order, the scoped gather beside
-   `report_upto`, the mark left alone, the `REPORT_LIMIT` trim, and the send window with its three
+   `report_upto`, the mark left alone, the `REPORT_LIMIT` trim, and the send popover with its three
    choices and both ways in. **Done when:** a craft can send everything it knows about one system
    to a named craft or to nobody, beamed or shouted, sealed or open; the mark to that recipient is
    unchanged afterwards; a scoped send with nothing new is not refused; a broadcast refuses a
@@ -899,5 +909,5 @@ game has no players — so each of these is a change in place, not a versioned a
   (2026-09-22).
 - **Courses fly against believed positions,** and re-plan as the belief improves (2026-09-22).
 - **A player can report one system on purpose,** to a craft or to nobody, beamed or shouted,
-  sealed or open, from one send window with two ways into it. A targeted report does not move the
+  sealed or open, from one popover with two ways into it. A targeted report does not move the
   recipient's mark and is not refused for having nothing new (2026-09-22).

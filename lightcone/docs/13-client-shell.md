@@ -238,8 +238,8 @@ Sealing is offered only for a craft whose key this ship holds, and the checkbox 
 is not. The client's copy of that rule is an interface courtesy; the server refuses the order
 either way.
 
-A conversation also offers **sending a report on one system**, which opens the send window with
-this craft as the recipient and a system to pick. The same window opens from the System window
+A conversation also offers **sending a report on one system**, which opens the send popover with
+this craft as the recipient and a system to pick. The same popover opens from the System window
 with the system already fixed, and it is the only surface either route uses. See
 [25-system-knowledge.md](25-system-knowledge.md#reporting-one-system-on-purpose). A report is not
 a message: it writes no transcript row and is never acknowledged, so nothing about it appears in
