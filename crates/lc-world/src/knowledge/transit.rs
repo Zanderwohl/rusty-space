@@ -207,7 +207,8 @@ const Z_EVENT: f64 = 10.0;
 ///
 /// Cheap next to a search, which is why it goes first rather than searching again after each.
 fn lone_events(points: &[Point], periods: (f64, f64)) -> Vec<Event> {
-    let events = events(points, Z_EVENT / 3.0);
+    let mean = baseline(points);
+    let events = events(points, mean, Z_EVENT / 3.0);
     events
         .iter()
         .filter(|e| e.z >= Z_EVENT)
@@ -221,7 +222,7 @@ fn lone_events(points: &[Point], periods: (f64, f64)) -> Vec<Event> {
                 }
                 let gap = (other.t - e.t).abs();
                 (1..).map(|k| gap / k as f64).take_while(|p| *p >= periods.0).any(|p| {
-                    p <= periods.1 && recurs(points, e, p)
+                    p <= periods.1 && recurs(points, mean, e, p)
                 })
             })
         })
@@ -231,8 +232,8 @@ fn lone_events(points: &[Point], periods: (f64, f64)) -> Vec<Event> {
 
 /// Whether a dip is there again at every multiple of `period` the log covers, and the log covers
 /// at least one.
-fn recurs(points: &[Point], e: &Event, period: f64) -> bool {
-    let (first, last) = (points[0].t, points[points.len() - 1].t);
+fn recurs(points: &[Point], mean: f64, e: &Event, period: f64) -> bool {
+    let (Some(first), Some(last)) = (points.first().map(|p| p.t), points.last().map(|p| p.t)) else { return false };
     let from = ((first - e.t) / period).ceil() as i64;
     let to = ((last - e.t) / period).floor() as i64;
     let mut covered = 0;
@@ -246,8 +247,9 @@ fn recurs(points: &[Point], e: &Event, period: f64) -> bool {
         if lo == hi {
             continue;
         }
-        let w: f64 = points[lo..hi].iter().map(|p| p.w).sum();
-        let depth = points[lo..hi].iter().map(|p| p.w * p.x).sum::<f64>() / w - baseline(points);
+        let window = points.get(lo..hi).unwrap_or_default();
+        let w: f64 = window.iter().map(|p| p.w).sum();
+        let depth = window.iter().map(|p| p.w * p.x).sum::<f64>() / w - mean;
         if depth < e.depth / 3.0 - 3.0 / w.sqrt() {
             return false;
         }
@@ -262,8 +264,7 @@ fn baseline(points: &[Point]) -> f64 {
 }
 
 /// Every dip at least `z_min` deep, strongest first, none overlapping another.
-fn events(points: &[Point], z_min: f64) -> Vec<Event> {
-    let mean = baseline(points);
+fn events(points: &[Point], mean: f64, z_min: f64) -> Vec<Event> {
     let mut found: Vec<Event> = Vec::new();
     for hours in DURATIONS_H {
         let duration = hours * 3600.0;

@@ -711,4 +711,63 @@ mod tests {
         let belief = new.knowledge_of(near).and_then(|k| k.belief(secret).cloned()).expect("it landed after the restart");
         assert!(belief.learned_s > now_s + 3_000.0, "when its light got there: {}", belief.learned_s);
     }
+
+    /// Review item 15's measurement: a tick with a hundred craft sweeping, each holding ten
+    /// thousand files. Ignored because it is a timing, not a check; run it with
+    /// `cargo test -p lc-server --lib a_busy_tick -- --ignored --nocapture`, and the figure is
+    /// in doc 24.
+    #[tokio::test]
+    #[ignore]
+    async fn a_busy_tick_is_measured() {
+        let template = AuthoredStars::sample().stars()[1].clone();
+        let stars: Vec<CatalogueStar> = (0..2_000u64)
+            .map(|k| {
+                let mut star = template.clone();
+                star.id = StarId::synthesise("busy", k);
+                let u = (k as f64 * 0.618_034).fract() * std::f64::consts::TAU;
+                star.position_ly = DVec3::new(u.cos(), u.sin(), (k as f64 * 0.414_2).fract() - 0.5) * (5.0 + k as f64 * 0.05);
+                star
+            })
+            .collect();
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.load_world(World::new(stars));
+        let mut wire = Loopback::new();
+        let sweep = lc_proto::Duty::Sweep { center: [0.0, 0.0, 1.0], radius_rad: std::f64::consts::PI, dwell_s: 60.0, started_s: 0.0 };
+        for n in 0..100i64 {
+            let ship = ShipId(1_000 + n);
+            server.admit(ClientId(n as u64 + 1), crate::world::still(ship, DVec3::X * n as f64 * 1.0e6), 0.0);
+            let now_s = server.now_t() as f64 * 1.0e-6;
+            let knowledge = &mut server.aboard(CraftId(ship.0)).knowledge;
+            for k in 0..10_000u64 {
+                let toward = DVec3::new((k as f64).sin(), (k as f64).cos(), 0.2).normalize();
+                knowledge.sighted(
+                    StarId::synthesise("known", k),
+                    Sighting {
+                        witness: witness(CraftId(ship.0)),
+                        observed_s: now_s,
+                        bearing: Bearing { observer_ly: DVec3::ZERO, toward, sigma_rad: 1e-6 },
+                        band: em_spectra::Band::V,
+                        flux: 1e-12,
+                        flux_sigma: 1e-15,
+                        lineage: Vec::new(),
+                    },
+                );
+            }
+            wire.client_says(ClientId(n as u64 + 1), act(ship, Order::SetDuty { duty: sweep.clone(), integration_s: 1.0e4 }));
+        }
+        // Past the sign-in pages, so what is timed is a craft at work rather than one catching up.
+        for _ in 0..80 {
+            server.tick(&mut wire).await.unwrap();
+            for n in 0..100u64 {
+                wire.take(ClientId(n + 1));
+            }
+        }
+        let started = std::time::Instant::now();
+        const TICKS: u32 = 20;
+        for _ in 0..TICKS {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let per_tick = started.elapsed() / TICKS;
+        eprintln!("a tick with 100 craft sweeping, 10 000 files each: {per_tick:?}");
+    }
 }

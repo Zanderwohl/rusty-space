@@ -207,6 +207,13 @@ decides what was kept.
 
 ## Open
 
+- **What a busy tick costs.** Measured on 2026-09-22 by `a_busy_tick_is_measured` in
+  `lc-server/src/instruments.rs`: a hundred craft sweeping a two-thousand-star sky, each holding
+  ten thousand files, all signed in, is 53 ms a tick in a debug build — whose own crates are
+  unoptimized — against a 50 ms tick. Reports and client pages read only what changed since their
+  mark, and logs due for reading are a queue, so neither grows with files held; a sweep still
+  looks at every star in reach for every craft each tick. Measure again in a release build before
+  deciding anything from it.
 - **Reading is on the tick thread, deliberately for now.** A read is a search over thousands of
   periods, one log a tick. It is the first thing on the shard whose cost grows with how long a
   player has watched, and analyses will get more expensive; when they do it moves to a worker.
