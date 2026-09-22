@@ -403,7 +403,9 @@ pub fn update_hulls(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(BodySurfaceMaterial {
                     uniforms: BodySurfaceUniform::default(),
-                    pattern: surfaces.flat.clone(),
+                    pattern: surfaces.flat.pattern.clone(),
+                    color: surfaces.flat.color.clone(),
+                    clouds: surfaces.flat.clouds.clone(),
                 })),
                 Transform::default(),
                 // The same reason a resolved body carries it: these are placed by hand at a

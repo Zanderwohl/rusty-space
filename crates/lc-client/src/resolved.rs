@@ -317,6 +317,7 @@ fn uniforms(
     tone: &crate::tonemap::ToneMap,
     reflected: glam::Vec3,
     emitted: glam::Vec3,
+    (color, clouds): (f32, f32),
 ) -> BodySurfaceUniform {
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
@@ -324,7 +325,7 @@ fn uniforms(
         dark: Vec4::new(dark[0], dark[1], dark[2], 1.0),
         light: Vec4::new(light[0], light[1], light[2], 1.0),
         to_star: to_star.extend(NIGHT),
-        params: Vec4::new(0.0, contrast, 0.0, 0.0),
+        params: Vec4::new(color, contrast, clouds, 0.0),
         reflected: reflected.extend(0.0),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
         emitted: emitted.extend(if body.surface.is_banded() { INVERSION } else { 0.0 }),
@@ -377,11 +378,15 @@ pub fn update_resolved(
             let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
             let (reflected, emitted) =
                 surface_shading(&session.0, body, star_radius, star_teff, star_distance);
+            let drawn = surfaces.drawn(&body.name);
+            let own = surfaces.images(&body.name, body.surface, &mut images);
             commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(BodySurfaceMaterial {
-                    uniforms: uniforms(body, star_ly, &session.tone, reflected, emitted),
-                    pattern: surfaces.pattern(&body.name, body.surface, &mut images),
+                    uniforms: uniforms(body, star_ly, &session.tone, reflected, emitted, drawn),
+                    pattern: own.pattern,
+                    color: own.color,
+                    clouds: own.clouds,
                 })),
                 Transform::default(),
                 NoFrustumCulling,
@@ -404,7 +409,8 @@ pub fn update_resolved(
             let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
             let (reflected, emitted) =
                 surface_shading(&session.0, body, star_radius, star_teff, star_distance);
-            let next = uniforms(body, star_ly, &session.tone, reflected, emitted);
+            let drawn = surfaces.drawn(&body.name);
+            let next = uniforms(body, star_ly, &session.tone, reflected, emitted, drawn);
             if asset.uniforms != next {
                 asset.uniforms = next;
             }

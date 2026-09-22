@@ -1,5 +1,6 @@
 //! A resolved body's surface: a pattern the host bakes, colored by a palette the body's class
-//! gives. The host supplies `shaders/body_surface.wgsl`.
+//! gives, or a color map of its own, and optionally a cloud deck over either. The host supplies
+//! `shaders/body_surface.wgsl`.
 
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
@@ -11,7 +12,9 @@ pub struct BodySurfaceUniform {
     pub light: Vec4,
     /// World direction to the star; `w` is the ambient floor on the night side.
     pub to_star: Vec4,
-    /// `(unused, contrast, unused, unused)`.
+    /// `(color, contrast, clouds, unused)`. `color` is 1 where [`BodySurfaceMaterial::color`]
+    /// replaces the pattern and palette, and `clouds` is 1 where
+    /// [`BodySurfaceMaterial::clouds`] is drawn over the surface.
     pub params: Vec4,
     /// Starlight the surface reflects, as linear display light before the tone map. `w` unused.
     pub reflected: Vec4,
@@ -54,6 +57,13 @@ pub struct BodySurfaceMaterial {
     #[texture(1, dimension = "cube", visibility(fragment))]
     #[sampler(2, visibility(fragment))]
     pub pattern: Handle<Image>,
+    /// The surface's own albedo, an sRGB cubemap, when `params.x` says so. Sampled with the
+    /// pattern's sampler.
+    #[texture(3, dimension = "cube", visibility(fragment))]
+    pub color: Handle<Image>,
+    /// A cloud deck, an sRGB cubemap with straight alpha as coverage, when `params.z` says so.
+    #[texture(4, dimension = "cube", visibility(fragment))]
+    pub clouds: Handle<Image>,
 }
 
 impl Material for BodySurfaceMaterial {

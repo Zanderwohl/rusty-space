@@ -1,11 +1,16 @@
-# Which texture graph draws a resolved body's surface pattern. TOML.
+# Which texture graphs draw a resolved body's surface. TOML.
 #
-# A body named under [bodies] takes that graph; every other body takes its class's. Paths are
-# under textures/. The graph is the pattern only, in [0, 1]: the palette and contrast stay the
-# class's, from lc_world::surface, and each body's seed is its name's.
+# A body takes its class's graph, which is the pattern only, in [0, 1]: the palette and contrast
+# stay the class's, from lc_world::surface. A body named under [bodies] takes that graph instead,
+# and its color output is the surface's color. One named under [clouds] has that graph's color
+# drawn over the surface, its alpha the cover. Paths are under textures/, and each body's seed
+# is its name's.
+#
+# The worlds here are types of planet rather than portraits of these ones: the bundled system
+# has them until something generates surfaces of its own.
 #
 # Surfaces are baked on a sphere, so a graph here may use only Color, Noise, Coordinate, Mix,
-# MinMax and Wave.
+# MinMax and Wave; Map, with a palette of any kind; and a passthrough Transform set to Extend.
 
 [classes]
 GasGiant = "surfaces/gas_giant.tgraph"
@@ -16,3 +21,8 @@ Weathered = "surfaces/weathered.tgraph"
 Scorched = "surfaces/scorched.tgraph"
 
 [bodies]
+Earth = "worlds/earthlike.tgraph"
+Mars = "worlds/marslike.tgraph"
+
+[clouds]
+Earth = "worlds/earthlike-clouds.tgraph"

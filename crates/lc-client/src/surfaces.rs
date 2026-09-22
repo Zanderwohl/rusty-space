@@ -1,9 +1,10 @@
-//! Which graph draws a resolved body's surface, and the cubemap it bakes into.
+//! Which graphs draw a resolved body's surface, and the cubemaps they bake into.
 //!
-//! `textures/surfaces.lcsurfaces` decides: a body named under `[bodies]` gets that graph, and
-//! every other body its class's. So a hand-made Earth is a file and a line, not a change here.
-//! The graph supplies only the pattern; palette and contrast stay the class's, from
-//! `lc_world::surface`, and each body's seed is its name's.
+//! `textures/surfaces.lcsurfaces` decides. A body takes its class's graph, which supplies only a
+//! pattern: palette and contrast stay the class's, from `lc_world::surface`. A body named under
+//! `[bodies]` takes that graph instead, baked in color, and one named under `[clouds]` has a
+//! cloud deck drawn over it. So a hand-made Earth is a file and a line, not a change here. Each
+//! body's seed is its name's.
 
 use std::collections::HashMap;
 
@@ -21,20 +22,44 @@ const MANIFEST: &str = "textures/surfaces.lcsurfaces";
 /// a half a body.
 pub const FACE: u32 = 512;
 
+/// The same for a color cubemap, at 24 megabytes. A color graph is the whole surface rather
+/// than a variation on one, and it is what a ship in low orbit fills the view with.
+pub const COLOR_FACE: u32 = 1024;
+
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct SurfaceManifest {
     /// Paths under `textures/`.
     pub classes: HashMap<Surface, String>,
+    /// Baked in color, in place of the class's pattern and palette.
     #[serde(default)]
     pub bodies: HashMap<String, String>,
+    #[serde(default)]
+    pub clouds: HashMap<String, String>,
+}
+
+/// The graphs a body is drawn from, as paths under `textures/`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Look<'a> {
+    pub ground: Ground<'a>,
+    pub clouds: Option<&'a str>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ground<'a> {
+    Pattern(&'a str),
+    Color(&'a str),
 }
 
 impl SurfaceManifest {
-    pub fn graph_for(&self, name: &str, class: Surface) -> Option<&str> {
-        self.bodies
-            .get(name)
-            .or_else(|| self.classes.get(&class))
-            .map(String::as_str)
+    pub fn look_for(&self, name: &str, class: Surface) -> Option<Look<'_>> {
+        let ground = match self.bodies.get(name) {
+            Some(path) => Ground::Color(path),
+            None => Ground::Pattern(self.classes.get(&class)?),
+        };
+        Some(Look {
+            ground,
+            clouds: self.clouds.get(name).map(String::as_str),
+        })
     }
 }
 
@@ -85,48 +110,79 @@ impl AssetLoader for ManifestLoader {
     }
 }
 
+/// What a body's surface material binds. Each is a placeholder until its bake lands, and stays
+/// one if the manifest gives the body no such graph.
+#[derive(Clone)]
+pub struct BodyImages {
+    pub pattern: Handle<Image>,
+    pub color: Handle<Image>,
+    pub clouds: Handle<Image>,
+}
+
+struct Body {
+    images: BodyImages,
+    class: Surface,
+    /// Whether `color` and `clouds` are drawn; `None` until the manifest has said.
+    drawn: Option<(bool, bool)>,
+}
+
 #[derive(Resource)]
 pub struct Surfaces {
     manifest: Handle<SurfaceManifest>,
-    /// For what is drawn with the surface material but has no pattern of its own: hulls.
-    pub flat: Handle<Image>,
-    /// Kept for the session. A body's pattern never changes, and bodies stop and start being
+    /// For what is drawn with the surface material but has no surface of its own: hulls.
+    pub flat: BodyImages,
+    /// Kept for the session. A body's surface never changes, and bodies stop and start being
     /// resolved as the ship moves; re-baking each time would be most of the cost.
-    by_body: HashMap<String, Handle<Image>>,
-    /// Waiting on the manifest to say which graph.
-    unrouted: Vec<(String, Surface, Handle<Image>)>,
+    by_body: HashMap<String, Body>,
 }
 
 impl FromWorld for Surfaces {
     fn from_world(world: &mut World) -> Self {
         let manifest = world.resource::<AssetServer>().load(MANIFEST);
-        let flat = world
-            .resource_mut::<Assets<Image>>()
-            .add(placeholder(Target::new(Shape::Cube(1))));
+        let mut images = world.resource_mut::<Assets<Image>>();
+        let cube = Target::new(Shape::Cube(1));
+        let flat = BodyImages {
+            pattern: images.add(placeholder(cube)),
+            color: images.add(placeholder(cube.color())),
+            clouds: images.add(placeholder(cube.color())),
+        };
         Self {
             manifest,
             flat,
             by_body: HashMap::new(),
-            unrouted: Vec::new(),
         }
     }
 }
 
 impl Surfaces {
-    /// The pattern `name` is drawn with: flat at first, its own once baked.
-    pub fn pattern(
-        &mut self,
-        name: &str,
-        class: Surface,
-        images: &mut Assets<Image>,
-    ) -> Handle<Image> {
-        if let Some(image) = self.by_body.get(name) {
-            return image.clone();
-        }
-        let image = images.add(placeholder(Target::new(Shape::Cube(FACE))));
-        self.by_body.insert(name.to_owned(), image.clone());
-        self.unrouted.push((name.to_owned(), class, image.clone()));
-        image
+    /// What `name` is drawn with: flat at first, its own once baked.
+    pub fn images(&mut self, name: &str, class: Surface, images: &mut Assets<Image>) -> BodyImages {
+        self.by_body
+            .entry(name.to_owned())
+            .or_insert_with(|| {
+                let cube = Target::new(Shape::Cube(1));
+                Body {
+                    images: BodyImages {
+                        pattern: images.add(placeholder(cube)),
+                        color: images.add(placeholder(cube.color())),
+                        clouds: images.add(placeholder(cube.color())),
+                    },
+                    class,
+                    drawn: None,
+                }
+            })
+            .images
+            .clone()
+    }
+
+    /// Whether `name`'s color and cloud cubemaps are drawn, as the material's weights for them.
+    pub fn drawn(&self, name: &str) -> (f32, f32) {
+        let (color, clouds) = self
+            .by_body
+            .get(name)
+            .and_then(|b| b.drawn)
+            .unwrap_or_default();
+        (f32::from(u8::from(color)), f32::from(u8::from(clouds)))
     }
 }
 
@@ -142,24 +198,39 @@ fn route(
     assets: Res<AssetServer>,
     mut bakes: ResMut<Bakes>,
 ) {
-    if surfaces.unrouted.is_empty() {
+    if surfaces.by_body.values().all(|b| b.drawn.is_some()) {
         return;
     }
     let Some(manifest) = manifests.get(&surfaces.manifest) else {
         if let LoadState::Failed(e) = assets.load_state(&surfaces.manifest) {
             warn!("the surface manifest did not load, drawing bodies flat: {e}");
-            surfaces.unrouted.clear();
+            for body in surfaces.by_body.values_mut() {
+                body.drawn = Some((false, false));
+            }
         }
         return;
     };
-    for (name, class, image) in std::mem::take(&mut surfaces.unrouted) {
-        match manifest.graph_for(&name, class) {
-            Some(path) => {
-                let graph = assets.load(format!("textures/{path}"));
-                bakes.request(graph, seed_of(&name), Target::new(Shape::Cube(FACE)), image);
-            }
-            None => warn!("no surface graph for {name} or its class, {class:?}"),
+    for (name, body) in surfaces.by_body.iter_mut().filter(|(_, b)| b.drawn.is_none()) {
+        let Some(look) = manifest.look_for(name, body.class) else {
+            warn!("no surface graph for {name} or its class, {:?}", body.class);
+            body.drawn = Some((false, false));
+            continue;
+        };
+        let seed = seed_of(name);
+        let mut bake = |path: &str, target, image: &Handle<Image>| {
+            let graph = assets.load(format!("textures/{path}"));
+            bakes.request(graph, seed, target, image.clone());
+        };
+        let pattern = Target::new(Shape::Cube(FACE));
+        let color = Target::new(Shape::Cube(COLOR_FACE)).color();
+        match look.ground {
+            Ground::Pattern(path) => bake(path, pattern, &body.images.pattern),
+            Ground::Color(path) => bake(path, color, &body.images.color),
         }
+        if let Some(path) = look.clouds {
+            bake(path, color, &body.images.clouds);
+        }
+        body.drawn = Some((matches!(look.ground, Ground::Color(_)), look.clouds.is_some()));
     }
 }
 
@@ -176,7 +247,8 @@ impl Plugin for SurfacesPlugin {
 
 #[cfg(test)]
 mod tests {
-    use texture_graph_core::{EvalCtx, Graph, LayerKind, cube_sample, eval, load_from_str};
+    use texture_graph_core::{EvalCtx, Graph, cube_sample, eval, load_from_str};
+    use texture_graph_gpu::{Baker, DeviceCtx, ScalarFormat};
 
     use super::*;
 
@@ -228,30 +300,34 @@ mod tests {
         })
     }
 
-    /// Every class reaches a graph, and every graph is one a sphere bake accepts. A kind the bake
-    /// refuses would fail only at run time, leaving that class drawn flat.
+    /// Every class reaches a graph, and every graph in the manifest bakes on a sphere: a kind the
+    /// bake refuses would fail only at run time, leaving that body drawn flat. Skipped without a
+    /// GPU.
     #[test]
-    fn every_class_has_a_graph_a_sphere_can_bake() {
+    fn every_graph_in_the_manifest_bakes_on_a_sphere() {
         let manifest = manifest();
         for class in ALL {
-            let path = manifest
-                .graph_for("nobody in particular", class)
-                .expect("routed");
-            for layer in &graph(path).layers {
-                assert!(
-                    matches!(
-                        layer.kind,
-                        LayerKind::Color(_)
-                            | LayerKind::Noise(_)
-                            | LayerKind::Coordinate(_)
-                            | LayerKind::Mix(_)
-                            | LayerKind::MinMax(_)
-                            | LayerKind::Wave(_)
-                    ),
-                    "{path} uses {}, which a sphere bake refuses",
-                    layer.kind.category_label(),
-                );
-            }
+            assert!(manifest.classes.contains_key(&class), "{class:?} is not routed");
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let Ok(ctx) = runtime.block_on(DeviceCtx::request_headless()) else {
+            eprintln!("no GPU; the manifest's graphs were not baked");
+            return;
+        };
+        let mut baker = Baker::new(ctx);
+        let eval = EvalCtx::default();
+        for path in manifest.classes.values() {
+            let g = graph(path);
+            baker
+                .bake_scalar_cube(&g, g.output.color.unwrap(), 8, ScalarFormat::R8Unorm, &eval)
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
+        }
+        for path in manifest.bodies.values().chain(manifest.clouds.values()) {
+            baker
+                .bake_color_cube(&graph(path), 8, &eval)
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
         }
     }
 
@@ -305,20 +381,31 @@ mod tests {
 
     #[test]
     fn a_body_named_in_the_manifest_takes_its_own_graph() {
-        let mut manifest = manifest();
-        manifest
-            .bodies
-            .insert("Earth".into(), "bodies/earth.tgraph".into());
+        let manifest: SurfaceManifest = toml::from_str(
+            r#"
+            [classes]
+            Weathered = "surfaces/weathered.tgraph"
+            [bodies]
+            Earth = "worlds/earthlike.tgraph"
+            [clouds]
+            Earth = "worlds/earthlike-clouds.tgraph"
+            "#,
+        )
+        .unwrap();
         assert_eq!(
-            manifest.graph_for("Earth", Surface::Weathered),
-            Some("bodies/earth.tgraph")
+            manifest.look_for("Earth", Surface::Weathered),
+            Some(Look {
+                ground: Ground::Color("worlds/earthlike.tgraph"),
+                clouds: Some("worlds/earthlike-clouds.tgraph"),
+            })
         );
         assert_eq!(
-            manifest.graph_for("Mars", Surface::Weathered),
-            manifest
-                .classes
-                .get(&Surface::Weathered)
-                .map(String::as_str)
+            manifest.look_for("Mercury", Surface::Weathered),
+            Some(Look {
+                ground: Ground::Pattern("surfaces/weathered.tgraph"),
+                clouds: None,
+            })
         );
+        assert_eq!(manifest.look_for("Mercury", Surface::Rock), None);
     }
 }
