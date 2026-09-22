@@ -33,6 +33,10 @@ pub const PROFILE_LATITUDE: usize = 0;
 /// Row holding density against radius, from the inner edge to the outer one.
 pub const PROFILE_RADIAL: usize = 1;
 
+/// Grains in one repeat of [`PopulationMaterial::grain`]. Must match `GRAIN_TILE` in
+/// `population.wgsl`; what the texture holds across one repeat is the texture's own business.
+pub const GRAIN_TILE: f32 = 16.0;
+
 #[derive(Clone, Debug, PartialEq, ShaderType)]
 pub struct PopulationUniform {
     pub tint: Vec4,
@@ -112,6 +116,11 @@ pub struct PopulationMaterial {
     /// WebGPU, and the profile has decades in it where eight bits would band.
     #[texture(1, sample_type = "float", filterable = false, visibility(fragment))]
     pub profile: Handle<Image>,
+    /// Granularity: a single-channel 3D texture in `0..1`, sampled with wrapping, one repeat
+    /// per [`GRAIN_TILE`] grains. It must tile, or the seams show at every repeat.
+    #[texture(2, dimension = "3d", visibility(fragment))]
+    #[sampler(3, visibility(fragment))]
+    pub grain: Handle<Image>,
 }
 
 impl Material for PopulationMaterial {

@@ -114,9 +114,12 @@ impl Plugin for ClientPlugin {
             em_render::plume_material::PlumeMaterialPlugin,
             BodySurfaceMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
+            crate::procedural::ProceduralTexturesPlugin,
             crate::library::LibraryPlugin,
             crate::faces::FacesPlugin,
             crate::map::MapPlugin,
+            crate::bench::BenchPlugin,
+            crate::haze::HazePlugin,
         ))
             // **Which camera egui draws on is not left to spawn order.**
             //
@@ -352,8 +355,7 @@ fn spawn_camera(mut commands: Commands) {
 /// The camera never translates. Distance to a star is tens of trillions of kilometers and no
 /// float holds that next to a render unit, so the ship stays at the render origin and the sky
 /// moves around it; what changes when the ship flies is the direction to each star.
-fn aim_camera(ui: Res<Ui>, mut camera: Query<&mut Transform, With<SkyCamera>>) {
-    let Ok(mut transform) = camera.single_mut() else { return };
+fn aim_camera(ui: Res<Ui>, mut transform: Single<&mut Transform, With<SkyCamera>>) {
     let forward = sim_to_render(ui.look.forward()).as_vec3();
     let up = sim_to_render(DVec3::Z).as_vec3();
     transform.look_to(forward, up);

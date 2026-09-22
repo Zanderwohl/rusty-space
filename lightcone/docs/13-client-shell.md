@@ -806,10 +806,16 @@ it has a width the geometry does not know about.
   three milliradians — and a camera closer to the plane than that is *inside* the nearest ring.
   The inside of a tube is a solid wall, so the first edge-on photograph was a rectangle of flat
   green with nothing in it.
-- **A spoke's thickness is set by its near end.** Every point of a ring is the same distance
-  from the center, so one tube radius serves all of it. A spoke runs from near the eye out to
-  its rim, and a constant width that is a pixel at the far end is eighty at the near one.
-  Scaled to the outermost decade, twelve spokes were twelve solid wedges across the view.
+- **A line's thickness is set where it is nearest the camera, one segment at a time.** A
+  spoke runs from near the eye out to its rim, and a constant width that is a pixel at the far
+  end is eighty at the near one: scaled to the outermost decade, twelve spokes were twelve
+  solid wedges across the view. The width was first a uniform per entity, sized at its near
+  end and written every frame — which cost half the frame, and thinned every far side below a
+  pixel until the Oort cloud's outline was a trail of dots. `map_line.wgsl` now sizes each
+  vertex by the camera's distance to the nearer of the two center-line segments meeting at it,
+  from the view, and the materials hold only constants. By a vertex's own distance was not
+  enough: a spoke is one segment, and the part passing under the camera is nowhere near
+  either end.
 
 ### The corner square, and one set of gestures
 

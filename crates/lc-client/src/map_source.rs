@@ -10,6 +10,8 @@
 //! handed: a CSV today, a shard's answer once the server is authoritative. `local::start`
 //! passes the client's own stars to the server in the box so both place craft alike.
 
+use std::collections::HashMap;
+
 use em_map::{ItemKey, ItemKind, MapItem, MapSnapshot};
 use glam::DVec3;
 use lc_world::navigation::Kind;
@@ -58,9 +60,12 @@ impl Source {
 /// catalogue every frame.
 ///
 /// Not every item has a subject. The reader's own craft has none and is picked through.
+///
+/// Keyed rather than a list of pairs: picking asks this once per placement, every frame the map
+/// is up, and a scan made that quadratic in the size of the map.
 pub struct Picture {
     pub snapshot: MapSnapshot,
-    pub subjects: Vec<(ItemKey, Subject)>,
+    pub subjects: HashMap<ItemKey, Subject>,
 }
 
 
@@ -68,17 +73,17 @@ pub struct Picture {
 #[derive(Default)]
 struct Build {
     items: Vec<MapItem>,
-    subjects: Vec<(ItemKey, Subject)>,
+    subjects: HashMap<ItemKey, Subject>,
 }
 
 impl Build {
     fn with_capacity(n: usize) -> Self {
-        Self { items: Vec::with_capacity(n), subjects: Vec::with_capacity(n) }
+        Self { items: Vec::with_capacity(n), subjects: HashMap::with_capacity(n) }
     }
 
     fn push(&mut self, item: MapItem, subject: Option<Subject>) {
         if let Some(subject) = subject {
-            self.subjects.push((item.key, subject));
+            self.subjects.insert(item.key, subject);
         }
         self.items.push(item);
     }

@@ -11,6 +11,7 @@ use em_foundations::time::{Instant, TimeDelta};
 use glam::DVec3;
 
 use crate::id::BodyIndex;
+use crate::memo::Lookup;
 use crate::motive::{MotiveSelection, TransitionEvent};
 use crate::system::System;
 
@@ -53,7 +54,65 @@ pub fn position_at(system: &System, i: BodyIndex, time: Instant) -> Option<DVec3
 
 /// Position and velocity at `time`, without touching the arena. `None` on the same terms
 /// as [`position_at`].
+///
+/// Remembered per instant (see `memo`). Sums run root first either way, so a remembered answer
+/// is the same bits as a fresh one.
 pub fn state_at(system: &System, i: BodyIndex, time: Instant) -> Option<(DVec3, DVec3)> {
+    let generation = system.generation();
+    let memo = system.memo();
+    match memo.lookup(generation, time, i, system.len()) {
+        Lookup::Known(state) => return state,
+        Lookup::Skip => return solve_chain(system, i, time),
+        Lookup::Remember => {}
+    }
+
+    // Down to the nearest ancestor already answered, or the root.
+    let mut chain = Vec::with_capacity(4);
+    let mut above = (DVec3::ZERO, DVec3::ZERO);
+    let mut walk = Some(i);
+    while let Some(body) = walk {
+        if chain.len() >= MAX_CHAIN_DEPTH || chain.contains(&body) {
+            return None;
+        }
+        if body != i
+            && let Some(known) = memo.known(generation, time, body)
+        {
+            match known {
+                Some(state) => above = state,
+                // Something above is Newtonian, so everything below it is too.
+                None => {
+                    memo.store(generation, time, &[(i, None)]);
+                    return None;
+                }
+            }
+            break;
+        }
+        chain.push(body);
+        walk = primary_at(system, body, time);
+    }
+
+    let (mut position, mut velocity) = above;
+    let mut answers = Vec::with_capacity(chain.len());
+    let mut moving = true;
+    for &body in chain.iter().rev() {
+        let state = match moving.then(|| local_state_at(system, body, time)).flatten() {
+            Some((local_position, local_velocity)) => {
+                position += local_position;
+                velocity += local_velocity;
+                Some((position, velocity))
+            }
+            None => {
+                moving = false;
+                None
+            }
+        };
+        answers.push((body, state));
+    }
+    memo.store(generation, time, &answers);
+    answers.last().and_then(|(_, state)| *state)
+}
+
+fn solve_chain(system: &System, i: BodyIndex, time: Instant) -> Option<(DVec3, DVec3)> {
     // Root-most first, so each body can be placed relative to one already placed.
     let mut chain = Vec::with_capacity(4);
     let mut walk = Some(i);
@@ -379,4 +438,48 @@ mod non_mutating_tests {
         assert!(position_at(&s, follower, Instant::J2000).is_none(),
             "a body parented to an integrated one is just as unpredictable");
     }
+
+    /// Bits, so a `NaN` equals itself: 1I/'Oumuamua's velocity is one at J2000.
+    fn bits(state: Option<(DVec3, DVec3)>) -> Option<[u64; 6]> {
+        state.map(|(p, v)| [p.x, p.y, p.z, v.x, v.y, v.z].map(f64::to_bits))
+    }
+
+    /// Remembered answers are the same bits as fresh ones, whichever order bodies are asked in.
+    #[test]
+    fn a_remembered_answer_is_the_answer() {
+        let day = TimeDelta::from_seconds(86_400.0);
+        for offset in [0.0, 1.0, 36_525.0, -18_262.0] {
+            let time = Instant::J2000 + day * offset;
+            let system = built();
+            let fresh: Vec<_> = system.indices().map(|i| solve_chain(&system, i, time)).collect();
+            let forward: Vec<BodyIndex> = system.indices().collect();
+            let backward: Vec<BodyIndex> = forward.iter().rev().copied().collect();
+            for order in [&forward, &backward, &forward] {
+                for &i in order.iter() {
+                    assert_eq!(bits(state_at(&system, i, time)), bits(fresh[i.get()]),
+                        "{} at {offset} days", system.name(i));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_edit_forgets_what_was_remembered() {
+        let time = Instant::J2000 + TimeDelta::from_seconds(5.0e6);
+        let mut system = built();
+        let earth = system.by_name("Earth").unwrap();
+        let moon = system.by_name("Luna").or_else(|| system.by_name("Moon")).unwrap();
+        for _ in 0..3 {
+            state_at(&system, moon, time);
+        }
+
+        *system.motive_mut(earth) = crate::motive::Motive::fixed(DVec3::new(1.0e12, 0.0, 0.0));
+        let after = state_at(&system, moon, time);
+        assert_eq!(after, solve_chain(&system, moon, time));
+        assert_ne!(after, {
+            let untouched = built();
+            solve_chain(&untouched, moon, time)
+        }, "premise: moving the Earth moves the Moon");
+    }
+
 }

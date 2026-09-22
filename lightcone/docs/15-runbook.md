@@ -34,8 +34,15 @@ Three, none of which belong in this repository or in a shell history.
 | | where it lives | used by |
 |---|---|---|
 | Namecheap API key | `~/.config/lightcone/proxy.env` on rocinante, mode 600 | the proxy, at certificate renewal |
-| `RELEASE_TOKEN` | the same file, and your shell when running `tools/release.sh` | promoting builds |
-| PostgreSQL password | the same file | the site |
+| `RELEASE_TOKEN` | `~/.config/lightcone/web.env` on rocinante | the site, which checks it; and `tools/release.sh` |
+| PostgreSQL password | `proxy.env` | the site |
+
+`release.sh` needs the token in your shell. Take it from the host without printing it:
+
+```bash
+export RELEASE_TOKEN="$(ssh zandy@rocinante.local 'grep -m1 ^RELEASE_TOKEN= ~/.config/lightcone/web.env | cut -d= -f2-')"
+export LC_SITE=https://dev.lightconefrontier.com LC_CDN=https://cdn.dev.lightconefrontier.com
+```
 
 To set one without it reaching your history or the screen:
 

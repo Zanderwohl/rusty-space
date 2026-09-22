@@ -17,7 +17,9 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureFormat, TextureUsages};
 use bevy_egui::EguiUserTextures;
 use em_map::{ItemKey, ItemKind, MapFrame, MapSnapshot, Placement, compose};
-use em_render::body_material::{BASE_TUBE_RADIUS, BodyWireframeMaterial};
+use em_render::body_material::BASE_TUBE_RADIUS;
+
+use crate::map_line::MapLineMaterial;
 use em_render::render_space::sim_to_render;
 use em_render::wire_mesh;
 use glam::DVec3;
@@ -36,15 +38,14 @@ const INITIAL_SIDE: u32 = 512;
 const MIN_SIDE: u32 = 64;
 const MAX_SIDE: u32 = 4096;
 
-/// How wide a line is drawn, in pixels. Screen-constant, so the shader's `target_tube_radius`
-/// is set per entity from that entity's own scale.
+/// How wide a line is drawn, in pixels. Held there per vertex by `map_line.wgsl`.
 const LINE_PX: f32 = 1.6;
 
 /// The most of its own unit mesh a tube may take, per family.
 ///
 /// The shader displaces along normals in mesh space, so this is a proportion of the thing
-/// drawn and not of the screen. Unclamped, a ring seen from forty times its radius wants a
-/// tube a tenth of itself thick and the camera ends up inside it.
+/// drawn and not of the screen. Unclamped, a ring seen from forty times its radius would be a
+/// tube a tenth of itself thick.
 const LINE_TUBE_FRACTION: f32 = 0.02;
 const SPHERE_TUBE_FRACTION: f32 = 0.06;
 
@@ -56,6 +57,8 @@ const DOT_TUBE_FRACTION: f32 = BASE_TUBE_RADIUS;
 /// its brightness. It is the ruler, not what is being measured.
 const SCALE_PX: f32 = LINE_PX * 0.5;
 const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
+/// A population's outline, dashed. At full brightness a shell's six curves outshine the map.
+const POPULATION_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
 
 /// How much of the palette color a line is drawn at.
 ///
@@ -129,25 +132,33 @@ pub struct MapCamera;
 #[derive(Component)]
 pub struct MapDrawn;
 
-/// Which item an entity stands for, so a transform can be written without respawning.
+/// Which item an entity stands for, by its place in the frame's list, so a transform can be
+/// written without respawning.
+///
+/// An index rather than the key it could be looked up by: [`place`] respawns the whole layer
+/// whenever the key list changes, so while these entities exist `frame.placements` holds the
+/// same placements in the same order it did when they were spawned. That makes the index the
+/// cheap half of a lookup the scan would otherwise repeat for every entity, every frame.
 #[derive(Component)]
-pub struct MapItemOf(pub ItemKey);
+pub struct MapItemOf(pub usize);
 
 /// A decade ring, by its place in the frame's list.
 #[derive(Component)]
 pub struct MapRingOf(pub usize);
 
-/// The drop-line under an item.
+/// The drop-line under an item, by its placement's place in the frame's list.
 #[derive(Component)]
-pub struct MapDropOf(pub ItemKey);
+pub struct MapDropOf(pub usize);
 
-/// Where a star measured by parallax might be: its error along the line of sight.
+/// Where a star measured by parallax might be: its error along the line of sight. By its
+/// placement's place in the frame's list.
 #[derive(Component)]
-pub struct MapSpreadOf(pub ItemKey);
+pub struct MapSpreadOf(pub usize);
 
-/// A belt, a ring system or a cloud, drawn as its own outline rather than as a point.
+/// A belt, a ring system or a cloud, drawn as its own outline rather than as a point. By its
+/// placement's place in the frame's list.
 #[derive(Component)]
-pub struct MapAnnulusOf(pub ItemKey);
+pub struct MapAnnulusOf(pub usize);
 
 /// The reference plane's spokes. One entity.
 #[derive(Component)]
@@ -167,7 +178,7 @@ pub struct Map {
     pub snapshot: MapSnapshot,
     /// What each item of the snapshot is, in the terms the rest of the interface selects
     /// things in. See [`crate::map_source::Picture`].
-    pub subjects: Vec<(ItemKey, crate::pick::Subject)>,
+    pub subjects: std::collections::HashMap<ItemKey, crate::pick::Subject>,
     /// Which item holds the ship, when the snapshot has one. Worked out beside the snapshot
     /// because that is where the session is.
     pub primary: Option<ItemKey>,
@@ -253,7 +264,8 @@ impl Viewport {
     }
 
     /// A circle's line, as a fraction of its radius. Both are fixed pixel sizes, so the
-    /// distance and scale in [`tube_target`] cancel and this is the answer, not a cap.
+    /// distance and scale in [`crate::map_line::tube_radius`] cancel and this is the answer,
+    /// not a cap.
     fn point_tube_fraction(self, mark_px: f32) -> f32 {
         LINE_PX / (mark_px * 0.5)
     }
@@ -271,7 +283,7 @@ pub struct MapPlugin;
 
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(em_render::body_material::BodyWireframeMaterialPlugin)
+        app.add_plugins(crate::map_line::MapLinePlugin)
             .add_systems(Startup, setup)
             // **After the scene the snapshot is built from.** Taken in `Stage::Act`, it held
             // the previous frame's eye while the contacts in it were this frame's, so this
@@ -279,8 +291,12 @@ impl Plugin for MapPlugin {
             // whenever the ship was under way.
             .add_systems(
                 Update,
-                (survey, resize, place).chain().in_set(Stage::Scene).after(crate::app::Placed),
-            );
+                (survey, resize, place, switch_camera)
+                    .chain()
+                    .in_set(Stage::Scene)
+                    .after(crate::app::Placed),
+            )
+            .add_systems(OnExit(crate::app::AppState::InGame), hide);
     }
 }
 
@@ -300,7 +316,7 @@ fn setup(
         wanted: UVec2::splat(INITIAL_SIDE),
         shown: false,
         snapshot: MapSnapshot::observed(0.0, Vec::new()),
-        subjects: Vec::new(),
+        subjects: std::collections::HashMap::new(),
         primary: None,
         frame: None,
         sphere: meshes.add(wire_mesh::generate_latlon_sphere(&[], BASE_TUBE_RADIUS, 4)),
@@ -333,6 +349,8 @@ fn setup(
         Camera {
             // Before the window camera, whose frame shows what this one drew.
             order: -1,
+            // Until something shows it: see `switch_camera`.
+            is_active: false,
             clear_color: ClearColorConfig::Custom(Color::BLACK),
             ..default()
         },
@@ -341,6 +359,18 @@ fn setup(
         Tonemapping::None,
         Transform::default(),
     ));
+}
+
+/// Render the map only while something shows it: in the menu and the loading screen nothing does.
+fn switch_camera(map: Res<Map>, mut camera: Single<&mut Camera, With<MapCamera>>) {
+    if camera.is_active != map.shown {
+        camera.is_active = map.shown;
+    }
+}
+
+/// Only the game's interface pass sets `shown`, so leaving the game has to clear it.
+fn hide(mut map: ResMut<Map>) {
+    map.shown = false;
 }
 
 fn target_image(size: UVec2) -> Image {
@@ -399,42 +429,42 @@ fn place(
     mut commands: Commands,
     mut map: ResMut<Map>,
     mut ui: ResMut<Ui>,
-    mut materials: ResMut<Assets<BodyWireframeMaterial>>,
+    mut materials: ResMut<Assets<MapLineMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut camera: Query<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
+    camera: Single<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
     existing: Query<Entity, With<MapDrawn>>,
     mut items: Query<
-        (&MapItemOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<BodyWireframeMaterial>),
+        (&MapItemOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<MapLineMaterial>),
         (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpokes>,
             Without<MapSpreadOf>),
     >,
     mut drops: Query<
-        (&MapDropOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<BodyWireframeMaterial>),
+        (&MapDropOf, &mut Transform, &mut Mesh3d),
         (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
             Without<MapSpreadOf>),
     >,
     mut spreads: Query<
-        (&MapSpreadOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
+        (&MapSpreadOf, &mut Transform),
         (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
             Without<MapDropOf>),
     >,
     mut rings: Query<
-        (&MapRingOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
+        (&MapRingOf, &mut Transform),
         (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
             Without<MapSpreadOf>),
     >,
     mut spokes: Query<
-        (&mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
+        &mut Transform,
         (With<MapSpokes>, Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>,
             Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpreadOf>),
     >,
     mut annuli: Query<
-        (&MapAnnulusOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
+        (&MapAnnulusOf, &mut Transform),
         (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapRingOf>,
             Without<MapSpokes>, Without<MapSpreadOf>),
     >,
 ) {
-    let Ok((mut transform, mut projection)) = camera.single_mut() else { return };
+    let (mut transform, mut projection) = camera.into_inner();
     if !map.shown {
         for entity in &existing {
             commands.entity(entity).despawn();
@@ -490,7 +520,7 @@ fn place(
     }
 
     for (of, mut at, mut mesh, material) in items.iter_mut() {
-        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+        let Some(placement) = frame.placements.get(of.0) else { continue };
         *at = item_transform(placement, view);
         // Crossing the threshold does not change the set that is drawn, so the level of
         // detail is a handle swap rather than a respawn.
@@ -498,11 +528,15 @@ fn place(
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
         }
-        set_thickness(&mut materials, material, at.scale.max_element(), view.rad_per_px,
-            at.translation.length(), fraction, LINE_PX);
+        // A mark's cap follows its form. Compared first: a write re-prepares the material.
+        if materials.get(&material.0).is_some_and(|m| m.max_fraction != fraction)
+            && let Some(mut asset) = materials.get_mut(&material.0)
+        {
+            asset.max_fraction = fraction;
+        }
     }
-    for (of, mut at, mut mesh, material) in drops.iter_mut() {
-        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+    for (of, mut at, mut mesh) in drops.iter_mut() {
+        let Some(placement) = frame.placements.get(of.0) else { continue };
         *at = drop_transform(placement);
         // Drifting off the plane gains dashes, not longer ones, so the mesh changes.
         let dashes = dash_count(at.scale.y, at.translation.length(), rad_per_px);
@@ -510,37 +544,22 @@ fn place(
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
         }
-        set_thickness(&mut materials, material, 1.0, rad_per_px, at.translation.length(),
-            LINE_TUBE_FRACTION, SCALE_PX);
     }
-    for (of, mut at, material) in spreads.iter_mut() {
-        let Some((near, far)) = frame.placements.iter().find(|p| p.key == of.0).and_then(|p| p.spread) else {
-            continue;
-        };
+    for (of, mut at) in spreads.iter_mut() {
+        let Some((near, far)) = frame.placements.get(of.0).and_then(|p| p.spread) else { continue };
         *at = segment_transform(near, far);
-        set_thickness(&mut materials, material, 1.0, rad_per_px, at.translation.length(),
-            LINE_TUBE_FRACTION, LINE_PX);
     }
-    for (of, mut at, material) in rings.iter_mut() {
+    for (of, mut at) in rings.iter_mut() {
         let Some(ring) = frame.rings.get(of.0) else { continue };
         *at = ring_transform(&frame, ring.radius);
-        set_thickness(&mut materials, material, ring.radius, rad_per_px,
-            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION, SCALE_PX);
     }
-    for (of, mut at, material) in annuli.iter_mut() {
-        let Some(placement) = frame.placements.iter().find(|p| p.key == of.0) else { continue };
+    for (of, mut at) in annuli.iter_mut() {
+        let Some(placement) = frame.placements.get(of.0) else { continue };
         let Some(annulus) = placement.annulus else { continue };
         *at = annulus_transform(placement, annulus);
-        set_thickness(&mut materials, material, annulus.outer, rad_per_px,
-            nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION,
-            LINE_PX);
     }
-    if let Ok((mut at, material)) = spokes.single_mut() {
+    if let Ok(mut at) = spokes.single_mut() {
         *at = ring_transform(&frame, standoff * SPOKE_REACH);
-        // Against the transform's scale, not the stand-off: the shader displaces in mesh
-        // space, so any other number is wrong by that ratio. Sized at the near end.
-        set_thickness(&mut materials, material, standoff * SPOKE_REACH, rad_per_px, standoff,
-            LINE_TUBE_FRACTION, SCALE_PX);
     }
     map.frame = Some(frame);
 }
@@ -617,23 +636,6 @@ fn reference_line(snapshot: &MapSnapshot, primary: Option<ItemKey>) -> Option<DV
     let ship = snapshot.observer()?.position_ly;
     let at = snapshot.item(primary?)?.position_ly;
     Some(ship - at)
-}
-
-/// How close a ring or a shell comes to the camera, in render units.
-///
-/// A tube's width is set by the nearest part of its mesh. Sized against the far edge, a shell
-/// spanning 633 to 181 000 units gets a tube thicker than its inner edge's distance, which
-/// puts the camera inside it. Floored at the camera's clearance over the reference plane, so a
-/// belt seen from within is a hairline rather than nothing.
-fn nearest_reach(center_at: f32, annulus: em_map::Annulus, standoff: f32) -> f32 {
-    let nearest = if center_at < annulus.inner {
-        annulus.inner - center_at
-    } else if center_at > annulus.outer {
-        center_at - annulus.outer
-    } else {
-        0.0
-    };
-    nearest.max(standoff * em_map::camera::ELEVATION_FLOOR.sin() as f32)
 }
 
 /// The outline mesh for a population, normalized so its outer edge is one unit.
@@ -782,35 +784,6 @@ fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
     }
 }
 
-/// The tube radius a mesh wants, in its own local units, to hold `width_px` on screen.
-///
-/// The shader displaces along normals in local space, so the world width is `scale * target`
-/// and the answer is the wanted world width over the scale. Shared by the spawn and the
-/// per-frame update: a spawn that took the material's default and let the next frame correct
-/// it put the camera inside a spoke's tube for that frame.
-pub fn tube_target(scale: f32, rad_per_px: f32, distance: f32, max_fraction: f32,
-    width_px: f32) -> f32 {
-    let world = (distance * rad_per_px * width_px).max(f32::MIN_POSITIVE);
-    match scale > f32::MIN_POSITIVE {
-        true => (world / scale).min(max_fraction),
-        false => BASE_TUBE_RADIUS,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn set_thickness(
-    materials: &mut Assets<BodyWireframeMaterial>,
-    material: &MeshMaterial3d<BodyWireframeMaterial>,
-    scale: f32,
-    rad_per_px: f32,
-    distance: f32,
-    max_fraction: f32,
-    width_px: f32,
-) {
-    let Some(mut asset) = materials.get_mut(&material.0) else { return };
-    asset.target_tube_radius = tube_target(scale, rad_per_px, distance, max_fraction, width_px);
-}
-
 fn spawn_scene(
     commands: &mut Commands,
     map: &Map,
@@ -818,19 +791,21 @@ fn spawn_scene(
     standoff: f32,
     view: Viewport,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<BodyWireframeMaterial>,
+    materials: &mut Assets<MapLineMaterial>,
 ) {
-    let rad_per_px = view.rad_per_px;
     let layer = RenderLayers::layer(MAP_LAYER);
+    let ring = materials.add(line_material(RING, LINE_TUBE_FRACTION, SCALE_PX, SCALE_COLOR_SCALE));
+    let drop = materials.add(line_material(DROP, LINE_TUBE_FRACTION, SCALE_PX, SCALE_COLOR_SCALE));
+    let population = materials.add(MapLineMaterial {
+        dash_px: DASH_PX,
+        ..line_material(POPULATION, LINE_TUBE_FRACTION, LINE_PX, POPULATION_COLOR_SCALE)
+    });
 
-    for (index, ring) in frame.rings.iter().enumerate() {
-        let at = ring_transform(frame, ring.radius);
-        let target = tube_target(ring.radius, rad_per_px,
-            at.translation.length().max(ring.radius), LINE_TUBE_FRACTION, SCALE_PX);
+    for (index, placed) in frame.rings.iter().enumerate() {
         commands.spawn((
             Mesh3d(map.ring.clone()),
-            MeshMaterial3d(materials.add(line_material(RING, target, SCALE_COLOR_SCALE))),
-            at,
+            MeshMaterial3d(ring.clone()),
+            ring_transform(frame, placed.radius),
             NoFrustumCulling,
             layer.clone(),
             MapDrawn,
@@ -838,90 +813,80 @@ fn spawn_scene(
         ));
     }
 
-    let reach = standoff * SPOKE_REACH;
     commands.spawn((
         Mesh3d(map.spokes.clone()),
-        MeshMaterial3d(materials.add(line_material(
-            SPOKE,
-            tube_target(reach, rad_per_px, standoff, LINE_TUBE_FRACTION, SCALE_PX),
-            SCALE_COLOR_SCALE,
-        ))),
-        ring_transform(frame, reach),
+        MeshMaterial3d(materials.add(line_material(SPOKE, LINE_TUBE_FRACTION, SCALE_PX,
+            SCALE_COLOR_SCALE))),
+        ring_transform(frame, standoff * SPOKE_REACH),
         NoFrustumCulling,
         layer.clone(),
         MapDrawn,
         MapSpokes,
     ));
 
-    for placement in &frame.placements {
+    for (index, placement) in frame.placements.iter().enumerate() {
         let at = item_transform(placement, view);
         let (mesh, fraction) = mesh_for(form_of(placement, view), placement, map, view);
         commands.spawn((
             Mesh3d(mesh.clone()),
+            // Its own, because its cap changes with its form.
             MeshMaterial3d(materials.add(line_material(
                 color_of(placement.kind),
-                tube_target(at.scale.max_element(), view.rad_per_px, at.translation.length(),
-                    fraction, LINE_PX),
+                fraction,
+                LINE_PX,
                 LINE_COLOR_SCALE,
             ))),
             at,
             NoFrustumCulling,
             layer.clone(),
             MapDrawn,
-            MapItemOf(placement.key),
+            MapItemOf(index),
         ));
         if let Some(annulus) = placement.annulus {
-            let at = annulus_transform(placement, annulus);
-            let target = tube_target(annulus.outer, rad_per_px,
-                nearest_reach(at.translation.length(), annulus, standoff), LINE_TUBE_FRACTION,
-                LINE_PX);
             commands.spawn((
                 Mesh3d(meshes.add(annulus_mesh(annulus))),
-                MeshMaterial3d(materials.add(line_material(POPULATION, target,
-                    LINE_COLOR_SCALE))),
-                at,
+                MeshMaterial3d(population.clone()),
+                annulus_transform(placement, annulus),
                 NoFrustumCulling,
                 layer.clone(),
                 MapDrawn,
-                MapAnnulusOf(placement.key),
+                MapAnnulusOf(index),
             ));
         }
         if let Some((near, far)) = placement.spread {
             let at = segment_transform(near, far);
-            let target = tube_target(1.0, rad_per_px, at.translation.length(), LINE_TUBE_FRACTION, LINE_PX);
             commands.spawn((
                 // One dash: a solid line.
                 Mesh3d(map.drops[0].clone()),
-                MeshMaterial3d(materials.add(line_material(color_of(placement.kind), target, LINE_COLOR_SCALE))),
+                MeshMaterial3d(materials.add(line_material(color_of(placement.kind), LINE_TUBE_FRACTION,
+                    LINE_PX, LINE_COLOR_SCALE))),
                 at,
                 NoFrustumCulling,
                 layer.clone(),
                 MapDrawn,
-                MapSpreadOf(placement.key),
+                MapSpreadOf(index),
             ));
         }
         if placement.has_drop_line() {
             let at = drop_transform(placement);
-            let target = tube_target(1.0, rad_per_px, at.translation.length(),
-                LINE_TUBE_FRACTION, SCALE_PX);
-            let dashes = dash_count(at.scale.y, at.translation.length(), rad_per_px);
+            let dashes = dash_count(at.scale.y, at.translation.length(), view.rad_per_px);
             commands.spawn((
                 Mesh3d(map.drops[dashes - 1].clone()),
-                MeshMaterial3d(materials.add(line_material(DROP, target, SCALE_COLOR_SCALE))),
+                MeshMaterial3d(drop.clone()),
                 at,
                 NoFrustumCulling,
                 layer.clone(),
                 MapDrawn,
-                MapDropOf(placement.key),
+                MapDropOf(index),
             ));
         }
     }
 }
 
-fn line_material(color: Color, target_tube_radius: f32, color_scale: f32)
-    -> BodyWireframeMaterial {
+fn line_material(color: Color, max_fraction: f32, width_px: f32, color_scale: f32)
+    -> MapLineMaterial {
     let rgba = color.to_linear();
-    BodyWireframeMaterial {
+    MapLineMaterial {
         base_color: LinearRgba::new(
             rgba.red * color_scale,
             rgba.green * color_scale,
@@ -929,11 +894,10 @@ fn line_material(color: Color, target_tube_radius: f32, color_scale: f32)
             1.0,
         ),
         emission_strength: LINE_EMISSION,
-        // Set here rather than corrected next frame. See [`tube_target`].
-        target_tube_radius,
-        // Unlit: with no suns the shader's day/night factor is one.
-        num_suns: 0,
-        ..default()
+        base_tube_radius: BASE_TUBE_RADIUS,
+        max_fraction,
+        width_px,
+        dash_px: 0.0,
     }
 }
 
@@ -958,6 +922,7 @@ fn color_of(kind: ItemKind) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map_line::tube_radius;
 
     use crate::ui::{Frame, MapFocus};
     use em_map::{ItemKey, ItemKind, MapItem, MapSnapshot};
@@ -1189,26 +1154,24 @@ mod tests {
         );
     }
 
-    /// No line is thicker than the camera's clearance over the plane.
-    ///
-    /// `em_map::camera::ELEVATION_FLOOR` holds the camera off the plane and every line is a
-    /// tube with a width of its own. A tube wider than that clearance contains the camera, and
-    /// the inside of a tube is opaque. Checked on the family that is scaled hardest.
+    /// No tube can contain the camera, at any scale or distance. The inside of a tube is opaque.
     #[test]
-    fn a_line_is_never_thicker_than_the_camera_clears_the_plane() {
-        let floor = em_map::camera::ELEVATION_FLOOR.sin() as f32;
-        for standoff in [1.0e-3f32, 1.0, 40.0, 1.0e3, 1.0e5] {
-            for height in [64.0f32, 410.0, 2160.0] {
-                let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / height;
-                let reach = standoff * SPOKE_REACH;
-                let world =
-                    reach * tube_target(reach, rad_per_px, standoff, LINE_TUBE_FRACTION, SCALE_PX);
-                let clearance = standoff * floor;
-                assert!(
-                    world < clearance,
-                    "spokes at stand-off {standoff:e}, {height} px: tube {world:e} against a \
-                     clearance of {clearance:e}",
-                );
+    fn no_tube_can_reach_the_camera() {
+        for height in [64.0f32, 410.0, 2160.0] {
+            let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / height;
+            for scale in [1.0e-6f32, 1.0, 1.0e5] {
+                for distance in [1.0e-6f32, 1.0, 6.33e2, 1.81e5] {
+                    for (fraction, width) in [(LINE_TUBE_FRACTION, SCALE_PX),
+                        (LINE_TUBE_FRACTION, LINE_PX), (SPHERE_TUBE_FRACTION, LINE_PX)]
+                    {
+                        let world =
+                            scale * tube_radius(scale, rad_per_px, distance, fraction, width);
+                        assert!(
+                            world < distance,
+                            "a tube {world:e} wide at {distance:e}, scale {scale:e}, {height} px",
+                        );
+                    }
+                }
             }
         }
     }
@@ -1328,7 +1291,7 @@ mod tests {
         for distance in [1.0e-3f32, 1.0, 40.0, 1.0e5] {
             let scale = point_radius(distance, view.rad_per_px, view.point_px);
             let target =
-                tube_target(scale, view.rad_per_px, distance, DOT_TUBE_FRACTION, LINE_PX);
+                tube_radius(scale, view.rad_per_px, distance, DOT_TUBE_FRACTION, LINE_PX);
             assert!(
                 (target - BASE_TUBE_RADIUS).abs() < 1.0e-9,
                 "at {distance:e} the disc would shift by {}",
@@ -1444,65 +1407,14 @@ mod tests {
         }
     }
 
-    /// A belt's tube never reaches the camera. Anything spanning a range of distances has to
-    /// be sized by its near side; the Oort cloud runs from 633 render units to 181 000.
-    #[test]
-    fn an_annulus_never_swallows_the_camera() {
-        let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
-        let cases = [
-            // The Oort cloud, as the solar system's generator actually produces it.
-            (em_map::Annulus { inner: 6.33e2, outer: 1.81e5, half_angle_rad: 1.57 }, 59.2, 60.0),
-            // The asteroid belt, seen from outside and from within.
-            (em_map::Annulus { inner: 2.1, outer: 3.3, half_angle_rad: 0.2 }, 59.2, 60.0),
-            (em_map::Annulus { inner: 2.1, outer: 3.3, half_angle_rad: 0.2 }, 0.5, 1.0),
-            // And a camera sitting inside the band itself.
-            (em_map::Annulus { inner: 2.1, outer: 3.3, half_angle_rad: 0.2 }, 2.7, 3.0),
-        ];
-        for (annulus, center_at, standoff) in cases {
-            let reach = nearest_reach(center_at, annulus, standoff);
-            let world = annulus.outer
-                * tube_target(annulus.outer, rad_per_px, reach, LINE_TUBE_FRACTION, LINE_PX);
-            assert!(
-                world < reach,
-                "outer {:e}: tube {world:e} against a reach of {reach:e}",
-                annulus.outer,
-            );
-        }
-    }
-
-    /// And the reach is the near edge.
-    #[test]
-    fn the_reach_is_measured_to_the_near_edge() {
-        let shell = em_map::Annulus { inner: 600.0, outer: 1.0e5, half_angle_rad: 1.57 };
-        // Inside the cavity: the near edge is the inner one.
-        assert!((nearest_reach(60.0, shell, 60.0) - 540.0).abs() < 1.0);
-        // Outside it altogether: the near edge is the outer one.
-        assert!((nearest_reach(1.2e5, shell, 60.0) - 2.0e4).abs() < 1.0);
-        // Within the band, floored so a belt seen from inside is still a hairline.
-        assert!(nearest_reach(1000.0, shell, 60.0) > 0.0);
-    }
-
-    /// And the material's default is not good enough, so a spawn cannot take it and wait for
-    /// the next frame to correct it.
-    #[test]
-    fn the_default_tube_would_swallow_the_camera() {
-        let standoff = 40.0f32;
-        let clearance = standoff * em_map::camera::ELEVATION_FLOOR.sin() as f32;
-        let world = standoff * SPOKE_REACH * BASE_TUBE_RADIUS;
-        assert!(
-            world > clearance,
-            "the default is safe after all, so this test is no longer about anything",
-        );
-    }
-
     /// A line holds its screen width however hard its mesh is scaled, which is why the
-    /// thickness is a per-entity dial rather than baked in.
+    /// thickness is worked out from the view rather than baked in.
     #[test]
     fn a_line_holds_its_width_on_screen_across_the_scales() {
         let rad_per_px = 2.0 * (std::f32::consts::FRAC_PI_4 * 0.5).tan() / 410.0;
         let width_px = |scale: f32, distance: f32| {
             let world =
-                scale * tube_target(scale, rad_per_px, distance, LINE_TUBE_FRACTION, SCALE_PX);
+                scale * tube_radius(scale, rad_per_px, distance, LINE_TUBE_FRACTION, SCALE_PX);
             world / distance / rad_per_px
         };
         for scale in [1.0f32, 1.0e2, 1.0e4] {

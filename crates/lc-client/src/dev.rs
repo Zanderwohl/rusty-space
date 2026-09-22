@@ -76,6 +76,8 @@ pub struct DevEntry {
     pub after_frames: u32,
     /// How many consecutive frames to photograph. More than one for diagnosing a flicker.
     pub burst: u32,
+    /// Frames to time after [`DevEntry::after_frames`] of warm-up. See `bench`.
+    pub bench: Option<u32>,
     /// A menu page to open on arrival. The only way to photograph one that draws over the
     /// root, which an action running on entering the sky cannot reach.
     pub menu_page: Option<crate::ui::MenuPage>,
@@ -397,7 +399,6 @@ pub(crate) fn pin_map_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
     ui.map.orbit.set_distance_m(au * em_map::snapshot::M_PER_AU);
 }
 
-/// Photograph the sky through the real pipeline, then quit.
 /// `shot.png` and 2 becomes `shot.2.png`.
 fn numbered(path: &str, index: u32) -> String {
     match path.rsplit_once('.') {
@@ -406,6 +407,7 @@ fn numbered(path: &str, index: u32) -> String {
     }
 }
 
+/// Photograph the sky through the real pipeline, then quit.
 pub(crate) fn photograph(
     mut commands: Commands,
     dev: Res<DevEntry>,

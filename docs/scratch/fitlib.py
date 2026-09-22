@@ -14,6 +14,11 @@ DAY = 86400.0
 D2R = math.pi / 180.0
 J2000 = 2451545.0
 
+def wrap_mean_anomaly(m_deg, e):
+    """Into [0, 360) for an ellipse. A hyperbola's mean anomaly is not an angle and never
+    repeats: wrapped, 'Oumuamua's J2000 phase lands near perihelion instead of ~100 AU out."""
+    return m_deg % 360.0 if e < 1.0 else m_deg
+
 def kepler_E(m, e):
     m = math.fmod(m, 2 * math.pi)
     E = m if e < 0.8 else math.pi

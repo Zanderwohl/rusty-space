@@ -70,8 +70,6 @@ pub struct RelativisticStarfieldUniform {
     pub halo_gain: f32,
     /// How much angular structure the glare carries. Zero leaves it a smooth halo.
     pub corona_strength: f32,
-    /// Filaments per radian of sky. Higher is finer structure.
-    pub corona_frequency: f32,
     /// Exponent of the glare's power-law falloff from the source.
     pub halo_falloff: f32,
     /// Shortest streamer, and how much longer the longest is, as fractions of the quad.
@@ -126,7 +124,6 @@ impl Default for RelativisticStarfieldUniform {
             overflow_gain: 1.0,
             halo_gain: 0.3,
             corona_strength: 0.0,
-            corona_frequency: 11.0,
             halo_falloff: 1.25,
             corona_reach_min: 0.20,
             corona_reach_span: 0.50,
@@ -152,6 +149,15 @@ pub struct RelativisticStarfieldMaterial {
     /// WebGPU, and interpolating log2 is the right thing to do anyway.
     #[texture(1, sample_type = "float", filterable = false, visibility(vertex, fragment))]
     pub band_lut: Handle<Image>,
+    /// The corona's two fields, cubemaps sampled on the direction out from a star: how bright
+    /// its threads are there, and how far that streamer reaches, in `[0, 1]`. One pair serves
+    /// every star; the shader turns it by a rotation drawn from each star's seed.
+    #[texture(2, dimension = "cube", visibility(fragment))]
+    #[sampler(3, visibility(fragment))]
+    pub corona_filaments: Handle<Image>,
+    #[texture(4, dimension = "cube", visibility(fragment))]
+    #[sampler(5, visibility(fragment))]
+    pub corona_reach: Handle<Image>,
 }
 
 impl Material for RelativisticStarfieldMaterial {

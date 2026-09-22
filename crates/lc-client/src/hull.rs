@@ -78,9 +78,14 @@ pub struct Eye {
     pub anchored: Option<ShipId>,
 }
 
-/// One craft with a mesh. `None` is the player's own ship.
+/// One craft with a mesh, by its place in this frame's drawn set.
+///
+/// An index rather than the [`ShipId`] it could be found by: the set is compared against
+/// [`Hulls::drawn`] every frame and respawned whenever it differs, so while these entities
+/// exist the list holds the same craft in the same order it did when they were spawned. The
+/// player's own ship has no id at all and is simply the first of them.
 #[derive(Component)]
-pub struct Hull(pub Option<ShipId>);
+pub struct Hull(pub usize);
 
 /// The shared ovoid, and which craft currently have one.
 ///
@@ -256,7 +261,7 @@ fn shading(session: &Session, star_radius_m: f64, star_teff_k: f64, star_distanc
 /// it is the nearest star in the catalogue — which at that range contributes almost nothing,
 /// and the point of it is that a hull out there is a silhouette with a direction rather than a
 /// uniformly unlit blob.
-fn lighting(session: &Session) -> Option<(DVec3, f64, f64)> {
+pub fn lighting(session: &Session) -> Option<(DVec3, f64, f64)> {
     if let Some(system) = session.system.as_ref() {
         return Some((system.star_position_ly(), system.star_radius_m(), system.star_teff_k()));
     }
@@ -280,10 +285,17 @@ fn emitted(session: &Session) -> Vec3 {
 
 /// The same, before the band mapping. Split out because the exposure meters against radiance
 /// and the shader wants display light.
+///
+/// Computed once. It is a function of [`HULL_K`] alone, and each band is a 32-interval Simpson
+/// over the Planck curve — a couple of hundred `exp` calls that used to be paid again for every
+/// hull in the scene, twice a frame.
 fn hull_radiance() -> PerBand<f32> {
-    PerBand::new(std::array::from_fn(|i| {
-        blackbody::band_radiance(em_spectra::Band::ALL[i], HULL_K) as f32
-    }))
+    static RADIANCE: std::sync::LazyLock<PerBand<f32>> = std::sync::LazyLock::new(|| {
+        PerBand::new(std::array::from_fn(|i| {
+            blackbody::band_radiance(em_spectra::Band::ALL[i], HULL_K) as f32
+        }))
+    });
+    *RADIANCE
 }
 
 fn uniforms(
@@ -369,14 +381,16 @@ pub fn update_hulls(
     mut hulls: ResMut<Hulls>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
+    surfaces: Res<crate::surfaces::Surfaces>,
     existing: Query<(Entity, &Hull)>,
     mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &Hull)>,
 ) {
     let look = ui.look.forward();
     let want = drawn(&game.0, &uplink, &eye, look);
-    let keys: Vec<Option<ShipId>> = want.iter().map(|(id, _)| *id).collect();
 
-    if keys != hulls.drawn {
+    // Compared against the drawn set without building it: this runs every frame, and the keys
+    // are only wanted on the frame that respawns.
+    if !want.iter().map(|(id, _)| id).eq(hulls.drawn.iter()) {
         for (entity, _) in &existing {
             commands.entity(entity).despawn();
         }
@@ -384,28 +398,31 @@ pub fn update_hulls(
             .mesh
             .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
             .clone();
-        for (id, _) in &want {
+        for index in 0..want.len() {
             commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(BodySurfaceMaterial {
                     uniforms: BodySurfaceUniform::default(),
+                    pattern: surfaces.flat.clone(),
                 })),
                 Transform::default(),
                 // The same reason a resolved body carries it: these are placed by hand at a
                 // scale where a mesh's own bounds say nothing useful about where it lands.
                 NoFrustumCulling,
-                Hull(*id),
+                Hull(index),
             ));
         }
-        hulls.drawn = keys;
+        hulls.drawn = want.iter().map(|(id, _)| *id).collect();
         // Spawned this frame and placed the next. One frame at the origin is one frame with
         // the hull inside the camera, which is a flash of nothing rather than a wrong picture.
         return;
     }
 
     let star = lighting(&game.0);
+    // One mapping, so one answer: nothing about a particular hull enters its own heat.
+    let own = emitted(&game.0);
     for (mut transform, material, marker) in placed.iter_mut() {
-        let Some((_, at)) = want.iter().find(|(id, _)| *id == marker.0) else { continue };
+        let Some((_, at)) = want.get(marker.0) else { continue };
         transform.translation = sim_to_render(at.offset_m / UNIT_M).as_vec3();
         transform.rotation = attitude(at.facing, star.map(|(star_ly, _, _)| star_ly - at.at_ly));
         transform.scale = half_extents(at.length_m);
@@ -417,13 +434,13 @@ pub fn update_hulls(
                 uniforms(
                     star_ly - at.at_ly,
                     shading(&game.0, radius, teff, distance),
-                    emitted(&game.0),
+                    own,
                     &game.0.tone,
                 )
             }
             // No star to reflect. The hull still glows with its own heat, which is the whole
             // reason a ship between the stars is a thing you can see at all.
-            None => uniforms(DVec3::Z, Vec3::ZERO, emitted(&game.0), &game.0.tone),
+            None => uniforms(DVec3::Z, Vec3::ZERO, own, &game.0.tone),
         };
         if asset.uniforms != next {
             asset.uniforms = next;
@@ -436,9 +453,13 @@ pub fn update_hulls(
 /// Both halves, because the exposure has to account for both: a ship is reflected starlight in
 /// the optical and its own heat in the infrared, and which one dominates is a question about
 /// the band mapping rather than about the ship.
-pub fn radiance_at(session: &Session, at_ly: DVec3) -> PerBand<f32> {
+///
+/// `star` is [`lighting`]'s answer, passed in rather than asked for: between the stars that is
+/// a search over the whole catalogue, and a caller metering a scene wants every hull in it lit
+/// by the same one anyway.
+pub fn radiance_at(star: Option<(DVec3, f64, f64)>, at_ly: DVec3) -> PerBand<f32> {
     let own = hull_radiance();
-    let Some((star_ly, radius, teff)) = lighting(session) else { return own };
+    let Some((star_ly, radius, teff)) = star else { return own };
     let lit =
         crate::resolved::lit_radiance(ALBEDO, radius, teff, star_ly.distance(at_ly) * M_PER_LY);
     PerBand::new(std::array::from_fn(|i| {

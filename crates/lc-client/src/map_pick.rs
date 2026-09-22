@@ -212,7 +212,7 @@ fn sight<'a>(state: &Ui, map: &'a Map, frame: &'a MapFrame, viewport: Vec2) -> V
 
     let mut out = Vec::with_capacity(frame.placements.len());
     for placement in &frame.placements {
-        let Some((_, subject)) = map.subjects.iter().find(|(key, _)| *key == placement.key) else {
+        let Some(subject) = map.subjects.get(&placement.key) else {
             continue;
         };
         let outline = outline_of(placement, &view, aspect);

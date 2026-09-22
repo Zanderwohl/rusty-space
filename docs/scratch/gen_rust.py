@@ -1,4 +1,5 @@
 import json, math
+import fitlib as F
 from bodies import all_bodies, BARYCENTRIC
 
 G = 6.6743015e-11
@@ -141,7 +142,7 @@ def emit(slug, name, cmd, prim, tags, center):
                         }}),
                         rotation: {rot},
                         epoch: KeplerEpoch::J2000(MeanAnomalyAtJ2000 {{
-                            mean_anomaly: {fmt(m0 % 360.0)},
+                            mean_anomaly: {fmt(F.wrap_mean_anomaly(m0, e))},
                         }}),
                         anomalistic_period: Some(TimeDelta::from_days({fmt(period_days)})),
                     }},

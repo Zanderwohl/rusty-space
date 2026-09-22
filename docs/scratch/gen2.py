@@ -4,6 +4,7 @@ The user's save is authoritative for identity, mass, radius, colour, tags and ro
 JPL supplies the orbital elements. Bodies JPL cannot supply keep the save's elements.
 """
 import json, math, sqlite3
+from fitlib import wrap_mean_anomaly
 from merged_table import save, resolved, ALIAS, EXTRA_IDS, PRIMARY_OF_EXTRA
 
 DB = "/Users/zandy/Downloads/solar_system.em"
@@ -124,6 +125,10 @@ def emit(bid, primary):
             notes.append("// A fixed ellipse fits this poorly; treat the position as indicative.")
         period = 360.0 / n
         anom = f"Some(TimeDelta::from_days({fmt(period)}))"
+        # |a|: a hyperbola's semi-major axis is negative, and mu is not.
+        n_rad_s = math.radians(n) / 86400.0
+        mu = (f"// mu implied by the fitted period and semi-major axis.\n"
+              f"                        gravitational_parameter: Some({fmt(n_rad_s ** 2 * abs(a) ** 3)}),")
         if abs(ar) > 1e-9 or abs(nr) > 1e-9:
             rotexpr = (f"""KeplerRotation::PrecessingEulerAngles(KeplerPrecessingEulerAngles {{
                             inclination: {fmt(inc)},
@@ -139,7 +144,7 @@ def emit(bid, primary):
                             argument_of_periapsis: {fmt(argp % 360)},
                         }})""")
         shape = f"eccentricity: {fmt(e)},\n                            semi_major_axis: {fmt(a)},"
-        epoch = f"mean_anomaly: {fmt(m0 % 360)},"
+        epoch = f"mean_anomaly: {fmt(wrap_mean_anomaly(m0, e))},"
     else:
         k = userkep[bid]
         notes.append(f"// {name}: JPL publishes no ephemeris under this designation, so these")
@@ -151,8 +156,9 @@ def emit(bid, primary):
                         }})""")
         shape = (f"eccentricity: {fmt(k['eccentricity'] or 0.0)},\n"
                  f"                            semi_major_axis: {fmt(k['semi_major_axis'] or 1.0)},")
-        epoch = f"mean_anomaly: {fmt((k['mean_anomaly'] or 0.0) % 360)},"
+        epoch = f"mean_anomaly: {fmt(wrap_mean_anomaly(k['mean_anomaly'] or 0.0, k['eccentricity'] or 0.0))},"
         anom = "None"
+        mu = "gravitational_parameter: None,"
 
     if rnote: notes.append(f"// radius: {rnote}")
     if mnote: notes.append(f"// mass: {mnote}")
@@ -179,6 +185,7 @@ def emit(bid, primary):
                             {epoch}
                         }}),
                         anomalistic_period: {anom},
+                        {mu}
                     }},
                     appearance: {ap},
                     rotation: {rotation_of(bid)},

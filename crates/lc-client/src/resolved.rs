@@ -42,10 +42,13 @@ pub const NIGHT: f32 = 0.012;
 /// changing how much light the body sends.
 const INVERSION: f32 = 0.3;
 
+/// Which of this frame's resolved bodies an entity stands for.
+///
+/// An index rather than the name it could be found by: the set is compared against
+/// [`Resolved::drawn`] every frame and respawned whenever it differs, so while these entities
+/// exist the list holds the same bodies in the same order it did when they were spawned.
 #[derive(Component)]
-pub struct ResolvedBody {
-    pub name: String,
-}
+pub struct ResolvedBody(pub usize);
 
 /// The shared unit sphere, and which bodies currently have one.
 #[derive(Resource, Default)]
@@ -186,13 +189,17 @@ pub fn sample_scene(
     // Hulls, the player's own included. A ship filling half the frame is the brightest thing
     // in it, and an exposure metered without it puts the picture's subject off the top of the
     // window — which is a white blob where the ship is.
+    //
+    // Asked once: between the stars there is no system to light a hull and the answer is a
+    // search over the whole catalogue.
+    let hull_star = crate::hull::lighting(&game.0);
     let hulls = std::iter::once((game.ship.length_m, eye.boom_m, observer))
         .chain(uplink.contacts.iter().map(|c| {
             (c.length_m, c.position_ly.distance(observer) * M_PER_LY, c.position_ly)
         }));
     for (length_m, distance_m, at_ly) in hulls {
         scene.discs.push(Disc {
-            radiance: crate::hull::radiance_at(&game.0, at_ly),
+            radiance: crate::hull::radiance_at(hull_star, at_ly),
             solid_angle_sr: crate::hull::solid_angle_sr(length_m, distance_m),
         });
     }
@@ -313,14 +320,11 @@ fn uniforms(
 ) -> BodySurfaceUniform {
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
-    // Stable per body and independent of everything else, so a world looks the same every time
-    // it is approached.
-    let seed = (crate::system::name_seed(&body.name) % 100_000) as f32 * 1.0e-2;
     BodySurfaceUniform {
         dark: Vec4::new(dark[0], dark[1], dark[2], 1.0),
         light: Vec4::new(light[0], light[1], light[2], 1.0),
         to_star: to_star.extend(NIGHT),
-        params: Vec4::new(0.0, contrast, seed, if body.surface.is_banded() { 1.0 } else { 0.0 }),
+        params: Vec4::new(0.0, contrast, 0.0, 0.0),
         reflected: reflected.extend(0.0),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
         emitted: emitted.extend(if body.surface.is_banded() { INVERSION } else { 0.0 }),
@@ -337,6 +341,8 @@ pub fn update_resolved(
     mut resolved: ResMut<Resolved>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
+    mut surfaces: ResMut<crate::surfaces::Surfaces>,
+    mut images: ResMut<Assets<Image>>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     existing: Query<(Entity, &ResolvedBody)>,
     mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &ResolvedBody)>,
@@ -357,9 +363,9 @@ pub fn update_resolved(
         .iter()
         .filter(|d| is_resolved(d, eye.at_ly, rad_per_px))
         .collect();
-    let names: Vec<String> = want.iter().map(|d| d.name.clone()).collect();
-
-    if names != resolved.drawn {
+    // Compared against the drawn set without building it: this runs every frame, and the
+    // names are only wanted on the frame that respawns.
+    if !want.iter().map(|d| &d.name).eq(resolved.drawn.iter()) {
         for (entity, _) in &existing {
             commands.entity(entity).despawn();
         }
@@ -367,7 +373,7 @@ pub fn update_resolved(
             .mesh
             .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
             .clone();
-        for body in &want {
+        for (index, body) in want.iter().enumerate() {
             let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
             let (reflected, emitted) =
                 surface_shading(&session.0, body, star_radius, star_teff, star_distance);
@@ -375,18 +381,19 @@ pub fn update_resolved(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(BodySurfaceMaterial {
                     uniforms: uniforms(body, star_ly, &session.tone, reflected, emitted),
+                    pattern: surfaces.pattern(&body.name, body.surface, &mut images),
                 })),
                 Transform::default(),
                 NoFrustumCulling,
-                ResolvedBody { name: body.name.clone() },
+                ResolvedBody(index),
             ));
         }
-        resolved.drawn = names;
+        resolved.drawn = want.iter().map(|d| d.name.clone()).collect();
         return;
     }
 
     for (mut transform, material, marker) in placed.iter_mut() {
-        let Some(body) = bodies.drawn.iter().find(|d| d.name == marker.name) else { continue };
+        let Some(body) = want.get(marker.0).copied() else { continue };
         transform.translation =
             sim_to_render((body.position_ly - eye.at_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation =

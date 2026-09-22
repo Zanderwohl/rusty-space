@@ -1,0 +1,81 @@
+TextureGraphFile(
+    format_version: 3,
+    metadata: FileMetadata(
+        name: "Ice surface",
+        description: Some("Mottled, with a sharper high-frequency term. The pattern only, in [0, 1]: the class\'s palette and contrast are the client\'s, and each body\'s seed is EvalCtx::seed. Baked on a sphere, so only Color, Noise, Coordinate, Mix, MinMax and Wave may appear."),
+        authors: [
+            "Alexander Lowry",
+        ],
+        modified: "2026-09-21T00:00:00Z",
+        written_by: "texture-graph-core 36960c5",
+    ),
+    graph: Graph(
+        layers: [
+            Layer(
+                id: 2,
+                name: "broad",
+                kind: Noise(Noise(
+                    dims: D3,
+                    seed_offset: 1,
+                    frequency: 4.4,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (0, 0, 0),
+                    fractal: Fractal(
+                        octaves: 5,
+                        lacunarity: 2.13,
+                        gain: 0.5,
+                        mode: Standard,
+                        normalize: true,
+                    ),
+                )),
+            ),
+            Layer(
+                id: 3,
+                name: "fine",
+                kind: Noise(Noise(
+                    dims: D3,
+                    seed_offset: 2,
+                    frequency: 18.0,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (0, 0, 0),
+                    fractal: Fractal(
+                        octaves: 3,
+                        lacunarity: 2.13,
+                        gain: 0.5,
+                        mode: Standard,
+                        normalize: true,
+                    ),
+                )),
+            ),
+            Layer(
+                id: 4,
+                name: "relief",
+                kind: Mix(Mix(
+                    a: Some(2),
+                    b: Some(3),
+                    mode: Blend,
+                    factor: Const(0.25),
+                    space: Oklch,
+                )),
+            ),
+        ],
+        list_order: [
+            2,
+            3,
+            4,
+        ],
+        canvases: {},
+        output: Output(
+            color: Some(4),
+            roughness: Const(0.5),
+            metallic: Const(0.0),
+            normal: None,
+        ),
+        params: {},
+        next_id: 5,
+    ),
+)

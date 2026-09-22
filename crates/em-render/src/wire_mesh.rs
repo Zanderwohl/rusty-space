@@ -15,7 +15,40 @@ use std::f32::consts::PI;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::render::render_resource::VertexFormat;
+use bevy_mesh::{Indices, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues};
+
+/// The previous point on the center line, for every vertex of a ring; the ring's own center at
+/// an open end. With [`ATTRIBUTE_CENTER_AFTER`], lets a shader size a tube by the nearest point
+/// of its segments rather than by the vertex, which on a long segment is far from it.
+pub const ATTRIBUTE_CENTER_BEFORE: MeshVertexAttribute =
+    MeshVertexAttribute::new("TubeCenterBefore", 0x5455_4245_4246_0001, VertexFormat::Float32x3);
+/// The next point on the center line. See [`ATTRIBUTE_CENTER_BEFORE`].
+pub const ATTRIBUTE_CENTER_AFTER: MeshVertexAttribute =
+    MeshVertexAttribute::new("TubeCenterAfter", 0x5455_4245_4146_0001, VertexFormat::Float32x3);
+/// Distance along the center line from its first point, in mesh units.
+pub const ATTRIBUTE_ARC_LENGTH: MeshVertexAttribute =
+    MeshVertexAttribute::new("TubeArcLength", 0x5455_4245_4152_0001, VertexFormat::Float32);
+
+/// The three center-line attributes, in vertex order.
+#[derive(Default)]
+pub struct CenterLine {
+    pub before: Vec<[f32; 3]>,
+    pub after: Vec<[f32; 3]>,
+    pub arc: Vec<f32>,
+}
+
+impl CenterLine {
+    fn extend(&mut self, other: CenterLine) {
+        self.before.extend(other.before);
+        self.after.extend(other.after);
+        self.arc.extend(other.arc);
+    }
+
+    fn points(positions: &[[f32; 3]]) -> Self {
+        Self { before: positions.to_vec(), after: positions.to_vec(), arc: vec![0.0; positions.len()] }
+    }
+}
 
 /// Number of points per circle/parallel
 const POINTS_PER_CIRCLE: u32 = 36;
@@ -143,8 +176,44 @@ pub fn build_tube_from_points(
     (positions, normals, colors, indices)
 }
 
+/// The center-line attributes for the vertices [`build_tube_from_points`] makes.
+pub fn center_line(points: &[Vec3], tube_sides: u32, closed: bool) -> CenterLine {
+    if points.len() < 2 {
+        return CenterLine::default();
+    }
+    let last = points.len() - 1;
+    let sides = tube_sides as usize;
+    let mut line = CenterLine {
+        before: Vec::with_capacity(points.len() * sides),
+        after: Vec::with_capacity(points.len() * sides),
+        arc: Vec::with_capacity(points.len() * sides),
+    };
+    let mut along = 0.0;
+    for (i, center) in points.iter().enumerate() {
+        let prev = match (i, closed) {
+            (0, true) => points[last],
+            (0, false) => *center,
+            _ => points[i - 1],
+        };
+        let next = match (i == last, closed) {
+            (true, true) => points[0],
+            (true, false) => *center,
+            _ => points[i + 1],
+        };
+        if i > 0 {
+            along += center.distance(points[i - 1]);
+        }
+        for _ in 0..sides {
+            line.before.push(prev.to_array());
+            line.after.push(next.to_array());
+            line.arc.push(along);
+        }
+    }
+    line
+}
+
 /// Build an empty mesh that still declares the vertex layout required by
-/// `body_wireframe.wgsl` (`position`, `normal`, `color`).
+/// `body_wireframe.wgsl` (`position`, `normal`, `color`) and the center-line attributes.
 fn empty_wireframe_mesh() -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
@@ -156,6 +225,9 @@ fn empty_wireframe_mesh() -> Mesh {
         Mesh::ATTRIBUTE_COLOR,
         VertexAttributeValues::Float32x4(Vec::new()),
     );
+    mesh.insert_attribute(ATTRIBUTE_CENTER_BEFORE, Vec::<[f32; 3]>::new());
+    mesh.insert_attribute(ATTRIBUTE_CENTER_AFTER, Vec::<[f32; 3]>::new());
+    mesh.insert_attribute(ATTRIBUTE_ARC_LENGTH, Vec::<f32>::new());
     mesh.insert_indices(Indices::U32(Vec::new()));
     mesh
 }
@@ -201,6 +273,7 @@ pub fn generate_latlon_sphere(highlight_latitudes: &[f64], tube_radius: f32, tub
     let mut all_normals: Vec<[f32; 3]> = Vec::new();
     let mut all_colors: Vec<[f32; 4]> = Vec::new();
     let mut all_indices: Vec<u32> = Vec::new();
+    let mut all_lines = CenterLine::default();
 
     let mut add_tube = |points: &[Vec3], brightness: f32, closed: bool| {
         let offset = all_positions.len() as u32;
@@ -209,6 +282,7 @@ pub fn generate_latlon_sphere(highlight_latitudes: &[f64], tube_radius: f32, tub
         all_normals.extend(norm);
         all_colors.extend(col);
         all_indices.extend(idx);
+        all_lines.extend(center_line(points, tube_sides, closed));
     };
 
     // Collect all latitudes to draw
@@ -270,16 +344,7 @@ pub fn generate_latlon_sphere(highlight_latitudes: &[f64], tube_radius: f32, tub
     ];
     add_tube(&pole_points, BRIGHTNESS_PRIMARY, false);
 
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, all_positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, all_normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, VertexAttributeValues::Float32x4(all_colors));
-    mesh.insert_indices(Indices::U32(all_indices));
-
-    mesh
+    assemble(all_positions, all_normals, all_colors, all_indices, all_lines)
 }
 
 /// Generate a great circle tube mesh perpendicular to the given normal vector.
@@ -304,17 +369,8 @@ pub fn generate_great_circle_tube(normal: Vec3, tube_radius: f32, tube_sides: u3
 
     let (positions, normals, colors, indices) =
         build_tube_from_points(&points, BRIGHTNESS_PRIMARY, tube_radius, tube_sides, true, 0);
-
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, VertexAttributeValues::Float32x4(colors));
-    mesh.insert_indices(Indices::U32(indices));
-
-    mesh
+    let line = center_line(&points, tube_sides, true);
+    assemble(positions, normals, colors, indices, line)
 }
 
 
@@ -335,7 +391,8 @@ pub fn ring_tube(segments: u32, tube_radius: f32, tube_sides: u32, brightness: f
         .collect();
     let (positions, normals, colors, indices) =
         build_tube_from_points(&points, brightness, tube_radius, tube_sides, true, 0);
-    assemble(positions, normals, colors, indices)
+    let line = center_line(&points, tube_sides, true);
+    assemble(positions, normals, colors, indices, line)
 }
 
 /// A filled unit disc in the XZ plane, normal `+Y`.
@@ -362,7 +419,9 @@ pub fn disc(segments: u32, brightness: f32) -> Mesh {
         indices.extend([0, i, i + 1]);
         indices.extend([0, i + 1, i]);
     }
-    assemble(positions, normals, colors, indices)
+    // A disc has no center line; each vertex is its own.
+    let line = CenterLine::points(&positions);
+    assemble(positions, normals, colors, indices, line)
 }
 
 /// Radial spokes from the origin out to unit radius, in the XZ plane.
@@ -422,6 +481,7 @@ struct Buffers {
     normals: Vec<[f32; 3]>,
     colors: Vec<[f32; 4]>,
     indices: Vec<u32>,
+    line: CenterLine,
 }
 
 impl Buffers {
@@ -434,19 +494,23 @@ impl Buffers {
         self.normals.extend(norm);
         self.colors.extend(col);
         self.indices.extend(idx);
+        self.line.extend(center_line(points, tube_sides, closed));
     }
 
     fn into_mesh(self) -> Mesh {
-        assemble(self.positions, self.normals, self.colors, self.indices)
+        assemble(self.positions, self.normals, self.colors, self.indices, self.line)
     }
 }
 
 fn assemble(positions: Vec<[f32; 3]>, normals: Vec<[f32; 3]>, colors: Vec<[f32; 4]>,
-    indices: Vec<u32>) -> Mesh {
+    indices: Vec<u32>, line: CenterLine) -> Mesh {
     let mut mesh = empty_wireframe_mesh();
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, VertexAttributeValues::Float32x4(colors));
+    mesh.insert_attribute(ATTRIBUTE_CENTER_BEFORE, line.before);
+    mesh.insert_attribute(ATTRIBUTE_CENTER_AFTER, line.after);
+    mesh.insert_attribute(ATTRIBUTE_ARC_LENGTH, line.arc);
     mesh.insert_indices(Indices::U32(indices));
     mesh
 }

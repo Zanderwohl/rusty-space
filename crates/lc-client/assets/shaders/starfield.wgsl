@@ -40,7 +40,6 @@ struct StarfieldUniform {
     /// How much angular structure the glare carries. Zero leaves it a smooth halo.
     corona_strength: f32,
     /// Filaments per radian of sky. Higher is finer structure.
-    corona_frequency: f32,
     /// Exponent of the glare's power-law falloff from the source.
     halo_falloff: f32,
     /// Shortest streamer, and how much longer the longest is, as fractions of the quad.
@@ -66,6 +65,10 @@ struct StarfieldUniform {
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: StarfieldUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var band_lut: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var corona_filaments: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var filaments_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var corona_reach: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var reach_sampler: sampler;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -85,9 +88,12 @@ struct VertexOutput {
     @location(3) sky: vec3<f32>,
     /// World direction to the star, the axis the corona is arranged about.
     @location(4) axis: vec3<f32>,
-    @location(5) seed: f32,
+    /// The star's own turn of the corona, as the columns of a rotation. See `spin_of`.
+    @location(5) @interpolate(flat) spin_x: vec3<f32>,
     /// How much of the quad the corona fills. The rest of the quad is glare, which is angular.
     @location(6) corona: f32,
+    @location(7) @interpolate(flat) spin_y: vec3<f32>,
+    @location(8) @interpolate(flat) spin_z: vec3<f32>,
 };
 
 fn lorentz(beta: vec3<f32>) -> f32 {
@@ -121,66 +127,30 @@ fn doppler(to_source: vec3<f32>, beta: vec3<f32>) -> f32 {
 // of the star and the filaments come out radial without being asked for. It is a function of
 // world direction and a per-star seed and of nothing else, so it does not swim when the camera
 // turns, it is the same for every client, and flying around a star shows its other side.
+//
+// Both fields are baked from `textures/corona.tgraph` onto cubemaps, once, for every star.
 
-fn hash31(p: vec3<f32>) -> f32 {
-    var q = fract(p * 0.1031);
-    q = q + dot(q, q.zyx + 31.32);
-    return fract((q.x + q.y) * q.z);
-}
-
-fn value_noise(p: vec3<f32>) -> f32 {
-    let i = floor(p);
-    let f = fract(p);
-    // Smoothstep weights, so the lattice does not show as a grid.
-    let w = f * f * (3.0 - 2.0 * f);
-    let c000 = hash31(i + vec3<f32>(0.0, 0.0, 0.0));
-    let c100 = hash31(i + vec3<f32>(1.0, 0.0, 0.0));
-    let c010 = hash31(i + vec3<f32>(0.0, 1.0, 0.0));
-    let c110 = hash31(i + vec3<f32>(1.0, 1.0, 0.0));
-    let c001 = hash31(i + vec3<f32>(0.0, 0.0, 1.0));
-    let c101 = hash31(i + vec3<f32>(1.0, 0.0, 1.0));
-    let c011 = hash31(i + vec3<f32>(0.0, 1.0, 1.0));
-    let c111 = hash31(i + vec3<f32>(1.0, 1.0, 1.0));
-    let x00 = mix(c000, c100, w.x);
-    let x10 = mix(c010, c110, w.x);
-    let x01 = mix(c001, c101, w.x);
-    let x11 = mix(c011, c111, w.x);
-    return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z);
-}
-
-/// Ridged fractal noise: `1 - |2n - 1|` turns the smooth field's zero crossings into creases,
-/// which is what makes threads rather than blobs.
-fn filaments(direction: vec3<f32>, seed: f32) -> f32 {
-    let p = direction * material.corona_frequency + vec3<f32>(seed, seed * 1.7, seed * 2.3);
-    var sum = 0.0;
-    var amplitude = 0.66;
-    var frequency = 1.0;
-    // Three octaves, not more. The fine ones read as fur, and a corona is a few broad
-    // streamers. Squared rather than cubed for the same reason: each extra power narrows the
-    // crease, and these are meant to be thick.
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        let n = value_noise(p * frequency);
-        let ridge = 1.0 - abs(2.0 * n - 1.0);
-        sum = sum + amplitude * ridge * ridge;
-        frequency = frequency * 2.4;
-        amplitude = amplitude * 0.42;
-    }
-    return clamp(sum, 0.0, 1.5);
-}
-
-/// How far one streamer reaches, `[0, 1]`.
+/// A rotation drawn from a star's seed, which turns the one baked corona a different way for
+/// every star. Where the shader used to offset the noise by the seed, this turns it: as
+/// distinct, and still a function of the seed and the world direction only.
 ///
-/// A second field on the *same* angular scale as the threads but a different seed, so length
-/// and brightness are not the same number.
-///
-/// The scale matters as much as the decorrelation. Driving both from one field made every long
-/// streamer also the brightest, which the eye picks up at once; sampling the length at half the
-/// frequency replaced the streamers with half a dozen broad lobes, because the thing being
-/// varied was no longer a streamer.
-fn reach_of(direction: vec3<f32>, seed: f32) -> f32 {
-    let p = direction * material.corona_frequency
-        + vec3<f32>(seed * 3.1 + 41.0, seed * 0.7 + 17.0, seed * 1.3 + 29.0);
-    return value_noise(p);
+/// `fract` before the trigonometry keeps every argument small, so every GPU computes the same
+/// turn.
+fn spin_of(seed: f32) -> mat3x3<f32> {
+    let azimuth = fract(seed * 0.7548777) * 2.0 * PI;
+    // Uniform in z is uniform over the sphere, so no axis is favoured.
+    let z = fract(seed * 0.5698403) * 2.0 - 1.0;
+    let angle = fract(seed * 0.3819660) * 2.0 * PI;
+    let s = sqrt(max(1.0 - z * z, 0.0));
+    let k = vec3<f32>(s * cos(azimuth), s * sin(azimuth), z);
+    let c = cos(angle);
+    let n = sin(angle);
+    let t = 1.0 - c;
+    return mat3x3<f32>(
+        vec3<f32>(c + t * k.x * k.x, t * k.x * k.y + n * k.z, t * k.x * k.z - n * k.y),
+        vec3<f32>(t * k.x * k.y - n * k.z, c + t * k.y * k.y, t * k.y * k.z + n * k.x),
+        vec3<f32>(t * k.x * k.z + n * k.y, t * k.y * k.z - n * k.x, c + t * k.z * k.z),
+    );
 }
 
 /// Band radiance of a blackbody at `teff`, from the table em-spectra generated.
@@ -288,7 +258,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let up_world = (view.world_from_view * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
     out.sky = right_world * vertex.corner.x + up_world * vertex.corner.y;
     out.axis = seen;
-    out.seed = vertex.params.z;
+    let spin = spin_of(vertex.params.z);
+    out.spin_x = spin[0];
+    out.spin_y = spin[1];
+    out.spin_z = spin[2];
 
     // w = 0 drops the camera's translation, so the sky depends only on where it is pointed.
     // The quad center sits one unit down the view ray, which makes the corner offset equal to
@@ -338,14 +311,17 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // not. The sample direction leans along the line of sight as it goes out, so threads
         // evolve with distance instead of being perfectly straight spokes.
         let around = normalize(in.sky);
-        let dir = normalize(around + in.axis * (r * 0.5));
-        let threads = filaments(dir, in.seed);
+        let dir = mat3x3<f32>(in.spin_x, in.spin_y, in.spin_z)
+            * normalize(around + in.axis * (r * 0.5));
+        // Level zero: this branch is not uniform control flow, so no implicit derivative.
+        let threads = textureSampleLevel(corona_filaments, filaments_sampler, dir, 0.0).r;
         // How far this streamer goes, which is ragged rather than a circle. The fade has to
         // *finish* inside the quad: run it past r = 1 and the discard at the edge cuts it into
         // a hard disc, which is the circle this was meant to avoid, only sharper.
         // Scaled into the corona's own share of the quad, so a streamer's tip is a fixed
         // distance from the star in the world rather than a fixed fraction of the sprite.
-        let reach = (material.corona_reach_min + reach_of(dir, in.seed) * material.corona_reach_span)
+        let reach_here = textureSampleLevel(corona_reach, reach_sampler, dir, 0.0).r;
+        let reach = (material.corona_reach_min + reach_here * material.corona_reach_span)
             * in.corona;
         let edge = 1.0 - smoothstep(reach, min(reach + material.corona_fade, 0.99), r);
         let lit = material.corona_floor + threads * material.corona_gain;

@@ -1,9 +1,9 @@
 //! What a body looks like, derived from what it is.
 //!
-//! No authored appearance and no textures. A body's radius, mass and equilibrium temperature
-//! already say whether it is a gas giant, a ball of ice or a rock, and those three facts are
-//! carried by every body in every system, real or generated. Anything the renderer needs beyond
-//! them is a seed.
+//! A body's radius, mass and equilibrium temperature already say whether it is a gas giant, a
+//! ball of ice or a rock, and those three facts are carried by every body in every system, real
+//! or generated. The class picks the palette here and the pattern in the client, which a named
+//! body may override.
 
 use serde::{Deserialize, Serialize};
 

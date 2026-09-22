@@ -72,6 +72,8 @@ tools/check-shaders.sh "$OUT/assets"
 # the CDN once rather than under every build id, so this must never become a `cp -R assets`.
 # See lightcone/docs/21-library.md.
 cp -R crates/lc-client/assets/fonts "$OUT/assets/fonts"
+# Procedural texture graphs, baked by the client at load. See src/procedural.rs.
+cp -R crates/lc-client/assets/textures "$OUT/assets/textures"
 
 WASM_BYTES=$(wc -c < "$OUT/${BIN}_bg.wasm" | tr -d ' ')
 JS_BYTES=$(wc -c < "$OUT/$BIN.js" | tr -d ' ')

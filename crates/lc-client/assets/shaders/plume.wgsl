@@ -41,20 +41,17 @@ struct PlumeUniform {
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: PlumeUniform;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var churn: texture_3d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var churn_sampler: sampler;
 
 const STEPS: i32 = 24;
 const LUMA = vec3<f32>(0.2126, 0.7152, 0.0722);
 
-/// Octaves of the churn. Two: one for the lanes and one to stop them being combed.
-const OCTAVES: i32 = 2;
-
-/// The churn's period along the flow, in lattice cells of the first octave.
+/// The churn's period, in lattice cells of its first octave, on every axis.
 ///
-/// The hash repeats on it, so the host can wrap the phase there and the pattern does not jump.
-/// It has to: the clock runs to tens of millions of times real time, and a phase that only ever
-/// grew would be out of `f32`'s useful spacing long before anyone stopped watching. Mirrored by
-/// `em_render::plume_material::CHURN_PERIOD`.
-const CHURN_PERIOD: f32 = 64.0;
+/// The baked churn repeats on it, so the host can wrap the phase there and the pattern does not
+/// jump. Mirrored by `em_render::plume_material::CHURN_PERIOD`, and by `textures/plume.tgraph`.
+const CHURN_PERIOD: f32 = 32.0;
 
 /// Which part of the noise counts as a fuel-rich lane.
 ///
@@ -77,34 +74,6 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     return out;
 }
 
-/// A lattice value in `[0, 1)`, repeating along `z` with `period`.
-///
-/// Periodic on purpose, and only on that axis: `z` is the one the phase slides along, so a
-/// hash that repeats there is what lets the host wrap the phase without the pattern jumping.
-fn hash3(cell: vec3<f32>, period: f32) -> f32 {
-    let z = cell.z - floor(cell.z / period) * period;
-    // Offset before the cast: the cross-section coordinates are signed, and `u32` of a negative
-    // float is not a number anyone here would want.
-    let key = vec3<u32>(u32(cell.x + 1024.0), u32(cell.y + 1024.0), u32(z));
-    var n = key.x * 1597334677u + key.y * 3812015801u + key.z * 2654435761u;
-    n = (n ^ (n >> 15u)) * 2246822519u;
-    n = (n ^ (n >> 13u)) * 3266489917u;
-    n = n ^ (n >> 16u);
-    return f32(n) * (1.0 / 4294967296.0);
-}
-
-/// Trilinear value noise on that lattice, in `[0, 1]`.
-fn value_noise(p: vec3<f32>, period: f32) -> f32 {
-    let cell = floor(p);
-    let t = p - cell;
-    let w = t * t * (3.0 - 2.0 * t);
-    let a = mix(hash3(cell, period), hash3(cell + vec3<f32>(1.0, 0.0, 0.0), period), w.x);
-    let b = mix(hash3(cell + vec3<f32>(0.0, 1.0, 0.0), period), hash3(cell + vec3<f32>(1.0, 1.0, 0.0), period), w.x);
-    let c = mix(hash3(cell + vec3<f32>(0.0, 0.0, 1.0), period), hash3(cell + vec3<f32>(1.0, 0.0, 1.0), period), w.x);
-    let d = mix(hash3(cell + vec3<f32>(0.0, 1.0, 1.0), period), hash3(cell + vec3<f32>(1.0, 1.0, 1.0), period), w.x);
-    return mix(mix(a, b, w.y), mix(c, d, w.y), w.z);
-}
-
 /// How fuel-rich the gas is at a point: zero is burnt clean, one is a streak of soot.
 ///
 /// Sampled on `(where the point sits across the cone, how far along it is)` — the cross-section
@@ -121,23 +90,15 @@ fn value_noise(p: vec3<f32>, period: f32) -> f32 {
 /// rays at the silhouette kept any contrast, so the plume had a fringe and a blank middle.
 /// Localising a lane in the cross-section means every ray crosses a few of them and none of it
 /// averages flat.
+///
+/// The noise itself is `textures/plume.tgraph`, two octaves baked into a volume that repeats on
+/// every axis. Level zero, explicitly: the march samples inside a loop, where an implicit
+/// derivative is not allowed.
 fn richness(p: vec3<f32>, radius: f32, along: f32) -> f32 {
     let flat = p.xz / max(radius, 1e-6);
-    var coord = vec3<f32>(flat * material.churn.y, along * material.churn.z - material.churn.x);
-    var period = CHURN_PERIOD;
-    var amplitude = 1.0;
-    var total = 0.0;
-    var weight = 0.0;
-    for (var i = 0; i < OCTAVES; i = i + 1) {
-        total = total + value_noise(coord, period) * amplitude;
-        weight = weight + amplitude;
-        // The period doubles with the coordinate, so every octave still repeats where the first
-        // one does and the wrap stays seamless for all of them.
-        coord = coord * 2.0;
-        period = period * 2.0;
-        amplitude = amplitude * 0.5;
-    }
-    return smoothstep(RICH_LOW, RICH_HIGH, total / weight);
+    let coord = vec3<f32>(flat * material.churn.y, along * material.churn.z - material.churn.x);
+    let n = textureSampleLevel(churn, churn_sampler, coord / CHURN_PERIOD, 0.0).r;
+    return smoothstep(RICH_LOW, RICH_HIGH, n);
 }
 
 /// How much gas is at a point of the proxy, split into `(clean, rich)`, in arbitrary units.
@@ -167,7 +128,7 @@ fn gas(p: vec3<f32>) -> vec2<f32> {
     // distance it traveled and the brightness scale below means something.
     let fading = pow(max(1.0 - along, 0.0), material.shape.w);
     let amount = profile * fading;
-    // Most samples of a convex volume are outside it. Sixteen hashes each is worth skipping.
+    // Most samples of a convex volume are outside it, and skipping them skips the fetch.
     if (amount < 1e-4) {
         return vec2<f32>(amount, 0.0);
     }

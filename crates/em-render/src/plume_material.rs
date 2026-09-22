@@ -29,13 +29,17 @@ use bevy_mesh::MeshVertexBufferLayoutRef;
 /// than about not missing anything. Two dozen is past where the banding stops being visible.
 pub const STEPS: u32 = 24;
 
-/// The churn's period along the flow, in lattice cells of its first octave.
+/// The churn's period, in lattice cells of its first octave, on every axis.
 ///
-/// The shader's hash repeats on it, which is what makes wrapping the phase invisible. Wrapped
-/// it must be: the clock reaches tens of millions of times real time and a phase that only grew
-/// would leave `f32`'s useful spacing while somebody was still looking at it. `plume.wgsl`
-/// carries the same number.
-pub const CHURN_PERIOD: f32 = 64.0;
+/// [`PlumeMaterial::churn`] repeats on it, which is what makes wrapping the phase invisible.
+/// Wrapped it must be: the clock reaches tens of millions of times real time and a phase that
+/// only grew would leave `f32`'s useful spacing while somebody was still looking at it.
+/// `plume.wgsl` carries the same number, and so does the graph the host bakes the churn from.
+///
+/// The same on every axis because the churn is baked as one repeating cube. Across the plume it
+/// has to be wider than the lanes reach — about thirteen cells either side at seven lanes — or a
+/// lane repeats inside one plume.
+pub const CHURN_PERIOD: f32 = 32.0;
 
 #[derive(Clone, Debug, PartialEq, ShaderType)]
 pub struct PlumeUniform {
@@ -94,10 +98,15 @@ impl Default for PlumeUniform {
     }
 }
 
-#[derive(Asset, AsBindGroup, TypePath, Debug, Clone, Default)]
+#[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 pub struct PlumeMaterial {
     #[uniform(0, visibility(vertex, fragment))]
     pub uniforms: PlumeUniform,
+    /// How fuel-rich the gas is, before the shader's lane window: a single-channel 3D texture in
+    /// `[0, 1]` that repeats every [`CHURN_PERIOD`] cells, sampled with wrapping.
+    #[texture(1, dimension = "3d", visibility(fragment))]
+    #[sampler(2, visibility(fragment))]
+    pub churn: Handle<Image>,
 }
 
 impl Material for PlumeMaterial {

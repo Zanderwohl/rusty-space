@@ -1,0 +1,136 @@
+TextureGraphFile(
+    format_version: 3,
+    metadata: FileMetadata(
+        name: "Gas giant surface",
+        description: Some("Latitude bands, warped by turbulence so they are not stripes. The pattern only, in [0, 1]: the class\'s palette and contrast are the client\'s, and each body\'s seed is EvalCtx::seed. Baked on a sphere, so only Color, Noise, Coordinate, Mix, MinMax and Wave may appear."),
+        authors: [
+            "Alexander Lowry",
+        ],
+        modified: "2026-09-21T00:00:00Z",
+        written_by: "texture-graph-core 36960c5",
+    ),
+    graph: Graph(
+        layers: [
+            Layer(
+                id: 2,
+                name: "height",
+                kind: Coordinate(Coordinate(
+                    axis: V,
+                )),
+            ),
+            Layer(
+                id: 3,
+                name: "turbulence",
+                kind: Noise(Noise(
+                    dims: D3,
+                    seed_offset: 1,
+                    frequency: 6.2,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (0, 0, 0),
+                    fractal: Fractal(
+                        octaves: 4,
+                        lacunarity: 2.13,
+                        gain: 0.5,
+                        mode: Standard,
+                        normalize: true,
+                    ),
+                )),
+            ),
+            Layer(
+                id: 4,
+                name: "drift",
+                kind: Noise(Noise(
+                    dims: D3,
+                    seed_offset: 2,
+                    frequency: 2.2,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (0, 0, 0),
+                    fractal: Fractal(
+                        octaves: 2,
+                        lacunarity: 2.13,
+                        gain: 0.5,
+                        mode: Standard,
+                        normalize: true,
+                    ),
+                )),
+            ),
+            Layer(
+                id: 5,
+                name: "bent",
+                kind: Mix(Mix(
+                    a: Some(2),
+                    b: Some(3),
+                    mode: Blend,
+                    factor: Const(0.026763989),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 6,
+                name: "drifted",
+                kind: Mix(Mix(
+                    a: Some(5),
+                    b: Some(4),
+                    mode: Blend,
+                    factor: Const(0.023752969),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 7,
+                name: "bands",
+                kind: Wave(Wave(
+                    input: Layer(6),
+                    shape: Sine,
+                    frequency: 6.0303807,
+                    phase: 0.9848094,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 8,
+                name: "half",
+                kind: Color(Oklch(
+                    l: 0.5,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 9,
+                name: "sharpened",
+                kind: Mix(Mix(
+                    a: Some(8),
+                    b: Some(7),
+                    mode: Blend,
+                    factor: Const(1.24),
+                    space: Oklch,
+                )),
+            ),
+        ],
+        list_order: [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+        ],
+        canvases: {},
+        output: Output(
+            color: Some(9),
+            roughness: Const(0.5),
+            metallic: Const(0.0),
+            normal: None,
+        ),
+        params: {},
+        next_id: 10,
+    ),
+)

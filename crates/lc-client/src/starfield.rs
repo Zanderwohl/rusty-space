@@ -70,8 +70,6 @@ pub struct PointStyle {
     pub halo_falloff: f32,
     /// How much angular structure the glare carries. Zero leaves it a smooth halo.
     pub corona_strength: f32,
-    /// Filaments per radian of sky. Halving it halves their number and doubles their width.
-    pub corona_frequency: f32,
     /// Shortest streamer, and how much longer the longest is, as fractions of the quad.
     pub corona_reach_min: f32,
     pub corona_reach_span: f32,
@@ -88,7 +86,7 @@ pub struct PointStyle {
 ///
 /// A table rather than a hand-written panel: a knob that exists and has no slider is a knob
 /// nobody finds, and the two drift apart the moment one is added.
-pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 15] = [
+pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 14] = [
     ("min radius px", |s| &mut s.min_px, 0.5, 40.0),
     ("max radius px", |s| &mut s.max_px, 1.0, 120.0),
     ("glare per stop", |s| &mut s.glow_radius_gain, 0.0, 4.0),
@@ -99,7 +97,6 @@ pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 15] = [
     // and the value that looked right was below the range this slider first offered.
     ("halo falloff", |s| &mut s.halo_falloff, 0.05, 4.0),
     ("corona strength", |s| &mut s.corona_strength, 0.0, 1.0),
-    ("corona frequency", |s| &mut s.corona_frequency, 1.0, 60.0),
     ("reach shortest", |s| &mut s.corona_reach_min, 0.0, 0.9),
     ("reach spread", |s| &mut s.corona_reach_span, 0.0, 0.9),
     ("tip fade", |s| &mut s.corona_fade, 0.02, 0.8),
@@ -119,7 +116,6 @@ pub const DISTANT: PointStyle = PointStyle {
     // Nothing three pixels across has visible structure, and noise at that size is a shimmer.
     halo_falloff: 1.9,
     corona_strength: 0.0,
-    corona_frequency: 11.0,
     corona_reach_min: 0.2,
     corona_reach_span: 0.5,
     corona_fade: 0.28,
@@ -143,7 +139,6 @@ pub const BODIES: PointStyle = PointStyle {
     halo_gain: 0.25,
     halo_falloff: 1.9,
     corona_strength: 0.0,
-    corona_frequency: 11.0,
     corona_reach_min: 0.2,
     corona_reach_span: 0.37,
     corona_fade: 0.28,
@@ -164,9 +159,6 @@ pub const LOCAL: PointStyle = PointStyle {
     halo_gain: 0.15,
     halo_falloff: 1.4,
     corona_strength: 0.95,
-    // Streamers per radian of sky. Halving this halves their number and doubles their width,
-    // which is the single lever that matters for how a corona reads.
-    corona_frequency: 12.0,
     corona_reach_min: 0.20,
     corona_reach_span: 0.37,
     corona_fade: 0.28,
@@ -234,6 +226,15 @@ pub fn style_for(ui: &crate::ui::UiState, which: Which) -> PointStyle {
 
 #[derive(Component)]
 pub struct SkyMesh;
+
+/// How many stars fall inside the local shell.
+///
+/// The cheap half of [`partition`]: the split has to build a [`Point`] per star, which hashes a
+/// seed and draws a swarm apiece, and [`update_sky`] wants the number on every frame and the
+/// points on almost none.
+pub fn local_count(session: &Session) -> usize {
+    session.stars.iter().filter(|s| session.distance_to(s) < LOCAL_SHELL_LY).count()
+}
 
 /// Split the sky into the background and the system the ship is in.
 pub fn partition(session: &Session) -> (Vec<Point>, Vec<Point>) {
@@ -408,7 +409,6 @@ pub fn uniforms(
         brightness: style.brightness,
         halo_gain: style.halo_gain,
         corona_strength: style.corona_strength,
-        corona_frequency: style.corona_frequency,
         halo_falloff: style.halo_falloff,
         corona_reach_min: style.corona_reach_min,
         corona_reach_span: style.corona_reach_span,
@@ -457,6 +457,7 @@ pub fn spawn_sky(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    corona: Res<crate::procedural::Corona>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     existing: Query<Entity, With<SkyMesh>>,
 ) {
@@ -478,6 +479,8 @@ pub fn spawn_sky(
         let material = materials.add(RelativisticStarfieldMaterial {
             uniforms: uniform.clone(),
             band_lut: lut.clone(),
+            corona_filaments: corona.filaments.clone(),
+            corona_reach: corona.reach.clone(),
         });
         commands.spawn((
             Mesh3d(mesh.clone()),
@@ -553,11 +556,12 @@ pub fn update_sky(
     mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
 ) {
-    let (distant_stars, local_stars) = partition(&session.0);
     // Membership as well as distance: crossing into a system moves a star from one pass to the
-    // other, and nothing about the ship's position alone says that happened.
+    // other, and nothing about the ship's position alone says that happened. Counted rather
+    // than partitioned, because the partition is only wanted on the frame that rebakes.
     let moved = session.ship.motion.position_ly.distance(sky.origin_ly) > REBAKE_LY;
-    if moved || local_stars.len() != sky.local.count {
+    if moved || local_count(&session.0) != sky.local.count {
+        let (distant_stars, local_stars) = partition(&session.0);
         sky.origin_ly = session.ship.motion.position_ly;
         sky.distant.count = distant_stars.len();
         sky.local.count = local_stars.len();
