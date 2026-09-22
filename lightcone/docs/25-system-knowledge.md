@@ -92,20 +92,90 @@ called with it, the planet gets its letter, and the conclusion's class moves ont
   They cross at the pole, up to its sign, and the direction of motion settles the sign. A
   planet's orientation from outside is a **cooperative** measurement, which suits reports.
 
-### From inside: imaging and orbit determination
+### From inside: surveying a system
 
-Inside a system, planets are bright points near the star. A new duty, **Survey system**, images
-the space around the star: detection against the star's glare (`survey::glare` exists), and a
-bearing and reflected flux per body per pass.
+**The target: a few months in a system tells you what its planets are, beyond doubt.** The shard
+runs at 8766 times real time (`server::TICK_US`), so a game year is a real hour:
 
-- The ship's own motion gives parallax. Over an arc of the planet's orbit, triangulated positions
-  fit a Keplerian orbit: period, size, eccentricity, and the full orientation. The fit tightens
-  with the arc, so an outer planet takes longer to pin down than an inner one, and the panel
-  says so.
-- Moons are found the same way around a resolved planet, and belts from thermal imaging: the
-  plane of a disc is its orientation.
-- A body found by imaging and one found by transit are the same `BodyId`. The records combine,
-  and an `EdgeOnTo` constraint tightens an astrometric pole.
+| real | game | |
+|---|---|---|
+| one tick, 50 ms | 7.3 minutes | |
+| one second | 2.4 hours | |
+| one minute | 6.1 days | |
+| 15 minutes | 3 months | everything below, for Venus, Earth, Mars, Jupiter and Saturn |
+| 30 minutes | 6 months | |
+
+A player who parks and surveys for a quarter of an hour of real time should get tremendous
+returns, and the instrument allows it. Inside a system the major planets are the brightest things
+in the sky after the star, and a four-meter mirror resolves them outright. From 5 AU, Venus is a
+disc of about 3 arcseconds and Jupiter about 40, against a diffraction limit of 0.035. So this is
+not the transit search's statistics at the noise floor. It is looking.
+
+**The duty.** A new duty, **Survey system**, revisits each body it holds about once a game hour,
+every eight ticks or so, and spends the rest of its time sweeping the space around the star for
+new ones, against the star's glare (`survey::glare` exists).
+
+**What one visit measures,** per body:
+
+- a bearing, to the centroid precision the disc's brightness allows (`astrometry`);
+- the angular diameter, once resolved, and its oblateness;
+- the flux in every band the sensor sees: reflected light in B to K, thermal emission in the
+  thermal infrared, and radio;
+- anything extended about it: rings, and points moving with it, which are its moons.
+
+**What reading those gives,** and how soon in real time:
+
+| learned | how | real time |
+|---|---|---|
+| existence and position | the first visit | the first second |
+| size | angular diameter times distance; the distance comes from the orbit fit | seconds, then as good as the orbit |
+| rotation period | the periodogram of its flux: Earth's clouds and continents, Jupiter's bands | Earth and Mars within a minute; Jupiter sooner |
+| orbit: period, size, eccentricity, plane, velocity | an angles-only fit (Gauss, then least squares) with the star's gravity; the star's mass is itself refined once two orbits are held | inner planets within a few minutes; Saturn's 3° arc to about a percent by 15 |
+| mass | its moons, by Kepler's third law: Io goes round in 17 real seconds, Callisto in under three minutes, the Moon in four and a half, Titan in under three | minutes, for anything with a moon |
+| density, so rock or gas | mass over volume | as soon as both are held |
+| albedo and color | flux against the starlight falling on a disc of known size, per band | as soon as the size is held |
+| temperature | thermal flux against the temperature it would have with no atmosphere | minutes |
+| a surface under cloud | radio: thermal emission from a surface the clouds hide | minutes |
+
+A body with no moon has no mass from this. Venus then stays of unknown mass, and its type comes
+from everything else.
+
+**What the readings conclude** is a hypothesis set, as the transit search's is: *airless rock*,
+*rock with a thin atmosphere*, *rock under a thick atmosphere*, *temperate rock with oceans and
+cloud*, *ice giant*, *gas giant*. With its evidence, as for Sol after 15 minutes:
+
+| | size | evidence | leading reading |
+|---|---|---|---|
+| Venus | 0.95 Earth | albedo 0.7 and gray across B to I; cloud tops near 230 K; **radio from a 700 K surface** | rock under a thick atmosphere |
+| Earth | 1.00 | albedo 0.3, blue; a 24-hour rotation with changing cloud; 255 K in the thermal infrared; the Moon gives a mass and a density of 5.5 | temperate rock with oceans and cloud |
+| Mars | 0.53 | albedo 0.17, red; temperature near what no atmosphere would give; Phobos gives a density of 3.9 | rock with a thin atmosphere |
+| Jupiter | 11.2 | density 1.3 from the Galilean moons; 6.5% oblate; emits 1.7 times what it absorbs; radio | gas giant |
+| Saturn | 9.4 | density 0.69 from Titan; rings resolved; 10% oblate; a heat excess | gas giant |
+
+**Room.** A body's measurements are logs like a star's photometry and count against room. A
+visit an hour in eight bands, for eight planets, is about 3 MB in three months, which is the
+starting ship's whole store. So a body's log is read and consumed often, into a digest that keeps
+what the fit needs: the least-squares normal equations for its orbit, per-band flux means, and
+the rotation periodogram's bins. Reading a body is a small least-squares problem, not a period
+search over thousands of trials, so it has its own budget per tick, apart from the one read a
+tick the transit search gets.
+
+**Combining.** A body found by imaging and one found by transit are the same `BodyId`. The records
+combine, and an `EdgeOnTo` constraint tightens an imaged pole.
+
+**What the truth has to hold first.** A telescope cannot find what the model lacks. Today a body
+has a mass, a radius, an orbit and, for Sol, a display color. Each body needs:
+
+- a geometric albedo per band;
+- an atmosphere (none, thin, thick, or envelope) and what shows at the top of it (rock, ice,
+  ocean, cloud);
+- a rotation period and axis;
+- internal heat;
+- rings, with their radii and optical depth.
+
+Sol's major planets and large moons get an authored table of their real values. A generated
+system's come from rules on mass, radius and the starlight falling on it. The generator also
+needs moons, where it does not already make them, or no generated planet has a mass to find.
 
 ### On somebody's word: the charts
 
@@ -232,11 +302,19 @@ quite there is the same deferred mechanic as for stars.
    from belief, and the detail section with sources.
 4. **Transits make bodies.** A settled transit calls `found_planet`, the period gives a distance
    through the mass prior, and the result is `EdgeOnTo`, crossed with other craft's.
-5. **Imaging inside a system.** The Survey system duty, reflected-light detection, orbit
-   determination, and spin axes.
-6. **Courses from beliefs.** Options gated by what is known, and orbits of unknown orientation.
-7. **More of what a body is.** Albedo and temperature from reflected and thermal flux, moons,
-   and belt planes.
+5. **What a body is, in the truth.** Albedo per band, atmosphere, rotation, internal heat, rings,
+   an authored table for Sol, generator rules for everything else, and moons for generated
+   planets.
+6. **Surveying a system from inside.** The Survey system duty, the visit's measurements, the
+   orbit fit, size, rotation, mass from moons, the type hypotheses, and body logs digested often.
+   **Done when:** a ship parked 5 AU from Sol, surveying for three game months (15 real minutes
+   at the design rate), believes Venus, Earth, Mars, Jupiter and Saturn with periods to 0.1%
+   (Saturn's to 1%), radii to 1%, masses to 1% where a moon gives one, the leading type above
+   99% and matching the table above, and the system plane to 0.1°. Every one of them has a
+   position within the first real second.
+7. **Courses from beliefs.** Options gated by what is known, and orbits of unknown orientation.
+8. **The rest of what a body is.** Belt planes from thermal imaging, and spectra finer than the
+   bands, if a later instrument adds them.
 
 ## Open
 
