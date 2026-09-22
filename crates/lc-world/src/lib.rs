@@ -25,6 +25,7 @@ pub mod ignition;
 pub mod injection;
 pub mod instrument;
 pub mod knowledge;
+pub mod labels;
 pub mod libration;
 pub mod motion;
 pub mod navigation;

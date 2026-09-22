@@ -320,6 +320,7 @@ mod tests {
             angular_radius: 0.0,
             annulus: Some(em_map::Annulus { inner: 2.0, outer: 3.0, half_angle_rad: 0.2 }),
             pole: bevy::math::Vec3::Z,
+            spread: None,
         };
         let view = MapView {
             orbit: em_map::Orbit::framing(DVec3::ZERO, em_map::snapshot::M_PER_AU),

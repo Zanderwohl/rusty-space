@@ -208,7 +208,9 @@ pub(crate) fn run_dev_actions(
             .find(|s| lc_world::sky::generate::swarm_for(s).is_some())
             .map(|s| s.id);
         if let Some(id) = found {
+            // Selected and stared at: selecting alone only describes it.
             out.write(Requested(Action::SelectTarget(Some(id))));
+            out.write(Requested(Action::StareSelected));
         }
     }
 }

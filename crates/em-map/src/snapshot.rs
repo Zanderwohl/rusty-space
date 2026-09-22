@@ -94,6 +94,10 @@ pub struct MapItem {
     /// Meters, and it carries the half-angle as well as the two radii: without it a cloud and
     /// a belt are the same pair of numbers, and one of them is a shell.
     pub annulus_m: Option<crate::outline::Extent>,
+    /// Where else it might be: the ends of a segment, light-years from the world origin, for a
+    /// position known only to an error. A star placed by parallax is uncertain along the line
+    /// of sight far more than across it, and the map should show which way.
+    pub spread_ly: Option<(DVec3, DVec3)>,
 }
 
 impl MapItem {
@@ -109,7 +113,14 @@ impl MapItem {
             weight: 0.0,
             pole,
             annulus_m: None,
+            spread_ly: None,
         }
+    }
+
+    /// Say that it is somewhere between `near_ly` and `far_ly`, not exactly where it is drawn.
+    pub fn spread(mut self, near_ly: DVec3, far_ly: DVec3) -> Self {
+        self.spread_ly = Some((near_ly, far_ly));
+        self
     }
 
     /// How much this one is worth naming, against everything else wanting the same pixels.
@@ -135,6 +146,7 @@ impl MapItem {
                 outer: extent.inner.max(extent.outer),
                 ..extent
             }),
+            spread_ly: None,
         }
     }
 }

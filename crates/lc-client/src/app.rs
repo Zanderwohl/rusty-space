@@ -657,7 +657,7 @@ mod tests {
         app.world_mut().write_message(Requested(Action::SelectTarget(Some(id))));
         app.update();
         assert_eq!(app.world().resource::<Ui>().selected, Some(id));
-        assert_eq!(app.world().resource::<Game>().pointing, Some(id));
+        assert_eq!(app.world().resource::<Game>().described, Some(id));
     }
 
     #[test]

@@ -310,6 +310,13 @@ pub fn sweep_between(
 /// So the nearby sky arrives as claims from a charting office the ship has never met, held on
 /// that office's word until the ship measures one for itself, and everything beyond `reach_ly`
 /// is sky nobody aboard has ever detected.
+/// What the charting office calls a star: a number of its own, the same for every ship it
+/// charts for. Not the catalogue's name, which is the generator's and never shown.
+pub fn chart_number(id: StarId) -> String {
+    let raw = id.get();
+    format!("HC {:04X}-{:02X}", raw >> 48, (raw >> 40) & 0xFF)
+}
+
 pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach_ly: f64, now_s: f64) {
     let Some(band) = at.optics().band() else { return };
     let from = at.position_ly;
@@ -336,12 +343,16 @@ pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach
                 lineage: vec![hop],
             },
         );
-        if let Some(name) = star.provenance.name.clone() {
-            knowledge.named(
-                star.id,
-                Naming { witness: CHARTS, name, kind: NameKind::Given, stated_s: now_s, lineage: vec![hop] },
-            );
-        }
+        knowledge.named(
+            star.id,
+            Naming {
+                witness: CHARTS,
+                name: chart_number(star.id),
+                kind: NameKind::Designation,
+                stated_s: now_s,
+                lineage: vec![hop],
+            },
+        );
         knowledge.told(
             star.id,
             Claim {

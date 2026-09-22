@@ -70,7 +70,7 @@ pub fn telescope(
 
     provenance(ui, game);
     conclusion(ui, game, out);
-    curve(ui, state, game, out, plot);
+    curve(ui, game, out, plot);
 }
 
 /// One hypothesis, in words.
@@ -124,43 +124,55 @@ fn room(ui: &mut egui::Ui, game: &Game) {
 /// A probability with its evidence, never a verdict: see
 /// `lightcone/docs/24-standing-instruments.md`.
 fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
-    let Some(id) = game.pointing.filter(|id| game.knowledge.knows(*id)) else { return };
+    let Some(id) = described(game).filter(|id| game.knowledge.knows(*id)) else { return };
     let day = 86_400.0;
-    match game.knowledge.conclusion(id) {
-        None => {
-            ui.weak("The log has not been read yet.");
+    let owner = game.knowledge.owner;
+    let all = game.knowledge.conclusions(id);
+    if all.is_empty() {
+        ui.weak("No log of it has been read yet.");
+    }
+    let believed = game.knowledge.believed(id);
+    if let Some(planet) = believed.planet.filter(|p| p.probability >= 0.5) {
+        ui.label(format!(
+            "Believed: a {} on a {:.2}-day orbit — {:.0}%, from {} log",
+            planet.class.name(),
+            planet.transit.period_s / day,
+            planet.probability * 100.0,
+            crate::range::who(planet.observer, owner),
+        ));
+    }
+    // Planets are read against a stand-in for the generator the game will ship with.
+    ui.weak("Planet readings are provisional until the planet generator exists.");
+    for c in all {
+        let whose = crate::range::who(c.observer, owner);
+        let from = c.from_ly.map_or(String::new(), |p| format!(" from {:.2}, {:.2}, {:.2} ly", p.x, p.y, p.z));
+        ui.label(format!("{whose}'s log{from}:"));
+        for h in c.transits.iter().chain(&c.populations).filter(|h| h.probability >= 0.005) {
+            ui.label(format!("  {} — {:.0}%", describe(&h.kind), h.probability * 100.0));
         }
-        Some(c) => {
-            ui.label("Transiting:");
-            for h in c.transits.iter().filter(|h| h.probability >= 0.005) {
-                ui.label(format!("  {} — {:.0}%", describe(&h.kind), h.probability * 100.0));
-            }
-            if !c.populations.is_empty() {
-                ui.label("In orbit:");
-                for h in c.populations.iter().filter(|h| h.probability >= 0.005) {
-                    ui.label(format!("  {} — {:.0}%", describe(&h.kind), h.probability * 100.0));
-                }
-            }
-            let whose = if c.observer == game.knowledge.owner { "this ship's" } else { "another craft's" };
-            let searched = match c.evidence.periods_s {
-                Some((lo, hi)) => format!("periods {:.1} to {:.1} d searched", lo / day, hi / day),
-                None => "too short to search for a period yet".into(),
-            };
-            ui.weak(format!(
-                "From {} of {whose} samples in {} bands; {searched}; it would have found {:.0}% of the transiting planets the galaxy makes.",
-                c.evidence.samples,
-                c.evidence.bands.count_ones(),
-                c.evidence.completeness * 100.0,
-            ));
-            if c.discarded_s.is_some() {
-                ui.weak("The log behind it has been thrown away; only the conclusion is left.");
-            }
+        let searched = match c.evidence.periods_s {
+            Some((lo, hi)) => format!("periods {:.1} to {:.1} d searched", lo / day, hi / day),
+            None => "too short to search for a period yet".into(),
+        };
+        ui.weak(format!(
+            "  {} samples in {} bands; {searched}; would have found {:.0}% of the transiting planets the galaxy makes.",
+            c.evidence.samples,
+            c.evidence.bands.count_ones(),
+            c.evidence.completeness * 100.0,
+        ));
+        if c.discarded_s.is_some() {
+            ui.weak("  The log behind it has been thrown away; only the conclusion is left.");
         }
     }
     let mut keep = game.knowledge.retained(id);
     if ui.checkbox(&mut keep, "Keep the raw log").changed() {
         ask(out, Action::RetainRaw(id, keep));
     }
+}
+
+/// What the panel describes: the selection, whatever the telescope is doing.
+fn described(game: &Game) -> Option<StarId> {
+    game.described.or(game.pointing)
 }
 
 /// What the telescope is committed to, and how to commit it to something else.
@@ -170,8 +182,8 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
         Duty::Idle => {
             ui.label("Telescope idle — nothing is being learned.");
         }
-        Duty::Stare(_) => {
-            ui.label("Staring: the whole exposure on one star.");
+        Duty::Stare(id) => {
+            ui.label(format!("Staring at {}: the whole exposure on one star.", game.name_of(*id)));
         }
         Duty::Sweep(sweep) => {
             let (passes, fraction) = sweep.progress(now);
@@ -184,7 +196,7 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
             // A pass is the unit that matters: a star is found when the sweep reaches its
             // field, and its parallax comes from the ship having moved between two passes.
             ui.weak(format!(
-                "one pass every {:.1} hours of ship time",
+                "one pass every {:.1} hours",
                 sweep.pass_s() / 3600.0
             ));
         }
@@ -199,7 +211,16 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
             ));
         }
     }
+    // The telescope and the selection are two things, and the panel says when they differ.
+    if let (Some(on), Some(looking)) = (game.observatory.pointing(), game.described)
+        && on != looking
+    {
+        ui.weak(format!("The telescope is on {}; the panel below describes {}.", game.name_of(on), game.name_of(looking)));
+    }
     ui.horizontal(|ui| {
+        if ui.button("Stare").clicked() {
+            ask(out, Action::StareSelected);
+        }
         if ui.button("Survey the sky").clicked() {
             ask(out, Action::SurveySky);
         }
@@ -283,21 +304,20 @@ fn naming(
 
 /// Where the belief about the selected star came from, and how old it is.
 fn provenance(ui: &mut egui::Ui, game: &Game) {
-    let Some(belief) = game.pointing.and_then(|id| game.belief(id)) else {
+    let Some(belief) = described(game).and_then(|id| game.belief(id)) else {
         ui.weak("Nothing detected under the crosshair yet.");
         return;
     };
+    let owner = game.knowledge.owner;
     match belief.name.as_ref() {
-        Some(naming) if naming.witness == game.knowledge.owner => {
-            ui.label(format!("Called {} by this ship.", naming.name));
-        }
         Some(naming) => {
-            ui.label(format!("Called {} by whoever charted it.", naming.name));
+            ui.label(format!("Called {} by {}.", naming.name, crate::range::who(naming.witness, owner)));
         }
         None => {
             ui.weak("Nobody has called it anything.");
         }
     }
+    ui.label(format!("Range: {}", crate::range::describe(Some(belief), owner, game.ship.motion.position_ly)));
     ui.label(format!(
         "{} bearings from {} {}",
         belief.sightings,
@@ -340,17 +360,17 @@ fn provenance(ui: &mut egui::Ui, game: &Game) {
     }
 }
 
-/// The light curve of whatever is under the crosshair, in the selected band.
+/// The light curve of whatever the panel describes, in the selected band.
 fn curve(
     ui: &mut egui::Ui,
-    state: &Ui,
     game: &mut Game,
     out: &mut MessageWriter<Requested>,
     plot: &mut CurvePlot,
 ) {
     let mut curve = game.curve();
     ui.horizontal(|ui| {
-        ui.label(format!("integration: {:.0} s", state.integration_s));
+        // The shard's figure, which is the one being integrated at.
+        ui.label(format!("integration: {:.0} s", game.observatory.integration_s));
         ui.separator();
         ui.label(format!("{} samples", curve.len()));
         if curve.len() > 1 {

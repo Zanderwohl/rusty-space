@@ -86,6 +86,8 @@ pub enum Action {
     SurveySky,
     /// Sweep the patch of sky the view is pointed at, which comes round far more often.
     SurveyAhead,
+    /// Put the whole exposure on the selected star.
+    StareSelected,
     /// Add the selected star to the watch rotation, or drop it from one.
     WatchSelected,
     /// Call the selected star something. A name is this ship's, not the star's.
@@ -310,23 +312,33 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             session.auto_expose();
         }
 
+        // What the panels describe, and nothing else: a click to read a star's provenance must
+        // not end a week-long sweep. Staring is `StareSelected`.
         Action::SelectTarget(id) => {
             ui.selected = id;
-            session.point_at(id);
-            commit(ui, session, &mut effects);
-            match id.filter(|i| session.knows(*i)).map(|i| session.name_of(i)) {
-                Some(name) => effects.push(Effect::Notify(format!("watching {name}"))),
-                None if id.is_some() => {
-                    effects.push(Effect::Notify("watching an undetected source".into()))
-                }
-                None => {}
-            }
+            session.describe(id);
         }
+        Action::StareSelected => match ui.selected {
+            Some(id) => {
+                let name = session.name_of(id);
+                set_duty(ui, session, Duty::Stare(id), &mut effects);
+                effects.push(Effect::Notify(format!("staring at {name}")));
+            }
+            None => effects.push(Effect::Notify("nothing selected to stare at".into())),
+        },
         Action::SelectNearest => match nearest_interstellar(session) {
             Some(id) => apply_to(ui, session, Action::SelectTarget(Some(id)), &mut effects),
             None => effects.push(Effect::Notify("nothing interstellar in range".into())),
         },
-        Action::SetIntegration(seconds) => ui.integration_s = seconds.max(0.0),
+        Action::SetIntegration(seconds) => {
+            ui.integration_s = seconds.max(0.0);
+            // The exposure is part of the duty, so a new one is a new order for the shard; the
+            // panel shows the shard's figure until it says it has taken it.
+            if session.observatory.duty != Duty::Idle {
+                let duty = session.observatory.duty.clone();
+                set_duty(ui, session, duty, &mut effects);
+            }
+        }
         Action::SurveySky | Action::SurveyAhead => {
             let now = session.coordinate_time_s();
             let sweep = if action == Action::SurveySky {
@@ -335,8 +347,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 Sweep::region(ui.look.forward(), SURVEY_CONE_RAD, now)
             };
             let hours = sweep.pass_s() / 3600.0;
-            session.take_up(Duty::Sweep(sweep));
-            commit(ui, session, &mut effects);
+            set_duty(ui, session, Duty::Sweep(sweep), &mut effects);
             effects.push(Effect::Notify(format!(
                 "surveying: a pass every {hours:.1} hours"
             )));
@@ -375,25 +386,19 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                     None => targets.push(id),
                 }
                 let count = targets.len();
-                if targets.is_empty() {
-                    session.take_up(Duty::Idle);
+                let duty = if targets.is_empty() {
+                    Duty::Idle
                 } else {
                     let started_s = session.coordinate_time_s();
-                    session.take_up(Duty::Watch {
-                        targets,
-                        dwell_s: ui.integration_s.max(1.0),
-                        started_s,
-                    });
-                }
-                commit(ui, session, &mut effects);
+                    Duty::Watch { targets, dwell_s: ui.integration_s.max(1.0), started_s }
+                };
+                set_duty(ui, session, duty, &mut effects);
                 effects.push(Effect::Notify(format!("watching {count} stars")));
             }
             None => effects.push(Effect::Notify("nothing selected to watch".into())),
         },
         Action::StopSurvey => {
-            session.take_up(Duty::Idle);
-            commit(ui, session, &mut effects);
-            ui.selected = None;
+            set_duty(ui, session, Duty::Idle, &mut effects);
             effects.push(Effect::Notify("telescope idle".into()));
         }
         Action::SetCurveBand(band) => {
@@ -482,7 +487,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 let note = match session.cancel() {
                     // What it says is where the ship ended up, because canceling does not
                     // stop it: it keeps its velocity and that velocity is now an orbit.
-                    Some(coast) => format!("drive cut — {}", crate::hud::arc(&coast)),
+                    Some(coast) => format!("drive cut — {}", crate::hud::arc(&coast, &session.body_label(&coast.primary))),
                     None => "drive cut".to_string(),
                 };
                 effects.push(Effect::Notify(note));
@@ -702,16 +707,20 @@ fn apply_to(ui: &mut UiState, session: &mut Session, action: Action, effects: &m
 ///
 /// Out of what is *known*: the key picks a target to watch, and a target nobody has detected
 /// is not one the ship could name, let alone point at.
-/// Hand the telescope's new duty to the shard, which is what runs it.
+/// Put the telescope on a duty.
 ///
-/// Taken up here too, so the panel shows it at once; the acceptance that comes back says when
-/// the shard actually started it, and replaces this.
-fn commit(ui: &UiState, session: &Session, effects: &mut Vec<Effect>) {
+/// With a shard the duty is the shard's to take up, and nothing is taken up here: the
+/// acceptance, or the refusal, is what the panel shows, so a refused order leaves nothing
+/// to undo. Without one it starts now.
+fn set_duty(ui: &UiState, session: &mut Session, duty: Duty, effects: &mut Vec<Effect>) {
     if session.remote {
-        effects.push(Effect::Send(lc_proto::Order::SetDuty {
-            duty: (&session.observatory.duty).into(),
-            integration_s: ui.integration_s,
-        }));
+        effects.push(Effect::Send(lc_proto::Order::SetDuty { duty: (&duty).into(), integration_s: ui.integration_s }));
+        return;
+    }
+    session.observatory.integration_s = ui.integration_s.max(1.0);
+    match duty {
+        Duty::Stare(id) => session.point_at(Some(id)),
+        duty => session.take_up(duty),
     }
 }
 
@@ -966,16 +975,22 @@ mod tests {
         assert!(s.tone.reference.is_finite() && s.tone.reference > 0.0);
     }
 
+    /// Review item 4. Selecting a star changes what the panels describe and nothing else: a
+    /// sweep under way stays under way. Staring is its own, deliberate action.
     #[test]
-    fn selecting_a_target_points_the_telescope_and_says_so() {
+    fn selecting_describes_and_staring_is_deliberate() {
         let (mut ui, mut s) = fixture();
         let id = s.stars[0].id;
+        apply(Action::SurveySky, &mut ui, &mut s);
         let effects = apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
-        assert_eq!(ui.selected, Some(id));
+        assert_eq!((ui.selected, s.described), (Some(id), Some(id)));
+        assert!(matches!(s.observatory.duty, Duty::Sweep(_)), "the sweep goes on");
+        assert!(effects.is_empty(), "nothing was ordered");
+
+        let effects = apply(Action::StareSelected, &mut ui, &mut s);
         assert_eq!(s.pointing, Some(id));
+        assert!(matches!(s.observatory.duty, Duty::Stare(on) if on == id));
         assert!(matches!(effects.as_slice(), [Effect::Notify(_)]));
-        apply(Action::SelectTarget(None), &mut ui, &mut s);
-        assert_eq!(s.pointing, None);
     }
 
     #[test]
@@ -1006,6 +1021,7 @@ mod tests {
         for action in [
             Action::StartGame,
             Action::SelectTarget(Some(id)),
+            Action::StareSelected,
             Action::OpenPanel(Panel::Telescope),
             Action::SetBandPreset(2),
             Action::ExposureDown,
@@ -1182,6 +1198,7 @@ mod tests {
         let mut s = Session::new(&provider, 3);
         let mut ui = UiState::default();
         apply(Action::SelectTarget(Some(star.id)), &mut ui, &mut s);
+        apply(Action::StareSelected, &mut ui, &mut s);
 
         let watch = |s: &mut Session, ui: &mut UiState, band: Band| {
             apply(Action::SetCurveBand(band), ui, s);
@@ -1202,6 +1219,7 @@ mod tests {
     fn changing_the_curve_band_reads_the_other_series_rather_than_losing_one() {
         let (mut ui, mut s) = fixture();
         apply(Action::SelectTarget(Some(s.stars[0].id)), &mut ui, &mut s);
+        apply(Action::StareSelected, &mut ui, &mut s);
         s.observe(1.0e4);
         assert!(!s.curve().is_empty());
         apply(Action::SetCurveBand(Band::K), &mut ui, &mut s);
@@ -1232,6 +1250,7 @@ mod tests {
         let (mut ui, mut s) = fixture();
         let last = s.stars.last().unwrap().id;
         apply(Action::SelectTarget(Some(last)), &mut ui, &mut s);
+        apply(Action::StareSelected, &mut ui, &mut s);
         assert!(s.target(last).is_some(), "pointing at a star should model it");
         assert!(s.observe(1.0e4).is_some());
     }
@@ -1276,11 +1295,13 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        let sent = orders(&apply(Action::SelectTarget(Some(id)), &mut ui, &mut s));
+        assert!(orders(&apply(Action::SelectTarget(Some(id)), &mut ui, &mut s)).is_empty(), "selecting orders nothing");
+        let sent = orders(&apply(Action::StareSelected, &mut ui, &mut s));
         assert!(
             matches!(sent.as_slice(), [lc_proto::Order::SetDuty { duty: lc_proto::Duty::Stare { star }, .. }] if *star == id.get()),
             "{sent:?}",
         );
+        assert_eq!(s.observatory.duty, Duty::Idle, "and nothing is taken up until the shard says so");
         let sent = orders(&apply(Action::SurveySky, &mut ui, &mut s));
         assert!(matches!(sent.as_slice(), [lc_proto::Order::SetDuty { duty: lc_proto::Duty::Sweep { .. }, .. }]));
         let sent = orders(&apply(Action::NameSelected("Kettle".into()), &mut ui, &mut s));

@@ -46,11 +46,12 @@ pub struct Energy {
 ///
 /// Apsides rather than elements. Nobody looks at an eccentricity and knows whether they are
 /// about to hit the planet.
-pub fn arc(coast: &crate::coast::Coast) -> String {
+/// `primary` is what this ship calls the body, not its key.
+pub fn arc(coast: &crate::coast::Coast, primary: &str) -> String {
     let near = span(coast.periapsis_m());
     match coast.apoapsis_m() {
-        Some(far) => format!("{near} by {} about {}", span(far), coast.primary),
-        None => format!("escaping {} past {near}", coast.primary),
+        Some(far) => format!("{near} by {} about {primary}", span(far)),
+        None => format!("escaping {primary} past {near}"),
     }
 }
 
@@ -106,14 +107,15 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
     Hud {
         clock: format!("T + {:.2} years", session.coordinate_time_s() / YEAR_S),
         ship_clock: format!("T' + {:.2} years", session.ship.motion.clock_s / YEAR_S),
-        target: ui.selected.and_then(|id| {
-            let star = session.star(id)?;
-            // Distance directly, not by way of sky(): shading six thousand stars once a frame
-            // to read one number off the result is the same answer at six thousand times the
-            // cost. A light-year of distance is a year of staleness by definition.
-            let age = session.distance_to(star);
-            let label = session.name_of(id);
-            Some(format!("{label} — {age:.2} ly"))
+        // What this ship believes, never the catalogue: a click on any light in the sky is not
+        // a range to it.
+        target: ui.selected.map(|id| {
+            let range = crate::range::describe(
+                session.knowledge.belief(id),
+                session.knowledge.owner,
+                session.ship.motion.position_ly,
+            );
+            format!("{} — {range}", session.name_of(id))
         }),
         mapping: name.to_uppercase(),
         exposure: match ui.exposure_offset {
@@ -130,7 +132,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
                 left / YEAR_S,
             )
         }),
-        coasting: session.coast().map(arc),
+        coasting: session.coast().map(|coast| arc(&coast, &session.body_label(&coast.primary))),
         // Anything but the design rate is said on screen rather than left to look normal —
         // whether the player set it offline or a shard staging a scene stated it. The clock
         // running sixty times over is exactly when a readout of how fast earns its place.
@@ -209,17 +211,17 @@ mod tests {
         assert!(lines(&s, &ui).clock.contains("T + 1.00 years"));
     }
 
-    /// The one thing the readout exists for.
+    /// The one thing the readout exists for, and only as far as this ship knows it: the
+    /// charts' range, on the charts' word.
     #[test]
-    fn a_selected_target_says_how_old_its_light_is() {
+    fn a_selected_target_says_how_far_it_is_and_on_whose_word() {
         let (mut ui, mut s) = fixture();
         let id = s.stars[0].id;
         assert!(lines(&s, &ui).target.is_none());
         apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
         let target = lines(&s, &ui).target.expect("a target line");
-        // The sample provider's nearest star is 4.2 light-years out, and a light-year of
-        // distance is a year of staleness.
-        assert!(target.contains("4.2") && target.ends_with(" ly"), "{target}");
+        // The sample provider's nearest star is 4.2 light-years out, charted to a percent.
+        assert!(target.contains(" ± ") && target.contains("on the charts' word"), "{target}");
     }
 
     #[test]
@@ -304,7 +306,8 @@ mod tests {
         s.tick_instruments(1.0);
         apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
         let target = lines(&s, &ui).target.unwrap();
-        assert!(target.ends_with(" ly"));
+        // A second's stare has detected nothing yet, so there is neither a name nor a range.
+        assert!(target.ends_with("not detected"), "{target}");
         assert!(
             !target.starts_with("Authored"),
             "a catalogue name is not a name: {target}"

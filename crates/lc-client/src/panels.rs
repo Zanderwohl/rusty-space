@@ -365,7 +365,7 @@ fn debug(
         ));
     }
     match game.system.as_ref() {
-        Some(system) => ui.label(format!("in {} — {} bodies loaded", system.star_name, system.len())),
+        Some(system) => ui.label(format!("in {} — {} bodies loaded", game.name_of(system.star), system.len())),
         None => ui.label("between systems"),
     };
     ui.label(format!("stars detected: {}", game.knowledge.stars().count()));
@@ -460,7 +460,7 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
             // A transfer's numbers are in its body's frame, and saying which is the difference
             // between "ten kilometers a second" and "ten kilometers a second *past Earth*".
             let frame = match game.flown_about() {
-                Some(body) => format!(" past {body}"),
+                Some(body) => format!(" past {}", game.body_label(body)),
                 None => String::new(),
             };
             ui.label(format!("speed: {:.6}c{frame}", state.beta.length()));
@@ -479,7 +479,12 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
             match state.selected.and_then(|id| game.star(id)) {
                 Some(star) => {
                     let name = game.name_of(star.id);
-                    ui.label(format!("{name} — {:.2} ly", game.distance_to(star)));
+                    let range = crate::range::describe(
+                        game.knowledge.belief(star.id),
+                        game.knowledge.owner,
+                        game.ship.motion.position_ly,
+                    );
+                    ui.label(format!("{name} — {range}"));
                     if ui.button("Fly there").clicked() {
                         ask(out, Action::FlyTo(None));
                     }
@@ -531,8 +536,14 @@ fn system(
         ships(ui, game, uplink, out);
         return;
     }
+    let labels = game.home_labels();
+    let called = |target: &lc_world::navigation::Target, fallback: &str| match target {
+        lc_world::navigation::Target::Body(key) => labels.of(key),
+        // A band's designation is made from its shape, not from anybody's name.
+        lc_world::navigation::Target::Band(_) => fallback.to_string(),
+    };
     ui.horizontal(|ui| {
-        ui.label(&system.star_name);
+        ui.label(game.name_of(system.star));
         ui.checkbox(show_all, "all");
     });
 
@@ -541,7 +552,7 @@ fn system(
             let picked = state.focus.as_ref() == Some(&entry.target);
             ui.horizontal(|ui| {
                 ui.add_space(entry.depth as f32 * 12.0);
-                let row = ui.selectable_label(picked, &entry.designation);
+                let row = ui.selectable_label(picked, called(&entry.target, &entry.designation));
                 if row.clicked() {
                     let next = (!picked).then(|| entry.target.clone());
                     ask(out, Action::FocusTarget(next));
@@ -563,7 +574,7 @@ fn system(
         return;
     };
     let Some(entry) = system.inventory().iter().find(|e| &e.target == target) else { return };
-    ui.heading(&entry.designation);
+    ui.heading(called(&entry.target, &entry.designation));
     ui.weak(match entry.orbit_radius_m {
         r if r > 0.0 => format!(
             "{} — {} out, {} away",
@@ -680,7 +691,7 @@ fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<R
             // Not "adrift": the ship is on something, and which conic it is on is the first
             // thing a player needs after cutting the engine.
             Some(coast) => {
-                ui.label(format!("coasting: {}", crate::hud::arc(coast)));
+                ui.label(format!("coasting: {}", crate::hud::arc(coast, &game.body_label(&coast.primary))));
                 if let Some(period) = coast.period_s() {
                     ui.weak(format!("one turn in {}", duration(period)));
                 }

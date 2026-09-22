@@ -735,7 +735,7 @@ fn fold(
                     let note = match game.0.cut_drive_at(at_s) {
                         // What it says is where the ship ended up, because cutting does not
                         // stop it: it keeps its velocity and that velocity is now an orbit.
-                        Some(coast) => format!("drive cut — {}", crate::hud::arc(&coast)),
+                        Some(coast) => format!("drive cut — {}", crate::hud::arc(&coast, &game.0.body_label(&coast.primary))),
                         None => "drive cut".to_string(),
                     };
                     Some(note)

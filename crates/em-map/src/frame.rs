@@ -46,6 +46,8 @@ pub struct Placement {
     pub annulus: Option<Annulus>,
     /// Spin axis or ring normal, simulation axes, unit length.
     pub pole: Vec3,
+    /// The ends of where it might be, render units: see [`crate::MapItem::spread_ly`].
+    pub spread: Option<(Vec3, Vec3)>,
 }
 
 impl Placement {
@@ -159,6 +161,10 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Plane, meters_per_u
                 half_angle_rad: a.half_angle_rad as f32,
             }),
             pole: item.pole.normalize_or(DVec3::Z).as_vec3(),
+            spread: item
+                .spread_ly
+                .map(|(near, far)| (relative(near), relative(far)))
+                .filter(|(near, far)| near.is_finite() && far.is_finite()),
         });
     }
 

@@ -73,6 +73,25 @@ impl Distance {
 /// the 3x3 system `sum (I - u u^T) x = sum (I - u u^T) p`. That matrix's smallest eigenvalue
 /// is the parallax squared — 1e-12 of the others at 25 ly over an AU — so inverting it in f64
 /// returns noise. Centered slopes carry the same information as small numbers.
+/// The angle the widest pair of observing positions subtends at `star_ly`, radians: how much
+/// parallax the bearings had to work with. Two craft a light-year apart beat one orbit, and this
+/// is the number that says so.
+pub fn baseline_rad(bearings: &[Bearing], star_ly: DVec3) -> f64 {
+    let mut widest: f64 = 0.0;
+    for (i, a) in bearings.iter().enumerate() {
+        for b in bearings.iter().skip(i + 1) {
+            let toward = (star_ly - (a.observer_ly + b.observer_ly) * 0.5).normalize_or_zero();
+            let apart = b.observer_ly - a.observer_ly;
+            let across = (apart - toward * apart.dot(toward)).length();
+            let range = (star_ly - a.observer_ly).length();
+            if range > 0.0 {
+                widest = widest.max(across / range);
+            }
+        }
+    }
+    widest
+}
+
 pub fn triangulate(bearings: &[Bearing]) -> Distance {
     let weight = |b: &Bearing| 1.0 / (b.sigma_rad * b.sigma_rad).max(f64::MIN_POSITIVE);
     let total: f64 = bearings.iter().map(weight).sum();

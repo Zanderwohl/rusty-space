@@ -84,6 +84,13 @@ pub struct Belief {
     /// this craft's own, and checked. A [`Claim`] cannot be, which is the distinction. Whose
     /// bearings they were is [`Belief::witnesses`] and [`Belief::hops`].
     pub triangulated: bool,
+    /// For a distance triangulated here, the angle its widest baseline subtended at the star.
+    pub baseline_rad: Option<f64>,
+    /// For a distance taken from a claim, whose word it is on.
+    pub claimed_by: Option<Witness>,
+    /// This craft's own lower bound, when a claim was believed over it. A chart that puts a star
+    /// nearer than the craft's own bearings allow is a disagreement worth seeing.
+    pub floor_ly: Option<f64>,
     pub band: Band,
     pub flux: f64,
     /// Coordinate seconds the most recent light held arrived — at its witness, not here.
@@ -206,15 +213,26 @@ impl File {
         let measured = astrometry::triangulate(&bearings);
         let taken = matches!(measured, Distance::Measured { .. });
         let claimed = self.claims.iter().min_by(|a, b| sigma_of(a).total_cmp(&sigma_of(b)));
+        let believed_claim = claimed.filter(|_| !taken);
+        let distance = match believed_claim {
+            Some(claim) => claim.distance,
+            None => measured,
+        };
         Some(Belief {
             subject,
             name: self.naming(owner).cloned(),
             bearing: latest.bearing,
-            distance: match (taken, claimed) {
-                (false, Some(claim)) => claim.distance,
-                _ => measured,
-            },
+            distance,
             triangulated: taken,
+            baseline_rad: match measured {
+                Distance::Measured { position_ly, .. } => Some(astrometry::baseline_rad(&bearings, position_ly)),
+                _ => None,
+            },
+            claimed_by: believed_claim.map(|c| c.witness),
+            floor_ly: match (believed_claim, measured) {
+                (Some(_), Distance::AtLeast(ly)) => Some(ly),
+                _ => None,
+            },
             band: latest.band,
             flux: latest.flux,
             observed_s: latest.observed_s,

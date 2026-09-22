@@ -102,6 +102,8 @@ pub struct Session {
     /// whatever this says; it decides what is *shown*.
     pub curve_band: Band,
     pub pointing: Option<StarId>,
+    /// What the panels describe: the selection, which is not where the telescope is pointed.
+    pub described: Option<StarId>,
     /// What this ship has seen, and what it has been told. Nothing else is knowledge: a star
     /// absent from here is one nobody aboard has ever detected.
     pub knowledge: Knowledge,
@@ -160,6 +162,7 @@ impl Session {
             tone: ToneMap::default(),
             curve_band: Band::V,
             pointing: None,
+            described: None,
             knowledge: Knowledge::new(Witness(0)),
             observatory: Observatory::default(),
             ship: Craft::at(CraftId(0), Kind::Ship, DVec3::ZERO),
@@ -550,6 +553,21 @@ impl Session {
         self.knowledge.name_of(id).unwrap_or_else(|| "unidentified source".to_string())
     }
 
+    /// What this ship calls the star it is in and every body around it. Never the generator's
+    /// names, which are only keys: see [`lc_world::labels`].
+    pub fn home_labels(&self) -> lc_world::labels::Labels {
+        let Some(system) = self.system.as_ref() else { return Default::default() };
+        let star = self.name_of(system.star);
+        lc_world::labels::label(system, &star, |body| {
+            self.knowledge.name_of(lc_world::knowledge::Subject::Body { star: system.star, body })
+        })
+    }
+
+    /// What this ship calls a body of its system, by the key it is targeted by.
+    pub fn body_label(&self, key: &str) -> String {
+        self.home_labels().of(key)
+    }
+
     /// Give a star a name of this ship's own.
     pub fn name_star(&mut self, id: StarId, name: &str) -> bool {
         let name = name.trim();
@@ -578,9 +596,15 @@ impl Session {
         self.knowledge.belief(id)?.distance.position_ly()
     }
 
-    /// The telescope's curve for what it is pointed at, in the displayed band.
+    /// Describe `id` in the panels, wherever the telescope is.
+    pub fn describe(&mut self, id: Option<StarId>) {
+        self.described = id;
+    }
+
+    /// The curve of what the panels describe, in the displayed band; failing a selection, of
+    /// what the telescope is on.
     pub fn curve(&self) -> LightCurve {
-        let Some(id) = self.pointing else {
+        let Some(id) = self.described.or(self.pointing) else {
             return LightCurve::of(self.curve_band, &[], None);
         };
         let light_age = self.knowledge.belief(id).and_then(|b| b.light_age_s());
@@ -1025,7 +1049,7 @@ mod tests {
         eprintln!(
             "cut at {:.0} km/s -> {} (e {:.3})",
             moving.length() / 1.0e3,
-            crate::hud::arc(&coast),
+            crate::hud::arc(&coast, &session.body_label(&coast.primary)),
             coast.elements.eccentricity,
         );
 

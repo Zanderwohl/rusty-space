@@ -141,6 +141,10 @@ pub struct MapRingOf(pub usize);
 #[derive(Component)]
 pub struct MapDropOf(pub ItemKey);
 
+/// Where a star measured by parallax might be: its error along the line of sight.
+#[derive(Component)]
+pub struct MapSpreadOf(pub ItemKey);
+
 /// A belt, a ring system or a cloud, drawn as its own outline rather than as a point.
 #[derive(Component)]
 pub struct MapAnnulusOf(pub ItemKey);
@@ -401,25 +405,33 @@ fn place(
     existing: Query<Entity, With<MapDrawn>>,
     mut items: Query<
         (&MapItemOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpokes>),
+        (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpokes>,
+            Without<MapSpreadOf>),
     >,
     mut drops: Query<
         (&MapDropOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>),
+        (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
+            Without<MapSpreadOf>),
+    >,
+    mut spreads: Query<
+        (&MapSpreadOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
+        (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
+            Without<MapDropOf>),
     >,
     mut rings: Query<
         (&MapRingOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapSpokes>, Without<MapAnnulusOf>),
+        (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
+            Without<MapSpreadOf>),
     >,
     mut spokes: Query<
         (&mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
         (With<MapSpokes>, Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>,
-            Without<MapRingOf>, Without<MapAnnulusOf>),
+            Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpreadOf>),
     >,
     mut annuli: Query<
         (&MapAnnulusOf, &mut Transform, &MeshMaterial3d<BodyWireframeMaterial>),
         (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapRingOf>,
-            Without<MapSpokes>),
+            Without<MapSpokes>, Without<MapSpreadOf>),
     >,
 ) {
     let Ok((mut transform, mut projection)) = camera.single_mut() else { return };
@@ -500,6 +512,14 @@ fn place(
         }
         set_thickness(&mut materials, material, 1.0, rad_per_px, at.translation.length(),
             LINE_TUBE_FRACTION, SCALE_PX);
+    }
+    for (of, mut at, material) in spreads.iter_mut() {
+        let Some((near, far)) = frame.placements.iter().find(|p| p.key == of.0).and_then(|p| p.spread) else {
+            continue;
+        };
+        *at = segment_transform(near, far);
+        set_thickness(&mut materials, material, 1.0, rad_per_px, at.translation.length(),
+            LINE_TUBE_FRACTION, LINE_PX);
     }
     for (of, mut at, material) in rings.iter_mut() {
         let Some(ring) = frame.rings.get(of.0) else { continue };
@@ -736,6 +756,21 @@ fn drop_transform(placement: &Placement) -> Transform {
     }
 }
 
+/// The unit line along `+Y`, laid from `near` to `far`.
+fn segment_transform(near: Vec3, far: Vec3) -> Transform {
+    let (near, far) = (render(near.as_dvec3()), render(far.as_dvec3()));
+    let span = far - near;
+    let length = span.length();
+    Transform {
+        translation: near,
+        rotation: match length > f32::EPSILON {
+            true => Quat::from_rotation_arc(Vec3::Y, span / length),
+            false => Quat::IDENTITY,
+        },
+        scale: Vec3::new(1.0, length, 1.0),
+    }
+}
+
 /// A unit ring in the XZ plane, turned onto the reference plane and grown to its radius.
 fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
     let normal = render(frame.plane_normal.as_dvec3()).normalize();
@@ -849,6 +884,20 @@ fn spawn_scene(
                 layer.clone(),
                 MapDrawn,
                 MapAnnulusOf(placement.key),
+            ));
+        }
+        if let Some((near, far)) = placement.spread {
+            let at = segment_transform(near, far);
+            let target = tube_target(1.0, rad_per_px, at.translation.length(), LINE_TUBE_FRACTION, LINE_PX);
+            commands.spawn((
+                // One dash: a solid line.
+                Mesh3d(map.drops[0].clone()),
+                MeshMaterial3d(materials.add(line_material(color_of(placement.kind), target, LINE_COLOR_SCALE))),
+                at,
+                NoFrustumCulling,
+                layer.clone(),
+                MapDrawn,
+                MapSpreadOf(placement.key),
             ));
         }
         if placement.has_drop_line() {
@@ -1186,6 +1235,7 @@ mod tests {
             angular_radius: radius / distance,
             annulus: None,
             pole: glam::Vec3::Z,
+            spread: None,
         }
     }
 

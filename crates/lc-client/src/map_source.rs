@@ -111,7 +111,7 @@ pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVe
     let mut build = Build::with_capacity(bodies.drawn.len() + uplink.contacts.len() + 64);
     build.push(observer(session, uplink, eye_ly), None);
     push_local_system(&mut build, session);
-    push_bodies(&mut build, bodies);
+    push_bodies(&mut build, bodies, &session.home_labels());
     push_stars(&mut build, session, eye_ly);
 
     for contact in &uplink.contacts {
@@ -149,8 +149,9 @@ pub fn coordinate(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> Picture 
     build.push(observer(session, uplink, eye_ly), None);
     push_local_system(&mut build, session);
     if let Some(system) = session.system.as_ref() {
+        let labels = session.home_labels();
         for body in system.drawables_at(eye_ly, now) {
-            push_drawable(&mut build, &body);
+            push_drawable(&mut build, &body, &labels);
         }
     }
     push_stars(&mut build, session, eye_ly);
@@ -228,18 +229,19 @@ fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
 ///
 /// The same name `pick.rs` builds a `Target::Body` from over the sky, so a click means the
 /// same thing in either mode.
-fn push_drawable(build: &mut Build, body: &lc_world::system::Drawable) {
+fn push_drawable(build: &mut Build, body: &lc_world::system::Drawable, labels: &lc_world::labels::Labels) {
+    let label = labels.of(&body.name);
     build.push(
         MapItem::body(
             ItemKey::from_name(&body.name),
-            body.name.clone(),
+            label.clone(),
             kind_of(body.kind),
             body.position_ly,
             body.radius_m,
             body.pole,
         )
         .weighing(body.mass_kg),
-        Some(Subject::Body(body.name.clone())),
+        Some(Subject::Body(body.name.clone(), label)),
     );
 }
 
@@ -266,9 +268,9 @@ fn key_of(system: &lc_world::system::LocalSystem, index: em_sim::id::BodyIndex) 
     }
 }
 
-fn push_bodies(build: &mut Build, bodies: &Bodies) {
+fn push_bodies(build: &mut Build, bodies: &Bodies, labels: &lc_world::labels::Labels) {
     for body in &bodies.drawn {
-        push_drawable(build, body);
+        push_drawable(build, body, labels);
     }
 }
 
@@ -276,16 +278,17 @@ fn push_bodies(build: &mut Build, bodies: &Bodies) {
 /// excluded by construction and a population is not a body.
 fn push_local_system(build: &mut Build, session: &Session) {
     let Some(system) = session.system.as_ref() else { return };
+    let name = session.name_of(system.star);
     build.push(
         MapItem::body(
             ItemKey::from_id("star", system.star.get()),
-            system.star_name.clone(),
+            name.clone(),
             ItemKind::Star,
             system.star_position_ly(),
             system.star_radius_m(),
             DVec3::Z,
         ).weighing(system.star_mass_kg()),
-        Some(Subject::Star(system.star, system.star_name.clone())),
+        Some(Subject::Star(system.star, name)),
     );
     let origin = system.star_position_ly();
     for (index, population) in system.populations.iter().enumerate() {
@@ -324,19 +327,20 @@ fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
         if Some(id) == here {
             continue;
         }
-        let Some(position_ly) = belief.distance.position_ly() else {
+        let lc_world::knowledge::Distance::Measured { position_ly, sigma_ly } = belief.distance else {
             continue;
         };
         if position_ly.distance(eye_ly) > REACH_LY {
             continue;
         }
-        let star = session.star(id);
+        let line = (position_ly - eye_ly).normalize_or_zero();
         let name = session.name_of(id);
-        // Radius and mass are not observed quantities here; they come from the same catalogue
-        // the truth does, and are what the mark is *sized* by rather than what it claims.
-        let (radius_m, mass_solar) = star
-            .map(|s| (s.star.radius_m, s.mass_solar))
-            .unwrap_or((6.957e8, 1.0));
+        // Sized from what is believed, not looked up: brighter for its distance is ranked above
+        // fainter, and nothing on the map is drawn at a size this ship has not measured.
+        let radius_m = lc_world::star::Star::SOL.radius_m;
+        let mass_solar = belief
+            .luminosity_w()
+            .map_or(1.0, |watts| (watts / sun_band_w(belief.band)).max(0.0).powf(0.25));
         build.push(
             MapItem::body(
                 ItemKey::from_id("star", id.get()),
@@ -346,10 +350,19 @@ fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
                 radius_m,
                 DVec3::Z,
             )
-            .weighing(mass_solar * SOLAR_MASS_KG),
+            .weighing(mass_solar * SOLAR_MASS_KG)
+            // A parallax is vague in depth and sharp across it, so the error is drawn along the
+            // line of sight: the far edge of a charted volume is visibly the uncertain part.
+            .spread(position_ly - line * sigma_ly, position_ly + line * sigma_ly),
             Some(Subject::Star(id, name)),
         );
     }
+}
+
+/// The Sun's luminosity in one band, watts: what a believed luminosity is ranked against.
+fn sun_band_w(band: em_spectra::Band) -> f64 {
+    let m = lc_world::system::M_PER_LY;
+    4.0 * std::f64::consts::PI * m * m * lc_world::knowledge::survey::flux_from(&lc_world::star::Star::SOL, band, m)
 }
 
 #[cfg(test)]

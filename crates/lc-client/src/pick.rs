@@ -41,7 +41,8 @@ pub(crate) const ARROW_PX: f32 = 11.0;
 /// What a candidate turned out to be, and what to call it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Subject {
-    Body(String),
+    /// A body of the local system: the key it is targeted by, and what this ship calls it.
+    Body(String, String),
     Star(StarId, String),
     /// A population, by its index in the system's list.
     Swarm(usize, String),
@@ -53,7 +54,7 @@ impl Subject {
     /// Whether this is the same thing as `other`, by identity rather than by name.
     pub(crate) fn is(&self, other: &Subject) -> bool {
         match (self, other) {
-            (Subject::Body(a), Subject::Body(b)) => a == b,
+            (Subject::Body(a, _), Subject::Body(b, _)) => a == b,
             (Subject::Star(a, _), Subject::Star(b, _)) => a == b,
             (Subject::Swarm(a, _), Subject::Swarm(b, _)) => a == b,
             (Subject::Craft(a, _), Subject::Craft(b, _)) => a == b,
@@ -71,7 +72,7 @@ impl Subject {
     /// name of, not something to select.
     pub(crate) fn select(&self) -> Option<Action> {
         match self {
-            Subject::Body(name) => Some(Action::FocusTarget(Some(Target::Body(name.clone())))),
+            Subject::Body(key, _) => Some(Action::FocusTarget(Some(Target::Body(key.clone())))),
             Subject::Star(id, _) => Some(Action::SelectTarget(Some(*id))),
             Subject::Swarm(index, _) => Some(Action::FocusTarget(Some(Target::Band(*index)))),
             Subject::Craft(..) => None,
@@ -245,7 +246,8 @@ fn survey(
 /// What the interface says is selected, as a subject. The map marks the same thing.
 pub(crate) fn selected(ui: &Ui) -> Option<Subject> {
     match &ui.focus {
-        Some(Target::Body(name)) => Some(Subject::Body(name.clone())),
+        // Matched on the key alone, like a star on its identifier.
+        Some(Target::Body(key)) => Some(Subject::Body(key.clone(), String::new())),
         Some(Target::Band(index)) => Some(Subject::Swarm(*index, String::new())),
         // Matched on the identifier alone; the name rides along for the label.
         None => ui.selected.map(|id| Subject::Star(id, String::new())),
@@ -255,8 +257,7 @@ pub(crate) fn selected(ui: &Ui) -> Option<Subject> {
 /// What a subject is called on screen.
 fn label_of(seen: &Sighted) -> String {
     match &seen.subject {
-        Subject::Body(name) => name.clone(),
-        Subject::Star(_, name) | Subject::Swarm(_, name) | Subject::Craft(_, name) => name.clone(),
+        Subject::Body(_, name) | Subject::Star(_, name) | Subject::Swarm(_, name) | Subject::Craft(_, name) => name.clone(),
     }
 }
 
@@ -341,6 +342,7 @@ fn sight(
         });
     }
 
+    let labels = game.home_labels();
     for body in &bodies.drawn {
         let offset = body.position_ly - ship;
         let distance_m = offset.length() * M_PER_LY;
@@ -351,7 +353,7 @@ fn sight(
         // out as nothing and the slack does the work, which is the same thing a point gets.
         let radius_px = (body.radius_m / distance_m) as f32 / rad_per_px.max(f32::MIN_POSITIVE);
         out.push(Sighted {
-            subject: Subject::Body(body.name.clone()),
+            subject: Subject::Body(body.name.clone(), labels.of(&body.name)),
             clip: project(offset.normalize_or_zero()),
             radius_px: radius_px.max(0.0),
             rank: rank::BODY,
@@ -686,7 +688,7 @@ mod tests {
     /// apart.
     #[test]
     fn a_click_sends_the_action_the_list_sends() {
-        let body = Subject::Body("Earth".into());
+        let body = Subject::Body("Earth".into(), "Earth".into());
         assert_eq!(body.select(), Some(Action::FocusTarget(Some(Target::Body("Earth".into())))));
 
         let id = StarId::synthesise("test", 7);
@@ -819,7 +821,7 @@ mod tests {
     fn a_star_is_matched_by_identity_and_not_by_name() {
         let id = StarId::synthesise("test", 7);
         assert!(Subject::Star(id, String::new()).is(&Subject::Star(id, "Sol".into())));
-        assert!(!Subject::Star(id, "Sol".into()).is(&Subject::Body("Sol".into())));
+        assert!(!Subject::Star(id, "Sol".into()).is(&Subject::Body("Sol".into(), "Sol".into())));
         assert!(
             !Subject::Star(id, "Sol".into()).is(&Subject::Star(StarId::synthesise("test", 8), "Sol".into()))
         );
