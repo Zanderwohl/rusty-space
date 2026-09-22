@@ -117,6 +117,7 @@ impl Plugin for ClientPlugin {
             crate::library::LibraryPlugin,
             crate::faces::FacesPlugin,
             crate::map::MapPlugin,
+            crate::bench::BenchPlugin,
         ))
             // **Which camera egui draws on is not left to spawn order.**
             //
@@ -148,7 +149,7 @@ impl Plugin for ClientPlugin {
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .init_resource::<panels::HudFoot>()
             .init_resource::<crate::map_panel::WorldInset>()
-            .add_systems(Startup, (spawn_camera, crate::dev::unlock_present))
+            .add_systems(Startup, spawn_camera)
             .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnExit(AppState::InGame), crate::map_panel::release_world_frame)
             .add_systems(OnEnter(AppState::InGame), spawn_sky)
@@ -161,7 +162,6 @@ impl Plugin for ClientPlugin {
                     // Not gated on a state: `--menu --shot` photographs the menu, and the
                     // system does nothing unless a path was asked for.
                     crate::dev::photograph,
-                    crate::dev::bench,
                     crate::dev::run_dev_actions.run_if(in_state(AppState::InGame)),
                     crate::dev::place_at_body.run_if(in_state(AppState::InGame)),
                     crate::dev::place_on_station.run_if(in_state(AppState::InGame)),

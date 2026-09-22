@@ -21,11 +21,32 @@ const BASELINE: Rgba = Rgba(0.55, 0.60, 0.70, 0.55);
 const YEAR_S: f64 = 31_557_600.0;
 
 /// What a drawing depends on. Anything else changing does not need a redraw.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 struct Drawn {
     samples: usize,
     span: (f64, f64),
     size: (u32, u32),
+}
+
+impl Drawn {
+    /// Whether `now` differs from this drawing by as much as a pixel.
+    ///
+    /// A sample arrives every frame and each one moves the whole curve, so redrawing on any
+    /// change rasterized up to four thousand points and uploaded the texture every frame the
+    /// telescope was open. Once the window is full a new sample moves the picture by a fraction
+    /// of a pixel; waiting until it has moved by one keeps the cost near one pixel column's
+    /// worth of work a frame, and no drawn pixel is ever more than one out of date.
+    fn stale(&self, now: &Drawn) -> bool {
+        if now.size != self.size || now.samples < self.samples || now.span.0 < self.span.0 {
+            return true;
+        }
+        let columns = f64::from(now.size.0.max(1));
+        // At a frozen clock every sample lands at the same instant, so time alone never moves.
+        let arrived = (now.samples - self.samples) as f64 >= (now.samples as f64 / columns).max(1.0);
+        let per_column = (now.span.1 - now.span.0) / columns;
+        let advanced = now.span.1 - self.span.1 >= per_column && now.span.1 > self.span.1;
+        arrived || advanced
+    }
 }
 
 /// A cached rendering of the curve.
@@ -48,7 +69,7 @@ impl CurvePlot {
             span: (samples[0].0, samples[samples.len() - 1].0),
             size: (w, h),
         };
-        if self.drawn != Some(now) || self.texture.is_none() {
+        if self.drawn.is_none_or(|drawn| drawn.stale(&now)) || self.texture.is_none() {
             if let Some(image) = render(samples, w, h) {
                 match &mut self.texture {
                     Some(handle) => handle.set(image, egui::TextureOptions::LINEAR),
@@ -123,6 +144,39 @@ pub fn render(samples: &[(f64, f64)], width: u32, height: u32) -> Option<egui::C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn drawn(samples: usize, span: (f64, f64)) -> Drawn {
+        Drawn { samples, span, size: (400, 190) }
+    }
+
+    #[test]
+    fn a_full_curve_waits_for_a_pixel_of_time_before_redrawing() {
+        // Four thousand samples across four hundred columns: a column is ten samples of time.
+        let before = drawn(4000, (0.0, 4000.0));
+        assert!(!before.stale(&drawn(4000, (1.0, 4001.0))), "a tenth of a pixel redrew");
+        assert!(!before.stale(&drawn(4000, (9.0, 4009.0))));
+        assert!(before.stale(&drawn(4000, (10.0, 4010.0))), "a whole pixel did not");
+    }
+
+    #[test]
+    fn a_short_curve_redraws_for_every_sample() {
+        let before = drawn(40, (0.0, 40.0));
+        assert!(before.stale(&drawn(41, (0.0, 41.0))));
+    }
+
+    #[test]
+    fn a_frozen_clock_still_redraws_as_samples_pile_up() {
+        let before = drawn(800, (5.0, 5.0));
+        assert!(!before.stale(&drawn(801, (5.0, 5.0))));
+        assert!(before.stale(&drawn(803, (5.0, 5.0))), "a column of samples should redraw");
+    }
+
+    #[test]
+    fn a_reset_or_a_resize_redraws_at_once() {
+        let before = drawn(4000, (100.0, 4100.0));
+        assert!(before.stale(&drawn(3, (0.0, 3.0))), "a new band kept the old picture");
+        assert!(before.stale(&Drawn { size: (401, 190), ..before }), "a resize kept it");
+    }
 
     fn curve(n: usize, f: impl Fn(usize) -> f64) -> Vec<(f64, f64)> {
         (0..n).map(|k| (k as f64 * YEAR_S * 0.01, f(k))).collect()

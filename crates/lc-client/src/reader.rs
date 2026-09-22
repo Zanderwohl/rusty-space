@@ -481,7 +481,6 @@ pub(crate) fn key(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response 
         .on_hover_text(hint)
 }
 
-/// The page itself: lay it out where the reader is, turn it if they asked, then paint it.
 /// How many pages this chapter has at this size, counted once and kept until one of them
 /// changes. Counting is a whole-chapter pagination, which is the one place this client does
 /// that — and it is why it is cached rather than done per frame.
@@ -489,8 +488,12 @@ pub(crate) fn key(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response 
 pub struct Counted {
     key: Option<(usize, u32, u32)>,
     pages: usize,
+    /// Which page `at` is, under the same key. Counting it means paginating from the top of the
+    /// chapter, which is the work the page count is cached to avoid.
+    folio: Option<(Cursor, usize)>,
 }
 
+/// The page itself: lay it out where the reader is, turn it if they asked, then paint it.
 #[allow(clippy::too_many_arguments)]
 fn page(
     ui: &mut egui::Ui,
@@ -572,11 +575,20 @@ fn page(
     if counted.key != Some(key) {
         counted.key = Some(key);
         counted.pages = paginate::pages(doc, &setter, frame).count();
+        counted.folio = None;
     }
-    let folio_number = paginate::pages(doc, &setter, frame)
-        .position(|p| p.cursor() >= current.cursor())
-        .map(|i| i + 1)
-        .unwrap_or(1);
+    let at = current.cursor();
+    let folio_number = match counted.folio {
+        Some((cached, number)) if cached == at => number,
+        _ => {
+            let number = paginate::pages(doc, &setter, frame)
+                .position(|p| p.cursor() >= at)
+                .map(|i| i + 1)
+                .unwrap_or(1);
+            counted.folio = Some((at, number));
+            number
+        }
+    };
 
     let (outer, _) = ui.allocate_exact_size(Vec2::new(full, height), egui::Sense::hover());
     let rect = Rect::from_min_size(
