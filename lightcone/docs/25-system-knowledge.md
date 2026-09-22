@@ -509,12 +509,12 @@ iterates parts and keys off `part.subject`, which is already any `Subject` inclu
 `report_for` currently halves its system limit until the JSON fits; a one-system report has
 nothing to halve. A system with many bodies and a long tail of sightings can exceed it, so the
 scoped path needs its own answer — drop the oldest sightings per body first, since a fitted orbit
-makes its own input arcs redundant, and say in the popover that it was trimmed.
+makes its own input arcs redundant, and say in the sheet that it was trimmed.
 
 ### The three choices, which are already independent
 
-[05-observation.md](05-observation.md#saying-something) settles this and the popover only has to
-keep it: **addressed to**, **aimed** and **sealed** are three independent choices, and an
+[05-observation.md](05-observation.md#saying-something) settles this and the share sheet only has
+to keep it: **addressed to**, **aimed** and **sealed** are three independent choices, and an
 interface that conflates them is how a player broadcasts a private message in clear.
 
 All three are already separate fields on the order, so nothing has to be invented:
@@ -546,7 +546,7 @@ visible rather than inferred:
 
 ### What is in it, and what is not
 
-The popover states the payload before it goes, because a report's size is real: a full survey
+The sheet states the payload before it goes, because a report's size is real: a full survey
 is megabytes, a beam has a data rate, and every transmission is to cost stored energy
 ([23-factions.md](23-factions.md#cost)). Scoping a report to one system is the answer to the
 bandwidth question 22-provenance raised and left open.
@@ -569,64 +569,115 @@ bandwidth question 22-provenance raised and left open.
 
 ### The surface
 
-**One surface, two ways in,** differing only in which field arrives filled. Two send dialogs that
-drift apart is the failure worth designing against.
+**It is a share sheet,** the one on every phone, and it should feel like one. A player who has
+shared a photo already knows this interaction, and there is nothing about reporting a survey that
+needs a new one invented for it.
 
-| from | arrives with |
-|---|---|
-| the System window (`Y`), or a star in the telescope list | the system fixed, the recipient to pick |
-| a conversation in the communications window (`C`) | the recipient fixed, the system to pick |
+That metaphor is not decoration; it settles the question the two entry points were raising.
+Phones have both directions and so does this, because they are the same surface reached from
+either side:
 
-**It is a popover: a small transient surface over the panel that opened it.** Two rules bear on
-it and neither forbids it:
+| phone | here | arrives with |
+|---|---|---|
+| a photo → **Share** → pick a person | the System window (`Y`), or a star in the telescope list | the system fixed, the recipient to pick |
+| a conversation → **attach** → pick a photo | a conversation in the communications window (`C`) | the recipient fixed, the system to pick |
+
+What carries over from the phone, and why each part is right here rather than merely familiar:
+
+- **The thing being shared stays named at the top.** A share sheet shows the photo's thumbnail. A
+  player about to give away a survey of Sol should be looking at the words *Sol* and what would go
+  with it, since that is exactly the fact they might get wrong.
+- **The sheet sits over what you were looking at,** rather than replacing it, and what is behind
+  it goes quiet — dimmed and not clickable, still there. That is the answer to the modality
+  question below, and the metaphor is what settles it.
+- **Destinations are a list, and "anyone listening" is a row in it.** A phone lists people and
+  AirDrop together; here a broadcast is a row beside the craft rather than a separate mode to
+  switch into. The radio panel's party list already has exactly this shape — **Public** pinned
+  above the craft, most recently heard from first — so the recipient picker is that list.
+- **The common case is one tap, and the options are there for when you want them.** A phone's
+  share sheet has the simple path plus an options row you expand. Aim and seal are that row.
+- **"Sent" is all you get.** A phone tells you it shared and nothing more; a report is **sent, not
+  delivered**, and no acknowledgement is coming. The metaphor is honest about this one where a
+  messaging interface would not be.
+
+One place the phone's habit is wrong, and worth naming so nobody copies it: a share sheet's
+recipient row is ordered by **who you shared with recently**, and it reshuffles. Doc 13 already
+warns about exactly this for the party list — "a list that reorders itself can be misclicked, and
+it reorders exactly when a message lands". Ordering the picker by most-recently-heard-from is the
+same hazard. Either hold the order still while the sheet is open, or order it by something that
+does not move.
+
+**On modality,** since a sheet over a panel raises it. Two rules bear on this and neither forbids
+a sheet:
 
 - [13-client-shell.md](13-client-shell.md#states)'s **"nothing is modal"** is an argument about
   *pausing*, not about transient surfaces. Its reason is that the clock never stops, so an
   overlay that blocks the world behind it claims something untrue, and its subject is `Overlay`
-  not being an `AppState` — the escape menu, settings and the debug window. A send popover blocks
+  not being an `AppState` — the escape menu, settings and the debug window. A share sheet blocks
   nothing and claims nothing; the rule is satisfied by the clock still running behind it.
 - [18-ui-style.md](18-ui-style.md#one-surface-at-a-time)'s **"one surface at a time"** is the rule
   that actually applies, and it is a positive one: when something is modal, what is behind it
   **stands down** — gone, not dimmed and still readable — because two panels of similar size at
   the same place read as one muddled object. The sign-in modal is the worked precedent.
 
-So the popover is **opaque**, per doc 18's rule that anything over another panel is opaque, and
-the open question it raises is how far "stands down" goes here. The sign-in case is a modal the
-size of its parent. This one is small over something large, which is the case doc 18's argument
-does not quite cover: the muddle it warns about comes from *similar* sizes. Worth deciding when it
-is built, and the options are honest ones — leave the parent drawn, dim it, or have it build
-nothing while the popover is up.
+So the sheet is **opaque**, per doc 18's rule that anything over another panel is opaque. On how
+far "stands down" goes, the share sheet decides it: **the parent stays drawn, dimmed and not
+clickable.** Doc 18's worry is a second thing to read and a second set of buttons to try, and
+disabling the parent's controls answers that without removing the very thing the player is
+sharing — which is the point of it being visible at all. The sign-in case goes all the way to
+*gone* because it is a modal the size of its parent, where two similar surfaces at one place read
+as one muddled object; a small sheet over a large panel is not that case, and the phone has been
+demonstrating the difference for fifteen years.
 
-In implementation it is still a `Panel` arm in `panels::open_panels`, since that is where every
-surface in the client is drawn and a second mechanism would be the real cost. Nothing about
-living there makes it less of a popover: it opens with its context filled in, it sits over its
-parent, and it closes when the report goes.
+In implementation it is a `Panel` arm in `panels::open_panels`, since that is where every surface
+in the client is drawn and a second mechanism would be the real cost. Nothing about living there
+makes it less of a sheet: it opens with its context filled in, it sits over its parent, and it
+closes when the report goes.
 
-Its fields, top to bottom: the system and what would go, the recipient, the aim, the seal, and one
-button that **says what it will do** — *Beam to Kestrel, sealed*, or *Shout to anyone listening,
-open* — rather than **Send**. The button naming the act is what makes the three independent
-choices legible at the moment they take effect, which is the entire reason for keeping them
-independent, and it is where a player catches themselves about to give a survey away.
+Top to bottom: **what is being shared**, the **recipient list**, an expandable **options** row
+holding the aim and the seal, and one button that **says what it will do** — *Beam to Kestrel,
+sealed*, or *Shout to anyone listening, open* — rather than **Send**. The button naming the act is
+what keeps the three choices legible at the moment they take effect even when a player never
+opened the options row, which is what makes a one-tap share compatible with
+[05-observation.md](05-observation.md#saying-something)'s insistence that the choices stay
+independent and visible.
 
-Two pieces of the client can be reused rather than rebuilt:
+**Defaults, which a share sheet cannot avoid having.** One tap means the options chose themselves,
+and one of them decides whether a survey is given away. So the defaults are the **private** ones
+and shouting is the deliberate act:
 
-- **The recipient picker is the channel list.** Today a report's addressee is whichever
-  conversation is open, and there is no way to report to a craft without opening its conversation.
-  The same party list the radio panel draws is the picker.
+| | default | when |
+|---|---|---|
+| aim | beam at the recipient | they are in sight. `Aim::Ship` is refused `NotInSight` otherwise, so omni is then the only option and the beam row says why |
+| seal | sealed | this ship holds their key. Otherwise open, and the row says it is open and what that means |
+
+That polarity is the one that matches the rest of the design: 05-observation's "first contact is
+loud by necessity" makes shouting the thing you do when you must, not the thing that happens
+because you did not look. A player can still broadcast a survey in clear — 05-observation is
+explicit that the interface should let them make the mistake — but it takes an act, and the button
+will have said *Shout to anyone listening, open* before they made it.
+
+Two pieces of the client are reused rather than rebuilt:
+
+- **The recipient picker is the radio panel's party list**, Public pinned above the craft. Today a
+  report's addressee is whichever conversation happens to be open, and there is no way to report
+  to a craft without opening its conversation first.
 - **The system picker is the star list**, and `Ui::selected` is already "one selection, whichever
   view you are looking at" — the telescope list, the sky and the map all send
-  `Action::SelectTarget`. Opening this from the System window means the system is simply the
-  selected one.
+  `Action::SelectTarget`. Shared from the System window, the system is just the selected one.
 
 The client's own `Aimed` enum — `Omni`, `AtThem`, `AtTheSelectedStar` — is the existing mirror of
-`Aim` and already encodes "at whatever star the telescope is on" as an interface fact rather than
-a protocol one. It is what the aim row should use here too.
+`Aim`, encoding "at whatever star the telescope is on" as an interface fact rather than a protocol
+one. The options row uses it unchanged. Note `AtTheSelectedStar` is doing double duty once a
+system is the thing being shared, and the two selections are not the same: a player can hold
+Sol's survey while beaming at Vega, and the row has to say which star it is aiming at rather than
+assume it is the one being reported.
 
 **What comes back: nothing, and the surface has to say so.** A report is not a conversation and
 writes no transcript row ([22-provenance.md](22-provenance.md#reports-on-the-air)). The sender
 gets the shard's acceptance and no more; the recipient gets a notification — today
 `"{who}: told you about {n} stars"` (`uplink.rs:629`) — and the knowledge arrives in their next
-`Learned`. So the window closes on acceptance and leaves no thread to watch, because there is
+`Learned`. So the sheet closes on acceptance and leaves no thread to watch, because there is
 nothing to watch: a report is **sent, not delivered**, no acknowledgement is coming, and the
 amber unacknowledged triangle a message gets would be a lie here. A player who wants to be sure
 sends it again. That notification should name the system for a scoped report rather than counting
@@ -843,7 +894,7 @@ knowledge. Today:
 8. **The rest of what a body is.** Belt planes from thermal imaging, and spectra finer than the
    bands, if a later instrument adds them.
 9. **Reporting one system on purpose.** `about` on the order, the scoped gather beside
-   `report_upto`, the mark left alone, the `REPORT_LIMIT` trim, and the send popover with its three
+   `report_upto`, the mark left alone, the `REPORT_LIMIT` trim, and the share sheet with its three
    choices and both ways in. **Done when:** a craft can send everything it knows about one system
    to a named craft or to nobody, beamed or shouted, sealed or open; the mark to that recipient is
    unchanged afterwards; a scoped send with nothing new is not refused; a broadcast refuses a
@@ -909,5 +960,8 @@ game has no players — so each of these is a change in place, not a versioned a
   (2026-09-22).
 - **Courses fly against believed positions,** and re-plan as the belief improves (2026-09-22).
 - **A player can report one system on purpose,** to a craft or to nobody, beamed or shouted,
-  sealed or open, from one popover with two ways into it. A targeted report does not move the
-  recipient's mark and is not refused for having nothing new (2026-09-22).
+  sealed or open. A targeted report does not move the recipient's mark and is not refused for
+  having nothing new (2026-09-22).
+- **The send surface is a phone's share sheet,** deliberately familiar, reached from the system
+  or from the conversation, with the parent dimmed behind it and the private options as the
+  defaults (2026-09-22).
