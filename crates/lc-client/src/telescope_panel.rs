@@ -113,10 +113,7 @@ fn room(ui: &mut egui::Ui, game: &Game) {
     let mb = |bytes: f64| bytes / 1_048_576.0;
     ui.label(format!("Data: {:.2} of {:.2} MB", mb(used), mb(capacity)));
     if used >= capacity {
-        ui.colored_label(
-            egui::Color32::from_rgb(230, 150, 60),
-            "Full: the telescope still measures, but nothing keeps the samples. Reading a log into a conclusion frees its room.",
-        );
+        ui.colored_label(egui::Color32::from_rgb(230, 150, 60), "Data full.");
     }
 }
 
