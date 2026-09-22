@@ -457,8 +457,10 @@ Three things the shapes buy:
 - **An altitude is in radii above the surface**, not kilometers, so `low` means the same thing
   at Deimos and at Jupiter — bodies four orders apart in size.
 - **A polar orbit is one whose normal is perpendicular to the body's pole**, and an equatorial
-  one has the pole for its normal. One line either way, and the same `Orbit` draws a ring
-  system by taking the ring plane instead.
+  one has the pole for its normal. That leaves a polar orbit's node free, so the one chosen
+  passes through the ship and runs the way it is already going: equatorial to polar is one
+  burn where the ship stands, not a wait for a node or a flight to one. The same `Orbit` draws
+  a ring system by taking the ring plane instead.
 - **A crossing meets an orbit at its nearest point.** An orbit is a circle and a ship arriving
   at one has a near side; entering at whatever point the clock happened to have it can mean a
   crossing straight through the body. The phase is therefore chosen when the course is planned
