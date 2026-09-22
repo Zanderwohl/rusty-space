@@ -41,7 +41,7 @@ never reaches a player.
 |---|---|---|
 | `Sighting` | a bearing to the body and its reflected flux, as for a star | imaging inside the system |
 | `Orbit` | elements with errors, and how much of the orientation is known (below) | a transit fit, an astrometric fit, or a claim |
-| `Naming` | as now: a planet letter from `found_planet`, and any given name | the crew, the charts |
+| `Naming` | as now: a planet letter from `found_planet`, and any given name | the crew, other craft |
 | `Conclusion` | what kind of body: rocky or giant, and later temperature and albedo | transit depth, reflected and thermal flux |
 
 `Orbit` grows from one number to what a fit actually yields:
@@ -56,7 +56,7 @@ pub struct Orbit {
     /// A time at which the body was at a known place on the orbit: a transit's mid-time, or an
     /// astrometric fit's epoch. With a full orientation this places the body now.
     pub epoch_s: Option<f64>,
-    pub method: Method,                  // Transit, Astrometric, Claim
+    pub method: Method,                  // Transit, Astrometric, or Claim: stated by a craft that sent no raw data
     pub stated_s: f64,
     pub lineage: Lineage,
 }
@@ -177,13 +177,15 @@ Sol's major planets and large moons get an authored table of their real values. 
 system's come from rules on mass, radius and the starlight falling on it. The generator also
 needs moons, where it does not already make them, or no generated planet has a mass to find.
 
-### On somebody's word: the charts
+### Nothing on creation
 
-A new ship is issued the charts of the volume it launched from (22-provenance.md). Its **home
-system** comes with them: the major planets' orbits as `Claim`-method `Orbit` records from the
-charting office, one hop, errors of a few percent on size and a degree or so on orientation.
-Minor bodies are not charted. So a ship starting at Sol knows its planets from day one, as
-something it was told, and can check them with its own telescope.
+**A new ship knows literally nothing** (decided 2026-09-22). No charts: not its home system's
+planets, and not the stars around it either. Everything it knows it looked at or was told by
+another craft. This replaces the charting office of [22-provenance.md](22-provenance.md), which
+issued a new ship twenty light-years of star distances and would have issued its home planets.
+
+So the first minutes of a new ship are looking: its own star is a bright bearing with no
+distance, and the survey from inside is what turns it into a system.
 
 ### From other craft
 
@@ -243,8 +245,9 @@ nothing else.
 
 ### The System panel
 
-The body list shows **known bodies only**, outward by believed distance, planets lettered. A
-transit candidate below `SETTLED` does not appear. A system with nothing known says so.
+The body list shows **known bodies only**, outward by believed distance, planets lettered.
+Transit candidates below `SETTLED` are listed after them, dimmed, with their probability. A system
+with nothing known says so.
 
 Beneath the list, a detail section shaped like the telescope's star section:
 
@@ -254,7 +257,7 @@ Beneath the list, a detail section shaped like the telescope's star section:
 - **Type:** `giant 94%, rocky 6%`;
 - **Orientation:** `known ± 0.4°`, `edge-on to one line of sight`, or `unknown`;
 - a small **Sources** section: *3 transits seen by this ship*, *orbit fitted to 14 bearings over
-  38 days*, *on the charts' word*, *relayed once*;
+  38 days*, *on craft 12's word*, *relayed once*;
 - then the courses, as now, but only the ones the knowledge supports (below).
 
 A header row for the star gives the **system plane**: `solved from 3 orbits, ± 0.6°`, or
@@ -267,6 +270,12 @@ A header row for the star gives the **system plane**: `solved from 3 orbits, ± 
   own believed plane.
 - A body with `Shell` is a dashed circle facing the camera at its radius: a sphere seen edge-on,
   saying "somewhere at this distance".
+- **Unconfirmed transit candidates are drawn,** in a fainter green than a settled body, at the
+  distance their period gives.
+- **A distance's error is drawn,** as an error bar running radially from the star along the
+  presumed plane: the believed system plane when there is one, otherwise the plane that contains
+  the line of sight the transit was seen along. A candidate's bar is usually wide, because its
+  period may still be an alias and the star's mass is a prior; it shrinks as the belief does.
 - The reference plane option becomes **System plane**, the believed one, with zero longitude as
   above. When the plane is unknown the option is disabled and says why; Galactic is always
   available. `em_map::Plane` gains a variant carrying a basis rather than hard-wiring `+Z`. Only
@@ -285,10 +294,22 @@ Offered from what is known, not from the generator:
 The spin axis of a planet, which is what "equatorial" and "polar" mean, is its own record from
 imaging: until it is held, those two options are replaced by "orbit at altitude".
 
-Flying still happens against the true system once a course is chosen, as a crossing to a star
-still aims at the catalogue position (22-provenance.md, *Navigation on beliefs*). What changes is
-which courses a player is offered. Aiming at the believed position and finding the planet is not
-quite there is the same deferred mechanic as for stars.
+**Courses are flown against believed positions** (decided 2026-09-22). A course aims at where
+the crew believes the body will be, from its believed orbit, and arrives off by the belief's
+error. That is the mechanic, not a flaw in it:
+
+- While a ship flies, its telescope keeps working, and a better belief **re-plans the course**,
+  as a pursuit re-plans against a moving quarry (`chase`). Approaching a planet is itself a
+  survey with a shrinking baseline problem: the closer it gets, the better it knows where it is
+  going.
+- A ship that arrives where a planet was believed to be and finds nothing there is told so, and
+  what it holds is only as good as its sources. Somebody else's stated orbit, relayed twice, is
+  worth checking before trusting it with a flight.
+- **An orbit around a body needs its mass.** Orbital speed at an altitude is set by it. A body
+  with no mass held, like Venus without a moon, offers "hold station at altitude" rather than an
+  orbit, until a mass is known.
+- Crossings between stars follow the same rule. That is the approach of 22-provenance.md's
+  *Navigation on beliefs*, and it is scheduled with the rest of this rather than deferred.
 
 ## Phases
 
@@ -297,9 +318,10 @@ quite there is the same deferred mechanic as for stars.
    galactic node. That is a stopgap which reads the generator, as the System panel already does,
    and it is replaced in phase 3.
 2. **Records and beliefs.** The full `Orbit` with `Orientation` and `Method`, knowledge format 5,
-   `BodyBelief`, `SystemPlane`, and charts that issue the home system's planets.
-3. **The panel and the map read beliefs.** Known bodies only, shells, the System plane option
-   from belief, and the detail section with sources.
+   `BodyBelief` and `SystemPlane`. New ships stop being issued charts.
+3. **The panel and the map read beliefs.** Known bodies only, candidates in fainter green,
+   shells, distance error bars along the presumed plane, the System plane option from belief, and
+   the detail section with sources.
 4. **Transits make bodies.** A settled transit calls `found_planet`, the period gives a distance
    through the mass prior, and the result is `EdgeOnTo`, crossed with other craft's.
 5. **What a body is, in the truth.** Albedo per band, atmosphere, rotation, internal heat, rings,
@@ -312,15 +334,15 @@ quite there is the same deferred mechanic as for stars.
    (Saturn's to 1%), radii to 1%, masses to 1% where a moon gives one, the leading type above
    99% and matching the table above, and the system plane to 0.1°. Every one of them has a
    position within the first real second.
-7. **Courses from beliefs.** Options gated by what is known, and orbits of unknown orientation.
+7. **Courses from beliefs.** Options gated by what is known, courses aimed at believed positions
+   and re-planned as the belief improves, station-keeping where no mass is held, and crossings
+   between stars aimed the same way.
 8. **The rest of what a body is.** Belt planes from thermal imaging, and spectra finer than the
    bands, if a later instrument adds them.
 
-## Open
+## Decided
 
-- **Home system on the charts:** planets and major moons as claims (recommended), or nothing, so
-  a new ship has to find even its own neighbors.
-- **Unconfirmed candidates:** hidden until settled (recommended), or drawn as a shell marked
-  unconfirmed.
-- **Flying on truth:** courses offered from belief but flown against truth for now
-  (recommended), or aimed at the belief with its error, which is a mechanic of its own.
+- **A new ship knows nothing,** not even its home system or the stars around it (2026-09-22).
+- **Unconfirmed candidates are drawn,** fainter, with distance error bars along the presumed plane
+  (2026-09-22).
+- **Courses fly against believed positions,** and re-plan as the belief improves (2026-09-22).

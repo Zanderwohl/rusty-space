@@ -213,6 +213,11 @@ anyone has identified its source — and the telescope is what turns it from a l
 
 ## Starting from nothing
 
+**Superseded (2026-09-22):** a new ship is issued nothing at all, not even charts. It knows only
+what it looks at or is told by another craft. See
+[25-system-knowledge.md](25-system-knowledge.md). What follows is the charting office as it was
+designed and is still built, until phase 2 there removes it.
+
 A new ship is not issued the sky. It is issued the **charts of the volume it launched from**:
 claims from a charting office it will never meet, one hop of lineage, error growing with range,
 and nothing at all past the edge. Everything beyond that is sky the player surveys or is told
@@ -323,7 +328,8 @@ Most of what was on this list is now planned in detail as phase 11 of
 persistence, conclusions from logs ([24-standing-instruments.md](24-standing-instruments.md)),
 factions and relays ([23-factions.md](23-factions.md)). Two items are not part of it:
 
-1. **Navigation on beliefs.** Deferred by decision. A crossing still aims at the catalogue
+1. **Navigation on beliefs.** Now scheduled: courses fly against believed positions, in phase 7
+   of [25-system-knowledge.md](25-system-knowledge.md). Deferred until then. A crossing still aims at the catalogue
    position. It ought to aim at the believed one and arrive off by the error on it — which for a
    charted star is far wider than the shell it is aiming into, so the crossing has to refine the
    fix as its own baseline opens. That is a mechanic of its own: the approach where you find out
