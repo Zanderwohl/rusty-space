@@ -43,6 +43,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 |---|---|
 | `--shot <path> --frames <n>` | photograph and quit |
 | `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
+| `--bench <n>` | time `n` frames after `--frames` of warm-up and quit: frame time, main-world CPU, render passes. See `src/bench.rs` |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
 | `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
 | `--panel <name>` / `--tune` | open a panel. `--panel map` is the exception: the map is a mode of the main view, so this is a pin holding it there |
@@ -123,6 +124,10 @@ Each of these cost real time. None of them are visible from the code that hits t
 - Render positions are f32 relative to the camera: about **six meters** at a hundred thousand
   kilometers. Never place the camera on a surface — an infinitely thin sheet containing the
   camera swings wildly from frame to frame.
+- **Frame time on macOS comes in whole refresh intervals**, vsync or not: the compositor paces
+  a windowed surface. On a 75 Hz display every frame is 13.3 or 26.7 ms, so a saving smaller
+  than an interval cannot show in it. `--bench` prints main-world CPU as well, which is not
+  quantized — compare that, and compare only runs at the same printed window size.
 - Two runs stopped at frame `n` and frame `n+1` are **not** consecutive frames. They have
   accumulated different wall time. Use `--burst`.
 - `--turn` and `--pitch` **do not always land**. Three runs of one `--pitch 60 --frames 200`
