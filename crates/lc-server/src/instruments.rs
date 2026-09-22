@@ -307,7 +307,8 @@ impl<J: Journal> Server<J> {
     pub(crate) fn act_on_knowledge(&mut self, id: CraftId, order: &Order, at_s: f64) -> Result<Order, Refusal> {
         match order {
             Order::SetDuty { duty, integration_s } => {
-                if !(integration_s.is_finite() && *integration_s >= 0.0) {
+                let integration_ok = (0.0..=lc_proto::INTEGRATION_MAX_S).contains(integration_s);
+                if !integration_ok || !duty.is_valid() {
                     return Err(Refusal::Impossible);
                 }
                 let aboard = self.aboard(id);
@@ -634,5 +635,38 @@ mod tests {
         assert!(original.own_series(watched, em_spectra::Band::V).unwrap().len() > 40_000, "a log longer than a page");
         assert_eq!(copy.len(), original.len(), "every file arrived");
         assert_eq!(copy.own_series(watched, em_spectra::Band::V), original.own_series(watched, em_spectra::Band::V), "and the whole log");
+    }
+
+    /// Review item 10. Every number in a duty is checked: a NaN radius, which `clamp` would
+    /// pass through and which would finish an all-sky sweep in a tick, is refused, and so is a
+    /// zero direction, a dwell out of range and a watch longer than the limit.
+    #[tokio::test]
+    async fn a_duty_with_a_number_no_telescope_could_take_is_refused() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let sweep = |center: [f64; 3], radius_rad: f64, dwell_s: f64| lc_proto::Duty::Sweep { center, radius_rad, dwell_s, started_s: 0.0 };
+        let bad = [
+            (sweep([0.0, 0.0, 1.0], f64::NAN, 60.0), 1.0e4),
+            (sweep([0.0, 0.0, 0.0], 1.0, 60.0), 1.0e4),
+            (sweep([f64::INFINITY, 0.0, 1.0], 1.0, 60.0), 1.0e4),
+            (sweep([0.0, 0.0, 1.0], 1.0, 0.0), 1.0e4),
+            (sweep([0.0, 0.0, 1.0], 1.0, f64::NAN), 1.0e4),
+            (lc_proto::Duty::Watch { stars: vec![1; lc_proto::WATCH_LIMIT + 1], dwell_s: 60.0, started_s: 0.0 }, 1.0e4),
+            (lc_proto::Duty::Watch { stars: Vec::new(), dwell_s: 60.0, started_s: 0.0 }, 1.0e4),
+            (lc_proto::Duty::Idle, f64::NAN),
+            (lc_proto::Duty::Idle, 1.0e12),
+        ];
+        for (duty, integration_s) in bad {
+            wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty: duty.clone(), integration_s }));
+            server.tick(&mut wire).await.unwrap();
+            let said = wire.take(ClientId(1));
+            assert!(
+                said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::Impossible, .. })),
+                "{duty:?} at {integration_s} was not refused",
+            );
+            assert_eq!(server.duty_of(ship), Some(&Duty::Idle), "and the telescope did not take it up");
+        }
     }
 }

@@ -926,7 +926,7 @@ pub mod golden;
 mod knowing;
 mod radio;
 
-pub use knowing::{Duty, NAME_LIMIT, Subject};
+pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
 
 pub use radio::{
     ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,

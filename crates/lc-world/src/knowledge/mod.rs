@@ -46,6 +46,10 @@ pub use subject::{BodyId, Subject};
 /// baseline. Sixteen well-spread bearings measure a parallax as well as a thousand.
 pub const BEARINGS_KEPT: usize = 16;
 
+/// How many relative namings deep a name is read before it stops: see
+/// [`Knowledge::name_of`].
+pub const NAME_DEPTH: usize = 10;
+
 /// What one photometric sample takes aboard, bytes: a time, a value and an error.
 pub const SAMPLE_BYTES: f64 = 24.0;
 
@@ -433,12 +437,26 @@ impl Knowledge {
     /// "Hearthlight b" aboard a ship that calls the star Hearthlight, and follows the star when
     /// it is renamed.
     pub fn name_of(&self, subject: impl Into<Subject>) -> Option<String> {
-        let subject = subject.into();
-        let naming = self.files.get(&subject)?.naming(self.owner)?;
+        self.name_at_depth(subject.into(), 0)
+    }
+
+    /// [`Knowledge::name_of`], with how many relative namings deep it already is. A report can
+    /// carry anything, including a relative naming on a star, which would read after itself for
+    /// ever; past [`NAME_DEPTH`] the subject goes by where it is instead.
+    fn name_at_depth(&self, subject: Subject, depth: usize) -> Option<String> {
+        let file = self.files.get(&subject)?;
+        let naming = file.naming(self.owner)?;
         match naming.kind {
+            NameKind::Relative if depth >= NAME_DEPTH => {
+                let toward = file.sightings.first().map_or(glam::DVec3::Z, |s| s.bearing.toward);
+                Some(designation(toward))
+            }
             NameKind::Relative => {
-                let star = self.name_of(subject.star()?).unwrap_or_else(|| "?".into());
-                Some(format!("{star} {}", naming.name))
+                let star = match subject.star() {
+                    Some(star) => self.name_at_depth(Subject::Star(star), depth + 1),
+                    None => None,
+                };
+                Some(format!("{} {}", star.unwrap_or_else(|| "?".into()), naming.name))
             }
             _ => Some(naming.name.clone()),
         }
@@ -1258,5 +1276,31 @@ mod tests {
         assert_eq!(k.own_series(a, Band::V).unwrap().len(), 1);
         assert_eq!(k.own_series(a, Band::K).unwrap().len(), 1);
         assert_eq!(k.own_series(b, Band::V).unwrap().len(), 1);
+    }
+
+    /// Review item 17. A report can say anything, including that a star's name is relative to
+    /// itself. Reading it gives a name back rather than recursing until the stack is gone.
+    #[test]
+    fn a_hostile_relative_name_reads_as_something() {
+        let star = star_id(99);
+        let hostile = Report {
+            from: Witness(9),
+            sent_s: 1.0,
+            entries: vec![Entry {
+                system: Subject::Star(star),
+                parts: vec![Part {
+                    subject: Subject::Star(star),
+                    sightings: vec![sighting(9, DVec3::ZERO, DVec3::X, 0.0)],
+                    claims: Vec::new(),
+                    names: vec![Naming { witness: Witness(9), name: "b".into(), kind: NameKind::Relative, stated_s: 1.0, lineage: Vec::new() }],
+                    orbits: Vec::new(),
+                    conclusions: Vec::new(),
+                }],
+            }],
+        };
+        let mut ship = Knowledge::new(Witness(1));
+        ship.receive(&hostile, 3.0);
+        let name = ship.name_of(star).expect("a name");
+        assert_eq!(name.matches(" b").count(), NAME_DEPTH, "{name}");
     }
 }

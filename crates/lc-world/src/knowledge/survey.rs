@@ -201,7 +201,9 @@ impl Sweep {
     pub fn region(center: DVec3, radius_rad: f64, started_s: f64) -> Self {
         Self {
             center: center.normalize_or(DVec3::Z),
-            radius_rad: radius_rad.clamp(FIELD_RAD, std::f64::consts::PI),
+            // A NaN radius is refused before it gets here; if one did, all-sky is the honest
+            // reading of "no bound", where a clamp would pass the NaN through.
+            radius_rad: if radius_rad.is_nan() { std::f64::consts::PI } else { radius_rad.clamp(FIELD_RAD, std::f64::consts::PI) },
             field_rad: FIELD_RAD,
             dwell_s: DWELL_S,
             started_s,

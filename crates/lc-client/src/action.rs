@@ -390,7 +390,8 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                     Duty::Idle
                 } else {
                     let started_s = session.coordinate_time_s();
-                    Duty::Watch { targets, dwell_s: ui.integration_s.max(1.0), started_s }
+                    let dwell_s = ui.integration_s.clamp(lc_proto::DWELL_MIN_S, lc_proto::DWELL_MAX_S);
+                    Duty::Watch { targets, dwell_s, started_s }
                 };
                 set_duty(ui, session, duty, &mut effects);
                 effects.push(Effect::Notify(format!("watching {count} stars")));
