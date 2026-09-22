@@ -270,6 +270,11 @@ impl Knowledge {
         }
     }
 
+    /// Every subject this craft keeps the raw log of.
+    pub fn retained_subjects(&self) -> Vec<Subject> {
+        self.files.iter().filter(|(_, f)| f.retained).map(|(s, _)| *s).collect()
+    }
+
     pub fn retained(&self, subject: impl Into<Subject>) -> bool {
         self.files.get(&subject.into()).is_some_and(|f| f.retained)
     }

@@ -167,6 +167,7 @@ impl<J: Journal> Server<J> {
                     idem: *idem,
                     sealed,
                     body: Some(report),
+                    format: lc_proto::REPORT_FORMAT,
                 };
                 Ok(Transmission {
                     kind: lc_proto::kind::REPORT,
@@ -725,6 +726,23 @@ mod tests {
             )),
             "sealing needs a key that has arrived",
         );
+
+        // With Bry's key, sealed goes out: the addressee is taught what it carries, and the
+        // craft that overhears it is taught nothing, however it reached it.
+        server.keys.entry(CraftId(1)).or_default().insert(ShipId(2), 0);
+        let secret = teach(&mut server, 1, 2);
+        wire.client_says(
+            ada,
+            Inbound::Act(Intent { ship_id: ShipId(1), order: survey(Secrecy::Sealed), issued_at_client_t: 0 }),
+        );
+        let until = server.now_t() + TWO_LIGHT_HOURS as i64 + 2 * TICK_US;
+        while server.now_t() < until {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let heard = reports(&wire.take(nosy));
+        assert!(heard.iter().any(|r| r.sealed && r.body.is_none()), "the eavesdropper hears a sealed report with no body");
+        assert!(server.knowledge_of(ShipId(2)).is_some_and(|k| k.knows(secret)), "the addressee learns it");
+        assert!(!server.knowledge_of(ShipId(3)).is_some_and(|k| k.knows(secret)), "the eavesdropper does not");
     }
 
     /// A report is not a conversation: nothing files one in a transcript, so a ship signing in

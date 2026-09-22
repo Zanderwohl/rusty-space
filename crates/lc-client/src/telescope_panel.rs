@@ -41,16 +41,17 @@ pub fn telescope(
     room(ui, game);
     ui.separator();
 
-    ui.label(format!("Detected: {} stars", game.knowledge.stars().count()));
+    let order = known(game);
+    let seen = game.knowledge.stars().filter(|(_, b)| b.hops == 0).count();
+    ui.label(format!("Known: {} stars, {seen} seen by this ship", order.len()));
+    // Only the rows on screen are laid out, and only their labels are written.
+    let row_height = ui.text_style_height(&egui::TextStyle::Body);
     egui::ScrollArea::vertical()
         .max_height(160.0)
-        .show(ui, |ui| {
-            for line in detected(game) {
-                if ui
-                    .selectable_label(state.selected == Some(line.id), line.label)
-                    .clicked()
-                {
-                    ask(out, Action::SelectTarget(Some(line.id)));
+        .show_rows(ui, row_height, order.len(), |ui, rows| {
+            for &(_, id) in order.get(rows).unwrap_or_default() {
+                if ui.selectable_label(state.selected == Some(id), label(game, id)).clicked() {
+                    ask(out, Action::SelectTarget(Some(id)));
                 }
             }
         });
@@ -233,44 +234,30 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     });
 }
 
-/// One line of the target list.
-struct Detected {
-    id: StarId,
-    label: String,
-}
-
-/// Stars this ship has detected, nearest believed first, with what is believed about them.
-///
-/// Not the catalogue. A star nobody aboard has seen does not appear, which is the whole point:
-/// the list is a record of work done, not a table handed over at the start.
-fn detected(game: &Game) -> Vec<Detected> {
-    let mut lines: Vec<(f64, Detected)> = game
+/// Every star this ship knows, nearest believed first, as an order to show them in. Cheap: no
+/// labels, which only the rows on screen get.
+fn known(game: &Game) -> Vec<(f64, StarId)> {
+    let here = game.ship.motion.position_ly;
+    let mut order: Vec<(f64, StarId)> = game
         .knowledge
         .stars()
         .map(|(id, belief)| {
-            let name = game.name_of(id);
-            let (order, distance) = match belief.distance {
-                Distance::Measured { sigma_ly, .. } => {
-                    let ly = belief
-                        .distance
-                        .from(game.ship.motion.position_ly)
-                        .unwrap_or(0.0);
-                    (ly, format!("{ly:.2} +/- {sigma_ly:.2} ly"))
-                }
-                Distance::AtLeast(ly) => (1e9, format!("beyond {ly:.1} ly")),
-                Distance::Unknown => (2e9, "bearing only".to_string()),
+            let key = match belief.distance {
+                Distance::Measured { .. } => belief.distance.from(here).unwrap_or(0.0),
+                Distance::AtLeast(_) => 1e9,
+                Distance::Unknown => 2e9,
             };
-            (
-                order,
-                Detected {
-                    id,
-                    label: format!("{name} — {distance}"),
-                },
-            )
+            (key, id)
         })
         .collect();
-    lines.sort_by(|a, b| a.0.total_cmp(&b.0));
-    lines.into_iter().map(|(_, line)| line).collect()
+    order.sort_by(|a, b| a.0.total_cmp(&b.0));
+    order
+}
+
+/// One row of the list: the name, and the range as far as this ship knows it.
+fn label(game: &Game, id: StarId) -> String {
+    let range = crate::range::describe(game.knowledge.belief(id), game.knowledge.owner, game.ship.motion.position_ly);
+    format!("{} — {range}", game.name_of(id))
 }
 
 /// The field that calls a star something.

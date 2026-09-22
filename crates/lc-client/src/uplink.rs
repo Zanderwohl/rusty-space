@@ -854,8 +854,13 @@ fn fold(
             Err(why) => warn!(%why, "a knowledge page that would not parse"),
         },
         // Its own photometry, which no report carries.
-        Outbound::Logged { logs } => match serde_json::from_str::<Vec<lc_world::knowledge::Log>>(&logs) {
-            Ok(logs) => game.0.knowledge.copy_logs(&logs),
+        Outbound::Logged { logs } => match serde_json::from_str::<lc_world::knowledge::Logs>(&logs) {
+            Ok(page) => {
+                game.0.knowledge.copy_logs(&page.logs);
+                for subject in page.retained {
+                    game.0.knowledge.retain_raw(subject, true);
+                }
+            }
             Err(why) => warn!(%why, "a log page that would not parse"),
         },
         Outbound::Observing { duty, integration_s } => game.0.adopt_duty(&duty, integration_s),
@@ -1421,6 +1426,7 @@ mod tests {
             idem: 3,
             sealed: false,
             body: Some(serde_json::to_string(&report).unwrap()),
+            format: lc_proto::REPORT_FORMAT,
         };
         let sighting = Sighting {
             event_id: 21,
@@ -1458,6 +1464,7 @@ mod tests {
             idem: 4,
             sealed: true,
             body: None,
+            format: lc_proto::REPORT_FORMAT,
         };
         let sighting = Sighting {
             event_id: 22,

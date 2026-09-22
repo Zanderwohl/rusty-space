@@ -172,6 +172,14 @@ pub struct Log {
     pub samples: Vec<Sample>,
 }
 
+/// A page of a craft's own logs for its own client, with the subjects it keeps raw — a choice
+/// of the craft's own, which no report carries either.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Logs {
+    pub logs: Vec<Log>,
+    pub retained: Vec<Subject>,
+}
+
 /// A time that orders totally, for an index.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct At(f64);

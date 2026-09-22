@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 33;
+pub const PROTOCOL_VERSION: u32 = 34;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -768,7 +768,7 @@ pub enum Outbound {
     /// changes. Appended last.
     Observing { duty: Duty, integration_s: f64 },
     /// This craft's own photometry since the last of these: a serialized
-    /// `Vec<lc_world::knowledge::Log>`. A report never carries logs, so a client's copy of its
+    /// `lc_world::knowledge::Logs`, with the subjects it keeps raw. A report never carries logs, so a client's copy of its
     /// own curves arrives this way, in pages. Appended last.
     Logged { logs: String },
 }
@@ -929,7 +929,7 @@ mod radio;
 pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
 
 pub use radio::{
-    ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
+    ACK_DEPTH, Aim, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
 };
 
 #[cfg(test)]
@@ -1216,6 +1216,34 @@ mod tests {
         })
     }
 
+    /// The knowledge orders and messages, each field a different value so a swap shows.
+    fn set_duty() -> Inbound {
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::SetDuty {
+                duty: Duty::Sweep { center: [0.25, 0.5, 0.75], radius_rad: 1.5, dwell_s: 60.0, started_s: 7.0 },
+                integration_s: 1.0e4,
+            },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
+    fn name_it() -> Inbound {
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::NameIt { subject: Subject::Body { star: 7, body: 9 }, name: "Kettle".into() },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
+    fn observing() -> Outbound {
+        Outbound::Observing { duty: Duty::Watch { stars: vec![3, 4], dwell_s: 90.0, started_s: 5.0 }, integration_s: 2.0e3 }
+    }
+
+    fn learned() -> Outbound {
+        Outbound::Learned { report: "{}".into() }
+    }
+
     fn send_report() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
@@ -1315,6 +1343,14 @@ mod tests {
             golden::SEND_REPORT,
             "Order::SendReport changed shape at protocol version {PROTOCOL_VERSION}",
         );
+        for (what, bytes, pinned) in [
+            ("Order::SetDuty", encode(&set_duty()), golden::SET_DUTY),
+            ("Order::NameIt", encode(&name_it()), golden::NAME_IT),
+            ("Outbound::Observing", encode(&observing()), golden::OBSERVING),
+            ("Outbound::Learned", encode(&learned()), golden::LEARNED),
+        ] {
+            assert_eq!(bytes, pinned, "{what} changed shape at protocol version {PROTOCOL_VERSION}");
+        }
 
         // The shelf. Appended variants, so their discriminants are the only new numbers here.
         let shelf = Outbound::Library {

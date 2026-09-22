@@ -414,7 +414,7 @@ mod tests {
     /// A craft whose knowledge rows are missing comes back with its charts, not knowing nothing.
     #[tokio::test]
     async fn a_craft_restored_without_knowledge_is_issued_its_charts() {
-        let (mut old, _) = running().await;
+        let (old, _) = running().await;
         let checkpoint = old.checkpoint();
         let mut new = a_shard();
         assert!(new.adopt(checkpoint).is_empty());

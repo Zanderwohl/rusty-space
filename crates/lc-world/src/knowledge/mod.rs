@@ -36,7 +36,7 @@ pub mod transit;
 pub use astrometry::{Bearing, Distance};
 pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;
-pub use report::{ENTRIES_PER_REPORT, Entry, Log, Mark, Part, Report, Reporting};
+pub use report::{ENTRIES_PER_REPORT, Entry, Log, Logs, Mark, Part, Report, Reporting};
 pub use record::{
     Claim, Hop, Lineage, NameKind, Naming, Orbit, Sample, Series, Sighting, Witness,
     learned_s,
@@ -740,6 +740,25 @@ mod tests {
         let age = belief.light_age_s().unwrap();
         assert!((age / crate::flight::JULIAN_YEAR_S - 6.0).abs() < 0.05);
         assert!(belief.emitted_s().unwrap() < belief.observed_s);
+    }
+
+    /// Past the reservoir, it is the looks closest to another that go, not the oldest: an
+    /// early look from far along the orbit is kept over later ones bunched together.
+    #[test]
+    fn the_reservoir_drops_the_closest_look_not_the_oldest() {
+        let mut k = Knowledge::new(Witness(1));
+        let star = star_id(2);
+        let truth = DVec3::new(0.0, 0.0, 6.0);
+        // The first look is from far away; every later one from nearly the same place.
+        let far = DVec3::X * AU_LY * 10.0;
+        k.sighted(star, sighting(1, far, truth - far, 0.0));
+        for i in 1..=(BEARINGS_KEPT as u64 + 4) {
+            let at = DVec3::Y * AU_LY * (1.0 + i as f64 * 1e-3);
+            k.sighted(star, sighting(1, at, truth - at, i as f64 * 1e6));
+        }
+        let kept = k.file(star).unwrap().sightings();
+        assert_eq!(kept.len(), BEARINGS_KEPT);
+        assert!(kept.iter().any(|s| s.observed_s == 0.0), "the oldest look, and the widest, is kept");
     }
 
     /// The reservoir keeps the baseline, which is the thing distance is made of.

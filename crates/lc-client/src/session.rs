@@ -529,7 +529,10 @@ impl Session {
     pub fn observe(&mut self, exposure_s: f64) -> Option<Observation> {
         let id = self.pointing?;
         let target = self.targets.get(&id)?;
-        let obs = observe(target, self.observer, &self.telescope, exposure_s, 0x10c)?;
+        // Seeded as the shard seeds it, by who is looking at what: two craft see different noise
+        // and one craft looking twice sees the same.
+        let seed = lc_world::rng::hash(&[self.knowledge.owner.0, id.get()]);
+        let obs = observe(target, self.observer, &self.telescope, exposure_s, seed)?;
         let now = self.coordinate_time_s();
         let witness = self.knowledge.owner;
         for band in Band::ALL {

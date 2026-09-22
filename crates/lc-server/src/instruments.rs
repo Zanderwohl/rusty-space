@@ -227,8 +227,18 @@ impl<J: Journal> Server<J> {
                 // nobody but its addressee, whoever holds the craft it lands on.
                 let payload = crate::radio::redact(event.kind, &event.payload, scheduled.observer);
                 let Ok(reported) = serde_json::from_str::<lc_proto::Reported>(&payload) else {
+                    eprintln!("WARNING: report {} is not a report; it will not land", event.id);
                     continue;
                 };
+                if reported.format != lc_proto::REPORT_FORMAT {
+                    eprintln!(
+                        "WARNING: report {} is in format {}, not {}; it will not land",
+                        event.id,
+                        reported.format,
+                        lc_proto::REPORT_FORMAT,
+                    );
+                    continue;
+                }
                 let Some(body) = reported.body else { continue };
                 self.instruments.landings.push(Landing {
                     observer: CraftId(scheduled.observer.0),
@@ -252,7 +262,10 @@ impl<J: Journal> Server<J> {
             if landing.strength < floor {
                 continue;
             }
-            let Ok(report) = serde_json::from_str::<Report>(&landing.body) else { continue };
+            let Ok(report) = serde_json::from_str::<Report>(&landing.body) else {
+                eprintln!("WARNING: a report landing on craft {} would not parse", landing.observer.0);
+                continue;
+            };
             let arrived_s = landing.arrive_t as f64 * 1.0e-6;
             self.aboard(landing.observer);
             self.fit(landing.observer, false);
@@ -265,18 +278,34 @@ impl<J: Journal> Server<J> {
     /// copy is caught up.
     pub(crate) fn tell_learned(&mut self, wire: &mut impl Transport) {
         let now_s = self.now_t as f64 * 1.0e-6;
-        let connected: Vec<(lc_proto::ClientId, ShipId, Mark, f64)> =
-            self.clients.iter().map(|(c, state)| (*c, state.ship, state.learned, state.logged_s)).collect();
-        for (client, ship, since, logged) in connected {
+        let connected: Vec<(lc_proto::ClientId, ShipId, Mark, f64, bool)> = self
+            .clients
+            .iter()
+            .map(|(c, state)| (*c, state.ship, state.learned, state.logged_s, state.retained_sent))
+            .collect();
+        for (client, ship, since, logged, retained_sent) in connected {
             let knowledge = &self.aboard(CraftId(ship.0)).knowledge;
             let learned = page(PAGE, |limit| {
                 let (report, through) = knowledge.report_upto(since, now_s, limit);
                 (serde_json::to_string(&report).ok(), through)
             });
+            let retained = knowledge.retained_subjects();
             let logs = page(LOG_PAGE, |limit| {
                 let (logs, through) = knowledge.logs_upto(logged, limit);
-                (serde_json::to_string(&logs).ok(), through)
+                let page = lc_world::knowledge::Logs { logs, retained: retained.clone() };
+                (serde_json::to_string(&page).ok(), through)
             });
+            // A connection is told what its craft keeps raw once, logs or none; after that each
+            // log page says so again, and an accepted order says when it changes.
+            let logs = match logs {
+                None if !retained_sent => serde_json::to_string(&lc_world::knowledge::Logs { logs: Vec::new(), retained })
+                    .ok()
+                    .map(|body| (Some(body), logged)),
+                other => other,
+            };
+            if let Some(state) = self.clients.get_mut(&client) {
+                state.retained_sent = true;
+            }
             if let Some((body, through)) = learned {
                 if let Some(report) = body {
                     wire.send(client, Outbound::Learned { report });
@@ -627,7 +656,11 @@ mod tests {
                     report
                 }
                 Outbound::Logged { logs } => {
-                    copy.copy_logs(&serde_json::from_str::<Vec<lc_world::knowledge::Log>>(logs).unwrap());
+                    let page: lc_world::knowledge::Logs = serde_json::from_str(logs).unwrap();
+                    copy.copy_logs(&page.logs);
+                    for subject in page.retained {
+                        copy.retain_raw(subject, true);
+                    }
                     logs
                 }
                 _ => continue,
@@ -640,6 +673,7 @@ mod tests {
         assert!(original.own_series(watched, em_spectra::Band::V).unwrap().len() > 40_000, "a log longer than a page");
         assert_eq!(copy.len(), original.len(), "every file arrived");
         assert_eq!(copy.own_series(watched, em_spectra::Band::V), original.own_series(watched, em_spectra::Band::V), "and the whole log");
+        assert!(copy.retained(watched), "and that it is kept raw");
     }
 
     /// Review item 10. Every number in a duty is checked: a NaN radius, which `clamp` would

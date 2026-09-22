@@ -77,6 +77,8 @@ pub struct Connected {
     pub learned: lc_world::knowledge::Mark,
     /// The same for the craft's own samples, which come separately. See [`crate::instruments`].
     pub logged_s: f64,
+    /// Whether this connection has been told which subjects its craft keeps raw.
+    pub retained_sent: bool,
 }
 
 pub struct Server<J: Journal> {
@@ -367,6 +369,7 @@ impl<J: Journal> Server<J> {
             backlog_sent: false,
             learned: Default::default(),
             logged_s: f64::NEG_INFINITY,
+            retained_sent: false,
         });
         self.aboard(CraftId(ship_id.0));
     }
@@ -888,6 +891,7 @@ impl<J: Journal> Server<J> {
             backlog_sent: false,
             learned: Default::default(),
             logged_s: f64::NEG_INFINITY,
+            retained_sent: false,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused

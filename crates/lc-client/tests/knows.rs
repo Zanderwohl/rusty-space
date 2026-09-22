@@ -89,4 +89,18 @@ fn a_sweep_finds_stars_the_charts_never_reached() {
         missed > 0,
         "a sky with no blind spots is a bug, not a good telescope"
     );
+    // And some of what it missed it missed for the reason stated: lost in a brighter source's
+    // glare, not merely not reached yet.
+    let optics = lc_world::knowledge::survey::Optics::of(session.telescope);
+    let band = optics.band().expect("a sensor with a band");
+    let mut sky = lc_world::knowledge::observatory::Sky::new(std::sync::Arc::new(session.stars.clone()));
+    let sources = sky.sources(band, session.ship.motion.position_ly);
+    let glared = session
+        .stars
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| !session.knowledge.knows(s.id))
+        .filter(|(i, _)| lc_world::knowledge::survey::hidden_by(&sources, *i, optics.resolution_rad(band)).is_some())
+        .count();
+    assert!(glared > 0, "of {missed} missed, none was hidden by glare");
 }

@@ -144,7 +144,16 @@ pub struct Reported {
     /// this protocol even though it travels as a string: a change to it is a version bump.
     /// `None` when this receiver may not read it.
     pub body: Option<String>,
+    /// Which shape `body` is in: [`REPORT_FORMAT`] when written. A report outlives the process
+    /// that sent it — it is in the journal until its light has passed everyone — so a shard
+    /// reading one written by an older shard needs to know it cannot read it, rather than fail
+    /// to parse it and say nothing. Zero is a report from before this was stated.
+    #[serde(default)]
+    pub format: u32,
 }
+
+/// The shape of a report's body today. Bump it when `lc_world::knowledge::Report` changes shape.
+pub const REPORT_FORMAT: u32 = 2;
 
 /// How many of the addressee's messages an outgoing one acknowledges.
 ///
