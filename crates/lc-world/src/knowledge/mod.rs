@@ -1,12 +1,9 @@
 //! What one craft has actually seen, and who told it the rest.
 //!
-//! There is no current state of a distant system, only measurements: each was taken somewhere,
-//! at some time, by somebody, and reached here by some route. A belief is a fold over the
-//! measurements held, and two craft folding different sets are both right.
-//!
-//! Nothing here knows the truth. Everything in a [`Knowledge`] came in through
-//! [`survey`](crate::knowledge::survey) or through a [`Report`] from another witness, and a
-//! star nobody has seen is simply absent. See `lightcone/docs/22-provenance.md`.
+//! A belief is a fold over the measurements held, each taken somewhere, at some time, by
+//! somebody. Nothing here knows the truth: everything in a [`Knowledge`] came in through
+//! [`survey`] or a [`Report`], and a star nobody has seen is absent.
+//! See `lightcone/docs/22-provenance.md`.
 
 // Nothing in the game loop panics: startup may, and past it a wire message, a row or another
 // craft's report is data. Every exception carries an `allow` with its reason.
@@ -43,11 +40,9 @@ pub use record::{
 };
 pub use subject::{BodyId, Subject};
 
-/// How many bearings per subject per witness are kept.
-///
-/// Distance comes from the spread of the observing positions, so the reservoir keeps the
-/// widest spread rather than the most recent: dropping the closest pair costs the least
-/// baseline. Sixteen well-spread bearings measure a parallax as well as a thousand.
+/// Bearings kept per subject per witness. Distance comes from the spread of observing
+/// positions, so the widest spread is kept rather than the most recent; sixteen well-spread
+/// bearings measure a parallax as well as a thousand.
 pub const BEARINGS_KEPT: usize = 16;
 
 /// How many relative namings deep a name is read before it stops: see
@@ -64,8 +59,6 @@ fn sigma_of(claim: &Claim) -> f64 {
     }
 }
 
-/// Which of two namings a craft goes by: a chosen name over an assigned one, its own over
-/// somebody else's, and the more recent over the older.
 fn better_name(held: Option<&Naming>, new: &Naming, owner: Witness) -> bool {
     let rank = |n: &Naming| (n.kind.chosen(), n.witness == owner, n.stated_s);
     match held {
@@ -78,26 +71,21 @@ fn better_name(held: Option<&Naming>, new: &Naming, owner: Witness) -> bool {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Belief {
     pub subject: Subject,
-    /// The naming this craft goes by, and who said it. `None` for something detected and not
-    /// yet written down anywhere. A relative naming is only a suffix: what to *show* is
-    /// [`Knowledge::name_of`], which reads it after the star's own name.
+    /// `None` until written down anywhere. A relative naming is only a suffix; what to show is
+    /// [`Knowledge::name_of`].
     pub name: Option<Naming>,
     /// The most recent bearing, from wherever that witness was.
     pub bearing: Bearing,
     pub distance: Distance,
-    /// Whether the distance was worked out from bearings this craft holds — its own, or
-    /// somebody's raw measurements relayed to it — rather than taken from a stated number.
-    ///
-    /// Raw bearings from a probe are still a measurement: they can be re-solved, combined with
-    /// this craft's own, and checked. A [`Claim`] cannot be, which is the distinction. Whose
-    /// bearings they were is [`Belief::witnesses`] and [`Belief::hops`].
+    /// Whether the distance was solved from bearings held here, its own or relayed raw, rather
+    /// than taken from a [`Claim`], which cannot be re-solved or checked.
     pub triangulated: bool,
     /// For a distance triangulated here, the angle its widest baseline subtended at the star.
     pub baseline_rad: Option<f64>,
     /// For a distance taken from a claim, whose word it is on.
     pub claimed_by: Option<Witness>,
-    /// This craft's own lower bound, when a claim was believed over it. A chart that puts a star
-    /// nearer than the craft's own bearings allow is a disagreement worth seeing.
+    /// This craft's own lower bound, when a claim was believed over it, so a chart nearer than
+    /// the craft's bearings allow shows as a disagreement.
     pub floor_ly: Option<f64>,
     pub band: Band,
     pub flux: f64,
@@ -112,7 +100,6 @@ pub struct Belief {
 }
 
 impl Belief {
-    /// The star this is a belief about, if it is one.
     pub fn star(&self) -> Option<StarId> {
         self.subject.as_star()
     }
@@ -199,8 +186,7 @@ impl File {
         name
     }
 
-    /// The orbit this craft goes by: its own statement if it has made one, otherwise the most
-    /// recent anybody made.
+    /// Its own statement if it has made one, otherwise the most recent anybody made.
     fn orbit(&self, owner: Witness) -> Option<&Orbit> {
         self.orbits
             .iter()
@@ -216,8 +202,7 @@ impl File {
         let mut witnesses: Vec<Witness> = self.sightings.iter().map(|s| s.witness).collect();
         witnesses.sort_unstable();
         witnesses.dedup();
-        // Measured here beats stated by somebody else, whatever error bars either carries:
-        // one is a measurement this craft can check and the other is a thing it was told.
+        // Measured here beats a claim whatever error bars either carries: only one can be checked.
         let measured = astrometry::triangulate(&bearings);
         let taken = matches!(measured, Distance::Measured { .. });
         let claimed = self.claims.iter().min_by(|a, b| sigma_of(a).total_cmp(&sigma_of(b)));
@@ -251,13 +236,12 @@ impl File {
         })
     }
 
-    /// Keep the bearings that are farthest apart, which is what a parallax is made of.
+    /// Keep the bearings that are farthest apart.
     fn decimate(&mut self, witness: Witness) {
         while self.sightings.iter().filter(|s| s.witness == witness).count() > BEARINGS_KEPT {
             let held: Vec<(usize, &Sighting)> =
                 self.sightings.iter().enumerate().filter(|(_, s)| s.witness == witness).collect();
-            // Never the newest: it is what the display reads, and a curve of one stale
-            // bearing is worse than a slightly narrower baseline.
+            // Never the newest: it is what the display reads.
             let Some(&(newest, _)) = held.iter().max_by(|a, b| a.1.observed_s.total_cmp(&b.1.observed_s)) else {
                 return;
             };
@@ -279,8 +263,8 @@ impl File {
 
 }
 
-/// One photometric sample, as a log row: what it is of, whose it is, and when this craft learned
-/// it — which for a relayed series is when it arrived, not when it was measured.
+/// One photometric sample as a log row. For a relayed series `learned_s` is when it arrived,
+/// not when it was measured.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Logged {
     pub subject: Subject,
@@ -296,22 +280,19 @@ pub struct Knowledge {
     pub owner: Witness,
     files: BTreeMap<Subject, File>,
     beliefs: BTreeMap<Subject, Belief>,
-    /// Files changed since they were last written down, and samples taken since then. Not part
-    /// of what a craft knows — two copies that differ only in what has been saved are the same
-    /// knowledge — so equality ignores them.
+    /// Files and samples not yet written down. Not part of what a craft knows, so equality
+    /// ignores them, as it does every field below `beliefs`.
     changed: std::collections::BTreeSet<Subject>,
     unsaved: Vec<Logged>,
     consumed: Vec<Consumed>,
-    /// What changed when, so that what is new since a mark is read without walking every file:
-    /// anything a report carries, and this craft's own samples.
+    /// What changed when, so what is new since a mark is found without walking every file.
     backlog: report::Backlog,
     sampled: report::Recent,
     /// Subjects with samples added since their log was last read.
     unread: std::collections::BTreeSet<Subject>,
-    /// Subjects whose logs are to be read and consumed whatever they say: see
-    /// [`Knowledge::analyze`]. Not part of what a craft knows.
+    /// Subjects whose logs are to be consumed whatever they say: see [`Knowledge::analyze`].
     analyzing: std::collections::BTreeSet<Subject>,
-    /// Room aboard, and how much of it is in use: see [`room`]. Not part of what a craft knows.
+    /// See [`room`].
     capacity_bytes: f64,
     occupied_bytes: f64,
     unkept: u64,
@@ -342,12 +323,11 @@ impl Knowledge {
         }
     }
 
-    /// What has changed since the last call: every file touched, with its samples taken out,
-    /// and every sample added, as log rows. Clears both.
+    /// Every file touched since the last call, without its samples, and every sample added, as
+    /// log rows. Clears both.
     ///
-    /// Files and samples are stored apart because they grow apart. A file is bounded and is
-    /// rewritten whole when it changes; a watched star's samples are appended every integration
-    /// and would make rewriting its file the most expensive thing a shard did.
+    /// Stored apart because a file is bounded and rewritten whole, while a watched star's samples
+    /// are appended every integration and would make that rewrite the costliest thing a shard did.
     pub fn take_changes(&mut self) -> (Vec<(Subject, File)>, Vec<Logged>) {
         let files = std::mem::take(&mut self.changed)
             .into_iter()
@@ -371,8 +351,8 @@ impl Knowledge {
         self.files.iter().map(|(s, f)| (*s, f.header()))
     }
 
-    /// Rebuild a craft's knowledge from what was written down: its files, then its samples in the
-    /// order they were taken. Nothing restored counts as changed.
+    /// Rebuild from what was written down. Logs must be in the order taken; nothing restored
+    /// counts as changed.
     pub fn restore(
         owner: Witness,
         files: impl IntoIterator<Item = (Subject, File)>,
@@ -446,19 +426,14 @@ impl Knowledge {
             .map(|(s, f)| (*s, f))
     }
 
-    /// What this craft calls something, as a player should see it.
-    ///
-    /// A relative naming is read after the star's name — **this** craft's name for the star,
-    /// whoever assigned the suffix — so a planet a probe called "Kettle b" is shown as
-    /// "Hearthlight b" aboard a ship that calls the star Hearthlight, and follows the star when
-    /// it is renamed.
+    /// What this craft calls something, as a player should see it. A relative naming is read
+    /// after this craft's name for the star, whoever assigned the suffix.
     pub fn name_of(&self, subject: impl Into<Subject>) -> Option<String> {
         self.name_at_depth(subject.into(), 0)
     }
 
-    /// [`Knowledge::name_of`], with how many relative namings deep it already is. A report can
-    /// carry anything, including a relative naming on a star, which would read after itself for
-    /// ever; past [`NAME_DEPTH`] the subject goes by where it is instead.
+    /// A report can carry a relative naming on a star, which would read after itself forever;
+    /// past [`NAME_DEPTH`] the subject goes by its designation instead.
     fn name_at_depth(&self, subject: Subject, depth: usize) -> Option<String> {
         let file = self.files.get(&subject)?;
         let naming = file.naming(self.owner)?;
@@ -483,8 +458,7 @@ impl Knowledge {
         self.file_sighting(subject.into(), sighting);
     }
 
-    /// File a distance somebody states. Nothing is taken on trust that a measurement of its
-    /// own would not override.
+    /// File a distance somebody states.
     pub fn told(&mut self, subject: impl Into<Subject>, claim: Claim) {
         let subject = subject.into();
         let file = self.files.entry(subject).or_default();
@@ -510,10 +484,8 @@ impl Knowledge {
 
     /// File what somebody calls something.
     ///
-    /// Each witness holds one chosen name and one a rule assigned, side by side: renaming a
-    /// planet "Spout" does not unassign its letter, which stays frozen and keeps its place among
-    /// the letters, and the chosen name is what is shown. Renaming is stating a new chosen name,
-    /// and the later statement is what that witness calls it now.
+    /// Each witness holds one chosen name and one a rule assigned. The assigned one is frozen, so
+    /// renaming a planet does not free its letter; a later chosen name replaces the earlier.
     pub fn named(&mut self, subject: impl Into<Subject>, naming: Naming) {
         let subject = subject.into();
         let file = self.files.entry(subject).or_default();
@@ -539,12 +511,9 @@ impl Knowledge {
         self.named(subject, naming);
     }
 
-    /// Record a planet this craft has found, and letter it.
-    ///
-    /// The orbit is filed as this craft's own statement and the letter as a relative naming,
-    /// placed against the letters this craft already goes by for the same star — see
-    /// [`names::planet_letter`]. A planet already lettered keeps its letter: nothing a rule
-    /// assigned is ever reassigned. Returns the letter.
+    /// Record a planet this craft has found, and letter it against the letters it already uses
+    /// for the star (see [`names::planet_letter`]). A planet already lettered keeps its letter.
+    /// Returns the letter.
     pub fn found_planet(
         &mut self,
         star: StarId,
@@ -572,8 +541,7 @@ impl Knowledge {
             .members(star)
             .filter(|(s, _)| *s != subject && matches!(s, Subject::Body { .. }))
             .filter_map(|(_, file)| {
-                // This craft's letter, not whatever name wins: a planet renamed "Spout" still holds
-                // its letter's place.
+                // The letter, not whatever name wins: a renamed planet still holds its place.
                 let letter = file.names.iter().find(|n| n.witness == owner && n.kind == NameKind::Relative)?;
                 Some((letter.name.clone(), file.orbit(owner)?.semi_major_au))
             })
@@ -634,9 +602,7 @@ impl Knowledge {
         if file.sightings.iter().any(|s| s.same_as(&sighting)) {
             return;
         }
-        // Finding something is writing it down. A craft's own first detection gets a
-        // designation from the direction it was found in, so the log has something to call it
-        // until somebody names it properly.
+        // A craft's own first detection gets a designation, so the log has something to call it.
         if witness == owner && file.names.is_empty() {
             file.names.push(Naming {
                 witness: owner,
@@ -746,8 +712,7 @@ mod tests {
         assert!(belief.emitted_s().unwrap() < belief.observed_s);
     }
 
-    /// Past the reservoir, it is the looks closest to another that go, not the oldest: an
-    /// early look from far along the orbit is kept over later ones bunched together.
+    /// Past the reservoir the closest looks go, not the oldest.
     #[test]
     fn the_reservoir_drops_the_closest_look_not_the_oldest() {
         let mut k = Knowledge::new(Witness(1));
@@ -765,7 +730,6 @@ mod tests {
         assert!(kept.iter().any(|s| s.observed_s == 0.0), "the oldest look, and the widest, is kept");
     }
 
-    /// The reservoir keeps the baseline, which is the thing distance is made of.
     #[test]
     fn a_long_watch_keeps_the_widest_bearings() {
         let mut k = Knowledge::new(Witness(1));
@@ -881,8 +845,7 @@ mod tests {
         assert!(position_ly.distance(truth) < 1.0, "{position_ly}");
     }
 
-    /// A chart is somebody's word, and one look of your own does not overturn it — but a
-    /// parallax does.
+    /// One look of your own does not overturn a claim, but a parallax does.
     #[test]
     fn a_measurement_of_your_own_beats_a_distance_you_were_told() {
         let star = star_id(11);
@@ -961,8 +924,7 @@ mod tests {
         );
     }
 
-    /// Finding something is writing it down, and what gets written down is a designation —
-    /// beaten by any name a crew actually chooses.
+    /// A first sighting writes down a designation, beaten by any chosen name.
     #[test]
     fn a_found_star_gets_a_designation_and_a_named_one_keeps_its_name() {
         let star = star_id(20);
@@ -986,8 +948,7 @@ mod tests {
         );
     }
 
-    /// A name travels like anything else, and two crews may hold different names for the same
-    /// light. Your own wins on your own screen; theirs is still there, with their name on it.
+    /// Your own name wins on your own screen; theirs stays on file with its witness.
     #[test]
     fn a_name_is_something_somebody_said_and_carries_who_said_it() {
         let star = star_id(21);
@@ -1038,7 +999,7 @@ mod tests {
         (body, Subject::Body { star, body })
     }
 
-    /// A planet is named after its star, and the star is whatever *this* craft calls it.
+    /// A planet is named after whatever this craft calls its star.
     #[test]
     fn a_planet_is_read_after_this_craft_name_for_its_star() {
         let star = star_id(40);
@@ -1055,7 +1016,6 @@ mod tests {
         assert_eq!(k.name_of(subject).as_deref(), Some("Spout"), "until somebody names it");
     }
 
-    /// A letter is frozen: a better orbit later does not move it.
     #[test]
     fn a_letter_once_assigned_is_never_reassigned() {
         let star = star_id(41);
@@ -1078,7 +1038,6 @@ mod tests {
         assert_eq!(k.found_planet(star, between, 0.9, 1.0, 2.0), "bb", "no single letter left");
     }
 
-    /// Everything about a system rides with its star: one entry, however many planets.
     #[test]
     fn a_report_carries_a_system_as_one_entry() {
         let star = star_id(43);
@@ -1101,8 +1060,7 @@ mod tests {
         assert_eq!(first.entries[0].parts.len(), 4);
     }
 
-    /// The whole of 11a: a receiver sees another craft's planets named after its own name for
-    /// the star, and renaming the star renames them.
+    /// A receiver reads another craft's planets after its own name for the star.
     #[test]
     fn a_receiver_reads_somebody_else_planets_after_its_own_star_name() {
         let star = star_id(45);
@@ -1157,9 +1115,7 @@ mod tests {
         assert_eq!(k.members(star).map(|(s, _)| s).collect::<Vec<_>>(), vec![subject]);
     }
 
-    /// A replica is kept current by reports from the craft itself, and those add no hop: the
-    /// copy is the same knowledge, not something it was told. Its own samples come separately,
-    /// only the new ones each time, and a report never carries them.
+    /// A replica's reports add no hop, and its samples travel separately, only the new ones.
     #[test]
     fn a_replica_absorbs_without_a_hop_and_only_new_samples_travel() {
         let star = star_id(60);
@@ -1185,8 +1141,7 @@ mod tests {
         assert_eq!(copy.file(star), held.file(star), "and the copy is the original");
     }
 
-    /// What is written down is files without their samples and samples as log rows, and the two
-    /// together rebuild the same knowledge — the map after a restart is the map before it.
+    /// Files without samples plus samples as log rows rebuild the same knowledge.
     #[test]
     fn what_is_written_down_rebuilds_the_same_knowledge() {
         let star = star_id(70);
@@ -1244,8 +1199,7 @@ mod tests {
         assert!(probe.report(Mark::default(), 99.0).is_empty(), "nor anything learned after it was sent");
     }
 
-    /// A report is a slice of a backlog: oldest first, resumed from where the last one ended,
-    /// and never cut through the middle of one instant.
+    /// Oldest first, resumed where the last report ended, and pages through ties at one instant.
     #[test]
     fn a_capped_report_drains_the_backlog_in_order() {
         let mut probe = Knowledge::new(Witness(2));
@@ -1261,8 +1215,7 @@ mod tests {
         assert_eq!(second.learned_through(), Some(7.0));
         assert_eq!(probe.report_upto(through.unwrap(), 300.0, 4).0.stars(), 2, "and the rest");
 
-        // Everything learned at one instant — a sweep's tick, a set of charts — still pages: the
-        // mark carries the system it stopped at as well as the time.
+        // The mark carries the system it stopped at as well as the time.
         let mut tied = Knowledge::new(Witness(2));
         for k in 0..10u64 {
             tied.sighted(star_id(k), sighting(2, DVec3::ZERO, DVec3::X, 5.0));
@@ -1300,7 +1253,6 @@ mod tests {
         assert!(k.own_series(star, Band::K).is_none());
     }
 
-    /// Switching bands, or to another star and back, does not lose what was measured.
     #[test]
     fn photometry_is_kept_per_star_and_band() {
         let mut k = Knowledge::new(Witness(1));
@@ -1322,8 +1274,7 @@ mod tests {
         assert_eq!(k.own_series(b, Band::V).unwrap().len(), 1);
     }
 
-    /// Review item 17. A report can say anything, including that a star's name is relative to
-    /// itself. Reading it gives a name back rather than recursing until the stack is gone.
+    /// A star named relative to itself reads as a name rather than overflowing the stack.
     #[test]
     fn a_hostile_relative_name_reads_as_something() {
         let star = star_id(99);
@@ -1348,8 +1299,7 @@ mod tests {
         assert_eq!(name.matches(" b").count(), NAME_DEPTH, "{name}");
     }
 
-    /// Review item 14. A planet renamed keeps its letter: a refined orbit does not bring the
-    /// letter back over the chosen name, and the next planet is placed against the letter.
+    /// A refined orbit does not bring the letter back over a chosen name, and the letter stays taken.
     #[test]
     fn a_chosen_name_always_wins_and_keeps_its_letter() {
         let star = star_id(46);

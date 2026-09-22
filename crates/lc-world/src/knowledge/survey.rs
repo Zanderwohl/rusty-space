@@ -12,31 +12,26 @@ use crate::rng;
 use crate::sky::StarId;
 use crate::star::Star;
 
-/// Signal to noise a source must clear to be recorded at all.
 pub const DETECTION_SNR: f64 = 5.0;
 
-/// Fraction of a source's light that optics spread into a halo around it rather than into its
-/// own image. Baffles and clean mirrors lower it; nothing removes it.
+/// Fraction of a source's light that optics spread into a halo rather than its own image.
 ///
-/// This one number is why a sky has blind spots. A faint star is lost wherever the halo of a
-/// brighter one outshines it, which is a disc of radius `resolution * sqrt(SCATTER * ratio)`
-/// — arcseconds around a comparable star, tens of degrees around the sun the telescope is
-/// sitting next to.
+/// A faint star is lost within `resolution * sqrt(SCATTER * ratio)` of a brighter one:
+/// arcseconds around a comparable star, tens of degrees around the local sun.
 pub const SCATTER: f64 = 1e-3;
 
-/// A field of view, radians. Two degrees across is a wide-field survey camera.
+/// Radians: two degrees, a wide-field survey camera.
 pub const FIELD_RAD: f64 = 0.035;
 
-/// Coordinate seconds a sweep spends on each field before moving to the next.
+/// Coordinate seconds a sweep spends on each field.
 pub const DWELL_S: f64 = 60.0;
 
-/// What a telescope, or several acting as one, can resolve and collect.
+/// A telescope, or several acting as one.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Optics {
     pub instrument: Instrument,
-    /// Widest separation between elements combining into one image. A lone telescope's is its
-    /// own aperture; a swarm's is how far apart the swarm is spread, which is why a swarm sees
-    /// past a glare a single mirror cannot.
+    /// Widest separation between elements combining into one image; a lone telescope's is its
+    /// own aperture.
     pub baseline_m: f64,
 }
 
@@ -49,8 +44,7 @@ impl Optics {
         }
     }
 
-    /// Several instruments observing as one: the collecting area adds, the baseline is how far
-    /// apart they are.
+    /// The collecting area adds; the baseline is how far apart they are.
     pub fn joined(instrument: Instrument, elements: f64, baseline_m: f64) -> Self {
         let instrument = instrument.with_aperture(instrument.aperture_m2 * elements.max(1.0));
         Self {
@@ -59,8 +53,7 @@ impl Optics {
         }
     }
 
-    /// Which band the survey works in: V where the instrument has it, otherwise whatever it
-    /// does have. A detection is in one band and the record says which.
+    /// V where the instrument has it, otherwise whatever it does have.
     pub fn band(&self) -> Option<Band> {
         Band::ALL
             .into_iter()
@@ -72,7 +65,7 @@ impl Optics {
         astrometry::resolution_rad(band.center_m(), self.baseline_m)
     }
 
-    /// Signal to noise on a point source, photon statistics against the instrument's own glow.
+    /// Photon statistics against the instrument's own glow.
     pub fn snr(&self, band: Band, flux_w_m2: f64, exposure_s: f64) -> f64 {
         let source = self
             .instrument
@@ -85,16 +78,16 @@ impl Optics {
     }
 }
 
-/// One point source as it arrives at the observer, in the band being surveyed.
+/// A point source as it arrives at the observer, in the band being surveyed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Source {
     pub star: StarId,
-    /// Unit vector from the observer toward it, aberration already removed.
+    /// Unit vector, aberration already removed.
     pub toward: DVec3,
     pub flux_w_m2: f64,
 }
 
-/// Band flux from a star at a distance, W/m^2. The same geometry `observation::observe` uses.
+/// W/m^2. The same geometry `observation::observe` uses.
 pub fn flux_from(star: &Star, band: Band, distance_m: f64) -> f64 {
     if distance_m <= 0.0 {
         return 0.0;
@@ -103,7 +96,7 @@ pub fn flux_from(star: &Star, band: Band, distance_m: f64) -> f64 {
     std::f64::consts::PI * star.radius_m * star.radius_m * radiance / (distance_m * distance_m)
 }
 
-/// How close to a brighter source a fainter one is lost, radians.
+/// Radians.
 pub fn glare_radius_rad(resolution_rad: f64, bright: f64, faint: f64) -> f64 {
     if faint <= 0.0 || bright <= faint {
         return resolution_rad;
@@ -111,7 +104,6 @@ pub fn glare_radius_rad(resolution_rad: f64, bright: f64, faint: f64) -> f64 {
     resolution_rad * (SCATTER * bright / faint).sqrt().max(1.0)
 }
 
-/// Whether anything in `sky` hides `sky[index]`.
 pub fn hidden_by(sky: &[Source], index: usize, resolution_rad: f64) -> Option<StarId> {
     let target = *sky.get(index)?;
     sky.iter()
@@ -124,11 +116,8 @@ pub fn hidden_by(sky: &[Source], index: usize, resolution_rad: f64) -> Option<St
         .map(|(_, s)| s.star)
 }
 
-/// Point at `sky[index]` for `exposure_s` and record what comes back.
-///
-/// `None` when the source is under the detection threshold or inside something brighter's
-/// halo. The noise is seeded from the witness, the star and the arrival time, so a server can
-/// recompute exactly what this instrument saw — see `lightcone/docs/05-observation.md`.
+/// Noise is seeded from the witness, the star and the arrival time, so a server can recompute
+/// exactly what this instrument saw. See `lightcone/docs/05-observation.md`.
 #[allow(clippy::too_many_arguments)]
 pub fn look(
     optics: &Optics,
@@ -171,14 +160,11 @@ pub fn look(
     })
 }
 
-/// A telescope working its way across a region of sky, field by field.
-///
-/// The sky is not observed at once. Fields are visited in a fixed order and each gets its
-/// dwell, so coverage is a function of how long the instrument has been at it — and a star is
-/// found when the sweep reaches the field it happens to be in, not when the player looks.
+/// A region of sky visited field by field in a fixed order, each for its dwell: a star is found
+/// when the sweep reaches its field.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Sweep {
-    /// Center of the region, in the observer's frame.
+    /// In the observer's frame.
     pub center: DVec3,
     pub radius_rad: f64,
     pub field_rad: f64,
@@ -197,12 +183,10 @@ impl Sweep {
         }
     }
 
-    /// A cone of sky: everything within `radius_rad` of a direction.
     pub fn region(center: DVec3, radius_rad: f64, started_s: f64) -> Self {
         Self {
             center: center.normalize_or(DVec3::Z),
-            // A NaN radius is refused before it gets here; if one did, all-sky is the honest
-            // reading of "no bound", where a clamp would pass the NaN through.
+            // A NaN is refused upstream; if one got here, a clamp would pass it through.
             radius_rad: if radius_rad.is_nan() { std::f64::consts::PI } else { radius_rad.clamp(FIELD_RAD, std::f64::consts::PI) },
             field_rad: FIELD_RAD,
             dwell_s: DWELL_S,
@@ -215,10 +199,7 @@ impl Sweep {
         self
     }
 
-    /// The visiting order, laid out once.
-    ///
-    /// Worth holding on to: a tick asks which field each of several thousand stars is in, and
-    /// the ring table is the same for all of them.
+    /// Worth holding on to: a tick asks which field each of thousands of stars is in.
     pub fn plan(&self) -> Plan {
         let count = (self.radius_rad / self.field_rad).ceil().max(1.0) as u64;
         let mut rings = Vec::with_capacity(count as usize);
@@ -238,43 +219,38 @@ impl Sweep {
         }
     }
 
-    /// Fields in one pass over the region.
     pub fn fields(&self) -> u64 {
         self.plan().fields
     }
 
-    /// Coordinate seconds one pass takes.
+    /// Coordinate seconds.
     pub fn pass_s(&self) -> f64 {
         self.fields() as f64 * self.dwell_s
     }
 
-    /// Exposure any one star gets per pass: the dwell, not the pass.
+    /// Per star per pass: the dwell, not the pass.
     pub fn exposure_s(&self) -> f64 {
         self.dwell_s
     }
 
-    /// Which field a direction falls in, or `None` outside the region.
     pub fn field_of(&self, toward: DVec3) -> Option<u64> {
         self.plan().field_of(toward)
     }
 
-    /// When a direction's field was first finished inside `(from_s, to_s]`, if it was.
     pub fn observed_between(&self, toward: DVec3, from_s: f64, to_s: f64) -> Option<f64> {
         self.plan().observed_between(toward, from_s, to_s).first().copied()
     }
 
-    /// Completed passes, and how far through the current one the sweep is.
     pub fn progress(&self, now_s: f64) -> (u64, f64) {
         let passes = ((now_s - self.started_s) / self.pass_s()).max(0.0);
         (passes as u64, passes.fract())
     }
 }
 
-/// A sweep with its field layout resolved.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     sweep: Sweep,
-    /// Where each ring of polar angle starts in the order, and how many fields it holds.
+    /// Each ring of polar angle: its first field, and how many it holds.
     rings: Vec<(u64, u64)>,
     fields: u64,
     basis: (DVec3, DVec3),
@@ -306,12 +282,8 @@ impl Plan {
         Some(offset + i.min(n - 1))
     }
 
-    /// Every time a direction's field was finished inside `(from_s, to_s]`, oldest first, at most
-    /// [`PASSES_PER_CALL`] of them.
-    ///
-    /// A field's measurement is stamped at the end of its dwell, because that is when the
-    /// exposure it reports actually exists. Several passes can end inside one window across a gap
-    /// in the ticks, and each is a bearing from wherever the craft was.
+    /// Oldest first, at most [`PASSES_PER_CALL`]. Each is stamped at the end of its dwell,
+    /// when the exposure it reports exists.
     pub fn observed_between(&self, toward: DVec3, from_s: f64, to_s: f64) -> Vec<f64> {
         let Some(field) = self.field_of(toward) else { return Vec::new() };
         let per_pass = self.fields as f64;
@@ -326,25 +298,18 @@ impl Plan {
     }
 }
 
-/// Passes of one field recorded from one window at most: a long gap costs a bounded amount.
+/// So a long gap costs a bounded amount.
 pub const PASSES_PER_CALL: usize = 8;
 
-/// What a telescope is committed to.
-///
-/// One instrument does one thing at a time, and what it is doing decides what its owner can
-/// learn: a stare deepens one star's curve, a sweep finds stars nobody has looked at, and a
-/// watch trades depth for keeping several systems under observation at once.
+/// What a telescope is committed to; one thing at a time.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub enum Duty {
     #[default]
     Idle,
     Stare(StarId),
     Sweep(Sweep),
-    /// A rotation: each target in turn, for `dwell_s` apiece, for as long as it is left on.
-    ///
-    /// This is what watches a swarm of systems over years — every target gets a sample every
-    /// `dwell_s * targets` of coordinate time, which is a light curve with gaps in it, and
-    /// gaps are what the period finders in `05-observation.md` are written to survive.
+    /// Each target in turn, for `dwell_s` apiece: a light curve with gaps, which the period
+    /// finders in `05-observation.md` are written to survive.
     Watch {
         targets: Vec<StarId>,
         dwell_s: f64,
@@ -390,7 +355,6 @@ impl From<&lc_proto::Duty> for Duty {
 }
 
 impl Duty {
-    /// Which star the instrument is on at this moment, if it is on one.
     pub fn target_at(&self, now_s: f64) -> Option<StarId> {
         match self {
             Self::Stare(id) => Some(*id),
@@ -401,7 +365,6 @@ impl Duty {
         }
     }
 
-    /// Which turn of a watch rotation `now_s` falls in.
     pub fn slot_at(&self, now_s: f64) -> Option<i64> {
         match self {
             Self::Watch {
@@ -521,9 +484,7 @@ mod tests {
         assert!(sweep.observed_between(DVec3::Y, 0.0, pass * 3.0).is_none());
     }
 
-    /// Depth is bought with time, and a four square meter mirror has plenty of it to spend:
-    /// a sun-like star stays over the threshold to the far side of the galaxy. Nearby, what
-    /// limits a survey is how much sky it has got round to, not how faint it can go.
+    /// With a long exposure a four square meter mirror detects a sun across the galaxy.
     #[test]
     fn depth_is_bought_with_exposure() {
         let optics = Optics::of(Instrument::SHIP);
@@ -563,7 +524,7 @@ mod tests {
         assert!((seen.flux / flux - 1.0).abs() < 0.1);
     }
 
-    /// The same seed gives the same measurement, which is what lets a server check a claim.
+    /// The same seed gives the same measurement, so a server can check a claim.
     #[test]
     fn noise_is_addressed_not_drawn() {
         let optics = Optics::of(Instrument::SHIP);
@@ -581,9 +542,7 @@ mod tests {
         assert_ne!(once.bearing.toward, somebody.bearing.toward);
     }
 
-    /// The sun a telescope is sitting beside hides a wedge of sky degrees across. A star of
-    /// the same kind a few light-years off hides only arcseconds, which is the same formula
-    /// and the whole difference between a blind spot and a close pair.
+    /// The local sun hides degrees of sky; the same star a few light-years off hides arcseconds.
     #[test]
     fn a_bright_star_blots_out_a_disc_around_itself() {
         let optics = Optics::of(Instrument::SHIP);

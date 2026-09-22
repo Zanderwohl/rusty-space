@@ -1,7 +1,7 @@
 //! The records a craft holds: who measured what, when, and how it got here.
 //!
-//! Each record carries a witness and a lineage, and nothing here folds them into a belief —
-//! that is [`super::Knowledge`]'s job. See `lightcone/docs/22-provenance.md`.
+//! Nothing here folds records into a belief; that is [`super::Knowledge`]. See
+//! `lightcone/docs/22-provenance.md`.
 
 use em_spectra::Band;
 use serde::{Deserialize, Serialize};
@@ -19,8 +19,7 @@ pub struct Hop {
     pub to: Witness,
     /// Coordinate seconds the report was transmitted.
     pub sent_s: f64,
-    /// Coordinate seconds its light landed. Never earlier than `sent_s` by more than the
-    /// distance between the two, because that is what carried it.
+    /// Coordinate seconds its light landed: at least `sent_s` plus the light time between them.
     pub received_s: f64,
 }
 
@@ -32,16 +31,15 @@ pub fn learned_s(lineage: &Lineage, observed_s: f64) -> f64 {
     lineage.last().map(|h| h.received_s).unwrap_or(observed_s)
 }
 
-/// One detection of a star: which way, how bright, from where, by whom.
+/// One detection of a star.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Sighting {
     pub witness: Witness,
-    /// Coordinate seconds the light arrived. The light *left* `distance` years earlier, which
-    /// is not known until the distance is.
+    /// Coordinate seconds the light arrived, not when it left.
     pub observed_s: f64,
     pub bearing: Bearing,
     pub band: Band,
-    /// Flux in `band`, W/m^2, as measured. Luminosity only follows once distance does.
+    /// Flux in `band`, W/m^2.
     pub flux: f64,
     pub flux_sigma: f64,
     pub lineage: Lineage,
@@ -68,16 +66,15 @@ pub struct Sample {
 
 /// A run of photometry on one star, in one band, by one witness.
 ///
-/// Kept per witness because merging two observers' curves would splice series taken at
-/// different distances — and therefore of different epochs of the same star. Never sent to
-/// another craft: what a log says travels as a conclusion. Nothing bounds it but the room aboard.
+/// Kept per witness because two observers at different distances see different epochs of the
+/// same star. Never sent to another craft: what a log says travels as a conclusion. Nothing
+/// bounds it but the room aboard.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Series {
     pub witness: Witness,
     pub band: Band,
     samples: Vec<Sample>,
-    /// Everything observed at or before this was read and thrown away, and is not taken back
-    /// however it arrives.
+    /// Everything observed at or before this was consumed and is refused however it arrives.
     consumed_s: f64,
 }
 
@@ -107,8 +104,7 @@ impl Series {
         self.samples.last()
     }
 
-    /// Add a sample at the end. False if it was not kept: older than the last one held, or
-    /// from a stretch already read and thrown away.
+    /// False if it was not kept: older than the last one held, or already consumed.
     pub fn push(&mut self, sample: Sample) -> bool {
         if sample.observed_s <= self.consumed_s
             || self
@@ -132,16 +128,14 @@ impl Series {
         self.consumed_s
     }
 
-    /// The series with its samples taken out: what a stored file holds, the samples being
-    /// written to a log of their own. See `lightcone/docs/24-standing-instruments.md`.
+    /// What a stored file holds; the samples go to a log of their own. See
+    /// `lightcone/docs/24-standing-instruments.md`.
     pub fn emptied(&self) -> Series {
         Series { samples: Vec::new(), ..self.clone() }
     }
 
-    /// Emission times and deficits, for a plot.
-    ///
-    /// The x axis is when the light *left*, which needs a distance; without one the samples
-    /// are returned against arrival time and the caller says so.
+    /// Emission times and deficits, for a plot. Without a light age the samples are against
+    /// arrival time, and the caller must say so.
     pub fn against_emission(&self, light_age_s: Option<f64>) -> Vec<(f64, f64)> {
         let shift = light_age_s.unwrap_or(0.0);
         self.samples
@@ -151,12 +145,8 @@ impl Series {
     }
 }
 
-/// What somebody calls something.
-///
-/// **Nothing has a name of its own.** A name is a thing an observer gave a star, a planet or a
-/// craft and may have passed on, so it travels like every other record: with a witness, a time
-/// and a lineage, and two crews may hold different names for the same light without either
-/// being wrong.
+/// What somebody calls something. A name travels like every other record, and two crews may
+/// hold different names for the same light.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Naming {
     pub witness: Witness,
@@ -171,28 +161,21 @@ pub struct Naming {
 pub enum NameKind {
     /// Somebody decided to call it this.
     Given,
-    /// What an instrument wrote down when it found it, so that the log has something to say.
-    /// Always beaten by a name somebody chose.
+    /// What an instrument wrote down when it found it. Always beaten by a name somebody chose.
     Designation,
-    /// Assigned, and read after whatever the holder calls the subject's star: `b` on a planet
-    /// is shown as "Kettle b" by a craft that calls the star the Kettle, and as "Hearthlight b"
-    /// by one that calls it Hearthlight. Ranked as a designation.
+    /// Assigned, and read after whatever the holder calls the subject's star. Ranked as a
+    /// designation.
     Relative,
 }
 
 impl NameKind {
-    /// Whether somebody chose it, rather than a rule assigning it.
     pub fn chosen(self) -> bool {
         matches!(self, Self::Given)
     }
 }
 
-/// A distance somebody states, as opposed to bearings this craft can triangulate itself.
-///
-/// This is how a conclusion travels when the measurements behind it do not — a charting
-/// office's parallax program, a faction's shared catalogue, a probe with more data than
-/// bandwidth. It is believed because of who said it, which is the honest way to hold it, and
-/// a craft's own triangulation overrides it the moment it has one.
+/// A distance somebody states, for when the measurements behind it do not travel. A craft's own
+/// triangulation overrides it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Claim {
     pub witness: Witness,
@@ -204,9 +187,8 @@ pub struct Claim {
 
 /// Where somebody says a body orbits: a semi-major axis about its star.
 ///
-/// A statement, like a [`Claim`], because a craft outside a system does not watch its planets
-/// go round — it infers an orbit from a period, or is told one. Letters are assigned against
-/// these, so they travel with the system they describe.
+/// A statement, like a [`Claim`], because a craft outside a system infers an orbit from a period
+/// or is told one. Letters are assigned against these.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Orbit {
     pub witness: Witness,

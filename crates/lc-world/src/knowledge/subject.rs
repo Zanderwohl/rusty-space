@@ -1,9 +1,7 @@
 //! What a record is about.
 //!
-//! Knowledge was keyed by star. A craft also learns about planets, belts and other craft, and
-//! all of them are named, noted and reported the same way, so the key is a [`Subject`]. Every
-//! body and population belongs to a star, and a report about a system is one entry however many
-//! of them it carries — see `lightcone/docs/23-factions.md`.
+//! Every body and population belongs to a star, and a report about a system is one entry
+//! however many of them it carries. See `lightcone/docs/23-factions.md`.
 
 use serde::{Deserialize, Serialize};
 
@@ -12,9 +10,8 @@ use crate::sky::StarId;
 
 /// A body inside a star's system: a planet, a moon, a comet.
 ///
-/// Hashed from the star and the key the system's generator knows it by, so it is stable across
-/// processes and never the generator's own name — which is catalogue-derived and must not reach
-/// a player any more than a star's catalogue name may.
+/// Hashed from the star and the generator's key, so it is stable across processes and never
+/// carries the generator's catalogue-derived name, which must not reach a player.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BodyId(u64);
 
@@ -60,8 +57,7 @@ impl Subject {
         }
     }
 
-    /// What a report groups this under: the star for anything in a system, the craft itself
-    /// otherwise.
+    /// What a report groups this under.
     pub fn system(self) -> Subject {
         match self.star() {
             Some(star) => Self::Star(star),

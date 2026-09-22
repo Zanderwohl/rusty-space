@@ -1,11 +1,8 @@
 //! What a log says, once it has been read: hypotheses with probabilities, and the evidence.
 //!
-//! Two questions are asked of every log, each with its own hypotheses summing to one: is
-//! something transiting, and what is in orbit — a swarm, or only the belts every system has.
-//! A log is read when it has grown enough to change an answer. Once the transit answer is
-//! settled, or the craft is out of room, the samples are thrown away and what survives is the
-//! conclusion and a [`Digest`]: the population moments, which lose nothing, and the log folded
-//! at a settled planet's period, so later samples refine it. The loss is deliberate; see
+//! Two questions, each with hypotheses summing to one: is something transiting, and is there a
+//! swarm or only belts. Once the transit answer is settled, or the craft is out of room, the
+//! samples are discarded, leaving the conclusion and a [`Digest`]. See
 //! `lightcone/docs/24-standing-instruments.md`.
 
 use em_spectra::Band;
@@ -16,50 +13,44 @@ use super::prior::Prior;
 use super::transit::{self, Candidate, Fold, Point};
 use super::{Knowledge, Lineage, Subject, Witness, learned_s};
 
-/// Probability at which the leading hypothesis is taken as settled and its log consumed.
 pub const SETTLED: f64 = 0.99;
 
-/// Transits a planet needs to have shown before its log is consumed: two fix a period, and the
-/// third is the check that it was the right one.
+/// Two fix a period; the third checks it.
 pub const TRANSITS_TO_SETTLE: u32 = 3;
 
 /// Samples a log gains before it is read again, at least.
 pub const READ_EVERY: usize = 96;
 
-/// And at least this fraction of what it held when last read. Reading costs as the log's length
-/// times its span, so reading at fixed intervals would cost as the square of a long watch; at
-/// geometric ones all the reads together cost a few times the last.
+/// And at least this fraction of what it held when last read. A read costs length times span,
+/// so fixed intervals would cost as the square of a long watch; geometric ones cost a few times
+/// the last read.
 pub const READ_GROWTH: f64 = 0.5;
 
-/// Folds kept for a settled planet: its period and two either side at the period's error, so
-/// later samples can still move the period.
+/// Folds either side of a settled planet's period, at its error, so later samples can move it.
 const NEIGHBORS: i32 = 2;
 
-/// What somebody concluded from somebody's photometry of one subject.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Conclusion {
     /// Who read the log.
     pub witness: Witness,
     /// Whose log it was.
     pub observer: Witness,
-    /// Where the observer was when it last looked, light-years. A transit is seen only from
-    /// near its orbit's plane, so two observers in different places can both be right.
+    /// Light-years. A transit is seen only from near its orbit's plane, so two observers in
+    /// different places can both be right.
     pub from_ly: Option<glam::DVec3>,
     pub stated_s: f64,
     pub lineage: Lineage,
-    /// Whether anything transits. Most probable first; the probabilities sum to one.
+    /// Most probable first; sums to one.
     pub transits: Vec<Hypothesis>,
-    /// What is in orbit. Most probable first; the probabilities sum to one. Empty when the log
-    /// holds no visible band.
+    /// Most probable first; sums to one. Empty when the log holds no visible band.
     pub populations: Vec<Hypothesis>,
     pub evidence: Evidence,
     pub covering: Covering,
-    /// The reader threw the log away through this arrival time, and cannot be asked for it.
+    /// The reader discarded the log through this arrival time.
     pub discarded_s: Option<f64>,
 }
 
 impl Conclusion {
-    /// The most probable answer to whether anything transits.
     pub fn leading(&self) -> Option<&Hypothesis> {
         self.transits.first()
     }
@@ -75,33 +66,27 @@ pub struct Hypothesis {
     pub kind: Kind,
 }
 
-/// What might be there. Only what the generator makes: see
-/// `lightcone/docs/12-buildout.md`, 11d.
+/// Only what the generator makes: see `lightcone/docs/12-buildout.md`, 11d.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub enum Kind {
-    /// No transiting planet. Absence of evidence, weighed by how much the log could have seen:
-    /// its probability is only ever as high as the log's [`Evidence::completeness`].
+    /// No transiting planet; never more probable than [`Evidence::completeness`].
     Quiet,
     /// Provisional until the planet generator exists: see [`super::transit`].
     Planet { class: Class, transit: Candidate },
-    /// A transiting planet this log could not have found yet: too wide for its span, or too
-    /// small for its precision.
+    /// A transiting planet this log could not have found yet.
     Unsearched,
-    /// A swarm about the star.
     Swarm(Swarm),
-    /// Only the belts every system has, seen by their glow if at all.
+    /// Only the belts every system has.
     Belts {
         /// Thermal-infrared glow beyond the star's own, as a fraction of it, and its error.
-        /// `None` if the instrument does not see that band.
         excess: Option<(f64, f64)>,
     },
 }
 
-/// A swarm, as far as its moments say. The inversion needs the star's radius and mass, which a
-/// craft only has as "a star as bright as this one", and only with a distance.
+/// The inversion needs the star's radius and mass, which a craft has only as "a star as bright
+/// as this one", and only with a distance.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Swarm {
-    /// Fraction of the star it covers, and its error.
     pub coverage: (f64, f64),
     pub flicker: Option<f64>,
     pub crossing_s: Option<f64>,
@@ -128,29 +113,24 @@ impl Class {
 /// What the probabilities were drawn from.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Evidence {
-    /// Samples read, over every pass, bands combined.
+    /// Over every pass, bands combined.
     pub samples: u64,
-    /// Bands used, one bit per [`Band::index`].
+    /// One bit per [`Band::index`].
     pub bands: u16,
-    /// ln of how much more likely the log is with a transiting planet than without.
     pub ln_bayes: f64,
-    /// How often the generator puts a transiting planet in the periods searched.
     pub prior: f64,
     /// `None` when the log was too short to search at all.
     pub periods_s: Option<(f64, f64)>,
-    /// Share of the transiting planets the generator makes that this log would have found.
     pub completeness: f64,
-    /// Scatter beyond the error bars, as a fraction of the star's flux, found and allowed for.
+    /// Scatter beyond the error bars, as a fraction of the star's flux.
     pub jitter: f64,
 }
 
-/// The stretch of time a conclusion describes.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Covering {
-    /// When the light read arrived, at the observer.
+    /// Arrival at the observer.
     pub observed_s: (f64, f64),
-    /// How long it had traveled, if the reader had a distance. Without one a conclusion is
-    /// about some stretch of the star's past it cannot place.
+    /// `None` without a distance.
     pub light_age_s: Option<f64>,
 }
 
@@ -161,8 +141,8 @@ impl Covering {
     }
 }
 
-/// What is kept of a log once it has been consumed. The reader's own, never transmitted: a
-/// receiver can only trust a conclusion, not rework it.
+/// What is kept of a consumed log. Never transmitted: a receiver can only trust a conclusion,
+/// not rework it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Digest {
     pub observer: Witness,
@@ -171,11 +151,10 @@ pub struct Digest {
     pub observed_s: (f64, f64),
     pub jitter: f64,
     pub moments: Moments,
-    /// The most any log of this star so far could have seen. Not combined: two logs that both
-    /// missed long periods do not add up to one that did not.
+    /// The most of any log so far, not combined: two logs that both missed long periods do not
+    /// add up to one that did not.
     pub completeness: f64,
-    /// A settled planet: the search that settled it, whose odds later passes update rather
-    /// than recompute, and the log folded at its period. `None` when nothing was settled.
+    /// Later passes update this search's odds rather than recompute them.
     pub planet: Option<Settled>,
 }
 
@@ -188,17 +167,13 @@ pub struct Settled {
     pub folds: Vec<Fold>,
 }
 
-/// A fold over every conclusion held about one subject.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Believed {
     pub planet: Option<Planet>,
-    /// Chance of a swarm, and whose log said so.
     pub swarm: Option<(f64, Witness)>,
-    /// How many conclusions it was folded from.
     pub readers: usize,
 }
 
-/// The strongest planet any conclusion names, and whose log it came from.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Planet {
     pub probability: f64,
@@ -207,18 +182,15 @@ pub struct Planet {
     pub observer: Witness,
 }
 
-/// Samples consumed from one series, for the store to delete.
+/// For the store to delete.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Consumed {
     pub subject: Subject,
     pub witness: Witness,
     pub band: Band,
-    /// Everything observed at or before this is gone.
     pub through_s: f64,
 }
 
-/// Combine every band's samples taken at the same instant into one point, weighted by inverse
-/// variance.
 fn combine(series: &[&super::Series]) -> (Vec<Point>, u16) {
     let mut by_time: std::collections::BTreeMap<u64, (f64, f64, f64)> = Default::default();
     let mut bands = 0u16;
@@ -240,8 +212,7 @@ fn combine(series: &[&super::Series]) -> (Vec<Point>, u16) {
     (points, bands)
 }
 
-/// Scatter the error bars do not explain, from the median absolute deviation so that transits
-/// themselves — a few percent of the points, far off — do not count as noise.
+/// From the median absolute deviation so that transits do not count as noise.
 fn jitter_of(points: &[Point]) -> f64 {
     if points.len() < 8 {
         return 0.0;
@@ -252,7 +223,7 @@ fn jitter_of(points: &[Point]) -> f64 {
     (scale * scale - var).max(0.0).sqrt()
 }
 
-/// The middle of some numbers; zero for none.
+/// Zero for none.
 fn median_of(mut values: Vec<f64>) -> f64 {
     values.sort_by(f64::total_cmp);
     values.get(values.len() / 2).copied().unwrap_or(0.0)
@@ -260,7 +231,6 @@ fn median_of(mut values: Vec<f64>) -> f64 {
 
 
 impl Knowledge {
-    /// Mark a subject's logs to be kept whatever the pipeline concludes, or not.
     pub fn retain_raw(&mut self, subject: impl Into<Subject>, keep: bool) {
         let subject = subject.into();
         let file = self.files.entry(subject).or_default();
@@ -273,11 +243,8 @@ impl Knowledge {
         }
     }
 
-    /// Read every log this craft holds of its own into a conclusion and consume it, to make
-    /// room. At the rate logs are always read, not at once: each read is a period search.
-    ///
-    /// Consumed whatever it says, as a full craft's are, so a transit search not yet settled is
-    /// lost and the next log is searched afresh. A retained subject is left alone.
+    /// Read and consume every log of this craft's own, except retained ones, whatever they say.
+    /// Queued at the usual read rate, since each read is a period search.
     pub fn analyze(&mut self) {
         let owner = self.owner;
         for (subject, file) in &self.files {
@@ -288,12 +255,10 @@ impl Knowledge {
         }
     }
 
-    /// Logs [`Knowledge::analyze`] has yet to consume.
     pub fn analyzing(&self) -> usize {
         self.analyzing.len()
     }
 
-    /// Every subject this craft keeps the raw log of.
     pub fn retained_subjects(&self) -> Vec<Subject> {
         self.files.iter().filter(|(_, f)| f.retained).map(|(s, _)| *s).collect()
     }
@@ -302,14 +267,12 @@ impl Knowledge {
         self.files.get(&subject.into()).is_some_and(|f| f.retained)
     }
 
-    /// This craft's own conclusion about a subject, if it has drawn one.
     pub fn conclusion(&self, subject: impl Into<Subject>) -> Option<&Conclusion> {
         let owner = self.owner;
         self.files.get(&subject.into())?.conclusions.iter().find(|c| c.witness == owner && c.observer == owner)
     }
 
-    /// Every conclusion held about a subject, each on its observer's name: this craft's own
-    /// first, then the most recently stated.
+    /// This craft's own first, then the most recently stated.
     pub fn conclusions(&self, subject: impl Into<Subject>) -> Vec<&Conclusion> {
         let owner = self.owner;
         let mut all: Vec<&Conclusion> =
@@ -320,11 +283,8 @@ impl Knowledge {
         all
     }
 
-    /// What this craft believes from every conclusion it holds about a subject.
-    ///
-    /// A planet seen transiting from anywhere is there, whatever observers elsewhere saw, so the
-    /// strongest planet stands. A swarm is a shell and looks the same from everywhere, so the
-    /// observer with the longest log is believed.
+    /// A planet seen transiting from anywhere is there, so the strongest stands. A swarm looks
+    /// the same from everywhere, so the longest log is believed.
     pub fn believed(&self, subject: impl Into<Subject>) -> Believed {
         let all = self.conclusions(subject);
         let planet = all
@@ -345,7 +305,7 @@ impl Knowledge {
         Believed { planet, swarm, readers: all.len() }
     }
 
-    /// File a conclusion. One per reader per observer, the later winning.
+    /// One per reader per observer, the later winning.
     pub fn concluded(&mut self, subject: impl Into<Subject>, conclusion: Conclusion) {
         let subject = subject.into();
         let file = self.files.entry(subject).or_default();
@@ -361,16 +321,12 @@ impl Knowledge {
         self.refresh(subject);
     }
 
-    /// Samples consumed since the last call, for the store to delete. Clears them.
     pub fn take_consumed(&mut self) -> Vec<Consumed> {
         std::mem::take(&mut self.consumed)
     }
 
-    /// Logs this craft holds that have grown enough since last read to be worth reading again.
-    ///
-    /// Only this craft's own logs are ever read: nobody else's travel. Kept as a queue of
-    /// subjects that have had samples since their last read, so asking costs what is waiting
-    /// rather than every file held.
+    /// Own logs grown enough to read again; nobody else's logs travel. A queue, so asking costs
+    /// what is waiting rather than every file held.
     pub fn due(&self) -> Vec<(Subject, Witness)> {
         let owner = self.owner;
         let full = self.is_full();
@@ -393,12 +349,8 @@ impl Knowledge {
             .collect()
     }
 
-    /// Read one observer's log of one subject and state what it says.
-    ///
-    /// The log is consumed if the transit answer is settled, if the craft is out of room —
-    /// reading is how a full craft keeps watching — or if it is being analyzed, unless the
-    /// subject is retained. Returns the
-    /// conclusion drawn, or `None` if there was nothing to read.
+    /// Unless the subject is retained, the log is consumed if the transit answer is settled, the
+    /// craft is full, or it is being analyzed.
     pub fn read_log(&mut self, subject: Subject, observer: Witness, prior: &Prior, now_s: f64) -> Option<Conclusion> {
         self.unread.remove(&subject);
         let analyzing = self.analyzing.remove(&subject);
@@ -412,8 +364,8 @@ impl Knowledge {
         if points.is_empty() && digest.is_none() {
             return None;
         }
-        // After combining: whatever the scatter is, it is common to every band, and adding it per
-        // band would have the combination average it away.
+        // After combining: the scatter is common to every band, and adding it per band would
+        // have the combination average it away.
         let jitter = digest.as_ref().map_or_else(|| jitter_of(&points), |d| d.jitter);
         points.iter_mut().for_each(|p| p.w = 1.0 / (1.0 / p.w + jitter * jitter));
         let first = points.first().map_or(f64::INFINITY, |p| p.t);
@@ -424,7 +376,6 @@ impl Knowledge {
         let settled = digest.as_ref().and_then(|d| d.planet.clone());
         let mut folds = Vec::new();
         let (ln_bayes, prior_p, periods, candidate, delta_chi2) = match &settled {
-            // A settled planet: fold the new samples into what was kept and read it again there.
             Some(planet) => {
                 folds = planet.folds.clone();
                 folds.iter_mut().for_each(|f| f.add(&points));
@@ -461,8 +412,7 @@ impl Knowledge {
                 transits.push(Hypothesis { probability: planet * share, kind: Kind::Planet { class, transit: c } });
             }
         } else if planet > 0.0 {
-            // Odds for a planet with no box to show for them: nothing to name, so it is folded
-            // back into what the log has not yet found.
+            // Odds for a planet with no box: nothing to name, so it goes to Unsearched.
             if let Some(unsearched) = transits.iter_mut().find(|h| h.kind == Kind::Unsearched) {
                 unsearched.probability += planet;
             }
@@ -523,8 +473,7 @@ impl Knowledge {
                     periods_s,
                     folds: neighbors(&transit, &points),
                 }),
-                // Consumed for room with nothing settled: what the search had is lost, and
-                // the next log is searched afresh.
+                // Nothing settled: what the search had is lost.
                 _ => None,
             };
             let digest = Digest {
@@ -544,14 +493,12 @@ impl Knowledge {
         Some(conclusion)
     }
 
-    /// Throw away one observer's samples of a subject through `through_s`, keeping the digest.
     fn consume(&mut self, subject: Subject, observer: Witness, through_s: f64, digest: Digest) {
         let Some(file) = self.files.get_mut(&subject) else { return };
         for series in file.series.iter_mut().filter(|s| s.witness == observer) {
             series.consume_through(through_s);
             self.consumed.push(Consumed { subject, witness: observer, band: series.band, through_s });
         }
-        // Samples not yet written down are simply not written.
         self.unsaved
             .retain(|l| !(l.subject == subject && l.witness == observer && l.sample.observed_s <= through_s));
         match file.digests.iter_mut().find(|d| d.observer == observer) {
@@ -562,7 +509,6 @@ impl Knowledge {
     }
 }
 
-/// Swarm or only belts, from the moments, against the generator's systems.
 fn populations(moments: &Moments, prior: &Prior, host: Option<crate::star::Star>) -> Vec<Hypothesis> {
     let Some(reading) = moments.read() else { return Vec::new() };
     let Some(swarm) = prior.swarm_given(reading.dim, reading.excess) else { return Vec::new() };
@@ -587,12 +533,10 @@ fn populations(moments: &Moments, prior: &Prior, host: Option<crate::star::Star>
     out
 }
 
-/// The error of a typical point, for what the log could have seen.
 fn typical_sigma(points: &[Point]) -> f64 {
     median_of(points.iter().map(|p| p.w.recip().sqrt()).collect())
 }
 
-/// Folds at a planet's period and either side of it at its error.
 fn neighbors(transit: &Candidate, points: &[Point]) -> Vec<Fold> {
     (-NEIGHBORS..=NEIGHBORS)
         .map(|k| {
@@ -603,7 +547,7 @@ fn neighbors(transit: &Candidate, points: &[Point]) -> Vec<Fold> {
         .collect()
 }
 
-/// The period step between kept folds: what they can still resolve.
+/// What the kept folds can still resolve.
 fn spacing(folds: &[Fold]) -> f64 {
     folds.iter().zip(folds.iter().skip(1)).map(|(a, b)| (b.period_s - a.period_s).abs()).fold(0.0, f64::max)
 }
@@ -647,7 +591,7 @@ mod tests {
         }
     }
 
-    /// A neighborhood like the real one: mostly red dwarfs, a few like the Sun, fewer brighter.
+    /// Mostly red dwarfs, a few like the Sun, fewer brighter.
     fn neighborhood() -> Vec<CatalogueStar> {
         (0..1500)
             .map(|k| {
@@ -657,9 +601,8 @@ mod tests {
             .collect()
     }
 
-    /// A red dwarf five light-years out, with the periods of the planets the generator gave it,
-    /// of which the innermost goes round in under five days. They share the system's pole, so
-    /// placed edge-on to the origin they transit and placed along the pole they never do.
+    /// A red dwarf five light-years out with an inner planet under five days, placed edge-on
+    /// (its planets transit) or along its pole (they never do), and its planets' periods.
     fn red_dwarf(edge_on: bool) -> (CatalogueStar, Vec<f64>) {
         (100_000..)
             .find_map(|key| {
@@ -675,7 +618,6 @@ mod tests {
             .unwrap()
     }
 
-    /// Stare at a star from the origin for `days`, one sample every [`CADENCE_S`].
     fn stare(target: &CatalogueStar, days: f64) -> (Knowledge, f64) {
         let mut sky = Sky::new(Arc::new(vec![target.clone()]));
         let mut knowledge = Knowledge::new(Witness(1));
@@ -688,8 +630,8 @@ mod tests {
         (knowledge, start + steps as f64 * CADENCE_S)
     }
 
-    /// The whole of 11d, in the library: a planet the generator placed comes out as the most
-    /// probable hypothesis, with its period within error, and the log that found it is gone.
+    /// A generated planet is the leading hypothesis, its period within error, and its log is
+    /// consumed.
     #[test]
     fn a_generated_planet_is_the_most_probable_reading_of_its_transits() {
         let (target, periods) = red_dwarf(true);
@@ -718,8 +660,7 @@ mod tests {
         knowledge.measured(target.id, Witness(1), em_spectra::Band::V, old);
         assert!(knowledge.file(target.id).unwrap().series().iter().all(|s| s.is_empty()));
 
-        // The conclusion travels; a replica drops the log with its original, and anyone else
-        // holds the conclusion as something it was told.
+        // A replica drops the log with its original; anyone else holds the conclusion as told.
         let report = knowledge.report(crate::knowledge::Mark::through(now - 1.0), now);
         replica.absorb(&report);
         assert!(replica.file(target.id).unwrap().series().iter().all(|s| s.is_empty()));
@@ -733,8 +674,7 @@ mod tests {
         let believed = other.believed(target.id);
         assert_eq!(believed.planet.map(|p| p.observer), Some(Witness(1)));
 
-        // Somebody watching from where the orbit never crosses the star saw nothing. Both are
-        // held, each on its own name, and the planet one of them saw still stands.
+        // An observer off the orbit's plane saw nothing; both are held and the planet stands.
         let elsewhere = Conclusion {
             witness: Witness(5),
             observer: Witness(5),
@@ -748,8 +688,7 @@ mod tests {
         assert_eq!((believed.readers, believed.planet.map(|p| p.observer)), (2, Some(Witness(1))));
     }
 
-    /// Seen along the pole the same planets never transit. Two months of nothing is not
-    /// nothing there: it is only as much evidence of absence as the log could have seen.
+    /// Seen along the pole, nothing transits, and Quiet is capped by what two months could see.
     #[test]
     fn a_star_seen_along_its_pole_is_quiet_only_as_far_as_the_log_could_see() {
         let (target, _) = red_dwarf(false);
@@ -767,8 +706,7 @@ mod tests {
         assert!((conclusion.transits.iter().map(|h| h.probability).sum::<f64>() - 1.0).abs() < 1e-9);
     }
 
-    /// A full craft reads to make room: the log goes whether or not anything was settled, and
-    /// what survives is the moments and how much the log could have seen.
+    /// A full craft consumes a log even with nothing settled, keeping moments and completeness.
     #[test]
     fn a_full_craft_consumes_what_it_could_not_settle() {
         let (target, _) = red_dwarf(false);
@@ -788,8 +726,7 @@ mod tests {
         assert!(!knowledge.is_full(), "and there is room again");
     }
 
-    /// Analyzing reads a craft with room to spare as if it were full: every log is due and
-    /// every log it reads is consumed, leaving no raw samples to take room. A retained one stays.
+    /// Analyzing consumes every log as if the craft were full, except a retained one.
     #[test]
     fn analyzing_consumes_every_log_but_a_retained_one() {
         let (target, _) = red_dwarf(false);
@@ -812,8 +749,7 @@ mod tests {
         assert_eq!((knowledge.analyzing(), knowledge.bytes()), (0, 0.0), "the room is free");
     }
 
-    /// A star the generator gave a swarm dims, flickers and glows, and reads as a swarm, with
-    /// its coverage; one without reads as only its belts.
+    /// A generated swarm reads as a swarm with its coverage; a star without reads as belts.
     #[test]
     fn a_swarm_is_read_from_its_moments_and_belts_from_their_absence() {
         use crate::population::Population;

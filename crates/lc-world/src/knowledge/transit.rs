@@ -1,20 +1,15 @@
 //! Finding a transiting planet in a star's log, and how likely it is that there is one.
 //!
-//! Box least squares over period, phase and duration, as
-//! `lightcone/docs/05-observation.md` describes. The probability is a marginal likelihood: the
-//! box's likelihood ratio averaged over every period, phase, duration and depth a planet could
-//! have, weighted by how often the generator actually makes one there. So the only planets
-//! this can find are ones the generator can place, and a 70% detection is meant to be right
-//! seven times in ten. See `lightcone/docs/24-standing-instruments.md`.
+//! Box least squares over period, phase and duration (`lightcone/docs/05-observation.md`). The
+//! probability is a marginal likelihood weighted by the generator's own planets, so a 70%
+//! detection is meant to be right seven times in ten. See
+//! `lightcone/docs/24-standing-instruments.md`.
 //!
-//! **Provisional.** The planet generator this is measured against is a placeholder — the shipped
-//! game will not run on it — so every planet probability is only as good as the stand-in, and the
-//! client says so beside each one.
+//! **Provisional:** the planet generator measured against is a placeholder, so every planet
+//! probability is only as good as the stand-in.
 //!
-//! Times are coordinate seconds of arrival at the observer. That is the right clock for a period
-//! only while the observer is still. A moving one sees every period Doppler-shifted — by a fifth
-//! at a fifth of `c`, far past a period's error — and a log taken under way is folded here as
-//! though it were not; correcting arrival times for the craft's motion is not done yet.
+//! Times are coordinate seconds of arrival. A moving observer sees periods Doppler-shifted, by
+//! a fifth at a fifth of `c`, and arrival times are not yet corrected for the craft's motion.
 
 use serde::{Deserialize, Serialize};
 
@@ -23,24 +18,20 @@ use crate::sky::generate::AU;
 
 const DAY_S: f64 = 86_400.0;
 
-/// Phase bins a fold has. A bin is well under the shortest transit worth searching for at any
-/// period the search reaches in a log of a few months.
+/// Phase bins: well under the shortest transit searched at any period a log of a few months
+/// reaches.
 pub const BINS: usize = 512;
 
-/// Transit durations searched, hours: a close-in planet of a red dwarf to a wide one of a hot
-/// star.
+/// Hours: a close-in planet of a red dwarf to a wide one of a hot star.
 const DURATIONS_H: [f64; 8] = [0.6, 1.0, 1.6, 2.6, 4.2, 6.7, 10.7, 17.0];
 
 
-/// The shortest period searched. Shorter than anything the generator places around the
-/// dimmest star it has.
+/// Shorter than anything the generator places around its dimmest star.
 pub const PERIOD_MIN_S: f64 = 0.2 * DAY_S;
 
-/// Transits a log has to be able to hold before a period counts as searched.
 pub const TRANSITS_NEEDED: f64 = 2.0;
 
-/// One brightness measurement, bands already combined: arrival time, deficit, and weight
-/// `1 / sigma^2`.
+/// Bands already combined; `w` is `1 / sigma^2`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point {
     pub t: f64,
@@ -48,16 +39,14 @@ pub struct Point {
     pub w: f64,
 }
 
-/// A log folded at one period: sufficient for a box search at that period, whatever is added
-/// to it later. Weighted sums per phase bin, the deficit itself rather than its departure from a
-/// mean, because the mean moves as samples arrive.
+/// A log folded at one period. Sums the deficit itself, not its departure from a mean, because
+/// the mean moves as samples arrive.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Fold {
     pub period_s: f64,
     pub epoch_s: f64,
     weight: Vec<f64>,
     sum: Vec<f64>,
-    /// Arrival times of the first and last sample folded in, for counting transits.
     pub span_s: (f64, f64),
 }
 
@@ -82,7 +71,6 @@ impl Fold {
         }
     }
 
-    /// The deepest box this fold holds, at its own period.
     pub fn best(&self) -> Option<Candidate> {
         let total_w: f64 = self.weight.iter().sum();
         let total_x: f64 = self.sum.iter().sum();
@@ -108,49 +96,42 @@ impl Fold {
     }
 }
 
-/// The best box at one period, as found.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Candidate {
     pub period_s: f64,
     pub period_sigma_s: f64,
-    /// Arrival time of the middle of the first transit in the log.
+    /// Middle of the first transit in the log.
     pub epoch_s: f64,
     pub duration_s: f64,
     pub depth: f64,
     pub depth_sigma: f64,
-    /// How much better a box fits than a flat line.
+    /// Against a flat line.
     pub delta_chi2: f64,
-    /// Transits seen: how many of the transits this period predicts inside the log have at
-    /// least one sample in them. A fold's reading, which has no samples to look at, counts those
-    /// its span holds instead.
+    /// Predicted transits with at least one sample in them; from a fold, those its span holds.
     pub transits: u32,
 }
 
 /// Lone events a search will set aside before giving up on finding a period.
 const SET_ASIDE_MAX: u32 = 4;
 
-/// The result of a search: the odds the log gives for a transiting planet, and the best one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Search {
     /// ln of the marginal likelihood of a transiting planet over that of none.
     pub ln_bayes: f64,
-    /// How often the generator puts a transiting planet in the periods searched, before any data.
     pub planet_prior: f64,
     pub periods_s: (f64, f64),
     pub best: Option<Candidate>,
-    /// Dips that no period in range repeats — a planet too wide to have transited twice in the
-    /// log, most likely — taken out before the search that found `best`.
+    /// Dips no period in range repeats, taken out before the search that found `best`.
     pub set_aside: u32,
 }
 
 impl Search {
-    /// Probability of a transiting planet in the periods searched, given the log.
     pub fn planet_probability(&self) -> f64 {
         posterior(self.planet_prior, self.ln_bayes)
     }
 }
 
-/// Prior odds updated by a log Bayes factor, without overflowing on a clear detection.
+/// Works in log odds so a clear detection does not overflow.
 pub fn posterior(prior: f64, ln_bayes: f64) -> f64 {
     if prior <= 0.0 {
         return 0.0;
@@ -162,13 +143,11 @@ pub fn posterior(prior: f64, ln_bayes: f64) -> f64 {
     1.0 / (1.0 + (-ln_odds).exp())
 }
 
-/// Search a log for a transiting planet. `None` when the log is too short to hold two transits
-/// of anything the search reaches.
+/// `None` when the log is too short to hold two transits.
 ///
-/// One deep transit of a planet too wide to repeat in the log fits under a box at almost any
-/// period, and would win. So a period is only believed if every transit it predicts that the log
-/// covers is there; when the best is not, the dip carrying it is set aside and the log searched
-/// again without it.
+/// One deep lone transit fits under a box at almost any period and would win, so a period is
+/// believed only if every transit it predicts in the log is there; otherwise the dip carrying it
+/// is set aside and the log searched again.
 pub fn search(points: &[Point], prior: &Prior) -> Option<Search> {
     let mut points = points.to_vec();
     points.retain(|p| p.w > 0.0 && p.w.is_finite() && p.x.is_finite());
@@ -194,7 +173,6 @@ pub fn search(points: &[Point], prior: &Prior) -> Option<Search> {
     }
 }
 
-/// A single dip, found by sliding a box along the log in time.
 #[derive(Clone, Copy, Debug)]
 struct Event {
     t: f64,
@@ -206,9 +184,7 @@ struct Event {
 /// A dip this far out of the noise is found alone, without folding, and has to repeat to count.
 const Z_EVENT: f64 = 10.0;
 
-/// Dips too strong for their period to be left to the fold: ones no period in range repeats.
-///
-/// Cheap next to a search, which is why it goes first rather than searching again after each.
+/// Strong dips no period in range repeats. Cheap next to a search, so it runs first.
 fn lone_events(points: &[Point], periods: (f64, f64)) -> Vec<Event> {
     let mean = baseline(points);
     let events = events(points, mean, Z_EVENT / 3.0);
@@ -233,8 +209,6 @@ fn lone_events(points: &[Point], periods: (f64, f64)) -> Vec<Event> {
         .collect()
 }
 
-/// Whether a dip is there again at every multiple of `period` the log covers, and the log covers
-/// at least one.
 fn recurs(points: &[Point], mean: f64, e: &Event, period: f64) -> bool {
     let (Some(first), Some(last)) = (points.first().map(|p| p.t), points.last().map(|p| p.t)) else { return false };
     let from = ((first - e.t) / period).ceil() as i64;
@@ -266,7 +240,6 @@ fn baseline(points: &[Point]) -> f64 {
     points.iter().map(|p| p.w * p.x).sum::<f64>() / w
 }
 
-/// Every dip at least `z_min` deep, strongest first, none overlapping another.
 #[allow(clippy::indexing_slicing)] // bin indices are below the fold's bin count by construction and prefix sums hold 2 * bins + 1 entries
 fn events(points: &[Point], mean: f64, z_min: f64) -> Vec<Event> {
     let mut found: Vec<Event> = Vec::new();
@@ -300,11 +273,10 @@ fn events(points: &[Point], mean: f64, z_min: f64) -> Vec<Event> {
     kept
 }
 
-/// Whether every transit a candidate predicts, where the log covers it, is there. `Err` with
-/// the middle of the deepest one when not.
+/// `Err` with the middle of the deepest transit when not every predicted one is there.
 ///
-/// "There" is lenient — a third of the mean depth, less three errors — because a partly covered
-/// transit is shallower than a box, and limb darkening makes even a covered one uneven.
+/// Lenient, a third of the mean depth less three errors, because a partly covered transit is
+/// shallower than a box and limb darkening makes even a covered one uneven.
 fn repeats(points: &[Point], c: &Candidate) -> Result<(), f64> {
     let total_w: f64 = points.iter().map(|p| p.w).sum();
     let mean = points.iter().map(|p| p.w * p.x).sum::<f64>() / total_w;
@@ -356,8 +328,7 @@ fn search_once(points: &[Point], prior: &Prior) -> Option<Search> {
     while ln_f <= -periods.0.ln() {
         let period = (-ln_f).exp();
         let (shortest, longest) = durations_for(period);
-        // A step in frequency that moves the fold by half a typical transit over the log. A
-        // grazing one, shorter, is found a little weaker.
+        // Moves the fold by half a typical transit over the log; a grazing one is found weaker.
         let step = typical_duration(period) / (2.0 * span);
         let bins = ((2.0 * period / shortest).ceil() as usize).clamp(32, BINS);
         let freq = 1.0 / period;
@@ -478,17 +449,16 @@ fn refine(points: &[Point], total_w: f64, first: f64, last: f64, period: f64, st
         - within.iter().cloned().fold(f64::INFINITY, f64::min);
     let statistical = (spread / 2.0).max(fine_step / 12f64.sqrt());
     let found = b_best.candidate(p_best, first, first, last, None);
-    // Two things the width of the peak does not know. A box is the wrong shape for a
-    // limb-darkened transit, which at high signal to noise shows as scatter inside the box far
-    // beyond the error bars; and the fold resolves the epoch only to a bin.
+    // The peak width misses two things: a box is the wrong shape for a limb-darkened transit,
+    // which at high SNR shows as scatter far beyond the error bars; and the fold resolves the
+    // epoch only to a bin.
     let misfit = misfit(points, &found).max(1.0);
     let binned = p_best / BINS as f64 / 12f64.sqrt() / f64::from(found.transits.saturating_sub(1).max(1));
     let sigma = (statistical * statistical * misfit + binned * binned).sqrt();
     Candidate { period_sigma_s: sigma, transits: seen(points, &found), ..found }
 }
 
-/// How many transits a candidate predicts that have a sample inside them. A gap in the log can
-/// fall across one, and a transit nobody watched was not seen.
+/// Predicted transits with a sample inside them; a gap in the log can fall across one.
 fn seen(points: &[Point], c: &Candidate) -> u32 {
     let mut epochs: Vec<i64> = points
         .iter()
@@ -525,7 +495,7 @@ struct Box {
     bins: usize,
     depth: f64,
     sigma: f64,
-    /// Depth over its error: positive for a dip.
+    /// Positive for a dip.
     z: f64,
 }
 
@@ -582,9 +552,9 @@ fn prefix(weight: &[f64], sum: &[f64]) -> (Vec<f64>, Vec<f64>) {
     (cw, cy)
 }
 
-/// The transit durations worth trying at a period, seconds. A central transit lasts
-/// `P / pi * R / a`, which goes as `P^(1/3)`: about an hour at one day for a red dwarf, two for
-/// the Sun, three for a hot star. The range reaches below that for grazing transits.
+/// Seconds. A central transit lasts `P / pi * R / a`, which goes as `P^(1/3)`: about an hour at
+/// one day for a red dwarf, two for the Sun, three for a hot star. The range reaches below that
+/// for grazing transits.
 fn durations_for(period: f64) -> (f64, f64) {
     let scale = typical_duration(period);
     (0.3 * scale, 4.5 * scale)
@@ -664,8 +634,7 @@ fn ratio_table(z: f64) -> f64 {
     table[i] * (1.0 - f) + table[i + 1] * f
 }
 
-/// ln of the standard normal CDF: what is left of a Gaussian in depth once depths below zero,
-/// which no planet has, are cut away.
+/// ln of the standard normal CDF: cuts away negative depths, which no planet has.
 fn ln_phi(z: f64) -> f64 {
     if z > 5.0 {
         return 0.0;
@@ -689,7 +658,7 @@ fn erfc(x: f64) -> f64 {
     if x >= 0.0 { r } else { 2.0 - r }
 }
 
-/// Semi-major axis of a period around a star of gravitational parameter `mu`, in AU.
+/// AU.
 pub fn semi_major_au(period_s: f64, mu: f64) -> f64 {
     (mu * (period_s / std::f64::consts::TAU).powi(2)).cbrt() / AU
 }

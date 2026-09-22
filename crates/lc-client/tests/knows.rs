@@ -1,8 +1,7 @@
-//! What a ship holds after the client has actually started one up.
+//! What a ship holds after the client has started one up.
 //!
-//! The unit tests use three authored stars. This runs the real catalogue through the real
-//! session, because "the charts cover twenty light-years" is a claim about 119 625 rows and
-//! the cost of a sweep over them is not visible at three.
+//! Runs the real catalog (119 625 rows) through the real session: the unit tests' three
+//! authored stars show neither the charted volume nor the cost of a sweep.
 
 use lc_client::session::{CHARTED_LY, Session};
 use lc_world::knowledge::survey::{Duty, Sweep};
@@ -35,7 +34,7 @@ fn a_ship_leaves_port_with_the_charts_of_its_own_volume_and_no_more() {
         session.stars.len()
     );
 
-    // Held on the charting office's word, at a percent of the range.
+    // Held on the charts' word, at a percent of the range.
     let far = session
         .knowledge
         .beliefs()
@@ -79,7 +78,6 @@ fn a_sweep_finds_stars_the_charts_never_reached() {
         "{found} known after two passes, {charted} charted"
     );
 
-    // What a sweep does not find is what the sun it is sitting beside is in front of.
     let missed = session
         .stars
         .iter()
@@ -89,8 +87,7 @@ fn a_sweep_finds_stars_the_charts_never_reached() {
         missed > 0,
         "a sky with no blind spots is a bug, not a good telescope"
     );
-    // And some of what it missed it missed for the reason stated: lost in a brighter source's
-    // glare, not merely not reached yet.
+    // Some of what it missed is hidden in a brighter source's glare, not merely not reached yet.
     let optics = lc_world::knowledge::survey::Optics::of(session.telescope);
     let band = optics.band().expect("a sensor with a band");
     let mut sky = lc_world::knowledge::observatory::Sky::new(std::sync::Arc::new(session.stars.clone()));

@@ -1,9 +1,7 @@
 //! The rules that name something before anybody chooses a name for it.
 //!
-//! Stars get the bearing they were found along, small bodies the time they were found, and
-//! planets a letter for their expected place in the system. Every rule is deterministic given
-//! what the assigning craft knew, and nothing a rule assigned is ever reassigned — see
-//! "Planet letters" in `lightcone/docs/23-factions.md`.
+//! Every rule is deterministic given what the assigning craft knew, and nothing a rule assigned
+//! is ever reassigned. See "Planet letters" in `lightcone/docs/23-factions.md`.
 
 use glam::DVec3;
 
@@ -11,8 +9,7 @@ use crate::flight::JULIAN_YEAR_S;
 
 /// A designation from the direction something was found in, ecliptic degrees.
 ///
-/// Fixed at discovery rather than recomputed, because the bearing changes as the observer
-/// moves and a catalogue number that drifted would be no use for talking about.
+/// Fixed at discovery rather than recomputed, because the bearing drifts as the observer moves.
 pub fn designation(toward: DVec3) -> String {
     let toward = toward.normalize_or(DVec3::X);
     let longitude = toward.y.atan2(toward.x).rem_euclid(std::f64::consts::TAU).to_degrees();
@@ -29,9 +26,8 @@ pub fn discovery_designation(discovered_s: f64, order: u32) -> String {
 
 /// Where a system's planets are expected to be, for stars up to a luminosity.
 ///
-/// Slot `n` sits at `innermost_au_per_sqrt_l * sqrt(L) * ratio^n`: the innermost orbit moves out
-/// with the square root of luminosity, because that is where a given temperature is, and
-/// neighbors sit a roughly constant ratio apart.
+/// Slot `n` sits at `innermost_au_per_sqrt_l * sqrt(L) * ratio^n`: a given temperature moves out
+/// with the square root of luminosity, and neighbors sit a roughly constant ratio apart.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpacingRow {
     pub up_to_luminosity_solar: f64,
@@ -39,13 +35,10 @@ pub struct SpacingRow {
     pub ratio: f64,
 }
 
-/// The expected spacing, by luminosity. A table so it can be tuned — and split by stellar class
-/// — without touching the rule that reads it.
-///
-/// One row today, matching `sky::generate`: its first orbit is `sqrt(L)` AU times a uniform
-/// 0.2–0.6 times a uniform 1.4–2.3, a geometric mean of 0.70, and each step out multiplies by
-/// another uniform 1.4–2.3, a geometric mean of 1.83. A table that disagreed with the generator
-/// would leave gaps for planets it never makes.
+/// The expected spacing, by luminosity. Must match `sky::generate`, or letters are left for
+/// planets it never makes: its first orbit is `sqrt(L)` AU times a uniform 0.2–0.6 times a
+/// uniform 1.4–2.3, a geometric mean of 0.70, and each step out multiplies by another uniform
+/// 1.4–2.3, a geometric mean of 1.83.
 pub const SPACING: &[SpacingRow] = &[SpacingRow {
     up_to_luminosity_solar: f64::INFINITY,
     innermost_au_per_sqrt_l: 0.70,
@@ -70,16 +63,13 @@ pub fn expected_slot(semi_major_au: f64, luminosity_solar: f64, table: &[Spacing
 
 /// The letter a newly found planet takes.
 ///
-/// `placed` is the letters this craft already goes by for planets of the same star, with the
-/// orbit each was placed at. Letters run `b` outward (`a` is the star) and alphabetical order
-/// is orbital order, so the new letter has to sort between whatever orbits just inside and just
-/// outside it. It takes its expected slot's letter when that fits. When it does not — the slot
-/// is taken, or on the wrong side of a neighbor — it takes a second letter after the neighbor
-/// inside it, `cb` after `c`, `bb` and `bc` between `b` and `c`, and `ab` inside `b`, leaving
-/// every single letter for the slot it names.
+/// `placed` is the letters this craft already uses for the same star, with their orbits.
+/// Alphabetical order is orbital order, from `b` (`a` is the star). The expected slot's letter is
+/// taken when it fits; otherwise a second letter after the neighbor inside (`cb` after `c`, `ab`
+/// inside `b`), so every single letter stays free for the slot it names.
 ///
-/// A second letter never starts at `a`. `a` is kept free at every depth to mean "inside the
-/// first", the way it means the star at the top, so there is always room to insert.
+/// A letter never ends in `a`, because nothing sorts between `b` and `ba`: so there is always
+/// room to insert another inside it.
 pub fn planet_letter(
     placed: &[(String, f64)],
     semi_major_au: f64,
@@ -195,9 +185,7 @@ mod tests {
         assert!(planet_letter(&[], 7.0, 1.0, SPACING).as_str() > "e");
     }
 
-    /// Where the slot is taken or on the wrong side of a neighbor, a second letter after the
-    /// neighbor inside it: doc 23's rule 4. No single letter is spent on a planet out of its
-    /// slot, so the one that belongs there can still have it.
+    /// A planet out of its slot takes a second letter, leaving the single letter for its slot.
     #[test]
     fn a_taken_slot_takes_a_second_letter_and_leaves_the_next_slot_free() {
         // Something at c's orbit is already "c"; a planet just outside it is still in c's slot.
@@ -237,9 +225,8 @@ mod tests {
         assert_eq!(by_orbit, by_letter, "{held:?}");
     }
 
-    /// The default table is the generator's spacing, measured. Lettering thousands of
-    /// generated systems — every planet found, in a random order — should need a second letter
-    /// only occasionally, and should not leave the alphabet mostly empty.
+    /// If the table drifts from the generator, generated systems lettered in random order need
+    /// second letters often, or leave the alphabet mostly empty.
     #[test]
     fn the_default_table_fits_what_the_generator_makes() {
         use crate::sky::{AuthoredStars, StarId, StarProvider, generate};

@@ -1,8 +1,7 @@
 //! What the generator makes, measured, so that a log is read against the galaxy it came from.
 //!
-//! A conclusion is a likelihood times a prior, and the honest prior is the generator's own
-//! distribution: every star's generated ladder of planets, and every system's belts and
-//! swarm, seen from directions spread over the sky. See
+//! The prior is the generator's own distribution: every star's ladder of planets, and every
+//! system's belts and swarm seen from directions spread over the sky. See
 //! `lightcone/docs/24-standing-instruments.md`.
 
 use em_spectra::{Band, blackbody};
@@ -18,58 +17,45 @@ use crate::system::M_PER_LY;
 /// Catalogue stars the planet prior is measured over, at most.
 const PRIOR_STARS: usize = 4000;
 
-/// Catalogue stars the population prior is measured over, at most, and the directions each is
-/// seen from. Belts are flat, so where they are seen from matters; a swarm is a shell, and does
-/// not care.
+/// Belts are flat, so they are seen from several directions; a swarm is a shell.
 const POPULATION_STARS: usize = 1500;
 const DIRECTIONS: u64 = 4;
 
-/// Signal to noise a transit needs to be found, summed over the log. The usual threshold, and
-/// close to where the search's own look-elsewhere cost puts it.
+/// Summed over the log. The usual threshold, and close to where the search's look-elsewhere
+/// cost puts it.
 pub const DETECTION_SNR: f64 = 7.1;
 
-/// One planet as the generator placed it: its period, how deep its transit would be, and the
-/// chance a random observer sees it transit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Drawn {
     ln_period: f64,
     ln_depth: f64,
     rocky: bool,
-    /// `R* / a`. A system's planets share a plane, so from a random direction the planets that
-    /// transit are always the innermost few: all those with `R* / a` above the observer's
-    /// `|sin latitude|`.
+    /// `R* / a`. A system's planets share a plane, so the ones that transit are all those with
+    /// `R* / a` above the observer's `|sin latitude|`.
     reach: f64,
 }
 
-/// The generator's planets, as a population to take priors from.
-///
-/// Orientation is integrated exactly rather than sampled: a star's planets are sorted by
-/// `reach`, and each slice of `|sin latitude|` between two of them is a set of transiting
-/// planets with a known probability.
+/// Orientation is integrated exactly rather than sampled: with a star's planets sorted by
+/// `reach`, each slice of `|sin latitude|` between two of them is a set of transiting planets.
 #[derive(Clone, Debug, Default)]
 pub struct Prior {
     systems: Vec<Vec<Drawn>>,
     populations: Vec<Seen>,
-    /// Stars the prior was measured over, with their luminosity in every band, watts: what a
-    /// craft that knows a star's brightness and distance can take it to be like.
+    /// With their luminosity in every band, watts.
     hosts: Vec<(Star, [f64; 7])>,
 }
 
-/// A system's belts and swarm as the generator made them, seen from one direction.
+/// A system's belts and swarm, seen from one direction.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Seen {
-    /// Mean fraction of the star's visible light blocked.
     dim: f64,
-    /// Thermal-infrared re-emission, as a fraction of the star's own light in that band.
+    /// As a fraction of the star's own light in the thermal band.
     excess: f64,
     swarm: bool,
 }
 
 impl Prior {
-    /// Measure the prior over a set of stars, each with its own generated ladder.
-    ///
-    /// Pass the stars a craft cannot tell this one apart from. With nothing known but that the
-    /// star exists, that is the catalogue.
+    /// Pass the stars a craft cannot tell this one apart from; knowing nothing, the catalogue.
     pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogueStar>) -> Self {
         let stars: Vec<&CatalogueStar> = stars.into_iter().collect();
         let stride = stars.len().div_ceil(PRIOR_STARS).max(1);
@@ -119,12 +105,9 @@ impl Prior {
         Prior { systems, populations, hosts }
     }
 
-    /// Chance a log would have found a transiting planet if the star has one: the share of the
-    /// generator's transiting planets — at every period, not only those searched — that fall in
-    /// the periods searched and stand [`DETECTION_SNR`] out of the noise.
-    ///
-    /// What turns "nothing seen" into "nothing there", and only as far as it goes: a short or
-    /// noisy log has found nothing because it could not have.
+    /// Chance a log would have found a transiting planet if the star has one: the share of
+    /// transiting planets at every period that fall in the periods searched and stand
+    /// [`DETECTION_SNR`] out of the noise.
     #[allow(clippy::indexing_slicing)] // grid indices are clamped into the grid before they index it
     pub fn completeness(&self, periods_s: (f64, f64), sigma: f64, points: usize) -> f64 {
         let (lo, hi) = (periods_s.0.ln(), periods_s.1.ln());
@@ -150,11 +133,9 @@ impl Prior {
         if all > 0.0 { found / all } else { 0.0 }
     }
 
-    /// Chance a star dimmed by `dim` in the visible, and glowing by `excess` in the thermal
-    /// infrared if that was measured, has a swarm rather than only the belts every system has.
+    /// Chance a star has a swarm rather than only the belts every system has.
     pub fn swarm_given(&self, dim: (f64, f64), excess: Option<(f64, f64)>) -> Option<f64> {
-        // A generated system is never exactly what a craft measures, so each is given a spread
-        // of its own beside the measurement's.
+        // Each generated system gets a spread of its own beside the measurement's.
         let ln_like = |seen: &Seen| {
             let var = dim.1 * dim.1 + (0.2 * seen.dim).powi(2);
             let mut ll = -0.5 * (dim.0 - seen.dim).powi(2) / var - 0.5 * var.ln();
@@ -181,10 +162,9 @@ impl Prior {
         }
     }
 
-    /// The star the prior was measured over that is most like one of this luminosity in this
-    /// band. What a swarm's elements are sized against when the star itself is only a brightness
-    /// and a distance.
-    #[allow(clippy::indexing_slicing)] // grid indices are clamped into the grid before they index it
+    /// The measured star most like one of this luminosity in this band, for when the star
+    /// itself is only a brightness and a distance.
+    #[allow(clippy::indexing_slicing)] // band indices come from `Band::index`, below seven
     pub fn host_like(&self, band: Band, luminosity_w: f64) -> Option<Star> {
         if !(luminosity_w > 0.0) {
             return None;
@@ -198,8 +178,7 @@ impl Prior {
             .map(|(star, _)| *star)
     }
 
-    /// Chance a star has at least one transiting planet in the periods: its widest-reaching
-    /// planet there transits.
+    /// Chance a star has at least one transiting planet in the periods.
     pub fn planet_prior(&self, periods_s: (f64, f64)) -> f64 {
         if self.systems.is_empty() {
             return 0.0;
@@ -227,8 +206,7 @@ impl Prior {
         for planets in &self.systems {
             let mut sorted: Vec<Drawn> = planets.clone();
             sorted.sort_by(|a, b| b.reach.total_cmp(&a.reach));
-            // Slice j: the first j+1 planets transit. Whichever of them are in range, a detection
-            // is one of them, equally likely.
+            // Slice j: the first j+1 planets transit; a detection is any in range, equally likely.
             for j in 0..sorted.len() {
                 let next = sorted.get(j + 1).map_or(0.0, |d| d.reach);
                 let slice = sorted[j].reach - next;
@@ -242,10 +220,8 @@ impl Prior {
         Density::of(&weighted, lo, hi)
     }
 
-    /// Chance a transit of this period and depth is of a rocky planet rather than a giant.
-    ///
-    /// `None` when the generator makes nothing like it, which the search's probability will
-    /// already have said.
+    /// Chance a transit of this period and depth is of a rocky planet rather than a giant;
+    /// `None` when the generator makes nothing like it.
     pub fn rocky_given(&self, period_s: f64, depth: f64, depth_sigma: f64) -> Option<f64> {
         let lp = period_s.ln();
         let (mut rocky, mut all) = (0.0, 0.0);
@@ -346,7 +322,6 @@ fn smooth(values: &[f64], rows: usize, cols: usize, sigma_r: f64, sigma_c: f64) 
 }
 
 
-/// A direction uniform on the sphere, from one hash.
 fn direction(h: u64) -> DVec3 {
     let z = rng::uniform(h) * 2.0 - 1.0;
     let phi = rng::uniform(rng::mix(h)) * std::f64::consts::TAU;

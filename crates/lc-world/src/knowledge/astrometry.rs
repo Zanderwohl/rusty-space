@@ -1,8 +1,7 @@
 //! Where a star is, from which way it was seen and from where.
 //!
-//! A single bearing says nothing about distance. Two bearings from places a baseline apart
-//! differ by the parallax, `B / d` radians, and that difference is the whole of the distance
-//! measurement. See `lightcone/docs/22-provenance.md`.
+//! Two bearings from places a baseline `B` apart differ by the parallax, `B / d` radians,
+//! which is the whole distance measurement. See `lightcone/docs/22-provenance.md`.
 
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
@@ -34,8 +33,7 @@ pub fn centroid_sigma_rad(resolution_rad: f64, snr: f64) -> f64 {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Bearing {
     pub observer_ly: DVec3,
-    /// Unit vector from the observer toward the star, with the observer's own aberration
-    /// already removed: a craft knows its own velocity exactly.
+    /// Unit vector, with the observer's own aberration already removed.
     pub toward: DVec3,
     pub sigma_rad: f64,
 }
@@ -48,8 +46,7 @@ pub enum Distance {
     Unknown,
     /// No parallax found, which says the star is at least this far away, light-years.
     AtLeast(f64),
-    /// Triangulated. `sigma_ly` is along the line of sight; across it the error is the bearing
-    /// error times the distance, which is far smaller.
+    /// `sigma_ly` is along the line of sight; across it the error is far smaller.
     Measured { position_ly: DVec3, sigma_ly: f64 },
 }
 
@@ -67,15 +64,7 @@ impl Distance {
     }
 }
 
-/// Least squares over every bearing, in a frame whose `z` is the mean bearing.
-///
-/// Solved as a regression of transverse position on slope, both centered, rather than as
-/// the 3x3 system `sum (I - u u^T) x = sum (I - u u^T) p`. That matrix's smallest eigenvalue
-/// is the parallax squared — 1e-12 of the others at 25 ly over an AU — so inverting it in f64
-/// returns noise. Centered slopes carry the same information as small numbers.
-/// The angle the widest pair of observing positions subtends at `star_ly`, radians: how much
-/// parallax the bearings had to work with. Two craft a light-year apart beat one orbit, and this
-/// is the number that says so.
+/// The angle the widest pair of observing positions subtends at `star_ly`, radians.
 pub fn baseline_rad(bearings: &[Bearing], star_ly: DVec3) -> f64 {
     let mut widest: f64 = 0.0;
     for (i, a) in bearings.iter().enumerate() {
@@ -92,6 +81,11 @@ pub fn baseline_rad(bearings: &[Bearing], star_ly: DVec3) -> f64 {
     widest
 }
 
+/// Least squares over every bearing, in a frame whose `z` is the mean bearing.
+///
+/// A regression of transverse position on slope, not the 3x3 system
+/// `sum (I - u u^T) x = sum (I - u u^T) p`: that matrix's smallest eigenvalue is the parallax
+/// squared, 1e-12 of the others at 25 ly over an AU, so inverting it in f64 returns noise.
 #[allow(clippy::indexing_slicing)] // axes are 0 and 1 of two-element arrays and a vector
 pub fn triangulate(bearings: &[Bearing]) -> Distance {
     let weight = |b: &Bearing| 1.0 / (b.sigma_rad * b.sigma_rad).max(f64::MIN_POSITIVE);
@@ -262,7 +256,7 @@ mod tests {
         }
     }
 
-    /// Two craft a light-day apart see what an orbit takes months to show.
+    /// Two craft a light-day apart measure better than half an orbit at 1 AU.
     #[test]
     fn a_wide_pair_beats_a_year_of_orbiting() {
         let star = DVec3::new(0.0, 300.0, 0.0);

@@ -1,37 +1,33 @@
 //! How much room what a craft knows takes, and what happens when there is none left.
 //!
-//! Only raw logs take room. Bearings, names, claims, conclusions and the digests of consumed logs
-//! are small next to a log and bounded per subject, and charging for them left a craft that had
-//! surveyed the sky full for good, with reading its logs making it worse. A sample is a fixed
-//! game unit, near enough what postcard writes. Files are never dropped for room; what stops
-//! when a craft is full is its logs. See `lightcone/docs/24-standing-instruments.md`.
+//! Only raw logs take room. Everything else is small and bounded per subject, and charging for
+//! it would leave a craft that had surveyed the sky full for good. A sample is a fixed game unit,
+//! near enough what postcard writes. A full craft stops keeping samples; files are never dropped.
+//! See `lightcone/docs/24-standing-instruments.md`.
 
 use super::{File, Knowledge, SAMPLE_BYTES};
 
 impl File {
-    /// Room this file takes aboard: its raw samples, whoever took them.
+    /// Room this file takes aboard, bytes.
     pub fn bytes(&self) -> f64 {
         self.samples() as f64 * SAMPLE_BYTES
     }
 
-    /// Raw samples held, whoever took them. Counted, not summed as bytes: a float `sum` of
-    /// nothing is -0.0, which a display shows as "-0.00".
+    /// Counted, not summed as bytes: a float `sum` of nothing is -0.0, which displays as "-0.00".
     fn samples(&self) -> usize {
         self.series.iter().map(|s| s.len()).sum()
     }
 }
 
 impl Knowledge {
-    /// Set how much room this craft has, and count what it is using. The count is kept up to
-    /// date as samples arrive and recounted here, so call it whenever the capacity may have
-    /// changed or a log may have been consumed — a shard does, every tick it runs the craft.
+    /// Set the room and recount what is used. Call it whenever the capacity may have changed or a
+    /// log may have been consumed; a shard does, every tick.
     pub fn fit_to(&mut self, capacity_bytes: f64) {
         self.capacity_bytes = capacity_bytes;
         self.occupied_bytes = self.bytes();
     }
 
-    /// Room everything held takes, counted now. What a display shows; [`Knowledge::fit_to`] is
-    /// what enforces it.
+    /// Counted now, for display; [`Knowledge::fit_to`] is what enforces it.
     pub fn bytes(&self) -> f64 {
         self.files.values().map(File::samples).sum::<usize>() as f64 * SAMPLE_BYTES
     }
@@ -44,7 +40,6 @@ impl Knowledge {
         self.occupied_bytes
     }
 
-    /// Whether there is no room left for another sample.
     pub fn is_full(&self) -> bool {
         self.occupied_bytes + SAMPLE_BYTES > self.capacity_bytes
     }
@@ -54,7 +49,6 @@ impl Knowledge {
         self.unkept
     }
 
-    /// Count one kept sample against the room.
     pub(super) fn charge_sample(&mut self) {
         self.occupied_bytes += SAMPLE_BYTES;
     }

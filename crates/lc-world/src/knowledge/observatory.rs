@@ -1,8 +1,7 @@
 //! Running a telescope: turning a duty and elapsed time into records.
 //!
-//! Engine-free so a shard runs it for every craft every tick, whether or not anybody is flying
-//! them — the universe runs when nobody is watching. A client runs the same code only when it
-//! has no shard, which is a test or a headless snapshot. See
+//! Engine-free so a shard runs it for every craft every tick, flown or not. A client runs it
+//! only with no shard: a test or a headless snapshot. See
 //! `lightcone/docs/24-standing-instruments.md`.
 
 use std::collections::HashMap;
@@ -20,31 +19,24 @@ use crate::rng;
 use crate::sky::{CatalogueStar, StarId, generate};
 use crate::system::M_PER_LY;
 
-/// Who the charts a ship launches with came from. Not this ship, and not any craft it will ever
-/// meet: a name for "somebody else measured this and we are taking their word".
+/// Who the charts a ship launches with came from: not this ship, nor any craft it will meet.
 pub const CHARTS: Witness = Witness(u64::MAX);
 
-/// Fractional error on a charted distance: a percent at the edge of the charted volume, which is
-/// a good office and still visible as a scatter on the map.
+/// Fractional error on a charted distance: small, and still visible as scatter on the map.
 pub const CHART_ERROR: f64 = 0.01;
 
-/// How far the charts a ship starts with reach, light-years. Past this, the sky is unsurveyed.
+/// Light-years.
 pub const CHARTED_LY: f64 = 20.0;
 
 /// Watch turns measured in one tick at most.
 const TURNS_PER_TICK: i64 = 64;
 
-/// Light-microseconds per light-year, for putting an observer on the grid.
 const LUS_PER_LY: f64 = M_PER_LY / 299.792458;
 
-/// The sky an instrument can point at, and what is cached about it.
-///
-/// Shared: a star's band luminosity and its emission model do not depend on who is looking, so
-/// one of these serves every craft a shard runs.
+/// Nothing cached here depends on who is looking, so one serves every craft a shard runs.
 pub struct Sky {
     stars: Arc<Vec<CatalogueStar>>,
-    /// Band luminosity per star, watts, in the order of `stars`. Only the distance changes with
-    /// the observer, so the rest is computed once and divided by `r^2`.
+    /// Watts, in the order of `stars`.
     luminosity: HashMap<Band, Vec<f64>>,
     targets: HashMap<StarId, Target>,
 }
@@ -58,8 +50,8 @@ impl Sky {
         &self.stars
     }
 
-    /// Every star as a point source arriving at `here`, in `band`, in the order of
-    /// [`Sky::stars`] — a detection is indexed into this, and the glare test needs the whole sky.
+    /// In the order of [`Sky::stars`]: a detection is indexed into this, and the glare test
+    /// needs the whole sky.
     pub fn sources(&mut self, band: Band, here: DVec3) -> Vec<Source> {
         let stars = &self.stars;
         let luminosity = self.luminosity.entry(band).or_insert_with(|| {
@@ -87,7 +79,7 @@ impl Sky {
             .collect()
     }
 
-    /// A star's emission model, built the first time anything points at it.
+    /// Built the first time anything points at it.
     pub fn target(&mut self, id: StarId) -> Option<&Target> {
         if !self.targets.contains_key(&id) {
             let star = self.stars.iter().find(|s| s.id == id)?;
@@ -97,8 +89,6 @@ impl Sky {
     }
 }
 
-/// A star's system as the photometry sees it: the star, its planets as occluders, and its
-/// populations.
 pub fn build_target(star: &CatalogueStar) -> Target {
     let system = generate::system_for(star);
     let mut model = crate::emission::EmissionModel::new(star.star, star.seed());
@@ -120,7 +110,6 @@ pub fn build_target(star: &CatalogueStar) -> Target {
     Target::new(SystemFrame::new(origin), model)
 }
 
-/// Where an instrument is and what it is.
 #[derive(Clone, Copy, Debug)]
 pub struct Station {
     pub position_ly: DVec3,
@@ -139,20 +128,16 @@ impl Station {
     }
 }
 
-/// What one instrument is committed to, and how far through it it is.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct Observatory {
     pub duty: Duty,
-    /// Coordinate seconds a stare integrates for before it records a sample.
+    /// Coordinate seconds.
     pub integration_s: f64,
-    /// When the last photometric sample was taken, and when the sweep was last asked what it
-    /// had covered. How a duty turns elapsed time into exposure rather than producing one
-    /// measurement per tick.
+    /// Last photometric sample and last sweep check: how elapsed time becomes exposure rather
+    /// than one measurement per tick.
     sampled_s: f64,
     swept_s: f64,
-    /// Which turn of a watch rotation the last sample came from.
     slot: i64,
-    /// Where it is pointed right now.
     pointing: Option<StarId>,
 }
 
@@ -174,8 +159,7 @@ impl Observatory {
         self.pointing
     }
 
-    /// Take up a duty, starting its clock at `now_s`. A sweep or a watch starts where it is
-    /// taken up, whatever start time it was handed: the instrument cannot have begun earlier.
+    /// A sweep or a watch starts at `now_s`, whatever start it was handed.
     pub fn take_up(&mut self, mut duty: Duty, now_s: f64) {
         match &mut duty {
             Duty::Sweep(sweep) => sweep.started_s = now_s,
@@ -189,10 +173,8 @@ impl Observatory {
         self.duty = duty;
     }
 
-    /// Run the duty for however much coordinate time has passed since the last call.
-    ///
-    /// Exposure is elapsed coordinate time, not a number typed into a panel: a measurement
-    /// labeled with an integration it did not get is a lie about its own error bars.
+    /// Exposure is elapsed coordinate time, so no measurement claims an integration it did not
+    /// get.
     pub fn tick(&mut self, sky: &mut Sky, knowledge: &mut Knowledge, at: Station, now_s: f64) {
         match self.duty.clone() {
             Duty::Idle => {}
@@ -211,8 +193,7 @@ impl Observatory {
                 let Some(slot) = duty.slot_at(now_s) else { return };
                 let previous = std::mem::replace(&mut self.slot, slot);
                 // Every turn that ended since the last tick, each measured when it ended; on the
-                // first tick no turn has a full dwell behind it. Capped, so a long gap costs a
-                // bounded amount.
+                // first tick no turn has a full dwell behind it. Capped, so a long gap is bounded.
                 if previous != i64::MIN {
                     for turn in previous.max(slot - TURNS_PER_TICK)..slot {
                         let ended_s = started_s + (turn + 1) as f64 * dwell;
@@ -233,10 +214,8 @@ impl Observatory {
     }
 }
 
-/// One photometric sample of a star, in every band the instrument has.
-///
-/// Noise is seeded from the witness and the star as well as the time, so two craft watching
-/// the same star see different noise and a shard can recompute exactly what either saw.
+/// Noise is seeded from the witness and the star, so two craft see different noise and a shard
+/// can recompute exactly what either saw.
 pub fn photometry(
     sky: &mut Sky,
     knowledge: &mut Knowledge,
@@ -259,9 +238,6 @@ pub fn photometry(
 }
 
 /// A bearing to a star the instrument is already pointed at.
-///
-/// A stare measures where something is as well as how bright it is, which is why watching one
-/// star from a moving ship eventually gives its distance without any survey at all.
 pub fn fix(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, id: StarId, exposure_s: f64, now_s: f64) {
     let optics = at.optics();
     let Some(band) = optics.band() else { return };
@@ -275,7 +251,6 @@ pub fn fix(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, id: StarId, ex
     }
 }
 
-/// Whatever fields a sweep finished between two coordinate times.
 pub fn sweep_between(
     sky: &mut Sky,
     knowledge: &mut Knowledge,
@@ -313,20 +288,15 @@ pub fn sweep_between(
     }
 }
 
-/// Issue the charts a ship leaves port with.
-///
-/// A craft does not start from nothing — it starts from somebody else's parallax program,
-/// which is exactly as good as whoever ran it and does not extend past where they were looking.
-/// So the nearby sky arrives as claims from a charting office the ship has never met, held on
-/// that office's word until the ship measures one for itself, and everything beyond `reach_ly`
-/// is sky nobody aboard has ever detected.
-/// What the charting office calls a star: a number of its own, the same for every ship it
-/// charts for. Not the catalogue's name, which is the generator's and never shown.
+/// The charting office's designation for a star, the same for every ship. The catalogue name is
+/// the generator's and is never shown.
 pub fn chart_number(id: StarId) -> String {
     let raw = id.get();
     format!("HC {:04X}-{:02X}", raw >> 48, (raw >> 40) & 0xFF)
 }
 
+/// The charts a ship leaves port with: claims from [`CHARTS`] out to `reach_ly`, held on the
+/// office's word until the ship measures a star itself.
 pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach_ly: f64, now_s: f64) {
     let Some(band) = at.optics().band() else { return };
     let from = at.position_ly;
@@ -385,7 +355,7 @@ mod tests {
 
     const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
 
-    /// The three sample stars at 4.2 ly, one along each axis, so nothing hides behind anything.
+    /// Three stars at 4.2 ly, one along each axis, so none hides behind another.
     fn spread() -> Sky {
         let template = AuthoredStars::sample().stars()[0].clone();
         let stars = [DVec3::X, DVec3::Y, DVec3::Z]
@@ -487,8 +457,7 @@ mod tests {
         }
     }
 
-    /// Ticked once after nine turns, a watch measures every turn that ended, each stamped when
-    /// it ended rather than when the tick came.
+    /// Ticked once after nine turns, a watch measures every turn, each stamped when it ended.
     #[test]
     fn a_watch_measures_every_turn_that_ended_across_a_gap() {
         let mut sky = spread();
@@ -506,8 +475,8 @@ mod tests {
         }
     }
 
-    /// Two craft staring at one star see different noise, and a craft seeing it twice sees the
-    /// same — what lets a shard check a claim.
+    /// Different witnesses see different noise; the same witness sees the same, so a shard can
+    /// check a claim.
     #[test]
     fn noise_belongs_to_the_witness() {
         let run = |witness: u64| {

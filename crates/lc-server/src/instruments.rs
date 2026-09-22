@@ -1,10 +1,8 @@
 //! Instruments that run whether or not anybody is flying them, and the knowledge they fill.
 //!
-//! Every craft's knowledge lives here, not in its client. A duty is advanced every tick for
-//! every craft that has one, a report landing on a craft is folded in when its light arrives
-//! whether or not anybody is signed in to it, and a connected client is sent what its craft
-//! learned — a report from itself, which it folds into its copy. See
-//! `lightcone/docs/24-standing-instruments.md`.
+//! Every craft's knowledge lives here, not in its client. Duties advance and reports land with
+//! nobody signed in; a connected client is sent what its craft learned as a report, which it
+//! folds into its copy. See `lightcone/docs/24-standing-instruments.md`.
 
 use std::collections::HashMap;
 
@@ -23,22 +21,20 @@ use crate::transport::Transport;
 use crate::world::{Event, Scheduled};
 
 /// Systems per page of a craft's knowledge sent to a client that has just signed in. A
-/// thoroughly surveyed sky is thousands, so it arrives over a few ticks rather than as one
-/// message the size of the catalogue.
+/// surveyed sky is thousands of systems, so it arrives over a few ticks.
 const PAGE: usize = 256;
 
 /// Samples per page of a craft's own logs, before the byte bound shrinks it.
 const LOG_PAGE: usize = 20_000;
 
 /// Bytes a page may take, whichever stream. Far inside [`lc_proto::FRAME_LIMIT`]: a page over
-/// that is one the client refuses, and it would reconnect and be sent the same page again.
+/// that is refused by the client, which would reconnect and be sent the same page again.
 pub(crate) const PAGE_BYTES: usize = 1 << 20;
 
 /// Logs read per tick across the whole shard. Reading one is a search over thousands of
-/// periods, so the shard takes them in turn rather than all at once.
+/// periods.
 const READS_PER_TICK: usize = 1;
 
-/// What one craft holds and is doing with its instruments.
 #[derive(Clone, Debug)]
 pub(crate) struct Aboard {
     pub knowledge: Knowledge,
@@ -46,7 +42,6 @@ pub(crate) struct Aboard {
     pub reporting: Reporting,
 }
 
-/// A report on its way to a craft, and when its light lands.
 #[derive(Clone, Debug)]
 pub(crate) struct Landing {
     observer: CraftId,
@@ -55,19 +50,16 @@ pub(crate) struct Landing {
     body: String,
 }
 
-/// Everything the server holds about what craft know.
 #[derive(Default)]
 pub(crate) struct Instruments {
     pub aboard: HashMap<CraftId, Aboard>,
-    /// Built from the world's stars the first time anything looks at them, and shared by every
-    /// craft: a star's output and its emission model do not depend on who is looking.
+    /// Built lazily and shared by every craft: a star's output does not depend on who looks.
     sky: Option<Sky>,
-    /// What the generator's planets look like across the world's stars, which is what a log is
-    /// read against. Measured once, like the sky.
+    /// The generator's planet population, which a log is read against. Built lazily.
     prior: Option<Prior>,
-    /// The craft whose log was read last, so the next read goes to the one after it.
+    /// Round-robin cursor for [`READS_PER_TICK`].
     reader: Option<CraftId>,
-    /// The craft whose room was last recounted from scratch, likewise.
+    /// Round-robin cursor for the one full recount per tick.
     recounted: Option<CraftId>,
     landings: Vec<Landing>,
 }
@@ -83,12 +75,12 @@ pub(crate) fn witness(id: CraftId) -> Witness {
     Witness(id.0 as u64)
 }
 
-/// The largest page `build` makes that fits [`PAGE_BYTES`], halving `limit` until it does, and
-/// what to resume from. `None` when there is nothing new.
+/// The largest page `build` makes that fits [`PAGE_BYTES`], and what to resume from. `None`
+/// when there is nothing new.
 ///
-/// A single item larger than a page is sent alone as long as it fits a frame. One that does not
-/// is skipped — the body is `None` and the mark still moves past it — because sending it would
-/// close the connection, and so would every reconnection after.
+/// A single item larger than a page is sent alone if it fits a frame. One that does not is
+/// skipped (body `None`, mark moved past it), because sending it would close the connection on
+/// every reconnection.
 fn page<T>(mut limit: usize, build: impl Fn(usize) -> (Option<String>, Option<T>)) -> Option<(Option<String>, T)> {
     loop {
         let (body, through) = build(limit);
@@ -109,18 +101,14 @@ impl<J: Journal> Server<J> {
         self.instruments.sky.get_or_insert_with(|| Sky::new(stars))
     }
 
-    /// Where a craft's instruments are and what they are, now.
     fn station(&self, id: CraftId) -> Option<Station> {
         let craft = self.fleet.get(id)?;
         let position_ly = craft.position_at(self.now_t as f64) / LIGHT_US_PER_LY;
         Some(Station { position_ly, instrument: craft.sensor })
     }
 
-    /// A craft's knowledge, starting it with the charts of where it is if it has none yet.
-    ///
-    /// A new craft is not issued the sky. It is issued the charts of the volume it is in — the
-    /// charting office's word, overridden the moment it measures anything itself — and has to
-    /// find the rest. See `lightcone/docs/22-provenance.md`.
+    /// A craft's instruments, issuing a new craft the charts of the volume it is in. See
+    /// `lightcone/docs/22-provenance.md`.
     pub(crate) fn aboard(&mut self, id: CraftId) -> &mut Aboard {
         let fresh = (!self.instruments.aboard.contains_key(&id)).then(|| {
             let mut knowledge = Knowledge::new(witness(id));
@@ -137,7 +125,7 @@ impl<J: Journal> Server<J> {
         }))
     }
 
-    /// Room for knowledge aboard a craft now: its data modules and the onboard store.
+    /// Bytes: data modules plus the onboard store.
     fn data_capacity(&self, id: CraftId) -> f64 {
         let now_s = self.now_t as f64 * 1.0e-6;
         self.fleet
@@ -146,11 +134,10 @@ impl<J: Journal> Server<J> {
             .map_or(ONBOARD_DATA_BYTES, |f| f.balance.data_capacity(&f.loadout_at(now_s)))
     }
 
-    /// Recount what a craft's knowledge takes if its room changed, or regardless.
+    /// Recount what a craft's knowledge takes if its room changed, or if `recount`.
     ///
-    /// Samples keep the count as they arrive. Everything else — a sighting, a name, a log read
-    /// and thrown away — is noticed at a recount, which costs a pass over every file and so is
-    /// done when something changed and otherwise one craft a tick.
+    /// Samples keep the count as they arrive; anything else is noticed only at a recount, which
+    /// is a pass over every file, so it runs on change and otherwise one craft a tick.
     fn fit(&mut self, id: CraftId, recount: bool) {
         let capacity = self.data_capacity(id);
         if let Some(aboard) = self.instruments.aboard.get_mut(&id)
@@ -160,7 +147,6 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Advance every craft's duty to now.
     pub(crate) fn run_instruments(&mut self) {
         let now_s = self.now_t as f64 * 1.0e-6;
         let busy: Vec<CraftId> = self
@@ -189,7 +175,6 @@ impl<J: Journal> Server<J> {
         self.read_logs(now_s);
     }
 
-    /// Read the logs that are due, a few a tick, taking the craft in turn.
     fn read_logs(&mut self, now_s: f64) {
         let mut ids: Vec<CraftId> = self.instruments.aboard.keys().copied().collect();
         ids.sort_unstable_by_key(|id| id.0);
@@ -216,15 +201,12 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Note where this tick's reports will land, so they are folded in when their light does.
-    ///
-    /// Read off the deliveries rather than recomputed, because the deliveries already are the
-    /// answer: who the beam covered, when the light gets there, and how loud it is.
+    /// Note where this tick's reports will land. Read off the deliveries, which already hold
+    /// who was covered, when, and how loud.
     pub(crate) fn schedule_landings(&mut self, events: &[Event], deliveries: &[Scheduled]) {
         for event in events.iter().filter(|e| e.kind == lc_proto::kind::REPORT) {
             for scheduled in deliveries.iter().filter(|d| d.event == event.id) {
-                // Redacted here exactly as a client is sent it, so a sealed report teaches
-                // nobody but its addressee, whoever holds the craft it lands on.
+                // Redacted as a client is sent it, so a sealed report teaches only its addressee.
                 let payload = crate::radio::redact(event.kind, &event.payload, scheduled.observer);
                 let Ok(reported) = serde_json::from_str::<lc_proto::Reported>(&payload) else {
                     eprintln!("WARNING: report {} is not a report; it will not land", event.id);
@@ -250,14 +232,14 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Fold in every report whose light has arrived, for every craft, signed in or not.
+    /// Fold in every report whose light has arrived, signed in or not.
     pub(crate) fn land_reports(&mut self) {
         let now = self.now_t;
         let (due, pending): (Vec<Landing>, Vec<Landing>) =
             std::mem::take(&mut self.instruments.landings).into_iter().partition(|l| l.arrive_t <= now);
         self.instruments.landings = pending;
         for landing in due {
-            // Under the noise floor it is light that went past, not a report received.
+            // Under the noise floor it was not received.
             let floor = self.fleet.get(landing.observer).map(|c| c.noise_floor).unwrap_or(f32::INFINITY);
             if landing.strength < floor {
                 continue;
@@ -273,9 +255,8 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Send every connected client what its craft has learned since the last time, and its own
-    /// samples, a page of each at most. Paging carries on over the ticks that follow until the
-    /// copy is caught up.
+    /// Send every connected client at most one page each of what its craft has learned and of
+    /// its own samples.
     pub(crate) fn tell_learned(&mut self, wire: &mut impl Transport) {
         let now_s = self.now_t as f64 * 1.0e-6;
         let connected: Vec<(lc_proto::ClientId, ShipId, Mark, f64, bool)> = self
@@ -295,8 +276,8 @@ impl<J: Journal> Server<J> {
                 let page = lc_world::knowledge::Logs { logs, retained: retained.clone() };
                 (serde_json::to_string(&page).ok(), through)
             });
-            // A connection is told what its craft keeps raw once, logs or none; after that each
-            // log page says so again, and an accepted order says when it changes.
+            // Send what the craft keeps raw once even with no logs; later log pages and accepted
+            // orders carry it after that.
             let logs = match logs {
                 None if !retained_sent && !retained.is_empty() => serde_json::to_string(&lc_world::knowledge::Logs { logs: Vec::new(), retained })
                     .ok()
@@ -325,7 +306,6 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Tell a client what its craft's telescope is doing.
     pub(crate) fn tell_observing(&mut self, wire: &mut impl Transport, client: lc_proto::ClientId, id: CraftId) {
         let observatory = &self.aboard(id).observatory;
         let observing = Outbound::Observing {
@@ -335,9 +315,8 @@ impl<J: Journal> Server<J> {
         wire.send(client, observing);
     }
 
-    /// The orders that change what a craft knows or is doing with its instruments, rather than
-    /// where it is. Nothing is put on the air, so they are not events; the order comes back as
-    /// applied, with a sweep's or a watch's start set to when it actually began.
+    /// Instrument and knowledge orders. Nothing goes on the air, so they are not events. Returns
+    /// the order as applied, with a sweep's or watch's actual start time.
     pub(crate) fn act_on_knowledge(&mut self, id: CraftId, order: &Order, at_s: f64) -> Result<Order, Refusal> {
         match order {
             Order::SetDuty { duty, integration_s } => {
@@ -360,7 +339,6 @@ impl<J: Journal> Server<J> {
                 }
                 let subject = Subject::from(*subject);
                 let knowledge = &mut self.aboard(id).knowledge;
-                // A name for something this craft has never heard of is a name for nothing.
                 if !knowledge.knows(subject) {
                     return Err(Refusal::Impossible);
                 }
@@ -383,11 +361,11 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// The report a craft would send `to` now, and what it would advance the mark to.
+    /// The report a craft would send `to` now, and the mark it would advance to. Built from the
+    /// shard's knowledge, never the client's.
     ///
-    /// Written here, from the knowledge the shard holds, never taken from the client. Shrunk
-    /// until it fits a transmission: the slice is bounded by systems and a system's file is
-    /// not, so a long watch on one star can make even a few of them too large.
+    /// Shrunk until it fits [`lc_proto::REPORT_LIMIT`]: [`ENTRIES_PER_REPORT`] counts systems,
+    /// and one system's file grows without bound over a long watch.
     pub(crate) fn report_for(&self, id: CraftId, to: Option<ShipId>, at_s: f64) -> Result<(String, Mark), Refusal> {
         let aboard = self.instruments.aboard.get(&id).ok_or(Refusal::NothingNew)?;
         let since = aboard.reporting.since(to.map_or(0, |t| t.0));
@@ -431,8 +409,8 @@ mod tests {
     const MONTH_US: i64 = 30 * 86_400 * 1_000_000;
 
     /// A home star at the origin, where a new craft starts, and three more thirty light-years
-    /// out along the axes that do not look back through the home star's glare. The charts reach
-    /// twenty, so the three are what a sweep has to find for itself.
+    /// out along axes clear of the home star's glare. The charts reach twenty, so only a sweep
+    /// finds the three.
     fn sky() -> Vec<CatalogueStar> {
         let template = AuthoredStars::sample().stars()[1].clone();
         [DVec3::ZERO, DVec3::X * 30.0, DVec3::Y * 30.0, DVec3::Z * 30.0]
@@ -456,8 +434,7 @@ mod tests {
         server
     }
 
-    /// Sign in, and everything said on the tick that welcomed it — which already includes the
-    /// first page of what its craft knows.
+    /// Sign in, and everything said on the welcoming tick, including the first knowledge page.
     async fn sign_in(
         server: &mut Server<Memory>,
         wire: &mut Loopback,
@@ -477,7 +454,7 @@ mod tests {
         (ship, said)
     }
 
-    /// Everything a client was told its craft knows, folded as the client folds it.
+    /// Folds reports as the client does.
     fn replica(ship: ShipId, messages: &[Outbound]) -> Knowledge {
         let mut copy = Knowledge::new(witness(CraftId(ship.0)));
         for message in messages {
@@ -492,7 +469,6 @@ mod tests {
         Inbound::Act(Intent { ship_id: ship, order, issued_at_client_t: i64::MAX })
     }
 
-    /// A new craft is issued the charts of where it starts, and its client is sent them.
     #[tokio::test]
     async fn a_new_craft_starts_with_the_charts_of_where_it_is() {
         let broker = Broker::new([1u8; 32]);
@@ -505,9 +481,8 @@ mod tests {
         assert_eq!(copy.stars().count(), 1, "and nothing past twenty light-years is");
     }
 
-    /// The whole of 11b. A craft set to sweep keeps sweeping with nobody signed in to it; a
-    /// report sent to it meanwhile is folded in when its light lands; and signing back in hands
-    /// the client all of it.
+    /// With nobody signed in, a craft keeps sweeping and receives a report when its light lands;
+    /// signing back in hands the client all of it.
     #[tokio::test]
     async fn a_craft_keeps_observing_and_listening_while_nobody_is_signed_in() {
         let broker = Broker::new([1u8; 32]);
@@ -520,8 +495,7 @@ mod tests {
         assert!(wire.take(ClientId(1)).iter().any(|m| matches!(m, Outbound::Accepted { .. })));
         server.disconnected(ClientId(1));
 
-        // A second craft a light-hour out on the far side of the home star from where new craft
-        // start, which knows one thing the first does not.
+        // A second craft a light-hour out, which knows one star the first does not.
         let bry = ClientId(2);
         let at = -DVec3::X * 3_600.0 * 1.0e6;
         server.admit(bry, crate::world::still(ShipId(90), at), 0.0);
@@ -572,7 +546,7 @@ mod tests {
         );
     }
 
-    /// A duty, like a name, is applied by the shard and comes back as applied.
+    /// A client-supplied start time is replaced by the shard's.
     #[tokio::test]
     async fn a_duty_starts_when_the_shard_applies_it() {
         let broker = Broker::new([1u8; 32]);
@@ -610,9 +584,8 @@ mod tests {
         assert_eq!(replica(ship, &all).name_of(sky()[0].id).as_deref(), Some("Hearth"));
     }
 
-    /// The whole of review item 7. A craft that knows more than one frame can carry — a sky of
-    /// files and a long log — signs in, and is paged all of it over the ticks that follow, every
-    /// page inside the bound, until its copy is the original.
+    /// A craft that knows more than one frame holds is paged all of it, every page inside
+    /// [`PAGE_BYTES`], until its copy matches the original.
     #[tokio::test]
     async fn a_craft_that_knows_more_than_a_frame_is_paged_all_of_it() {
         let broker = Broker::new([1u8; 32]);
@@ -626,8 +599,7 @@ mod tests {
             let toward = DVec3::new((k as f64).sin(), (k as f64).cos(), 0.1).normalize();
             let sighting = Sighting {
                 witness: witness(id),
-                // After the page the sign-in already sent, and all at one instant, as a sweep's
-                // tick or a set of charts is.
+                // After the sign-in page, and all at one instant, as a sweep tick or charts are.
                 observed_s: now_s + 1.0,
                 bearing: Bearing { observer_ly: DVec3::ZERO, toward, sigma_rad: 1e-6 },
                 band: em_spectra::Band::V,
@@ -638,7 +610,7 @@ mod tests {
             knowledge.sighted(StarId::synthesise("paging", k), sighting);
         }
         let watched = StarId::synthesise("paging", 0);
-        // Kept raw, so the shard does not read it into a conclusion while it is being paged.
+        // Kept raw, so the shard does not consume it while paging.
         knowledge.retain_raw(watched, true);
         for n in 0..200_000u64 {
             let sample = lc_world::knowledge::Sample { observed_s: now_s + n as f64 * 1e-3, deficit: 1e-4, sigma: 1e-5 };
@@ -680,9 +652,8 @@ mod tests {
         assert!(copy.retained(watched), "and that it is kept raw");
     }
 
-    /// Review item 10. Every number in a duty is checked: a NaN radius, which `clamp` would
-    /// pass through and which would finish an all-sky sweep in a tick, is refused, and so is a
-    /// zero direction, a dwell out of range and a watch longer than the limit.
+    /// Every number in a duty is checked; a NaN radius would pass `clamp` and finish an all-sky
+    /// sweep in a tick.
     #[tokio::test]
     async fn a_duty_with_a_number_no_telescope_could_take_is_refused() {
         let broker = Broker::new([1u8; 32]);
@@ -713,8 +684,7 @@ mod tests {
         }
     }
 
-    /// Review item 8. A report a light-hour out when its shard stops still lands, at the time
-    /// its light gets there, on the shard that comes back: the journal still holds its delivery.
+    /// A report in flight across a restart lands on time, because the journal holds its delivery.
     #[tokio::test]
     async fn a_report_in_flight_across_a_restart_still_lands() {
         let mut old = Server::new(Memory::default(), 0, 1);
@@ -755,10 +725,9 @@ mod tests {
         assert!(belief.learned_s > now_s + 3_000.0, "when its light got there: {}", belief.learned_s);
     }
 
-    /// Review item 15's measurement: a tick with a hundred craft sweeping, each holding ten
-    /// thousand files. Ignored because it is a timing, not a check; run it with
-    /// `cargo test -p lc-server --lib a_busy_tick -- --ignored --nocapture`, and the figure is
-    /// in doc 24.
+    /// A tick with a hundred craft sweeping, each holding ten thousand files. A timing, not a
+    /// check: `cargo test -p lc-server --lib a_busy_tick -- --ignored --nocapture`. The figure is
+    /// in `lightcone/docs/24-standing-instruments.md`.
     #[tokio::test]
     #[ignore]
     async fn a_busy_tick_is_measured() {
@@ -798,7 +767,7 @@ mod tests {
             }
             wire.client_says(ClientId(n as u64 + 1), act(ship, Order::SetDuty { duty: sweep.clone(), integration_s: 1.0e4 }));
         }
-        // Past the sign-in pages, so what is timed is a craft at work rather than one catching up.
+        // Past the sign-in pages, so the timing is of craft at work, not catching up.
         for _ in 0..80 {
             server.tick(&mut wire).await.unwrap();
             for n in 0..100u64 {

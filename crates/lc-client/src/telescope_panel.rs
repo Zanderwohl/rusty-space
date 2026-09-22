@@ -1,9 +1,8 @@
-//! The telescope window: what the instrument is committed to, what has been detected, and
-//! where the belief about any of it came from.
+//! The telescope window: what the instrument is doing, what has been detected, and where each
+//! belief came from.
 //!
-//! Everything shown here comes out of [`lc_world::knowledge`] rather than out of the
-//! catalogue. A star nobody aboard has detected has no row, and a star nobody has measured a
-//! parallax to has a row with no distance in it — see `lightcone/docs/22-provenance.md`.
+//! Everything shown comes from [`lc_world::knowledge`], not the catalog: an undetected star has
+//! no row, and one with no parallax has no distance. See `lightcone/docs/22-provenance.md`.
 
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -74,7 +73,6 @@ pub fn telescope(
     curve(ui, game, out, plot);
 }
 
-/// One hypothesis, in words.
 fn describe(kind: &Kind) -> String {
     let day = 86_400.0;
     match kind {
@@ -102,7 +100,7 @@ fn describe(kind: &Kind) -> String {
     }
 }
 
-/// How much of the room aboard this ship's raw logs take, and the button that frees it.
+/// Storage taken by this ship's raw logs, and the button that frees it.
 fn room(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let now = game.coordinate_time_s();
     let capacity = game
@@ -130,8 +128,6 @@ fn room(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     });
 }
 
-/// What this ship has concluded from the log of whatever is under the crosshair.
-///
 /// A probability with its evidence, never a verdict: see
 /// `lightcone/docs/24-standing-instruments.md`.
 fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
@@ -176,12 +172,10 @@ fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>
     }
 }
 
-/// What the panel describes: the selection, whatever the telescope is doing.
 fn described(game: &Game) -> Option<StarId> {
     game.described.or(game.pointing)
 }
 
-/// What the telescope is committed to, and how to commit it to something else.
 fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let now = game.coordinate_time_s();
     match &game.observatory.duty {
@@ -200,8 +194,8 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
                 passes + 1,
                 fraction * 100.0
             ));
-            // A pass is the unit that matters: a star is found when the sweep reaches its
-            // field, and its parallax comes from the ship having moved between two passes.
+            // Stars are found as a pass reaches their field; parallax needs the ship to have
+            // moved between passes.
             ui.weak(format!(
                 "one pass every {:.1} hours",
                 sweep.pass_s() / 3600.0
@@ -218,7 +212,6 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
             ));
         }
     }
-    // The telescope and the selection are two things, and the panel says when they differ.
     if let (Some(on), Some(looking)) = (game.observatory.pointing(), game.described)
         && on != looking
     {
@@ -240,8 +233,7 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     });
 }
 
-/// Every star this ship knows, nearest believed first, as an order to show them in. Cheap: no
-/// labels, which only the rows on screen get.
+/// Nearest believed first. No labels: only the rows on screen get those.
 fn known(game: &Game) -> Vec<(f64, StarId)> {
     let here = game.ship.motion.position_ly;
     let mut order: Vec<(f64, StarId)> = game
@@ -260,8 +252,7 @@ fn known(game: &Game) -> Vec<(f64, StarId)> {
     order
 }
 
-/// One row of the list, the full width of it: the name on the left and the range as far as this
-/// ship knows it on the right. Where the range came from is the details' business, not the list's.
+/// Name on the left, range on the right. Where the range came from is shown only in the details.
 fn row(ui: &mut egui::Ui, game: &Game, id: StarId, selected: bool, height: f32) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::click());
@@ -293,7 +284,6 @@ fn row(ui: &mut egui::Ui, game: &Game, id: StarId, selected: bool, height: f32) 
     response
 }
 
-/// What the selected star is called, how far it is, and where each of those came from.
 fn details(
     ui: &mut egui::Ui,
     state: &Ui,
@@ -308,8 +298,7 @@ fn details(
     for name in names(game, id) {
         ui.strong(name);
     }
-    // A name is a record like any other: this ship's, stamped with when it said so, and carried
-    // to anyone it reports to.
+    // A name is a record like any other: timestamped and relayed to whoever this ship reports to.
     if state.selected == Some(id) {
         let field = ui.add(egui::TextEdit::singleline(draft).hint_text("Add Name").desired_width(150.0));
         let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -327,8 +316,7 @@ fn details(
     });
 }
 
-/// Every name this ship holds for a star, chosen ones first, each once. What it goes by when
-/// nobody has named it is its own discovery's designation, which is one of these.
+/// Chosen names first, each once. An unnamed star's discovery designation is one of these.
 fn names(game: &Game, id: StarId) -> Vec<String> {
     let mut held: Vec<_> = game.knowledge.file(id).map(|f| f.names().to_vec()).unwrap_or_default();
     held.sort_by_key(|n| !n.kind.chosen());
@@ -344,7 +332,6 @@ fn names(game: &Game, id: StarId) -> Vec<String> {
     names
 }
 
-/// The light curve of whatever the panel describes, in the selected band.
 fn curve(
     ui: &mut egui::Ui,
     game: &mut Game,
@@ -367,8 +354,7 @@ fn curve(
     ui.horizontal(|ui| {
         ui.label("curve");
         for b in em_spectra::Band::ALL {
-            // A band the sensor cannot reach is shown as unavailable rather than omitted, so
-            // the instrument's limits are visible instead of merely being enforced.
+            // Shown disabled rather than omitted, so the sensor's limits are visible.
             if !game.telescope.sees(b) {
                 ui.weak(format!("{b:?}"));
                 continue;
@@ -389,8 +375,7 @@ fn curve(
     }
 
     if let Some((_, last)) = &last {
-        // The picture is the readout, but a number is the one form of it that survives being
-        // read aloud, screenshotted, or looked at by someone who cannot see the color.
+        // A number survives being read aloud or seen by someone who cannot see the color.
         let (label, value) = if *last >= 0.0 {
             ("deficit", *last)
         } else {

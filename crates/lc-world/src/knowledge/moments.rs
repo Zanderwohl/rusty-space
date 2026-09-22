@@ -1,11 +1,8 @@
 //! The steady part of a light curve, and its flicker: what belts and swarms show.
 //!
-//! A swarm dims a star in every visible band alike, flickers about that mean as its elements
-//! cross the disc, and glows in the thermal infrared from the light it caught. A belt is too
-//! thin to dim anything a craft can measure and shows only as that glow. All three are
-//! moments — sums, sums of squares, and products at a lag — so, unlike a transit search, they
-//! lose nothing when the samples behind them are thrown away. See
-//! `lightcone/docs/05-observation.md`.
+//! A swarm dims every visible band alike, flickers as its elements cross the disc, and glows
+//! in the thermal infrared; a belt shows only the glow. All three are moments, so unlike a
+//! transit search they survive discarding the samples. See `lightcone/docs/05-observation.md`.
 
 use std::collections::BTreeMap;
 
@@ -14,23 +11,20 @@ use serde::{Deserialize, Serialize};
 
 use super::Series;
 
-/// The bands a swarm dims alike. K and past it the elements' own glow starts to count.
+/// From K on, the elements' own glow starts to count.
 const VISIBLE: [Band; 4] = [Band::B, Band::V, Band::R, Band::I];
 
-/// Lags the flicker is correlated at, seconds: a quarter hour to five days, each a factor of
-/// root two past the last. A crossing takes about two hours at a red dwarf's light radius and
-/// two days at a hot star's.
+/// Lags, seconds: a quarter hour to five days in steps of root two. A crossing takes about two
+/// hours at a red dwarf's light radius and two days at a hot star's.
 const LAG_MIN_S: f64 = 900.0;
 const LAGS: usize = 19;
 
-/// Width of the bins points are averaged into before they are paired: half the shortest lag.
 const BIN_S: f64 = LAG_MIN_S / 2.0;
 
-/// Significance flicker needs before it is reported: its covariance at the shortest lag this
-/// many errors above zero.
+/// In errors of the covariance at the shortest lag.
 const FLICKER_SIGNIFICANCE: f64 = 3.0;
 
-/// Sums over one band's samples, weighted by inverse variance.
+/// Weighted by inverse variance.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 struct Sums {
     n: f64,
@@ -39,7 +33,6 @@ struct Sums {
     wxx: f64,
 }
 
-/// Sums over pairs of visible points at one lag.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 struct Pairs {
     n: f64,
@@ -49,34 +42,28 @@ struct Pairs {
     xx: f64,
 }
 
-/// A log's moments. Sufficient for what is read from them, and additive: a log read in
-/// pieces gives the same answer as one read whole, less the pairs that straddle a piece's end.
+/// Additive: a log read in pieces reads the same as one read whole, less the pairs that
+/// straddle a piece's end.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Moments {
     bands: [Sums; 7],
     lags: Vec<Pairs>,
-    /// Arrival times of the first and last sample, for how many independent stretches of
-    /// flicker the log spans.
+    /// First and last arrival, for how many independent stretches of flicker the log spans.
     span_s: Option<(f64, f64)>,
 }
 
-/// What the moments say.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Reading {
     /// Mean fraction of the visible light blocked, and its error.
     pub dim: (f64, f64),
-    /// Thermal-infrared glow beyond the star's own, as a fraction of it, if the instrument sees
-    /// that band.
+    /// Thermal-infrared glow beyond the star's own, as a fraction of it.
     pub excess: Option<(f64, f64)>,
     /// Scatter of the dimming about its mean, if it stands out of the noise.
     pub flicker: Option<f64>,
-    /// How long an element takes to cross the disc, from where the flicker stops being
-    /// correlated with itself.
     pub crossing_s: Option<f64>,
 }
 
 impl Moments {
-    /// Add every sample of these series, and the visible points they combine to.
     #[allow(clippy::indexing_slicing)] // band indices come from `Band::index`, below seven, and lag bins from `lag_bin`, below `LAGS`
     pub fn add(&mut self, series: &[&Series]) {
         let mut visible: BTreeMap<u64, (f64, f64, f64)> = Default::default();
@@ -99,8 +86,8 @@ impl Moments {
             }
         }
         let points: Vec<(f64, f64)> = visible.into_values().map(|(t, w, wx)| (t, wx / w)).collect();
-        // Paired as bins, not as points: a dense log pairs every sample with every other inside
-        // five days, which is quadratic, and nothing shorter than the shortest lag is asked of it.
+        // Paired as bins, not points: pairing every sample within five days is quadratic, and
+        // nothing shorter than the shortest lag is asked of it.
         let mut binned: BTreeMap<i64, (f64, f64, f64)> = BTreeMap::new();
         for &(t, x) in &points {
             let bin = binned.entry((t / BIN_S).floor() as i64).or_insert((0.0, 0.0, 0.0));
@@ -159,8 +146,7 @@ impl Moments {
         };
     }
 
-    /// Mean and error of one band. The error is the larger of the photon noise and the scatter
-    /// the samples actually show, which is what flicker is.
+    /// The error is the larger of the photon noise and the scatter the samples show.
     #[allow(clippy::indexing_slicing)] // band indices come from `Band::index`, below seven, and lag bins from `lag_bin`, below `LAGS`
     fn mean(&self, band: Band) -> Option<(f64, f64)> {
         let s = self.bands[band.index()];
@@ -172,7 +158,7 @@ impl Moments {
         Some((mean, (1.0 / s.w).max(scatter).sqrt()))
     }
 
-    /// Covariance of the visible points with themselves at lag bin `k`, and its error.
+    /// Autocovariance of the visible points at lag bin `k`, and its error.
     fn covariance(&self, k: usize) -> Option<(f64, f64)> {
         let p = self.lags.get(k)?;
         if p.n < 8.0 {
@@ -203,8 +189,8 @@ impl Moments {
                 (cov < 0.5 * cov0).then(|| 2.0 * lag_center(k))
             })
         });
-        // Flicker makes neighboring samples one measurement, not many: the mean is only as
-        // good as the number of crossings the log spans.
+        // Flicker correlates neighboring samples: the mean is only as good as the number of
+        // crossings the log spans.
         let span = self.span_s.map_or(0.0, |(a, b)| b - a);
         let independent = crossing_s.map_or(f64::INFINITY, |t| (span / t).max(1.0));
         let dim_sigma = (1.0 / w + flicker.map_or(0.0, |(_, c)| c) / independent).sqrt();
@@ -227,7 +213,6 @@ fn lag_center(k: usize) -> f64 {
     (lag_edge(k) * lag_edge(k + 1)).sqrt()
 }
 
-/// Which lag bin a lag falls in; `None` below the shortest.
 fn lag_bin(lag: f64) -> Option<usize> {
     if lag < LAG_MIN_S {
         return None;

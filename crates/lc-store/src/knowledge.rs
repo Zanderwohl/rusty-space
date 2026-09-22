@@ -1,7 +1,6 @@
-//! What craft know, written down: a file per subject, and the photometric log beside it.
+//! What craft know: a file per subject, and the photometric log beside it.
 //!
-//! This crate stores bytes and numbers and has no opinion about what a subject or a file is;
-//! the server encodes both. See `sql/0010_knowledge.sql` and
+//! Subjects and files are opaque bytes here; the server encodes both. See `sql/0010_knowledge.sql` and
 //! `lightcone/docs/24-standing-instruments.md`.
 
 use tokio_postgres::{Client, Error, GenericClient};
@@ -39,8 +38,7 @@ pub struct Discarded {
     pub through_s: f64,
 }
 
-/// Write files, replacing whatever each craft had for each subject. One statement whatever the
-/// count.
+/// Write files, replacing whatever each craft had for each subject.
 pub async fn save_files(client: &impl GenericClient, files: &[Filed]) -> Result<u64, Error> {
     if files.is_empty() {
         return Ok(0);
@@ -83,11 +81,10 @@ pub async fn load_files(client: &Client) -> Result<Vec<Filed>, Error> {
         .collect())
 }
 
-/// Append samples. A sample already written — the same craft, subject, witness, band and
-/// instants — is skipped rather than refused, so a checkpoint that is retried after a failure
-/// does not fail again on what it wrote the first time.
+/// Append samples. A duplicate is skipped rather than refused, so a retried checkpoint does not
+/// fail on what it wrote the first time.
 ///
-/// **The partitions for their learned times must exist**: see [`crate::store::ensure_partitions`].
+/// The partitions for their learned times must exist: see [`crate::store::ensure_partitions`].
 pub async fn save_samples(client: &impl GenericClient, rows: &[LogRow]) -> Result<u64, Error> {
     if rows.is_empty() {
         return Ok(0);
@@ -111,7 +108,7 @@ pub async fn save_samples(client: &impl GenericClient, rows: &[LogRow]) -> Resul
         .await
 }
 
-/// Delete samples that have been read into conclusions. One statement whatever the count.
+/// Delete samples that have been read into conclusions.
 pub async fn delete_samples(client: &impl GenericClient, discarded: &[Discarded]) -> Result<u64, Error> {
     if discarded.is_empty() {
         return Ok(0);
@@ -192,8 +189,7 @@ mod tests {
         assert_eq!(read, vec![filed(band, b"planet", b"p"), filed(band, b"star", b"second")]);
     }
 
-    /// Samples come back exactly — f64 to the bit — in the order each series was taken, and a
-    /// sample written twice is one sample.
+    /// Samples come back bit-exact, in series order, and a sample written twice is one sample.
     #[tokio::test]
     async fn samples_come_back_to_the_bit_in_order_and_once() {
         let Some(client) = store().await else { return };
@@ -220,7 +216,6 @@ mod tests {
         assert_eq!(read, vec![row(10.0, 0.1), row(20.000_000_1, -1.8149592025296526e-22)]);
         assert_eq!(read[0].witness as u64, u64::MAX);
 
-        // Read into a conclusion: the first goes, the later one stays.
         let discarded = Discarded { ship_id: band, subject: b"star".to_vec(), witness: u64::MAX as i64, band: 1, through_s: 10.0 };
         assert_eq!(delete_samples(&client, &[discarded]).await.unwrap(), 1);
         let left: Vec<LogRow> =

@@ -56,7 +56,7 @@ pub enum Duty {
     Watch { stars: Vec<u64>, dwell_s: f64, started_s: f64 },
 }
 
-/// Something a craft knows about. Mirrors `lc_world::knowledge::Subject`.
+/// Something a craft knows about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Subject {
     Star(u64),

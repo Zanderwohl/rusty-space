@@ -1,16 +1,13 @@
 //! How far something is, as far as this ship knows, in words.
 //!
-//! A distance is earned: it comes from bearings taken a baseline apart, or on somebody's word,
-//! and until then a star is a direction. Nothing here reads the catalogue. See
-//! `lightcone/docs/22-provenance.md`.
+//! A distance comes from bearings taken a baseline apart or from a claim; until then a star is
+//! only a direction. Nothing here reads the catalog. See `lightcone/docs/22-provenance.md`.
 
 use lc_world::knowledge::observatory::CHARTS;
 use lc_world::knowledge::{Belief, Distance, Witness};
 
-/// Arc-seconds in a radian, for a baseline small enough to want them.
 const ARCSEC_PER_RAD: f64 = 206_264.806;
 
-/// Who a witness is, from this ship.
 pub fn who(witness: Witness, owner: Witness) -> String {
     match witness {
         w if w == owner => "this ship".into(),
@@ -19,8 +16,7 @@ pub fn who(witness: Witness, owner: Witness) -> String {
     }
 }
 
-/// The range to a believed star from `here_ly`, with its error, or what is known instead.
-/// `None` for something this ship has never detected. Where it came from is [`sources`].
+/// `None` is a star this ship has never detected. Where the range came from is [`sources`].
 pub fn short(belief: Option<&Belief>, here_ly: glam::DVec3) -> String {
     let Some(belief) = belief else { return "not detected".into() };
     match belief.distance {
@@ -32,7 +28,6 @@ pub fn short(belief: Option<&Belief>, here_ly: glam::DVec3) -> String {
     }
 }
 
-/// Where a belief came from, one note per line.
 pub fn sources(belief: &Belief, owner: Witness) -> Vec<String> {
     let instruments = if belief.witnesses == 1 { "instrument" } else { "instruments" };
     let mut notes = vec![format!("{} bearings from {} {instruments}", belief.sightings, belief.witnesses)];
@@ -44,8 +39,8 @@ pub fn sources(belief: &Belief, owner: Witness) -> Vec<String> {
         1 => "Relayed once; somebody else did the looking".into(),
         n => format!("Relayed {n} times"),
     });
-    // A distance worked out from bearings is one this ship can check. A stated one is not,
-    // however narrow its error.
+    // A distance solved from bearings can be checked here; a stated one cannot, however narrow
+    // its error.
     notes.push(match (belief.distance, belief.claimed_by) {
         (Distance::Unknown, _) => "No parallax yet".into(),
         (Distance::AtLeast(ly), _) => format!("No parallax over the baseline, so past {ly:.1} ly"),
@@ -63,7 +58,6 @@ fn possessive(name: &str) -> String {
     if name.ends_with('s') { format!("{name}'") } else { format!("{name}'s") }
 }
 
-/// An angle, in whatever unit reads best.
 fn angle_text(rad: f64) -> String {
     let arcsec = rad * ARCSEC_PER_RAD;
     match arcsec {
@@ -94,8 +88,7 @@ mod tests {
         }
     }
 
-    /// A direction is not a range, a claim says whose it is, and a range this ship measured
-    /// says what baseline it had to work with.
+    /// A range this ship measured names its baseline; a bare direction has no range.
     #[test]
     fn a_range_says_where_it_came_from() {
         let id = StarId::synthesise("range", 1);
@@ -114,7 +107,7 @@ mod tests {
         assert!(notes.iter().any(|n| n == "Distance solved from bearings held here"), "{notes:?}");
     }
 
-    /// The short form is a number and nothing else; where it came from goes to the sources.
+    /// The short form is only the number; whose word it is goes to the sources.
     #[test]
     fn a_short_range_leaves_its_sources_apart() {
         let id = StarId::synthesise("range", 2);

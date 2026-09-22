@@ -1,8 +1,7 @@
 //! A file as it is written down, in this format and every one before it.
 //!
-//! Postcard is positional and cannot notice an older shape, so each format a file was ever
-//! written in has its shape here and a way up to the current one. A format bump then costs
-//! nothing a craft knew; see `lightcone/docs/24-standing-instruments.md`.
+//! Postcard is positional and cannot notice an older shape, so each format ever written has its
+//! shape here and a way up to the current one. See `lightcone/docs/24-standing-instruments.md`.
 //!
 //! **Bump [`FILE_FORMAT`] when [`File`], or anything inside it, changes shape**, and add the
 //! shape that was current as a new reader.
@@ -30,8 +29,8 @@ pub fn decode(format: i32, bytes: &[u8]) -> Result<File, String> {
     }
 }
 
-/// A series as formats 1 to 3 wrote it, when it carried the route a relayed log took. A stored
-/// file's samples are logged apart, so only who, which band and how far it was consumed matter.
+/// A series as formats 1 to 3 wrote it. Its lineage is dropped, and its samples, which a stored
+/// file logs apart.
 #[derive(Serialize, Deserialize)]
 struct SeriesV3 {
     witness: Witness,
@@ -326,8 +325,7 @@ mod tests {
         assert_eq!((file.series()[0].witness, file.series()[0].band), (Witness(4), Band::V));
     }
 
-    /// A format-2 conclusion's "quiet" was only "nothing in the periods searched", and its
-    /// settled planet keeps its folds.
+    /// A format-2 "quiet" reads as unsearched, and its settled planet keeps its folds.
     #[test]
     fn format_2_reads() {
         let old = FileV2 {

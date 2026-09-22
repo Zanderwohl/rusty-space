@@ -1,10 +1,8 @@
 //! What a craft calls the bodies of the system it is in.
 //!
-//! Nothing here reads a body's own name: that is the generator's, or a real catalogue's, and
-//! nothing has a name of its own. A body is called what this craft named it, and failing that
-//! what the designation rule makes of its place — letters by expected slot for planets, a
-//! numeral under its parent for anything else. The body's own name is only ever a key. See
-//! `lightcone/docs/23-factions.md`, "What things are called".
+//! A body's own name is only ever a key. A body is called what this craft named it, or else
+//! what the designation rule makes of its place. See `lightcone/docs/23-factions.md`, "What
+//! things are called".
 
 use std::collections::BTreeMap;
 
@@ -21,19 +19,17 @@ pub struct Labels {
 }
 
 impl Labels {
-    /// What to call the body targeted by `key`. A key with no label is a body this pass did
-    /// not see, and is called nothing in particular rather than by its key.
+    /// A key with no label is a body this pass did not see; it is never called by its key.
     pub fn of(&self, key: &str) -> String {
         self.by_key.get(key).cloned().unwrap_or_else(|| "unidentified body".into())
     }
 }
 
-/// Label every body of `system`. `star` is what this craft calls the system's star; `named` is
-/// what it has called a body, if anything.
+/// `star` is what this craft calls the system's star.
 pub fn label(system: &LocalSystem, star: &str, named: impl Fn(BodyId) -> Option<String>) -> Labels {
     let mut by_key = BTreeMap::new();
     let luminosity_solar = system.star_luminosity_w() / em_spectra::stellar::SOLAR_LUMINOSITY;
-    // Lettered planets so far, which is what the next letter is placed against.
+    // The next planet letter is placed against these.
     let mut placed: Vec<(String, f64)> = Vec::new();
     // The label at each depth of the walk, and how many children each has had.
     let mut parents: Vec<(String, usize)> = vec![(star.to_string(), 0)];
@@ -79,8 +75,7 @@ mod tests {
         LocalSystem::for_star(&stars.stars()[2]).expect("a generated system")
     }
 
-    /// Planets are lettered after this craft's name for the star, never after the generator's
-    /// names, and a body the craft has named is called that.
+    /// No generator name reaches a label, and a body the craft named is called that.
     #[test]
     fn bodies_are_called_what_this_craft_calls_them() {
         let system = system();

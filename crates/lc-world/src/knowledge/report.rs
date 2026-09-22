@@ -1,10 +1,9 @@
 //! What one craft tells another, and what a shard tells its own craft's client.
 //!
-//! A report carries what a craft has concluded — sightings, claims, names, orbits and
-//! conclusions — and never its photometric logs, which are enormous next to what was learned
-//! from them and cost energy to send in proportion. A craft's own client is sent its logs
-//! separately, as [`Log`]s, because a client is a copy of the craft and not somebody it tells.
-//! See `lightcone/docs/22-provenance.md` and `lightcone/docs/24-standing-instruments.md`.
+//! A report never carries photometric logs, which are enormous next to what was learned from
+//! them and cost energy to send. A craft's own client gets its logs separately, as [`Log`]s,
+//! because it is a copy of the craft, not somebody it tells. See
+//! `lightcone/docs/22-provenance.md` and `lightcone/docs/24-standing-instruments.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -16,10 +15,7 @@ use super::{
     learned_s,
 };
 
-/// How many systems one transmission carries.
-///
-/// A surveyed sky has thousands of entries, so a report is a slice of a backlog rather than a
-/// snapshot. Sixty-four systems is a few tens of kilobytes.
+/// How many systems one transmission carries: a few tens of kilobytes.
 pub const ENTRIES_PER_REPORT: usize = 64;
 
 /// Everything one report carries about one subject.
@@ -27,12 +23,10 @@ pub const ENTRIES_PER_REPORT: usize = 64;
 pub struct Part {
     pub subject: Subject,
     pub sightings: Vec<Sighting>,
-    /// Distances somebody states: see [`Claim`].
     pub claims: Vec<Claim>,
-    /// What the sender and whoever told them call it: see [`Naming`].
     pub names: Vec<Naming>,
     pub orbits: Vec<Orbit>,
-    /// What each observer's log was read to say, each on that observer's name.
+    /// Each on its observer's name.
     pub conclusions: Vec<Conclusion>,
 }
 
@@ -70,11 +64,8 @@ impl Entry {
     }
 }
 
-/// How far through its own backlog a craft has reported, per recipient.
-///
-/// Reports drain a backlog, so the sender has to remember how far it has got with each
-/// recipient. The key is the recipient's ship id, `0` for a broadcast — what was shouted to
-/// nobody in particular is its own backlog.
+/// How far through its own backlog a craft has reported, keyed by recipient ship id, `0` for a
+/// broadcast.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Reporting {
     told: BTreeMap<i64, Mark>,
@@ -86,7 +77,7 @@ impl Reporting {
         self.told.get(&to).copied().unwrap_or_default()
     }
 
-    /// A report to this recipient has gone out, carrying everything through `through`.
+    /// A mark never moves back.
     pub fn sent(&mut self, to: i64, through: Mark) {
         let mark = self.told.entry(to).or_default();
         if through > *mark {
@@ -94,8 +85,7 @@ impl Reporting {
         }
     }
 
-    /// Marks as a craft saved them before they carried a system, when a time meant everything
-    /// through it.
+    /// Marks saved as bare times, each meaning everything through it.
     pub fn from_times(told: BTreeMap<i64, f64>) -> Self {
         Self { told: told.into_iter().map(|(to, at_s)| (to, Mark::through(at_s))).collect() }
     }
@@ -104,9 +94,8 @@ impl Reporting {
 /// How far through a backlog something has got: everything learned before `at_s`, and at
 /// exactly `at_s` everything about systems up to `after`.
 ///
-/// A time alone is not enough. A sweep finds a hundred stars in one tick and charts issue a
-/// volume at one instant, so a page that could only cut between times would have to carry all
-/// of them or none.
+/// A time alone is not enough: a sweep finds a hundred stars in one tick, and a page that could
+/// only cut between times would have to carry all of them or none.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Mark {
     pub at_s: f64,
@@ -136,7 +125,7 @@ impl PartialOrd for Mark {
     }
 }
 
-/// What one craft sends another. A message like any other: emitted somewhere, arriving later.
+/// What one craft sends another.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Report {
     pub from: Witness,
@@ -163,8 +152,7 @@ impl Report {
     }
 }
 
-/// A craft's own samples of one subject in one band, for its own client. Never sent to another
-/// craft.
+/// A craft's own samples of one subject in one band, for its own client only.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Log {
     pub subject: Subject,
@@ -172,8 +160,8 @@ pub struct Log {
     pub samples: Vec<Sample>,
 }
 
-/// A page of a craft's own logs for its own client, with the subjects it keeps raw — a choice
-/// of the craft's own, which no report carries either.
+/// A page of a craft's own logs for its own client, with the subjects it keeps raw, which no
+/// report carries either.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Logs {
     pub logs: Vec<Log>,
@@ -198,8 +186,8 @@ impl Ord for At {
     }
 }
 
-/// Subjects by the latest time something happened to them, so that "what is new since" reads
-/// only what is new instead of every file a craft holds.
+/// Subjects by the latest time something happened to them, so "what is new since" does not
+/// read every file.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Recent {
     at: BTreeMap<Subject, f64>,
@@ -225,12 +213,10 @@ impl Recent {
     }
 }
 
-/// Every reportable thing a craft holds, by when it was learned and the system it belongs to —
-/// the order a report drains its backlog in — so a page costs what it carries, not what the
-/// craft knows.
+/// Every reportable thing a craft holds, in the order a report drains it, so a page costs what
+/// it carries, not what the craft knows.
 ///
-/// Entries are added and never removed. One left behind by a record that was since replaced
-/// names a time at which that subject now has nothing, and costs a lookup that finds nothing.
+/// Entries are never removed. One left by a replaced record costs a lookup that finds nothing.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Backlog {
     items: BTreeSet<(At, Subject, Subject)>,
@@ -256,7 +242,7 @@ impl Backlog {
 }
 
 impl File {
-    /// Everything here whose learned time `keep` accepts, or `None` if nothing.
+    /// Everything here whose learned time `fresh` accepts, or `None` if nothing.
     pub(super) fn part(&self, subject: Subject, fresh: impl Fn(f64) -> bool) -> Option<Part> {
         let part = Part {
             subject,
@@ -281,20 +267,15 @@ impl File {
 }
 
 impl Knowledge {
-    /// Everything learned after `since`, ready to transmit.
-    ///
-    /// By what this craft *learned* rather than by when it was measured: a report is a statement
-    /// about what the sender has, and a decade-old sighting relayed yesterday is news.
+    /// Everything learned after `since`, by when it was learned rather than measured: a
+    /// decade-old sighting relayed yesterday is news.
     pub fn report(&self, since: Mark, sent_s: f64) -> Report {
         self.report_upto(since, sent_s, usize::MAX).0
     }
 
-    /// The same, as much of it as `limit` systems will carry, and the mark to resume from.
-    ///
-    /// A surveyed sky does not fit in one transmission, so a report is a piece of a backlog,
-    /// oldest first. Everything a system learned at one instant goes together — a planet rides
-    /// with its star — and nothing learned after `sent_s` goes at all. `None` for the mark when
-    /// there is nothing to send.
+    /// The same, oldest first, as much as `limit` systems will carry, and the mark to resume
+    /// from (`None` when there is nothing to send). A planet rides with its star, and nothing
+    /// learned after `sent_s` goes.
     pub fn report_upto(&self, since: Mark, sent_s: f64, limit: usize) -> (Report, Option<Mark>) {
         let mut systems: BTreeSet<Subject> = BTreeSet::new();
         let mut subjects: BTreeSet<Subject> = BTreeSet::new();
@@ -326,19 +307,15 @@ impl Knowledge {
         (report, Some(Mark { at_s: cut.0 .0, after: Some(cut.1) }))
     }
 
-    /// Fold in what somebody else sent, as of the moment its light landed.
-    ///
-    /// Every item gains a hop, so where it came from survives however far it is passed on, and
-    /// something already held by a shorter route is not taken twice.
+    /// Fold in what somebody else sent, as of the moment its light landed. Every item gains a
+    /// hop.
     pub fn receive(&mut self, report: &Report, received_s: f64) {
         let hop = Hop { from: report.from, to: self.owner, sent_s: report.sent_s, received_s };
         self.fold(report, Some(hop));
     }
 
-    /// Take a copy of what this craft already knows, handed over by whoever holds the original.
-    ///
-    /// No hop: a client's replica of its own craft's knowledge is the same knowledge, not
-    /// something it was told. See `lightcone/docs/24-standing-instruments.md`.
+    /// Take a copy of what this craft already knows from whoever holds the original. No hop:
+    /// a replica is the same knowledge, not something it was told.
     pub fn absorb(&mut self, report: &Report) {
         self.fold(report, None);
     }
@@ -368,8 +345,7 @@ impl Knowledge {
                 self.orbits(subject, Orbit { lineage, ..orbit.clone() });
             }
             for conclusion in &part.conclusions {
-                // A replica follows its original in throwing a log away, so that it does not
-                // hold samples the craft itself no longer has.
+                // A replica drops the samples its original consumed.
                 if hop.is_none()
                     && let Some(through_s) = conclusion.discarded_s
                     && let Some(file) = self.files.get_mut(&subject)
@@ -387,14 +363,12 @@ impl Knowledge {
         }
     }
 
-    /// This craft's own samples taken after `since_s`, oldest first, at most about `limit` of
-    /// them, and the time the client should resume from. Every sample at the last time taken
-    /// goes, however many bands and subjects share it, for the same reason a report's cut does.
+    /// This craft's own samples taken after `since_s`, oldest first, about `limit` of them, and
+    /// the time to resume from. Every sample at the last time taken goes, so a tie is never split.
     pub fn logs_upto(&self, since_s: f64, limit: usize) -> (Vec<Log>, Option<f64>) {
         use std::cmp::Reverse;
         use std::collections::BinaryHeap;
-        // Each series is already in time order, so the oldest `limit` across them are a merge
-        // of their heads, not a sort of everything since the mark.
+        // Each series is in time order, so this merges their heads rather than sorting everything.
         let mut heads: BinaryHeap<Reverse<(At, Subject, Band, usize)>> = BinaryHeap::new();
         let mut runs: BTreeMap<(Subject, Band), &[Sample]> = BTreeMap::new();
         for subject in self.sampled.after(since_s) {
@@ -412,7 +386,6 @@ impl Knowledge {
         let mut taken = 0;
         let mut through: Option<f64> = None;
         while let Some(Reverse((at, subject, band, i))) = heads.pop() {
-            // Every sample at the last time taken goes, whatever the limit.
             if taken >= limit && through != Some(at.0) {
                 break;
             }
@@ -428,8 +401,8 @@ impl Knowledge {
         (logs.into_iter().map(|((subject, band), samples)| Log { subject, band, samples }).collect(), through)
     }
 
-    /// Take a copy of this craft's own samples, handed over by whoever holds the original.
-    /// Never charged for room or written down: the original does both.
+    /// Take a copy of this craft's own samples. Never charged for room or written down: the
+    /// original does both.
     pub fn copy_logs(&mut self, logs: &[Log]) {
         let owner = self.owner;
         for log in logs {
