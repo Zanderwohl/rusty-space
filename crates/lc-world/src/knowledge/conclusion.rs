@@ -264,10 +264,33 @@ impl Knowledge {
     pub fn retain_raw(&mut self, subject: impl Into<Subject>, keep: bool) {
         let subject = subject.into();
         let file = self.files.entry(subject).or_default();
+        if keep {
+            self.analyzing.remove(&subject);
+        }
         if file.retained != keep {
             file.retained = keep;
             self.changed.insert(subject);
         }
+    }
+
+    /// Read every log this craft holds of its own into a conclusion and consume it, to make
+    /// room. At the rate logs are always read, not at once: each read is a period search.
+    ///
+    /// Consumed whatever it says, as a full craft's are, so a transit search not yet settled is
+    /// lost and the next log is searched afresh. A retained subject is left alone.
+    pub fn analyze(&mut self) {
+        let owner = self.owner;
+        for (subject, file) in &self.files {
+            if !file.retained && file.series.iter().any(|s| s.witness == owner && s.len() > 0) {
+                self.analyzing.insert(*subject);
+                self.unread.insert(*subject);
+            }
+        }
+    }
+
+    /// Logs [`Knowledge::analyze`] has yet to consume.
+    pub fn analyzing(&self) -> usize {
+        self.analyzing.len()
     }
 
     /// Every subject this craft keeps the raw log of.
@@ -364,7 +387,7 @@ impl Knowledge {
                 let digested = file.digests.iter().find(|d| d.observer == owner).map_or(0, |d| d.samples as usize);
                 let next = (read + READ_EVERY).max((read as f64 * (1.0 + READ_GROWTH)) as usize);
                 // A full craft reads whatever it holds: reading is how it makes room.
-                (full && held > 0) || held + digested >= next
+                ((full || self.analyzing.contains(subject)) && held > 0) || held + digested >= next
             })
             .map(|subject| (*subject, owner))
             .collect()
@@ -372,11 +395,13 @@ impl Knowledge {
 
     /// Read one observer's log of one subject and state what it says.
     ///
-    /// The log is consumed if the transit answer is settled, or if the craft is out of room —
-    /// reading is how a full craft keeps watching — unless the subject is retained. Returns the
+    /// The log is consumed if the transit answer is settled, if the craft is out of room —
+    /// reading is how a full craft keeps watching — or if it is being analyzed, unless the
+    /// subject is retained. Returns the
     /// conclusion drawn, or `None` if there was nothing to read.
     pub fn read_log(&mut self, subject: Subject, observer: Witness, prior: &Prior, now_s: f64) -> Option<Conclusion> {
         self.unread.remove(&subject);
+        let analyzing = self.analyzing.remove(&subject);
         let belief = self.belief(subject);
         let light_age_s = belief.and_then(|b| b.light_age_s());
         let host = belief.and_then(|b| prior.host_like(b.band, b.luminosity_w()?));
@@ -488,7 +513,7 @@ impl Knowledge {
         };
         let quiet_settled = matches!(leading, Some((p, Kind::Quiet)) if p >= SETTLED);
         let retained = self.files.get(&subject).is_some_and(|f| f.retained);
-        if (planet_settled || quiet_settled || self.is_full()) && !retained && !points.is_empty() {
+        if (planet_settled || quiet_settled || analyzing || self.is_full()) && !retained && !points.is_empty() {
             let planet = match (&settled, planet_settled, leading) {
                 (Some(held), _, _) => Some(Settled { folds, ln_bayes, delta_chi2, ..held.clone() }),
                 (None, true, Some((_, Kind::Planet { transit, .. }))) => periods.map(|periods_s| Settled {
@@ -761,6 +786,30 @@ mod tests {
         assert!(digest.planet.is_none() && digest.completeness == read.evidence.completeness);
         knowledge.fit_to(capacity);
         assert!(!knowledge.is_full(), "and there is room again");
+    }
+
+    /// Analyzing reads a craft with room to spare as if it were full: every log is due and
+    /// every log it reads is consumed, leaving no raw samples to take room. A retained one stays.
+    #[test]
+    fn analyzing_consumes_every_log_but_a_retained_one() {
+        let (target, _) = red_dwarf(false);
+        let (mut knowledge, now) = stare(&target, 20.0);
+        let subject = Subject::Star(target.id);
+        let prior = Prior::measure(&neighborhood());
+        knowledge.read_log(subject, Witness(1), &prior, now).unwrap();
+        assert!(knowledge.due().is_empty(), "read, and too little new since to read again");
+        assert!(knowledge.bytes() > 0.0, "and kept, since nothing was settled");
+
+        knowledge.retain_raw(subject, true);
+        knowledge.analyze();
+        assert_eq!(knowledge.analyzing(), 0, "a retained log is not analyzed");
+
+        knowledge.retain_raw(subject, false);
+        knowledge.analyze();
+        assert_eq!((knowledge.analyzing(), knowledge.due()), (1, vec![(subject, Witness(1))]));
+        let read = knowledge.read_log(subject, Witness(1), &prior, now).unwrap();
+        assert!(read.discarded_s.is_some());
+        assert_eq!((knowledge.analyzing(), knowledge.bytes()), (0, 0.0), "the room is free");
     }
 
     /// A star the generator gave a swarm dims, flickers and glows, and reads as a swarm, with

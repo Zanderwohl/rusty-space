@@ -195,7 +195,7 @@ impl<J: Journal> Server<J> {
 #[cfg(test)]
 mod tests {
     use glam::DVec3;
-    use lc_proto::{ClientId, Inbound, Intent, Order, ShipId};
+    use lc_proto::{ClientId, Inbound, Intent, Order, Outbound, ShipId};
     use lc_world::sky::{AuthoredStars, CatalogueStar, StarId, StarProvider};
 
     use super::*;
@@ -393,6 +393,28 @@ mod tests {
         assert_eq!(knowledge.capacity_bytes(), lc_world::fitting::ONBOARD_DATA_BYTES);
         assert!(knowledge.occupied_bytes() < knowledge.capacity_bytes() / 2.0);
         assert_eq!(knowledge.unkept(), 0);
+    }
+
+    /// Analyze drains a craft's logs and frees their room.
+    #[tokio::test]
+    async fn analyzing_frees_the_room_the_logs_took() {
+        let (mut server, mut wire) = running().await;
+        let act = |order| Inbound::Act(Intent { ship_id: SHIP, order, issued_at_client_t: i64::MAX });
+        wire.client_says(ClientId(1), act(Order::SetDuty { duty: lc_proto::Duty::Idle, integration_s: 1.0e4 }));
+        server.tick(&mut wire).await.unwrap();
+        let logs = server.knowledge_of(SHIP).unwrap().bytes();
+        assert!(logs > 0.0, "logs to analyze");
+
+        wire.client_says(ClientId(1), act(Order::Analyze));
+        server.tick(&mut wire).await.unwrap();
+        let accepted = wire.take(ClientId(1));
+        assert!(accepted.iter().any(|o| matches!(o, Outbound::Accepted { order: Order::Analyze, .. })), "{accepted:?}");
+        for _ in 0..100 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let knowledge = server.knowledge_of(SHIP).unwrap();
+        assert_eq!((knowledge.analyzing(), knowledge.bytes()), (0, 0.0));
+        assert!(knowledge.stars().count() > 1, "and everything else it knew is still known");
     }
 
     /// Review item 20. A checkpoint whose write failed hands everything back, and the next one

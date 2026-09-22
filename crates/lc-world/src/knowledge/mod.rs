@@ -308,6 +308,9 @@ pub struct Knowledge {
     sampled: report::Recent,
     /// Subjects with samples added since their log was last read.
     unread: std::collections::BTreeSet<Subject>,
+    /// Subjects whose logs are to be read and consumed whatever they say: see
+    /// [`Knowledge::analyze`]. Not part of what a craft knows.
+    analyzing: std::collections::BTreeSet<Subject>,
     /// Room aboard, and how much of it is in use: see [`room`]. Not part of what a craft knows.
     capacity_bytes: f64,
     occupied_bytes: f64,
@@ -332,6 +335,7 @@ impl Knowledge {
             backlog: Default::default(),
             sampled: Default::default(),
             unread: Default::default(),
+            analyzing: Default::default(),
             capacity_bytes: f64::INFINITY,
             occupied_bytes: 0.0,
             unkept: 0,

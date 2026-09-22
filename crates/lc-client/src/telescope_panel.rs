@@ -38,7 +38,7 @@ pub fn telescope(
     ui.separator();
 
     duty(ui, game, out);
-    room(ui, game);
+    room(ui, game, out);
     ui.separator();
 
     let order = known(game);
@@ -102,8 +102,8 @@ fn describe(kind: &Kind) -> String {
     }
 }
 
-/// How much of the room aboard what this ship knows takes.
-fn room(ui: &mut egui::Ui, game: &Game) {
+/// How much of the room aboard this ship's raw logs take, and the button that frees it.
+fn room(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let now = game.coordinate_time_s();
     let capacity = game
         .ship
@@ -111,10 +111,23 @@ fn room(ui: &mut egui::Ui, game: &Game) {
         .map_or(lc_world::fitting::ONBOARD_DATA_BYTES, |f| f.balance.data_capacity(&f.loadout_at(now)));
     let used = game.knowledge.bytes();
     let mb = |bytes: f64| bytes / 1_048_576.0;
-    ui.label(format!("Data: {:.2} of {:.2} MB", mb(used), mb(capacity)));
-    if used >= capacity {
-        ui.colored_label(egui::Color32::from_rgb(230, 150, 60), "Data full.");
-    }
+    ui.horizontal(|ui| {
+        ui.label(format!("Data: {:.2} of {:.2} MB", mb(used), mb(capacity)));
+        if used >= capacity {
+            ui.colored_label(egui::Color32::from_rgb(230, 150, 60), "Data full.");
+        }
+        match game.knowledge.analyzing() {
+            0 => {
+                let button = ui.add_enabled(used > 0.0, egui::Button::new("Analyze"));
+                if button.on_hover_text("Read every log into a conclusion and free its room").clicked() {
+                    ask(out, Action::Analyze);
+                }
+            }
+            n => {
+                ui.weak(format!("Analyzing, {n} logs left"));
+            }
+        }
+    });
 }
 
 /// What this ship has concluded from the log of whatever is under the crosshair.

@@ -94,6 +94,8 @@ pub enum Action {
     NameSelected(String),
     /// Keep a star's raw log whatever is concluded from it, or let it go once it has been read.
     RetainRaw(StarId, bool),
+    /// Read every log this ship holds into a conclusion and free its room.
+    Analyze,
     /// Send what this ship has learned since it last reported to `to`.
     SendReport {
         to: Option<lc_proto::ShipId>,
@@ -362,6 +364,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             Some(_) => effects.push(Effect::Notify("nothing detected there to name".into())),
             None => effects.push(Effect::Notify("nothing selected to name".into())),
         },
+        // Only a shard reads logs, so with none there is nothing to analyze.
+        Action::Analyze => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::Analyze));
+            } else {
+                effects.push(Effect::Notify("no server, so nothing reads the logs".into()));
+            }
+        }
         Action::RetainRaw(id, keep) => {
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::RetainRaw { subject: lc_proto::Subject::Star(id.get()), keep }));
@@ -1316,6 +1326,9 @@ mod tests {
         let sent = orders(&apply(Action::RetainRaw(id, true), &mut ui, &mut s));
         assert!(matches!(sent.as_slice(), [lc_proto::Order::RetainRaw { keep: true, .. }]), "{sent:?}");
         assert!(!s.knowledge.retained(id), "kept when the shard says so, not before");
+        let sent = orders(&apply(Action::Analyze, &mut ui, &mut s));
+        assert!(matches!(sent.as_slice(), [lc_proto::Order::Analyze]), "{sent:?}");
+        assert_eq!(s.knowledge.analyzing(), 0, "analyzing when the shard says so, not before");
     }
 
 

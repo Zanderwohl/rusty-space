@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 35;
+pub const PROTOCOL_VERSION: u32 = 36;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -383,6 +383,9 @@ pub enum Order {
     /// ship. It puts nothing on the air and is answered by [`Outbound::AutoAcking`], not
     /// `Accepted`. Appended last.
     AutoAck { with: ShipId, on: bool },
+    /// Read every log this craft holds into a conclusion and consume it, to make room. Kept
+    /// raw logs are left alone. Appended last.
+    Analyze,
 }
 
 /// A client's request. Never authoritative about anything.
@@ -1528,6 +1531,7 @@ mod tests {
                 order: Order::AutoAck { with: ShipId(7), on: true },
                 issued_at_client_t: 0,
             }),
+            Inbound::Act(Intent { ship_id: ShipId(42), order: Order::Analyze, issued_at_client_t: 0 }),
         ];
         for message in inbound {
             let bytes = encode(&message);

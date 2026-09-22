@@ -378,6 +378,7 @@ impl Knowledge {
                         .iter_mut()
                         .filter(|s| s.witness == conclusion.observer)
                         .for_each(|s| s.consume_through(through_s));
+                    self.analyzing.remove(&subject);
                 }
                 let lineage = heard(&conclusion.lineage);
                 self.concluded(subject, Conclusion { lineage, ..conclusion.clone() });

@@ -375,6 +375,10 @@ impl<J: Journal> Server<J> {
                 knowledge.retain_raw(Subject::from(*subject), *keep);
                 Ok(order.clone())
             }
+            Order::Analyze => {
+                self.aboard(id).knowledge.analyze();
+                Ok(Order::Analyze)
+            }
             _ => Err(Refusal::Impossible),
         }
     }

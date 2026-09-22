@@ -91,24 +91,27 @@ it already loads every ship.
 
 ### Data modules, and fullness
 
-What a craft knows takes room aboard. A **data module** ([19-ship-fitting.md](19-ship-fitting.md))
-holds `data_per_module`, and a craft's knowledge has a fullness against its total exactly as
-stored energy does against storage.
+A craft's raw logs take room aboard. A **data module** ([19-ship-fitting.md](19-ship-fitting.md))
+holds `data_per_module`, and the logs have a fullness against the total exactly as stored energy
+does against storage.
 
-The capacity is anchored so that the *files* — bearings, names, notes, conclusions — of a
-thoroughly surveyed neighborhood fit comfortably, and the *logs* are what fill it. That puts the
-pressure where the design wants it:
+**Only raw logs count.** Bearings, names, claims, conclusions and the digests of consumed logs
+are free: each is small and bounded per subject. Charging for them was tried, and a craft that had
+surveyed the sky was full for good — about 16 bearings of 96 bytes for each of eight thousand
+stars — while consuming a sweep's short logs added more in digests than it freed in samples. That
+puts the pressure where the design wants it:
 
 - **full, a craft stops recording raw samples**: the telescope keeps measuring and nothing keeps
   the lines, and the panel says so. Files are never dropped for room — losing what you know
   because you learned something else would be a worse mechanic than refusing to learn more;
 - **consuming a log into a conclusion frees its room**, so processing is how a craft keeps
-  watching;
+  watching. It happens on its own when a log has grown or the craft is full, and **Analyze** in
+  the telescope panel (`Order::Analyze`) consumes every log the craft holds, at the same rate —
+  one read a tick across the shard — losing any transit search not yet settled;
 - **"retain raw" costs room for as long as it is set**, which is what makes keeping a log a
   decision.
 
-A craft with no data modules still has a small fixed onboard store, enough for its files and very
-little else, so a ship stripped for speed still knows where it is.
+A craft with no data modules still has a small fixed onboard store, for a little log.
 
 ## Logs become conclusions
 
@@ -193,16 +196,16 @@ custody of. A shard that restarts resumes all of it.
 | nothing transiting | absence of evidence, not evidence of absence. Its probability is the chance of no planet times the log's **completeness** — the share of the transiting planets the generator makes, at every period, that the log would have found — and the rest is *a planet this log could not have found yet*. Two months on a red dwarf is a few percent; it takes a log as long as the generator's widest orbits to say much more |
 | swarm or belts | from moments, which survive consumption whole: the mean dimming across the visible bands, the thermal-infrared glow beyond the star's own, the flicker's covariance at the shortest lag and the lag at which it has halved, which is half a crossing. The probability is a likelihood against the generator's systems seen from spread directions; a swarm's element size and orbit come from `emission::invert_moments`, against the cataloged star most like this one's brightness when there is a distance |
 | settled | the leading transit hypothesis at 99%: a planet after three transits, or nothing transiting once completeness allows it |
-| consumed | when settled, or when the craft is full — reading is how a full craft keeps watching — unless the subject is retained. Consumed for room with nothing settled, the transit search is lost and the next log is searched afresh |
+| consumed | when settled, when the craft is full — reading is how a full craft keeps watching — or when analyzed, unless the subject is retained. Consumed for room with nothing settled, the transit search is lost and the next log is searched afresh |
 | what is kept | `Digest`: the moments, the best completeness any log of the star reached, and for a settled planet the search's odds and folds at its period and two either side at its error. The samples go, from memory and, at the next checkpoint, from `lc_samples` |
 | what travels | `Conclusion`, in a report's part, with its evidence, its covering and `discarded_s`. A replica drops its copy of the log when it hears its original did |
 
 ### As built: room
 
-A byte here is a game unit — a fixed size per record, near what postcard writes — so counting is
-cheap and does not move with an encoding. `data_per_module` is one year of a thirty-minute stare
-in every band, about 2.1 MB; a craft with no data modules has `ONBOARD_DATA_BYTES`, 1 MiB, which
-holds the charts, a first sweep and a couple of months of one star. The shard recounts a craft's
+A sample is a game unit, `SAMPLE_BYTES` (24), near what postcard writes, so counting is cheap and
+does not move with an encoding; nothing else is counted. `data_per_module` is one year of a
+thirty-minute stare in every band, about 2.1 MB; a craft with no data modules has
+`ONBOARD_DATA_BYTES`, 1 MiB, a couple of months of one star. The shard recounts a craft's
 room when its loadout changes, after its log is read, and otherwise one craft a tick; samples keep
 the count between recounts. The client shows the room and never enforces it: the shard is what
 decides what was kept.

@@ -586,7 +586,7 @@ impl<J: Journal> Server<J> {
         let at_s = at as f64 * 1.0e-6;
         // Orders about what a craft knows or is watching put nothing on the air, so they are
         // not events. They still get an identifier, so an acceptance looks like any other.
-        if matches!(intent.order, Order::SetDuty { .. } | Order::NameIt { .. } | Order::RetainRaw { .. }) {
+        if matches!(intent.order, Order::SetDuty { .. } | Order::NameIt { .. } | Order::RetainRaw { .. } | Order::Analyze) {
             let order = self.act_on_knowledge(id, &intent.order, at_s)?;
             let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
             return Ok(Applied { event_id, at_t: at, order });
@@ -791,7 +791,9 @@ impl<J: Journal> Server<J> {
                 (KIND_CUT, 0.0, "{\"refit\":false}".to_string(), Order::CancelRefit)
             }
             // Returned from above, before anything is put on the air.
-            Order::SetDuty { .. } | Order::NameIt { .. } | Order::RetainRaw { .. } => return Err(Refusal::Impossible),
+            Order::SetDuty { .. } | Order::NameIt { .. } | Order::RetainRaw { .. } | Order::Analyze => {
+                return Err(Refusal::Impossible);
+            }
             Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => {
                 // The whole of it in `crate::radio`, because everything a transmission needs
                 // to decide — the keyring, the aim, the acknowledgement window — is that

@@ -1,46 +1,17 @@
 //! How much room what a craft knows takes, and what happens when there is none left.
 //!
-//! Bytes here are a game unit: a fixed size per record, near enough what postcard writes, so
-//! the count is cheap and does not move when a record's encoding does. Files are never dropped
-//! for room — losing what you know because you learned something else would be a worse
-//! mechanic than refusing to learn more — so what stops when a craft is full is its logs. See
-//! `lightcone/docs/24-standing-instruments.md`.
+//! Only raw logs take room. Bearings, names, claims, conclusions and the digests of consumed logs
+//! are small next to a log and bounded per subject, and charging for them left a craft that had
+//! surveyed the sky full for good, with reading its logs making it worse. A sample is a fixed
+//! game unit, near enough what postcard writes. Files are never dropped for room; what stops
+//! when a craft is full is its logs. See `lightcone/docs/24-standing-instruments.md`.
 
-use super::transit::BINS;
 use super::{File, Knowledge, SAMPLE_BYTES};
 
-const FILE_BYTES: f64 = 32.0;
-const SIGHTING_BYTES: f64 = 96.0;
-const NAMING_BYTES: f64 = 48.0;
-const CLAIM_BYTES: f64 = 64.0;
-const ORBIT_BYTES: f64 = 40.0;
-const SERIES_BYTES: f64 = 32.0;
-const HOP_BYTES: f64 = 32.0;
-const CONCLUSION_BYTES: f64 = 320.0;
-/// A digest's header and its population moments.
-const DIGEST_BYTES: f64 = 1024.0;
-const FOLD_BYTES: f64 = BINS as f64 * 16.0 + 48.0;
-
 impl File {
-    /// Room this file takes aboard.
+    /// Room this file takes aboard: its raw samples, whoever took them.
     pub fn bytes(&self) -> f64 {
-        let hops = |n: usize| n as f64 * HOP_BYTES;
-        let sightings: f64 = self.sightings.iter().map(|s| SIGHTING_BYTES + hops(s.lineage.len())).sum();
-        let names: f64 = self.names.iter().map(|n| NAMING_BYTES + n.name.len() as f64 + hops(n.lineage.len())).sum();
-        let claims: f64 = self.claims.iter().map(|c| CLAIM_BYTES + hops(c.lineage.len())).sum();
-        let orbits: f64 = self.orbits.iter().map(|o| ORBIT_BYTES + hops(o.lineage.len())).sum();
-        let series: f64 = self
-            .series
-            .iter()
-            .map(|s| SERIES_BYTES + s.len() as f64 * SAMPLE_BYTES)
-            .sum();
-        let conclusions: f64 = self.conclusions.iter().map(|c| CONCLUSION_BYTES + hops(c.lineage.len())).sum();
-        let digests: f64 = self
-            .digests
-            .iter()
-            .map(|d| DIGEST_BYTES + d.planet.as_ref().map_or(0, |p| p.folds.len()) as f64 * FOLD_BYTES)
-            .sum();
-        FILE_BYTES + sightings + names + claims + orbits + series + conclusions + digests
+        self.series.iter().map(|s| s.len() as f64 * SAMPLE_BYTES).sum()
     }
 }
 
@@ -97,8 +68,6 @@ mod tests {
         let mut k = Knowledge::new(Witness(1));
         k.name_it(star, "Kettle", 0.0);
         k.fit_to(f64::INFINITY);
-        // The running count charges samples only; a new series' header is noticed at the next
-        // recount, which here finds the craft over.
         k.fit_to(k.occupied_bytes() + 11.0 * SAMPLE_BYTES);
         for n in 0..20 {
             k.measured(star, Witness(1), Band::V, Sample { observed_s: n as f64, deficit: 0.0, sigma: 1e-5 });

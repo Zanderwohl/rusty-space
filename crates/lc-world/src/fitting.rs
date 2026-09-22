@@ -128,13 +128,12 @@ pub struct Balance {
 }
 
 /// What [`Balance::data_per_module`] is anchored to: one module holds a year of a
-/// thirty-minute stare in every band. Room for a surveyed sky's files several times over, so
-/// that raw logs are what fill it — see `lightcone/docs/24-standing-instruments.md`.
+/// thirty-minute stare in every band. Only raw logs take room — see
+/// `lightcone/docs/24-standing-instruments.md`.
 pub const DATA_ANCHOR_S: f64 = crate::flight::JULIAN_YEAR_S;
 const DATA_ANCHOR_CADENCE_S: f64 = 1800.0;
 
-/// Bytes a craft holds with no data modules at all: the charts and a first sweep, and very
-/// little log. A ship stripped for speed still knows where it is.
+/// Bytes of raw log a craft holds with no data modules at all: a couple of months of one star.
 pub const ONBOARD_DATA_BYTES: f64 = 1_048_576.0;
 
 /// The distance, AU from a Sun-like star, at which the starting ship broadside fills from empty in
