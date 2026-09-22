@@ -37,8 +37,8 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 toml = "0.8"
 # Procedural textures: authored as graphs, baked on the GPU at load. Core without `std-fs`, since
 # graphs arrive through the asset server. A git pin until texture-graph is on crates.io.
-texture-graph-core = { git = "https://github.com/Zanderwohl/texture-graph.git", rev = "1832a5e", default-features = false }
-texture-graph-gpu = { git = "https://github.com/Zanderwohl/texture-graph.git", rev = "1832a5e" }
+texture-graph-core = { git = "https://github.com/Zanderwohl/texture-graph.git", rev = "3cd5f5c", default-features = false }
+texture-graph-gpu = { git = "https://github.com/Zanderwohl/texture-graph.git", rev = "3cd5f5c" }
 
 # The desktop sign-in: a loopback listener, the system browser, and somewhere to keep the
 # device grant. None of it exists in a browser, where the page already has a session.
