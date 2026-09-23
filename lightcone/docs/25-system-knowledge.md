@@ -6,7 +6,7 @@ a system reads the generator. This extends the transit search in
 [24-standing-instruments.md](24-standing-instruments.md) from "there is probably a planet" to a
 body with a name, an orbit and a place in a plane that was itself worked out.
 
-Status: **design**, with phases 1, 2 and 4 built and 3 part built. Nothing below is built
+Status: **design**, with phases 1, 2, 3 and 4 built, bar one deferred item in 3. Nothing below is built
 except where it says so, and what is carries a mark. Every claim about what exists was checked against the code on
 2026-09-22, and the symbols named are real; where a draft of this document guessed wrong, the
 correction is in the text rather than quietly removed, because the wrong guess was usually "that
@@ -918,10 +918,19 @@ knowledge. Today:
      than it is: *edge-on to one line of sight*, and a transit's distance marked as resting on a
      prior. Courses still join back to a truth target by hashing generator keys, until phase 7.
      Belts are still the generator's, until phase 8.
-   - ⬜ **The map.** Still draws truth's bodies. Needs the primitives listed under *The map*: a
-     camera-facing dashed ring for a `Shell`, faintness for a candidate, and a radial error bar.
-     `Form` in `map.rs` has `Sphere`, `Circle` and `Dot`, none of which is a ring at an orbit
-     radius, so this is the one part of phase 3 that is new renderer work rather than new reads.
+   - ✅ **The map.** Draws `bodies_of`. **No new renderer work was needed**, against the
+     expectation above: `outline::torus` at a right half-angle already produces a dashed sphere
+     outline — the Oort cloud draws one — and its inner and outer radii carry the distance error
+     as the shell's own thickness. So the *camera-facing dashed circle* and the *radial error
+     bar* below are one existing shape, and an orbit of known size and unknown orientation is
+     drawn as the sphere it is. A placed body draws its error **along** the ring rather than
+     across it, since what is uncertain is how far round it has got. Keys are the ones truth's
+     bodies had, joined through the generator key, or `primary` and the focus would name keys
+     nothing draws.
+   - ⬜ **Candidates are not drawn.** Their radius needs a period turned through a mass prior,
+     and the client builds no `Prior` — adding one to draw faint rings is the wrong trade when
+     the panel lists them already. The shard computes that radius at settle, so **sending it** is
+     the cheap fix, and it belongs with a wire change rather than with a read.
 
    **The sky stays truth, and only the map is a chart of knowledge** (decided 2026-09-22). Not
    stated before and load-bearing. **The sky is a camera:** it reflects local truth without
