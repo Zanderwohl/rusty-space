@@ -336,7 +336,7 @@ mod tests {
 
     const VIEW: Vec2 = Vec2::new(1280.0, 720.0);
 
-    /// Clip space from a normalised device position and a depth, which is what a projection
+    /// Clip space from a normalized device position and a depth, which is what a projection
     /// would have produced for something in front of the camera.
     fn in_front(ndc_x: f32, ndc_y: f32, w: f32) -> Vec4 {
         Vec4::new(ndc_x * w, ndc_y * w, 0.0, w)

@@ -60,5 +60,5 @@ pub use observation::{Observation, Target, observe};
 pub use occluder::{Occluder, transit_depth};
 pub use population::Population;
 pub use shell::{Shell, ShellSample};
-pub use sky::{CatalogueStar, StarId, StarProvider};
+pub use sky::{CatalogStar, StarId, StarProvider};
 pub use star::Star;

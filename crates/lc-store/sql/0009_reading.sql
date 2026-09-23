@@ -10,7 +10,7 @@
 
 CREATE TABLE IF NOT EXISTS reading (
     account     text NOT NULL,
-    -- The catalogue's id, not a file name. The file a book is served from can change without
+    -- The catalog's id, not a file name. The file a book is served from can change without
     -- the book changing; two of the first six were named after a Gutenberg number.
     book        text NOT NULL,
     -- Which spine document, and how far into its text.

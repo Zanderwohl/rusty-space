@@ -563,18 +563,18 @@ mod tests {
     use crate::knowledge::observatory::{Sky, Station, photometry};
     use crate::rng;
     use crate::sky::generate::planets_of;
-    use crate::sky::{CatalogueStar, Component, Provenance, StarId};
+    use crate::sky::{CatalogStar, Component, Provenance, StarId};
     use crate::star::Star;
 
     const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
     const CADENCE_S: f64 = 1800.0;
 
-    fn star(key: u64, luminosity_solar: f64, position_ly: DVec3) -> CatalogueStar {
+    fn star(key: u64, luminosity_solar: f64, position_ly: DVec3) -> CatalogStar {
         let l_w = luminosity_solar * em_spectra::stellar::SOLAR_LUMINOSITY;
         let teff = 5772.0 * luminosity_solar.powf(0.13);
         let mass = em_spectra::stellar::main_sequence_mass_solar(luminosity_solar);
-        CatalogueStar {
-            id: StarId::synthesise("conclusion", key),
+        CatalogStar {
+            id: StarId::synthesize("conclusion", key),
             provenance: Provenance { source: "conclusion".into(), key, name: None },
             position_ly,
             velocity: DVec3::ZERO,
@@ -592,7 +592,7 @@ mod tests {
     }
 
     /// Mostly red dwarfs, a few like the Sun, fewer brighter.
-    fn neighborhood() -> Vec<CatalogueStar> {
+    fn neighborhood() -> Vec<CatalogStar> {
         (0..1500)
             .map(|k| {
                 let u = rng::uniform(rng::hash(&[k, 0x6e]));
@@ -609,7 +609,7 @@ mod tests {
     /// planets no sixty-day log would ever find, and a test of what a log concludes needs one
     /// it can conclude something about. A late M dwarf because that is what makes an
     /// Earth-sized planet a percent-deep transit, which is why the real search uses them too.
-    fn red_dwarf(edge_on: bool) -> (CatalogueStar, Vec<f64>) {
+    fn red_dwarf(edge_on: bool) -> (CatalogStar, Vec<f64>) {
         (100_000..)
             .find_map(|key| {
                 let mut s = star(key, 0.001, DVec3::ZERO);
@@ -626,7 +626,7 @@ mod tests {
             .unwrap()
     }
 
-    fn stare(target: &CatalogueStar, days: f64) -> (Knowledge, f64) {
+    fn stare(target: &CatalogStar, days: f64) -> (Knowledge, f64) {
         let mut sky = Sky::new(Arc::new(vec![target.clone()]));
         let mut knowledge = Knowledge::new(Witness(1));
         let at = Station { position_ly: DVec3::ZERO, instrument: Instrument::SHIP };
@@ -770,7 +770,7 @@ mod tests {
     #[test]
     fn a_swarm_is_read_from_its_moments_and_belts_from_their_absence() {
         use crate::population::Population;
-        let has_swarm = |s: &CatalogueStar| {
+        let has_swarm = |s: &CatalogStar| {
             crate::sky::generate::system_for(s).populations.into_iter().find(|p| p.radiating_ratio == Population::PANEL)
         };
         let (with, swarm) = (200_000..)

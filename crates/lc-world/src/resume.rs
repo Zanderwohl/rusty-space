@@ -543,13 +543,13 @@ mod tests {
     use super::*;
     use crate::motion::{Change, Event, Motive, ShipId, advance, apply};
     use crate::navigation::{Course, Plane};
-    use crate::sky::{CatalogueStar, StarProvider};
+    use crate::sky::{CatalogStar, StarProvider};
 
     fn sol() -> Option<LocalSystem> {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .ok()?;
-        let sun: CatalogueStar =
+        let sun: CatalogStar =
             provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some("Sol"))?.clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);

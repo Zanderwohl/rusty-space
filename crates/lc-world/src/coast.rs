@@ -250,7 +250,7 @@ mod tests {
     fn sol() -> LocalSystem {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
-                .expect("the catalogue");
+                .expect("the catalog");
         let sun = crate::sky::StarProvider::stars(&provider)
             .iter()
             .find(|s| s.provenance.name.as_deref() == Some("Sol"))

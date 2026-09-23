@@ -206,7 +206,7 @@ impl MapView {
     /// the camera and the plane it is angled against cannot disagree.
     ///
     /// **A system plane nobody has solved falls back to the galactic one**, which this craft
-    /// knows from the catalogue and which needs nothing measured. Falling back to `+Z` laid
+    /// knows from the catalog and which needs nothing measured. Falling back to `+Z` laid
     /// every unsolved system's rings in the ecliptic of J2000 -- Sol's plane, shown around a
     /// star nobody has surveyed, which is the exact mistake `25-system-knowledge.md` opens by
     /// describing.

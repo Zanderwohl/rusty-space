@@ -17,7 +17,7 @@ use lc_spacetime::Worldline;
 use lc_world::craft::{Craft, CraftId, Kind};
 use lc_world::motion::LIGHT_US_PER_LY;
 use lc_world::signal::Beam;
-use lc_world::sky::{CatalogueStar, StarId};
+use lc_world::sky::{CatalogStar, StarId};
 use lc_world::system::{LOCAL_SHELL_LY, LocalSystem};
 
 /// The stars a shard is authoritative over, and the systems loaded around them.
@@ -28,34 +28,34 @@ use lc_world::system::{LOCAL_SHELL_LY, LocalSystem};
 /// never disagree about whether a ship is in a system.
 #[derive(Default)]
 pub struct World {
-    /// Shared so `crate::admin` reads the same catalogue: it is the largest thing in the process
+    /// Shared so `crate::admin` reads the same catalog: it is the largest thing in the process
     /// and never changes once loaded.
-    stars: Arc<Vec<CatalogueStar>>,
+    stars: Arc<Vec<CatalogStar>>,
     /// Loaded on first arrival and shared thereafter. Building one is a couple of hundred
     /// bodies out of a preset, and every craft in the same system points at the same copy —
     /// which is only possible because a system is never propagated.
     loaded: HashMap<StarId, Arc<LocalSystem>>,
-    /// Where each star sits in `stars`. Built once, because the catalogue never changes.
+    /// Where each star sits in `stars`. Built once, because the catalog never changes.
     index: HashMap<StarId, usize>,
 }
 
 /// The index every lookup goes through.
-fn index_of(stars: &[CatalogueStar]) -> HashMap<StarId, usize> {
+fn index_of(stars: &[CatalogStar]) -> HashMap<StarId, usize> {
     stars.iter().enumerate().map(|(k, star)| (star.id, k)).collect()
 }
 
 impl World {
-    pub fn new(stars: Vec<CatalogueStar>) -> Self {
+    pub fn new(stars: Vec<CatalogStar>) -> Self {
         let stars = Arc::new(stars);
         Self { index: index_of(&stars), stars, loaded: HashMap::new() }
     }
 
-    /// So the process carries one catalogue however many readers it has.
-    pub fn from_shared(stars: Arc<Vec<CatalogueStar>>) -> Self {
+    /// So the process carries one catalog however many readers it has.
+    pub fn from_shared(stars: Arc<Vec<CatalogStar>>) -> Self {
         Self { index: index_of(&stars), stars, loaded: HashMap::new() }
     }
 
-    pub fn stars(&self) -> Arc<Vec<CatalogueStar>> {
+    pub fn stars(&self) -> Arc<Vec<CatalogStar>> {
         Arc::clone(&self.stars)
     }
 
@@ -63,16 +63,16 @@ impl World {
         self.stars.is_empty()
     }
 
-    /// Where a star is, by its catalogue id.
+    /// Where a star is, by its catalog id.
     ///
     /// The only thing that resolves an id on this side, and the reason `Order::Cross` names a
     /// star rather than a position: a client can ask for a star this shard holds and nothing
-    /// else. Both ends hold the same catalogue — see the shard's `--sky`.
+    /// else. Both ends hold the same catalog — see the shard's `--sky`.
     pub fn star_at(&self, id: u64) -> Option<DVec3> {
         self.stars.iter().find(|s| s.id.get() == id).map(|s| s.position_ly)
     }
 
-    /// Where a star is, by the name the catalogue knows it under.
+    /// Where a star is, by the name the catalog knows it under.
     ///
     /// The other half of [`World::star_at`], and here for the same reason: a scene names the
     /// system it is staged in, and only this side may turn a name into a place.
@@ -113,7 +113,7 @@ impl World {
         Some(system)
     }
 
-    /// One star's system, by its catalogue id, loaded if nothing has asked yet.
+    /// One star's system, by its catalog id, loaded if nothing has asked yet.
     ///
     /// The same cache [`World::system_at`] fills, so a system a craft is flying in is not built
     /// a second time to answer a question about it.
@@ -127,17 +127,17 @@ impl World {
         Some(system)
     }
 
-    /// A star by its catalogue id.
+    /// A star by its catalog id.
     ///
-    /// Through the index rather than by scanning. The catalogue does not change, so the map is
+    /// Through the index rather than by scanning. The catalog does not change, so the map is
     /// built once, and the alternative was a hundred thousand comparisons every tick a craft
     /// asked about a star that is not there -- which nothing else would have stopped, because
     /// a miss caches nothing to remember it by.
-    pub fn star_by_id(&self, id: StarId) -> Option<&CatalogueStar> {
+    pub fn star_by_id(&self, id: StarId) -> Option<&CatalogStar> {
         self.stars.get(*self.index.get(&id)?)
     }
 
-    /// Whether the catalogue holds this star at all. What an order naming one is refused by.
+    /// Whether the catalog holds this star at all. What an order naming one is refused by.
     pub fn holds(&self, id: StarId) -> bool {
         self.index.contains_key(&id)
     }

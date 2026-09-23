@@ -153,7 +153,7 @@ async fn complete(
     // Two budgets. The per-account one stops a single password being guessed; the per-address
     // one stops a leaked credential list being walked, which spends one attempt per account and
     // so never troubles the first.
-    let by_account = format!("account:{}", crate::store::normalise_email(&form.email));
+    let by_account = format!("account:{}", crate::store::normalize_email(&form.email));
     let by_address = format!("addr:{}", from.ip());
     if !broker.attempts.allows(&by_account, PER_ACCOUNT)
         || !broker.attempts.allows(&by_address, PER_ADDRESS)
@@ -273,7 +273,7 @@ async fn native(
 
     // The same two budgets the form path gets. A JSON endpoint is a better target for stuffing
     // than a form, not a worse one.
-    let by_account = format!("account:{}", crate::store::normalise_email(&form.email));
+    let by_account = format!("account:{}", crate::store::normalize_email(&form.email));
     let by_address = format!("addr:{}", from.ip());
     if !broker.attempts.allows(&by_account, PER_ACCOUNT)
         || !broker.attempts.allows(&by_address, PER_ADDRESS)

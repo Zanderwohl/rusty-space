@@ -10,7 +10,7 @@
 
 pub mod assets;
 pub mod auth;
-pub mod catalogue;
+pub mod catalog;
 pub mod config;
 pub mod detail;
 pub mod listing;

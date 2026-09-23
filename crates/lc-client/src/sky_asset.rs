@@ -9,13 +9,13 @@ use bevy::asset::io::Reader;
 use bevy::asset::{AssetLoader, LoadContext};
 use bevy::prelude::*;
 use lc_world::sky::chunk::{ChunkError, ChunkProvider};
-use lc_world::sky::{CatalogueStar, StarProvider};
+use lc_world::sky::{CatalogStar, StarProvider};
 
 /// A decoded sky chunk.
 #[derive(Asset, TypePath, Debug)]
 pub struct Sky {
     pub source: String,
-    pub stars: Vec<CatalogueStar>,
+    pub stars: Vec<CatalogStar>,
     /// Records the chunk held that did not describe a star.
     pub skipped: usize,
 }
@@ -24,7 +24,7 @@ impl StarProvider for Sky {
     fn name(&self) -> &str {
         &self.source
     }
-    fn stars(&self) -> &[CatalogueStar] {
+    fn stars(&self) -> &[CatalogStar] {
         &self.stars
     }
 }

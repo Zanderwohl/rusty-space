@@ -143,7 +143,7 @@ pub fn dynamo(mass_earths: f64, spin_s: f64, h: u64, tuning: &Tuning) -> bool {
 }
 
 /// The planets of one architecture, innermost first.
-pub fn planets(system: &str, arch: &Architecture, star: &crate::sky::CatalogueStar, tuning: &Tuning) -> Vec<Planet> {
+pub fn planets(system: &str, arch: &Architecture, star: &crate::sky::CatalogStar, tuning: &Tuning) -> Vec<Planet> {
     let seed = star.seed();
     let giants = arch.giant_jupiters();
     arch.planets()
@@ -267,7 +267,7 @@ fn water(
 /// A habitable planet has liquid water whatever its equilibrium temperature says, because that
 /// is what the zone *means*: its outer edge is the furthest a thick enough atmosphere can still
 /// hold a surface above freezing. The greenhouse that does it is a free parameter of the planet
-/// and is not modelled, so the zone stands in for it.
+/// and is not modeled, so the zone stands in for it.
 fn top_of(class: Class, atmosphere: Atmosphere, equilibrium_k: f64, water_fraction: f64, habitable: bool) -> Top {
     const FREEZING_K: f64 = 273.0;
     match atmosphere {
@@ -312,9 +312,9 @@ mod tests {
     use super::super::architecture::architecture;
     use crate::sky::{AuthoredStars, StarId, StarProvider};
 
-    fn sun_like(key: u64) -> crate::sky::CatalogueStar {
+    fn sun_like(key: u64) -> crate::sky::CatalogStar {
         let mut s = AuthoredStars::sample().stars()[1].clone();
-        s.id = StarId::synthesise("planet", key);
+        s.id = StarId::synthesize("planet", key);
         s.star = crate::star::Star::SOL;
         s.luminosity_solar = 1.0;
         s.mass_solar = 1.0;

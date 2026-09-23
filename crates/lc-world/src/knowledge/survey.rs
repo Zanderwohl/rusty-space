@@ -157,7 +157,7 @@ pub struct Source {
     /// the range keeps the two from disagreeing.
     pub radius_m: f64,
     /// Seconds for one turn. Truth, for a close look to time against. `None` for a star: the
-    /// catalogue states no rotation for one, and following a sunspot round is a later thing.
+    /// catalog states no rotation for one, and following a sunspot round is a later thing.
     pub spin_s: Option<f64>,
 }
 
@@ -381,7 +381,7 @@ pub fn colors(
         if !(snr.is_finite() && snr >= DETECTION_SNR) {
             return None;
         }
-        // The error goes back with the reading. A digest that folds colours weighs each visit
+        // The error goes back with the reading. A digest that folds colors weighs each visit
         // by how well it was measured, and it cannot do that from the flux alone.
         let sigma = flux * (1.0 / snr).max(PHOTOMETRY_FLOOR);
         Some((flux + rng::gaussian(rng::hash(&[seed, band.index() as u64])) * sigma, sigma))
@@ -704,7 +704,7 @@ mod tests {
 
     fn source(key: u64, toward: DVec3, flux: f64) -> Source {
         Source {
-            subject: Subject::Star(StarId::synthesise("test", key)),
+            subject: Subject::Star(StarId::synthesize("test", key)),
             toward: toward.normalize(),
             flux_w_m2: flux,
             diameter_rad: 0.0,
@@ -982,7 +982,7 @@ mod tests {
         let disc = 2.0 * sun().radius_m / (5.0 * AU_M);
         assert!(disc / resolution > 6000.0, "{} elements", disc / resolution);
         let sky = [Source {
-            subject: Subject::Star(StarId::synthesise("test", 1)),
+            subject: Subject::Star(StarId::synthesize("test", 1)),
             toward: DVec3::X,
             flux_w_m2: host,
             diameter_rad: disc,
@@ -1019,8 +1019,8 @@ mod tests {
 
         let at = |range_m: f64| Source {
             subject: Subject::Body {
-                star: StarId::synthesise("t", 1),
-                body: crate::knowledge::BodyId::of(StarId::synthesise("t", 1), "Earth"),
+                star: StarId::synthesize("t", 1),
+                body: crate::knowledge::BodyId::of(StarId::synthesize("t", 1), "Earth"),
             },
             toward: DVec3::X,
             // Bright enough to be detected at any of these ranges; the point here is the disc.
@@ -1085,7 +1085,7 @@ mod tests {
 
     #[test]
     fn a_watch_gives_each_target_its_turn() {
-        let ids: Vec<StarId> = (0..3).map(|k| StarId::synthesise("test", k)).collect();
+        let ids: Vec<StarId> = (0..3).map(|k| StarId::synthesize("test", k)).collect();
         let duty = Duty::Watch {
             targets: ids.clone(),
             dwell_s: 100.0,
@@ -1105,7 +1105,7 @@ mod tests {
     /// brightest body -- is measured on the first tick rather than a whole cycle later.
     #[test]
     fn a_survey_takes_the_bodies_in_turn_from_the_clock() {
-        let duty = Duty::Survey { star: StarId::synthesise("t", 1), started_s: 0.0 };
+        let duty = Duty::Survey { star: StarId::synthesize("t", 1), started_s: 0.0 };
         let tick = 438.3;
 
         let first = duty.visits(213, 0.0, tick);
@@ -1124,7 +1124,7 @@ mod tests {
         assert!(duty.visits(0, 0.0, tick).is_empty(), "no bodies, no turns");
         assert!(duty.visits(10, tick, 0.0).is_empty(), "time does not run backwards");
         assert!(Duty::Idle.visits(10, 0.0, tick).is_empty(), "only a survey has turns");
-        assert_eq!(duty.surveying(), Some(StarId::synthesise("t", 1)));
+        assert_eq!(duty.surveying(), Some(StarId::synthesize("t", 1)));
         assert_eq!(Duty::Idle.surveying(), None);
     }
 

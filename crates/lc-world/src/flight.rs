@@ -29,7 +29,7 @@ pub const JULIAN_YEAR_S: f64 = 31_557_600.0;
 
 /// How close to a star a crossing stops: about 63 astronomical units.
 ///
-/// Outside the planets, far inside the Oort shell. Arriving at the catalogue position would
+/// Outside the planets, far inside the Oort shell. Arriving at the catalog position would
 /// put the ship inside the star.
 pub const STANDOFF_LY: f64 = 1.0e-3;
 

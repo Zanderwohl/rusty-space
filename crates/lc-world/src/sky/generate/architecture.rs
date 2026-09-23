@@ -3,12 +3,12 @@
 //! Nothing here is drawn independently. A rung's mass is the solid in the annulus it sweeps,
 //! its class follows from that mass and whether it is past the snow line, and the belts are
 //! what the rungs failed to assemble. Mass is conserved across the whole ladder, which is what
-//! makes the asteroid belt and the Kuiper analogue consequences rather than decorations.
+//! makes the asteroid belt and the Kuiper analog consequences rather than decorations.
 
 use super::disc::{self, Disc, JUPITER_EARTHS};
 use super::tuning::Tuning;
 use crate::rng;
-use crate::sky::CatalogueStar;
+use crate::sky::CatalogStar;
 
 /// What a rung assembled into.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,7 +108,7 @@ impl Architecture {
 }
 
 /// The architecture of one star's system.
-pub fn architecture(star: &CatalogueStar, tuning: &Tuning) -> Architecture {
+pub fn architecture(star: &CatalogStar, tuning: &Tuning) -> Architecture {
     let disc = Disc::of(star, tuning);
     let seed = star.seed();
     let mut rungs = rungs_of(&disc, star, tuning, seed);
@@ -118,7 +118,7 @@ pub fn architecture(star: &CatalogueStar, tuning: &Tuning) -> Architecture {
 }
 
 /// Where the rungs sit and what each one assembles.
-fn rungs_of(disc: &Disc, star: &CatalogueStar, tuning: &Tuning, seed: u64) -> Vec<Rung> {
+fn rungs_of(disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64) -> Vec<Rung> {
     let t = &tuning.ladder;
     let mut axes = Vec::new();
     let mut a = disc.inner_m
@@ -189,7 +189,7 @@ fn envelope(class: Class, core: f64, h: u64, t: &super::tuning::Ladder) -> f64 {
 ///
 /// This is where hot Jupiters come from, and it is also why a system that has one has almost
 /// nothing else: a giant crossing the inner disc does not leave it behind.
-fn migrate(rungs: &mut Vec<Rung>, disc: &Disc, star: &CatalogueStar, tuning: &Tuning, seed: u64) {
+fn migrate(rungs: &mut Vec<Rung>, disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64) {
     let t = &tuning.ladder;
     let Some(k) = rungs
         .iter()
@@ -210,7 +210,7 @@ fn migrate(rungs: &mut Vec<Rung>, disc: &Disc, star: &CatalogueStar, tuning: &Tu
 
 /// Mark every rung that never became a planet: stirred by a giant's resonances, or simply
 /// never given enough to assemble one.
-fn sterilize(rungs: &mut [Rung], star: &CatalogueStar, tuning: &Tuning) {
+fn sterilize(rungs: &mut [Rung], star: &CatalogStar, tuning: &Tuning) {
     let reaches: Vec<(f64, f64)> = rungs
         .iter()
         .filter(|r| r.class.is_giant())
@@ -246,9 +246,9 @@ pub(crate) mod tests_support {
     use super::*;
     use crate::sky::{AuthoredStars, StarId, StarProvider};
 
-    pub fn sun_like(key: u64) -> CatalogueStar {
+    pub fn sun_like(key: u64) -> CatalogStar {
         let mut s = AuthoredStars::sample().stars()[1].clone();
-        s.id = StarId::synthesise("arch", key);
+        s.id = StarId::synthesize("arch", key);
         s.star = crate::star::Star::SOL;
         s.luminosity_solar = 1.0;
         s.mass_solar = 1.0;
@@ -269,7 +269,7 @@ mod tests {
 
     /// **The claim the belts rest on.** Every rung's core plus its debris is the solid in its
     /// own annulus, and the annuli tile the disc, so nothing is invented and nothing vanishes.
-    /// The Kuiper analogue exists because this holds, not because it was placed.
+    /// The Kuiper analog exists because this holds, not because it was placed.
     #[test]
     fn the_ladder_conserves_the_disc() {
         let mut tuning = Tuning::default();

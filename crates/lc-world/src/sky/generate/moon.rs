@@ -198,7 +198,7 @@ mod tests {
         (0..count)
             .map(|k| {
                 let mut s = AuthoredStars::sample().stars()[1].clone();
-                s.id = StarId::synthesise("moon", k);
+                s.id = StarId::synthesize("moon", k);
                 s.star = crate::star::Star::SOL;
                 s.luminosity_solar = 1.0;
                 s.mass_solar = 1.0;
@@ -290,7 +290,7 @@ mod tests {
     }
 
     /// Capture is a cross-section, so the count goes as the square of the sphere the planet
-    /// holds -- which puts a Jupiter analogue near the ninety-odd the real one has.
+    /// holds -- which puts a Jupiter analog near the ninety-odd the real one has.
     #[test]
     fn a_jupiter_catches_more_than_a_neptune() {
         let counts = |planets: &[Vec<Planet>], heavy: bool| {

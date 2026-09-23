@@ -17,7 +17,7 @@ use em_plot::raster;
 
 use lc_world::sky::generate::architecture::Class;
 use lc_world::sky::generate::{self, AU, GeneratedSystem, Tuning, disc, planet};
-use lc_world::sky::{AuthoredStars, CatalogueStar, StarId, StarProvider};
+use lc_world::sky::{AuthoredStars, CatalogStar, StarId, StarProvider};
 use lc_world::worlds::Atmosphere;
 
 const WIDTH: u32 = 1200;
@@ -58,10 +58,10 @@ fn main() -> ExitCode {
 }
 
 /// A sun-like star with this key, and one scaled to a luminosity.
-fn star(key: u64, luminosity: f64) -> CatalogueStar {
+fn star(key: u64, luminosity: f64) -> CatalogStar {
     let teff = 5772.0 * luminosity.powf(0.13);
     let mut s = AuthoredStars::sample().stars()[1].clone();
-    s.id = StarId::synthesise("plots", key);
+    s.id = StarId::synthesize("plots", key);
     s.luminosity_solar = luminosity;
     s.star.teff_k = teff;
     s.star.radius_m =
@@ -76,7 +76,7 @@ fn star(key: u64, luminosity: f64) -> CatalogueStar {
 }
 
 /// The sample every plot is drawn from: sun-like stars, and a spread of luminosities.
-fn sample() -> Vec<(CatalogueStar, GeneratedSystem)> {
+fn sample() -> Vec<(CatalogStar, GeneratedSystem)> {
     (0..STARS)
         .map(|k| {
             // A luminosity function weighted to the dim end, as the galaxy is.
@@ -107,7 +107,7 @@ fn run(into: &str) -> Result<usize, String> {
 /// Every star in the sample, not only the sun-like ones: measuring the axis in snow lines is
 /// what lets a red dwarf's system and a blue star's lie on the same picture, because that is
 /// the one radius the whole architecture is built around.
-fn architecture(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<(), String> {
+fn architecture(into: &str, sample: &[(CatalogStar, GeneratedSystem)]) -> Result<(), String> {
     let mut by_class: [Vec<(f64, f64)>; 4] = Default::default();
     let (mut stalled, mut stirred) = (Vec::new(), Vec::new());
     let mut habitable = (f64::INFINITY, 0.0f64);
@@ -152,7 +152,7 @@ fn architecture(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Resu
 const CLASSES: [Class; 4] = [Class::Rocky, Class::Icy, Class::IceGiant, Class::GasGiant];
 
 /// How many planets a star gets, and how many of them are giants.
-fn counts(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<(), String> {
+fn counts(into: &str, sample: &[(CatalogStar, GeneratedSystem)]) -> Result<(), String> {
     let all: Vec<f64> = sample.iter().map(|(_, s)| s.planets.len() as f64).collect();
     let giants: Vec<f64> =
         sample.iter().map(|(_, s)| s.planets.iter().filter(|p| p.class.is_giant()).count() as f64).collect();
@@ -180,7 +180,7 @@ fn counts(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<(),
 }
 
 /// Mass against radius, with the three planets the relation is anchored on.
-fn mass_radius(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<(), String> {
+fn mass_radius(into: &str, sample: &[(CatalogStar, GeneratedSystem)]) -> Result<(), String> {
     let mut by_class: [Vec<(f64, f64)>; 4] = Default::default();
     for (_, system) in sample {
         for p in &system.planets {
@@ -224,7 +224,7 @@ fn mass_radius(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Resul
 }
 
 /// The chain that decides what a body has over it, with the solar system laid on top.
-fn retention(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<(), String> {
+fn retention(into: &str, sample: &[(CatalogStar, GeneratedSystem)]) -> Result<(), String> {
     let mut by_air: [Vec<(f64, f64)>; 4] = Default::default();
     for (_, system) in sample {
         for p in system.planets.iter().filter(|p| !p.class.is_giant()) {
@@ -287,7 +287,7 @@ fn air_index(a: Atmosphere) -> usize {
 }
 
 /// Grown moons against caught ones, in the one plot that separates them.
-fn moons(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<(), String> {
+fn moons(into: &str, sample: &[(CatalogStar, GeneratedSystem)]) -> Result<(), String> {
     let (mut grown, mut caught) = (Vec::new(), Vec::new());
     for (star, system) in sample {
         for p in &system.planets {
@@ -318,7 +318,7 @@ fn moons(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<(), 
 }
 
 /// The habitable zone, and what lands in it, across three and a half decades of starlight.
-fn habitable(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<(), String> {
+fn habitable(into: &str, sample: &[(CatalogStar, GeneratedSystem)]) -> Result<(), String> {
     let (mut all, mut good, mut inner, mut outer) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for (star, system) in sample {
         for p in &system.planets {
@@ -355,7 +355,7 @@ fn habitable(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<
 }
 
 /// Metals are the rock: what a star's abundance buys it.
-fn metals(into: &str, sample: &[(CatalogueStar, GeneratedSystem)]) -> Result<(), String> {
+fn metals(into: &str, sample: &[(CatalogStar, GeneratedSystem)]) -> Result<(), String> {
     let mut points = Vec::new();
     for (star, system) in sample {
         let giants = system.planets.iter().filter(|p| p.class.is_giant()).count() as f64;
@@ -448,8 +448,8 @@ fn figure(
 
 fn chart_point(chart: &Chart, vx: f64, vy: f64, dx: f32, dy: f32) -> Point {
     let t = (
-        chart.x.scale.normalise(vx, chart.x.range) as f32,
-        chart.y.scale.normalise(vy, chart.y.range) as f32,
+        chart.x.scale.normalize(vx, chart.x.range) as f32,
+        chart.y.scale.normalize(vy, chart.y.range) as f32,
     );
     Point::new(chart.area.x + t.0 * chart.area.width + dx, chart.area.y + (1.0 - t.1) * chart.area.height + dy)
 }
@@ -482,7 +482,7 @@ fn threshold(chart: &Chart, molar_g: f64) -> Primitives {
     let tuning = Tuning::default();
     let points: Vec<Point> = (0..=160)
         .map(|k| {
-            let t = chart.x.scale.denormalise(k as f64 / 160.0, chart.x.range);
+            let t = chart.x.scale.denormalize(k as f64 / 160.0, chart.x.range);
             let exo = planet::exosphere_k(t, &tuning);
             let v = tuning.world.retention * disc::thermal_speed(molar_g, exo) / 1000.0;
             chart_point(chart, t, v, 0.0, 0.0)

@@ -52,7 +52,7 @@ pub const REPORT_LIMIT: usize = 64 * 1024;
 pub enum Body {
     /// Never empty.
     Text(String),
-    /// A ship's automatic answer, carrying only acknowledgements.
+    /// A ship's automatic answer, carrying only acknowledgments.
     Ack,
     Key,
     /// Sealed to somebody else.
@@ -92,7 +92,7 @@ pub struct Spoken {
 }
 
 /// A survey report on the air. Not a [`Spoken`]: it is not filed in a conversation and earns no
-/// acknowledgement.
+/// acknowledgment.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reported {
     /// `None` for a broadcast.

@@ -17,7 +17,7 @@ use super::{Bearing, Claim, Distance, Hop, Knowledge, NameKind, Naming, Sample, 
 use crate::instrument::Instrument;
 use crate::observation::{Target, observe};
 use crate::rng;
-use crate::sky::{CatalogueStar, StarId, generate};
+use crate::sky::{CatalogStar, StarId, generate};
 use crate::system::M_PER_LY;
 
 /// Who the charts a ship launches with came from: not this ship, nor any craft it will meet.
@@ -36,8 +36,8 @@ const LUS_PER_LY: f64 = M_PER_LY / 299.792458;
 
 /// Nothing cached here depends on who is looking, so one serves every craft a shard runs.
 pub struct Sky {
-    stars: Arc<Vec<CatalogueStar>>,
-    /// Where each star sits in `stars`. Built once, because the catalogue never changes, and
+    stars: Arc<Vec<CatalogStar>>,
+    /// Where each star sits in `stars`. Built once, because the catalog never changes, and
     /// worth having: finding a star by scanning is a hundred thousand comparisons and the
     /// survey does it every tick.
     index: HashMap<StarId, usize>,
@@ -47,12 +47,12 @@ pub struct Sky {
 }
 
 impl Sky {
-    pub fn new(stars: Arc<Vec<CatalogueStar>>) -> Self {
+    pub fn new(stars: Arc<Vec<CatalogStar>>) -> Self {
         let index = stars.iter().enumerate().map(|(k, star)| (star.id, k)).collect();
         Self { stars, index, luminosity: HashMap::new(), targets: HashMap::new() }
     }
 
-    pub fn stars(&self) -> &[CatalogueStar] {
+    pub fn stars(&self) -> &[CatalogStar] {
         &self.stars
     }
 
@@ -62,7 +62,7 @@ impl Sky {
 
     /// One star as a source, without building the rest of the sky.
     ///
-    /// **The whole catalogue is not needed to ask about one star.** A craft surveying its own
+    /// **The whole catalog is not needed to ask about one star.** A craft surveying its own
     /// system wants its own sun and the bodies around it; the sky beyond contributes no glare
     /// worth the arithmetic, and building a source for every star in it was a hundred thousand
     /// of them allocated and thrown away per craft per tick, on the tick thread.
@@ -108,7 +108,7 @@ impl Sky {
     }
 }
 
-pub fn build_target(star: &CatalogueStar) -> Target {
+pub fn build_target(star: &CatalogStar) -> Target {
     let system = generate::system_for(star);
     let mut model = crate::emission::EmissionModel::new(star.star, star.seed());
     model.populations = system.populations;
@@ -256,7 +256,7 @@ impl Observatory {
 ///
 /// The star belongs in that list and not beside it. It is the brightest thing by nine orders of
 /// magnitude, so it is the only meaningful glare in the system, and `survey::look` can only be
-/// asked about it if it is a source like any other. The rest of the catalogue is left out: a
+/// asked about it if it is a source like any other. The rest of the catalog is left out: a
 /// star light-years off cannot outshine a planet at 5 AU, so it can neither glare on one nor
 /// hide behind one.
 pub fn survey_between(
@@ -326,7 +326,7 @@ pub fn survey_between(
     }
 }
 
-/// The system's own star as a source, worked the way the catalogue path works it so the two
+/// The system's own star as a source, worked the way the catalog path works it so the two
 /// cannot disagree about how bright the ship's own sun is.
 fn host_source(sky: &mut Sky, system: &LocalSystem, band: Band, from: DVec3) -> Option<Source> {
     sky.source_of(band, from, system.star)
@@ -334,7 +334,7 @@ fn host_source(sky: &mut Sky, system: &LocalSystem, band: Band, from: DVec3) -> 
 
 /// One star as a source seen from `here`. The one construction, so
 /// [`Sky::sources`] and [`Sky::source_of`] cannot disagree.
-fn source_from(star: &CatalogueStar, luminosity_w: f64, here: DVec3) -> Source {
+fn source_from(star: &CatalogStar, luminosity_w: f64, here: DVec3) -> Source {
     let offset = star.position_ly - here;
     let distance_m = offset.length() * M_PER_LY;
     let (flux, diameter_rad) = if distance_m > 0.0 {
@@ -431,7 +431,7 @@ pub fn sweep_between(
     }
 }
 
-/// The charting office's designation for a star, the same for every ship. The catalogue name is
+/// The charting office's designation for a star, the same for every ship. The catalog name is
 /// the generator's and is never shown.
 pub fn chart_number(id: StarId) -> String {
     let raw = id.get();
@@ -451,7 +451,7 @@ pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach
         if distance > reach_ly || distance <= 0.0 {
             continue;
         }
-        // A catalogue distance is a parallax like any other, so its error grows with range.
+        // A catalog distance is a parallax like any other, so its error grows with range.
         let sigma_ly = CHART_ERROR * distance;
         let slip = rng::gaussian(rng::hash(&[star.id.get(), 0x0_c_4_a_7]));
         knowledge.sighted(
@@ -513,7 +513,7 @@ mod tests {
             .enumerate()
             .map(|(k, axis)| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("spread", k as u64);
+                star.id = StarId::synthesize("spread", k as u64);
                 star.position_ly = axis * 4.2;
                 star
             })
@@ -738,7 +738,7 @@ mod tests {
     #[test]
     fn a_survey_starts_when_it_is_taken_up() {
         let mut o = Observatory::default();
-        o.take_up(Duty::Survey { star: StarId::synthesise("t", 1), started_s: -1.0e9 }, 400.0);
+        o.take_up(Duty::Survey { star: StarId::synthesize("t", 1), started_s: -1.0e9 }, 400.0);
         let Duty::Survey { started_s, .. } = o.duty else { panic!("the duty did not take") };
         assert_eq!(started_s, 400.0);
     }
@@ -874,7 +874,7 @@ mod tests {
     }
     /// **A survey does not need the sky behind it.** It wants its own sun and the bodies
     /// around it; everything else contributes no glare worth the arithmetic. Building a source
-    /// for every catalogue star to pick one out by index was a hundred thousand of them
+    /// for every catalog star to pick one out by index was a hundred thousand of them
     /// allocated and thrown away per craft per tick, on the tick thread.
     ///
     /// Checked as a statement about the answer rather than about the cost: the same survey in
@@ -883,14 +883,14 @@ mod tests {
     fn a_survey_sees_the_same_whatever_is_behind_it() {
         let Some((_, system)) = sol() else { return };
         let sun = crate::sky::AuthoredStars::sample().stars()[1].clone();
-        let star = crate::sky::CatalogueStar { id: system.star, ..sun };
+        let star = crate::sky::CatalogStar { id: system.star, ..sun };
 
         // The same sun, alone and then buried in twenty thousand other stars.
         let alone = Sky::new(Arc::new(vec![star.clone()]));
         let mut crowd = vec![star.clone()];
         crowd.extend((0..20_000u64).map(|k| {
             let mut other = star.clone();
-            other.id = crate::sky::StarId::synthesise("crowd", k);
+            other.id = crate::sky::StarId::synthesize("crowd", k);
             other.position_ly = DVec3::new(k as f64 % 97.0 + 3.0, k as f64 % 53.0, k as f64 % 31.0);
             other
         }));
@@ -904,7 +904,7 @@ mod tests {
             knowledge
         };
         let (one, many) = (surveyed(alone), surveyed(crowded));
-        assert_eq!(one, many, "the catalogue behind a system changed what a survey saw");
+        assert_eq!(one, many, "the catalog behind a system changed what a survey saw");
         assert!(
             one.belief(Subject::Star(system.star)).is_some(),
             "and it has to have seen something"
@@ -916,7 +916,7 @@ mod tests {
     /// asked.
     #[test]
     fn one_source_matches_what_the_whole_sky_says() {
-        let stars: Vec<crate::sky::CatalogueStar> =
+        let stars: Vec<crate::sky::CatalogStar> =
             crate::sky::AuthoredStars::sample().stars().to_vec();
         let mut sky = Sky::new(Arc::new(stars.clone()));
         let here = DVec3::new(0.3, -1.2, 4.0);
@@ -929,7 +929,7 @@ mod tests {
             }
         }
         // And a star it does not hold has no source.
-        assert!(sky.source_of(Band::V, here, crate::sky::StarId::synthesise("nope", 1)).is_none());
+        assert!(sky.source_of(Band::V, here, crate::sky::StarId::synthesize("nope", 1)).is_none());
     }
 
 }

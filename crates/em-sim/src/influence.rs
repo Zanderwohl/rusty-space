@@ -68,7 +68,7 @@ pub struct Soi {
 }
 
 impl Soi {
-    /// Radius toward `dir`, meters. `dir` need not be normalised; a zero vector is read as
+    /// Radius toward `dir`, meters. `dir` need not be normalized; a zero vector is read as
     /// "across the primary line", where every model is at its widest.
     pub fn radius_toward(&self, dir: DVec3) -> f64 {
         let cos = if dir.length_squared() > 0.0 && self.to_primary.length_squared() > 0.0 {

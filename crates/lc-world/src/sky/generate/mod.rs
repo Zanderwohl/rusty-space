@@ -35,7 +35,7 @@ use em_sim::universe::{
 use em_spectra::PerBand;
 use glam::DVec3;
 
-use super::CatalogueStar;
+use super::CatalogStar;
 use crate::distribution::{Distribution, Inclination};
 use crate::population::Population;
 use crate::rng;
@@ -114,13 +114,13 @@ pub fn spin_axis_for(system_pole: DVec3, seed: u64) -> DVec3 {
     (system_pole * cos_tilt + (u * phi.cos() + v * phi.sin()) * sin_tilt).normalize_or(system_pole)
 }
 
-/// Generate the system around one catalogue star.
-pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
+/// Generate the system around one catalog star.
+pub fn system_for(star: &CatalogStar) -> GeneratedSystem {
     system_with(star, &Tuning::default())
 }
 
 /// The same, under a tuning of the caller's choosing. What the documentation's plots sweep.
-pub fn system_with(star: &CatalogueStar, tuning: &Tuning) -> GeneratedSystem {
+pub fn system_with(star: &CatalogStar, tuning: &Tuning) -> GeneratedSystem {
     let seed = star.seed();
     let name = star.provenance.name.clone().unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
     let pole = pole_for(seed);
@@ -154,7 +154,7 @@ pub fn system_with(star: &CatalogueStar, tuning: &Tuning) -> GeneratedSystem {
 /// Hierarchical two-body decomposition, which `em-sim` propagates unmodified. Contact and
 /// near-contact systems are excluded rather than modeled: they need more than two-body
 /// Keplerian motion.
-pub fn binary_for(primary: &CatalogueStar, secondary: &CatalogueStar) -> GeneratedSystem {
+pub fn binary_for(primary: &CatalogStar, secondary: &CatalogStar) -> GeneratedSystem {
     let mut system = system_for(primary);
     let secondary_name =
         secondary.provenance.name.clone().unwrap_or_else(|| format!("Star {:016x}", secondary.id.get()));
@@ -177,7 +177,7 @@ pub fn binary_for(primary: &CatalogueStar, secondary: &CatalogueStar) -> Generat
 /// rung's radius is its solid body and a planet's is what transits: a sub-Neptune's envelope
 /// is most of what a telescope sees of it, and a prior built on the rung would look for
 /// something that is not there.
-pub fn planets_of(star: &CatalogueStar) -> Vec<Planet> {
+pub fn planets_of(star: &CatalogStar) -> Vec<Planet> {
     let tuning = Tuning::default();
     let name = star.provenance.name.clone().unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
     planet::planets(&name, &architecture(star, &tuning), star, &tuning)
@@ -193,7 +193,7 @@ pub const SWARM_FRACTION: f64 = 0.03;
 ///
 /// The renderer needs this for every star in the sky and a full system for almost none of them,
 /// so the draw is separable: one hash per star rather than a planet set and three populations.
-pub fn swarm_for(star: &CatalogueStar) -> Option<Population> {
+pub fn swarm_for(star: &CatalogStar) -> Option<Population> {
     swarm(star.seed(), star)
 }
 
@@ -207,7 +207,7 @@ pub fn swarm_for(star: &CatalogueStar) -> Option<Population> {
 /// Isotropic, circular and gray. Those three together are the signature, and no natural
 /// population has all three: an isotropic natural population is an Oort cloud, which is
 /// eccentric and made of dust, and dust reddens where panels do not.
-fn swarm(seed: u64, star: &CatalogueStar) -> Option<Population> {
+fn swarm(seed: u64, star: &CatalogStar) -> Option<Population> {
     if rng::uniform(rng::hash(&[seed, 0x5761_726d])) > SWARM_FRACTION {
         return None;
     }
@@ -456,7 +456,7 @@ mod tests {
     use em_foundations::time::Instant;
     use em_sim::system::System;
 
-    fn sun_like() -> CatalogueStar {
+    fn sun_like() -> CatalogStar {
         AuthoredStars::sample().stars()[1].clone()
     }
 
@@ -473,7 +473,7 @@ mod tests {
         let mut checked = 0;
         for key in 0..40u64 {
             let star = AuthoredStars::sample().stars()[2].clone();
-            let seeded = CatalogueStar { id: crate::sky::StarId::synthesise("moons", key), ..star };
+            let seeded = CatalogStar { id: crate::sky::StarId::synthesize("moons", key), ..star };
             let system = system_for(&seeded);
             for planet in &system.planets {
                 for moon in &planet.moons {
@@ -502,7 +502,7 @@ mod tests {
         let mut giants = 0;
         for key in 0..40u64 {
             let star = AuthoredStars::sample().stars()[2].clone();
-            let seeded = CatalogueStar { id: crate::sky::StarId::synthesise("hills", key), ..star };
+            let seeded = CatalogStar { id: crate::sky::StarId::synthesize("hills", key), ..star };
             let system = system_for(&seeded);
             for planet in &system.planets {
                 let giant = planet.class.is_giant();
@@ -629,7 +629,7 @@ mod tests {
         let stars = AuthoredStars::sample();
         let mut checked = 0;
         for key in 0..25u64 {
-            let star = CatalogueStar { id: crate::sky::StarId::synthesise("equator", key), ..stars.stars()[2].clone() };
+            let star = CatalogStar { id: crate::sky::StarId::synthesize("equator", key), ..stars.stars()[2].clone() };
             let system = system_for(&star);
             let sim = build(&system);
             for planet in &system.planets {
@@ -660,7 +660,7 @@ mod tests {
         let (mut backwards, mut total) = (0, 0);
         let mut widest: f64 = 0.0;
         for key in 0..12u64 {
-            let star = CatalogueStar { id: crate::sky::StarId::synthesise("caught", key), ..stars.stars()[2].clone() };
+            let star = CatalogStar { id: crate::sky::StarId::synthesize("caught", key), ..stars.stars()[2].clone() };
             let system = system_for(&star);
             let sim = build(&system);
             for planet in &system.planets {

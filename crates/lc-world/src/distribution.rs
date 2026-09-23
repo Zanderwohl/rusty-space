@@ -26,7 +26,7 @@ impl Distribution {
         }
     }
 
-    /// Normal, truncated at three sigma and renormalised.
+    /// Normal, truncated at three sigma and renormalized.
     pub fn normal(mean: f64, sigma: f64, nodes: usize) -> Self {
         assert!(nodes > 0);
         if sigma <= 0.0 {
@@ -177,7 +177,7 @@ mod tests {
     use std::f64::consts::{FRAC_PI_2, PI};
 
     #[test]
-    fn distributions_are_normalised_and_have_the_right_mean() {
+    fn distributions_are_normalized_and_have_the_right_mean() {
         for d in [
             Distribution::delta(3.0),
             Distribution::uniform(2.0, 4.0, 9),

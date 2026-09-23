@@ -289,7 +289,7 @@ fn in_the_system_plane(belief: &BodyBelief) -> bool {
     belief.about.is_none()
 }
 
-/// A pole folded onto one hemisphere, so an average is not cancelled by direction of travel.
+/// A pole folded onto one hemisphere, so an average is not canceled by direction of travel.
 ///
 /// **Onto a fixed one.** The sign of a pole is which way the body goes round, and an edge-on
 /// measurement does not settle it, so the two readings of one plane have to be brought
@@ -525,7 +525,7 @@ mod tests {
     const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
 
     fn star() -> StarId {
-        StarId::synthesise("test", 1)
+        StarId::synthesize("test", 1)
     }
 
     fn body(key: &str) -> BodyId {
@@ -664,7 +664,7 @@ mod tests {
     }
 
     /// **A pole's sign is the direction of travel, which an edge-on reading does not settle.**
-    /// Folding the two halves together is what stops one retrograde orbit cancelling a
+    /// Folding the two halves together is what stops one retrograde orbit canceling a
     /// prograde one into no plane at all.
     #[test]
     fn a_retrograde_orbit_does_not_cancel_the_plane() {
@@ -745,7 +745,7 @@ mod tests {
     /// plane pushed the scatter past the limit and left Sol reading as unsolved.
     #[test]
     fn a_moons_orbit_says_nothing_about_the_system_plane() {
-        let star = StarId::synthesise("plane", 61);
+        let star = StarId::synthesize("plane", 61);
         let mut k = Knowledge::new(Witness(1));
         let pole = DVec3::new(0.1, 0.2, 0.97).normalize();
         let known = |p: DVec3| Orientation::Known { pole: p, sigma_rad: 0.01, node: 0.0, periapsis: 0.0 };
@@ -788,7 +788,7 @@ mod tests {
     /// zero longitude moved to the other node with it.
     #[test]
     fn the_plane_does_not_flip_when_a_body_is_found_inside_another() {
-        let star = StarId::synthesise("plane", 62);
+        let star = StarId::synthesize("plane", 62);
         let pole = DVec3::new(0.0, 0.3, 0.954).normalize();
         let known = |p: DVec3| Orientation::Known { pole: p, sigma_rad: 0.01, node: 0.0, periapsis: 0.0 };
         let solve = |orders: &[(&str, f64, DVec3)]| {

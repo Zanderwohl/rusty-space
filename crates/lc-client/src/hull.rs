@@ -252,7 +252,7 @@ fn shading(session: &Session, star_radius_m: f64, star_teff_k: f64, star_distanc
 /// Where the light on a hull comes from, and how bright it is there.
 ///
 /// The system's own star where there is one. Between the stars there is no system to ask, so
-/// it is the nearest star in the catalogue — which at that range contributes almost nothing,
+/// it is the nearest star in the catalog — which at that range contributes almost nothing,
 /// and the point of it is that a hull out there is a silhouette with a direction rather than a
 /// uniformly unlit blob.
 pub fn lighting(session: &Session) -> Option<(DVec3, f64, f64)> {
@@ -442,7 +442,7 @@ pub fn update_hulls(
 /// the band mapping rather than about the ship.
 ///
 /// `star` is [`lighting`]'s answer, passed in rather than asked for: between the stars that is
-/// a search over the whole catalogue, and a caller metering a scene wants every hull in it lit
+/// a search over the whole catalog, and a caller metering a scene wants every hull in it lit
 /// by the same one anyway.
 pub fn radiance_at(star: Option<(DVec3, f64, f64)>, at_ly: DVec3) -> PerBand<f32> {
     let own = hull_radiance();

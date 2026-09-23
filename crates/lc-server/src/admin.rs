@@ -1,6 +1,6 @@
 //! A read-only HTTP surface for the administration console.
 //!
-//! **No contact with the tick loop**: it reads the checkpoint and an `Arc` of the catalogue,
+//! **No contact with the tick loop**: it reads the checkpoint and an `Arc` of the catalog,
 //! takes no lock the simulation wants, and cannot make a page load cost the world a frame.
 //! Keep that if this grows a second route.
 //!
@@ -18,7 +18,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use lc_world::sky::CatalogueStar;
+use lc_world::sky::CatalogStar;
 use tokio::sync::Mutex;
 
 use crate::ability::Level;
@@ -35,7 +35,7 @@ pub const SYSTEMS: &str = "/admin/systems";
 pub struct Api {
     pub db: Arc<tokio_postgres::Client>,
     /// Shared, not copied: the largest thing in the process.
-    pub stars: Arc<Vec<CatalogueStar>>,
+    pub stars: Arc<Vec<CatalogStar>>,
     pub trusted: Arc<Trusted>,
     spent: Arc<Mutex<Spent>>,
 }
@@ -43,7 +43,7 @@ pub struct Api {
 impl Api {
     pub fn new(
         db: Arc<tokio_postgres::Client>,
-        stars: Arc<Vec<CatalogueStar>>,
+        stars: Arc<Vec<CatalogStar>>,
         trusted: Arc<Trusted>,
     ) -> Api {
         Api {
@@ -99,7 +99,7 @@ struct Asked {
     limit: Option<String>,
 }
 
-/// The limit arrives in a URL, and an unbounded one serialises the whole catalogue.
+/// The limit arrives in a URL, and an unbounded one serializes the whole catalog.
 const MOST_PER_PAGE: u64 = 200;
 
 async fn systems(
@@ -150,7 +150,7 @@ async fn systems(
         )
             .into_response(),
         Err(why) => {
-            eprintln!("admin systems: could not serialise: {why}");
+            eprintln!("admin systems: could not serialize: {why}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -198,7 +198,7 @@ async fn status(
         )
             .into_response(),
         Err(why) => {
-            eprintln!("admin status: could not serialise: {why}");
+            eprintln!("admin status: could not serialize: {why}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

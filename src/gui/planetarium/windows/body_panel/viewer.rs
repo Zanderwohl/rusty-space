@@ -94,7 +94,7 @@ fn body_details(ui: &mut Ui, system: &System, index: BodyIndex) {
             fields::text_row(ui, "Name", "", info.display_name(), "");
             fields::text_row(ui, "ID", "The key this body is stored and referenced under", &info.id, "");
             if let Some(designation) = &info.designation {
-                fields::text_row(ui, "Designation", "Catalogue designation", designation, "");
+                fields::text_row(ui, "Designation", "Catalog designation", designation, "");
             }
             let tags = info.tags.join(", ");
             fields::text_row(

@@ -3,7 +3,7 @@
 // Descended from assets/shaders/starfield.wgsl in the Exotic Matters app, which established
 // the technique: bake four vertices per star into one mesh, expand the quad in view space in
 // the vertex stage, and clamp to background depth. What is different here is that nothing
-// about a star's *appearance* is baked. The catalogue shader bakes a color and a brightness
+// about a star's *appearance* is baked. The catalog shader bakes a color and a brightness
 // because its only input is an apparent magnitude; this one bakes a temperature and a radius
 // and derives the rest per frame, because aberration, Doppler shift, the band mapping and the
 // exposure all change while the ship flies and re-uploading the mesh for them does not scale.
@@ -126,8 +126,8 @@ fn doppler(to_source: vec3<f32>, beta: vec3<f32>) -> f32 {
 // invisible without occulting it. This ship occults it: it has no eyes, only a pipeline, and
 // 07-rendering.md already hands the player the band matrix on the same grounds.
 //
-// The structure is ridged fractal noise sampled on the *normalised* direction from the star.
-// Normalising discards the radial coordinate, so the pattern is constant along every ray out
+// The structure is ridged fractal noise sampled on the *normalized* direction from the star.
+// Normalizing discards the radial coordinate, so the pattern is constant along every ray out
 // of the star and the filaments come out radial without being asked for. It is a function of
 // world direction and a per-star seed and of nothing else, so it does not swim when the camera
 // turns, it is the same for every client, and flying around a star shows its other side.
@@ -142,7 +142,7 @@ fn doppler(to_source: vec3<f32>, beta: vec3<f32>) -> f32 {
 /// turn.
 fn spin_of(seed: f32) -> mat3x3<f32> {
     let azimuth = fract(seed * 0.7548777) * 2.0 * PI;
-    // Uniform in z is uniform over the sphere, so no axis is favoured.
+    // Uniform in z is uniform over the sphere, so no axis is favored.
     let z = fract(seed * 0.5698403) * 2.0 - 1.0;
     let angle = fract(seed * 0.3819660) * 2.0 * PI;
     let s = sqrt(max(1.0 - z * z, 0.0));
@@ -270,7 +270,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.corona = clamp(corona_rad / radius_rad, 0.0, 1.0);
 
     // Offset from the star in the plane of the sky, in world axes so the pattern is anchored
-    // to the star rather than to the camera. Normalising this in the fragment discards the
+    // to the star rather than to the camera. Normalizing this in the fragment discards the
     // distance out and leaves only the angle around the star, which is what makes every
     // feature a radial thread instead of a blob.
     //

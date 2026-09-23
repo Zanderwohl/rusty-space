@@ -142,7 +142,7 @@ async fn what_a_craft_knows_survives_the_store_and_a_restart() {
         .enumerate()
         .map(|(k, at)| {
             let mut star = template.clone();
-            star.id = StarId::synthesise("store-knowledge", k as u64);
+            star.id = StarId::synthesize("store-knowledge", k as u64);
             star.position_ly = at;
             star
         })

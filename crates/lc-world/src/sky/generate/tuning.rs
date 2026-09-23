@@ -79,7 +79,7 @@ pub struct Ladder {
     ///
     /// Accretion slows as the cube of the orbit, so past this the disc runs out of time and
     /// leaves its solids where they lie. That leftover *is* the trans-planetary belt, which is
-    /// why the Kuiper analogue costs nothing to place: mass conservation puts it there.
+    /// why the Kuiper analog costs nothing to place: mass conservation puts it there.
     pub growth_over_snow: f64,
     /// Core mass above which a body beyond the snow line holds an ice envelope, Earth masses.
     pub ice_giant_core_earths: f64,
@@ -187,7 +187,7 @@ pub struct Moons {
     pub density: (f64, f64),
 }
 
-/// Belts, the Kuiper analogue and the Oort cloud.
+/// Belts, the Kuiper analog and the Oort cloud.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Belts {
     /// Share of a sterilized rung's solids still there to be seen. The asteroid belt holds

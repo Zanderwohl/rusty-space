@@ -32,7 +32,7 @@ enum Separation {
 }
 ```
 
-A line that is far too long to fit in the column, deliberately, so that the horizontal scroll behaviour of a code block can be checked rather than assumed to work:
+A line that is far too long to fit in the column, deliberately, so that the horizontal scroll behavior of a code block can be checked rather than assumed to work:
 
 ```rust
 let observed = instrument.measure(&system, observer_worldline, Instant::from_julian_days(2451545.0), Band::V, Exposure::seconds(600.0));

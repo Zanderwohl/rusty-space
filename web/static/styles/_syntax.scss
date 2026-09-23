@@ -1,7 +1,7 @@
 // Syntax highlighting.
 //
 // syntect emits classes rather than inline styles, which is the whole reason the code in a
-// post changes colour with the rest of the page: an inline `style="color:…"` would be the
+// post changes color with the rest of the page: an inline `style="color:…"` would be the
 // same in light mode and dark, and no stylesheet rule could override it.
 //
 // Scope names come from the syntax definitions, so they name what a token *is* — a keyword,

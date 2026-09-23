@@ -423,7 +423,7 @@ mod tests {
 
     fn belief(method: Option<Method>, stated_by: Option<Witness>, hops: usize) -> BodyBelief {
         BodyBelief {
-            subject: lc_world::knowledge::Subject::Star(StarId::synthesise("t", 1)),
+            subject: lc_world::knowledge::Subject::Star(StarId::synthesize("t", 1)),
             body: BodyId::from_raw(1),
             name: Some("b".into()),
             kind: Vec::new(),
@@ -497,7 +497,7 @@ mod tests {
     /// thing that could ever disprove it -- behind a click that did nothing.
     #[test]
     fn a_phantom_row_can_be_picked_and_stays_picked() {
-        let star = StarId::synthesise("t", 1);
+        let star = StarId::synthesize("t", 1);
         let real = BodyId::of(star, "Aa");
         let phantom = BodyId::phantom(star, Witness(1), 7);
         let target = Target::Body("Aa".into());
@@ -521,7 +521,7 @@ mod tests {
     /// body that has merged into a real one.
     #[test]
     fn a_pick_that_left_the_list_is_dropped() {
-        let star = StarId::synthesise("t", 1);
+        let star = StarId::synthesize("t", 1);
         let gone = BodyId::phantom(star, Witness(1), 7);
         let held = crate::beliefs::Held::from_parts(Vec::new(), Default::default());
         assert_eq!(settle_pick(None, Some(gone), &[], &held), None);

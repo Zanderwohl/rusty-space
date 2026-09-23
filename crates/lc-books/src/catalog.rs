@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct Catalogue {
+pub struct Catalog {
     #[serde(default, rename = "book")]
     pub books: Vec<Entry>,
 }
@@ -55,7 +55,7 @@ impl Writer {
     }
 }
 
-impl Catalogue {
+impl Catalog {
     pub fn from_toml(text: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(text)
     }
@@ -173,13 +173,13 @@ impl Order {
 /// `recent` is the ids this reader has opened, most recently first — the order the shard sent
 /// them in, which is the only record of recency either end has. See `lc_proto::Outbound::Reading`.
 pub fn shelve<'a>(
-    catalogue: &'a Catalogue,
+    catalog: &'a Catalog,
     query: &str,
     order: Order,
     recent: &[String],
 ) -> Vec<&'a Entry> {
     let mut found: Vec<&Entry> =
-        catalogue.books.iter().filter(|b| matches(b, query)).collect();
+        catalog.books.iter().filter(|b| matches(b, query)).collect();
     found.sort_by(|a, b| {
         let title = |e: &Entry| e.sort_title().to_lowercase();
         match order {
@@ -210,8 +210,8 @@ pub fn shelve<'a>(
 mod tests {
     use super::*;
 
-    fn shelf() -> Catalogue {
-        Catalogue::from_toml(
+    fn shelf() -> Catalog {
+        Catalog::from_toml(
             r#"
             [[book]]
             id = "the-gilded-age"

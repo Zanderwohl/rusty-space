@@ -33,7 +33,7 @@ can differ at all"**, and there turn out to be four.
 
 **1 is not an error.** The client applies its own order optimistically at its own coordinate;
 the server applies it a fraction of a second later at a coordinate it chose. They converge as
-soon as the acknowledgement arrives. This is the common case and it needs no mechanism beyond
+soon as the acknowledgment arrives. This is the common case and it needs no mechanism beyond
 knowing which coordinate the server used — which today it does not tell you (see below).
 
 **3 is the one that surprised me.** IEEE-754 pins `+ - * /` exactly, so the same arithmetic gives
@@ -77,7 +77,7 @@ the server to say what that was, and **it currently does not**:
 - `accel_g` is clamped to the craft's drive, silently. Ask for a thousand g, get five, and be
   told nothing.
 
-Both need an acknowledgement:
+Both need an acknowledgment:
 
 ```
 Accepted { ship_id, event_id, at_t, order }

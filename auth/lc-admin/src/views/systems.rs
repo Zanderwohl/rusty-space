@@ -8,7 +8,7 @@
 
 use maud::{Markup, html};
 
-use crate::catalogue::{Dir, Listing, PER_PAGE, Sort};
+use crate::catalog::{Dir, Listing, PER_PAGE, Sort};
 use crate::shard::{Missing, System, Systems};
 
 pub fn page(listing: &Listing, found: &Result<Systems, Missing>) -> Markup {
@@ -177,7 +177,7 @@ fn empty(listing: &Listing, systems: &Systems) -> Markup {
     }
 }
 
-/// Bounded, as the user index's is: a catalogue is thousands of systems.
+/// Bounded, as the user index's is: a catalog is thousands of systems.
 fn pager(listing: &Listing, total: u64) -> Markup {
     let pages = listing.pages(total);
     if pages <= 1 {
@@ -284,9 +284,9 @@ mod tests {
     }
 
     /// The summary counts from the shard's total, not from the page in hand — a pager built
-    /// from the latter has one page in it whatever the catalogue holds.
+    /// from the latter has one page in it whatever the catalog holds.
     #[test]
-    fn the_summary_and_pager_count_the_whole_catalogue() {
+    fn the_summary_and_pager_count_the_whole_catalog() {
         let listing = Listing::default().at_page(2);
         let markup = region(&listing, &found(7973, 25)).into_string();
         assert!(markup.contains("Showing 26–50 of 7973."), "{markup}");

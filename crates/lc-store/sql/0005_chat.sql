@@ -60,6 +60,6 @@ CREATE TABLE IF NOT EXISTS lc_keyring (
     subject  bigint NOT NULL,
     -- Coordinate microseconds the offer landed. Kept because "since when" is a fair question
     -- about a key and the answer is not derivable from anything else here.
-    learnt_t bigint NOT NULL,
+    learned_t bigint NOT NULL,
     PRIMARY KEY (holder, subject)
 );

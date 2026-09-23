@@ -666,7 +666,7 @@ mod tests {
 
     /// What the shader assumes of the shipped grain, which an edit in the editor could break
     /// without anything else noticing: the volume must tile on the unit cube, with as many
-    /// grains across it as the shader divides by, centred on half.
+    /// grains across it as the shader divides by, centered on half.
     #[test]
     fn the_shipped_grain_tiles_as_the_shader_assumes() {
         let path = concat!(
@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(
             noise.range,
             NoiseRange::Unsigned,
-            "the shader recentres on half itself"
+            "the shader recenters on half itself"
         );
         assert_eq!(noise.frequency, GRAIN_TILE);
         assert_eq!(

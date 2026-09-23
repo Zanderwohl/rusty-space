@@ -384,7 +384,7 @@ impl<J: Journal> Server<J> {
                 if !integration_ok || !duty.is_valid() {
                     return Err(Refusal::Impossible);
                 }
-                // `Duty::is_valid` cannot check a star id, because `lc-proto` has no catalogue
+                // `Duty::is_valid` cannot check a star id, because `lc-proto` has no catalog
                 // to check it against. Refused here instead: a duty pointed at a star nobody
                 // has is a duty that finds nothing every tick forever, and a survey's does not
                 // even cache the miss.
@@ -469,7 +469,7 @@ mod tests {
     use glam::DVec3;
     use lc_proto::{ClientId, Inbound, Intent, PROTOCOL_VERSION};
     use lc_world::knowledge::{Bearing, Sighting};
-    use lc_world::sky::{AuthoredStars, CatalogueStar, StarId, StarProvider};
+    use lc_world::sky::{AuthoredStars, CatalogStar, StarId, StarProvider};
 
     use super::*;
     use crate::journal::Memory;
@@ -485,14 +485,14 @@ mod tests {
     /// A home star at the origin, where a new craft starts, and three more thirty light-years
     /// out along axes clear of the home star's glare. The charts reach twenty, so only a sweep
     /// finds the three.
-    fn sky() -> Vec<CatalogueStar> {
+    fn sky() -> Vec<CatalogStar> {
         let template = AuthoredStars::sample().stars()[1].clone();
         [DVec3::ZERO, DVec3::X * 30.0, DVec3::Y * 30.0, DVec3::Z * 30.0]
             .into_iter()
             .enumerate()
             .map(|(k, at)| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("instruments", k as u64);
+                star.id = StarId::synthesize("instruments", k as u64);
                 star.position_ly = at;
                 star
             })
@@ -596,7 +596,7 @@ mod tests {
         let bry = ClientId(2);
         let at = -DVec3::X * 3_600.0 * 1.0e6;
         server.admit(bry, crate::world::still(ShipId(90), at), 0.0);
-        let secret = StarId::synthesise("instruments", 99);
+        let secret = StarId::synthesize("instruments", 99);
         let now_s = server.now_t() as f64 * 1.0e-6;
         server.aboard(CraftId(90)).knowledge.sighted(
             secret,
@@ -714,7 +714,7 @@ mod tests {
     /// nothing of any orbit, so it declines them -- and declining is the behavior worth
     /// pinning here, since `knowledge::arc` covers the arcs that do settle.
     /// **A duty pointed at a star nobody has is refused.** `Duty::is_valid` cannot check an
-    /// id -- `lc-proto` carries no catalogue to check it against -- so a bogus one was taken
+    /// id -- `lc-proto` carries no catalog to check it against -- so a bogus one was taken
     /// up and then looked for on every tick forever, and a survey's lookup caches no miss to
     /// remember it by.
     #[tokio::test]
@@ -725,7 +725,7 @@ mod tests {
         let (ship, _) =
             sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
 
-        let nowhere = StarId::synthesise("no-such-catalogue", 7);
+        let nowhere = StarId::synthesize("no-such-catalog", 7);
         for duty in [
             lc_proto::Duty::Survey { star: nowhere.get(), started_s: 0.0 },
             lc_proto::Duty::Stare { star: nowhere.get() },
@@ -740,7 +740,7 @@ mod tests {
             );
         }
 
-        // And a star the catalogue does hold is taken up as before.
+        // And a star the catalog does hold is taken up as before.
         let real = sky()[0].id;
         let order = Order::SetDuty {
             duty: lc_proto::Duty::Survey { star: real.get(), started_s: 0.0 },
@@ -863,9 +863,9 @@ mod tests {
                 flux_sigma: 1e-15,
                 lineage: Vec::new(),
             };
-            knowledge.sighted(StarId::synthesise("paging", k), sighting);
+            knowledge.sighted(StarId::synthesize("paging", k), sighting);
         }
-        let watched = StarId::synthesise("paging", 0);
+        let watched = StarId::synthesize("paging", 0);
         // Kept raw, so the shard does not consume it while paging.
         knowledge.retain_raw(watched, true);
         for n in 0..200_000u64 {
@@ -949,7 +949,7 @@ mod tests {
         let (near, far) = (ShipId(40), ShipId(41));
         old.admit(ClientId(1), crate::world::still(near, DVec3::ZERO), 0.0);
         old.admit(ClientId(2), crate::world::still(far, DVec3::X * 3_600.0 * 1.0e6), 0.0);
-        let secret = StarId::synthesise("instruments", 77);
+        let secret = StarId::synthesize("instruments", 77);
         let now_s = old.now_t() as f64 * 1.0e-6;
         old.aboard(CraftId(far.0)).knowledge.sighted(
             secret,
@@ -991,10 +991,10 @@ mod tests {
     #[ignore]
     async fn a_busy_tick_is_measured() {
         let template = AuthoredStars::sample().stars()[1].clone();
-        let stars: Vec<CatalogueStar> = (0..2_000u64)
+        let stars: Vec<CatalogStar> = (0..2_000u64)
             .map(|k| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("busy", k);
+                star.id = StarId::synthesize("busy", k);
                 let u = (k as f64 * 0.618_034).fract() * std::f64::consts::TAU;
                 star.position_ly = DVec3::new(u.cos(), u.sin(), (k as f64 * 0.414_2).fract() - 0.5) * (5.0 + k as f64 * 0.05);
                 star
@@ -1012,7 +1012,7 @@ mod tests {
             for k in 0..10_000u64 {
                 let toward = DVec3::new((k as f64).sin(), (k as f64).cos(), 0.2).normalize();
                 knowledge.sighted(
-                    StarId::synthesise("known", k),
+                    StarId::synthesize("known", k),
                     Sighting {
                         witness: witness(CraftId(ship.0)),
                         observed_s: now_s,

@@ -354,7 +354,7 @@ chose. Two hosts, two shaders, one path, and neither build ever sees the other's
 
 ## The sky chunk
 
-120 000 rows of CSV is 34 MB. The same catalogue packed is **39 bytes a star**, and the client
+120 000 rows of CSV is 34 MB. The same catalog packed is **39 bytes a star**, and the client
 only ever uses the nearest 6 000 of them, so the shipped chunk holds 8 000 — a little above
 `SKY_LIMIT`, so raising that does not silently shorten the sky.
 
@@ -363,7 +363,7 @@ all follow from color index, luminosity and velocity, so they are absent and der
 `StarRecord::assemble` is that derivation and both importers go through it; the chunk cannot
 disagree with the code that made it, because there is only one.
 
-The equivalence test runs the real 107 000-star catalogue down both routes and compares star
+The equivalence test runs the real 107 000-star catalog down both routes and compares star
 for star. **It found four bugs**, none of which would have shown up as anything but a slightly
 different sky:
 
@@ -400,11 +400,11 @@ cdn.<domain>/game/<build-id>/manifest.json
 cdn.<domain>/game/<build-id>/lightcone_web.js
 cdn.<domain>/game/<build-id>/lightcone_web_bg.wasm
 cdn.<domain>/game/<build-id>/assets/shaders/*.wgsl
-cdn.<domain>/game/<build-id>/assets/sky/catalogue.lcsky
+cdn.<domain>/game/<build-id>/assets/sky/catalog.lcsky
 ```
 
 The sky is at the same path in every build and is not a parameter: the client always asks for
-`sky/catalogue.lcsky`, and which catalogue that is is decided by the build that staged it. A
+`sky/catalog.lcsky`, and which catalog that is is decided by the build that staged it. A
 build directory is immutable, so the name needs no content hash to be cacheable.
 
 ```json
@@ -469,7 +469,7 @@ room. Two of the numbers moved a long way from the guess and both are worth keep
 exception to `CLAUDE.md`'s "do not build release": there the rule protects a dev loop, and
 here the artifact *is* the product.
 
-The client has no textures and no skybox — the starfield is generated from the catalogue and
+The client has no textures and no skybox — the starfield is generated from the catalog and
 body appearance is derived, per [07-rendering.md](07-rendering.md). So the download is the
 binary, and the lever that matters is `opt-level = "s"` plus `wasm-opt -Oz`, not asset
 compression.
@@ -544,7 +544,7 @@ not fetch an HTTP build — so the day the site gets TLS, the CDN needs it the s
 CI, on a tag:
 
 1. build wasm, `wasm-opt`, stage the merged asset tree
-2. pack the sky chunk to `assets/sky/catalogue.lcsky`
+2. pack the sky chunk to `assets/sky/catalog.lcsky`
 3. write `manifest.json`
 4. `aws s3 cp --recursive` into `game/<build-id>/` with the headers above
 5. `POST /internal/release` on the site: `{build_id, cdn_base, manifest_key, bytes}` — inserts

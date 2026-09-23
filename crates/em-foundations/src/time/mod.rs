@@ -78,7 +78,7 @@ impl Instant {
 }
 
 // Total ordering via `total_cmp`, so `Instant` can key a sorted structure or map.
-// The `+ 0.0` normalises -0.0, which IEEE totalOrder puts strictly below +0.0 and would
+// The `+ 0.0` normalizes -0.0, which IEEE totalOrder puts strictly below +0.0 and would
 // otherwise break Ord/Eq/Hash agreement; it is the identity for every other value.
 impl Ord for Instant {
     #[inline]

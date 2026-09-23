@@ -561,7 +561,7 @@ mod tests {
     /// deck is bright and flat, and bare rock is dark. Without this every generated body is
     /// flat at its class albedo and a color measures nothing.
     #[test]
-    fn a_generated_body_is_the_colour_of_what_it_is_made_of() {
+    fn a_generated_body_is_the_color_of_what_it_is_made_of() {
         let made = |top: Top, air: Atmosphere, surface| {
             of("generated-body", surface, &Stated::tags(air, top, false))
         };

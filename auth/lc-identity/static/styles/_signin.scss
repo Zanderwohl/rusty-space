@@ -5,7 +5,7 @@
 // different ones read as three unrelated objects rather than one column.
 $panel: 24rem;
 
-// Not a link, so it needs the wordmark's weight without the anchor colour.
+// Not a link, so it needs the wordmark's weight without the anchor color.
 .wordmark {
   color: var(--ink);
   font-family: var(--font-ui);
@@ -34,7 +34,7 @@ body > footer {
   text-align: center;
 }
 
-// `role="alert"`, and it has to look like one. The palette has no other warm colour, so this
+// `role="alert"`, and it has to look like one. The palette has no other warm color, so this
 // is the only thing on the page that is not ink or accent.
 .complaint {
   border-inline-start: 2px solid var(--warn);

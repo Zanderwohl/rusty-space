@@ -6,7 +6,7 @@
 
 use super::tuning::Tuning;
 use crate::rng;
-use crate::sky::CatalogueStar;
+use crate::sky::CatalogStar;
 use crate::star::Star;
 
 /// Kilograms in one Earth mass, and the other constants the generator measures against.
@@ -39,7 +39,7 @@ pub struct Disc {
 
 impl Disc {
     /// The disc around one star.
-    pub fn of(star: &CatalogueStar, tuning: &Tuning) -> Self {
+    pub fn of(star: &CatalogStar, tuning: &Tuning) -> Self {
         let t = &tuning.disc;
         let seed = star.seed();
         let at = |k: f64| radius_at(&star.star, k);
@@ -124,7 +124,7 @@ impl Disc {
     }
 
     /// Total mass of ices beyond the snow line, Earth masses. What a system has to throw
-    /// around: comets, the Kuiper analogue and the Oort cloud all come out of it.
+    /// around: comets, the Kuiper analog and the Oort cloud all come out of it.
     pub fn icy_reservoir(&self) -> f64 {
         self.solids_between(self.snow_m, self.outer_m)
     }
@@ -188,7 +188,7 @@ mod tests {
 
     const AU: f64 = 1.495_978_707e11;
 
-    fn sun_like() -> CatalogueStar {
+    fn sun_like() -> CatalogStar {
         let mut s = AuthoredStars::sample().stars()[1].clone();
         s.star = Star::SOL;
         s.luminosity_solar = 1.0;

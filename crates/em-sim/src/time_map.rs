@@ -2,7 +2,7 @@
 //!
 //! Keys are typed, not raw floats: `SortedTimes<Instant>` holds absolute event times, while
 //! [`TimeMap`] is keyed by [`TimeDelta`] because trajectory samples are offsets from
-//! periapsis. Both are `Ord + Eq + Hash` with negative zero normalised, so no NaN panic and
+//! periapsis. Both are `Ord + Eq + Hash` with negative zero normalized, so no NaN panic and
 //! no `-0.0`/`0.0` split.
 
 use std::collections::HashMap;

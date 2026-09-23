@@ -772,7 +772,7 @@ mod tests {
         let body = Subject::Body("Earth".into(), "Earth".into());
         assert_eq!(body.select(), Some(Action::FocusTarget(Some(Target::Body("Earth".into())))));
 
-        let id = StarId::synthesise("test", 7);
+        let id = StarId::synthesize("test", 7);
         let star = Subject::Star(id, "Sol".into());
         assert_eq!(star.select(), Some(Action::SelectTarget(Some(id))));
     }
@@ -900,11 +900,11 @@ mod tests {
     /// The selection is matched by identity, not by the name that rides along for the label.
     #[test]
     fn a_star_is_matched_by_identity_and_not_by_name() {
-        let id = StarId::synthesise("test", 7);
+        let id = StarId::synthesize("test", 7);
         assert!(Subject::Star(id, String::new()).is(&Subject::Star(id, "Sol".into())));
         assert!(!Subject::Star(id, "Sol".into()).is(&Subject::Body("Sol".into(), "Sol".into())));
         assert!(
-            !Subject::Star(id, "Sol".into()).is(&Subject::Star(StarId::synthesise("test", 8), "Sol".into()))
+            !Subject::Star(id, "Sol".into()).is(&Subject::Star(StarId::synthesize("test", 8), "Sol".into()))
         );
     }
 }

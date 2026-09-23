@@ -191,12 +191,12 @@ mod tests {
     use super::*;
     use super::super::architecture::{Class, architecture};
     use super::super::{Tuning, pole_for};
-    use crate::sky::{AuthoredStars, CatalogueStar, StarId, StarProvider};
+    use crate::sky::{AuthoredStars, CatalogStar, StarId, StarProvider};
     use crate::star::Star;
 
-    fn sun_like(key: u64) -> CatalogueStar {
+    fn sun_like(key: u64) -> CatalogStar {
         let mut s = AuthoredStars::sample().stars()[1].clone();
-        s.id = StarId::synthesise("belt", key);
+        s.id = StarId::synthesize("belt", key);
         s.star = Star::SOL;
         s.luminosity_solar = 1.0;
         s.mass_solar = 1.0;
@@ -204,7 +204,7 @@ mod tests {
         s
     }
 
-    fn of(star: &CatalogueStar, tuning: &Tuning) -> (Architecture, Vec<Population>) {
+    fn of(star: &CatalogStar, tuning: &Tuning) -> (Architecture, Vec<Population>) {
         let arch = architecture(star, tuning);
         let pops = populations(&arch, pole_for(star.seed()), star.seed(), tuning);
         (arch, pops)

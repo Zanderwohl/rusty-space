@@ -7,13 +7,13 @@ use lc_client::session::{CHARTED_LY, Session};
 use lc_world::knowledge::survey::{Duty, Sweep};
 use lc_world::sky::{StarProvider, hyg::HygProvider};
 
-fn catalogue() -> Option<HygProvider> {
+fn catalog() -> Option<HygProvider> {
     HygProvider::load("../../assets/catalogs/hygdata_v42.csv").ok()
 }
 
 #[test]
 fn a_ship_leaves_port_with_the_charts_of_its_own_volume_and_no_more() {
-    let Some(provider) = catalogue() else { return };
+    let Some(provider) = catalog() else { return };
     let mut session = Session::new(&provider, 6000);
     assert!(session.knowledge.is_empty());
     session.issue_charts(CHARTED_LY);
@@ -57,7 +57,7 @@ fn a_ship_leaves_port_with_the_charts_of_its_own_volume_and_no_more() {
 
 #[test]
 fn a_sweep_finds_stars_the_charts_never_reached() {
-    let Some(provider) = catalogue() else { return };
+    let Some(provider) = catalog() else { return };
     let mut session = Session::new(&provider, 6000);
     session.issue_charts(CHARTED_LY);
     let charted = session.knowledge.len();

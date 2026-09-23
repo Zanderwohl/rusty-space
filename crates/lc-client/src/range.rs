@@ -94,7 +94,7 @@ mod tests {
     /// A range this ship measured names its baseline; a bare direction has no range.
     #[test]
     fn a_range_says_where_it_came_from() {
-        let id = StarId::synthesise("range", 1);
+        let id = StarId::synthesize("range", 1);
         let star = DVec3::new(0.0, 0.0, 4.0);
         let mut k = Knowledge::new(Witness(1));
         assert_eq!(short(k.belief(id), DVec3::ZERO), "not detected");
@@ -113,7 +113,7 @@ mod tests {
     /// The short form is only the number; whose word it is goes to the sources.
     #[test]
     fn a_short_range_leaves_its_sources_apart() {
-        let id = StarId::synthesise("range", 2);
+        let id = StarId::synthesize("range", 2);
         let star = DVec3::new(0.0, 0.0, 4.0);
         let mut k = Knowledge::new(Witness(1));
         k.sighted(id, look(DVec3::ZERO, star, 0.0));

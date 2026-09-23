@@ -17,7 +17,7 @@ pub struct Row {
     pub id: Uuid,
     pub display_name: String,
     pub level: Level,
-    /// One, to recognise the account by. The user page enumerates them.
+    /// One, to recognize the account by. The user page enumerates them.
     pub email: Option<String>,
     /// How many bans are in force right now.
     pub in_force: i64,
@@ -85,7 +85,7 @@ fn contains(term: &str) -> String {
 /// **One static statement** whatever the filters: each is a bound parameter that is null or a
 /// value, and only `order by` is assembled — from enums, never from request text.
 ///
-/// The `($n is null or ...)` shape costs a plan the planner cannot specialise per filter,
+/// The `($n is null or ...)` shape costs a plan the planner cannot specialize per filter,
 /// which is the right trade until the `ilike` search needs a trigram index anyway.
 pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx::Result<Page> {
     let search = (!listing.q.is_empty()).then(|| contains(&listing.q));

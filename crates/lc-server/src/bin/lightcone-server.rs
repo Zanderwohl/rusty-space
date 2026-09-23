@@ -21,7 +21,7 @@ lightcone-server — one shard
   --bind <addr>       where to listen (default 127.0.0.1:8080)
   --audience <name>   the audience tickets must name (default shard-1)
   --jwks <url|path>   the broker's published keys, fetched at boot
-  --sky <url|path>    the packed catalogue this shard is authoritative over
+  --sky <url|path>    the packed catalog this shard is authoritative over
   --shard <n>         this shard's number, which keys its saved state (default 1)
   --db <url>          where craft are kept, so the world outlives this process
                       (or LC_SHARD_DB, which is where it belongs: it is a password,
@@ -38,8 +38,8 @@ read back at boot — including the world's clock, without which every saved cra
 whose crossing has not begun.
 
 Point --sky at the **same chunk the promoted client downloads**, which is
-<cdn>/game/<build>/assets/sky/catalogue.lcsky. Both ends place craft into systems by position
-against the same shell radius, so two different catalogues is two different answers to which
+<cdn>/game/<build>/assets/sky/catalog.lcsky. Both ends place craft into systems by position
+against the same shell radius, so two different catalogs is two different answers to which
 system a ship is in — and nothing reports the disagreement.
 ";
 
@@ -114,17 +114,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             provider.stars().to_vec()
         }
         // Three hand-written stars. Fine for a shard nobody connects a real client to, and
-        // wrong for every other case: a client loading the real catalogue will disagree with
+        // wrong for every other case: a client loading the real catalog will disagree with
         // this about which system it is in, and neither end will say so.
         None => {
             eprintln!("WARNING: no --sky, so this shard's world is the authored sample. A client");
-            eprintln!("         with a real catalogue will not agree with it about anything.");
+            eprintln!("         with a real catalog will not agree with it about anything.");
             AuthoredStars::sample().stars().to_vec()
         }
     };
     // Shared with the administration surface below.
-    let catalogue = std::sync::Arc::new(stars);
-    server.load_world(World::from_shared(catalogue.clone()));
+    let catalog = std::sync::Arc::new(stars);
+    server.load_world(World::from_shared(catalog.clone()));
 
     // Refused rather than silently skipped: a console pointed at a shard that quietly declined
     // to listen is a card reading "unavailable" with nothing to explain it.
@@ -134,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let api = lc_server::admin::Api::new(
             std::sync::Arc::new(connect(url).await?),
-            catalogue.clone(),
+            catalog.clone(),
             std::sync::Arc::new(keys),
         );
         let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -146,8 +146,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // The shelf. A shard with no catalogue runs without one and says nothing about a library;
-    // a shard with a catalogue and no base would send files hanging off nothing, so both are
+    // The shelf. A shard with no catalog runs without one and says nothing about a library;
+    // a shard with a catalog and no base would send files hanging off nothing, so both are
     // required together or neither is taken.
     match (
         after("--library").or_else(|| std::env::var("LC_LIBRARY").ok()),
@@ -155,7 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ) {
         (Some(path), Some(base)) => {
             let text = std::fs::read_to_string(&path)
-                .map_err(|e| format!("cannot read the catalogue at {path}: {e}"))?;
+                .map_err(|e| format!("cannot read the catalog at {path}: {e}"))?;
             server.library = lc_server::library::Library::from_toml(&base, &text)?;
             eprintln!("shelf: {} books from {path}, served from {base}", server.library.books.len());
         }
@@ -236,7 +236,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 None => eprintln!("shard {shard_id} has no saved state; starting a new world"),
             }
-            // After the clock is adopted, because the acknowledgement window is stamped
+            // After the clock is adopted, because the acknowledgment window is stamped
             // against it: a shard that read these first would date every message it had ever
             // been told to the instant before it knew what time it was.
             server.resume_conversations().await?;
@@ -397,7 +397,7 @@ fn read_jwks(source: &str) -> Result<serde_json::Value, Box<dyn std::error::Erro
 /// Bytes from a URL or a file, which is how every input this takes is named.
 ///
 /// A URL matters for the sky in particular: pointing a shard at the CDN path of the promoted
-/// build is what makes "both ends hold the same catalogue" a fact rather than a convention
+/// build is what makes "both ends hold the same catalog" a fact rather than a convention
 /// somebody has to keep.
 ///
 /// **Name the service, not the site.** In a container deployment the public name resolves to

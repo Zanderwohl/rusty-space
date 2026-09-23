@@ -239,10 +239,10 @@ mod tests {
         let (mut planets, mut doubled, mut widest) = (0usize, 0usize, 0u8);
         for key in 0..2000u64 {
             let mut star = template.clone();
-            star.id = StarId::synthesise("letters", key);
+            star.id = StarId::synthesize("letters", key);
             // The generator sizes a disc from the star's radius and temperature, not from a
             // luminosity column, so a star whose columns disagree is not a star it would ever
-            // be handed. Build each one the way a catalogue does.
+            // be handed. Build each one the way a catalog does.
             let (lum, teff) = [(0.01, 3400.0), (0.3, 4900.0), (1.0, 5772.0), (5.0, 7600.0), (40.0, 11000.0)]
                 [key as usize % 5];
             star.luminosity_solar = lum;

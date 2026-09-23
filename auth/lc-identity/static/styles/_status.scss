@@ -2,7 +2,7 @@
 //
 // It lives here rather than in `_tokens.scss` so that file stays a verbatim copy of the
 // site's — see the test in `assets.rs`, which is what stops the two palettes drifting. The
-// site has nothing that fails, so it has never needed a colour for it.
+// site has nothing that fails, so it has never needed a color for it.
 :root {
   --warn: #e39b8f;
 }

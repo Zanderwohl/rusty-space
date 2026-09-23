@@ -7,12 +7,12 @@ Decisions not yet made, grouped by what they block. Each topic document carries 
 
 | question | decision |
 |---|---|
-| Star proper motion | Planned, not implemented. Catalogue frozen; stars still get a `Worldline`, currently constant, so nothing reads a position as a field. |
+| Star proper motion | Planned, not implemented. Catalog frozen; stars still get a `Worldline`, currently constant, so nothing reads a position as a field. |
 | World boundary | Terminates. The galaxy fits inside 36 500 ly; a skybox of distant galaxies lies beyond it. A third coordinate tier is possible and not expected. |
 | Multi-star systems | A binary is a barycenter with two children — a hierarchical decomposition `em-sim` already propagates. One shell per system, two emission sources, and coherent mutual eclipses on the analytic path. Contact binaries excluded from generation. |
 | Shell radius | Immutable world geometry. |
 | Swarm sub-populations | They exist and nest. One record per wave or per band; deficits add, so a meta-population needs no separate representation. |
-| Oort and Kuiper generation | Scaled by stellar generation and metallicity, with metallicity synthesised from galactic kinematics since the catalogue lacks `[Fe/H]`. |
+| Oort and Kuiper generation | Scaled by stellar generation and metallicity, with metallicity synthesized from galactic kinematics since the catalog lacks `[Fe/H]`. |
 | Deposit granularity | Per-body totals. |
 | Event ID allocation | `(shard, coordinate_time, sequence)`, snowflake-style. Locally generated and time-ordered whether or not sharding happens. |
 | Von Neumann termination | Replication orders carry a generation TTL. Drift can corrupt the counter, producing self-perpetuating drifters, which is a mechanic rather than a bug. |
@@ -67,14 +67,14 @@ does. `em-foundations` is not modified; `lc-spacetime` converts at the boundary 
 ### 3. Star data behind a provider interface — DECIDED
 
 Created by the decision that the shipped game is a fictional galaxy. World generation must not
-parse a catalogue directly, and an HYG number must never become a `source_id`. See
+parse a catalog directly, and an HYG number must never become a `source_id`. See
 [03-world-model.md](03-world-model.md). Free now; a data migration and a schema change later.
 
 ### 4. `BANDS` as a compile-time constant — DECIDED
 
 One line, but it belongs in exactly one crate (`em-spectra`) and it is baked into the shell
 file format, so the format needs a version field from its first write. Going from five bands
-to seven was free in a document and would not have been free in a serialised asset.
+to seven was free in a document and would not have been free in a serialized asset.
 
 ## Explicitly not blocking
 
@@ -114,7 +114,7 @@ Listed so they do not get planned. Each is a local edit whenever it is faced.
 | Caustic edge term | A thin ring's turning latitudes carry an integrable spike that a level-5 shell smears. An analytic correction is cheaper than raising the whole shell's level, and is unwritten. |
 | Optical depth | Deficits are summed linearly, which fails as a swarm approaches full coverage — exactly the end state the game is about. Switch to `1 - exp(-tau)` past a few percent. |
 | Non-Poisson flicker | Real swarms have resonances, gaps and clumps, so the noise is correlated and its spectrum says more than the current model admits. |
-| The `m ~ 1` transition band | Neither the Gaussian nor the Poisson branch of the flicker synthesiser is right there, and a Kuiper analogue sits in it. Generating the true event train is affordable at `m ~ 1`; decide whether to. |
+| The `m ~ 1` transition band | Neither the Gaussian nor the Poisson branch of the flicker synthesizer is right there, and a Kuiper analog sits in it. Generating the true event train is affordable at `m ~ 1`; decide whether to. |
 | Limb darkening | Bundle Claret tables, or fit a two-parameter function of `Teff`. |
 | Band set | Four bands assumed, including a thermal IR band so waste heat is visible. More bands cost linearly in baked shell size and nothing on the analytic path. |
 | Reflected light and phase curves | 1e-5 of stellar flux at best. Probably out; it is an information channel if in. |
@@ -142,7 +142,7 @@ advance. Each is local to one component.
 | Identity on a socket | **Designed:** [16-identity.md](16-identity.md). A broker neither product owns, a sixty-second single-use ticket, verified locally against JWKS. |
 | Does the password provider ship? | Open. It exists so development can make accounts without an upstream. Its deferred list — delivery, reset, captcha, breach lists — is the condition: empty, or it stays a development provider. |
 | Reconciliation | **Designed:** [17-reconciliation.md](17-reconciliation.md). Three tiers chosen by cause, not size. |
-| What owns the systems | Open, and now visible. The shard lists its systems to the administration console ([16-identity.md](16-identity.md)) but is **not authoritative** for them: they are the star catalogue it was loaded with, and its own `systems` table is empty. Becoming authoritative means a way to edit one, which means deciding what a system *is* apart from the star it is named for. |
+| What owns the systems | Open, and now visible. The shard lists its systems to the administration console ([16-identity.md](16-identity.md)) but is **not authoritative** for them: they are the star catalog it was loaded with, and its own `systems` table is empty. Becoming authoritative means a way to edit one, which means deciding what a system *is* apart from the star it is named for. |
 | More than one galaxy | Open. Every system today is a row in one flat list, which the console pages through and the shard scans linearly for the nearest star. Neither survives a second galaxy — a list needs something to group by, and a nearest-star scan across galaxies is both slow and wrong. Worth settling before the systems move into the database, because whatever groups them is a column in that table. |
 
 ## Blocking the client/server seam

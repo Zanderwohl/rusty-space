@@ -544,10 +544,10 @@ GET /admin/status/{account}   →  application/ron
 Three things about it are the design rather than the implementation.
 
 **RON, not JSON, and not a shared type.** A format crosses the workspace boundary where a type
-cannot: the shard serialises `lc_server::status::Status` and the console deserialises into
+cannot: the shard serializes `lc_server::status::Status` and the console deserializes into
 `lc_admin::shard::Status`, its own mirror. The same trade as the ticket claims. What it costs
 is that a field renamed on one side silently stops arriving on the other, with no compiler in
-between — so the console's test holds a payload **printed by the shard's own serialiser**, not
+between — so the console's test holds a payload **printed by the shard's own serializer**, not
 one written by hand, and that test is the only place in either build that will notice.
 
 **A game ticket authorises it.** The same object a client presents to open a socket: signed by
@@ -558,7 +558,7 @@ administrator reading the page, so the shard's log says who asked about whom. Si
 there as everywhere: the second presentation of a ticket is a 401.
 
 **It never touches the tick loop.** It reads the checkpoint from the database and the
-catalogue from an `Arc` — no lock the simulation wants, nothing down a channel the tick reads.
+catalog from an `Arc` — no lock the simulation wants, nothing down a channel the tick reads.
 A console refreshing a page cannot cost the world a frame, and that is the property to keep if
 it ever grows a second route. The cost is that the answer is a few seconds stale.
 

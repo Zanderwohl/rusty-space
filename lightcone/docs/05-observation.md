@@ -42,14 +42,14 @@ Transit depths are `(R_body / R_star)^2`:
 | swarm covering 1% of the sky as seen from the star | 1e-2, steady |
 | 1.5e6 collectors of 1e6 km^2 at 1 AU | 5.3e-6 mean, 1.9e-6 rms flicker |
 
-Required exposure for an Earth-analogue at 10 pc with `eta = 0.5`:
+Required exposure for an Earth-analog at 10 pc with `eta = 0.5`:
 
 ```
 N = 1 / (8.4e-5)^2 = 1.4e8 photons
 T = N / (F * A * eta) = 1.4e8 / (1.2e8 * A * 0.5) = 2.4 / A   seconds of in-game time
 ```
 
-So aperture is not the binding constraint nearby. **Telescope time is.** An Earth-analogue
+So aperture is not the binding constraint nearby. **Telescope time is.** An Earth-analog
 transits for 13 hours once per year with a duty cycle of 0.0015, and confirming a period
 takes three transits — three in-game years, three real hours of continuous pointing at one
 star. Aperture becomes binding with distance, because `F` falls as `1/d^2`: the same
@@ -334,7 +334,7 @@ the three choices behind it are **independent**, and the interface keeps them th
 
 | choice | decides | cost |
 |---|---|---|
-| addressed to | whose acknowledgements ride back with it, and who can decrypt | none |
+| addressed to | whose acknowledgments ride back with it, and who can decrypt | none |
 | aimed | who *hears* it | a beam must be aimed, and an aim can miss |
 | sealed | who can *read* it | you must already hold their key |
 
@@ -360,7 +360,7 @@ Nobody starts holding anybody's key. That is not a balance decision; it falls ou
 frequency argument above. A private channel has to be arranged, arranging it takes a message,
 and that message has nowhere to go but the open. The first thing anyone ever says is public.
 
-### Acknowledgement is the only delivery report
+### Acknowledgment is the only delivery report
 
 Nothing at either end can observe a message landing. The light either fell on an antenna or went
 past it, and only the far end knows which. So a message carries the identifiers of the last ten
@@ -389,7 +389,7 @@ need reconciling against something that is not there.
 ### Answering automatically, and the bearing a dish answers on
 
 A ship can be set to acknowledge one craft automatically: anything that craft says comes back
-answered with an acknowledgement: a message whose body is `Body::Ack`, and whose whole content is
+answered with an acknowledgment: a message whose body is `Body::Ack`, and whose whole content is
 the identifiers riding in its payload. Only the shard sends one; a client cannot.
 
 **In the mode it was spoken in.** Every transmission states whether it went out as a beam — one
@@ -402,10 +402,10 @@ It is a bearing and not a target, and the difference is the mechanic: it points 
 *was* when the light left, not where they will be when the answer lands. A craft under thrust in
 between is missed, and by more the further away it is.
 
-**An acknowledgement is never itself acknowledged.** Two ships each answering the other
+**An acknowledgment is never itself acknowledged.** Two ships each answering the other
 automatically would trade light for ever, at whatever the round trip between them is, with no
 pilot present at either end. Only text earns an answer, and a resend
-earns one answer rather than one per attempt. One acknowledgement ends the exchange; there is no
+earns one answer rather than one per attempt. One acknowledgment ends the exchange; there is no
 second round of it.
 
 It is off for every craft until it is asked for. A ship that answered everything it heard would
@@ -513,7 +513,7 @@ direction the player expects news to come from.
 | step | where |
 |---|---|
 | light curve generation | client, from the star's emission model and the known occluders |
-| noise realisation | client, from a seed derived from `(telescope, star, time bucket)` |
+| noise realization | client, from a seed derived from `(telescope, star, time bucket)` |
 | FFT / BLS / Lomb-Scargle | client, in the UI, on demand |
 | what a player has *discovered* | server, because it gates rules and must not be forgeable |
 

@@ -679,18 +679,18 @@ pub struct Entry {
 
 /// What to call a body.
 ///
-/// Its own name first, then whatever catalogue designation it carries, and only then a made-up
+/// Its own name first, then whatever catalog designation it carries, and only then a made-up
 /// one: the primary's name and a numeral, which is how an unnamed body has been designated
 /// since Galileo. Players will be able to name planets, and that name goes in the first slot.
 pub fn designate(
     name: Option<&str>,
-    catalogue: Option<&str>,
+    catalog: Option<&str>,
     primary: &str,
     rank: usize,
 ) -> String {
-    match (name, catalogue) {
+    match (name, catalog) {
         (Some(name), _) if !name.is_empty() => name.to_string(),
-        (_, Some(catalogue)) if !catalogue.is_empty() => catalogue.to_string(),
+        (_, Some(catalog)) if !catalog.is_empty() => catalog.to_string(),
         _ => format!("{primary} {}", roman(rank)),
     }
 }
@@ -844,7 +844,7 @@ pub fn plan(
 /// What a population is, from its shape alone.
 ///
 /// A belt is flat and a cloud is not, and nothing else about a population distinguishes them.
-/// Used for naming one on screen; the Oort analogue is the only isotropic one a system has.
+/// Used for naming one on screen; the Oort analog is the only isotropic one a system has.
 pub fn is_flat(population: &Population) -> bool {
     population.inclination.max_inclination() < 1.0
 }
@@ -909,7 +909,7 @@ mod tests {
     fn sol() -> LocalSystem {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
-                .expect("the catalogue");
+                .expect("the catalog");
         let sun = provider
             .stars()
             .iter()
@@ -1314,7 +1314,7 @@ mod tests {
 
     /// A body is called what it is called; only one with nothing at all gets invented a name.
     #[test]
-    fn a_designation_prefers_the_name_then_the_catalogue_then_a_numeral() {
+    fn a_designation_prefers_the_name_then_the_catalog_then_a_numeral() {
         assert_eq!(designate(Some("Titan"), Some("S VI"), "Saturn", 6), "Titan");
         assert_eq!(designate(None, Some("S/2004 S 13"), "Saturn", 40), "S/2004 S 13");
         assert_eq!(designate(None, None, "Saturn", 7), "Saturn VII");

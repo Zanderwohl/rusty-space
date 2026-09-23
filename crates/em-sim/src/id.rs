@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// A stable identifier for a body, derived from its name.
 ///
 /// The hash is spelled out here rather than taken from `DefaultHasher`, so it is stable
-/// across processes, platforms and Rust versions. Case-sensitive: normalise names when
+/// across processes, platforms and Rust versions. Case-sensitive: normalize names when
 /// authoring, not here.
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

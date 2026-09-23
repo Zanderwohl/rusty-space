@@ -56,7 +56,7 @@ pub async fn page() -> Markup {
                         h3 { "In" }
                         ul {
                             li { "Special relativity: light delay, Doppler, aberration, proper time." }
-                            li { "Real Keplerian orbits, on real catalogue stars." }
+                            li { "Real Keplerian orbits, on real catalog stars." }
                             li { "Passive observation — photometry, transits, spectroscopy." }
                             li { "Radio and tight-beam, and the difference in who hears you." }
                             li { "Extraction, construction, self-replicating probes." }

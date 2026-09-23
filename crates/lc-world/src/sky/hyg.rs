@@ -1,4 +1,4 @@
-//! The HYG catalogue, behind the provider interface.
+//! The HYG catalog, behind the provider interface.
 //!
 //! Validation data, not the world. Its own numbering reaches [`Provenance`] and stops there.
 
@@ -8,7 +8,7 @@ use em_foundations::reference_frame::equatorial;
 use glam::DVec3;
 
 use super::record::{StarRecord, assemble_all};
-use super::{CatalogueStar, StarProvider};
+use super::{CatalogStar, StarProvider};
 
 const PARSEC_LY: f64 = 3.261_563_777;
 /// One parsec per year, in m/s. HYG's velocity unit.
@@ -37,7 +37,7 @@ impl std::fmt::Display for HygError {
 impl std::error::Error for HygError {}
 
 pub struct HygProvider {
-    stars: Vec<CatalogueStar>,
+    stars: Vec<CatalogStar>,
     /// Rows rejected for unusable data, so the loss is visible rather than silent.
     pub skipped: usize,
 }
@@ -49,7 +49,7 @@ impl HygProvider {
         Ok(Self { stars, skipped })
     }
 
-    /// The catalogue as records, before anything is derived from them.
+    /// The catalog as records, before anything is derived from them.
     ///
     /// This is what the packer writes into a sky chunk, so the chunk and this importer are
     /// the same data taking two routes to the same `assemble`.
@@ -77,7 +77,7 @@ impl HygProvider {
             };
             // Rows with no usable parallax carry a sentinel distance and a luminosity derived
             // from it, which is meaningless. Zero is legitimate: it is the Sun. This check is
-            // HYG's own and stays here; everything that applies to any catalogue is in
+            // HYG's own and stays here; everything that applies to any catalog is in
             // `StarRecord::assemble`.
             if dist < 0.0 || dist >= UNKNOWN_DISTANCE_PC {
                 continue;
@@ -111,7 +111,7 @@ impl StarProvider for HygProvider {
     fn name(&self) -> &str {
         SOURCE
     }
-    fn stars(&self) -> &[CatalogueStar] {
+    fn stars(&self) -> &[CatalogStar] {
         &self.stars
     }
 }
@@ -121,23 +121,23 @@ mod tests {
     use em_spectra::stellar;
 
     use super::*;
-    use crate::sky::{CatalogueStar, StarId};
+    use crate::sky::{CatalogStar, StarId};
 
-    fn catalogue() -> Option<HygProvider> {
+    fn catalog() -> Option<HygProvider> {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/catalogs/hygdata_v42.csv");
         HygProvider::load(path).ok()
     }
 
     #[test]
-    fn the_whole_catalogue_loads_with_synthetic_ids() {
-        let Some(p) = catalogue() else {
+    fn the_whole_catalog_loads_with_synthetic_ids() {
+        let Some(p) = catalog() else {
             eprintln!("HYG not present; skipping");
             return;
         };
         assert!(p.len() > 100_000, "only {} stars loaded", p.len());
         assert!(p.skipped < p.len() / 3, "{} rows rejected", p.skipped);
 
-        // No catalogue number is an identity, and ids are unique.
+        // No catalog number is an identity, and ids are unique.
         let mut ids: Vec<u64> = p.stars().iter().map(|s| s.id.get()).collect();
         ids.sort_unstable();
         let before = ids.len();
@@ -145,13 +145,13 @@ mod tests {
         assert_eq!(ids.len(), before, "synthetic ids collided");
         for s in p.stars().iter().take(5000) {
             assert_ne!(s.id.get(), s.provenance.key, "an id must not be the HYG number");
-            assert_eq!(s.id, StarId::synthesise(SOURCE, s.provenance.key));
+            assert_eq!(s.id, StarId::synthesize(SOURCE, s.provenance.key));
         }
     }
 
     #[test]
     fn the_sun_comes_out_solar() {
-        let Some(p) = catalogue() else { return };
+        let Some(p) = catalog() else { return };
         let sol = p
             .stars()
             .iter()
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn positions_are_ecliptic_and_in_light_years() {
-        let Some(p) = catalogue() else { return };
+        let Some(p) = catalog() else { return };
         // Sirius: 8.6 ly away, and well off the ecliptic plane.
         let sirius = p
             .stars()
@@ -181,8 +181,8 @@ mod tests {
 
     #[test]
     fn multiples_are_grouped_and_singles_are_not() {
-        let Some(p) = catalogue() else { return };
-        let grouped: Vec<&CatalogueStar> =
+        let Some(p) = catalog() else { return };
+        let grouped: Vec<&CatalogStar> =
             p.stars().iter().filter(|s| s.component.group.is_some()).collect();
         assert!(grouped.len() > 100, "only {} components are in a multiple", grouped.len());
         assert!(grouped.len() < p.len() / 10, "multiples should be a minority");
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn metallicity_spans_a_plausible_range() {
-        let Some(p) = catalogue() else { return };
+        let Some(p) = catalog() else { return };
         let feh: Vec<f64> = p.stars().iter().map(|s| s.metallicity).collect();
         let mean = feh.iter().sum::<f64>() / feh.len() as f64;
         assert!((-0.8..=0.1).contains(&mean), "mean [Fe/H] is {mean}");

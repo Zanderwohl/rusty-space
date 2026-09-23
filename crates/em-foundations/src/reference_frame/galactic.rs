@@ -4,7 +4,7 @@
 //! below the disc of the galaxy, and the two are 60° apart. Simulation space is the ecliptic
 //! of J2000, so the ecliptic pole is `+Z` by construction and needs nothing; the galactic pole
 //! is a published equatorial direction that reaches simulation space through
-//! [`super::equatorial::to_ecliptic`], the same one rotation a catalogue import takes.
+//! [`super::equatorial::to_ecliptic`], the same one rotation a catalog import takes.
 //!
 //! Directions only. Where the galactic plane's own zero point sits is 26 000 light-years away
 //! and irrelevant to anything drawn about a star: a map anchors its plane at what it is looking

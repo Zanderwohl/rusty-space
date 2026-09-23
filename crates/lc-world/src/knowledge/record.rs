@@ -274,7 +274,7 @@ pub struct Colors {
     /// the geometry of the visits rather than the surface. Two bands measured in the *same*
     /// visit share both exactly, so their ratio is free of either -- and a band detected only
     /// on near visits no longer biases the answer, because every value folded is already a
-    /// colour.
+    /// color.
     pub mean: PerBand<f64>,
     /// Weighted sum of squared deviations, for the spread of that ratio.
     pub scatter: PerBand<f64>,
@@ -291,7 +291,7 @@ impl Colors {
     /// One fixed band rather than the brightest, because a running fold cannot change what its
     /// values mean partway through. V is the middle of the optical run and what an instrument
     /// is likeliest to have; a visit that did not measure it folds nothing, which is honest --
-    /// a colour needs two bands at once and there is only one.
+    /// a color needs two bands at once and there is only one.
     pub const REFERENCE: Band = Band::V;
 
     pub fn new(witness: Witness) -> Self {
@@ -321,7 +321,7 @@ impl Colors {
                 continue;
             }
             let ratio = measured / reference;
-            // Both errors, because the reference carries its own into every colour it makes.
+            // Both errors, because the reference carries its own into every color it makes.
             let part = ((sigma / measured).powi(2) + reference_part.powi(2)).sqrt();
             let spread = (ratio * part).abs();
             if !(spread > 0.0) || !spread.is_finite() {
@@ -368,7 +368,7 @@ impl Colors {
         learned_s(&self.lineage, self.spanned_s.1)
     }
 
-    /// The colour: this band's flux over that one's, and its fractional error.
+    /// The color: this band's flux over that one's, and its fractional error.
     ///
     /// What a type hypothesis reads, and what no single band can say. The reference cancels,
     /// so any pair may be asked for however the digest was folded.

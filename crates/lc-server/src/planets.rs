@@ -147,7 +147,7 @@ mod tests {
     use super::*;
 
     /// The authored star whose generated system has planets.
-    fn system() -> (lc_world::sky::CatalogueStar, LocalSystem) {
+    fn system() -> (lc_world::sky::CatalogStar, LocalSystem) {
         let stars = AuthoredStars::sample();
         let star = StarProvider::stars(&stars)[2].clone();
         let system = LocalSystem::for_star(&star).expect("a generated system");

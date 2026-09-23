@@ -1333,7 +1333,7 @@ mod tests {
     fn a_filed_arc_becomes_a_believed_orbit() {
         use crate::knowledge::{Knowledge, Witness};
 
-        let star = StarId::synthesise("arc", 1);
+        let star = StarId::synthesize("arc", 1);
         let star_ly = DVec3::new(3.0, -1.0, 0.5);
         let body = crate::knowledge::BodyId::of(star, "Kettle");
         let subject = Subject::Body { star, body };
@@ -1398,7 +1398,7 @@ mod tests {
     fn a_moon_finds_its_planet_and_the_planet_is_weighed_by_it() {
         use crate::knowledge::{Knowledge, Witness};
 
-        let star = StarId::synthesise("arc", 3);
+        let star = StarId::synthesize("arc", 3);
         let star_ly = DVec3::new(3.0, -1.0, 0.5);
         let mut k = Knowledge::new(Witness(7));
 
@@ -1511,7 +1511,7 @@ mod tests {
     fn only_a_body_whose_bearings_have_outgrown_its_orbit_is_due() {
         use crate::knowledge::{Knowledge, Witness};
 
-        let star = StarId::synthesise("arc", 2);
+        let star = StarId::synthesize("arc", 2);
         let mut k = Knowledge::new(Witness(7));
         let subject = |n: u64| Subject::Body { star, body: crate::knowledge::BodyId::of(star, &format!("b{n}")) };
         let sighting = |at_s: f64| crate::knowledge::Sighting {
@@ -1582,7 +1582,7 @@ mod tests {
     fn a_transit_and_a_fit_are_both_kept() {
         use crate::knowledge::{Knowledge, Method, Witness};
 
-        let star = StarId::synthesise("arc", 4);
+        let star = StarId::synthesize("arc", 4);
         let subject = Subject::Body { star, body: crate::knowledge::BodyId::of(star, "one") };
         let mut k = Knowledge::new(Witness(7));
         let stated = |method, at_s: f64| crate::knowledge::Orbit {
@@ -1621,7 +1621,7 @@ mod tests {
     fn a_failed_fit_goes_to_the_back_of_the_queue() {
         use crate::knowledge::{Knowledge, Witness};
 
-        let star = StarId::synthesise("arc", 3);
+        let star = StarId::synthesize("arc", 3);
         let mut k = Knowledge::new(Witness(7));
         let subject = |n: u64| Subject::Body { star, body: crate::knowledge::BodyId::of(star, &format!("b{n}")) };
         // All pointing one way from one place: no parallax, no curvature, nothing to fit.

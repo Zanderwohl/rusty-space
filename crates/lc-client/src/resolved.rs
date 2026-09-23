@@ -134,7 +134,7 @@ const METERED_POINTS: usize = 32;
 
 /// How far the bodies' share of the frame may move before the exposure is re-placed, in stops.
 ///
-/// Not every frame: re-placing costs a pass over every star in the catalogue. A quarter of a
+/// Not every frame: re-placing costs a pass over every star in the catalog. A quarter of a
 /// stop is below what anyone can see step, and a body's surface radiance does not depend on how
 /// far away the ship is at all — only its size on screen does — so an approach crosses this
 /// perhaps a few dozen times rather than continuously.
@@ -186,7 +186,7 @@ pub fn sample_scene(
     // window — which is a white blob where the ship is.
     //
     // Asked once: between the stars there is no system to light a hull and the answer is a
-    // search over the whole catalogue.
+    // search over the whole catalog.
     let hull_star = crate::hull::lighting(&game.0);
     let hulls = std::iter::once((game.ship.length_m, eye.boom_m, observer))
         .chain(uplink.contacts.iter().map(|c| {

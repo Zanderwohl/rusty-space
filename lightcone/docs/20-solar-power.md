@@ -117,7 +117,7 @@ of code.
 
 ### What is already there
 
-- **Luminosity.** `LocalSystem::star_luminosity_w()` is the primary's, from the catalogue's radius
+- **Luminosity.** `LocalSystem::star_luminosity_w()` is the primary's, from the catalog's radius
   and temperature. Sol comes out within a percent of 3.828 × 10²⁶ W, which a test in `star.rs`
   already pins.
 - **Where the star is.** `LocalSystem::star_position_at(seconds)` answers for any coordinate time
@@ -168,7 +168,7 @@ At settlement `Fitting` records `solar_w` for the segment that begins. `stored_j
 for it, with the clamps the drain already has:
 
 - **Net power** is `solar_w − drain_w`.
-- **When net is positive** it fills towards capacity and stops there. The excess is lost, as a
+- **When net is positive** it fills toward capacity and stops there. The excess is lost, as a
   real collector with nowhere to put it would lose it.
 - **When net is negative** it drains free energy only, down to zero, as the drain does now.
 

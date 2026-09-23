@@ -687,7 +687,7 @@ fn fold(
                     }
                 }
                 Order::Cross { star, accel_g, max_beta } => {
-                    // Resolved here too, against this client's own catalogue — the same one
+                    // Resolved here too, against this client's own catalog — the same one
                     // the shard was given, which is what makes an id mean one thing on both
                     // ends. A star this build does not hold is a shard and a client that were
                     // handed different skies, and saying so is better than flying nowhere.
@@ -747,7 +747,7 @@ fn fold(
                 Order::Refit { .. } => Some("refit begun".into()),
                 Order::CancelRefit => Some("refit stopped where it was".into()),
                 // Recorded against the identifier the server minted, which is the only thing
-                // an acknowledgement will ever name it by. Not shown in the events box: that
+                // an acknowledgment will ever name it by. Not shown in the events box: that
                 // box is for what happened *to* this ship, and the chat window already has it.
                 Order::Say { to, secrecy, body, idem, .. } => {
                     let name = to
@@ -1275,7 +1275,7 @@ mod tests {
         assert_eq!(contact.name, "Vela");
         assert_eq!(contact.length_m, 1_200.0);
         assert_eq!(contact.position_ly, glam::DVec3::new(1.0, 2.0, 3.0));
-        // Normalised on the way in, so nothing downstream has to wonder.
+        // Normalized on the way in, so nothing downstream has to wonder.
         assert_eq!(contact.facing, glam::DVec3::Z);
         assert_eq!(contact.emitted_s, 0.5);
         assert_eq!(contact.jet_power_w, 4.2e17, "it was seen burning");
@@ -1297,7 +1297,7 @@ mod tests {
 
         let provider =
             lc_world::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
-                .expect("the catalogue");
+                .expect("the catalog");
         let sun = lc_world::sky::StarProvider::stars(&provider)
             .iter()
             .find(|s| s.provenance.name.as_deref() == Some("Sol"))
@@ -1503,10 +1503,10 @@ mod tests {
         assert!(note.text.contains("are you there"));
     }
 
-    /// An acknowledgement marks a line delivered and puts nothing in the events box,
+    /// An acknowledgment marks a line delivered and puts nothing in the events box,
     /// whether it was meant for this ship or overheard on its way to somebody else.
     #[test]
-    fn an_acknowledgement_is_not_a_notice() {
+    fn an_acknowledgment_is_not_a_notice() {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         fold(&mut uplink, &mut game, &mut ui, Outbound::Accepted {
@@ -1590,7 +1590,7 @@ mod tests {
     }
 
     /// Sending is not receiving. A message this ship sent is in the transcript against the
-    /// identifier the server minted — which is the only thing an acknowledgement can name — and
+    /// identifier the server minted — which is the only thing an acknowledgment can name — and
     /// is not in the events box, which is for what happened *to* this ship.
     #[test]
     fn an_accepted_message_is_recorded_against_the_identifier_it_will_be_acknowledged_by() {
@@ -1616,7 +1616,7 @@ mod tests {
         assert!(!conversation.delivered(&sent), "unanswered, so not acknowledged");
         assert_eq!(ui.0.notifications.len(), before, "a sent message reported itself as news");
 
-        // And the acknowledgement, when it comes back, names it.
+        // And the acknowledgment, when it comes back, names it.
         let spoken = lc_proto::Spoken {
             to: Some(7),
             beamed: false,

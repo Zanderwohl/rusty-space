@@ -1,6 +1,6 @@
-//! `[Fe/H]` synthesised from kinematics.
+//! `[Fe/H]` synthesized from kinematics.
 //!
-//! The catalogue has no metallicity column, so it is inferred rather than read. Kinematics
+//! The catalog has no metallicity column, so it is inferred rather than read. Kinematics
 //! and abundance are genuinely correlated: the galaxy's oldest stars formed from unenriched
 //! gas and were scattered onto fast, inclined orbits, so speed relative to the local standard
 //! of rest is a usable proxy. Fast is old is metal-poor.
@@ -33,8 +33,8 @@ pub fn from_speed(speed_m_s: f64, seed: u64) -> f64 {
 /// Mass of solid material available to a system, relative to a solar-metallicity one.
 ///
 /// Scales as `10^[Fe/H]`: a tenth of the metals is a tenth of the rock, which is a smaller
-/// belt, a thinner Kuiper analogue and fewer volatiles. This is what makes metal-rich systems
-/// worth traveling to, from real catalogue data rather than a sprinkled bonus.
+/// belt, a thinner Kuiper analog and fewer volatiles. This is what makes metal-rich systems
+/// worth traveling to, from real catalog data rather than a sprinkled bonus.
 pub fn solid_mass_factor(feh: f64) -> f64 {
     10f64.powf(feh)
 }

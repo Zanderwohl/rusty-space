@@ -12,5 +12,5 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.39"
 serde = { version = "1", features = ["derive"] }
-# The catalogue is a file a person edits, and the one format on this shelf with comments in it.
+# The catalog is a file a person edits, and the one format on this shelf with comments in it.
 toml = "0.8"

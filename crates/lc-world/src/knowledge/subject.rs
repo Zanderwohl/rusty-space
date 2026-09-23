@@ -12,7 +12,7 @@ use crate::sky::StarId;
 /// A body inside a star's system: a planet, a moon, a comet.
 ///
 /// Hashed from the star and the generator's key, so it is stable across processes and never
-/// carries the generator's catalogue-derived name, which must not reach a player.
+/// carries the generator's catalog-derived name, which must not reach a player.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BodyId(u64);
 
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn a_body_is_its_star_and_its_key() {
-        let (a, b) = (StarId::synthesise("t", 1), StarId::synthesise("t", 2));
+        let (a, b) = (StarId::synthesize("t", 1), StarId::synthesize("t", 2));
         assert_eq!(BodyId::of(a, "b"), BodyId::of(a, "b"));
         assert_ne!(BodyId::of(a, "b"), BodyId::of(a, "c"));
         assert_ne!(BodyId::of(a, "b"), BodyId::of(b, "b"), "the same key around another star");
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn everything_in_a_system_is_grouped_under_its_star() {
-        let star = StarId::synthesise("t", 1);
+        let star = StarId::synthesize("t", 1);
         let planet = Subject::Body { star, body: BodyId::of(star, "b") };
         let belt = Subject::Population { star, index: 0 };
         assert_eq!(planet.system(), Subject::Star(star));

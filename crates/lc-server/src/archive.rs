@@ -184,7 +184,7 @@ impl<J: Journal> Server<J> {
 mod tests {
     use glam::DVec3;
     use lc_proto::{ClientId, Inbound, Intent, Order, Outbound, ShipId};
-    use lc_world::sky::{AuthoredStars, CatalogueStar, StarId, StarProvider};
+    use lc_world::sky::{AuthoredStars, CatalogStar, StarId, StarProvider};
 
     use super::*;
     use crate::journal::Memory;
@@ -193,14 +193,14 @@ mod tests {
 
     /// A home star, and three more thirty light-years out that only a sweep finds; see
     /// `crate::instruments`' tests for why these directions.
-    fn sky() -> Vec<CatalogueStar> {
+    fn sky() -> Vec<CatalogStar> {
         let template = AuthoredStars::sample().stars()[1].clone();
         [DVec3::ZERO, DVec3::X * 30.0, DVec3::Y * 30.0, DVec3::Z * 30.0]
             .into_iter()
             .enumerate()
             .map(|(k, at)| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("archive", k as u64);
+                star.id = StarId::synthesize("archive", k as u64);
                 star.position_ly = at;
                 star
             })
@@ -291,7 +291,7 @@ mod tests {
 
     /// A red dwarf five light-years out whose innermost planet has a period under five days,
     /// placed so its planets transit as seen from the origin. Returns the periods too.
-    fn red_dwarf() -> (CatalogueStar, Vec<f64>) {
+    fn red_dwarf() -> (CatalogStar, Vec<f64>) {
         let template = AuthoredStars::sample().stars()[0].clone();
         let luminosity: f64 = 0.01;
         let teff = 5772.0 * luminosity.powf(0.13);
@@ -299,7 +299,7 @@ mod tests {
         (100_000..)
             .find_map(|key| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("archive-planet", key);
+                star.id = StarId::synthesize("archive-planet", key);
                 // Edge-on to the origin, so every planet transits.
                 star.position_ly = lc_world::sky::generate::pole_for(star.seed()).any_orthonormal_vector() * 5.0;
                 star.luminosity_solar = luminosity;
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn a_file_from_the_future_is_refused_rather_than_misread() {
-        let star = Subject::Star(StarId::synthesise("archive", 1));
+        let star = Subject::Star(StarId::synthesize("archive", 1));
         let mut row = file_row(CraftId(1), star, &File::default(), 0);
         assert!(read_file(&row).is_ok());
         row.format = KNOWLEDGE_FORMAT + 1;
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn a_log_row_reads_back_to_the_bit() {
         let logged = Logged {
-            subject: Subject::Star(StarId::synthesise("archive", 1)),
+            subject: Subject::Star(StarId::synthesize("archive", 1)),
             witness: lc_world::knowledge::observatory::CHARTS,
             band: Band::K,
             sample: Sample { observed_s: 1_234.567_891_23, deficit: -1.8149592025296526e-22, sigma: 1e-5 },

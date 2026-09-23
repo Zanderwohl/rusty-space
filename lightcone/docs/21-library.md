@@ -31,7 +31,7 @@ readout stays visible, notifications still land, and closing the book puts the k
 | piece | lives | why there |
 |---|---|---|
 | the bytes | CDN, `library/<file>.epub` | big, immutable, and wanted by both builds |
-| the catalogue | `books.toml`, shipped with `lc-server` | edited by a person, read by everyone |
+| the catalog | `books.toml`, shipped with `lc-server` | edited by a person, read by everyone |
 | progress | `lc_store`, `(account, book)` | per-account, relational, and a checkpoint rather than an event |
 | the reader | `lc-books` + `lc-client` | parsing is engine-free; only egui can measure egui's fonts |
 
@@ -71,7 +71,7 @@ the sky are.
 editions carrying a hundred and seventy-eight scanned plates each.
 
 **The alternative was tried on paper and was worse.** The plan here used to say git holds the
-catalogue and never the bytes, with a `fetch-books.sh` that re-downloaded each book from its
+catalog and never the bytes, with a `fetch-books.sh` that re-downloaded each book from its
 `source` and checked a `sha256`. It does not survive contact with the files: these six came
 through Apple Books, three of them arrived unpacked and were re-zipped locally, and a fresh
 Gutenberg download is a different arrangement of bytes with a different hash. The script would
@@ -109,7 +109,7 @@ things to know before wiring it:
 - **It must be added before `AssetPlugin`**, or it registers nothing and warns about it.
 - It logs a loud warning about loading arbitrary URLs, and the warning is correct. The answer
   is that **the client never receives a URL** — it receives a base from its own shard and a
-  bare file name from the catalogue, and composes them after rejecting any name containing a
+  bare file name from the catalog, and composes them after rejecting any name containing a
   slash, a backslash or a dot segment. One function, one test.
 - The native `web_asset_cache` feature writes to `.web-asset-cache` in the process working
   directory and never invalidates. That is not a cache a shipped desktop client should have.
@@ -119,7 +119,7 @@ things to know before wiring it:
 
 ---
 
-# The catalogue is a file
+# The catalog is a file
 
 Titles and authors are written by a person and read by everyone. That is the site's `content/`
 pattern, not a table: a `books.toml` shipped with the server, parsed at boot, failing the boot
@@ -152,7 +152,7 @@ source  = "https://www.gutenberg.org/ebooks/84.epub3.images"
   be corrected, never as the answer. It is optional; some works do not have one.
 - `authors` is a list because many books have several, and the shelf groups by each of them.
 
-The catalogue is data the client renders, so it is also the only place a typo shows up. Boot
+The catalog is data the client renders, so it is also the only place a typo shows up. Boot
 validation is: ids unique, file names bare, `sha256` well-formed, every `id` distinct from
 every other.
 
@@ -178,7 +178,7 @@ honest statement about the current window and is never written down.
 
 ## The server stores a number it cannot check
 
-The shard has the catalogue, not the books. It cannot compute a location, cannot validate an
+The shard has the catalog, not the books. It cannot compute a location, cannot validate an
 offset, and does not need to: progress is self-reported, and the feature is worth nothing to
 cheat at. `location` and `locations` are stored alongside the locator purely so the shelf can
 say "34%" without downloading the book first.
@@ -214,7 +214,7 @@ assumes the gate was forgotten rather than reasoned about.
 
 | direction | message | carries |
 |---|---|---|
-| server → client | `Library` | the shelf's base, and the catalogue |
+| server → client | `Library` | the shelf's base, and the catalog |
 | server → client | `Reading` | this account's locators, on connect, **most recently read first** |
 | client → server | `SetReading` | one book's locator, on every turn |
 
@@ -414,7 +414,7 @@ of a paragraph of Faustina is worse than a glyph that is missing. See
 **Static cuts, not the variable files.** Both families ship a `VariableFont_wght`, and the
 reason for not using one has changed under this note: it used to be that nothing in egui called
 `ab_glyph`'s `set_variation`, so a variable font could only render at its default instance.
-Bevy 0.19 brought egui 0.36, which rasterises through `skrifa` and shapes through `harfrust`,
+Bevy 0.19 brought egui 0.36, which rasterizes through `skrifa` and shapes through `harfrust`,
 and a variation location is settable per face (`FontTweak::coords`) or per run (`TextFormat`).
 So the door is open and nobody has walked through it.
 
@@ -424,7 +424,7 @@ run. Worth revisiting; not yet measured.
 
 Two numbers that go with them: the body is set at 18 points, and **the column is capped at
 thirty-four times that**, centered in whatever the window gives. A line of prose stops being
-readable somewhere past seventy characters, and a maximised window would otherwise set a book at
+readable somewhere past seventy characters, and a maximized window would otherwise set a book at
 a hundred and forty. **It is loaded as an asset
 when the reader is first opened, not embedded in the binary**, so a player who never opens a
 book never pays for it and the first-play figure above is unchanged. Installing a font into
@@ -520,7 +520,7 @@ Each step is useful on its own, and the fun one does not wait for the server.
 | 1 | **built.** `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
 | 2 | **built.** the shelf on the CDN: `publish-books.sh`, the Caddyfile header, the client's HTTP asset source | `curl` returns an epub with the right type and an immutable cache header |
 | 3 | **built, less the CDN.** the reader window: `EpubLoader`, plates, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
-| 4 | **built.** the catalogue and progress over the wire: three messages, `0005_reading.sql`, the reporting rule | signing in on a second machine opens to the same sentence |
+| 4 | **built.** the catalog and progress over the wire: three messages, `0005_reading.sql`, the reporting rule | signing in on a second machine opens to the same sentence |
 | 5 | **built, less the badges.** the shelf's sorts and filter, the TOC, jump to location | the controls above all exist |
 
 Step 4 is `lc_server::library`, `lc_store::reading` and the two client systems that take the
@@ -553,10 +553,10 @@ Step 3 is `crate::library` and `crate::reader` in the client. Three things it ta
 - **Size the window before drawing into it.** Content sized from what is left inside a window
   that grows to fit its content is a loop whose fixed point is a window taller than the screen.
 
-The catalogue arrives the same way a book does — an asset, parsed by a loader, held in a
+The catalog arrives the same way a book does — an asset, parsed by a loader, held in a
 resource — so step 4 replaces where it comes from and nothing above it moves. Until then it is a
 file in the client's asset directory with the shape this document already gave it, and the client
-resolves a name through it: a catalogue id from the shelf, a file stem from a development flag,
+resolves a name through it: a catalog id from the shelf, a file stem from a development flag,
 and the same book either way.
 
 The client fetches a book from wherever its shard says the shelf is, and from its own asset
@@ -598,7 +598,7 @@ thought to write down, and on the first run they found two.
   deliberately.
 - **Whether a book is ever diegetic**: a station library you have to be docked at to browse.
   Attractive, and it contradicts "no game reason" the moment it gates anything. Nothing in this
-  design forecloses it; the catalogue would grow a condition and the reader would not change.
+  design forecloses it; the catalog would grow a condition and the reader would not change.
 
 ## Not in this
 
@@ -611,5 +611,5 @@ would need a size cap, a sanitiser and somewhere to put the bytes that is not th
 Their epubs carry a license header and footer inside the text. Leaving them there costs a
 screen and requires nothing of anyone; **stripping them is what triggers the clause about
 removing every reference to Project Gutenberg**, which is not a trade worth making. So the
-files are published byte-for-byte as downloaded — which the `sha256` in the catalogue also
+files are published byte-for-byte as downloaded — which the `sha256` in the catalog also
 happens to prove — and the table of contents lands the player on Chapter 1.

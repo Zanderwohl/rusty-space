@@ -195,7 +195,7 @@ radius, flat, circular and prograde. A rocky planet has no such disc, so its onl
 giant impact: rare, and a quarter of Earth's Hill radius out, which is where Luna is.
 
 A **catch** was a passing body the planet held. How many is a cross-section, so the count goes
-as the square of the Hill radius — a Jupiter analogue reaches the ninety-odd the real one has,
+as the square of the Hill radius — a Jupiter analog reaches the ninety-odd the real one has,
 and the mean over all giants is nearer forty because most of them hold a smaller sphere. They sit far out, eccentric, at any inclination, and two thirds go backwards.
 
 ![Moon semi-major axis against inclination](plots/moons.png)
@@ -242,7 +242,7 @@ what reach runaway.
 The giant-planet–metallicity correlation falls out: flat and near zero below about `-0.7`, and
 climbing steeply above it. That is the observed relation, and nothing here was fitted to it.
 
-Metallicity itself is inferred from kinematics rather than read, because the catalogue has no
+Metallicity itself is inferred from kinematics rather than read, because the catalog has no
 abundance column — fast is old is metal-poor. The relation is saturating rather than
 exponential: an exponential starts falling immediately, which made every ordinary disc star
 metal-poor and left the whole galaxy short of the rock that builds planets.

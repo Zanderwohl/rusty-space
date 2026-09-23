@@ -13,7 +13,7 @@ conclusions and then thrown away.
 | | before 11b | now |
 |---|---|---|
 | telescope duty | client, per frame | server, per tick, for every craft with a duty — `lc_world::knowledge::observatory` |
-| detection and noise | client, from its copy of the catalogue | server, the same functions |
+| detection and noise | client, from its copy of the catalog | server, the same functions |
 | a craft's knowledge | client `Session::knowledge`, lost on restart | server, per craft (`lc-server`'s `instruments`); the client holds a replica. Persisted in 11c |
 | naming, duties | client edits its own knowledge | `Order::NameIt`, `Order::SetDuty`: applied by the server, echoed |
 | reports sent and received | client builds and folds them | server writes them from what it holds and folds them on landing, signed in or not |
@@ -123,7 +123,7 @@ player wants is:
 > **structured swarm**, knee at 0.4 mHz — 30%
 
 So logs are **processed**: periodically, or when enough data has accumulated to change the
-answer, each subject's log is run through the analyses of
+answer, each subject's log is run through the analyzes of
 [05-observation.md](05-observation.md) — box least squares for transits, a periodogram for
 rotation and pulsation, the first two moments and the spectral knee for populations — and what
 comes out is a set of **conclusions**.
@@ -150,7 +150,7 @@ conclusion is a likelihood from the data times that prior, normalized over the h
 
 The goal is conclusions that are well calibrated — a 70% hot Jupiter a hot Jupiter seven times
 in ten — which is a design choice worth making on purpose. The alternative, deliberately
-miscalibrated priors, is a way to make some instruments or some analyses better than others
+miscalibrated priors, is a way to make some instruments or some analyzes better than others
 later.
 
 It is a goal and not yet a fact. The planet generator the priors are measured from is a
@@ -222,7 +222,7 @@ decides what was kept.
   deciding anything from it.
 - **Reading is on the tick thread, deliberately for now.** A read is a search over thousands of
   periods, one log a tick. It is the first thing on the shard whose cost grows with how long a
-  player has watched, and analyses will get more expensive; when they do it moves to a worker.
+  player has watched, and analyzes will get more expensive; when they do it moves to a worker.
 - **A craft with no shard does not read its logs.** The offline client runs the instruments but
   not the pipeline.
 
@@ -233,7 +233,7 @@ decides what was kept.
   generator makes them: eclipsing binaries (a binary's companion does not yet occult in the
   photometry) and swarms by structure (the generator makes only isotropic shells). A hypothesis
   for something that does not exist is a probability permanently near zero.
-- **The catalogue in the client.** The client still holds every star's true position, because the
+- **The catalog in the client.** The client still holds every star's true position, because the
   sky view draws the light that arrives. A modified client can read it. That was true before this
   document and is not made worse by it, but it is the next thing to fix once knowledge is
   server-side: the sky could be drawn from arriving light without the client ever holding a

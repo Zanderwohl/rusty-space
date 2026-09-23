@@ -33,7 +33,7 @@ pub fn seal(key: &[u8], session: &Session) -> String {
 }
 
 /// `None` for anything wrong. The signature is checked **before** the payload is parsed —
-/// deserialising unauthenticated input is running a parser on something an attacker chose.
+/// deserializing unauthenticated input is running a parser on something an attacker chose.
 pub fn open(key: &[u8], value: &str, now: i64) -> Option<Session> {
     let (payload, mac) = value.split_once('.')?;
     let expected = sign(key, payload.as_bytes());

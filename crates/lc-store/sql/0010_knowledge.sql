@@ -24,9 +24,9 @@ CREATE TABLE IF NOT EXISTS lc_knowledge (
 -- Photometric samples, which a file leaves out.
 --
 -- Unbounded while a star is watched, so appended rather than rewritten, and partitioned by when
--- the craft **learnt** each sample rather than when it was measured: a relayed series can be
+-- the craft **learned** each sample rather than when it was measured: a relayed series can be
 -- years old on arrival, and a partition keyed on measurement time would need to exist for a past
--- nobody made one for. Learnt time is always about now, which is where partitions are kept ready.
+-- nobody made one for. Learned time is always about now, which is where partitions are kept ready.
 -- Kept until processing consumes it into a conclusion (phase 11d).
 CREATE TABLE IF NOT EXISTS lc_samples (
     ship_id    bigint           NOT NULL,
@@ -38,8 +38,8 @@ CREATE TABLE IF NOT EXISTS lc_samples (
     -- instant that is not a whole microsecond, and a key that rounded it would not be the key.
     observed_s double precision NOT NULL,
     -- Coordinate microseconds, for the partitions.
-    learnt_t   bigint           NOT NULL,
+    learned_t   bigint           NOT NULL,
     deficit    double precision NOT NULL,
     sigma      double precision NOT NULL,
-    PRIMARY KEY (ship_id, subject, witness, band, observed_s, learnt_t)
-) PARTITION BY RANGE (learnt_t);
+    PRIMARY KEY (ship_id, subject, witness, band, observed_s, learned_t)
+) PARTITION BY RANGE (learned_t);

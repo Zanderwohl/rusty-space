@@ -34,7 +34,7 @@ wrong and to reload the page. Nothing reconnects yet, which is what makes that h
 main menu before a world exists and from the escape overlay while one is running, so it may
 not assume a world.
 
-`Loading` exists because it has work to do: the catalogue is 120 000 rows and generation is
+`Loading` exists because it has work to do: the catalog is 120 000 rows and generation is
 per star. A frozen window is not a loading screen.
 
 ## The game does not pause
@@ -68,7 +68,7 @@ of where the player is.
 ### The backdrop is generated, not loaded
 
 The sky behind the menu is drawn by the real starfield pass, at rest, but its stars are not the
-catalogue's. Loading the catalogue is what `Loading` exists for — a hundred and twenty thousand
+catalog's. Loading the catalog is what `Loading` exists for — a hundred and twenty thousand
 rows, and generation per star — and a menu that waits for it is the frozen window that state
 was added to avoid.
 
@@ -186,7 +186,7 @@ without being asked for.
 
 A message this ship sent shows `ack` once the far end names it, and an **amber warning triangle**
 until then — which is also the button that sends it again. See
-[05-observation.md](05-observation.md#acknowledgement-is-the-only-delivery-report) for why that
+[05-observation.md](05-observation.md#acknowledgment-is-the-only-delivery-report) for why that
 is the only delivery report there is, and why a resend is a second pulse of light rather than a
 retry. The triangle is *painted* rather than typed: the obvious glyph is U+26A0 and the default
 font draws a tofu box for it, which is the trap that has already cost this interface a close
@@ -199,17 +199,17 @@ compared to another signal, which is how anybody reads a dB figure anyway. A mes
 from a transcript has no reading at all, because how loudly a signal landed is a fact about one
 receiver and what is written down is what was said.
 
-A message with **nothing in it** is an acknowledgement and nothing else, and it is not shown at
+A message with **nothing in it** is an acknowledgment and nothing else, and it is not shown at
 either end — there is nothing to read, and a log of empty lines is one nobody can read either.
 What it acknowledges is kept on the conversation rather than on the line, because the message
-that carries an acknowledgement is usually the one about to be dropped for being empty; losing
+that carries an acknowledgment is usually the one about to be dropped for being empty; losing
 the evidence along with the clutter would make every message look unanswered for ever.
 
-An acknowledgement is also never answered. It is the end of an exchange, not the middle of one.
+An acknowledgment is also never answered. It is the end of an exchange, not the middle of one.
 
 **auto-ack** answers that craft automatically, in the mode it was spoken to in; see
 [05-observation.md](05-observation.md#answering-automatically-and-the-bearing-a-dish-answers-on)
-for the bearing a beam is answered on and for why an acknowledgement is never itself
+for the bearing a beam is answered on and for why an acknowledgment is never itself
 acknowledged. It is per craft and never on the public channel: a ship that answered every
 broadcast it heard would announce its position to everything in range. The checkbox sends an
 order and shows what the server says back; the answering is done by the server, so it goes on
@@ -517,7 +517,7 @@ Arming a course and flying it are separate: **Go** is what commits, and it uses 
 acceleration. The crossing is a brachistochrone to the injection point and then the ship holds
 station on it.
 
-**A body is called what it is called.** Its own name first, then whatever catalogue designation
+**A body is called what it is called.** Its own name first, then whatever catalog designation
 it carries, and only then a made-up one — the primary's name and a Roman numeral, which is how
 an unnamed body has been designated since Galileo. When players can name worlds, that name goes
 in the first slot and nothing else changes.
@@ -603,7 +603,7 @@ tied to it, because that has to stay under the smallest depth a real body produc
 
 ![The light curve](../images/light-curve.png)
 
-Drawn by em-plot into a `tiny_skia` pixmap and handed to egui as a texture, rasterised only when
+Drawn by em-plot into a `tiny_skia` pixmap and handed to egui as a texture, rasterized only when
 what it shows changes. Not with egui's own painter: em-plot already has the min/max column
 decimation that a curve of thousands of samples in a panel of hundreds of pixels needs, and a
 second plotting implementation is the thing to avoid.
@@ -698,11 +698,11 @@ the offset between the two readable instead of hiding it.
 Fifteen orders of magnitude of zoom means the map has no scale of its own, so a rule is drawn
 in the bottom right of whichever surface is up: a bar of a round length, labeled in a unit a
 reader holds — `5 Gm`, `2 AU`, `1 ly`. Where the label is a small whole number of its own unit
-the bar is ticked into that many parts, so five ticks on a `5 Gm` bar are a gigametre each and
+the bar is ticked into that many parts, so five ticks on a `5 Gm` bar are a gigameter each and
 the reader gets a second scale for nothing.
 
 Astronomical units and light-years sit among the metric prefixes because this is a map of space:
-between a gigametre and an astronomical unit there is nothing anyone measures in, and `150 Gm`
+between a gigameter and an astronomical unit there is nothing anyone measures in, and `150 Gm`
 is a worse answer than `1 AU` to the same question.
 
 The rule is lifted clear of anything floating across the bottom of the surface — the events box
@@ -900,7 +900,7 @@ name from the absence of one, which is the one thing worth seeing at a glance.
 **Nothing on the map is white.** The palette has two phosphors, and this ship is drawn in the
 same amber as the rest, as the same filled dot. Drawn as a white circle it was a white outline
 around whichever contact happened to be beside it, which at these scales is most of them: ten
-kilometres is well under a pixel at a hundredth of an astronomical unit. What says which craft
+kilometers is well under a pixel at a hundredth of an astronomical unit. What says which craft
 is the reader's is the rings, which are drawn from it.
 
 The amber is `em_ui::vfd::AMBER`, at the **same perceptual lightness as the interface's green**
@@ -923,7 +923,7 @@ cast with, which is a round-trip test rather than two functions hoping to agree.
 
 **And a floor, because the collision rule thins a crowd and says nothing about an empty view.**
 Without one a lone asteroid in open space is named as readily as a planet, and the inner system
-came out a field of catalogue designations. A thing must weigh at least a hundred-millionth of
+came out a field of catalog designations. A thing must weigh at least a hundred-millionth of
 the heaviest thing **on screen** to be worth a name. That bar is set from the case that has to
 work — Earth beside the Sun, three parts in a million — and sits well under it, because what it
 is really aimed at is the gap between the smallest planet and the largest asteroid: Mercury is

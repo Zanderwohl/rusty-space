@@ -161,12 +161,12 @@ mod tests {
 
     const AU_M: f64 = 1.495_978_707e11;
 
-    fn catalogue() -> Option<HygProvider> {
+    fn catalog() -> Option<HygProvider> {
         HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv").ok()
     }
 
     fn sol() -> Option<LocalSystem> {
-        let provider = catalogue()?;
+        let provider = catalog()?;
         let sun = provider
             .stars()
             .iter()
@@ -373,7 +373,7 @@ mod tests {
         let band = Band::V;
         let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
 
-        // The host star's source, worked the way the catalogue path works it.
+        // The host star's source, worked the way the catalog path works it.
         let star_at = system.star_position_ly();
         let range_m = (star_at - from).length() * M_PER_LY;
         let host = crate::knowledge::survey::Source {

@@ -33,7 +33,7 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # Plates. Every image on the first shelf is a JPEG; the other two are insurance, and the
 # formats this does not name are ones an epub is not allowed to carry anyway.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif"] }
-# The catalogue, which the asset loader parses.
+# The catalog, which the asset loader parses.
 toml = "0.8"
 # Procedural textures: authored as graphs, baked on the GPU at load. Core without `std-fs`, since
 # graphs arrive through the asset server. A git pin until texture-graph is on crates.io.

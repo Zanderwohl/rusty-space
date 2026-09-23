@@ -137,7 +137,7 @@ true body at all. So:
 same thing — is 22-provenance's open question, and this is where it stops being theoretical. The
 truth match above is what avoids it in the normal case. A craft that imaged a planet before
 anyone's transit settled still merges by `BodyId`, because both paths went through the truth
-lookup. The case with no answer yet is two craft merging catalogues where one holds a false
+lookup. The case with no answer yet is two craft merging catalogs where one holds a false
 positive at the same period as the other's real planet, and the honest outcome is that they hold
 two bodies.
 
@@ -171,7 +171,7 @@ fit needs it as a parameter; a moon's orbit measures it. It cannot come from tru
   1. **A ship at rest measures nothing, and this one is at rest exactly.** `ShipState::at` is
      documented "At rest at a point" and sets `beta: DVec3::ZERO` with `Motive::Drifting`;
      `World::start` hands a new craft a position and nothing else; and `Sky::sources` reads the
-     *catalogue* position for every star, which for the host is the system's origin and never
+     *catalog* position for every star, which for the host is the system's origin and never
      moves. So the baseline is zero forever and so is the parallax.
 
      That is not a defect to fix. Arriving at rest is a decision already taken and already
@@ -272,7 +272,7 @@ bodies of one system in turn, **brightest first**, for `SURVEY_DWELL_S` each. Wh
   server loads the system the *duty* names rather than the one the craft is in. A survey ordered
   from outside is then refused by the physics — the bodies are points in the star's glare —
   rather than by a silent special case.
-- **The sky the survey looks at is the system's bodies plus its own star, and not the catalogue.**
+- **The sky the survey looks at is the system's bodies plus its own star, and not the catalog.**
   The star belongs *in* that list because it is the only meaningful glare in the system and
   `look` can only be asked about it if it is a source like any other. A star light-years off
   cannot outshine a planet at 5 AU, so it can neither glare on one nor hide behind one.
@@ -304,7 +304,7 @@ and that is the whole difference.
 was half wrong, so both halves are recorded here.
 
 The sweep has no special case for the craft's host star: `Sky::sources` iterates the whole
-catalogue and gives each star a flux of `L / 4πd²`, and at `START_OFFSET_AU` — 5 AU, about
+catalog and gives each star a flux of `L / 4πd²`, and at `START_OFFSET_AU` — 5 AU, about
 7.9e-5 ly — the host's flux is enormous. The old `glare_radius_rad` was
 `resolution_rad * (SCATTER * bright / faint).sqrt().max(1.0)`, a hard disc: one radius for one
 pair, floored at the resolution so it could only ever widen.
@@ -328,7 +328,7 @@ from 5 AU, against 2.7e-8 read off its -2.7 at opposition. See [`visit`].
 
 So **Jupiter was never hidden,** and neither was any other major planet: the radius already had
 the faint source's own brightness in it, and a planet at 5 AU is a billion times brighter than a
-background star. What was hidden was the far end of the catalogue — the faintest stars, out to
+background star. What was hidden was the far end of the catalog — the faintest stars, out to
 every angle, because `sqrt(bright / faint)` has no bound and nothing clamped brightness anywhere.
 
 That is a defect in the **shape** of the model, not in its scale. A hard disc says a source is
@@ -812,8 +812,8 @@ the rest in phase 5 — and they are kept here because the reasoning is what a l
   374, 395`). Sol has rotation and generated systems have none, so the rotation-period row of the
   survey table works for Sol and finds nothing anywhere else. Generated rings are absent the same
   way, and for the same reason.
-- ~~**The star's own spin axis.**~~ **Done in phase 1:** `CatalogueStar::spin_axis`, its
-  system's pole tilted up to 12°. It went on `CatalogueStar` rather than on `Star`, which is also
+- ~~**The star's own spin axis.**~~ **Done in phase 1:** `CatalogStar::spin_axis`, its
+  system's pole tilted up to 12°. It went on `CatalogStar` rather than on `Star`, which is also
   a template for `Prior::host_like` and has no business carrying an orientation. Nothing reads it
   visibly yet — the star's map sphere is featureless — but it is where surface features will sit,
   and it is no longer `+Z` for every star in the galaxy.
@@ -1030,7 +1030,7 @@ What carries over from the phone, and why each part is right here rather than me
 - **The common case is one tap, and the options are there for when you want them.** A phone's
   share sheet has the simple path plus an options row you expand. Aim and seal are that row.
 - **"Sent" is all you get.** A phone tells you it shared and nothing more; a report is **sent, not
-  delivered**, and no acknowledgement is coming. The metaphor is honest about this one where a
+  delivered**, and no acknowledgment is coming. The metaphor is honest about this one where a
   messaging interface would not be.
 
 One place the phone's habit is wrong, and worth naming so nobody copies it: a share sheet's
@@ -1111,7 +1111,7 @@ writes no transcript row ([22-provenance.md](22-provenance.md#reports-on-the-air
 gets the shard's acceptance and no more; the recipient gets a notification — today
 `"{who}: told you about {n} stars"` (`uplink.rs:629`) — and the knowledge arrives in their next
 `Learned`. So the sheet closes on acceptance and leaves no thread to watch, because there is
-nothing to watch: a report is **sent, not delivered**, no acknowledgement is coming, and the
+nothing to watch: a report is **sent, not delivered**, no acknowledgment is coming, and the
 amber unacknowledged triangle a message gets would be a lie here. A player who wants to be sure
 sends it again. That notification should name the system for a scoped report rather than counting
 stars, since "told you about 1 star" is a poor description of a survey of Sol.
@@ -1144,7 +1144,7 @@ the per-band photometry — is already in the file with a witness on it, so a ty
 rather than recorded and needs no record, no wire format and no lineage of its own. It moves the
 moment a better measurement arrives, and two craft holding different evidence honestly disagree.
 
-Colours divide the star out. A craft measures a flux ratio between two bands and wants the
+Colors divide the star out. A craft measures a flux ratio between two bands and wants the
 body's reflectance ratio; the range to the body and the star's own output both cancel, which is
 why a color is the one thing a distant craft reads cleanly. The albedo does not cancel — it
 needs the body's distance from its star *and* the range to the craft — so it is left unmeasured
@@ -1336,7 +1336,7 @@ knowledge. Today:
   refused with `Refusal::Impossible` when the craft does not `knows` it — which is the gate
   `Order::NameIt` and `Order::RetainRaw` already use (`instruments.rs:342`, `:350`).
 - **Crossing between stars is `Order::Cross { star, accel_g, max_beta }`,** not a `Course`, and it
-  resolves the catalogue id through `World::star_at` — the *shard's* catalogue, not the craft's
+  resolves the catalog id through `World::star_at` — the *shard's* catalog, not the craft's
   knowledge. That is the one to gate first: it is the only order that names a place a craft may
   never have seen.
 - **Body-relative courses already track moving bodies.** `Course::Orbit` and `Rings` resolve to a
@@ -1362,7 +1362,7 @@ knowledge. Today:
    becomes a belief and the option is renamed. A stopgap which reads the generator, as the
    System panel already does. What it came to:
 
-   - `CatalogueStar::system_pole` and `::spin_axis`, both derived rather than stored, so the
+   - `CatalogStar::system_pole` and `::spin_axis`, both derived rather than stored, so the
      `.lcsky` format is untouched. `system_pole` is where Sol's `+Z` is decided; reading
      `generate::pole_for` directly would hand Sol a random plane its JPL-fitted planets are not
      in. `spin_axis` is that pole tilted up to `SPIN_TILT_MAX_RAD`, 12°, uniform over the cap.
@@ -1378,7 +1378,7 @@ knowledge. Today:
    - `MapView` holds the resolved pole beside the camera, for the reason the rest of that struct
      is held together: its angles are measured against this basis, so the two cannot be a frame
      apart. `survey` writes it each frame; `ZERO` between the stars reads as `+Z`.
-   - **Changed from the plan:** the spin axis went on `CatalogueStar`, not on `Star`. `Star` is
+   - **Changed from the plan:** the spin axis went on `CatalogStar`, not on `Star`. `Star` is
      also used as a *template* by `Prior::host_like`, and a template has no business carrying an
      orientation. Nothing else about phase 1 moved.
 2. **Records only.** ✅ **Built** (2026-09-22). The full `Orbit` with `Orientation` and `Method`,
@@ -1577,7 +1577,7 @@ game has no players — so each of these is a change in place, not a versioned a
 
 | phase | change |
 |---|---|
-| 1 | ✅ **None.** `CatalogueStar::system_pole` and `::spin_axis` are derived, not stored, so neither the `.lcsky` catalogue nor the checkpoint changed. `SAVE_FORMAT` stays 9 |
+| 1 | ✅ **None.** `CatalogStar::system_pole` and `::spin_axis` are derived, not stored, so neither the `.lcsky` catalog nor the checkpoint changed. `SAVE_FORMAT` stays 9 |
 | 2 | ✅ **Done.** `Orbit` grew, `Orientation` and `Method` are new, and `formats.rs`' three back-readers `FileV3`/`FileV2`/`FileV1` were deleted rather than repointed at a frozen `OrbitV4`. `FILE_FORMAT` and `OLDEST_FILE_FORMAT` are both 5 |
 | 2 | `REPORT_FORMAT` stays 2. It carries the new `Orbit` by carrying `Part`, whose shape is unchanged, and the one shard is redeployed whole — a bump would only drop reports already in flight |
 | 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
@@ -1586,7 +1586,7 @@ game has no players — so each of these is a change in place, not a versioned a
 | 6 | ✅ **`Orbit` grew `about: Option<BodyId>`** — what it goes round, `None` being the star — and `BodyBelief` grew `about` and `mass_kg` beside it. `FILE_FORMAT` is 8 and `REPORT_FORMAT` is 5 |
 | 6 | ✅ **`Sighting` grew `range_m` and `spin_s`,** both `Option<(f64, f64)>`, beside `size`: the three things a close look measures and a distant one cannot. `Drawable` grew `spin_s` to have a rotation to measure, worked out from the arena's lock for a tidally locked body. `FILE_FORMAT` is 7 and `REPORT_FORMAT` is 4 |
 | 6 | ✅ **`Sighting` grew a `size: Option<(f64, f64)>`** — an angular diameter and its sigma, `None` for a point source. `FILE_FORMAT` was 6 and `REPORT_FORMAT` 3. The report format *does* move here where phase 2 left it alone, because `Part` carries `Sighting` by value and its shape is what changed; `Reported::format` is checked strictly on landing, so reports in flight across the deploy fail to land, which is the right trade for one shard with no players |
-| 6 | ✅ **`survey::Source` carries a `Subject` and a `diameter_rad`** rather than a `StarId`. Stars and bodies then live in one sky, which they have to: the host star glares on its own planets and only one list can be asked which of two sources outshines the other. `hidden_by` and `blended_with` return a `Subject`. Not stored and not on the wire — `Source` is built per look from the catalogue and from `visit::sources` |
+| 6 | ✅ **`survey::Source` carries a `Subject` and a `diameter_rad`** rather than a `StarId`. Stars and bodies then live in one sky, which they have to: the host star glares on its own planets and only one list can be asked which of two sources outshines the other. `hidden_by` and `blended_with` return a `Subject`. Not stored and not on the wire — `Source` is built per look from the catalog and from `visit::sources` |
 | 6 | ✅ **`Duty::Survey { star, started_s }`** through every site this row lists, plus `Duty::surveying` and `Duty::visits`, an `Action::SurveySystem` and its button, and a pinned `golden::SURVEYING`. `PROTOCOL_VERSION` stays 36: a new variant appends a discriminant, so every pinned vector above it is byte-identical |
 | 6 | the sites that were listed for a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
 | 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |

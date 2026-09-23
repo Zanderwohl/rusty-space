@@ -171,7 +171,7 @@ A channel is a conversation sealed to `(F, g)`, shouted or beamed like any messa
 - **Readable** by every craft that holds that generation when the light lands.
 - **Heard** by everybody in range, as always. That a faction is talking — how much, how often,
   from where — is visible to anybody listening, and it is intelligence.
-- **Not addressed to anyone**, so nobody acknowledges it automatically. Acknowledgement is
+- **Not addressed to anyone**, so nobody acknowledges it automatically. Acknowledgment is
   between two craft; a channel of forty would acknowledge itself forever.
 
 ## Relays
@@ -181,7 +181,7 @@ already, and the useful part of their answers carries over — with one differen
 **the network moves**. Every link's length is a light-time between two craft that are both in
 motion, and every route a craft knows was computed from where its neighbors *were*.
 
-The closest real analogue is not the internet. It is **delay-tolerant networking** — the
+The closest real analog is not the internet. It is **delay-tolerant networking** — the
 Bundle Protocol (RFC 9171) and the contact-graph routing NASA flies between spacecraft — which
 was built for exactly this: links that exist only at predictable times, and delays long enough
 that end-to-end conversation is impossible.
@@ -361,7 +361,7 @@ A craft holds one chosen name and one assigned name for anything, side by side. 
 "Spout" is shown in place of its letter and never unassigns it: the letter stays frozen, holds its
 place among the letters, and a refined orbit cannot bring it back over the name.
 
-A little silly, and real catalogues have been sillier. What matters is that the rule is
+A little silly, and real catalogs have been sillier. What matters is that the rule is
 deterministic given what the assigning craft knew, so two craft with the same data agree, and
 that no later discovery ever renames anything.
 

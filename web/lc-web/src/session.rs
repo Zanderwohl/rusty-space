@@ -71,7 +71,7 @@ pub fn seal(key: &[u8], session: &Session) -> String {
 /// "tampered" than with "expired", and the one thing it must not do is trust it.
 pub fn open(key: &[u8], value: &str, now: i64) -> Option<Session> {
     let (payload, mac) = value.split_once('.')?;
-    // Verified **before** the payload is parsed. Deserialising something unauthenticated is
+    // Verified **before** the payload is parsed. Deserializing something unauthenticated is
     // running a parser on input an attacker chose.
     let expected = sign(key, payload.as_bytes());
     if !constant_time_eq(mac.as_bytes(), expected.as_bytes()) {
@@ -196,7 +196,7 @@ mod tests {
         }
     }
 
-    /// The signature is checked before the payload is parsed. Running a deserialiser over
+    /// The signature is checked before the payload is parsed. Running a deserializer over
     /// unauthenticated input is running a parser on something an attacker chose.
     #[test]
     fn the_signature_is_checked_before_the_payload() {

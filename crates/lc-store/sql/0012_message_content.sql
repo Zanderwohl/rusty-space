@@ -1,4 +1,4 @@
--- What a message is, stated rather than read off an empty body. An acknowledgement and a key
+-- What a message is, stated rather than read off an empty body. An acknowledgment and a key
 -- offer were both stored as '', and every reader had to tell them from text by remembering to.
 ALTER TABLE lc_messages ADD COLUMN content text;
 UPDATE lc_messages

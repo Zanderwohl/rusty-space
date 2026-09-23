@@ -25,7 +25,7 @@ pub struct BodyState {
     pub current_local_position: Option<DVec3>,
     pub current_primary_position: Option<DVec3>,
     pub trajectory: Option<TimeMap<DVec3>>,
-    /// When the Newtonian state was last (re)initialised; detects motive transitions.
+    /// When the Newtonian state was last (re)initialized; detects motive transitions.
     pub newtonian_init_time: Option<Instant>,
 }
 

@@ -52,7 +52,7 @@ pub enum Motive {
     Holding(Waypoint),
     /// Ballistic on a conic, about whichever body's influence it is in.
     Falling(Coast),
-    /// Nothing holding it and nothing to fall towards: a straight line at whatever it has.
+    /// Nothing holding it and nothing to fall toward: a straight line at whatever it has.
     ///
     /// Carries where and when the line started, so it is read rather than integrated. Adding
     /// `beta * elapsed` each step is not the same number at two step sizes, and two sides that
@@ -373,7 +373,7 @@ pub enum Change {
     /// [`Change::SetCourse`]: that one resolves a waypoint *inside* a system and refuses
     /// without one, and this is the thing a ship does when leaving.
     ///
-    /// A **position**, not a star id, because this fold is pure motion and has no catalogue to
+    /// A **position**, not a star id, because this fold is pure motion and has no catalog to
     /// look one up in. Naming the star is the wire's job — see `lc_proto::Order::Cross` — and
     /// the authority resolves it before folding, so both sides fold the same coordinate.
     Cross { to_ly: DVec3, drive: Drive },
@@ -902,13 +902,13 @@ mod tests {
     use super::*;
     use lc_spacetime::Worldline;
     use crate::navigation::Plane;
-    use crate::sky::{CatalogueStar, StarProvider};
+    use crate::sky::{CatalogStar, StarProvider};
 
     fn sol() -> Option<LocalSystem> {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .ok()?;
-        let sun: CatalogueStar =
+        let sun: CatalogStar =
             provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some("Sol"))?.clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);

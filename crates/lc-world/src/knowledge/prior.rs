@@ -9,12 +9,12 @@ use glam::DVec3;
 
 use crate::population::Population;
 use crate::rng;
-use crate::sky::CatalogueStar;
+use crate::sky::CatalogStar;
 use crate::sky::generate::{self, planets_of};
 use crate::star::Star;
 use crate::system::M_PER_LY;
 
-/// Catalogue stars the planet prior is measured over, at most.
+/// Catalog stars the planet prior is measured over, at most.
 const PRIOR_STARS: usize = 4000;
 
 /// Belts are flat, so they are seen from several directions; a swarm is a shell.
@@ -58,16 +58,16 @@ struct Seen {
 /// what it shows crossing wherever it actually does. A factor of about 1.7, one sigma.
 const DEPTH_WIDTH: f64 = 0.55;
 
-/// Fractional error on a host's mass when the neighbourhood holds nothing to compare it with.
+/// Fractional error on a host's mass when the neighborhood holds nothing to compare it with.
 ///
 /// The main-sequence mass-luminosity relation scatters by about this much at a fixed
 /// luminosity, from rotation, age and metallicity, so this is what one star alone is worth.
 const LONE_HOST_SPREAD: f64 = 0.3;
 
 impl Prior {
-    /// Pass the stars a craft cannot tell this one apart from; knowing nothing, the catalogue.
-    pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogueStar>) -> Self {
-        let stars: Vec<&CatalogueStar> = stars.into_iter().collect();
+    /// Pass the stars a craft cannot tell this one apart from; knowing nothing, the catalog.
+    pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogStar>) -> Self {
+        let stars: Vec<&CatalogStar> = stars.into_iter().collect();
         let stride = stars.len().div_ceil(PRIOR_STARS).max(1);
         let systems = stars
             .iter()

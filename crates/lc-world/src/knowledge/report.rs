@@ -28,7 +28,7 @@ pub struct Part {
     pub orbits: Vec<Orbit>,
     /// Each on its observer's name.
     pub conclusions: Vec<Conclusion>,
-    /// What each observer has folded of a body's colours. Fixed in size per witness however
+    /// What each observer has folded of a body's colors. Fixed in size per witness however
     /// many visits went into it, which is what makes it cheap enough to send.
     pub colors: Vec<Colors>,
 }

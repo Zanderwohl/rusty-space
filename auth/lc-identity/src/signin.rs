@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::bans::Sanction;
 use crate::password;
 use crate::providers::Provider;
-use crate::store::{Link, Store, StoreError, normalise_email};
+use crate::store::{Link, Store, StoreError, normalize_email};
 
 /// How long a sign-in code is worth anything.
 ///
@@ -146,7 +146,7 @@ pub async fn with_password(
     email: &str,
     password_input: &str,
 ) -> Result<Uuid, Refused> {
-    let subject = normalise_email(email);
+    let subject = normalize_email(email);
     let link = store.link(Provider::Password, &subject).await?;
     let stored = match &link {
         Some(link) => store.secret(Provider::Password, &link.subject).await?,
@@ -183,7 +183,7 @@ pub async fn register_password(
     display_name: &str,
 ) -> Result<Uuid, Refused> {
     let phc = password::hash(password_input).map_err(Refused::Unacceptable)?;
-    let subject = normalise_email(email);
+    let subject = normalize_email(email);
     if store.link(Provider::Password, &subject).await?.is_some() {
         return Err(Refused::Taken);
     }

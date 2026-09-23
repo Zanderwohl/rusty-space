@@ -87,7 +87,7 @@ jobs:
             --target wasm32-unknown-unknown --no-default-features
 
       # The browser build must not contain a CSV reader: there is no filesystem to read from,
-      # and the catalogue ships as a packed chunk instead.
+      # and the catalog ships as a packed chunk instead.
       - name: No CSV reader in the browser build
         run: |
           if cargo tree -p lc-client --no-default-features \

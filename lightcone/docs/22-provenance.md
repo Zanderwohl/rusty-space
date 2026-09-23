@@ -15,11 +15,11 @@ it, which is nothing.
 ## The rule
 
 **A star nobody aboard has detected is absent.** Not dimmed, not grayed out, not listed
-without a distance: absent. The catalogue is the world; it is not what anyone knows of the
+without a distance: absent. The catalog is the world; it is not what anyone knows of the
 world, and the client must never read it where a player can see the answer.
 
 This was the thing most obviously wrong before this document existed. The client held 6000
-catalogue stars, drew all of them on the map at their true positions, listed the nearest forty
+catalog stars, drew all of them on the map at their true positions, listed the nearest forty
 in the telescope panel, and kept exactly one light curve — which it threw away the moment the
 telescope moved. Knowledge was free and memory was not, which is precisely backwards.
 
@@ -169,24 +169,24 @@ The others stay on file, because "they call it Hearthlight and we call it the Ke
 about a conversation, and losing it would lose the conversation.
 
 **A designation is written at discovery and then fixed.** It is the bearing the source was found
-along, in ecliptic degrees — recomputing it as the ship moved would give a catalogue number that
+along, in ecliptic degrees — recomputing it as the ship moved would give a catalog number that
 drifted, which is no use for talking about.
 
-The catalogue's names survive exactly as its row numbers do: in
-`sky::Provenance`, next to the key, never read by anything a player sees. `CatalogueStar` has no
+The catalog's names survive exactly as its row numbers do: in
+`sky::Provenance`, next to the key, never read by anything a player sees. `CatalogStar` has no
 `name` field to reach for by accident. When the shipped game moves to an authored galaxy, the
-catalogue's names go with the catalogue and nothing else changes — which is the same argument
+catalog's names go with the catalog and nothing else changes — which is the same argument
 [03-world-model.md](03-world-model.md) makes about identity.
 
 Two things this leaves open, and both belong with factions rather than here:
 
 - **A faction name is a shared name.** The mechanism is already the one above: a faction
-  relaying its catalogue is a witness whose namings everyone holds. What is missing is the rule
+  relaying its catalog is a witness whose namings everyone holds. What is missing is the rule
   about whose name wins on a shared screen, which is a question about the faction, not the star.
 - **Cross-identification.** Two craft agreeing that their records are of the same star is done
   today by the synthetic star id, which is an engine convenience: real observers match positions
   and brightnesses, and two crews with poor parallaxes could reasonably disagree about whether
-  they are looking at the same thing. Worth revisiting when a faction's catalogue is merged
+  they are looking at the same thing. Worth revisiting when a faction's catalog is merged
   rather than copied.
 
 ## Beliefs, and where they are drawn
@@ -203,7 +203,7 @@ been told about, the chart stops being what it believes — and the difference b
 visible on the map as a mark that moves.
 
 **A claim is held on its witness's name.** That is what makes a charting office, a faction
-catalogue, and a probe reporting a conclusion rather than its raw data all the same mechanism,
+catalog, and a probe reporting a conclusion rather than its raw data all the same mechanism,
 and what will make a lying faction possible without any new machinery.
 
 The map draws **believed positions**, which are not true positions. A star charted at a percent
@@ -323,7 +323,7 @@ sides, so a shard recomputes exactly what an instrument saw, which is what
 [05-observation.md](05-observation.md) asks for. The client reads a distance only from belief —
 measured with its error and the angle its baseline subtended, stated on somebody's word, a floor,
 or a bearing only — and names the home system from the crew's namings; nothing a player sees
-reads a catalogue name.
+reads a catalog name.
 
 ## What is not, and in what order
 
@@ -333,7 +333,7 @@ persistence, conclusions from logs ([24-standing-instruments.md](24-standing-ins
 factions and relays ([23-factions.md](23-factions.md)). Two items are not part of it:
 
 1. **Navigation on beliefs.** Now scheduled: courses fly against believed positions, in phase 7
-   of [25-system-knowledge.md](25-system-knowledge.md). Deferred until then. A crossing still aims at the catalogue
+   of [25-system-knowledge.md](25-system-knowledge.md). Deferred until then. A crossing still aims at the catalog
    position. It ought to aim at the believed one and arrive off by the error on it — which for a
    charted star is far wider than the shell it is aiming into, so the crossing has to refine the
    fix as its own baseline opens. That is a mechanic of its own: the approach where you find out

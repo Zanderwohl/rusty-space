@@ -91,10 +91,10 @@ pub struct Game(pub Session);
 ///
 /// An **asset path**, not a filesystem path: the asset server reads a file on the desktop and
 /// fetches over HTTP in a browser, and this code cannot tell which. A `.csv` is still accepted
-/// on native builds with the `hyg` feature, which is how the catalogue gets packed in the
+/// on native builds with the `hyg` feature, which is how the catalog gets packed in the
 /// first place.
 #[derive(Resource, Default)]
-pub struct Catalogue(pub Option<String>);
+pub struct Catalog(pub Option<String>);
 
 /// The sky asset in flight, while [`AppState::Loading`] waits for it.
 #[derive(Resource)]
@@ -139,7 +139,7 @@ impl Plugin for ClientPlugin {
             .add_message::<Requested>()
             .insert_resource(Ui(UiState::default()))
             .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
-            .init_resource::<Catalogue>()
+            .init_resource::<Catalog>()
             .init_resource::<crate::dev::DevEntry>()
             .init_resource::<Looking>()
             .init_resource::<Bodies>()
@@ -247,7 +247,7 @@ impl Plugin for ClientPlugin {
                 EguiPrimaryContextPass,
                 (
                     // Before anything is laid out: it changes how every glyph is
-                    // rasterised, and a pass that ran first would be measured hinted.
+                    // rasterized, and a pass that ran first would be measured hinted.
                     crate::faces::unhint,
                     // First of the drawing, so a frame that has the faces is drawn in them
                     // rather than the frame after it.
@@ -424,7 +424,7 @@ fn strand(
 /// Starts the sky loading, or finishes immediately when there is nothing to load.
 fn begin_load(
     dev: Res<crate::dev::DevEntry>,
-    catalogue: Res<Catalogue>,
+    catalog: Res<Catalog>,
     assets: Res<AssetServer>,
     mut commands: Commands,
     mut game: ResMut<Game>,
@@ -432,7 +432,7 @@ fn begin_load(
     uplink: Res<crate::uplink::Uplink>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    match catalogue.0.as_deref() {
+    match catalog.0.as_deref() {
         // Packing is native tooling and reads a file directly; see `skypack`. Absent from a
         // browser build, where the feature is off and `csv` is not in the tree at all.
         #[cfg(feature = "hyg")]
@@ -440,7 +440,7 @@ fn begin_load(
             match lc_world::sky::hyg::HygProvider::load(path) {
                 Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p, &uplink, dev.charted),
                 Err(e) => {
-                    ui.notify(format!("catalogue: {e}"), 0.0);
+                    ui.notify(format!("catalog: {e}"), 0.0);
                     enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink, dev.charted);
                 }
             }

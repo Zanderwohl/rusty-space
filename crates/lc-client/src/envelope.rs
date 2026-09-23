@@ -60,7 +60,7 @@ pub const FAINTEST: f64 = 1.0e-13;
 /// Covering fraction as an opacity.
 ///
 /// A fourth root, and the exponent is the whole decision. The quantity spans fourteen decades —
-/// an asteroid belt covers 2.6e-12 of its star's sky, a Kuiper analogue 3e-8, a half-built swarm
+/// an asteroid belt covers 2.6e-12 of its star's sky, a Kuiper analog 3e-8, a half-built swarm
 /// 0.4 — so a linear mapping renders everything natural as exactly zero.
 ///
 /// A logarithm was the first attempt and overcorrected badly: it put the Kuiper belt at 0.46,
@@ -69,7 +69,7 @@ pub const FAINTEST: f64 = 1.0e-13;
 /// belt 0.001, a Kuiper belt 0.013 and a half-built swarm 0.80: a trace, a haze, and a
 /// structure, which is the right reading of all three.
 ///
-/// An envelope is a visualisation either way. It is an orbit line, not a photograph.
+/// An envelope is a visualization either way. It is an orbit line, not a photograph.
 pub fn opacity_of(covering: f64) -> f32 {
     if covering <= FAINTEST {
         return 0.0;
@@ -170,7 +170,7 @@ const ANOMALY_STEPS: usize = 256;
 
 /// Sub-samples across the cell each quadrature node stands for.
 ///
-/// The distributions are quadrature, not a catalogue. Nine semi-major axes and five
+/// The distributions are quadrature, not a catalog. Nine semi-major axes and five
 /// eccentricities are forty-five sharp annuli, and summed straight they read as concentric
 /// rings that no belt has. Each node stands for a cell of the distribution it was drawn from,
 /// so the profile is integrated across that cell. Twelve is where the residual ripple falls
@@ -197,10 +197,10 @@ pub fn profile_of(population: &Population) -> Profile {
             population.inclination.sky_density(sin_phi.clamp(-1.0, 1.0).asin())
         })
         .collect();
-    let latitude = peak_normalised(&latitude);
+    let latitude = peak_normalized(&latitude);
 
     let radial = radial_profile(population, extent.outer_m, inner as f64);
-    let radial = peak_normalised(&radial);
+    let radial = peak_normalized(&radial);
 
     // The reference ray: outward from the star in the plane, where the latitude factor is its
     // own peak of one, so this integral is the radial row alone.
@@ -210,7 +210,7 @@ pub fn profile_of(population: &Population) -> Profile {
     Profile { latitude, radial, field: Field { inner, slab, reference } }
 }
 
-fn peak_normalised(values: &[f64]) -> Vec<f32> {
+fn peak_normalized(values: &[f64]) -> Vec<f32> {
     let peak = values.iter().cloned().fold(0.0f64, f64::max).max(f64::MIN_POSITIVE);
     values.iter().map(|v| (v / peak) as f32).collect()
 }
@@ -349,7 +349,7 @@ pub fn build_proxy() -> Mesh {
 /// Radial divisions of a ring. Enough that the Cassini Division is a gap rather than a hint.
 pub const RADIAL: usize = 96;
 
-/// A flat annulus carrying each vertex's optical depth, normalised so the deepest band is one.
+/// A flat annulus carrying each vertex's optical depth, normalized so the deepest band is one.
 ///
 /// A ring is not a shell: it has radial structure and no latitude. Drawing it as a shell at one
 /// radius would put Saturn's rings on a circle, and they span a factor of 1.8 in radius with a
@@ -412,7 +412,7 @@ const ALBEDO: f64 = 0.1;
 ///
 /// The old flat tint, kept as a level so the change is a change of *color* and not of
 /// brightness. It has to be a display decision: a belt's real surface brightness is four
-/// decades under a star's and renders as nothing at all in every normalised preset, which is
+/// decades under a star's and renders as nothing at all in every normalized preset, which is
 /// true photometrically and useless as a picture — the same argument [`opacity_of`] settles for
 /// the opacity. An envelope is an orbit line, not a photograph.
 const DISPLAY_LEVEL: f32 = 0.76;
@@ -456,7 +456,7 @@ pub fn source_radiance(population: &Population, lighting: Lighting) -> em_spectr
 
 /// The per-band `(source, extinction)` pairs the shader reads, and the mapping's own columns.
 ///
-/// The source is normalised so the brightest display channel lands at [`DISPLAY_LEVEL`]: the
+/// The source is normalized so the brightest display channel lands at [`DISPLAY_LEVEL`]: the
 /// bands set the *color* and the march sets the amount, and separating them is what keeps a
 /// population legible in a preset its light barely reaches while still saying which preset it
 /// is being seen in.
@@ -589,7 +589,7 @@ pub fn spawn(
             mesh: mesh.clone(),
             material,
             population: i,
-            // The field is normalised to the outer edge, so that is what scales it. The
+            // The field is normalized to the outer edge, so that is what scales it. The
             // thermal radius is where the light comes from, which is a different number
             // and is what the interface names the band by.
             radius: (p.extent().map(|e| e.outer_m).unwrap_or(0.0) / UNIT_M) as f32,
@@ -966,7 +966,7 @@ mod tests {
         assert!(sample(&profile, DVec3::X * mid) > 0.1, "and something in between");
     }
 
-    /// The nodes are quadrature, not a catalogue. Nine semi-major axes summed straight paint
+    /// The nodes are quadrature, not a catalog. Nine semi-major axes summed straight paint
     /// nine annuli, and a belt made of concentric rings is a rendering of the integration
     /// scheme rather than of a belt.
     #[test]
@@ -978,7 +978,7 @@ mod tests {
             .sum::<f32>()
             / (row.len() - 2) as f32;
         assert!(ripple < 0.01, "the radial profile is lumpy: {ripple}");
-        assert!(row.iter().cloned().fold(0.0f32, f32::max) > 0.99, "peak-normalised");
+        assert!(row.iter().cloned().fold(0.0f32, f32::max) > 0.99, "peak-normalized");
     }
 
     /// The thing the sensor presets are named for. A meter of rock is a meter of rock from B to

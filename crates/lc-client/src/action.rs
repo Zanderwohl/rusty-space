@@ -730,7 +730,7 @@ fn apply_to(ui: &mut UiState, session: &mut Session, action: Action, effects: &m
 
 /// The nearest star worth pointing at.
 ///
-/// Not simply the first: the catalogue carries the Sun at about an astronomical unit, and
+/// Not simply the first: the catalog carries the Sun at about an astronomical unit, and
 /// "nearest star" has to mean one that is somewhere else.
 /// Put the telescope on a duty.
 ///
@@ -1220,7 +1220,7 @@ mod tests {
         let Some(star) = provider.stars().iter().find(|s| {
             lc_world::sky::generate::swarm_for(s).is_some()
         }) else {
-            // The sample sky is three stars and may carry no swarm. The catalogue test covers
+            // The sample sky is three stars and may carry no swarm. The catalog test covers
             // the populated case; this one has nothing to say.
             return;
         };
@@ -1296,11 +1296,11 @@ mod tests {
         let naming = s.belief(id).unwrap().name.clone().unwrap();
         assert_eq!(
             naming.witness, s.knowledge.owner,
-            "ours, not the catalogue's"
+            "ours, not the catalog's"
         );
         assert!(naming.lineage.is_empty(), "nobody told us this one");
 
-        let unknown = lc_world::sky::StarId::synthesise("absent", 7);
+        let unknown = lc_world::sky::StarId::synthesize("absent", 7);
         ui.selected = Some(unknown);
         let effects = apply(Action::NameSelected("Nowhere".into()), &mut ui, &mut s);
         assert!(
@@ -1354,7 +1354,7 @@ mod tests {
 
 
     /// The charts a ship launches with carry the charting office's names, with the office's
-    /// name on them. Nothing reads a name off the catalogue.
+    /// name on them. Nothing reads a name off the catalog.
     #[test]
     fn a_charted_star_is_called_what_the_office_called_it() {
         let (_, s) = fixture();

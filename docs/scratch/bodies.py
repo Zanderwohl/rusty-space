@@ -113,7 +113,7 @@ INTERSTELLAR = [
     ("2i-borisov", "Borisov", "2I;", ["Interstellar"]),
 ]
 
-BARYCENTRIC = {"nix", "hydra", "kerberos", "styx"}  # orbit the Pluto-Charon barycentre
+BARYCENTRIC = {"nix", "hydra", "kerberos", "styx"}  # orbit the Pluto-Charon barycenter
 # Eris's moon. Its NAIF id is the Eris system id with a 120 prefix.
 ERIS_MOON = [("dysnomia", "Dysnomia", "120136199", "eris")]
 

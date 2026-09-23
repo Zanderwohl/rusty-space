@@ -56,7 +56,7 @@ impl ItemKey {
 
     /// A key for an id that is only unique inside its own domain.
     ///
-    /// A star's catalogue id and a ship's id are small integers counted from different places,
+    /// A star's catalog id and a ship's id are small integers counted from different places,
     /// so raw they collide, and a collision is two things sharing one entity and one
     /// selection. The domain is hashed in first.
     pub const fn from_id(domain: &str, id: u64) -> Self {

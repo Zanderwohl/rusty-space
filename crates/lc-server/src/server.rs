@@ -706,7 +706,7 @@ impl<J: Journal> Server<J> {
                 if !accel_g.is_finite() || *accel_g <= 0.0 || !(*max_beta > 0.0) {
                     return Err(Refusal::Impossible);
                 }
-                // Resolved here, against this shard's own catalogue. A star it does not hold
+                // Resolved here, against this shard's own catalog. A star it does not hold
                 // is not somewhere anyone may fly to, whatever the client believes it has.
                 let to_ly = self.world.star_at(*star).ok_or(Refusal::Impossible)?;
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
@@ -816,7 +816,7 @@ impl<J: Journal> Server<J> {
             }
             Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => {
                 // The whole of it in `crate::radio`, because everything a transmission needs
-                // to decide — the keyring, the aim, the acknowledgement window — is that
+                // to decide — the keyring, the aim, the acknowledgment window — is that
                 // module's and none of it is this one's.
                 let spoken = self.compose(id, intent.ship_id, &intent.order, at)?;
                 beam = spoken.beam;
@@ -1263,7 +1263,7 @@ use crate::transport::Loopback;
         let trip_ly = 2.0e7 / lc_world::system::M_PER_LY;
         let to_ly = DVec3::new(lc_world::flight::STANDOFF_LY + trip_ly, 0.0, 0.0);
         // Folded directly: between the stars there is no course to set, and an order to cross
-        // would need a catalogue star there.
+        // would need a catalog star there.
         let craft = server.fleet_mut().get_mut(CraftId(1)).unwrap();
         let drive = craft.turning(craft.kind.drive());
         craft
@@ -2198,7 +2198,7 @@ pub(crate) mod course_tests {
     use lc_world::system::LocalSystem;
     use std::sync::Arc;
 
-    pub(crate) fn a_star() -> Option<lc_world::sky::CatalogueStar> {
+    pub(crate) fn a_star() -> Option<lc_world::sky::CatalogStar> {
         AuthoredStars::sample().stars().first().cloned()
     }
 
@@ -3089,7 +3089,7 @@ mod hello_tests {
     async fn crossing_to_a_star_arrives_in_its_system_at_rest_and_not_in_an_orbit() {
         let Some(here) = a_star() else { return };
         let mut there = here.clone();
-        there.id = lc_world::sky::StarId::synthesise("test", 7);
+        there.id = lc_world::sky::StarId::synthesize("test", 7);
         // Further apart than `LOCAL_SHELL_LY`, or the two shells overlap and being "in" one of
         // them is whichever the lookup reaches first rather than a fact about where the ship is.
         there.position_ly = here.position_ly + DVec3::new(2.0, 0.0, 0.0);

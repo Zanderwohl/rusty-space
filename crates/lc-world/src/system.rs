@@ -9,7 +9,7 @@ use em_sim::system::System;
 use em_sim::universe::UniverseFileContents;
 use em_foundations::time::Instant;
 use glam::DVec3;
-use crate::sky::{CatalogueStar, StarId, generate};
+use crate::sky::{CatalogStar, StarId, generate};
 
 /// Meters in a light-year.
 pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
@@ -36,7 +36,7 @@ pub const INVENTORY_EPOCH_S: f64 = 0.0;
 /// the same statement as being in the system.
 pub const LOCAL_SHELL_LY: f64 = 1.6;
 
-/// The catalogue name of the system whose data is real rather than generated.
+/// The catalog name of the system whose data is real rather than generated.
 pub const SOL: &str = "Sol";
 
 /// A body's rings, as the renderer wants them.
@@ -124,7 +124,7 @@ pub struct LocalSystem {
 
 impl LocalSystem {
     /// Load the system around a star, real where there is real data and generated otherwise.
-    pub fn for_star(star: &CatalogueStar) -> Option<Self> {
+    pub fn for_star(star: &CatalogStar) -> Option<Self> {
         let populations = generate::system_for(star).populations;
         let contents = Self::contents_for(star);
         let sim = System::from_contents(&contents).ok()?;
@@ -156,7 +156,7 @@ impl LocalSystem {
         Some(system)
     }
 
-    fn contents_for(star: &CatalogueStar) -> UniverseFileContents {
+    fn contents_for(star: &CatalogStar) -> UniverseFileContents {
         match star.provenance.name.as_deref() {
             // The one system with measured data rather than generated: two hundred and thirty
             // bodies fitted against JPL, moons and comets included.
@@ -639,7 +639,7 @@ mod tests {
 
     const AU: f64 = 1.495_978_707e11;
 
-    fn catalogue() -> Option<crate::sky::hyg::HygProvider> {
+    fn catalog() -> Option<crate::sky::hyg::HygProvider> {
         crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv").ok()
     }
 
@@ -678,9 +678,9 @@ mod tests {
     /// are the ones to watch, and this asserts all two hundred.
     #[test]
     fn a_drawable_is_the_kind_the_inventory_says_it_is() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
-            panic!("the catalogue should carry Sol")
+            panic!("the catalog should carry Sol")
         };
         let system = LocalSystem::for_star(sun).expect("Sol loads");
         let drawn = system.drawables_at(system.origin_ly, 0.0);
@@ -701,9 +701,9 @@ mod tests {
 
     #[test]
     fn the_solar_system_is_the_real_one_and_the_rest_are_generated() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let sun = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL));
-        let Some(sun) = sun else { panic!("the catalogue should carry Sol") };
+        let Some(sun) = sun else { panic!("the catalog should carry Sol") };
 
         let real = LocalSystem::for_star(sun).expect("Sol loads");
         assert!(real.len() > 100, "the preset carries moons too, got {}", real.len());
@@ -770,7 +770,7 @@ mod tests {
 
     #[test]
     fn propagating_moves_the_bodies() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
@@ -805,14 +805,14 @@ mod tests {
     /// should be the planets a person can see, in roughly the order they see them.
     #[test]
     fn the_naked_eye_planets_are_the_brightest_things_in_the_sky() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
         let mut sys = LocalSystem::for_star(sun).unwrap();
         sys.advance_to(0.0);
 
-        // Roughly where the Earth is at J2000, which is where the catalogue puts the observer.
+        // Roughly where the Earth is at J2000, which is where the catalog puts the observer.
         let earth = sys
             .drawables_at(sun.position_ly, 0.0)
             .into_iter()
@@ -841,7 +841,7 @@ mod tests {
     /// few times what the planet does when they are open, and nothing at all when edge-on.
     #[test]
     fn saturns_rings_brighten_it_and_the_tilt_decides_by_how_much() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
@@ -890,7 +890,7 @@ mod tests {
 
     #[test]
     fn a_body_without_rings_has_none_and_is_unaffected() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };

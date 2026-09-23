@@ -26,7 +26,7 @@ ut aliquid ex ea commodi consequatur.
 
 Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse:
 
-![A placeholder diagram: three labelled circles connected by arrows](/static/images/placeholder-diagram.svg)
+![A placeholder diagram: three labeled circles connected by arrows](/static/images/placeholder-diagram.svg)
 
 Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit.
 

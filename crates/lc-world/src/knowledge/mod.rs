@@ -711,7 +711,7 @@ mod tests {
     const AU_LY: f64 = 1.581_250_7e-5;
 
     fn star_id(key: u64) -> StarId {
-        StarId::synthesise("test", key)
+        StarId::synthesize("test", key)
     }
 
     /// An orbit stated at `au`, with the period a Sun-like host gives it. Nothing here is
@@ -1158,7 +1158,7 @@ mod tests {
 
     /// **A digest that never leaves the craft is not a digest.** `Colors` was folded, stored
     /// and read locally and was in no report, so a probe's months of photometry died with it
-    /// and a ship it talked to learned nothing about what colour anything was.
+    /// and a ship it talked to learned nothing about what color anything was.
     #[test]
     fn a_report_carries_what_a_probe_measured_of_a_body() {
         use em_spectra::{Band, PerBand};

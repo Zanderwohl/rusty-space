@@ -102,7 +102,7 @@ impl std::fmt::Display for ManifestLoadError {
 }
 impl std::error::Error for ManifestLoadError {}
 
-/// TOML, under an extension of its own because the library's catalogue already has `toml`.
+/// TOML, under an extension of its own because the library's catalog already has `toml`.
 #[derive(Default, TypePath)]
 pub struct ManifestLoader;
 

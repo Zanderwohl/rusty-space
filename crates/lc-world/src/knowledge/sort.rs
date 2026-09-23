@@ -5,17 +5,17 @@
 //! small sub-Neptune depending on its density, an ocean and an ice world differ only in how
 //! bright and how blue they are, and every one of those numbers has an error bar. So the answer
 //! is a list of types with probabilities, and the prior is the generator itself -- the same
-//! code that made the body, sampled over a neighbourhood of stars.
+//! code that made the body, sampled over a neighborhood of stars.
 //!
 //! This is the same shape as [`super::prior::Prior::rocky_given`] and for the same reason, one
-//! dimension at a time: what makes it work is that the *spread* is modelled, not just the
+//! dimension at a time: what makes it work is that the *spread* is modeled, not just the
 //! measurement. Two ocean worlds are not the same color, and a classification that assumed
 //! they were would be certain and wrong.
 
 use em_spectra::Band;
 use serde::{Deserialize, Serialize};
 
-use crate::sky::CatalogueStar;
+use crate::sky::CatalogStar;
 use crate::sky::generate::architecture::Class;
 use crate::sky::generate::{disc, planets_of};
 use crate::surface::Surface;
@@ -121,7 +121,7 @@ impl Sort {
 /// What a craft has measured about a body. Every field is optional, because a survey gets them
 /// one at a time and an answer from three of them is worth having.
 ///
-/// Each is a value and one sigma. Colours are *reflectance* ratios: a craft measures a flux
+/// Each is a value and one sigma. Colors are *reflectance* ratios: a craft measures a flux
 /// ratio and divides out the star it already measured, so what is left is the body.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Measured {
@@ -156,7 +156,7 @@ impl Measured {
     /// it, so a type is derived rather than stated and needs no record of its own. It moves the
     /// moment a better measurement arrives.
     ///
-    /// Colours divide the star out. A craft measures a flux ratio between two bands, and what
+    /// Colors divide the star out. A craft measures a flux ratio between two bands, and what
     /// it wants is the body's reflectance ratio -- the range to the body and the star's output
     /// both cancel, which is why a color is the one thing a distant craft can read cleanly.
     ///
@@ -236,8 +236,8 @@ pub struct Sorts {
 
 impl Sorts {
     /// Sample the generator over the stars a craft cannot tell this one apart from.
-    pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogueStar>) -> Self {
-        let stars: Vec<&CatalogueStar> = stars.into_iter().collect();
+    pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogStar>) -> Self {
+        let stars: Vec<&CatalogStar> = stars.into_iter().collect();
         let stride = stars.len().div_ceil(SORT_STARS).max(1);
         let mut drawn = Vec::new();
         for star in stars.iter().step_by(stride) {
@@ -350,11 +350,11 @@ pub(crate) mod tests_support {
     use super::*;
     use crate::sky::{AuthoredStars, StarId, StarProvider};
 
-    /// A main-sequence star of this luminosity, with the columns a catalogue would give it.
-    pub fn star_of(key: u64, luminosity: f64) -> CatalogueStar {
+    /// A main-sequence star of this luminosity, with the columns a catalog would give it.
+    pub fn star_of(key: u64, luminosity: f64) -> CatalogStar {
         let teff = 5772.0 * luminosity.powf(0.13);
         let mut s = AuthoredStars::sample().stars()[1].clone();
-        s.id = StarId::synthesise("sorts", key);
+        s.id = StarId::synthesize("sorts", key);
         s.luminosity_solar = luminosity;
         s.star.teff_k = teff;
         s.star.radius_m = em_spectra::stellar::radius_from_luminosity(
@@ -367,7 +367,7 @@ pub(crate) mod tests_support {
         s
     }
 
-    pub fn neighborhood(keys: std::ops::Range<u64>) -> Vec<CatalogueStar> {
+    pub fn neighborhood(keys: std::ops::Range<u64>) -> Vec<CatalogStar> {
         keys.map(|k| {
             let u = crate::rng::uniform(crate::rng::hash(&[k, 0x1u64]));
             star_of(k, 10f64.powf(-2.0 + 3.0 * u * u))
@@ -376,7 +376,7 @@ pub(crate) mod tests_support {
     }
 
     /// Truth and a perfect reading of it, for every planet of these stars.
-    pub fn truths(stars: &[CatalogueStar]) -> Vec<(Sort, Measured)> {
+    pub fn truths(stars: &[CatalogStar]) -> Vec<(Sort, Measured)> {
         stars
             .iter()
             .flat_map(|s| {
@@ -408,7 +408,7 @@ mod tests {
     /// classify the planets of stars it has never seen. Held out, because a classifier scored
     /// on its own training set is scored on nothing.
     #[test]
-    fn a_measured_world_is_recognised_for_what_it_is() {
+    fn a_measured_world_is_recognized_for_what_it_is() {
         let prior = Sorts::measure(&neighborhood(0..400));
         assert!(!prior.is_empty());
 
@@ -468,7 +468,7 @@ mod tests {
     /// three. A color takes that error from one in five to one in two hundred, and that is
     /// what the per-band photometry in `lightcone/docs/25-system-knowledge.md` is for.
     #[test]
-    fn colour_is_what_tells_an_ocean_from_a_deck() {
+    fn color_is_what_tells_an_ocean_from_a_deck() {
         let prior = Sorts::measure(&neighborhood(0..400));
         let cases: Vec<(Sort, Measured)> = truths(&neighborhood(30_000..30_120))
             .into_iter()

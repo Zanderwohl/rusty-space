@@ -114,7 +114,7 @@ pub trait Journal {
 
     /// The last [`lc_proto::ACK_DEPTH`] messages each observer has from each sender.
     ///
-    /// Read once, when a shard comes back, to refill the acknowledgement window. Without it the
+    /// Read once, when a shard comes back, to refill the acknowledgment window. Without it the
     /// first reply after a restart acknowledges nothing, which the far end cannot distinguish
     /// from its messages never having arrived.
     fn ack_window(

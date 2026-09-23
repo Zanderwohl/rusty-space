@@ -1,13 +1,13 @@
 //! Where stars come from.
 //!
-//! The shipped game is set in a fictional galaxy; real catalogue data is how the physics gets
-//! validated, not what ships. So star data arrives through a provider, and **a catalogue's own
+//! The shipped game is set in a fictional galaxy; real catalog data is how the physics gets
+//! validated, not what ships. So star data arrives through a provider, and **a catalog's own
 //! numbering never becomes a [`StarId`]** — it survives only as provenance. Both rules are
 //! free now and are data migrations later.
 //!
 //! Its **names** are provenance too, for the same reason and one more: nothing in this game has
 //! a name of its own. A name is something an observer gave a star and may have passed on, and
-//! it lives in [`crate::knowledge`] with a witness on it. That is why [`CatalogueStar`] has no
+//! it lives in [`crate::knowledge`] with a witness on it. That is why [`CatalogStar`] has no
 //! `name` field to reach for — see `lightcone/docs/22-provenance.md`.
 
 use glam::DVec3;
@@ -27,12 +27,12 @@ pub mod hyg;
 /// A synthetic, stable star identifier.
 ///
 /// Hashed from the provider's name and its own key, so it is order-independent: importing the
-/// same catalogue twice, or in a different order, gives the same ids.
+/// same catalog twice, or in a different order, gives the same ids.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StarId(u64);
 
 impl StarId {
-    pub fn synthesise(provider: &str, key: u64) -> Self {
+    pub fn synthesize(provider: &str, key: u64) -> Self {
         let tag = provider.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
             (h ^ b as u64).wrapping_mul(0x100_0000_01b3)
         });
@@ -58,7 +58,7 @@ pub struct Provenance {
     pub source: String,
     /// The source's own row number or designation, for tracing back to it.
     pub key: u64,
-    /// What the catalogue calls it.
+    /// What the catalog calls it.
     ///
     /// **Provenance, not a name.** Nothing in the game has a name of its own: a name is
     /// something an observer gave a star and may have told somebody else, and it lives in
@@ -85,7 +85,7 @@ impl Component {
 
 /// One star as a provider hands it over.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct CatalogueStar {
+pub struct CatalogStar {
     pub id: StarId,
     pub provenance: Provenance,
     /// Ecliptic position in light-years, the frame the simulation uses.
@@ -95,12 +95,12 @@ pub struct CatalogueStar {
     pub star: Star,
     pub luminosity_solar: f64,
     pub mass_solar: f64,
-    /// `[Fe/H]`, synthesised from kinematics; see [`metallicity`].
+    /// `[Fe/H]`, synthesized from kinematics; see [`metallicity`].
     pub metallicity: f64,
     pub component: Component,
 }
 
-impl CatalogueStar {
+impl CatalogStar {
     /// Seed for everything generated about this star. Derived from the id, so generation is
     /// reproducible and independent of load order.
     pub fn seed(&self) -> u64 {
@@ -119,7 +119,7 @@ impl CatalogueStar {
         }
     }
 
-    /// Which way the star itself spins: [`CatalogueStar::system_pole`] tilted a few degrees.
+    /// Which way the star itself spins: [`CatalogStar::system_pole`] tilted a few degrees.
     pub fn spin_axis(&self) -> DVec3 {
         generate::spin_axis_for(self.system_pole(), self.seed())
     }
@@ -127,14 +127,14 @@ impl CatalogueStar {
 
 /// A source of stars.
 ///
-/// World generation never parses a catalogue directly. `HygProvider` is one implementation
+/// World generation never parses a catalog directly. `HygProvider` is one implementation
 /// and an authored galaxy will be another; the trait is what keeps the second from being a
 /// rewrite.
 pub trait StarProvider {
     fn name(&self) -> &str;
-    fn stars(&self) -> &[CatalogueStar];
+    fn stars(&self) -> &[CatalogStar];
 
-    fn get(&self, id: StarId) -> Option<&CatalogueStar> {
+    fn get(&self, id: StarId) -> Option<&CatalogStar> {
         self.stars().iter().find(|s| s.id == id)
     }
 
@@ -153,11 +153,11 @@ pub trait StarProvider {
 /// proven. Also the seed of an authored galaxy.
 pub struct AuthoredStars {
     name: String,
-    stars: Vec<CatalogueStar>,
+    stars: Vec<CatalogStar>,
 }
 
 impl AuthoredStars {
-    pub fn new(name: impl Into<String>, stars: Vec<CatalogueStar>) -> Self {
+    pub fn new(name: impl Into<String>, stars: Vec<CatalogStar>) -> Self {
         Self { name: name.into(), stars }
     }
 
@@ -166,8 +166,8 @@ impl AuthoredStars {
         let make = |key: u64, ly: f64, teff: f64, lum: f64| {
             let l_w = lum * em_spectra::stellar::SOLAR_LUMINOSITY;
             let mass = em_spectra::stellar::main_sequence_mass_solar(lum);
-            CatalogueStar {
-                id: StarId::synthesise("authored", key),
+            CatalogStar {
+                id: StarId::synthesize("authored", key),
                 provenance: Provenance {
                     source: "authored".into(),
                     key,
@@ -195,7 +195,7 @@ impl StarProvider for AuthoredStars {
     fn name(&self) -> &str {
         &self.name
     }
-    fn stars(&self) -> &[CatalogueStar] {
+    fn stars(&self) -> &[CatalogStar] {
         &self.stars
     }
 }
@@ -206,12 +206,12 @@ mod tests {
 
     #[test]
     fn ids_are_stable_and_provider_scoped() {
-        assert_eq!(StarId::synthesise("hyg", 71456), StarId::synthesise("hyg", 71456));
-        assert_ne!(StarId::synthesise("hyg", 71456), StarId::synthesise("hyg", 71457));
-        // The same catalogue key under a different provider is a different star.
-        assert_ne!(StarId::synthesise("hyg", 1), StarId::synthesise("authored", 1));
+        assert_eq!(StarId::synthesize("hyg", 71456), StarId::synthesize("hyg", 71456));
+        assert_ne!(StarId::synthesize("hyg", 71456), StarId::synthesize("hyg", 71457));
+        // The same catalog key under a different provider is a different star.
+        assert_ne!(StarId::synthesize("hyg", 1), StarId::synthesize("authored", 1));
         // And an id is not the key wearing a hat.
-        assert_ne!(StarId::synthesise("hyg", 71456).get(), 71456);
+        assert_ne!(StarId::synthesize("hyg", 71456).get(), 71456);
     }
 
     #[test]
@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(p.name(), "authored");
         let first = p.stars()[0].id;
         assert_eq!(p.get(first).unwrap().id, first);
-        assert!(p.get(StarId::synthesise("nope", 0)).is_none());
+        assert!(p.get(StarId::synthesize("nope", 0)).is_none());
     }
 
     #[test]

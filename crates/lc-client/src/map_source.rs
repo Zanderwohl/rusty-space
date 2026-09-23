@@ -6,7 +6,7 @@
 //! function rather than a second renderer, and a relay or a fleet's shared picture is another
 //! provider.
 //!
-//! The catalogue is test data. Stars come from [`Session::stars`], whatever the session was
+//! The catalog is test data. Stars come from [`Session::stars`], whatever the session was
 //! handed: a CSV today, a shard's answer once the server is authoritative. `local::start`
 //! passes the client's own stars to the server in the box so both place craft alike.
 
@@ -26,8 +26,8 @@ use crate::uplink::Uplink;
 /// How far the map reaches, light-years.
 ///
 /// A fixed sphere: a reach that moved with the zoom would change what exists as well as what
-/// is framed. Twenty-five light-years is 166 stars out of the bundled catalogue's 119 625.
-/// One solar mass. The catalogue states a star's mass in them and
+/// is framed. Twenty-five light-years is 166 stars out of the bundled catalog's 119 625.
+/// One solar mass. The catalog states a star's mass in them and
 /// [`em_map::MapItem::weight`] wants the kilograms a planet's is in.
 const SOLAR_MASS_KG: f64 = 1.988_41e30;
 
@@ -59,7 +59,7 @@ impl Source {
 ///
 /// Both at once because only the provider can say: an [`ItemKey`] is a digest and nothing
 /// reads back out of it. Recovering a star's id afterwards would mean hashing the whole
-/// catalogue every frame.
+/// catalog every frame.
 ///
 /// Not every item has a subject. The reader's own craft has none and is picked through.
 ///
@@ -262,7 +262,7 @@ fn push_drawable(build: &mut Build, body: &lc_world::system::Drawable, labels: &
 /// system the same question — so "about Earth" and the center of the map agree by construction.
 /// `None` between the stars, where there is no system to be held by.
 ///
-/// The star is keyed by its catalogue id and every other body by name, because `drawables_at`
+/// The star is keyed by its catalog id and every other body by name, because `drawables_at`
 /// leaves the star out and [`push_local_system`] puts it back under a key of its own. See
 /// [`key_of`].
 pub fn primary(session: &Session) -> Option<ItemKey> {
@@ -397,7 +397,7 @@ fn push_local_system(build: &mut Build, session: &Session) {
 
 /// Stars this ship has a position for, less the one this system is already drawing.
 ///
-/// **Believed positions, not catalogue positions.** A star is on the map because somebody
+/// **Believed positions, not catalog positions.** A star is on the map because somebody
 /// measured a parallax to it, and it is drawn where that measurement puts it — off by the
 /// error on the measurement, which for a charted distance is a percent of the range. A star
 /// detected but never triangulated has a direction and no place to be, so it is not here; the
@@ -539,7 +539,7 @@ mod tests {
         );
     }
 
-    /// **The primary has to be a key the snapshot holds.** The star is keyed by its catalogue
+    /// **The primary has to be a key the snapshot holds.** The star is keyed by its catalog
     /// id and every other body by name, and a primary keyed the other way is a button that
     /// does nothing at all.
     #[test]

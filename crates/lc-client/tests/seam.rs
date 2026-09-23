@@ -18,10 +18,10 @@ use lc_server::websocket::WebSocketServer;
 /// of the bound is that a broken seam fails rather than hangs.
 const PATIENCE: Duration = Duration::from_secs(5);
 
-/// The sky both ends hold. The authored sample rather than a packed catalogue, because what
+/// The sky both ends hold. The authored sample rather than a packed catalog, because what
 /// matters here is that they hold the *same* one and that a star id means one thing across the
 /// wire — not which stars they are.
-fn a_sky() -> Vec<lc_world::sky::CatalogueStar> {
+fn a_sky() -> Vec<lc_world::sky::CatalogStar> {
     use lc_world::sky::StarProvider;
     lc_world::sky::AuthoredStars::sample().stars().to_vec()
 }
@@ -172,7 +172,7 @@ async fn an_impossible_order_is_answered_too() {
 }
 
 /// A crossing names a **star**, and the server answers with the acceleration it actually flew.
-/// The id is only meaningful because both ends were given the same catalogue.
+/// The id is only meaningful because both ends were given the same catalog.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_crossing_names_a_star_the_server_also_holds() {
     let address = shard(true).await;
