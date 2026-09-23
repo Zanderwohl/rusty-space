@@ -7,8 +7,9 @@
 # does the rest, and surfaces.rs's tests hold it to the graph's output. Paths are under
 # textures/, and each body's seed is its name's.
 #
-# The worlds here are types of planet rather than portraits of these ones: the bundled system
-# has them until something generates surfaces of its own.
+# A rocky world with air -- anything lc_world::climate gives a climate, measured or generated --
+# takes the [rocky] graphs, with the ground graph's parameters bound from that climate. Earth and
+# Mars are two settings of it. A body named under [bodies] still takes its own graph over that.
 #
 # Surfaces are baked on a sphere, so a graph here may use only Color, Noise, Coordinate, Mix,
 # MinMax and Wave; Map, with a palette of any kind; and a passthrough Transform set to Extend.
@@ -21,9 +22,6 @@ Rock = "surfaces/rock.tgraph"
 Weathered = "surfaces/weathered.tgraph"
 Scorched = "surfaces/scorched.tgraph"
 
-[bodies]
-Earth = "worlds/earthlike.tgraph"
-Mars = "worlds/marslike.tgraph"
-
-[clouds]
-Earth = "worlds/earthlike-clouds.tgraph"
+[rocky]
+ground = "worlds/rocky.tgraph"
+clouds = "worlds/earthlike-clouds.tgraph"

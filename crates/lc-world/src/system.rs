@@ -64,6 +64,8 @@ pub struct Drawable {
     /// [`Drawable::surface`] everywhere else. This is what a survey reads per band, and the one
     /// place Venus is allowed to differ from Mars. See [`crate::worlds`].
     pub world: crate::worlds::World,
+    /// What a rocky world with air is painted with. See [`crate::climate`].
+    pub climate: Option<crate::climate::Climate>,
     /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub pole: DVec3,
     /// How long it takes to turn once, seconds. `None` where the arena states no rotation.
@@ -252,6 +254,7 @@ impl LocalSystem {
                     surface,
                     // Keyed by the arena's id, which is what `rings::for_body` is keyed by and
                     // is not always the display name -- see `worlds`.
+                    climate: crate::climate::of(self.sim.name(i), &world, equilibrium_k, &self.sim.info(i).tags),
                     world,
                     pole,
                     spin_s,

@@ -38,6 +38,17 @@ pub struct BodySurfaceUniform {
     pub weather: Vec4,
     /// Each slot's westward drift at the equator, radians; negative before its keyframe.
     pub drift: Vec4,
+    /// `(cover, opacity, 0, 0)`: added to the deck's drive, and what share of its alpha is drawn.
+    /// An opacity above one closes the gaps.
+    pub deck: Vec4,
+    /// Multiplies the deck's gray, linear. White for water cloud.
+    pub deck_tint: Vec4,
+    /// What an atmosphere scatters, as linear display light: the starlight a white surface of
+    /// this body facing the star would send.
+    pub starlight: Vec4,
+    /// See [`crate::atmosphere_material::AtmosphereUniform`]. Zero for a body without air.
+    pub air_gas: Vec4,
+    pub air_haze: Vec4,
 }
 
 impl Default for BodySurfaceUniform {
@@ -52,6 +63,11 @@ impl Default for BodySurfaceUniform {
             exposure: Vec4::new(1.0, 2.5, 0.0, 0.0),
             weather: Vec4::ZERO,
             drift: Vec4::ZERO,
+            deck: Vec4::new(0.0, 1.0, 0.0, 0.0),
+            deck_tint: Vec4::ONE,
+            starlight: Vec4::ZERO,
+            air_gas: Vec4::ZERO,
+            air_haze: Vec4::ZERO,
         }
     }
 }
@@ -101,6 +117,9 @@ pub struct BodySurfaceMaterialPlugin;
 
 impl Plugin for BodySurfaceMaterialPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<BodySurfaceMaterial>::default());
+        app.add_plugins((
+            crate::atmosphere_material::ScatterShaderPlugin,
+            MaterialPlugin::<BodySurfaceMaterial>::default(),
+        ));
     }
 }

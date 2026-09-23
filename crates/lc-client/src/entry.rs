@@ -174,6 +174,8 @@ pub fn parse(args: &[String]) -> Entry {
             .filter(|name| name.eq_ignore_ascii_case("map"))
             .map(|_| crate::ui::ViewMode::Map),
         at_body: after("--at"),
+        wear: after("--wear"),
+        standoff_radii: value(args, "--standoff"),
         station: after("--station"),
         charted: flag("--charted"),
         map_camera: after("--map").and_then(|spec| {

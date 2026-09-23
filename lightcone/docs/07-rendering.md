@@ -508,10 +508,37 @@ the noise underneath them is new. `src/surfaces.rs` is the routing; `src/procedu
 
 **A body can have a world of its own.** One named under `[bodies]` takes that graph in color, and
 its color replaces the class's pattern and palette, baked into six 1024² sRGB faces. One named
-under `[clouds]` has a cloud deck drawn over the surface. The graphs under `textures/worlds/` are
-types of planet — an earthlike, a marslike and an earthlike cloud deck — rather than maps, and the
-bundled system's Earth and Mars wear them until something generates surfaces of its own. The
-clouds are painted on the surface, not a shell above it, and turn with it.
+under `[clouds]` has a cloud deck drawn over the surface. The clouds are painted on the surface,
+not a shell above it, and turn with it.
+
+**Every rocky world with air is one graph.** Earth and Mars used to be two graphs, an earthlike
+and a marslike, and they are really two points on one spectrum. `worlds/rocky.tgraph` is that
+spectrum: its parameters are sea level, ice, life, rust, sand, aridity and dark provinces, and
+the client binds them per body before the bake. What they are bound *to* is
+`lc_world::climate`, which derives them from what the world is — the sea's share of the surface
+from the water's share of the mass (logistic in its logarithm, through Earth's 71 per cent at
+Earth's 2.3e-4), the ice from the surface temperature capped by how much water there is to
+freeze, the green from a temperate sea, the rust from dry ground under air. The generator states
+a planet's water as an `em-sim` tag beside its air and top, so a generated world arrives with all
+of it. Earth, Mars, Venus and Titan are measured instead, for the reason `worlds` measures them.
+
+A parameter is not a share, so the client carries two measured tables — `SEA_LEVELS` and
+`ICE_LEVELS` in `surfaces.rs` — from each parameter to the share of the sphere it covers, and a
+test evaluates the graph over the sphere and several seeds and holds the tables to it. An edit
+to the graph that moves the coastline fails there. The ice's edge is at `|sin latitude| = 1 -
+ice` only on average; a coarse and a fine noise rag it, and high ground holds it further out.
+
+Every world with air wears the same cloud deck, `worlds/earthlike-clouds.tgraph`, and its climate
+says how much of it: a `cover` added to the deck's drive (zero is Earth, a fifth below is the
+scattered wisps of a dry world, one is a deck with no break in it), an `opacity`, and a tint. Mars
+is at `-0.17` and half opacity, which is more than Mars really has; exaggerated a little so the
+wisps show. Venus and Titan are the unbroken decks, pale yellow and orange.
+
+`--wear "<generated planet>"` dresses the body `--at` names in a generated planet's climate, so
+the generator's worlds can be photographed without flying to them; `--standoff <radii>` brings
+the camera in.
+
+![A smattering of generated worlds](../images/rocky-worlds.png)
 
 **A cloud deck evolves.** Its graph is not baked in color. Its weather, the `zonal` layer, is
 baked again every two game days with a new seed, one byte a texel into one of three 1024² slots;
@@ -524,6 +551,28 @@ drawn alone, so the shear never exceeds a period's worth. Keyframes come from co
 so every client draws the same weather. The shader holds the graph's density ramp and cloud
 palette as constants, and `surfaces.rs`'s tests hold those to the graph's own output: an edit to
 that end of the graph fails there rather than silently not showing.
+
+**Air.** A world with a climate has air, drawn as single scattering in two parts: gas, blue as the
+inverse fourth power of the wavelength, and a haze that scatters forward in its own color —
+Mars's dust, which eats blue, Titan's tholins, and thin water haze everywhere else. Both are
+exponential in height, with a scale height exaggerated about twentyfold, so a limb shows at the
+distances a ship sees planets from. `scatter.wgsl` is the integral, shared by two draws:
+
+- the surface, which scatters it over the disc — dimming what leaves the ground, reddening the
+  beam that reaches it, and adding what the air sends the eye — before its own tone map, so the
+  terminator and the limb are one curve;
+- a shell six scale heights up, drawn additively on back faces with no depth write, for the limb
+  against space. Over the disc its back faces are behind the body, which writes depth, so it
+  draws only the limb and needs no test of its own.
+
+Three things here were found by looking. The planet's shadow has to be soft: a hard test lights
+each of a march's samples wholly or not at all, and the terminator came out in bands, one a
+sample. A ray through the body now just keeps descending into air the exponential makes as dense
+as it likes. Air scattered from white starlight was three times too bright against a ground whose
+albedo is its cubemap times its class's, so the air takes the ground's own scale. And single
+scattering loses what the beam gives the sky, so clouds seen through air came out the color of a
+sunset: most of what the air takes from the beam is handed back to the ground, and a share of
+haze's phase is isotropic for the same reason, or a dusty limb reads darker than the ground under it.
 
 Any graph here is sampled on the sphere, so it may use only what means the same thing there:
 Color, Noise, Coordinate, Mix, MinMax and Wave; a Map, whose palette texture-graph bakes on a

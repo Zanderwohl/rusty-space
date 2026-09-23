@@ -5,13 +5,15 @@
 // graph of its own has a color cubemap instead, and may have a cloud deck. Every cubemap is
 // sampled on the body-fixed direction, which is what the mesh's local position already is, so
 // the surface turns with the body and does not swim with the camera. The mesh's +Y is the pole.
-// The cloud deck is lightcone/docs/07-rendering.md's "A cloud deck evolves".
+// The cloud deck is lightcone/docs/07-rendering.md's "A cloud deck evolves", and the air over
+// it that doc's "Air".
 
 #import bevy_pbr::{
     mesh_functions,
     mesh_view_bindings::view,
     view_transformations::position_world_to_clip,
 }
+#import lightcone::scatter::{air_of, crossing, scatter, star_depth, top_of}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -23,6 +25,9 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_normal: vec3<f32>,
     @location(1) local_direction: vec3<f32>,
+    @location(2) world_position: vec3<f32>,
+    @location(3) center: vec3<f32>,
+    @location(4) radius: f32,
 }
 
 struct BodySurfaceUniform {
@@ -43,7 +48,19 @@ struct BodySurfaceUniform {
     weather: vec4<f32>,
     /// Each slot's westward drift at the equator, radians.
     drift: vec4<f32>,
+    /// `(cover, opacity, 0, 0)`: added to the drive, and the share of its alpha drawn.
+    deck: vec4<f32>,
+    /// Multiplies the deck's gray, linear.
+    deck_tint: vec4<f32>,
+    /// Starlight on a white surface facing the star, linear display light.
+    starlight: vec4<f32>,
+    /// scatter.wgsl's `Air`, packed: zero for a body without any.
+    air_gas: vec4<f32>,
+    air_haze: vec4<f32>,
 }
+
+/// Share of what the air scatters out of the beam that reaches the ground anyway.
+const SKYLIGHT: f32 = 0.85;
 
 /// Rec. 709, matching crate::tonemap.
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
@@ -85,14 +102,14 @@ fn deck(dir: vec3<f32>) -> vec4<f32> {
         + w.x * (textureSample(weather_0, pattern_sampler, turned(dir, -d.x)).r - mean)
         + w.y * (textureSample(weather_1, pattern_sampler, turned(dir, -d.y)).r - mean)
         + w.z * (textureSample(weather_2, pattern_sampler, turned(dir, -d.z)).r - mean);
-    let drive = weather + textureSample(climate, pattern_sampler, dir).r;
+    let drive = weather + textureSample(climate, pattern_sampler, dir).r + material.deck.x;
     let density = saturate((drive - DENSITY_FROM) / (DENSITY_TO - DENSITY_FROM));
     let low = density < CLOUD_KNEE;
     let t = select((density - CLOUD_KNEE) / (1.0 - CLOUD_KNEE), density / CLOUD_KNEE, low);
     let alpha = select(mix(CLOUD_ALPHA.y, CLOUD_ALPHA.z, t), mix(CLOUD_ALPHA.x, CLOUD_ALPHA.y, t), low);
     let l = select(mix(CLOUD_L.y, CLOUD_L.z, t), mix(CLOUD_L.x, CLOUD_L.y, t), low);
     // A gray's Oklab lightness is the cube root of its linear value.
-    return vec4<f32>(vec3<f32>(l * l * l), alpha);
+    return vec4<f32>(vec3<f32>(l * l * l) * material.deck_tint.rgb, saturate(alpha * material.deck.y));
 }
 
 @vertex
@@ -105,6 +122,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // The mesh's own position is the body-fixed direction, because it is a unit sphere. So the
     // pattern turns with the body and is a function of nothing else.
     out.local_direction = normalize(vertex.position);
+    out.world_position = world.xyz;
+    out.center = world_from_local[3].xyz;
+    out.radius = length(world_from_local[0].xyz);
     return out;
 }
 
@@ -121,9 +141,33 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Lambert, with a soft terminator. A hard one is a straight line across the disc and reads
     // as a cut rather than as a horizon.
-    let lambert = dot(normalize(in.world_normal), normalize(material.to_star.xyz));
+    let to_star = normalize(material.to_star.xyz);
+    let lambert = dot(normalize(in.world_normal), to_star);
     let lit = smoothstep(-0.12, 0.25, lambert);
-    let light = max(lit, material.to_star.w);
+    var light = vec3<f32>(max(lit, material.to_star.w));
+
+    // The air between the eye and the ground: it reddens the light reaching the ground near
+    // the terminator, dims what leaves it, and adds what it scatters, which is the blue of a
+    // day side and the brightening toward the limb.
+    let air = air_of(material.air_gas, material.air_haze);
+    var scattered = vec3<f32>(0.0);
+    var through = vec3<f32>(1.0);
+    if (air.height > 0.0) {
+        let o = (view.world_position - in.center) / in.radius;
+        let n = normalize(in.world_position - in.center);
+        let ray = n - o;
+        let t1 = length(ray);
+        let d = ray / t1;
+        let t0 = max(crossing(o, d, top_of(air)).x, 0.0);
+        let s = scatter(o, d, t0, t1, to_star, air);
+        // What the air takes from the beam it mostly scatters on down to the ground, which is
+        // why clouds seen from space are white rather than the color of a sunset. Single
+        // scattering alone would lose it.
+        let beam = exp(-star_depth(n, to_star, air, false));
+        light *= beam + (1.0 - beam) * SKYLIGHT;
+        scattered = s.light * material.starlight.rgb;
+        through = s.through;
+    }
 
     // The body's own light, which does not care where the star is. In the optical it is zero
     // and this is the shader it always was; at ten microns it is the whole picture, and a
@@ -133,8 +177,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // of the warm interior out. Mean-preserving about one, so the band the body is seen in
     // moves its pattern about rather than changing how much light it sends.
     let inversion = material.emitted.w;
-    let linear = material.reflected.rgb * albedo * light
-        + material.emitted.rgb * mix(1.0 + inversion, 1.0 - inversion, t);
+    let linear = (material.reflected.rgb * albedo * light
+        + material.emitted.rgb * mix(1.0 + inversion, 1.0 - inversion, t)) * through + scattered;
 
     // The tone map of crate::tonemap, evaluated here rather than per body: the two terms mix
     // differently across the disc and the curve is logarithmic, so one level for the whole

@@ -10,6 +10,7 @@
 
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
+use em_render::atmosphere_material::{AtmosphereMaterial, AtmosphereUniform, TOP_HEIGHTS};
 use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use em_render::render_space::sim_to_render;
 use em_spectra::{Band, PerBand, blackbody};
@@ -45,6 +46,10 @@ const INVERSION: f32 = 0.3;
 /// Which body a resolved sphere stands for.
 #[derive(Component)]
 pub struct ResolvedBody(pub String);
+
+/// The shell a resolved body's air is drawn on, a child of its sphere.
+#[derive(Component)]
+pub struct ResolvedAir(pub Handle<AtmosphereMaterial>);
 
 /// The unit sphere every resolved body shares.
 #[derive(Resource, Default)]
@@ -287,6 +292,17 @@ pub fn emitted_radiance(body: &Drawable) -> PerBand<f32> {
     }))
 }
 
+/// A climate's air, as scatter.wgsl packs it: gas depths and scale height, then the haze's
+/// albedo and depth. Zero without air.
+fn air_of(body: &Drawable) -> (Vec4, Vec4) {
+    let Some(c) = &body.climate else { return (Vec4::ZERO, Vec4::ZERO) };
+    let a = c.air;
+    (
+        Vec3::from_array(a.gas).extend(a.height),
+        Vec3::from_array(a.haze_albedo).extend(a.haze),
+    )
+}
+
 /// What the surface reflects and what it emits, each as linear display light.
 ///
 /// Through the band mapping but *not* through the tone map: the two mix differently across the
@@ -315,6 +331,8 @@ fn uniforms(
     (color, clouds): (f32, f32),
     weather: Option<crate::surfaces::Weather>,
 ) -> BodySurfaceUniform {
+    let (air_gas, air_haze) = air_of(body);
+    let deck = body.climate.map(|c| c.clouds);
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
     BodySurfaceUniform {
@@ -333,6 +351,24 @@ fn uniforms(
         exposure: Vec4::new(tone.surface_reference, tone.surface_stops, 0.0, 0.0),
         weather: weather.map_or(Vec4::ZERO, |w| w.weights),
         drift: weather.map_or(Vec4::ZERO, |w| w.drift),
+        deck: deck.map_or(Vec4::new(0.0, 1.0, 0.0, 0.0), |d| Vec4::new(d.cover, d.opacity, 0.0, 0.0)),
+        deck_tint: deck.map_or(Vec4::ONE, |d| Vec3::from_array(d.tint).extend(1.0)),
+        // The ground's own scale, so the air and the ground keep the ratio they have: the
+        // surface's albedo is its cubemap times its class's, and air scaled by white starlight
+        // came out three times too bright against it.
+        starlight: reflected.extend(0.0),
+        air_gas,
+        air_haze,
+    }
+}
+
+fn air_uniforms(surface: &BodySurfaceUniform) -> AtmosphereUniform {
+    AtmosphereUniform {
+        to_star: surface.to_star,
+        starlight: surface.starlight,
+        exposure: surface.exposure,
+        gas: surface.air_gas,
+        haze: surface.air_haze,
     }
 }
 
@@ -358,6 +394,7 @@ pub fn update_resolved(
     mut resolved: ResMut<Resolved>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
+    mut airs: ResMut<Assets<AtmosphereMaterial>>,
     mut surfaces: ResMut<crate::surfaces::Surfaces>,
     mut images: ResMut<Assets<Image>>,
     mut bakes: ResMut<crate::procedural::Bakes>,
@@ -367,6 +404,7 @@ pub fn update_resolved(
         &mut Transform,
         &MeshMaterial3d<BodySurfaceMaterial>,
         &ResolvedBody,
+        Option<&ResolvedAir>,
     )>,
 ) {
     let rad_per_px = crate::starfield::camera_scale(&camera);
@@ -395,7 +433,7 @@ pub fn update_resolved(
         .collect();
     // Linear searches: only a handful of bodies are ever resolved at once.
     let mut kept: Vec<&str> = Vec::with_capacity(want.len());
-    for (entity, mut transform, material, marker) in placed.iter_mut() {
+    for (entity, mut transform, material, marker, air) in placed.iter_mut() {
         let Some(body) = want.iter().find(|d| d.name == marker.0).copied() else {
             commands.entity(entity).despawn();
             continue;
@@ -404,6 +442,12 @@ pub fn update_resolved(
         *transform = placement(body, eye.at_ly);
         if let Some(mut asset) = materials.get_mut(&material.0) {
             let next = shade(body, &mut surfaces);
+            if let Some(mut shell) = air.and_then(|a| airs.get_mut(&a.0)) {
+                let next = air_uniforms(&next);
+                if shell.uniforms != next {
+                    shell.uniforms = next;
+                }
+            }
             if asset.uniforms != next {
                 asset.uniforms = next;
             }
@@ -415,15 +459,26 @@ pub fn update_resolved(
             .mesh
             .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
             .clone();
-        let own = surfaces.images(&body.name, body.surface, &mut images);
+        let own = surfaces.images(&body.name, body.surface, body.climate, &mut images);
         let uniforms = shade(body, &mut surfaces);
-        commands.spawn((
-            Mesh3d(mesh),
+        let air = air_uniforms(&uniforms);
+        let mut sphere = commands.spawn((
+            Mesh3d(mesh.clone()),
             MeshMaterial3d(materials.add(own.material(uniforms))),
             placement(body, eye.at_ly),
             NoFrustumCulling,
             ResolvedBody(body.name.clone()),
         ));
+        if let Some(climate) = body.climate {
+            let shell = airs.add(AtmosphereMaterial { uniforms: air });
+            sphere.insert(ResolvedAir(shell.clone()));
+            sphere.with_child((
+                Mesh3d(mesh),
+                MeshMaterial3d(shell),
+                Transform::from_scale(Vec3::splat(1.0 + TOP_HEIGHTS * climate.air.height)),
+                NoFrustumCulling,
+            ));
+        }
     }
 }
 
@@ -446,6 +501,7 @@ mod tests {
             rings: None,
             surface: Surface::Rock,
             world: lc_world::worlds::of("test", Surface::Rock, &[]),
+            climate: None,
             pole: DVec3::Z,
             spin_s: None,
             position_ly: at,

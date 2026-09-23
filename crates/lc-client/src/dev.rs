@@ -41,6 +41,12 @@ pub struct DevEntry {
     /// Put the ship beside a body of the local system, by name. There is no action for this and
     /// there never will be; it exists so a thing too small to fly to can be looked at.
     pub at_body: Option<String>,
+    /// How far off `--at` stands, in the body's radii.
+    pub standoff_radii: Option<f64>,
+    /// Dress the `--at` body in the climate of a generated planet, by its name: `--wear "Wolf 359
+    /// c"`. Its surface, clouds and air are derived exactly as that planet's would be; only the
+    /// sphere they are drawn on is borrowed. A generated system is otherwise a crossing away.
+    pub wear: Option<String>,
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
     pub station: Option<String>,
@@ -225,6 +231,48 @@ pub(crate) fn run_dev_actions(
     }
 }
 
+/// The climate a generated planet named `name` has, from the nearest stars whose name it
+/// begins with.
+fn generated_climate(stars: &[lc_world::sky::CatalogueStar], name: &str) -> Option<lc_world::climate::Climate> {
+    stars
+        .iter()
+        .filter(|s| s.provenance.name.as_deref().is_some_and(|n| name.starts_with(n)))
+        .flat_map(lc_world::sky::generate::planets_of)
+        .find(|p| p.name == name)
+        .and_then(|p| {
+            lc_world::climate::derived(
+                p.atmosphere,
+                p.top,
+                p.equilibrium_k,
+                Some(p.water_fraction),
+                lc_world::climate::variety(&p.name),
+            )
+        })
+}
+
+/// See [`DevEntry::wear`]. Every frame, because the bodies are rebuilt every frame; after them
+/// and before anything resolves them.
+pub(crate) fn dress_worn(
+    dev: Res<DevEntry>,
+    game: Res<Game>,
+    mut bodies: ResMut<crate::starfield::Bodies>,
+    mut worn: Local<Option<Option<lc_world::climate::Climate>>>,
+) {
+    let (Some(name), Some(at)) = (&dev.wear, &dev.at_body) else { return };
+    let climate = *worn.get_or_insert_with(|| {
+        let found = generated_climate(&game.stars, name);
+        match &found {
+            Some(c) => info!("wearing {name}: {c:?}"),
+            None => warn!("no generated planet with air is named {name}"),
+        }
+        found
+    });
+    let Some(climate) = climate else { return };
+    if let Some(body) = bodies.drawn.iter_mut().find(|d| &d.name == at) {
+        body.climate = Some(climate);
+    }
+}
+
 /// Stand off from a named body, once its system has loaded.
 pub(crate) fn place_at_body(
     dev: Res<DevEntry>,
@@ -240,7 +288,7 @@ pub(crate) fn place_at_body(
     let Some(body) = bodies.drawn.iter().find(|d| &d.name == want) else { return };
     // Far enough out that the body is a disc rather than a wall. Rings reach a couple of
     // planetary radii, so this has to clear them.
-    let stand_off = body.radius_m * 12.0 / crate::system::M_PER_LY;
+    let stand_off = body.radius_m * dev.standoff_radii.unwrap_or(12.0) / crate::system::M_PER_LY;
     let origin = game.system.as_ref().map(|s| s.origin_ly).unwrap_or_default();
     let from_star = (body.position_ly - origin)
         .normalize_or_zero();

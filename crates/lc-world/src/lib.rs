@@ -10,6 +10,7 @@
 
 pub mod attitude;
 pub mod boost;
+pub mod climate;
 pub mod coast;
 pub mod consort;
 pub mod cost;
