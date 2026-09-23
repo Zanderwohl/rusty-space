@@ -30,7 +30,6 @@ pub const COMMANDS: &[Spec] = &[
         verb: Verb::Help,
         level: Level::PLAYER,
         summary: "what the commands are, or what one of them takes",
-        help: "With no command, every command you may run. With one, how to type it.",
         args: &[ArgSpec {
             name: "command",
             // Text and not a word from the table: the list of choices in a refusal would name
@@ -38,7 +37,7 @@ pub const COMMANDS: &[Spec] = &[
             kind: Kind::Text,
             need: Need::Optional,
             level: Level::PLAYER,
-            help: "the command to explain",
+            help: "a command name",
         }],
     },
     Spec {
@@ -46,9 +45,6 @@ pub const COMMANDS: &[Spec] = &[
         verb: Verb::Teleport,
         level: Level::ADMIN,
         summary: "put a ship on station about a star or a body, without flying there",
-        help: "The ship vanishes where it was and appears on an equatorial orbit of the target. \
-               Each is an event seen at its own light delay: anyone near where it left goes on \
-               seeing it there until that light has passed. The where command prints the ids.",
         args: &[
             ArgSpec {
                 name: "target",
@@ -72,14 +68,14 @@ pub const COMMANDS: &[Spec] = &[
                 kind: Kind::Id,
                 need: Need::Optional,
                 level: Level::ADMIN,
-                help: "the star a body belongs to, needed when nobody has been in its system",
+                help: "the star the body belongs to",
             },
             ArgSpec {
                 name: "ship",
                 kind: Kind::Id,
                 need: Need::Optional,
                 level: Level::SUPERADMIN,
-                help: "somebody else's ship, by its id; your own if not given",
+                help: "the ship to move; default your own",
             },
         ],
     },
@@ -88,14 +84,12 @@ pub const COMMANDS: &[Spec] = &[
         verb: Verb::Where,
         level: Level::DEBUG,
         summary: "the ids of the star your ship is at and of the bodies around it",
-        help: "Bodies are listed by kind, orbit and id, and never by name: a name is what a \
-               crew calls something, and a shard has none to give.",
         args: &[ArgSpec {
             name: "show",
             kind: Kind::Word(&["major", "all"]),
             need: Need::Default("major"),
             level: Level::DEBUG,
-            help: "the bodies a system is usually described by, or every one",
+            help: "which bodies to list",
         }],
     },
     Spec {
@@ -103,7 +97,6 @@ pub const COMMANDS: &[Spec] = &[
         verb: Verb::Grant,
         level: Level::DEBUG,
         summary: "put energy in your own ship",
-        help: "Out of nothing, in modules' worth of storage.",
         args: &[ArgSpec {
             name: "modules",
             kind: Kind::Number(&[
@@ -113,7 +106,7 @@ pub const COMMANDS: &[Spec] = &[
             ]),
             need: Need::Default("1"),
             level: Level::DEBUG,
-            help: "how much",
+            help: "energy, in modules of storage (ME)",
         }],
     },
     Spec {
@@ -121,13 +114,12 @@ pub const COMMANDS: &[Spec] = &[
         verb: Verb::Stage,
         level: Level::DEBUG,
         summary: "put a named scene in the world",
-        help: "Replaces any scene already running, and sets the clock to the scene's rate.",
         args: &[ArgSpec {
             name: "scene",
             kind: Kind::Word(SCENES),
             need: Need::Required,
             level: Level::DEBUG,
-            help: "which",
+            help: "the scene",
         }],
     },
 ];

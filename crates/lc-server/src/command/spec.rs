@@ -20,10 +20,8 @@ pub struct Spec {
     pub verb: Verb,
     /// The least senior level that may run it.
     pub level: Level,
-    /// One line, for the list.
+    /// One line, for the list and under the usage line.
     pub summary: &'static str,
-    /// The rest of the help text, after the usage line.
-    pub help: &'static str,
     pub args: &'static [ArgSpec],
 }
 
@@ -165,7 +163,7 @@ impl Spec {
 
     /// The whole of `help <name>`.
     pub fn help_for(&self, level: Level) -> String {
-        let mut out = format!("{}\n{}", self.usage(level), self.help);
+        let mut out = format!("{}\n{}", self.usage(level), self.summary);
         for arg in self.args_for(level) {
             let _ = write!(out, "\n  {}: {}", arg.name, arg.help);
             if let Some(range) = arg.kind.range_for(level) {
@@ -304,7 +302,7 @@ mod tests {
     ];
 
     const SPEC: Spec =
-        Spec { name: "go", verb: Verb::Teleport, level: Level::PLAYER, summary: "", help: "", args: ARGS };
+        Spec { name: "go", verb: Verb::Teleport, level: Level::PLAYER, summary: "", args: ARGS };
 
     fn bound(line: &str, level: Level) -> Result<Bound, BindError> {
         bind(&SPEC, &parse(line).expect("it parses"), level)
