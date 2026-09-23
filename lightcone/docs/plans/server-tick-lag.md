@@ -11,6 +11,27 @@ profiled. Phase 0 exists so every later phase is judged by a number rather than 
 The tick is 50 ms (`TICK_MS`, 20 Hz). At the design rate one tick is about 438 coordinate
 seconds, so a survey (`SURVEY_DWELL_S` = 60) visits about seven bodies a tick.
 
+## Status
+
+Measured with `a_surveying_shard_is_measured` (`crates/lc-server/src/instruments.rs`): ten craft
+surveying one system for 1,400 ticks, workspace code optimized.
+
+| after | mean tick | ticks over 50 ms | worst |
+|---|---|---|---|
+| Phase 1 only | 269 ms | 1,308 | 3,544 ms, all `fit_orbits` |
+| Phase 2 | 3.0 ms | 0 | 3.5 ms, survey |
+| Phase 6 | 1.15 ms | 0 | 1.6 ms, survey |
+
+Done: 0, 1, 2, 4, 5 (backlog and empty pages), 6, and from 7 `next_due`, the prior off the
+tick, surveyed systems pinned, and indexed star lookups.
+
+Open: 3 (a cheaper fit — off the tick now, so this is throughput and CPU, not lag); from 5,
+refreshing once per subject in `receive` and paging in one pass; from 7, a maintained
+`retained_subjects`; and the pre-existing list at the end.
+
+Taking the checkpoint snapshot costs about 1 ms for ten surveying craft (721 files, 1.2 MB).
+It stays on the tick, so the checkpoint is still the shard at one tick.
+
 ## Phase 0 — Measure the tick
 
 Nothing here fixes anything. It makes the rest checkable.
