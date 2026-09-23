@@ -24,6 +24,8 @@ pub struct Preview {
     pub stored_j: f64,
     /// Stored energy, plus what dismantling returns, less what building costs. Before drain.
     pub available_j: f64,
+    /// What the plan throws away for want of room in storage, joules.
+    pub vented_j: f64,
     pub capacity_after_j: f64,
     /// Dry mass of the draft plus the energy it would end with, before drain.
     pub mass_after_kg: f64,
@@ -39,6 +41,8 @@ pub struct Preview {
     pub planned: Result<(usize, f64), Shortage>,
     /// Why Apply cannot be pressed, when it cannot.
     pub blocked: Option<String>,
+    /// What Apply would cost that the player might not want to pay. Does not stop it.
+    pub warning: Option<String>,
 }
 
 /// What `draft` would take this ship through. `None` for a ship with no fitting.
@@ -47,13 +51,16 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
     let balance = fitting.balance;
     let current = fitting.loadout_at(now_s);
     let stored_j = fitting.stored_j_at(&ship.motion, now_s);
-    let available_j = budget_j(&balance, current, draft, stored_j);
+    let refit = lc_world::refit::Order { from: current, target: draft, stored_j, start_s: now_s }.solve(&balance);
+    // The plan's own account where there is one, since it knows what storage cannot keep. The
+    // arithmetic is only for saying how far short a plan that fails is.
+    let (available_j, vented_j) = match &refit {
+        Ok(refit) => (stored_j - refit.net_j(), refit.vented_j()),
+        Err(_) => (budget_j(&balance, current, draft, stored_j), 0.0),
+    };
     let dry_kg = balance.dry_mass_kg(&draft);
     let mass_after_kg = dry_kg + available_j.max(0.0) / lc_world::fitting::C2;
-
-    let planned = lc_world::refit::Order { from: current, target: draft, stored_j, start_s: now_s }
-        .solve(&balance)
-        .map(|refit| (refit.steps().count(), refit.duration_s()));
+    let planned = refit.map(|refit| (refit.steps().count(), refit.duration_s()));
     let blocked = if !remote {
         Some("no server: refits are the shard's to run".into())
     } else if ship.is_refitting(now_s) {
@@ -67,10 +74,18 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
     } else {
         None
     };
+    // A rounding error's worth of venting is not worth a line.
+    let warning = (vented_j > 1.0e-6 * balance.module_energy_j()).then(|| {
+        format!(
+            "{} has no room in storage and would be thrown away; empty energy storage would keep it",
+            me(vented_j, balance.module_energy_j())
+        )
+    });
     Some(Preview {
         target: draft,
         stored_j,
         available_j,
+        vented_j,
         capacity_after_j: balance.capacity_j(&draft),
         mass_after_kg,
         g_dry: balance.accel_g(&draft, dry_kg),
@@ -80,6 +95,7 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
         drain_after_w: balance.drain_w(&draft),
         planned,
         blocked,
+        warning,
     })
 }
 
@@ -108,7 +124,6 @@ pub fn shortfall(short: Shortage) -> String {
     match short {
         Shortage::Unbuildable => "more modules than slots, or no drone left to build with".into(),
         Shortage::Energy => "not enough energy, even taking apart what is not wanted".into(),
-        Shortage::Capacity => "a dismantling would return more than storage can hold".into(),
         Shortage::NoDrones => "no drones to do the work".into(),
         Shortage::CannotBuild(module) => format!("cannot build {}", module.name()),
         Shortage::CannotDismantle(module) => format!("cannot take apart {}", module.name()),
@@ -270,6 +285,9 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     if let Some(why) = &view.blocked {
         ui.weak(why);
     }
+    if let Some(warning) = &view.warning {
+        ui.colored_label(ui.visuals().warn_fg_color, warning);
+    }
 }
 
 pub fn dev_actions(ui: &mut egui::Ui, game: &Session, out: &mut MessageWriter<Requested>) {
@@ -329,21 +347,24 @@ mod tests {
 
     #[test]
     fn apply_says_why_it_cannot_be_pressed() {
-        let full = Loadout { storage: 5, ..Loadout::STARTING };
-        let view = preview(&ship(), full, true, 0.0).unwrap();
-        assert_eq!(view.blocked, Some(shortfall(Shortage::Capacity)));
+        let unaffordable = Loadout { engines: 40, slots: 60, ..Loadout::STARTING };
+        let view = preview(&ship(), unaffordable, true, 0.0).unwrap();
+        assert_eq!(view.blocked, Some(shortfall(Shortage::Energy)));
         let same = preview(&ship(), Loadout::STARTING, true, 0.0).unwrap();
         assert_eq!(same.blocked.as_deref(), Some("nothing to change"));
         let offline = preview(&ship(), Loadout { engines: 6, ..Loadout::STARTING }, false, 0.0);
         assert!(offline.unwrap().blocked.unwrap().starts_with("no server"));
     }
 
-    /// A full ship cannot take a drone apart, and the panel says so rather than pinning the slider.
+    /// A full ship can take a drone apart, and is warned that the refund has nowhere to go.
     #[test]
-    fn a_full_ship_is_told_why_it_cannot_take_a_drone_apart() {
+    fn a_full_ship_is_warned_that_a_refund_would_be_thrown_away() {
         let fewer = Loadout { drones: 1, ..Loadout::STARTING };
         let view = preview(&ship(), fewer, true, 0.0).unwrap();
-        assert_eq!(view.blocked, Some(shortfall(Shortage::Capacity)));
+        assert_eq!(view.blocked, None);
+        assert!(view.warning.as_deref().unwrap().starts_with("0.95 ME has no room"), "{:?}", view.warning);
+        // Nothing kept, so the energy after is what is stored now.
+        assert!((view.available_j / view.stored_j - 1.0).abs() < 1.0e-12);
 
         let b = Balance::DEFAULT;
         let mut craft = ship();
@@ -352,7 +373,7 @@ mod tests {
             ..craft.fitting().unwrap().account()
         };
         craft.fit(Some(Fitting::from_account(&account, b)));
-        assert_eq!(preview(&craft, fewer, true, 0.0).unwrap().blocked, None);
+        assert_eq!(preview(&craft, fewer, true, 0.0).unwrap().warning, None);
     }
 
     #[test]

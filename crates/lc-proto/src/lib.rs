@@ -831,7 +831,6 @@ pub enum Refusal {
 pub enum Shortfall {
     Unbuildable,
     Energy,
-    Capacity,
     NoDrones,
     CannotBuild(Module),
     CannotDismantle(Module),
@@ -1439,7 +1438,7 @@ mod tests {
             },
             consort(),
             fitted(),
-            Outbound::Refused { ship_id: ShipId(1), reason: Refusal::Short(Shortfall::Capacity) },
+            Outbound::Refused { ship_id: ShipId(1), reason: Refusal::Short(Shortfall::Energy) },
             Outbound::Backlog {
                 messages: vec![Said {
                     event_id: 9,

@@ -162,8 +162,9 @@ one slot. It is greedy:
 1. **Build drones first**, when there is room and energy. Every later step is faster for it.
 2. **Grow the hull** when the target needs more slots than it has.
 3. **Build** the next module when there is a free slot and the energy for it.
-4. Otherwise **dismantle** the next module the target does not want, provided its 95% refund
-   fits in the storage that will remain afterwards. Living and engines go before storage.
+4. Otherwise **dismantle** the next module the target does not want. Living, data and engines
+   go before storage. Whatever of its 95% refund the storage left afterwards has no room for is
+   **thrown away**, as is what a full storage module held; `Refit::vented_j` says how much.
 5. **Shrink the hull** once enough slots are free.
 6. **Dismantle drones last.**
 
@@ -188,7 +189,8 @@ crew's clock would need the motive to evaluate.
 ### Cancel
 
 Completed steps stay. The step in progress is reversed, and whatever of its energy had already
-moved comes back at the 95% dismantling rate. The ship is left in the partial loadout, which may be
+moved comes back at the 95% dismantling rate. A dismantling's refund so far goes back into the
+module, less anything already thrown away, which stays gone. The ship is left in the partial loadout, which may be
 worse than either end, and that is intended.
 
 ### Flying and refitting exclude each other
@@ -296,6 +298,7 @@ when the visuals should follow.
   - **Apply**, disabled *with the reason shown* when it cannot be done or the ship is under way
     ([18-ui-style.md](18-ui-style.md)). The draft survives Apply, so a refused refit leaves the
     sliders where they were; **Cancel** while a refit runs, with progress
+  - a warning, not a refusal, when the plan would throw energy away for want of room in storage
 - **Dev actions panel** (`Panel::DevActions`, key `F5`, `--panel dev`): *+1 ME*, *+10 ME*, *fill
   storage*. Development only, and a shard takes them only from an admin.
 - **Flight panel**: the acceleration buttons offer what the ship is rated for now, not fixed
@@ -348,8 +351,7 @@ As planned, and done in this order.
 - **Transmission** should draw on the same budget; `Order::Transmit` states a power and is free.
 - **Other modules**: weapons, cargo, sensors. The planner's order of priority will need a rule
   for each.
-- **A full ship cannot swap a module.** Taking one apart returns energy storage has no room for,
-  so a full ship asked to trade living space for an engine is refused for capacity. Venting the
-  excess is the obvious answer and is not built.
+- **A full ship throws energy away** when it takes a module apart, rather than being refused.
+  The refit panel warns how much, and a player who cares makes room in storage first.
 - **Holding a station is free**, as it was before energy: `motion::thrust_g` treats the
   milligravities as zero, and so does the cost.

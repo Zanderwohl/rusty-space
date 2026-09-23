@@ -608,7 +608,6 @@ impl From<crate::refit::Shortage> for lc_proto::Shortfall {
         match s {
             Shortage::Unbuildable => Self::Unbuildable,
             Shortage::Energy => Self::Energy,
-            Shortage::Capacity => Self::Capacity,
             Shortage::NoDrones => Self::NoDrones,
             Shortage::CannotBuild(m) => Self::CannotBuild(m.into()),
             Shortage::CannotDismantle(m) => Self::CannotDismantle(m.into()),
@@ -646,7 +645,6 @@ impl From<lc_proto::Shortfall> for crate::refit::Shortage {
         match short {
             Shortfall::Unbuildable => Self::Unbuildable,
             Shortfall::Energy => Self::Energy,
-            Shortfall::Capacity => Self::Capacity,
             Shortfall::NoDrones => Self::NoDrones,
             Shortfall::CannotBuild(m) => Self::CannotBuild(m.into()),
             Shortfall::CannotDismantle(m) => Self::CannotDismantle(m.into()),
