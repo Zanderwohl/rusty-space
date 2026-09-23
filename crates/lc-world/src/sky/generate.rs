@@ -36,6 +36,15 @@ pub struct Planet {
     pub mean_anomaly_deg: f64,
     pub radius_m: f64,
     pub mass_kg: f64,
+    /// How long one turn takes, seconds. What a survey reads off the periodogram of a body's
+    /// own flux, so a generated planet without one is a planet whose rotation can never be
+    /// measured. See `lightcone/docs/25-system-knowledge.md`.
+    pub spin_s: f64,
+    /// How far the spin axis leans from the system's pole, radians. Earth is 0.41 and Uranus
+    /// is 1.71, so the distribution has to allow both.
+    pub obliquity_rad: f64,
+    /// Which way it leans, measured about the system pole, radians.
+    pub spin_node_rad: f64,
 }
 
 /// One star or a barycenter with two, plus everything orbiting it.
@@ -75,6 +84,22 @@ pub fn pole_for(seed: u64) -> DVec3 {
     let r = (1.0 - z * z).max(0.0).sqrt();
     DVec3::new(r * phi.cos(), r * phi.sin(), z)
 }
+
+/// How long a generated body takes to turn once, seconds.
+///
+/// Log-uniform between these, by class. A giant is fast because it kept its accretion angular
+/// momentum -- Jupiter is 9.9 hours and Saturn 10.6 -- and a rocky planet is anywhere from
+/// hours to months, with Venus's 243 days the slow end of what the solar system offers.
+const GIANT_SPIN_S: (f64, f64) = (7.0 * 3600.0, 20.0 * 3600.0);
+const ROCKY_SPIN_S: (f64, f64) = (4.0 * 3600.0, 250.0 * 86_400.0);
+
+/// How far a planet's spin axis leans from its system's pole, radians.
+///
+/// Most lean a little and a few lean absurdly: the solar system has six planets under 30
+/// degrees and Uranus at 98. Drawn as a gaussian with a heavy tail rather than uniformly,
+/// because a system where every planet is on its side would be as wrong as one where none is.
+const TYPICAL_OBLIQUITY_RAD: f64 = 0.35;
+const TUMBLED_CHANCE: f64 = 0.1;
 
 /// How far a star's spin axis can lie from the plane its planets orbit in.
 ///
@@ -186,9 +211,52 @@ fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
                 mean_anomaly_deg: rng::uniform_in(h(6), 0.0, 360.0),
                 radius_m: rung.radius_earths * EARTH_RADIUS,
                 mass_kg: rung.mass_earths * EARTH_MASS,
+                spin_s: spin_of(h(7), rung.rocky),
+                obliquity_rad: obliquity_of(h(8)),
+                spin_node_rad: rng::uniform_in(h(9), 0.0, std::f64::consts::TAU),
             }
         })
         .collect()
+}
+
+/// A planet's rotation, as `em-sim` states one.
+///
+/// The axis is the system's pole leaned by the planet's own obliquity, so a system's planets
+/// mostly spin near their orbital plane and occasionally do not. Built as the quaternion that
+/// carries `+Z` onto that axis, because [`crate::system::pole_of`] reads the axis back out as
+/// `orientation * DVec3::Z` and the two have to agree.
+fn spin_of_planet(system_pole: DVec3, planet: &Planet) -> em_sim::body::BodyRotation {
+    use em_sim::body::{BodyRotation, RotationEpoch};
+    let pole = system_pole.normalize_or(DVec3::Z);
+    let (u, v) = pole.any_orthonormal_pair();
+    let lean = u * planet.spin_node_rad.cos() + v * planet.spin_node_rad.sin();
+    let axis = (pole * planet.obliquity_rad.cos() + lean * planet.obliquity_rad.sin())
+        .normalize_or(pole);
+    let orientation = glam::DQuat::from_rotation_arc(DVec3::Z, axis);
+    // Radians per second. Always positive: which way it turns is the axis's own sign, and an
+    // obliquity past a right angle is what retrograde means here.
+    let rate = std::f64::consts::TAU / planet.spin_s.max(1.0);
+    BodyRotation::spinning(orientation, rate, RotationEpoch::J2000)
+}
+
+/// One turn, seconds, log-uniform inside the class's range.
+///
+/// Log rather than linear, because the range spans three orders of magnitude and a linear draw
+/// would make almost every rocky planet a slow one.
+fn spin_of(h: u64, rocky: bool) -> f64 {
+    let (lo, hi) = if rocky { ROCKY_SPIN_S } else { GIANT_SPIN_S };
+    (rng::uniform_in(h, lo.ln(), hi.ln())).exp()
+}
+
+/// How far this one leans, radians, in `0..=PI`.
+fn obliquity_of(h: u64) -> f64 {
+    let tumbled = rng::uniform(rng::mix(h)) < TUMBLED_CHANCE;
+    let lean = match tumbled {
+        // On its side or retrograde, as Uranus and Venus are.
+        true => rng::uniform_in(h, std::f64::consts::FRAC_PI_2, std::f64::consts::PI),
+        false => (rng::gaussian(h) * TYPICAL_OBLIQUITY_RAD).abs(),
+    };
+    lean.clamp(0.0, std::f64::consts::PI)
 }
 
 /// The belt, Kuiper analogue and Oort cloud every system gets.
@@ -414,7 +482,7 @@ impl GeneratedSystem {
                     None,
                 ),
                 appearance: debug_ball(p.radius_m, (140, 140, 160)),
-                rotation: None,
+                rotation: Some(spin_of_planet(self.pole, p)),
             }));
         }
 
@@ -446,6 +514,66 @@ mod tests {
 
     fn build(system: &GeneratedSystem) -> System {
         System::from_contents(&system.to_universe()).expect("generated system must load")
+    }
+
+    /// **A generated planet with no rotation is one whose spin can never be measured**, which
+    /// is what phase 6 reads off the periodogram of its flux. Every one has a spin now, and the
+    /// axis reads back out the way `system::pole_of` extracts it.
+    #[test]
+    fn every_generated_planet_spins_about_a_readable_axis() {
+        let star = sun_like();
+        let system = system_for(&star);
+        let sim = build(&system);
+        assert!(!system.planets.is_empty(), "nothing to spin");
+
+        let mut leaning = 0;
+        for planet in &system.planets {
+            assert!(planet.spin_s > 3600.0, "{}: {} s is not a rotation", planet.name, planet.spin_s);
+            assert!(planet.spin_s < 300.0 * 86_400.0, "{}: slower than any planet", planet.name);
+            if planet.obliquity_rad > 0.05 {
+                leaning += 1;
+            }
+        }
+        assert!(leaning > 0, "no planet leans at all");
+
+        // The axis em-sim hands back is the one the obliquity describes.
+        for i in sim.indices() {
+            if crate::navigation::Kind::of(&sim.info(i).tags) != crate::navigation::Kind::Planet {
+                continue;
+            }
+            let rotation = sim.rotation(i).expect("a generated planet has a rotation");
+            let axis = crate::system::pole_of(rotation).expect("and a readable axis");
+            let planet = system
+                .planets
+                .iter()
+                .find(|p| p.name == sim.name(i))
+                .expect("every sim planet came from a generated one");
+            let lean = axis.dot(system.pole).clamp(-1.0, 1.0).acos();
+            assert!(
+                (lean - planet.obliquity_rad).abs() < 1.0e-9,
+                "{}: leans {lean} against {}",
+                planet.name,
+                planet.obliquity_rad,
+            );
+        }
+    }
+
+    /// Spins are log-uniform over three orders of magnitude, so a sample has to hold both fast
+    /// and slow ones -- a linear draw would make almost everything slow.
+    #[test]
+    fn generated_spins_span_hours_to_months() {
+        let mut fast = 0;
+        let mut slow = 0;
+        for key in 0..400u64 {
+            if spin_of(rng::hash(&[key, 7]), true) < 12.0 * 3600.0 {
+                fast += 1;
+            }
+            if spin_of(rng::hash(&[key, 7]), true) > 30.0 * 86_400.0 {
+                slow += 1;
+            }
+        }
+        assert!(fast > 20, "only {fast} of 400 turn in under half a day");
+        assert!(slow > 20, "only {slow} of 400 take over a month");
     }
 
     /// Sol's planets are fitted against JPL in the ecliptic of J2000, so its plane is `+Z` and
