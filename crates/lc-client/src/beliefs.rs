@@ -37,6 +37,12 @@ impl Held {
         self.targets.get(&body)
     }
 
+    /// A list made by hand, for a test that needs one without a session behind it.
+    #[cfg(test)]
+    pub(crate) fn from_parts(bodies: Vec<BodyBelief>, targets: HashMap<BodyId, Target>) -> Self {
+        Self { bodies, plane: SystemPlane::Unknown, targets }
+    }
+
     /// The belief held about whatever is at a target, if anything is.
     pub fn at(&self, target: &Target) -> Option<&BodyBelief> {
         self.bodies.iter().find(|b| self.target(b.body) == Some(target))

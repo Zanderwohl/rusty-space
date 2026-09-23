@@ -10,7 +10,7 @@ use bevy_egui::egui;
 use lc_world::knowledge::conclusion::{Kind, SETTLED};
 use lc_world::knowledge::record::{Method, Orientation};
 use lc_world::knowledge::sort::Measured;
-use lc_world::knowledge::{BodyBelief, Placed, SystemPlane};
+use lc_world::knowledge::{BodyBelief, BodyId, Placed, SystemPlane};
 use lc_world::navigation::Target;
 use lc_world::sky::StarId;
 
@@ -39,7 +39,8 @@ pub(crate) fn system(
     uplink: &crate::uplink::Uplink,
     tab: &mut SystemTab,
     show_all: &mut bool,
-    revealed: &mut Option<Target>,
+    picked: &mut Option<BodyId>,
+    revealed: &mut Option<BodyId>,
     out: &mut MessageWriter<Requested>,
 ) {
     let Some(system) = game.system.as_ref() else {
@@ -75,24 +76,27 @@ pub(crate) fn system(
     ui.weak(plane_text(held.plane));
     ui.separator();
 
+    *picked = settle_pick(state.focus.as_ref(), *picked, known, held);
+
     egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
         if known.is_empty() {
             ui.weak("Nothing known here yet. What the telescope finds appears in this list.");
         }
         for belief in known {
             let target = held.target(belief.body).cloned();
-            let picked = target.is_some() && state.focus.as_ref() == target.as_ref();
+            let on = *picked == Some(belief.body);
             ui.horizontal(|ui| {
-                let row = ui.selectable_label(picked, name_of(belief));
+                let row = ui.selectable_label(on, name_of(belief));
                 if row.clicked() {
-                    if let Some(target) = target.clone() {
-                        ask(out, Action::FocusTarget((!picked).then_some(target)));
-                    }
+                    // Off the focus either way: a phantom has no target to put there, and
+                    // leaving the old one would light two rows at once.
+                    ask(out, Action::FocusTarget((!on).then_some(target).flatten()));
+                    *picked = (!on).then_some(belief.body);
                 }
-                // Once, when the focus changes. Every frame would fight the player's own
+                // Once, when the pick changes. Every frame would fight the player's own
                 // scrolling, and never would hide a body picked from anywhere but this list.
-                if picked && revealed.as_ref() != target.as_ref() {
-                    *revealed = target.clone();
+                if on && *revealed != Some(belief.body) {
+                    *revealed = Some(belief.body);
                     row.scroll_to_me(Some(egui::Align::Center));
                 }
                 ui.weak(distance_text(belief));
@@ -137,30 +141,37 @@ pub(crate) fn system(
     });
     ui.separator();
 
+    // A body's detail is its belief, whether or not anything in the arena answers to it.
+    if let Some(belief) = picked.and_then(|body| known.iter().find(|b| b.body == body)) {
+        details(ui, belief, game, system, held.target(belief.body));
+    }
     let Some(target) = state.focus.as_ref() else {
-        ui.label("Pick something to go to.");
+        if picked.is_none() {
+            ui.label("Pick something to go to.");
+        }
         return;
     };
     let Some(entry) = system.inventory().iter().find(|e| &e.target == target) else { return };
 
-    // A body's detail is its belief. A band has none yet, so it reads as it always did; a
-    // *body* with none is one this craft has never detected, and its designation, its orbit
-    // and its range are all the arena's rather than anything anybody measured. Reachable
-    // through a sky pick or `--focus`, so it has to be refused here and not only not offered.
-    match held.at(target) {
-        Some(belief) => details(ui, belief, game, system, target),
-        None if entry.kind == lc_world::navigation::Kind::Band => {
-            ui.heading(&entry.designation);
-            ui.weak(format!(
-                "{} — {} out, {} away",
-                entry.kind.label(),
-                span_m(entry.orbit_radius_m),
-                span(range_to(game, system, target)),
-            ));
-        }
-        None => {
-            ui.heading("Nothing detected here");
-            ui.weak("This craft holds no evidence of a body at this target.");
+    // A band has no belief yet, so it reads as it always did; a *body* with none is one this
+    // craft has never detected, and its designation, its orbit and its range are all the
+    // arena's rather than anything anybody measured. Reachable through a sky pick or
+    // `--focus`, so it has to be refused here and not only not offered.
+    if picked.is_none() {
+        match entry.kind {
+            lc_world::navigation::Kind::Band => {
+                ui.heading(&entry.designation);
+                ui.weak(format!(
+                    "{} — {} out, {} away",
+                    entry.kind.label(),
+                    span_m(entry.orbit_radius_m),
+                    span(range_to(game, system, target)),
+                ));
+            }
+            _ => {
+                ui.heading("Nothing detected here");
+                ui.weak("This craft holds no evidence of a body at this target.");
+            }
         }
     }
 
@@ -188,10 +199,18 @@ fn details(
     belief: &BodyBelief,
     game: &Game,
     system: &lc_world::system::LocalSystem,
-    target: &Target,
+    target: Option<&Target>,
 ) {
     ui.heading(name_of(belief));
-    ui.weak(format!("{} away", span(range_to(game, system, target))));
+    // A body nothing in the arena answers to has no place to measure from, so the range is the
+    // one its own orbit implies: what the crew would say, and all there is to say.
+    match target {
+        Some(target) => ui.weak(format!("{} away", span(range_to(game, system, target)))),
+        None => ui.weak(match believed_range(belief, game, system) {
+            Some(range) => format!("about {} away", span(range)),
+            None => "nowhere in particular".to_string(),
+        }),
+    };
 
     if let Some((period_s, sigma_s)) = belief.period_s {
         ui.label(format!("Year: {}", with_error(period_s / 86_400.0, sigma_s / 86_400.0, "d")));
@@ -221,6 +240,37 @@ fn details(
             ui.weak(note);
         }
     });
+}
+
+/// Which body the list has picked.
+///
+/// The focus is the authority whenever it names something, because a body picked on the map or
+/// in the sky has to light up here too. The panel keeps a pick of its own as well, for a body
+/// only this craft believes in: that has no target to be focused, and a row that cannot be
+/// clicked puts the evidence for it -- the one thing that could ever disprove it -- behind the
+/// click. A pick the list no longer holds is dropped.
+fn settle_pick(
+    focus: Option<&Target>,
+    picked: Option<BodyId>,
+    known: &[BodyBelief],
+    held: &crate::beliefs::Held,
+) -> Option<BodyId> {
+    match focus {
+        Some(target) => known.iter().find(|b| held.target(b.body) == Some(target)).map(|b| b.body),
+        None => picked.filter(|body| known.iter().any(|b| b.body == *body)),
+    }
+}
+
+/// How far off a believed body is, from its own orbit rather than from the arena.
+fn believed_range(
+    belief: &BodyBelief,
+    game: &Game,
+    system: &lc_world::system::LocalSystem,
+) -> Option<f64> {
+    let Placed::Known { offset_au, .. } = belief.position_now else { return None };
+    let star = system.star_position_at(game.coordinate_time_s())?;
+    let at = star + offset_au * (lc_world::navigation::AU / lc_world::system::M_PER_LY);
+    Some(at.distance(game.ship.motion.position_ly))
 }
 
 fn name_of(belief: &BodyBelief) -> String {
@@ -440,5 +490,40 @@ mod tests {
         assert!(known.contains("1.1°"), "{known}");
         assert!(plane_text(SystemPlane::Circle(DVec3::X)).contains("circle"));
         assert!(plane_text(SystemPlane::Unknown).contains("unknown"));
+    }
+
+    /// A body no generator made can still be picked. Its row was unclickable while selection
+    /// went through a truth target it has none of, which put the evidence for it -- the one
+    /// thing that could ever disprove it -- behind a click that did nothing.
+    #[test]
+    fn a_phantom_row_can_be_picked_and_stays_picked() {
+        let star = StarId::synthesise("t", 1);
+        let real = BodyId::of(star, "Aa");
+        let phantom = BodyId::phantom(star, Witness(1), 7);
+        let target = Target::Body("Aa".into());
+        let bodies: Vec<BodyBelief> = [real, phantom]
+            .iter()
+            .map(|id| BodyBelief { body: *id, ..belief(None, None, 0) })
+            .collect();
+        let held = crate::beliefs::Held::from_parts(
+            bodies.clone(),
+            [(real, target.clone())].into_iter().collect(),
+        );
+
+        assert_eq!(settle_pick(None, Some(phantom), &bodies, &held), Some(phantom));
+        // And the focus wins whenever it names one, so a body picked on the map lights up here.
+        assert_eq!(settle_pick(Some(&target), Some(phantom), &bodies, &held), Some(real));
+        // A focus on something that is not a body in this list picks nothing.
+        assert_eq!(settle_pick(Some(&Target::Band(0)), Some(real), &bodies, &held), None);
+    }
+
+    /// A pick the list no longer holds is dropped, or the detail pane would go on describing a
+    /// body that has merged into a real one.
+    #[test]
+    fn a_pick_that_left_the_list_is_dropped() {
+        let star = StarId::synthesise("t", 1);
+        let gone = BodyId::phantom(star, Witness(1), 7);
+        let held = crate::beliefs::Held::from_parts(Vec::new(), Default::default());
+        assert_eq!(settle_pick(None, Some(gone), &[], &held), None);
     }
 }
