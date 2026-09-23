@@ -154,7 +154,7 @@ impl World {
 
     /// Drop systems nothing wants any more.
     ///
-    /// `occupied` is the star of every craft that is in one. The fleet is the record of who is
+    /// `occupied` is every star a craft is in or surveying. The fleet is the record of who is
     /// where; a reference count is not, since a caller holding an `Arc` in a local raises it
     /// just as far.
     ///

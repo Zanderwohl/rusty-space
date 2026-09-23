@@ -301,7 +301,7 @@ impl<J: Journal> Server<J> {
     pub fn load_world(&mut self, world: World) {
         self.world = world;
         // A sky cached from the last world would put this world's craft under the wrong stars.
-        self.instruments.forget_sky();
+        self.instruments.forget_sky(self.world.stars());
     }
 
     /// The fleet, for a caller putting a craft into a system.
@@ -1021,8 +1021,14 @@ impl<J: Journal> Server<J> {
         if self.ticks % u64::from(TICKS_PER_SECOND) == 0 {
             // The fleet is the record of who is in what, so it is what pins a system. Read
             // after placement, or a craft that has just arrived is not counted as being there.
-            let occupied: Vec<lc_world::sky::StarId> =
-                self.fleet.iter().filter_map(|craft| craft.system.as_ref().map(|s| s.star)).collect();
+            // A system under survey is pinned too: past the cap, surveys would otherwise evict
+            // each other's systems every second and rebuild them the next tick.
+            let occupied: Vec<lc_world::sky::StarId> = self
+                .fleet
+                .iter()
+                .filter_map(|craft| craft.system.as_ref().map(|s| s.star))
+                .chain(self.instruments.aboard.values().filter_map(|a| a.observatory.duty.surveying()))
+                .collect();
             self.world.sweep(occupied, now_s);
         }
     }

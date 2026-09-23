@@ -9,7 +9,6 @@
 
 use lc_world::craft::CraftId;
 use lc_world::knowledge::conclusion::{Kind, SETTLED, TRANSITS_TO_SETTLE};
-use lc_world::knowledge::prior::Prior;
 use lc_world::knowledge::record::{Method, Orbit, Orientation};
 use lc_world::knowledge::transit::Candidate;
 use lc_world::knowledge::{BodyId, Conclusion, Subject, Witness};
@@ -116,7 +115,7 @@ impl<J: Journal> Server<J> {
         let luminosity_w = belief.luminosity_w()?;
         let band = belief.band;
         let stars = self.world.stars();
-        let prior = self.instruments.prior.get_or_insert_with(|| Prior::measure(stars.iter()));
+        let prior = self.instruments.prior.get(&stars)?;
         let (mu, mu_fraction) = prior.host_mass(band, luminosity_w)?;
         let luminosity_solar = luminosity_w / em_spectra::stellar::SOLAR_LUMINOSITY;
 

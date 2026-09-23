@@ -328,11 +328,20 @@ impl Knowledge {
     /// Own logs grown enough to read again; nobody else's logs travel. A queue, so asking costs
     /// what is waiting rather than every file held.
     pub fn due(&self) -> Vec<(Subject, Witness)> {
+        self.due_iter().collect()
+    }
+
+    /// The first of [`Knowledge::due`], without finding the rest.
+    pub fn next_due(&self) -> Option<(Subject, Witness)> {
+        self.due_iter().next()
+    }
+
+    fn due_iter(&self) -> impl Iterator<Item = (Subject, Witness)> + '_ {
         let owner = self.owner;
         let full = self.is_full();
         self.unread
             .iter()
-            .filter(|subject| {
+            .filter(move |subject| {
                 let Some(file) = self.files.get(subject) else { return false };
                 let held = file.series.iter().filter(|s| s.witness == owner).map(|s| s.len()).max().unwrap_or(0);
                 let read = file
@@ -345,8 +354,7 @@ impl Knowledge {
                 // A full craft reads whatever it holds: reading is how it makes room.
                 ((full || self.analyzing.contains(subject)) && held > 0) || held + digested >= next
             })
-            .map(|subject| (*subject, owner))
-            .collect()
+            .map(move |subject| (*subject, owner))
     }
 
     /// Unless the subject is retained, the log is consumed if the transit answer is settled, the

@@ -5,6 +5,8 @@
 //! folds into its copy. See `lightcone/docs/24-standing-instruments.md`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, channel};
 
 use lc_proto::{Order, Outbound, Refusal, ShipId};
 use lc_world::craft::CraftId;
@@ -14,6 +16,7 @@ use lc_world::knowledge::survey::Duty;
 use lc_world::knowledge::prior::Prior;
 use lc_world::knowledge::{ENTRIES_PER_REPORT, Knowledge, Mark, Report, Reporting, Subject, Witness};
 use lc_world::motion::LIGHT_US_PER_LY;
+use lc_world::sky::CatalogStar;
 
 use crate::journal::Journal;
 use crate::server::Server;
@@ -61,8 +64,8 @@ pub(crate) struct Instruments {
     pub aboard: HashMap<CraftId, Aboard>,
     /// Built lazily and shared by every craft: a star's output does not depend on who looks.
     sky: Option<Sky>,
-    /// The generator's planet population, which a log is read against. Built lazily.
-    pub(crate) prior: Option<Prior>,
+    /// The generator's planet population, which a log is read against.
+    pub(crate) prior: PriorCell,
     /// Round-robin cursor for [`READS_PER_TICK`].
     reader: Option<CraftId>,
     /// Round-robin cursor for [`FITS_PER_TICK`].
@@ -74,9 +77,47 @@ pub(crate) struct Instruments {
 }
 
 impl Instruments {
-    pub(crate) fn forget_sky(&mut self) {
+    /// Drop what was cached from the last world, and start measuring this one's prior.
+    pub(crate) fn forget_sky(&mut self, stars: Arc<Vec<CatalogStar>>) {
         self.sky = None;
-        self.prior = None;
+        self.prior = PriorCell::measuring(stars);
+    }
+}
+
+/// [`Prior::measure`], run on its own thread from the moment a world is loaded.
+///
+/// Over a full catalog it generates fifteen hundred systems, and it used to do that on the tick
+/// thread at the first log anyone read.
+#[derive(Default)]
+pub(crate) struct PriorCell {
+    held: Option<Prior>,
+    coming: Option<Receiver<Prior>>,
+}
+
+impl PriorCell {
+    fn measuring(stars: Arc<Vec<CatalogStar>>) -> Self {
+        let (send, coming) = channel();
+        std::thread::spawn(move || {
+            let _ = send.send(Prior::measure(stars.iter()));
+        });
+        Self { held: None, coming: Some(coming) }
+    }
+
+    /// The prior, or `None` while it is still being measured; whatever needs it waits a tick.
+    /// Measured here and now if no world was ever loaded, which is where a test runs.
+    ///
+    /// A test waits for it instead, so what a tick does does not depend on how fast a thread is.
+    pub(crate) fn get(&mut self, stars: &[CatalogStar]) -> Option<&Prior> {
+        if self.held.is_none() {
+            match &self.coming {
+                #[cfg(not(test))]
+                Some(coming) => self.held = coming.try_recv().ok(),
+                #[cfg(test)]
+                Some(coming) => self.held = coming.recv().ok(),
+                None => self.held = Some(Prior::measure(stars.iter())),
+            }
+        }
+        self.held.as_ref()
     }
 }
 
@@ -250,14 +291,13 @@ impl<J: Journal> Server<J> {
             if reads == READS_PER_TICK {
                 break;
             }
-            let Some((subject, observer)) =
-                self.instruments.aboard.get(&id).and_then(|a| a.knowledge.due().first().copied())
+            let Some((subject, observer)) = self.instruments.aboard.get(&id).and_then(|a| a.knowledge.next_due())
             else {
                 continue;
             };
             let stars = self.world.stars();
             let instruments = &mut self.instruments;
-            let prior = instruments.prior.get_or_insert_with(|| Prior::measure(stars.iter()));
+            let Some(prior) = instruments.prior.get(&stars) else { return };
             let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
             let settled = aboard
                 .knowledge
