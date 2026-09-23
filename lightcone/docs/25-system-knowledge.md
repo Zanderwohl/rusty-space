@@ -6,8 +6,8 @@ a system reads the generator. This extends the transit search in
 [24-standing-instruments.md](24-standing-instruments.md) from "there is probably a planet" to a
 body with a name, an orbit and a place in a plane that was itself worked out.
 
-Status: **design**, with phases 1, 2, 3 and 4 built, bar one deferred item in 3. Nothing below is built
-except where it says so, and what is carries a mark. Every claim about what exists was checked against the code on
+Status: **design**, with phases 1 to 5 built, bar a deferred item in each of 3 and 5. Nothing
+below is built except where it says so, and what is carries a mark. Every claim about what exists was checked against the code on
 2026-09-22, and the symbols named are real; where a draft of this document guessed wrong, the
 correction is in the text rather than quietly removed, because the wrong guess was usually "that
 already exists" about something that does not.
@@ -26,7 +26,7 @@ already exists" about something that does not.
   `Plane` is now a selector and `Plane::about(system_pole)` yields a `Datum` carrying the
   resolved basis; see phase 1 below for what it changed.
 - Truth already holds a good deal of what the survey below wants to measure. See *What the truth
-  has to hold first*, which lists it against the three things still genuinely absent.
+  has to hold first*, which lists it against what was absent and is now built.
 
 ## The rule, for systems
 
@@ -370,8 +370,8 @@ is already there, and an earlier draft of this section underestimated it badly. 
 `em_spectra::Band` already runs `B, V, R, I, K, ThermalIr, Radio`, and the starfield shader
 already evaluates every one of them and adds a second, thermal blackbody on top
 (`starfield.wgsl:225-230`). So every channel the survey table wants exists and is computed. What
-is actually missing is three things, the fourth having been the star's own pole,
-which phase 1 built:
+was missing is the four below. **All four are now built** — the star's pole in phase 1 and
+the rest in phase 5 — and they are kept here because the reasoning is what a later reader needs:
 
 - **Albedo per band.** There is one geometric albedo per class, and it is collapsed into a single
   `effective_radius_m` — a gray reflector. `effective_radius`' own doc says the consequence: a
@@ -957,13 +957,32 @@ knowledge. Today:
      receiver could reproduce the radius. It is not, and does not need to be — the `Orbit`
      carries the axis itself, so a receiver reads the distance rather than recomputing it. The
      mass would only matter for re-deriving one, which nothing does.
-5. **What a body is, in the truth.** The three still absent, the star's own pole having been
-   phase 1's: reflectance per band, an atmosphere and what shows at the top of it, and rotation
-   for generated bodies. Then the authored Sol table, which lives in `lc-world` beside `rings.rs`,
-   generator rules for everything else, rings for generated planets — `rings::for_body` is keyed
-   on real body names, so today only Sol has any — and moons for generated planets, without which
-   no generated planet has a mass to find. Internal heat, Sol's rotations and body spin axes are
-   already held.
+5. **What a body is, in the truth.** ✅ **Built** (2026-09-22). What it came to:
+
+   - `worlds.rs`, in the shape `rings.rs` established: an authored table of sixteen visited
+     bodies keyed by the arena's id, each with geometric albedo per band, an atmosphere, what is
+     at the top of it, and what it radiates over what it absorbs. Everything unvisited falls
+     back to rules on its class, deliberately duller — a generated planet cannot be a Venus,
+     because nothing about its radius, mass and temperature says it is one.
+   - **What the reflectances are for is the ordering and the color**, as `rings.rs` says of its
+     optical depths. Venus bright and nearly gray, Earth darker and blue, Mars darker still and
+     red: those three statements are what a survey reads, and they are what the tests pin.
+   - Two things the classifier could never have given: radio gets through a deck that stops the
+     infrared, which is how a 737 K surface is found under cloud, and a giant carries its own
+     heat so its temperature does not follow from its distance.
+   - **Rotation** for generated planets: a period log-uniform by class, an obliquity gaussian
+     with a heavy tail — six planets under 30° and Uranus at 98° — and retrograde expressed as
+     an obliquity past a right angle rather than a negative rate.
+   - **Moons**, which is what phase 6 owed the most. A telescope has one route to a planet's
+     mass, a satellite through Kepler's third law, so every giant gets at least one and rocky
+     planets usually none. They sit inside a third of the Hill radius, and **in the planet's
+     equatorial plane** — which makes the obliquity measurable from outside, since the tilt of
+     the moons' orbits is the tilt of the planet.
+   - `Drawable` carries the resolved `World`, so the survey reads it off the body.
+   - **Not done:** rings for generated planets. `rings::for_body` is keyed on real body names,
+     so only Sol has any. Nothing in the survey's done-when needs one — Saturn's rings are
+     Sol's — so it waits rather than being invented.
+
 6. **Surveying a system from inside,** and charts go away. First the local star: a saturation
    ceiling, a bearing to the host regardless, a glare hole sized for planets, and the ship's
    parallax distance to its own sun, without which no mass prior runs. Then the Survey system
