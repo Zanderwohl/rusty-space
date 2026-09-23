@@ -406,7 +406,6 @@ fn resize(mut map: ResMut<Map>, mut images: ResMut<Assets<Image>>) {
 fn survey(
     game: Res<Game>,
     mut ui: ResMut<Ui>,
-    bodies: Res<crate::starfield::Bodies>,
     uplink: Res<crate::uplink::Uplink>,
     eye: Res<crate::hull::Eye>,
     mut map: ResMut<Map>,
@@ -425,7 +424,7 @@ fn survey(
         .map(|system| game.0.knowledge.system_plane(system.star))
         .unwrap_or_default();
     let picture = match ui.map.source {
-        Source::Observed => crate::map_source::observed(&game.0, &bodies, &uplink, eye.at_ly),
+        Source::Observed => crate::map_source::observed(&game.0, &uplink, eye.at_ly),
         #[cfg(feature = "godview")]
         Source::God => crate::map_source::coordinate(&game.0, &uplink, eye.at_ly),
     };
