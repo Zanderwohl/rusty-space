@@ -9,7 +9,7 @@ use std::time::Duration;
 use lc_proto::ClientId;
 use tokio::signal::unix::{SignalKind, signal};
 use lc_server::journal::{Memory, Postgres, Store};
-use lc_server::server::{Server, TICK_MS};
+use lc_server::server::{Server, TICK_MS, TICKS_PER_SECOND};
 use lc_server::ticket::Trusted;
 use lc_server::websocket::WebSocketServer;
 use lc_server::world::World;
@@ -264,6 +264,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Consecutive ticks whose journal write failed, so a store that has gone away is reported
     // rather than repeated twenty times a second.
     let mut failing = 0u32;
+    let mut overruns = lc_server::timing::Overruns::new(
+        Duration::from_millis(TICK_MS as u64),
+        TICKS_PER_SECOND,
+    );
 
     loop {
         tokio::select! {
@@ -290,6 +294,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 failing += 1;
             }
         }
+        if let Some(line) = overruns.note(server.last_tick()) {
+            eprintln!("WARNING: {line}");
+        }
 
         since_save += 1;
         if since_save >= SAVE_EVERY_TICKS
@@ -299,8 +306,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // A failed checkpoint is not a reason to stop the world. It is a reason to say so
             // every time, because a shard that has quietly stopped saving looks exactly like one
             // that is fine.
+            let started = std::time::Instant::now();
             if let Err(why) = checkpoint(client, shard_id, &mut server).await {
                 eprintln!("ERROR: checkpoint failed: {why}");
+            }
+            let took = started.elapsed();
+            if took > Duration::from_millis(TICK_MS as u64) {
+                eprintln!("WARNING: checkpoint held the tick for {:.1} ms", took.as_secs_f64() * 1.0e3);
             }
         }
     }

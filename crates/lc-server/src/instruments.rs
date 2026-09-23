@@ -182,8 +182,11 @@ impl<J: Journal> Server<J> {
             let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
             aboard.observatory.tick(sky, system.as_deref(), &mut aboard.knowledge, at, now_s);
         }
+        self.stages.mark("observe");
         self.read_logs(now_s);
+        self.stages.mark("read_logs");
         self.fit_orbits(now_s);
+        self.stages.mark("fit_orbits");
     }
 
     /// Fit one body's orbit, for one craft, per tick. See [`FITS_PER_TICK`].

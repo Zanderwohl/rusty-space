@@ -148,6 +148,8 @@ pub struct Server<J: Journal> {
     /// a tick became a rate times a constant: at any rate but one, `now_t` is no longer a
     /// clean multiple of anything and "about once a real second" came out as never.
     ticks: u64,
+    /// Where the last tick's real time went. See [`crate::timing`].
+    pub(crate) stages: crate::timing::Stages,
     /// Everything a conversation needs, held here because a `Server` is where state lives and
     /// read only by [`crate::radio`], whose module doc is where the reasoning for all five is.
     ///
@@ -212,6 +214,7 @@ impl<J: Journal> Server<J> {
             library: crate::library::Library::default(),
             director: None,
             ticks: 0,
+            stages: Default::default(),
             balance: lc_world::fitting::Balance::DEFAULT,
             refitting: std::collections::HashSet::new(),
         }
@@ -405,6 +408,7 @@ impl<J: Journal> Server<J> {
     /// One tick. The order is the whole of it.
     pub async fn tick(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         // 1. Advance.
+        self.stages.restart();
         self.ticks += 1;
         self.now_t += self.tick_us();
         let now_s = self.now_t as f64 * 1.0e-6;
@@ -412,10 +416,12 @@ impl<J: Journal> Server<J> {
         // positions *in* a system, and one resolved against the wrong system is a craft in the
         // wrong place.
         self.resync_systems(now_s);
+        self.stages.mark("resync");
         // Nothing moved on the server before this. Reading a worldline never needed it — every
         // motive is a closed form — but the transitions do: a crossing that arrives becomes a
         // station, and a ballistic arc folds the patch it was solved for.
         self.fleet.advance(now_s, self.tick_us() as f64 * 1.0e-6);
+        self.stages.mark("advance");
         // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
         // the range it has already made and this is a comparison until the window moves.
         self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
@@ -436,6 +442,7 @@ impl<J: Journal> Server<J> {
         for budget in self.budgets.values_mut() {
             budget.advance(TICKS_PER_SECOND);
         }
+        self.stages.mark("intents");
         // After motion, so every instrument looks from where its craft now is, and after the
         // intents, so a report composed this tick carries nothing its craft learns in it.
         self.run_instruments();
@@ -450,15 +457,26 @@ impl<J: Journal> Server<J> {
         self.answer_owed(self.now_t - self.tick_us(), &mut events, &mut deliveries);
         self.announce_drives(self.now_t - self.tick_us(), &mut events, &mut deliveries);
         self.keep_accounts(wire);
+        self.stages.mark("scene");
         self.schedule_landings(&events, &deliveries);
         self.land_reports();
+        self.stages.mark("landings");
         self.journal.write(&events, &deliveries).await?;
         self.write_conversations().await?;
+        self.stages.mark("journal");
         self.pending = events;
         self.state_the_clock(wire);
         self.tell_learned(wire);
+        self.stages.mark("tell");
         // 3 and 4. Everything that has arrived since the last tick, through the gate.
-        self.flush(wire).await
+        let flushed = self.flush(wire).await;
+        self.stages.mark("flush");
+        flushed
+    }
+
+    /// Where the last tick's real time went.
+    pub fn last_tick(&self) -> &crate::timing::Stages {
+        &self.stages
     }
 
     fn handle(

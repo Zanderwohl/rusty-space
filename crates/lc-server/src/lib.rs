@@ -32,6 +32,7 @@ pub mod systems;
 #[cfg(test)]
 pub mod testing;
 pub mod ticket;
+pub mod timing;
 pub mod transport;
 pub mod websocket;
 pub mod world;
