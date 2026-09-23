@@ -372,7 +372,7 @@ pub fn colors(
     arriving: &PerBand<f64>,
     exposure_s: f64,
     seed: u64,
-) -> PerBand<Option<f64>> {
+) -> PerBand<Option<(f64, f64)>> {
     arriving.map(|band, flux| {
         if !optics.instrument.sees(band) {
             return None;
@@ -381,8 +381,10 @@ pub fn colors(
         if !(snr.is_finite() && snr >= DETECTION_SNR) {
             return None;
         }
+        // The error goes back with the reading. A digest that folds colours weighs each visit
+        // by how well it was measured, and it cannot do that from the flux alone.
         let sigma = flux * (1.0 / snr).max(PHOTOMETRY_FLOOR);
-        Some(flux + rng::gaussian(rng::hash(&[seed, band.index() as u64])) * sigma)
+        Some((flux + rng::gaussian(rng::hash(&[seed, band.index() as u64])) * sigma, sigma))
     })
 }
 

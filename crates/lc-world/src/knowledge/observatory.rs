@@ -679,7 +679,7 @@ mod tests {
         for name in ["Venus", "Earth", "Mars"] {
             let held = colors(name);
             for band in [em_spectra::Band::B, em_spectra::Band::V, em_spectra::Band::R] {
-                assert!(held.flux_in(band).is_some(), "{name} was not measured in {band:?}");
+                assert!(held.against_reference(band).is_some(), "{name} was not measured in {band:?}");
             }
         }
         // Redness is the R over B ratio, and it is the ordering that matters rather than any

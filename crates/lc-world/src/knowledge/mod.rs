@@ -500,6 +500,19 @@ impl Knowledge {
         self.refresh(subject);
     }
 
+    /// File a digest somebody else folded. One per witness, the one that watched longer
+    /// winning: a digest is not a statement to be corrected but a running total, and the
+    /// longer run is the one with more in it.
+    pub(super) fn absorb_colors(&mut self, subject: Subject, digest: Colors) {
+        let file = self.files.entry(subject).or_default();
+        match file.colors.iter_mut().find(|c| c.witness == digest.witness) {
+            Some(held) if held.spanned_s.1 >= digest.spanned_s.1 => {}
+            Some(held) => *held = digest,
+            None => file.colors.push(digest),
+        }
+        self.refresh(subject);
+    }
+
     /// Fold one visit's per-band fluxes into a body's digest, which is fixed in size however
     /// many visits it has taken. The row itself is never kept.
     pub fn measured_colors(
@@ -507,7 +520,7 @@ impl Knowledge {
         subject: impl Into<Subject>,
         witness: Witness,
         at_s: f64,
-        flux: &em_spectra::PerBand<Option<f64>>,
+        flux: &em_spectra::PerBand<Option<(f64, f64)>>,
     ) {
         let subject = subject.into();
         let file = self.files.entry(subject).or_default();
@@ -1143,6 +1156,45 @@ mod tests {
         assert_eq!(first.entries[0].parts.len(), 4);
     }
 
+    /// **A digest that never leaves the craft is not a digest.** `Colors` was folded, stored
+    /// and read locally and was in no report, so a probe's months of photometry died with it
+    /// and a ship it talked to learned nothing about what colour anything was.
+    #[test]
+    fn a_report_carries_what_a_probe_measured_of_a_body() {
+        use em_spectra::{Band, PerBand};
+
+        let star = star_id(63);
+        let (body, subject) = planet(star, "one");
+        let mut probe = Knowledge::new(Witness(2));
+        probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 0.0));
+
+        let mut row = PerBand::splat(None);
+        row[Band::V] = Some((1.0e-12, 1.0e-15));
+        row[Band::R] = Some((2.0e-12, 2.0e-15));
+        for visit in 0..6 {
+            probe.measured_colors(subject, Witness(2), visit as f64, &row);
+        }
+        let mine = probe.file(subject).unwrap().colors()[0].color(Band::R, Band::V).unwrap();
+
+        let mut ship = Knowledge::new(Witness(1));
+        ship.receive(&probe.report(Mark::default(), 100.0), 200.0);
+
+        let held = ship.file(subject).expect("the body came across").colors();
+        assert_eq!(held.len(), 1, "one digest, on the witness that folded it");
+        assert_eq!(held[0].witness, Witness(2), "and it stays the probe's measurement");
+        assert_eq!(held[0].lineage.len(), 1, "carried one hop");
+        let theirs = held[0].color(Band::R, Band::V).unwrap();
+        assert!((theirs.0 / mine.0 - 1.0).abs() < 1.0e-12, "{theirs:?} against {mine:?}");
+
+        // The belief a panel reads is the one that arrived.
+        let belief = ship.body_belief(star, body, 300.0).expect("a belief about it");
+        assert!(belief.colors.is_some(), "and the digest is what a type hypothesis reads");
+
+        // Absorbed again with nothing new in it, the longer run is kept rather than doubled.
+        ship.receive(&probe.report(Mark::default(), 400.0), 500.0);
+        assert_eq!(ship.file(subject).unwrap().colors().len(), 1);
+    }
+
     /// A receiver reads another craft's planets after its own name for the star.
     #[test]
     fn a_receiver_reads_somebody_else_planets_after_its_own_star_name() {
@@ -1373,6 +1425,7 @@ mod tests {
                     names: vec![Naming { witness: Witness(9), name: "b".into(), kind: NameKind::Relative, stated_s: 1.0, lineage: Vec::new() }],
                     orbits: Vec::new(),
                     conclusions: Vec::new(),
+                    colors: Vec::new(),
                 }],
             }],
         };

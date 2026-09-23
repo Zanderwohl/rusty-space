@@ -634,7 +634,9 @@ mod from_a_file {
                     let band = Band::ALL[i];
                     let reflect = world.reflectance_in(band);
                     (reflect > 0.0).then(|| {
-                        reflect * em_spectra::blackbody::band_radiance(band, star.star.teff_k)
+                        let arriving =
+                            reflect * em_spectra::blackbody::band_radiance(band, star.star.teff_k);
+                        (arriving, arriving * 1.0e-3)
                     })
                 }));
                 colors.fold(visit as f64, &flux);

@@ -265,60 +265,115 @@ impl Method {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Colors {
     pub witness: Witness,
-    /// Per band: how many visits contributed, their mean flux in W/m^2, and the sum of squared
-    /// deviations from it. Welford's, so a mean and a variance accumulate in one pass and
-    /// neither needs the rows back.
+    /// Visits where this band *and* [`Colors::REFERENCE`] were both measured.
     pub visits: PerBand<u32>,
+    /// Weighted mean of this band's flux over the reference band's, in the same visit.
+    ///
+    /// **A ratio, not a flux.** A body is visited from wherever the craft happens to be, so
+    /// the raw flux carries the range and the phase as well as the body: averaging it measured
+    /// the geometry of the visits rather than the surface. Two bands measured in the *same*
+    /// visit share both exactly, so their ratio is free of either -- and a band detected only
+    /// on near visits no longer biases the answer, because every value folded is already a
+    /// colour.
     pub mean: PerBand<f64>,
+    /// Weighted sum of squared deviations, for the spread of that ratio.
     pub scatter: PerBand<f64>,
-    /// Coordinate seconds of the first and last visit folded in.
+    /// Summed weights, per band. Kept because a weighted mean needs them to continue.
+    pub weight: PerBand<f64>,
+    /// Coordinate seconds of the first and last visit that measured something.
     pub spanned_s: (f64, f64),
     pub lineage: Lineage,
 }
 
 impl Colors {
+    /// The band every other is measured against.
+    ///
+    /// One fixed band rather than the brightest, because a running fold cannot change what its
+    /// values mean partway through. V is the middle of the optical run and what an instrument
+    /// is likeliest to have; a visit that did not measure it folds nothing, which is honest --
+    /// a colour needs two bands at once and there is only one.
+    pub const REFERENCE: Band = Band::V;
+
     pub fn new(witness: Witness) -> Self {
         Self {
             witness,
             visits: PerBand::splat(0),
             mean: PerBand::splat(0.0),
             scatter: PerBand::splat(0.0),
+            weight: PerBand::splat(0.0),
             spanned_s: (f64::INFINITY, f64::NEG_INFINITY),
             lineage: Lineage::new(),
         }
     }
 
-    /// Fold one visit in. `flux` is `None` for a band the instrument does not have or could not
-    /// detect the body in, which is not the same as a zero.
-    pub fn fold(&mut self, at_s: f64, flux: &PerBand<Option<f64>>) {
-        for band in Band::ALL {
-            let Some(measured) = flux[band] else { continue };
-            let n = self.visits[band].saturating_add(1);
-            self.visits[band] = n;
-            let step = measured - self.mean[band];
-            self.mean[band] += step / n as f64;
-            // Welford: the second term uses the *updated* mean, which is what keeps this stable
-            // where `sum of squares minus square of sum` cancels away its own digits.
-            self.scatter[band] += step * (measured - self.mean[band]);
+    /// Fold one visit in. Each entry is a flux and its one sigma; `None` for a band the
+    /// instrument does not have or could not detect the body in, which is not a zero.
+    pub fn fold(&mut self, at_s: f64, flux: &PerBand<Option<(f64, f64)>>) {
+        let Some((reference, reference_sigma)) = flux[Self::REFERENCE] else { return };
+        if !(reference.abs() > 0.0) {
+            return;
         }
-        self.spanned_s = (self.spanned_s.0.min(at_s), self.spanned_s.1.max(at_s));
+        let reference_part = reference_sigma / reference;
+        let mut folded = false;
+        for band in Band::ALL {
+            let Some((measured, sigma)) = flux[band] else { continue };
+            if !(measured.abs() > 0.0) {
+                continue;
+            }
+            let ratio = measured / reference;
+            // Both errors, because the reference carries its own into every colour it makes.
+            let part = ((sigma / measured).powi(2) + reference_part.powi(2)).sqrt();
+            let spread = (ratio * part).abs();
+            if !(spread > 0.0) || !spread.is_finite() {
+                continue;
+            }
+            let w = 1.0 / (spread * spread);
+            // Weighted Welford: a far, noisy visit must not weigh the same as a near one, and
+            // with the range divided out that is the only thing left to tell them apart.
+            let total = self.weight[band] + w;
+            let step = ratio - self.mean[band];
+            self.mean[band] += step * w / total;
+            self.scatter[band] += w * step * (ratio - self.mean[band]);
+            self.weight[band] = total;
+            self.visits[band] = self.visits[band].saturating_add(1);
+            folded = true;
+        }
+        // Only a visit that measured something has been spanned. A visit that saw nothing at
+        // all is not evidence and must not stretch the record of when this was watched.
+        if folded {
+            self.spanned_s = (self.spanned_s.0.min(at_s), self.spanned_s.1.max(at_s));
+        }
     }
 
-    /// Mean flux in a band and one sigma on that mean, or `None` where nothing was measured.
-    pub fn flux_in(&self, band: Band) -> Option<(f64, f64)> {
+    /// This band over the reference, and one sigma on that mean, or `None` where nothing was
+    /// measured.
+    pub fn against_reference(&self, band: Band) -> Option<(f64, f64)> {
         let n = self.visits[band];
-        if n == 0 {
+        if n == 0 || !(self.weight[band] > 0.0) {
             return None;
         }
-        // One visit gives a mean and no spread to judge it by, which is honestly nothing.
-        let variance = if n > 1 { self.scatter[band] / (n - 1) as f64 } else { f64::INFINITY };
-        Some((self.mean[band], (variance / n as f64).sqrt()))
+        // One visit gives a mean and no spread to judge it by, so the weight is all there is.
+        let variance = if n > 1 {
+            (self.scatter[band] / self.weight[band]).max(0.0) * n as f64 / (n - 1) as f64
+        } else {
+            0.0
+        };
+        let from_spread = (variance / n as f64).sqrt();
+        Some((self.mean[band], from_spread.max((1.0 / self.weight[band]).sqrt())))
     }
 
-    /// The ratio of two bands' means, and its fractional error: the color, which is what a
-    /// type hypothesis reads and what no single band can say.
+    /// When this digest reached the craft holding it: the newest visit in it, carried forward
+    /// by however many relays it crossed.
+    pub fn learned_s(&self) -> f64 {
+        learned_s(&self.lineage, self.spanned_s.1)
+    }
+
+    /// The colour: this band's flux over that one's, and its fractional error.
+    ///
+    /// What a type hypothesis reads, and what no single band can say. The reference cancels,
+    /// so any pair may be asked for however the digest was folded.
     pub fn color(&self, over: Band, under: Band) -> Option<(f64, f64)> {
-        let ((a, sa), (b, sb)) = (self.flux_in(over)?, self.flux_in(under)?);
+        let ((a, sa), (b, sb)) = (self.against_reference(over)?, self.against_reference(under)?);
         (b.abs() > 0.0 && a.abs() > 0.0).then(|| {
             let ratio = a / b;
             (ratio, ratio.abs() * ((sa / a).powi(2) + (sb / b).powi(2)).sqrt())
@@ -392,5 +447,88 @@ impl Orbit {
             stated_s,
             lineage: Lineage::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod colors_tests {
+    use super::*;
+
+    fn seen(values: &[(Band, f64)], part: f64) -> PerBand<Option<(f64, f64)>> {
+        let mut out = PerBand::splat(None);
+        for (band, flux) in values {
+            out[*band] = Some((*flux, flux * part));
+        }
+        out
+    }
+
+    /// **A digest measures the body, not the visits.** A body visited from four times the
+    /// range returns a sixteenth of the light, and folding raw flux averaged that geometry
+    /// into the answer. Two bands measured in the same visit share the range and the phase
+    /// exactly, so what is folded is their ratio and the distance never enters.
+    #[test]
+    fn range_and_phase_divide_out_of_a_color() {
+        let mut near = Colors::new(Witness(1));
+        let mut far = Colors::new(Witness(1));
+        // One body: twice as bright in R as in V, half as bright in B.
+        for visit in 0..8 {
+            let at = visit as f64;
+            near.fold(at, &seen(&[(Band::B, 0.5), (Band::V, 1.0), (Band::R, 2.0)], 1.0e-3));
+            // The same body from four times as far, at a third of the phase.
+            let dim = 1.0 / 48.0;
+            far.fold(at, &seen(&[(Band::B, 0.5 * dim), (Band::V, dim), (Band::R, 2.0 * dim)], 1.0e-3));
+        }
+        let (a, _) = near.color(Band::R, Band::B).expect("a color");
+        let (b, _) = far.color(Band::R, Band::B).expect("and the same color");
+        assert!((a - 4.0).abs() < 0.01, "R over B is {a}");
+        assert!((a / b - 1.0).abs() < 1.0e-9, "{a} against {b} from four times the range");
+    }
+
+    /// A band detected only on the near visits used to drag the answer with it: its mean was
+    /// of bright readings and the other band's mean included the dim ones. Folding colors
+    /// leaves nothing for that to bias.
+    #[test]
+    fn a_band_seen_only_up_close_does_not_bias_the_rest() {
+        let mut held = Colors::new(Witness(1));
+        for visit in 0..6 {
+            let dim = if visit < 3 { 1.0 } else { 1.0 / 40.0 };
+            // B is only detected on the three near visits; V and R on all six.
+            let mut row = vec![(Band::V, dim), (Band::R, 2.0 * dim)];
+            if visit < 3 {
+                row.push((Band::B, 0.5 * dim));
+            }
+            held.fold(visit as f64, &seen(&row, 1.0e-3));
+        }
+        let (ratio, _) = held.color(Band::R, Band::B).expect("a color from the overlap");
+        assert!((ratio - 4.0).abs() < 0.05, "R over B is {ratio}, and the body's is 4");
+        assert_eq!(held.visits[Band::B], 3);
+        assert_eq!(held.visits[Band::R], 6);
+    }
+
+    /// A visit that measured nothing is not evidence, so it must not stretch the record of
+    /// when the body was watched.
+    #[test]
+    fn a_visit_that_saw_nothing_spans_nothing() {
+        let mut held = Colors::new(Witness(1));
+        held.fold(100.0, &seen(&[(Band::V, 1.0), (Band::R, 2.0)], 1.0e-3));
+        held.fold(900.0, &PerBand::splat(None));
+        // And a visit that missed the reference band has no color in it either.
+        held.fold(950.0, &seen(&[(Band::R, 2.0)], 1.0e-3));
+        assert_eq!(held.spanned_s, (100.0, 100.0));
+        assert_eq!(held.visits[Band::R], 1, "a reading with nothing to compare it against");
+    }
+
+    /// A better-measured visit counts for more, which is what a weighted fold is for: with the
+    /// distance divided out there is nothing else left to tell two visits apart.
+    #[test]
+    fn a_precise_visit_outweighs_a_ragged_one() {
+        let mut held = Colors::new(Witness(1));
+        // One careful reading of the truth, and nine ragged ones a long way off it.
+        held.fold(0.0, &seen(&[(Band::V, 1.0), (Band::R, 2.0)], 1.0e-4));
+        for visit in 1..10 {
+            held.fold(visit as f64, &seen(&[(Band::V, 1.0), (Band::R, 3.0)], 0.5));
+        }
+        let (ratio, _) = held.color(Band::R, Band::V).expect("a color");
+        assert!((ratio - 2.0).abs() < 0.05, "the careful reading should win: {ratio}");
     }
 }
