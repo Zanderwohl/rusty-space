@@ -163,9 +163,6 @@ fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>
             c.evidence.bands.count_ones(),
             c.evidence.completeness * 100.0,
         ));
-        if c.discarded_s.is_some() {
-            ui.weak("  The log behind it has been thrown away; only the conclusion is left.");
-        }
     }
     let mut keep = game.knowledge.retained(id);
     if ui.checkbox(&mut keep, "Keep the raw log").changed() {
@@ -218,27 +215,12 @@ fn duty(
             ));
         }
         Duty::Survey { star, .. } => {
-            // What this craft has found, not what is there: the arena's count is a list of
-            // everything the generator made, and a survey that has detected two bodies must
-            // not report two hundred.
             let here = game.system.as_ref().filter(|s| s.star == *star).is_some();
-            let bodies = match here {
-                true => held.bodies.len(),
-                false => 0,
-            };
             ui.label(format!("Surveying {}", game.name_of(*star)));
-            // How long a body waits for its turn, which is what sets how fast an orbit fills
-            // in. Nothing found yet is worth saying rather than showing a zero.
-            if bodies > 0 {
-                ui.weak(format!(
-                    "{bodies} bodies, {:.0} s each: one comes round every {:.1} hours",
-                    lc_world::knowledge::survey::SURVEY_DWELL_S,
-                    bodies as f64 * lc_world::knowledge::survey::SURVEY_DWELL_S / 3600.0
-                ));
-            } else if here {
-                ui.weak("nothing detected yet");
-            } else {
+            if !here {
                 ui.weak("not in that system");
+            } else if held.bodies.is_empty() {
+                ui.weak("nothing detected yet");
             }
         }
     }
