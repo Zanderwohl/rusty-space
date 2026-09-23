@@ -8,7 +8,8 @@
 //!
 //! Hemispherical reflectance in the five reflected bands, shaped after laboratory spectra (USGS
 //! and ASTER libraries) and read for their shape. Zero in the two emissive bands, where what
-//! leaves a surface is its own heat.
+//! leaves a surface is its own heat, and each ground's emissivity and thermal inertia say how
+//! much, and when.
 
 use em_spectra::{BANDS, Band};
 
@@ -52,12 +53,62 @@ impl Ground {
     pub fn reflectance_in(self, band: Band) -> f32 {
         self.reflectance()[band.index()]
     }
+
+    /// Emissivity in [`Band`] order. Kirchhoff's law where the ground reflects, so what does not
+    /// reflect is what glows; measured values in the two emissive bands.
+    ///
+    /// A cloud's is its opacity instead: what share of the ground's own light it stops. Water
+    /// cloud is opaque at ten microns and transparent at 21 cm, which is how radar and radio see
+    /// through Venus's.
+    pub fn emissivity(self) -> [f32; BANDS] {
+        let (thermal, radio) = match self {
+            Ground::Water => (0.98, 0.45),
+            Ground::Ice => (0.97, 0.9),
+            Ground::Growth => (0.97, 0.9),
+            Ground::Sand => (0.90, 0.9),
+            Ground::Basalt => (0.95, 0.9),
+            Ground::Rust => (0.93, 0.9),
+            Ground::Cloud => (0.95, 0.0),
+        };
+        let r = self.reflectance();
+        std::array::from_fn(|k| match Band::ALL[k] {
+            Band::ThermalIr => thermal,
+            Band::Radio => radio,
+            _ => 1.0 - r[k],
+        })
+    }
+
+    /// Share of a day's swing in temperature the ground damps, `[0, 1]`. The sea's heat capacity
+    /// is why it is as warm at night as by day; dry sand is the other end.
+    pub fn inertia(self) -> f32 {
+        match self {
+            Ground::Water => 0.95,
+            Ground::Ice => 0.6,
+            Ground::Growth => 0.55,
+            Ground::Sand => 0.15,
+            Ground::Basalt => 0.3,
+            Ground::Rust => 0.2,
+            Ground::Cloud => 1.0,
+        }
+    }
 }
 
 /// Bare ground `rust` of the way from basalt to Mars, band by band, as rocky.tgraph mixes them.
 pub fn rock(rust: f32) -> [f32; BANDS] {
-    let (a, b) = (Ground::Basalt.reflectance(), Ground::Rust.reflectance());
-    std::array::from_fn(|k| a[k] + (b[k] - a[k]) * rust.clamp(0.0, 1.0))
+    between(Ground::Basalt.reflectance(), Ground::Rust.reflectance(), rust)
+}
+
+/// [`rock`]'s emissivity and inertia.
+pub fn rock_emissivity(rust: f32) -> [f32; BANDS] {
+    between(Ground::Basalt.emissivity(), Ground::Rust.emissivity(), rust)
+}
+
+pub fn rock_inertia(rust: f32) -> f32 {
+    between([Ground::Basalt.inertia()], [Ground::Rust.inertia()], rust)[0]
+}
+
+fn between<const N: usize>(a: [f32; N], b: [f32; N], t: f32) -> [f32; N] {
+    std::array::from_fn(|k| a[k] + (b[k] - a[k]) * t.clamp(0.0, 1.0))
 }
 
 #[cfg(test)]
@@ -76,6 +127,18 @@ mod tests {
             assert_eq!(r(g, Band::ThermalIr), 0.0);
             assert_eq!(r(g, Band::Radio), 0.0);
         }
+    }
+
+    /// The sea is the one ground that stays warm through the night, and a cloud hides the ground
+    /// at ten microns and not at 21 cm.
+    #[test]
+    fn what_glows_and_when() {
+        assert!(Ground::ALL.iter().all(|g| *g == Ground::Cloud || g.inertia() <= Ground::Water.inertia()));
+        assert!(Ground::Sand.inertia() < Ground::Growth.inertia());
+        let e = |g: Ground, b: Band| g.emissivity()[b.index()];
+        assert!(e(Ground::Cloud, Band::ThermalIr) > 0.9 && e(Ground::Cloud, Band::Radio) == 0.0);
+        assert!(e(Ground::Water, Band::Radio) < e(Ground::Sand, Band::Radio), "the sea is radio-cold");
+        assert!((e(Ground::Water, Band::V) - 0.95).abs() < 1e-6, "Kirchhoff where it reflects");
     }
 
     #[test]

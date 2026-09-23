@@ -43,6 +43,9 @@ pub struct DevEntry {
     pub at_body: Option<String>,
     /// How far off `--at` stands, in the body's radii.
     pub standoff_radii: Option<f64>,
+    /// The angle `--at` stands at between the star and itself, seen from the body, degrees.
+    /// Past ninety it is looking at the night side.
+    pub phase_deg: Option<f64>,
     /// Dress the `--at` body in the climate of a generated planet, by its name: `--wear "Wolf 359
     /// c"`. Its surface, clouds and air are derived exactly as that planet's would be; only the
     /// sphere they are drawn on is borrowed. A generated system is otherwise a crossing away.
@@ -297,7 +300,8 @@ pub(crate) fn place_at_body(
     // Off to the side and a little sunward, so the body shows a terminator. Straight out from
     // the star is the night side, which is a correct view of nothing.
     let across = from_star.cross(DVec3::Z).normalize_or_zero();
-    let offset = (across * 0.9 - from_star * 0.45).normalize_or_zero();
+    let phase = dev.phase_deg.unwrap_or(63.4).to_radians();
+    let offset = (across * phase.sin() - from_star * phase.cos()).normalize_or_zero();
     game.place_at(body.position_ly + offset * stand_off);
     if let Some(look) = crate::ui::Look::aimed_at(-offset) {
         ui.look = look;

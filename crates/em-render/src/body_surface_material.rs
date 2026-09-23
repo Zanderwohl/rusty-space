@@ -55,7 +55,20 @@ pub struct BodySurfaceUniform {
     /// The same through the natural mapping, which is what the color cubemap was painted in.
     /// The color is scaled by the ratio of the two, so in the natural mapping nothing changes.
     pub ground_natural: [Vec4; GROUNDS],
+    /// Per band, what it adds to the display channels from a blackbody at `thermal.x`, and in
+    /// `w` its center wavelength in microns. The shader scales each by the Planck ratio at the
+    /// temperature it works out, so at `thermal.x` with unit emissivity this sums to `emitted`.
+    pub bands: [Vec4; BANDS],
+    /// `(mean temperature K, how far the air evens day and night, 0, on)`. With `on`, the shader
+    /// works out each fragment's own temperature and emission in place of `emitted`.
+    pub thermal: Vec4,
+    /// Each ground's emissivity, two to a ground: `(B, V, R, I)` then `(K, 10um, radio,
+    /// inertia)`, in [`Self::ground`]'s order.
+    pub emissivity: [Vec4; 2 * GROUNDS],
 }
+
+/// em_spectra's band count, which this crate does not depend on for one number.
+pub const BANDS: usize = 7;
 
 /// Kinds of ground a surface mixes: see [`BodySurfaceUniform::ground`].
 pub const GROUNDS: usize = 6;
@@ -79,6 +92,9 @@ impl Default for BodySurfaceUniform {
             air_haze: Vec4::ZERO,
             ground: [Vec4::ONE; GROUNDS],
             ground_natural: [Vec4::ONE; GROUNDS],
+            bands: [Vec4::ZERO; BANDS],
+            thermal: Vec4::ZERO,
+            emissivity: [Vec4::ONE; 2 * GROUNDS],
         }
     }
 }

@@ -101,6 +101,9 @@ pub struct Air {
     pub haze_albedo: [f32; 3],
     /// Scale height as a share of the radius. See the module doc.
     pub height: f32,
+    /// How far the air evens out day and night, `[0, 1]`: carrying heat round to the night side
+    /// and holding it there. Venus's night is as hot as its day; Mars's air does almost nothing.
+    pub evens: f32,
 }
 
 /// Vertical optical depth of an Earth's worth of nitrogen, per channel at 680, 550 and 440 nm:
@@ -271,7 +274,7 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Option<Climate> {
             clouds: Clouds { cover: 1.0, opacity: 1.1, tint },
             // The haze above the deck, not the deck: the deck is the ground here, and a haze
             // as deep as the whole cloud would put out the light before the terminator.
-            air: Air { gas, haze: 0.25 + 0.5 * b, haze_albedo, height: 0.035 },
+            air: Air { gas, haze: 0.25 + 0.5 * b, haze_albedo, height: 0.035, evens: 1.0 },
         });
     }
 
@@ -326,7 +329,13 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Option<Climate> {
         aridity,
         dark,
         clouds,
-        air: Air { gas, haze, haze_albedo, height: if thick { 0.025 } else { 0.018 } },
+        air: Air {
+            gas,
+            haze,
+            haze_albedo,
+            height: if thick { 0.025 } else { 0.018 },
+            evens: if thick { 0.5 } else { 0.05 },
+        },
     })
 }
 
@@ -356,7 +365,7 @@ fn measured(id: &str) -> Option<Climate> {
             aridity: 0.0,
             dark: 0.0,
             clouds: Clouds { cover: 0.0, opacity: 1.0, tint: [1.0; 3] },
-            air: Air { gas: EARTH_GAS, haze: 0.01, haze_albedo: [0.9, 0.9, 0.9], height: 0.025 },
+            air: Air { gas: EARTH_GAS, haze: 0.01, haze_albedo: [0.9, 0.9, 0.9], height: 0.025, evens: 0.5 },
         },
         // Its clouds are water ice, faint and sparse; exaggerated a little so the wisps show.
         "Mars" => Climate {
@@ -374,16 +383,17 @@ fn measured(id: &str) -> Option<Climate> {
                 haze: 0.12,
                 haze_albedo: [0.95, 0.66, 0.42],
                 height: 0.02,
+                evens: 0.05,
             },
         },
         "Venus" => Climate {
             clouds: Clouds { cover: 1.0, opacity: 1.1, tint: [1.0, 0.93, 0.7] },
-            air: Air { gas: EARTH_GAS.map(|g| g * 1.2), haze: 0.35, haze_albedo: [0.98, 0.93, 0.74], height: 0.03 },
+            air: Air { gas: EARTH_GAS.map(|g| g * 1.2), haze: 0.35, haze_albedo: [0.98, 0.93, 0.74], height: 0.03, evens: 1.0 },
             ..derived(&deck(328.0), variety(id))?
         },
         "Titan" => Climate {
             clouds: Clouds { cover: 1.0, opacity: 1.1, tint: [0.68, 0.42, 0.16] },
-            air: Air { gas: [0.0; 3], haze: 1.0, haze_albedo: [0.95, 0.6, 0.26], height: 0.035 },
+            air: Air { gas: [0.0; 3], haze: 1.0, haze_albedo: [0.95, 0.6, 0.26], height: 0.035, evens: 1.0 },
             ..derived(&deck(90.0), variety(id))?
         },
         _ => return None,

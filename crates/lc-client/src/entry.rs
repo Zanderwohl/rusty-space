@@ -176,6 +176,7 @@ pub fn parse(args: &[String]) -> Entry {
         at_body: after("--at"),
         wear: after("--wear"),
         standoff_radii: value(args, "--standoff"),
+        phase_deg: value(args, "--phase"),
         station: after("--station"),
         charted: flag("--charted"),
         map_camera: after("--map").and_then(|spec| {

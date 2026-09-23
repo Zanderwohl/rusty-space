@@ -28,6 +28,8 @@ struct VertexOutput {
     @location(2) world_position: vec3<f32>,
     @location(3) center: vec3<f32>,
     @location(4) radius: f32,
+    /// The spin axis, world.
+    @location(5) pole: vec3<f32>,
 }
 
 struct BodySurfaceUniform {
@@ -61,6 +63,12 @@ struct BodySurfaceUniform {
     /// ice, growth, sand, rock, cloud.
     ground: array<vec4<f32>, 6>,
     ground_natural: array<vec4<f32>, 6>,
+    /// Per band: display light from a blackbody at `thermal.x`, and its center in microns.
+    bands: array<vec4<f32>, 7>,
+    /// `(mean temperature K, how far the air evens day and night, 0, on)`.
+    thermal: vec4<f32>,
+    /// Per ground: `(B, V, R, I)`, then `(K, 10um, radio, inertia)`.
+    emissivity: array<vec4<f32>, 12>,
 }
 
 /// Share of what the air scatters out of the beam that reaches the ground anyway.
@@ -122,6 +130,93 @@ fn deck(dir: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(vec3<f32>(l * l * l) * material.deck_tint.rgb, saturate(alpha * material.deck.y));
 }
 
+/// How much of the texel at `dir` is water, ice, growth, sand and rock, summing to one.
+fn grounds(dir: vec3<f32>) -> array<f32, 5> {
+    let land = textureSample(mask_land, pattern_sampler, dir).r;
+    let ice = textureSample(mask_ice, pattern_sampler, dir).r;
+    let growth = textureSample(mask_growth, pattern_sampler, dir).r;
+    let sand = textureSample(mask_sand, pattern_sampler, dir).r;
+    let ground = land * (1.0 - ice);
+    let dry = ground * (1.0 - growth);
+    return array<f32, 5>((1.0 - land) * (1.0 - ice), ice, ground * growth, dry * sand, dry * (1.0 - sand));
+}
+
+/// Ground `k`'s emissivity in band `b`, or its inertia at `b = 7`.
+fn emissivity_of(k: i32, b: i32) -> f32 {
+    return material.emissivity[2 * k + b / 4][b % 4];
+}
+
+/// Second radiation constant, micron kelvins.
+const C2_UM_K: f32 = 14388.0;
+
+/// `1 - exp(-x)`, which loses everything to rounding at radio's tiny `x`.
+fn one_minus_exp(x: f32) -> f32 {
+    return select(1.0 - exp(-x), x * (1.0 - 0.5 * x), x < 0.01);
+}
+
+/// `B(um, t) / B(um, t0)`, written so neither exponent overflows: the blue end at a hundred
+/// kelvin is `exp(300)`.
+fn planck_ratio(um: f32, t: f32, t0: f32) -> f32 {
+    let x = C2_UM_K / (um * max(t, 1.0));
+    let x0 = C2_UM_K / (um * t0);
+    return exp(clamp(x0 - x, -80.0, 80.0)) * one_minus_exp(x0) / max(one_minus_exp(x), 1.0e-20);
+}
+
+/// `v` turned by `angle` about unit `axis`, right-handed.
+fn about(v: vec3<f32>, axis: vec3<f32>, angle: f32) -> vec3<f32> {
+    let c = cos(angle);
+    let s = sin(angle);
+    return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0 - c);
+}
+
+/// A latitude's mean temperature over a day, from the body's mean: warmer at the equator.
+fn zonal_k(sin_lat: f32) -> f32 {
+    return material.thermal.x * (1.08 - 0.3 * sin_lat * sin_lat);
+}
+
+/// The ground's temperature at world normal `n`, with the damping `damp` its inertia and its
+/// air give it. Undamped it is in balance with the sun overhead and cold at night; damped it is
+/// its latitude's mean all day. The hottest hour comes after noon by as much as it is damped,
+/// east of the point under the star, because the ground is still giving back the morning.
+fn ground_k(n: vec3<f32>, sin_lat: f32, to_star: vec3<f32>, pole: vec3<f32>, damp: f32) -> f32 {
+    let t0 = material.thermal.x;
+    let mean = zonal_k(sin_lat);
+    let sun = about(to_star, pole, 0.8 * damp);
+    // A smooth max rather than a clamp: ground goes on giving back the day's heat after sunset,
+    // for longer the more it holds. Clamped, a dry world's terminator was a ruled line.
+    let c = dot(n, sun);
+    let soft = 0.02 + 0.3 * damp;
+    let day = 4.0 * pow(t0, 4.0) * 0.5 * (c + sqrt(c * c + soft * soft));
+    let night = pow(0.5 * mean, 4.0);
+    return pow(mix(max(day, night), pow(mean, 4.0), damp), 0.25);
+}
+
+/// What the ground and the cloud over it radiate, as display light. A cloud's emissivity is its
+/// opacity, so it hides the ground at ten microns and not at 21 cm, and its tops are cold.
+fn glow(dir: vec3<f32>, n: vec3<f32>, to_star: vec3<f32>, pole: vec3<f32>, cloud: f32) -> vec3<f32> {
+    let w = grounds(dir);
+    var inertia = 0.0;
+    for (var k = 0; k < 5; k++) {
+        inertia += w[k] * emissivity_of(k, 7);
+    }
+    let damp = 1.0 - (1.0 - inertia) * (1.0 - material.thermal.y);
+    let t0 = material.thermal.x;
+    let t_ground = ground_k(n, dir.y, to_star, pole, damp);
+    let t_cloud = 0.8 * zonal_k(dir.y);
+    var out = vec3<f32>(0.0);
+    for (var b = 0; b < 7; b++) {
+        var e = 0.0;
+        for (var k = 0; k < 5; k++) {
+            e += w[k] * emissivity_of(k, b);
+        }
+        let um = material.bands[b].w;
+        let cover = cloud * emissivity_of(CLOUD, b);
+        let radiated = (1.0 - cover) * e * planck_ratio(um, t_ground, t0) + cover * planck_ratio(um, t_cloud, t0);
+        out += material.bands[b].rgb * radiated;
+    }
+    return out;
+}
+
 /// What the current band mapping sees of a color painted in the natural one, where the texel
 /// is the grounds its masks say. rocky.tgraph's own mix: ice over everything, then land over
 /// water, growth over dry ground, sand over rock.
@@ -130,13 +225,7 @@ fn deck(dir: vec3<f32>) -> vec4<f32> {
 /// and in the natural mapping is exactly itself. A channel carrying I rather than red takes the
 /// forest's red edge instead of its red.
 fn banded(dir: vec3<f32>, own: vec3<f32>) -> vec3<f32> {
-    let land = textureSample(mask_land, pattern_sampler, dir).r;
-    let ice = textureSample(mask_ice, pattern_sampler, dir).r;
-    let growth = textureSample(mask_growth, pattern_sampler, dir).r;
-    let sand = textureSample(mask_sand, pattern_sampler, dir).r;
-    let ground = land * (1.0 - ice);
-    let dry = ground * (1.0 - growth);
-    let w = array<f32, 5>((1.0 - land) * (1.0 - ice), ice, ground * growth, dry * sand, dry * (1.0 - sand));
+    let w = grounds(dir);
     var now = vec3<f32>(0.0);
     var natural = vec3<f32>(0.0);
     for (var k = 0; k < 5; k++) {
@@ -159,6 +248,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.world_position = world.xyz;
     out.center = world_from_local[3].xyz;
     out.radius = length(world_from_local[0].xyz);
+    out.pole = normalize((world_from_local * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz);
     return out;
 }
 
@@ -215,8 +305,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // of the warm interior out. Mean-preserving about one, so the band the body is seen in
     // moves its pattern about rather than changing how much light it sends.
     let inversion = material.emitted.w;
-    let linear = (material.reflected.rgb * albedo * light
-        + material.emitted.rgb * mix(1.0 + inversion, 1.0 - inversion, t)) * through + scattered;
+    var emitted = material.emitted.rgb * mix(1.0 + inversion, 1.0 - inversion, t);
+    if (material.thermal.w > 0.5) {
+        emitted = glow(in.local_direction, normalize(in.world_normal), to_star, normalize(in.pole), cloud.a * material.params.z);
+    }
+    let linear = (material.reflected.rgb * albedo * light + emitted) * through + scattered;
 
     // The tone map of crate::tonemap, evaluated here rather than per body: the two terms mix
     // differently across the disc and the curve is logarithmic, so one level for the whole

@@ -579,9 +579,33 @@ for water cloud, which is why clouds go cyan with K on the red channel.
 
 ![Earth, a gold-forested world and Mars through four band mappings](../images/bands.png)
 
-What this does not yet do: the ten-micron term is still one blackbody over the whole disc, so a
-thermal mapping shows a flat disc with no day and night and no sea against land, and the air's
-optical depths are still per display channel, so an infrared mapping keeps a blue limb.
+**Every fragment has its own temperature.** A world with a climate no longer glows as one
+blackbody. Each ground has an emissivity per band — Kirchhoff's `1 - reflectance` where it
+reflects, measured values at ten microns and 21 cm — and a thermal inertia, the share of a day's
+swing it damps: the sea almost all of it, dry sand almost none. The air evens things further by
+the climate's `evens`, all the way for Venus and hardly at all for Mars. The shader works out the
+ground's temperature from the sun over it, blending the instantaneous balance toward its
+latitude's daily mean by that damping. The hottest hour lands after noon, east of the point
+under the star, by as much as the ground is damped, and the day's heat drains away after sunset
+over a width that grows with it. Cloud tops are cold, and a cloud's emissivity is its opacity,
+so it hides the ground at ten microns and not at 21 cm.
+
+Each band then radiates its Planck ratio against the body's mean temperature, weighted by the
+host's table of what that band alone adds to each display channel: at the mean temperature with
+unit emissivity the table sums to exactly the blackbody the host used to send, under every
+mapping, and a test holds it there. The ratio is written so neither exponent overflows, because
+the blue end at a hundred kelvin is `exp(300)`, and so radio's tiny exponent does not round away.
+A world with its own temperatures is metered on its day side: metered at its mean, the day side
+sat three stops over and the disc was one clipped circle.
+
+So the sea and its air keep a world glowing through the night, and a desert goes dark at dusk.
+`--phase <deg>` stands `--at` at that angle between the star and the camera, so the night side
+can be photographed.
+
+![Day and night at ten microns](../images/thermal.png)
+
+What this does not yet do: the air's optical depths are still per display channel, so an
+infrared mapping keeps a blue limb, and a thick atmosphere does not yet radiate from its own top.
 
 **Air.** A world with a climate has air, drawn as single scattering in two parts: gas, blue as the
 inverse fourth power of the wavelength, and a haze that scatters forward in its own color —

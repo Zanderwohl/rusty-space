@@ -11,7 +11,7 @@
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 use em_render::atmosphere_material::{AtmosphereMaterial, AtmosphereUniform, TOP_HEIGHTS};
-use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform, GROUNDS};
+use em_render::body_surface_material::{BANDS, BodySurfaceMaterial, BodySurfaceUniform, GROUNDS};
 use em_render::render_space::sim_to_render;
 use em_spectra::{Band, BandMapping, PerBand, blackbody, presets};
 use glam::DVec3;
@@ -238,8 +238,27 @@ pub fn surface_radiance(
     star_distance_m: f64,
 ) -> PerBand<f32> {
     let reflected = reflected_radiance(body, star_radius_m, star_teff_k, star_distance_m);
-    let emitted = emitted_radiance(body);
+    let emitted = match body.climate {
+        // A world with its own temperatures is metered on its day side, which is what fills
+        // the picture: at its mean the day side sat three stops over at ten microns, one flat
+        // clipped disc.
+        Some(c) => blackbody_at(body.effective_k * day_side(c.air.evens)),
+        None => emitted_radiance(body),
+    };
     PerBand::new(std::array::from_fn(|i| reflected[Band::ALL[i]] + emitted[Band::ALL[i]]))
+}
+
+/// The day hemisphere's mean temperature over the body's mean: the average of `(4 cos z)^(1/4)`
+/// over it, 1.13 where nothing carries heat round and one where the air evens everything.
+fn day_side(evens: f32) -> f64 {
+    1.0 + 0.13 * (1.0 - f64::from(evens))
+}
+
+fn blackbody_at(k: f64) -> PerBand<f32> {
+    if k <= 0.0 {
+        return PerBand::splat(0.0);
+    }
+    PerBand::new(std::array::from_fn(|i| blackbody::band_radiance(Band::ALL[i], k) as f32))
 }
 
 /// The starlight half: `p (R_star / d)^2 B(T_star)`, which has the star's spectrum.
@@ -284,12 +303,7 @@ pub fn lit_radiance(
 /// times what it takes from the Sun, and at ten microns that is the difference between a body
 /// you can see and one you cannot.
 pub fn emitted_radiance(body: &Drawable) -> PerBand<f32> {
-    if body.effective_k <= 0.0 {
-        return PerBand::splat(0.0);
-    }
-    PerBand::new(std::array::from_fn(|i| {
-        blackbody::band_radiance(Band::ALL[i], body.effective_k) as f32
-    }))
+    blackbody_at(body.effective_k)
 }
 
 /// A climate's air, as scatter.wgsl packs it: gas depths and scale height, then the haze's
@@ -344,6 +358,51 @@ fn grounds(mapping: &BandMapping, star: &PerBand<f32>, rust: f32) -> [Vec4; GROU
     })
 }
 
+/// What a surface that knows its grounds is drawn with, in every band.
+#[derive(Clone, Copy)]
+struct Grounds {
+    now: [Vec4; GROUNDS],
+    natural: [Vec4; GROUNDS],
+    bands: [Vec4; BANDS],
+    thermal: Vec4,
+    emissivity: [Vec4; 2 * GROUNDS],
+}
+
+impl Grounds {
+    fn of(mapping: &BandMapping, star: &PerBand<f32>, climate: &lc_world::climate::Climate, mean_k: f64) -> Self {
+        use lc_world::ground::{Ground, rock_emissivity, rock_inertia};
+        let rust = climate.rust;
+        // Each band alone through the mapping, so the shader can weight them one by one.
+        let bands = std::array::from_fn(|b| {
+            let band = Band::ALL[b];
+            let alone = PerBand::new(std::array::from_fn(|i| {
+                if i == b { blackbody::band_radiance(band, mean_k) as f32 } else { 0.0 }
+            }));
+            Vec3::from_array(mapping.apply(&alone)).extend((band.center_m() * 1.0e6) as f32)
+        });
+        let emissivities = [
+            (Ground::Water.emissivity(), Ground::Water.inertia()),
+            (Ground::Ice.emissivity(), Ground::Ice.inertia()),
+            (Ground::Growth.emissivity(), Ground::Growth.inertia()),
+            (Ground::Sand.emissivity(), Ground::Sand.inertia()),
+            (rock_emissivity(rust), rock_inertia(rust)),
+            (Ground::Cloud.emissivity(), Ground::Cloud.inertia()),
+        ];
+        let mut emissivity = [Vec4::ZERO; 2 * GROUNDS];
+        for (k, (e, inertia)) in emissivities.into_iter().enumerate() {
+            emissivity[2 * k] = Vec4::new(e[0], e[1], e[2], e[3]);
+            emissivity[2 * k + 1] = Vec4::new(e[4], e[5], e[6], inertia);
+        }
+        Self {
+            now: grounds(mapping, star, rust),
+            natural: grounds(&presets::natural(), star, rust),
+            bands,
+            thermal: Vec4::new(mean_k as f32, climate.air.evens, 0.0, 1.0),
+            emissivity,
+        }
+    }
+}
+
 fn uniforms(
     body: &Drawable,
     star_ly: DVec3,
@@ -351,12 +410,12 @@ fn uniforms(
     reflected: glam::Vec3,
     emitted: glam::Vec3,
     drawn: crate::surfaces::Drawn,
-    ground: Option<([Vec4; GROUNDS], [Vec4; GROUNDS])>,
+    grounds: Option<Grounds>,
     weather: Option<crate::surfaces::Weather>,
 ) -> BodySurfaceUniform {
     let as_weight = |on: bool| f32::from(u8::from(on));
     let (color, clouds) = (as_weight(drawn.color), as_weight(drawn.clouds));
-    let (ground, ground_natural) = ground.unwrap_or(([Vec4::ONE; GROUNDS], [Vec4::ONE; GROUNDS]));
+    let flat = BodySurfaceUniform::default();
     let (air_gas, air_haze) = air_of(body);
     let deck = body.climate.map(|c| c.clouds);
     let (dark, light, contrast) = body.surface.palette();
@@ -385,8 +444,11 @@ fn uniforms(
         starlight: reflected.extend(0.0),
         air_gas,
         air_haze,
-        ground,
-        ground_natural,
+        ground: grounds.map_or(flat.ground, |g| g.now),
+        ground_natural: grounds.map_or(flat.ground_natural, |g| g.natural),
+        bands: grounds.map_or(flat.bands, |g| g.bands),
+        thermal: grounds.map_or(flat.thermal, |g| g.thermal),
+        emissivity: grounds.map_or(flat.emissivity, |g| g.emissivity),
     }
 }
 
@@ -452,7 +514,7 @@ pub fn update_resolved(
         let drawn = surfaces.drawn(&body.name);
         let ground = body.climate.filter(|_| drawn.grounds).map(|c| {
             let star = lit_radiance(1.0, star_radius, star_teff, star_distance);
-            (grounds(&session.0.mapping, &star, c.rust), grounds(&presets::natural(), &star, c.rust))
+            Grounds::of(&session.0.mapping, &star, &c, body.effective_k)
         });
         let weather = surfaces.weather(&body.name, now_s, body.radius_m, &mut bakes);
         uniforms(body, star_ly, &session.tone, reflected, emitted, drawn, ground, weather)
@@ -559,6 +621,21 @@ mod tests {
         // K on red: snow goes dark.
         let k = grounds(&BandMapping::direct(Band::K, Band::V, Band::B), &star, 0.3);
         assert!(k[1].x < natural[1].x / 4.0, "snow in K: {} against {}", k[1].x, natural[1].x);
+    }
+
+    /// At the mean temperature with unit emissivity the shader's per-band table sums to exactly
+    /// what the host would have sent as `emitted`, in any mapping.
+    #[test]
+    fn the_band_table_sums_to_the_blackbody() {
+        let climate = lc_world::climate::of("Earth", lc_world::worlds::for_body("Earth").unwrap(), 278.0, 5772.0, &[]).unwrap();
+        let star = lit_radiance(1.0, 6.957e8, 5772.0, AU);
+        for (_, mapping) in presets::all() {
+            let g = Grounds::of(&mapping, &star, &climate, 255.0);
+            let sum: Vec3 = g.bands.iter().map(|b| b.truncate()).sum();
+            let blackbody = PerBand::new(std::array::from_fn(|i| blackbody::band_radiance(Band::ALL[i], 255.0) as f32));
+            let want = Vec3::from_array(mapping.apply(&blackbody));
+            assert!((sum - want).abs().max_element() <= want.max_element() * 1e-5, "{sum} against {want}");
+        }
     }
 
     /// A Jupiter-like body at Jupiter's distance, so the numbers mean something.
