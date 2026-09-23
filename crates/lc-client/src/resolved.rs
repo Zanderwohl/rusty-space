@@ -318,6 +318,7 @@ fn uniforms(
     reflected: glam::Vec3,
     emitted: glam::Vec3,
     (color, clouds): (f32, f32),
+    weather: Option<crate::surfaces::Weather>,
 ) -> BodySurfaceUniform {
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
@@ -325,11 +326,18 @@ fn uniforms(
         dark: Vec4::new(dark[0], dark[1], dark[2], 1.0),
         light: Vec4::new(light[0], light[1], light[2], 1.0),
         to_star: to_star.extend(NIGHT),
-        params: Vec4::new(color, contrast, clouds, 0.0),
+        params: Vec4::new(
+            color,
+            contrast,
+            if weather.is_some() { clouds } else { 0.0 },
+            0.0,
+        ),
         reflected: reflected.extend(0.0),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
         emitted: emitted.extend(if body.surface.is_banded() { INVERSION } else { 0.0 }),
         exposure: Vec4::new(tone.surface_reference, tone.surface_stops, 0.0, 0.0),
+        weather: weather.map_or(Vec4::ZERO, |w| w.weights),
+        drift: weather.map_or(Vec4::ZERO, |w| w.drift),
     }
 }
 
@@ -344,6 +352,7 @@ pub fn update_resolved(
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
     mut surfaces: ResMut<crate::surfaces::Surfaces>,
     mut images: ResMut<Assets<Image>>,
+    mut bakes: ResMut<crate::procedural::Bakes>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     existing: Query<(Entity, &ResolvedBody)>,
     mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &ResolvedBody)>,
@@ -358,6 +367,7 @@ pub fn update_resolved(
     };
     let star_ly = system.star_position_ly();
     let (star_radius, star_teff) = (system.star_radius_m(), system.star_teff_k());
+    let now_s = session.0.coordinate_time_s();
 
     let want: Vec<&Drawable> = bodies
         .drawn
@@ -380,14 +390,19 @@ pub fn update_resolved(
                 surface_shading(&session.0, body, star_radius, star_teff, star_distance);
             let drawn = surfaces.drawn(&body.name);
             let own = surfaces.images(&body.name, body.surface, &mut images);
+            let weather = surfaces.weather(&body.name, now_s, body.radius_m, &mut bakes);
+            let uniforms = uniforms(
+                body,
+                star_ly,
+                &session.tone,
+                reflected,
+                emitted,
+                drawn,
+                weather,
+            );
             commands.spawn((
                 Mesh3d(mesh.clone()),
-                MeshMaterial3d(materials.add(BodySurfaceMaterial {
-                    uniforms: uniforms(body, star_ly, &session.tone, reflected, emitted, drawn),
-                    pattern: own.pattern,
-                    color: own.color,
-                    clouds: own.clouds,
-                })),
+                MeshMaterial3d(materials.add(own.material(uniforms))),
                 Transform::default(),
                 NoFrustumCulling,
                 ResolvedBody(index),
@@ -410,7 +425,16 @@ pub fn update_resolved(
             let (reflected, emitted) =
                 surface_shading(&session.0, body, star_radius, star_teff, star_distance);
             let drawn = surfaces.drawn(&body.name);
-            let next = uniforms(body, star_ly, &session.tone, reflected, emitted, drawn);
+            let weather = surfaces.weather(&body.name, now_s, body.radius_m, &mut bakes);
+            let next = uniforms(
+                body,
+                star_ly,
+                &session.tone,
+                reflected,
+                emitted,
+                drawn,
+                weather,
+            );
             if asset.uniforms != next {
                 asset.uniforms = next;
             }

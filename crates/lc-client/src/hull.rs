@@ -316,6 +316,7 @@ fn uniforms(
         // pattern: its two palette ends are the same gray.
         emitted: emitted.extend(0.0),
         exposure: Vec4::new(tone.surface_reference, tone.surface_stops, 0.0, 0.0),
+        ..default()
     }
 }
 
@@ -401,12 +402,9 @@ pub fn update_hulls(
         for index in 0..want.len() {
             commands.spawn((
                 Mesh3d(mesh.clone()),
-                MeshMaterial3d(materials.add(BodySurfaceMaterial {
-                    uniforms: BodySurfaceUniform::default(),
-                    pattern: surfaces.flat.pattern.clone(),
-                    color: surfaces.flat.color.clone(),
-                    clouds: surfaces.flat.clouds.clone(),
-                })),
+                MeshMaterial3d(
+                    materials.add(surfaces.flat.material(BodySurfaceUniform::default())),
+                ),
                 Transform::default(),
                 // The same reason a resolved body carries it: these are placed by hand at a
                 // scale where a mesh's own bounds say nothing useful about where it lands.
