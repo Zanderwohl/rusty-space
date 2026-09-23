@@ -6,6 +6,22 @@ use serde::{Deserialize, Serialize};
 /// Planck's constant times c, for photon energy.
 const HC: f64 = blackbody::H * em_spectra::bands::C;
 
+/// Best relative precision on an *absolute* flux, however many photons arrive.
+///
+/// Photon noise on a bright source falls without limit and is never what stops real
+/// photometry: the flat field, the filter and the gain do, and knowing what a count is worth
+/// in watts is the hardest calibration in the trade. A part in a thousand is better than
+/// absolute spectrophotometry manages today and is what a fleet with a standard-star network
+/// is taken to reach.
+///
+/// Only absolute fluxes. A transit deficit is the star measured against itself, so every one
+/// of those systematics is common to both halves and divides out; `observation::observe` is
+/// photon-limited and says so. Centroiding is floored separately and for its own reasons, by
+/// `astrometry::CENTROID_FLOOR`.
+///
+/// Without this the ship measures its own sun's flux to a part in 1e11.
+pub const PHOTOMETRY_FLOOR: f64 = 1.0e-3;
+
 /// An instrument's band coverage is set by detector physics, not by tier. Silicon's 1.12 eV
 /// bandgap covers B, V, R and I in one device; K needs a cooled narrow-gap detector, 10 um a
 /// cryogenic bolometer, and 21 cm an antenna.

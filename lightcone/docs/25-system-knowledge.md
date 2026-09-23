@@ -164,6 +164,47 @@ fit needs it as a parameter; a moon's orbit measures it. It cannot come from tru
   Inside a system the distance is a parallax against the ship's own motion, short-baseline but
   very close, and `astrometry::triangulate` already computes exactly that from bearings. It is the
   **first** thing a new ship measures, because every other number in the system hangs off it.
+
+  **Two things block that, both found by reading rather than by running.** The plan is right; it
+  does not work on the code as it stands.
+
+  1. **A ship at rest measures nothing, and this one is at rest exactly.** `ShipState::at` is
+     documented "At rest at a point" and sets `beta: DVec3::ZERO` with `Motive::Drifting`;
+     `World::start` hands a new craft a position and nothing else; and `Sky::sources` reads the
+     *catalogue* position for every star, which for the host is the system's origin and never
+     moves. So the baseline is zero forever and so is the parallax.
+
+     That is not a defect to fix. Arriving at rest is a decision already taken and already
+     pinned: `crossing_to_a_star_arrives_in_its_system_at_rest_and_not_in_an_orbit` says
+     "arriving puts the ship in the new system at rest, and choosing an orbit there is a second
+     order", and `Course::Orbit` is that order. Nor is it one to work around — that a ship has
+     to move before it can measure anything is the rule this whole document rests on, and the
+     host star is not an exception to it.
+
+     What is wrong is the word **parked** in the done-when below. A ship holding still 5 AU out
+     can never learn how far away its own sun is, and should not. The scenario has to be a ship
+     **in orbit** at 5 AU, which sweeps 0.7 AU of baseline in three game months; against a
+     centroid floored at `resolution * CENTROID_FLOOR`, 3e-10 rad, that is a distance to about a
+     part in 1e8, and the 1% planet radii the done-when asks for need it.
+
+     An angular diameter was considered as a route that works at rest, and is not one. The
+     disc is 6,244 resolution elements across at 5 AU, so the *diameter* is easy; turning it
+     into a distance needs the star's radius from a main-sequence relation whose scatter is 5 to
+     10%, and 10% on the distance is 10% on every planet radius. It is worth having for its own
+     sake — every planet needs one — but not as a distance to the host.
+  2. **The bearings that are kept are the wrong ones for a host star.** `File::decimate` keeps
+     the `BEARINGS_KEPT` sightings whose *observer positions* are farthest apart, which is right
+     for a star light-years off and wrong for one 5 AU away: a ship going round it keeps bearings
+     spread over the whole orbit, so the kept bearings point over as much as 360°.
+     `astrometry::triangulate` then takes a weighted mean direction `z` and drops every bearing
+     with `toward.dot(z) <= 0.5`. Bearings spread around a circle have a mean direction near
+     zero, so most are dropped and the distance silently returns to `Unknown` — the ship would
+     measure its own sun early, then stop being able to.
+
+     So decimation has to prefer a wide baseline *among bearings that still share a direction*,
+     or triangulate has to solve in windows. This is the same conditioning that
+     `triangulate`'s own doc warns about, approached from the other end: there the parallax was
+     too small to invert, here it is too large for the small-angle frame the solver works in.
 - ~~**A transit `Conclusion` records the host mass it used.**~~ **Dropped in phase 4.** The
   argument was that a receiver could not otherwise turn a relayed period into the same radius the
   sender did. It does not have to: the `Orbit` carries the axis itself, so a receiver reads the
@@ -193,34 +234,83 @@ at 550 nm is 0.06 arcseconds. From 5 AU, Venus is a disc of about 3 arcseconds a
 
 **The duty.** A new duty, **Survey system**, revisits each body it holds about once a game hour,
 every eight ticks or so, and spends the rest of its time sweeping the space around the star for
-new ones, against the star's glare (`survey::glare_radius_rad` and `survey::hidden_by` exist).
+new ones, against the star's glare, which the next subsection settles.
 
-**The local star is in the way, and today it hides the system.** The sweep has no special case for
-the craft's host star: `Sky::sources` iterates the whole catalogue and gives each star a flux of
-`L / 4πd²`, and at `START_OFFSET_AU` — 5 AU, about 7.9e-5 ly — the host's flux is enormous.
-`survey::hidden_by` then drops any source within `glare_radius_rad` of something brighter, which
-is `resolution_rad * (SCATTER * bright / faint).sqrt().max(1.0)` — floored at the resolution, so
-it can only ever widen the blind spot — with `SCATTER` at 1e-3, whose doc says what that comes to:
-"arcseconds around a comparable star, tens of degrees around the local sun."
-Nothing clamps brightness anywhere — `survey::look` has a detection floor at `DETECTION_SNR` and
-no ceiling, and `Instrument::counts_from_flux` is unbounded above.
+**The local star is in the way.** ✅ **Built** (2026-09-22), and the diagnosis it was built from
+was half wrong, so both halves are recorded here.
 
-So a ship inside a system is currently blind across tens of degrees around exactly the point its
-planets orbit. Three things are needed, and they are the first work of the survey duty, not a
-detail of it:
+The sweep has no special case for the craft's host star: `Sky::sources` iterates the whole
+catalogue and gives each star a flux of `L / 4πd²`, and at `START_OFFSET_AU` — 5 AU, about
+7.9e-5 ly — the host's flux is enormous. The old `glare_radius_rad` was
+`resolution_rad * (SCATTER * bright / faint).sqrt().max(1.0)`, a hard disc: one radius for one
+pair, floored at the resolution so it could only ever widen.
 
-- **A saturation ceiling,** so the host star's counts are what a real detector would give rather
-  than an unbounded number that scales the glare radius without limit.
-- **A bearing to the host star regardless.** It is the one source that must always be measurable,
-  because the ship's distance to it is the prior for everything else. A saturated star still gives
-  a centroid; it is its flux that is lost, not its position.
-- **A glare hole sized for planets, not for stars behind them.** The current radius answers "can I
-  see a faint star next to a bright one", where the contrast is astronomical. A planet at 5 AU is
-  far brighter than a background star and much closer in, so the useful exclusion is a small inner
-  radius plus a floor that falls off with separation, not one hard disc.
+What that actually came to, measured rather than assumed:
+
+| what is being looked for, from 5 AU | old blind spot around the sun |
+|---|---|
+| Jupiter, reflecting in V | 0.017° |
+| Saturn | 0.067° |
+| Mars | 0.18° |
+| a Sun-like star 100 ly off | 0.68° |
+| the faintest source the instrument reaches at all | the whole sky |
+
+So **Jupiter was never hidden,** and neither was any other major planet: the radius already had
+the faint source's own brightness in it, and a planet at 5 AU is a billion times brighter than a
+background star. What was hidden was the far end of the catalogue — the faintest stars, out to
+every angle, because `sqrt(bright / faint)` has no bound and nothing clamped brightness anywhere.
+
+That is a defect in the **shape** of the model, not in its scale. A hard disc says a source is
+either seen perfectly or not at all, and says it from a ratio that grows without limit. Replaced
+with the thing the disc was standing in for: **the wings of the bright source's own image**, with
+a surface brightness falling as the cube of the separation, whose integral outward from one
+resolution element is `SCATTER` of the source. Three properties follow, and none of them had to
+be put in by hand:
+
+- **The hole is sized by what is being looked for.** A cube root, so nine orders of contrast cost
+  three of separation. From 5 AU the sun now loses a planet only where the two are one image, and
+  loses the faintest source the instrument reaches — 25 counts, which is `DETECTION_SNR` against
+  its own photons — out to 4.3°. That is the "small inner radius plus a falloff" this section
+  asked for, and it is one expression rather than two rules.
+- **Glare is background, not a veto.** `survey::look` adds the wings of everything brighter to the
+  noise instead of consulting `hidden_by`, so a source beside something bright comes back with a
+  worse bearing and a worse flux, and only disappears once that noise swallows it. `hidden_by`
+  stays, and now answers a different question — *which* source is in the way, for a reader who
+  wants to be told — and is no longer in the measuring path at all.
+- **A bearing to the host star needs no special case.** Nothing outshines it, so its own glare is
+  zero and it is always measured. The rule that would have had to be written down turned out to be
+  a consequence.
+
+One thing the wings could not say, and the hard disc had been covering for. Two sources closer
+together than one resolution element are **one image**, whatever their contrast: the fainter's
+photons land inside the brighter's own image, so there is one measurement to make and not two,
+and no exposure and no contrast separates them. The wings start where that ends, so they say
+nothing about it, and replacing the disc with them alone made the three stars of
+`AuthoredStars::sample` — which sit at *exactly* the same bearing — all separately detectable.
+`survey::blended_with` is that rule on its own, named for what it is rather than folded into
+glare, and `hud::an_unnamed_star_still_gets_a_label` is what caught it.
+
+**The ceiling is on the calibration, not on the well.** A saturation ceiling was asked for here so
+that the host's counts would stop scaling the glare radius. With the wings in place that reason is
+gone — the sun's halo 45° out is a fiftieth of one count — but a ceiling is still right, for a
+better reason: without one the ship measures its own sun's flux to a part in 1e11. What stops real
+photometry is never the photons. It is the flat field, the filter and the gain, and
+`instrument::PHOTOMETRY_FLOOR` is a part in a thousand of an **absolute** flux.
+
+Two floors it is deliberately not:
+
+- **Not on a transit deficit.** A deficit is the star measured against itself, so every one of
+  those systematics is common to both halves and divides out. `observation::observe` stays photon-
+  limited, and differential photometry beating absolute calibration is the whole reason the transit
+  search works at all. Applying the floor there was tried, and it put the swarm in
+  `one_band_cannot_tell_a_swarm_from_dust_and_two_can` — a deficit of 6.9e-6 — under the noise.
+- **Not on a centroid.** Astrometry really does improve with every photon, and has its own floor in
+  `astrometry::CENTROID_FLOOR` for its own reasons: the optics and the pointing, not the gain. So
+  the host's *position* is as good as it ever was while its *brightness* is honest, which is what
+  this section wanted from a saturation ceiling and did not get from one.
 
 Mercury and Venus at inner elongations stay hidden, which is correct and is the same reason they
-are hard from Earth. What is not correct is Jupiter being hidden.
+are hard from Earth.
 
 **What one visit measures,** per body:
 
@@ -991,7 +1081,7 @@ knowledge. Today:
    Only once this
    works does a new ship stop being issued charts, on every path listed under *Nothing on
    creation*, together with the photograph flag that replaces them.
-   **Done when:** a ship parked 5 AU from Sol, surveying for three game months (15 real minutes
+   **Done when:** a ship in orbit 5 AU from Sol, surveying for three game months (15 real minutes
    at the design rate), believes Venus, Earth, Mars, Jupiter and Saturn with periods to 0.1%
    (Saturn's to 1%), radii to 1%, masses to 1% where a moon gives one, the leading type above
    99% and matching the table above, and the system plane to 0.1°. Every one of them has a

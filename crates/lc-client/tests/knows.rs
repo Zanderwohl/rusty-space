@@ -97,7 +97,7 @@ fn a_sweep_finds_stars_the_charts_never_reached() {
         .iter()
         .enumerate()
         .filter(|(_, s)| !session.knowledge.knows(s.id))
-        .filter(|(i, _)| lc_world::knowledge::survey::hidden_by(&sources, *i, optics.resolution_rad(band)).is_some())
+        .filter(|(i, _)| lc_world::knowledge::survey::hidden_by(&optics, band, &sources, *i, lc_world::knowledge::survey::DWELL_S).is_some())
         .count();
     assert!(glared > 0, "of {missed} missed, none was hidden by glare");
 }

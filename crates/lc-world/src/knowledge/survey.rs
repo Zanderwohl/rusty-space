@@ -5,7 +5,7 @@ use em_spectra::{Band, blackbody};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
-use crate::instrument::Instrument;
+use crate::instrument::{Instrument, PHOTOMETRY_FLOOR};
 use crate::knowledge::astrometry::{self, Bearing};
 use crate::knowledge::{Sighting, Witness};
 use crate::rng;
@@ -14,10 +14,13 @@ use crate::star::Star;
 
 pub const DETECTION_SNR: f64 = 5.0;
 
-/// Fraction of a source's light that optics spread into a halo rather than its own image.
+/// Fraction of a source's light the optics spread into wings rather than into its own image.
 ///
-/// A faint star is lost within `resolution * sqrt(SCATTER * ratio)` of a brighter one:
-/// arcseconds around a comparable star, tens of degrees around the local sun.
+/// The wings fall as the cube of the separation, near what is measured off a real mirror and,
+/// unlike a shallower fall, integrating to something finite. So the blind spot around a bright
+/// source is not one radius: it depends on what is being looked for. A planet at the same range
+/// is lost only where it is behind the star. The faintest star the instrument can reach at all
+/// is lost across degrees. See [`glare_radius_rad`].
 pub const SCATTER: f64 = 1e-3;
 
 /// Radians: two degrees, a wide-field survey camera.
@@ -67,14 +70,39 @@ impl Optics {
 
     /// Photon statistics against the instrument's own glow.
     pub fn snr(&self, band: Band, flux_w_m2: f64, exposure_s: f64) -> f64 {
+        self.snr_over(band, flux_w_m2, exposure_s, 0.0)
+    }
+
+    /// The same, with `glare_counts` of another source's wings falling in the same resolution
+    /// element.
+    ///
+    /// Photon statistics, uncapped: detection and centroiding really do improve with every
+    /// photon, and centroiding has its own floor in `astrometry::CENTROID_FLOOR`. What does not
+    /// is the flux, which [`look`] holds at [`PHOTOMETRY_FLOOR`].
+    pub fn snr_over(&self, band: Band, flux_w_m2: f64, exposure_s: f64, glare_counts: f64) -> f64 {
         let source = self
             .instrument
             .counts_from_flux(band, flux_w_m2, exposure_s);
-        let background = self.instrument.self_emission_counts(band, exposure_s);
+        let background =
+            self.instrument.self_emission_counts(band, exposure_s) + glare_counts.max(0.0);
         if source <= 0.0 {
             return 0.0;
         }
         source / (source + background).sqrt()
+    }
+
+    pub fn counts(&self, band: Band, flux_w_m2: f64, exposure_s: f64) -> f64 {
+        self.instrument.counts_from_flux(band, flux_w_m2, exposure_s)
+    }
+
+    /// Counts the wings of a source of `counts` put into one resolution element this far off it.
+    ///
+    /// Surface brightness `A / theta^3` whose integral from one resolution element outwards is
+    /// `SCATTER` of the source. Inside that first element there is no halo, only the image.
+    pub fn halo_counts(&self, band: Band, counts: f64, separation_rad: f64) -> f64 {
+        let resolution = self.resolution_rad(band);
+        let ratio = resolution / separation_rad.max(resolution);
+        counts * SCATTER * ratio * ratio * ratio / std::f64::consts::TAU
     }
 }
 
@@ -96,24 +124,97 @@ pub fn flux_from(star: &Star, band: Band, distance_m: f64) -> f64 {
     std::f64::consts::PI * star.radius_m * star.radius_m * radiance / (distance_m * distance_m)
 }
 
-/// Radians.
-pub fn glare_radius_rad(resolution_rad: f64, bright: f64, faint: f64) -> f64 {
-    if faint <= 0.0 || bright <= faint {
+/// How close a source giving `faint_counts` may come to one giving `bright_counts` before the
+/// wings of the brighter bury it, radians. Never inside one resolution element, where the two
+/// are one image whatever their brightness.
+///
+/// Both arguments are counts over the same exposure, so the answer is what the detector can do
+/// rather than what arrives. The cube root is the wings' falloff read backwards: nine orders of
+/// magnitude of contrast cost three of separation, which is why a bright planet is lost only
+/// behind its star while a faint one of 25 counts is lost across degrees.
+pub fn glare_radius_rad(resolution_rad: f64, bright_counts: f64, faint_counts: f64) -> f64 {
+    let noise = faint_counts / DETECTION_SNR;
+    if bright_counts <= 0.0 || noise <= 0.0 {
         return resolution_rad;
     }
-    resolution_rad * (SCATTER * bright / faint).sqrt().max(1.0)
+    let widening = bright_counts * SCATTER / (std::f64::consts::TAU * noise * noise);
+    resolution_rad * widening.cbrt().max(1.0)
 }
 
-pub fn hidden_by(sky: &[Source], index: usize, resolution_rad: f64) -> Option<StarId> {
-    let target = *sky.get(index)?;
+/// Counts every brighter source's wings put where `index` is.
+pub fn glare_counts(
+    optics: &Optics,
+    band: Band,
+    sky: &[Source],
+    index: usize,
+    exposure_s: f64,
+) -> f64 {
+    let Some(target) = sky.get(index) else { return 0.0 };
     sky.iter()
         .enumerate()
         .filter(|(i, s)| *i != index && s.flux_w_m2 > target.flux_w_m2)
-        .find(|(_, s)| {
-            let separation = s.toward.angle_between(target.toward);
-            separation < glare_radius_rad(resolution_rad, s.flux_w_m2, target.flux_w_m2)
+        .map(|(_, s)| {
+            let counts = optics.counts(band, s.flux_w_m2, exposure_s);
+            optics.halo_counts(band, counts, s.toward.angle_between(target.toward))
         })
-        .map(|(_, s)| s.star)
+        .sum()
+}
+
+/// A brighter source closer than one resolution element, with which `index` is one image.
+///
+/// Not glare. The fainter source's photons land inside the brighter one's own image, so there
+/// is one measurement to make and not two, and no exposure and no contrast separates them.
+/// [`glare_counts`] cannot say this: the wings it models start where this ends.
+pub fn blended_with(
+    optics: &Optics,
+    band: Band,
+    sky: &[Source],
+    index: usize,
+) -> Option<StarId> {
+    let target = *sky.get(index)?;
+    let resolution = optics.resolution_rad(band);
+    sky.iter()
+        .filter(|s| s.star != target.star && s.flux_w_m2 > target.flux_w_m2)
+        .find(|s| s.toward.angle_between(target.toward) < resolution)
+        .map(|s| s.star)
+}
+
+/// The source most in the way of `index`, when glare is what loses it: it would be detected in
+/// a clean sky and is not in this one.
+///
+/// [`look`] does not consult this. The glare is background there, so a source near something
+/// bright degrades before it disappears; this answers *which* source is in the way, for a
+/// reader who wants to be told.
+pub fn hidden_by(
+    optics: &Optics,
+    band: Band,
+    sky: &[Source],
+    index: usize,
+    exposure_s: f64,
+) -> Option<StarId> {
+    let target = *sky.get(index)?;
+    if let Some(blend) = blended_with(optics, band, sky, index) {
+        return Some(blend);
+    }
+    let glare = glare_counts(optics, band, sky, index, exposure_s);
+    if optics.snr(band, target.flux_w_m2, exposure_s) < DETECTION_SNR
+        || optics.snr_over(band, target.flux_w_m2, exposure_s, glare) >= DETECTION_SNR
+    {
+        return None;
+    }
+    sky.iter()
+        .filter(|s| s.star != target.star && s.flux_w_m2 > target.flux_w_m2)
+        .max_by(|a, b| {
+            let halo = |s: &Source| {
+                optics.halo_counts(
+                    band,
+                    optics.counts(band, s.flux_w_m2, exposure_s),
+                    s.toward.angle_between(target.toward),
+                )
+            };
+            halo(a).total_cmp(&halo(b))
+        })
+        .map(|s| s.star)
 }
 
 /// Noise is seeded from the witness, the star and the arrival time, so a server can recompute
@@ -130,21 +231,26 @@ pub fn look(
 ) -> Option<Sighting> {
     let band = optics.band()?;
     let target = *sky.get(index)?;
-    let snr = optics.snr(band, target.flux_w_m2, exposure_s);
+    if blended_with(optics, band, sky, index).is_some() {
+        return None;
+    }
+    // Glare is background, not a veto: a source beside something bright comes back with a
+    // worse bearing and a worse flux, and only disappears once that noise swallows it.
+    let glare = glare_counts(optics, band, sky, index, exposure_s);
+    let snr = optics.snr_over(band, target.flux_w_m2, exposure_s, glare);
     if snr < DETECTION_SNR {
         return None;
     }
     let resolution = optics.resolution_rad(band);
-    if hidden_by(sky, index, resolution).is_some() {
-        return None;
-    }
 
     let seed = rng::hash(&[witness.0, target.star.get(), observed_s.to_bits()]);
     let sigma_rad = astrometry::centroid_sigma_rad(resolution, snr);
     let (x, y) = target.toward.any_orthonormal_pair();
     let scatter = x * rng::gaussian(rng::hash(&[seed, 1])) * sigma_rad
         + y * rng::gaussian(rng::hash(&[seed, 2])) * sigma_rad;
-    let flux_sigma = target.flux_w_m2 / snr;
+    // Photons bound the position; calibration bounds the brightness. The ship's own sun
+    // arrives with enough photons to claim a part in 1e11 and is worth a part in a thousand.
+    let flux_sigma = target.flux_w_m2 * (1.0 / snr).max(PHOTOMETRY_FLOOR);
     Some(Sighting {
         witness,
         observed_s,
@@ -542,41 +648,93 @@ mod tests {
         assert_ne!(once.bearing.toward, somebody.bearing.toward);
     }
 
-    /// The local sun hides degrees of sky; the same star a few light-years off hides arcseconds.
+    /// A blind spot is not one radius. The same sun that loses a barely detectable star across
+    /// degrees loses a planet beside it only where the two are one image.
     #[test]
-    fn a_bright_star_blots_out_a_disc_around_itself() {
+    fn a_blind_spot_is_sized_by_what_is_being_looked_for() {
+        let optics = Optics::of(Instrument::SHIP);
+        let resolution = optics.resolution_rad(Band::V);
+        let host = optics.counts(Band::V, flux_from(&sun(), Band::V, 5.0 * AU_M), DWELL_S);
+
+        // The faintest thing the instrument reaches at all: DETECTION_SNR against its own
+        // photons, so 25 counts.
+        let faintest = glare_radius_rad(resolution, host, DETECTION_SNR * DETECTION_SNR);
+        assert!(
+            faintest.to_degrees() > 1.0 && faintest.to_degrees() < 20.0,
+            "{} degrees around the local sun",
+            faintest.to_degrees()
+        );
+
+        // Jupiter's reflected V flux from 5 AU off, worked from the same sun: a disc of
+        // 7e7 m at 5.2 AU returning half of what falls on it.
+        let sunlight = flux_from(&sun(), Band::V, 5.2 * AU_M);
+        let jupiter = sunlight * 0.5 * (6.99e7 * 6.99e7) / (4.0 * (5.0 * AU_M) * (5.0 * AU_M));
+        let hole = glare_radius_rad(resolution, host, optics.counts(Band::V, jupiter, DWELL_S));
+        assert!(
+            (hole - resolution).abs() < resolution * 1e-6,
+            "a planet is lost only behind its star, not {} rad out",
+            hole
+        );
+
+        // And a comparable star a few light-years off is no sun in the eyepiece.
+        let neighbor = optics.counts(Band::V, flux_from(&sun(), Band::V, 4.0 * M_PER_LY), DWELL_S);
+        let far = optics.counts(Band::V, flux_from(&sun(), Band::V, 100.0 * M_PER_LY), DWELL_S);
+        assert!(
+            glare_radius_rad(resolution, neighbor, far).to_degrees() < 1e-3,
+            "a star is not a sun in the eyepiece"
+        );
+    }
+
+    /// Glare costs precision before it costs the detection, which one hard disc could not say.
+    #[test]
+    fn glare_degrades_a_bearing_before_it_loses_it() {
         let optics = Optics::of(Instrument::SHIP);
         let near = flux_from(&sun(), Band::V, AU_M);
         let far = flux_from(&sun(), Band::V, 100.0 * M_PER_LY);
-        let blind = glare_radius_rad(optics.resolution_rad(Band::V), near, far);
-        assert!(
-            blind.to_degrees() > 1.0,
-            "{} degrees of blind spot",
-            blind.to_degrees()
+        let resolution = optics.resolution_rad(Band::V);
+        let blind = glare_radius_rad(
+            resolution,
+            optics.counts(Band::V, near, 600.0),
+            optics.counts(Band::V, far, 600.0),
         );
-        let neighbor = glare_radius_rad(
-            optics.resolution_rad(Band::V),
-            flux_from(&sun(), Band::V, 4.0 * M_PER_LY),
-            far,
-        );
-        assert!(
-            neighbor.to_degrees() < 1e-3,
-            "a star is not a sun in the eyepiece"
-        );
+        assert!(blind > resolution, "the glare reaches past one element");
 
-        let behind = DVec3::new(1.0, blind * 0.5, 0.0);
-        let beside = DVec3::new(1.0, blind * 2.0, 0.0);
         let sky = [
             source(1, DVec3::X, near),
-            source(2, behind, far),
-            source(3, beside, far),
+            source(2, DVec3::new(1.0, blind * 0.5, 0.0), far),
+            source(3, DVec3::new(1.0, blind * 8.0, 0.0), far),
         ];
         assert!(look(&optics, &sky, 1, 600.0, DVec3::ZERO, 0.0, Witness(1)).is_none());
-        assert!(look(&optics, &sky, 2, 600.0, DVec3::ZERO, 0.0, Witness(1)).is_some());
-        assert!(
-            look(&optics, &sky, 0, 600.0, DVec3::ZERO, 0.0, Witness(1)).is_some(),
-            "nothing hides the bright one"
+        let clear = look(&optics, &sky, 2, 600.0, DVec3::ZERO, 0.0, Witness(1)).expect("well off");
+        let host = look(&optics, &sky, 0, 600.0, DVec3::ZERO, 0.0, Witness(1))
+            .expect("nothing hides the brightest thing in the sky");
+        assert!(host.bearing.sigma_rad <= clear.bearing.sigma_rad);
+        assert_eq!(
+            hidden_by(&optics, Band::V, &sky, 1, 600.0),
+            Some(sky[0].star)
         );
+        assert_eq!(hidden_by(&optics, Band::V, &sky, 2, 600.0), None);
+        assert_eq!(hidden_by(&optics, Band::V, &sky, 0, 600.0), None);
+    }
+
+    /// Contrast is not the point when two things are one image, and no exposure fixes it.
+    #[test]
+    fn two_sources_inside_one_resolution_element_are_one_image() {
+        let optics = Optics::of(Instrument::SHIP);
+        let resolution = optics.resolution_rad(Band::V);
+        let bright = flux_from(&sun(), Band::V, 10.0 * M_PER_LY);
+        let sky = [
+            source(1, DVec3::X, bright),
+            source(2, DVec3::new(1.0, resolution * 0.5, 0.0), bright * 0.5),
+            source(3, DVec3::new(1.0, resolution * 4.0, 0.0), bright * 0.5),
+        ];
+        assert_eq!(blended_with(&optics, Band::V, &sky, 1), Some(sky[0].star));
+        assert_eq!(blended_with(&optics, Band::V, &sky, 2), None);
+        assert_eq!(blended_with(&optics, Band::V, &sky, 0), None, "the brighter one is the image");
+
+        assert!(look(&optics, &sky, 1, 1.0e6, DVec3::ZERO, 0.0, Witness(1)).is_none());
+        assert!(look(&optics, &sky, 2, DWELL_S, DVec3::ZERO, 0.0, Witness(1)).is_some());
+        assert_eq!(hidden_by(&optics, Band::V, &sky, 1, DWELL_S), Some(sky[0].star));
     }
 
     #[test]
@@ -585,7 +743,11 @@ mod tests {
         let swarm = Optics::joined(Instrument::SHIP, 100.0, 1.0e5);
         let near = flux_from(&sun(), Band::V, AU_M);
         let far = flux_from(&sun(), Band::V, 100.0 * M_PER_LY);
-        let separation = glare_radius_rad(lone.resolution_rad(Band::V), near, far) * 0.5;
+        let separation = glare_radius_rad(
+            lone.resolution_rad(Band::V),
+            lone.counts(Band::V, near, 600.0),
+            lone.counts(Band::V, far, 600.0),
+        ) * 0.5;
         let sky = [
             source(1, DVec3::X, near),
             source(2, DVec3::new(1.0, separation, 0.0), far),
@@ -593,8 +755,29 @@ mod tests {
         assert!(look(&lone, &sky, 1, 600.0, DVec3::ZERO, 0.0, Witness(1)).is_none());
         assert!(look(&swarm, &sky, 1, 600.0, DVec3::ZERO, 0.0, Witness(1)).is_some());
         assert_eq!(
-            hidden_by(&sky, 1, lone.resolution_rad(Band::V)),
+            hidden_by(&lone, Band::V, &sky, 1, 600.0),
             Some(sky[0].star)
+        );
+    }
+
+    /// The ship's own sun is the one source whose distance everything else hangs off, and the
+    /// glare that loses everything near it is its own: nothing outshines it.
+    #[test]
+    fn the_host_star_is_measured_however_bright_it_is() {
+        let optics = Optics::of(Instrument::SHIP);
+        let host = flux_from(&sun(), Band::V, 5.0 * AU_M);
+        let sky = [
+            source(1, DVec3::X, host),
+            source(2, DVec3::Y, flux_from(&sun(), Band::V, 10.0 * M_PER_LY)),
+        ];
+        let seen = look(&optics, &sky, 0, DWELL_S, DVec3::ZERO, 0.0, Witness(1))
+            .expect("a saturated star still gives a centroid");
+        assert!(seen.bearing.sigma_rad.is_finite() && seen.bearing.sigma_rad > 0.0);
+        // Its flux comes back at the calibration floor rather than to a part in 1e11.
+        let precision = seen.flux_sigma / host;
+        assert!(
+            (precision - PHOTOMETRY_FLOOR).abs() < PHOTOMETRY_FLOOR * 1e-9,
+            "{precision} against a floor of {PHOTOMETRY_FLOOR}"
         );
     }
 
