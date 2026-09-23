@@ -75,6 +75,14 @@ pub struct BodyBelief {
     pub orientation: Orientation,
     pub method: Option<Method>,
     pub position_now: Placed,
+    /// Meters and one sigma. An angular diameter times a range, so it needs a look that had
+    /// both: close enough to range the body, which from across a system nothing is.
+    pub radius_m: Option<(f64, f64)>,
+    /// Seconds for one turn, and one sigma, from the closest look that timed it.
+    pub spin_s: Option<(f64, f64)>,
+    /// Meters a second in the star's frame, and one sigma, from the orbit rather than from any
+    /// measurement: elements and a time are a velocity, and nothing else here is.
+    pub velocity_m_s: Option<(DVec3, f64)>,
     /// Whose word the orbit is on, and how many hands it passed through.
     pub stated_by: Option<Witness>,
     pub hops: usize,
@@ -106,6 +114,14 @@ impl Knowledge {
             orientation: orbit.map_or(Orientation::Unknown, |o| o.orientation),
             method: orbit.map(|o| o.method),
             position_now: orbit.map_or(Placed::Unknown, |o| placed_at(o, now_s)),
+            radius_m: measured_radius(file),
+            spin_s: file
+                .sightings()
+                .iter()
+                .filter_map(|seen| seen.spin_s.map(|spin| (seen.observed_s, spin)))
+                .min_by(|a, b| a.1 .1.total_cmp(&b.1 .1))
+                .map(|(_, spin)| spin),
+            velocity_m_s: orbit.and_then(|o| moving_at(o, now_s)),
             stated_by: orbit.map(|o| o.witness),
             hops: orbit.map_or(0, |o| o.lineage.len()),
         })
@@ -263,6 +279,67 @@ fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     // How far along the ring the pole's own error carries the body, added to the size error.
     let along_au = offset_au.length() * sigma_rad;
     Placed::Known { offset_au, sigma_au: (sigma_au * sigma_au + along_au * along_au).sqrt() }
+}
+
+/// A radius, from the sighting with the best-known one: an angular diameter and a range from
+/// the same look, so neither has to be carried across time while the body moves.
+///
+/// The tightest rather than the newest. A close pass measures a radius once and to a part in
+/// thousands; later looks from across the system measure it far worse or not at all, and taking
+/// the newest would throw the good one away.
+fn measured_radius(file: &crate::knowledge::File) -> Option<(f64, f64)> {
+    file.sightings()
+        .iter()
+        .filter_map(|seen| {
+            let ((size, size_sigma), (range, range_sigma)) = (seen.size?, seen.range_m?);
+            (size.is_finite() && size > 0.0 && range > 0.0).then(|| {
+                let radius = size * range / 2.0;
+                // Two independent fractional errors on a product.
+                let fraction = ((size_sigma / size).powi(2) + (range_sigma / range).powi(2)).sqrt();
+                (radius, radius * fraction)
+            })
+        })
+        .min_by(|a, b| (a.1 / a.0).total_cmp(&(b.1 / b.0)))
+}
+
+/// The velocity an orbit implies, meters a second in the star's frame.
+///
+/// The one element `placed_at` throws away. It passes `mu = 1.0` because only the geometry is
+/// wanted there; a velocity needs the real one, which the orbit itself states -- `n^2 a^3` is
+/// Kepler's third law read backwards, exactly as `knowledge::arc` measures it.
+fn moving_at(orbit: &Orbit, now_s: f64) -> Option<(DVec3, f64)> {
+    let (Orientation::Known { pole, sigma_rad, node, periapsis }, Some(epoch_s)) =
+        (orbit.orientation, orbit.epoch_s)
+    else {
+        return None;
+    };
+    let (au, sigma_au) = orbit.semi_major_au;
+    if !(orbit.period_s.0 > 0.0 && au.is_finite() && au > 0.0) {
+        return None;
+    }
+    let a_m = au * crate::navigation::AU;
+    let n = std::f64::consts::TAU / orbit.period_s.0;
+    let mu = n * n * a_m * a_m * a_m;
+    let e = orbit.eccentricity.map_or(0.0, |(e, _)| e).clamp(0.0, 0.999);
+    let mean = std::f64::consts::TAU * (now_s - epoch_s) / orbit.period_s.0;
+    let eccentric = em_foundations::kepler::anomaly::eccentric_from_mean_newton(
+        mean, e, KEPLER_TOLERANCE, KEPLER_STEPS,
+    );
+    let elements = em_foundations::kepler::state::Elements {
+        semi_major_axis: a_m,
+        eccentricity: e,
+        inclination: pole.z.clamp(-1.0, 1.0).acos(),
+        longitude_of_ascending_node: node,
+        argument_of_periapsis: periapsis,
+        true_anomaly: em_foundations::kepler::anomaly::true_from_eccentric(eccentric, e),
+    };
+    let (_, velocity) = em_foundations::kepler::state::to_state(mu, &elements)?;
+    // The speed goes as the square root of the axis, so half its fractional error, and the
+    // direction is only as good as the plane.
+    let fraction = (sigma_au / au).abs() * 0.5
+        + (orbit.period_s.1 / orbit.period_s.0).abs()
+        + sigma_rad.abs();
+    Some((velocity, velocity.length() * fraction))
 }
 
 /// `placed_at`'s geometry, for the orbit fit's round-trip test in `knowledge::arc`. AU.

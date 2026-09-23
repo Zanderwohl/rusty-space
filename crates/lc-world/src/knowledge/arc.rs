@@ -119,17 +119,26 @@ pub struct Look {
     pub toward: DVec3,
     pub at_s: f64,
     pub sigma_rad: f64,
+    /// Meters, where the look was close enough to range the body. A bearing with a range is a
+    /// *position*, so three of them make this no longer a search: see [`fit`].
+    pub range_m: Option<f64>,
 }
 
 impl Look {
     /// From a stored sighting, with the star's position as the origin of the frame.
-    pub fn of(bearing: &Bearing, at_s: f64, star_ly: DVec3) -> Self {
+    pub fn of(seen: &crate::knowledge::Sighting, star_ly: DVec3) -> Self {
         Self {
-            from_m: (bearing.observer_ly - star_ly) * crate::system::M_PER_LY,
-            toward: bearing.toward,
-            at_s,
-            sigma_rad: bearing.sigma_rad.max(f64::MIN_POSITIVE),
+            from_m: (seen.bearing.observer_ly - star_ly) * crate::system::M_PER_LY,
+            toward: seen.bearing.toward,
+            at_s: seen.observed_s,
+            sigma_rad: seen.bearing.sigma_rad.max(f64::MIN_POSITIVE),
+            range_m: seen.range_m.map(|(range, _)| range),
         }
+    }
+
+    /// Where the body was, for a look that ranged it.
+    fn place(&self) -> Option<DVec3> {
+        self.range_m.map(|range| self.from_m + self.toward * range)
     }
 }
 
@@ -147,6 +156,13 @@ pub struct Fitted {
     pub epoch_s: f64,
     /// `n^2 a^3`: the star's gravitational parameter as this orbit measures it.
     pub mu: f64,
+    /// The arc was too short to say anything about the eccentricity, so a circle was assumed.
+    ///
+    /// Not a claim that the orbit is circular. `1/r = A + B cos + C sin` needs the arc to bend
+    /// to separate those three, and over a few degrees it does not: the matrix is singular and
+    /// the size is all that survives. A record made from this states its eccentricity as
+    /// `None`, which doc 25's rule 4 distinguishes from stating a circle.
+    pub assumed_circular: bool,
     /// Weighted root-mean-square of what the fit misses the bearings by, radians.
     pub residual_rad: f64,
     pub looks: usize,
@@ -256,26 +272,49 @@ fn timing(mean: &[(f64, f64)]) -> Option<(f64, f64)> {
     sound(per_rad.abs()).then_some((per_rad, mean_t - per_rad * mean_m))
 }
 
-/// The orbit through three positions at three times, scored against every look.
+/// The orbit through a sequence of positions at their times, scored against every look.
 ///
-/// The positions give the plane, the plane gives the conic, the conic gives the anomalies and
-/// the anomalies with the times give the period. Nothing here is searched.
-fn through(places: [(DVec3, f64); 3], looks: &[Look], bound: f64) -> Option<Fitted> {
-    let [(r1, t1), (r2, t2), (r3, t3)] = places;
-    let mut pole = (r2 - r1).cross(r3 - r1);
-    let scale = r1.length().max(r2.length()).max(r3.length());
+/// Nothing here is searched. The positions give the plane, the plane gives the conic, the conic
+/// gives the anomalies, and the anomalies with the times give the period.
+///
+/// The pole is the sum of `r_i x r_{i+1}`, which is twice the area each step sweeps and so
+/// points along the orbit's own normal. Not `(r2 - r1) x (r3 - r1)`: for positions on a short
+/// arc that cross product is the arc's *curvature*, a part in ten thousand of the same
+/// magnitudes, and it fell under the degeneracy guard for every three-degree arc -- which is
+/// exactly the case ranging exists to rescue.
+fn through(places: &[(DVec3, f64)], looks: &[Look], bound: f64) -> Option<Fitted> {
+    if places.len() < 3 {
+        return None;
+    }
+    let mut pole = DVec3::ZERO;
+    let mut scale = 0.0f64;
+    for pair in places.windows(2) {
+        let (Some((from, _)), Some((to, _))) = (pair.first(), pair.last()) else { continue };
+        pole += from.cross(*to);
+        scale = scale.max(from.length()).max(to.length());
+    }
     if !sound(pole.length() - DEGENERATE * scale * scale) {
         return None;
     }
-    pole = pole.normalize();
+    let pole = pole.normalize();
     let (u, v) = basis(pole);
-    let angle = |r: DVec3| r.dot(v).atan2(r.dot(u));
-    let points = [
-        (angle(r1), r1.length()),
-        (angle(r2), r2.length()),
-        (angle(r3), r3.length()),
-    ];
-    let (semi_latus_rectum, eccentricity, periapsis_rad) = conic(&points)?;
+    let points: Vec<(f64, f64)> = places
+        .iter()
+        .map(|(r, _)| (r.dot(v).atan2(r.dot(u)), r.length()))
+        .collect();
+    // A circle where the conic is singular, which over a few degrees of arc it is: the rows
+    // `(1, cos, sin)` are then nearly the same row three times over. The size still comes out,
+    // and saying only that is better than solving a singular system for a shape.
+    let (semi_latus_rectum, eccentricity, periapsis_rad, assumed_circular) = match conic(&points) {
+        Some((p, e, w)) => (p, e, w, false),
+        None => {
+            let mean = points.iter().map(|(_, r)| r).sum::<f64>() / points.len() as f64;
+            if !sound(mean) {
+                return None;
+            }
+            (mean, 0.0, 0.0, true)
+        }
+    };
     let semi_major_m = kepler::semi_major_axis::from_eccentricity_and_semi_latus_rectum(
         eccentricity,
         semi_latus_rectum,
@@ -289,11 +328,12 @@ fn through(places: [(DVec3, f64); 3], looks: &[Look], bound: f64) -> Option<Fitt
         let e = kepler::anomaly::eccentric_from_true(true_anomaly, eccentricity);
         kepler::anomaly::mean_from_eccentric(e, eccentricity)
     };
-    let (per_rad, epoch_s) = timing(&[
-        (anomaly(points[0].0), t1),
-        (anomaly(points[1].0), t2),
-        (anomaly(points[2].0), t3),
-    ])?;
+    let means: Vec<(f64, f64)> = points
+        .iter()
+        .zip(places)
+        .map(|((theta, _), (_, t))| (anomaly(*theta), *t))
+        .collect();
+    let (per_rad, epoch_s) = timing(&means)?;
     let period_s = per_rad.abs() * std::f64::consts::TAU;
     if !sound(period_s) {
         return None;
@@ -304,10 +344,12 @@ fn through(places: [(DVec3, f64); 3], looks: &[Look], bound: f64) -> Option<Fitt
         semi_major_m,
         eccentricity,
         period_s,
+        // A negative rate is a prograde orbit seen from the wrong side of its plane.
         pole: if per_rad < 0.0 { -pole } else { pole },
         periapsis_rad: if per_rad < 0.0 { -periapsis_rad } else { periapsis_rad },
         epoch_s,
         mu: n * n * semi_major_m * semi_major_m * semi_major_m,
+        assumed_circular,
         residual_rad: 0.0,
         looks: looks.len(),
     };
@@ -603,7 +645,7 @@ impl Fitted {
             witness,
             period_s: (self.period_s, spread.period_s),
             semi_major_au: (au, spread.semi_major_m / crate::navigation::AU),
-            eccentricity: Some((self.eccentricity, spread.eccentricity)),
+            eccentricity: (!self.assumed_circular).then_some((self.eccentricity, spread.eccentricity)),
             orientation: crate::knowledge::Orientation::Known {
                 pole: self.pole,
                 sigma_rad: spread.pole_rad,
@@ -630,8 +672,24 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
     let mut ordered = looks.to_vec();
     ordered.sort_by(|a, b| a.at_s.total_cmp(&b.at_s));
     // Spread across the arc rather than adjacent: three looks minutes apart barely differ, and
-    // the plane they define would be whatever the noise says.
-    let (a, b, c) = (ordered[0], ordered[ordered.len() / 2], ordered[ordered.len() - 1]);
+    // the plane they define would be whatever the noise says. Ranged looks first where there
+    // are three of them, since those skip the search entirely.
+    let ranged: Vec<Look> = ordered.iter().copied().filter(|l| l.range_m.is_some()).collect();
+    let anchors = if ranged.len() >= 3 { &ranged } else { &ordered };
+    let (a, c) = (*anchors.first()?, *anchors.last()?);
+    let b = *anchors.get(anchors.len() / 2)?;
+
+    // Ranged looks are positions, and three positions are an orbit outright: no grid, no
+    // polish, nothing searched. What proximity buys is not a better search but no search.
+    // Every ranged look, not three of them: the plane a short arc gives is only as good as the
+    // number of positions defining it.
+    if ranged.len() >= 3 {
+        let places: Vec<(DVec3, f64)> =
+            ranged.iter().filter_map(|l| Some((l.place()?, l.at_s))).collect();
+        if let Some(found) = through(&places, &ordered, f64::INFINITY) {
+            return Some(settle(found, &ordered, SETTLINGS * 8));
+        }
+    }
 
     let score = |rho_a: f64, rho_b: f64, bound: f64| -> Option<Fitted> {
         if !(sound(rho_a) && sound(rho_b)) {
@@ -641,7 +699,7 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
         let r2 = b.from_m + b.toward * rho_b;
         let rho_c = coplanar_range(r1, r2, c.from_m, c.toward)?;
         let r3 = c.from_m + c.toward * rho_c;
-        through([(r1, a.at_s), (r2, b.at_s), (r3, c.at_s)], &ordered, bound)
+        through(&[(r1, a.at_s), (r2, b.at_s), (r3, c.at_s)], &ordered, bound)
     };
 
     let step = (FAR_AU / NEAR_AU).ln() / (RANGES - 1) as f64;
@@ -658,9 +716,9 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
             let near = found.iter().position(|(a, b, _, _, _)| {
                 a.abs_diff(i) < APART && b.abs_diff(j) < APART
             });
-            match near {
-                Some(k) if fitted.residual_rad < found[k].4.residual_rad => {
-                    found[k] = (i, j, *x, *y, fitted);
+            match near.and_then(|k| found.get_mut(k)) {
+                Some(held) if fitted.residual_rad < held.4.residual_rad => {
+                    *held = (i, j, *x, *y, fitted);
                 }
                 Some(_) => {}
                 None => found.push((i, j, *x, *y, fitted)),
@@ -690,10 +748,23 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
         .iter()
         .skip(1)
         .any(|other| !agrees(other) && other.residual_rad < best.residual_rad * RIVAL);
+    if rivalled {
+        return None;
+    }
+    // A circle is only an answer when the positions were known. Assuming one drops two
+    // parameters, so an arc too short to shape a conic can still be *fitted* by a circle -- and
+    // from bearings alone that circle can be anywhere, because nothing pins the range.
+    // Measured on the shard: ten hours of bearings on a moon at 0.0097 AU fitted a circle at 63
+    // AU, agreed with by every separated start, implying a star of 299 suns and so squeaking
+    // past the mass bound by a hair. If the arc cannot shape a conic and no look ranged it,
+    // there is no orbit here.
+    if best.assumed_circular && ranged.len() < 3 {
+        return None;
+    }
     // The winner alone is settled properly. Every candidate got the same cheap budget above so
     // that the comparison between them is fair; spending the long budget on all of them costs
     // four times as much and changes which one wins not at all.
-    (!rivalled).then(|| settle(best, &ordered, SETTLINGS * 8))
+    Some(settle(best, &ordered, SETTLINGS * 8))
 }
 
 impl crate::knowledge::Knowledge {
@@ -707,7 +778,7 @@ impl crate::knowledge::Knowledge {
         self.file(subject).map_or_else(Vec::new, |file| {
             file.sightings()
                 .iter()
-                .map(|seen| Look::of(&seen.bearing, seen.observed_s, star_ly))
+                .map(|seen| Look::of(seen, star_ly))
                 .collect()
         })
     }
@@ -792,6 +863,7 @@ mod tests {
                 periapsis_rad: 1.8,
                 epoch_s: 4.0e6,
                 mu: self.mu,
+                assumed_circular: false,
                 residual_rad: 0.0,
                 looks: 0,
             }
@@ -812,7 +884,8 @@ mod tests {
     }
 
     /// Bearings from a ship on a circular `ship_au` orbit, `count` of them `every_s` apart,
-    /// each nudged by a gaussian of `sigma` radians per axis.
+    /// each nudged by a gaussian of `sigma` radians per axis. No ranges: a telescope across a
+    /// system does not get one. [`ranged`] adds them.
     fn looks(truth: &Truth, ship_au: f64, count: usize, every_s: f64, sigma: f64) -> Vec<Look> {
         let ship_r = ship_au * AU_M;
         let ship_period = kepler::period::third_law(ship_r, truth.mu);
@@ -830,7 +903,20 @@ mod tests {
                     toward: (toward + nudge).normalize(),
                     at_s: t,
                     sigma_rad: sigma.max(1.0e-12),
+                    range_m: None,
                 }
+            })
+            .collect()
+    }
+
+    /// The same looks, with a range on each to the fraction a close pass would give.
+    fn ranged(truth: &Truth, seen: &[Look], fraction: f64) -> Vec<Look> {
+        seen.iter()
+            .enumerate()
+            .map(|(i, look)| {
+                let truth_range = (truth.at(look.at_s) - look.from_m).length();
+                let slip = rng::gaussian(rng::hash(&[i as u64, 3])) * fraction * truth_range;
+                Look { range_m: Some(truth_range + slip), ..*look }
             })
             .collect()
     }
@@ -1077,6 +1163,8 @@ mod tests {
                         sigma_rad: look.sigma_rad,
                     },
                     size: None,
+                    range_m: None,
+                    spin_s: None,
                     band: em_spectra::Band::V,
                     flux: 1.0e-9,
                     flux_sigma: 1.0e-12,
@@ -1125,6 +1213,8 @@ mod tests {
             observed_s: at_s,
             bearing: Bearing { observer_ly: DVec3::X, toward: DVec3::Y, sigma_rad: 1.0e-9 },
             size: None,
+            range_m: None,
+            spin_s: None,
             band: em_spectra::Band::V,
             flux: 1.0e-9,
             flux_sigma: 1.0e-12,
@@ -1187,6 +1277,73 @@ mod tests {
             stated_s: 0.0,
             lineage: Vec::new(),
         }
+    }
+
+    /// **Ranges settle the arc that bearings could not, and say what they still cannot.** Three
+    /// degrees of Saturn's orbit is refused from bearings alone, correctly, because four
+    /// different orbits explain it. Ranged looks are positions, so the same three degrees gives
+    /// the plane and the size -- but *not* the eccentricity: `1/r = A + B cos + C sin` needs the
+    /// arc to bend to separate those three, and over three degrees the matrix is singular
+    /// whatever the ranges are worth. So it reports a circle and states its eccentricity as
+    /// unconstrained, and what it calls the axis is really the radius it is at.
+    #[test]
+    fn a_range_settles_an_arc_that_bearings_cannot() {
+        let truth = like(9.537, 0.0565);
+        let bearings = looks(&truth, 5.0, 24, 0.25 * YEAR_S / 24.0, SIGMA);
+        assert!(fit(&bearings).is_none(), "bearings alone cannot, which is the point");
+
+        // A part in a thousand on each range, well short of what a close pass gives.
+        let close = ranged(&truth, &bearings, 1.0e-3);
+        let fitted = fit(&close).expect("positions over three degrees are an orbit");
+        assert!(fitted.assumed_circular, "three degrees cannot shape a conic");
+
+        // The size it reports is where the body is, which for an eccentric orbit is not the
+        // axis: Saturn at 0.0565 runs from 9.0 to 10.1 AU and this arc is near the near end.
+        let here = (truth.at(bearings[0].at_s).length() / AU_M, fitted.semi_major_m / AU_M);
+        assert!((here.1 / here.0 - 1.0).abs() < 0.02, "{:?} AU: it is at {}", here, here.0);
+        let tilt = fitted.pole.angle_between(truth.pole.normalize());
+        assert!(tilt.to_degrees() < 1.0, "plane out by {} degrees", tilt.to_degrees());
+        // And the period to about a tenth, from three degrees of it.
+        let period = off(fitted.period_s, truth.period_s());
+        assert!(period < 0.15, "period off by {period}");
+
+        // The record says the eccentricity is unconstrained rather than saying it is zero,
+        // which doc 25's rule 4 is about.
+        let orbit = fitted.stated(crate::knowledge::Witness(1), &close, 0.0);
+        assert_eq!(orbit.eccentricity, None);
+
+        // A quarter of the orbit, ranged, does shape the conic and gets everything.
+        let long = ranged(&truth, &looks(&truth, 5.0, 24, truth.period_s() / 96.0, SIGMA), 1.0e-3);
+        let better = fit(&long).expect("a quarter of an orbit is enough");
+        assert!(!better.assumed_circular, "a quarter of an orbit bends plenty");
+        assert!(off(better.semi_major_m, truth.semi_major_m) < 0.02, "{}", off(better.semi_major_m, truth.semi_major_m));
+        assert!(off(better.period_s, truth.period_s()) < 0.05, "{}", off(better.period_s, truth.period_s()));
+        assert!(
+            (better.eccentricity - truth.eccentricity).abs() < 0.03,
+            "eccentricity {} against {}",
+            better.eccentricity,
+            truth.eccentricity
+        );
+    }
+
+    /// And it is quick, because there is nothing to search: the three positions are the answer
+    /// and the rest is settling it.
+    #[test]
+    fn a_ranged_fit_does_no_searching() {
+        let truth = like(1.0, 0.0167);
+        let bearings = looks(&truth, 5.0, 24, 3.0 * DAY_S, SIGMA);
+        let close = ranged(&truth, &bearings, 1.0e-4);
+
+        let searched = std::time::Instant::now();
+        fit(&bearings).expect("fits");
+        let searched = searched.elapsed();
+        let placed = std::time::Instant::now();
+        fit(&close).expect("fits");
+        let placed = placed.elapsed();
+        assert!(
+            placed * 4 < searched,
+            "ranged took {placed:?} against {searched:?} searched"
+        );
     }
 
     /// The angle between two nearly-parallel unit vectors, which `DVec3::angle_between` cannot

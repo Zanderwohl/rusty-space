@@ -383,6 +383,70 @@ Two floors it is deliberately not:
 Mercury and Venus at inner elongations stay hidden, which is correct and is the same reason they
 are hard from Earth.
 
+### Proximity is the instrument
+
+✅ **Built** (2026-09-22). There is no lidar module any more than there is a telescope module:
+a ship has one sensor, and what it can do with a body depends on how much of the sky that body
+fills. Past `survey::CLOSE_ELEMENTS` — a thousand resolution elements across the disc — the disc
+is a map rather than a dot, and three things come for nothing that no amount of watching from
+across a system gives:
+
+- **A range.** A bearing with a range is a *position*.
+- **A rotation period,** from following features across the disc. The rate, not a whole
+  revolution: features move a measurable fraction of the way round in a dwell, so a first close
+  look already states a period and nothing has to remember how long a body has been watched.
+- **A radius,** which is the angular diameter and the range multiplied, from the one look. Both
+  ride on the `Sighting` for that reason: carried apart, one would have to be propagated across
+  time while the body moved.
+
+A thousand elements is chosen so that a survey from `START_OFFSET_AU` does **not** get any of it
+and a visit does. From 5 AU a ship's telescope puts Jupiter at 630 elements, Saturn at 290, Earth
+at 57 and Mars at 30 — discs, all of them, and none of them close. Jupiter has to be approached
+inside 3.1 AU, Earth inside 0.29, Mars inside 0.15. From an orbit about any of them it is
+millions. **So flying somewhere is worth something,** and that one number is what decides it.
+
+**What ranging does to the orbit fit is the largest part of this.** Ranged looks are positions,
+and positions are an orbit outright: no grid, no polish, nothing searched. Three game months of
+Saturn — three degrees of arc, refused outright from bearings — becomes the plane to under a
+degree, the size to 2% and the period to about a tenth. Two things had to change for that:
+
+- **The plane is the sum of `r_i x r_{i+1}` over every position,** twice the area each step
+  sweeps, which points along the orbit's own normal. Not `(r2 - r1) x (r3 - r1)` from three of
+  them: on a short arc that cross product is the arc's *curvature*, a part in ten thousand of
+  the same magnitudes, and it fell under the degeneracy guard for every three-degree arc —
+  exactly the case ranging exists to rescue.
+- **A circle where the conic is singular.** `1/r = A + B cos + C sin` needs the arc to bend to
+  separate those three, and over a few degrees it does not, whatever the ranges are worth: the
+  rows are the same row three times over. So the size survives and the shape does not, and the
+  record states its eccentricity as `None` — which rule 4 distinguishes from stating a circle.
+  What it calls the axis is then the radius the body is *at*: Saturn at 0.0565 runs from 9.0 to
+  10.1 AU, and three degrees near the near end reports 9.0.
+
+**A circle is only an answer when the positions were known,** and finding that out cost a real
+defect. Assuming one drops two parameters, so an arc too short to shape a conic can still be
+*fitted* by a circle — and from bearings alone that circle can be anywhere, because nothing pins
+the range. On the shard, ten hours of bearings on a **moon at 0.0097 AU fitted a circle at 63
+AU**, agreed with by every separated start, implying a star of 299 suns and so squeaking past the
+mass bound by one. `knowledge::arc` now refuses a circle that nothing ranged.
+
+**Which exposed something this document has not dealt with: a moon does not orbit the star.**
+`fit_orbit` puts every body's bearings in the star's frame and fits an orbit about it, and the
+survey files moons as readily as planets — Sol has 221 bodies and most of them are moons. A
+moon's own orbit is about its planet, and which planet that is has to be *learned*: it is the
+"points moving with it, which are its moons" in the visit list above, and it is not built. Until
+it is, a moon's bearings are being offered to a fit that cannot use them, and the guards above
+are what stop that becoming a wrong answer rather than no answer. **Open.** The association is
+the missing piece, and a moon's orbit about its primary is what gives that primary's mass — so
+this blocks the mass row of the visit table too.
+
+**Not oblateness.** The arena's bodies are spheres, so there is no figure to measure and none is
+invented. Same decision as rings for generated planets in phase 5, for the same reason.
+
+**And the velocity is not measured at all.** An orbit and a time *are* a velocity: `placed_at`
+throws that half away because only geometry is wanted there, and `body_belief` keeps it. The one
+thing needed is the real `mu`, which the orbit states — `n^2 a^3`, Kepler's third law read
+backwards, as `knowledge::arc` measures it.
+
 **What one visit measures,** per body. ✅ The *truth* side is **built** (2026-09-22) as
 `lc_world::visit`: `Visit { body, toward, range_m, diameter_rad, phase_rad, flux }` for every
 body of a system as its light arrives at a point, brightest first. What it settled:
@@ -1336,7 +1400,8 @@ game has no players — so each of these is a change in place, not a versioned a
 | 2 | ✅ **Done.** `Orbit` grew, `Orientation` and `Method` are new, and `formats.rs`' three back-readers `FileV3`/`FileV2`/`FileV1` were deleted rather than repointed at a frozen `OrbitV4`. `FILE_FORMAT` and `OLDEST_FILE_FORMAT` are both 5 |
 | 2 | `REPORT_FORMAT` stays 2. It carries the new `Orbit` by carrying `Part`, whose shape is unchanged, and the one shard is redeployed whole — a bump would only drop reports already in flight |
 | 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
-| 6 | ✅ **`Sighting` grew a `size: Option<(f64, f64)>`** — an angular diameter and its sigma, `None` for a point source. `FILE_FORMAT` is 6 and `REPORT_FORMAT` is 3. The report format *does* move here where phase 2 left it alone, because `Part` carries `Sighting` by value and its shape is what changed; `Reported::format` is checked strictly on landing, so reports in flight across the deploy fail to land, which is the right trade for one shard with no players |
+| 6 | ✅ **`Sighting` grew `range_m` and `spin_s`,** both `Option<(f64, f64)>`, beside `size`: the three things a close look measures and a distant one cannot. `Drawable` grew `spin_s` to have a rotation to measure, worked out from the arena's lock for a tidally locked body. `FILE_FORMAT` is 7 and `REPORT_FORMAT` is 4 |
+| 6 | ✅ **`Sighting` grew a `size: Option<(f64, f64)>`** — an angular diameter and its sigma, `None` for a point source. `FILE_FORMAT` was 6 and `REPORT_FORMAT` 3. The report format *does* move here where phase 2 left it alone, because `Part` carries `Sighting` by value and its shape is what changed; `Reported::format` is checked strictly on landing, so reports in flight across the deploy fail to land, which is the right trade for one shard with no players |
 | 6 | ✅ **`survey::Source` carries a `Subject` and a `diameter_rad`** rather than a `StarId`. Stars and bodies then live in one sky, which they have to: the host star glares on its own planets and only one list can be asked which of two sources outshines the other. `hidden_by` and `blended_with` return a `Subject`. Not stored and not on the wire — `Source` is built per look from the catalogue and from `visit::sources` |
 | 6 | ✅ **`Duty::Survey { star, started_s }`** through every site this row lists, plus `Duty::surveying` and `Duty::visits`, an `Action::SurveySystem` and its button, and a pinned `golden::SURVEYING`. `PROTOCOL_VERSION` stays 36: a new variant appends a discriminant, so every pinned vector above it is byte-identical |
 | 6 | the sites that were listed for a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |

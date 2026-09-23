@@ -41,8 +41,20 @@ pub struct Sighting {
     pub bearing: Bearing,
     /// Angular diameter and its sigma, radians, once the disc is resolved. `None` for a point
     /// source, which is everything interstellar and anything small enough or far enough inside
-    /// a system. A radius needs this and a distance; neither alone says anything.
+    /// a system. A radius needs this and a range; neither alone says anything.
     pub size: Option<(f64, f64)>,
+    /// Meters and one sigma, from close enough to range it directly rather than infer it.
+    ///
+    /// The other two fields beside this one are what proximity buys, and this is the one that
+    /// buys the most: a bearing with a range is a *position*, so an orbit fitted to ranged
+    /// looks is not a search at all. See `survey::CLOSE_ELEMENTS`.
+    pub range_m: Option<(f64, f64)>,
+    /// Seconds for one turn, and one sigma, from watching features cross the disc.
+    ///
+    /// Only the period. The axis is not here because a close look does not settle it as
+    /// cleanly, and a giant's moons give it better: the tilt of their orbits is the tilt of the
+    /// planet. See `sky::generate`.
+    pub spin_s: Option<(f64, f64)>,
     pub band: Band,
     /// Flux in `band`, W/m^2.
     pub flux: f64,

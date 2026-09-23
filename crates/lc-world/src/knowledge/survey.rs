@@ -36,6 +36,24 @@ pub const DWELL_S: f64 = 60.0;
 /// which is what sets how often anything comes round.
 pub const SURVEY_DWELL_S: f64 = 60.0;
 
+/// Resolution elements across a disc past which the instruments measure it directly rather
+/// than infer it from across a system: a range, and how fast it turns.
+///
+/// **Proximity is the instrument.** There is no lidar module any more than there is a telescope
+/// module; what a ship has is one sensor, and how much it can do with a body depends on how
+/// much of the sky that body fills. Past a thousand elements the disc is a map rather than a
+/// dot: features can be followed across it, and the return of a ranging pulse is worth having.
+///
+/// A thousand is chosen so that a survey from `START_OFFSET_AU` does *not* get it and a visit
+/// does. From 5 AU a ship's telescope puts Jupiter at 630 elements, Saturn at 290, Earth at 57
+/// and Mars at 30, so every one of them has to be approached: Jupiter inside 3.1 AU, Earth
+/// inside 0.29, Mars inside 0.15. From an orbit about any of them it is millions.
+pub const CLOSE_ELEMENTS: f64 = 1.0e3;
+
+/// Best fractional precision on a range, however close. Ranging is a time-of-flight and a clock
+/// is the least of a ship's problems; what limits it is knowing where its own antenna is.
+pub const RANGE_FLOOR: f64 = 1.0e-6;
+
 /// Bodies a survey measures in one tick, so a long gap costs a bounded amount.
 ///
 /// At the design rate a tick is 438 coordinate seconds, so seven bodies fit in one and a
@@ -135,6 +153,13 @@ pub struct Source {
     /// Angular diameter, radians. Effectively zero for anything interstellar; a body inside the
     /// system, and the system's own star, are discs.
     pub diameter_rad: f64,
+    /// Meters. Truth, and used only to turn the diameter into a range the way a ranging pulse
+    /// would: a source's range is `2 * radius / diameter`, so carrying the radius rather than
+    /// the range keeps the two from disagreeing.
+    pub radius_m: f64,
+    /// Seconds for one turn. Truth, for a close look to time against. `None` for a star: the
+    /// catalogue states no rotation for one, and following a sunspot round is a later thing.
+    pub spin_s: Option<f64>,
 }
 
 /// W/m^2. The same geometry `observation::observe` uses.
@@ -282,11 +307,56 @@ pub fn look(
             sigma_rad,
         },
         size: disc(target.diameter_rad, resolution, sigma_rad, rng::hash(&[seed, 4])),
+        range_m: ranged(&target, resolution, exposure_s, rng::hash(&[seed, 5])),
+        spin_s: target.spin_s.and_then(|spin| {
+            spun(target.diameter_rad, resolution, spin, exposure_s, rng::hash(&[seed, 6]))
+        }),
         band,
         flux: target.flux_w_m2 + rng::gaussian(rng::hash(&[seed, 3])) * flux_sigma,
         flux_sigma,
         lineage: Vec::new(),
     })
+}
+
+/// A ranging measurement, for a body whose disc fills enough of the sky to be worth aiming a
+/// pulse at. `None` otherwise, which is everything seen from across a system.
+///
+/// `range_rad` is not a field of a [`Source`]: the range comes from the diameter and the body's
+/// own radius, both of which the source knows, and a source with no size has no range either.
+fn ranged(target: &Source, resolution_rad: f64, exposure_s: f64, seed: u64) -> Option<(f64, f64)> {
+    let elements = target.diameter_rad / resolution_rad;
+    if !(elements.is_finite() && elements >= CLOSE_ELEMENTS && target.radius_m > 0.0) {
+        return None;
+    }
+    let range = 2.0 * target.radius_m / target.diameter_rad;
+    // A pulse resolves the near limb to about the same fraction of the body that one resolution
+    // element is, and a longer look averages more pulses.
+    let sigma = (range / elements / (exposure_s.max(1.0)).sqrt()).max(range * RANGE_FLOOR);
+    Some((range + rng::gaussian(seed) * sigma, sigma))
+}
+
+/// How fast a body turns, from following features across a disc close enough to have any.
+/// `None` otherwise.
+///
+/// The rate, not a whole revolution: features move a measurable fraction of the way round in a
+/// dwell, and the period follows. So a first close look already states a period, which is why
+/// nothing here has to remember how long a body has been watched.
+fn spun(
+    diameter_rad: f64,
+    resolution_rad: f64,
+    spin_s: f64,
+    exposure_s: f64,
+    seed: u64,
+) -> Option<(f64, f64)> {
+    let elements = diameter_rad / resolution_rad;
+    if !(elements.is_finite() && elements >= CLOSE_ELEMENTS && spin_s > 0.0) {
+        return None;
+    }
+    // A feature is placed to one element in `elements`, twice over, against how far round it
+    // went in the dwell. A dwell longer than the period is one turn's worth and no better.
+    let turned = (exposure_s / spin_s).clamp(f64::MIN_POSITIVE, 1.0);
+    let sigma = (spin_s * std::f64::consts::SQRT_2 / elements / turned).max(spin_s * RANGE_FLOOR);
+    Some((spin_s + rng::gaussian(seed) * sigma, sigma))
 }
 
 /// The measured angular diameter of a resolved disc, or `None` for a point source.
@@ -609,6 +679,8 @@ mod tests {
             toward: toward.normalize(),
             flux_w_m2: flux,
             diameter_rad: 0.0,
+            radius_m: 0.0,
+            spin_s: None,
         }
     }
 
@@ -885,6 +957,8 @@ mod tests {
             toward: DVec3::X,
             flux_w_m2: host,
             diameter_rad: disc,
+            radius_m: sun().radius_m,
+            spin_s: None,
         }];
         let seen = look(&optics, &sky, 0, DWELL_S, DVec3::ZERO, 0.0, Witness(1)).expect("seen");
         let (measured, sigma) = seen.size.expect("a resolved star has a size");
@@ -902,6 +976,82 @@ mod tests {
         let far = [source(2, DVec3::X, flux_from(&sun(), Band::V, 10.0 * M_PER_LY))];
         let point = look(&optics, &far, 0, DWELL_S, DVec3::ZERO, 0.0, Witness(1)).expect("seen");
         assert_eq!(point.size, None);
+    }
+
+    /// **Proximity is the instrument.** The same telescope that can only bear and weigh a
+    /// planet from across a system ranges it and times its turning from close up, and the line
+    /// between is how much of the sky the disc fills.
+    #[test]
+    fn closeness_buys_a_range_and_a_rotation_and_distance_takes_them_away() {
+        let optics = Optics::of(Instrument::SHIP);
+        let resolution = optics.resolution_rad(Band::V);
+        let earth_m = 6.371e6;
+        let spin_s = 86_164.0;
+
+        let at = |range_m: f64| Source {
+            subject: Subject::Body {
+                star: StarId::synthesise("t", 1),
+                body: crate::knowledge::BodyId::of(StarId::synthesise("t", 1), "Earth"),
+            },
+            toward: DVec3::X,
+            // Bright enough to be detected at any of these ranges; the point here is the disc.
+            flux_w_m2: 1.0e-7,
+            diameter_rad: 2.0 * earth_m / range_m,
+            radius_m: earth_m,
+            spin_s: Some(spin_s),
+        };
+
+        // From five AU an Earth is 57 resolution elements across: a disc, and nothing more.
+        let far = at(5.0 * AU_M);
+        assert!(far.diameter_rad / resolution < CLOSE_ELEMENTS);
+        let seen = look(&optics, &[far], 0, DWELL_S, DVec3::ZERO, 0.0, Witness(1)).expect("seen");
+        assert!(seen.size.is_some(), "the disc is resolved even so");
+        assert_eq!(seen.range_m, None, "no ranging from across a system");
+        assert_eq!(seen.spin_s, None, "and no features to follow");
+
+        // From a low orbit it is millions of elements across, and both come for free.
+        let close = at(earth_m + 4.0e5);
+        assert!(close.diameter_rad / resolution > 1.0e6);
+        let seen = look(&optics, &[close], 0, DWELL_S, DVec3::ZERO, 0.0, Witness(1)).expect("seen");
+        let (range, range_sigma) = seen.range_m.expect("a close pass ranges it");
+        assert!(
+            (range / (earth_m + 4.0e5) - 1.0).abs() < 1.0e-5,
+            "{range} m against {}",
+            earth_m + 4.0e5
+        );
+        assert!(range_sigma / range <= 1.0e-5, "{}", range_sigma / range);
+        let (spin, spin_sigma) = seen.spin_s.expect("a close pass times its turning");
+        assert!((spin / spin_s - 1.0).abs() < 1.0e-3, "{spin} s against {spin_s}");
+        assert!(spin_sigma > 0.0);
+
+        // And the radius follows from the two together, which is the whole reason both are on
+        // the one record.
+        let radius = seen.size.expect("resolved").0 * range / 2.0;
+        assert!((radius / earth_m - 1.0).abs() < 1.0e-3, "{radius} m against {earth_m}");
+    }
+
+    /// The threshold is a thousand elements because that is where a survey from the standard
+    /// standoff stops getting it and a visit starts. Worth pinning: it is the one number that
+    /// decides whether flying somewhere is worth anything.
+    #[test]
+    fn nothing_at_the_standard_standoff_is_close_enough() {
+        let optics = Optics::of(Instrument::SHIP);
+        let resolution = optics.resolution_rad(Band::V);
+        let elements = |radius_m: f64, range_au: f64| 2.0 * radius_m / (range_au * AU_M) / resolution;
+
+        for (name, radius_m, seen_from) in [
+            ("Jupiter", 6.991e7, 5.0),
+            ("Saturn", 5.823e7, 9.0),
+            ("Earth", 6.371e6, 5.0),
+            ("Mars", 3.390e6, 5.0),
+        ] {
+            let across = elements(radius_m, seen_from);
+            assert!(across < CLOSE_ELEMENTS, "{name} is already close at {across:.0} elements");
+            assert!(across > 20.0, "{name} should still be a disc, not {across:.0} elements");
+        }
+        // Jupiter needs approaching to about three AU, Earth to under a third of one.
+        assert!(elements(6.991e7, 3.0) > CLOSE_ELEMENTS);
+        assert!(elements(6.371e6, 0.25) > CLOSE_ELEMENTS);
     }
 
     #[test]

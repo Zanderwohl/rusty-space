@@ -86,6 +86,8 @@ impl Sky {
                     } else {
                         0.0
                     },
+                    radius_m: star.star.radius_m,
+                    spin_s: None,
                 }
             })
             .collect()
@@ -415,8 +417,10 @@ pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach
                 witness: CHARTS,
                 observed_s: now_s,
                 bearing: Bearing { observer_ly: from, toward: source.toward, sigma_rad: sigma_ly / distance },
-                // A chart gives a place and a brightness and never a size.
+                // A chart gives a place and a brightness and nothing a close look would.
                 size: None,
+                range_m: None,
+                spin_s: None,
                 band,
                 flux: source.flux_w_m2,
                 flux_sigma: source.flux_w_m2 * CHART_ERROR,

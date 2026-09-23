@@ -192,6 +192,20 @@ fn details(
     if let Some((au, sigma)) = belief.semi_major_au {
         ui.label(format!("Distance from star: {}", with_error(au, sigma, "AU")));
     }
+    // What a close pass buys, and nothing shows until one has been made: from across a system
+    // a body is a bearing and a brightness. See `survey::CLOSE_ELEMENTS`.
+    if let Some((radius_m, sigma_m)) = belief.radius_m {
+        ui.label(format!("Radius: {}", with_error(radius_m / 1000.0, sigma_m / 1000.0, "km")))
+            .on_hover_text("An angular diameter and a range from the one look, which needs a close pass");
+    }
+    if let Some((spin_s, sigma_s)) = belief.spin_s {
+        ui.label(format!("Day: {}", with_error(spin_s / 3600.0, sigma_s / 3600.0, "h")))
+            .on_hover_text("Timed by following features across the disc");
+    }
+    if let Some((velocity, sigma)) = belief.velocity_m_s {
+        ui.label(format!("Speed: {}", with_error(velocity.length() / 1000.0, sigma / 1000.0, "km/s")))
+            .on_hover_text("From the orbit, not from any measurement of its own");
+    }
     ui.label(format!("Type: {}", type_text(belief)));
     ui.label(format!("Orientation: {}", orientation_text(belief.orientation)));
 
@@ -355,6 +369,9 @@ mod tests {
             orientation: Orientation::Unknown,
             method,
             position_now: Placed::Unknown,
+            radius_m: None,
+            spin_s: None,
+            velocity_m_s: None,
             stated_by,
             hops,
         }

@@ -34,6 +34,10 @@ pub struct Visit {
     pub phase_rad: f64,
     /// W/m^2 arriving in each band: reflected starlight plus the body's own thermal emission.
     pub flux: PerBand<f64>,
+    /// Meters. Truth, carried so a close look can turn its measured diameter into a range.
+    pub radius_m: f64,
+    /// Seconds for one turn, where the arena states a rotation.
+    pub spin_s: Option<f64>,
 }
 
 /// What arrives from `body` at `from_ly`, with the star at `star_at_ly`.
@@ -92,6 +96,8 @@ pub fn of(star: &Star, star_at_ly: DVec3, body: &Drawable, from_ly: DVec3) -> Vi
         toward: offset.normalize_or_zero(),
         range_m,
         diameter_rad: if range_m > 0.0 { 2.0 * body.radius_m / range_m } else { 0.0 },
+        radius_m: body.radius_m,
+        spin_s: body.spin_s,
         phase_rad: to_star
             .normalize_or_zero()
             .angle_between(to_ship.normalize_or_zero()),
@@ -137,6 +143,8 @@ pub fn sources(system: &LocalSystem, band: Band, from_ly: DVec3, now_s: f64) -> 
             toward: seen.toward,
             flux_w_m2: seen.flux[band],
             diameter_rad: seen.diameter_rad,
+            radius_m: seen.radius_m,
+            spin_s: seen.spin_s,
         })
         .collect()
 }
@@ -368,6 +376,8 @@ mod tests {
             toward: (star_at - from).normalize(),
             flux_w_m2: survey::flux_from(&star_of(&system), band, range_m),
             diameter_rad: 2.0 * system.star_radius_m() / range_m,
+            radius_m: system.star_radius_m(),
+            spin_s: None,
         };
         let mut sky = vec![host];
         sky.extend(sources(&system, band, from, 0.0));

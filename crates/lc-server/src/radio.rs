@@ -760,6 +760,8 @@ mod tests {
                 observed_s: now_s,
                 bearing: Bearing { observer_ly: DVec3::ZERO, toward: DVec3::X, sigma_rad: 1e-9 },
                 size: None,
+                range_m: None,
+                spin_s: None,
                 band: em_spectra::Band::V,
                 flux: 1e-12,
                 flux_sigma: 1e-15,

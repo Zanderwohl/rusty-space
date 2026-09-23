@@ -570,6 +570,8 @@ mod tests {
                 observed_s: now_s,
                 bearing: Bearing { observer_ly: DVec3::ZERO, toward: DVec3::Y, sigma_rad: 1e-9 },
                 size: None,
+                range_m: None,
+                spin_s: None,
                 band: em_spectra::Band::V,
                 flux: 1e-12,
                 flux_sigma: 1e-15,
@@ -707,6 +709,9 @@ mod tests {
         let now_s = server.now_t() as f64 * 1.0e-6;
         let bodies = knowledge.bodies_of(star, now_s);
         assert!(bodies.len() > 5, "only {} bodies", bodies.len());
+        // Ten hours is nothing of any orbit, and no range from this far out, so nothing is
+        // fitted. It was: a circle assumed where the arc could not shape a conic fitted a moon
+        // at 0.0097 AU to 63 AU, which is what `knowledge::arc` now refuses.
         assert!(
             bodies.iter().all(|b| b.method.is_none()),
             "an orbit was minted from {:.0} hours of arc",
@@ -754,6 +759,8 @@ mod tests {
                 observed_s: now_s + 1.0,
                 bearing: Bearing { observer_ly: DVec3::ZERO, toward, sigma_rad: 1e-6 },
                 size: None,
+                range_m: None,
+                spin_s: None,
                 band: em_spectra::Band::V,
                 flux: 1e-12,
                 flux_sigma: 1e-15,
@@ -854,6 +861,8 @@ mod tests {
                 observed_s: now_s,
                 bearing: Bearing { observer_ly: DVec3::X, toward: DVec3::Y, sigma_rad: 1e-9 },
                 size: None,
+                range_m: None,
+                spin_s: None,
                 band: em_spectra::Band::V,
                 flux: 1e-12,
                 flux_sigma: 1e-15,
@@ -912,6 +921,8 @@ mod tests {
                         observed_s: now_s,
                         bearing: Bearing { observer_ly: DVec3::ZERO, toward, sigma_rad: 1e-6 },
                         size: None,
+                        range_m: None,
+                        spin_s: None,
                         band: em_spectra::Band::V,
                         flux: 1e-12,
                         flux_sigma: 1e-15,

@@ -66,6 +66,11 @@ pub struct Drawable {
     pub world: crate::worlds::World,
     /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub pole: DVec3,
+    /// How long it takes to turn once, seconds. `None` where the arena states no rotation.
+    ///
+    /// A tidally locked body's is its orbit about its own primary, which is what being locked
+    /// means; the arena states the lock rather than the rate, so it is worked out here.
+    pub spin_s: Option<f64>,
     /// Where it is, light-years from the world origin, simulation axes.
     pub position_ly: DVec3,
     pub radius_m: f64,
@@ -208,6 +213,7 @@ impl LocalSystem {
                 // be a second chance to have it wrong.
                 let kind = crate::navigation::Kind::of(&self.sim.info(i).tags);
                 let pole = self.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
+                let spin_s = self.sim.rotation(i).and_then(|r| self.spin_of(i, r));
                 let rings = crate::rings::for_body(self.sim.name(i))
                     .map(|system| Rings { system, pole });
 
@@ -246,6 +252,7 @@ impl LocalSystem {
                     // is not always the display name -- see `worlds`.
                     world: crate::worlds::of(self.sim.name(i), surface),
                     pole,
+                    spin_s,
                     position_ly: self.origin_ly + at / M_PER_LY,
                     radius_m,
                     mass_kg: self.sim.info(i).mass,
@@ -316,6 +323,25 @@ impl LocalSystem {
 
     /// Where the primary is at a coordinate time. It moves: a star with planets orbits their
     /// common center, which for the Sun and Jupiter is outside the Sun.
+    /// How long a body takes to turn once, seconds.
+    fn spin_of(&self, i: BodyIndex, rotation: &em_sim::body::BodyRotation) -> Option<f64> {
+        use em_sim::body::RotationMode;
+        match &rotation.mode {
+            RotationMode::Spinning { angular_velocity, .. } => {
+                (angular_velocity.abs() > 0.0).then(|| std::f64::consts::TAU / angular_velocity.abs())
+            }
+            // Locked is a statement about the orbit, not a rate: one turn per orbit about the
+            // primary it is locked to.
+            RotationMode::TidallyLocked { .. } => {
+                let parent = self.sim.parent(i)?;
+                let radius = self.sim.local_position(i)?.length();
+                let mu = self.sim.mu(parent);
+                (radius > 0.0 && mu > 0.0)
+                    .then(|| em_foundations::kepler::period::third_law(radius, mu))
+            }
+        }
+    }
+
     pub fn star_position_at(&self, seconds: f64) -> Option<DVec3> {
         let (at, _) = self.body_state_at(self.primary, seconds)?;
         Some(self.origin_ly + at / M_PER_LY)
