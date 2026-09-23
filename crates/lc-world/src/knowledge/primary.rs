@@ -43,10 +43,15 @@ impl crate::knowledge::Knowledge {
     }
 
     /// The body of `star` most in need of an orbit: one whose bearings have grown since its
-    /// orbit was last stated, oldest statement first, and never-fitted bodies before those.
+    /// orbit was last stated, longest since its last attempt first.
     ///
     /// Round-robin by age rather than by any measure of promise. A fit costs about a tick, so
     /// what matters is that every body gets its turn and none is starved.
+    ///
+    /// **By attempt, not by statement.** An arc that cannot yet shape an orbit states nothing,
+    /// so ranking by what was stated leaves that body at the front of the queue on every tick
+    /// and nothing else in the system is ever fitted. Saturn on a three-month arc is enough to
+    /// starve Venus, Earth, Mars and Jupiter indefinitely.
     pub fn unfitted(&self, star: StarId) -> Option<Subject> {
         let mine = |subject: Subject| -> Option<f64> {
             let file = self.file(subject)?;
@@ -60,7 +65,8 @@ impl crate::knowledge::Knowledge {
                 .filter(|o| o.witness == self.owner && o.method == crate::knowledge::Method::Astrometric)
                 .map(|o| o.stated_s)
                 .fold(f64::MIN, f64::max);
-            (newest > stated).then_some(stated)
+            let tried = self.tried.get(&subject).copied().unwrap_or(f64::MIN);
+            (newest > stated).then_some(stated.max(tried))
         };
         self.members(star)
             .filter_map(|(subject, _)| match subject {
@@ -142,6 +148,8 @@ impl crate::knowledge::Knowledge {
                 Some((about, fitted, looks))
             })
             .min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad));
+        // Recorded whatever comes of it, so the queue moves on. See [`Knowledge::unfitted`].
+        self.tried.insert(subject, now_s);
         let Some((about, fitted, looks)) = best else { return false };
         let orbit = fitted.stated(self.owner, about, &looks, now_s);
         self.orbits(subject, orbit);

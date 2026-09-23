@@ -231,6 +231,29 @@ fn swarm(seed: u64, star: &CatalogueStar) -> Option<Population> {
     })
 }
 
+/// A unit normal leaned `lean` radians away from `axis`, in the direction `node` picks out.
+///
+/// The one construction for tilting a plane off another plane. Inclinations cannot simply be
+/// added: two tilts compose that way only when they share a node line, and here they never do
+/// -- the system's node is measured against the ecliptic and a planet's against its own pole.
+/// Composing the normals is exact and needs no case.
+fn tilted(axis: DVec3, lean: f64, node: f64) -> DVec3 {
+    let axis = axis.normalize_or(DVec3::Z);
+    let (u, v) = axis.any_orthonormal_pair();
+    (axis * lean.cos() + (u * node.cos() + v * node.sin()) * lean.sin()).normalize_or(axis)
+}
+
+/// Inclination and longitude of ascending node, degrees, of an orbit whose plane has this
+/// normal. The inverse of `(sin i sin O, -sin i cos O, cos i)`.
+fn euler_of(normal: DVec3) -> (f64, f64) {
+    (normal.z.clamp(-1.0, 1.0).acos().to_degrees(), normal.x.atan2(-normal.y).to_degrees())
+}
+
+/// The axis a planet turns about, simulation axes.
+fn spin_axis_of(system_pole: DVec3, planet: &Planet) -> DVec3 {
+    tilted(system_pole, planet.obliquity_rad, planet.spin_node_rad)
+}
+
 /// A planet's rotation, as `em-sim` states one.
 ///
 /// The axis is the system's pole leaned by the planet's own obliquity, so a system's planets
@@ -239,12 +262,7 @@ fn swarm(seed: u64, star: &CatalogueStar) -> Option<Population> {
 /// `orientation * DVec3::Z` and the two have to agree.
 fn spin_of_planet(system_pole: DVec3, planet: &Planet) -> em_sim::body::BodyRotation {
     use em_sim::body::{BodyRotation, RotationEpoch};
-    let pole = system_pole.normalize_or(DVec3::Z);
-    let (u, v) = pole.any_orthonormal_pair();
-    let lean = u * planet.spin_node_rad.cos() + v * planet.spin_node_rad.sin();
-    let axis = (pole * planet.obliquity_rad.cos() + lean * planet.obliquity_rad.sin())
-        .normalize_or(pole);
-    let orientation = glam::DQuat::from_rotation_arc(DVec3::Z, axis);
+    let orientation = glam::DQuat::from_rotation_arc(DVec3::Z, spin_axis_of(system_pole, planet));
     // Radians per second. Always positive: which way it turns is the axis's own sign, and an
     // obliquity past a right angle is what retrograde means here.
     let rate = std::f64::consts::TAU / planet.spin_s.max(1.0);
@@ -363,16 +381,18 @@ impl GeneratedSystem {
         };
 
         // The system's plane as Euler angles: a normal (sin i sin O, -sin i cos O, cos i).
-        let tilt_deg = self.pole.z.clamp(-1.0, 1.0).acos().to_degrees();
-        let node_deg = self.pole.x.atan2(-self.pole.y).to_degrees();
         for p in &self.planets {
+            // Its own plane, leaned off the system's by its inclination. Not the system's
+            // inclination plus its own: see [`tilted`].
+            let (tilt_deg, node_deg) =
+                euler_of(tilted(self.pole, p.inclination_deg.to_radians(), p.orbit_node_rad));
             bodies.push(SomeBody::KeplerEntry(KeplerEntry {
                 info: stated(&p.name, p.mass_kg, false, &["Planet"], p),
                 params: kepler(
                     &center,
                     p.semi_major_m,
                     p.eccentricity,
-                    tilt_deg + p.inclination_deg,
+                    tilt_deg,
                     node_deg,
                     p.mean_anomaly_deg,
                     None,
@@ -383,23 +403,31 @@ impl GeneratedSystem {
             // A regular moon sits in its planet's equatorial plane, which is where it formed
             // -- and is what makes a planet's obliquity measurable from the outside: the tilt
             // of its retinue's orbits *is* the tilt of the planet. A captured one remembers
-            // nothing of that plane and is tilted out of it by its own inclination.
-            let equator_deg = tilt_deg + p.obliquity_rad.to_degrees();
+            // nothing of that plane and is leaned out of it by its own inclination.
+            //
+            // Off the planet's *spin axis*, not off the system's plane with the obliquity
+            // added: the two tilts are measured about different nodes and adding them puts a
+            // moon nowhere near the equator it formed in.
+            let equator = spin_axis_of(self.pole, p);
             for moon in &p.moons {
                 // Captured stragglers are loose bodies a planet happens to hold, and the map
                 // and the inventory should treat them as such rather than as a retinue.
                 let tags: &[&str] = if moon.regular { &["Moon"] } else { &["Irregular"] };
                 bodies.push(SomeBody::KeplerEntry(KeplerEntry {
                     info: info(&moon.name, moon.mass_kg, false, tags),
-                    params: kepler(
-                        &p.name,
-                        moon.semi_major_m,
-                        moon.eccentricity,
-                        (equator_deg + moon.inclination_rad.to_degrees()).rem_euclid(360.0),
-                        (p.spin_node_rad + moon.node_rad).to_degrees(),
-                        moon.mean_anomaly_deg,
-                        None,
-                    ),
+                    params: {
+                        let (inclination, node) =
+                            euler_of(tilted(equator, moon.inclination_rad, moon.node_rad));
+                        kepler(
+                            &p.name,
+                            moon.semi_major_m,
+                            moon.eccentricity,
+                            inclination,
+                            node,
+                            moon.mean_anomaly_deg,
+                            None,
+                        )
+                    },
                     appearance: debug_ball(moon.radius_m, (120, 120, 130)),
                     rotation: None,
                 }));
@@ -585,6 +613,130 @@ mod tests {
             assert_eq!(axis, spin_axis_for(pole, key), "{key}: not reproducible");
         }
         assert!(tilted > 190, "only {tilted} of 200 stars are tilted at all");
+    }
+
+    /// **The tilt of a retinue's orbits is the tilt of the planet**, which is what doc 25
+    /// phase 5 reads a planet's obliquity off. A regular moon formed in a disc around its
+    /// planet's equator, so its orbit pole has to agree with the planet's spin axis to within
+    /// its own small inclination -- and the moons have to agree with each other.
+    ///
+    /// It did not hold: the moon's inclination was the system's tilt plus the obliquity plus
+    /// its own, added as though all three shared a node line, and its node was an angle in an
+    /// unrelated basis. With an obliquity of 60 degrees that put a moon up to 120 degrees off
+    /// the equator it formed in, and no two moons in the same plane.
+    #[test]
+    fn a_retinues_orbits_lie_in_its_planets_equator() {
+        let stars = AuthoredStars::sample();
+        let mut checked = 0;
+        for key in 0..25u64 {
+            let star = CatalogueStar { id: crate::sky::StarId::synthesise("equator", key), ..stars.stars()[2].clone() };
+            let system = system_for(&star);
+            let sim = build(&system);
+            for planet in &system.planets {
+                let axis = spin_axis_of(system.pole, planet);
+                for moon in planet.moons.iter().filter(|m| m.regular) {
+                    let period = moon_period(moon.semi_major_m, planet.mass_kg);
+                    let pole = orbit_pole(&sim, &moon.name, &planet.name, period);
+                    let off = pole.dot(axis).clamp(-1.0, 1.0).acos();
+                    assert!(
+                        off < moon.inclination_rad + 1.0e-6,
+                        "{}: {:.3} rad off an equator it formed in, own inclination {:.4}",
+                        moon.name,
+                        off,
+                        moon.inclination_rad,
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 40, "only {checked} regular moons");
+    }
+
+    /// A captured moon remembers nothing of the plane its planet formed in, so its orbit pole
+    /// is spread over the whole sky and most of them go backwards.
+    #[test]
+    fn a_caught_moons_orbit_remembers_nothing() {
+        let stars = AuthoredStars::sample();
+        let (mut backwards, mut total) = (0, 0);
+        let mut widest: f64 = 0.0;
+        for key in 0..12u64 {
+            let star = CatalogueStar { id: crate::sky::StarId::synthesise("caught", key), ..stars.stars()[2].clone() };
+            let system = system_for(&star);
+            let sim = build(&system);
+            for planet in &system.planets {
+                let axis = spin_axis_of(system.pole, planet);
+                for moon in planet.moons.iter().filter(|m| !m.regular) {
+                    let period = moon_period(moon.semi_major_m, planet.mass_kg);
+                    let off = orbit_pole(&sim, &moon.name, &planet.name, period)
+                        .dot(axis)
+                        .clamp(-1.0, 1.0)
+                        .acos();
+                    assert!(
+                        (off - moon.inclination_rad).abs() < 1.0e-6,
+                        "{}: {off} against the {} it was given",
+                        moon.name,
+                        moon.inclination_rad,
+                    );
+                    backwards += usize::from(moon.retrograde());
+                    widest = widest.max(off);
+                    total += 1;
+                }
+            }
+        }
+        assert!(total > 200, "only {total} captures");
+        assert!(widest > 3.0, "captures should reach right round: widest is {widest} rad");
+        let share = backwards as f64 / total as f64;
+        assert!((0.55..0.75).contains(&share), "{share} of captures go backwards");
+    }
+
+    /// The unit normal of a body's orbit about its primary, from where `em-sim` actually puts
+    /// it. Propagated rather than read off the elements, so this checks the whole chain.
+    fn orbit_pole(sim: &System, body: &str, primary: &str, period_s: f64) -> DVec3 {
+        let at = |t: f64| {
+            let when = Instant::from_seconds_since_j2000(t);
+            let place = |name: &str| {
+                let i = sim.by_name(name).unwrap_or_else(|| panic!("{name} is not in the arena"));
+                em_sim::propagate::position_at(sim, i, when).expect("a propagated position")
+            };
+            place(body) - place(primary)
+        };
+        // A ten-thousandth of a period apart. A caught moon's eccentricity runs past 0.65,
+        // and near periapsis an eighth of a period sweeps most of the way round -- far enough
+        // that the cross product is ill conditioned and, past half a turn, points the other
+        // way. Short is what makes this the angular momentum rather than a chord.
+        at(0.0).cross(at(period_s * 1.0e-4)).normalize()
+    }
+
+    /// How long a satellite takes to go round, seconds.
+    fn moon_period(semi_major_m: f64, primary_kg: f64) -> f64 {
+        const G: f64 = 6.674_301_5e-11;
+        std::f64::consts::TAU * (semi_major_m.powi(3) / (G * primary_kg)).sqrt()
+    }
+
+    /// **A planet may lie on its side, and some have to.** The obliquity's heavy tail is what
+    /// puts a Uranus in the sky, and it was not there: the tumble test read the very uniform
+    /// `rng::gaussian` draws first, so a planet that failed it had a gaussian capped at 2.15
+    /// sigma and no planet could lean between 43 and 90 degrees.
+    #[test]
+    fn obliquity_fills_the_whole_range() {
+        let t = Tuning::default().world;
+        let mut bins = [0usize; 6];
+        let n = 20_000u64;
+        for k in 0..n {
+            let lean = planet::obliquity_of(rng::hash(&[k, 0x0b]), &t).to_degrees();
+            let bin = ((lean / 30.0) as usize).min(5);
+            bins[bin] += 1;
+        }
+        // The gap this test exists for: 60 to 90 degrees is the top of the gaussian's tail and
+        // the bottom of nothing else, so it is the bin that was empty.
+        for (k, count) in bins.iter().enumerate() {
+            assert!(*count > 0, "nothing leans {}-{} degrees: {bins:?}", k * 30, (k + 1) * 30);
+        }
+        assert!(bins[2] > 20, "43 to 60 degrees should not be a hole: {bins:?}");
+        // Still mostly modest, and still a real tail.
+        assert!(bins[0] > n as usize / 2, "most planets lean a little: {bins:?}");
+        let tumbled: usize = bins[3..].iter().sum();
+        assert!(tumbled * 20 > n as usize, "{tumbled} of {n} on their side or retrograde");
     }
 
     #[test]

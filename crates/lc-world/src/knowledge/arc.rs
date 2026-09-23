@@ -1461,6 +1461,52 @@ mod tests {
         assert_eq!(fresh.unfitted(star), Some(subject(3)), "a transit is not an astrometric fit");
     }
 
+    /// **A body that cannot be fitted must not hold the queue.**
+    ///
+    /// An arc too short to shape an orbit states nothing, so a queue ranked by what has been
+    /// stated hands the same body every fit slot forever and nothing else in the system is
+    /// ever fitted at all. The attempt is what has to be recorded.
+    #[test]
+    fn a_failed_fit_goes_to_the_back_of_the_queue() {
+        use crate::knowledge::{Knowledge, Witness};
+
+        let star = StarId::synthesise("arc", 3);
+        let mut k = Knowledge::new(Witness(7));
+        let subject = |n: u64| Subject::Body { star, body: crate::knowledge::BodyId::of(star, &format!("b{n}")) };
+        // All pointing one way from one place: no parallax, no curvature, nothing to fit.
+        let sighting = |at_s: f64| crate::knowledge::Sighting {
+            witness: Witness(7),
+            observed_s: at_s,
+            bearing: Bearing { observer_ly: DVec3::X, toward: DVec3::Y, sigma_rad: 1.0e-9 },
+            size: None,
+            range_m: None,
+            spin_s: None,
+            band: em_spectra::Band::V,
+            flux: 1.0e-9,
+            flux_sigma: 1.0e-12,
+            lineage: Vec::new(),
+        };
+        for n in 1..=3u64 {
+            for i in 0..LOOKS_NEEDED as u64 {
+                k.sighted(subject(n), sighting(i as f64));
+            }
+        }
+
+        // Every body is served in turn, although not one of them can be fitted.
+        let mut served = Vec::new();
+        for tick in 0..6 {
+            let due = k.unfitted(star).expect("something is always due here");
+            served.push(due);
+            assert!(!k.fit_orbit(due, DVec3::X, 100.0 + tick as f64), "none of these can be fitted");
+        }
+        for n in 1..=3u64 {
+            assert!(served.contains(&subject(n)), "{:?} never got a turn: {served:?}", subject(n));
+        }
+        // And it is a rotation rather than a shuffle: three bodies, so the fourth turn is the
+        // first body again.
+        assert_eq!(served[0], served[3], "{served:?}");
+    }
+
     fn orbit_of() -> crate::knowledge::Orbit {
         crate::knowledge::Orbit {
             witness: crate::knowledge::Witness(7),

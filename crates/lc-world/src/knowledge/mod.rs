@@ -314,6 +314,13 @@ pub struct Knowledge {
     unread: std::collections::BTreeSet<Subject>,
     /// Subjects whose logs are to be consumed whatever they say: see [`Knowledge::analyze`].
     analyzing: std::collections::BTreeSet<Subject>,
+    /// When a fit was last *attempted* on each body, which is not when one last succeeded.
+    ///
+    /// Scheduling, not knowledge: a body whose arc cannot yet shape an orbit states nothing,
+    /// so ranking the queue by what has been stated leaves that body at the front of it
+    /// forever and every other body in the system is never fitted at all. Not compared, not
+    /// saved and not reported, because an attempt is not something a craft knows.
+    tried: BTreeMap<Subject, f64>,
     /// See [`room`].
     capacity_bytes: f64,
     occupied_bytes: f64,
@@ -329,6 +336,7 @@ impl PartialEq for Knowledge {
 impl Knowledge {
     pub fn new(owner: Witness) -> Self {
         Self {
+            tried: BTreeMap::new(),
             owner,
             files: BTreeMap::new(),
             beliefs: BTreeMap::new(),

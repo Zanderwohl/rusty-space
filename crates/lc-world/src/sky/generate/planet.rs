@@ -59,6 +59,9 @@ pub struct Planet {
     pub obliquity_rad: f64,
     /// Which way it leans, measured about the system pole, radians.
     pub spin_node_rad: f64,
+    /// Where its orbit crosses the system's plane, radians. Without one every planet's
+    /// inclination would tilt it the same way and a system would be a fan rather than a disc.
+    pub orbit_node_rad: f64,
     /// Zero-albedo equilibrium temperature, kelvin.
     pub equilibrium_k: f64,
     /// Whether a convecting core gives it a field. What decides if its water survives.
@@ -204,6 +207,7 @@ fn of(
         spin_s,
         obliquity_rad: obliquity_of(h(8), t),
         spin_node_rad: rng::uniform_in(h(9), 0.0, std::f64::consts::TAU),
+        orbit_node_rad: rng::uniform_in(h(18), 0.0, std::f64::consts::TAU),
         equilibrium_k: rung.equilibrium_k,
         magnetic,
         atmosphere,
@@ -288,7 +292,12 @@ pub fn spin_of(h: u64, giant: bool, t: &super::tuning::World) -> f64 {
 
 /// How far this one leans, radians, in `0..=PI`.
 pub fn obliquity_of(h: u64, t: &super::tuning::World) -> f64 {
-    let lean = if rng::uniform(rng::mix(h)) < t.tumbled_chance {
+    // Salted, and it has to be: `rng::gaussian` draws its first uniform from `mix(h)`, so
+    // testing `uniform(mix(h))` here would be reading the gaussian's own input. A planet that
+    // failed the tumble test would then be one whose first uniform is at least the tumble
+    // chance, which caps the gaussian at 2.15 sigma -- and the heavy tail this is supposed to
+    // have would stop at 43 degrees.
+    let lean = if rng::uniform(rng::hash(&[h, 0x7017])) < t.tumbled_chance {
         // On its side or retrograde, as Uranus and Venus are.
         rng::uniform_in(h, std::f64::consts::FRAC_PI_2, std::f64::consts::PI)
     } else {
