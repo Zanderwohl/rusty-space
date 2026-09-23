@@ -5,9 +5,7 @@
 // graph of its own has a color cubemap instead, and may have a cloud deck. Every cubemap is
 // sampled on the body-fixed direction, which is what the mesh's local position already is, so
 // the surface turns with the body and does not swim with the camera. The mesh's +Y is the pole.
-//
-// A cloud deck is weather over climate. The weather is a few keyframes of the same noise that
-// the host blends through, each carried by the wind; see em_render's body_surface_material.
+// The cloud deck is lightcone/docs/07-rendering.md's "A cloud deck evolves".
 
 #import bevy_pbr::{
     mesh_functions,
@@ -43,7 +41,7 @@ struct BodySurfaceUniform {
     exposure: vec4<f32>,
     /// Each weather slot's weight; `w` is the weather's mean.
     weather: vec4<f32>,
-    /// How far the equator's easterlies have carried each slot westward, radians.
+    /// Each slot's westward drift at the equator, radians.
     drift: vec4<f32>,
 }
 
@@ -67,7 +65,7 @@ const CLOUD_KNEE: f32 = 0.4;
 const CLOUD_ALPHA: vec3<f32> = vec3<f32>(0.0, 0.45, 0.92);
 const CLOUD_L: vec3<f32> = vec3<f32>(0.92, 0.91, 0.94);
 
-/// `dir` turned about the pole by `angle`, eastward.
+/// `dir` turned eastward about the pole by `angle`.
 fn turned(dir: vec3<f32>, angle: f32) -> vec3<f32> {
     let c = cos(angle);
     let s = sin(angle);
@@ -76,12 +74,10 @@ fn turned(dir: vec3<f32>, angle: f32) -> vec3<f32> {
 
 /// The deck at `dir`: linear gray, and straight alpha as cover.
 fn deck(dir: vec3<f32>) -> vec4<f32> {
-    // Easterlies at the equator, westerlies at mid-latitudes, easterlies again at the poles:
-    // an eastward angular rate of -cos(3 * latitude), in units of the equator's.
+    // Eastward angular rate -cos(3 * latitude), in units of the equator's.
     let c = sqrt(max(1.0 - dir.y * dir.y, 0.0));
     let wind = 3.0 * c - 4.0 * c * c * c;
-    // Each slot is read where its weather was when it was blown there. `turned` by minus the
-    // drift, because a pattern moved east is found to the west of where it now is.
+    // Minus the drift: a pattern moved east is found to the west.
     let mean = material.weather.w;
     let w = material.weather;
     let d = material.drift * wind;

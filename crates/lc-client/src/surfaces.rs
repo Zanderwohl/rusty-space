@@ -6,11 +6,9 @@
 //! cloud deck drawn over it. So a hand-made Earth is a file and a line, not a change here. Each
 //! body's seed is its name's.
 //!
-//! A cloud deck is not baked in color. Its graph's [`WEATHER`] layer is baked again every
-//! [`CLOUD_PERIOD_S`] with a new seed, and body_surface.wgsl blends through the keyframes and
-//! takes the cover from the blend, carrying each keyframe on the wind as it goes. Its
-//! [`CLIMATE`] layer does not change, and is baked once. Every client derives the keyframes
-//! from coordinate time, so they agree about the weather.
+//! A cloud deck's [`WEATHER`] is rebaked every [`CLOUD_PERIOD_S`] with a new seed and blended
+//! in body_surface.wgsl; its [`CLIMATE`] is baked once. Keyframes follow coordinate time, so
+//! every client draws the same weather. See lightcone/docs/07-rendering.md.
 
 use std::collections::HashMap;
 use std::f64::consts::FRAC_PI_2;
@@ -34,24 +32,19 @@ pub const FACE: u32 = 512;
 /// than a variation on one, and it is what a ship in low orbit fills the view with.
 pub const COLOR_FACE: u32 = 1024;
 
-/// A cloud graph's noise, which changes with each keyframe. It stays below one, so a byte
-/// holds it; three keyframes are 18 megabytes.
+/// It stays below one, so a byte holds it.
 const WEATHER: Target = Target::new(Shape::Cube(COLOR_FACE)).layer("zonal");
 
-/// A cloud graph's belts, which do not change and vary only with latitude.
 const CLIMATE: Target = Target::new(Shape::Cube(64)).layer("drive term 1");
 
-/// [`WEATHER`]'s mean over the sphere, about which keyframes are blended. It varies by about half
-/// a percent from seed to seed.
+/// [`WEATHER`]'s mean over the sphere, measured; it varies about half a percent by seed.
 const WEATHER_MEAN: f32 = 0.556;
 
-/// Coordinate seconds from one cloud keyframe to the next. Weather loses its shape in a few days.
-/// At [`crate::session::TIME_RATE`] this is about twenty real seconds, and a tick of the server
-/// moves the blend by a quarter of a percent.
+/// Coordinate seconds between cloud keyframes: about twenty real seconds at
+/// [`crate::session::TIME_RATE`], so a server tick moves the blend a quarter of a percent.
 pub const CLOUD_PERIOD_S: f64 = 2.0 * 86_400.0;
 
-/// The equator's easterlies, meters a second. The mid-latitudes' westerlies follow from it; see
-/// body_surface.wgsl.
+/// At the equator, meters a second; body_surface.wgsl shapes it by latitude.
 const EASTERLIES_M_S: f64 = 10.0;
 
 #[derive(Asset, TypePath, Debug, Deserialize)]
@@ -144,7 +137,6 @@ impl AssetLoader for ManifestLoader {
 pub struct BodyImages {
     pub pattern: Handle<Image>,
     pub color: Handle<Image>,
-    /// A slot for each keyframe of the cloud deck's weather.
     pub weather: [Handle<Image>; 3],
     pub climate: Handle<Image>,
 }
@@ -174,7 +166,7 @@ impl BodyImages {
     }
 }
 
-/// A cloud deck's weather as the shader blends it this frame: see [`BodySurfaceUniform`].
+/// See [`BodySurfaceUniform`]'s `weather` and `drift`.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Weather {
     pub weights: Vec4,
@@ -276,8 +268,7 @@ impl Surfaces {
             if bakes.settled(&body.images.weather[slot]) {
                 weights[slot] = weight as f32;
             }
-            // Zero when the keyframe is drawn alone, so the wind shears none further than a
-            // period's worth.
+            // Zero when drawn alone, so no keyframe shears past a period's worth.
             drift[slot] = (EASTERLIES_M_S * (now_s - j as f64 * CLOUD_PERIOD_S) / radius_m) as f32;
         }
         // A keyframe that has not landed leaves the other drawn alone, at full contrast.
@@ -293,9 +284,8 @@ impl Surfaces {
     }
 }
 
-/// The keyframes drawn at `now_s` and their weights, whose squares sum to one. So the blend of
-/// two independent fields has the contrast of either, where plain weights would lose a third of
-/// it half-way.
+/// The keyframes drawn at `now_s`, weighted so the squares sum to one: plain weights lose a third
+/// of the contrast half-way.
 fn blend(now_s: f64) -> [(i64, f64); 2] {
     let at = now_s / CLOUD_PERIOD_S;
     let k = at.floor();
@@ -308,8 +298,6 @@ fn slot_of(keyframe: i64) -> usize {
     keyframe.rem_euclid(3) as usize
 }
 
-/// Each keyframe a draw of its own. Adjacent seeds give unrelated fields, which is why the
-/// weather is blended rather than stepped.
 fn keyframe_seed(seed: u32, keyframe: i64) -> u32 {
     seed ^ ((keyframe as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) as u32
 }
@@ -490,9 +478,8 @@ mod tests {
         (lerp(CLOUD_L).powi(3), lerp(CLOUD_ALPHA))
     }
 
-    /// The shader takes the deck apart and puts it back together: weather plus climate is the
-    /// graph's drive, and its cover and color are the graph's. So the graph stays what the deck
-    /// looks like, and an edit to it that the shader would not follow fails here.
+    /// Weather plus climate is the graph's drive, and the shader's cover and color are the
+    /// graph's, so an edit to the graph the shader would not follow fails here.
     #[test]
     fn the_shaders_deck_is_the_graphs_deck() {
         let manifest = manifest();
@@ -530,7 +517,7 @@ mod tests {
         );
     }
 
-    /// The blend is about [`WEATHER_MEAN`], and a keyframe is baked in a byte, which clips at one.
+    /// A byte clips at one, and the blend is about [`WEATHER_MEAN`].
     #[test]
     fn the_weather_has_the_mean_and_range_the_blend_assumes() {
         let g = graph(manifest().clouds.get("Earth").unwrap());
@@ -563,8 +550,7 @@ mod tests {
         }
     }
 
-    /// Nothing jumps: the weights keep their squares' sum at one, and at a keyframe the drawn
-    /// pair hands over to the next with the same field at full weight on both sides.
+    /// No jump at a keyframe, and no loss of contrast between them.
     #[test]
     fn the_blend_is_continuous_and_keeps_its_contrast() {
         for k in [-3i64, 0, 1, 4000] {
