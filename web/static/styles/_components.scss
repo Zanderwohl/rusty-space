@@ -1,7 +1,7 @@
 // Named things. Each one names what it is, never what it looks like.
 
 .wordmark {
-  align-items: center;
+  align-items: baseline;
   color: var(--ink);
   display: inline-flex;
   font-family: var(--font-display);
@@ -16,8 +16,11 @@
   gap: 0.25em;
   text-decoration: none;
 
+  // Sized so the cone's ink, which fills 80% of its box, spans the letters' cap height and
+  // extrusion (0.98em in Nabla), and dropped so its ink sits on the letters' baseline.
   img {
-    height: 1em;
+    height: 1.22em;
+    margin-block-end: -0.2em;
     width: auto;
   }
 }
