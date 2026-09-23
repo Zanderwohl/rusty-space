@@ -611,7 +611,7 @@ pub(crate) fn station(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Re
         }
         return;
     };
-    ui.label(format!("holding: {}", waypoint.label()));
+    ui.label(format!("holding: {}", waypoint.label(&game.home_labels())));
     if let Some(period) = waypoint.period_s(system, game.coordinate_time_s()) {
         ui.weak(format!("one turn in {}", duration(period)));
     }

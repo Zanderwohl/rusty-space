@@ -138,7 +138,7 @@ pub(crate) fn place_on_station(
     // rather than wherever the clock had it.
     let waypoint = waypoint.nearest_to(here, &system, now);
     let Some(at) = waypoint.place_at(&system, now) else { return };
-    let label = waypoint.label();
+    let label = waypoint.label(&game.home_labels());
     // Not over a `--focus`: this flag says where the ship is, that one says what is selected.
     if !dev.actions.iter().any(|action| matches!(action, Action::FocusTarget(_))) {
         ui.focus = course.target();

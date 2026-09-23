@@ -298,15 +298,21 @@ impl Waypoint {
     }
 
     /// What to call this on screen.
-    pub fn label(&self) -> String {
+    /// What to call this station, in the crew's own names.
+    ///
+    /// **Takes [`Labels`] rather than formatting the key**, because a waypoint holds the
+    /// generator's key for whatever it is anchored to and that is not a name anybody aboard
+    /// knows. A ship sent to `180.5-00.1` must not be reported as holding at `99942-Apophis`.
+    /// See [`crate::labels`].
+    pub fn label(&self, labels: &crate::labels::Labels) -> String {
         match self {
             Waypoint::Fixed(_) => "a fixed point".to_string(),
             Waypoint::Orbit(orbit) => match &orbit.about {
                 Anchor::Star => format!("a band at {:.1} AU", orbit.radius_m / AU),
-                Anchor::Body(name) => format!("orbit of {name}"),
+                Anchor::Body(key) => format!("orbit of {}", labels.of(key)),
             },
-            Waypoint::Lagrange { body, point } => format!("{body} {point:?}"),
-            Waypoint::Libration(l) => format!("{} {:?} libration", l.body, l.point),
+            Waypoint::Lagrange { body, point } => format!("{} {point:?}", labels.of(body)),
+            Waypoint::Libration(l) => format!("{} {:?} libration", labels.of(&l.body), l.point),
         }
     }
 
@@ -1385,6 +1391,65 @@ mod tests {
             assert!((v.length() - 1.0).abs() < 1e-12, "{pole} gave {v}");
             assert!(u.dot(v).abs() < 1e-12, "{pole} gave a skew basis");
         }
+    }
+
+    /// **A station is named in the crew's words, never the generator's key.** A ship flown to
+    /// `180.5-00.1` reported as holding at `99942-Apophis` has told the player the name of a
+    /// body nobody aboard has identified.
+    #[test]
+    fn a_station_is_never_labeled_by_the_generators_key() {
+        let stars = AuthoredStars::sample();
+        let star = StarProvider::stars(&stars)[2].clone();
+        let system = LocalSystem::for_star(&star).expect("a generated system");
+        let key = system
+            .inventory()
+            .iter()
+            .find_map(|e| match (&e.target, e.depth) {
+                // Past the primary: `labels` maps the star itself separately.
+                (Target::Body(key), depth) if depth > 0 => Some(key.clone()),
+                _ => None,
+            })
+            .expect("a body");
+
+        // What the crew calls it: one body detected, under its discovery designation.
+        let labels = crate::labels::label(&system, "the star", |body| {
+            (body == crate::knowledge::BodyId::of(star.id, &key)).then(|| "180.5-00.1".to_string())
+        });
+
+        let stations = [
+            Waypoint::Lagrange { body: key.clone(), point: LagrangePoint::L1 },
+            Waypoint::Orbit(Orbit {
+                about: Anchor::Body(key.clone()),
+                radius_m: 1.0e7,
+                pole: DVec3::Z,
+                phase_rad: 0.0,
+            }),
+        ];
+        for station in stations {
+            let said = station.label(&labels);
+            assert!(!said.contains(&key), "the key leaked: {said}");
+            assert!(said.contains("180.5-00.1"), "not the crew's name: {said}");
+        }
+    }
+
+    /// A body nobody has detected has no name to give, and the key is still not it.
+    #[test]
+    fn an_undetected_body_is_unidentified_rather_than_keyed() {
+        let stars = AuthoredStars::sample();
+        let star = StarProvider::stars(&stars)[2].clone();
+        let system = LocalSystem::for_star(&star).expect("a generated system");
+        let key = system
+            .inventory()
+            .iter()
+            .find_map(|e| match (&e.target, e.depth) {
+                // Past the primary: `labels` maps the star itself separately.
+                (Target::Body(key), depth) if depth > 0 => Some(key.clone()),
+                _ => None,
+            })
+            .expect("a body");
+        let labels = crate::labels::label(&system, "the star", |_| None);
+        let said = Waypoint::Lagrange { body: key.clone(), point: LagrangePoint::L1 }.label(&labels);
+        assert!(!said.contains(&key), "the key leaked: {said}");
     }
 }
 

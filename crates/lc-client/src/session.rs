@@ -405,7 +405,8 @@ impl Session {
             change: motion::Change::SetCourse { course: course.clone(), drive },
         };
         self.ship.apply(&event).ok()?;
-        self.ship.motion.bound_for().map(|w| w.label())
+        let labels = self.home_labels();
+        self.ship.motion.bound_for().map(|w| w.label(&labels))
     }
 
 
@@ -1003,7 +1004,10 @@ mod tests {
         let course =
             lc_world::navigation::Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: lc_world::navigation::Plane::Equatorial };
         let label = session.set_course(&course).expect("a course to Earth");
-        assert_eq!(label, "orbit of Earth");
+        // Named in the crew's words, and this crew has observed nothing, so it has none for
+        // the body it is flying to. "Earth" here would be the generator's key read out.
+        assert!(label.starts_with("orbit of "), "{label}");
+        assert!(!label.contains("Earth"), "the generator's key leaked: {label}");
         assert!(session.cruise().is_some(), "and a crossing to fly it");
 
         // Fly. A tenth of a real second a step, which at the design rate is fifteen minutes.
