@@ -11,12 +11,12 @@ create table accounts (
 );
 
 -- One row per way of signing in to an account. `subject` is whatever the provider calls the
--- user: Google's `sub`, a Discord snowflake, or the normalized email for a password account.
+-- user: Google's `sub`, a Discord snowflake, or the normalised email for a password account.
 create table links (
     provider       text        not null,
     subject        text        not null,
     account_id     uuid        not null references accounts (id) on delete cascade,
-    -- Normalized to lowercase on the way in. Null where the provider gave none.
+    -- Normalised to lowercase on the way in. Null where the provider gave none.
     email          text,
     -- Whether the *provider* verified it. Google's `email_verified`, Discord's `verified`. A
     -- password account's email is false until delivery exists to prove otherwise.
