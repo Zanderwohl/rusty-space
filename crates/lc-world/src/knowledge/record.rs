@@ -273,8 +273,7 @@ pub struct Colors {
     /// the raw flux carries the range and the phase as well as the body: averaging it measured
     /// the geometry of the visits rather than the surface. Two bands measured in the *same*
     /// visit share both exactly, so their ratio is free of either -- and a band detected only
-    /// on near visits no longer biases the answer, because every value folded is already a
-    /// color.
+    /// on near visits cannot bias the answer, because every value folded is already a color.
     pub mean: PerBand<f64>,
     /// Weighted sum of squared deviations, for the spread of that ratio.
     pub scatter: PerBand<f64>,
@@ -484,9 +483,9 @@ mod colors_tests {
         assert!((a / b - 1.0).abs() < 1.0e-9, "{a} against {b} from four times the range");
     }
 
-    /// A band detected only on the near visits used to drag the answer with it: its mean was
-    /// of bright readings and the other band's mean included the dim ones. Folding colors
-    /// leaves nothing for that to bias.
+    /// A band detected only up close would drag the answer with it if means were folded rather
+    /// than ratios: its mean would be of bright readings while the other band's took in the dim
+    /// ones. A ratio within one visit leaves nothing for that to bias.
     #[test]
     fn a_band_seen_only_up_close_does_not_bias_the_rest() {
         let mut held = Colors::new(Witness(1));

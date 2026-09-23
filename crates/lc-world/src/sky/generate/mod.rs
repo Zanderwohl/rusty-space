@@ -598,8 +598,8 @@ mod tests {
         assert_eq!(other.system_pole(), pole_for(other.seed()));
         assert!(other.system_pole().dot(DVec3::Z).abs() < 0.999, "a generated pole that is +Z");
 
-        // And the system reports the same one. It used to carry its seed's pole whatever the
-        // star was, so Sol's belts were drawn in the ecliptic and its system said otherwise.
+        // And the system reports the same one. A seeded pole here would draw Sol's belts in
+        // the ecliptic while its system said they were somewhere else.
         assert_eq!(system_for(&sol).pole, DVec3::Z);
         assert_eq!(system_for(&other).pole, other.system_pole());
     }
