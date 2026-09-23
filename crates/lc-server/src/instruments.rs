@@ -35,6 +35,15 @@ pub(crate) const PAGE_BYTES: usize = 1 << 20;
 /// periods.
 const READS_PER_TICK: usize = 1;
 
+/// Orbits fitted per tick across the whole shard.
+///
+/// One, for the same reason as [`READS_PER_TICK`] and more so: an angles-only fit is a search
+/// over two ranges with a Kepler solve at every look of every candidate, and costs about a
+/// tick's own budget. Round-robin by which body's orbit is oldest, so a system of two hundred
+/// comes round in two hundred ticks -- ten real seconds -- which is far faster than any of
+/// their orbits change.
+const FITS_PER_TICK: usize = 1;
+
 #[derive(Clone, Debug)]
 pub(crate) struct Aboard {
     pub knowledge: Knowledge,
@@ -59,6 +68,8 @@ pub(crate) struct Instruments {
     pub(crate) prior: Option<Prior>,
     /// Round-robin cursor for [`READS_PER_TICK`].
     reader: Option<CraftId>,
+    /// Round-robin cursor for [`FITS_PER_TICK`].
+    fitter: Option<CraftId>,
     /// Round-robin cursor for the one full recount per tick.
     recounted: Option<CraftId>,
     landings: Vec<Landing>,
@@ -179,6 +190,42 @@ impl<J: Journal> Server<J> {
             aboard.observatory.tick(sky, system.as_deref(), &mut aboard.knowledge, at, now_s);
         }
         self.read_logs(now_s);
+        self.fit_orbits(now_s);
+    }
+
+    /// Fit one body's orbit, for one craft, per tick. See [`FITS_PER_TICK`].
+    ///
+    /// The star's *believed* position is what the bearings are put into the frame of, so a
+    /// craft that has not measured its own sun's distance fits nothing -- which is the chain
+    /// doc 25 describes, and the reason the survey measures the star every tick.
+    fn fit_orbits(&mut self, now_s: f64) {
+        let mut ids: Vec<CraftId> = self.instruments.aboard.keys().copied().collect();
+        ids.sort_unstable_by_key(|id| id.0);
+        let after = self.instruments.fitter.map_or(0, |r| ids.partition_point(|id| id.0 <= r.0));
+        ids.rotate_left(after);
+        let mut fits = 0;
+        for id in ids {
+            if fits == FITS_PER_TICK {
+                break;
+            }
+            let Some(star) = self.instruments.aboard.get(&id).and_then(|a| a.observatory.duty.surveying())
+            else {
+                continue;
+            };
+            let Some(aboard) = self.instruments.aboard.get_mut(&id) else { continue };
+            let Some(star_ly) = aboard
+                .knowledge
+                .belief(lc_world::knowledge::Subject::Star(star))
+                .and_then(|b| b.distance.position_ly())
+            else {
+                continue;
+            };
+            let Some(subject) = aboard.knowledge.unfitted(star) else { continue };
+            self.instruments.fitter = Some(id);
+            fits += 1;
+            aboard.knowledge.fit_orbit(subject, star_ly, now_s);
+            self.fit(id, true);
+        }
     }
 
     fn read_logs(&mut self, now_s: f64) {
@@ -622,6 +669,50 @@ mod tests {
                 other.id
             );
         }
+    }
+
+    /// **The fitting chain is alive on the shard, and refuses where it should.** A drifting
+    /// craft surveying its own system triangulates its sun, which is what puts the bearings in
+    /// a frame at all, and the fit is then offered bodies whose arcs are hours long. Hours is
+    /// nothing of any orbit, so it declines them -- and declining is the behaviour worth
+    /// pinning here, since `knowledge::arc` covers the arcs that do settle.
+    #[tokio::test]
+    async fn a_surveying_craft_measures_its_sun_and_declines_the_short_arcs() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let star = sky()[0].id;
+
+        // Adrift rather than at rest: a ship that holds still measures no parallax, so its own
+        // sun has no distance and nothing downstream of that runs at all. Across the line of
+        // sight and not along it -- a craft starts on the +X axis from its star, and drifting
+        // straight out along it sweeps no baseline at all.
+        if let Some(craft) = server.fleet_mut().get_mut(CraftId(ship.0)) {
+            craft.motion.beta = DVec3::new(0.0, 1.0e-6, 0.0);
+        }
+        let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
+        wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
+        for _ in 0..80 {
+            server.tick(&mut wire).await.unwrap();
+        }
+
+        let knowledge = &server.instruments.aboard[&CraftId(ship.0)].knowledge;
+        let host = knowledge
+            .belief(lc_world::knowledge::Subject::Star(star))
+            .expect("its own sun is surveyed every tick");
+        assert!(host.triangulated, "a drifting ship should measure it: {:?}", host.distance);
+
+        // Bodies enough to fit, and no orbit from any of them yet.
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let bodies = knowledge.bodies_of(star, now_s);
+        assert!(bodies.len() > 5, "only {} bodies", bodies.len());
+        assert!(
+            bodies.iter().all(|b| b.method.is_none()),
+            "an orbit was minted from {:.0} hours of arc",
+            now_s / 3600.0
+        );
+        assert!(knowledge.unfitted(star).is_some(), "the fitter has work and is being offered it");
     }
 
     #[tokio::test]

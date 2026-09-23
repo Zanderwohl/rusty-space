@@ -480,8 +480,40 @@ what it came to:
   about 1e-8 radians — thirty times the noise it was meant to be measuring — and every fit
   plateaued there. `atan2` of the cross product keeps its digits all the way down.
 
-One fit costs about 100 ms in a debug build, where this crate's own code is unoptimized, so it
-belongs on a per-tick budget of one the way `READS_PER_TICK` bounds log reading.
+One fit costs about 100 ms in a debug build, where this crate's own code is unoptimized, so
+`FITS_PER_TICK` is one, the way `READS_PER_TICK` bounds log reading. Round-robin by whose orbit
+is oldest, so a system of two hundred comes round in two hundred ticks -- ten real seconds --
+which is far faster than any of their orbits change.
+
+**Wired in** (2026-09-22). `Knowledge::looks_at` puts a body's bearings in the frame of where its
+star is *believed* to be; `unfitted` picks whose turn it is; `fit_orbit` mints an `Orbit` with
+`Method::Astrometric`, which `body_belief` reads back into a `Placed::Known`. Three things that
+had to be got right, and one that was not:
+
+- **Believed, not true.** The observer positions are the ship's own and exact; the star's is a
+  parallax with its own error, and an error there shifts every look by the same vector and biases
+  the orbit. A craft that has not measured its own sun fits nothing, which is the chain this
+  document has described from the start, and the reason the survey measures the star every tick.
+- **The elements have to mean what the reader means.** `Fitted` keeps its plane in
+  `any_orthonormal_vector`'s basis, which nothing else shares; the record keeps an ascending node
+  in simulation axes and periapsis measured round from it. A wrong conversion is a body drawn in
+  the wrong place and nothing that complains, so the test puts the orbit through `placed_at` and
+  checks it lands where the fit says, at eight points round three different orbits.
+- **The error bars are the marginal ones,** found by moving each element until the fit is a
+  chi-square worse *with the others re-settling*. Held fixed they come out eighty times too
+  small, because the period and the axis trade against each other. They are still a few times
+  optimistic, and [`spread`] says why: the re-settling is the same pattern search the fit uses
+  and stops for the same reason.
+- **An orbit has to be an orbit about a star,** and neither the geometry nor the timing says so
+  on its own. `1/r = A + B cos + C sin` puts the semi-latus rectum at `1/A`, and three points
+  nearly collinear in `(cos, sin)` put `A` near zero: nine hours of a generated system fitted to
+  **2.9e16 AU with a plausible 158 day period**. Bounding the axis to the band the ranges were
+  searched in moved it to 188 AU and 187 days -- inside the band, and a star of twenty-six
+  million suns. So the implied mass is bounded too, at 0.02 to 300 solar. That is not circular
+  even though the mass is one of the answers: the range of stars is a fact about stars. Both
+  checks live in `residual`, because every candidate is scored there and nothing else is a
+  chokepoint -- the 2.9e16 AU orbit *settled* its way out of the band, so checking only where the
+  three-point solution lands catches nothing.
 
 A body with no moon has no mass from this. Venus then stays of unknown mass, and its type comes
 from everything else.

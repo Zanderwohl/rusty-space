@@ -265,6 +265,15 @@ fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     Placed::Known { offset_au, sigma_au: (sigma_au * sigma_au + along_au * along_au).sqrt() }
 }
 
+/// `placed_at`'s geometry, for the orbit fit's round-trip test in `knowledge::arc`. AU.
+#[cfg(test)]
+pub(crate) fn placed_for_test(orbit: &Orbit, now_s: f64) -> glam::DVec3 {
+    match placed_at(orbit, now_s) {
+        Placed::Known { offset_au, .. } => offset_au,
+        other => panic!("a full orientation should place it, got {other:?}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
