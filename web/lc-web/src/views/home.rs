@@ -7,7 +7,7 @@ const DESCRIPTION: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing el
 
 pub async fn page() -> Markup {
     shell(
-        Head::new("Lorem ipsum dolor", DESCRIPTION),
+        Head::site(DESCRIPTION),
         html! {
             section class="stack" {
                 h1 { "Everything you know is out of date." }

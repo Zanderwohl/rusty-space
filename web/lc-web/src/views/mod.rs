@@ -12,9 +12,12 @@ use crate::assets;
 /// The design documents are the only thing to read until the devlog has more in it.
 pub const REPO: &str = "https://github.com/Zanderwohl/rusty-space/tree/master/lightcone";
 
+const SITE_NAME: &str = "Lightcone Frontier";
+
 /// What goes in `<head>`, gathered in one place so no page half-fills it.
 pub struct Head<'a> {
-    pub title: &'a str,
+    /// `None` titles the page with the site name alone.
+    pub title: Option<&'a str>,
     pub description: &'a str,
     /// Set for posts. Turns the card into an article and carries the date.
     pub published: Option<String>,
@@ -22,7 +25,11 @@ pub struct Head<'a> {
 
 impl<'a> Head<'a> {
     pub fn new(title: &'a str, description: &'a str) -> Self {
-        Head { title, description, published: None }
+        Head { title: Some(title), description, published: None }
+    }
+
+    pub fn site(description: &'a str) -> Self {
+        Head { title: None, description, published: None }
     }
 
     pub fn article(mut self, published: String) -> Self {
@@ -52,10 +59,13 @@ pub fn document(head: Head<'_>, body: Markup) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (head.title) " — Lightcone Frontier" }
+                title {
+                    @if let Some(title) = head.title { (title) " — " }
+                    (SITE_NAME)
+                }
                 meta name="description" content=(head.description);
-                meta property="og:site_name" content="Lightcone Frontier";
-                meta property="og:title" content=(head.title);
+                meta property="og:site_name" content=(SITE_NAME);
+                meta property="og:title" content=(head.title.unwrap_or(SITE_NAME));
                 meta property="og:description" content=(head.description);
                 meta property="og:type" content=(if head.published.is_some() { "article" } else { "website" });
                 @if let Some(published) = &head.published {
@@ -73,7 +83,7 @@ pub fn document(head: Head<'_>, body: Markup) -> Markup {
 
 fn masthead() -> Markup {
     html! {
-        a class="wordmark" href="/" { "Lightcone Frontier" }
+        a class="wordmark" href="/" { (SITE_NAME) }
         nav {
             a href="/play" { "Play" }
             a href="/blog" { "Devlog" }
