@@ -358,8 +358,17 @@ fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     let Some((offset_au, _)) = em_foundations::kepler::state::to_state(1.0, &elements) else {
         return Placed::Shell { radius_au: au, sigma_au };
     };
-    // How far along the ring the pole's own error carries the body, added to the size error.
-    let along_au = offset_au.length() * sigma_rad;
+    // **Where a body has got to is a phase, and a phase drifts.** A period known to a part in
+    // a hundred is a body a quarter of the way round its orbit after twenty-five turns, and a
+    // belief that reported only the size and the plane said a course could be flown against it.
+    // `M = tau (t - epoch) / P`, so the period's error carries `tau |t - epoch| sigma_P / P^2`
+    // of anomaly with it. Doc 25: the sigma is grown by how long since it was last seen.
+    let (period_s, period_sigma) = orbit.period_s;
+    let drift = std::f64::consts::TAU * (now_s - epoch_s).abs() * period_sigma / (period_s * period_s);
+    // Capped at half a turn, past which the body is simply somewhere on its ring and an error
+    // bar longer than the ring says nothing more than that.
+    let along = (sigma_rad * sigma_rad + drift * drift).sqrt().min(std::f64::consts::PI);
+    let along_au = offset_au.length() * along;
     Placed::Known { offset_au, sigma_au: (sigma_au * sigma_au + along_au * along_au).sqrt() }
 }
 
@@ -475,9 +484,12 @@ fn moving_at(orbit: &Orbit, now_s: f64) -> Option<(DVec3, f64)> {
         true_anomaly: em_foundations::kepler::anomaly::true_from_eccentric(eccentric, e),
     };
     let (_, velocity) = em_foundations::kepler::state::to_state(mu, &elements)?;
-    // The speed goes as the square root of the axis, so half its fractional error, and the
-    // direction is only as good as the plane.
-    let fraction = (sigma_au / au).abs() * 0.5
+    // `mu` is not independent here -- it came from this same orbit's own period and axis -- so
+    // the speed is `n a`, which is linear in the axis rather than going as its square root. The
+    // axis's whole fractional error enters, not half of it. The direction is only as good as
+    // the plane. Summed rather than in quadrature because a single fit's elements are
+    // correlated and this is the conservative reading of that.
+    let fraction = (sigma_au / au).abs()
         + (orbit.period_s.1 / orbit.period_s.0).abs()
         + sigma_rad.abs();
     Some((velocity, velocity.length() * fraction))
@@ -666,6 +678,54 @@ mod tests {
             ("c", orbit(5.0, known(DVec3::X, 0.01), Some(0.0))),
         ]);
         assert_eq!(k.system_plane(star()), SystemPlane::Unknown, "sixty degrees apart is a plane");
+    }
+
+    /// **A belief goes stale, and it has to say so.** A period known to a part in a hundred
+    /// puts the body a quarter of the way round its orbit after twenty-five turns, and the
+    /// error bar said nothing about it: only the size and the plane went in, so a belief
+    /// measured once was as good a thing to fly a course against a century later.
+    #[test]
+    fn a_position_grows_less_certain_the_longer_since_it_was_seen() {
+        let period = 3.156e7;
+        let orbit = Orbit {
+            witness: Witness(1),
+            about: None,
+            // A part in a hundred on the period, and a part in a thousand on the size.
+            period_s: (period, period * 0.01),
+            semi_major_au: (1.0, 0.001),
+            eccentricity: Some((0.0, 0.01)),
+            orientation: Orientation::Known {
+                pole: DVec3::Z,
+                sigma_rad: 1.0e-4,
+                node: 0.0,
+                periapsis: 0.0,
+            },
+            epoch_s: Some(0.0),
+            method: crate::knowledge::Method::Astrometric,
+            stated_s: 0.0,
+            lineage: Vec::new(),
+        };
+        let sigma_at = |t: f64| match placed_at(&orbit, t) {
+            Placed::Known { sigma_au, .. } => sigma_au,
+            other => panic!("{other:?}"),
+        };
+
+        // At the epoch there is no drift, so it is the size and the plane and nothing else.
+        let fresh = sigma_at(0.0);
+        assert!(fresh < 0.002, "at the epoch it is {fresh} AU");
+
+        // Ten orbits on, a hundredth of a period is a tenth of a turn: most of an AU.
+        let later = sigma_at(10.0 * period);
+        assert!(later > 0.5, "ten orbits on it is only {later} AU");
+        assert!(later > 100.0 * fresh, "{later} against {fresh}");
+
+        // It grows the same either side of the epoch: a belief is no better backwards.
+        assert!((sigma_at(-10.0 * period) - later).abs() < 1.0e-9);
+
+        // And it stops growing once the body is simply somewhere on its ring.
+        let ancient = sigma_at(10_000.0 * period);
+        assert!(ancient < 4.0, "an error bar longer than the ring says nothing more: {ancient}");
+        assert!(ancient >= later);
     }
 
     /// **A moon's plane is its planet's equator, not the system's.** Uranus's retinue is 98
