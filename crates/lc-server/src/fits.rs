@@ -7,6 +7,7 @@
 
 use std::collections::HashSet;
 use std::panic::AssertUnwindSafe;
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use lc_world::craft::CraftId;
@@ -14,7 +15,14 @@ use lc_world::knowledge::primary::{FitJob, Solved};
 
 pub(crate) struct Fits {
     send: Sender<(CraftId, Option<Solved>)>,
-    done: Receiver<(CraftId, Option<Solved>)>,
+    /// Behind a `Mutex` only to be `Sync`: a receiver is `Send` and not `Sync`, and a `Server`
+    /// that is not `Sync` cannot be handed to `tokio::spawn`, which is how a test runs one.
+    /// Nothing contends for it -- it is drained once a tick, on the tick.
+    ///
+    /// A poisoned lock is taken anyway rather than refused. What it guards is a receiver, which
+    /// a panic elsewhere cannot leave half-written, and a shard that stopped fitting orbits
+    /// because an unrelated thread died would be the worse outcome.
+    done: Mutex<Receiver<(CraftId, Option<Solved>)>>,
     /// Craft with a fit in flight. One each: a second would be fitting the same arc.
     busy: HashSet<CraftId>,
     /// Half the machine, so the tick and the network keep the rest.
@@ -25,7 +33,7 @@ impl Default for Fits {
     fn default() -> Self {
         let (send, done) = channel();
         let cores = std::thread::available_parallelism().map_or(2, usize::from);
-        Self { send, done, busy: HashSet::new(), most: (cores / 2).clamp(1, 4) }
+        Self { send, done: Mutex::new(done), busy: HashSet::new(), most: (cores / 2).clamp(1, 4) }
     }
 }
 
@@ -51,16 +59,22 @@ impl Fits {
 
     /// Every fit that has finished since the last call. Never blocks.
     pub fn finished(&mut self) -> Vec<(CraftId, Solved)> {
-        let mut out = Vec::new();
-        loop {
-            match self.done.try_recv() {
-                Ok((id, solved)) => {
-                    self.busy.remove(&id);
-                    out.extend(solved.map(|s| (id, s)));
+        let mut taken = Vec::new();
+        {
+            let done = self.done.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            loop {
+                match done.try_recv() {
+                    Ok(finished) => taken.push(finished),
+                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
                 }
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => return out,
             }
         }
+        let mut out = Vec::new();
+        for (id, solved) in taken {
+            self.busy.remove(&id);
+            out.extend(solved.map(|s| (id, s)));
+        }
+        out
     }
 
     /// Every fit in flight, waited for. For a test that needs a fit to have landed.
@@ -68,7 +82,8 @@ impl Fits {
     pub fn wait(&mut self) -> Vec<(CraftId, Solved)> {
         let mut out = Vec::new();
         while !self.busy.is_empty() {
-            let Ok((id, solved)) = self.done.recv() else { break };
+            let received = self.done.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recv();
+            let Ok((id, solved)) = received else { break };
             self.busy.remove(&id);
             out.extend(solved.map(|s| (id, s)));
         }

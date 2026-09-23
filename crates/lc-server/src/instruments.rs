@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, channel};
 
 use lc_proto::{Order, Outbound, Refusal, ShipId};
@@ -91,7 +92,8 @@ impl Instruments {
 #[derive(Default)]
 pub(crate) struct PriorCell {
     held: Option<Prior>,
-    coming: Option<Receiver<Prior>>,
+    /// See [`crate::fits::Fits::done`] for why this is behind a `Mutex`.
+    coming: Option<Mutex<Receiver<Prior>>>,
 }
 
 impl PriorCell {
@@ -100,7 +102,7 @@ impl PriorCell {
         std::thread::spawn(move || {
             let _ = send.send(Prior::measure(stars.iter()));
         });
-        Self { held: None, coming: Some(coming) }
+        Self { held: None, coming: Some(Mutex::new(coming)) }
     }
 
     /// The prior, or `None` while it is still being measured; whatever needs it waits a tick.
@@ -111,9 +113,13 @@ impl PriorCell {
         if self.held.is_none() {
             match &self.coming {
                 #[cfg(not(test))]
-                Some(coming) => self.held = coming.try_recv().ok(),
+                Some(coming) => {
+                    self.held = coming.lock().unwrap_or_else(std::sync::PoisonError::into_inner).try_recv().ok()
+                }
                 #[cfg(test)]
-                Some(coming) => self.held = coming.recv().ok(),
+                Some(coming) => {
+                    self.held = coming.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recv().ok()
+                }
                 None => self.held = Some(Prior::measure(stars.iter())),
             }
         }
