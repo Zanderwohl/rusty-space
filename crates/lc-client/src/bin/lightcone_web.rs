@@ -8,7 +8,7 @@
 //! - **No `.meta` probing**, because every one of those is a round trip and a 404.
 //! - **WebGPU only.** There is no WebGL2 fallback and there will not be one: the renderer
 //!   needs storage buffers and compute, and a silently degraded sky is worse than a refusal.
-//! - **The sky is not an argument.** Every build ships its catalogue at [`SKY`], so the CDN
+//! - **The sky is not an argument.** Every build ships its catalog at [`SKY`], so the CDN
 //!   decides what is loaded and a URL cannot.
 //! - **No main menu.** The library gates that, not this file: see `app::HAS_MAIN_MENU`.
 //!
@@ -24,7 +24,7 @@ use bevy::render::RenderPlugin;
 #[cfg(target_arch = "wasm32")]
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 #[cfg(target_arch = "wasm32")]
-use lc_client::app::{Catalogue, ClientPlugin};
+use lc_client::app::{Catalog, ClientPlugin};
 
 /// The canvas the game draws into. The page owns it; Bevy finds it by selector.
 #[cfg(target_arch = "wasm32")]
@@ -37,10 +37,10 @@ const CANVAS: &str = "#lightcone";
 #[cfg(target_arch = "wasm32")]
 const DEFAULT_ASSET_BASE: &str = "assets";
 
-/// The packed catalogue, under the asset base. `tools/build-wasm.sh` writes it here, and a
+/// The packed catalog, under the asset base. `tools/build-wasm.sh` writes it here, and a
 /// shard's `--sky` names the same object.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-const SKY: &str = "sky/catalogue.lcsky";
+const SKY: &str = "sky/catalog.lcsky";
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
@@ -104,7 +104,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .insert_resource(Catalogue(Some(SKY.to_owned())))
+        .insert_resource(Catalog(Some(SKY.to_owned())))
         .insert_resource(lc_client::uplink::ServerAddress(server))
         .insert_resource(entry.dev)
         .add_plugins(ClientPlugin)

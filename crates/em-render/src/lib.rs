@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod atmosphere_material;
 pub mod body_material;
 pub mod body_surface_material;
 pub mod body_point_material;

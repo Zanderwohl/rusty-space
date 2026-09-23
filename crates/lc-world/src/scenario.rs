@@ -14,7 +14,7 @@
 //! to begin with, which is why the runner is server-side — see `lc_server::director`.
 //!
 //! Data only, and in this crate rather than the server's because both ends read it: the client
-//! names the scenes on a panel, and a catalogue on the wire would be a second copy of a list.
+//! names the scenes on a panel, and a catalog on the wire would be a second copy of a list.
 
 use crate::craft::Kind;
 
@@ -124,7 +124,7 @@ pub struct Scenario {
     pub name: &'static str,
     /// One line, for the button.
     pub blurb: &'static str,
-    /// The catalogue star to stage in. `"Sol"` is the one system with measured rather than
+    /// The catalog star to stage in. `"Sol"` is the one system with measured rather than
     /// generated bodies, which is the only place Jupiter and Saturn exist by name.
     pub star: &'static str,
     /// How fast the world runs while this is staged, as a multiple of the design rate of one
@@ -405,7 +405,7 @@ mod tests {
     use crate::navigation::Course;
     use crate::system::LocalSystem;
 
-    /// Every spelling in the catalogue is one the parser reads. A typo here is a scene that
+    /// Every spelling in the catalog is one the parser reads. A typo here is a scene that
     /// stages a craft nowhere, and the failure would be a missing ship rather than an error.
     #[test]
     fn every_course_in_every_scene_parses() {
@@ -533,22 +533,22 @@ mod tests {
         }
     }
 
-    /// **The test that catches a misspelt moon.** A course that parses is not a course that
+    /// **The test that catches a misspelled moon.** A course that parses is not a course that
     /// exists: `orbit:Juipter:low` reads perfectly and resolves to nothing, and the symptom
     /// would be a craft that never appears rather than an error anybody sees.
     ///
-    /// Skips when the catalogue is not on disk, as the other tests that need a real sky do.
+    /// Skips when the catalog is not on disk, as the other tests that need a real sky do.
     #[cfg(feature = "hyg")]
     #[test]
     fn every_course_resolves_against_the_system_it_is_staged_in() {
-        use crate::sky::{CatalogueStar, StarProvider};
+        use crate::sky::{CatalogStar, StarProvider};
         let Ok(provider) = crate::sky::hyg::HygProvider::load(
             "../../assets/catalogs/hygdata_v42_dist_sort.csv",
         ) else {
             return;
         };
         for scene in Scenario::ALL {
-            let star: CatalogueStar = provider
+            let star: CatalogStar = provider
                 .stars()
                 .iter()
                 .find(|s| s.provenance.name.as_deref() == Some(scene.star))

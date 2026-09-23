@@ -64,14 +64,14 @@ Consequences worth planning for:
   binary dims by a fraction of order unity where a planet dims by 1e-4. Any observer at a
   suitable angle gets the orbital period, the mass ratio and the inclination for free, long
   before they could detect a planet. This is the strongest photometric signal in the game and
-  it comes from real catalogue data.
+  it comes from real catalog data.
 - Close binaries whose separation is comparable to their radii need more than two-body
   Keplerian motion. Exclude contact and near-contact systems from generation rather than
   modeling them.
 
 ## Systems and star data
 
-### The catalogue is test data, not the world
+### The catalog is test data, not the world
 
 The shipped game is set in a **fictional galaxy** with authored features — globular clusters,
 stellar nurseries, structures chosen for play rather than inherited from the sky. Real star
@@ -79,13 +79,13 @@ data is how the physics gets validated, not what the game ships.
 
 That has one architectural consequence, and it is cheap now and expensive later:
 
-- **Star data comes through a provider interface from the start.** `HygCatalogue` is one
+- **Star data comes through a provider interface from the start.** `HygCatalog` is one
   implementation; `AuthoredGalaxy` and `ProceduralGalaxy` are others. Nothing in world
   generation parses a CSV directly.
-- **Star identity is a synthetic stable ID, never a catalogue ID.** An HYG number must not
+- **Star identity is a synthetic stable ID, never a catalog ID.** An HYG number must not
   reach `source_id`, the event store, or the wire format. The importer assigns IDs; the
-  catalogue's own numbers survive only as a provenance field.
-- **A star has no name either.** The catalogue's names sit beside its keys in the same
+  catalog's own numbers survive only as a provenance field.
+- **A star has no name either.** The catalog's names sit beside its keys in the same
   provenance field and are never shown to a player. What a player sees is what somebody called
   it, with a witness on it; see [22-provenance.md](22-provenance.md).
 
@@ -100,16 +100,16 @@ assumptions and should be watched rather than solved now:
 | stellar nursery | dust that belongs to no system. The occlusion model puts populations inside a shell; extended interstellar dust needs path extinction instead, which is a different calculation |
 | authored structures | generation is currently seeded and deterministic; authored content is neither, so both paths must coexist |
 
-Plotting the filtered catalogue as an HR diagram is the cheapest check that the import is
+Plotting the filtered catalog as an HR diagram is the cheapest check that the import is
 right — see [11-plotting.md](11-plotting.md). If the distance sentinel were not cut, the
 main sequence would not appear.
 
 ### Source data
 
-The validation catalogue is HYG v4.2, already in `assets/catalogs/hygdata_v42.csv` and read by
+The validation catalog is HYG v4.2, already in `assets/catalogs/hygdata_v42.csv` and read by
 `src/catalog/`. It supplies position (RA/Dec/distance), spectral class, absolute magnitude,
 and proper motion for ~120 000 stars. Positions convert to the ecliptic frame the sim
-already uses; note the catalogue is equatorial and the existing conversion lives in the
+already uses; note the catalog is equatorial and the existing conversion lives in the
 star-field path.
 
 Per-star derived data, generated once at world creation:
@@ -119,7 +119,7 @@ Per-star derived data, generated once at world creation:
 | mass, radius, effective temperature | spectral class lookup, `src/catalog/spectral.rs` |
 | luminosity | radius and temperature, Stefan-Boltzmann |
 | shell radius | mass, clamped against neighbors |
-| planet set | procedural, seeded by the star's catalogue ID |
+| planet set | procedural, seeded by the star's catalog ID |
 
 Planet generation is procedural and deterministic from a seed, so the same world ID always
 produces the same system, and a client can generate a system locally rather than downloading
@@ -177,14 +177,14 @@ anything:
 | population | typical parameters | photometrically |
 |---|---|---|
 | asteroid belt | narrow `a`, low inclination spread, moderate `e` | marginal |
-| Kuiper analogue | wide `a`, low inclination, many small bodies | near the detection floor |
+| Kuiper analog | wide `a`, low inclination, many small bodies | near the detection floor |
 | Oort cloud | very wide `a`, isotropic inclination, `e` near 1 | invisible |
 
 **Decided: population mass scales with stellar generation and metallicity.** A later-generation
 star formed from enriched gas has more solid material available, so it gets more massive belts,
-a denser Kuiper analogue, and richer volatiles. A Population II star gets almost nothing.
+a denser Kuiper analog, and richer volatiles. A Population II star gets almost nothing.
 
-The catalogue does not carry `[Fe/H]`, so metallicity is synthesised rather than read: seed it
+The catalog does not carry `[Fe/H]`, so metallicity is synthesized rather than read: seed it
 from galactic position — thin disc, thick disc, halo — plus the star's kinematics, which HYG
 does carry as proper motion and radial velocity. Halo stars move fast relative to the local
 standard of rest and are metal-poor; that correlation is strong enough to generate from and it
@@ -312,7 +312,7 @@ those events over the generated baseline reconstructs the system exactly.
 
 - Multi-star systems. `em-sim` propagates Keplerian orbits about a primary; a close binary
   needs either a hierarchical two-body decomposition or a restricted three-body treatment.
-  The catalogue has many binaries and ignoring them removes a large fraction of real stars.
+  The catalog has many binaries and ignoring them removes a large fraction of real stars.
 - ~~Whether a system's shell radius can be changed by players.~~ **Decided: immutable.** The
   shell is world geometry. A swarm large enough to argue otherwise is a later problem.
 - ~~Granularity of swarm sub-populations.~~ **Decided: sub-populations exist and nest.** A

@@ -44,9 +44,9 @@ pub async fn save_files(client: &impl GenericClient, files: &[Filed]) -> Result<
         return Ok(0);
     }
     let ships: Vec<i64> = files.iter().map(|f| f.ship_id).collect();
-    let subjects: Vec<Vec<u8>> = files.iter().map(|f| f.subject.clone()).collect();
+    let subjects: Vec<&[u8]> = files.iter().map(|f| f.subject.as_slice()).collect();
     let formats: Vec<i32> = files.iter().map(|f| f.format).collect();
-    let bodies: Vec<Vec<u8>> = files.iter().map(|f| f.file.clone()).collect();
+    let bodies: Vec<&[u8]> = files.iter().map(|f| f.file.as_slice()).collect();
     let saved: Vec<i64> = files.iter().map(|f| f.saved_t).collect();
     client
         .execute(
@@ -90,7 +90,7 @@ pub async fn save_samples(client: &impl GenericClient, rows: &[LogRow]) -> Resul
         return Ok(0);
     }
     let ships: Vec<i64> = rows.iter().map(|r| r.ship_id).collect();
-    let subjects: Vec<Vec<u8>> = rows.iter().map(|r| r.subject.clone()).collect();
+    let subjects: Vec<&[u8]> = rows.iter().map(|r| r.subject.as_slice()).collect();
     let witnesses: Vec<i64> = rows.iter().map(|r| r.witness).collect();
     let bands: Vec<i16> = rows.iter().map(|r| r.band).collect();
     let observed: Vec<f64> = rows.iter().map(|r| r.observed_s).collect();
@@ -114,7 +114,7 @@ pub async fn delete_samples(client: &impl GenericClient, discarded: &[Discarded]
         return Ok(0);
     }
     let ships: Vec<i64> = discarded.iter().map(|d| d.ship_id).collect();
-    let subjects: Vec<Vec<u8>> = discarded.iter().map(|d| d.subject.clone()).collect();
+    let subjects: Vec<&[u8]> = discarded.iter().map(|d| d.subject.as_slice()).collect();
     let witnesses: Vec<i64> = discarded.iter().map(|d| d.witness).collect();
     let bands: Vec<i16> = discarded.iter().map(|d| d.band).collect();
     let through: Vec<f64> = discarded.iter().map(|d| d.through_s).collect();

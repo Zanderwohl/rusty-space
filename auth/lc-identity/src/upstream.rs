@@ -20,7 +20,7 @@ use crate::pages::{refusal, sign_in_page};
 use crate::providers::{Provider, Upstream};
 use crate::routes::{Broker, Destination};
 use crate::signin::{self, Refused};
-use crate::store::{Flow, Link, Store, normalise_email};
+use crate::store::{Flow, Link, Store, normalize_email};
 
 /// How long a player has at the provider's consent screen.
 ///
@@ -130,7 +130,7 @@ struct TokenResponse {
 
 /// Swap an authorization code for the provider's claims about a person.
 ///
-/// **The ID token's signature is not checked, and that is the specified behaviour rather than a
+/// **The ID token's signature is not checked, and that is the specified behavior rather than a
 /// shortcut.** This response arrives over a TLS connection *we* opened to the provider's token
 /// endpoint, authenticated with our client secret — there is no path for anyone else to have
 /// put a token in it, so a signature proves nothing the transport has not already proven. OIDC
@@ -245,7 +245,7 @@ pub async fn account_from_claims(
         return Ok(link.account_id);
     }
 
-    let email = claims.email.as_deref().map(normalise_email);
+    let email = claims.email.as_deref().map(normalize_email);
     let existing = match (&email, claims.email_verified) {
         (Some(email), true) => store.account_for_verified_email(email).await?,
         _ => None,

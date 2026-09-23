@@ -127,7 +127,7 @@ This forbids storing ship motion only as an integrator state. It is already sati
 
 | kind | representation | source |
 |---|---|---|
-| star | fixed point, or linear proper motion | HYG catalogue in `assets/catalogs/` |
+| star | fixed point, or linear proper motion | HYG catalog in `assets/catalogs/` |
 | planet, moon, comet | Keplerian elements | `em_sim::motive` |
 | ship under thrust | piecewise analytic arcs | `em_sim::trajectory::Path`, `em_sim::patch` |
 | structure | fixed relative to its parent body | — |
@@ -235,7 +235,7 @@ and `JulianDate`, and for the same reason.
 
 ## Decided
 
-**Stars get proper motion eventually, not yet.** The catalogue is frozen for now, so every
+**Stars get proper motion eventually, not yet.** The catalog is frozen for now, so every
 interstellar retarded-time solve is exact and closed-form. It is planned, so the architecture
 must not assume static stars: a star gets a `Worldline` like everything else, currently
 returning a constant. Nothing may read a star's position as a field. When proper motion is

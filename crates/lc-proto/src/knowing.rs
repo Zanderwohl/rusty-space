@@ -40,6 +40,7 @@ impl Duty {
             Duty::Watch { stars, dwell_s, started_s } => {
                 !stars.is_empty() && stars.len() <= WATCH_LIMIT && dwell(*dwell_s) && started_s.is_finite()
             }
+            Duty::Survey { started_s, .. } => started_s.is_finite(),
         }
     }
 }
@@ -54,6 +55,9 @@ pub enum Duty {
     Stare { star: u64 },
     Sweep { center: [f64; 3], radius_rad: f64, dwell_s: f64, started_s: f64 },
     Watch { stars: Vec<u64>, dwell_s: f64, started_s: f64 },
+    /// Every body of one star's system in turn, brightest first. The bodies are not named
+    /// because the craft does not know them yet: finding them is what the duty is for.
+    Survey { star: u64, started_s: f64 },
 }
 
 /// Something a craft knows about.

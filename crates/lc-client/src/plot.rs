@@ -1,7 +1,7 @@
 //! The light curve as a picture: em-plot draws it, egui shows it.
 //!
 //! Two things meet here that otherwise have no reason to know about each other. em-plot
-//! rasterises to a `tiny_skia` pixmap with no engine and no UI toolkit in it, which is what
+//! rasterizes to a `tiny_skia` pixmap with no engine and no UI toolkit in it, which is what
 //! made the headless snapshot possible; egui wants a texture. The bridge is a copy and a
 //! fingerprint, and keeping it in one file is what stops the plotting code learning about egui.
 
@@ -54,7 +54,7 @@ pub struct CurvePlot {
 }
 
 impl CurvePlot {
-    /// Draw the curve into `ui`, rasterising only when what it shows has changed.
+    /// Draw the curve into `ui`, rasterizing only when what it shows has changed.
     pub fn show(&mut self, ui: &mut egui::Ui, samples: &[(f64, f64)], size: egui::Vec2) {
         let (w, h) = (size.x.max(64.0) as u32, size.y.max(48.0) as u32);
         if samples.len() < 2 {
@@ -84,7 +84,7 @@ impl CurvePlot {
     }
 }
 
-/// Rasterise the curve. Separate from the widget so it can be checked without a context.
+/// Rasterize the curve. Separate from the widget so it can be checked without a context.
 /// The caption is egui's job, not the plot's: baked into the bitmap it collided with the axis
 /// labels, and egui draws text better than a 12-pixel bitmap font does.
 pub fn caption(band: Band) -> String {
@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn a_curve_rasterises_to_the_size_it_was_asked_for() {
+    fn a_curve_rasterizes_to_the_size_it_was_asked_for() {
         let image = render(&curve(400, |k| (k % 40) as f64 * 1e-4), 520, 190)
             .expect("an image");
         assert_eq!(image.size, [520, 190]);

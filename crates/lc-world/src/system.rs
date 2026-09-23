@@ -6,10 +6,9 @@
 
 use em_sim::id::BodyIndex;
 use em_sim::system::System;
-use em_sim::universe::UniverseFileContents;
 use em_foundations::time::Instant;
 use glam::DVec3;
-use crate::sky::{CatalogueStar, StarId, generate};
+use crate::sky::{CatalogStar, StarId, generate};
 
 /// Meters in a light-year.
 pub const M_PER_LY: f64 = 9.460_730_472_580_8e15;
@@ -36,7 +35,7 @@ pub const INVENTORY_EPOCH_S: f64 = 0.0;
 /// the same statement as being in the system.
 pub const LOCAL_SHELL_LY: f64 = 1.6;
 
-/// The catalogue name of the system whose data is real rather than generated.
+/// The catalog name of the system whose data is real rather than generated.
 pub const SOL: &str = "Sol";
 
 /// A body's rings, as the renderer wants them.
@@ -60,8 +59,19 @@ pub struct Drawable {
     pub rings: Option<Rings>,
     /// What it looks like, from what it is.
     pub surface: crate::surface::Surface,
+    /// What it is made of and wrapped in: measured where anybody has been, and derived from
+    /// [`Drawable::surface`] everywhere else. This is what a survey reads per band, and the one
+    /// place Venus is allowed to differ from Mars. See [`crate::worlds`].
+    pub world: crate::worlds::World,
+    /// What a rocky world with air is painted with. See [`crate::climate`].
+    pub climate: Option<crate::climate::Climate>,
     /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub pole: DVec3,
+    /// How long it takes to turn once, seconds. `None` where the arena states no rotation.
+    ///
+    /// A tidally locked body's is its orbit about its own primary, which is what being locked
+    /// means; the arena states the lock rather than the rate, so it is worked out here.
+    pub spin_s: Option<f64>,
     /// Where it is, light-years from the world origin, simulation axes.
     pub position_ly: DVec3,
     pub radius_m: f64,
@@ -95,6 +105,12 @@ pub struct LocalSystem {
     pub populations: Vec<crate::population::Population>,
     /// Where the system's barycenter sits, light-years from the world origin.
     pub origin_ly: DVec3,
+    /// The normal of the plane the planets and belts orbit in. What a player means by this
+    /// system's ecliptic, and what the map's plane option measures against.
+    pub pole: DVec3,
+    /// Which way the star spins, a few degrees off [`LocalSystem::pole`]. Only the star's own
+    /// orientation: the plane is the planets'.
+    pub star_spin: DVec3,
     sim: System,
     primary: BodyIndex,
     /// Everything here a ship can be sent to, ordered outward. Built once: the order comes
@@ -109,9 +125,18 @@ pub struct LocalSystem {
 
 impl LocalSystem {
     /// Load the system around a star, real where there is real data and generated otherwise.
-    pub fn for_star(star: &CatalogueStar) -> Option<Self> {
-        let populations = generate::system_for(star).populations;
-        let contents = Self::contents_for(star);
+    pub fn for_star(star: &CatalogStar) -> Option<Self> {
+        // Once. Generating a system is the expensive part of loading one, and the populations
+        // and the bodies both come out of the same pass.
+        let generated = generate::system_for(star);
+        let contents = match star.provenance.name.as_deref() {
+            // The one system with measured data rather than generated: two hundred and thirty
+            // bodies fitted against JPL, moons and comets included. Its belts are still the
+            // generator's, which knows they are Sol's.
+            Some(SOL) => em_sim::presets::solar_system(),
+            _ => generated.to_universe(),
+        };
+        let populations = generated.populations;
         let sim = System::from_contents(&contents).ok()?;
         // The most massive body is the primary. Not the first: a multiple is a barycenter with
         // children, and the barycenter is massless.
@@ -123,6 +148,8 @@ impl LocalSystem {
             star_name: star.provenance.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get())),
             populations,
             origin_ly: star.position_ly,
+            pole: star.system_pole(),
+            star_spin: star.spin_axis(),
             sim,
             primary,
             inventory: Vec::new(),
@@ -137,15 +164,6 @@ impl LocalSystem {
         system.inventory =
             build_inventory(&system.sim, primary, &system.star_name, &system.populations);
         Some(system)
-    }
-
-    fn contents_for(star: &CatalogueStar) -> UniverseFileContents {
-        match star.provenance.name.as_deref() {
-            // The one system with measured data rather than generated: two hundred and thirty
-            // bodies fitted against JPL, moons and comets included.
-            Some(SOL) => em_sim::presets::solar_system(),
-            _ => generate::system_for(star).to_universe(),
-        }
     }
 
     /// Propagate to a coordinate time, in seconds since the world origin.
@@ -167,6 +185,16 @@ impl LocalSystem {
     /// analytically here is what lets a system be shared, immutable, between every craft in
     /// it — nothing has to advance one to ask it a question any more.
     pub fn drawables_at(&self, observer_ly: DVec3, seconds: f64) -> Vec<Drawable> {
+        self.drawn_at(observer_ly, seconds, true)
+    }
+
+    /// [`LocalSystem::drawables_at`] without the climate, which only paints a surface. For a
+    /// survey, which asks every tick and never paints anything.
+    pub fn drawables_unpainted_at(&self, observer_ly: DVec3, seconds: f64) -> Vec<Drawable> {
+        self.drawn_at(observer_ly, seconds, false)
+    }
+
+    fn drawn_at(&self, observer_ly: DVec3, seconds: f64, painted: bool) -> Vec<Drawable> {
         let time = Instant::from_seconds_since_j2000(seconds);
         let star_at = match em_sim::propagate::position_at(&self.sim, self.primary, time) {
             Some(at) => at,
@@ -196,6 +224,7 @@ impl LocalSystem {
                 // be a second chance to have it wrong.
                 let kind = crate::navigation::Kind::of(&self.sim.info(i).tags);
                 let pole = self.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
+                let spin_s = self.sim.rotation(i).and_then(|r| self.spin_of(i, r));
                 let rings = crate::rings::for_body(self.sim.name(i))
                     .map(|system| Rings { system, pole });
 
@@ -209,9 +238,11 @@ impl LocalSystem {
                 // What actually reflects: the lit disc, plus whatever of the rings is turned
                 // toward both the star and the observer.
                 let mut area = std::f64::consts::PI * radius_m * radius_m * phase;
-                // Its own albedo, not one number for everything. Ice reflects six times what
-                // bare rock does and the classification already knows which this is.
-                let mut albedo = surface.albedo();
+                // Its own albedo, not one number for everything, and the same one a survey
+                // reads per band: a second opinion about how bright a body is would be a
+                // second chance to have it wrong.
+                let world = crate::worlds::of(self.sim.name(i), surface, &self.sim.info(i).tags);
+                let mut albedo = world.gray_albedo();
                 if let Some(rings) = rings {
                     let lit = rings.pole.dot(to_star.normalize_or_zero()).abs();
                     let seen = rings.pole.dot(to_observer.normalize_or_zero()).abs();
@@ -230,7 +261,14 @@ impl LocalSystem {
                     kind,
                     rings,
                     surface,
+                    // Keyed by the arena's id, which is what `rings::for_body` is keyed by and
+                    // is not always the display name -- see `worlds`.
+                    climate: painted
+                        .then(|| crate::climate::of(self.sim.name(i), &world, equilibrium_k, self.star_teff_k, &self.sim.info(i).tags))
+                        .flatten(),
+                    world,
                     pole,
+                    spin_s,
                     position_ly: self.origin_ly + at / M_PER_LY,
                     radius_m,
                     mass_kg: self.sim.info(i).mass,
@@ -301,6 +339,59 @@ impl LocalSystem {
 
     /// Where the primary is at a coordinate time. It moves: a star with planets orbits their
     /// common center, which for the Sun and Jupiter is outside the Sun.
+    /// How long a body takes to turn once, seconds.
+    fn spin_of(&self, i: BodyIndex, rotation: &em_sim::body::BodyRotation) -> Option<f64> {
+        use em_sim::body::RotationMode;
+        match &rotation.mode {
+            RotationMode::Spinning { angular_velocity, .. } => {
+                (angular_velocity.abs() > 0.0).then(|| std::f64::consts::TAU / angular_velocity.abs())
+            }
+            // Locked is a statement about the orbit, not a rate: one turn per orbit about the
+            // primary it is locked to.
+            RotationMode::TidallyLocked { .. } => self.period_of(i),
+        }
+    }
+
+    /// The semi-major axis of a body's orbit about whatever it goes round, meters.
+    ///
+    /// **Not how far away it is now.** Those differ by a factor of `1 +- e`, so a period taken
+    /// from the distance rather than the axis is out by `(1 +- e)^1.5` -- thirty per cent for
+    /// Mercury, and enough for anything past an eccentricity of about 0.013 to miss the window
+    /// a transit is identified by. [`crate::navigation::Entry::orbit_radius_m`] is the distance
+    /// and says so; this is the element.
+    ///
+    /// `None` for a body whose motion is not Keplerian, which nothing generated or preset is.
+    pub fn semi_major_of(&self, i: BodyIndex) -> Option<f64> {
+        let when = Instant::from_seconds_since_j2000(INVENTORY_EPOCH_S);
+        match &self.sim.motive(i).motive_at(when).1 {
+            em_sim::motive::MotiveSelection::Keplerian(kepler) => {
+                let a = kepler.semi_major_axis();
+                (a.is_finite() && a > 0.0).then_some(a)
+            }
+            _ => None,
+        }
+    }
+
+    /// How long a body takes to go once round its primary, seconds.
+    ///
+    /// The primary's own `mu` where the arena carries one -- Sol's preset states them -- and
+    /// `G` times its stated mass otherwise, which is what a generated system gives.
+    pub fn period_of(&self, i: BodyIndex) -> Option<f64> {
+        const G: f64 = 6.674_301_5e-11;
+        let parent = self.sim.parent(i)?;
+        let mu = match self.sim.mu(parent) {
+            stated if stated > 0.0 => stated,
+            _ => G * self.sim.info(parent).mass,
+        };
+        let a = self.semi_major_of(i)?;
+        (mu > 0.0).then(|| em_foundations::kepler::period::third_law(a, mu))
+    }
+
+    /// The same, for a body named by what a course targets it as.
+    pub fn period_of_target(&self, key: &str) -> Option<f64> {
+        self.period_of(self.sim.by_name(key)?)
+    }
+
     pub fn star_position_at(&self, seconds: f64) -> Option<DVec3> {
         let (at, _) = self.body_state_at(self.primary, seconds)?;
         Some(self.origin_ly + at / M_PER_LY)
@@ -562,8 +653,34 @@ mod tests {
 
     const AU: f64 = 1.495_978_707e11;
 
-    fn catalogue() -> Option<crate::sky::hyg::HygProvider> {
+    fn catalog() -> Option<crate::sky::hyg::HygProvider> {
         crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv").ok()
+    }
+
+    /// **The plane a map draws has to be the one the planets are actually in.** This is the
+    /// claim `LocalSystem::pole` exists to make, and the whole of phase 1 of
+    /// `lightcone/docs/25-system-knowledge.md` rests on it: `+Z` was drawn under systems whose
+    /// planets orbit somewhere else, which put every planet out of the plane beneath it.
+    ///
+    /// Generated inclinations are gaussian with a two-degree sigma, so ten is four sigma and
+    /// the same figure catches a pole that is ignored outright -- a random pole is 60 degrees
+    /// out on average.
+    #[test]
+    fn a_generated_systems_planets_lie_in_its_own_pole() {
+        let stars = AuthoredStars::sample();
+        // The third authored star is the one whose generated system has planets.
+        let star = &StarProvider::stars(&stars)[2];
+        let system = LocalSystem::for_star(star).expect("a generated system");
+        let drawn = system.drawables_at(star.position_ly, 0.0);
+        assert!(!drawn.is_empty(), "nothing to measure");
+
+        for body in &drawn {
+            let offset = body.position_ly - system.star_position_ly();
+            let out = offset.normalize().dot(system.pole).abs().asin().to_degrees();
+            assert!(out < 10.0, "{} is {out:.1}° out of its own system's plane", body.name);
+        }
+        // And the pole is not simply +Z, or this would pass without measuring anything.
+        assert!(system.pole.dot(DVec3::Z).abs() < 0.999, "the generated pole is +Z");
     }
 
     /// A drawable's kind is the same answer the inventory gives, for every body in the solar
@@ -575,9 +692,9 @@ mod tests {
     /// are the ones to watch, and this asserts all two hundred.
     #[test]
     fn a_drawable_is_the_kind_the_inventory_says_it_is() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
-            panic!("the catalogue should carry Sol")
+            panic!("the catalog should carry Sol")
         };
         let system = LocalSystem::for_star(sun).expect("Sol loads");
         let drawn = system.drawables_at(system.origin_ly, 0.0);
@@ -598,9 +715,9 @@ mod tests {
 
     #[test]
     fn the_solar_system_is_the_real_one_and_the_rest_are_generated() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let sun = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL));
-        let Some(sun) = sun else { panic!("the catalogue should carry Sol") };
+        let Some(sun) = sun else { panic!("the catalog should carry Sol") };
 
         let real = LocalSystem::for_star(sun).expect("Sol loads");
         assert!(real.len() > 100, "the preset carries moons too, got {}", real.len());
@@ -667,7 +784,7 @@ mod tests {
 
     #[test]
     fn propagating_moves_the_bodies() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
@@ -702,14 +819,14 @@ mod tests {
     /// should be the planets a person can see, in roughly the order they see them.
     #[test]
     fn the_naked_eye_planets_are_the_brightest_things_in_the_sky() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
         let mut sys = LocalSystem::for_star(sun).unwrap();
         sys.advance_to(0.0);
 
-        // Roughly where the Earth is at J2000, which is where the catalogue puts the observer.
+        // Roughly where the Earth is at J2000, which is where the catalog puts the observer.
         let earth = sys
             .drawables_at(sun.position_ly, 0.0)
             .into_iter()
@@ -738,7 +855,7 @@ mod tests {
     /// few times what the planet does when they are open, and nothing at all when edge-on.
     #[test]
     fn saturns_rings_brighten_it_and_the_tilt_decides_by_how_much() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
@@ -787,7 +904,7 @@ mod tests {
 
     #[test]
     fn a_body_without_rings_has_none_and_is_unaffected() {
-        let Some(provider) = catalogue() else { return };
+        let Some(provider) = catalog() else { return };
         let Some(sun) = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)) else {
             return;
         };
@@ -797,3 +914,4 @@ mod tests {
         assert!(earth.rings.is_none());
     }
 }
+

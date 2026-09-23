@@ -3,7 +3,7 @@
 //! One conversation per craft, and a conversation is not a chat log: half of it is still in
 //! flight. A message this ship sent exists the moment it is sent and arrives years later, and
 //! there is nothing at either end that can notice it landing — so the only evidence a message
-//! got through is the **acknowledgement** that rides back with the next one, naming it by the
+//! got through is the **acknowledgment** that rides back with the next one, naming it by the
 //! identifier the server minted. [`Line::delivered`] is that, and it is the whole of it.
 //!
 //! No engine here and no socket: `crate::uplink` folds the wire into this, and
@@ -20,14 +20,14 @@ pub struct Line {
     ///
     /// More than one when it was resent. A resend is a second pulse of light and a second
     /// event — it really happened — but it is not a second thing somebody said, so it joins the
-    /// line it repeats rather than making a new one. An acknowledgement of *any* of them
+    /// line it repeats rather than making a new one. An acknowledgment of *any* of them
     /// acknowledges the message.
     pub event_ids: Vec<i64>,
     /// Which message this is, across those transmissions. See [`lc_proto::MessageKey`].
     pub idem: lc_proto::MessageKey,
     pub mine: bool,
     pub sealed: bool,
-    /// Never [`Body::Ack`]: an acknowledgement is absorbed into [`Conversation::acked`] and is
+    /// Never [`Body::Ack`]: an acknowledgment is absorbed into [`Conversation::acked`] and is
     /// not a line. [`Body::Unreadable`] was heard and cannot be read, which is a different
     /// thing from not having been heard.
     pub body: Body,
@@ -120,13 +120,13 @@ pub struct Conversation {
     /// In the order this ship learned of them, which for a conversation across light delay is
     /// not the order they were sent in: a reply can be composed before the message it crosses.
     ///
-    /// **Not everything that arrived.** An acknowledgement is absorbed into
+    /// **Not everything that arrived.** An acknowledgment is absorbed into
     /// [`Conversation::acked`] rather than shown: there is nothing in it to read.
     pub lines: Vec<Line>,
     /// Every event identifier the other end has named, from any message they sent.
     ///
     /// Kept here rather than read back off the lines because the message that carries an
-    /// acknowledgement is usually a [`Body::Ack`] — and that one is not a line.
+    /// acknowledgment is usually a [`Body::Ack`] — and that one is not a line.
     /// Losing the evidence along with the clutter would make every message look unanswered for
     /// ever.
     acked: std::collections::BTreeSet<i64>,
@@ -309,7 +309,7 @@ impl Chat {
             };
             let conversation = self.conversations.entry(with.0).or_default();
             conversation.name = said.with_name.clone();
-            // Only what the *other* end named. This ship's own acknowledgements say nothing
+            // Only what the *other* end named. This ship's own acknowledgments say nothing
             // about whether its own messages arrived, and folding them in would mark every
             // message it ever sent as delivered.
             if !said.mine {
@@ -356,7 +356,7 @@ impl Chat {
             conversation.name = format!("ship {}", from.0);
         }
         // **What it acknowledges is kept whatever becomes of the message itself.** Absorbed
-        // first, because the usual carrier of an acknowledgement is a `Body::Ack`, which is
+        // first, because the usual carrier of an acknowledgment is a `Body::Ack`, which is
         // about to be dropped.
         conversation.acked.extend(spoken.acks.iter().copied());
         // Idempotent twice over. A reconnection replays — `ResumeFrom` winds the delivery
@@ -437,7 +437,7 @@ impl Chat {
     }
 
     /// A message this ship has just had accepted. Recorded against the identifier the server
-    /// minted, which is the only thing an acknowledgement will ever name it by.
+    /// minted, which is the only thing an acknowledgment will ever name it by.
     #[allow(clippy::too_many_arguments)]
     pub fn sent(
         &mut self,
@@ -522,7 +522,7 @@ fn restore_into(lines: &mut Vec<Line>, said: Said) {
         if !line.event_ids.contains(&said.event_id) {
             line.event_ids.push(said.event_id);
         }
-        // The acknowledgements of the copy that actually landed are the ones worth keeping,
+        // The acknowledgments of the copy that actually landed are the ones worth keeping,
         // and a later copy can only know more.
         if said.acks.len() > line.acks.len() {
             line.acks = said.acks;
@@ -624,7 +624,7 @@ mod tests {
         assert_eq!(conversation.lines[0].sent_s, 1.0);
     }
 
-    /// An acknowledgement of *any* transmission acknowledges the message. Which pulse of light
+    /// An acknowledgment of *any* transmission acknowledges the message. Which pulse of light
     /// got there is not a thing the sender needs to know.
     #[test]
     fn acknowledging_the_second_copy_acknowledges_the_message() {
@@ -811,11 +811,11 @@ mod tests {
         assert_eq!(order, vec![ShipId(7), ShipId(8)]);
     }
 
-    /// **The quiet half of an acknowledgement.** It is not shown — there is nothing to read —
+    /// **The quiet half of an acknowledgment.** It is not shown — there is nothing to read —
     /// and what it acknowledges is kept anyway. Dropping both would
     /// make every message look unanswered for ever, which is the failure worth guarding.
     #[test]
-    fn an_acknowledgement_is_not_shown_and_still_marks_the_message_delivered() {
+    fn an_acknowledgment_is_not_shown_and_still_marks_the_message_delivered() {
         let mut chat = Chat::default();
         chat.sent(Some(ShipId(7)), Some("Ada"), 100, 1, text("are you there"), false, 1.0);
         let sent = line(&chat, 7, 0);
@@ -832,13 +832,13 @@ mod tests {
         chat.received(ShipId(7), Some("Ada"), 200, bare, 9.0, 12.0, 1.0);
 
         let conversation = chat.get(ShipId(7)).unwrap();
-        assert_eq!(conversation.lines.len(), 1, "an acknowledgement was shown as a line");
-        assert!(conversation.delivered(&sent), "the acknowledgement was dropped with the line");
+        assert_eq!(conversation.lines.len(), 1, "an acknowledgment was shown as a line");
+        assert!(conversation.delivered(&sent), "the acknowledgment was dropped with the line");
     }
 
-    /// This ship's own acknowledgements are as quiet as anybody's.
+    /// This ship's own acknowledgments are as quiet as anybody's.
     #[test]
-    fn this_ships_own_acknowledgements_are_not_shown_either() {
+    fn this_ships_own_acknowledgments_are_not_shown_either() {
         let mut chat = Chat::default();
         chat.sent(Some(ShipId(7)), Some("Ada"), 300, 9, Body::Ack, false, 1.0);
         assert!(chat.get(ShipId(7)).is_none_or(|c| c.lines.is_empty()));
@@ -847,7 +847,7 @@ mod tests {
     /// A message this ship cannot *read* is still shown. That somebody in earshot is talking in
     /// private is exactly the kind of thing worth showing.
     #[test]
-    fn an_unreadable_message_is_not_mistaken_for_an_acknowledgement() {
+    fn an_unreadable_message_is_not_mistaken_for_an_acknowledgment() {
         let mut chat = Chat::default();
         let sealed = Spoken {
             to: Some(99),

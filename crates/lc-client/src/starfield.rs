@@ -17,7 +17,7 @@ use em_render::render_space::sim_to_render;
 use em_spectra::{Band, BandMapping, blackbody};
 use glam::DVec3;
 use lc_world::rng;
-use lc_world::sky::{CatalogueStar, generate};
+use lc_world::sky::{CatalogStar, generate};
 
 use crate::session::{POINT_STOPS, Session};
 
@@ -44,7 +44,7 @@ pub const REBAKE_LY: f64 = 1.0;
 /// How one class of star is drawn.
 ///
 /// There are two, and they obey different laws, which is the arrangement Exotic Matters
-/// arrived at and this follows. The background is a dome: a catalogue star is at infinity, its
+/// arrived at and this follows. The background is a dome: a catalog star is at infinity, its
 /// drawn size says how bright it is and nothing else, and it does not change as the ship moves.
 /// A local star is an object: it has a distance, its size is the angle it actually subtends,
 /// and approaching it changes both.
@@ -269,7 +269,7 @@ pub fn partition(session: &Session) -> (Vec<Point>, Vec<Point>) {
 }
 
 /// Which star's system the ship is inside, if any.
-pub fn local_star(session: &Session) -> Option<&CatalogueStar> {
+pub fn local_star(session: &Session) -> Option<&CatalogStar> {
     session.stars.iter().find(|s| session.distance_to(s) < LOCAL_SHELL_LY)
 }
 
@@ -323,12 +323,12 @@ pub struct Point {
 }
 
 impl Point {
-    pub fn star(s: &CatalogueStar) -> Self {
+    pub fn star(s: &CatalogStar) -> Self {
         Self {
             position_ly: s.position_ly,
             teff_k: s.star.teff_k as f32,
             radius_m: s.star.radius_m as f32,
-            // Hashed rather than taken raw so two adjacent catalogue ids do not give two stars
+            // Hashed rather than taken raw so two adjacent catalog ids do not give two stars
             // the same corona.
             seed: (rng::mix(s.seed()) >> 40) as f32 * 1.0e-3,
             warm: warm_params(s),
@@ -391,7 +391,7 @@ pub fn build_mesh(points: &[Point], origin_ly: DVec3) -> Mesh {
 /// Drawn from the same generator the telescope reads, so a star that measures as engineered
 /// also looks engineered. The swarm is separable from the rest of the system on purpose: this
 /// runs for every star in the sky, and generating a full planetary system for each would not.
-pub fn warm_params(star: &CatalogueStar) -> [f32; 4] {
+pub fn warm_params(star: &CatalogStar) -> [f32; 4] {
     let Some(swarm) = generate::swarm_for(star) else { return [0.0; 4] };
     let r = star.star.radius_m;
     [
@@ -792,7 +792,7 @@ mod tests {
             .filter(|s| generate::swarm_for(s).is_some())
             .take(8)
             .collect();
-        assert!(!swarmed.is_empty(), "the catalogue should hold some swarms");
+        assert!(!swarmed.is_empty(), "the catalog should hold some swarms");
 
         for star in swarmed {
             let [teff, scale, deficit, _] = warm_params(star);
@@ -940,7 +940,7 @@ mod tests {
         let mut per_star: Vec<f32> = seeds(&build_mesh(&points_of(&s), DVec3::ZERO));
         // Four vertices per star carry the same seed; one per star is what must differ.
         per_star.dedup();
-        assert_eq!(per_star.len(), s.stars.len(), "adjacent catalogue ids collided: {per_star:?}");
+        assert_eq!(per_star.len(), s.stars.len(), "adjacent catalog ids collided: {per_star:?}");
     }
 
     /// A three-pixel dot has no room for structure, and noise at that size is a shimmer.

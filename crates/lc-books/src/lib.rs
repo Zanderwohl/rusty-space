@@ -8,7 +8,7 @@
 #![forbid(unsafe_code)]
 
 mod archive;
-pub mod catalogue;
+pub mod catalog;
 pub mod grid;
 pub mod nav;
 pub mod opf;
@@ -16,7 +16,7 @@ pub mod paginate;
 pub mod text;
 mod xml;
 
-pub use catalogue::{Catalogue, Entry, Order};
+pub use catalog::{Catalog, Entry, Order};
 pub use grid::Grid;
 pub use nav::TocEntry;
 pub use opf::{Author, Item, Metadata};

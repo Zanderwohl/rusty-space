@@ -83,6 +83,18 @@ or a better type removes the comment that would have explained it.
 
 Cap a module at **1000 lines of code**, tests excluded. Past that, split by responsibility.
 
+A module may raise its own cap by saying so in its module doc, with the reason:
+
+```rust
+//! Line limit: 2000. <why this module is the exception>
+```
+
+Read from the file rather than from a list in the tool, so the number and its justification
+cannot drift apart. `lc-server/src/server.rs` is the one that has it today: the tick, what an
+intent may do, and the single gate every release to a client passes through. A new exception
+wants an argument that splitting would put something *further* from what it guards — not that
+the file got long.
+
 ```bash
 python3 tools/api_surface.py crates/<name>      # public surface, and the line counts
 ```

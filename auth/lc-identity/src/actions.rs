@@ -45,7 +45,7 @@ impl Action {
         }
     }
 
-    /// Unrecognised names render as themselves; see [`crate::bans::Reason::from_stored`].
+    /// Unrecognized names render as themselves; see [`crate::bans::Reason::from_stored`].
     pub fn from_stored(stored: &str) -> Option<Action> {
         Action::ALL.into_iter().find(|a| a.slug() == stored)
     }

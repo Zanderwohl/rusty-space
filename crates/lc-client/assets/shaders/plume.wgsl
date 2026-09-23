@@ -88,7 +88,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 /// makes each lane a full radial sheet — and a ray down the middle of the plume crosses every
 /// angle there is, averages the lot, and comes out the color of clean gas. Only the grazing
 /// rays at the silhouette kept any contrast, so the plume had a fringe and a blank middle.
-/// Localising a lane in the cross-section means every ray crosses a few of them and none of it
+/// Localizing a lane in the cross-section means every ray crosses a few of them and none of it
 /// averages flat.
 ///
 /// The noise itself is `textures/plume.tgraph`, two octaves baked into a volume that repeats on
@@ -150,7 +150,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // astronomical unit from the render origin, so the eye is of order `1e8` in the proxy's own
     // units — and `eye + direction * t` then asks `f32` for a point near the origin as the
     // difference of two numbers near `1e8`, where its spacing is about eight. Every position
-    // the density is sampled at comes out quantised to nothing and the plume does not appear at
+    // the density is sampled at comes out quantized to nothing and the plume does not appear at
     // all. Starting from the fragment keeps every term of order one.
     let eye = material.eye_local.xyz;
     let toward = in.local - eye;

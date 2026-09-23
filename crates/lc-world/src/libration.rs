@@ -6,7 +6,7 @@
 //! the point itself, is somewhere you can see out from.
 //!
 //! [`em_foundations::lagrange`] has the mechanics. This is the curve those numbers describe,
-//! placed in a real system: the linearised Lissajous of the circular restricted three-body
+//! placed in a real system: the linearized Lissajous of the circular restricted three-body
 //! problem, written in the rotating frame of the two bodies and read back out into simulation
 //! space.
 //!
@@ -27,7 +27,7 @@ use crate::system::{LocalSystem, M_PER_LY};
 ///
 /// A fifth puts a Sun-Earth libration orbit about three hundred thousand kilometers across the
 /// radial direction and nine hundred thousand along track, which is the size JWST's actually
-/// is. Large enough to be a place rather than a dot; small enough that the linearisation the
+/// is. Large enough to be a place rather than a dot; small enough that the linearization the
 /// whole thing rests on still holds.
 pub const DEFAULT_AMPLITUDE: f64 = 0.2;
 
@@ -172,13 +172,13 @@ fn pair(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sky::{CatalogueStar, StarProvider};
+    use crate::sky::{CatalogStar, StarProvider};
 
     fn sol() -> Option<LocalSystem> {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .ok()?;
-        let sun: CatalogueStar =
+        let sun: CatalogStar =
             provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some("Sol"))?.clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);
@@ -333,7 +333,7 @@ mod tests {
             crate::navigation::Waypoint::Lagrange { body: "Earth".into(), point: LagrangePoint::L2 };
         let (at_point, widest_at_point) = survey(&|t| point.place_at(&system, t));
         assert_eq!(at_point, 64, "the point is on the line at every instant, by construction");
-        // Not zero: the direction is normalised out of positions of order 1e11 meters, and a
+        // Not zero: the direction is normalized out of positions of order 1e11 meters, and a
         // millionth of a degree at this range is four centimeters.
         assert!(widest_at_point < 1.0e-4, "{widest_at_point} degrees off the line");
 

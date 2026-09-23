@@ -7,37 +7,73 @@ use crate::snapshot::M_PER_LY;
 
 /// Which plane the map lays its rings in.
 ///
-/// Two, because there are two questions: where a moon sits in its system is about the
-/// ecliptic, and where a system sits among the rest is about the disc of the galaxy.
+/// Two, because there are two questions: where a moon sits in its system is about that system's
+/// own plane, and where a system sits among the rest is about the disc of the galaxy.
+///
+/// A selector and nothing more. The geometry it names is a [`Datum`], which needs to know the
+/// system being looked at — there is no one ecliptic, only the plane each system's planets
+/// happen to share, and in Lightcone that plane is something a craft works out rather than
+/// something it is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Plane {
+    /// The plane the system in view has its planets in, supplied to [`Plane::about`].
     #[default]
-    Ecliptic,
+    System,
     Galactic,
 }
 
 impl Plane {
     pub fn other(self) -> Self {
         match self {
-            Self::Ecliptic => Self::Galactic,
-            Self::Galactic => Self::Ecliptic,
+            Self::System => Self::Galactic,
+            Self::Galactic => Self::System,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Ecliptic => "ecliptic",
+            Self::System => "system plane",
             Self::Galactic => "galactic",
         }
     }
 
-    /// The plane's normal, a unit vector in simulation space. The ecliptic's is `+Z` by
-    /// construction and not by coincidence: simulation space is the ecliptic of J2000.
+    /// Resolve against the pole of the system being looked at.
+    ///
+    /// `system_pole` is the normal of the plane that system's planets orbit in — in Lightcone,
+    /// the believed one. It is ignored for [`Plane::Galactic`], whose frame is the same
+    /// everywhere. A zero or non-finite pole falls back to `+Z` rather than producing a
+    /// degenerate basis, so a caller with no belief still gets a usable frame.
+    pub fn about(self, system_pole: DVec3) -> Datum {
+        let (u, v, n) = match self {
+            Self::Galactic => galactic::basis(),
+            Self::System => {
+                let n = system_pole.normalize_or(DVec3::Z);
+                let u = galactic::zero_longitude(n);
+                (u, n.cross(u), n)
+            }
+        };
+        Datum { plane: self, u, v, n }
+    }
+}
+
+/// A [`Plane`] resolved against one system: the frame the map actually measures in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Datum {
+    plane: Plane,
+    u: DVec3,
+    v: DVec3,
+    n: DVec3,
+}
+
+impl Datum {
+    /// Which of the two this resolved, for a label or a toggle.
+    pub fn plane(self) -> Plane {
+        self.plane
+    }
+
+    /// The plane's normal, a unit vector in simulation space.
     pub fn normal(self) -> DVec3 {
-        match self {
-            Self::Ecliptic => DVec3::Z,
-            Self::Galactic => galactic::north_pole(),
-        }
+        self.n
     }
 
     /// A right-handed orthonormal basis `(u, v, n)`, with `n` the normal.
@@ -45,10 +81,7 @@ impl Plane {
     /// `u` is where a ring's zero bearing points and where azimuth is measured from, so it
     /// must be fixed rather than derived from the view.
     pub fn basis(self) -> (DVec3, DVec3, DVec3) {
-        match self {
-            Self::Ecliptic => (DVec3::X, DVec3::Y, DVec3::Z),
-            Self::Galactic => galactic::basis(),
-        }
+        (self.u, self.v, self.n)
     }
 
     /// How far `at_ly` stands above the plane through `origin_ly`, meters. Signed.
@@ -97,11 +130,23 @@ impl Plane {
 mod tests {
     use super::*;
 
+    /// A pole that is neither axis and neither plane's normal, so nothing here passes by
+    /// accidentally agreeing with `+Z`.
+    fn a_pole() -> DVec3 {
+        DVec3::new(0.3, -0.5, 0.81).normalize()
+    }
+
+    /// Both planes, resolved against one system. Every geometric property below holds of any
+    /// datum, which is the point of resolving one.
+    fn datums() -> [Datum; 2] {
+        [Plane::System.about(a_pole()), Plane::Galactic.about(a_pole())]
+    }
+
     /// A bearing is what the camera's azimuth is measured against, so the two have to agree:
     /// a camera at the bearing of a thing looks at it along the plane.
     #[test]
     fn a_bearing_is_the_azimuth_that_points_at_it() {
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             let (u, v, n) = plane.basis();
             assert!(plane.bearing(u).unwrap().abs() < 1.0e-12, "the axis it is measured from");
             assert!((plane.bearing(v).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1.0e-12);
@@ -139,7 +184,7 @@ mod tests {
     #[test]
     fn a_drop_line_ends_in_the_plane_it_was_dropped_to() {
         let origin = DVec3::new(4.2, -1.0, 0.7);
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             for offset in [DVec3::new(0.1, 0.2, 0.3), DVec3::new(-0.4, 0.05, -0.9)] {
                 let at = origin + offset;
                 let foot = plane.foot_ly(at, origin);
@@ -154,7 +199,7 @@ mod tests {
     #[test]
     fn the_foot_is_straight_below_what_it_hangs_from() {
         let origin = DVec3::ZERO;
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             let at = DVec3::new(0.3, -0.2, 0.5);
             let drop = plane.foot_ly(at, origin) - at;
             assert!(drop.cross(plane.normal()).length() < 1e-12, "{plane:?}: not vertical");
@@ -165,7 +210,7 @@ mod tests {
     #[test]
     fn something_in_the_plane_has_no_drop_at_all() {
         let origin = DVec3::new(1.0, 2.0, 3.0);
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             let (u, v, _) = plane.basis();
             let at = origin + u * 0.4 - v * 0.9;
             assert!(plane.height_m(at, origin).abs() < floor_m(at.length()));
@@ -176,27 +221,67 @@ mod tests {
     /// Height is signed, so a body below the plane drops upward.
     #[test]
     fn below_the_plane_is_negative() {
-        let plane = Plane::Ecliptic;
+        let plane = Plane::System.about(DVec3::Z);
         assert!(plane.height_m(DVec3::Z, DVec3::ZERO) > 0.0);
         assert!(plane.height_m(-DVec3::Z, DVec3::ZERO) < 0.0);
     }
 
     /// The two planes differ, which is the point of the toggle. A `Galactic` wired to `+Z`
-    /// passes every other test here.
+    /// passes every other test here. Measured against Sol, whose pole is `+Z`, because 60.19°
+    /// is the real tilt between the ecliptic of J2000 and the galactic plane.
     #[test]
     fn the_two_planes_disagree() {
-        let tilt = Plane::Ecliptic.normal().dot(Plane::Galactic.normal()).acos().to_degrees();
+        let ecliptic = Plane::System.about(DVec3::Z);
+        let galactic = Plane::Galactic.about(DVec3::Z);
+        let tilt = ecliptic.normal().dot(galactic.normal()).acos().to_degrees();
         assert!((tilt - 60.19).abs() < 0.01, "{tilt}°");
 
         let at = DVec3::new(0.0, 0.0, 1.0);
-        let a = Plane::Ecliptic.height_m(at, DVec3::ZERO);
-        let b = Plane::Galactic.height_m(at, DVec3::ZERO);
+        let a = ecliptic.height_m(at, DVec3::ZERO);
+        let b = galactic.height_m(at, DVec3::ZERO);
         assert!((a - b).abs() > 0.4 * M_PER_LY, "a point reads the same height in both");
+    }
+
+    /// The whole point of resolving: a system's ecliptic is its own planets' plane, and only
+    /// Sol's is `+Z`. This is the bug doc 25 opens with.
+    #[test]
+    fn an_ecliptic_is_the_system_it_was_resolved_against() {
+        let pole = a_pole();
+        assert!((Plane::System.about(pole).normal() - pole).length() < 1e-12);
+        assert_eq!(Plane::System.about(DVec3::Z).normal(), DVec3::Z);
+        // And the galactic frame is the same in every system.
+        assert_eq!(Plane::Galactic.about(pole), Plane::Galactic.about(DVec3::Z));
+    }
+
+    /// Zero longitude is the ascending node on the galactic plane: in both planes at once, and
+    /// on the ascending side, so a body there is heading galactic north.
+    #[test]
+    fn longitude_starts_at_the_ascending_galactic_node() {
+        let north = galactic::north_pole();
+        for pole in [a_pole(), DVec3::Z, DVec3::X, -DVec3::Z, DVec3::new(-0.2, 0.9, 0.3).normalize()] {
+            let datum = Plane::System.about(pole.normalize());
+            let (u, _, n) = datum.basis();
+            assert!(u.dot(n).abs() < 1e-12, "{pole}: the zero is out of its own plane");
+            assert!(u.dot(north).abs() < 1e-12, "{pole}: the zero is off the galactic plane");
+            assert!(n.cross(u).dot(north) > 0.0, "{pole}: that is the descending node");
+        }
+    }
+
+    /// A system whose plane is the galactic plane has no node to start from, and must still
+    /// produce a usable frame rather than a zero vector.
+    #[test]
+    fn a_system_lying_in_the_galactic_plane_falls_back() {
+        for pole in [galactic::north_pole(), -galactic::north_pole()] {
+            let (u, v, n) = Plane::System.about(pole).basis();
+            assert!((u.length() - 1.0).abs() < 1e-12, "the zero is not a unit vector");
+            assert!(u.dot(n).abs() < 1e-12, "the zero is out of the plane");
+            assert!((u.cross(v).dot(n) - 1.0).abs() < 1e-12, "left-handed");
+        }
     }
 
     #[test]
     fn a_basis_is_orthonormal_and_right_handed() {
-        for plane in [Plane::Ecliptic, Plane::Galactic] {
+        for plane in datums() {
             let (u, v, n) = plane.basis();
             assert!((u.cross(v).dot(n) - 1.0).abs() < 1e-12, "{plane:?} is left-handed");
             assert!((n - plane.normal()).length() < 1e-12, "{plane:?}: basis and normal differ");

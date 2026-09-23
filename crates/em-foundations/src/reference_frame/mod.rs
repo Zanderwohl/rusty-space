@@ -242,7 +242,7 @@ impl ReferenceFrame {
     pub fn look_at(&self, target: DVec3) -> Self {
         let transformation = self.transform_to(DMat4::IDENTITY.into());
         let universal_target = transformation.point(target);
-        self.look_at_universal(universal_target, self.z_axis()) // the up hint is orthogonalised to the new direction
+        self.look_at_universal(universal_target, self.z_axis()) // the up hint is orthogonalized to the new direction
     }
 
     /// Look at a point in the universal frame.

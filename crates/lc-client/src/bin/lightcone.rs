@@ -5,7 +5,7 @@
 
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
-use lc_client::app::{Catalogue, ClientPlugin};
+use lc_client::app::{Catalog, ClientPlugin};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -37,7 +37,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .insert_resource(Catalogue(entry.catalogue))
+        .insert_resource(Catalog(entry.catalog))
         // `--local` wins over `--server`: asking for one in this process is the more specific
         // request, and its address is not known until the socket is bound.
         .insert_resource(lc_client::uplink::ServerAddress(

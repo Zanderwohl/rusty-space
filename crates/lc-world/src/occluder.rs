@@ -194,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn an_earth_analogue_transits_at_the_documented_depth() {
+    fn an_earth_analog_transits_at_the_documented_depth() {
         let ratio = 6.371e6 / 6.957e8;
         assert!((transit_depth(0.0, ratio, (0.0, 0.0)) - 8.386e-5).abs() < 1e-8);
         // With solar limb darkening a central transit is about 21% deeper than geometric.

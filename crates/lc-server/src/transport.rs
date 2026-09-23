@@ -1,7 +1,7 @@
 //! How messages get in and out.
 //!
 //! A trait, because the transport is still open — QUIC for native, WebTransport or WebSocket
-//! for the browser, and the serialisation format undecided besides. None of that changes the
+//! for the browser, and the serialization format undecided besides. None of that changes the
 //! filter, which is what phase 8 is actually about, so none of it is here yet.
 //!
 //! There is one implementation: in process, for tests. It is enough to prove the thing that

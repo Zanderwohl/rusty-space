@@ -596,7 +596,7 @@ impl KeplerEpoch {
             }
         };
 
-        // Normalise to the first periapsis passage at or after J2000. Only a repeating
+        // Normalize to the first periapsis passage at or after J2000. Only a repeating
         // orbit has more than one to choose from; a hyperbola passes periapsis once, and
         // sliding that passage forward by a "period" would move the whole arc.
         if eccentricity < 1.0 && n > 0.0 && raw_time < 0.0 && raw_time.is_finite() {

@@ -19,7 +19,7 @@ anyhow = "1"
 mime_guess = "2"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 # default-fancy is the pure-Rust regex engine. The oniguruma default drags in a C library,
-# which would put a C toolchain in the build image for syntax colouring.
+# which would put a C toolchain in the build image for syntax coloring.
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }

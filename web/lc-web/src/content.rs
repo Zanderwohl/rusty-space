@@ -252,7 +252,7 @@ fn reading_minutes(body: &str) -> usize {
 /// Markdown to HTML, with code blocks highlighted into classes rather than inline styles.
 ///
 /// Classes are what make the highlighting follow the theme: an inline `style="color:…"` from
-/// syntect would be the same colour in light mode and dark, and there is no stylesheet rule
+/// syntect would be the same color in light mode and dark, and there is no stylesheet rule
 /// that can override it.
 fn render(body: &str, syntaxes: &SyntaxSet) -> String {
     let mut options = Options::empty();
@@ -319,7 +319,7 @@ fn highlight(lang: &str, source: &str, syntaxes: &SyntaxSet) -> String {
     );
     for line in LinesWithEndings::from(source) {
         // A failure here is a syntax definition problem, not a content problem. Losing the
-        // colour is survivable; losing the code is not.
+        // color is survivable; losing the code is not.
         if generator.parse_html_for_line_which_includes_newline(line).is_err() {
             return format!("<pre><code>{}</code></pre>", escape(source));
         }

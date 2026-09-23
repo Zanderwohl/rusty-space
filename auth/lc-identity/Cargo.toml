@@ -27,7 +27,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 argon2 = { version = "0.5", features = ["std"] }
 password-hash = { version = "0.5", features = ["std", "getrandom"] }
 jsonwebtoken = "9"
-# Key generation and PKCS#8 serialisation. `jsonwebtoken` verifies and signs but does not
+# Key generation and PKCS#8 serialization. `jsonwebtoken` verifies and signs but does not
 # make keys, and a broker that cannot make one cannot start without an operator first finding
 # an openssl invocation.
 ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core"] }

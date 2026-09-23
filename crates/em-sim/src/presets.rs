@@ -1,5 +1,10 @@
 //! Bundled universe presets.
 //!
+//! Line limit: 12000. Generated, not written: every element here is a least-squares fit against
+//! a JPL Horizons series, emitted by the pipeline in `docs/horizons-golden-vectors.md`. Two
+//! hundred and thirty bodies come to nine thousand lines of literal, and splitting a generated
+//! table into files would only decide where the generator writes its line breaks.
+//!
 //! Plain data, so a headless tool or an editor can build a system without an engine.
 //! Writing these to disk is the app's job.
 

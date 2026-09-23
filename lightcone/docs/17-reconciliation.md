@@ -33,7 +33,7 @@ can differ at all"**, and there turn out to be four.
 
 **1 is not an error.** The client applies its own order optimistically at its own coordinate;
 the server applies it a fraction of a second later at a coordinate it chose. They converge as
-soon as the acknowledgement arrives. This is the common case and it needs no mechanism beyond
+soon as the acknowledgment arrives. This is the common case and it needs no mechanism beyond
 knowing which coordinate the server used — which today it does not tell you (see below).
 
 **3 is the one that surprised me.** IEEE-754 pins `+ - * /` exactly, so the same arithmetic gives
@@ -77,7 +77,7 @@ the server to say what that was, and **it currently does not**:
 - `accel_g` is clamped to the craft's drive, silently. Ask for a thousand g, get five, and be
   told nothing.
 
-Both need an acknowledgement:
+Both need an acknowledgment:
 
 ```
 Accepted { ship_id, event_id, at_t, order }
@@ -220,7 +220,7 @@ its frames throttled, so its clock nearly stops while the world does not. It com
 behind and is pulled straight.
 
 A correction moves the **world's** clock and not the crew's. The ship's proper time is however
-long they have actually lived through, and no amount of resynchronising un-ages anybody — which
+long they have actually lived through, and no amount of resynchronizing un-ages anybody — which
 is a distinct method for exactly that reason.
 
 ## A crossing starts from whatever the ship is doing
@@ -230,7 +230,7 @@ moving, and neither was.
 
 **The speed along the line is carried.** A burn at constant proper acceleration starting at `b0`
 *is* the burn from rest entered part-way through — if a ship boosting from rest reaches `b0` at
-`t0`, this ship's trajectory is that one's from `t0` onward. So the generalisation is an offset
+`t0`, this ship's trajectory is that one's from `t0` onward. So the generalization is an offset
 and every closed form is unchanged, the brake included, since it still ends at rest. Signed, so
 a target behind the ship is the same trajectory entered before it turns around.
 

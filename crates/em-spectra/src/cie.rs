@@ -31,7 +31,7 @@ pub fn z_bar(nm: f64) -> f64 {
 }
 
 /// Integrate a spectral radiance function, taking wavelength in **meters**, against the
-/// matching functions. Unnormalised: only ratios and chromaticity are meaningful.
+/// matching functions. Unnormalized: only ratios and chromaticity are meaningful.
 pub fn xyz_from_spectral(f: impl Fn(f64) -> f64) -> [f64; 3] {
     let (lo, hi) = VISIBLE_NM;
     let mut xyz = [0.0; 3];
@@ -92,7 +92,7 @@ pub fn decode_srgb(c: f64) -> f64 {
 
 /// Clip negatives and scale so the largest component is 1. For displaying a color whose
 /// absolute brightness is carried elsewhere — see the tone mapping in `07-rendering.md`.
-pub fn normalise_to_max(rgb: [f64; 3]) -> [f64; 3] {
+pub fn normalize_to_max(rgb: [f64; 3]) -> [f64; 3] {
     let clipped: [f64; 3] = std::array::from_fn(|i| rgb[i].max(0.0));
     let m = clipped.iter().cloned().fold(0.0, f64::max);
     if m <= 0.0 { [0.0; 3] } else { std::array::from_fn(|i| clipped[i] / m) }
@@ -156,9 +156,9 @@ mod tests {
     }
 
     #[test]
-    fn normalising_clips_out_of_gamut_and_peaks_at_one() {
-        let n = normalise_to_max([2.0, -0.5, 1.0]);
+    fn normalizing_clips_out_of_gamut_and_peaks_at_one() {
+        let n = normalize_to_max([2.0, -0.5, 1.0]);
         assert_eq!(n, [1.0, 0.0, 0.5]);
-        assert_eq!(normalise_to_max([0.0, 0.0, 0.0]), [0.0; 3]);
+        assert_eq!(normalize_to_max([0.0, 0.0, 0.0]), [0.0; 3]);
     }
 }

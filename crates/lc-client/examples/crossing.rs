@@ -25,9 +25,9 @@ const FRAMES: usize = 6;
 fn main() {
     let mut args = std::env::args().skip(1);
     let output = args.next().unwrap_or_else(|| "crossing.png".into());
-    let catalogue = args.next();
+    let catalog = args.next();
 
-    let provider: Box<dyn StarProvider> = match &catalogue {
+    let provider: Box<dyn StarProvider> = match &catalog {
         Some(p) => match lc_world::sky::hyg::HygProvider::load(p) {
             Ok(h) => Box::new(h),
             Err(e) => {
@@ -41,7 +41,7 @@ fn main() {
     let ui = UiState::default();
     let mut session = Session::new(provider.as_ref(), 3000);
 
-    // The first star that is actually interstellar: the catalogue puts the Sun about an
+    // The first star that is actually interstellar: the catalog puts the Sun about an
     // astronomical unit out and flying to it is not a crossing.
     let Some(target) = session.stars.iter().find(|s| s.position_ly.length() > 1.0).map(|s| s.id)
     else {

@@ -106,7 +106,7 @@ mod tests {
         let local = DVec3::new(1.496e11, -2.5e10, 7.0e9);
         let g = f.to_global(Micros::new(1_000_000_500), local).unwrap();
         let back = f.to_local(g);
-        // The grid quantises to 299.79 m, so half a cell is the worst case per axis.
+        // The grid quantizes to 299.79 m, so half a cell is the worst case per axis.
         assert!((back - local).abs().max_element() <= LIGHT_MICROSECOND_M / 2.0 + 1e-6);
     }
 

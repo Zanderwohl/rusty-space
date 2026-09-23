@@ -284,6 +284,7 @@ pub struct MapPlugin;
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::map_line::MapLinePlugin)
+            .init_resource::<crate::beliefs::Beliefs>()
             .add_systems(Startup, setup)
             // **After the scene the snapshot is built from.** Taken in `Stage::Act`, it held
             // the previous frame's eye while the contacts in it were this frame's, so this
@@ -405,17 +406,23 @@ fn resize(mut map: ResMut<Map>, mut images: ResMut<Assets<Image>>) {
 /// Build this frame's snapshot from whichever source the interface is showing.
 fn survey(
     game: Res<Game>,
-    ui: Res<Ui>,
-    bodies: Res<crate::starfield::Bodies>,
+    mut ui: ResMut<Ui>,
     uplink: Res<crate::uplink::Uplink>,
     eye: Res<crate::hull::Eye>,
     mut map: ResMut<Map>,
+    mut beliefs: ResMut<crate::beliefs::Beliefs>,
 ) {
     if !map.shown {
         return;
     }
+    let held = beliefs.held(&game.0);
+    // Before anything is composed: the plane the camera's angles are measured against is the
+    // one this craft has solved for the system it is in, and a ship that crossed to another
+    // star is in another one. Truth's pole is deliberately not read here -- what the map draws
+    // is what the crew worked out. See `lightcone/docs/25-system-knowledge.md`.
+    ui.map.system_plane = held.plane;
     let picture = match ui.map.source {
-        Source::Observed => crate::map_source::observed(&game.0, &bodies, &uplink, eye.at_ly),
+        Source::Observed => crate::map_source::observed(&game.0, &uplink, eye.at_ly, held),
         #[cfg(feature = "godview")]
         Source::God => crate::map_source::coordinate(&game.0, &uplink, eye.at_ly),
     };
@@ -484,7 +491,7 @@ fn place(
     let view = ui.map;
     let meters_per_unit = crate::view::ScaleTier::for_distance(view.orbit.distance_m())
         .meters_per_unit();
-    let frame = compose(&map.snapshot, &view.orbit, view.plane, meters_per_unit);
+    let frame = compose(&map.snapshot, &view.orbit, view.datum(), meters_per_unit);
 
     // The depth range is written from the stand-off every frame rather than fixed. The sky's
     // camera spans 1e-10 to 1e9 because it has to cover everything at once; the map's distance
@@ -496,7 +503,7 @@ fn place(
     }
 
     // The eye is the render origin, and the map looks back at its focus.
-    let (forward, up) = view.orbit.orientation(view.plane);
+    let (forward, up) = view.orbit.orientation(view.datum());
     transform.translation = Vec3::ZERO;
     transform.look_to(render(forward), render(up));
 
@@ -610,7 +617,7 @@ pub fn spin(view: &mut crate::ui::MapView, snapshot: &MapSnapshot, primary: Opti
         crate::ui::MapFocus::Primary(crate::ui::Frame::Local) => reference_line(snapshot, primary),
         _ => None,
     };
-    let Some(bearing) = line.and_then(|line| view.plane.bearing(line)) else {
+    let Some(bearing) = line.and_then(|line| view.datum().bearing(line)) else {
         // Nothing to hold onto: the camera stays where it is and starts again from whatever
         // the line reads next.
         view.bearing = None;
@@ -965,7 +972,7 @@ mod tests {
         assert_eq!(orbit.focus_ly, ship, "following did not reach the interface's copy");
 
         // Now the drag. A small pan has to leave the camera near the ship, not near zero.
-        orbit.pan(em_map::Plane::Ecliptic, 0.05, 0.0);
+        orbit.pan(em_map::Plane::System.about(DVec3::Z), 0.05, 0.0);
         let moved = orbit.focus_ly.distance(ship);
         assert!(moved > 0.0, "the pan moved nothing");
         assert!(
@@ -1051,7 +1058,16 @@ mod tests {
     fn locked_on(frame: Frame) -> crate::ui::MapView {
         crate::ui::MapView {
             focus: MapFocus::Primary(frame),
-            plane: em_map::Plane::Ecliptic,
+            plane: em_map::Plane::System,
+            // Solved, and solved as `+Z`, because these ships are placed in the `xy` plane: a
+            // quarter of an orbit is a quarter turn of the camera only when the orbit lies in
+            // the plane the camera is angled against. A craft that has solved nothing gets the
+            // galactic frame, which this motion is not in.
+            system_plane: lc_world::knowledge::SystemPlane::Known {
+                pole: DVec3::Z,
+                sigma_rad: 0.0,
+                zero: DVec3::X,
+            },
             ..Default::default()
         }
     }

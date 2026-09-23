@@ -234,7 +234,7 @@ pub async fn ticket(state: &AppState, session: &Session) -> Option<String> {
 ///
 /// **Already signed in is not a failure.** A stale sign-in finishing in a browser that already
 /// holds a session is the back button, not an attack, and the code is simply dropped — which is
-/// strictly safer than honouring it, since honouring a sign-in nobody here started is the login
+/// strictly safer than honoring it, since honoring a sign-in nobody here started is the login
 /// CSRF the nonce exists to stop.
 fn refuse(state: &AppState, headers: &HeaderMap) -> Response {
     if let Some(session) = state.who(headers) {
@@ -330,7 +330,7 @@ mod tests {
     fn the_nonce_cookie_is_not_the_session_cookie() {
         assert!(!sets_the_session(&with_cookies(&[session::set_state("n", true)])));
         assert!(!sets_the_session(&with_cookies(&[session::clear_state(true)])));
-        // And a response carrying both is still recognised by the one that matters.
+        // And a response carrying both is still recognized by the one that matters.
         assert!(sets_the_session(&with_cookies(&[
             session::clear_state(true),
             session::set("v", 60, true),

@@ -1,4 +1,12 @@
 //! The tick loop, intent validation, and the one place anything is released to a client.
+//!
+//! Line limit: 2000. The one module allowed past the thousand-line cap, because it is the
+//! shard's core assembly: the tick, what an intent is allowed to do, and the single gate every
+//! release to a client passes through. Splitting those apart would put the gate somewhere other
+//! than the loop it guards, and a second place a release could be written from is exactly the
+//! thing this file exists to prevent. Everything that can live elsewhere already does —
+//! `instruments`, `radio`, `planets`, `chase`, `drive`, `fitting`, `persist` — so what is left
+//! is the part with nowhere else to be.
 
 use std::collections::HashMap;
 
@@ -140,6 +148,8 @@ pub struct Server<J: Journal> {
     /// a tick became a rate times a constant: at any rate but one, `now_t` is no longer a
     /// clean multiple of anything and "about once a real second" came out as never.
     ticks: u64,
+    /// Where the last tick's real time went. See [`crate::timing`].
+    pub(crate) stages: crate::timing::Stages,
     /// Everything a conversation needs, held here because a `Server` is where state lives and
     /// read only by [`crate::radio`], whose module doc is where the reasoning for all five is.
     ///
@@ -204,6 +214,7 @@ impl<J: Journal> Server<J> {
             library: crate::library::Library::default(),
             director: None,
             ticks: 0,
+            stages: Default::default(),
             balance: lc_world::fitting::Balance::DEFAULT,
             refitting: std::collections::HashSet::new(),
         }
@@ -290,7 +301,7 @@ impl<J: Journal> Server<J> {
     pub fn load_world(&mut self, world: World) {
         self.world = world;
         // A sky cached from the last world would put this world's craft under the wrong stars.
-        self.instruments.forget_sky();
+        self.instruments.forget_sky(self.world.stars());
     }
 
     /// The fleet, for a caller putting a craft into a system.
@@ -397,6 +408,7 @@ impl<J: Journal> Server<J> {
     /// One tick. The order is the whole of it.
     pub async fn tick(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         // 1. Advance.
+        self.stages.restart();
         self.ticks += 1;
         self.now_t += self.tick_us();
         let now_s = self.now_t as f64 * 1.0e-6;
@@ -404,13 +416,16 @@ impl<J: Journal> Server<J> {
         // positions *in* a system, and one resolved against the wrong system is a craft in the
         // wrong place.
         self.resync_systems(now_s);
+        self.stages.mark("resync");
         // Nothing moved on the server before this. Reading a worldline never needed it — every
         // motive is a closed form — but the transitions do: a crossing that arrives becomes a
         // station, and a ballistic arc folds the patch it was solved for.
         self.fleet.advance(now_s, self.tick_us() as f64 * 1.0e-6);
+        self.stages.mark("advance");
         // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
         // the range it has already made and this is a comparison until the window moves.
         self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
+        self.stages.mark("prepare");
         // 2. Drain intents, validate, write events, schedule deliveries.
         let mut events = Vec::new();
         let mut deliveries = Vec::new();
@@ -428,6 +443,7 @@ impl<J: Journal> Server<J> {
         for budget in self.budgets.values_mut() {
             budget.advance(TICKS_PER_SECOND);
         }
+        self.stages.mark("intents");
         // After motion, so every instrument looks from where its craft now is, and after the
         // intents, so a report composed this tick carries nothing its craft learns in it.
         self.run_instruments();
@@ -442,15 +458,26 @@ impl<J: Journal> Server<J> {
         self.answer_owed(self.now_t - self.tick_us(), &mut events, &mut deliveries);
         self.announce_drives(self.now_t - self.tick_us(), &mut events, &mut deliveries);
         self.keep_accounts(wire);
+        self.stages.mark("scene");
         self.schedule_landings(&events, &deliveries);
         self.land_reports();
+        self.stages.mark("landings");
         self.journal.write(&events, &deliveries).await?;
         self.write_conversations().await?;
+        self.stages.mark("journal");
         self.pending = events;
         self.state_the_clock(wire);
         self.tell_learned(wire);
+        self.stages.mark("tell");
         // 3 and 4. Everything that has arrived since the last tick, through the gate.
-        self.flush(wire).await
+        let flushed = self.flush(wire).await;
+        self.stages.mark("flush");
+        flushed
+    }
+
+    /// Where the last tick's real time went.
+    pub fn last_tick(&self) -> &crate::timing::Stages {
+        &self.stages
     }
 
     fn handle(
@@ -698,7 +725,7 @@ impl<J: Journal> Server<J> {
                 if !accel_g.is_finite() || *accel_g <= 0.0 || !(*max_beta > 0.0) {
                     return Err(Refusal::Impossible);
                 }
-                // Resolved here, against this shard's own catalogue. A star it does not hold
+                // Resolved here, against this shard's own catalog. A star it does not hold
                 // is not somewhere anyone may fly to, whatever the client believes it has.
                 let to_ly = self.world.star_at(*star).ok_or(Refusal::Impossible)?;
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
@@ -808,7 +835,7 @@ impl<J: Journal> Server<J> {
             }
             Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => {
                 // The whole of it in `crate::radio`, because everything a transmission needs
-                // to decide — the keyring, the aim, the acknowledgement window — is that
+                // to decide — the keyring, the aim, the acknowledgment window — is that
                 // module's and none of it is this one's.
                 let spoken = self.compose(id, intent.ship_id, &intent.order, at)?;
                 beam = spoken.beam;
@@ -978,7 +1005,7 @@ impl<J: Journal> Server<J> {
             self.fleet.iter().map(|craft| (craft.id, craft.motion.position_ly)).collect();
         let placements: Vec<(CraftId, Option<Arc<LocalSystem>>)> = where_each
             .into_iter()
-            .map(|(id, at)| (id, self.world.system_at(at)))
+            .map(|(id, at)| (id, self.world.system_at(at, now_s)))
             .collect();
 
         for (id, system) in placements {
@@ -987,6 +1014,22 @@ impl<J: Journal> Server<J> {
                 continue;
             }
             craft.enter(system, now_s);
+        }
+
+        // Once a second rather than every tick: the sweep walks every loaded system, and what
+        // it is looking for takes a survey rotation to become true.
+        if self.ticks % u64::from(TICKS_PER_SECOND) == 0 {
+            // The fleet is the record of who is in what, so it is what pins a system. Read
+            // after placement, or a craft that has just arrived is not counted as being there.
+            // A system under survey is pinned too: past the cap, surveys would otherwise evict
+            // each other's systems every second and rebuild them the next tick.
+            let occupied: Vec<lc_world::sky::StarId> = self
+                .fleet
+                .iter()
+                .filter_map(|craft| craft.system.as_ref().map(|s| s.star))
+                .chain(self.instruments.aboard.values().filter_map(|a| a.observatory.duty.surveying()))
+                .collect();
+            self.world.sweep(occupied, now_s);
         }
     }
 
@@ -1255,7 +1298,7 @@ use crate::transport::Loopback;
         let trip_ly = 2.0e7 / lc_world::system::M_PER_LY;
         let to_ly = DVec3::new(lc_world::flight::STANDOFF_LY + trip_ly, 0.0, 0.0);
         // Folded directly: between the stars there is no course to set, and an order to cross
-        // would need a catalogue star there.
+        // would need a catalog star there.
         let craft = server.fleet_mut().get_mut(CraftId(1)).unwrap();
         let drive = craft.turning(craft.kind.drive());
         craft
@@ -2190,7 +2233,7 @@ pub(crate) mod course_tests {
     use lc_world::system::LocalSystem;
     use std::sync::Arc;
 
-    pub(crate) fn a_star() -> Option<lc_world::sky::CatalogueStar> {
+    pub(crate) fn a_star() -> Option<lc_world::sky::CatalogStar> {
         AuthoredStars::sample().stars().first().cloned()
     }
 
@@ -3081,7 +3124,7 @@ mod hello_tests {
     async fn crossing_to_a_star_arrives_in_its_system_at_rest_and_not_in_an_orbit() {
         let Some(here) = a_star() else { return };
         let mut there = here.clone();
-        there.id = lc_world::sky::StarId::synthesise("test", 7);
+        there.id = lc_world::sky::StarId::synthesize("test", 7);
         // Further apart than `LOCAL_SHELL_LY`, or the two shells overlap and being "in" one of
         // them is whichever the lookup reaches first rather than a fact about where the ship is.
         there.position_ly = here.position_ly + DVec3::new(2.0, 0.0, 0.0);

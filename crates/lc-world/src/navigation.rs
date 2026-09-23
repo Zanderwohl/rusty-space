@@ -298,15 +298,21 @@ impl Waypoint {
     }
 
     /// What to call this on screen.
-    pub fn label(&self) -> String {
+    /// What to call this station, in the crew's own names.
+    ///
+    /// **Takes [`Labels`] rather than formatting the key**, because a waypoint holds the
+    /// generator's key for whatever it is anchored to and that is not a name anybody aboard
+    /// knows. A ship sent to `180.5-00.1` must not be reported as holding at `99942-Apophis`.
+    /// See [`crate::labels`].
+    pub fn label(&self, labels: &crate::labels::Labels) -> String {
         match self {
             Waypoint::Fixed(_) => "a fixed point".to_string(),
             Waypoint::Orbit(orbit) => match &orbit.about {
                 Anchor::Star => format!("a band at {:.1} AU", orbit.radius_m / AU),
-                Anchor::Body(name) => format!("orbit of {name}"),
+                Anchor::Body(key) => format!("orbit of {}", labels.of(key)),
             },
-            Waypoint::Lagrange { body, point } => format!("{body} {point:?}"),
-            Waypoint::Libration(l) => format!("{} {:?} libration", l.body, l.point),
+            Waypoint::Lagrange { body, point } => format!("{} {point:?}", labels.of(body)),
+            Waypoint::Libration(l) => format!("{} {:?} libration", labels.of(&l.body), l.point),
         }
     }
 
@@ -679,18 +685,18 @@ pub struct Entry {
 
 /// What to call a body.
 ///
-/// Its own name first, then whatever catalogue designation it carries, and only then a made-up
+/// Its own name first, then whatever catalog designation it carries, and only then a made-up
 /// one: the primary's name and a numeral, which is how an unnamed body has been designated
 /// since Galileo. Players will be able to name planets, and that name goes in the first slot.
 pub fn designate(
     name: Option<&str>,
-    catalogue: Option<&str>,
+    catalog: Option<&str>,
     primary: &str,
     rank: usize,
 ) -> String {
-    match (name, catalogue) {
+    match (name, catalog) {
         (Some(name), _) if !name.is_empty() => name.to_string(),
-        (_, Some(catalogue)) if !catalogue.is_empty() => catalogue.to_string(),
+        (_, Some(catalog)) if !catalog.is_empty() => catalog.to_string(),
         _ => format!("{primary} {}", roman(rank)),
     }
 }
@@ -844,7 +850,7 @@ pub fn plan(
 /// What a population is, from its shape alone.
 ///
 /// A belt is flat and a cloud is not, and nothing else about a population distinguishes them.
-/// Used for naming one on screen; the Oort analogue is the only isotropic one a system has.
+/// Used for naming one on screen; the Oort analog is the only isotropic one a system has.
 pub fn is_flat(population: &Population) -> bool {
     population.inclination.max_inclination() < 1.0
 }
@@ -909,7 +915,7 @@ mod tests {
     fn sol() -> LocalSystem {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
-                .expect("the catalogue");
+                .expect("the catalog");
         let sun = provider
             .stars()
             .iter()
@@ -1233,8 +1239,10 @@ mod tests {
             .filter_map(|i| Course::Belt(i).resolve(&system, DVec3::ZERO, 0.0))
             .count();
         assert_eq!(belts, system.populations.len(), "every population is somewhere to go");
-        let flat = system.populations.iter().filter(|p| is_flat(p)).count();
-        assert_eq!(flat, system.populations.len() - 1, "all but the cloud are flat");
+        // How many populations a system has is what its ladder left behind, so the count
+        // varies. What does not is that only a cloud is round.
+        let round = system.populations.iter().filter(|p| !is_flat(p)).count();
+        assert!(round <= 1, "{round} isotropic populations, and only a cloud may be one");
     }
 
     #[test]
@@ -1312,7 +1320,7 @@ mod tests {
 
     /// A body is called what it is called; only one with nothing at all gets invented a name.
     #[test]
-    fn a_designation_prefers_the_name_then_the_catalogue_then_a_numeral() {
+    fn a_designation_prefers_the_name_then_the_catalog_then_a_numeral() {
         assert_eq!(designate(Some("Titan"), Some("S VI"), "Saturn", 6), "Titan");
         assert_eq!(designate(None, Some("S/2004 S 13"), "Saturn", 40), "S/2004 S 13");
         assert_eq!(designate(None, None, "Saturn", 7), "Saturn VII");
@@ -1383,6 +1391,65 @@ mod tests {
             assert!((v.length() - 1.0).abs() < 1e-12, "{pole} gave {v}");
             assert!(u.dot(v).abs() < 1e-12, "{pole} gave a skew basis");
         }
+    }
+
+    /// **A station is named in the crew's words, never the generator's key.** A ship flown to
+    /// `180.5-00.1` reported as holding at `99942-Apophis` has told the player the name of a
+    /// body nobody aboard has identified.
+    #[test]
+    fn a_station_is_never_labeled_by_the_generators_key() {
+        let stars = AuthoredStars::sample();
+        let star = StarProvider::stars(&stars)[2].clone();
+        let system = LocalSystem::for_star(&star).expect("a generated system");
+        let key = system
+            .inventory()
+            .iter()
+            .find_map(|e| match (&e.target, e.depth) {
+                // Past the primary: `labels` maps the star itself separately.
+                (Target::Body(key), depth) if depth > 0 => Some(key.clone()),
+                _ => None,
+            })
+            .expect("a body");
+
+        // What the crew calls it: one body detected, under its discovery designation.
+        let labels = crate::labels::label(&system, "the star", |body| {
+            (body == crate::knowledge::BodyId::of(star.id, &key)).then(|| "180.5-00.1".to_string())
+        });
+
+        let stations = [
+            Waypoint::Lagrange { body: key.clone(), point: LagrangePoint::L1 },
+            Waypoint::Orbit(Orbit {
+                about: Anchor::Body(key.clone()),
+                radius_m: 1.0e7,
+                pole: DVec3::Z,
+                phase_rad: 0.0,
+            }),
+        ];
+        for station in stations {
+            let said = station.label(&labels);
+            assert!(!said.contains(&key), "the key leaked: {said}");
+            assert!(said.contains("180.5-00.1"), "not the crew's name: {said}");
+        }
+    }
+
+    /// A body nobody has detected has no name to give, and the key is still not it.
+    #[test]
+    fn an_undetected_body_is_unidentified_rather_than_keyed() {
+        let stars = AuthoredStars::sample();
+        let star = StarProvider::stars(&stars)[2].clone();
+        let system = LocalSystem::for_star(&star).expect("a generated system");
+        let key = system
+            .inventory()
+            .iter()
+            .find_map(|e| match (&e.target, e.depth) {
+                // Past the primary: `labels` maps the star itself separately.
+                (Target::Body(key), depth) if depth > 0 => Some(key.clone()),
+                _ => None,
+            })
+            .expect("a body");
+        let labels = crate::labels::label(&system, "the star", |_| None);
+        let said = Waypoint::Lagrange { body: key.clone(), point: LagrangePoint::L1 }.label(&labels);
+        assert!(!said.contains(&key), "the key leaked: {said}");
     }
 }
 

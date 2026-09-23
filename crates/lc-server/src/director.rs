@@ -154,8 +154,8 @@ impl<J: Journal> Server<J> {
         // sharing a system by pointer, and `resync_systems` will not replace an `Arc` whose
         // star already matches — so a cast handed a private copy would be in the right place,
         // in the right system by name, and invisible to everyone for ever.
-        let Some(system) = self.world.system_at(at) else { return };
         let now_s = self.now_t() as f64 * 1.0e-6;
+        let Some(system) = self.world.system_at(at, now_s) else { return };
 
         let pov_member = director.scenario.pov;
         {
@@ -294,12 +294,12 @@ mod tests {
     use crate::world::World;
     use lc_proto::ClientId;
     use lc_world::craft::Kind;
-    use lc_world::sky::CatalogueStar;
+    use lc_world::sky::CatalogStar;
 
     /// A star the real solar system hangs off. `LocalSystem` keys the JPL-fitted preset off the
     /// name, so this is the measured two hundred and thirty bodies rather than a generated set
     /// — which is the only place Jupiter and Saturn exist to be orbited.
-    fn sol() -> Option<CatalogueStar> {
+    fn sol() -> Option<CatalogStar> {
         let mut star = crate::server::course_tests::a_star()?;
         star.provenance.name = Some(lc_world::system::SOL.to_string());
         Some(star)

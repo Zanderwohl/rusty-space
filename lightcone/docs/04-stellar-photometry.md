@@ -179,7 +179,7 @@ rms deficit / mean deficit = 1 / sqrt(m)
 ```
 
 with a correlation time equal to the disc crossing time `t_cross = 2 R_star / v_perp`. This
-is a real, observable, and cheaply generated signal: the client synthesises a realisation
+is a real, observable, and cheaply generated signal: the client synthesizes a realization
 from a seed keyed on `(star, population, time bucket)`, with the right mean, the right
 variance, and the right autocorrelation. No element is ever instantiated.
 
@@ -202,7 +202,7 @@ needs 4900 s in-game. Both are cheap nearby and scale as `d^2` with distance.
 
 `m` is not always large. The same population record and the same integral cover the case
 where elements almost never overlap, but the **description** of the signal changes, and a
-synthesiser that assumes Gaussian fluctuation about a mean is simply wrong there.
+synthesizer that assumes Gaussian fluctuation about a mean is simply wrong there.
 
 The diagnostic is already stored: `rms / mean = 1 / sqrt(m)`. When it exceeds about 1/3, the
 fluctuation is comparable to the thing it is fluctuating about, and the signal is not noise
@@ -219,7 +219,7 @@ The solar system spans all three:
 | population | `m` | mean deficit | single-event depth | event rate | duration |
 |---|---|---|---|---|---|
 | swarm, 1.5e6 x 1e6 km^2 at 1 AU | 8.1 | 5.3e-6 | 6.6e-7 | continuous | 13 h |
-| Kuiper analogue, 1e9 x 50 km at 40 AU | 3.4 | 1.7e-8 | 5.2e-9 | continuous | 3.4 d |
+| Kuiper analog, 1e9 x 50 km at 40 AU | 3.4 | 1.7e-8 | 5.2e-9 | continuous | 3.4 d |
 | Hills cloud, 1e12 x 1 km at 5000 AU | 0.22 | 4.5e-13 | 2.1e-12 | 1 per 0.5 yr | 38 d |
 | Oort cloud, 1e12 x 1 km at 20 000 AU | 0.014 | 2.8e-14 | 2.1e-12 | 1 per 15.5 yr | 77 d |
 
@@ -245,12 +245,12 @@ that loses the signal:
 | event rate | 1 per 1.5 in-game years |
 | event duration | 0.8 in-game days, 8 real seconds |
 
-A synthesiser that reported the mean would declare this population invisible. What an
+A synthesizer that reported the mean would declare this population invisible. What an
 observer actually sees is a deep, isolated, unexplained dip once every year or two: the
 signature of something large and artificial in an orbit, and one of the more alarming things
 the game can show a player.
 
-So the flicker synthesiser branches on `m`, which the shell already stores:
+So the flicker synthesizer branches on `m`, which the shell already stores:
 
 ```
 m >> 1   Gaussian noise, variance d^2/m, correlation time t_cross
@@ -288,7 +288,7 @@ or a closed form. The sphere is needed when the result is not axisymmetric:
 - a swarm whose element distribution is deliberately shaped to avoid a known observer.
 
 Deficits add in the optically-thin limit (`d << 1`), which is what makes accumulation
-correct: rasterise each population's contribution once and sum. The shell is invalidated by
+correct: rasterize each population's contribution once and sum. The shell is invalidated by
 any event that changes a population's parameters, and content-addressed by the hash of those
 parameters so an unchanged swarm reuses its bake across restarts.
 
@@ -324,7 +324,7 @@ Pick the level from the population's inclination spread. Most swarms sit at 4 or
 
 ```
 1. barycentric interpolation of (m, d_b, t_cross) at n              3 vertex reads
-2. flicker realisation from the seeded generator at t_r             O(1)
+2. flicker realization from the seeded generator at t_r             O(1)
 3. discrete occluders: f_i(n, t_r) for each                         O(occluders)
 4. L_star(t_r) from the variability model                           O(1)
 5. combine
@@ -416,7 +416,7 @@ itself the observable**:
 | reddening — much deeper in B than K, absent in radio | dust, debris, a natural cloud |
 | gray in the optical with an IR excess | solid, and absorbing rather than merely blocking — engineering |
 
-A civilisation that wants its swarm mistaken for a dust cloud has to make it reddening, which
+A civilization that wants its swarm mistaken for a dust cloud has to make it reddening, which
 means making it out of small particles, which means giving up the structural integrity that
 made it a collector. The disguise has a physical price, and the game does not have to invent
 one.
@@ -436,7 +436,7 @@ Checked against real values: `B-V = 0.65` returns 5778 K for the Sun against an 
 **One color index cannot separate a cool star from a reddened one.** Dust and temperature move
 `B - V` the same direction, so an A0 at 10 125 K behind `E(B-V) = 0.3` reads as 7462 K, an F
 star. This is the real degeneracy of real photometry, and it is a deception vector: a
-civilisation that wants to look like something else can lean on it.
+civilization that wants to look like something else can lean on it.
 
 Breaking it needs a second color, so that reddening and cooling can be told apart by
 *direction* rather than magnitude. In a color-color diagram the reddening vector points one
@@ -464,7 +464,7 @@ angle.
 So the blind zone is not an instrument tier to buy past. It is a genuine hole in what
 continuum photometry can know, and closing it needs spectroscopy — line features rather than
 the shape of the continuum. That gives the spectrograph of
-[05-observation.md](05-observation.md) a specific job, and it gives a civilisation that wants
+[05-observation.md](05-observation.md) a specific job, and it gives a civilization that wants
 to hide behind dust a reason to prefer a late-K star.
 
 The radio band also stops the game from being a pure line-of-sight problem. A system behind a
@@ -560,8 +560,8 @@ None of them blocks a first version.
 - Correlated rather than Poisson statistics. Real swarms have structure — resonances, gaps,
   clumps — which makes the flicker non-Poisson and its spectrum informative in ways the
   current model does not capture. Probably a later refinement, and a good one.
-- The transition band, `m` of roughly 0.3 to 3, where neither branch of the synthesiser is
-  right. A Kuiper analogue sits there. Either interpolate, or generate the true Poisson event
+- The transition band, `m` of roughly 0.3 to 3, where neither branch of the synthesizer is
+  right. A Kuiper analog sits there. Either interpolate, or generate the true Poisson event
   train in that band and accept the cost, since `m ~ 1` means few events to generate.
 - Whether populations shadow each other. Two overlapping swarms at different radii are not
   independent; the optically-thin sum is wrong once total deficit approaches 1, which is

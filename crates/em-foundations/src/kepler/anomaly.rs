@@ -215,7 +215,7 @@ pub fn true_from_mean_bessel(mean_anomaly: f64, eccentricity: f64, terms: usize)
 /// True anomaly from mean anomaly, solved to [`DEFAULT_TOLERANCE`].
 ///
 /// Halley for `e < 1`, Newton on the hyperbolic form for `e > 1`. `None` for parabolic
-/// (`e == 1`), which has no mean anomaly in this parameterisation.
+/// (`e == 1`), which has no mean anomaly in this parameterization.
 pub fn true_from_mean(mean_anomaly: f64, eccentricity: f64) -> Option<f64> {
     if eccentricity < 1.0 {
         let ea = eccentric_from_mean_halley(

@@ -41,7 +41,7 @@ const REFERENCES: &[Reference] = &[
     Reference { body: "Luna",    julian_day: 2460676.5, position_km: [ 1.520523605713538E+05, -3.488036665045074E+05, -3.066409317095052E+04] },
 ];
 
-/// Model position of `body` relative to its primary, in metres, from the bundled preset.
+/// Model position of `body` relative to its primary, in meters, from the bundled preset.
 fn modeled_position(body_id: &str, jd: f64) -> Option<DVec3> {
     let contents = solar_system();
     let g = contents.physics.gravitational_constant;

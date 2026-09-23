@@ -61,9 +61,9 @@ impl<'a> Chart<'a> {
 
     fn px(&self, vx: f64, vy: f64) -> Point {
         Point::new(
-            self.area.x + (self.x.scale.normalise(vx, self.x.range) as f32) * self.area.width,
+            self.area.x + (self.x.scale.normalize(vx, self.x.range) as f32) * self.area.width,
             self.area.y + self.area.height
-                - (self.y.scale.normalise(vy, self.y.range) as f32) * self.area.height,
+                - (self.y.scale.normalize(vy, self.y.range) as f32) * self.area.height,
         )
     }
 
@@ -71,7 +71,7 @@ impl<'a> Chart<'a> {
     pub fn value_at(&self, p: Point) -> (f64, f64) {
         let tx = ((p.x - self.area.x) / self.area.width) as f64;
         let ty = ((self.area.y + self.area.height - p.y) / self.area.height) as f64;
-        (self.x.scale.denormalise(tx, self.x.range), self.y.scale.denormalise(ty, self.y.range))
+        (self.x.scale.denormalize(tx, self.x.range), self.y.scale.denormalize(ty, self.y.range))
     }
 
     /// Decimate a series to this chart's pixel width.
@@ -220,7 +220,7 @@ impl TickFormat {
 
     pub fn apply(&self, v: f64) -> String {
         // Rounding a tick at the edge of a padded range can land on -0.0, which prints as
-        // "-0.00e0". Adding zero normalises it and is the identity for everything else.
+        // "-0.00e0". Adding zero normalizes it and is the identity for everything else.
         let v = v + 0.0;
         if self.scientific {
             format!("{:.*e}", self.decimals, v)

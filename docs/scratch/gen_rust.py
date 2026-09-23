@@ -26,7 +26,7 @@ COLOR = {
     "Asteroid": (145, 107, 54), "TNO": (190, 185, 180), "Centaur": (160, 140, 130),
     "Comet": (170, 200, 210), "Interstellar": (200, 170, 210), "Dwarf Planet": (200, 195, 190),
 }
-# Colours already chosen in the repo, kept.
+# Colors already chosen in the repo, kept.
 KEEP_COLOR = {
     "sol": (219,222,35), "mercury": (145,145,145), "venus": (224,224,224),
     "earth": (59,179,75), "mars": (242,66,17), "Jupiter": (201,144,57),

@@ -11,8 +11,8 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
-// A grid rather than a wrapper element: `align-content` centres the whole row group
-// vertically and `justify-items` centres it horizontally, so the panel needs no positioning
+// A grid rather than a wrapper element: `align-content` centers the whole row group
+// vertically and `justify-items` centers it horizontally, so the panel needs no positioning
 // of its own and a tall page (a long refusal, a small phone) simply scrolls.
 body {
   align-content: center;

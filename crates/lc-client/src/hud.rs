@@ -107,7 +107,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
     Hud {
         clock: format!("T + {:.2} years", session.coordinate_time_s() / YEAR_S),
         ship_clock: format!("T' + {:.2} years", session.ship.motion.clock_s / YEAR_S),
-        // What this ship believes, never the catalogue: a click on any light in the sky is not
+        // What this ship believes, never the catalog: a click on any light in the sky is not
         // a range to it.
         target: ui.selected.map(|id| {
             let range = crate::range::short(session.knowledge.belief(id), session.ship.motion.position_ly);
@@ -291,7 +291,7 @@ mod tests {
     }
 
     /// A star nobody has named still has something to call it: the designation its own
-    /// discovery wrote down. Nothing falls back to a catalogue.
+    /// discovery wrote down. Nothing falls back to a catalog.
     #[test]
     fn an_unnamed_star_still_gets_a_label() {
         let (mut ui, mut s) = fixture();
@@ -306,7 +306,7 @@ mod tests {
         assert!(target.ends_with("not detected"), "{target}");
         assert!(
             !target.starts_with("Authored"),
-            "a catalogue name is not a name: {target}"
+            "a catalog name is not a name: {target}"
         );
     }
 }

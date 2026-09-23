@@ -5,13 +5,14 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::record::Witness;
 use crate::rng;
 use crate::sky::StarId;
 
 /// A body inside a star's system: a planet, a moon, a comet.
 ///
 /// Hashed from the star and the generator's key, so it is stable across processes and never
-/// carries the generator's catalogue-derived name, which must not reach a player.
+/// carries the generator's catalog-derived name, which must not reach a player.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BodyId(u64);
 
@@ -21,6 +22,17 @@ impl BodyId {
             (h ^ b as u64).wrapping_mul(0x100_0000_01b3)
         });
         Self(rng::hash(&[star.get(), tag]))
+    }
+
+    /// A body only one craft believes in: a transit that matched no real planet.
+    ///
+    /// Keyed by the witness as well as the star, so two craft with the same false positive get
+    /// different ids and never merge. That is the honest outcome — they have no shared object to
+    /// agree about — and it is why this cannot be [`BodyId::of`] with a made-up key. `bucket`
+    /// groups near-equal periods, so one craft's repeated transits of its own phantom land on
+    /// one body. See `lightcone/docs/25-system-knowledge.md#which-body-a-transit-is`.
+    pub fn phantom(star: StarId, witness: Witness, bucket: i64) -> Self {
+        Self(rng::hash(&[star.get(), witness.0, bucket as u64, 0xfa_1_5e]))
     }
 
     #[inline]
@@ -62,6 +74,19 @@ impl Subject {
         match self.star() {
             Some(star) => Self::Star(star),
             None => self,
+        }
+    }
+
+    /// A stable number for seeding a measurement's noise, distinct across the variants.
+    ///
+    /// A star's is its own id unchanged, so what a telescope saw before this existed is what it
+    /// sees now.
+    pub fn key(self) -> u64 {
+        match self {
+            Self::Star(star) => star.get(),
+            Self::Body { star, body } => rng::hash(&[star.get(), body.get()]),
+            Self::Population { star, index } => rng::hash(&[star.get(), index as u64, 0x_b_e_1_7]),
+            Self::Craft(id) => rng::hash(&[id as u64, 0x_c_2_a_f_7]),
         }
     }
 
@@ -111,7 +136,7 @@ mod tests {
 
     #[test]
     fn a_body_is_its_star_and_its_key() {
-        let (a, b) = (StarId::synthesise("t", 1), StarId::synthesise("t", 2));
+        let (a, b) = (StarId::synthesize("t", 1), StarId::synthesize("t", 2));
         assert_eq!(BodyId::of(a, "b"), BodyId::of(a, "b"));
         assert_ne!(BodyId::of(a, "b"), BodyId::of(a, "c"));
         assert_ne!(BodyId::of(a, "b"), BodyId::of(b, "b"), "the same key around another star");
@@ -119,7 +144,7 @@ mod tests {
 
     #[test]
     fn everything_in_a_system_is_grouped_under_its_star() {
-        let star = StarId::synthesise("t", 1);
+        let star = StarId::synthesize("t", 1);
         let planet = Subject::Body { star, body: BodyId::of(star, "b") };
         let belt = Subject::Population { star, index: 0 };
         assert_eq!(planet.system(), Subject::Star(star));

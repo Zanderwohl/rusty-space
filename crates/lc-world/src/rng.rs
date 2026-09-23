@@ -4,7 +4,7 @@
 //! sequential generator. Two clients must agree on what a star did, and a value must be
 //! recoverable at an arbitrary past time without having generated everything before it.
 
-/// SplitMix64 finaliser.
+/// SplitMix64 finalizer.
 #[inline]
 pub fn mix(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);

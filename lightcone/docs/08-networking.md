@@ -269,7 +269,7 @@ says where, and a solve that falls off the end returns nothing rather than a gue
 too far away to be answered honestly sees nothing at all, which is the only safe way to not
 know.
 
-The lesson generalises: **anything computed from a worldline has to be computed from the
+The lesson generalizes: **anything computed from a worldline has to be computed from the
 worldline as it was**, and a type that cannot represent "as it was" will let a gate pass
 something that should never have left.
 
@@ -368,9 +368,9 @@ breaks, and the test is what says what the optimization would cost.
 
 ### A crossing names a star
 
-`Order::Cross` carries a **catalogue id**, not a position. A position would let a client fly to
+`Order::Cross` carries a **catalog id**, not a position. A position would let a client fly to
 somewhere it invented; an id can only name a star the shard also holds. That is what the
-shard's `--sky` buys: both ends are handed the same packed catalogue, so an id means one thing
+shard's `--sky` buys: both ends are handed the same packed catalog, so an id means one thing
 across the wire, and a star the server does not have is a refusal rather than a silent
 disagreement about where anybody is.
 
@@ -400,7 +400,7 @@ Channels:
 | control | reliable ordered | login, subscription, world parameters |
 | events | reliable ordered | the delivery stream, the game's substance |
 | local state | unreliable | the player's own ship, high rate, superseded immediately |
-| bulk | reliable, out of band | system snapshots, baked shells, catalogue chunks |
+| bulk | reliable, out of band | system snapshots, baked shells, catalog chunks |
 
 ## Tick model
 
@@ -523,7 +523,7 @@ else.
 
 - ~~Transport~~. **Decided: WebSocket first**, behind a `Transport` trait, with WebTransport
   and QUIC to follow when the datagram channel has a consumer and the TLS story is settled.
-- ~~Serialisation format~~. **Decided: `postcard`.** Both ends are Rust, including the WASM
+- ~~Serialization format~~. **Decided: `postcard`.** Both ends are Rust, including the WASM
   client, so a self-describing format buys nothing — and it would cost something: it lets a
   stale client half-understand a message, and a client misreading a sighting is not a degraded
   experience but a wrong one. A strict version handshake refusing the connection is the honest

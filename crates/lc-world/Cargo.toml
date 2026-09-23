@@ -19,6 +19,8 @@ em-sim = { path = "../em-sim", default-features = false }
 glam = { version = "0.32", features = ["serde"] }
 serde = { version = "1.0.215", features = ["derive"] }
 csv = { version = "1", optional = true }
+# Offline only: the documentation's plots. Never in a build the game links.
+em-plot = { path = "../em-plot", features = ["raster"], optional = true }
 
 # Offline tooling. Native only, and the only program in the tree that reads a CSV.
 [[bin]]
@@ -26,11 +28,19 @@ name = "skypack"
 path = "src/bin/skypack.rs"
 required-features = ["hyg"]
 
+# The figures in lightcone/docs/26-system-generation.md, drawn from the generator itself.
+[[bin]]
+name = "systems"
+path = "src/bin/systems.rs"
+required-features = ["plots"]
+
 [features]
 default = ["hyg"]
 # The HYG importer, and the CSV reader it needs. Off for a world built from an authored
 # galaxy, which is what the shipped game uses.
 hyg = ["dep:csv"]
+# The documentation's plots.
+plots = ["dep:em-plot"]
 
 [dev-dependencies]
 serde_json = { version = "1", features = ["float_roundtrip"] }

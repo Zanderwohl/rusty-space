@@ -6,7 +6,7 @@
 //! function rather than a second renderer, and a relay or a fleet's shared picture is another
 //! provider.
 //!
-//! The catalogue is test data. Stars come from [`Session::stars`], whatever the session was
+//! The catalog is test data. Stars come from [`Session::stars`], whatever the session was
 //! handed: a CSV today, a shard's answer once the server is authoritative. `local::start`
 //! passes the client's own stars to the server in the box so both place craft alike.
 
@@ -14,18 +14,20 @@ use std::collections::HashMap;
 
 use em_map::{ItemKey, ItemKind, MapItem, MapSnapshot};
 use glam::DVec3;
+use lc_world::knowledge::Placed;
+#[cfg(feature = "godview")]
 use lc_world::navigation::Kind;
 
+use crate::beliefs::Held;
 use crate::pick::Subject;
 use crate::session::Session;
-use crate::starfield::Bodies;
 use crate::uplink::Uplink;
 
 /// How far the map reaches, light-years.
 ///
 /// A fixed sphere: a reach that moved with the zoom would change what exists as well as what
-/// is framed. Twenty-five light-years is 166 stars out of the bundled catalogue's 119 625.
-/// One solar mass. The catalogue states a star's mass in them and
+/// is framed. Twenty-five light-years is 166 stars out of the bundled catalog's 119 625.
+/// One solar mass. The catalog states a star's mass in them and
 /// [`em_map::MapItem::weight`] wants the kilograms a planet's is in.
 const SOLAR_MASS_KG: f64 = 1.988_41e30;
 
@@ -57,7 +59,7 @@ impl Source {
 ///
 /// Both at once because only the provider can say: an [`ItemKey`] is a digest and nothing
 /// reads back out of it. Recovering a star's id afterwards would mean hashing the whole
-/// catalogue every frame.
+/// catalog every frame.
 ///
 /// Not every item has a subject. The reader's own craft has none and is picked through.
 ///
@@ -93,6 +95,7 @@ impl Build {
     }
 }
 
+#[cfg(feature = "godview")]
 fn kind_of(kind: Kind) -> ItemKind {
     match kind {
         Kind::Star => ItemKind::Star,
@@ -105,18 +108,20 @@ fn kind_of(kind: Kind) -> ItemKind {
 
 /// What this ship can see, as its own instruments have it.
 ///
-/// Bodies come off the [`Bodies`] resource rather than a second call to `drawables_at`: it is
-/// refilled every frame from the eye the sky is drawn from, so the map and the view agree by
-/// construction.
+/// **The map is a chart, not a camera.** Bodies here are what this craft *believes* is in the
+/// system, not what the generator put there — a planet appears once something has found it. The
+/// sky is the other half of that split and stays truth: it is what a craft discovers planets
+/// with, and one filtered by knowledge would be one in which nothing could be found. See
+/// `lightcone/docs/25-system-knowledge.md`.
 ///
 /// Contacts are retarded — a ship is drawn where the light arriving now left from — and stars
-/// are older still. Bodies in the observer's own system are at coordinate time, because
-/// `update_bodies` places them there: across one system the delay is under a pixel.
-pub fn observed(session: &Session, bodies: &Bodies, uplink: &Uplink, eye_ly: DVec3) -> Picture {
-    let mut build = Build::with_capacity(bodies.drawn.len() + uplink.contacts.len() + 64);
+/// are older still. Bodies in the observer's own system are at coordinate time: across one
+/// system the delay is under a pixel.
+pub fn observed(session: &Session, uplink: &Uplink, eye_ly: DVec3, held: &Held) -> Picture {
+    let mut build = Build::with_capacity(uplink.contacts.len() + 64);
     build.push(observer(session, uplink, eye_ly), None);
     push_local_system(&mut build, session);
-    push_bodies(&mut build, bodies, &session.home_labels());
+    push_believed(&mut build, session, held);
     push_stars(&mut build, session, eye_ly);
 
     for contact in &uplink.contacts {
@@ -234,6 +239,7 @@ fn observer(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> MapItem {
 ///
 /// The same name `pick.rs` builds a `Target::Body` from over the sky, so a click means the
 /// same thing in either mode.
+#[cfg(feature = "godview")]
 fn push_drawable(build: &mut Build, body: &lc_world::system::Drawable, labels: &lc_world::labels::Labels) {
     let label = labels.of(&body.name);
     build.push(
@@ -256,7 +262,7 @@ fn push_drawable(build: &mut Build, body: &lc_world::system::Drawable, labels: &
 /// system the same question — so "about Earth" and the center of the map agree by construction.
 /// `None` between the stars, where there is no system to be held by.
 ///
-/// The star is keyed by its catalogue id and every other body by name, because `drawables_at`
+/// The star is keyed by its catalog id and every other body by name, because `drawables_at`
 /// leaves the star out and [`push_local_system`] puts it back under a key of its own. See
 /// [`key_of`].
 pub fn primary(session: &Session) -> Option<ItemKey> {
@@ -273,11 +279,79 @@ fn key_of(system: &lc_world::system::LocalSystem, index: em_sim::id::BodyIndex) 
     }
 }
 
-fn push_bodies(build: &mut Build, bodies: &Bodies, labels: &lc_world::labels::Labels) {
-    for body in &bodies.drawn {
-        push_drawable(build, body, labels);
+/// What this craft believes is in the local system.
+///
+/// Keyed the way truth's bodies were, because [`primary`] and the focus are keys and a body
+/// keyed differently is a button that does nothing at all. A body no generator made — a
+/// transit's false positive — falls back to its own id, which nothing else will ask for.
+///
+/// Nothing here carries a radius or a mass: a transit says a body exists and roughly where, not
+/// how big it is. Both arrive with imaging, in phase 6.
+fn push_believed(build: &mut Build, session: &Session, held: &Held) {
+    let Some(system) = session.system.as_ref() else { return };
+    let star_ly = system.star_position_ly();
+    // The galactic normal where no plane is solved, for the reason `MapView::resolved_plane`
+    // gives: `+Z` is Sol's plane and drawing another star's error bars about it is a
+    // measurement of one system shown around another.
+    let pole = match held.plane {
+        lc_world::knowledge::SystemPlane::Known { pole, .. } => pole,
+        _ => em_map::Plane::Galactic.about(DVec3::Z).normal(),
+    };
+    for belief in &held.bodies {
+        let named = match held.target(belief.body) {
+            Some(lc_world::navigation::Target::Body(name)) => Some(name.clone()),
+            _ => None,
+        };
+        let key = named
+            .as_deref()
+            .map(ItemKey::from_name)
+            .unwrap_or_else(|| ItemKey::from_id("phantom", belief.body.get()));
+        let label = belief.name.clone().unwrap_or_else(|| "unnamed body".to_string());
+        // Keyed by what the body is targeted by, never by what it is called. Two bodies
+        // nobody has named are both "unnamed body", so a label as a key made every one of
+        // them the same subject: picking one focused nothing and hovering one lit them all.
+        let subject = named.map(|target| Subject::Body(target, label.clone()));
+        match belief.position_now {
+            // Where on the ring it is, with the error drawn along the ring rather than across
+            // it: what is uncertain is how far round it has got.
+            Placed::Known { offset_au, sigma_au } => {
+                let at = star_ly + offset_au * AU_LY;
+                let along = offset_au.normalize_or(DVec3::X).cross(pole).normalize_or(DVec3::X);
+                build.push(
+                    MapItem::body(key, label, ItemKind::Planet, at, 0.0, pole)
+                        .spread(at - along * (sigma_au * AU_LY), at + along * (sigma_au * AU_LY)),
+                    subject,
+                );
+            }
+            // A sphere of that radius, dashed, and its thickness *is* the error: an orbit of
+            // known size and unknown orientation is not a ring in a guessed plane. The shell
+            // falls out of `outline::torus` at a right half-angle, which the Oort cloud
+            // already draws.
+            Placed::Shell { radius_au, sigma_au } => {
+                let (r, s) = (radius_au * AU_LY, sigma_au.abs() * AU_LY);
+                build.push(
+                    MapItem::annulus(
+                        key,
+                        label,
+                        star_ly,
+                        pole,
+                        em_map::outline::Extent {
+                            inner: (r - s).max(0.0),
+                            outer: r + s,
+                            half_angle_rad: std::f64::consts::FRAC_PI_2,
+                        },
+                    ),
+                    subject,
+                );
+            }
+            // Believed to exist, with nowhere to put it. Drawing it anywhere would be a claim.
+            Placed::Unknown => {}
+        }
     }
 }
+
+/// Light-years in an astronomical unit.
+const AU_LY: f64 = lc_world::navigation::AU / lc_world::system::M_PER_LY;
 
 /// The local system's own star and its belts. `drawables_at` returns neither: the primary is
 /// excluded by construction and a population is not a body.
@@ -291,7 +365,9 @@ fn push_local_system(build: &mut Build, session: &Session) {
             ItemKind::Star,
             system.star_position_ly(),
             system.star_radius_m(),
-            DVec3::Z,
+            // The star's own spin, not its planets' plane: a few degrees apart, and this is
+            // where its surface features will sit.
+            system.star_spin,
         ).weighing(system.star_mass_kg()),
         Some(Subject::Star(system.star, name)),
     );
@@ -321,7 +397,7 @@ fn push_local_system(build: &mut Build, session: &Session) {
 
 /// Stars this ship has a position for, less the one this system is already drawing.
 ///
-/// **Believed positions, not catalogue positions.** A star is on the map because somebody
+/// **Believed positions, not catalog positions.** A star is on the map because somebody
 /// measured a parallax to it, and it is drawn where that measurement puts it — off by the
 /// error on the measurement, which for a charted distance is a percent of the range. A star
 /// detected but never triangulated has a direction and no place to be, so it is not here; the
@@ -396,7 +472,7 @@ mod tests {
     #[test]
     fn the_observer_is_in_every_snapshot() {
         let session = session();
-        let snapshot = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+        let snapshot = observed(&session, &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session))
             .snapshot;
         let observer = snapshot.observer().expect("the observer is not on their own map");
         assert_eq!(observer.position_ly, DVec3::ZERO);
@@ -409,7 +485,7 @@ mod tests {
     fn the_reach_is_a_sphere_about_the_observer() {
         let session = session();
         let count = |eye: DVec3| {
-            observed(&session, &Bodies::default(), &Uplink::default(), eye)
+            observed(&session, &Uplink::default(), eye, &crate::beliefs::of(&session))
                 .snapshot
                 .items
                 .iter()
@@ -429,7 +505,7 @@ mod tests {
     fn an_unsurveyed_sky_puts_no_stars_on_the_map() {
         let blank = Session::new(&AuthoredStars::sample(), 3);
         let snapshot =
-            observed(&blank, &Bodies::default(), &Uplink::default(), DVec3::ZERO).snapshot;
+            observed(&blank, &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&blank)).snapshot;
         assert!(!snapshot.items.iter().any(|i| i.kind == ItemKind::Star));
         assert!(
             snapshot.observer().is_some(),
@@ -445,9 +521,9 @@ mod tests {
         let star = &session.stars[1];
         let snapshot = observed(
             &session,
-            &Bodies::default(),
             &Uplink::default(),
             DVec3::ZERO,
+            &crate::beliefs::of(&session),
         )
         .snapshot;
         let drawn = snapshot
@@ -463,7 +539,7 @@ mod tests {
         );
     }
 
-    /// **The primary has to be a key the snapshot holds.** The star is keyed by its catalogue
+    /// **The primary has to be a key the snapshot holds.** The star is keyed by its catalog
     /// id and every other body by name, and a primary keyed the other way is a button that
     /// does nothing at all.
     #[test]
@@ -487,12 +563,113 @@ mod tests {
         assert_ne!(star_key, ItemKey::from_name(&system.star_name), "the star is not by name");
     }
 
+    /// **The map draws no planet nobody has found.** This is the whole of the chart-not-camera
+    /// split: the same system, before and after one body is known, and the sky is untouched
+    /// either way. See `lightcone/docs/25-system-knowledge.md`.
+    #[test]
+    fn the_map_draws_only_bodies_this_craft_believes_in() {
+        let mut session = session();
+        let star = lc_world::sky::StarProvider::stars(&AuthoredStars::sample())[2].clone();
+        session.ship.motion.position_ly = star.position_ly;
+        session.sync_system();
+        let system = session.system.clone().expect("the ship is at a star");
+        assert!(!system.inventory().is_empty(), "the generator made bodies to not draw");
+
+        let planets = |session: &Session| {
+            observed(session, &Uplink::default(), star.position_ly, &crate::beliefs::of(session))
+                .snapshot
+                .items
+                .iter()
+                .filter(|i| i.kind == ItemKind::Planet || i.annulus_m.is_some())
+                .count()
+        };
+        // Populations are the generator's until phase 8, so count from where we start rather
+        // than from zero: what matters is that a body appears when it is found and not before.
+        let before = planets(&session);
+
+        // One settled transit's worth of knowledge: an orbit of known size and unknown
+        // orientation.
+        let key = system
+            .inventory()
+            .iter()
+            .find_map(|e| match &e.target {
+                lc_world::navigation::Target::Body(key) => Some(key.clone()),
+                _ => None,
+            })
+            .expect("a body");
+        let body = lc_world::knowledge::BodyId::of(star.id, &key);
+        let period = 3.0e7;
+        session.knowledge.found_planet(
+            star.id,
+            body,
+            lc_world::knowledge::Orbit {
+                about: None,
+                witness: session.knowledge.owner,
+                period_s: (period, period * 1.0e-3),
+                semi_major_au: (1.5, 0.15),
+                eccentricity: None,
+                orientation: lc_world::knowledge::Orientation::EdgeOnTo { toward: DVec3::X },
+                epoch_s: Some(0.0),
+                method: lc_world::knowledge::Method::Transit,
+                stated_s: 0.0,
+                lineage: Vec::new(),
+            },
+            1.0,
+            0.0,
+        );
+        assert_eq!(planets(&session), before + 1, "the found body is not drawn");
+
+        // And it is drawn as a shell, not as a ring in a plane nobody solved: an orbit of known
+        // size and unknown orientation is a sphere of that radius.
+        let snapshot = observed(&session, &Uplink::default(), star.position_ly, &crate::beliefs::of(&session)).snapshot;
+        let shell = snapshot
+            .items
+            .iter()
+            .find(|i| i.key == ItemKey::from_name(&key))
+            .expect("the believed body is on the map");
+        let extent = shell.annulus_m.expect("a shell has an extent");
+        assert!(
+            (extent.half_angle_rad - std::f64::consts::FRAC_PI_2).abs() < 1.0e-12,
+            "a right half-angle is what makes it a shell rather than a belt",
+        );
+        assert!(extent.inner < extent.outer, "the thickness is the distance error");
+    }
+
+    /// The star is drawn about its own spin axis, not about `+Z`.
+    ///
+    /// It was `DVec3::Z` for every system, which drew a generated star lying in the ecliptic of
+    /// J2000 while its planets orbited somewhere else entirely. See
+    /// `lightcone/docs/25-system-knowledge.md`.
+    #[test]
+    fn the_star_is_drawn_about_its_own_axis() {
+        // The third authored star is the one whose generated system has planets, and a local
+        // system is loaded from where the ship is rather than set.
+        let mut session = session();
+        let star = lc_world::sky::StarProvider::stars(&AuthoredStars::sample())[2].clone();
+        session.ship.motion.position_ly = star.position_ly;
+        session.sync_system();
+        let system = session.system.clone().expect("the ship is at a star");
+        let snapshot =
+            observed(&session, &Uplink::default(), star.position_ly, &crate::beliefs::of(&session)).snapshot;
+        let star = snapshot
+            .items
+            .iter()
+            .find(|i| i.key == ItemKey::from_id("star", system.star.get()))
+            .expect("the local star is on the map");
+
+        assert_eq!(star.pole, system.star_spin);
+        assert!(star.pole.dot(DVec3::Z).abs() < 0.999, "the star is back on +Z");
+        // Near its planets' plane but not in it: the spin is the star's own.
+        let tilt = star.pole.dot(system.pole).clamp(-1.0, 1.0).acos();
+        assert!(tilt <= lc_world::sky::generate::SPIN_TILT_MAX_RAD + 1.0e-12, "{tilt} rad off");
+    }
+
     /// **This ship is named like any other.** A map that draws five ships and names four of
     /// them has a hole in it where the reader is, and the name is the one the account carries
     /// rather than a word for "you".
     #[test]
     fn this_ship_is_named_and_weighed_like_a_ship() {
-        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+        let snapshot = observed(&session(), &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session()))
             .snapshot;
         let observer = snapshot.observer().expect("the observer is not on their own map");
         assert!(!observer.label.is_empty(), "nothing to draw");
@@ -506,7 +683,7 @@ mod tests {
     /// Two things sharing a key share an entity and a selection.
     #[test]
     fn nothing_shares_a_key() {
-        let snapshot = observed(&session(), &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+        let snapshot = observed(&session(), &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session()))
             .snapshot;
         let mut seen = keys(&snapshot);
         let before = seen.len();
@@ -521,9 +698,9 @@ mod tests {
     #[test]
     fn a_snapshot_is_stated_at_one_epoch() {
         let session = session();
-        let once = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+        let once = observed(&session, &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session))
             .snapshot;
-        let twice = observed(&session, &Bodies::default(), &Uplink::default(), DVec3::ZERO)
+        let twice = observed(&session, &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session))
             .snapshot;
         assert_eq!(once.epoch_s, session.coordinate_time_s());
         assert_eq!(once, twice);

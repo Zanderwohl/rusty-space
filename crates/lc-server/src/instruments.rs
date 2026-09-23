@@ -5,15 +5,19 @@
 //! folds into its copy. See `lightcone/docs/24-standing-instruments.md`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, channel};
 
 use lc_proto::{Order, Outbound, Refusal, ShipId};
 use lc_world::craft::CraftId;
 use lc_world::fitting::ONBOARD_DATA_BYTES;
-use lc_world::knowledge::observatory::{self, CHARTED_LY, Observatory, Sky, Station};
+use lc_world::knowledge::observatory::{Observatory, Sky, Station};
 use lc_world::knowledge::survey::Duty;
 use lc_world::knowledge::prior::Prior;
 use lc_world::knowledge::{ENTRIES_PER_REPORT, Knowledge, Mark, Report, Reporting, Subject, Witness};
 use lc_world::motion::LIGHT_US_PER_LY;
+use lc_world::sky::CatalogStar;
 
 use crate::journal::Journal;
 use crate::server::Server;
@@ -35,6 +39,12 @@ pub(crate) const PAGE_BYTES: usize = 1 << 20;
 /// periods.
 const READS_PER_TICK: usize = 1;
 
+/// Orbit fits started per tick across the whole shard.
+///
+/// Solved off the tick by [`crate::fits`], which also caps how many run at once. Round-robin by
+/// craft, and within a craft by which body waited longest.
+const FITS_PER_TICK: usize = 1;
+
 #[derive(Clone, Debug)]
 pub(crate) struct Aboard {
     pub knowledge: Knowledge,
@@ -55,19 +65,65 @@ pub(crate) struct Instruments {
     pub aboard: HashMap<CraftId, Aboard>,
     /// Built lazily and shared by every craft: a star's output does not depend on who looks.
     sky: Option<Sky>,
-    /// The generator's planet population, which a log is read against. Built lazily.
-    prior: Option<Prior>,
+    /// The generator's planet population, which a log is read against.
+    pub(crate) prior: PriorCell,
     /// Round-robin cursor for [`READS_PER_TICK`].
     reader: Option<CraftId>,
+    /// Round-robin cursor for [`FITS_PER_TICK`].
+    fitter: Option<CraftId>,
+    fits: crate::fits::Fits,
     /// Round-robin cursor for the one full recount per tick.
     recounted: Option<CraftId>,
     landings: Vec<Landing>,
 }
 
 impl Instruments {
-    pub(crate) fn forget_sky(&mut self) {
+    /// Drop what was cached from the last world, and start measuring this one's prior.
+    pub(crate) fn forget_sky(&mut self, stars: Arc<Vec<CatalogStar>>) {
         self.sky = None;
-        self.prior = None;
+        self.prior = PriorCell::measuring(stars);
+    }
+}
+
+/// [`Prior::measure`], run on its own thread from the moment a world is loaded.
+///
+/// Over a full catalog it generates fifteen hundred systems, and it used to do that on the tick
+/// thread at the first log anyone read.
+#[derive(Default)]
+pub(crate) struct PriorCell {
+    held: Option<Prior>,
+    /// See [`crate::fits::Fits::done`] for why this is behind a `Mutex`.
+    coming: Option<Mutex<Receiver<Prior>>>,
+}
+
+impl PriorCell {
+    fn measuring(stars: Arc<Vec<CatalogStar>>) -> Self {
+        let (send, coming) = channel();
+        std::thread::spawn(move || {
+            let _ = send.send(Prior::measure(stars.iter()));
+        });
+        Self { held: None, coming: Some(Mutex::new(coming)) }
+    }
+
+    /// The prior, or `None` while it is still being measured; whatever needs it waits a tick.
+    /// Measured here and now if no world was ever loaded, which is where a test runs.
+    ///
+    /// A test waits for it instead, so what a tick does does not depend on how fast a thread is.
+    pub(crate) fn get(&mut self, stars: &[CatalogStar]) -> Option<&Prior> {
+        if self.held.is_none() {
+            match &self.coming {
+                #[cfg(not(test))]
+                Some(coming) => {
+                    self.held = coming.lock().unwrap_or_else(std::sync::PoisonError::into_inner).try_recv().ok()
+                }
+                #[cfg(test)]
+                Some(coming) => {
+                    self.held = coming.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recv().ok()
+                }
+                None => self.held = Some(Prior::measure(stars.iter())),
+            }
+        }
+        self.held.as_ref()
     }
 }
 
@@ -96,33 +152,26 @@ fn page<T>(mut limit: usize, build: impl Fn(usize) -> (Option<String>, Option<T>
 }
 
 impl<J: Journal> Server<J> {
-    fn sky(&mut self) -> &mut Sky {
-        let stars = self.world.stars();
-        self.instruments.sky.get_or_insert_with(|| Sky::new(stars))
-    }
-
     fn station(&self, id: CraftId) -> Option<Station> {
         let craft = self.fleet.get(id)?;
         let position_ly = craft.position_at(self.now_t as f64) / LIGHT_US_PER_LY;
         Some(Station { position_ly, instrument: craft.sensor })
     }
 
-    /// A craft's instruments, issuing a new craft the charts of the volume it is in. See
-    /// `lightcone/docs/22-provenance.md`.
+    /// A craft's instruments. **A new craft knows nothing** -- not its home system's planets and
+    /// not the stars around it either. Everything it holds it looked at or was told.
+    ///
+    /// This is where the charting office of `lightcone/docs/22-provenance.md` used to hand a new
+    /// ship twenty light-years of star distances. The survey from inside replaced the argument
+    /// for it: a ship that knows nothing is not idle, it is in a system full of unexamined
+    /// planets that pay out in the first real minute. `observatory::issue_charts` stays for
+    /// photographs and tests; nothing a player reaches calls it.
     pub(crate) fn aboard(&mut self, id: CraftId) -> &mut Aboard {
-        let fresh = (!self.instruments.aboard.contains_key(&id)).then(|| {
-            let mut knowledge = Knowledge::new(witness(id));
-            if let Some(at) = self.station(id) {
-                let now_s = self.now_t as f64 * 1.0e-6;
-                observatory::issue_charts(self.sky(), &mut knowledge, at, CHARTED_LY, now_s);
-            }
-            Aboard { knowledge, observatory: Observatory::default(), reporting: Reporting::default() }
-        });
-        self.instruments.aboard.entry(id).or_insert_with(|| fresh.unwrap_or_else(|| Aboard {
+        self.instruments.aboard.entry(id).or_insert_with(|| Aboard {
             knowledge: Knowledge::new(witness(id)),
             observatory: Observatory::default(),
             reporting: Reporting::default(),
-        }))
+        })
     }
 
     /// Bytes: data modules plus the onboard store.
@@ -149,12 +198,14 @@ impl<J: Journal> Server<J> {
 
     pub(crate) fn run_instruments(&mut self) {
         let now_s = self.now_t as f64 * 1.0e-6;
-        let busy: Vec<CraftId> = self
+        // The surveyed star comes along because loading its system needs the world mutably and
+        // the tick below needs the instruments mutably.
+        let busy: Vec<(CraftId, Option<lc_world::sky::StarId>)> = self
             .instruments
             .aboard
             .iter()
             .filter(|(_, a)| a.observatory.duty != Duty::Idle)
-            .map(|(id, _)| *id)
+            .map(|(id, a)| (*id, a.observatory.duty.surveying()))
             .collect();
         let mut ids: Vec<CraftId> = self.instruments.aboard.keys().copied().collect();
         ids.sort_unstable_by_key(|id| id.0);
@@ -163,16 +214,77 @@ impl<J: Journal> Server<J> {
             self.fit(id, true);
             self.instruments.recounted = Some(id);
         }
-        for id in busy {
+        for (id, surveyed) in busy {
             self.fit(id, false);
             let Some(at) = self.station(id) else { continue };
+            // The system the *duty* names, not the one the craft is in. A survey ordered from
+            // outside is then refused by the physics -- the bodies are points in the star's
+            // glare -- rather than by a silent special case here.
+            let system = surveyed.and_then(|star| self.world.system_for(star, now_s));
             let stars = self.world.stars();
             let instruments = &mut self.instruments;
             let sky = instruments.sky.get_or_insert_with(|| Sky::new(stars));
             let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
-            aboard.observatory.tick(sky, &mut aboard.knowledge, at, now_s);
+            aboard.observatory.tick(sky, system.as_deref(), &mut aboard.knowledge, at, now_s);
         }
+        self.stages.mark("observe");
         self.read_logs(now_s);
+        self.stages.mark("read_logs");
+        self.fit_orbits(now_s);
+        self.stages.mark("fit_orbits");
+    }
+
+    /// File the fits that have finished, and start one more. See [`FITS_PER_TICK`].
+    ///
+    /// The star's *believed* position is what the bearings are put into the frame of, so a
+    /// craft that has not measured its own sun's distance fits nothing -- which is the chain
+    /// doc 25 describes, and the reason the survey measures the star every tick.
+    fn fit_orbits(&mut self, now_s: f64) {
+        let finished = self.instruments.fits.finished();
+        self.file_fits(finished);
+        let mut ids: Vec<CraftId> = self.instruments.aboard.keys().copied().collect();
+        ids.sort_unstable_by_key(|id| id.0);
+        let after = self.instruments.fitter.map_or(0, |r| ids.partition_point(|id| id.0 <= r.0));
+        ids.rotate_left(after);
+        let mut started = 0;
+        for id in ids {
+            if started == FITS_PER_TICK || self.instruments.fits.full() {
+                break;
+            }
+            if self.instruments.fits.busy(id) {
+                continue;
+            }
+            let Some(aboard) = self.instruments.aboard.get_mut(&id) else { continue };
+            let Some(star) = aboard.observatory.duty.surveying() else { continue };
+            let Some(star_ly) = aboard
+                .knowledge
+                .belief(lc_world::knowledge::Subject::Star(star))
+                .and_then(|b| b.distance.position_ly())
+            else {
+                continue;
+            };
+            let Some(subject) = aboard.knowledge.unfitted(star) else { continue };
+            let Some(job) = aboard.knowledge.fit_job(subject, star_ly, now_s) else { continue };
+            self.instruments.fitter = Some(id);
+            started += 1;
+            self.instruments.fits.start(id, job);
+        }
+    }
+
+    /// No recount after: a fit changes no samples, and a recount is a pass over every file.
+    fn file_fits(&mut self, finished: Vec<(CraftId, lc_world::knowledge::primary::Solved)>) {
+        for (id, solved) in finished {
+            if let Some(aboard) = self.instruments.aboard.get_mut(&id) {
+                aboard.knowledge.file_fit(solved);
+            }
+        }
+    }
+
+    /// Wait for every fit in flight and file it. A test's way to see a fit land.
+    #[cfg(test)]
+    pub(crate) fn settle_fits(&mut self) {
+        let finished = self.instruments.fits.wait();
+        self.file_fits(finished);
     }
 
     fn read_logs(&mut self, now_s: f64) {
@@ -185,18 +297,26 @@ impl<J: Journal> Server<J> {
             if reads == READS_PER_TICK {
                 break;
             }
-            let Some((subject, observer)) =
-                self.instruments.aboard.get(&id).and_then(|a| a.knowledge.due().first().copied())
+            let Some((subject, observer)) = self.instruments.aboard.get(&id).and_then(|a| a.knowledge.next_due())
             else {
                 continue;
             };
             let stars = self.world.stars();
             let instruments = &mut self.instruments;
-            let prior = instruments.prior.get_or_insert_with(|| Prior::measure(stars.iter()));
+            let Some(prior) = instruments.prior.get(&stars) else { return };
             let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
-            aboard.knowledge.read_log(subject, observer, prior, now_s);
+            let settled = aboard
+                .knowledge
+                .read_log(subject, observer, prior, now_s)
+                .as_ref()
+                .and_then(crate::planets::settled_planet);
             instruments.reader = Some(id);
             reads += 1;
+            // A settled transit is a body from here on: lettered, with the orbit its period
+            // implies. See `crate::planets`, and doc 25's "Transits make bodies".
+            if let Some(transit) = settled {
+                self.found_by_transit(id, subject, &transit, now_s);
+            }
             self.fit(id, true);
         }
     }
@@ -268,11 +388,15 @@ impl<J: Journal> Server<J> {
             let knowledge = &self.aboard(CraftId(ship.0)).knowledge;
             let learned = page(PAGE, |limit| {
                 let (report, through) = knowledge.report_upto(since, now_s, limit);
-                (serde_json::to_string(&report).ok(), through)
+                // Nothing new is the usual answer, and not worth encoding an empty report for.
+                (through.and_then(|_| serde_json::to_string(&report).ok()), through)
             });
             let retained = knowledge.retained_subjects();
             let logs = page(LOG_PAGE, |limit| {
                 let (logs, through) = knowledge.logs_upto(logged, limit);
+                if through.is_none() {
+                    return (None, None);
+                }
                 let page = lc_world::knowledge::Logs { logs, retained: retained.clone() };
                 (serde_json::to_string(&page).ok(), through)
             });
@@ -322,6 +446,20 @@ impl<J: Journal> Server<J> {
             Order::SetDuty { duty, integration_s } => {
                 let integration_ok = (0.0..=lc_proto::INTEGRATION_MAX_S).contains(integration_s);
                 if !integration_ok || !duty.is_valid() {
+                    return Err(Refusal::Impossible);
+                }
+                // `Duty::is_valid` cannot check a star id, because `lc-proto` has no catalog
+                // to check it against. Refused here instead: a duty pointed at a star nobody
+                // has is a duty that finds nothing every tick forever, and a survey's does not
+                // even cache the miss.
+                let named = match lc_world::knowledge::survey::Duty::from(duty) {
+                    lc_world::knowledge::survey::Duty::Survey { star, .. } => Some(star),
+                    lc_world::knowledge::survey::Duty::Stare(star) => Some(star),
+                    _ => None,
+                };
+                if let Some(star) = named
+                    && !self.world.holds(star)
+                {
                     return Err(Refusal::Impossible);
                 }
                 let aboard = self.aboard(id);
@@ -395,7 +533,7 @@ mod tests {
     use glam::DVec3;
     use lc_proto::{ClientId, Inbound, Intent, PROTOCOL_VERSION};
     use lc_world::knowledge::{Bearing, Sighting};
-    use lc_world::sky::{AuthoredStars, CatalogueStar, StarId, StarProvider};
+    use lc_world::sky::{AuthoredStars, CatalogStar, StarId, StarProvider};
 
     use super::*;
     use crate::journal::Memory;
@@ -411,14 +549,14 @@ mod tests {
     /// A home star at the origin, where a new craft starts, and three more thirty light-years
     /// out along axes clear of the home star's glare. The charts reach twenty, so only a sweep
     /// finds the three.
-    fn sky() -> Vec<CatalogueStar> {
+    fn sky() -> Vec<CatalogStar> {
         let template = AuthoredStars::sample().stars()[1].clone();
         [DVec3::ZERO, DVec3::X * 30.0, DVec3::Y * 30.0, DVec3::Z * 30.0]
             .into_iter()
             .enumerate()
             .map(|(k, at)| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("instruments", k as u64);
+                star.id = StarId::synthesize("instruments", k as u64);
                 star.position_ly = at;
                 star
             })
@@ -469,16 +607,39 @@ mod tests {
         Inbound::Act(Intent { ship_id: ship, order, issued_at_client_t: i64::MAX })
     }
 
+    /// **A new craft knows nothing** (decided 2026-09-22): not its home system's planets, and
+    /// not the star it is standing next to either. Everything it holds it looked at or was
+    /// told, and the first minutes of a new ship are looking.
+    ///
+    /// This is the charting office of `lightcone/docs/22-provenance.md` gone. It used to hand a
+    /// new ship twenty light-years of star distances, and the argument was that a player who
+    /// starts with nothing has no reason to fly anywhere. The survey from inside answers that:
+    /// a ship that knows nothing is in a system full of unexamined planets.
     #[tokio::test]
-    async fn a_new_craft_starts_with_the_charts_of_where_it_is() {
+    async fn a_new_craft_knows_nothing_at_all() {
         let broker = Broker::new([1u8; 32]);
         let mut server = server(&broker);
         let mut wire = Loopback::new();
         let (ship, said) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let copy = replica(ship, &said);
-        let home = sky()[0].id;
-        assert!(copy.knows(home), "the home star is charted");
-        assert_eq!(copy.stars().count(), 1, "and nothing past twenty light-years is");
+        assert!(!copy.knows(sky()[0].id), "not even the star it is standing next to");
+        assert_eq!(copy.stars().count(), 0, "nor any other");
+
+        // And looking is what changes that: one stare and it holds the star.
+        wire.client_says(
+            ClientId(1),
+            act(ship, Order::SetDuty {
+                duty: lc_proto::Duty::Stare { star: sky()[0].id.get() },
+                integration_s: 1.0,
+            }),
+        );
+        for _ in 0..4 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(
+            server.instruments.aboard[&CraftId(ship.0)].knowledge.knows(sky()[0].id),
+            "a stare finds what a chart used to be given"
+        );
     }
 
     /// With nobody signed in, a craft keeps sweeping and receives a report when its light lands;
@@ -499,7 +660,7 @@ mod tests {
         let bry = ClientId(2);
         let at = -DVec3::X * 3_600.0 * 1.0e6;
         server.admit(bry, crate::world::still(ShipId(90), at), 0.0);
-        let secret = StarId::synthesise("instruments", 99);
+        let secret = StarId::synthesize("instruments", 99);
         let now_s = server.now_t() as f64 * 1.0e-6;
         server.aboard(CraftId(90)).knowledge.sighted(
             secret,
@@ -507,6 +668,9 @@ mod tests {
                 witness: witness(CraftId(90)),
                 observed_s: now_s,
                 bearing: Bearing { observer_ly: DVec3::ZERO, toward: DVec3::Y, sigma_rad: 1e-9 },
+                size: None,
+                range_m: None,
+                spin_s: None,
                 band: em_spectra::Band::V,
                 flux: 1e-12,
                 flux_sigma: 1e-15,
@@ -564,12 +728,167 @@ mod tests {
         assert!(started > 0.0 && started <= server.now_t() as f64 * 1.0e-6 + TICK_US as f64, "{started}");
     }
 
+    /// **A survey ordered through the shard finds the bodies of a generated system.** A new
+    /// craft starts `START_OFFSET_AU` from the first star, which is where the duty is for, and
+    /// the whole path runs: the order, `World::system_for` loading the system, `visit::sources`
+    /// placing its bodies, and the sightings landing under `Subject::Body`.
+    #[tokio::test]
+    async fn a_survey_finds_the_bodies_of_the_system_the_craft_is_in() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let star = sky()[0].id;
+
+        let duty = lc_proto::Duty::Survey { star: star.get(), started_s: -1.0e12 };
+        wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
+        server.tick(&mut wire).await.unwrap();
+        assert!(
+            wire.take(ClientId(1)).iter().any(|m| matches!(
+                m,
+                Outbound::Accepted { order: Order::SetDuty { duty: lc_proto::Duty::Survey { .. }, .. }, .. }
+            )),
+            "the survey was not accepted"
+        );
+
+        let before = server.instruments.aboard[&CraftId(ship.0)].knowledge.len();
+        for _ in 0..40 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let knowledge = &server.instruments.aboard[&CraftId(ship.0)].knowledge;
+        let bodies = knowledge.bodies_of(star, server.now_t() as f64 * 1.0e-6);
+        assert!(
+            bodies.len() > 5,
+            "forty ticks of surveying found {} bodies; it held {before} subjects to begin with",
+            bodies.len()
+        );
+        // Under the star whose system it is, and nothing under any other.
+        for other in &sky()[1..] {
+            assert!(
+                knowledge.bodies_of(other.id, server.now_t() as f64 * 1.0e-6).is_empty(),
+                "a body turned up under {:?}",
+                other.id
+            );
+        }
+    }
+
+    /// **The fitting chain is alive on the shard, and refuses where it should.** A drifting
+    /// craft surveying its own system triangulates its sun, which is what puts the bearings in
+    /// a frame at all, and the fit is then offered bodies whose arcs are hours long. Hours is
+    /// nothing of any orbit, so it declines them -- and declining is the behavior worth
+    /// pinning here, since `knowledge::arc` covers the arcs that do settle.
+    /// **A duty pointed at a star nobody has is refused.** `Duty::is_valid` cannot check an
+    /// id -- `lc-proto` carries no catalog to check it against -- so a bogus one was taken
+    /// up and then looked for on every tick forever, and a survey's lookup caches no miss to
+    /// remember it by.
+    #[tokio::test]
+    async fn a_duty_naming_a_star_nobody_has_is_refused() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) =
+            sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+
+        let nowhere = StarId::synthesize("no-such-catalog", 7);
+        for duty in [
+            lc_proto::Duty::Survey { star: nowhere.get(), started_s: 0.0 },
+            lc_proto::Duty::Stare { star: nowhere.get() },
+        ] {
+            let order = Order::SetDuty { duty: duty.clone(), integration_s: 1.0e4 };
+            assert!(
+                matches!(
+                    server.act_on_knowledge(CraftId(ship.0), &order, 0.0),
+                    Err(lc_proto::Refusal::Impossible)
+                ),
+                "{duty:?} was taken up although no such star exists"
+            );
+        }
+
+        // And a star the catalog does hold is taken up as before.
+        let real = sky()[0].id;
+        let order = Order::SetDuty {
+            duty: lc_proto::Duty::Survey { star: real.get(), started_s: 0.0 },
+            integration_s: 1.0e4,
+        };
+        assert!(server.act_on_knowledge(CraftId(ship.0), &order, 0.0).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_surveying_craft_measures_its_sun_and_declines_the_short_arcs() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let star = sky()[0].id;
+
+        // Adrift rather than at rest: a ship that holds still measures no parallax, so its own
+        // sun has no distance and nothing downstream of that runs at all. Across the line of
+        // sight and not along it -- a craft starts on the +X axis from its star, and drifting
+        // straight out along it sweeps no baseline at all.
+        if let Some(craft) = server.fleet_mut().get_mut(CraftId(ship.0)) {
+            craft.motion.beta = DVec3::new(0.0, 1.0e-6, 0.0);
+        }
+        let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
+        wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
+        for _ in 0..80 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        // Fits are solved off the tick; the claims below are about what they conclude.
+        server.settle_fits();
+
+        let knowledge = &server.instruments.aboard[&CraftId(ship.0)].knowledge;
+        let host = knowledge
+            .belief(lc_world::knowledge::Subject::Star(star))
+            .expect("its own sun is surveyed every tick");
+        assert!(host.triangulated, "a drifting ship should measure it: {:?}", host.distance);
+
+        // Bodies enough to fit, and no orbit from any of them yet.
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let bodies = knowledge.bodies_of(star, now_s);
+        assert!(bodies.len() > 5, "only {} bodies", bodies.len());
+        // Ten hours is a fraction of any orbit here but the innermost, so that is the only
+        // one that settles -- and from inside the system, with the host star's distance
+        // measured, it settles correctly. The next planet out is a twenty-seventh of an orbit
+        // and gets nothing. It was: a circle assumed where the arc could not shape a conic
+        // fitted a moon at 0.0097 AU to 63 AU, which is what `knowledge::arc` now refuses.
+        let truth: Vec<f64> = lc_world::sky::generate::planets_of(&sky()[0])
+            .iter()
+            .map(|p| std::f64::consts::TAU * (p.semi_major_m.powi(3) / sky()[0].star.mu).sqrt())
+            .collect();
+        for fitted in bodies.iter().filter(|b| b.method.is_some()) {
+            let (period, _) = fitted.period_s.expect("a fitted orbit states its period");
+            let miss = truth.iter().map(|t| (period / t - 1.0).abs()).fold(f64::INFINITY, f64::min);
+            assert!(miss < 0.05, "a {:.0} hour orbit that is nothing in this system", period / 3600.0);
+            assert!(
+                period < 15.0 * now_s,
+                "an orbit of {:.0} hours was minted from {:.0} hours of arc",
+                period / 3600.0,
+                now_s / 3600.0
+            );
+        }
+        assert!(knowledge.unfitted(star).is_some(), "the fitter has work and is being offered it");
+    }
+
     #[tokio::test]
     async fn a_craft_names_only_what_it_knows() {
         let broker = Broker::new([1u8; 32]);
         let mut server = server(&broker);
         let mut wire = Loopback::new();
         let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        // One star looked at and one not, since a craft is handed nothing on creation and the
+        // distinction this pins is between what it has seen and what it has not.
+        wire.client_says(
+            ClientId(1),
+            act(ship, Order::SetDuty {
+                duty: lc_proto::Duty::Stare { star: sky()[0].id.get() },
+                integration_s: 1.0,
+            }),
+        );
+        for _ in 0..4 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let _ = wire.take(ClientId(1));
+
         let home = lc_proto::Subject::Star(sky()[0].id.get());
         let far = lc_proto::Subject::Star(sky()[1].id.get());
         wire.client_says(ClientId(1), act(ship, Order::NameIt { subject: home, name: "Hearth".into() }));
@@ -602,14 +921,17 @@ mod tests {
                 // After the sign-in page, and all at one instant, as a sweep tick or charts are.
                 observed_s: now_s + 1.0,
                 bearing: Bearing { observer_ly: DVec3::ZERO, toward, sigma_rad: 1e-6 },
+                size: None,
+                range_m: None,
+                spin_s: None,
                 band: em_spectra::Band::V,
                 flux: 1e-12,
                 flux_sigma: 1e-15,
                 lineage: Vec::new(),
             };
-            knowledge.sighted(StarId::synthesise("paging", k), sighting);
+            knowledge.sighted(StarId::synthesize("paging", k), sighting);
         }
-        let watched = StarId::synthesise("paging", 0);
+        let watched = StarId::synthesize("paging", 0);
         // Kept raw, so the shard does not consume it while paging.
         knowledge.retain_raw(watched, true);
         for n in 0..200_000u64 {
@@ -693,7 +1015,7 @@ mod tests {
         let (near, far) = (ShipId(40), ShipId(41));
         old.admit(ClientId(1), crate::world::still(near, DVec3::ZERO), 0.0);
         old.admit(ClientId(2), crate::world::still(far, DVec3::X * 3_600.0 * 1.0e6), 0.0);
-        let secret = StarId::synthesise("instruments", 77);
+        let secret = StarId::synthesize("instruments", 77);
         let now_s = old.now_t() as f64 * 1.0e-6;
         old.aboard(CraftId(far.0)).knowledge.sighted(
             secret,
@@ -701,6 +1023,9 @@ mod tests {
                 witness: witness(CraftId(far.0)),
                 observed_s: now_s,
                 bearing: Bearing { observer_ly: DVec3::X, toward: DVec3::Y, sigma_rad: 1e-9 },
+                size: None,
+                range_m: None,
+                spin_s: None,
                 band: em_spectra::Band::V,
                 flux: 1e-12,
                 flux_sigma: 1e-15,
@@ -732,10 +1057,10 @@ mod tests {
     #[ignore]
     async fn a_busy_tick_is_measured() {
         let template = AuthoredStars::sample().stars()[1].clone();
-        let stars: Vec<CatalogueStar> = (0..2_000u64)
+        let stars: Vec<CatalogStar> = (0..2_000u64)
             .map(|k| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("busy", k);
+                star.id = StarId::synthesize("busy", k);
                 let u = (k as f64 * 0.618_034).fract() * std::f64::consts::TAU;
                 star.position_ly = DVec3::new(u.cos(), u.sin(), (k as f64 * 0.414_2).fract() - 0.5) * (5.0 + k as f64 * 0.05);
                 star
@@ -753,11 +1078,14 @@ mod tests {
             for k in 0..10_000u64 {
                 let toward = DVec3::new((k as f64).sin(), (k as f64).cos(), 0.2).normalize();
                 knowledge.sighted(
-                    StarId::synthesise("known", k),
+                    StarId::synthesize("known", k),
                     Sighting {
                         witness: witness(CraftId(ship.0)),
                         observed_s: now_s,
                         bearing: Bearing { observer_ly: DVec3::ZERO, toward, sigma_rad: 1e-6 },
+                        size: None,
+                        range_m: None,
+                        spin_s: None,
                         band: em_spectra::Band::V,
                         flux: 1e-12,
                         flux_sigma: 1e-15,
@@ -781,5 +1109,68 @@ mod tests {
         }
         let per_tick = started.elapsed() / TICKS;
         eprintln!("a tick with 100 craft sweeping, 10 000 files each: {per_tick:?}");
+    }
+
+    /// Ten craft surveying one system for a coordinate week, drifting so they measure parallax
+    /// and fit orbits. A timing, not a check: `cargo test -p lc-server --lib a_surveying_shard
+    /// -- --ignored --nocapture`. See `lightcone/docs/plans/server-tick-lag.md`.
+    #[tokio::test]
+    #[ignore]
+    async fn a_surveying_shard_is_measured() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.load_world(World::new(sky()));
+        let mut wire = Loopback::new();
+        let star = sky()[0].id;
+        let at = sky()[0].position_ly;
+        let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
+        const CRAFT: i64 = 10;
+        for n in 0..CRAFT {
+            let ship = ShipId(1_000 + n);
+            // A few AU out, spread round the star, each drifting across its own line of sight.
+            let u = n as f64 / CRAFT as f64 * std::f64::consts::TAU;
+            let offset = DVec3::new(u.cos(), u.sin(), 0.0) * 3.0 * 1.58e-5;
+            server.admit(ClientId(n as u64 + 1), crate::world::still(ship, at + offset), 0.0);
+            if let Some(craft) = server.fleet_mut().get_mut(CraftId(ship.0)) {
+                craft.motion.beta = DVec3::new(-u.sin(), u.cos(), 0.0) * 1.0e-6;
+            }
+            wire.client_says(ClientId(n as u64 + 1), act(ship, Order::SetDuty { duty: duty.clone(), integration_s: 1.0e4 }));
+        }
+        const TICKS: u32 = 1_400;
+        let mut total = std::time::Duration::ZERO;
+        let mut worst: Option<crate::timing::Stages> = None;
+        let mut slow = 0;
+        let mut checkpointed: Option<(std::time::Duration, usize, usize)> = None;
+        for _ in 0..TICKS {
+            server.tick(&mut wire).await.unwrap();
+            for n in 0..CRAFT as u64 {
+                wire.take(ClientId(n + 1));
+            }
+            let tick = server.last_tick();
+            total += tick.total();
+            slow += usize::from(tick.total() > std::time::Duration::from_millis(crate::server::TICK_MS as u64));
+            if worst.as_ref().is_none_or(|w| tick.total() > w.total()) {
+                worst = Some(tick.clone());
+            }
+            // The part of a checkpoint the tick waits for: the snapshot and the encoded files.
+            if server.now_t() % (400 * TICK_US) == 0 {
+                let started = std::time::Instant::now();
+                let taken = server.checkpoint();
+                let remembered = server.take_knowledge();
+                let took = started.elapsed();
+                let files = remembered.files.len();
+                let bytes: usize = remembered.files.iter().map(|f| f.file.len()).sum::<usize>() + taken.ships.len();
+                if checkpointed.is_none_or(|(worst, _, _)| took > worst) {
+                    checkpointed = Some((took, files, bytes));
+                }
+            }
+        }
+        eprintln!(
+            "{CRAFT} craft surveying for {TICKS} ticks: mean {:?}, {slow} over budget, worst {}",
+            total / TICKS,
+            worst.map_or_else(String::new, |w| w.to_string()),
+        );
+        if let Some((took, files, bytes)) = checkpointed {
+            eprintln!("worst checkpoint snapshot {took:?}: {files} files, {bytes} bytes");
+        }
     }
 }

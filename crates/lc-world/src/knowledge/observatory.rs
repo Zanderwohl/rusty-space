@@ -12,11 +12,12 @@ use glam::DVec3;
 use lc_spacetime::{Coord, Micros, frame::SystemFrame};
 
 use super::survey::{self, Duty, Optics, Source, Sweep};
-use super::{Bearing, Claim, Distance, Hop, Knowledge, NameKind, Naming, Sample, Sighting, Witness};
+use crate::system::LocalSystem;
+use super::{Bearing, Claim, Distance, Hop, Knowledge, NameKind, Naming, Sample, Sighting, Subject, Witness};
 use crate::instrument::Instrument;
 use crate::observation::{Target, observe};
 use crate::rng;
-use crate::sky::{CatalogueStar, StarId, generate};
+use crate::sky::{CatalogStar, StarId, generate};
 use crate::system::M_PER_LY;
 
 /// Who the charts a ship launches with came from: not this ship, nor any craft it will meet.
@@ -35,26 +36,46 @@ const LUS_PER_LY: f64 = M_PER_LY / 299.792458;
 
 /// Nothing cached here depends on who is looking, so one serves every craft a shard runs.
 pub struct Sky {
-    stars: Arc<Vec<CatalogueStar>>,
+    stars: Arc<Vec<CatalogStar>>,
+    /// Where each star sits in `stars`. Built once, because the catalog never changes, and
+    /// worth having: finding a star by scanning is a hundred thousand comparisons and the
+    /// survey does it every tick.
+    index: HashMap<StarId, usize>,
     /// Watts, in the order of `stars`.
     luminosity: HashMap<Band, Vec<f64>>,
     targets: HashMap<StarId, Target>,
 }
 
 impl Sky {
-    pub fn new(stars: Arc<Vec<CatalogueStar>>) -> Self {
-        Self { stars, luminosity: HashMap::new(), targets: HashMap::new() }
+    pub fn new(stars: Arc<Vec<CatalogStar>>) -> Self {
+        let index = stars.iter().enumerate().map(|(k, star)| (star.id, k)).collect();
+        Self { stars, index, luminosity: HashMap::new(), targets: HashMap::new() }
     }
 
-    pub fn stars(&self) -> &[CatalogueStar] {
+    pub fn stars(&self) -> &[CatalogStar] {
         &self.stars
     }
 
-    /// In the order of [`Sky::stars`]: a detection is indexed into this, and the glare test
-    /// needs the whole sky.
-    pub fn sources(&mut self, band: Band, here: DVec3) -> Vec<Source> {
+    pub fn index_of(&self, id: StarId) -> Option<usize> {
+        self.index.get(&id).copied()
+    }
+
+    /// One star as a source, without building the rest of the sky.
+    ///
+    /// **The whole catalog is not needed to ask about one star.** A craft surveying its own
+    /// system wants its own sun and the bodies around it; the sky beyond contributes no glare
+    /// worth the arithmetic, and building a source for every star in it was a hundred thousand
+    /// of them allocated and thrown away per craft per tick, on the tick thread.
+    pub fn source_of(&mut self, band: Band, here: DVec3, id: StarId) -> Option<Source> {
+        let index = self.index_of(id)?;
+        let luminosity = *self.luminosities(band).get(index)?;
+        Some(source_from(self.stars.get(index)?, luminosity, here))
+    }
+
+    /// Each star's output in a band, watts, built once per band.
+    fn luminosities(&mut self, band: Band) -> &[f64] {
         let stars = &self.stars;
-        let luminosity = self.luminosity.entry(band).or_insert_with(|| {
+        self.luminosity.entry(band).or_insert_with(|| {
             stars
                 .iter()
                 .map(|star| {
@@ -62,34 +83,32 @@ impl Sky {
                     4.0 * std::f64::consts::PI * M_PER_LY * M_PER_LY * unit
                 })
                 .collect()
-        });
-        stars
+        })
+    }
+
+    /// In the order of [`Sky::stars`]: a detection is indexed into this, and the glare test
+    /// needs the whole sky.
+    pub fn sources(&mut self, band: Band, here: DVec3) -> Vec<Source> {
+        let _ = self.luminosities(band);
+        let luminosity = self.luminosity.get(&band).map(Vec::as_slice).unwrap_or(&[]);
+        self.stars
             .iter()
             .zip(luminosity.iter())
-            .map(|(star, luminosity)| {
-                let offset = star.position_ly - here;
-                let distance_m = offset.length() * M_PER_LY;
-                let flux = if distance_m > 0.0 {
-                    luminosity / (4.0 * std::f64::consts::PI * distance_m * distance_m)
-                } else {
-                    0.0
-                };
-                Source { star: star.id, toward: offset.normalize_or_zero(), flux_w_m2: flux }
-            })
+            .map(|(star, luminosity)| source_from(star, *luminosity, here))
             .collect()
     }
 
     /// Built the first time anything points at it.
     pub fn target(&mut self, id: StarId) -> Option<&Target> {
         if !self.targets.contains_key(&id) {
-            let star = self.stars.iter().find(|s| s.id == id)?;
+            let star = self.stars.get(self.index_of(id)?)?;
             self.targets.insert(id, build_target(star));
         }
         self.targets.get(&id)
     }
 }
 
-pub fn build_target(star: &CatalogueStar) -> Target {
+pub fn build_target(star: &CatalogStar) -> Target {
     let system = generate::system_for(star);
     let mut model = crate::emission::EmissionModel::new(star.star, star.seed());
     model.populations = system.populations;
@@ -163,7 +182,7 @@ impl Observatory {
     pub fn take_up(&mut self, mut duty: Duty, now_s: f64) {
         match &mut duty {
             Duty::Sweep(sweep) => sweep.started_s = now_s,
-            Duty::Watch { started_s, .. } => *started_s = now_s,
+            Duty::Watch { started_s, .. } | Duty::Survey { started_s, .. } => *started_s = now_s,
             _ => {}
         }
         self.sampled_s = now_s;
@@ -175,7 +194,18 @@ impl Observatory {
 
     /// Exposure is elapsed coordinate time, so no measurement claims an integration it did not
     /// get.
-    pub fn tick(&mut self, sky: &mut Sky, knowledge: &mut Knowledge, at: Station, now_s: f64) {
+    ///
+    /// `system` is the one the craft is inside, `None` between the stars. Optional for the same
+    /// reason `motion::state_at` takes it that way: a survey of a system nobody has loaded has
+    /// no bodies to point at and no answer to give, and the other duties never look at it.
+    pub fn tick(
+        &mut self,
+        sky: &mut Sky,
+        system: Option<&LocalSystem>,
+        knowledge: &mut Knowledge,
+        at: Station,
+        now_s: f64,
+    ) {
         match self.duty.clone() {
             Duty::Idle => {}
             Duty::Stare(id) => {
@@ -210,7 +240,119 @@ impl Observatory {
                 sweep_between(sky, knowledge, at, &sweep, self.swept_s, now_s);
                 self.swept_s = now_s;
             }
+            duty @ Duty::Survey { star, .. } => {
+                self.pointing = Some(star);
+                if let Some(system) = system.filter(|s| s.star == star) {
+                    survey_between(sky, system, knowledge, at, &duty, self.swept_s, now_s);
+                }
+                self.swept_s = now_s;
+            }
         }
+    }
+}
+
+/// One tick of a survey: the bodies whose turn it is, measured against a sky that holds the
+/// system's own star as well as its bodies.
+///
+/// The star belongs in that list and not beside it. It is the brightest thing by nine orders of
+/// magnitude, so it is the only meaningful glare in the system, and `survey::look` can only be
+/// asked about it if it is a source like any other. The rest of the catalog is left out: a
+/// star light-years off cannot outshine a planet at 5 AU, so it can neither glare on one nor
+/// hide behind one.
+pub fn survey_between(
+    sky: &mut Sky,
+    system: &LocalSystem,
+    knowledge: &mut Knowledge,
+    at: Station,
+    duty: &Duty,
+    from_s: f64,
+    to_s: f64,
+) {
+    let optics = at.optics();
+    let Some(band) = optics.band() else { return };
+    let mut sources = host_source(sky, system, band, at.position_ly)
+        .into_iter()
+        .collect::<Vec<Source>>();
+    let star_last = sources.len();
+    // Brightest first over the bodies only, so the star keeps its place at the front and the
+    // rotation below is over a list whose order is a property of the system. One band for all
+    // of them; every band only for the few measured below, which is what the digest needs.
+    let lit = crate::visit::Lit::new(system, band, at.position_ly, to_s);
+    sources.extend(lit.seen.iter().map(|visit| visit.source(system.star, band)));
+
+    let bodies = sources.len() - star_last;
+    let witness = knowledge.owner;
+
+    // The star every tick, and not as a turn in the rotation. It is not a target of the survey;
+    // it is the reference the survey is measured against, in every frame because it is the
+    // brightest thing in the sky and what the phase angle of everything else is reckoned from.
+    // So it costs no dwell of its own, and its parallax accumulates with the ship's motion --
+    // without which nothing here has a distance and no mass prior runs.
+    if star_last > 0
+        && let Some(seen) = survey::look(
+            &optics,
+            &sources,
+            0,
+            survey::SURVEY_DWELL_S,
+            at.position_ly,
+            to_s,
+            witness,
+        )
+    {
+        knowledge.sighted(Subject::Star(system.star), seen);
+    }
+
+    for slot in duty.visits(bodies, from_s, to_s) {
+        let index = star_last + slot;
+        let Some(source) = sources.get(index) else { continue };
+        let Some(sighting) =
+            survey::look(&optics, &sources, index, survey::SURVEY_DWELL_S, at.position_ly, to_s, witness)
+        else {
+            continue;
+        };
+        let Some(flux) = lit.every_band(slot, at.position_ly) else { continue };
+        // One visit, one row, folded and freed: the per-band fluxes go into a digest that is
+        // the same size after a thousand visits as after one, which is what lets a survey run
+        // for game months inside a fixed store.
+        let colors = survey::colors(
+            &optics,
+            &flux,
+            survey::SURVEY_DWELL_S,
+            crate::rng::hash(&[witness.0, source.subject.key(), to_s.to_bits()]),
+        );
+        knowledge.sighted(source.subject, sighting);
+        knowledge.measured_colors(source.subject, witness, to_s, &colors);
+    }
+}
+
+/// The system's own star as a source, worked the way the catalog path works it so the two
+/// cannot disagree about how bright the ship's own sun is.
+fn host_source(sky: &mut Sky, system: &LocalSystem, band: Band, from: DVec3) -> Option<Source> {
+    sky.source_of(band, from, system.star)
+}
+
+/// One star as a source seen from `here`. The one construction, so
+/// [`Sky::sources`] and [`Sky::source_of`] cannot disagree.
+fn source_from(star: &CatalogStar, luminosity_w: f64, here: DVec3) -> Source {
+    let offset = star.position_ly - here;
+    let distance_m = offset.length() * M_PER_LY;
+    let (flux, diameter_rad) = if distance_m > 0.0 {
+        (
+            luminosity_w / (4.0 * std::f64::consts::PI * distance_m * distance_m),
+            // A star is a point at any interstellar range and a disc from inside its own
+            // system, which is the ship's own sun and nothing else.
+            2.0 * star.star.radius_m / distance_m,
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    Source {
+        subject: Subject::Star(star.id),
+        toward: offset.normalize_or_zero(),
+        flux_w_m2: flux,
+        diameter_rad,
+        radius_m: star.star.radius_m,
+        spin_s: None,
     }
 }
 
@@ -241,8 +383,8 @@ pub fn photometry(
 pub fn fix(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, id: StarId, exposure_s: f64, now_s: f64) {
     let optics = at.optics();
     let Some(band) = optics.band() else { return };
+    let Some(index) = sky.index_of(id) else { return };
     let sources = sky.sources(band, at.position_ly);
-    let Some(index) = sources.iter().position(|s| s.star == id) else { return };
     let witness = knowledge.owner;
     if let Some(seen) =
         survey::look(&optics, &sources, index, exposure_s, at.position_ly, now_s, witness)
@@ -283,12 +425,12 @@ pub fn sweep_between(
             survey::look(&optics, &sources, index, sweep.exposure_s(), at.position_ly, when, witness)
             && let Some(source) = sources.get(index)
         {
-            knowledge.sighted(source.star, seen);
+            knowledge.sighted(source.subject, seen);
         }
     }
 }
 
-/// The charting office's designation for a star, the same for every ship. The catalogue name is
+/// The charting office's designation for a star, the same for every ship. The catalog name is
 /// the generator's and is never shown.
 pub fn chart_number(id: StarId) -> String {
     let raw = id.get();
@@ -308,7 +450,7 @@ pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach
         if distance > reach_ly || distance <= 0.0 {
             continue;
         }
-        // A catalogue distance is a parallax like any other, so its error grows with range.
+        // A catalog distance is a parallax like any other, so its error grows with range.
         let sigma_ly = CHART_ERROR * distance;
         let slip = rng::gaussian(rng::hash(&[star.id.get(), 0x0_c_4_a_7]));
         knowledge.sighted(
@@ -317,6 +459,10 @@ pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach
                 witness: CHARTS,
                 observed_s: now_s,
                 bearing: Bearing { observer_ly: from, toward: source.toward, sigma_rad: sigma_ly / distance },
+                // A chart gives a place and a brightness and nothing a close look would.
+                size: None,
+                range_m: None,
+                spin_s: None,
                 band,
                 flux: source.flux_w_m2,
                 flux_sigma: source.flux_w_m2 * CHART_ERROR,
@@ -354,6 +500,9 @@ mod tests {
     use crate::sky::{AuthoredStars, StarProvider};
 
     const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
+    const AU_M: f64 = 1.495_978_707e11;
+    /// Coordinate seconds in one tick at the design rate: 50 ms of real time at 8766x.
+    const TICK_S: f64 = 438.3;
 
     /// Three stars at 4.2 ly, one along each axis, so none hides behind another.
     fn spread() -> Sky {
@@ -363,7 +512,7 @@ mod tests {
             .enumerate()
             .map(|(k, axis)| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("spread", k as u64);
+                star.id = StarId::synthesize("spread", k as u64);
                 star.position_ly = axis * 4.2;
                 star
             })
@@ -375,12 +524,230 @@ mod tests {
         Station { position_ly, instrument: Instrument::SHIP }
     }
 
+    /// Sol loaded, and a sky with only its own star in it.
+    fn sol() -> Option<(Sky, LocalSystem)> {
+        let provider =
+            crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
+                .ok()?;
+        let sun = provider
+            .stars()
+            .iter()
+            .find(|s| s.provenance.name.as_deref() == Some(crate::system::SOL))?
+            .clone();
+        let system = LocalSystem::for_star(&sun)?;
+        Some((Sky::new(Arc::new(vec![sun])), system))
+    }
+
+    /// **What phase 6 is for.** A ship five AU out, told to survey its own system, comes to
+    /// hold its planets: each a subject with a bearing, a brightness and a measured disc, under
+    /// the same `BodyId` a navigation order would name.
+    ///
+    /// The claim pinned is the done-when's: *every one of them has a position within the first
+    /// real second*. At the design rate that is twenty ticks of 438 coordinate seconds.
+    #[test]
+    fn a_survey_finds_the_planets_of_the_system_it_is_in() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        assert_eq!(o.duty.label(), "surveying");
+
+        // One tick brings round seven bodies, brightest first, plus the star, which is measured
+        // every tick rather than taking a turn. The first body is the brightest thing in the
+        // system: Jupiter, from here.
+        o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S);
+        let first = k.len();
+        assert_eq!(first, 8, "seven turns of SURVEY_DWELL_S, and the star besides");
+        assert!(k.belief(Subject::Star(system.star)).is_some(), "the star is measured first of all");
+        let jupiter = Subject::Body {
+            star: system.star,
+            body: crate::knowledge::BodyId::of(system.star, "Jupiter"),
+        };
+        assert!(k.file(jupiter).is_some(), "the brightest body comes round first");
+
+        // A real second, at which point the done-when wants every major planet placed.
+        for step in 2..=20 {
+            o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S * step as f64);
+        }
+        for name in ["Venus", "Earth", "Mars", "Jupiter", "Saturn"] {
+            let subject = Subject::Body {
+                star: system.star,
+                body: crate::knowledge::BodyId::of(system.star, name),
+            };
+            let file = k.file(subject).unwrap_or_else(|| panic!("{name} has no position yet"));
+            let seen = file.sightings().first().unwrap_or_else(|| panic!("{name} has no sighting"));
+            let (diameter, sigma) = seen.size.unwrap_or_else(|| panic!("{name} has no disc"));
+            assert!(diameter > 0.0 && sigma > 0.0 && sigma < diameter);
+        }
+
+        // Mars is not among the first seven, and that is the physics rather than a fault: from
+        // five AU the Galilean moons and Titan are all brighter than it is.
+        let held = k.len();
+        assert!(held > 100, "only {held} subjects after a real second");
+        // Everything but the star itself is a body, and every one of them reads back.
+        assert_eq!(k.bodies_of(system.star, TICK_S * 20.0).len(), held - 1, "a body did not read back");
+    }
+
+    /// **A moving ship's bearings on a moving planet are not a distance.** `triangulate` fits a
+    /// static point to whatever it is given, and a body's bearings are all taken from inside its
+    /// own system where it moves appreciably between them. Before this was guarded, a ship on a
+    /// 5 AU orbit surveying Sol put Jupiter at 1.63 AU plus or minus 9e-7 -- sixteen million
+    /// sigma from where it was, which is worse than no answer.
+    #[test]
+    fn a_body_never_gets_a_distance_from_being_watched_move() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(2));
+        let mut o = Observatory::default();
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+
+        // A circular 5 AU orbit about a solar mass, which is what `Course::Orbit` would fly.
+        let period_s = std::f64::consts::TAU * ((5.0 * AU_M).powi(3) / 1.327e20f64).sqrt();
+        let orbit = |t: f64| {
+            let phase = std::f64::consts::TAU * t / period_s;
+            system.star_position_ly()
+                + DVec3::new(phase.cos(), phase.sin(), 0.0) * 5.0 * AU_M / M_PER_LY
+        };
+        for step in 1..=120 {
+            let t = TICK_S * step as f64;
+            o.tick(&mut sky, Some(&system), &mut k, at(orbit(t)), t);
+        }
+
+        let mut checked = 0;
+        for name in ["Venus", "Earth", "Mars", "Jupiter", "Saturn"] {
+            let subject = Subject::Body {
+                star: system.star,
+                body: crate::knowledge::BodyId::of(system.star, name),
+            };
+            let Some(belief) = k.belief(subject) else { continue };
+            assert!(belief.sightings > 1, "{name} was only seen once");
+            assert_eq!(
+                belief.distance,
+                crate::knowledge::Distance::Unknown,
+                "{name} was given a distance by watching it move"
+            );
+            assert!(!belief.triangulated);
+            checked += 1;
+        }
+        assert_eq!(checked, 5, "only {checked} planets came round twice in 120 ticks");
+
+        // The ship's own sun, from the same bearings, is measured: it is the one thing in the
+        // system that holds still, which is the whole difference.
+        let host = k.belief(Subject::Star(system.star)).expect("the sun was surveyed too");
+        assert!(host.triangulated, "{:?}", host.distance);
+    }
+
+    /// **The per-visit digest is fixed in size.** One visit is one row of seven fluxes, folded
+    /// and freed, so a body costs the same after four hundred visits as after eight and a
+    /// survey can run for game months inside a fixed store. The orbit half of the digest is the
+    /// decimated arc itself, capped at `BEARINGS_KEPT` per witness.
+    #[test]
+    fn a_visit_is_folded_into_a_digest_that_does_not_grow() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+
+        let jupiter = Subject::Body {
+            star: system.star,
+            body: crate::knowledge::BodyId::of(system.star, "Jupiter"),
+        };
+        let size = |k: &Knowledge| {
+            let file = k.file(jupiter).expect("Jupiter is surveyed first of all");
+            (file.sightings().len(), file.colors().len(), file.colors()[0].visits[em_spectra::Band::V])
+        };
+
+        for step in 1..=8 {
+            o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S * step as f64);
+        }
+        let (sightings, digests, early) = size(&k);
+        assert_eq!(digests, 1, "one digest per witness, however many visits");
+        assert!(early > 0, "and it has visits in it");
+
+        for step in 9..=400 {
+            o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S * step as f64);
+        }
+        let (grown, digests, late) = size(&k);
+        assert_eq!(digests, 1, "still one digest");
+        assert!(late > early, "which took {early} visits and now takes {late}");
+        assert!(
+            grown <= crate::knowledge::BEARINGS_KEPT,
+            "{grown} bearings kept, past the cap of {}",
+            crate::knowledge::BEARINGS_KEPT
+        );
+        assert!(sightings <= grown, "a decimated arc only ever holds its cap");
+
+        // Nothing here costs room, because only raw logs do and a survey writes none.
+        assert_eq!(k.bytes(), 0.0, "a survey fills no store");
+    }
+
+    /// **The colors a type hypothesis reads.** Every band the instrument has, measured on the
+    /// same frames the survey band decided the detection on. Venus is bright and nearly gray,
+    /// Earth is blue, Mars is red -- the three statements `worlds` exists to make, now arriving
+    /// through a telescope rather than read off the table.
+    #[test]
+    fn a_survey_measures_every_band_it_has() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        for step in 1..=120 {
+            o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S * step as f64);
+        }
+
+        let colors = |name: &str| {
+            let body = crate::knowledge::BodyId::of(system.star, name);
+            k.body_belief(system.star, body, TICK_S * 120.0)
+                .and_then(|b| b.colors)
+                .unwrap_or_else(|| panic!("{name} has no digest"))
+        };
+
+        for name in ["Venus", "Earth", "Mars"] {
+            let held = colors(name);
+            for band in [em_spectra::Band::B, em_spectra::Band::V, em_spectra::Band::R] {
+                assert!(held.against_reference(band).is_some(), "{name} was not measured in {band:?}");
+            }
+        }
+        // Redness is the R over B ratio, and it is the ordering that matters rather than any
+        // one number: what a hypothesis set reads off these is which of them is which.
+        let red = |name: &str| colors(name).color(em_spectra::Band::R, em_spectra::Band::B).expect("a color").0;
+        assert!(red("Mars") > red("Venus"), "Mars is the red one: {} against {}", red("Mars"), red("Venus"));
+        assert!(red("Venus") > red("Earth"), "Earth is the blue one: {} against {}", red("Earth"), red("Venus"));
+    }
+
+    /// A survey of a system the craft has not been handed does nothing rather than inventing
+    /// it, which is the same reason `motion::state_at` takes its system as an `Option`.
+    #[test]
+    fn a_survey_without_its_system_learns_nothing() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        for step in 1..=8 {
+            o.tick(&mut sky, None, &mut k, at(from), 438.3 * step as f64);
+        }
+        assert!(k.is_empty(), "it found {} bodies out of nothing", k.len());
+    }
+
+    /// A survey takes its start from when it was told, not from the number in the order: an
+    /// instrument cannot have begun before it was ordered to.
+    #[test]
+    fn a_survey_starts_when_it_is_taken_up() {
+        let mut o = Observatory::default();
+        o.take_up(Duty::Survey { star: StarId::synthesize("t", 1), started_s: -1.0e9 }, 400.0);
+        let Duty::Survey { started_s, .. } = o.duty else { panic!("the duty did not take") };
+        assert_eq!(started_s, 400.0);
+    }
+
     #[test]
     fn an_idle_instrument_learns_nothing() {
         let mut sky = spread();
         let mut k = Knowledge::new(Witness(1));
         let mut o = Observatory::default();
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), YEAR_S);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), YEAR_S);
         assert!(k.is_empty());
     }
 
@@ -393,7 +760,7 @@ mod tests {
         let pass = Sweep::all_sky(0.0).pass_s();
         let mut found = Vec::new();
         for step in 1..=40 {
-            o.tick(&mut sky, &mut k, at(DVec3::ZERO), pass * step as f64 / 20.0);
+            o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), pass * step as f64 / 20.0);
             found.push(k.len());
         }
         assert_eq!(k.len(), 3, "two passes reach every field");
@@ -416,9 +783,9 @@ mod tests {
         let mut k = Knowledge::new(Witness(1));
         let mut o = Observatory { integration_s: 1.0e4, ..Default::default() };
         o.take_up(Duty::Stare(id), 0.0);
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), 5.0e3);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), 5.0e3);
         assert!(k.own_series(id, Band::V).is_none(), "half an integration is not a sample");
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), 1.0e4);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), 1.0e4);
         assert_eq!(k.own_series(id, Band::V).unwrap().len(), 1);
         assert_eq!(k.belief(id).unwrap().sightings, 1);
         assert_eq!(o.pointing(), Some(id));
@@ -435,7 +802,7 @@ mod tests {
         o.take_up(Duty::Stare(id), 0.0);
         for step in 1..=6 {
             let t = step as f64 * 2.0e4;
-            o.tick(&mut sky, &mut k, at(DVec3::Z * 0.02 * step as f64), t);
+            o.tick(&mut sky, None, &mut k, at(DVec3::Z * 0.02 * step as f64), t);
         }
         let belief = k.belief(id).unwrap();
         assert!(belief.triangulated, "{:?}", belief.distance);
@@ -450,7 +817,7 @@ mod tests {
         let mut o = Observatory::default();
         o.take_up(Duty::Watch { targets: ids.clone(), dwell_s: 4000.0, started_s: 0.0 }, 0.0);
         for step in 1..=30 {
-            o.tick(&mut sky, &mut k, at(DVec3::ZERO), step as f64 * 4000.0);
+            o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), step as f64 * 4000.0);
         }
         for id in &ids {
             assert!(k.own_series(*id, Band::V).is_some_and(|s| !s.is_empty()));
@@ -466,8 +833,8 @@ mod tests {
         let mut o = Observatory::default();
         let dwell = 4000.0;
         o.take_up(Duty::Watch { targets: ids.clone(), dwell_s: dwell, started_s: YEAR_S }, YEAR_S);
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), YEAR_S + 1.0);
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), YEAR_S + 9.5 * dwell);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), YEAR_S + 1.0);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), YEAR_S + 9.5 * dwell);
         for (n, id) in ids.iter().enumerate() {
             let times: Vec<f64> = k.own_series(*id, Band::V).unwrap().samples().iter().map(|s| s.observed_s).collect();
             let expected: Vec<f64> = (0..9).filter(|t| t % 3 == n).map(|t| YEAR_S + (t + 1) as f64 * dwell).collect();
@@ -504,4 +871,64 @@ mod tests {
         issue_charts(&mut sky, &mut none, at(DVec3::ZERO), 1.0, 0.0);
         assert!(none.is_empty());
     }
+    /// **A survey does not need the sky behind it.** It wants its own sun and the bodies
+    /// around it; everything else contributes no glare worth the arithmetic. Building a source
+    /// for every catalog star to pick one out by index was a hundred thousand of them
+    /// allocated and thrown away per craft per tick, on the tick thread.
+    ///
+    /// Checked as a statement about the answer rather than about the cost: the same survey in
+    /// a crowded sky and an empty one has to see exactly the same things.
+    #[test]
+    fn a_survey_sees_the_same_whatever_is_behind_it() {
+        let Some((_, system)) = sol() else { return };
+        let sun = crate::sky::AuthoredStars::sample().stars()[1].clone();
+        let star = crate::sky::CatalogStar { id: system.star, ..sun };
+
+        // The same sun, alone and then buried in twenty thousand other stars.
+        let alone = Sky::new(Arc::new(vec![star.clone()]));
+        let mut crowd = vec![star.clone()];
+        crowd.extend((0..20_000u64).map(|k| {
+            let mut other = star.clone();
+            other.id = crate::sky::StarId::synthesize("crowd", k);
+            other.position_ly = DVec3::new(k as f64 % 97.0 + 3.0, k as f64 % 53.0, k as f64 % 31.0);
+            other
+        }));
+        let crowded = Sky::new(Arc::new(crowd));
+
+        let surveyed = |mut sky: Sky| {
+            let mut knowledge = Knowledge::new(Witness(1));
+            let duty = Duty::Survey { star: system.star, started_s: 0.0 };
+            let where_from = at(system.origin_ly + DVec3::X * 3.0e-5);
+            survey_between(&mut sky, &system, &mut knowledge, where_from, &duty, 0.0, 400.0);
+            knowledge
+        };
+        let (one, many) = (surveyed(alone), surveyed(crowded));
+        assert_eq!(one, many, "the catalog behind a system changed what a survey saw");
+        assert!(
+            one.belief(Subject::Star(system.star)).is_some(),
+            "and it has to have seen something"
+        );
+    }
+
+    /// One source built alone is the same source the whole sky would have given, or the two
+    /// paths have drifted and a craft's own sun is a different brightness depending on which
+    /// asked.
+    #[test]
+    fn one_source_matches_what_the_whole_sky_says() {
+        let stars: Vec<crate::sky::CatalogStar> =
+            crate::sky::AuthoredStars::sample().stars().to_vec();
+        let mut sky = Sky::new(Arc::new(stars.clone()));
+        let here = DVec3::new(0.3, -1.2, 4.0);
+        for band in [Band::V, Band::ThermalIr] {
+            let all = sky.sources(band, here);
+            for (k, star) in stars.iter().enumerate() {
+                let one = sky.source_of(band, here, star.id).expect("a star it holds");
+                assert_eq!(Some(one), all.get(k).copied(), "{:?} in {band:?}", star.id);
+                assert_eq!(sky.index_of(star.id), Some(k));
+            }
+        }
+        // And a star it does not hold has no source.
+        assert!(sky.source_of(Band::V, here, crate::sky::StarId::synthesize("nope", 1)).is_none());
+    }
+
 }

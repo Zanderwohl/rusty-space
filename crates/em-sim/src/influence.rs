@@ -68,7 +68,7 @@ pub struct Soi {
 }
 
 impl Soi {
-    /// Radius toward `dir`, meters. `dir` need not be normalised; a zero vector is read as
+    /// Radius toward `dir`, meters. `dir` need not be normalized; a zero vector is read as
     /// "across the primary line", where every model is at its widest.
     pub fn radius_toward(&self, dir: DVec3) -> f64 {
         let cos = if dir.length_squared() > 0.0 && self.to_primary.length_squared() > 0.0 {
@@ -301,7 +301,7 @@ pub fn containment_chain(system: &System, point: DVec3, time: Instant) -> Vec<Bo
 
 /// The crossing search used to live here, and every caller still spells it
 /// `influence::crossings`. It is [`crate::crossing`] now — the same functions, with the
-/// traveler generalised from a body index to anything evaluable.
+/// traveler generalized from a body index to anything evaluable.
 pub use crate::crossing::{
     BodyPath, Crossing, SAMPLES_PER_REVOLUTION, Traveler, boundary_distance, boundary_distance_of,
     crossings, crossings_of, default_horizon, default_horizon_of, first_crossing_of, next_crossing,

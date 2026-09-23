@@ -15,7 +15,7 @@ use tokio_postgres::{Client, Error};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Content {
     Text(String),
-    /// Nothing but its acknowledgements.
+    /// Nothing but its acknowledgments.
     Ack,
     /// A key offer, kept in the same transcript because that is where a player looks for it.
     Key,
@@ -83,7 +83,7 @@ pub struct Held {
 /// more than this wants a window the interface asks for rather than a larger constant here.
 pub const BACKLOG_LIMIT: i64 = 500;
 
-/// Write messages. One statement each, because a message carries an array of acknowledgements
+/// Write messages. One statement each, because a message carries an array of acknowledgments
 /// and `unnest` flattens a two-dimensional one into a single column.
 ///
 /// Cheap regardless: these arrive at the rate a person types, not at the rate the world ticks.
@@ -234,7 +234,7 @@ pub async fn all_keys(client: &Client) -> Result<Vec<Held>, Error> {
 ///
 /// What a reply acknowledges, rebuilt after a restart. Without it the first message anybody
 /// sends when a shard comes back acknowledges nothing, and the other end reads that as its own
-/// messages having been lost — which is the one thing an acknowledgement exists to rule out.
+/// messages having been lost — which is the one thing an acknowledgment exists to rule out.
 pub async fn recent_heard(client: &Client, depth: i64) -> Result<Vec<(i64, i64, i64)>, Error> {
     let rows = client
         .query(
@@ -317,7 +317,7 @@ mod tests {
         let heard = heard_by(&client, ada).await.unwrap();
         assert_eq!(heard.len(), 1, "a sender does not hear its own signal");
         assert_eq!(heard[0].0.content, Content::Text("here".into()));
-        assert_eq!(heard[0].0.acks, vec![910_001], "the acknowledgement survived the array");
+        assert_eq!(heard[0].0.acks, vec![910_001], "the acknowledgment survived the array");
         assert_eq!(heard[0].1, 6_000);
 
         clear(&client, (ada, bry)).await;

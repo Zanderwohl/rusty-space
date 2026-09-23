@@ -12,6 +12,7 @@ lc-proto = { path = "../lc-proto" }
 lc-spacetime = { path = "../lc-spacetime" }
 lc-world = { path = "../lc-world", default-features = false }
 # The band a stored photometric sample was taken in.
+em-foundations = { path = "../em-foundations" }
 em-spectra = { path = "../em-spectra" }
 lc-store = { path = "../lc-store" }
 glam = "0.32"

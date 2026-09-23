@@ -10,7 +10,7 @@
 //! where the instrument tiers come from.
 //!
 //! [`BANDS`] is a compile-time constant and is defined here only. Changing it is one edit and
-//! a bump to any serialised format that stores per-band data.
+//! a bump to any serialized format that stores per-band data.
 //!
 //! # Units
 //!

@@ -29,7 +29,7 @@ done
 
 BUILD_ID="$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty)"
 OUT="target/web/$BUILD_ID"
-CATALOGUE=assets/catalogs/hygdata_v42.csv
+CATALOG=assets/catalogs/hygdata_v42.csv
 
 for tool in wasm-bindgen wasm-opt; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
@@ -42,7 +42,7 @@ rm -rf "$OUT"; mkdir -p "$OUT/assets"
 # no reason to send 34 MB when 0.3 will do.
 echo "==> sky chunk"
 mkdir -p "$OUT/assets/sky"
-cargo run -q -p lc-world --bin skypack -- "$CATALOGUE" "$OUT/assets/sky/catalogue.lcsky" \
+cargo run -q -p lc-world --bin skypack -- "$CATALOG" "$OUT/assets/sky/catalog.lcsky" \
   --limit "$SKY_LIMIT"
 
 # `--no-default-features` turns off `hyg`, which is what keeps the CSV reader -- and the only
@@ -77,7 +77,7 @@ cp -R crates/lc-client/assets/textures "$OUT/assets/textures"
 
 WASM_BYTES=$(wc -c < "$OUT/${BIN}_bg.wasm" | tr -d ' ')
 JS_BYTES=$(wc -c < "$OUT/$BIN.js" | tr -d ' ')
-SKY_BYTES=$(wc -c < "$OUT/assets/sky/catalogue.lcsky" | tr -d ' ')
+SKY_BYTES=$(wc -c < "$OUT/assets/sky/catalog.lcsky" | tr -d ' ')
 
 cat > "$OUT/manifest.json" <<JSON
 {
@@ -115,7 +115,7 @@ compressible | while IFS= read -r -d '' f; do gzip -9 -f -k -c "$f" > "$f.gz"; d
 
 echo
 echo "==> $OUT"
-for f in "$OUT/${BIN}_bg.wasm" "$OUT/$BIN.js" "$OUT/assets/sky/catalogue.lcsky"; do
+for f in "$OUT/${BIN}_bg.wasm" "$OUT/$BIN.js" "$OUT/assets/sky/catalog.lcsky"; do
   raw=$(wc -c < "$f" | tr -d ' ')
   if [ -f "$f.br" ]; then br=$(wc -c < "$f.br" | tr -d ' '); else br=0; fi
   printf '    %-28s %8.2f MB raw  %8.2f MB brotli\n' \

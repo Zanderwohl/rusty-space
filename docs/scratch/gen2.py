@@ -1,6 +1,6 @@
 """Emit the merged Solar System.
 
-The user's save is authoritative for identity, mass, radius, colour, tags and rotation.
+The user's save is authoritative for identity, mass, radius, color, tags and rotation.
 JPL supplies the orbital elements. Bodies JPL cannot supply keep the save's elements.
 """
 import json, math, sqlite3
@@ -42,7 +42,7 @@ def appearance_of(bid):
     a = app.get(bid)
     if a:
         r = a["radius"] or 1000.0
-        # A barycentre has no body to draw, so its appearance row is mostly null.
+        # A barycenter has no body to draw, so its appearance row is mostly null.
         cr, cg, cb = (a["color_r"] if a["color_r"] is not None else 120,
                       a["color_g"] if a["color_g"] is not None else 120,
                       a["color_b"] if a["color_b"] is not None else 120)

@@ -184,7 +184,7 @@ impl<J: Journal> Server<J> {
 mod tests {
     use glam::DVec3;
     use lc_proto::{ClientId, Inbound, Intent, Order, Outbound, ShipId};
-    use lc_world::sky::{AuthoredStars, CatalogueStar, StarId, StarProvider};
+    use lc_world::sky::{AuthoredStars, CatalogStar, StarId, StarProvider};
 
     use super::*;
     use crate::journal::Memory;
@@ -193,14 +193,14 @@ mod tests {
 
     /// A home star, and three more thirty light-years out that only a sweep finds; see
     /// `crate::instruments`' tests for why these directions.
-    fn sky() -> Vec<CatalogueStar> {
+    fn sky() -> Vec<CatalogStar> {
         let template = AuthoredStars::sample().stars()[1].clone();
         [DVec3::ZERO, DVec3::X * 30.0, DVec3::Y * 30.0, DVec3::Z * 30.0]
             .into_iter()
             .enumerate()
             .map(|(k, at)| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("archive", k as u64);
+                star.id = StarId::synthesize("archive", k as u64);
                 star.position_ly = at;
                 star
             })
@@ -267,9 +267,11 @@ mod tests {
         }
         let after = new.knowledge_of(SHIP).unwrap();
         assert_eq!(after.stars().count(), sky().len(), "the sweep carried on and finished the pass");
+        // Found by sweeping, and on nobody's word: a craft is issued no charts at all now, so
+        // the claim that used to be here on a restart is not there on the first pass either.
         let home = sky()[0].id;
-        let charts = after.file(home).unwrap().claims().len();
-        assert_eq!(charts, 1, "a restored craft is not issued its charts a second time");
+        assert!(after.knows(home), "the sweep reached the home star");
+        assert!(after.file(home).unwrap().claims().is_empty(), "a craft is issued no charts");
     }
 
     /// A second checkpoint writes only what changed since the first.
@@ -289,7 +291,7 @@ mod tests {
 
     /// A red dwarf five light-years out whose innermost planet has a period under five days,
     /// placed so its planets transit as seen from the origin. Returns the periods too.
-    fn red_dwarf() -> (CatalogueStar, Vec<f64>) {
+    fn red_dwarf() -> (CatalogStar, Vec<f64>) {
         let template = AuthoredStars::sample().stars()[0].clone();
         let luminosity: f64 = 0.01;
         let teff = 5772.0 * luminosity.powf(0.13);
@@ -297,7 +299,7 @@ mod tests {
         (100_000..)
             .find_map(|key| {
                 let mut star = template.clone();
-                star.id = StarId::synthesise("archive-planet", key);
+                star.id = StarId::synthesize("archive-planet", key);
                 // Edge-on to the origin, so every planet transits.
                 star.position_ly = lc_world::sky::generate::pole_for(star.seed()).any_orthonormal_vector() * 5.0;
                 star.luminosity_solar = luminosity;
@@ -309,7 +311,7 @@ mod tests {
                     teff,
                 );
                 star.star.mu = em_spectra::stellar::mu_from_mass_solar(mass);
-                let periods: Vec<f64> = lc_world::sky::generate::ladder(star.seed(), luminosity, 0.0)
+                let periods: Vec<f64> = lc_world::sky::generate::planets_of(&star)
                     .iter()
                     .map(|r| std::f64::consts::TAU * (r.semi_major_m.powi(3) / star.star.mu).sqrt())
                     .collect();
@@ -413,22 +415,35 @@ mod tests {
         assert!(retried.samples.starts_with(&failed.samples), "and every sample, in order");
     }
 
-    /// A craft whose knowledge rows are missing comes back with its charts.
+    /// A craft whose knowledge rows are missing comes back empty and keeps its duty.
+    ///
+    /// It used to come back with its charts, because `aboard` issued them to anything it had
+    /// not seen before. Nothing issues them now, so a craft that lost its files has lost them:
+    /// what it gets back is the telescope pointed where it was, and it looks again.
     #[tokio::test]
-    async fn a_craft_restored_without_knowledge_is_issued_its_charts() {
+    async fn a_craft_restored_without_knowledge_comes_back_empty_and_still_looking() {
         let (old, _) = running().await;
         let checkpoint = old.checkpoint();
         let mut new = a_shard();
         assert!(new.adopt(checkpoint).is_empty());
         assert!(new.adopt_knowledge(&[], &[]).is_empty());
         let knowledge = new.knowledge_of(SHIP).expect("aboard");
-        assert!(knowledge.knows(sky()[0].id), "the charts were issued");
-        assert_eq!(new.duty_of(SHIP), old.duty_of(SHIP), "and the duty kept");
+        assert!(!knowledge.knows(sky()[0].id), "nothing is handed back");
+        assert_eq!(new.duty_of(SHIP), old.duty_of(SHIP), "but the duty is kept");
+
+        let mut wire = Loopback::new();
+        for _ in 0..3000 {
+            new.tick(&mut wire).await.unwrap();
+        }
+        assert!(
+            new.knowledge_of(SHIP).unwrap().knows(sky()[0].id),
+            "and looking is what brings it back"
+        );
     }
 
     #[test]
     fn a_file_from_the_future_is_refused_rather_than_misread() {
-        let star = Subject::Star(StarId::synthesise("archive", 1));
+        let star = Subject::Star(StarId::synthesize("archive", 1));
         let mut row = file_row(CraftId(1), star, &File::default(), 0);
         assert!(read_file(&row).is_ok());
         row.format = KNOWLEDGE_FORMAT + 1;
@@ -438,7 +453,7 @@ mod tests {
     #[test]
     fn a_log_row_reads_back_to_the_bit() {
         let logged = Logged {
-            subject: Subject::Star(StarId::synthesise("archive", 1)),
+            subject: Subject::Star(StarId::synthesize("archive", 1)),
             witness: lc_world::knowledge::observatory::CHARTS,
             band: Band::K,
             sample: Sample { observed_s: 1_234.567_891_23, deficit: -1.8149592025296526e-22, sigma: 1e-5 },

@@ -22,6 +22,8 @@ pub fn telescope(
     ui: &mut egui::Ui,
     state: &Ui,
     game: &mut Game,
+    held: &crate::beliefs::Held,
+    revealed: &mut Option<StarId>,
     draft: &mut String,
     out: &mut MessageWriter<Requested>,
     plot: &mut CurvePlot,
@@ -36,7 +38,7 @@ pub fn telescope(
     });
     ui.separator();
 
-    duty(ui, game, out);
+    duty(ui, game, held, out);
     room(ui, game, out);
     ui.separator();
 
@@ -49,8 +51,17 @@ pub fn telescope(
         .max_height(160.0)
         .show_rows(ui, row_height, order.len(), |ui, rows| {
             for &(_, id) in order.get(rows).unwrap_or_default() {
-                if row(ui, game, id, state.selected == Some(id), row_height).clicked() {
+                let on = state.selected == Some(id);
+                let response = row(ui, game, id, on, row_height);
+                if response.clicked() {
                     ask(out, Action::SelectTarget(Some(id)));
+                }
+                // Once, when the selection changes. A star picked out of the sky is selected
+                // here already, but in a list of thousands it is selected somewhere the player
+                // cannot see, which reads as the pick having done nothing.
+                if on && *revealed != Some(id) {
+                    *revealed = Some(id);
+                    response.scroll_to_me(Some(egui::Align::Center));
                 }
             }
         });
@@ -162,9 +173,6 @@ fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>
             c.evidence.bands.count_ones(),
             c.evidence.completeness * 100.0,
         ));
-        if c.discarded_s.is_some() {
-            ui.weak("  The log behind it has been thrown away; only the conclusion is left.");
-        }
     }
     let mut keep = game.knowledge.retained(id);
     if ui.checkbox(&mut keep, "Keep the raw log").changed() {
@@ -176,7 +184,12 @@ fn described(game: &Game) -> Option<StarId> {
     game.described.or(game.pointing)
 }
 
-fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+fn duty(
+    ui: &mut egui::Ui,
+    game: &Game,
+    held: &crate::beliefs::Held,
+    out: &mut MessageWriter<Requested>,
+) {
     let now = game.coordinate_time_s();
     match &game.observatory.duty {
         Duty::Idle => {
@@ -211,6 +224,15 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
                 targets.len() as f64 * dwell_s / 3600.0
             ));
         }
+        Duty::Survey { star, .. } => {
+            let here = game.system.as_ref().filter(|s| s.star == *star).is_some();
+            ui.label(format!("Surveying {}", game.name_of(*star)));
+            if !here {
+                ui.weak("not in that system");
+            } else if held.bodies.is_empty() {
+                ui.weak("nothing detected yet");
+            }
+        }
     }
     if let (Some(on), Some(looking)) = (game.observatory.pointing(), game.described)
         && on != looking
@@ -226,6 +248,15 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
         }
         if ui.button("Survey ahead").on_hover_text("Survey cone in direction of travel to discover stars").clicked() {
             ask(out, Action::SurveyAhead);
+        }
+        let here = game.system.is_some();
+        if ui
+            .add_enabled(here, egui::Button::new("Survey system"))
+            .on_hover_text("Measure the bodies of this system, brightest first")
+            .on_disabled_hover_text("Only from inside a system")
+            .clicked()
+        {
+            ask(out, Action::SurveySystem);
         }
         if ui.button("Stop").on_hover_text("Stop all observations").clicked() {
             ask(out, Action::StopSurvey);

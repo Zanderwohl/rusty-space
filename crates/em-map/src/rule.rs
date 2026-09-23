@@ -150,9 +150,9 @@ mod tests {
     }
 
     #[test]
-    fn nothing_below_a_metre_has_a_name_here() {
+    fn nothing_below_a_meter_has_a_name_here() {
         assert!(choose(1.0e-2, 1.0e-3).is_none());
-        assert!(choose(1.0, 0.16).is_some(), "and a metre itself does");
+        assert!(choose(1.0, 0.16).is_some(), "and a meter itself does");
     }
 
     #[test]

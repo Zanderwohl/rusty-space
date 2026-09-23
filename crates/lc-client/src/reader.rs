@@ -42,7 +42,7 @@ const BODY_SIZE: f32 = 18.0;
 /// The widest the text column is allowed to get, whatever the window does.
 ///
 /// A line of prose stops being readable somewhere past seventy characters — the eye loses the
-/// start of the next one — and a maximised window would otherwise set a book at a hundred and
+/// start of the next one — and a maximized window would otherwise set a book at a hundred and
 /// forty. Roughly thirty-four times the body size, because a lowercase letter in a text face
 /// averages about half its point size.
 const MAX_MEASURE: f32 = BODY_SIZE * 34.0;
@@ -383,7 +383,7 @@ pub fn draw(
             if reading {
                 keys(ui, &state, &shelf, &mut out);
             } else {
-                crate::bookshelf::keys(ui, found, shelf.catalogue.books.len(), &mut order);
+                crate::bookshelf::keys(ui, found, shelf.catalog.books.len(), &mut order);
             }
         });
     if !open {
@@ -596,7 +596,7 @@ fn page(
     );
     let painter = ui.painter_at(outer);
     // A plate with a page to itself sits in the middle of it, the way a printed one does. Only
-    // when it is alone: centring a plate that text follows would open a gap above the text.
+    // when it is alone: centering a plate that text follows would open a gap above the text.
     let lone_plate = current.slices.len() == 1
         && matches!(doc.blocks[current.slices[0].block].block, Block::Image { .. });
     let mut y = rect.top();

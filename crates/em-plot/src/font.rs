@@ -1,7 +1,7 @@
 //! A 5x7 bitmap font, so the raster backend can draw labels without shipping a typeface.
 //!
 //! Enough for axis numbers and a title. Anything wanting real typography uses a backend that
-//! has a font; the core still rasterises nothing.
+//! has a font; the core still rasterizes nothing.
 
 pub const GLYPH_W: usize = 5;
 pub const GLYPH_H: usize = 7;

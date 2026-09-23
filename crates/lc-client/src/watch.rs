@@ -26,7 +26,8 @@ impl Session {
         let now = self.coordinate_time_s();
         let at = self.telescope_station();
         self.observatory.integration_s = integration_s;
-        self.observatory.tick(&mut self.sky_model, &mut self.knowledge, at, now);
+        let system = self.system.clone();
+        self.observatory.tick(&mut self.sky_model, system.as_deref(), &mut self.knowledge, at, now);
         if let Some(id) = self.observatory.pointing() {
             self.aim(Some(id));
         }

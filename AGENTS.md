@@ -45,6 +45,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
 | `--bench <n>` | time `n` frames after `--frames` of warm-up and quit: frame time, main-world CPU, render passes. See `src/bench.rs` |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
+| `--charted` | seed what the ship knows from truth. **A ship knows nothing on creation, so it photographs nothing**: without this every body shot is a ship staring at an empty panel and `--focus` names a body the panel does not list. The charting office kept as a dev tool |
 | `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
 | `--panel <name>` / `--tune` | open a panel. `--panel map` is the exception: the map is a mode of the main view, so this is a pin holding it there |
 | `--focus <body>` / `--focus band:<n>` | what is **selected**, as a click on either view would leave it. Everything else that aims is a camera, so this is the only way to photograph a reticle. `--station` sets the focus itself and stands aside when this is given |
@@ -55,7 +56,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
 | `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
 | `--map <bearing:elevation:au>` | pin the map's camera. A pin, so two shots of it are the same shot |
-| `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
+| `--map-plane <system\|galactic>` | which plane the map lays its rings in. `ecliptic` is the old spelling of `system` and still works. A system's plane is a belief, so the option is refused until one is solved — see `lightcone/docs/25-system-knowledge.md` |
 | `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto. A pin: `--map` on its own holds the ship, so a hand on the mouse cannot pan a shot two runs are meant to agree about |
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`, `corona`. Brings its own shard |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run, so two shots of a scene are the same shot |
@@ -230,7 +231,7 @@ Each of these cost real time. None of them are visible from the code that hits t
   by driving a browser and none by a test:
   - `hx-trigger="input changed ..."` on a `<form>` **never fires**. `changed` compares the value
     of the element the trigger is on and a form has no value. The search box did nothing.
-  - `target:(#q)` — the parenthesised selector form the documentation gives for selectors
+  - `target:(#q)` — the parenthesized selector form the documentation gives for selectors
     *containing whitespace* — matches nothing; the parentheses are not stripped. `target:#q`
     works.
   - `htmx:after:swap`'s `event.target` is the element that **issued** the request, not the one

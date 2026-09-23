@@ -123,9 +123,9 @@ mod tests {
 
         // A structure a kilometer away is simply gone.
         assert_eq!(narrow_first(1.0e3), 0.0, "this is the failure the reduction avoids");
-        // A thousand kilometers survives, quantised to the 16 km grid.
+        // A thousand kilometers survives, quantized to the 16 km grid.
         let coarse = narrow_first(1.0e6);
-        assert!(coarse > 0.0 && (coarse - 1.0e6).abs() > 500.0, "quantised to {coarse}");
+        assert!(coarse > 0.0 && (coarse - 1.0e6).abs() > 500.0, "quantized to {coarse}");
 
         // Subtracting in f64 first keeps both exactly.
         for offset in [1.0e3, 1.0e6] {

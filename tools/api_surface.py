@@ -11,6 +11,18 @@ from pathlib import Path
 
 LIMIT = 1000
 
+# A module may raise its own cap by saying so, in its own module doc, with a reason:
+#
+#     //! Line limit: 2000. <why this module is the exception>
+#
+# Read from the file rather than listed here, so the number and the justification cannot drift
+# apart and a reviewer meets the reason where the code is. The reason is required: a bare number
+# raises the cap while saying nothing, which is the one thing the rule exists to stop.
+RAISED = re.compile(r"^//!\s*Line limit:\s*(?P<limit>\d+)\s*[.:-]\s*(?P<why>\S.*)$")
+
+# A raise with no reason after the number. Reported rather than honored.
+BARE_RAISE = re.compile(r"^//!\s*Line limit:\s*\d+\s*[.:-]?\s*$")
+
 ITEM = re.compile(
     r"^(?P<indent>\s*)(?P<sig>pub(?:\s*\([^)]*\))?\s+"
     r"(?:const\s+fn|async\s+fn|unsafe\s+fn|fn|struct|enum|trait|type|const|static|mod|union)\b.*)$"
@@ -64,6 +76,7 @@ def continuation(lines, start):
 def main(roots):
     total = 0
     oversize = []
+    unjustified = []
     for root in roots:
         src = Path(root) / "src"
         if not src.is_dir():
@@ -75,8 +88,20 @@ def main(roots):
             code = strip_tests(raw)
             loc = len(code)
             total += loc
-            flag = "  ** OVER LIMIT **" if loc > LIMIT else ""
-            if loc > LIMIT:
+            limit = LIMIT
+            for line in raw[:40]:
+                stripped = line.strip()
+                raised = RAISED.match(stripped)
+                if raised:
+                    limit = int(raised.group("limit"))
+                    break
+                if BARE_RAISE.match(stripped):
+                    unjustified.append(path)
+                    break
+            flag = f"  ** OVER LIMIT **" if loc > limit else ""
+            if limit != LIMIT:
+                flag += f"  (own limit {limit})"
+            if loc > limit:
                 oversize.append((path, loc))
             rel = path.relative_to(Path(root) / "src")
             print(f"\n-- {rel}  ({loc} loc, {len(raw)} with tests){flag}")
@@ -104,10 +129,15 @@ def main(roots):
                 i += 1
     print(f"\n{'=' * 78}")
     print(f"{total} lines of code across {len(roots)} crate(s), limit {LIMIT} per file")
+    if unjustified:
+        print("RAISED WITH NO REASON GIVEN:")
+        for p in unjustified:
+            print(f"  {p}")
     if oversize:
         print("OVER LIMIT:")
         for p, n in oversize:
             print(f"  {p}: {n}")
+    if oversize or unjustified:
         return 1
     print("all modules within limit")
     return 0

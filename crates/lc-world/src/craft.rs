@@ -553,7 +553,7 @@ impl Craft {
         }
     }
 
-    /// Begin rebuilding towards `target`. Refused while under way, and when it cannot be done.
+    /// Begin rebuilding toward `target`. Refused while under way, and when it cannot be done.
     pub fn begin_refit(
         &mut self,
         target: crate::fitting::Loadout,
@@ -834,13 +834,13 @@ mod tests {
     use super::*;
     use crate::motion::{Change, ShipId};
     use crate::navigation::{Course, Plane};
-    use crate::sky::{CatalogueStar, StarProvider};
+    use crate::sky::{CatalogStar, StarProvider};
 
     fn sol() -> Option<Arc<LocalSystem>> {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .ok()?;
-        let sun: CatalogueStar =
+        let sun: CatalogStar =
             provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some("Sol"))?.clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);
@@ -1096,7 +1096,7 @@ mod tests {
             t += 3_600.0 * 6.0;
             craft.advance(t, 3_600.0 * 6.0);
         }
-        // The catalogue Sun is not exactly the anchor's 1361 W/m², so a few per cent either way.
+        // The catalog Sun is not exactly the anchor's 1361 W/m², so a few per cent either way.
         let half = stored(&craft, t) / capacity;
         assert!((half - 0.5).abs() < 0.03, "{half} full after half a year");
         craft.advance(1.1 * year, 0.6 * year);

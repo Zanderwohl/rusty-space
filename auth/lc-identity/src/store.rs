@@ -48,7 +48,7 @@ pub struct Link {
 ///
 /// Comparing addresses that have not been through this is how one account becomes two, and —
 /// where a verified address aligns accounts — how two become one that should not have.
-pub fn normalise_email(email: &str) -> String {
+pub fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
@@ -144,7 +144,7 @@ impl Store {
         &self,
         email: &str,
     ) -> Result<Option<Uuid>, StoreError> {
-        let email = normalise_email(email);
+        let email = normalize_email(email);
         match self {
             Store::Memory(m) => Ok(m
                 .0
@@ -219,7 +219,7 @@ impl Store {
         display_name: &str,
         link: Link,
     ) -> Result<Account, StoreError> {
-        let email = link.email.as_deref().map(normalise_email);
+        let email = link.email.as_deref().map(normalize_email);
         if link.email_verified
             && let Some(email) = &email
             && let Some(owner) = self.account_for_verified_email(email).await?
@@ -622,11 +622,11 @@ mod tests {
         );
     }
 
-    /// Addresses are compared normalised, or one account quietly becomes two.
+    /// Addresses are compared normalized, or one account quietly becomes two.
     #[test]
     fn addresses_are_compared_the_same_way_they_are_stored() {
-        assert_eq!(normalise_email("  Ada@Example.Test "), "ada@example.test");
-        assert_eq!(normalise_email("ada@example.test"), "ada@example.test");
+        assert_eq!(normalize_email("  Ada@Example.Test "), "ada@example.test");
+        assert_eq!(normalize_email("ada@example.test"), "ada@example.test");
     }
 
     /// The takeover this design exists to prevent. A password account's address is never

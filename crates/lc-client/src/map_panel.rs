@@ -216,7 +216,7 @@ fn labels(
             continue;
         }
         let Some(ndc) =
-            view.orbit.project(view.plane, placement.at.as_dvec3(), crate::map::MAP_FOV as f64,
+            view.orbit.project(view.datum(), placement.at.as_dvec3(), crate::map::MAP_FOV as f64,
                 aspect)
         else {
             continue;
@@ -482,18 +482,39 @@ fn rule_row(rect: egui::Rect, span: std::ops::Range<f32>, over: &[egui::Rect]) -
 /// How far a point on the surface reaches, in meters, where the rule is drawn. A ray cast at
 /// the rule's own height meets the plane, and the scale is taken at that depth; when it meets
 /// nothing the stand-off is the only answer left.
+/// Why a plane cannot be laid rings in, or `None` when it can.
+///
+/// Galactic always can: it is the same frame everywhere and needs nothing solved. A system's
+/// plane is a belief, and the two ways of not having one are worth distinguishing — nothing
+/// observed at all reads differently from "watched from one place and it is not enough", which
+/// is a hint about what to do next rather than a refusal.
+fn unsolved(plane: em_map::Plane, believed: lc_world::knowledge::SystemPlane) -> Option<&'static str> {
+    use lc_world::knowledge::SystemPlane;
+    if plane != em_map::Plane::System {
+        return None;
+    }
+    match believed {
+        SystemPlane::Known { .. } => None,
+        SystemPlane::Circle(_) => {
+            Some("the transits seen from here put this system's pole somewhere on a circle; \
+                  another craft watching from elsewhere would cross it")
+        }
+        SystemPlane::Unknown => Some("no orbit solved in this system yet"),
+    }
+}
+
 fn meters_per_point(rect: egui::Rect, view: crate::ui::MapView) -> Option<f32> {
     if rect.height() <= 0.0 {
         return None;
     }
     let rad_per_point = 2.0 * (crate::map::MAP_FOV * 0.5).tan() / rect.height();
-    let (forward, ..) = view.orbit.view_basis(view.plane);
-    let eye = view.orbit.eye_ly(view.plane);
+    let (forward, ..) = view.orbit.view_basis(view.datum());
+    let eye = view.orbit.eye_ly(view.datum());
     let aspect = (rect.width() / rect.height()) as f64;
     let direction =
-        view.orbit.ray(view.plane, glam::DVec2::new(0.0, RULE_SAMPLE_NDC_Y),
+        view.orbit.ray(view.datum(), glam::DVec2::new(0.0, RULE_SAMPLE_NDC_Y),
             crate::map::MAP_FOV as f64, aspect);
-    let depth_m = match view.plane.intersect(eye, direction, view.orbit.focus_ly) {
+    let depth_m = match view.datum().intersect(eye, direction, view.orbit.focus_ly) {
         Some(hit) => (hit - eye).dot(forward) * em_map::snapshot::M_PER_LY,
         None => view.orbit.distance_m(),
     };
@@ -524,7 +545,14 @@ fn controls(
     out: &mut MessageWriter<Requested>,
 ) {
     ui.horizontal(|ui| {
-        for plane in [em_map::Plane::Ecliptic, em_map::Plane::Galactic] {
+        for plane in [em_map::Plane::System, em_map::Plane::Galactic] {
+            // A system's plane is something this craft solved, so it can be missing. Grayed
+            // and saying why rather than absent, the same way a refused source is: the option
+            // exists, and what is lacking is the observation.
+            if let Some(why) = unsolved(plane, state.map.system_plane) {
+                ui.weak(plane.label()).on_hover_text(why);
+                continue;
+            }
             if ui.selectable_label(state.map.plane == plane, plane.label()).clicked() {
                 ask(out, Action::SetMapPlane(plane));
             }
@@ -726,9 +754,9 @@ fn under_cursor(
         (1.0 - (at.y - rect.min.y) / rect.height() * 2.0) as f64,
     );
     let aspect = (rect.width() / rect.height()) as f64;
-    let direction = view.orbit.ray(view.plane, ndc, crate::map::MAP_FOV as f64, aspect);
-    view.plane.intersect(
-        view.orbit.eye_ly(view.plane),
+    let direction = view.orbit.ray(view.datum(), ndc, crate::map::MAP_FOV as f64, aspect);
+    view.datum().intersect(
+        view.orbit.eye_ly(view.datum()),
         direction,
         map.plane_origin_ly(view.orbit.focus_ly),
     )
@@ -736,6 +764,24 @@ fn under_cursor(
 
 #[cfg(test)]
 mod tests {
+
+    /// **Galactic is always offered; a system's plane has to have been solved.** And the two
+    /// ways of not having one read differently, because one of them is a hint.
+    #[test]
+    fn the_system_plane_is_refused_until_it_is_solved() {
+        use lc_world::knowledge::SystemPlane;
+        let known = SystemPlane::Known { pole: glam::DVec3::Z, sigma_rad: 0.01, zero: glam::DVec3::X };
+
+        assert_eq!(unsolved(em_map::Plane::System, known), None);
+        assert!(unsolved(em_map::Plane::System, SystemPlane::Unknown).is_some());
+        let circle = unsolved(em_map::Plane::System, SystemPlane::Circle(glam::DVec3::X));
+        assert!(circle.is_some());
+        assert_ne!(circle, unsolved(em_map::Plane::System, SystemPlane::Unknown), "one reason for both");
+
+        for belief in [known, SystemPlane::Unknown, SystemPlane::Circle(glam::DVec3::X)] {
+            assert_eq!(unsolved(em_map::Plane::Galactic, belief), None, "galactic needs nothing");
+        }
+    }
     use super::*;
     use crate::ui::MapFocus;
     use em_map::ItemKey;
