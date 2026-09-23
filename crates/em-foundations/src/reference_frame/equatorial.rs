@@ -1,12 +1,12 @@
 //! The equatorial frame, and the one rotation that reaches simulation space.
 //!
-//! Catalogues and IAU pole tables are published in the **equatorial** frame of J2000
+//! Catalogs and IAU pole tables are published in the **equatorial** frame of J2000
 //! (ICRF): +X toward the vernal equinox, +Z toward the celestial pole. Simulation space
 //! shares +X but tilts +Z to the *ecliptic* pole, so the two differ by a single rotation
 //! about +X through the obliquity. Skipping it leaves everything 23.4° out — visible as a
 //! sky whose constellations sit at the wrong angle to the planets.
 //!
-//! Radians, as everywhere in this crate. Catalogues that store right ascension in hours
+//! Radians, as everywhere in this crate. Catalogs that store right ascension in hours
 //! convert on the way in.
 
 use glam::DVec3;
@@ -14,7 +14,7 @@ use glam::DVec3;
 /// Obliquity of the ecliptic at J2000, in radians (23.4392911°).
 ///
 /// The IAU 1976 value at J2000.0. It drifts by about 47 arcseconds per century; over the
-/// span a catalogue is useful that is far below the precision of the catalogue itself, so
+/// span a catalog is useful that is far below the precision of the catalog itself, so
 /// this is a constant rather than a function of epoch.
 pub const OBLIQUITY_J2000: f64 = 23.439_291_1 * std::f64::consts::PI / 180.0;
 
@@ -57,7 +57,7 @@ pub fn from_ecliptic(v: DVec3) -> DVec3 {
 
 /// Simulation-space unit vector from equatorial right ascension and declination, radians.
 ///
-/// [`direction`] followed by [`to_ecliptic`], which is what a catalogue import wants.
+/// [`direction`] followed by [`to_ecliptic`], which is what a catalog import wants.
 #[inline]
 pub fn ecliptic_direction(right_ascension: f64, declination: f64) -> DVec3 {
     to_ecliptic(direction(right_ascension, declination))

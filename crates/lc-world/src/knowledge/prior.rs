@@ -9,12 +9,12 @@ use glam::DVec3;
 
 use crate::population::Population;
 use crate::rng;
-use crate::sky::CatalogueStar;
-use crate::sky::generate::{self, ladder};
+use crate::sky::CatalogStar;
+use crate::sky::generate::{self, planets_of};
 use crate::star::Star;
 use crate::system::M_PER_LY;
 
-/// Catalogue stars the planet prior is measured over, at most.
+/// Catalog stars the planet prior is measured over, at most.
 const PRIOR_STARS: usize = 4000;
 
 /// Belts are flat, so they are seen from several directions; a swarm is a shell.
@@ -54,26 +54,36 @@ struct Seen {
     swarm: bool,
 }
 
+/// Spread in log depth between what a planet would show crossing the middle of its star and
+/// what it shows crossing wherever it actually does. A factor of about 1.7, one sigma.
+const DEPTH_WIDTH: f64 = 0.55;
+
+/// Fractional error on a host's mass when the neighborhood holds nothing to compare it with.
+///
+/// The main-sequence mass-luminosity relation scatters by about this much at a fixed
+/// luminosity, from rotation, age and metallicity, so this is what one star alone is worth.
+const LONE_HOST_SPREAD: f64 = 0.3;
+
 impl Prior {
-    /// Pass the stars a craft cannot tell this one apart from; knowing nothing, the catalogue.
-    pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogueStar>) -> Self {
-        let stars: Vec<&CatalogueStar> = stars.into_iter().collect();
+    /// Pass the stars a craft cannot tell this one apart from; knowing nothing, the catalog.
+    pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogStar>) -> Self {
+        let stars: Vec<&CatalogStar> = stars.into_iter().collect();
         let stride = stars.len().div_ceil(PRIOR_STARS).max(1);
         let systems = stars
             .iter()
             .step_by(stride)
             .map(|star| {
                 let radius = star.star.radius_m;
-                ladder(star.seed(), star.luminosity_solar, star.metallicity)
+                planets_of(star)
                     .iter()
-                    .map(|rung| {
-                        let period = std::f64::consts::TAU * (rung.semi_major_m.powi(3) / star.star.mu).sqrt();
-                        let ratio = rung.radius_earths * 6.371e6 / radius;
+                    .map(|p| {
+                        let period = std::f64::consts::TAU * (p.semi_major_m.powi(3) / star.star.mu).sqrt();
+                        let ratio = p.radius_m / radius;
                         Drawn {
                             ln_period: period.ln(),
                             ln_depth: (ratio * ratio).min(1.0).ln(),
-                            rocky: rung.rocky,
-                            reach: (radius / rung.semi_major_m).min(1.0),
+                            rocky: p.class.is_rocky(),
+                            reach: (radius / p.semi_major_m).min(1.0),
                         }
                     })
                     .collect()
@@ -178,6 +188,50 @@ impl Prior {
             .map(|(star, _)| *star)
     }
 
+    /// How wide a band of luminosity counts as "a star like this one" when the spread of their
+    /// masses is being measured. A factor either way, not a fraction.
+    ///
+    /// Wide, because the mass–luminosity relation is steep: a factor of two in luminosity is
+    /// only about a fifth in mass, so a narrow window would report a confidence the relation
+    /// does not have and a wide one costs little.
+    const LIKE_ENOUGH: f64 = 2.0;
+
+    /// A host's gravitational parameter and how well it is known, as a fraction.
+    ///
+    /// The fraction is **measured from the prior's own sample** rather than stated: the spread of
+    /// `mu` across the stars whose luminosity in this band is within [`Prior::LIKE_ENOUGH`] of
+    /// the one asked about. That is exactly the thing a craft does not know when all it has is a
+    /// brightness and a distance, and it is what carries into the distance of every planet found
+    /// by transit. See `lightcone/docs/25-system-knowledge.md#from-outside-transits`.
+    ///
+    /// `None` when the luminosity is not positive, as for [`Prior::host_like`]. A sample of one
+    /// reports no spread, which is honest about the sample and not about the relation — callers
+    /// with one host are reading a prior built from one star.
+    #[allow(clippy::indexing_slicing)] // band indices come from `Band::index`, below seven
+    pub fn host_mass(&self, band: Band, luminosity_w: f64) -> Option<(f64, f64)> {
+        let host = self.host_like(band, luminosity_w)?;
+        let like: Vec<f64> = self
+            .hosts
+            .iter()
+            .filter(|(_, l)| {
+                let ratio = l[band.index()] / luminosity_w;
+                ratio > 1.0 / Self::LIKE_ENOUGH && ratio < Self::LIKE_ENOUGH
+            })
+            .map(|(star, _)| star.mu)
+            .collect();
+        if like.len() < 2 {
+            // Not zero. One comparison star says nothing about the spread, and a mass with no
+            // error on it hands a transit's distance the period's precision -- which
+            // `25-system-knowledge.md` rule 4 says it never has, because the error *is* mostly
+            // the mass's. The main-sequence relation's own scatter is what is left to report.
+            return Some((host.mu, LONE_HOST_SPREAD));
+        }
+        let mean = like.iter().sum::<f64>() / like.len() as f64;
+        let variance =
+            like.iter().map(|mu| (mu - mean) * (mu - mean)).sum::<f64>() / (like.len() - 1) as f64;
+        Some((host.mu, variance.sqrt() / mean.max(f64::MIN_POSITIVE)))
+    }
+
     /// Chance a star has at least one transiting planet in the periods.
     pub fn planet_prior(&self, periods_s: (f64, f64)) -> f64 {
         if self.systems.is_empty() {
@@ -222,15 +276,27 @@ impl Prior {
 
     /// Chance a transit of this period and depth is of a rocky planet rather than a giant;
     /// `None` when the generator makes nothing like it.
+    ///
+    /// Compared in log depth, at a width that is not the measurement's. A generated planet's
+    /// depth is its central one and a real transit crosses at whatever impact parameter it
+    /// happens to have, so a measured depth is anywhere from that down to nothing -- a
+    /// half-milli-magnitude measurement of a grazing transit is a precise number for a planet
+    /// half the size. [`DEPTH_WIDTH`] is that spread, and it is far wider than the error bar.
+    /// Rocky and giant are two orders of magnitude apart, so it costs nothing to tell them
+    /// apart and everything to be strict about it.
     pub fn rocky_given(&self, period_s: f64, depth: f64, depth_sigma: f64) -> Option<f64> {
-        let lp = period_s.ln();
+        if !(depth > 0.0) {
+            return None;
+        }
+        let (lp, ld) = (period_s.ln(), depth.ln());
+        let width = DEPTH_WIDTH.max(depth_sigma / depth);
         let (mut rocky, mut all) = (0.0, 0.0);
         for d in self.systems.iter().flatten() {
             let near = (d.ln_period - lp) / 0.15;
             if near.abs() > 4.0 {
                 continue;
             }
-            let miss = (d.ln_depth.exp() - depth) / depth_sigma.max(depth * 0.05);
+            let miss = (d.ln_depth - ld) / width;
             let w = d.reach * (-0.5 * (near * near + miss * miss)).exp();
             all += w;
             if d.rocky {
@@ -360,3 +426,4 @@ mod tests {
         assert!(long <= 1.0);
     }
 }
+

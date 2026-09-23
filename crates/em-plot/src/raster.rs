@@ -28,7 +28,7 @@ impl TextMetrics for BitmapMetrics {
 
 /// Blend an axis-aligned rectangle straight into the pixels, with edge coverage.
 ///
-/// Not `fill_rect`. Sending small rectangles through the path rasteriser is slower — a
+/// Not `fill_rect`. Sending small rectangles through the path rasterizer is slower — a
 /// scatter is a hundred thousand of them — and tiny-skia's anti-aliased hairline scan
 /// converter asserts on sub-two-pixel geometry, which a 1.6 px marker is.
 fn fill_quad(pm: &mut Pixmap, x0: f32, y0: f32, x1: f32, y1: f32, c: Rgba) {
@@ -101,7 +101,7 @@ fn text(pixmap: &mut Pixmap, at: (f32, f32), s: &str, size: f32, anchor: Anchor,
     }
 }
 
-/// Rasterise primitives onto a new pixmap.
+/// Rasterize primitives onto a new pixmap.
 pub fn render(
     layers: &[&Primitives],
     width: u32,
@@ -148,7 +148,7 @@ mod tests {
     use crate::primitives::Monospace;
 
     #[test]
-    fn a_chart_rasterises_with_ink_on_it() {
+    fn a_chart_rasterizes_with_ink_on_it() {
         let m = Monospace::default();
         let c = Chart::new(
             Rect { x: 60.0, y: 20.0, width: 400.0, height: 200.0 },

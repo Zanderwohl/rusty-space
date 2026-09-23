@@ -179,6 +179,16 @@ impl Frame {
 pub struct MapView {
     pub orbit: em_map::Orbit,
     pub plane: em_map::Plane,
+    /// What [`em_map::Plane::System`] resolves against: the plane this craft *believes* the
+    /// local system's planets share, refreshed as it learns and as it moves between systems.
+    ///
+    /// The belief and not a bare pole, because the panel has to be able to say why the option is
+    /// unavailable — a craft that has solved no orbits has no system plane, and offering one
+    /// would be drawing a frame nobody measured.
+    ///
+    /// Held beside the camera for the reason the rest of this struct is held together: the
+    /// angles are measured against this basis, so the two cannot be a frame apart.
+    pub system_plane: lc_world::knowledge::SystemPlane,
     /// A key rather than a position: Saturn moves, and a camera pointed at where it was is a
     /// camera that drifts off it over an afternoon.
     pub focus: MapFocus,
@@ -192,6 +202,40 @@ pub struct MapView {
     /// leaving it leaves the camera where it is.
     pub bearing: Option<f64>,
     pub source: crate::map_source::Source,
+}
+
+impl MapView {
+    /// The reference plane as the geometry needs it: resolved against the system in view.
+    ///
+    /// Everything that casts a ray, measures a height or reads a bearing goes through this, so
+    /// the camera and the plane it is angled against cannot disagree.
+    ///
+    /// **A system plane nobody has solved falls back to the galactic one**, which this craft
+    /// knows from the catalog and which needs nothing measured. Falling back to `+Z` laid
+    /// every unsolved system's rings in the ecliptic of J2000 -- Sol's plane, shown around a
+    /// star nobody has surveyed, which is the exact mistake `25-system-knowledge.md` opens by
+    /// describing.
+    pub fn resolved_plane(&self) -> em_map::Plane {
+        match (self.plane, self.believed_pole()) {
+            (em_map::Plane::System, None) => em_map::Plane::Galactic,
+            (plane, _) => plane,
+        }
+    }
+
+    pub fn datum(&self) -> em_map::Datum {
+        self.resolved_plane().about(self.believed_pole().unwrap_or(DVec3::Z))
+    }
+
+    /// The believed pole, or `None` when this craft has not solved one.
+    ///
+    /// `Circle` is not a pole: a craft that has only watched transits from one place knows the
+    /// pole lies somewhere on a great circle, which is not enough to lay rings in.
+    pub fn believed_pole(&self) -> Option<DVec3> {
+        match self.system_plane {
+            lc_world::knowledge::SystemPlane::Known { pole, .. } => Some(pole),
+            _ => None,
+        }
+    }
 }
 
 /// Which craft the camera is behind.
@@ -561,6 +605,43 @@ impl UiState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lc_world::knowledge::SystemPlane;
+
+    /// **The map lays its rings in the plane the crew solved, not the one the generator used.**
+    /// A craft that has solved nothing gets a usable frame rather than a degenerate one, and the
+    /// panel is what refuses the option -- see `map_panel::unsolved`.
+    #[test]
+    fn the_maps_plane_follows_the_belief() {
+        let pole = DVec3::new(0.2, -0.4, 0.89).normalize();
+        let mut view = MapView {
+            plane: em_map::Plane::System,
+            system_plane: SystemPlane::Known { pole, sigma_rad: 0.01, zero: DVec3::X },
+            ..MapView::default()
+        };
+        assert_eq!(view.believed_pole(), Some(pole));
+        assert!((view.datum().normal() - pole).length() < 1.0e-12);
+
+        // A pole somewhere on a circle is not a pole: it cannot be laid rings in.
+        // A pole somewhere on a circle is not a pole. The map falls back to the galactic
+        // plane, which needs nothing solved -- not to +Z, which is Sol's plane and would be a
+        // measurement of one system shown around another.
+        let galactic_normal = em_map::Plane::Galactic.about(DVec3::Z).normal();
+        view.system_plane = SystemPlane::Circle(DVec3::X);
+        assert_eq!(view.believed_pole(), None);
+        assert_eq!(view.resolved_plane(), em_map::Plane::Galactic);
+        assert_eq!(view.datum().normal(), galactic_normal, "a frame it knows, not Sol's");
+
+        view.system_plane = SystemPlane::Unknown;
+        assert_eq!(view.believed_pole(), None);
+        assert_eq!(view.datum().normal(), galactic_normal);
+        assert!((galactic_normal - DVec3::Z).length() > 0.5, "the two frames are not the same");
+
+        // The galactic frame needs nothing solved and is the same in every system.
+        view.plane = em_map::Plane::Galactic;
+        let galactic = view.datum();
+        view.system_plane = SystemPlane::Known { pole, sigma_rad: 0.01, zero: DVec3::X };
+        assert_eq!(view.datum(), galactic, "a belief moved the galactic plane");
+    }
 
     #[test]
     fn panels_stack_in_the_order_they_were_opened() {

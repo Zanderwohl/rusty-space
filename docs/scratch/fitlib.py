@@ -40,7 +40,7 @@ def kepler_H(m, e):
     return H
 
 def model(p, t):
-    """t in seconds from J2000; returns position in metres."""
+    """t in seconds from J2000; returns position in meters."""
     ndeg, a, e, inc, raan0, argp0, m0, argp_rate, raan_rate = p
     d = t / DAY
     m = (m0 + ndeg * d) * D2R
@@ -53,7 +53,7 @@ def model(p, t):
         nu = 2 * math.atan2(math.sqrt(e + 1) * math.tanh(H / 2), math.sqrt(e - 1))
     denom = 1 + e * math.cos(nu)
     # For e > 1, cos(nu) = -1/e is the asymptote where r diverges. A fit iterate can land
-    # exactly there; clamp so the residual stays finite and the optimiser can back out.
+    # exactly there; clamp so the residual stays finite and the optimizer can back out.
     if abs(denom) < 1e-12:
         denom = math.copysign(1e-12, denom or 1.0)
     r = a * (1 - e * e) / denom

@@ -206,7 +206,7 @@ fn identity_section(
                 ui.add_enabled(false, egui::Label::new(id.as_str()));
             });
 
-            changed |= fields::row(ui, "Designation", "Catalogue designation, if it has one", |ui| {
+            changed |= fields::row(ui, "Designation", "Catalog designation, if it has one", |ui| {
                 let mut designation = info.designation.clone().unwrap_or_default();
                 if ui
                     .add(egui::TextEdit::singleline(&mut designation).desired_width(180.0))

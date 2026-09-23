@@ -3,7 +3,7 @@
 //! Two bearings from places a baseline `B` apart differ by the parallax, `B / d` radians,
 //! which is the whole distance measurement. See `lightcone/docs/22-provenance.md`.
 
-use glam::DVec3;
+use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
 
 /// Centroiding beats the diffraction limit by the signal-to-noise ratio, down to this fraction
@@ -12,6 +12,15 @@ pub const CENTROID_FLOOR: f64 = 1e-3;
 
 /// Parallax signal-to-noise below which a distance is only a lower bound.
 pub const PARALLAX_SNR: f64 = 2.0;
+
+/// Best fractional precision on a resolved disc's angular diameter.
+///
+/// The counterpart of [`CENTROID_FLOOR`] for a size rather than a position, and a floor for a
+/// different reason: the limb of a real body is not a step, and how it darkens toward the edge
+/// is a model rather than a measurement. Real interferometric stellar diameters do worse than
+/// this; a planet's sharp edge does better, and one number for both is as much as an instrument
+/// that cannot tell which it is looking at can claim.
+pub const LIMB_FLOOR: f64 = 1.0e-3;
 
 /// Diameter of a filled circular aperture of this area.
 pub fn diameter_m(aperture_m2: f64) -> f64 {
@@ -81,11 +90,83 @@ pub fn baseline_rad(bearings: &[Bearing], star_ly: DVec3) -> f64 {
     widest
 }
 
+/// Bearings spread by more than this about their mean are solved by [`intersect`] instead.
+///
+/// Radians. The two solvers fail in each other's regime and nowhere else: at this spread the
+/// 3x3 system's condition number is about 800, which f64 inverts without complaint, and at the
+/// 1e-6 of a star 25 ly off over an AU baseline it is 1e12, which it does not. The regression
+/// below runs in a frame that is a projection about the mean bearing, so it needs the bearings
+/// to share a direction and has nothing to say about a source seen from all round it.
+pub const WIDE_RAD: f64 = 0.05;
+
+/// Smallest determinant, against the cube of the matrix's own largest entry, that
+/// [`intersect`] will invert.
+const CONDITION: f64 = 1.0e-12;
+
+/// Least squares intersection of the lines of sight themselves:
+/// `sum (I - u u^T) x = sum (I - u u^T) p`.
+///
+/// What makes that matrix invertible is the bearings pointing in genuinely different
+/// directions, so this is only for a source near enough that they do. The ship's own sun 5 AU
+/// off, seen from around an orbit, is the case it exists for, and the case the regression in
+/// [`triangulate`] cannot take at all.
+///
+/// Two passes, because the measurement is an angle and the residual is a length: the first
+/// finds where the source roughly is, the second weights each bearing by `sigma_rad * range`,
+/// which is what its miss distance is actually worth.
+fn intersect(bearings: &[Bearing]) -> Option<Distance> {
+    let across = |u: DVec3| DMat3::IDENTITY - DMat3::from_cols(u * u.x, u * u.y, u * u.z);
+    let solve = |weight: &dyn Fn(&Bearing) -> f64| {
+        let mut normal = DMat3::ZERO;
+        let mut rhs = DVec3::ZERO;
+        for b in bearings {
+            let w = weight(b);
+            let p = across(b.toward);
+            normal += p * w;
+            rhs += (p * b.observer_ly) * w;
+        }
+        (normal, rhs)
+    };
+    // Against the matrix's own scale, not against zero: the entries are `1 / sigma^2` and run
+    // to 1e18, so a determinant of 1e40 is singular and `> 0.0` would have accepted it.
+    let inverse = |normal: DMat3| {
+        let scale = normal.to_cols_array().iter().fold(0.0f64, |m, e| m.max(e.abs()));
+        (normal.determinant().abs() > CONDITION * scale * scale * scale)
+            .then(|| normal.inverse())
+    };
+    let angular = |b: &Bearing| 1.0 / (b.sigma_rad * b.sigma_rad).max(f64::MIN_POSITIVE);
+    let (normal, rhs) = solve(&angular);
+    let rough = inverse(normal)? * rhs;
+
+    let weight = |b: &Bearing| {
+        let miss = b.sigma_rad * rough.distance(b.observer_ly);
+        1.0 / (miss * miss).max(f64::MIN_POSITIVE)
+    };
+    let (normal, rhs) = solve(&weight);
+    let covariance = inverse(normal)?;
+    let position_ly = covariance * rhs;
+    // The covariance is the inverse of the normal matrix once the weights are lengths. Report
+    // it along the mean line of sight, which is what `Distance::Measured` documents.
+    let toward = bearings
+        .iter()
+        .map(|b| (position_ly - b.observer_ly).normalize_or_zero())
+        .sum::<DVec3>()
+        .normalize_or(DVec3::Z);
+    let variance = toward.dot(covariance * toward);
+    if !position_ly.is_finite() || !variance.is_finite() || variance < 0.0 {
+        return None;
+    }
+    Some(Distance::Measured { position_ly, sigma_ly: variance.sqrt() })
+}
+
 /// Least squares over every bearing, in a frame whose `z` is the mean bearing.
 ///
 /// A regression of transverse position on slope, not the 3x3 system
 /// `sum (I - u u^T) x = sum (I - u u^T) p`: that matrix's smallest eigenvalue is the parallax
-/// squared, 1e-12 of the others at 25 ly over an AU, so inverting it in f64 returns noise.
+/// squared, 1e-12 of the others at 25 ly over an AU, so inverting it in f64 returns noise. For
+/// a source near enough that the bearings to it spread by more than [`WIDE_RAD`] the same
+/// matrix is well conditioned and this projection is the thing that breaks, so [`intersect`]
+/// takes that case.
 #[allow(clippy::indexing_slicing)] // axes are 0 and 1 of two-element arrays and a vector
 pub fn triangulate(bearings: &[Bearing]) -> Distance {
     let weight = |b: &Bearing| 1.0 / (b.sigma_rad * b.sigma_rad).max(f64::MIN_POSITIVE);
@@ -100,6 +181,16 @@ pub fn triangulate(bearings: &[Bearing]) -> Distance {
         .normalize_or_zero();
     if z == DVec3::ZERO {
         return Distance::Unknown;
+    }
+    // A source close enough to be seen from around belongs to the other solver, and the
+    // widest bearing decides rather than an average: one bearing past the gate below is one
+    // the regression would silently drop.
+    let widest = bearings
+        .iter()
+        .map(|b| b.toward.angle_between(z))
+        .fold(0.0, f64::max);
+    if widest > WIDE_RAD {
+        return intersect(bearings).unwrap_or(Distance::Unknown);
     }
     let (x, y) = z.any_orthonormal_pair();
     let origin = bearings
@@ -207,6 +298,101 @@ mod tests {
                 sighted(star, at, sigma, i)
             })
             .collect()
+    }
+
+    /// The ship's own sun, 5 AU off, seen from all round a 5 AU orbit: every other number in
+    /// its system hangs off this one, and the regression cannot take it at all -- bearings
+    /// spread over a circle have no mean direction to project about.
+    #[test]
+    fn a_ship_measures_the_distance_to_its_own_sun() {
+        let star = DVec3::new(2.0, -1.0, 0.5);
+        let radius = 5.0 * AU_LY;
+        // The centroid floor of a ship's telescope in V: resolution times CENTROID_FLOOR.
+        let sigma = 2.979e-7 * CENTROID_FLOOR;
+        let bearings: Vec<Bearing> = (0..crate::knowledge::BEARINGS_KEPT as u64)
+            .map(|i| {
+                let phase = std::f64::consts::TAU * i as f64 / crate::knowledge::BEARINGS_KEPT as f64;
+                let at = star + DVec3::new(phase.cos(), phase.sin(), 0.0) * radius;
+                sighted(star, at, sigma, i)
+            })
+            .collect();
+
+        let Distance::Measured { position_ly, sigma_ly } = triangulate(&bearings) else {
+            panic!("a sun seen from around its own orbit is measurable: {:?}", triangulate(&bearings))
+        };
+        let error = position_ly.distance(star);
+        assert!(error < 5.0 * sigma_ly, "{error} ly out against a sigma of {sigma_ly}");
+        assert!(
+            sigma_ly / radius < 1.0e-8,
+            "a part in {} of 5 AU is not enough for 1% planet radii",
+            radius / sigma_ly
+        );
+    }
+
+    /// The gate is on the widest bearing and not on an average, because one bearing outside it
+    /// is one the regression drops in silence.
+    #[test]
+    fn the_solver_switches_on_how_far_the_bearings_spread() {
+        let star = DVec3::new(10.0, 0.0, 0.0);
+        let sigma = 1.0e-9;
+        // A baseline wide enough that the bearings to a star 10 ly off stay well inside the
+        // gate, so this is the regression's case however many bearings there are.
+        let narrow: Vec<Bearing> = (0..8)
+            .map(|i| sighted(star, DVec3::Y * AU_LY * i as f64, sigma, i))
+            .collect();
+        let widest = narrow
+            .iter()
+            .map(|b| b.toward.angle_between(narrow[0].toward))
+            .fold(0.0, f64::max);
+        assert!(widest < WIDE_RAD, "{widest} rad should be the regression's");
+        assert!(matches!(triangulate(&narrow), Distance::Measured { .. }));
+
+        // The same star, but with one bearing taken from far enough off to spread past the
+        // gate. The intersection must take it and must still land on the star.
+        let mut wide = narrow.clone();
+        wide.push(sighted(star, DVec3::Y * 1.0, sigma, 99));
+        let Distance::Measured { position_ly, .. } = triangulate(&wide) else {
+            panic!("the intersection takes the wide case")
+        };
+        assert!(position_ly.distance(star) < 1.0e-3, "{position_ly} against {star}");
+    }
+
+    /// A wider orbit is a wider baseline and buys precision on everything out in the sky,
+    /// linearly. The host star is the one thing it does not help: it sits at the center of the
+    /// orbit, so the baseline and the range to it grow together.
+    #[test]
+    fn a_wider_orbit_buys_the_sky_and_not_the_sun() {
+        let star = DVec3::new(2.0, -1.0, 0.5);
+        let far = star + DVec3::X * 10.0;
+        let sigma = 2.979e-7 * CENTROID_FLOOR;
+        let round = |radius: f64, target: DVec3, salt: u64| -> f64 {
+            let bearings: Vec<Bearing> = (0..16u64)
+                .map(|i| {
+                    let phase = std::f64::consts::TAU * i as f64 / 16.0;
+                    let at = star + DVec3::new(phase.cos(), phase.sin(), 0.0) * radius;
+                    sighted(target, at, sigma, i + salt)
+                })
+                .collect();
+            match triangulate(&bearings) {
+                Distance::Measured { sigma_ly, .. } => sigma_ly,
+                other => panic!("{radius} ly orbit gave {other:?}"),
+            }
+        };
+
+        let (near, wide) = (1.0 * AU_LY, 30.0 * AU_LY);
+        let gain = round(near, far, 500) / round(wide, far, 500);
+        assert!(
+            (gain - 30.0).abs() < 1.0,
+            "thirty times the baseline is {gain} times the precision"
+        );
+
+        // And the sun's own fractional precision is the same from either orbit.
+        let host = |radius: f64| radius / round(radius, star, 0);
+        let (close, out) = (host(near), host(wide));
+        assert!(
+            (close / out - 1.0).abs() < 0.2,
+            "a part in {close:e} from 1 AU against {out:e} from 30"
+        );
     }
 
     #[test]

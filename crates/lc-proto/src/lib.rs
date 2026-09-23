@@ -271,7 +271,7 @@ pub struct Motion {
     /// Which way the nose points. Carried because a turn takes time and is as often as not
     /// half finished — nothing in a trajectory says where a nose had got to.
     pub attitude: [f64; 3],
-    /// Seconds on the ship's own clock, which no resynchronising may change.
+    /// Seconds on the ship's own clock, which no resynchronizing may change.
     pub clock_s: f64,
     pub drive: Drive,
     pub motive: Motive,
@@ -300,9 +300,9 @@ pub enum Order {
     SetCourse { course: Course, accel_g: f64, max_beta: f64 },
     /// Cross to another star, at this acceleration.
     ///
-    /// The star is named by **catalogue id**, not by position. A position would let a client
+    /// The star is named by **catalog id**, not by position. A position would let a client
     /// fly to somewhere it invented; an id can only name a star the server also holds, which
-    /// it does because both ends are given the same packed catalogue — see the shard's
+    /// it does because both ends are given the same packed catalog — see the shard's
     /// `--sky` in `lightcone/docs/15-runbook.md`. The server resolves the id and folds a
     /// coordinate, so the two never plan against different places.
     ///
@@ -331,14 +331,14 @@ pub enum Order {
     /// and the ship keeps whatever velocity the approach or the station left it with, on whatever
     /// conic that is.
     BreakOff,
-    /// Rebuild towards this loadout. Refused while under way.
+    /// Rebuild toward this loadout. Refused while under way.
     Refit { target: Loadout },
     /// Stop a refit where it is; the step in progress is reversed.
     CancelRefit,
     /// Put a message on the air, for `to`, pointed `aim`, readable by `secrecy`.
     ///
     /// **Three independent choices, and keeping them independent is the whole design.** Who it
-    /// is addressed to says where the reply goes and whose acknowledgements ride with it.
+    /// is addressed to says where the reply goes and whose acknowledgments ride with it.
     /// Where it is pointed says who *hears* it. Whether it is sealed says who can *read* it.
     /// A player who conflates them broadcasts a private message in clear across a system, which
     /// is a mistake the interface should let them make.
@@ -517,7 +517,7 @@ pub struct Presence {
 /// }
 /// ```
 ///
-/// Deserialising one is not a hole in that, and it is worth being exact about why. A `Cleared`
+/// Deserializing one is not a hole in that, and it is worth being exact about why. A `Cleared`
 /// read off the wire is a claim by whoever sent it — it says *a server released this*, not
 /// *this passed our gate*. The invariant is about what a process emits, and a server only ever
 /// emits ones it built with [`Cleared::clear`]; the client is the end that decodes them.
@@ -583,7 +583,7 @@ impl<T> Cleared<T> {
 
 /// A book on the shelf.
 ///
-/// A mirror of the catalogue rather than the catalogue's own type, for the reason the rest of
+/// A mirror of the catalog rather than the catalog's own type, for the reason the rest of
 /// this crate is a mirror: `lc-books` is a zip and an XML parser, and a protocol that borrowed
 /// its types would put both in every client's wire layer and make every change to how a book is
 /// parsed a change to the protocol. The two agree by being converted at the edge.
@@ -1285,6 +1285,10 @@ mod tests {
         Outbound::Observing { duty: Duty::Watch { stars: vec![3, 4], dwell_s: 90.0, started_s: 5.0 }, integration_s: 2.0e3 }
     }
 
+    fn surveying() -> Outbound {
+        Outbound::Observing { duty: Duty::Survey { star: 11, started_s: 5.0 }, integration_s: 2.0e3 }
+    }
+
     fn learned() -> Outbound {
         Outbound::Learned { report: "{}".into() }
     }
@@ -1392,6 +1396,7 @@ mod tests {
             ("Order::SetDuty", encode(&set_duty()), golden::SET_DUTY),
             ("Order::NameIt", encode(&name_it()), golden::NAME_IT),
             ("Outbound::Observing", encode(&observing()), golden::OBSERVING),
+            ("Outbound::Observing (survey)", encode(&surveying()), golden::SURVEYING),
             ("Outbound::Learned", encode(&learned()), golden::LEARNED),
         ] {
             assert_eq!(bytes, pinned, "{what} changed shape at protocol version {PROTOCOL_VERSION}");
@@ -1525,6 +1530,14 @@ mod tests {
                 order: Order::SetDuty {
                     duty: Duty::Watch { stars: vec![1, 2, u64::MAX], dwell_s: 400.0, started_s: 9.0 },
                     integration_s: 0.0,
+                },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::SetDuty {
+                    duty: Duty::Survey { star: 11, started_s: 0.0 },
+                    integration_s: 1.0e4,
                 },
                 issued_at_client_t: 0,
             }),

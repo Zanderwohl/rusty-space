@@ -141,7 +141,7 @@ takes a viewport of its own — the corner square — while the map is up.
 
 Stars are points with a physically-derived color and brightness, not billboards with a
 fixed sprite. The existing path is `src/presentation/local_starfield*.rs` with
-`src/catalog/spectral_color.rs`, driven by the HYG catalogue.
+`src/catalog/spectral_color.rs`, driven by the HYG catalog.
 
 `em-render::relativistic_starfield_material` is the descendant that the game uses, with
 `crates/lc-client/assets/shaders/starfield.wgsl`. It keeps the technique — one mesh, four
@@ -153,7 +153,7 @@ baked.
 |---|---|---|
 | baked per star | linear RGB, brightness, size | temperature, radius, position |
 | derived per frame | nothing | direction, aberration, Doppler, bands, exposure, size |
-| brightness from | catalogue apparent magnitude | `L / d^2` through the band mapping |
+| brightness from | catalog apparent magnitude | `L / d^2` through the band mapping |
 | positions | unit directions, fixed | light-years from a bake origin that follows the ship |
 
 ### The corona
@@ -166,7 +166,7 @@ it. It has no eyes, only a pipeline, and the band matrix is already handed to th
 exactly those grounds — a corona it chooses to render is the same kind of decision.
 
 The structure is ridged fractal noise, and the one idea that makes it work is **sampling on the
-normalised offset in the plane of the sky**. Normalising discards the distance out and leaves
+normalized offset in the plane of the sky**. Normalizing discards the distance out and leaves
 only the angle around the star, so the field is constant along every ray and every feature
 comes out radial without being asked for. The sample direction leans along the line of sight as
 it goes out, so threads evolve rather than being straight spokes.
@@ -250,7 +250,7 @@ warm in the thermal preset without any separate machinery.
 
 What this does not carry is a colored albedo. Mars comes out the Sun's color rather than its
 own, because the model says reflected light has the star's spectrum. A per-body albedo color is
-the next thing this wants, and the preset carries a visualisation color rather than a measured
+the next thing this wants, and the preset carries a visualization color rather than a measured
 albedo, so it wants a real table too.
 
 ### Where the bodies come from
@@ -290,7 +290,7 @@ core is a fraction of it. A single filled disc made a star a hundred and sixty p
 into a flat white ball with its actual disc swamped inside.
 
 The reason for the split is that the observer moves. Baking a color is right when the only
-input is a catalogue magnitude and wrong when aberration, Doppler shift, the band matrix and the
+input is a catalog magnitude and wrong when aberration, Doppler shift, the band matrix and the
 exposure all change while the ship flies: re-uploading four `vec4`s per star per frame does not
 scale to the target count, and computing them from a temperature costs nothing.
 
@@ -305,13 +305,13 @@ Positions are baked relative to an origin that follows the ship, with the ship's
 that origin as a uniform, so the shader differences two small numbers instead of two
 interstellar ones. The mesh is rebuilt once per light-year of travel.
 
-For the game, the brightness fed to that shader is not the catalogue's apparent magnitude.
+For the game, the brightness fed to that shader is not the catalog's apparent magnitude.
 It is `L(n, t_r) / d^2` from [04-stellar-photometry.md](04-stellar-photometry.md), evaluated
 for the camera's direction and retarded time. A star that a rival's swarm is occluding is
 dimmer in the sky, and it is dimmer because of the same function the telescope samples. The
 starfield and the science instrument must not be two implementations.
 
-Note the existing catalogue rotation: HYG is equatorial, the sim is ecliptic. That
+Note the existing catalog rotation: HYG is equatorial, the sim is ecliptic. That
 conversion already exists and is the sort of thing that silently puts everything 23.4 degrees
 out of place if duplicated.
 
@@ -431,9 +431,9 @@ optical depth is that column times that band's own coefficient, so seven bands c
 did. Only the conversion at the end differs, and it is seven exponentials and a matrix.
 
 **The level is a display decision; only the color is physics.** A belt's real surface
-brightness is four decades under a star's and renders as nothing at all in every normalised
+brightness is four decades under a star's and renders as nothing at all in every normalized
 preset — true photometrically and useless as a picture, which is the argument the fourth root
-already settles for the opacity. So the source spectrum is normalised to put the brightest
+already settles for the opacity. So the source spectrum is normalized to put the brightest
 display channel at a fixed level, and what carries the information is the *balance* between
 the channels and the per-band opacity. A population stays legible in a band its light barely
 reaches while still saying which band it is being seen in.
@@ -508,10 +508,49 @@ the noise underneath them is new. `src/surfaces.rs` is the routing; `src/procedu
 
 **A body can have a world of its own.** One named under `[bodies]` takes that graph in color, and
 its color replaces the class's pattern and palette, baked into six 1024² sRGB faces. One named
-under `[clouds]` has a cloud deck drawn over the surface. The graphs under `textures/worlds/` are
-types of planet — an earthlike, a marslike and an earthlike cloud deck — rather than maps, and the
-bundled system's Earth and Mars wear them until something generates surfaces of its own. The
-clouds are painted on the surface, not a shell above it, and turn with it.
+under `[clouds]` has a cloud deck drawn over the surface. The clouds are painted on the surface,
+not a shell above it, and turn with it.
+
+**Every rocky world with air is one graph.** Earth and Mars used to be two graphs, an earthlike
+and a marslike, and they are really two points on one spectrum. `worlds/rocky.tgraph` is that
+spectrum: its parameters are sea level, ice, life, rust, sand, aridity and dark provinces, and
+the client binds them per body before the bake. What they are bound *to* is
+`lc_world::climate`, which derives them from what the world is — the sea's share of the surface
+from the water's share of the mass (logistic in its logarithm, through Earth's 71 per cent at
+Earth's 2.3e-4), the ice from the surface temperature capped by how much water there is to
+freeze, the green from a temperate sea, the rust from dry ground under air. The generator states
+a planet's water and its life as `em-sim` tags beside its air and top, so a generated world
+arrives with all of it; a body whose life nobody stated is taken to be alive where its sea is
+temperate.
+
+**Growth is the color its star leaves.** A pigment is worth making where the photons are, so
+what a plant reflects is what its star sends least usefully — the argument of Kiang et al.
+(2007), taken for its ordering rather than its spectra. `climate::foliage` puts gold under a hot
+white star, green under the Sun, crimson under a cool orange one and near-black under a red
+dwarf, which gives little of anything, so a dimmer star makes darker growth. The anchors lerp in
+Oklab rather than round the hue circle, which would put a blue forest between green and red, and
+both ends are kept off rust's hue, or growth reads as bare red ground. It reaches the graph as two
+color parameters, `foliage` and `foliage high`.
+
+![Growth under stars from 3600 K to 9200 K](../images/foliage.png) Earth, Mars, Venus and Titan are measured instead, for the reason `worlds` measures them.
+
+A parameter is not a share, so the client carries two measured tables — `SEA_LEVELS` and
+`ICE_LEVELS` in `surfaces.rs` — from each parameter to the share of the sphere it covers, and a
+test evaluates the graph over the sphere and several seeds and holds the tables to it. An edit
+to the graph that moves the coastline fails there. The ice's edge is at `|sin latitude| = 1 -
+ice` only on average; a coarse and a fine noise rag it, and high ground holds it further out.
+
+Every world with air wears the same cloud deck, `worlds/earthlike-clouds.tgraph`, and its climate
+says how much of it: a `cover` added to the deck's drive (zero is Earth, a fifth below is the
+scattered wisps of a dry world, one is a deck with no break in it), an `opacity`, and a tint. Mars
+is at `-0.17` and half opacity, which is more than Mars really has; exaggerated a little so the
+wisps show. Venus and Titan are the unbroken decks, pale yellow and orange.
+
+`--wear "<generated planet>"` dresses the body `--at` names in a generated planet's climate, so
+the generator's worlds can be photographed without flying to them; `--standoff <radii>` brings
+the camera in.
+
+![A smattering of generated worlds](../images/rocky-worlds.png)
 
 **A cloud deck evolves.** Its graph is not baked in color. Its weather, the `zonal` layer, is
 baked again every two game days with a new seed, one byte a texel into one of three 1024² slots;
@@ -524,6 +563,82 @@ drawn alone, so the shear never exceeds a period's worth. Keyframes come from co
 so every client draws the same weather. The shader holds the graph's density ramp and cloud
 palette as constants, and `surfaces.rs`'s tests hold those to the graph's own output: an edit to
 that end of the graph fails there rather than silently not showing.
+
+**Every band sees its own ground.** The color cubemap says what a world looks like to an eye and
+nothing about the bands past it: that a forest is the brightest ground there is in I (the red
+edge), that the sea is black past the visible, that snow goes dark in K. So beside the color the
+client bakes four of rocky.tgraph's own layers as masks — `land`, `ice`, `green` and `sand
+amount` — and the shader mixes six kinds of ground by them, in the graph's own order: ice over
+everything, land over water, growth over dry ground, sand over rock. Each ground's reflectance
+per band is `lc_world::ground`, shaped after laboratory spectra, and rock runs from basalt to
+Mars's dust by the world's `rust`. The host puts each through the current band mapping and
+through the natural one, and the shader scales the color by the ratio of the two mixes: the
+color keeps its detail, is exactly itself in the natural mapping, and a channel carrying I
+rather than R takes the forest's red edge instead of its red. The cloud deck takes the same ratio
+for water cloud, which is why clouds go cyan with K on the red channel.
+
+![Earth, a gold-forested world and Mars through four band mappings](../images/bands.png)
+
+**Every fragment has its own temperature.** A world with a climate no longer glows as one
+blackbody. Each ground has an emissivity per band — Kirchhoff's `1 - reflectance` where it
+reflects, measured values at ten microns and 21 cm — and a thermal inertia, the share of a day's
+swing it damps: the sea almost all of it, dry sand almost none. The air evens things further by
+the climate's `evens`, all the way for Venus and hardly at all for Mars. The shader works out the
+ground's temperature from the sun over it, blending the instantaneous balance toward its
+latitude's daily mean by that damping. The hottest hour lands after noon, east of the point
+under the star, by as much as the ground is damped, and the day's heat drains away after sunset
+over a width that grows with it. Cloud tops are cold, and a cloud's emissivity is its opacity,
+so it hides the ground at ten microns and not at 21 cm.
+
+Each band then radiates its Planck ratio against the body's mean temperature, weighted by the
+host's table of what that band alone adds to each display channel: at the mean temperature with
+unit emissivity the table sums to exactly the blackbody the host used to send, under every
+mapping, and a test holds it there. The ratio is written so neither exponent overflows, because
+the blue end at a hundred kelvin is `exp(300)`, and so radio's tiny exponent does not round away.
+A world with its own temperatures is metered on its day side: metered at its mean, the day side
+sat three stops over and the disc was one clipped circle.
+
+So the sea and its air keep a world glowing through the night, and a desert goes dark at dusk.
+`--phase <deg>` stands `--at` at that angle between the star and the camera, so the night side
+can be photographed.
+
+![Day and night at ten microns](../images/thermal.png)
+
+**The air is per band too.** A climate states its gas and haze in V, and `Air::in_band` carries
+them to every band: gas as Rayleigh's inverse fourth power, haze nearly gray, and neither
+scattering at ten microns or 21 cm. The host averages each band's depths onto the display
+channels by the starlight the current mapping puts on each from it, so the shader's march is
+unchanged and still three channels wide — but a channel carrying K sees through the sky, and the
+blue limb is blue only where blue is. What the air does at ten microns is absorb: its `infrared`
+depth takes the ground's heat along the ray and gives out its own, at 0.85 of the body's mean
+temperature, in its place. Earth's is small, because ten microns is the window its water and
+carbon dioxide leave open; Venus's is opaque, so its disc is its air's. The shell draws the same
+glow along the limb, where the column is sixteen times deeper, so the limb glows at ten microns
+as it scatters in the visible.
+
+![The air through four band mappings](../images/air.png)
+
+**Air.** A world with a climate has air, drawn as single scattering in two parts: gas, blue as the
+inverse fourth power of the wavelength, and a haze that scatters forward in its own color —
+Mars's dust, which eats blue, Titan's tholins, and thin water haze everywhere else. Both are
+exponential in height, with a scale height exaggerated about twentyfold, so a limb shows at the
+distances a ship sees planets from. `scatter.wgsl` is the integral, shared by two draws:
+
+- the surface, which scatters it over the disc — dimming what leaves the ground, reddening the
+  beam that reaches it, and adding what the air sends the eye — before its own tone map, so the
+  terminator and the limb are one curve;
+- a shell six scale heights up, drawn additively on back faces with no depth write, for the limb
+  against space. Over the disc its back faces are behind the body, which writes depth, so it
+  draws only the limb and needs no test of its own.
+
+Three things here were found by looking. The planet's shadow has to be soft: a hard test lights
+each of a march's samples wholly or not at all, and the terminator came out in bands, one a
+sample. A ray through the body now just keeps descending into air the exponential makes as dense
+as it likes. Air scattered from white starlight was three times too bright against a ground whose
+albedo is its cubemap times its class's, so the air takes the ground's own scale. And single
+scattering loses what the beam gives the sky, so clouds seen through air came out the color of a
+sunset: most of what the air takes from the beam is handed back to the ground, and a share of
+haze's phase is isotropic for the same reason, or a dusty limb reads darker than the ground under it.
 
 Any graph here is sampled on the sphere, so it may use only what means the same thing there:
 Color, Noise, Coordinate, Mix, MinMax and Wave; a Map, whose palette texture-graph bakes on a
@@ -608,7 +723,7 @@ contributes nothing, which is the real 1.1 magnitude swing over Saturn's ring cy
 ### Two numbers that had to be found by looking
 
 **The opacity mapping is a fourth root.** Covering fraction spans fourteen decades: an asteroid
-belt covers 2.6e-12 of its star's sky, a Kuiper analogue 3e-8, a half-built swarm 0.4. Linearly,
+belt covers 2.6e-12 of its star's sky, a Kuiper analog 3e-8, a half-built swarm 0.4. Linearly,
 everything natural is exactly zero and only a technosignature shows — true photometrically and
 useless as a picture, for the same reason a linear tone map of sixty stops renders a black sky.
 
@@ -629,7 +744,7 @@ inside the Kuiper belt by nothing at all and the view from inside the asteroid b
 eighth. What it still sets is the band against the *stars*, which is the comparison that
 matters.
 
-An envelope is a visualisation either way — an orbit line, not a photograph. What it carries
+An envelope is a visualization either way — an orbit line, not a photograph. What it carries
 honestly is the ordering.
 
 ### The rest
@@ -672,7 +787,7 @@ and they are ordinary bodies.
 The object count per frame is bounded by what is *visible*, not by what exists. The
 light-cone cursor from [02-event-store.md](02-event-store.md) already yields sources in
 arrival order and prunes by strength, so the renderer takes the first N and stops. A sky
-with 120 000 catalogue stars draws as one instanced point cloud. A swarm is not drawn from
+with 120 000 catalog stars draws as one instanced point cloud. A swarm is not drawn from
 its members, because it has none: the renderer samples the population's distribution to
 generate as many representative instances as the current LOD calls for, seeded so the same
 swarm looks the same every frame and from every client. Instance count is a rendering
@@ -736,7 +851,7 @@ ships varying in size costs no protocol version.
 **The nose follows the drive, not the velocity.** `lc_world::motion::facing` reads what the
 current motive is *aiming* at — see `lc_world::attitude` — which is the thrust where there is
 thrust. Proper acceleration, so a ballistic arc counts as unpowered rather than pointing at
-whatever it is falling towards. The visible consequence is the right one: a crossing is burn,
+whatever it is falling toward. The visible consequence is the right one: a crossing is burn,
 flip and burn, so for its whole second half the ship points back the way it came while still
 traveling forward at a large fraction of `c`.
 
@@ -862,7 +977,7 @@ scaling red, which is not new information, it is a thumb on the scale.
 
 ### Why a hot plume is blue in thermal
 
-It is the preset working, not failing. `thermal` is normalised so a Sun-like spectrum is white
+It is the preset working, not failing. `thermal` is normalized so a Sun-like spectrum is white
 and an excess at ten microns is red, so red means *infrared-dominated*, which means cool. A
 fifty-thousand-kelvin plume gives channel shares of 0.06 / 0.10 / 0.84 — its thermal emission has
 left the infrared, exactly as an O star's has.
@@ -881,7 +996,7 @@ from — a ray grazing the side crosses almost nothing. Two traps, both paid for
   meters long an astronomical unit from the render origin, so the eye is of order `1e8` in the
   proxy's own units and `eye + direction * t` asks `f32` for a point near the origin as the
   difference of two numbers near `1e8`, where its spacing is about eight. Every sample comes out
-  quantised to nothing and the plume does not appear at all.
+  quantized to nothing and the plume does not appear at all.
 - The density is bounded by one. An earlier version had both a taper along the length *and* a
   `1/r²`, which between them made the column a hundred times deeper at the nozzle than at the
   mouth — every part of the cone landed above the top of the window and the whole thing was one
@@ -894,7 +1009,7 @@ filaments of cooler, sootier gas running the length of the plume. So a sample is
 rather than one: the march carries two columns, and the fragment colors them separately. Summing
 one column and tinting it afterwards averages the streaks away before they can be seen.
 
-The division of labour is the same one as everywhere else here. *That* the streaks are darker and
+The division of labor is the same one as everywhere else here. *That* the streaks are darker and
 redder is physics — a cooler blackbody, band-mapped exactly as the core is — with one honest
 correction: soot is the only constituent of a plume that is not optically thin, so it radiates as
 a graybody, at some emissivity below one. That emissivity is also what makes the streaks visible
@@ -946,7 +1061,7 @@ frozen client rate put a ship eight kilometers away five minutes in the past.
 
 ![Observer snapshot](../images/observer-snapshot.png)
 
-The client's session state drawn straight to a PNG by `em-plot`: four thousand catalogue
+The client's session state drawn straight to a PNG by `em-plot`: four thousand catalog
 stars shaded through the current band mapping, and the light curve the telescope has
 accumulated. The galactic plane is visible as the band across the sky map, star colors come
 from their own temperatures, and the curve is labeled with what it actually is — light from
@@ -983,7 +1098,7 @@ So the design question is the mapping, and the mapping belongs to the player.
 
 **Decided: the band-to-display matrix is user-controlled, with presets.** The player is a ship
 with no eyes, looking at the output of its own processing pipeline. Letting them reconfigure it
-is characterisation, not a compromise — and it is exactly what observational astronomy does,
+is characterization, not a compromise — and it is exactly what observational astronomy does,
 where every published image is a choice of filters mapped to three channels.
 
 ```rust
@@ -1007,7 +1122,7 @@ pub struct BandMapping {
 | composition | K, V, B | the gray-versus-reddening diagnostic, made visible: dust reads orange, a swarm reads neutral |
 | survey | V as luminance, 10 um as chroma | a monochrome sky in which only excess heat is colored |
 
-### A wide mapping has to be normalised
+### A wide mapping has to be normalized
 
 A preset whose three bands are far apart in wavelength cannot use weight 1 on each. A sun-like
 star delivers **88 times** more band-integrated radiance in V than at ten microns, so an
@@ -1015,7 +1130,7 @@ unweighted thermal mapping renders every ordinary star blue, and a swarm's therm
 beat its own star's visible light before it shows at all. Everything under about half coverage
 stays invisible. The physics was right and the mapping could not show it.
 
-`BandMapping::direct_normalised` weights each channel by `1 / B_band(5772 K)`, so a sun-like star
+`BandMapping::direct_normalized` weights each channel by `1 / B_band(5772 K)`, so a sun-like star
 comes out neutral and an excess in any band is a color. That is what a false-color astronomical
 image does and why they are readable. `thermal`, `dust_penetration` and `composition` all use it.
 
@@ -1091,7 +1206,7 @@ Two things that only became clear once it was implemented:
   radiance at interstellar range is of order 1e-10 in SI units, so any fixed reference is
   thirty stops out and the picture is uniformly black or white. Exposure is set from a high
   percentile of the sky rather than its maximum, because one star can be arbitrarily nearer
-  than the rest — the catalogue puts the Sun about an astronomical unit away, and it outshines
+  than the rest — the catalog puts the Sun about an astronomical unit away, and it outshines
   a star four light-years off by some thirty-six stops. Letting the brightest couple of percent
   clip is what a star map does anyway, and it is why daylight hides the sky.
 - **A resolved surface has a window of its own, five stops wide.** At a point's two and a
@@ -1150,7 +1265,7 @@ Two practical constraints:
   the ratio of the sphere to the field of view. Restricting it to the frame would also make the
   exposure change as the camera turns, which needs the star half of the pass cached before it
   can run at frame rate.
-- **Re-placing the window costs a pass over the catalogue**, so it happens when the bodies'
+- **Re-placing the window costs a pass over the catalog**, so it happens when the bodies'
   contribution has moved a quarter of a stop rather than every frame. A body's surface radiance
   does not depend on the ship's distance at all, so an approach crosses that a few dozen times
   rather than continuously. Unresolved bodies are ranked by a Stefan-Boltzmann proxy and only

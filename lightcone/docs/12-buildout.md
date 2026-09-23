@@ -43,7 +43,7 @@ existing app, so it can run in parallel throughout.
 **Done when:**
 
 - `cargo test -p lc-spacetime` passes, including: the interval classification table; the
-  single-root property over randomised sub-luminal worldlines; the straight-line retarded-time
+  single-root property over randomized sub-luminal worldlines; the straight-line retarded-time
   closed form checked against bisection; `i128` non-overflow at the `2^60` bound.
 - `cargo tree -p lc-spacetime | grep -i bevy` is empty.
 - `em-foundations` is untouched.
@@ -153,12 +153,12 @@ the retarded-time solver.
 
 **Deliver:** the star data provider interface, the HYG importer behind it, synthetic stable
 IDs, seeded procedural system generation producing `em_sim::system::BodyDef`, metallicity
-synthesised from galactic kinematics, and the Oort, Kuiper and belt populations that come with
+synthesized from galactic kinematics, and the Oort, Kuiper and belt populations that come with
 every system.
 
 **Done when:**
 
-- 120 000 catalogue stars load through the provider with synthetic IDs, and no HYG number
+- 120 000 catalog stars load through the provider with synthetic IDs, and no HYG number
   appears anywhere but a provenance field.
 - The same seed produces a byte-identical system, twice, in separate processes.
 - Binaries generate as a barycenter with two children and propagate.
@@ -231,7 +231,7 @@ scheduling, and the light-cone cursor.
   by assertion.
 - The cursor yields receptions in arrival order without sorting the full result, and early
   termination does the work of the terminated case and not more.
-- `lc_precedes` agrees with `lc-spacetime`'s `precedes` on a randomised corpus. Two
+- `lc_precedes` agrees with `lc-spacetime`'s `precedes` on a randomized corpus. Two
   implementations of causality is one too many, and this is the test that keeps them honest.
 
 **Do not:** shard.
@@ -387,7 +387,7 @@ are gone.
 
 **Do not:** invent hypotheses the generator cannot produce.
 
-**Read:** [05-observation.md](05-observation.md) for the analyses, [04-stellar-photometry.md](04-stellar-photometry.md)
+**Read:** [05-observation.md](05-observation.md) for the analyzes, [04-stellar-photometry.md](04-stellar-photometry.md)
 for what the signals look like, [24-standing-instruments.md](24-standing-instruments.md).
 
 ### 11e — Factions

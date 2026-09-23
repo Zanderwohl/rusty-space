@@ -63,7 +63,7 @@ Out:
 
 - **Player-visible time dilation.** Ships at relativistic speed accumulate less proper
   time, and that governs onboard process rates. The player's clock is always the server
-  frame. There is no per-player frame to synchronise, and no player ever sees a Lorentz
+  frame. There is no per-player frame to synchronize, and no player ever sees a Lorentz
   transform of the world. See [01-spacetime.md](01-spacetime.md).
 - **Full-sphere radiance simulation.** The emission shell around each star is a data model
   for what light leaves the system in each direction. It is evaluated at the directions

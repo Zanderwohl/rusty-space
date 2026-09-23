@@ -1,7 +1,7 @@
 use glam::DVec3;
 use lc_proto::{ClientId, Inbound, Outbound, Presence, ShipId, Sighting, kind};
 use lc_world::craft::{Craft, CraftId, Kind as Hull};
-use lc_world::sky::{AuthoredStars, CatalogueStar, StarProvider};
+use lc_world::sky::{AuthoredStars, CatalogStar, StarProvider};
 
 use super::*;
 use crate::journal::Memory;
@@ -10,7 +10,7 @@ use crate::world::World;
 
 const AU_LY: f64 = 1.495_978_707e11 / 9.460_730_472_580_8e15;
 
-fn stars() -> Vec<CatalogueStar> {
+fn stars() -> Vec<CatalogStar> {
     AuthoredStars::sample().stars().to_vec()
 }
 

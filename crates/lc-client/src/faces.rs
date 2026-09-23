@@ -1,4 +1,4 @@
-//! The faces egui is set in, how it rasterises them, and the one place its font set is built.
+//! The faces egui is set in, how it rasterizes them, and the one place its font set is built.
 //!
 //! egui holds a single `FontDefinitions` and `set_fonts` replaces it whole, so two places
 //! installing faces means the second silently undoes the first. Everything that adds one goes

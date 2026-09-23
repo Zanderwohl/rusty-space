@@ -13,7 +13,7 @@ use lc_world::knowledge::survey::Duty;
 use lc_world::knowledge::{Belief, Knowledge, Sample, Witness};
 use lc_world::motion::{self, Motive};
 use lc_world::observation::{Observation, Target, observe};
-use lc_world::sky::{CatalogueStar, StarId, StarProvider, generate};
+use lc_world::sky::{CatalogStar, StarId, StarProvider, generate};
 
 use crate::curve::LightCurve;
 use crate::flight::Cruise;
@@ -25,7 +25,7 @@ pub const TIME_RATE: f64 = 31_557_600.0 / 3600.0;
 /// Light-microseconds per light-year, for putting the observer on the grid.
 const LUS_PER_LY: f64 = 1.0 / LY_PER_LUS;
 
-/// Light-years per light-microsecond, for reading catalogue positions onto the grid.
+/// Light-years per light-microsecond, for reading catalog positions onto the grid.
 const LY_PER_LUS: f64 = 299.792458 / 9.460_730_472_580_8e15;
 
 /// What the ship looks through.
@@ -93,7 +93,14 @@ pub struct Scene {
 }
 
 pub struct Session {
-    pub stars: Vec<CatalogueStar>,
+    pub stars: Vec<CatalogStar>,
+    /// The generator's own population of worlds, as a prior over what a measured body is.
+    ///
+    /// Built from this craft's sky the first time a type is asked for and not before: it costs
+    /// a few hundred generated systems, and a player who never opens the System window never
+    /// pays for it. Derived from the same stars every other belief is read against, so no craft
+    /// is classifying against a sky it cannot see.
+    sorts: std::sync::OnceLock<lc_world::knowledge::sort::Sorts>,
     pub observer: Coord,
     pub telescope: Instrument,
     pub mapping: BandMapping,
@@ -142,9 +149,14 @@ pub struct Session {
 }
 
 impl Session {
+    /// What kind of world a measured body is, against this craft's own sky.
+    pub fn sorts(&self) -> &lc_world::knowledge::sort::Sorts {
+        self.sorts.get_or_init(|| lc_world::knowledge::sort::Sorts::measure(self.stars.iter()))
+    }
+
     /// Take the nearest stars to the origin and model a few of them.
     pub fn new(provider: &dyn StarProvider, count: usize) -> Self {
-        let mut stars: Vec<CatalogueStar> = provider.stars().to_vec();
+        let mut stars: Vec<CatalogStar> = provider.stars().to_vec();
         stars.sort_by(|a, b| a.position_ly.length().total_cmp(&b.position_ly.length()));
         stars.truncate(count.max(1));
 
@@ -155,6 +167,7 @@ impl Session {
 
         let sky_model = Sky::new(Arc::new(stars.clone()));
         let mut session = Self {
+            sorts: std::sync::OnceLock::new(),
             stars,
             observer: Coord::ORIGIN,
             telescope: SHIP_SENSOR,
@@ -179,7 +192,7 @@ impl Session {
     }
 
     /// The star whose system the ship is inside, if it is inside one.
-    pub fn local_star(&self) -> Option<&CatalogueStar> {
+    pub fn local_star(&self) -> Option<&CatalogStar> {
         self.stars.iter().find(|s| self.distance_to(s) < crate::starfield::LOCAL_SHELL_LY)
     }
 
@@ -317,7 +330,7 @@ impl Session {
     /// Begin a crossing to a star, stopping [`STANDOFF_LY`](crate::flight::STANDOFF_LY)
     /// short of it.
     ///
-    /// **Still to the catalogue position, which is a known gap.** A ship ought to fly to where
+    /// **Still to the catalog position, which is a known gap.** A ship ought to fly to where
     /// it believes a star is and arrive off by the error on that belief — which for a charted
     /// distance is a percent of the range, far wider than the shell it is aiming into, and so
     /// needs the crossing itself to refine the fix as the baseline opens. That is a piece of
@@ -356,7 +369,7 @@ impl Session {
     }
 
     /// A star by the raw id the wire carries.
-    pub fn star_by_raw(&self, id: u64) -> Option<&CatalogueStar> {
+    pub fn star_by_raw(&self, id: u64) -> Option<&CatalogStar> {
         self.stars.iter().find(|s| s.id.get() == id)
     }
 
@@ -392,7 +405,8 @@ impl Session {
             change: motion::Change::SetCourse { course: course.clone(), drive },
         };
         self.ship.apply(&event).ok()?;
-        self.ship.motion.bound_for().map(|w| w.label())
+        let labels = self.home_labels();
+        self.ship.motion.bound_for().map(|w| w.label(&labels))
     }
 
 
@@ -428,12 +442,12 @@ impl Session {
     }
 
     /// Where a star is relative to the ship, light-years.
-    pub fn offset_to(&self, star: &CatalogueStar) -> DVec3 {
+    pub fn offset_to(&self, star: &CatalogStar) -> DVec3 {
         star.position_ly - self.ship.motion.position_ly
     }
 
     /// Distance to a star, light-years.
-    pub fn distance_to(&self, star: &CatalogueStar) -> f64 {
+    pub fn distance_to(&self, star: &CatalogStar) -> f64 {
         self.offset_to(star).length()
     }
 
@@ -470,7 +484,7 @@ impl Session {
         self.targets.get(&id)
     }
 
-    pub fn star(&self, id: StarId) -> Option<&CatalogueStar> {
+    pub fn star(&self, id: StarId) -> Option<&CatalogStar> {
         self.stars.iter().find(|s| s.id == id)
     }
 
@@ -549,7 +563,7 @@ impl Session {
 
     /// What this ship calls a star.
     ///
-    /// **Not the catalogue.** Nothing has a name of its own: what comes back is whatever the
+    /// **Not the catalog.** Nothing has a name of its own: what comes back is whatever the
     /// crew, the charts, or somebody who told them calls it, and a star nobody aboard has
     /// detected has no name here to give. See `lightcone/docs/22-provenance.md`.
     pub fn name_of(&self, id: StarId) -> String {
@@ -624,7 +638,7 @@ impl Session {
     }
 
     /// Observed over emitted frequency for one star, given the ship's velocity.
-    pub fn doppler_to(&self, star: &CatalogueStar) -> f64 {
+    pub fn doppler_to(&self, star: &CatalogStar) -> f64 {
         let to_source = self.offset_to(star).normalize_or_zero();
         if to_source == DVec3::ZERO || self.ship.motion.beta == DVec3::ZERO {
             return 1.0;
@@ -633,7 +647,7 @@ impl Session {
     }
 
     /// Band radiance arriving from one star, light delay and Doppler shift included.
-    pub fn radiance_from(&self, star: &CatalogueStar) -> PerBand<f32> {
+    pub fn radiance_from(&self, star: &CatalogStar) -> PerBand<f32> {
         let distance_m = self.distance_to(star) * M_PER_LY;
         // A blackbody seen with Doppler factor D is exactly a blackbody at D times the
         // temperature: B_nu/nu^3 is invariant and Planck's law depends only on nu/T. So the
@@ -654,7 +668,7 @@ impl Session {
     ///
     /// Picking reads this too, so that a click lands on what the sky pass put there rather than
     /// on where the star is. At speed the two are nowhere near each other.
-    pub fn apparent_dir(&self, star: &CatalogueStar) -> DVec3 {
+    pub fn apparent_dir(&self, star: &CatalogStar) -> DVec3 {
         let true_dir = self.offset_to(star).normalize_or_zero();
         if self.ship.motion.beta == DVec3::ZERO || true_dir == DVec3::ZERO {
             true_dir
@@ -695,7 +709,7 @@ impl Session {
     /// Place the window so that `fraction` of the drawn sky falls below the top of it.
     ///
     /// A percentile rather than the maximum, because one star can be arbitrarily closer than
-    /// the rest — the Sun is in the catalogue at about an astronomical unit — and exposing
+    /// the rest — the Sun is in the catalog at about an astronomical unit — and exposing
     /// for it puts everything else thirty stops under and renders a black sky. Letting the
     /// brightest couple of percent clip is what a star map does anyway.
     ///
@@ -752,7 +766,7 @@ impl Session {
     }
 
     /// Displayed luminance a star would contribute under the current mapping.
-    pub fn luminance_from(&self, star: &CatalogueStar) -> f32 {
+    pub fn luminance_from(&self, star: &CatalogStar) -> f32 {
         luminance_of(&self.radiance_from(star), &self.mapping)
     }
 }
@@ -763,7 +777,7 @@ fn luminance_of(radiance: &PerBand<f32>, mapping: &BandMapping) -> f32 {
     rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722
 }
 
-/// An idealised instrument, for evaluating what leaves a system rather than what an
+/// An idealized instrument, for evaluating what leaves a system rather than what an
 /// instrument would record of it.
 fn full_spectrum() -> Instrument {
     Instrument::BASELINE
@@ -808,7 +822,7 @@ const SPECTRA_KEPT: usize = 4096;
 /// was most of a frame on its own and the largest thing in a profile of a frozen browser.
 ///
 /// Doppler shifts the temperature, so this is not constant while under way — but it moves
-/// slowly, and quantising it means a ship at rest computes each spectrum once ever.
+/// slowly, and quantizing it means a ship at rest computes each spectrum once ever.
 fn spectrum_at(teff_k: f64) -> PerBand<f32> {
     thread_local! {
         static SPECTRA: std::cell::RefCell<HashMap<u64, PerBand<f32>>> =
@@ -849,7 +863,7 @@ fn received(observation: &Observation, teff_k: f64, radius_m: f64, distance_m: f
     }))
 }
 
-fn build_target(star: &CatalogueStar) -> Target {
+fn build_target(star: &CatalogStar) -> Target {
     let system = generate::system_for(star);
     let mut model = lc_world::emission::EmissionModel::new(star.star, star.seed());
     model.populations = system.populations;
@@ -934,7 +948,7 @@ mod tests {
         }
     }
 
-    /// The bug this exists for: the Sun sits in the catalogue about an astronomical unit
+    /// The bug this exists for: the Sun sits in the catalog about an astronomical unit
     /// away, and exposing for the brightest star renders everything else black.
     ///
     /// Not an artifact — the Sun at one AU outshines a star four light-years off by some
@@ -947,14 +961,14 @@ mod tests {
         for k in 0..200u64 {
             let mut s = template.clone();
             s.provenance.key = k;
-            s.id = lc_world::sky::StarId::synthesise("many", k);
+            s.id = lc_world::sky::StarId::synthesize("many", k);
             let d = 4.0 + (k % 40) as f64;
             s.position_ly = glam::DVec3::new(d, (k % 7) as f64, (k % 11) as f64).normalize() * d;
             stars.push(s);
         }
         let mut sun = template.clone();
         sun.provenance.key = 9999;
-        sun.id = lc_world::sky::StarId::synthesise("many", 9999);
+        sun.id = lc_world::sky::StarId::synthesize("many", 9999);
         sun.position_ly = glam::DVec3::new(1.6e-5, 0.0, 0.0); // roughly an AU
         stars.insert(0, sun);
 
@@ -981,7 +995,7 @@ mod tests {
             &lc_world::sky::hyg::HygProvider::load(
                 "../../assets/catalogs/hygdata_v42_dist_sort.csv",
             )
-            .expect("the catalogue"),
+            .expect("the catalog"),
             64,
         );
         session.sync_system();
@@ -990,7 +1004,10 @@ mod tests {
         let course =
             lc_world::navigation::Course::Orbit { body: "Earth".into(), altitude_radii: 2.0, plane: lc_world::navigation::Plane::Equatorial };
         let label = session.set_course(&course).expect("a course to Earth");
-        assert_eq!(label, "orbit of Earth");
+        // Named in the crew's words, and this crew has observed nothing, so it has none for
+        // the body it is flying to. "Earth" here would be the generator's key read out.
+        assert!(label.starts_with("orbit of "), "{label}");
+        assert!(!label.contains("Earth"), "the generator's key leaked: {label}");
         assert!(session.cruise().is_some(), "and a crossing to fly it");
 
         // Fly. A tenth of a real second a step, which at the design rate is fifteen minutes.
@@ -1202,7 +1219,7 @@ mod tests {
         for (k, axis) in [DVec3::X, DVec3::Y, DVec3::Z].into_iter().enumerate() {
             let mut star = template.clone();
             star.provenance.key = k as u64;
-            star.id = lc_world::sky::StarId::synthesise("spread", k as u64);
+            star.id = lc_world::sky::StarId::synthesize("spread", k as u64);
             star.position_ly = axis * 4.2;
             stars.push(star);
         }
@@ -1217,7 +1234,7 @@ mod tests {
         let s = spread();
         assert!(
             s.knowledge.is_empty(),
-            "the catalogue is the world, not what is known of it"
+            "the catalog is the world, not what is known of it"
         );
         assert!(s.belief(s.stars[0].id).is_none());
         assert!(s.believed_position(s.stars[0].id).is_none());
@@ -1492,7 +1509,7 @@ mod tests {
     #[test]
     fn flying_somewhere_that_is_not_in_the_sky_does_nothing() {
         let mut s = session();
-        assert!(s.fly_to(lc_world::sky::StarId::synthesise("absent", 1)).is_none());
+        assert!(s.fly_to(lc_world::sky::StarId::synthesize("absent", 1)).is_none());
         assert!(s.cruise().is_none());
     }
 

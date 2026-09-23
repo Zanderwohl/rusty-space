@@ -1,4 +1,4 @@
-//! The minimum a catalogue has to supply, and the one place it becomes a [`CatalogueStar`].
+//! The minimum a catalog has to supply, and the one place it becomes a [`CatalogStar`].
 //!
 //! Everything else about a star — radius, temperature, mu, mass, metallicity — is derived,
 //! and it is derived here. Two importers deriving it separately is two chances to disagree,
@@ -7,7 +7,7 @@
 use em_spectra::{color_index, stellar};
 use glam::DVec3;
 
-use super::{CatalogueStar, Component, Provenance, StarId};
+use super::{CatalogStar, Component, Provenance, StarId};
 use crate::sky::metallicity;
 use crate::star::Star;
 
@@ -17,10 +17,10 @@ use crate::star::Star;
 /// that difference, one pair is honest and two would be a decoration.
 const LIMB_DARKENING: (f64, f64) = (0.4, 0.26);
 
-/// One row of a catalogue, reduced to what cannot be recomputed.
+/// One row of a catalog, reduced to what cannot be recomputed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StarRecord {
-    /// The catalogue's own key. Provenance, never an identity.
+    /// The catalog's own key. Provenance, never an identity.
     pub key: u64,
     pub name: Option<String>,
     /// Ecliptic, light-years.
@@ -32,7 +32,7 @@ pub struct StarRecord {
     pub luminosity_solar: f64,
     /// 1 for a single star or the primary of a multiple.
     pub component_index: u8,
-    /// The catalogue's key for the primary of this star's system; `None` for a single.
+    /// The catalog's key for the primary of this star's system; `None` for a single.
     pub group: Option<u64>,
 }
 
@@ -41,7 +41,7 @@ impl StarRecord {
     ///
     /// Returning an option rather than filtering at the call site means both importers reject
     /// the same rows for the same reasons.
-    pub fn assemble(&self, source: &str) -> Option<CatalogueStar> {
+    pub fn assemble(&self, source: &str) -> Option<CatalogStar> {
         if !color_index::bv_is_valid(self.color_index) || self.luminosity_solar <= 0.0 {
             return None;
         }
@@ -52,9 +52,9 @@ impl StarRecord {
             return None;
         }
         let mass_solar = stellar::main_sequence_mass_solar(self.luminosity_solar);
-        let id = StarId::synthesise(source, self.key);
+        let id = StarId::synthesize(source, self.key);
 
-        Some(CatalogueStar {
+        Some(CatalogStar {
             id,
             provenance: Provenance {
                 source: source.into(),
@@ -79,13 +79,13 @@ impl StarRecord {
 
 /// Clears the group of any star that turns out to be alone in it.
 ///
-/// Catalogues name a primary on every row, their own included, so grouping is provisional
+/// Catalogs name a primary on every row, their own included, so grouping is provisional
 /// until the whole set has been read. A group of one is not a multiple.
 ///
 /// This runs on assembled stars, not on records, and the order matters: a record whose
 /// partner is rejected by [`StarRecord::assemble`] would still be counted as a pair if the
 /// pruning happened first, and would then be the only member of a group it kept.
-pub fn prune_singleton_groups(stars: &mut [CatalogueStar]) {
+pub fn prune_singleton_groups(stars: &mut [CatalogStar]) {
     let mut counts: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
     for s in stars.iter() {
         if let Some(g) = s.component.group {
@@ -99,10 +99,10 @@ pub fn prune_singleton_groups(stars: &mut [CatalogueStar]) {
     }
 }
 
-/// Assembles a whole catalogue: derives every star, drops what will not derive, and resolves
+/// Assembles a whole catalog: derives every star, drops what will not derive, and resolves
 /// grouping over the survivors. Every importer goes through this, which is what makes the CSV
-/// and the packed chunk the same catalogue.
-pub fn assemble_all(source: &str, records: &[StarRecord]) -> (Vec<CatalogueStar>, usize) {
+/// and the packed chunk the same catalog.
+pub fn assemble_all(source: &str, records: &[StarRecord]) -> (Vec<CatalogStar>, usize) {
     let mut stars = Vec::with_capacity(records.len());
     let mut skipped = 0;
     for record in records {
@@ -155,7 +155,7 @@ mod tests {
         let r = sol();
         let a = r.assemble("one").unwrap();
         let b = r.assemble("two").unwrap();
-        assert_ne!(a.id, b.id, "the same key in two catalogues is two stars");
+        assert_ne!(a.id, b.id, "the same key in two catalogs is two stars");
         assert_ne!(a.id.get(), r.key);
     }
 

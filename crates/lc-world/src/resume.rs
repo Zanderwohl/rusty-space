@@ -32,7 +32,7 @@ pub struct Snapshot {
     /// half-finished as often as not and there is nothing in a trajectory that says where a
     /// nose had got to.
     pub attitude: DVec3,
-    /// Seconds on the ship's own clock. Never recomputed from the world's: no resynchronising
+    /// Seconds on the ship's own clock. Never recomputed from the world's: no resynchronizing
     /// un-ages a crew. See `lightcone/docs/17-reconciliation.md`.
     pub clock_s: f64,
     pub drive: Drive,
@@ -543,13 +543,13 @@ mod tests {
     use super::*;
     use crate::motion::{Change, Event, Motive, ShipId, advance, apply};
     use crate::navigation::{Course, Plane};
-    use crate::sky::{CatalogueStar, StarProvider};
+    use crate::sky::{CatalogStar, StarProvider};
 
     fn sol() -> Option<LocalSystem> {
         let provider =
             crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
                 .ok()?;
-        let sun: CatalogueStar =
+        let sun: CatalogStar =
             provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some("Sol"))?.clone();
         let mut system = LocalSystem::for_star(&sun)?;
         system.advance_to(0.0);

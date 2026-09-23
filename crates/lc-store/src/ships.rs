@@ -41,9 +41,9 @@ pub async fn save_ships(client: &impl GenericClient, ships: &[Ship]) -> Result<u
         return Ok(0);
     }
     let ids: Vec<i64> = ships.iter().map(|s| s.ship_id).collect();
-    let accounts: Vec<Option<String>> = ships.iter().map(|s| s.account.clone()).collect();
+    let accounts: Vec<Option<&str>> = ships.iter().map(|s| s.account.as_deref()).collect();
     let saved: Vec<i64> = ships.iter().map(|s| s.saved_t).collect();
-    let states: Vec<Vec<u8>> = ships.iter().map(|s| s.state.clone()).collect();
+    let states: Vec<&[u8]> = ships.iter().map(|s| s.state.as_slice()).collect();
     let formats: Vec<i32> = ships.iter().map(|s| s.format).collect();
     client
         .execute(

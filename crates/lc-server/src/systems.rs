@@ -1,6 +1,6 @@
 //! The systems this shard holds, as the console lists them.
 //!
-//! **Where they come from is this module's business.** Today, the star catalogue the shard was
+//! **Where they come from is this module's business.** Today, the star catalog the shard was
 //! started with; later, its own `systems` table. The console asks for systems and gets systems,
 //! so that move changes this file and nothing it ships — hence `id` and not `star`.
 //!
@@ -9,14 +9,14 @@
 
 use std::collections::HashMap;
 
-use lc_world::sky::CatalogueStar;
+use lc_world::sky::CatalogStar;
 use serde::{Deserialize, Serialize};
 
 /// One system.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Row {
     pub id: u64,
-    /// Most of a catalogue has none.
+    /// Most of a catalog has none.
     pub name: Option<String>,
     /// As of the last checkpoint.
     pub ships: u64,
@@ -65,9 +65,9 @@ pub struct Query {
 }
 
 /// **O(craft × systems)** — a linear nearest-star scan per craft. Nothing at three craft, and
-/// the first thing to change at thousands; the fix is an index on the catalogue, not a
+/// the first thing to change at thousands; the fix is an index on the catalog, not a
 /// different signature here.
-pub fn tally(at: &[glam::DVec3], stars: &[CatalogueStar]) -> HashMap<u64, u64> {
+pub fn tally(at: &[glam::DVec3], stars: &[CatalogStar]) -> HashMap<u64, u64> {
     let mut counts = HashMap::new();
     for position in at {
         if let Some(star) = crate::status::nearest_within_shell(*position, stars) {
@@ -78,7 +78,7 @@ pub fn tally(at: &[glam::DVec3], stars: &[CatalogueStar]) -> HashMap<u64, u64> {
 }
 
 /// One page of systems.
-pub fn page(stars: &[CatalogueStar], ships: &HashMap<u64, u64>, query: &Query) -> Page {
+pub fn page(stars: &[CatalogStar], ships: &HashMap<u64, u64>, query: &Query) -> Page {
     let needle = query.q.trim().to_lowercase();
     let mut rows: Vec<Row> = stars
         .iter()
@@ -112,7 +112,7 @@ pub fn page(stars: &[CatalogueStar], ships: &HashMap<u64, u64>, query: &Query) -
     rows.sort_by(|a, b| {
         let primary = match query.sort {
             // Unnamed last **whichever way the list runs** — they are the bulk of a
-            // catalogue — so named-ness is compared outside the direction flip.
+            // catalog — so named-ness is compared outside the direction flip.
             Sort::Name => {
                 return match (a.name.is_some(), b.name.is_some()) {
                     (true, false) => std::cmp::Ordering::Less,
@@ -147,9 +147,9 @@ mod tests {
     use lc_world::sky::{Component as StarComponent, Provenance, StarId};
     use lc_world::star::Star;
 
-    fn star(key: u64, name: Option<&str>, at: glam::DVec3) -> CatalogueStar {
-        CatalogueStar {
-            id: StarId::synthesise("test", key),
+    fn star(key: u64, name: Option<&str>, at: glam::DVec3) -> CatalogStar {
+        CatalogStar {
+            id: StarId::synthesize("test", key),
             provenance: Provenance {
                 source: "test".into(),
                 key,
@@ -172,7 +172,7 @@ mod tests {
 
     /// Spread far enough apart that no shell overlaps another — `LOCAL_SHELL_LY` is 1.6, so
     /// ten light-years between them leaves no ambiguity about which system a craft is in.
-    fn catalogue() -> Vec<CatalogueStar> {
+    fn catalog() -> Vec<CatalogStar> {
         (0..10)
             .map(|n| {
                 let name = match n {
@@ -194,7 +194,7 @@ mod tests {
     /// nothing — not toward whichever star happens to be nearest.
     #[test]
     fn craft_are_tallied_into_the_system_they_are_inside() {
-        let stars = catalogue();
+        let stars = catalog();
         let counts = tally(
             &[
                 glam::DVec3::ZERO,                        // in Sol
@@ -212,7 +212,7 @@ mod tests {
     /// **Every page is disjoint and together they are the whole list — whatever order the
     /// systems arrive in.**
     ///
-    /// The rotation is the point. `sort_by` is stable, so with the catalogue in the same order
+    /// The rotation is the point. `sort_by` is stable, so with the catalog in the same order
     /// every call the pages partition even with no tie-break at all — which is what the first
     /// version of this test proved, which is nothing. Sorting a differently-ordered copy for
     /// each page is what the future actually looks like: these systems are a `Vec` loaded once
@@ -229,7 +229,7 @@ mod tests {
                 let mut seen = Vec::new();
                 for (turn, offset) in (0..10).step_by(3).enumerate() {
                     // A different arrangement of the same systems for every page.
-                    let mut stars = catalogue();
+                    let mut stars = catalog();
                     let by = turn * 3 % stars.len();
                     stars.rotate_left(by);
                     let page = page(&stars, &counts, &Query {
@@ -263,7 +263,7 @@ mod tests {
     /// thousands, and a page of bare identifiers is a page nobody asked for.
     #[test]
     fn unnamed_systems_sort_last_in_both_directions() {
-        let stars = catalogue();
+        let stars = catalog();
         let counts = HashMap::new();
         for descending in [false, true] {
             let page = page(&stars, &counts, &Query { descending, limit: 4, ..query() });
@@ -284,7 +284,7 @@ mod tests {
     /// Searching finds a name however it is typed, and finds an identifier pasted in whole.
     #[test]
     fn a_search_matches_a_name_or_an_identifier() {
-        let stars = catalogue();
+        let stars = catalog();
         let counts = HashMap::new();
         let found = |q: &str| {
             page(
@@ -312,7 +312,7 @@ mod tests {
     /// easy to get wrong.
     #[test]
     fn ordering_by_ships_puts_the_busiest_first() {
-        let stars = catalogue();
+        let stars = catalog();
         let mut counts = HashMap::new();
         counts.insert(stars[5].id.get(), 7);
         counts.insert(stars[2].id.get(), 3);
@@ -336,7 +336,7 @@ mod tests {
     /// kind of empty it is.
     #[test]
     fn a_page_past_the_end_is_empty_and_still_counts() {
-        let stars = catalogue();
+        let stars = catalog();
         let page = page(&stars, &HashMap::new(), &Query { offset: 500, ..query() });
         assert!(page.systems.is_empty());
         assert_eq!(page.total, 10);

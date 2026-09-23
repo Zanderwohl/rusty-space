@@ -4,7 +4,7 @@
 //! background; everything dense with text stays in egui. The buttons emit actions like every
 //! other surface here, so the menu reads state and changes none.
 //!
-//! The sky behind it is scenery, not the world. The catalogue is a hundred and twenty thousand
+//! The sky behind it is scenery, not the world. The catalog is a hundred and twenty thousand
 //! rows and loading it is what `AppState::Loading` exists for, so the menu generates its own
 //! field of stars instead - drawn through the real starfield pass, at rest, so it is the same
 //! sky the game draws rather than a picture of one.
@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use em_ui::{MenuTheme, MenuUi};
 use glam::DVec3;
 use lc_world::rng;
-use lc_world::sky::{AuthoredStars, CatalogueStar, Component as StarComponent, Provenance, StarId};
+use lc_world::sky::{AuthoredStars, CatalogStar, Component as StarComponent, Provenance, StarId};
 use lc_world::star::Star;
 
 use crate::action::Action;
@@ -208,7 +208,7 @@ fn backdrop_sky(count: usize, seed: u64) -> AuthoredStars {
     AuthoredStars::new("menu backdrop", stars)
 }
 
-fn backdrop_star(seed: u64, index: u64) -> CatalogueStar {
+fn backdrop_star(seed: u64, index: u64) -> CatalogStar {
     let draw = |salt: u64| rng::uniform(rng::hash(&[seed, index, salt]));
 
     // Uniform on the sphere, and uniform in volume along the radius.
@@ -228,8 +228,8 @@ fn backdrop_star(seed: u64, index: u64) -> CatalogueStar {
     let teff_k = em_spectra::stellar::SOLAR_TEFF * mass.powf(0.505);
     let luminosity_w = luminosity_solar * em_spectra::stellar::SOLAR_LUMINOSITY;
 
-    CatalogueStar {
-        id: StarId::synthesise("menu", index),
+    CatalogStar {
+        id: StarId::synthesize("menu", index),
         provenance: Provenance { source: "menu".into(), key: index, name: None },
         position_ly,
         velocity: DVec3::ZERO,

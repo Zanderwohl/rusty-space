@@ -328,11 +328,20 @@ impl Knowledge {
     /// Own logs grown enough to read again; nobody else's logs travel. A queue, so asking costs
     /// what is waiting rather than every file held.
     pub fn due(&self) -> Vec<(Subject, Witness)> {
+        self.due_iter().collect()
+    }
+
+    /// The first of [`Knowledge::due`], without finding the rest.
+    pub fn next_due(&self) -> Option<(Subject, Witness)> {
+        self.due_iter().next()
+    }
+
+    fn due_iter(&self) -> impl Iterator<Item = (Subject, Witness)> + '_ {
         let owner = self.owner;
         let full = self.is_full();
         self.unread
             .iter()
-            .filter(|subject| {
+            .filter(move |subject| {
                 let Some(file) = self.files.get(subject) else { return false };
                 let held = file.series.iter().filter(|s| s.witness == owner).map(|s| s.len()).max().unwrap_or(0);
                 let read = file
@@ -345,8 +354,7 @@ impl Knowledge {
                 // A full craft reads whatever it holds: reading is how it makes room.
                 ((full || self.analyzing.contains(subject)) && held > 0) || held + digested >= next
             })
-            .map(|subject| (*subject, owner))
-            .collect()
+            .map(move |subject| (*subject, owner))
     }
 
     /// Unless the subject is retained, the log is consumed if the transit answer is settled, the
@@ -562,19 +570,19 @@ mod tests {
     use crate::instrument::Instrument;
     use crate::knowledge::observatory::{Sky, Station, photometry};
     use crate::rng;
-    use crate::sky::generate::ladder;
-    use crate::sky::{CatalogueStar, Component, Provenance, StarId};
+    use crate::sky::generate::planets_of;
+    use crate::sky::{CatalogStar, Component, Provenance, StarId};
     use crate::star::Star;
 
     const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
     const CADENCE_S: f64 = 1800.0;
 
-    fn star(key: u64, luminosity_solar: f64, position_ly: DVec3) -> CatalogueStar {
+    fn star(key: u64, luminosity_solar: f64, position_ly: DVec3) -> CatalogStar {
         let l_w = luminosity_solar * em_spectra::stellar::SOLAR_LUMINOSITY;
         let teff = 5772.0 * luminosity_solar.powf(0.13);
         let mass = em_spectra::stellar::main_sequence_mass_solar(luminosity_solar);
-        CatalogueStar {
-            id: StarId::synthesise("conclusion", key),
+        CatalogStar {
+            id: StarId::synthesize("conclusion", key),
             provenance: Provenance { source: "conclusion".into(), key, name: None },
             position_ly,
             velocity: DVec3::ZERO,
@@ -592,7 +600,7 @@ mod tests {
     }
 
     /// Mostly red dwarfs, a few like the Sun, fewer brighter.
-    fn neighborhood() -> Vec<CatalogueStar> {
+    fn neighborhood() -> Vec<CatalogStar> {
         (0..1500)
             .map(|k| {
                 let u = rng::uniform(rng::hash(&[k, 0x6e]));
@@ -601,24 +609,32 @@ mod tests {
             .collect()
     }
 
-    /// A red dwarf five light-years out with an inner planet under five days, placed edge-on
-    /// (its planets transit) or along its pole (they never do), and its planets' periods.
-    fn red_dwarf(edge_on: bool) -> (CatalogueStar, Vec<f64>) {
+    /// A late M dwarf five light-years out with an inner planet under five days and deep
+    /// enough to see, placed edge-on (its planets transit) or along its pole (they never do), and its
+    /// planets' periods.
+    ///
+    /// Both conditions are searched for rather than assumed. The generator makes plenty of
+    /// planets no sixty-day log would ever find, and a test of what a log concludes needs one
+    /// it can conclude something about. A late M dwarf because that is what makes an
+    /// Earth-sized planet a percent-deep transit, which is why the real search uses them too.
+    fn red_dwarf(edge_on: bool) -> (CatalogStar, Vec<f64>) {
         (100_000..)
             .find_map(|key| {
-                let mut s = star(key, 0.01, DVec3::ZERO);
+                let mut s = star(key, 0.001, DVec3::ZERO);
                 let pole = crate::sky::generate::pole_for(s.seed());
                 s.position_ly = if edge_on { pole.any_orthonormal_vector() } else { pole } * 5.0;
-                let periods: Vec<f64> = ladder(s.seed(), s.luminosity_solar, s.metallicity)
+                let planets = planets_of(&s);
+                let ratio = planets.first()?.radius_m / s.star.radius_m;
+                let periods: Vec<f64> = planets
                     .iter()
                     .map(|r| std::f64::consts::TAU * (r.semi_major_m.powi(3) / s.star.mu).sqrt())
                     .collect();
-                (*periods.first()? < 5.0 * 86_400.0).then_some((s, periods))
+                (*periods.first()? < 5.0 * 86_400.0 && ratio * ratio > 1.2e-3).then_some((s, periods))
             })
             .unwrap()
     }
 
-    fn stare(target: &CatalogueStar, days: f64) -> (Knowledge, f64) {
+    fn stare(target: &CatalogStar, days: f64) -> (Knowledge, f64) {
         let mut sky = Sky::new(Arc::new(vec![target.clone()]));
         let mut knowledge = Knowledge::new(Witness(1));
         let at = Station { position_ly: DVec3::ZERO, instrument: Instrument::SHIP };
@@ -635,7 +651,7 @@ mod tests {
     #[test]
     fn a_generated_planet_is_the_most_probable_reading_of_its_transits() {
         let (target, periods) = red_dwarf(true);
-        let (mut knowledge, now) = stare(&target, 60.0);
+        let (mut knowledge, now) = stare(&target, 110.0);
         let mut replica = Knowledge::new(Witness(1));
         replica.absorb(&knowledge.report(crate::knowledge::Mark::default(), now));
         replica.copy_logs(&knowledge.logs_upto(f64::NEG_INFINITY, usize::MAX).0);
@@ -647,7 +663,16 @@ mod tests {
         let conclusion = knowledge.read_log(subject, Witness(1), &prior, now).expect("a log to read");
         let leading = conclusion.leading().unwrap();
         let Kind::Planet { transit, .. } = leading.kind else { panic!("{:?}", conclusion.transits) };
-        assert!(leading.probability > SETTLED);
+        // That there is a planet is settled. Which kind it is need not be: a 1.3-Earth-radius
+        // body and a small ice giant make transits of nearly the same depth, and the prior
+        // says so rather than pretending otherwise.
+        let a_planet: f64 = conclusion
+            .transits
+            .iter()
+            .filter(|h| matches!(h.kind, Kind::Planet { .. }))
+            .map(|h| h.probability)
+            .sum();
+        assert!(a_planet > SETTLED, "{:?}", conclusion.transits);
         let off = periods.iter().map(|p| (transit.period_s - p).abs()).fold(f64::INFINITY, f64::min);
         assert!(off < 3.0 * transit.period_sigma_s, "{} against {periods:?}, sigma {}", transit.period_s, transit.period_sigma_s);
 
@@ -692,7 +717,7 @@ mod tests {
     #[test]
     fn a_star_seen_along_its_pole_is_quiet_only_as_far_as_the_log_could_see() {
         let (target, _) = red_dwarf(false);
-        let (mut knowledge, now) = stare(&target, 60.0);
+        let (mut knowledge, now) = stare(&target, 110.0);
         let prior = Prior::measure(&neighborhood());
         let conclusion = knowledge.read_log(Subject::Star(target.id), Witness(1), &prior, now).unwrap();
         let chance = |f: fn(&Kind) -> bool| -> f64 {
@@ -753,7 +778,7 @@ mod tests {
     #[test]
     fn a_swarm_is_read_from_its_moments_and_belts_from_their_absence() {
         use crate::population::Population;
-        let has_swarm = |s: &CatalogueStar| {
+        let has_swarm = |s: &CatalogStar| {
             crate::sky::generate::system_for(s).populations.into_iter().find(|p| p.radiating_ratio == Population::PANEL)
         };
         let (with, swarm) = (200_000..)

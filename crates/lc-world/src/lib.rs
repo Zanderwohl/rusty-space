@@ -10,6 +10,7 @@
 
 pub mod attitude;
 pub mod boost;
+pub mod climate;
 pub mod coast;
 pub mod consort;
 pub mod cost;
@@ -21,6 +22,7 @@ pub mod escort;
 pub mod fitting;
 pub mod flicker;
 pub mod flight;
+pub mod ground;
 pub mod ignition;
 pub mod injection;
 pub mod instrument;
@@ -48,6 +50,8 @@ pub mod surface;
 pub mod system;
 pub mod transfer;
 pub mod worldline;
+pub mod visit;
+pub mod worlds;
 
 pub use distribution::{Distribution, Inclination};
 pub use emission::{Body, EmissionModel, invert_moments};
@@ -58,5 +62,5 @@ pub use observation::{Observation, Target, observe};
 pub use occluder::{Occluder, transit_depth};
 pub use population::Population;
 pub use shell::{Shell, ShellSample};
-pub use sky::{CatalogueStar, StarId, StarProvider};
+pub use sky::{CatalogStar, StarId, StarProvider};
 pub use star::Star;

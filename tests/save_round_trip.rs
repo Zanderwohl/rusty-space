@@ -258,7 +258,7 @@ fn a_round_tripped_system_propagates_to_the_same_places() {
             }
         }
 
-        // One metre over ten years: far above the noise of storing days as REAL, far
+        // One meter over ten years: far above the noise of storing days as REAL, far
         // below anything the round trip could actually lose.
         assert!(
             worst < 1.0,

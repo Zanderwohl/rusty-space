@@ -14,7 +14,7 @@ use password_hash::{SaltString, rand_core::OsRng};
 /// Shortest password accepted.
 ///
 /// Low, and deliberately: with breach-list checking deferred there is nothing here that can
-/// tell a good password from a bad one, and a length rule that pretends otherwise is theatre.
+/// tell a good password from a bad one, and a length rule that pretends otherwise is theater.
 /// It exists to catch the empty string and the accidental single keystroke.
 pub const MIN_LENGTH: usize = 8;
 

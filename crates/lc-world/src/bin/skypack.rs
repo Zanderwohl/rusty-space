@@ -1,4 +1,4 @@
-//! Packs a star catalogue into a sky chunk.
+//! Packs a star catalog into a sky chunk.
 //!
 //! Offline, and native only. The browser build consumes what this writes and never sees a
 //! CSV; this is the only program that reads one.
@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let Some(input) = positional.first().map(PathBuf::from) else {
-        eprintln!("usage: skypack <catalogue.csv> [out.lcsky] [--limit N]");
+        eprintln!("usage: skypack <catalog.csv> [out.lcsky] [--limit N]");
         std::process::exit(2);
     };
     let output = positional

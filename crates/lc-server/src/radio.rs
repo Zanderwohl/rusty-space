@@ -1,17 +1,17 @@
 //! Saying things, and everything that decides who may hear them.
 //!
 //! Split out of [`crate::server`] because it is a self-contained question. The tick loop knows
-//! about worldlines and about a gate; this knows about aim, sealing, acknowledgement and the
+//! about worldlines and about a gate; this knows about aim, sealing, acknowledgment and the
 //! keyring, and the only thing the two share is that a transmission is an event like any other.
 //!
 //! **Three independent choices, and keeping them independent is the design.** Who a message is
-//! addressed to decides whose acknowledgements ride back with it and who can decrypt it. Where
+//! addressed to decides whose acknowledgments ride back with it and who can decrypt it. Where
 //! it is *pointed* decides who hears it. Whether it is *sealed* decides who can read it. A
 //! player who conflates them broadcasts a private message in clear across a system, and the
 //! interface lets them: it is the mistake a real operator makes, and it is legible afterwards
 //! because everyone in earshot saw it.
 //!
-//! **The keyring and the acknowledgement window are schedules, not sets.** Both live on
+//! **The keyring and the acknowledgment window are schedules, not sets.** Both live on
 //! [`crate::server::Server`] and both are written the instant a transmission leaves, stamped
 //! with the coordinate time its light *lands*, and refused by every reader until the clock has
 //! reached that. So a key sent four light-years takes four years to become usable, and the rule
@@ -85,7 +85,7 @@ pub struct Owed {
 }
 
 /// How many answered messages a craft remembers per sender for [`Server::answered`]. A resend
-/// of anything older is answered again, which costs one acknowledgement.
+/// of anything older is answered again, which costs one acknowledgment.
 const ANSWERED_DEPTH: usize = 64;
 
 /// What a transmission order becomes: an event to write, and a line for the transcript.
@@ -294,7 +294,7 @@ impl<J: Journal> Server<J> {
         said: &Utterance,
         landings: &[(CraftId, i64, f32)],
     ) {
-        // Only text is answered. An acknowledgement answered in turn would have two
+        // Only text is answered. An acknowledgment answered in turn would have two
         // auto-acking ships trade light for ever.
         let Some(to) = said.to.filter(|_| matches!(said.content, Content::Text(_))) else {
             return;
@@ -508,7 +508,7 @@ impl<J: Journal> Server<J> {
         self.journal.record(&said, &receipts, &taught).await
     }
 
-    /// Take up the keyring and the acknowledgement window a previous run left behind.
+    /// Take up the keyring and the acknowledgment window a previous run left behind.
     ///
     /// Both are in the store already — the keyring because a key offer writes one when it is
     /// transmitted, the window because every receipt is a row — so this is a read and not a
@@ -517,7 +517,7 @@ impl<J: Journal> Server<J> {
     ///
     /// Without it a shard coming back believes nobody holds anybody's key, and the first reply
     /// anyone sends acknowledges nothing — which the far end cannot tell from its own messages
-    /// having been lost, and that is the one thing an acknowledgement exists to rule out.
+    /// having been lost, and that is the one thing an acknowledgment exists to rule out.
     pub async fn resume_conversations(&mut self) -> Result<(), JournalError> {
         for held in self.journal.keyring().await? {
             self.keys
@@ -751,7 +751,7 @@ mod tests {
     /// Give a craft something to report: one bearing to one star.
     fn teach<J: Journal>(server: &mut Server<J>, craft: i64, key: u64) -> lc_world::sky::StarId {
         use lc_world::knowledge::{Bearing, Sighting, Witness};
-        let star = lc_world::sky::StarId::synthesise("radio", key);
+        let star = lc_world::sky::StarId::synthesize("radio", key);
         let now_s = server.now_t() as f64 * 1.0e-6;
         server.aboard(CraftId(craft)).knowledge.sighted(
             star,
@@ -759,6 +759,9 @@ mod tests {
                 witness: Witness(craft as u64),
                 observed_s: now_s,
                 bearing: Bearing { observer_ly: DVec3::ZERO, toward: DVec3::X, sigma_rad: 1e-9 },
+                size: None,
+                range_m: None,
+                spin_s: None,
                 band: em_spectra::Band::V,
                 flux: 1e-12,
                 flux_sigma: 1e-15,
@@ -1063,7 +1066,7 @@ mod tests {
         assert!(spoken(&wire.take(nosy)).is_empty(), "a bystander heard a beam it was not on");
     }
 
-    /// The acknowledgement rides back with the reply, names the message by its identifier, and
+    /// The acknowledgment rides back with the reply, names the message by its identifier, and
     /// covers no more than [`ACK_DEPTH`] of them.
     #[tokio::test]
     async fn a_reply_acknowledges_what_actually_arrived_and_nothing_else() {
@@ -1186,7 +1189,7 @@ mod tests {
 
         for order in [
             say(1, Aim::Omni, Secrecy::Open, "hello me"),
-            // An acknowledgement is the server's to send, as `Body::Ack`, and never a client's.
+            // An acknowledgment is the server's to send, as `Body::Ack`, and never a client's.
             say(2, Aim::Omni, Secrecy::Open, ""),
             say(2, Aim::Omni, Secrecy::Open, &"x".repeat(MESSAGE_LIMIT + 1)),
             // Nothing in sight to point at: the same answer an intercept gives.
@@ -1309,7 +1312,7 @@ mod tests {
         (server, Loopback::new())
     }
 
-    /// Acknowledgements from `from` that reached a client.
+    /// Acknowledgments from `from` that reached a client.
     fn acks_from(messages: &[Outbound], from: i64) -> Vec<Spoken> {
         sightings(messages)
             .into_iter()
@@ -1403,7 +1406,7 @@ mod tests {
         run_until(&mut server, &mut wire, 6 * TWO_LIGHT_HOURS as i64).await;
         let (to_ada, to_bry) = (wire.take(ClientId(1)), wire.take(ClientId(2)));
         assert_eq!(acks_from(&to_ada, 2).len(), 1, "Bry answered other than once");
-        assert!(acks_from(&to_bry, 1).is_empty(), "an acknowledgement was acknowledged");
+        assert!(acks_from(&to_bry, 1).is_empty(), "an acknowledgment was acknowledged");
         assert!(acks_from(&to_ada, 3).is_empty(), "a broadcast or somebody else's mail was answered");
     }
 

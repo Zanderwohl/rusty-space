@@ -4,7 +4,7 @@
 //! below the disc of the galaxy, and the two are 60° apart. Simulation space is the ecliptic
 //! of J2000, so the ecliptic pole is `+Z` by construction and needs nothing; the galactic pole
 //! is a published equatorial direction that reaches simulation space through
-//! [`super::equatorial::to_ecliptic`], the same one rotation a catalogue import takes.
+//! [`super::equatorial::to_ecliptic`], the same one rotation a catalog import takes.
 //!
 //! Directions only. Where the galactic plane's own zero point sits is 26 000 light-years away
 //! and irrelevant to anything drawn about a star: a map anchors its plane at what it is looking
@@ -44,6 +44,26 @@ pub fn north_pole() -> DVec3 {
 #[inline]
 pub fn center() -> DVec3 {
     equatorial::ecliptic_direction(CENTER_RA, CENTER_DEC)
+}
+
+/// Where longitude starts in a plane whose normal is `n`: its ascending node on the galactic
+/// plane.
+///
+/// Computable by anyone from the plane alone, so two observers who solved the same plane agree
+/// on it, and it moves only with the plane's own error. There is no vernal equinox to borrow.
+///
+/// `g.cross(n)` lies in both planes, and is the ascending rather than the descending node
+/// because a body at it is moving north: `(n x u) . g = 1 - (n . g)^2`, positive unless the two
+/// planes coincide. Within about a degree of coinciding the cross product is too short to
+/// normalize, and the zero falls back to the galactic center projected into the plane.
+pub fn zero_longitude(n: DVec3) -> DVec3 {
+    const COINCIDENT: f64 = 1.745e-2;
+    let node = north_pole().cross(n);
+    if node.length() > COINCIDENT {
+        return node.normalize();
+    }
+    let center = center();
+    (center - n * center.dot(n)).normalize_or(n.any_orthonormal_vector())
 }
 
 /// A right-handed orthonormal basis for the galactic frame, in simulation space: `(u, v, n)`.

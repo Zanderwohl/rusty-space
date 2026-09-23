@@ -550,7 +550,10 @@ impl<J: Journal> Server<J> {
         self.next_ship = self.next_ship.max(checkpoint.next_ship);
         let mut unreadable = Vec::new();
         for row in &checkpoint.ships {
-            let system = self.position_of(row).and_then(|at| self.world.system_at(at));
+            // The checkpoint's own time: these systems are wanted from the instant the
+            // shard comes back, not from whenever the clock was last read.
+            let now_s = self.now_t as f64 * 1.0e-6;
+            let system = self.position_of(row).and_then(|at| self.world.system_at(at, now_s));
             match load(row, system.as_deref()) {
                 Ok(mut craft) => {
                     if let Some(mut fitting) = craft.fitting().cloned() {

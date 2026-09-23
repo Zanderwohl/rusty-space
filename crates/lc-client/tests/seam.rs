@@ -18,10 +18,10 @@ use lc_server::websocket::WebSocketServer;
 /// of the bound is that a broken seam fails rather than hangs.
 const PATIENCE: Duration = Duration::from_secs(5);
 
-/// The sky both ends hold. The authored sample rather than a packed catalogue, because what
+/// The sky both ends hold. The authored sample rather than a packed catalog, because what
 /// matters here is that they hold the *same* one and that a star id means one thing across the
 /// wire — not which stars they are.
-fn a_sky() -> Vec<lc_world::sky::CatalogueStar> {
+fn a_sky() -> Vec<lc_world::sky::CatalogStar> {
     use lc_world::sky::StarProvider;
     lc_world::sky::AuthoredStars::sample().stars().to_vec()
 }
@@ -172,7 +172,7 @@ async fn an_impossible_order_is_answered_too() {
 }
 
 /// A crossing names a **star**, and the server answers with the acceleration it actually flew.
-/// The id is only meaningful because both ends were given the same catalogue.
+/// The id is only meaningful because both ends were given the same catalog.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_crossing_names_a_star_the_server_also_holds() {
     let address = shard(true).await;
@@ -389,12 +389,44 @@ async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
         panic!("no welcome");
     };
 
+    // A craft knows nothing on creation, so it has to look at the star before it can name it
+    // or report anything about it. One stare is enough: the shard files a sighting on the
+    // first tick the duty is up.
     let star = a_sky()[0].id;
+    sender.send(Inbound::Act(Intent {
+        ship_id: mine,
+        order: Order::SetDuty { duty: lc_proto::Duty::Stare { star: star.get() }, integration_s: 1.0 },
+        issued_at_client_t: i64::MAX,
+    }));
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    loop {
+        if sender.poll().iter().any(|m| matches!(m, Outbound::Learned { .. })) {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "the stare found nothing to report");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
     sender.send(Inbound::Act(Intent {
         ship_id: mine,
         order: Order::NameIt { subject: lc_proto::Subject::Star(star.get()), name: "Waystone".into() },
         issued_at_client_t: i64::MAX,
     }));
+    // And wait for the name to take before reporting, or the report is built from a file that
+    // has the sighting and not yet the naming.
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    loop {
+        let heard = sender.poll();
+        if let Some(refused) = heard.iter().find(|m| matches!(m, Outbound::Refused { .. })) {
+            panic!("the shard refused the naming: {refused:?}");
+        }
+        if heard.iter().any(|m| matches!(m, Outbound::Accepted { order: Order::NameIt { .. }, .. })) {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "the naming was never accepted");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
     sender.send(Inbound::Act(Intent {
         ship_id: mine,
         order: Order::SendReport {
@@ -442,6 +474,12 @@ async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
         assert!(tokio::time::Instant::now() < deadline, "no report arrived");
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    let name = copy.file(star).unwrap().names().iter().find(|n| n.witness == sent_by).unwrap().name.clone();
-    assert_eq!(name, "Waystone", "what the sender calls it, and who said so");
+    // What the receiver calls it, by the same ranking the game shows. A craft that detects a
+    // star names it with a designation of its own before anybody gives it a real name, so the
+    // file carries two namings from the same witness and only the ranking tells them apart.
+    assert_eq!(copy.name_of(star).as_deref(), Some("Waystone"), "what the sender calls it");
+    assert!(
+        copy.file(star).unwrap().names().iter().any(|n| n.witness == sent_by && n.name == "Waystone"),
+        "and on the sender's word"
+    );
 }

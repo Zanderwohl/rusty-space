@@ -30,7 +30,7 @@ const SOI_SHAPE_SHADER: &str = "shaders/soi_shape.wgsl";
 /// A WGSL module reached only through `#import` is never requested by the asset server on
 /// its own, and a shader whose import is unresolved does not fail loudly — it simply never
 /// finishes compiling, so meshes using it silently draw nothing. Holding a handle forces
-/// the module to load before either material's pipeline specialises.
+/// the module to load before either material's pipeline specializes.
 #[derive(Resource)]
 struct SoiShapeShader(#[allow(dead_code)] Handle<Shader>);
 

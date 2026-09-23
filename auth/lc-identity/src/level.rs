@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unrecognised_level_grants_nothing() {
+    fn an_unrecognized_level_grants_nothing() {
         for raw in [-1, 4, 99, i32::MIN, i32::MAX] {
             assert_eq!(Level::from_stored(raw), Level::PLAYER, "{raw} was admitted");
         }

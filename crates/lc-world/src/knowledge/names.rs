@@ -36,13 +36,17 @@ pub struct SpacingRow {
 }
 
 /// The expected spacing, by luminosity. Must match `sky::generate`, or letters are left for
-/// planets it never makes: its first orbit is `sqrt(L)` AU times a uniform 0.2–0.6 times a
-/// uniform 1.4–2.3, a geometric mean of 0.70, and each step out multiplies by another uniform
-/// 1.4–2.3, a geometric mean of 1.83.
+/// planets it never makes.
+///
+/// The generator's planets average 0.090 `sqrt(L)` AU for the innermost and a step of 1.77,
+/// and the table is deliberately finer than both. A slot is chosen by rounding, so what
+/// decides how often two planets want the same letter is the *spread* in the step and not its
+/// mean: steps run from 1.35 to 1.85 and a grid at the mean collides on every short one. At
+/// 1.55 the rate is four percent and the letters still stop well short of the alphabet.
 pub const SPACING: &[SpacingRow] = &[SpacingRow {
     up_to_luminosity_solar: f64::INFINITY,
-    innermost_au_per_sqrt_l: 0.70,
-    ratio: 1.83,
+    innermost_au_per_sqrt_l: 0.060,
+    ratio: 1.50,
 }];
 
 /// Which expected slot an orbit falls in, counting outward from zero.
@@ -161,13 +165,13 @@ mod tests {
         pairs.iter().map(|(l, a)| (l.to_string(), *a)).collect()
     }
 
-    /// Around a sun-like star, the default table's slots: b 0.70, c 1.28, d 2.35, e 4.29 AU …
+    /// Around a sun-like star, the default table's slots: b 0.060, c 0.090, d 0.14, e 0.20 AU …
     #[test]
     fn a_planet_takes_the_letter_of_its_expected_slot() {
-        assert_eq!(planet_letter(&[], 0.7, 1.0, SPACING), "b");
-        assert_eq!(planet_letter(&[], 1.3, 1.0, SPACING), "c");
-        assert_eq!(planet_letter(&[], 4.3, 1.0, SPACING), "e");
-        assert_eq!(planet_letter(&[], 0.05, 1.0, SPACING), "b", "nothing is inside b");
+        assert_eq!(planet_letter(&[], 0.060, 1.0, SPACING), "b");
+        assert_eq!(planet_letter(&[], 0.093, 1.0, SPACING), "c");
+        assert_eq!(planet_letter(&[], 0.2235, 1.0, SPACING), "e");
+        assert_eq!(planet_letter(&[], 0.005, 1.0, SPACING), "b", "nothing is inside b");
     }
 
     /// A Neptune found first far out leaves letters open inside it for what is expected there.
@@ -175,37 +179,37 @@ mod tests {
     fn gaps_are_left_for_planets_not_yet_found() {
         let first = planet_letter(&[], 30.0, 1.0, SPACING);
         assert!(first.as_str() > "f", "{first}");
-        let later = planet_letter(&placed(&[(&first, 30.0)]), 1.3, 1.0, SPACING);
+        let later = planet_letter(&placed(&[(&first, 30.0)]), 0.093, 1.0, SPACING);
         assert_eq!(later, "c", "an inner planet found later takes its own slot");
     }
 
     #[test]
     fn a_hotter_star_expects_its_planets_further_out() {
-        assert_eq!(planet_letter(&[], 7.0, 100.0, SPACING), "b");
-        assert!(planet_letter(&[], 7.0, 1.0, SPACING).as_str() > "e");
+        assert_eq!(planet_letter(&[], 0.60, 100.0, SPACING), "b");
+        assert!(planet_letter(&[], 0.60, 1.0, SPACING).as_str() > "e");
     }
 
     /// A planet out of its slot takes a second letter, leaving the single letter for its slot.
     #[test]
     fn a_taken_slot_takes_a_second_letter_and_leaves_the_next_slot_free() {
         // Something at c's orbit is already "c"; a planet just outside it is still in c's slot.
-        let one = placed(&[("c", 1.28)]);
-        assert_eq!(planet_letter(&one, 1.4, 1.0, SPACING), "cb");
-        let two = placed(&[("c", 1.28), ("cb", 1.4)]);
-        assert_eq!(planet_letter(&two, 2.35, 1.0, SPACING), "d", "and d is still d's");
-        // Something mis-slotted: "e" holds 1.0 AU, and a planet at 2.35 AU (slot d) is outside it.
-        assert_eq!(planet_letter(&placed(&[("e", 1.0)]), 2.35, 1.0, SPACING), "eb");
+        let one = placed(&[("c", 0.093)]);
+        assert_eq!(planet_letter(&one, 0.105, 1.0, SPACING), "cb");
+        let two = placed(&[("c", 0.093), ("cb", 0.105)]);
+        assert_eq!(planet_letter(&two, 0.144, 1.0, SPACING), "d", "and d is still d's");
+        // Something mis-slotted: "e" holds 0.08 AU, and a planet at 0.14 AU (slot d) is outside it.
+        assert_eq!(planet_letter(&placed(&[("e", 0.08)]), 0.144, 1.0, SPACING), "eb");
     }
 
     /// No single letter left between two neighbors: a second one, never starting at `a`.
     #[test]
     fn too_few_gaps_add_a_second_letter() {
-        let pair = placed(&[("b", 0.7), ("c", 1.28)]);
-        assert_eq!(planet_letter(&pair, 0.9, 1.0, SPACING), "bb");
-        let three = placed(&[("b", 0.7), ("bb", 0.9), ("c", 1.28)]);
-        assert_eq!(planet_letter(&three, 1.0, 1.0, SPACING), "bc", "outward in order");
-        assert_eq!(planet_letter(&three, 0.8, 1.0, SPACING), "bab", "and room inside bb too");
-        assert_eq!(planet_letter(&placed(&[("b", 0.7)]), 0.3, 1.0, SPACING), "ab", "inside b");
+        let pair = placed(&[("b", 0.060), ("c", 0.093)]);
+        assert_eq!(planet_letter(&pair, 0.070, 1.0, SPACING), "bb");
+        let three = placed(&[("b", 0.060), ("bb", 0.070), ("c", 0.093)]);
+        assert_eq!(planet_letter(&three, 0.080, 1.0, SPACING), "bc", "outward in order");
+        assert_eq!(planet_letter(&three, 0.065, 1.0, SPACING), "bab", "and room inside bb too");
+        assert_eq!(planet_letter(&placed(&[("b", 0.060)]), 0.02, 1.0, SPACING), "ab", "inside b");
     }
 
     /// Whatever the order of discovery, alphabetical order stays orbital order.
@@ -235,8 +239,20 @@ mod tests {
         let (mut planets, mut doubled, mut widest) = (0usize, 0usize, 0u8);
         for key in 0..2000u64 {
             let mut star = template.clone();
-            star.id = StarId::synthesise("letters", key);
-            star.luminosity_solar = [0.01, 0.3, 1.0, 5.0, 40.0][key as usize % 5];
+            star.id = StarId::synthesize("letters", key);
+            // The generator sizes a disc from the star's radius and temperature, not from a
+            // luminosity column, so a star whose columns disagree is not a star it would ever
+            // be handed. Build each one the way a catalog does.
+            let (lum, teff) = [(0.01, 3400.0), (0.3, 4900.0), (1.0, 5772.0), (5.0, 7600.0), (40.0, 11000.0)]
+                [key as usize % 5];
+            star.luminosity_solar = lum;
+            star.star.teff_k = teff;
+            star.star.radius_m = em_spectra::stellar::radius_from_luminosity(
+                lum * em_spectra::stellar::SOLAR_LUMINOSITY,
+                teff,
+            );
+            star.mass_solar = em_spectra::stellar::main_sequence_mass_solar(lum);
+            star.star.mu = em_spectra::stellar::mu_from_mass_solar(star.mass_solar);
             let system = generate::system_for(&star);
             let mut orbits: Vec<f64> =
                 system.planets.iter().map(|p| p.semi_major_m / 1.495_978_707e11).collect();
@@ -275,3 +291,4 @@ mod tests {
         assert_eq!(designation(DVec3::X * 3.0), along_x, "a direction, not a distance");
     }
 }
+

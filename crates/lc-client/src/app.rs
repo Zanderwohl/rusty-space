@@ -91,10 +91,10 @@ pub struct Game(pub Session);
 ///
 /// An **asset path**, not a filesystem path: the asset server reads a file on the desktop and
 /// fetches over HTTP in a browser, and this code cannot tell which. A `.csv` is still accepted
-/// on native builds with the `hyg` feature, which is how the catalogue gets packed in the
+/// on native builds with the `hyg` feature, which is how the catalog gets packed in the
 /// first place.
 #[derive(Resource, Default)]
-pub struct Catalogue(pub Option<String>);
+pub struct Catalog(pub Option<String>);
 
 /// The sky asset in flight, while [`AppState::Loading`] waits for it.
 #[derive(Resource)]
@@ -113,6 +113,7 @@ impl Plugin for ClientPlugin {
             PopulationMaterialPlugin,
             em_render::plume_material::PlumeMaterialPlugin,
             BodySurfaceMaterialPlugin,
+            em_render::atmosphere_material::AtmosphereMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
             crate::procedural::ProceduralTexturesPlugin,
             crate::library::LibraryPlugin,
@@ -139,7 +140,7 @@ impl Plugin for ClientPlugin {
             .add_message::<Requested>()
             .insert_resource(Ui(UiState::default()))
             .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
-            .init_resource::<Catalogue>()
+            .init_resource::<Catalog>()
             .init_resource::<crate::dev::DevEntry>()
             .init_resource::<Looking>()
             .init_resource::<Bodies>()
@@ -212,6 +213,7 @@ impl Plugin for ClientPlugin {
                     aim_camera,
                     update_sky,
                     update_bodies,
+                    crate::dev::dress_worn,
                     // After the bodies, because it meters them; before the surfaces, because
                     // they are shaded against what it places.
                     crate::resolved::sample_scene,
@@ -248,7 +250,7 @@ impl Plugin for ClientPlugin {
                 EguiPrimaryContextPass,
                 (
                     // Before anything is laid out: it changes how every glyph is
-                    // rasterised, and a pass that ran first would be measured hinted.
+                    // rasterized, and a pass that ran first would be measured hinted.
                     crate::faces::unhint,
                     // First of the drawing, so a frame that has the faces is drawn in them
                     // rather than the frame after it.
@@ -424,7 +426,8 @@ fn strand(
 
 /// Starts the sky loading, or finishes immediately when there is nothing to load.
 fn begin_load(
-    catalogue: Res<Catalogue>,
+    dev: Res<crate::dev::DevEntry>,
+    catalog: Res<Catalog>,
     assets: Res<AssetServer>,
     mut commands: Commands,
     mut game: ResMut<Game>,
@@ -432,23 +435,23 @@ fn begin_load(
     uplink: Res<crate::uplink::Uplink>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    match catalogue.0.as_deref() {
+    match catalog.0.as_deref() {
         // Packing is native tooling and reads a file directly; see `skypack`. Absent from a
         // browser build, where the feature is off and `csv` is not in the tree at all.
         #[cfg(feature = "hyg")]
         Some(path) if path.ends_with(".csv") => {
             match lc_world::sky::hyg::HygProvider::load(path) {
-                Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p, &uplink),
+                Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p, &uplink, dev.charted),
                 Err(e) => {
-                    ui.notify(format!("catalogue: {e}"), 0.0);
-                    enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink);
+                    ui.notify(format!("catalog: {e}"), 0.0);
+                    enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink, dev.charted);
                 }
             }
         }
         Some(path) => {
             commands.insert_resource(LoadingSky(assets.load(path.to_owned())));
         }
-        None => enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink),
+        None => enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink, dev.charted),
     }
 }
 
@@ -457,6 +460,7 @@ fn begin_load(
 /// A frozen window is not a loading screen, so this is a polled system rather than a blocking
 /// read: the loading panel keeps drawing while the fetch is in flight.
 fn finish_load(
+    dev: Res<crate::dev::DevEntry>,
     loading: Option<Res<LoadingSky>>,
     skies: Res<Assets<crate::sky_asset::Sky>>,
     assets: Res<AssetServer>,
@@ -471,7 +475,7 @@ fn finish_load(
         if sky.skipped > 0 {
             ui.notify(format!("{} sky records were unusable", sky.skipped), 0.0);
         }
-        enter_game(&mut game, &mut ui, &mut next, sky, &uplink);
+        enter_game(&mut game, &mut ui, &mut next, sky, &uplink, dev.charted);
         commands.remove_resource::<LoadingSky>();
     } else if let Some(state) = assets.get_load_state(&loading.0)
         && state.is_failed()
@@ -479,7 +483,7 @@ fn finish_load(
         // A sky that will not load is worth saying out loud rather than silently becoming
         // three hand-written stars.
         ui.notify("sky failed to load; using the sample", 0.0);
-        enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink);
+        enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink, dev.charted);
         commands.remove_resource::<LoadingSky>();
     }
 }
@@ -490,6 +494,7 @@ fn enter_game(
     next: &mut NextState<AppState>,
     provider: &dyn StarProvider,
     uplink: &crate::uplink::Uplink,
+    charted: bool,
 ) {
     let count = provider.len();
     // What the craft knows, and what its telescope is doing, survive the session being
@@ -505,13 +510,14 @@ fn enter_game(
     if game.0.remote {
         game.0.knowledge = knowledge;
         game.0.observatory = observatory;
-    } else {
-        // Loaded is not known. With no shard to issue them, the ship is issued the charts of
-        // the volume it launched from here — see `lightcone/docs/22-provenance.md`.
+    } else if charted {
+        // Loaded is not known, and nothing issues charts on a path a player reaches. The flag
+        // is the old charting office kept as a dev tool, because a ship that knows nothing
+        // photographs nothing and `--focus` needs a body the panel lists.
         game.0.issue_charts(crate::session::CHARTED_LY);
     }
     let known = game.0.knowledge.len();
-    ui.notify(format!("{count} stars loaded, {known} charted"), 0.0);
+    ui.notify(format!("{count} stars loaded, {known} known"), 0.0);
     ui.screen = Screen::InGame;
     next.set(AppState::InGame);
 }

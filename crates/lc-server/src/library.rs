@@ -1,6 +1,6 @@
 //! The shelf, as the shard holds it.
 //!
-//! The catalogue is a file the shard reads at boot and sends to every client; the bookmarks are
+//! The catalog is a file the shard reads at boot and sends to every client; the bookmarks are
 //! rows it keeps in memory and checkpoints beside the ships. Neither is part of the world:
 //! nothing here is an event, nothing is cleared, and nothing a player does with a book changes
 //! anything anyone else can see. See `lightcone/docs/21-library.md`.
@@ -33,15 +33,15 @@ pub struct Library {
 }
 
 impl Library {
-    /// Read a catalogue in the format `books.toml` is written in.
+    /// Read a catalog in the format `books.toml` is written in.
     pub fn from_toml(base: &str, text: &str) -> Result<Self, String> {
-        let catalogue = lc_books::Catalogue::from_toml(text).map_err(|e| e.to_string())?;
+        let catalog = lc_books::Catalog::from_toml(text).map_err(|e| e.to_string())?;
         let mut seen = std::collections::HashSet::new();
-        for book in &catalogue.books {
+        for book in &catalog.books {
             if !seen.insert(book.id.clone()) {
                 // Two rows under one id is a shelf where a bookmark means two things. Loudly at
                 // boot, rather than quietly whenever someone opens the wrong one.
-                return Err(format!("the catalogue lists {} twice", book.id));
+                return Err(format!("the catalog lists {} twice", book.id));
             }
             if book.file.contains('/') || book.file.contains('\\') || book.file.contains("..") {
                 return Err(format!("{} names a file outside the shelf: {}", book.id, book.file));
@@ -49,7 +49,7 @@ impl Library {
         }
         Ok(Self {
             base: base.to_owned(),
-            books: catalogue
+            books: catalog
                 .books
                 .into_iter()
                 .map(|book| Book {
@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn a_catalogue_with_one_id_twice_does_not_load() {
+    fn a_catalog_with_one_id_twice_does_not_load() {
         let doubled = format!("{SHELF}\n[[book]]\nid = \"the-gilded-age\"\ntitle = \"Again\"\nfile = \"b.epub\"\n");
         assert!(Library::from_toml("https://cdn/", &doubled).is_err());
     }

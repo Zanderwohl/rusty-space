@@ -86,7 +86,7 @@ pub fn router(state: AppState) -> Router {
 }
 
 /// A closed set in a query parameter, because the alternative to post/redirect/get is a
-/// refresh that repeats the act. Unrecognised renders nothing.
+/// refresh that repeats the act. Unrecognized renders nothing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Done {
     LevelSet,
@@ -178,9 +178,9 @@ async fn load_page(state: &AppState, listing: &Listing) -> Result<users::Page, R
 async fn system_index(
     State(state): State<AppState>,
     admin: Admin,
-    Query(params): Query<crate::catalogue::Params>,
+    Query(params): Query<crate::catalog::Params>,
 ) -> Response {
-    let listing = crate::catalogue::Listing::from_params(params);
+    let listing = crate::catalog::Listing::from_params(params);
     let found = load_systems(&state, &admin, &listing).await;
     views::shell(
         &state.assets,
@@ -194,9 +194,9 @@ async fn system_index(
 async fn system_rows(
     State(state): State<AppState>,
     admin: Admin,
-    Query(params): Query<crate::catalogue::Params>,
+    Query(params): Query<crate::catalog::Params>,
 ) -> Response {
-    let listing = crate::catalogue::Listing::from_params(params);
+    let listing = crate::catalog::Listing::from_params(params);
     let found = load_systems(&state, &admin, &listing).await;
     views::systems::region(&listing, &found).into_response()
 }
@@ -206,7 +206,7 @@ async fn system_rows(
 async fn load_systems(
     state: &AppState,
     admin: &Admin,
-    listing: &crate::catalogue::Listing,
+    listing: &crate::catalog::Listing,
 ) -> Result<crate::shard::Systems, crate::shard::Missing> {
     match state.shard() {
         None => Err(crate::shard::Missing::NotConfigured),

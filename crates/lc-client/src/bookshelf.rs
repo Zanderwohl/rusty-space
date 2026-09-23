@@ -7,7 +7,7 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 use egui::{Align, CornerRadius, Rect, Stroke, Vec2};
-use lc_books::catalogue::{Entry, Order, shelve};
+use lc_books::catalog::{Entry, Order, shelve};
 
 use crate::action::Action;
 use crate::input::Requested;
@@ -69,7 +69,7 @@ pub(crate) fn paper(
     search(ui, setting, query);
     ui.add_space(12.0);
 
-    if shelf.catalogue.books.is_empty() {
+    if shelf.catalog.books.is_empty() {
         ui.add(
             egui::Label::new(
                 egui::RichText::new("the shelf is empty").font(setting.body.clone()).color(FAINT),
@@ -79,7 +79,7 @@ pub(crate) fn paper(
         return 0;
     }
 
-    let found = shelve(&shelf.catalogue, query, *order, &shelf.recent());
+    let found = shelve(&shelf.catalog, query, *order, &shelf.recent());
     if found.is_empty() {
         ui.add(
             egui::Label::new(

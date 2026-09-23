@@ -9,7 +9,7 @@ use std::time::Duration;
 use lc_proto::ClientId;
 use tokio::signal::unix::{SignalKind, signal};
 use lc_server::journal::{Memory, Postgres, Store};
-use lc_server::server::{Server, TICK_MS};
+use lc_server::server::{Server, TICK_MS, TICKS_PER_SECOND};
 use lc_server::ticket::Trusted;
 use lc_server::websocket::WebSocketServer;
 use lc_server::world::World;
@@ -21,7 +21,7 @@ lightcone-server — one shard
   --bind <addr>       where to listen (default 127.0.0.1:8080)
   --audience <name>   the audience tickets must name (default shard-1)
   --jwks <url|path>   the broker's published keys, fetched at boot
-  --sky <url|path>    the packed catalogue this shard is authoritative over
+  --sky <url|path>    the packed catalog this shard is authoritative over
   --shard <n>         this shard's number, which keys its saved state (default 1)
   --db <url>          where craft are kept, so the world outlives this process
                       (or LC_SHARD_DB, which is where it belongs: it is a password,
@@ -38,8 +38,8 @@ read back at boot — including the world's clock, without which every saved cra
 whose crossing has not begun.
 
 Point --sky at the **same chunk the promoted client downloads**, which is
-<cdn>/game/<build>/assets/sky/catalogue.lcsky. Both ends place craft into systems by position
-against the same shell radius, so two different catalogues is two different answers to which
+<cdn>/game/<build>/assets/sky/catalog.lcsky. Both ends place craft into systems by position
+against the same shell radius, so two different catalogs is two different answers to which
 system a ship is in — and nothing reports the disagreement.
 ";
 
@@ -114,17 +114,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             provider.stars().to_vec()
         }
         // Three hand-written stars. Fine for a shard nobody connects a real client to, and
-        // wrong for every other case: a client loading the real catalogue will disagree with
+        // wrong for every other case: a client loading the real catalog will disagree with
         // this about which system it is in, and neither end will say so.
         None => {
             eprintln!("WARNING: no --sky, so this shard's world is the authored sample. A client");
-            eprintln!("         with a real catalogue will not agree with it about anything.");
+            eprintln!("         with a real catalog will not agree with it about anything.");
             AuthoredStars::sample().stars().to_vec()
         }
     };
     // Shared with the administration surface below.
-    let catalogue = std::sync::Arc::new(stars);
-    server.load_world(World::from_shared(catalogue.clone()));
+    let catalog = std::sync::Arc::new(stars);
+    server.load_world(World::from_shared(catalog.clone()));
 
     // Refused rather than silently skipped: a console pointed at a shard that quietly declined
     // to listen is a card reading "unavailable" with nothing to explain it.
@@ -134,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let api = lc_server::admin::Api::new(
             std::sync::Arc::new(connect(url).await?),
-            catalogue.clone(),
+            catalog.clone(),
             std::sync::Arc::new(keys),
         );
         let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -146,8 +146,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // The shelf. A shard with no catalogue runs without one and says nothing about a library;
-    // a shard with a catalogue and no base would send files hanging off nothing, so both are
+    // The shelf. A shard with no catalog runs without one and says nothing about a library;
+    // a shard with a catalog and no base would send files hanging off nothing, so both are
     // required together or neither is taken.
     match (
         after("--library").or_else(|| std::env::var("LC_LIBRARY").ok()),
@@ -155,7 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ) {
         (Some(path), Some(base)) => {
             let text = std::fs::read_to_string(&path)
-                .map_err(|e| format!("cannot read the catalogue at {path}: {e}"))?;
+                .map_err(|e| format!("cannot read the catalog at {path}: {e}"))?;
             server.library = lc_server::library::Library::from_toml(&base, &text)?;
             eprintln!("shelf: {} books from {path}, served from {base}", server.library.books.len());
         }
@@ -199,8 +199,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // what each of them knew.
                     let files = lc_store::knowledge::load_files(&client).await?;
                     let samples = lc_store::knowledge::load_samples(&client).await?;
+                    // Counted rather than listed: a format bump refuses every file a craft
+                    // holds, and thousands of identical lines bury the rest of the boot.
+                    let mut problems: std::collections::BTreeMap<String, usize> =
+                        std::collections::BTreeMap::new();
                     for problem in server.adopt_knowledge(&files, &samples) {
-                        eprintln!("WARNING: knowledge not restored: {problem}");
+                        *problems.entry(problem).or_default() += 1;
+                    }
+                    for (problem, count) in problems {
+                        eprintln!("WARNING: knowledge not restored ({count}x): {problem}");
                     }
                     eprintln!("resumed {} files and {} samples of knowledge", files.len(), samples.len());
                     let marks = lc_store::reading::load(&client).await?;
@@ -229,7 +236,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 None => eprintln!("shard {shard_id} has no saved state; starting a new world"),
             }
-            // After the clock is adopted, because the acknowledgement window is stamped
+            // After the clock is adopted, because the acknowledgment window is stamped
             // against it: a shard that read these first would date every message it had ever
             // been told to the instant before it knew what time it was.
             server.resume_conversations().await?;
@@ -254,9 +261,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
     let mut since_save = 0u32;
+    // A checkpoint being written. The connection is inside it until it finishes.
+    let mut saving: Option<tokio::task::JoinHandle<Written>> = None;
     // Consecutive ticks whose journal write failed, so a store that has gone away is reported
     // rather than repeated twenty times a second.
     let mut failing = 0u32;
+    let mut overruns = lc_server::timing::Overruns::new(
+        Duration::from_millis(TICK_MS as u64),
+        TICKS_PER_SECOND,
+    );
 
     loop {
         tokio::select! {
@@ -283,24 +296,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 failing += 1;
             }
         }
+        if let Some(line) = overruns.note(server.last_tick()) {
+            eprintln!("WARNING: {line}");
+        }
+
+        // A finished write hands the connection back, and on failure what it was writing.
+        if saving.as_ref().is_some_and(|task| task.is_finished())
+            && let Some(task) = saving.take()
+        {
+            store = Some(finish_checkpoint(task.await?, &mut server));
+        }
 
         since_save += 1;
         if since_save >= SAVE_EVERY_TICKS
-            && let Some(client) = &mut store
+            && let Some(client) = store.take()
         {
             since_save = 0;
-            // A failed checkpoint is not a reason to stop the world. It is a reason to say so
-            // every time, because a shard that has quietly stopped saving looks exactly like one
-            // that is fine.
-            if let Err(why) = checkpoint(client, shard_id, &mut server).await {
-                eprintln!("ERROR: checkpoint failed: {why}");
-            }
+            // The snapshot is taken here, on the tick, so it is the shard at one tick; only the
+            // writing is moved off it. It used to hold the tick for the whole transaction.
+            let taken = take(&mut server);
+            saving = Some(tokio::spawn(write(client, shard_id, taken)));
         }
     }
 
-    if let Some(client) = &mut store {
+    if let Some(task) = saving.take() {
+        store = Some(finish_checkpoint(task.await?, &mut server));
+    }
+    if let Some(client) = store.take() {
         eprintln!("stopping; writing a last checkpoint");
-        checkpoint(client, shard_id, &mut server).await?;
+        let (_, taken, written) = write(client, shard_id, take(&mut server)).await;
+        if let Err(why) = written {
+            give_back(&mut server, taken);
+            return Err(why.into());
+        }
     }
     Ok(())
 }
@@ -316,19 +344,37 @@ const SAVE_EVERY_TICKS: u32 = 400;
 /// enough that an operator sees a store outage going on, rarely enough to read.
 const COMPLAIN_EVERY_TICKS: u32 = 400;
 
-async fn checkpoint(
-    client: &mut tokio_postgres::Client,
-    shard_id: i64,
-    // `&mut` because a checkpoint drains what changed since the last one.
-    server: &mut Server<Store>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let taken = server.checkpoint();
-    // What changed since the last checkpoint: files touched, samples taken and consumed, shelves
-    // read. Drained here and handed back if the write fails, so nothing is lost to a failure but
-    // time: a file that never changes again would otherwise never be written.
-    let remembered = server.take_knowledge();
-    let marks: Vec<(String, lc_proto::Bookmark)> = server.library.take_dirty();
-    let rows: Vec<lc_store::reading::Bookmark> = marks
+/// A checkpoint as taken, for [`write`] to write and [`give_back`] to return if it could not.
+struct Taken {
+    checkpoint: lc_server::persist::Checkpoint,
+    /// What changed since the last checkpoint: files touched, samples taken and consumed.
+    /// Drained, and handed back if the write fails, so nothing is lost to a failure but time: a
+    /// file that never changes again would otherwise never be written.
+    remembered: lc_server::archive::Remembered,
+    marks: Vec<(String, lc_proto::Bookmark)>,
+}
+
+fn take(server: &mut Server<Store>) -> Taken {
+    Taken {
+        checkpoint: server.checkpoint(),
+        remembered: server.take_knowledge(),
+        marks: server.library.take_dirty(),
+    }
+}
+
+fn give_back(server: &mut Server<Store>, taken: Taken) {
+    server.untake_knowledge(taken.remembered);
+    server.library.redirty(&taken.marks);
+}
+
+/// A checkpoint write's outcome, with the connection and what was being written handed back.
+type Written = (tokio_postgres::Client, Taken, Result<(), tokio_postgres::Error>);
+
+/// Owns the connection while it writes, so it can run beside the tick; hands both back.
+async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) -> Written {
+    let started = std::time::Instant::now();
+    let rows: Vec<lc_store::reading::Bookmark> = taken
+        .marks
         .iter()
         .map(|(account, mark)| lc_store::reading::Bookmark {
             account: account.clone(),
@@ -343,27 +389,35 @@ async fn checkpoint(
     // written and their deletions not, say — would be reloaded as something that never was.
     let written = async {
         let transaction = client.transaction().await?;
-        lc_store::ships::save_ships(&transaction, &taken.ships).await?;
+        lc_store::ships::save_ships(&transaction, &taken.checkpoint.ships).await?;
         // The partitions the samples land in exist, because the journal keeps them ready ahead of
         // the clock every tick and nothing is learned in the future.
-        lc_store::knowledge::save_files(&transaction, &remembered.files).await?;
-        lc_store::knowledge::save_samples(&transaction, &remembered.samples).await?;
-        lc_store::knowledge::delete_samples(&transaction, &remembered.discarded).await?;
+        lc_store::knowledge::save_files(&transaction, &taken.remembered.files).await?;
+        lc_store::knowledge::save_samples(&transaction, &taken.remembered.samples).await?;
+        lc_store::knowledge::delete_samples(&transaction, &taken.remembered.discarded).await?;
         lc_store::ships::save_shard(&transaction, shard_id, lc_store::ships::Shard {
-            now_t: taken.now_t,
-            next_ship: taken.next_ship,
+            now_t: taken.checkpoint.now_t,
+            next_ship: taken.checkpoint.next_ship,
         })
         .await?;
         lc_store::reading::save(&transaction, &rows).await?;
         transaction.commit().await
     }
     .await;
-    if let Err(why) = written {
-        server.untake_knowledge(remembered);
-        server.library.redirty(&marks);
-        return Err(why.into());
+    if written.is_ok() {
+        eprintln!("checkpoint written in {:.0} ms", started.elapsed().as_secs_f64() * 1.0e3);
     }
-    Ok(())
+    (client, taken, written)
+}
+
+/// A failed checkpoint is not a reason to stop the world. It is a reason to say so every time,
+/// because a shard that has quietly stopped saving looks exactly like one that is fine.
+fn finish_checkpoint((client, taken, written): Written, server: &mut Server<Store>) -> tokio_postgres::Client {
+    if let Err(why) = written {
+        eprintln!("ERROR: checkpoint failed: {why}");
+        give_back(server, taken);
+    }
+    client
 }
 
 /// Connect, and drive the connection in the background.
@@ -390,7 +444,7 @@ fn read_jwks(source: &str) -> Result<serde_json::Value, Box<dyn std::error::Erro
 /// Bytes from a URL or a file, which is how every input this takes is named.
 ///
 /// A URL matters for the sky in particular: pointing a shard at the CDN path of the promoted
-/// build is what makes "both ends hold the same catalogue" a fact rather than a convention
+/// build is what makes "both ends hold the same catalog" a fact rather than a convention
 /// somebody has to keep.
 ///
 /// **Name the service, not the site.** In a container deployment the public name resolves to

@@ -14,7 +14,7 @@ use crate::presentation::render_space::ToRender;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StarGpuData {
-    /// Unit direction vector in Bevy Y-up render space, rotated out of the catalogue's
+    /// Unit direction vector in Bevy Y-up render space, rotated out of the catalog's
     /// equatorial frame into the ecliptic first, so it agrees with the simulation.
     pub dir: [f32; 3],
     /// Apparent magnitude as seen from Earth
@@ -95,7 +95,7 @@ fn load_csv(path: &str) -> Vec<DistantStar> {
             let dec = f(dec_col);
             let mag = f(mag_col);
 
-            // RA arrives in hours and dec in degrees; the catalogue frame is equatorial
+            // RA arrives in hours and dec in degrees; the catalog frame is equatorial
             // J2000, so the direction has to be tilted into the ecliptic before it can
             // share a sky with the simulation. Then the usual sim -> render conversion.
             let ra_rad = (ra as f64) * PI_F64 / 12.0;
@@ -135,7 +135,7 @@ mod tests {
         render.to_sim().normalize().z.asin().to_degrees()
     }
 
-    /// The catalogue is equatorial and the simulation is ecliptic, so the import has to
+    /// The catalog is equatorial and the simulation is ecliptic, so the import has to
     /// rotate by the obliquity. These are published ecliptic latitudes; without the
     /// rotation each star lands at its *declination* instead, which for Sirius is 23° out
     /// and for Polaris is 23° out in the other direction.
@@ -154,7 +154,7 @@ mod tests {
             let star = stars
                 .iter()
                 .find(|s| s.proper == name)
-                .unwrap_or_else(|| panic!("{name} is not in the brightest-stars catalogue"));
+                .unwrap_or_else(|| panic!("{name} is not in the brightest-stars catalog"));
             let found = ecliptic_latitude(star);
             assert!(
                 (found - latitude).abs() < 0.01,

@@ -10,17 +10,17 @@ use std::time::Instant;
 
 use glam::DVec3;
 use lc_client::session::Session;
-use lc_world::sky::{AuthoredStars, CatalogueStar, StarId, StarProvider};
+use lc_world::sky::{AuthoredStars, CatalogStar, StarId, StarProvider};
 
-/// About what the shipped catalogue chunk holds.
+/// About what the shipped catalog chunk holds.
 const STARS: u64 = 8000;
 
 fn a_full_sky() -> AuthoredStars {
     let one = AuthoredStars::sample().stars()[1].clone();
-    let stars: Vec<CatalogueStar> = (0..STARS)
+    let stars: Vec<CatalogStar> = (0..STARS)
         .map(|n| {
             let mut star = one.clone();
-            star.id = StarId::synthesise("bench", n);
+            star.id = StarId::synthesize("bench", n);
             // Spread them over a few hundred light-years, off-axis so nothing degenerates.
             let f = n as f64;
             star.position_ly = DVec3::new(f % 97.0 - 48.0, f % 61.0 - 30.0, f % 43.0 - 21.0);

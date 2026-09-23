@@ -160,7 +160,9 @@ pub fn observe(
             return None;
         }
         // Photon statistics, expressed as a fraction of the bare star's flux, which is the
-        // unit every deficit here is in.
+        // unit every deficit here is in, and photon statistics alone: a deficit is the star
+        // against itself, so the flat field and the gain that floor an absolute flux
+        // ([`crate::instrument::PHOTOMETRY_FLOOR`]) are common to both and divide out.
         let uncertainty = (source + background).sqrt() / bare;
         let net = occulted - extra;
         let noise = rng::gaussian(rng::hash(&[seed, band.index() as u64, t_r.to_bits()]));

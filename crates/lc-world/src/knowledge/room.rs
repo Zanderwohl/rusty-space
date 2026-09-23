@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn a_full_craft_stops_keeping_samples_and_keeps_everything_else() {
-        let star = Subject::Star(StarId::synthesise("room", 1));
+        let star = Subject::Star(StarId::synthesize("room", 1));
         let mut k = Knowledge::new(Witness(1));
         k.name_it(star, "Kettle", 0.0);
         k.fit_to(f64::INFINITY);

@@ -1,6 +1,6 @@
 //! What a chart emits: geometry and text placements, in pixels.
 //!
-//! Nothing here rasterises. Text is where a plotting library acquires a dependency tree —
+//! Nothing here rasterizes. Text is where a plotting library acquires a dependency tree —
 //! font loading, shaping, atlasing — and delegating it costs one trait and removes all of
 //! that. A backend turns these into meshes, painter calls, or an SVG string.
 

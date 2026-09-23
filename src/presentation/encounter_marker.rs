@@ -305,7 +305,7 @@ fn marker_face(velocity: DVec3, orbit_normal: DVec3) -> Option<(Vec4, Vec4)> {
         return None;
     }
 
-    // Orthogonalise: `r x v` is perpendicular to `v` in exact arithmetic, but both arrive
+    // Orthogonalize: `r x v` is perpendicular to `v` in exact arithmetic, but both arrive
     // here through a narrowing to f32.
     let plane_x = (orbit_normal - facing * facing.dot(orbit_normal)).normalize_or_zero();
     if plane_x == Vec3::ZERO {

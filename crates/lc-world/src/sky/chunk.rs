@@ -1,7 +1,7 @@
 //! A packed sky, for clients that cannot read a filesystem.
 //!
 //! The browser has no `std::fs` and no reason to download 32 MB of CSV. This is the same
-//! catalogue as a block of bytes: fetched over HTTP, decoded from a slice, and handed to the
+//! catalog as a block of bytes: fetched over HTTP, decoded from a slice, and handed to the
 //! same [`StarRecord::assemble`] the CSV importer uses.
 //!
 //! **What is stored is what cannot be recomputed.** Radius, temperature, mu, mass and
@@ -11,12 +11,12 @@
 //!
 //! Positions and velocities are `f32`. That is not a compromise against the source: HYG gives
 //! six significant digits, and `f32` carries seven. It would be a compromise against a
-//! catalogue that knew better, and the format version is how that gets noticed.
+//! catalog that knew better, and the format version is how that gets noticed.
 
 use glam::DVec3;
 
 use super::record::{StarRecord, assemble_all};
-use super::{CatalogueStar, StarProvider};
+use super::{CatalogStar, StarProvider};
 
 const MAGIC: &[u8; 6] = b"LCSKY\x00";
 const VERSION: u16 = 1;
@@ -66,7 +66,7 @@ impl std::fmt::Display for ChunkError {
                 write!(f, "sky chunk is truncated: wanted {wanted} bytes, had {had}")
             }
             Self::BadUtf8 => write!(f, "a star name is not valid UTF-8"),
-            Self::KeyTooLarge(k) => write!(f, "catalogue key {k} does not fit in 32 bits"),
+            Self::KeyTooLarge(k) => write!(f, "catalog key {k} does not fit in 32 bits"),
         }
     }
 }
@@ -77,7 +77,7 @@ impl std::error::Error for ChunkError {}
 /// **Use this rather than [`encode`] to build a shipped chunk.** The stored values are `f32`,
 /// and a row sitting exactly on a validity boundary — a `B-V` a hair outside `BV_VALID`, say —
 /// can round *into* range on the way in. Deciding with the source's own `f64` values and
-/// packing only the survivors means a chunk can never contain a star the catalogue rejected.
+/// packing only the survivors means a chunk can never contain a star the catalog rejected.
 ///
 /// Returns the bytes and the number of records dropped.
 pub fn pack(source: &str, records: &[StarRecord]) -> Result<(Vec<u8>, usize), ChunkError> {
@@ -239,7 +239,7 @@ impl<'a> Reader<'a> {
 /// A [`StarProvider`] over a decoded chunk.
 pub struct ChunkProvider {
     source: String,
-    stars: Vec<CatalogueStar>,
+    stars: Vec<CatalogStar>,
     /// Records the chunk held that did not assemble into a star.
     pub skipped: usize,
 }
@@ -256,7 +256,7 @@ impl StarProvider for ChunkProvider {
     fn name(&self) -> &str {
         &self.source
     }
-    fn stars(&self) -> &[CatalogueStar] {
+    fn stars(&self) -> &[CatalogStar] {
         &self.stars
     }
 }
@@ -387,7 +387,7 @@ mod tests {
     }
 }
 
-/// The CSV and the chunk are two routes to one catalogue, and this is what keeps them honest.
+/// The CSV and the chunk are two routes to one catalog, and this is what keeps them honest.
 ///
 /// Needs the bundled HYG data, so it is skipped where that is absent rather than failing.
 #[cfg(all(test, feature = "hyg"))]
@@ -398,7 +398,7 @@ mod equivalence {
     const CSV: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/catalogs/hygdata_v42.csv");
 
     #[test]
-    fn a_packed_catalogue_is_the_catalogue() {
+    fn a_packed_catalog_is_the_catalog() {
         let Ok(records) = HygProvider::read_records(CSV) else {
             eprintln!("HYG not present; skipping");
             return;
@@ -411,9 +411,9 @@ mod equivalence {
         assert_eq!(packed.name(), hyg::SOURCE);
         assert_eq!(dropped, records.len() - direct.len(), "pack and assemble disagreed");
         // A chunk may never gain a star: `pack` decides with the source's f64 values.
-        assert!(packed.len() <= direct.len(), "the chunk gained stars the catalogue rejected");
+        assert!(packed.len() <= direct.len(), "the chunk gained stars the catalog rejected");
         // Losing one is possible in principle — a record that assembles in f64 and not after
-        // rounding — and this asserts it does not happen with the bundled catalogue.
+        // rounding — and this asserts it does not happen with the bundled catalog.
         assert_eq!(packed.skipped, 0, "{} packed records failed to assemble", packed.skipped);
         assert_eq!(packed.len(), direct.len());
 
@@ -433,7 +433,7 @@ mod equivalence {
             worst_teff = worst_teff.max((a.star.teff_k - b.star.teff_k).abs() / a.star.teff_k);
         }
         assert!(worst_position < 1e-6, "position drifted by {worst_position:e} relative");
-        // Color index is quantised to a thousandth, and temperature follows from it. Near
+        // Color index is quantized to a thousandth, and temperature follows from it. Near
         // the Sun that is about two kelvin, so the bound is the quantum and not a guess.
         assert!(worst_teff < 2e-3, "temperature drifted by {worst_teff:e} relative");
     }

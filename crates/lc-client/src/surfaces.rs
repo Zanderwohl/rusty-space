@@ -6,6 +6,10 @@
 //! cloud deck drawn over it. So a hand-made Earth is a file and a line, not a change here. Each
 //! body's seed is its name's.
 //!
+//! A rocky world with air -- anything [`lc_world::climate`] has a climate for -- takes the
+//! manifest's `[rocky]` graphs instead, with the graph's parameters bound from its climate: one
+//! graph for Earth, Mars and every world the generator makes between and beyond them.
+//!
 //! A cloud deck's [`WEATHER`] is rebaked every [`CLOUD_PERIOD_S`] with a new seed and blended
 //! in body_surface.wgsl; its [`CLIMATE`] is baked once. Keyframes follow coordinate time, so
 //! every client draws the same weather. See lightcone/docs/07-rendering.md.
@@ -17,10 +21,13 @@ use bevy::asset::io::Reader;
 use bevy::asset::{AssetLoader, LoadContext, LoadState};
 use bevy::prelude::*;
 use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
+use lc_world::climate::Climate;
 use lc_world::surface::Surface;
 use serde::Deserialize;
+use texture_graph_core::ParamValue;
+use texture_graph_core::color::oklcha;
 
-use crate::procedural::{Bakes, Shape, Target, TextureGraph, placeholder};
+use crate::procedural::{Bakes, Params, Shape, Target, TextureGraph, placeholder};
 
 const MANIFEST: &str = "textures/surfaces.lcsurfaces";
 
@@ -56,6 +63,14 @@ pub struct SurfaceManifest {
     pub bodies: HashMap<String, String>,
     #[serde(default)]
     pub clouds: HashMap<String, String>,
+    pub rocky: Option<Rocky>,
+}
+
+/// The graphs every rocky world with air is drawn from.
+#[derive(Debug, Deserialize)]
+pub struct Rocky {
+    pub ground: String,
+    pub clouds: String,
 }
 
 /// The graphs a body is drawn from, as paths under `textures/`.
@@ -72,7 +87,14 @@ pub enum Ground<'a> {
 }
 
 impl SurfaceManifest {
-    pub fn look_for(&self, name: &str, class: Surface) -> Option<Look<'_>> {
+    /// A body named in the manifest takes its own graphs over anything a climate would give it.
+    pub fn look_for(&self, name: &str, class: Surface, climate: bool) -> Option<Look<'_>> {
+        if let (Some(rocky), true, false) = (&self.rocky, climate, self.bodies.contains_key(name)) {
+            return Some(Look {
+                ground: Ground::Color(&rocky.ground),
+                clouds: Some(&rocky.clouds),
+            });
+        }
         let ground = match self.bodies.get(name) {
             Some(path) => Ground::Color(path),
             None => Ground::Pattern(self.classes.get(&class)?),
@@ -102,7 +124,7 @@ impl std::fmt::Display for ManifestLoadError {
 }
 impl std::error::Error for ManifestLoadError {}
 
-/// TOML, under an extension of its own because the library's catalogue already has `toml`.
+/// TOML, under an extension of its own because the library's catalog already has `toml`.
 #[derive(Default, TypePath)]
 pub struct ManifestLoader;
 
@@ -139,6 +161,8 @@ pub struct BodyImages {
     pub color: Handle<Image>,
     pub weather: [Handle<Image>; 3],
     pub climate: Handle<Image>,
+    /// [`MASKS`], in order.
+    pub masks: [Handle<Image>; 4],
 }
 
 impl BodyImages {
@@ -149,12 +173,18 @@ impl BodyImages {
             color: images.add(placeholder(cube.color())),
             weather: std::array::from_fn(|_| images.add(placeholder(WEATHER))),
             climate: images.add(placeholder(CLIMATE)),
+            masks: std::array::from_fn(|_| images.add(placeholder(cube))),
         }
     }
 
     pub fn material(&self, uniforms: BodySurfaceUniform) -> BodySurfaceMaterial {
         let [weather_0, weather_1, weather_2] = self.weather.clone();
+        let [land, ice, growth, sand] = self.masks.clone();
         BodySurfaceMaterial {
+            land,
+            ice,
+            growth,
+            sand,
             uniforms,
             pattern: self.pattern.clone(),
             color: self.color.clone(),
@@ -165,6 +195,20 @@ impl BodyImages {
         }
     }
 }
+
+/// What of a body's own a material draws. All false until the manifest has said, and for a body
+/// it gives nothing.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct Drawn {
+    pub color: bool,
+    pub clouds: bool,
+    /// Whether the [`MASKS`] are baked, so each band can see its own ground.
+    pub grounds: bool,
+}
+
+/// rocky.tgraph's layers that say what its ground is made of, as body_surface.wgsl's `banded`
+/// mixes them: land over water, ice over everything, growth over dry land, sand over rock.
+pub const MASKS: [&str; 4] = ["land", "ice", "green", "sand amount"];
 
 /// See [`BodySurfaceUniform`]'s `weather` and `drift`.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -183,8 +227,9 @@ struct Deck {
 struct Body {
     images: BodyImages,
     class: Surface,
-    /// Whether `color` and clouds are drawn; `None` until the manifest has said.
-    drawn: Option<(bool, bool)>,
+    climate: Option<Climate>,
+    /// `None` until the manifest has said.
+    drawn: Option<Drawn>,
     deck: Option<Deck>,
 }
 
@@ -212,12 +257,19 @@ impl FromWorld for Surfaces {
 
 impl Surfaces {
     /// What `name` is drawn with: flat at first, its own once baked.
-    pub fn images(&mut self, name: &str, class: Surface, images: &mut Assets<Image>) -> BodyImages {
+    pub fn images(
+        &mut self,
+        name: &str,
+        class: Surface,
+        climate: Option<Climate>,
+        images: &mut Assets<Image>,
+    ) -> BodyImages {
         self.by_body
             .entry(name.to_owned())
             .or_insert_with(|| Body {
                 images: BodyImages::placeholders(images),
                 class,
+                climate,
                 drawn: None,
                 deck: None,
             })
@@ -225,14 +277,13 @@ impl Surfaces {
             .clone()
     }
 
-    /// Whether `name`'s color and cloud cubemaps are drawn, as the material's weights for them.
-    pub fn drawn(&self, name: &str) -> (f32, f32) {
-        let (color, clouds) = self
-            .by_body
-            .get(name)
-            .and_then(|b| b.drawn)
-            .unwrap_or_default();
-        (f32::from(u8::from(color)), f32::from(u8::from(clouds)))
+    pub fn drawn(&self, name: &str) -> Drawn {
+        self.by_body.get(name).and_then(|b| b.drawn).unwrap_or_default()
+    }
+
+    /// `name`'s climate, as it was when the body was first resolved.
+    pub fn climate(&self, name: &str) -> Option<Climate> {
+        self.by_body.get(name)?.climate
     }
 
     /// `name`'s cloud deck at `now_s`, coordinate time, asking for whichever keyframes it lacks.
@@ -321,38 +372,129 @@ fn route(
         if let LoadState::Failed(e) = assets.load_state(&surfaces.manifest) {
             warn!("the surface manifest did not load, drawing bodies flat: {e}");
             for body in surfaces.by_body.values_mut() {
-                body.drawn = Some((false, false));
+                body.drawn = Some(Drawn::default());
             }
         }
         return;
     };
     for (name, body) in surfaces.by_body.iter_mut().filter(|(_, b)| b.drawn.is_none()) {
-        let Some(look) = manifest.look_for(name, body.class) else {
+        let Some(look) = manifest.look_for(name, body.class, body.climate.is_some()) else {
             warn!("no surface graph for {name} or its class, {:?}", body.class);
-            body.drawn = Some((false, false));
+            body.drawn = Some(Drawn::default());
             continue;
         };
         let seed = seed_of(name);
         let graph = |path: &str| assets.load(format!("textures/{path}"));
-        let mut bake = |path: &str, target, image: &Handle<Image>| {
-            bakes.request(graph(path), seed, target, image.clone());
+        let params = match (&manifest.rocky, body.climate) {
+            (Some(rocky), Some(climate)) if matches!(look.ground, Ground::Color(p) if p == rocky.ground) => {
+                ground_params(&climate)
+            }
+            _ => Params::new(),
+        };
+        let mut bake = |path: &str, target, image: &Handle<Image>, params: Params| {
+            bakes.request_with(graph(path), seed, params, target, image.clone());
         };
         let pattern = Target::new(Shape::Cube(FACE));
         let color = Target::new(Shape::Cube(COLOR_FACE)).color();
+        let grounds = !params.is_empty();
+        if let (Ground::Color(path), true) = (&look.ground, grounds) {
+            for (layer, image) in MASKS.into_iter().zip(&body.images.masks) {
+                bake(path, pattern.layer(layer), image, params.clone());
+            }
+        }
         match look.ground {
-            Ground::Pattern(path) => bake(path, pattern, &body.images.pattern),
-            Ground::Color(path) => bake(path, color, &body.images.color),
+            Ground::Pattern(path) => bake(path, pattern, &body.images.pattern, params),
+            Ground::Color(path) => bake(path, color, &body.images.color, params),
         }
         if let Some(path) = look.clouds {
-            bake(path, CLIMATE, &body.images.climate);
+            bake(path, CLIMATE, &body.images.climate, Params::new());
             body.deck = Some(Deck {
                 graph: graph(path),
                 seed,
                 holds: [None; 3],
             });
         }
-        body.drawn = Some((matches!(look.ground, Ground::Color(_)), look.clouds.is_some()));
+        body.drawn = Some(Drawn {
+            color: matches!(look.ground, Ground::Color(_)),
+            clouds: look.clouds.is_some(),
+            grounds,
+        });
     }
+}
+
+/// The share of rocky.tgraph's surface under sea across its `sea` parameter's useful range, measured over the sphere and several seeds; a seed moves it a few per cent.
+/// `the_sea_covers_what_the_table_says` holds the graph to it.
+const SEA_LEVELS: [(f32, f32); 11] = [
+    (0.30, 0.004),
+    (0.35, 0.016),
+    (0.40, 0.054),
+    (0.45, 0.143),
+    (0.50, 0.299),
+    (0.55, 0.494),
+    (0.60, 0.696),
+    (0.65, 0.85),
+    (0.70, 0.942),
+    (0.75, 0.988),
+    (0.80, 0.997),
+];
+
+/// The same for its `ice`, at its default sea; `the_ice_covers_what_the_table_says`.
+const ICE_LEVELS: [(f32, f32); 11] = [
+    (-0.15, 0.0),
+    (-0.03, 0.011),
+    (0.09, 0.071),
+    (0.21, 0.187),
+    (0.33, 0.35),
+    (0.45, 0.522),
+    (0.57, 0.667),
+    (0.69, 0.778),
+    (0.81, 0.879),
+    (0.93, 0.963),
+    (1.05, 1.0),
+];
+
+/// The parameter that covers `share` of the surface, by `table`.
+fn level(table: &[(f32, f32)], share: f32) -> f32 {
+    let share = share.clamp(0.0, 1.0);
+    let i = table
+        .windows(2)
+        .position(|w| share <= w[1].1)
+        .unwrap_or(table.len() - 2);
+    let [(a, fa), (b, fb)] = [table[i], table[i + 1]];
+    if fb <= fa {
+        return a;
+    }
+    a + (b - a) * (share - fa) / (fb - fa)
+}
+
+fn sea_level(share: f32) -> f32 {
+    if share <= 0.0 { 0.0 } else { level(&SEA_LEVELS, share) }
+}
+
+/// Past the table's ends, so none is none and all is all.
+fn ice_level(share: f32) -> f32 {
+    match share {
+        s if s <= 0.0 => -0.3,
+        s if s >= 1.0 => 1.5,
+        s => level(&ICE_LEVELS, s),
+    }
+}
+
+/// rocky.tgraph's parameters, from what the world is.
+fn ground_params(c: &Climate) -> Params {
+    let scalar = ParamValue::Scalar;
+    let color = |[l, c, h]: [f32; 3]| ParamValue::Color(oklcha(l, c, h, 1.0));
+    vec![
+        ("sea", scalar(sea_level(c.ocean))),
+        ("ice", scalar(ice_level(c.ice))),
+        ("life", scalar(c.life)),
+        ("rust", scalar(c.rust)),
+        ("sand", scalar(c.sand)),
+        ("aridity", scalar(c.aridity)),
+        ("dark", scalar(c.dark)),
+        ("foliage", color(c.foliage.low)),
+        ("foliage high", color(c.foliage.high)),
+    ]
 }
 
 pub struct SurfacesPlugin;
@@ -450,7 +592,18 @@ mod tests {
                 .bake_color_cube(&graph(path), 8, &eval)
                 .unwrap_or_else(|e| panic!("{path}: {e}"));
         }
-        for path in manifest.clouds.values() {
+        let rocky = manifest.rocky.as_ref().expect("rocky worlds are routed");
+        let ground = graph(&rocky.ground);
+        baker
+            .bake_color_cube(&ground, 8, &eval)
+            .unwrap_or_else(|e| panic!("{}: {e}", rocky.ground));
+        for name in MASKS {
+            let layer = ground.layers.iter().find(|l| l.name == name).unwrap_or_else(|| panic!("no mask {name}")).id;
+            baker
+                .bake_scalar_cube(&ground, layer, 8, ScalarFormat::R8Unorm, &eval)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+        for path in manifest.clouds.values().chain([&rocky.clouds]) {
             let g = graph(path);
             for name in [WEATHER.layer, CLIMATE.layer].map(Option::unwrap) {
                 let layer = g.layers.iter().find(|l| l.name == name).unwrap().id;
@@ -483,8 +636,7 @@ mod tests {
     #[test]
     fn the_shaders_deck_is_the_graphs_deck() {
         let manifest = manifest();
-        let path = manifest.clouds.get("Earth").expect("Earth has clouds");
-        let g = graph(path);
+        let g = graph(&manifest.rocky.expect("rocky worlds have clouds").clouds);
         let clouds = g.output.color.unwrap();
         let mut covered = 0;
         for seed in [1, 0xdead_beef] {
@@ -520,7 +672,7 @@ mod tests {
     /// A byte clips at one, and the blend is about [`WEATHER_MEAN`].
     #[test]
     fn the_weather_has_the_mean_and_range_the_blend_assumes() {
-        let g = graph(manifest().clouds.get("Earth").unwrap());
+        let g = graph(&manifest().rocky.unwrap().clouds);
         let id = g
             .layers
             .iter()
@@ -627,24 +779,85 @@ mod tests {
             Earth = "worlds/earthlike.tgraph"
             [clouds]
             Earth = "worlds/earthlike-clouds.tgraph"
+            [rocky]
+            ground = "worlds/rocky.tgraph"
+            clouds = "worlds/clouds.tgraph"
             "#,
         )
         .unwrap();
         assert_eq!(
-            manifest.look_for("Earth", Surface::Weathered),
+            manifest.look_for("Kettle e", Surface::Weathered, true),
+            Some(Look {
+                ground: Ground::Color("worlds/rocky.tgraph"),
+                clouds: Some("worlds/clouds.tgraph"),
+            })
+        );
+        assert_eq!(
+            manifest.look_for("Earth", Surface::Weathered, true),
             Some(Look {
                 ground: Ground::Color("worlds/earthlike.tgraph"),
                 clouds: Some("worlds/earthlike-clouds.tgraph"),
             })
         );
         assert_eq!(
-            manifest.look_for("Mercury", Surface::Weathered),
+            manifest.look_for("Mercury", Surface::Weathered, false),
             Some(Look {
                 ground: Ground::Pattern("surfaces/weathered.tgraph"),
                 clouds: None,
             })
         );
-        assert_eq!(manifest.look_for("Mercury", Surface::Rock), None);
+        assert_eq!(manifest.look_for("Mercury", Surface::Rock, false), None);
+    }
+
+    /// The share of rocky.tgraph's surface where `layer` is above a half, with `name` bound to
+    /// `value`, over a few seeds.
+    fn share(g: &Graph, layer: &str, name: &str, value: f32) -> f32 {
+        let id = g.layers.iter().find(|l| l.name == layer).unwrap().id;
+        let n = 24;
+        let mut over = 0;
+        let mut all = 0;
+        for seed in [1, 7, 0xdead_beef] {
+            let mut ctx = EvalCtx { seed, ..EvalCtx::default() };
+            ctx.params.insert(name.into(), texture_graph_core::ParamValue::Scalar(value));
+            let ctx = g.resolve_params(&ctx);
+            for face in 0..6 {
+                for k in 0..n * n {
+                    let (u, v) = ((k % n) as f32 + 0.5, (k / n) as f32 + 0.5);
+                    let s = cube_sample(face, u / n as f32, v / n as f32);
+                    over += usize::from(eval::evaluate(g, id, s, &ctx).l > 0.5);
+                    all += 1;
+                }
+            }
+        }
+        over as f32 / all as f32
+    }
+
+    /// A table's shares against the graph's, and its inverse against both.
+    fn holds(table: &[(f32, f32)], measure: impl Fn(f32) -> f32, invert: impl Fn(f32) -> f32) {
+        let measured: Vec<(f32, f32)> = table.iter().map(|&(p, _)| (p, measure(p))).collect();
+        eprintln!("{measured:?}");
+        for (&(p, want), (_, got)) in table.iter().zip(&measured) {
+            assert!((want - got).abs() < 0.02, "at {p}: {got} against {want}");
+        }
+        assert!(table.windows(2).all(|w| w[1].1 >= w[0].1));
+        for share in [0.1, 0.5, 0.71, 0.95] {
+            let got = measure(invert(share));
+            assert!((got - share).abs() < 0.04, "{share} of the surface: {got}");
+        }
+    }
+
+    #[test]
+    fn the_sea_covers_what_the_table_says() {
+        let g = graph(&manifest().rocky.unwrap().ground);
+        holds(&SEA_LEVELS, |sea| 1.0 - share(&g, "land", "sea", sea), sea_level);
+    }
+
+    #[test]
+    fn the_ice_covers_what_the_table_says() {
+        let g = graph(&manifest().rocky.unwrap().ground);
+        holds(&ICE_LEVELS, |ice| share(&g, "ice", "ice", ice), ice_level);
+        assert_eq!(share(&g, "ice", "ice", ice_level(0.0)), 0.0, "no ice is none");
+        assert_eq!(share(&g, "ice", "ice", ice_level(1.0)), 1.0, "all ice is all");
     }
 }
 

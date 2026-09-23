@@ -193,7 +193,7 @@ impl fmt::Display for Misconfigured {
 
 impl std::error::Error for Misconfigured {}
 
-/// Read the list, and refuse anything it cannot honour.
+/// Read the list, and refuse anything it cannot honor.
 ///
 /// `lookup` reads one environment variable, so a test can supply a world without touching the
 /// process environment — which is shared, and which two tests running at once would fight over.

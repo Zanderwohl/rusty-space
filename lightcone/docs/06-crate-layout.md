@@ -12,7 +12,7 @@
 | `crates/em-spectra` | **new.** bands, blackbody, extinction, color, stellar relations, band-to-display mapping | serde only; no engine, no glam |
 | `crates/lc-spacetime` | event coordinates, intervals, retarded time, worldlines | glam, serde; no engine |
 | `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, em-spectra, lc-spacetime |
-| `crates/lc-proto` | wire messages, serialisation, versioning | serde, lc-spacetime, lc-world types |
+| `crates/lc-proto` | wire messages, serialization, versioning | serde, lc-spacetime, lc-world types |
 | `crates/lc-store` | Postgres schema, migrations, queries, the light-cone cursor | sqlx, lc-spacetime, lc-world |
 | `crates/lc-server` | authoritative server binary | lc-store, lc-world, lc-proto, tokio |
 | `crates/lc-client` | Bevy client, native and WASM | em-render, lc-world, lc-proto, bevy |
@@ -52,14 +52,14 @@ whether a module belongs: **does it know any game or TTRPG rule?** If not, it mo
 | `src/presentation/render_space.rs` | yes | the Z-up to Y-up boundary and `ToRender`; already the only converter, and both products need exactly it |
 | `src/presentation/body_mesh.rs`, `body_material.rs` | yes | sphere meshes and the body shader |
 | `src/presentation/body_point.rs`, `body_point_material.rs` | yes | distant bodies as points |
-| `src/presentation/local_starfield.rs`, `local_starfield_material.rs` | yes | background stars from a catalogue |
+| `src/presentation/local_starfield.rs`, `local_starfield_material.rs` | yes | background stars from a catalog |
 | `src/presentation/labels.rs` | yes | screen-space labels for world positions |
 | `src/presentation/lights.rs` | yes | star as a light source |
 | `src/presentation/rotation.rs` | yes | body spin applied to transforms |
 | `src/presentation/chain_path.rs` | yes | trajectory polylines from `em_sim::trajectory::Path` |
 | `src/presentation/celestial_markers.rs` | yes | generic orbital markers |
 | `src/presentation/encounter_marker.rs`, `encounter_marker_material.rs` | judgment | encounter markers are patched-conic concepts, which `em-sim` owns, so they move |
-| `src/camera/freecam.rs`, `planetarium.rs` | yes | controllers parameterised by scale |
+| `src/camera/freecam.rs`, `planetarium.rs` | yes | controllers parameterized by scale |
 | `src/catalog/` | **no, revised** | see below |
 | `src/gui/` | no | egui panels encode Exotic Matters' workflows; the game needs different ones |
 
@@ -97,7 +97,7 @@ Everything that moves keeps its public API, so no call site changes.
 
 ### `src/catalog/` does not move
 
-An earlier draft sent it to `em-render`. Phase 4 made that wrong: catalogue parsing is not a
+An earlier draft sent it to `em-render`. Phase 4 made that wrong: catalog parsing is not a
 rendering concern, and putting it in the render crate would have given the project two HYG
 parsers, one for the starfield and one for world generation.
 
@@ -106,7 +106,7 @@ The responsibilities split three ways instead:
 | concern | home |
 |---|---|
 | color, temperature, blackbody, extinction | `em-spectra` |
-| catalogue parsing, star identity, world data | `lc-world::sky`, behind `StarProvider` |
+| catalog parsing, star identity, world data | `lc-world::sky`, behind `StarProvider` |
 | drawing a list of stars it is handed | `em-render` |
 
 `em-render` therefore parses nothing. Exotic Matters keeps `src/catalog/` as its own loader
@@ -117,7 +117,7 @@ Extraction order, one commit each, app building at every step:
 
 1. `render_space` and `ToRender` — no dependents outside the app, smallest blast radius.
 2. Materials and meshes.
-3. The starfield and catalogue.
+3. The starfield and catalog.
 4. Cameras.
 5. Markers and paths.
 

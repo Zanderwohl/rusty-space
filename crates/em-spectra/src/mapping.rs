@@ -47,7 +47,7 @@ impl BandMapping {
     /// This is what a false-color astronomical image does, and it is why they are readable.
     /// [`presets::natural`] does not need it: B, V and R are close enough together that a
     /// blackbody is already nearly neutral across them.
-    pub fn direct_normalised(r: Band, g: Band, b: Band, reference_k: f64) -> Self {
+    pub fn direct_normalized(r: Band, g: Band, b: Band, reference_k: f64) -> Self {
         let mut mapping = Self::direct(r, g, b);
         for (channel, band) in [r, g, b].into_iter().enumerate() {
             let at_reference = crate::blackbody::band_radiance(band, reference_k);
@@ -127,24 +127,24 @@ pub mod presets {
         m
     }
 
-    /// The star a normalised preset is neutral against. Sun-like, because that is the star a
+    /// The star a normalized preset is neutral against. Sun-like, because that is the star a
     /// player has an intuition for.
     pub const REFERENCE_K: f64 = 5772.0;
 
     /// Industry and waste heat. A sun-like star is white; excess at ten microns is red.
     pub fn thermal() -> BandMapping {
-        BandMapping::direct_normalised(Band::ThermalIr, Band::K, Band::V, REFERENCE_K)
+        BandMapping::direct_normalized(Band::ThermalIr, Band::K, Band::V, REFERENCE_K)
             .with_bloom(Band::ThermalIr, 1.0)
     }
 
     /// Through clouds that are opaque in the optical.
     pub fn dust_penetration() -> BandMapping {
-        BandMapping::direct_normalised(Band::Radio, Band::ThermalIr, Band::K, REFERENCE_K)
+        BandMapping::direct_normalized(Band::Radio, Band::ThermalIr, Band::K, REFERENCE_K)
     }
 
     /// Gray versus reddening, made visible: dust reads orange, a swarm reads neutral.
     pub fn composition() -> BandMapping {
-        BandMapping::direct_normalised(Band::K, Band::V, Band::B, REFERENCE_K)
+        BandMapping::direct_normalized(Band::K, Band::V, Band::B, REFERENCE_K)
     }
 
     /// A monochrome sky in which only excess heat is colored.
@@ -229,8 +229,8 @@ mod tests {
         let natural = presets::natural();
         for t in [4500.0, 5772.0, 7000.0] {
             let direct = natural.apply(&radiance_at(t)).map(|v| v as f64);
-            let direct = cie::normalise_to_max(direct);
-            let exact = cie::normalise_to_max(cie::linear_srgb_from_xyz(cie::xyz_from_blackbody(t)));
+            let direct = cie::normalize_to_max(direct);
+            let exact = cie::normalize_to_max(cie::linear_srgb_from_xyz(cie::xyz_from_blackbody(t)));
             assert!(
                 cie::chroma(direct) > cie::chroma(exact) + 0.02,
                 "T={t}: direct {:.3} should exceed CIE {:.3}",
@@ -239,16 +239,16 @@ mod tests {
             );
         }
         // At 5772 K the excess is about half again as much color as there should be.
-        let d = cie::normalise_to_max(natural.apply(&radiance_at(5772.0)).map(|v| v as f64));
-        let e = cie::normalise_to_max(cie::linear_srgb_from_xyz(cie::xyz_from_blackbody(5772.0)));
+        let d = cie::normalize_to_max(natural.apply(&radiance_at(5772.0)).map(|v| v as f64));
+        let e = cie::normalize_to_max(cie::linear_srgb_from_xyz(cie::xyz_from_blackbody(5772.0)));
         assert!((cie::chroma(d) / cie::chroma(e) - 1.5).abs() < 0.2);
     }
 
     #[test]
     fn both_routes_agree_on_strongly_colored_stars() {
         for t in [2500.0, 20000.0] {
-            let direct = cie::normalise_to_max(presets::natural().apply(&radiance_at(t)).map(|v| v as f64));
-            let exact = cie::normalise_to_max(cie::linear_srgb_from_xyz(cie::xyz_from_blackbody(t)));
+            let direct = cie::normalize_to_max(presets::natural().apply(&radiance_at(t)).map(|v| v as f64));
+            let exact = cie::normalize_to_max(cie::linear_srgb_from_xyz(cie::xyz_from_blackbody(t)));
             assert!((cie::chroma(direct) - cie::chroma(exact)).abs() < 0.03, "T={t}");
         }
     }
@@ -267,7 +267,7 @@ mod tests {
     /// microns, so V wins the display and every swarm under about half coverage is invisible.
     /// The physics was right and the mapping could not show it.
     #[test]
-    fn a_wide_mapping_must_be_normalised_or_one_band_wins_outright() {
+    fn a_wide_mapping_must_be_normalized_or_one_band_wins_outright() {
         let solar = PerBand::new(std::array::from_fn(|i| {
             crate::blackbody::band_radiance(Band::ALL[i], presets::REFERENCE_K) as f32
         }));
@@ -297,7 +297,7 @@ mod tests {
         assert!(rgb[0] > 50.0 * rgb[2], "and dominate the visible channel, got {rgb:?}");
     }
 
-    /// Normalising must not disturb the preset that was already right. B, V and R sit close
+    /// Normalizing must not disturb the preset that was already right. B, V and R sit close
     /// enough together that a blackbody is nearly neutral across them without any weighting.
     #[test]
     fn the_natural_preset_is_left_alone() {
@@ -308,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn every_normalised_preset_is_neutral_on_the_reference_star() {
+    fn every_normalized_preset_is_neutral_on_the_reference_star() {
         let solar = PerBand::new(std::array::from_fn(|i| {
             crate::blackbody::band_radiance(Band::ALL[i], presets::REFERENCE_K) as f32
         }));

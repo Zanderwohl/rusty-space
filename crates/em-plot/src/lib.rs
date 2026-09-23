@@ -1,6 +1,6 @@
 //! Charts, curves and heat maps for this repository's plots.
 //!
-//! The core emits geometry and text *placements* and rasterises nothing — it needs only a way
+//! The core emits geometry and text *placements* and rasterizes nothing — it needs only a way
 //! to measure a string in order to place labels. That is what keeps the dependency list at
 //! zero; a backend turns the output into meshes, painter calls or SVG.
 //!

@@ -24,7 +24,7 @@ So: one shared crate, `crates/em-plot`, deliberately small.
 
 ## The design decision that keeps it small
 
-**The core emits geometry and text placements. It never rasterises text and never touches a
+**The core emits geometry and text placements. It never rasterizes text and never touches a
 GPU.**
 
 Text is where plotting libraries acquire their dependency trees: font loading, shaping,
@@ -106,10 +106,10 @@ so a debug view of a star's shell is the shell, not a copy of it.
 
 ![HR diagram of 107 859 HYG stars](../images/hr-diagram.png)
 
-Density mode over the bundled catalogue: 107 859 stars binned to cells and colored by count.
+Density mode over the bundled catalog: 107 859 stars binned to cells and colored by count.
 The main sequence, the red giant clump, the subgiant branch joining them, the M dwarf tail and
 a faint white dwarf sequence are all where they should be, and the vertical striping near
-`B-V` 1.4 is real quantisation in HYG's source catalogues rather than a rendering artifact.
+`B-V` 1.4 is real quantization in HYG's source catalogs rather than a rendering artifact.
 
 ```bash
 awk -F',' 'NR==1{print "ci,absmag"; next} $10>0 && $10<100000 && $17!="" {print $17","$15}' \
@@ -121,7 +121,7 @@ cargo run -p em-plot --features cli -- hr.csv hr.png \
 ```
 
 It is kept here because it checks more than the plotter: the CSV path, axis inversion, and
-phase 4's catalogue filtering all have to be right for this shape to appear. The `dist`
+phase 4's catalog filtering all have to be right for this shape to appear. The `dist`
 sentinel cut is what stops it being a smear.
 
 ## Crate placement

@@ -8,7 +8,7 @@
 //! Read from the **checkpoint**, so it is seconds stale and needs nothing from the running
 //! world: no channel into the tick, no lock on the fleet, no page load that costs a frame.
 
-use lc_world::sky::CatalogueStar;
+use lc_world::sky::CatalogStar;
 use serde::{Deserialize, Serialize};
 
 use crate::persist::Saved;
@@ -28,7 +28,7 @@ pub enum Whereabouts {
     },
     /// The nearest is named because "nowhere" is true and useless.
     Interstellar { star: u64, near: String, ly: f64 },
-    /// Outside the catalogue; reachable only by a craft placed by hand.
+    /// Outside the catalog; reachable only by a craft placed by hand.
     Nowhere,
 }
 
@@ -69,7 +69,7 @@ const AU_LY: f64 = 1.495_978_707e11 / 9.460_730_472_580_8e15;
 impl Status {
     /// A linear scan over `stars`, as `world::system_at` does: once per page view, and
     /// cheaper than the round trip that fetched the row.
-    pub fn of(ship_id: i64, saved_t: i64, saved: &Saved, stars: &[CatalogueStar]) -> Status {
+    pub fn of(ship_id: i64, saved_t: i64, saved: &Saved, stars: &[CatalogStar]) -> Status {
         Status {
             ship_id,
             name: saved.name.clone(),
@@ -83,7 +83,7 @@ impl Status {
 
 /// `total_cmp`, not `partial_cmp().unwrap()`: a NaN is a coordinate nothing should have
 /// produced, and an arbitrary ordering beats panicking on a page load.
-pub(crate) fn nearest(at: glam::DVec3, stars: &[CatalogueStar]) -> Option<(&CatalogueStar, f64)> {
+pub(crate) fn nearest(at: glam::DVec3, stars: &[CatalogStar]) -> Option<(&CatalogStar, f64)> {
     stars
         .iter()
         .min_by(|a, b| {
@@ -97,16 +97,16 @@ pub(crate) fn nearest(at: glam::DVec3, stars: &[CatalogueStar]) -> Option<(&Cata
 /// light-years from.
 pub(crate) fn nearest_within_shell(
     at: glam::DVec3,
-    stars: &[CatalogueStar],
-) -> Option<&CatalogueStar> {
+    stars: &[CatalogStar],
+) -> Option<&CatalogStar> {
     nearest(at, stars).filter(|(_, ly)| *ly < LOCAL_SHELL_LY).map(|(star, _)| star)
 }
 
-fn whereabouts(at: glam::DVec3, stars: &[CatalogueStar]) -> Whereabouts {
+fn whereabouts(at: glam::DVec3, stars: &[CatalogStar]) -> Whereabouts {
     let Some((star, ly)) = nearest(at, stars) else {
         return Whereabouts::Nowhere;
     };
-    // The catalogue's own name: this is the operator's status page, not a player's screen.
+    // The catalog's own name: this is the operator's status page, not a player's screen.
     let name = star
         .provenance
         .name
@@ -153,9 +153,9 @@ mod tests {
     use lc_world::sky::{Component as StarComponent, Provenance, StarId};
     use lc_world::star::Star;
 
-    fn star(key: u64, name: Option<&str>, at: glam::DVec3) -> CatalogueStar {
-        CatalogueStar {
-            id: StarId::synthesise("test", key),
+    fn star(key: u64, name: Option<&str>, at: glam::DVec3) -> CatalogStar {
+        CatalogStar {
+            id: StarId::synthesize("test", key),
             provenance: Provenance {
                 source: "test".into(),
                 key,
@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_catalogue_is_nowhere_rather_than_a_panic() {
+    fn an_empty_catalog_is_nowhere_rather_than_a_panic() {
         assert_eq!(whereabouts(glam::DVec3::ZERO, &[]), Whereabouts::Nowhere);
     }
 
@@ -241,7 +241,7 @@ mod tests {
     }
 
     /// The payload round-trips through RON, which is the only thing the console can do with
-    /// it. A type that serialises and does not deserialise would fail on the far side, where
+    /// it. A type that serializes and does not deserialize would fail on the far side, where
     /// there is no test to catch it.
     #[test]
     fn the_payload_round_trips_through_ron() {
@@ -265,7 +265,7 @@ mod tests {
                 refitting: false,
             }),
         };
-        let text = ron::to_string(&status).expect("it serialises");
+        let text = ron::to_string(&status).expect("it serializes");
         let back: Status = ron::from_str(&text).expect("it parses");
         assert_eq!(back, status);
         // Exactly, including the f64s — which is half the reason this is RON.

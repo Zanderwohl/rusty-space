@@ -12,15 +12,15 @@ pub enum Scale {
 
 impl Scale {
     /// Data value to a position on `[0, 1]` across `range`.
-    pub fn normalise(&self, value: f64, range: (f64, f64)) -> f64 {
+    pub fn normalize(&self, value: f64, range: (f64, f64)) -> f64 {
         let (lo, hi) = range;
         let f = self.forward(value);
         let (flo, fhi) = (self.forward(lo), self.forward(hi));
         if (fhi - flo).abs() < f64::MIN_POSITIVE { 0.0 } else { (f - flo) / (fhi - flo) }
     }
 
-    /// Inverse of [`Scale::normalise`], for reading a value off a chart.
-    pub fn denormalise(&self, t: f64, range: (f64, f64)) -> f64 {
+    /// Inverse of [`Scale::normalize`], for reading a value off a chart.
+    pub fn denormalize(&self, t: f64, range: (f64, f64)) -> f64 {
         let (lo, hi) = range;
         let (flo, fhi) = (self.forward(lo), self.forward(hi));
         self.inverse(flo + t * (fhi - flo))
@@ -119,13 +119,13 @@ impl Scale {
 fn nice_ticks(lo: f64, hi: f64, target: usize) -> Vec<f64> {
     let raw = (hi - lo) / target as f64;
     let magnitude = 10f64.powf(raw.log10().floor());
-    let normalised = raw / magnitude;
+    let normalized = raw / magnitude;
     let step = magnitude
-        * if normalised <= 1.0 {
+        * if normalized <= 1.0 {
             1.0
-        } else if normalised <= 2.0 {
+        } else if normalized <= 2.0 {
             2.0
-        } else if normalised <= 5.0 {
+        } else if normalized <= 5.0 {
             5.0
         } else {
             10.0
@@ -148,9 +148,9 @@ mod tests {
     #[test]
     fn linear_maps_the_ends_to_zero_and_one() {
         let s = Scale::Linear;
-        assert_eq!(s.normalise(0.0, (0.0, 10.0)), 0.0);
-        assert_eq!(s.normalise(10.0, (0.0, 10.0)), 1.0);
-        assert_eq!(s.normalise(2.5, (0.0, 10.0)), 0.25);
+        assert_eq!(s.normalize(0.0, (0.0, 10.0)), 0.0);
+        assert_eq!(s.normalize(10.0, (0.0, 10.0)), 1.0);
+        assert_eq!(s.normalize(2.5, (0.0, 10.0)), 0.25);
     }
 
     #[test]
@@ -162,8 +162,8 @@ mod tests {
             (Scale::SymLog { linear_threshold: 1e-9 }, (-1e-3, 1e-3), 1e-10),
         ];
         for (scale, range, value) in cases {
-            let t = scale.normalise(value, range);
-            let back = scale.denormalise(t, range);
+            let t = scale.normalize(value, range);
+            let back = scale.denormalize(t, range);
             assert!(
                 (back - value).abs() <= value.abs() * 1e-9 + 1e-18,
                 "{scale:?}: {value} -> {t} -> {back}"
@@ -175,13 +175,13 @@ mod tests {
     fn symlog_crosses_zero_where_log_cannot() {
         let s = Scale::SymLog { linear_threshold: 1e-9 };
         let range = (-1e-3, 1e-3);
-        assert!((s.normalise(0.0, range) - 0.5).abs() < 1e-12, "zero sits in the middle");
-        assert!(s.normalise(-1e-6, range) < 0.5);
-        assert!(s.normalise(1e-6, range) > 0.5);
+        assert!((s.normalize(0.0, range) - 0.5).abs() < 1e-12, "zero sits in the middle");
+        assert!(s.normalize(-1e-6, range) < 0.5);
+        assert!(s.normalize(1e-6, range) > 0.5);
         // And it still spans decades: a value a thousand times smaller is not at the middle.
-        assert!(s.normalise(1e-9, range) > 0.5 && s.normalise(1e-9, range) < s.normalise(1e-6, range));
+        assert!(s.normalize(1e-9, range) > 0.5 && s.normalize(1e-9, range) < s.normalize(1e-6, range));
         // Log10 cannot represent the negative half at all.
-        assert!(Scale::Log10.normalise(-1.0, (1.0, 10.0)).is_infinite());
+        assert!(Scale::Log10.normalize(-1.0, (1.0, 10.0)).is_infinite());
     }
 
     #[test]
@@ -231,7 +231,7 @@ mod tests {
         for v in Scale::Log10.ticks((-3.0, 100.0), 5) {
             assert!(v > 0.0 && v.is_finite());
         }
-        assert!(Scale::Log10.normalise(1.0, Scale::Log10.valid_range((-3.0, 100.0))).is_finite());
+        assert!(Scale::Log10.normalize(1.0, Scale::Log10.valid_range((-3.0, 100.0))).is_finite());
     }
 
     #[test]
@@ -239,13 +239,13 @@ mod tests {
         // Absolute magnitude: brighter is smaller, so the axis runs the other way.
         let range = (16.0, -6.0);
         let s = Scale::Linear;
-        assert!((s.normalise(16.0, range)).abs() < 1e-12, "the faint end is at the bottom");
-        assert!((s.normalise(-6.0, range) - 1.0).abs() < 1e-12);
-        assert!(s.normalise(0.0, range) > s.normalise(10.0, range));
+        assert!((s.normalize(16.0, range)).abs() < 1e-12, "the faint end is at the bottom");
+        assert!((s.normalize(-6.0, range) - 1.0).abs() < 1e-12);
+        assert!(s.normalize(0.0, range) > s.normalize(10.0, range));
         let ticks = s.ticks(range, 6);
         assert!(!ticks.is_empty(), "a reversed range still has ticks");
         assert!(ticks.iter().all(|v| *v >= -6.0 && *v <= 16.0));
-        assert!((s.denormalise(s.normalise(4.0, range), range) - 4.0).abs() < 1e-9);
+        assert!((s.denormalize(s.normalize(4.0, range), range) - 4.0).abs() < 1e-9);
     }
 
     #[test]

@@ -230,7 +230,7 @@ keeps the welcome's shape and puts the numbers next to what they govern.
 | `living_drain_w` | 4.43 × 10¹⁵ W | one living module drains 1 ME a century |
 | `data_mass_fraction` | 0.5 | a data module's mass, and so its build energy, over any other module's |
 | `data_work_factor` | 3 | how many times longer a data module takes to build or take apart than any other |
-| `data_per_module` | 2.1 MB | a year of a thirty-minute stare in every band: a surveyed sky's files fit several times over, and raw logs are what fill it. A craft with none still has a 1 MiB onboard store |
+| `data_per_module` | 2.95 MB | a year of a thirty-minute stare in every band: a surveyed sky's files fit several times over, and raw logs are what fill it. A craft with none still has a 1 MiB onboard store. It tracks `Band::ALL.len()`, so adding a band grows it |
 | `transmit_gain` | *anchored* | physical link-budget energy to stored energy; see [23-factions.md](23-factions.md#cost) |
 | `hull_density` | 50 kg/m³ | frame mass per slot, and so what growing the hull costs |
 | `slot_volume_m3` | 392 699 | |

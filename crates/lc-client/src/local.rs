@@ -15,7 +15,7 @@ use lc_server::server::{Server, TICK_MS};
 use lc_server::websocket::WebSocketServer;
 use lc_server::world::World;
 use lc_world::scenario::Scenario;
-use lc_world::sky::CatalogueStar;
+use lc_world::sky::CatalogStar;
 
 /// Start one, and return the address to connect to.
 ///
@@ -25,7 +25,7 @@ use lc_world::sky::CatalogueStar;
 /// `stars` should be the ones the client itself loaded. Both ends place craft into systems by
 /// position against the same shell radius, so a server with a different sky would disagree with
 /// the client about which system a ship is in.
-pub fn start(stars: Vec<CatalogueStar>, demo: Option<String>) -> Result<String, String> {
+pub fn start(stars: Vec<CatalogStar>, demo: Option<String>) -> Result<String, String> {
     let (tell, address) = channel::<Result<String, String>>();
     std::thread::Builder::new()
         .name("lc-local-server".into())
@@ -48,7 +48,7 @@ pub fn start(stars: Vec<CatalogueStar>, demo: Option<String>) -> Result<String, 
         .unwrap_or_else(|_| Err("the local server stopped before it started".into()))
 }
 
-/// The catalogue next to this build, if it ships one.
+/// The catalog next to this build, if it ships one.
 ///
 /// The base is the asset path the client already fetches books under, because a local shard
 /// lends the files in its own directory and there is no CDN in the box.
@@ -60,13 +60,13 @@ fn shelf() -> Result<Option<lc_server::library::Library>, String> {
     let text = std::fs::read_to_string(&path).map_err(|why| format!("{}: {why}", path.display()))?;
     // `LC_SHELF_BASE` is the same variable a deployed shard is told its CDN with, so the server
     // in the box can be pointed at one and the client then fetches over HTTP exactly as the
-    // browser build does. Unset, the shelf is the directory this catalogue was read from.
+    // browser build does. Unset, the shelf is the directory this catalog was read from.
     let base = std::env::var("LC_SHELF_BASE").unwrap_or_else(|_| crate::library::SHELF.to_owned());
     lc_server::library::Library::from_toml(&base, &text).map(Some)
 }
 
 async fn serve(
-    stars: Vec<CatalogueStar>,
+    stars: Vec<CatalogStar>,
     demo: Option<String>,
     tell: std::sync::mpsc::Sender<Result<String, String>>,
 ) {
@@ -91,7 +91,7 @@ async fn serve(
     // that could stage a scene could put a craft wherever it liked, which is the one thing the
     // authority keeps for itself.
     server.directing(true);
-    // The books beside the client that started this. A shard is told its catalogue on the
+    // The books beside the client that started this. A shard is told its catalog on the
     // command line; the one in the box finds it the same way the asset server does, so
     // single-player exercises the same wire path a deployment does rather than a shortcut
     // around it.

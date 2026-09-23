@@ -2,7 +2,7 @@
 // nothing and renders on arrival, which is what the rest of these pages are for.
 //
 // Converted from the upstream TTF to WOFF2 and otherwise untouched — 1.6 MB becomes 184 KB and
-// nothing about the font changes. `static/fonts/OFL_Nabla.txt` is the licence; Nabla carries no
+// nothing about the font changes. `static/fonts/OFL_Nabla.txt` is the license; Nabla carries no
 // reserved font name.
 //
 // The URL is relative to this stylesheet, which is served from `/v/<build>/styles/`, so it
@@ -16,7 +16,7 @@
   src: url("../fonts/Nabla.woff2") format("woff2");
 }
 
-// Nabla paints its own colours: it is a COLRv1 face whose glyphs are stacked layers, so `color`
+// Nabla paints its own colors: it is a COLRv1 face whose glyphs are stacked layers, so `color`
 // does not reach it and the default palette is a hot orange that belongs to somebody else's
 // site. Its author shipped two neutral palettes, and these are them — light letters for the
 // dark page, dark letters for the light one.

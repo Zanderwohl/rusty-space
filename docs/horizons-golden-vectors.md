@@ -73,13 +73,13 @@ Fetch the series with `START_TIME`/`STOP_TIME`/`STEP_SIZE` rather than `TLIST`:
 --data-urlencode "STEP_SIZE='5d'"
 ```
 
-Then least-squares fit `(a, e, i, Ω₀, ω₀, M₀, apsidal_period, nodal_period)` to minimise
+Then least-squares fit `(a, e, i, Ω₀, ω₀, M₀, apsidal_period, nodal_period)` to minimize
 position residual. Two things matter:
 
 **Fit mean motion, not `a`.** The objective is wildly multimodal in the mean motion — if
 the period is off by even 0.1%, phase error exceeds a full revolution within decades and
 the residuals go uncorrelated, so a gradient method collapses to a degenerate circle
-(`e → 0`). Parameterise by mean motion `n` directly, and use **span continuation**: fit
+(`e → 0`). Parameterize by mean motion `n` directly, and use **span continuation**: fit
 over ~1.5 years first, where phase is unambiguous, then widen to 3, 6, 12, 25, 50.
 Convert back with `a = (μ/n²)^⅓` at the end.
 
@@ -118,7 +118,7 @@ python3 gen_rust.py        # -> generated_bodies.rs
 - **Comets need an apparition selector.** `COMMAND='1P;'` returns a list of per-apparition
   records rather than an ephemeris. Use `DES=1P;CAP;` — closest apparition.
 - **Some moons orbit a barycenter, not their planet.** Nix, Hydra, Kerberos and Styx circle
-  the Pluto–Charon barycenter (`500@9`); centring them on Pluto puts Pluto's own 2100 km
+  the Pluto–Charon barycenter (`500@9`); centering them on Pluto puts Pluto's own 2100 km
   wobble into the "orbit" and the fit fails outright. Dysnomia likewise orbits the Eris
   system barycenter, `500@20136199`.
 - **The first continuation window must be a few orbits, not a fixed fraction.** Osculating

@@ -15,7 +15,8 @@
 
   --font-body: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
-  // The wordmark and nothing else. The only face this site downloads; see `_faces.scss`.
+  // The wordmark and nothing else. Only the site declares the face, in its `_faces.scss`;
+  // the two services carrying this file fall through to the UI face and download nothing.
   --font-display: "Nabla", var(--font-ui);
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 

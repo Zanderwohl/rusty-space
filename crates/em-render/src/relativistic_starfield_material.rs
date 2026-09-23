@@ -1,6 +1,6 @@
 //! A starfield shaded from physics rather than from a baked color.
 //!
-//! A descendant of [`crate::local_starfield_material`] and of the application's catalogue
+//! A descendant of [`crate::local_starfield_material`] and of the application's catalog
 //! starfield, sharing their billboard technique: one mesh, four vertices per star, expanded in
 //! the vertex stage. It does not replace either. The difference is what is baked. Those bake a
 //! color and a brightness, which is right when the input is a fixed apparent magnitude; this

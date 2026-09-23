@@ -16,26 +16,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::sky::StarId;
 
+pub mod arc;
 pub mod astrometry;
+pub mod body;
 pub mod conclusion;
 pub mod formats;
 pub mod moments;
 pub mod names;
 pub mod observatory;
+pub mod primary;
 pub mod prior;
+pub mod sort;
 pub mod record;
 pub mod report;
 pub mod room;
 pub mod subject;
 pub mod survey;
 pub mod transit;
+pub mod turns;
 
 pub use astrometry::{Bearing, Distance};
+pub use body::{BodyBelief, Placed, SystemPlane};
 pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;
 pub use report::{ENTRIES_PER_REPORT, Entry, Log, Logs, Mark, Part, Report, Reporting};
 pub use record::{
-    Claim, Hop, Lineage, NameKind, Naming, Orbit, Sample, Series, Sighting, Witness,
+    Claim, Colors, Hop, Lineage, Method, NameKind, Naming, Orbit, Orientation, Sample, Series,
+    Sighting, Witness,
     learned_s,
 };
 pub use subject::{BodyId, Subject};
@@ -132,6 +139,8 @@ pub struct File {
     names: Vec<Naming>,
     orbits: Vec<Orbit>,
     conclusions: Vec<Conclusion>,
+    /// Per-band photometry, folded per visit and fixed in size. One per witness.
+    colors: Vec<Colors>,
     /// This craft's own: what is left of logs it has consumed. Never transmitted.
     digests: Vec<Digest>,
     /// Keep this subject's logs whatever the pipeline concludes. This craft's own choice.
@@ -161,6 +170,10 @@ impl File {
 
     pub fn conclusions(&self) -> &[Conclusion] {
         &self.conclusions
+    }
+
+    pub fn colors(&self) -> &[Colors] {
+        &self.colors
     }
 
     pub fn digests(&self) -> &[Digest] {
@@ -203,7 +216,17 @@ impl File {
         witnesses.sort_unstable();
         witnesses.dedup();
         // Measured here beats a claim whatever error bars either carries: only one can be checked.
-        let measured = astrometry::triangulate(&bearings);
+        //
+        // Except for a body, which is never a static point. `triangulate` fits one to whatever
+        // bearings it is given, and a body's bearings are all taken from inside its own system
+        // where it moves appreciably between them -- so it returns a place the body was never
+        // at, with the error bar of a fit that converged. Measured: a ship on a 5 AU orbit
+        // surveying Sol put Jupiter at 1.63 AU plus or minus 9e-7, sixteen million sigma from
+        // where it was. A body's distance comes from its orbit; see `knowledge::body`.
+        let measured = match subject {
+            Subject::Body { .. } => Distance::Unknown,
+            _ => astrometry::triangulate(&bearings),
+        };
         let taken = matches!(measured, Distance::Measured { .. });
         let claimed = self.claims.iter().min_by(|a, b| sigma_of(a).total_cmp(&sigma_of(b)));
         let believed_claim = claimed.filter(|_| !taken);
@@ -236,7 +259,20 @@ impl File {
         })
     }
 
-    /// Keep the bearings that are farthest apart.
+    /// Keep the bearings that are farthest apart, in place **and** in time.
+    ///
+    /// Both baselines move a bearing, and which one is doing the work depends on what the craft
+    /// was doing. Parallax needs the observer to have gone somewhere; a body's own motion needs
+    /// only for time to have passed. A craft parked in a system has no spatial spread at all,
+    /// so scoring on position alone left every pair tied at zero. Each gap is therefore measured
+    /// against the widest of its own kind among the bearings held, which needs no scale chosen
+    /// between a light-year and a year.
+    ///
+    /// What goes is the look whose removal costs the least spread: the sum of the distances to
+    /// its two nearest neighbors. Not the older of the closest *pair* -- on an even cadence
+    /// every pair ties, so that ate the watch from its oldest end and left the last sixteen
+    /// minutes of a year-long arc. By this measure an interior look sits between two neighbors
+    /// and an end one has only a far side, so the ends are what survive.
     fn decimate(&mut self, witness: Witness) {
         while self.sightings.iter().filter(|s| s.witness == witness).count() > BEARINGS_KEPT {
             let held: Vec<(usize, &Sighting)> =
@@ -245,19 +281,38 @@ impl File {
             let Some(&(newest, _)) = held.iter().max_by(|a, b| a.1.observed_s.total_cmp(&b.1.observed_s)) else {
                 return;
             };
-            let Some(&(first, _)) = held.first() else { return };
-            let mut drop = (f64::INFINITY, first);
-            for (n, &(i, a)) in held.iter().enumerate() {
-                for &(j, b) in held.iter().skip(n + 1) {
-                    let gap = a.bearing.observer_ly.distance(b.bearing.observer_ly);
-                    let older = if a.observed_s < b.observed_s { i } else { j };
-                    let loser = if older == newest { if i == newest { j } else { i } } else { older };
-                    if gap < drop.0 {
-                        drop = (gap, loser);
-                    }
+            let apart = |a: &Sighting, b: &Sighting| {
+                (a.bearing.observer_ly.distance(b.bearing.observer_ly), (a.observed_s - b.observed_s).abs())
+            };
+            let (mut widest_ly, mut widest_s) = (0.0f64, 0.0f64);
+            for (n, &(_, a)) in held.iter().enumerate() {
+                for &(_, b) in held.iter().skip(n + 1) {
+                    let (ly, s) = apart(a, b);
+                    widest_ly = widest_ly.max(ly);
+                    widest_s = widest_s.max(s);
                 }
             }
-            self.sightings.remove(drop.1);
+            // A baseline nobody has is a baseline nothing is lost by ignoring.
+            let share = |v: f64, widest: f64| if widest > 0.0 { v / widest } else { 0.0 };
+
+            let mut drop: Option<(f64, usize)> = None;
+            for &(i, a) in held.iter().filter(|&&(i, _)| i != newest) {
+                let mut near: Vec<f64> = held
+                    .iter()
+                    .filter(|&&(j, _)| j != i)
+                    .map(|&(_, b)| {
+                        let (ly, s) = apart(a, b);
+                        share(ly, widest_ly).hypot(share(s, widest_s))
+                    })
+                    .collect();
+                near.sort_by(f64::total_cmp);
+                let cost: f64 = near.iter().take(2).sum();
+                if drop.is_none_or(|(least, _)| cost < least) {
+                    drop = Some((cost, i));
+                }
+            }
+            let Some((_, loser)) = drop else { return };
+            self.sightings.remove(loser);
         }
     }
 
@@ -292,6 +347,13 @@ pub struct Knowledge {
     unread: std::collections::BTreeSet<Subject>,
     /// Subjects whose logs are to be consumed whatever they say: see [`Knowledge::analyze`].
     analyzing: std::collections::BTreeSet<Subject>,
+    /// When a fit was last *attempted* on each body, which is not when one last succeeded.
+    ///
+    /// Scheduling, not knowledge: a body whose arc cannot yet shape an orbit states nothing,
+    /// so ranking the queue by what has been stated leaves that body at the front of it
+    /// forever and every other body in the system is never fitted at all. Not compared, not
+    /// saved and not reported, because an attempt is not something a craft knows.
+    tried: BTreeMap<Subject, primary::Attempt>,
     /// See [`room`].
     capacity_bytes: f64,
     occupied_bytes: f64,
@@ -307,6 +369,7 @@ impl PartialEq for Knowledge {
 impl Knowledge {
     pub fn new(owner: Witness) -> Self {
         Self {
+            tried: BTreeMap::new(),
             owner,
             files: BTreeMap::new(),
             beliefs: BTreeMap::new(),
@@ -470,11 +533,55 @@ impl Knowledge {
         self.refresh(subject);
     }
 
-    /// File where somebody says a body orbits. One statement per witness, the later winning.
+    /// File a digest somebody else folded. One per witness, the one that watched longer
+    /// winning: a digest is not a statement to be corrected but a running total, and the
+    /// longer run is the one with more in it.
+    pub(super) fn absorb_colors(&mut self, subject: Subject, digest: Colors) {
+        let file = self.files.entry(subject).or_default();
+        match file.colors.iter_mut().find(|c| c.witness == digest.witness) {
+            Some(held) if held.spanned_s.1 >= digest.spanned_s.1 => {}
+            Some(held) => *held = digest,
+            None => file.colors.push(digest),
+        }
+        self.refresh(subject);
+    }
+
+    /// Fold one visit's per-band fluxes into a body's digest, which is fixed in size however
+    /// many visits it has taken. The row itself is never kept.
+    pub fn measured_colors(
+        &mut self,
+        subject: impl Into<Subject>,
+        witness: Witness,
+        at_s: f64,
+        flux: &em_spectra::PerBand<Option<(f64, f64)>>,
+    ) {
+        let subject = subject.into();
+        let file = self.files.entry(subject).or_default();
+        match file.colors.iter_mut().find(|c| c.witness == witness) {
+            Some(held) => held.fold(at_s, flux),
+            None => {
+                let mut fresh = Colors::new(witness);
+                fresh.fold(at_s, flux);
+                file.colors.push(fresh);
+            }
+        }
+        self.refresh(subject);
+    }
+
+    /// File where somebody says a body orbits. One statement per witness *per method*, the
+    /// later winning.
+    ///
+    /// Per method, as [`Knowledge::named`] is per kind and for the same reason: a craft that
+    /// has both watched a body transit and fitted its arc holds two different statements about
+    /// it, made two different ways, and neither is a correction of the other. Keyed by witness
+    /// alone they overwrote each other on every pass -- a fit replaced by a transit's shell,
+    /// which made the body look unfitted, which refitted it, forever -- and a transit's
+    /// edge-on constraint could never tighten a fitted pole because the two were never held at
+    /// once.
     pub fn orbits(&mut self, subject: impl Into<Subject>, orbit: Orbit) {
         let subject = subject.into();
         let file = self.files.entry(subject).or_default();
-        match file.orbits.iter_mut().find(|o| o.witness == orbit.witness) {
+        match file.orbits.iter_mut().find(|o| o.witness == orbit.witness && o.method == orbit.method) {
             Some(held) if held.stated_s >= orbit.stated_s => {}
             Some(held) => *held = orbit,
             None => file.orbits.push(orbit),
@@ -518,16 +625,16 @@ impl Knowledge {
         &mut self,
         star: StarId,
         body: BodyId,
-        semi_major_au: f64,
+        orbit: Orbit,
         luminosity_solar: f64,
         now_s: f64,
     ) -> String {
         let subject = Subject::Body { star, body };
         let owner = self.owner;
-        self.orbits(
-            subject,
-            Orbit { witness: owner, semi_major_au, stated_s: now_s, lineage: Lineage::new() },
-        );
+        let semi_major_au = orbit.semi_major_au.0;
+        // Stamped here rather than trusted from the caller: this records what *this* craft
+        // found, and one witness per statement is what `orbits` files by.
+        self.orbits(subject, Orbit { witness: owner, ..orbit });
         if let Some(held) = self
             .files
             .get(&subject)
@@ -543,7 +650,7 @@ impl Knowledge {
             .filter_map(|(_, file)| {
                 // The letter, not whatever name wins: a renamed planet still holds its place.
                 let letter = file.names.iter().find(|n| n.witness == owner && n.kind == NameKind::Relative)?;
-                Some((letter.name.clone(), file.orbit(owner)?.semi_major_au))
+                Some((letter.name.clone(), file.orbit(owner)?.semi_major_au.0))
             })
             .collect();
         let letter = names::planet_letter(&placed, semi_major_au, luminosity_solar, names::SPACING);
@@ -637,7 +744,26 @@ mod tests {
     const AU_LY: f64 = 1.581_250_7e-5;
 
     fn star_id(key: u64) -> StarId {
-        StarId::synthesise("test", key)
+        StarId::synthesize("test", key)
+    }
+
+    /// An orbit stated at `au`, with the period a Sun-like host gives it. Nothing here is
+    /// testing the elements, only what the letters do with the distance.
+    fn at_au(au: f64, stated_s: f64) -> Orbit {
+        let a_m = au * crate::navigation::AU;
+        let period = em_foundations::kepler::period::third_law(a_m, crate::star::Star::SOL.mu);
+        Orbit {
+            about: None,
+            witness: Witness(0),
+            period_s: (period, period * 1.0e-3),
+            semi_major_au: (au, au * 1.0e-2),
+            eccentricity: None,
+            orientation: Orientation::Unknown,
+            epoch_s: None,
+            method: Method::Transit,
+            stated_s,
+            lineage: Lineage::new(),
+        }
     }
 
     fn sighting(witness: u64, at: DVec3, toward: DVec3, observed_s: f64) -> Sighting {
@@ -649,6 +775,9 @@ mod tests {
                 toward: toward.normalize(),
                 sigma_rad: 1e-9,
             },
+            size: None,
+            range_m: None,
+            spin_s: None,
             band: Band::V,
             flux: 1e-12,
             flux_sigma: 1e-15,
@@ -728,6 +857,34 @@ mod tests {
         let kept = k.file(star).unwrap().sightings();
         assert_eq!(kept.len(), BEARINGS_KEPT);
         assert!(kept.iter().any(|s| s.observed_s == 0.0), "the oldest look, and the widest, is kept");
+    }
+
+    /// A craft parked in a system moves nowhere, so every pair of its looks is tied at zero
+    /// parallax and the arc it spent months collecting was thrown away from the middle out.
+    /// Time is a baseline too.
+    #[test]
+    fn a_parked_craft_keeps_the_span_of_its_watch() {
+        let mut k = Knowledge::new(Witness(1));
+        let star = star_id(3);
+        let truth = DVec3::new(0.0, 0.0, 6.0);
+        let at = DVec3::X * AU_LY;
+        let last = (BEARINGS_KEPT as u64 + 40) as f64 * 1.0e6;
+        for i in 0..=(BEARINGS_KEPT as u64 + 40) {
+            k.sighted(star, sighting(1, at, truth - at, i as f64 * 1.0e6));
+        }
+        let kept = k.file(star).unwrap().sightings();
+        assert_eq!(kept.len(), BEARINGS_KEPT);
+
+        let times: Vec<f64> = kept.iter().map(|s| s.observed_s).collect();
+        let (oldest, newest) = (
+            times.iter().cloned().fold(f64::INFINITY, f64::min),
+            times.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        );
+        assert_eq!(newest, last, "the newest look is what the display reads");
+        assert_eq!(oldest, 0.0, "the watch's own span was decimated away");
+        // And spread across it, not clustered at one end.
+        let middle = times.iter().filter(|t| (last * 0.25..last * 0.75).contains(t)).count();
+        assert!(middle >= 4, "only {middle} of {BEARINGS_KEPT} in the middle half: {times:?}");
     }
 
     #[test]
@@ -1006,7 +1163,7 @@ mod tests {
         let mut k = Knowledge::new(Witness(1));
         k.name_it(star, "Kettle", 0.0);
         let (body, subject) = planet(star, "one");
-        assert_eq!(k.found_planet(star, body, 0.7, 1.0, 1.0), "b");
+        assert_eq!(k.found_planet(star, body, at_au(0.06, 1.0), 1.0, 1.0), "b");
         assert_eq!(k.name_of(subject).as_deref(), Some("Kettle b"));
 
         k.name_it(star, "The Kettle", 2.0);
@@ -1021,9 +1178,9 @@ mod tests {
         let star = star_id(41);
         let mut k = Knowledge::new(Witness(1));
         let (body, subject) = planet(star, "one");
-        assert_eq!(k.found_planet(star, body, 0.7, 1.0, 0.0), "b");
-        assert_eq!(k.found_planet(star, body, 4.3, 1.0, 5.0), "b");
-        assert_eq!(k.file(subject).unwrap().orbits()[0].semi_major_au, 4.3, "the orbit is updated");
+        assert_eq!(k.found_planet(star, body, at_au(0.06, 0.0), 1.0, 0.0), "b");
+        assert_eq!(k.found_planet(star, body, at_au(4.3, 5.0), 1.0, 5.0), "b");
+        assert_eq!(k.file(subject).unwrap().orbits()[0].semi_major_au.0, 4.3, "the orbit is updated");
     }
 
     #[test]
@@ -1033,9 +1190,9 @@ mod tests {
         let (outer, _) = planet(star, "outer");
         let (inner, _) = planet(star, "inner");
         let (between, _) = planet(star, "between");
-        assert_eq!(k.found_planet(star, outer, 1.28, 1.0, 0.0), "c");
-        assert_eq!(k.found_planet(star, inner, 0.7, 1.0, 1.0), "b");
-        assert_eq!(k.found_planet(star, between, 0.9, 1.0, 2.0), "bb", "no single letter left");
+        assert_eq!(k.found_planet(star, outer, at_au(0.09, 0.0), 1.0, 0.0), "c");
+        assert_eq!(k.found_planet(star, inner, at_au(0.06, 1.0), 1.0, 1.0), "b");
+        assert_eq!(k.found_planet(star, between, at_au(0.07, 2.0), 1.0, 2.0), "bb", "no single letter left");
     }
 
     #[test]
@@ -1044,9 +1201,9 @@ mod tests {
         let mut probe = Knowledge::new(Witness(2));
         probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 0.0));
         probe.name_it(star, "Kettle", 1.0);
-        for (key, a) in [("one", 0.7), ("two", 1.28), ("three", 2.35)] {
+        for (key, a) in [("one", 0.06), ("two", 0.09), ("three", 0.135)] {
             let (body, _) = planet(star, key);
-            probe.found_planet(star, body, a, 1.0, 2.0);
+            probe.found_planet(star, body, at_au(a, 2.0), 1.0, 2.0);
         }
         let report = probe.report(Mark::default(), 3.0);
         assert_eq!(report.stars(), 1, "one system, not four entries");
@@ -1060,6 +1217,45 @@ mod tests {
         assert_eq!(first.entries[0].parts.len(), 4);
     }
 
+    /// **A digest that never leaves the craft is not a digest.** `Colors` was folded, stored
+    /// and read locally and was in no report, so a probe's months of photometry died with it
+    /// and a ship it talked to learned nothing about what color anything was.
+    #[test]
+    fn a_report_carries_what_a_probe_measured_of_a_body() {
+        use em_spectra::{Band, PerBand};
+
+        let star = star_id(63);
+        let (body, subject) = planet(star, "one");
+        let mut probe = Knowledge::new(Witness(2));
+        probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 0.0));
+
+        let mut row = PerBand::splat(None);
+        row[Band::V] = Some((1.0e-12, 1.0e-15));
+        row[Band::R] = Some((2.0e-12, 2.0e-15));
+        for visit in 0..6 {
+            probe.measured_colors(subject, Witness(2), visit as f64, &row);
+        }
+        let mine = probe.file(subject).unwrap().colors()[0].color(Band::R, Band::V).unwrap();
+
+        let mut ship = Knowledge::new(Witness(1));
+        ship.receive(&probe.report(Mark::default(), 100.0), 200.0);
+
+        let held = ship.file(subject).expect("the body came across").colors();
+        assert_eq!(held.len(), 1, "one digest, on the witness that folded it");
+        assert_eq!(held[0].witness, Witness(2), "and it stays the probe's measurement");
+        assert_eq!(held[0].lineage.len(), 1, "carried one hop");
+        let theirs = held[0].color(Band::R, Band::V).unwrap();
+        assert!((theirs.0 / mine.0 - 1.0).abs() < 1.0e-12, "{theirs:?} against {mine:?}");
+
+        // The belief a panel reads is the one that arrived.
+        let belief = ship.body_belief(star, body, 300.0).expect("a belief about it");
+        assert!(belief.colors.is_some(), "and the digest is what a type hypothesis reads");
+
+        // Absorbed again with nothing new in it, the longer run is kept rather than doubled.
+        ship.receive(&probe.report(Mark::default(), 400.0), 500.0);
+        assert_eq!(ship.file(subject).unwrap().colors().len(), 1);
+    }
+
     /// A receiver reads another craft's planets after its own name for the star.
     #[test]
     fn a_receiver_reads_somebody_else_planets_after_its_own_star_name() {
@@ -1068,7 +1264,7 @@ mod tests {
         probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 0.0));
         probe.name_it(star, "Kettle", 1.0);
         let (body, subject) = planet(star, "one");
-        probe.found_planet(star, body, 1.28, 1.0, 2.0);
+        probe.found_planet(star, body, at_au(0.09, 2.0), 1.0, 2.0);
         assert_eq!(probe.name_of(subject).as_deref(), Some("Kettle c"));
 
         let mut ship = Knowledge::new(Witness(1));
@@ -1087,7 +1283,7 @@ mod tests {
 
         // And its own later find is lettered around the letter it was told.
         let (inner, inner_subject) = planet(star, "inner");
-        assert_eq!(ship.found_planet(star, inner, 0.7, 1.0, 12.0), "b");
+        assert_eq!(ship.found_planet(star, inner, at_au(0.06, 12.0), 1.0, 12.0), "b");
         assert_eq!(ship.name_of(inner_subject).as_deref(), Some("Home b"));
     }
 
@@ -1096,7 +1292,7 @@ mod tests {
         let star = star_id(46);
         let mut k = Knowledge::new(Witness(1));
         let (body, subject) = planet(star, "one");
-        k.found_planet(star, body, 0.7, 1.0, 0.0);
+        k.found_planet(star, body, at_au(0.06, 0.0), 1.0, 0.0);
         assert_eq!(k.name_of(subject).as_deref(), Some("? b"), "its star is not written down");
         k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 1.0));
         let designation = designation(DVec3::X);
@@ -1109,7 +1305,7 @@ mod tests {
         let mut k = Knowledge::new(Witness(1));
         k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 0.0));
         let (body, subject) = planet(star, "one");
-        k.found_planet(star, body, 0.7, 1.0, 1.0);
+        k.found_planet(star, body, at_au(0.06, 1.0), 1.0, 1.0);
         assert_eq!(k.len(), 2, "the star and its planet");
         assert_eq!(k.stars().count(), 1);
         assert_eq!(k.members(star).map(|(s, _)| s).collect::<Vec<_>>(), vec![subject]);
@@ -1155,7 +1351,7 @@ mod tests {
         }
         k.name_it(star, "Kettle", 1.0);
         let (body, _) = planet(star, "one");
-        k.found_planet(star, body, 0.7, 1.0, 2.0);
+        k.found_planet(star, body, at_au(0.06, 2.0), 1.0, 2.0);
         for t in 10..=14 {
             k.measured(star, Witness(1), Band::K, Sample { observed_s: t as f64, deficit: 0.0, sigma: 0.01 });
         }
@@ -1197,6 +1393,24 @@ mod tests {
         assert!(probe.report(Mark::through(200.0), 300.0).is_empty(), "nothing since then");
         assert_eq!(probe.report(Mark::through(50.0), 300.0).stars(), 1);
         assert!(probe.report(Mark::default(), 99.0).is_empty(), "nor anything learned after it was sent");
+    }
+
+    /// **The backlog is what the files hold, not everything they ever held.** A survey sights
+    /// a body every rotation and decimation drops the look in the middle, so a backlog that kept
+    /// every time grew for as long as the survey ran and a first report walked all of it.
+    #[test]
+    fn the_backlog_forgets_what_decimation_dropped() {
+        let mut probe = Knowledge::new(Witness(2));
+        for k in 0..500u64 {
+            let toward = DVec3::new((k as f64 * 0.01).cos(), (k as f64 * 0.01).sin(), 0.0);
+            probe.sighted(star_id(1), sighting(2, DVec3::ZERO, toward, k as f64));
+        }
+        let held = probe.file(star_id(1)).unwrap().sightings().len();
+        assert!(held < 500, "decimation kept all {held}");
+        // A name is filed with the first look, so the backlog is one more than the looks held.
+        let entries = probe.backlog.len();
+        assert!(entries <= held + 1, "{entries} backlog entries for {held} looks");
+        assert_eq!(probe.report(Mark::default(), 1_000.0).stars(), 1, "and it still reports");
     }
 
     /// Oldest first, resumed where the last report ended, and pages through ties at one instant.
@@ -1290,6 +1504,7 @@ mod tests {
                     names: vec![Naming { witness: Witness(9), name: "b".into(), kind: NameKind::Relative, stated_s: 1.0, lineage: Vec::new() }],
                     orbits: Vec::new(),
                     conclusions: Vec::new(),
+                    colors: Vec::new(),
                 }],
             }],
         };
@@ -1306,11 +1521,11 @@ mod tests {
         let mut k = Knowledge::new(Witness(1));
         k.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 0.0));
         let (inner, _) = planet(star, "inner");
-        assert_eq!(k.found_planet(star, inner, 0.7, 1.0, 1.0), "b");
+        assert_eq!(k.found_planet(star, inner, at_au(0.06, 1.0), 1.0, 1.0), "b");
         k.name_it(Subject::Body { star, body: inner }, "Spout", 2.0);
-        assert_eq!(k.found_planet(star, inner, 0.71, 1.0, 3.0), "b", "the letter is frozen");
+        assert_eq!(k.found_planet(star, inner, at_au(0.061, 3.0), 1.0, 3.0), "b", "the letter is frozen");
         assert_eq!(k.name_of(Subject::Body { star, body: inner }).as_deref(), Some("Spout"), "and the name still wins");
         let (next, _) = planet(star, "next");
-        assert_eq!(k.found_planet(star, next, 0.72, 1.0, 4.0), "bb", "b is still taken");
+        assert_eq!(k.found_planet(star, next, at_au(0.062, 4.0), 1.0, 4.0), "bb", "b is still taken");
     }
 }

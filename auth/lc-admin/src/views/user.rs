@@ -419,7 +419,7 @@ fn where_card(status: &Status) -> Markup {
                     p class="card-detail" { (format!("{ly:.2}")) " ly out" }
                 }
                 Whereabouts::Nowhere => {
-                    p class="card-headline" { "Off the catalogue" }
+                    p class="card-headline" { "Off the catalog" }
                     p class="card-detail" {
                         // Reachable only by a craft placed by hand.
                         "No star in this shard's sky is near this craft."

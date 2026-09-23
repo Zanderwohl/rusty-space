@@ -14,6 +14,7 @@ use lc_proto::{ClientId, kind};
 use lc_world::craft::CraftId;
 use lc_world::knowledge::BodyId;
 use lc_world::navigation::{Course, Plane, Target};
+use lc_world::sky::StarId;
 use lc_world::sky::generate::AU;
 use lc_world::system::LocalSystem;
 
@@ -51,14 +52,15 @@ impl<J: Journal> Server<J> {
     /// and otherwise in any system already loaded. Loading every star's system to look would be
     /// the whole catalog generated in one tick.
     fn locate(&mut self, id: u64, star: Option<u64>) -> Result<Place, String> {
+        let now_s = self.now_t() as f64 * 1.0e-6;
         if star.is_none()
-            && let Some(system) = self.world.system_of(id)
+            && let Some(system) = self.world.system_for(StarId::from_raw(id), now_s)
         {
             let key = system.sim().name(system.primary()).to_string();
             return Ok(Place { system, key, id, what: "star" });
         }
         let systems: Vec<Arc<LocalSystem>> = match star {
-            Some(star) => vec![self.world.system_of(star).ok_or_else(|| format!("no star {star:#x} here"))?],
+            Some(star) => vec![self.world.system_for(StarId::from_raw(star), now_s).ok_or_else(|| format!("no star {star:#x} here"))?],
             None => self.world.loaded().cloned().collect(),
         };
         systems

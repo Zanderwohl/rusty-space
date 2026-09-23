@@ -377,7 +377,7 @@ async fn declining_at_the_provider_returns_to_the_sign_in_page() {
         &format!("/signin/google/callback?error=access_denied&state={state}"),
     )
     .await;
-    assert_eq!(declined.status(), 200, "cancelling should not be an error");
+    assert_eq!(declined.status(), 200, "canceling should not be an error");
     let body = String::from_utf8(
         declined
             .into_body()

@@ -275,7 +275,7 @@ fn outline_of(placement: &Placement, view: &MapView, aspect: f64) -> Option<Vec<
 /// A camera-relative offset in clip space: the projection applied, the divide not, so
 /// something behind the camera still says which way it lies.
 fn clip_of(view: &MapView, offset: DVec3, aspect: f64) -> Vec4 {
-    view.orbit.clip(view.plane, offset, MAP_FOV as f64, aspect).as_vec4()
+    view.orbit.clip(view.datum(), offset, MAP_FOV as f64, aspect).as_vec4()
 }
 
 /// A window rectangle in the surface's own coordinates.
@@ -342,7 +342,7 @@ mod tests {
             orbit: em_map::Orbit::framing(DVec3::ZERO, em_map::snapshot::M_PER_AU),
             ..Default::default()
         };
-        let (forward, right, _) = view.orbit.view_basis(view.plane);
+        let (forward, right, _) = view.orbit.view_basis(view.datum());
         let clip = clip_of(&view, (-forward * 3.0 + right) * 1.0e-6, 1.6);
         assert!(clip.w < 0.0, "{clip:?}");
 

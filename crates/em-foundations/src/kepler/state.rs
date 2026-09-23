@@ -316,7 +316,7 @@ mod tests {
     fn speed_obeys_vis_viva() {
         let a: f64 = 7.0e6;
         let e = 0.4;
-        for nu in [0.0, 0.7, 1.9, 3.14159, 4.4, 5.9] {
+        for nu in [0.0, 0.7, 1.9, std::f64::consts::PI, 4.4, 5.9] {
             let el = Elements {
                 semi_major_axis: a, eccentricity: e, inclination: 0.3,
                 longitude_of_ascending_node: 1.0, argument_of_periapsis: 2.0,

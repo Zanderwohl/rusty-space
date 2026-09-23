@@ -20,7 +20,7 @@ const TOKEN_HEADER: &str = "x-release-token";
 ///
 /// The difference is not measurable over a network in practice; it is one line, and the
 /// alternative is explaining to the next reader why it was fine to skip.
-fn authorised(state: &AppState, headers: &HeaderMap) -> bool {
+fn authorized(state: &AppState, headers: &HeaderMap) -> bool {
     let Some(expected) = state.release_token.as_deref() else {
         return false;
     };
@@ -35,7 +35,7 @@ fn authorised(state: &AppState, headers: &HeaderMap) -> bool {
 /// Why a privileged request was refused. A small type rather than a `Response`, so the happy
 /// path does not carry a whole HTTP response around as its error variant.
 pub enum Denied {
-    Unauthorised,
+    Unauthorized,
     NoDatabase,
 }
 
@@ -43,7 +43,7 @@ impl IntoResponse for Denied {
     fn into_response(self) -> Response {
         match self {
             // The same answer whether the token is wrong or unset, so probing learns nothing.
-            Self::Unauthorised => (StatusCode::UNAUTHORIZED, "no").into_response(),
+            Self::Unauthorized => (StatusCode::UNAUTHORIZED, "no").into_response(),
             Self::NoDatabase => {
                 (StatusCode::SERVICE_UNAVAILABLE, "no database; release management is unavailable")
                     .into_response()
@@ -53,8 +53,8 @@ impl IntoResponse for Denied {
 }
 
 fn guard(state: &AppState, headers: &HeaderMap) -> Result<sqlx::PgPool, Denied> {
-    if !authorised(state, headers) {
-        return Err(Denied::Unauthorised);
+    if !authorized(state, headers) {
+        return Err(Denied::Unauthorized);
     }
     state.pool.clone().ok_or(Denied::NoDatabase)
 }

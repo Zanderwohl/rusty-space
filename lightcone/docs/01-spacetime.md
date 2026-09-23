@@ -127,7 +127,7 @@ This forbids storing ship motion only as an integrator state. It is already sati
 
 | kind | representation | source |
 |---|---|---|
-| star | fixed point, or linear proper motion | HYG catalogue in `assets/catalogs/` |
+| star | fixed point, or linear proper motion | HYG catalog in `assets/catalogs/` |
 | planet, moon, comet | Keplerian elements | `em_sim::motive` |
 | ship under thrust | piecewise analytic arcs | `em_sim::trajectory::Path`, `em_sim::patch` |
 | structure | fixed relative to its parent body | — |
@@ -173,7 +173,7 @@ if it ever were not — see [10-superluminal.md](10-superluminal.md).
 
 The exception is a worldline that **jumps**, which only a teleport makes. It is one root per
 continuous piece rather than one in all: `Worldline::breaks` names the jumps and the solvers
-split there. See [26-console.md](26-console.md).
+split there. See [27-console.md](27-console.md).
 
 `position_at(t)` being a total, single-valued function of server-frame `t` is also what makes
 closed causal loops unrepresentable: nothing can move backward in `t`, so no effect can be
@@ -239,7 +239,7 @@ and `JulianDate`, and for the same reason.
 
 ## Decided
 
-**Stars get proper motion eventually, not yet.** The catalogue is frozen for now, so every
+**Stars get proper motion eventually, not yet.** The catalog is frozen for now, so every
 interstellar retarded-time solve is exact and closed-form. It is planned, so the architecture
 must not assume static stars: a star gets a `Worldline` like everything else, currently
 returning a constant. Nothing may read a star's position as a field. When proper motion is

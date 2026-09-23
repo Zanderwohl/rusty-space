@@ -25,7 +25,7 @@ pub const SOLAR_CONSTANT_W_M2: f64 = 1_361.0;
 /// The hull's shadow along `to_star`, m², for a hull of `length_m`.
 ///
 /// `to_star` in the hull's own axes: x along the nose, y across the beam, z through the height.
-/// Needs no normalisation of the semi-axes' product form: `π √((bc sₓ)² + (ac s_y)² + (ab s_z)²)`
+/// Needs no normalization of the semi-axes' product form: `π √((bc sₓ)² + (ac s_y)² + (ab s_z)²)`
 /// for a unit `s`.
 pub fn silhouette_m2(length_m: f64, to_star: DVec3) -> f64 {
     let s = to_star.normalize_or_zero();

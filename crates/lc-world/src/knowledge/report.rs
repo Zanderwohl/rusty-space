@@ -11,8 +11,8 @@ use em_spectra::Band;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Claim, Conclusion, File, Hop, Knowledge, Lineage, Naming, Orbit, Sample, Sighting, Subject, Witness,
-    learned_s,
+    Claim, Colors, Conclusion, File, Hop, Knowledge, Lineage, Naming, Orbit, Sample, Sighting, Subject,
+    Witness, learned_s,
 };
 
 /// How many systems one transmission carries: a few tens of kilobytes.
@@ -28,6 +28,9 @@ pub struct Part {
     pub orbits: Vec<Orbit>,
     /// Each on its observer's name.
     pub conclusions: Vec<Conclusion>,
+    /// What each observer has folded of a body's colors. Fixed in size per witness however
+    /// many visits went into it, which is what makes it cheap enough to send.
+    pub colors: Vec<Colors>,
 }
 
 impl Part {
@@ -37,6 +40,7 @@ impl Part {
             && self.claims.is_empty()
             && self.names.is_empty()
             && self.orbits.is_empty()
+            && self.colors.is_empty()
     }
 
     fn learned_through(&self) -> f64 {
@@ -45,7 +49,14 @@ impl Part {
         let names = self.names.iter().map(|n| learned_s(&n.lineage, n.stated_s));
         let orbits = self.orbits.iter().map(|o| learned_s(&o.lineage, o.stated_s));
         let conclusions = self.conclusions.iter().map(Conclusion::learned_s);
-        sightings.chain(claims).chain(names).chain(orbits).chain(conclusions).fold(f64::NEG_INFINITY, f64::max)
+        let colors = self.colors.iter().map(Colors::learned_s);
+        sightings
+            .chain(claims)
+            .chain(names)
+            .chain(orbits)
+            .chain(conclusions)
+            .chain(colors)
+            .fold(f64::NEG_INFINITY, f64::max)
     }
 }
 
@@ -216,17 +227,32 @@ impl Recent {
 /// Every reportable thing a craft holds, in the order a report drains it, so a page costs what
 /// it carries, not what the craft knows.
 ///
-/// Entries are never removed. One left by a replaced record costs a lookup that finds nothing.
+/// Exactly the learned times the files hold now. It kept every time it had ever been handed, and
+/// a survey replaces records every visit, so it grew for as long as anyone surveyed and a
+/// report from the start walked all of it.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Backlog {
     items: BTreeSet<(At, Subject, Subject)>,
+    filed: BTreeMap<Subject, BTreeSet<At>>,
 }
 
 impl Backlog {
     pub(super) fn file(&mut self, subject: Subject, file: &File) {
-        for t in file.learned_times() {
-            self.items.insert((At(t), subject.system(), subject));
+        let now: BTreeSet<At> = file.learned_times().map(At).collect();
+        let system = subject.system();
+        let was = self.filed.entry(subject).or_default();
+        for gone in was.difference(&now) {
+            self.items.remove(&(*gone, system, subject));
         }
+        for new in now.difference(was) {
+            self.items.insert((*new, system, subject));
+        }
+        *was = now;
+    }
+
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.items.len()
     }
 
     /// Entries after `since` and not after `until_s`, oldest first.
@@ -251,6 +277,7 @@ impl File {
             names: self.names.iter().filter(|n| fresh(learned_s(&n.lineage, n.stated_s))).cloned().collect(),
             orbits: self.orbits.iter().filter(|o| fresh(learned_s(&o.lineage, o.stated_s))).cloned().collect(),
             conclusions: self.conclusions.iter().filter(|c| fresh(c.learned_s())).cloned().collect(),
+            colors: self.colors.iter().filter(|c| fresh(c.learned_s())).cloned().collect(),
         };
         (!part.is_empty()).then_some(part)
     }
@@ -262,7 +289,8 @@ impl File {
         let names = self.names.iter().map(|n| learned_s(&n.lineage, n.stated_s));
         let orbits = self.orbits.iter().map(|o| learned_s(&o.lineage, o.stated_s));
         let conclusions = self.conclusions.iter().map(Conclusion::learned_s);
-        sightings.chain(claims).chain(names).chain(orbits).chain(conclusions)
+        let colors = self.colors.iter().map(Colors::learned_s);
+        sightings.chain(claims).chain(names).chain(orbits).chain(conclusions).chain(colors)
     }
 }
 
@@ -343,6 +371,10 @@ impl Knowledge {
             for orbit in &part.orbits {
                 let lineage = heard(&orbit.lineage);
                 self.orbits(subject, Orbit { lineage, ..orbit.clone() });
+            }
+            for digest in &part.colors {
+                let lineage = heard(&digest.lineage);
+                self.absorb_colors(subject, Colors { lineage, ..digest.clone() });
             }
             for conclusion in &part.conclusions {
                 // A replica drops the samples its original consumed.

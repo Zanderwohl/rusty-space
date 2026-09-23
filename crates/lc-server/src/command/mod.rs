@@ -3,7 +3,7 @@
 //! A client sends the line as typed and nothing else. Parsing, the level check and every
 //! range are here, so no client can send a command no parser would have produced. A line is
 //! queued when it arrives and run at one point in the tick, after the intents, and its answer
-//! goes to the connection that sent it. See `lightcone/docs/26-console.md`.
+//! goes to the connection that sent it. See `lightcone/docs/27-console.md`.
 
 mod fitting;
 mod parse;

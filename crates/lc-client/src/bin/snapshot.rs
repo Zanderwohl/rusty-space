@@ -23,9 +23,9 @@ const FG: Rgba = Rgba::opaque(0.82, 0.85, 0.90);
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let output = args.next().unwrap_or_else(|| "snapshot.png".into());
-    let catalogue = args.next();
+    let catalog = args.next();
 
-    match run(&output, catalogue.as_deref()) {
+    match run(&output, catalog.as_deref()) {
         Ok(msg) => {
             println!("{msg}");
             ExitCode::SUCCESS
@@ -47,15 +47,15 @@ fn load(path: Option<&str>) -> Result<Box<dyn StarProvider>, String> {
     }
 }
 
-fn run(output: &str, catalogue: Option<&str>) -> Result<String, String> {
-    let provider = load(catalogue)?;
+fn run(output: &str, catalog: Option<&str>) -> Result<String, String> {
+    let provider = load(catalog)?;
     let mut session = Session::new(provider.as_ref(), 4000);
     session.telescope = Instrument::BASELINE
         .with_aperture(4.0)
         .with_bands(BandMask::ALL)
         .cooled_to(45.0);
 
-    // Point at the nearest modeled system we are not effectively inside. The catalogue
+    // Point at the nearest modeled system we are not effectively inside. The catalog
     // puts the Sun about an astronomical unit away, which is not an interstellar target.
     let target = session
         .stars

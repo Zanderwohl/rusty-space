@@ -31,9 +31,9 @@ pub fn asset_root() -> std::path::PathBuf {
 /// What a request to start the client asked for.
 pub struct Entry {
     pub dev: DevEntry,
-    /// The catalogue to load: the first positional argument, and an **asset** path rather than
+    /// The catalog to load: the first positional argument, and an **asset** path rather than
     /// a filesystem one. Desktop only; the browser build loads its build's own sky.
-    pub catalogue: Option<String>,
+    pub catalog: Option<String>,
     /// The shard to connect to. `None` is the single-process game, which is every build before
     /// there was a server to connect to and is still what `--shot` and the snapshot use.
     pub server: Option<String>,
@@ -100,7 +100,7 @@ pub fn parse(args: &[String]) -> Entry {
         actions.push(Action::SetCurveBand(*band));
     }
     if flag("--fly") {
-        // Index 0 of the sorted sky is the Sun in the full catalogue; 1 is interstellar.
+        // Index 0 of the sorted sky is the Sun in the full catalog; 1 is interstellar.
         actions.push(Action::FlyToNearest);
     }
     // What is selected, as a click on either view would leave it. Everything else that aims is
@@ -131,7 +131,9 @@ pub fn parse(args: &[String]) -> Entry {
     if let Some(name) = after("--map-plane") {
         let plane = match name.as_str() {
             "galactic" => Some(em_map::Plane::Galactic),
-            "ecliptic" => Some(em_map::Plane::Ecliptic),
+            // "ecliptic" was this option's name before a system's plane became something a
+            // craft solves; kept so older shot scripts still take the same picture.
+            "system" | "ecliptic" => Some(em_map::Plane::System),
             _ => None,
         };
         if let Some(plane) = plane {
@@ -172,7 +174,11 @@ pub fn parse(args: &[String]) -> Entry {
             .filter(|name| name.eq_ignore_ascii_case("map"))
             .map(|_| crate::ui::ViewMode::Map),
         at_body: after("--at"),
+        wear: after("--wear"),
+        standoff_radii: value(args, "--standoff"),
+        phase_deg: value(args, "--phase"),
         station: after("--station"),
+        charted: flag("--charted"),
         map_camera: after("--map").and_then(|spec| {
             let mut fields = spec.split(':').map(|f| f.parse::<f64>());
             match (fields.next(), fields.next(), fields.next()) {
@@ -195,13 +201,13 @@ pub fn parse(args: &[String]) -> Entry {
     };
     // The first argument only. Scanning for any non-flag token would pick up a flag's own
     // value: in `--band 2` the `2` looks exactly like a path.
-    let catalogue = args.first().filter(|a| !a.starts_with("--")).cloned();
+    let catalog = args.first().filter(|a| !a.starts_with("--")).cloned();
     // Asking for a scene is asking for a shard to run it in, so it implies `--local` rather
     // than silently doing nothing without one.
     let demo = after("--demo").filter(|name| scenario::Scenario::named(name).is_some());
     Entry {
         dev,
-        catalogue,
+        catalog,
         server: after("--server"),
         local: flag("--local") || demo.is_some(),
         demo,
@@ -213,7 +219,7 @@ pub fn parse(args: &[String]) -> Entry {
 /// `?band=2&fly` becomes the same argument vector the desktop binary receives, so [`parse`] is
 /// the only thing that knows what a flag means.
 ///
-/// Every parameter is a flag, so the catalogue — `parse`'s one positional argument — cannot be
+/// Every parameter is a flag, so the catalog — `parse`'s one positional argument — cannot be
 /// named here. The browser build's sky is fixed by the build it belongs to.
 #[cfg(target_arch = "wasm32")]
 pub fn from_query(query: &str) -> Vec<String> {
@@ -319,11 +325,11 @@ mod tests {
     }
 
     #[test]
-    fn the_catalogue_is_the_first_argument_and_only_the_first() {
-        let cat = parse(&args("sky/hyg-v42.lcsky --band 2")).catalogue;
+    fn the_catalog_is_the_first_argument_and_only_the_first() {
+        let cat = parse(&args("sky/hyg-v42.lcsky --band 2")).catalog;
         assert_eq!(cat.as_deref(), Some("sky/hyg-v42.lcsky"));
         // `2` is the band's value, and looks exactly like a path.
-        let none = parse(&args("--band 2")).catalogue;
+        let none = parse(&args("--band 2")).catalog;
         assert_eq!(none, None);
     }
 
@@ -344,7 +350,7 @@ mod tests {
 
     #[test]
     fn nothing_at_all_is_a_plain_start() {
-        let Entry { dev, catalogue: cat, server, local, demo } = parse(&[]);
+        let Entry { dev, catalog: cat, server, local, demo } = parse(&[]);
         assert!(!dev.observe_immediately);
         assert!(dev.actions.is_empty());
         assert_eq!(cat, None);
@@ -395,9 +401,9 @@ mod tests {
             parse(&args("--server ws://127.0.0.1:8080")).server.as_deref(),
             Some("ws://127.0.0.1:8080"),
         );
-        // And it is not mistaken for the catalogue, which is the first positional argument.
+        // And it is not mistaken for the catalog, which is the first positional argument.
         let entry = parse(&args("sky/hyg-v42.lcsky --server ws://host:1/"));
-        assert_eq!(entry.catalogue.as_deref(), Some("sky/hyg-v42.lcsky"));
+        assert_eq!(entry.catalog.as_deref(), Some("sky/hyg-v42.lcsky"));
         assert_eq!(entry.server.as_deref(), Some("ws://host:1/"));
     }
 }

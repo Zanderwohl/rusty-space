@@ -9,17 +9,17 @@ use bevy::asset::{AssetLoader, LoadContext, LoadState};
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use lc_books::{Block, Catalogue, Document, Epub, TocEntry};
+use lc_books::{Block, Catalog, Document, Epub, TocEntry};
 
 /// Where a book is fetched from, relative to the asset root.
 pub const SHELF: &str = "books";
 
-/// The catalogue, which is the only thing that knows what is on the shelf.
+/// The catalog, which is the only thing that knows what is on the shelf.
 ///
 /// A directory listing would do on a desktop and cannot exist in a browser, where the shelf is
 /// a CDN prefix and HTTP has no way to ask what is under it. So the list is a file, which is
 /// also what lets a title differ from a file name. Step 4 moves this to the server unchanged.
-pub const CATALOGUE: &str = "books/books.toml";
+pub const CATALOG: &str = "books/books.toml";
 
 /// The faces a page is set in: the family egui will know each by, and the file it comes from.
 ///
@@ -28,7 +28,7 @@ pub const CATALOGUE: &str = "books/books.toml";
 /// download where [14-hosting.md](../../lightcone/docs/14-hosting.md) measured it.
 ///
 /// **Static cuts, not the variable files** — but no longer because egui cannot do better.
-/// egui 0.36 rasterises through `skrifa` and shapes through `harfrust`, and both heed a
+/// egui 0.36 rasterizes through `skrifa` and shapes through `harfrust`, and both heed a
 /// variation location; the `ab_glyph` limit this note used to cite went away with Bevy 0.19.
 /// What the static cuts still buy is real italics and a real bold, against one file that would
 /// have to be shipped at `wght` and shaped per run. See `lightcone/docs/21-library.md`.
@@ -58,13 +58,13 @@ pub struct Book {
 pub struct FontFace(pub Vec<u8>);
 
 #[derive(Asset, TypePath)]
-pub struct Shelved(pub Catalogue);
+pub struct Shelved(pub Catalog);
 
 #[derive(Debug)]
 pub enum LoadError {
     Io(std::io::Error),
     Book(lc_books::Error),
-    Catalogue(toml::de::Error),
+    Catalog(toml::de::Error),
 }
 
 impl std::fmt::Display for LoadError {
@@ -72,7 +72,7 @@ impl std::fmt::Display for LoadError {
         match self {
             Self::Io(e) => write!(f, "{e}"),
             Self::Book(e) => write!(f, "{e}"),
-            Self::Catalogue(e) => write!(f, "the catalogue is malformed: {e}"),
+            Self::Catalog(e) => write!(f, "the catalog is malformed: {e}"),
         }
     }
 }
@@ -109,9 +109,9 @@ impl AssetLoader for BookLoader {
 }
 
 #[derive(Default, TypePath)]
-pub struct CatalogueLoader;
+pub struct CatalogLoader;
 
-impl AssetLoader for CatalogueLoader {
+impl AssetLoader for CatalogLoader {
     type Asset = Shelved;
     type Settings = ();
     type Error = LoadError;
@@ -125,7 +125,7 @@ impl AssetLoader for CatalogueLoader {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
         let text = String::from_utf8_lossy(&bytes);
-        Catalogue::from_toml(&text).map(Shelved).map_err(LoadError::Catalogue)
+        Catalog::from_toml(&text).map(Shelved).map_err(LoadError::Catalog)
     }
 
     fn extensions(&self) -> &[&str] {
@@ -165,8 +165,8 @@ impl AssetLoader for FontLoader {
 #[derive(Resource, Default)]
 pub struct Shelf {
     /// Everything on the shelf, whether or not anything is open.
-    pub catalogue: Catalogue,
-    pub catalogue_handle: Option<Handle<Shelved>>,
+    pub catalog: Catalog,
+    pub catalog_handle: Option<Handle<Shelved>>,
     pub handle: Option<Handle<Book>>,
     /// The file this handle was asked for, so a change of book is noticed.
     pub file: Option<String>,
@@ -230,17 +230,17 @@ pub fn keep_up(
     if wanted != shelf.file {
         *shelf = Shelf {
             face: std::mem::take(&mut shelf.face),
-            catalogue: std::mem::take(&mut shelf.catalogue),
-            catalogue_handle: shelf.catalogue_handle.clone(),
+            catalog: std::mem::take(&mut shelf.catalog),
+            catalog_handle: shelf.catalog_handle.clone(),
             marks: std::mem::take(&mut shelf.marks),
             base: std::mem::take(&mut shelf.base),
             ..Default::default()
         };
         shelf.file = wanted.clone();
         if let Some(name) = wanted {
-            // The catalogue decides what a name means. Without one — a development build with
+            // The catalog decides what a name means. Without one — a development build with
             // no shelf file — the name is taken for a file stem, which is what it used to be.
-            let path = match shelf.catalogue.find(&name) {
+            let path = match shelf.catalog.find(&name) {
                 Some(entry) => shelf.where_to_fetch(&entry.file.clone()),
                 None => Some(format!("{SHELF}/{name}.epub")),
             };
@@ -264,7 +264,7 @@ pub fn keep_up(
     }
     let Some(mut book) = books.get_mut(&handle) else { return };
 
-    // The catalogue's title wins over the book's own: it is the one a person checked.
+    // The catalog's title wins over the book's own: it is the one a person checked.
     if shelf.title.is_empty() {
         shelf.title = book.epub.title().to_owned();
         shelf.chapters = book.epub.toc().to_vec();
@@ -298,7 +298,7 @@ pub fn keep_up(
 
 /// Whether a name is a file on the shelf rather than a way out of it.
 ///
-/// One function and one test, which is the whole of what stands between a catalogue and an
+/// One function and one test, which is the whole of what stands between a catalog and an
 /// asset loader. See `bevy_asset`'s own warning about loading URLs from elsewhere.
 fn is_a_bare_name(file: &str) -> bool {
     !file.is_empty()
@@ -341,7 +341,7 @@ impl Shelf {
     /// Where to fetch a book from.
     ///
     /// **The client never receives a URL.** It receives a base from its own shard and a bare
-    /// file name from the catalogue, and composes them here — so a shard that tried to point a
+    /// file name from the catalog, and composes them here — so a shard that tried to point a
     /// client at somewhere else would have to do it with a file name, which this refuses. With
     /// no base the shelf is the asset directory, which is what a build with no shard has.
     pub fn where_to_fetch(&self, file: &str) -> Option<String> {
@@ -388,13 +388,13 @@ impl Shelf {
         self.marks.iter().map(|m| m.book.clone()).collect()
     }
 
-    /// The catalogue id of the open book, whatever name it was opened under.
+    /// The catalog id of the open book, whatever name it was opened under.
     ///
     /// A development flag names a book by its file and the shelf names it by its id; both end
     /// up here, and the shelf marks the right row either way.
     pub fn open_id(&self) -> Option<&str> {
         let name = self.file.as_deref()?;
-        self.catalogue.find(name).map(|entry| entry.id.as_str())
+        self.catalog.find(name).map(|entry| entry.id.as_str())
     }
 }
 
@@ -415,16 +415,16 @@ pub fn chapter_start(books: &mut Assets<Book>, shelf: &Shelf, entry: &TocEntry) 
 pub fn take_from_shard(mut shelf: ResMut<Shelf>, mut uplink: ResMut<crate::uplink::Uplink>) {
     if let Some((base, books)) = uplink.shelf.take() {
         shelf.base = base;
-        shelf.catalogue = lc_books::Catalogue {
+        shelf.catalog = lc_books::Catalog {
             books: books
                 .into_iter()
-                .map(|b| lc_books::catalogue::Entry {
+                .map(|b| lc_books::catalog::Entry {
                     id: b.id,
                     title: b.title,
                     authors: b
                         .authors
                         .into_iter()
-                        .map(|a| lc_books::catalogue::Writer { name: a.name, sort: a.sort })
+                        .map(|a| lc_books::catalog::Writer { name: a.name, sort: a.sort })
                         .collect(),
                     year: b.year,
                     subjects: b.subjects,
@@ -434,7 +434,7 @@ pub fn take_from_shard(mut shelf: ResMut<Shelf>, mut uplink: ResMut<crate::uplin
                 })
                 .collect(),
         };
-        info!("the shard lends {} books", shelf.catalogue.books.len());
+        info!("the shard lends {} books", shelf.catalog.books.len());
     }
     if let Some(marks) = uplink.bookmarks.take() {
         shelf.marks = marks;
@@ -542,13 +542,13 @@ pub fn report_place(
 /// How often a place is reported while it keeps changing.
 const REPORT_EVERY_S: f32 = 5.0;
 
-/// Fetch the catalogue once, and keep it where everything can read it.
+/// Fetch the catalog once, and keep it where everything can read it.
 ///
 /// **Not in the browser**, where there is no file to fetch: `tools/build-wasm.sh` stages the
 /// fonts and the sky and not the shelf, because 43 MB of epub belongs on the CDN once rather
 /// than under every build id. A browser build is always told what to read by its shard, so
 /// asking anyway only bought an asset-server error in the console on every page load.
-pub fn read_catalogue(
+pub fn read_catalog(
     mut shelf: ResMut<Shelf>,
     assets: Res<AssetServer>,
     shelved: Res<Assets<Shelved>>,
@@ -556,14 +556,14 @@ pub fn read_catalogue(
     if cfg!(target_arch = "wasm32") {
         return;
     }
-    match &shelf.catalogue_handle {
-        None => shelf.catalogue_handle = Some(assets.load(CATALOGUE)),
+    match &shelf.catalog_handle {
+        None => shelf.catalog_handle = Some(assets.load(CATALOG)),
         Some(handle) => {
-            if shelf.catalogue.books.is_empty()
+            if shelf.catalog.books.is_empty()
                 && let Some(loaded) = shelved.get(handle)
             {
-                shelf.catalogue = loaded.0.clone();
-                info!("the shelf holds {} books", shelf.catalogue.books.len());
+                shelf.catalog = loaded.0.clone();
+                info!("the shelf holds {} books", shelf.catalog.books.len());
             }
         }
     }
@@ -578,9 +578,9 @@ impl Plugin for LibraryPlugin {
             .init_asset::<Shelved>()
             .init_asset_loader::<BookLoader>()
             .init_asset_loader::<FontLoader>()
-            .init_asset_loader::<CatalogueLoader>()
+            .init_asset_loader::<CatalogLoader>()
             .init_resource::<Shelf>()
-            .add_systems(Update, (read_catalogue, take_from_shard, keep_up, report_place).chain());
+            .add_systems(Update, (read_catalog, take_from_shard, keep_up, report_place).chain());
     }
 }
 

@@ -58,7 +58,7 @@ const LOG_BUMP: f32 = 4.0;
 ///
 /// A mirror of [`lc_proto::Aim`] and not the type itself, because the third choice is "at
 /// whatever star the telescope is on" — which is a thing the interface knows and the protocol
-/// does not: on the wire it is already a catalogue identifier.
+/// does not: on the wire it is already a catalog identifier.
 #[derive(Clone, Copy, Default, PartialEq)]
 pub enum Aimed {
     #[default]
@@ -466,7 +466,7 @@ fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool, to: Option<&
         ),
         Body::Key => ui.label(said("sent this ship its key".to_string()).color(RADIO)),
         Body::Text(body) => ui.label(said(body.clone()).color(color)),
-        Body::Ack => ui.label(said("(acknowledgement)".to_string()).weak()),
+        Body::Ack => ui.label(said("(acknowledgment)".to_string()).weak()),
         // Heard and unreadable, which is worth showing rather than hiding: a player can see
         // that somebody in earshot is talking in private.
         Body::Unreadable => {

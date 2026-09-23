@@ -46,7 +46,7 @@ pub struct Status {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct System {
     pub id: u64,
-    /// Most of a catalogue has none.
+    /// Most of a catalog has none.
     pub name: Option<String>,
     pub ships: u64,
     /// Always zero today; nothing makes one.
@@ -182,7 +182,7 @@ mod tests {
     use super::*;
 
     /// **A captured payload — the bytes `lc_server::status` actually produced**, not a
-    /// hand-written approximation of them. It was printed by that crate's own serialiser and
+    /// hand-written approximation of them. It was printed by that crate's own serializer and
     /// pasted here, which is the only way this is evidence of anything: a sample written from
     /// memory agrees with whatever the author believed and proves nothing about the far side.
     ///
@@ -212,13 +212,13 @@ mod tests {
         assert_eq!(fit.stored_j, 1.5e12);
     }
 
-    /// **Captured from the shard's own serialiser**, like the one above.
+    /// **Captured from the shard's own serializer**, like the one above.
     const SYSTEMS_FROM_THE_SHARD: &str = r#"(total:7973,systems:[(id:1,name:Some("Sol"),ships:3,objects:0),(id:8472,name:None,ships:0,objects:0)])"#;
 
     #[test]
     fn parses_the_systems_the_shard_sends() {
         let page: Systems = ron::from_str(SYSTEMS_FROM_THE_SHARD).expect("the shard's shape");
-        // The total is the whole catalogue, not the length of this page. A console that read
+        // The total is the whole catalog, not the length of this page. A console that read
         // it as the latter would render a pager with one page in it.
         assert_eq!(page.total, 7973);
         assert_eq!(page.systems.len(), 2);
