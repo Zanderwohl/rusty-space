@@ -8,7 +8,7 @@
 //! What stays here is what is the *server's* fact rather than the world's: who owns a craft,
 //! what has happened, and who is due to be told.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use glam::DVec3;
@@ -34,10 +34,41 @@ pub struct World {
     /// Loaded on first arrival and shared thereafter. Building one is a couple of hundred
     /// bodies out of a preset, and every craft in the same system points at the same copy —
     /// which is only possible because a system is never propagated.
-    loaded: HashMap<StarId, Arc<LocalSystem>>,
+    ///
+    /// Swept by [`World::sweep`]. A craft can ask about a star it will never visit — a survey
+    /// names one from anywhere — so without a sweep this grew for as long as the shard ran.
+    loaded: HashMap<StarId, Held>,
     /// Where each star sits in `stars`. Built once, because the catalog never changes.
     index: HashMap<StarId, usize>,
 }
+
+/// One loaded system, and when anything last wanted it.
+struct Held {
+    system: Arc<LocalSystem>,
+    /// Coordinate seconds, stamped on every hit.
+    used_s: f64,
+}
+
+/// Coordinate seconds a system stays loaded after the last craft stopped asking for it.
+///
+/// One survey rotation over the largest system the generator makes: 256 bodies at
+/// [`SURVEY_DWELL_S`] apiece, against a measured maximum of 234. A live survey asks every tick,
+/// so this is hysteresis and not a deadline — it is the span after which nothing plausibly
+/// still wants the system.
+///
+/// **Tuned against the survey and not on its own.** If [`SURVEY_DWELL_S`] moves, or how many
+/// bodies a generated system holds moves, this moves with them; a window shorter than a
+/// rotation would drop a system a survey is working through and rebuild it.
+///
+/// [`SURVEY_DWELL_S`]: lc_world::knowledge::survey::SURVEY_DWELL_S
+const KEEP_LOADED_S: f64 = 256.0 * lc_world::knowledge::survey::SURVEY_DWELL_S;
+
+/// Systems held at once before the least recently wanted is dropped early.
+///
+/// A backstop under [`KEEP_LOADED_S`], not the usual path: a fleet that touches hundreds of
+/// systems inside one window would otherwise hold them all. Dropping costs one rebuild;
+/// refusing a load would fail a craft's arrival, which is worse.
+const MOST_LOADED: usize = 64;
 
 /// The index every lookup goes through.
 fn index_of(stars: &[CatalogStar]) -> HashMap<StarId, usize> {
@@ -99,32 +130,63 @@ impl World {
     /// The system containing `position_ly`, loaded if this is the first craft to arrive.
     ///
     /// `None` between the stars, which is most of the volume and most of the flying.
-    pub fn system_at(&mut self, position_ly: DVec3) -> Option<Arc<LocalSystem>> {
-        let star = self
+    pub fn system_at(&mut self, position_ly: DVec3, now_s: f64) -> Option<Arc<LocalSystem>> {
+        let id = self
             .stars
             .iter()
             .find(|star| star.position_ly.distance(position_ly) < LOCAL_SHELL_LY)?
-            .clone();
-        if let Some(system) = self.loaded.get(&star.id) {
-            return Some(system.clone());
-        }
-        let system = Arc::new(LocalSystem::for_star(&star)?);
-        self.loaded.insert(star.id, system.clone());
-        Some(system)
+            .id;
+        self.system_for(id, now_s)
     }
 
     /// One star's system, by its catalog id, loaded if nothing has asked yet.
     ///
     /// The same cache [`World::system_at`] fills, so a system a craft is flying in is not built
-    /// a second time to answer a question about it.
-    pub fn system_for(&mut self, id: StarId) -> Option<Arc<LocalSystem>> {
-        if let Some(system) = self.loaded.get(&id) {
-            return Some(system.clone());
+    /// a second time to answer a question about it. Asking is what keeps it loaded: `now_s` is
+    /// stamped here and read by [`World::sweep`].
+    pub fn system_for(&mut self, id: StarId, now_s: f64) -> Option<Arc<LocalSystem>> {
+        if let Some(held) = self.loaded.get_mut(&id) {
+            held.used_s = now_s;
+            return Some(held.system.clone());
         }
         let star = self.star_by_id(id)?.clone();
         let system = Arc::new(LocalSystem::for_star(&star)?);
-        self.loaded.insert(id, system.clone());
+        self.loaded.insert(id, Held { system: system.clone(), used_s: now_s });
         Some(system)
+    }
+
+    /// Drop systems nothing wants any more.
+    ///
+    /// `occupied` is the star of every craft that is in one — the fleet is the record of who is
+    /// where, so that is what is read rather than a reference count, which a caller holding an
+    /// `Arc` in a local for two lines would raise just as far.
+    ///
+    /// **A system a craft is in is never dropped**, whatever the cap says. Evicting it would
+    /// leave the craft pointing at a copy nothing else shares, and the next tick would build a
+    /// second one beside it.
+    pub fn sweep(&mut self, occupied: impl IntoIterator<Item = StarId>, now_s: f64) {
+        let pinned: HashSet<StarId> = occupied.into_iter().collect();
+        self.loaded
+            .retain(|id, held| pinned.contains(id) || now_s - held.used_s < KEEP_LOADED_S);
+
+        while self.loaded.len() > MOST_LOADED {
+            let Some(coldest) = self
+                .loaded
+                .iter()
+                .filter(|(id, _)| !pinned.contains(id))
+                .min_by(|a, b| a.1.used_s.total_cmp(&b.1.used_s))
+                .map(|(id, _)| *id)
+            else {
+                // Every one of them has a craft in it. Over the cap and nothing to drop.
+                break;
+            };
+            self.loaded.remove(&coldest);
+        }
+    }
+
+    /// How many systems are loaded. For a test and the status readout.
+    pub fn loaded_count(&self) -> usize {
+        self.loaded.len()
     }
 
     /// A star by its catalog id.
@@ -406,5 +468,92 @@ mod tests {
         assert_eq!(strength(100.0, 10.0), 1.0);
         assert_eq!(strength(100.0, 20.0), 0.25);
         assert!(strength(100.0, 0.0).is_finite(), "a coincident source is loud, not infinite");
+    }
+
+    fn sky_world() -> (World, Vec<StarId>) {
+        use lc_world::sky::{AuthoredStars, StarProvider};
+        let sky = AuthoredStars::sample();
+        let stars = sky.stars().to_vec();
+        let ids = stars.iter().map(|s| s.id).collect();
+        (World::new(stars), ids)
+    }
+
+    /// A survey names a star from anywhere, so a craft can load a system it will never visit.
+    /// Nothing dropped them, and a shard that ran long enough held the catalog.
+    #[test]
+    fn a_system_nothing_wants_is_dropped() {
+        let (mut world, ids) = sky_world();
+        for id in &ids {
+            world.system_for(*id, 0.0);
+        }
+        assert!(world.loaded_count() >= 2, "nothing loaded to sweep");
+
+        // Inside the window, with nobody in any of them: still there.
+        world.sweep(Vec::new(), KEEP_LOADED_S * 0.5);
+        assert_eq!(world.loaded_count(), ids.len(), "dropped while a survey could still want it");
+
+        world.sweep(Vec::new(), KEEP_LOADED_S + 1.0);
+        assert_eq!(world.loaded_count(), 0, "a system nothing has wanted for a rotation is held");
+    }
+
+    /// Asking is what keeps a system loaded, and a survey asks every tick. A window that
+    /// counted from the load rather than the last ask would drop a system mid-rotation and
+    /// rebuild it -- which is the cost the cache exists to avoid.
+    #[test]
+    fn asking_for_a_system_keeps_it() {
+        let (mut world, ids) = sky_world();
+        let id = ids[0];
+        world.system_for(id, 0.0);
+        // Far past the window, but asked for throughout.
+        let mut now = 0.0;
+        for _ in 0..5 {
+            now += KEEP_LOADED_S * 0.75;
+            world.system_for(id, now);
+            world.sweep(Vec::new(), now);
+        }
+        assert_eq!(world.loaded_count(), 1, "a system asked for every rotation was dropped");
+    }
+
+    /// **A craft's own system is never dropped.** Evicting it would leave the craft holding a
+    /// copy nothing else shares, and the next tick would build a second one beside it.
+    #[test]
+    fn a_system_a_craft_is_in_survives_any_sweep() {
+        let (mut world, ids) = sky_world();
+        let id = ids[0];
+        world.system_for(id, 0.0);
+        world.sweep([id], KEEP_LOADED_S * 1000.0);
+        assert_eq!(world.loaded_count(), 1, "the craft's own system was swept out from under it");
+    }
+
+    /// The cap is a backstop under the window: a fleet touching more systems than it holds
+    /// inside one rotation would otherwise keep them all.
+    #[test]
+    fn the_cap_drops_the_coldest_first() {
+        // More stars than the cap, all asked for inside the window, none occupied.
+        let mut world = World::new(
+            (0..(MOST_LOADED as u64 + 8))
+                .map(|k| {
+                    let mut star = lc_world::sky::StarProvider::stars(
+                        &lc_world::sky::AuthoredStars::sample(),
+                    )[1]
+                    .clone();
+                    star.id = lc_world::sky::StarId::synthesize("sweep", k);
+                    star.provenance.name = None;
+                    star.position_ly = DVec3::X * (k as f64 * 100.0);
+                    star
+                })
+                .collect(),
+        );
+        let ids: Vec<StarId> = world.stars().iter().map(|s| s.id).collect();
+        for (k, id) in ids.iter().enumerate() {
+            world.system_for(*id, k as f64);
+        }
+        assert!(world.loaded_count() > MOST_LOADED, "not enough loaded to reach the cap");
+
+        world.sweep(Vec::new(), ids.len() as f64);
+        assert_eq!(world.loaded_count(), MOST_LOADED);
+        // The coldest went; the ones asked for most recently stayed.
+        assert!(world.loaded.contains_key(ids.last().unwrap()), "the newest was dropped");
+        assert!(!world.loaded.contains_key(&ids[0]), "the coldest was kept");
     }
 }

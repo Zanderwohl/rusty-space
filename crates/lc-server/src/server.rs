@@ -986,7 +986,7 @@ impl<J: Journal> Server<J> {
             self.fleet.iter().map(|craft| (craft.id, craft.motion.position_ly)).collect();
         let placements: Vec<(CraftId, Option<Arc<LocalSystem>>)> = where_each
             .into_iter()
-            .map(|(id, at)| (id, self.world.system_at(at)))
+            .map(|(id, at)| (id, self.world.system_at(at, now_s)))
             .collect();
 
         for (id, system) in placements {
@@ -995,6 +995,16 @@ impl<J: Journal> Server<J> {
                 continue;
             }
             craft.enter(system, now_s);
+        }
+
+        // Once a second rather than every tick: the sweep walks every loaded system, and what
+        // it is looking for takes a survey rotation to become true.
+        if self.ticks % u64::from(TICKS_PER_SECOND) == 0 {
+            // The fleet is the record of who is in what, so it is what pins a system. Read
+            // after placement, or a craft that has just arrived is not counted as being there.
+            let occupied: Vec<lc_world::sky::StarId> =
+                self.fleet.iter().filter_map(|craft| craft.system.as_ref().map(|s| s.star)).collect();
+            self.world.sweep(occupied, now_s);
         }
     }
 

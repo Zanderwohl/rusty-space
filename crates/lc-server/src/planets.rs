@@ -120,7 +120,7 @@ impl<J: Journal> Server<J> {
         let (mu, mu_fraction) = prior.host_mass(band, luminosity_w)?;
         let luminosity_solar = luminosity_w / em_spectra::stellar::SOLAR_LUMINOSITY;
 
-        let system = self.world.system_for(star)?;
+        let system = self.world.system_for(star, now_s)?;
         let body = identify(&system, star, witness, transit);
 
         let orbit = Orbit::from_period(

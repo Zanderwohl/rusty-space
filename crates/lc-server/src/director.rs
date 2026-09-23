@@ -154,8 +154,8 @@ impl<J: Journal> Server<J> {
         // sharing a system by pointer, and `resync_systems` will not replace an `Arc` whose
         // star already matches — so a cast handed a private copy would be in the right place,
         // in the right system by name, and invisible to everyone for ever.
-        let Some(system) = self.world.system_at(at) else { return };
         let now_s = self.now_t() as f64 * 1.0e-6;
+        let Some(system) = self.world.system_at(at, now_s) else { return };
 
         let pov_member = director.scenario.pov;
         {

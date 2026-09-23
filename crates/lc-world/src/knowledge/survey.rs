@@ -34,6 +34,11 @@ pub const DWELL_S: f64 = 60.0;
 /// A body inside the system is bright and resolved, so this is not a depth: a planet gives
 /// 1e13 counts in a minute from 5 AU. It is how long the telescope is committed elsewhere,
 /// which is what sets how often anything comes round.
+///
+/// **The shard's `World::sweep` window is a multiple of this**, because how long a system is
+/// worth keeping loaded is how long a survey takes to come round to the same body again. Move
+/// this, or move how many bodies a generated system holds, and tune that window with it: too
+/// short and a system is dropped mid-rotation and rebuilt every time.
 pub const SURVEY_DWELL_S: f64 = 60.0;
 
 /// Resolution elements across a disc past which the instruments measure it directly rather

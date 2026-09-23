@@ -175,7 +175,7 @@ impl<J: Journal> Server<J> {
             // The system the *duty* names, not the one the craft is in. A survey ordered from
             // outside is then refused by the physics -- the bodies are points in the star's
             // glare -- rather than by a silent special case here.
-            let system = surveyed.and_then(|star| self.world.system_for(star));
+            let system = surveyed.and_then(|star| self.world.system_for(star, now_s));
             let stars = self.world.stars();
             let instruments = &mut self.instruments;
             let sky = instruments.sky.get_or_insert_with(|| Sky::new(stars));
