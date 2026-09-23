@@ -1,7 +1,7 @@
 //! Finding stars in the first place: where the telescope is pointed, what it picks up there,
 //! and what it cannot pick up because something brighter is in the way.
 
-use em_spectra::{Band, blackbody};
+use em_spectra::{Band, PerBand, blackbody};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
@@ -357,6 +357,34 @@ fn spun(
     let turned = (exposure_s / spin_s).clamp(f64::MIN_POSITIVE, 1.0);
     let sigma = (spin_s * std::f64::consts::SQRT_2 / elements / turned).max(spin_s * RANGE_FLOOR);
     Some((spin_s + rng::gaussian(seed) * sigma, sigma))
+}
+
+/// What a look measures in every band the instrument has, not only the one it surveys in.
+///
+/// The survey band decides whether the body was seen at all; these are the same frames read
+/// through the other filters. A band the instrument lacks, or one the body is too faint in, is
+/// `None` -- which is not a zero, and the digest keeps the difference.
+///
+/// Glare is not per-band here. It was already spent deciding the detection, and the bright
+/// thing casting it is the same star in every filter; carrying seven copies of it would be
+/// seven times the work for a correction smaller than the calibration floor.
+pub fn colors(
+    optics: &Optics,
+    arriving: &PerBand<f64>,
+    exposure_s: f64,
+    seed: u64,
+) -> PerBand<Option<f64>> {
+    arriving.map(|band, flux| {
+        if !optics.instrument.sees(band) {
+            return None;
+        }
+        let snr = optics.snr(band, *flux, exposure_s);
+        if !(snr.is_finite() && snr >= DETECTION_SNR) {
+            return None;
+        }
+        let sigma = flux * (1.0 / snr).max(PHOTOMETRY_FLOOR);
+        Some(flux + rng::gaussian(rng::hash(&[seed, band.index() as u64])) * sigma)
+    })
 }
 
 /// The measured angular diameter of a resolved disc, or `None` for a point source.

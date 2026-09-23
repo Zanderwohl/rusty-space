@@ -7,7 +7,7 @@
 use glam::DVec3;
 
 use super::conclusion::Hypothesis;
-use super::record::{Method, Orbit, Orientation};
+use super::record::{Colors, Method, Orbit, Orientation};
 use crate::sky::StarId;
 use super::subject::BodyId;
 use super::{Knowledge, Subject, Witness};
@@ -90,6 +90,9 @@ pub struct BodyBelief {
     pub velocity_m_s: Option<(DVec3, f64)>,
     /// What it is believed to go round. `None` is the system's star.
     pub about: Option<BodyId>,
+    /// Mean flux per band and one sigma on each, from the digest every visit folds into.
+    /// `None` in a band nothing was measured in, which is not a zero.
+    pub colors: Option<Colors>,
     /// Kilograms and one sigma, from whatever goes round *this* body: a satellite's orbit is
     /// its primary's mass by Kepler's third law and there is no other way to weigh one.
     pub mass_kg: Option<(f64, f64)>,
@@ -161,6 +164,13 @@ impl Knowledge {
                 .map(|(_, spin)| spin),
             velocity_m_s: orbit.and_then(|o| moving_at(o, now_s)),
             about: orbit.and_then(|o| o.about),
+            // The one with the most visits behind it. Two craft's digests are not folded
+            // together: Welford's needs the rows, and a report carries the digest, not them.
+            colors: file
+                .colors()
+                .iter()
+                .max_by_key(|c| c.visits.iter().map(|(_, n)| u64::from(*n)).sum::<u64>())
+                .cloned(),
             mass_kg: self.weighed(star, body),
             stated_by: orbit.map(|o| o.witness),
             hops: orbit.map_or(0, |o| o.lineage.len()),

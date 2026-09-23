@@ -3,7 +3,7 @@
 //! Nothing here folds records into a belief; that is [`super::Knowledge`]. See
 //! `lightcone/docs/22-provenance.md`.
 
-use em_spectra::Band;
+use em_spectra::{Band, PerBand};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
@@ -235,6 +235,80 @@ pub enum Method {
     /// Stated by a craft that sent no raw data. Cannot be re-solved or checked, exactly as a
     /// [`Claim`] cannot.
     Claim,
+}
+
+/// What a body has been measured at, band by band, folded from every visit.
+///
+/// **The per-visit digest.** One visit is one row -- a flux in every band the instrument has --
+/// and a row folded in is a row freed. Fixed in size per body, so eight planets cost the same
+/// in month three as in month one, which is the property the fifteen-minute run rests on.
+///
+/// The orbit half of the digest is the decimated arc itself: [`super::BEARINGS_KEPT`] bearings
+/// per witness, kept by widest spread, and `knowledge::arc` re-fits from them. That is doc 25's
+/// second route, taken over accumulated normal equations, so the conditioning question that
+/// route raised never had to be answered.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Colors {
+    pub witness: Witness,
+    /// Per band: how many visits contributed, their mean flux in W/m^2, and the sum of squared
+    /// deviations from it. Welford's, so a mean and a variance accumulate in one pass and
+    /// neither needs the rows back.
+    pub visits: PerBand<u32>,
+    pub mean: PerBand<f64>,
+    pub scatter: PerBand<f64>,
+    /// Coordinate seconds of the first and last visit folded in.
+    pub spanned_s: (f64, f64),
+    pub lineage: Lineage,
+}
+
+impl Colors {
+    pub fn new(witness: Witness) -> Self {
+        Self {
+            witness,
+            visits: PerBand::splat(0),
+            mean: PerBand::splat(0.0),
+            scatter: PerBand::splat(0.0),
+            spanned_s: (f64::INFINITY, f64::NEG_INFINITY),
+            lineage: Lineage::new(),
+        }
+    }
+
+    /// Fold one visit in. `flux` is `None` for a band the instrument does not have or could not
+    /// detect the body in, which is not the same as a zero.
+    pub fn fold(&mut self, at_s: f64, flux: &PerBand<Option<f64>>) {
+        for band in Band::ALL {
+            let Some(measured) = flux[band] else { continue };
+            let n = self.visits[band].saturating_add(1);
+            self.visits[band] = n;
+            let step = measured - self.mean[band];
+            self.mean[band] += step / n as f64;
+            // Welford: the second term uses the *updated* mean, which is what keeps this stable
+            // where `sum of squares minus square of sum` cancels away its own digits.
+            self.scatter[band] += step * (measured - self.mean[band]);
+        }
+        self.spanned_s = (self.spanned_s.0.min(at_s), self.spanned_s.1.max(at_s));
+    }
+
+    /// Mean flux in a band and one sigma on that mean, or `None` where nothing was measured.
+    pub fn flux_in(&self, band: Band) -> Option<(f64, f64)> {
+        let n = self.visits[band];
+        if n == 0 {
+            return None;
+        }
+        // One visit gives a mean and no spread to judge it by, which is honestly nothing.
+        let variance = if n > 1 { self.scatter[band] / (n - 1) as f64 } else { f64::INFINITY };
+        Some((self.mean[band], (variance / n as f64).sqrt()))
+    }
+
+    /// The ratio of two bands' means, and its fractional error: the colour, which is what a
+    /// type hypothesis reads and what no single band can say.
+    pub fn color(&self, over: Band, under: Band) -> Option<(f64, f64)> {
+        let ((a, sa), (b, sb)) = (self.flux_in(over)?, self.flux_in(under)?);
+        (b.abs() > 0.0 && a.abs() > 0.0).then(|| {
+            let ratio = a / b;
+            (ratio, ratio.abs() * ((sa / a).powi(2) + (sb / b).powi(2)).sqrt())
+        })
+    }
 }
 
 /// Where somebody says a body orbits, as much of it as they have.

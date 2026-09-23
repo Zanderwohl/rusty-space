@@ -126,6 +126,24 @@ pub fn all(system: &LocalSystem, band: Band, from_ly: DVec3, now_s: f64) -> Vec<
     seen
 }
 
+impl Visit {
+    /// This visit as a source the telescope can be pointed at, in one band.
+    ///
+    /// **The one place a body in the truth becomes a subject in a belief.** `BodyId::of` hashes
+    /// the same key `Target::Body` holds, so a survey's sighting and a navigation order name
+    /// one body.
+    pub fn source(&self, star: crate::sky::StarId, band: Band) -> Source {
+        Source {
+            subject: Subject::Body { star, body: BodyId::of(star, &self.body) },
+            toward: self.toward,
+            flux_w_m2: self.flux[band],
+            diameter_rad: self.diameter_rad,
+            radius_m: self.radius_m,
+            spin_s: self.spin_s,
+        }
+    }
+}
+
 /// Every body of a system as a source the telescope can be pointed at, in `band`.
 ///
 /// **The one place a body in the truth becomes a subject in a belief.** `BodyId::of` hashes the
@@ -133,20 +151,7 @@ pub fn all(system: &LocalSystem, band: Band, from_ly: DVec3, now_s: f64) -> Vec<
 /// The star's own sources come from [`crate::knowledge::observatory::Sky`] and belong in the
 /// same list: a planet is lost in its star's glare, and only one sky can say so.
 pub fn sources(system: &LocalSystem, band: Band, from_ly: DVec3, now_s: f64) -> Vec<Source> {
-    all(system, band, from_ly, now_s)
-        .into_iter()
-        .map(|seen| Source {
-            subject: Subject::Body {
-                star: system.star,
-                body: BodyId::of(system.star, &seen.body),
-            },
-            toward: seen.toward,
-            flux_w_m2: seen.flux[band],
-            diameter_rad: seen.diameter_rad,
-            radius_m: seen.radius_m,
-            spin_s: seen.spin_s,
-        })
-        .collect()
+    all(system, band, from_ly, now_s).iter().map(|seen| seen.source(system.star, band)).collect()
 }
 
 #[cfg(test)]

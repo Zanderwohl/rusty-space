@@ -39,8 +39,8 @@ pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;
 pub use report::{ENTRIES_PER_REPORT, Entry, Log, Logs, Mark, Part, Report, Reporting};
 pub use record::{
-    Claim, Hop, Lineage, Method, NameKind, Naming, Orbit, Orientation, Sample, Series, Sighting,
-    Witness,
+    Claim, Colors, Hop, Lineage, Method, NameKind, Naming, Orbit, Orientation, Sample, Series,
+    Sighting, Witness,
     learned_s,
 };
 pub use subject::{BodyId, Subject};
@@ -137,6 +137,8 @@ pub struct File {
     names: Vec<Naming>,
     orbits: Vec<Orbit>,
     conclusions: Vec<Conclusion>,
+    /// Per-band photometry, folded per visit and fixed in size. One per witness.
+    colors: Vec<Colors>,
     /// This craft's own: what is left of logs it has consumed. Never transmitted.
     digests: Vec<Digest>,
     /// Keep this subject's logs whatever the pipeline concludes. This craft's own choice.
@@ -166,6 +168,10 @@ impl File {
 
     pub fn conclusions(&self) -> &[Conclusion] {
         &self.conclusions
+    }
+
+    pub fn colors(&self) -> &[Colors] {
+        &self.colors
     }
 
     pub fn digests(&self) -> &[Digest] {
@@ -481,6 +487,28 @@ impl Knowledge {
             Some(held) if held.stated_s >= claim.stated_s => {}
             Some(held) => *held = claim,
             None => file.claims.push(claim),
+        }
+        self.refresh(subject);
+    }
+
+    /// Fold one visit's per-band fluxes into a body's digest, which is fixed in size however
+    /// many visits it has taken. The row itself is never kept.
+    pub fn measured_colors(
+        &mut self,
+        subject: impl Into<Subject>,
+        witness: Witness,
+        at_s: f64,
+        flux: &em_spectra::PerBand<Option<f64>>,
+    ) {
+        let subject = subject.into();
+        let file = self.files.entry(subject).or_default();
+        match file.colors.iter_mut().find(|c| c.witness == witness) {
+            Some(held) => held.fold(at_s, flux),
+            None => {
+                let mut fresh = Colors::new(witness);
+                fresh.fold(at_s, flux);
+                file.colors.push(fresh);
+            }
         }
         self.refresh(subject);
     }

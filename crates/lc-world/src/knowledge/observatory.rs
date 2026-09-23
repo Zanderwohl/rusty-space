@@ -269,10 +269,13 @@ pub fn survey_between(
         .into_iter()
         .collect::<Vec<Source>>();
     let star_last = sources.len();
-    sources.extend(crate::visit::sources(system, band, at.position_ly, to_s));
+    // The visits are kept beside their sources, not thrown away for one band's flux: a visit
+    // carries every band, and the digest below is what those are for.
+    let mut seen = crate::visit::all(system, band, at.position_ly, to_s);
     // Brightest first over the bodies only, so the star keeps its place at the front and the
     // rotation below is over a list whose order is a property of the system.
-    sources[star_last..].sort_unstable_by(|a, b| b.flux_w_m2.total_cmp(&a.flux_w_m2));
+    seen.sort_unstable_by(|a, b| b.flux[band].total_cmp(&a.flux[band]));
+    sources.extend(seen.iter().map(|visit| visit.source(system.star, band)));
 
     let bodies = sources.len() - star_last;
     let witness = knowledge.owner;
@@ -298,12 +301,23 @@ pub fn survey_between(
 
     for slot in duty.visits(bodies, from_s, to_s) {
         let index = star_last + slot;
-        if let Some(seen) =
+        let (Some(source), Some(visit)) = (sources.get(index), seen.get(slot)) else { continue };
+        let Some(sighting) =
             survey::look(&optics, &sources, index, survey::SURVEY_DWELL_S, at.position_ly, to_s, witness)
-            && let Some(source) = sources.get(index)
-        {
-            knowledge.sighted(source.subject, seen);
-        }
+        else {
+            continue;
+        };
+        // One visit, one row, folded and freed: the per-band fluxes go into a digest that is
+        // the same size after a thousand visits as after one, which is what lets a survey run
+        // for game months inside a fixed store.
+        let colors = survey::colors(
+            &optics,
+            &visit.flux,
+            survey::SURVEY_DWELL_S,
+            crate::rng::hash(&[witness.0, source.subject.key(), to_s.to_bits()]),
+        );
+        knowledge.sighted(source.subject, sighting);
+        knowledge.measured_colors(source.subject, witness, to_s, &colors);
     }
 }
 
@@ -593,6 +607,86 @@ mod tests {
         // system that holds still, which is the whole difference.
         let host = k.belief(Subject::Star(system.star)).expect("the sun was surveyed too");
         assert!(host.triangulated, "{:?}", host.distance);
+    }
+
+    /// **The per-visit digest is fixed in size.** One visit is one row of seven fluxes, folded
+    /// and freed, so a body costs the same after four hundred visits as after eight and a
+    /// survey can run for game months inside a fixed store. The orbit half of the digest is the
+    /// decimated arc itself, capped at `BEARINGS_KEPT` per witness.
+    #[test]
+    fn a_visit_is_folded_into_a_digest_that_does_not_grow() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+
+        let jupiter = Subject::Body {
+            star: system.star,
+            body: crate::knowledge::BodyId::of(system.star, "Jupiter"),
+        };
+        let size = |k: &Knowledge| {
+            let file = k.file(jupiter).expect("Jupiter is surveyed first of all");
+            (file.sightings().len(), file.colors().len(), file.colors()[0].visits[em_spectra::Band::V])
+        };
+
+        for step in 1..=8 {
+            o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S * step as f64);
+        }
+        let (sightings, digests, early) = size(&k);
+        assert_eq!(digests, 1, "one digest per witness, however many visits");
+        assert!(early > 0, "and it has visits in it");
+
+        for step in 9..=400 {
+            o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S * step as f64);
+        }
+        let (grown, digests, late) = size(&k);
+        assert_eq!(digests, 1, "still one digest");
+        assert!(late > early, "which took {early} visits and now takes {late}");
+        assert!(
+            grown <= crate::knowledge::BEARINGS_KEPT,
+            "{grown} bearings kept, past the cap of {}",
+            crate::knowledge::BEARINGS_KEPT
+        );
+        assert!(sightings <= grown, "a decimated arc only ever holds its cap");
+
+        // Nothing here costs room, because only raw logs do and a survey writes none.
+        assert_eq!(k.bytes(), 0.0, "a survey fills no store");
+    }
+
+    /// **The colours a type hypothesis reads.** Every band the instrument has, measured on the
+    /// same frames the survey band decided the detection on. Venus is bright and nearly gray,
+    /// Earth is blue, Mars is red -- the three statements `worlds` exists to make, now arriving
+    /// through a telescope rather than read off the table.
+    #[test]
+    fn a_survey_measures_every_band_it_has() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        for step in 1..=120 {
+            o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S * step as f64);
+        }
+
+        let colors = |name: &str| {
+            let body = crate::knowledge::BodyId::of(system.star, name);
+            k.body_belief(system.star, body, TICK_S * 120.0)
+                .and_then(|b| b.colors)
+                .unwrap_or_else(|| panic!("{name} has no digest"))
+        };
+
+        for name in ["Venus", "Earth", "Mars"] {
+            let held = colors(name);
+            for band in [em_spectra::Band::B, em_spectra::Band::V, em_spectra::Band::R] {
+                assert!(held.flux_in(band).is_some(), "{name} was not measured in {band:?}");
+            }
+        }
+        // Redness is the R over B ratio, and it is the ordering that matters rather than any
+        // one number: what a hypothesis set reads off these is which of them is which.
+        let red = |name: &str| colors(name).color(em_spectra::Band::R, em_spectra::Band::B).expect("a color").0;
+        assert!(red("Mars") > red("Venus"), "Mars is the red one: {} against {}", red("Mars"), red("Venus"));
+        assert!(red("Venus") > red("Earth"), "Earth is the blue one: {} against {}", red("Earth"), red("Venus"));
     }
 
     /// A survey of a system the craft has not been handed does nothing rather than inventing

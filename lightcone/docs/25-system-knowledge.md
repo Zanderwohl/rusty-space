@@ -668,7 +668,40 @@ planets alone. So the store is not the constraint at fifteen minutes and is the 
 thirty, which is too fine a margin to leave to chance: a done-when that ends in "Data full."
 is not a demo.
 
-So the cadence is part of the design, not an afterthought:
+✅ **Built** (2026-09-23), and **the room arithmetic above does not apply to the survey at all.**
+Only raw photometric logs count against room — `room.rs` charges `Series` and nothing else, on the
+grounds that everything else is bounded per subject — and the survey writes no `Series`. It writes
+sightings, and those are already capped at `BEARINGS_KEPT` per witness by `File::decimate`. A
+craft that has surveyed Sol for game months reports **zero bytes used**.
+
+So the table above was costed against a survey that logs photometry, and the one built does not.
+What it does log is one row of per-band fluxes a visit, and that is what the digest folds:
+
+- **`Colors` is the per-visit digest.** One visit is one row of seven fluxes, folded in and
+  freed. Welford's, so a mean and a variance accumulate in one pass and neither needs the rows
+  back — and the second term uses the *updated* mean, which is what keeps it stable where
+  "sum of squares minus square of sum" cancels away its own digits.
+- **Fixed in size per body.** Measured: a body costs the same after four hundred visits as after
+  eight, one digest per witness however many visits, and the arc beside it never past its cap.
+- **A band nothing was measured in is `None`, not a zero.** An instrument that lacks the band and
+  a body too faint in it are both "no measurement", and a zero would be a reading.
+- **`Optics::band` picks one band to survey in; the colours are every band the instrument has,**
+  read off the same frames. The survey band decides the detection; the rest are measured
+  alongside. Glare is not carried per band: it was already spent on that decision, the bright
+  thing casting it is the same star in every filter, and seven copies would cost seven times the
+  work for a correction under the calibration floor.
+
+**The orbit half of the digest is the decimated arc itself.** This section offered two routes and
+called the choice open: accumulate normal equations in a square-root form, or keep a decimated
+arc and re-fit. The code took the second before the question was put — `BEARINGS_KEPT` bearings
+per witness, kept by widest spread, and `knowledge::arc` re-fits from them. So the conditioning
+worry under *Fitting the orbit* never had to be answered, because nothing accumulates normal
+equations.
+
+Measured through a telescope rather than read off the table: Mars comes back redder than Venus
+and Venus redder than Earth, which are the three statements `worlds` exists to make.
+
+The cadence below is part of the design, not an afterthought:
 
 - **A body's log is digested every visit**, not when full. One visit is one row: a bearing, an
   angular diameter, seven fluxes. Reading it folds the row into the digest and frees it.
@@ -1473,6 +1506,7 @@ game has no players — so each of these is a change in place, not a versioned a
 | 2 | ✅ **Done.** `Orbit` grew, `Orientation` and `Method` are new, and `formats.rs`' three back-readers `FileV3`/`FileV2`/`FileV1` were deleted rather than repointed at a frozen `OrbitV4`. `FILE_FORMAT` and `OLDEST_FILE_FORMAT` are both 5 |
 | 2 | `REPORT_FORMAT` stays 2. It carries the new `Orbit` by carrying `Part`, whose shape is unchanged, and the one shard is redeployed whole — a bump would only drop reports already in flight |
 | 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
+| 6 | ✅ **`File` grew `colors: Vec<Colors>`**, the per-visit digest, one per witness. `FILE_FORMAT` is 9 and `REPORT_FORMAT` is 6 |
 | 6 | ✅ **`Orbit` grew `about: Option<BodyId>`** — what it goes round, `None` being the star — and `BodyBelief` grew `about` and `mass_kg` beside it. `FILE_FORMAT` is 8 and `REPORT_FORMAT` is 5 |
 | 6 | ✅ **`Sighting` grew `range_m` and `spin_s`,** both `Option<(f64, f64)>`, beside `size`: the three things a close look measures and a distant one cannot. `Drawable` grew `spin_s` to have a rotation to measure, worked out from the arena's lock for a tidally locked body. `FILE_FORMAT` is 7 and `REPORT_FORMAT` is 4 |
 | 6 | ✅ **`Sighting` grew a `size: Option<(f64, f64)>`** — an angular diameter and its sigma, `None` for a point source. `FILE_FORMAT` was 6 and `REPORT_FORMAT` 3. The report format *does* move here where phase 2 left it alone, because `Part` carries `Sighting` by value and its shape is what changed; `Reported::format` is checked strictly on landing, so reports in flight across the deploy fail to land, which is the right trade for one shard with no players |
