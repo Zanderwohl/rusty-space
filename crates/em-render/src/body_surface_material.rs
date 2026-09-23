@@ -1,5 +1,8 @@
 //! A resolved body's surface: a pattern the host bakes, colored by a palette the body's class
-//! gives. The host supplies `shaders/body_surface.wgsl`.
+//! gives, or a color map of its own, and optionally a cloud deck over either. The host supplies
+//! `shaders/body_surface.wgsl`.
+//!
+//! A cloud deck is keyframes of weather, blended by the shader, over a climate that is fixed.
 
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
@@ -11,7 +14,9 @@ pub struct BodySurfaceUniform {
     pub light: Vec4,
     /// World direction to the star; `w` is the ambient floor on the night side.
     pub to_star: Vec4,
-    /// `(unused, contrast, unused, unused)`.
+    /// `(color, contrast, clouds, unused)`. `color` is 1 where [`BodySurfaceMaterial::color`]
+    /// replaces the pattern and palette, and `clouds` is 1 where a cloud deck is drawn over the
+    /// surface.
     pub params: Vec4,
     /// Starlight the surface reflects, as linear display light before the tone map. `w` unused.
     pub reflected: Vec4,
@@ -29,6 +34,10 @@ pub struct BodySurfaceUniform {
     /// adding the results put Jupiter's day side twice its night side at ten microns where the
     /// true ratio is 1.14. The star field already evaluates the same curve per star.
     pub exposure: Vec4,
+    /// Each weather slot's weight, the squares summing to one; `w` is the weather's mean.
+    pub weather: Vec4,
+    /// Each slot's westward drift at the equator, radians; negative before its keyframe.
+    pub drift: Vec4,
 }
 
 impl Default for BodySurfaceUniform {
@@ -41,6 +50,8 @@ impl Default for BodySurfaceUniform {
             reflected: Vec4::ONE,
             emitted: Vec4::ZERO,
             exposure: Vec4::new(1.0, 2.5, 0.0, 0.0),
+            weather: Vec4::ZERO,
+            drift: Vec4::ZERO,
         }
     }
 }
@@ -54,6 +65,20 @@ pub struct BodySurfaceMaterial {
     #[texture(1, dimension = "cube", visibility(fragment))]
     #[sampler(2, visibility(fragment))]
     pub pattern: Handle<Image>,
+    /// The surface's own albedo, an sRGB cubemap, when `params.x` says so. Sampled with the
+    /// pattern's sampler.
+    #[texture(3, dimension = "cube", visibility(fragment))]
+    pub color: Handle<Image>,
+    /// One weather keyframe a slot, single-channel.
+    #[texture(4, dimension = "cube", visibility(fragment))]
+    pub weather_0: Handle<Image>,
+    #[texture(5, dimension = "cube", visibility(fragment))]
+    pub weather_1: Handle<Image>,
+    #[texture(6, dimension = "cube", visibility(fragment))]
+    pub weather_2: Handle<Image>,
+    /// The deck's fixed belts.
+    #[texture(7, dimension = "cube", visibility(fragment))]
+    pub climate: Handle<Image>,
 }
 
 impl Material for BodySurfaceMaterial {

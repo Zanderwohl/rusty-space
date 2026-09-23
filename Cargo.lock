@@ -652,12 +652,6 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.21.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
-
-[[package]]
-name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
@@ -6847,18 +6841,6 @@ dependencies = [
 
 [[package]]
 name = "ron"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
-dependencies = [
- "base64 0.21.7",
- "bitflags 2.13.2",
- "serde",
- "serde_derive",
-]
-
-[[package]]
-name = "ron"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "beceb6f7bf81c73e73aeef6dd1356d9a1b2b4909e1f0fc3e59b034f9572d7b7f"
@@ -7699,18 +7681,18 @@ dependencies = [
 [[package]]
 name = "texture-graph-core"
 version = "0.1.0"
-source = "git+https://github.com/Zanderwohl/texture-graph.git?rev=36960c5#36960c508e7e2d66d69402d4a9b10ccab096d2c2"
+source = "git+https://github.com/Zanderwohl/texture-graph.git?rev=a26a390#a26a3908ddfba1e579a1f2eb0b337618dbd5cae6"
 dependencies = [
  "palette",
- "ron 0.8.1",
+ "ron 0.12.2",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "texture-graph-gpu"
 version = "0.1.0"
-source = "git+https://github.com/Zanderwohl/texture-graph.git?rev=36960c5#36960c508e7e2d66d69402d4a9b10ccab096d2c2"
+source = "git+https://github.com/Zanderwohl/texture-graph.git?rev=a26a390#a26a3908ddfba1e579a1f2eb0b337618dbd5cae6"
 dependencies = [
  "bytemuck",
  "glam",

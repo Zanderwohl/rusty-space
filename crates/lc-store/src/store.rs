@@ -43,6 +43,17 @@ pub struct Delivery {
     pub strength: f32,
 }
 
+/// The width of one partition, microseconds. `lc_partition_span()` in SQL, and the two have to
+/// agree: a caller that works out which partition a row needs from a different span asks for
+/// the wrong one.
+pub const PARTITION_SPAN_US: i64 = 2_592_000_000_000;
+
+/// Which partition a coordinate time falls in. `lc_partition_of()` in SQL, floor division so
+/// it is right below zero too.
+pub fn partition_of(t: i64) -> i64 {
+    t.div_euclid(PARTITION_SPAN_US)
+}
+
 /// Create whatever partitions the range needs, on every partitioned table.
 ///
 /// Has to run ahead of any write into the range: a row with no partition is an error, not a
@@ -103,6 +114,15 @@ pub async fn insert_events(client: &Client, events: &[Event]) -> Result<u64, Err
             ],
         )
         .await
+}
+
+/// The highest identifier the store holds, or `None` for an empty one.
+///
+/// Read once at boot, so a shard resuming a world does not mint identifiers it has already
+/// used. See [`crate::id::Minter::resume_from`].
+pub async fn last_event_id(client: &Client) -> Result<Option<EventId>, Error> {
+    let row = client.query_one("SELECT max(event_id) FROM events", &[]).await?;
+    Ok(row.get::<_, Option<i64>>(0).and_then(EventId::from_raw))
 }
 
 /// Schedule deliveries. Written when the event is written, not worked out when it is read.
@@ -181,7 +201,7 @@ mod tests {
     use crate::migrate;
 
     /// One span is thirty days of coordinate time. Tests that cross a boundary use it.
-    const SPAN_US: i64 = 2_592_000_000_000;
+    const SPAN_US: i64 = PARTITION_SPAN_US;
 
     async fn store() -> Option<Client> {
         let client = crate::connect().await.ok()?;
@@ -272,6 +292,28 @@ mod tests {
         ensure_partitions(&client, far, far).await.unwrap();
         assert_eq!(insert_events(&client, &[event(&mut minter, 10_900, far)]).await.unwrap(), 1);
         client.execute("DELETE FROM events WHERE source_id = $1", &[&10_900i64]).await.unwrap();
+    }
+
+    /// The Rust and SQL answers have to be the same one: a caller that works out which
+    /// partition a row needs from its own arithmetic and then asks for a different one gets an
+    /// error at insert time and no clue where it came from.
+    #[tokio::test]
+    async fn which_partition_a_time_falls_in_is_one_answer() {
+        let Some(client) = store().await else { return };
+        for t in [
+            0,
+            1,
+            SPAN_US - 1,
+            SPAN_US,
+            SPAN_US * 900 + 7,
+            -1,
+            -SPAN_US,
+            -SPAN_US - 1,
+            438_300_001,
+        ] {
+            let row = client.query_one("SELECT lc_partition_of($1)", &[&t]).await.unwrap();
+            assert_eq!(partition_of(t), row.get::<_, i64>(0), "at {t}");
+        }
     }
 
     #[tokio::test]
