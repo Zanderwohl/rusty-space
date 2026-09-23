@@ -10,6 +10,7 @@
 //! material drawn before then draws unchanged but for the texture, and a bake that fails leaves
 //! a texture missing rather than a game that cannot start. See `lightcone/docs/07-rendering.md`.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -263,6 +264,8 @@ struct Reading {
 pub struct Bakes {
     waiting: Vec<Request>,
     reading: Vec<Reading>,
+    /// Bakes asked of each image and not yet settled, landed or failed.
+    unsettled: HashMap<AssetId<Image>, u32>,
     /// Built once: its pipelines are most of what a first bake costs.
     baker: Option<(Baker, RenderDevice)>,
 }
@@ -276,12 +279,29 @@ impl Bakes {
         target: Target,
         image: Handle<Image>,
     ) {
+        *self.unsettled.entry(image.id()).or_default() += 1;
         self.waiting.push(Request {
             graph,
             seed,
             target,
             image,
         });
+    }
+
+    /// Whether every bake asked of `image` has landed or failed. Bakes of one image land in the
+    /// order they were asked for, so the image then holds the last.
+    pub fn settled(&self, image: &Handle<Image>) -> bool {
+        !self.unsettled.contains_key(&image.id())
+    }
+}
+
+/// A free function so it can run while the baker is borrowed out of [`Bakes`].
+fn settle(unsettled: &mut HashMap<AssetId<Image>, u32>, image: &Handle<Image>) {
+    if let Some(n) = unsettled.get_mut(&image.id()) {
+        *n -= 1;
+        if *n == 0 {
+            unsettled.remove(&image.id());
+        }
     }
 }
 
@@ -320,6 +340,7 @@ fn run_bakes(
     for request in waiting {
         if let LoadState::Failed(e) = assets.load_state(&request.graph) {
             warn!("a procedural texture's graph did not load, drawing without it: {e}");
+            settle(&mut bakes.unsettled, &request.image);
             continue;
         }
         let Some(TextureGraph(graph)) = graphs.get(&request.graph) else {
@@ -332,7 +353,10 @@ fn run_bakes(
                 target: request.target,
                 image: request.image,
             }),
-            Err(e) => warn!("a procedural texture did not bake, drawing without it: {e}"),
+            Err(e) => {
+                warn!("a procedural texture did not bake, drawing without it: {e}");
+                settle(&mut bakes.unsettled, &request.image);
+            }
         }
     }
 
@@ -342,7 +366,7 @@ fn run_bakes(
     // Fires the map callbacks on native. A browser fires them from its own event loop and this
     // is a no-op there.
     let _ = device.poll(PollType::Poll);
-    let mut landed = false;
+    let mut landed = Vec::new();
     bakes.reading.retain(|reading| {
         let polled = reading
             .readback
@@ -355,10 +379,13 @@ fn run_bakes(
         };
         debug!("baked a procedural texture: {:?}", reading.target);
         let _ = images.insert(&reading.image, image_of(reading.target, bytes));
-        landed = true;
+        landed.push(reading.image.clone());
         false
     });
-    if landed {
+    for image in &landed {
+        settle(&mut bakes.unsettled, image);
+    }
+    if !landed.is_empty() {
         // Visiting every material marks it changed, which is what makes Bevy rebuild the bind
         // groups that still hold a placeholder's view.
         for _ in populations.iter_mut() {}

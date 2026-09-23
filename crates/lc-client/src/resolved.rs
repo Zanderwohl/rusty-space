@@ -42,19 +42,14 @@ pub const NIGHT: f32 = 0.012;
 /// changing how much light the body sends.
 const INVERSION: f32 = 0.3;
 
-/// Which of this frame's resolved bodies an entity stands for.
-///
-/// An index rather than the name it could be found by: the set is compared against
-/// [`Resolved::drawn`] every frame and respawned whenever it differs, so while these entities
-/// exist the list holds the same bodies in the same order it did when they were spawned.
+/// Which body a resolved sphere stands for.
 #[derive(Component)]
-pub struct ResolvedBody(pub usize);
+pub struct ResolvedBody(pub String);
 
-/// The shared unit sphere, and which bodies currently have one.
+/// The unit sphere every resolved body shares.
 #[derive(Resource, Default)]
 pub struct Resolved {
     pub mesh: Option<Handle<Mesh>>,
-    pub drawn: Vec<String>,
 }
 
 /// Whether a body is close enough to be worth drawing as a sphere.
@@ -318,6 +313,7 @@ fn uniforms(
     reflected: glam::Vec3,
     emitted: glam::Vec3,
     (color, clouds): (f32, f32),
+    weather: Option<crate::surfaces::Weather>,
 ) -> BodySurfaceUniform {
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
@@ -325,15 +321,35 @@ fn uniforms(
         dark: Vec4::new(dark[0], dark[1], dark[2], 1.0),
         light: Vec4::new(light[0], light[1], light[2], 1.0),
         to_star: to_star.extend(NIGHT),
-        params: Vec4::new(color, contrast, clouds, 0.0),
+        params: Vec4::new(
+            color,
+            contrast,
+            if weather.is_some() { clouds } else { 0.0 },
+            0.0,
+        ),
         reflected: reflected.extend(0.0),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
         emitted: emitted.extend(if body.surface.is_banded() { INVERSION } else { 0.0 }),
         exposure: Vec4::new(tone.surface_reference, tone.surface_stops, 0.0, 0.0),
+        weather: weather.map_or(Vec4::ZERO, |w| w.weights),
+        drift: weather.map_or(Vec4::ZERO, |w| w.drift),
+    }
+}
+
+/// Where a unit sphere goes to be `body`, seen from `eye_ly`.
+fn placement(body: &Drawable, eye_ly: DVec3) -> Transform {
+    Transform {
+        translation: sim_to_render((body.position_ly - eye_ly) * M_PER_LY / UNIT_M).as_vec3(),
+        rotation: Quat::from_rotation_arc(Vec3::Y, sim_to_render(body.pole).as_vec3().normalize()),
+        scale: Vec3::splat((body.radius_m / UNIT_M) as f32),
     }
 }
 
 /// Keep a sphere for every body close enough to be one.
+///
+/// A sphere lives exactly as long as its body stays resolved, and is placed on the frame it is
+/// spawned. Respawning every sphere whenever the set changed, and placing them a frame later,
+/// left Earth undrawn for a frame each time its moon crossed the threshold — a black flash.
 pub fn update_resolved(
     mut commands: Commands,
     session: Res<crate::app::Game>,
@@ -344,77 +360,70 @@ pub fn update_resolved(
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
     mut surfaces: ResMut<crate::surfaces::Surfaces>,
     mut images: ResMut<Assets<Image>>,
+    mut bakes: ResMut<crate::procedural::Bakes>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
-    existing: Query<(Entity, &ResolvedBody)>,
-    mut placed: Query<(&mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &ResolvedBody)>,
+    mut placed: Query<(
+        Entity,
+        &mut Transform,
+        &MeshMaterial3d<BodySurfaceMaterial>,
+        &ResolvedBody,
+    )>,
 ) {
     let rad_per_px = crate::starfield::camera_scale(&camera);
     let Some(system) = session.0.system.as_ref() else {
-        for (entity, _) in &existing {
+        for (entity, ..) in &placed {
             commands.entity(entity).despawn();
         }
-        resolved.drawn.clear();
         return;
     };
     let star_ly = system.star_position_ly();
     let (star_radius, star_teff) = (system.star_radius_m(), system.star_teff_k());
+    let now_s = session.0.coordinate_time_s();
+    let mut shade = |body: &Drawable, surfaces: &mut crate::surfaces::Surfaces| {
+        let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
+        let (reflected, emitted) =
+            surface_shading(&session.0, body, star_radius, star_teff, star_distance);
+        let drawn = surfaces.drawn(&body.name);
+        let weather = surfaces.weather(&body.name, now_s, body.radius_m, &mut bakes);
+        uniforms(body, star_ly, &session.tone, reflected, emitted, drawn, weather)
+    };
 
     let want: Vec<&Drawable> = bodies
         .drawn
         .iter()
         .filter(|d| is_resolved(d, eye.at_ly, rad_per_px))
         .collect();
-    // Compared against the drawn set without building it: this runs every frame, and the
-    // names are only wanted on the frame that respawns.
-    if !want.iter().map(|d| &d.name).eq(resolved.drawn.iter()) {
-        for (entity, _) in &existing {
+    // Linear searches: only a handful of bodies are ever resolved at once.
+    let mut kept: Vec<&str> = Vec::with_capacity(want.len());
+    for (entity, mut transform, material, marker) in placed.iter_mut() {
+        let Some(body) = want.iter().find(|d| d.name == marker.0).copied() else {
             commands.entity(entity).despawn();
-        }
-        let mesh = resolved
-            .mesh
-            .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
-            .clone();
-        for (index, body) in want.iter().enumerate() {
-            let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
-            let (reflected, emitted) =
-                surface_shading(&session.0, body, star_radius, star_teff, star_distance);
-            let drawn = surfaces.drawn(&body.name);
-            let own = surfaces.images(&body.name, body.surface, &mut images);
-            commands.spawn((
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(materials.add(BodySurfaceMaterial {
-                    uniforms: uniforms(body, star_ly, &session.tone, reflected, emitted, drawn),
-                    pattern: own.pattern,
-                    color: own.color,
-                    clouds: own.clouds,
-                })),
-                Transform::default(),
-                NoFrustumCulling,
-                ResolvedBody(index),
-            ));
-        }
-        resolved.drawn = want.iter().map(|d| d.name.clone()).collect();
-        return;
-    }
-
-    for (mut transform, material, marker) in placed.iter_mut() {
-        let Some(body) = want.get(marker.0).copied() else { continue };
-        transform.translation =
-            sim_to_render((body.position_ly - eye.at_ly) * M_PER_LY / UNIT_M).as_vec3();
-        transform.rotation =
-            Quat::from_rotation_arc(Vec3::Y, sim_to_render(body.pole).as_vec3().normalize());
-        transform.scale = Vec3::splat((body.radius_m / UNIT_M) as f32);
-
+            continue;
+        };
+        kept.push(&body.name);
+        *transform = placement(body, eye.at_ly);
         if let Some(mut asset) = materials.get_mut(&material.0) {
-            let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
-            let (reflected, emitted) =
-                surface_shading(&session.0, body, star_radius, star_teff, star_distance);
-            let drawn = surfaces.drawn(&body.name);
-            let next = uniforms(body, star_ly, &session.tone, reflected, emitted, drawn);
+            let next = shade(body, &mut surfaces);
             if asset.uniforms != next {
                 asset.uniforms = next;
             }
         }
+    }
+
+    for body in want.iter().filter(|d| !kept.contains(&d.name.as_str())) {
+        let mesh = resolved
+            .mesh
+            .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
+            .clone();
+        let own = surfaces.images(&body.name, body.surface, &mut images);
+        let uniforms = shade(body, &mut surfaces);
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(materials.add(own.material(uniforms))),
+            placement(body, eye.at_ly),
+            NoFrustumCulling,
+            ResolvedBody(body.name.clone()),
+        ));
     }
 }
 

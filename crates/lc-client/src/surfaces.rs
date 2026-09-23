@@ -5,16 +5,22 @@
 //! `[bodies]` takes that graph instead, baked in color, and one named under `[clouds]` has a
 //! cloud deck drawn over it. So a hand-made Earth is a file and a line, not a change here. Each
 //! body's seed is its name's.
+//!
+//! A cloud deck's [`WEATHER`] is rebaked every [`CLOUD_PERIOD_S`] with a new seed and blended
+//! in body_surface.wgsl; its [`CLIMATE`] is baked once. Keyframes follow coordinate time, so
+//! every client draws the same weather. See lightcone/docs/07-rendering.md.
 
 use std::collections::HashMap;
+use std::f64::consts::FRAC_PI_2;
 
 use bevy::asset::io::Reader;
 use bevy::asset::{AssetLoader, LoadContext, LoadState};
 use bevy::prelude::*;
+use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use lc_world::surface::Surface;
 use serde::Deserialize;
 
-use crate::procedural::{Bakes, Shape, Target, placeholder};
+use crate::procedural::{Bakes, Shape, Target, TextureGraph, placeholder};
 
 const MANIFEST: &str = "textures/surfaces.lcsurfaces";
 
@@ -25,6 +31,21 @@ pub const FACE: u32 = 512;
 /// The same for a color cubemap, at 24 megabytes. A color graph is the whole surface rather
 /// than a variation on one, and it is what a ship in low orbit fills the view with.
 pub const COLOR_FACE: u32 = 1024;
+
+/// It stays below one, so a byte holds it.
+const WEATHER: Target = Target::new(Shape::Cube(COLOR_FACE)).layer("zonal");
+
+const CLIMATE: Target = Target::new(Shape::Cube(64)).layer("drive term 1");
+
+/// [`WEATHER`]'s mean over the sphere, measured; it varies about half a percent by seed.
+const WEATHER_MEAN: f32 = 0.556;
+
+/// Coordinate seconds between cloud keyframes: about twenty real seconds at
+/// [`crate::session::TIME_RATE`], so a server tick moves the blend a quarter of a percent.
+pub const CLOUD_PERIOD_S: f64 = 2.0 * 86_400.0;
+
+/// At the equator, meters a second; body_surface.wgsl shapes it by latitude.
+const EASTERLIES_M_S: f64 = 10.0;
 
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct SurfaceManifest {
@@ -116,14 +137,55 @@ impl AssetLoader for ManifestLoader {
 pub struct BodyImages {
     pub pattern: Handle<Image>,
     pub color: Handle<Image>,
-    pub clouds: Handle<Image>,
+    pub weather: [Handle<Image>; 3],
+    pub climate: Handle<Image>,
+}
+
+impl BodyImages {
+    fn placeholders(images: &mut Assets<Image>) -> Self {
+        let cube = Target::new(Shape::Cube(1));
+        Self {
+            pattern: images.add(placeholder(cube)),
+            color: images.add(placeholder(cube.color())),
+            weather: std::array::from_fn(|_| images.add(placeholder(WEATHER))),
+            climate: images.add(placeholder(CLIMATE)),
+        }
+    }
+
+    pub fn material(&self, uniforms: BodySurfaceUniform) -> BodySurfaceMaterial {
+        let [weather_0, weather_1, weather_2] = self.weather.clone();
+        BodySurfaceMaterial {
+            uniforms,
+            pattern: self.pattern.clone(),
+            color: self.color.clone(),
+            weather_0,
+            weather_1,
+            weather_2,
+            climate: self.climate.clone(),
+        }
+    }
+}
+
+/// See [`BodySurfaceUniform`]'s `weather` and `drift`.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Weather {
+    pub weights: Vec4,
+    pub drift: Vec4,
+}
+
+struct Deck {
+    graph: Handle<TextureGraph>,
+    seed: u32,
+    /// The keyframe each weather slot was last asked to hold.
+    holds: [Option<i64>; 3],
 }
 
 struct Body {
     images: BodyImages,
     class: Surface,
-    /// Whether `color` and `clouds` are drawn; `None` until the manifest has said.
+    /// Whether `color` and clouds are drawn; `None` until the manifest has said.
     drawn: Option<(bool, bool)>,
+    deck: Option<Deck>,
 }
 
 #[derive(Resource)]
@@ -139,13 +201,7 @@ pub struct Surfaces {
 impl FromWorld for Surfaces {
     fn from_world(world: &mut World) -> Self {
         let manifest = world.resource::<AssetServer>().load(MANIFEST);
-        let mut images = world.resource_mut::<Assets<Image>>();
-        let cube = Target::new(Shape::Cube(1));
-        let flat = BodyImages {
-            pattern: images.add(placeholder(cube)),
-            color: images.add(placeholder(cube.color())),
-            clouds: images.add(placeholder(cube.color())),
-        };
+        let flat = BodyImages::placeholders(&mut world.resource_mut::<Assets<Image>>());
         Self {
             manifest,
             flat,
@@ -159,17 +215,11 @@ impl Surfaces {
     pub fn images(&mut self, name: &str, class: Surface, images: &mut Assets<Image>) -> BodyImages {
         self.by_body
             .entry(name.to_owned())
-            .or_insert_with(|| {
-                let cube = Target::new(Shape::Cube(1));
-                Body {
-                    images: BodyImages {
-                        pattern: images.add(placeholder(cube)),
-                        color: images.add(placeholder(cube.color())),
-                        clouds: images.add(placeholder(cube.color())),
-                    },
-                    class,
-                    drawn: None,
-                }
+            .or_insert_with(|| Body {
+                images: BodyImages::placeholders(images),
+                class,
+                drawn: None,
+                deck: None,
             })
             .images
             .clone()
@@ -184,6 +234,72 @@ impl Surfaces {
             .unwrap_or_default();
         (f32::from(u8::from(color)), f32::from(u8::from(clouds)))
     }
+
+    /// `name`'s cloud deck at `now_s`, coordinate time, asking for whichever keyframes it lacks.
+    /// `None` until a keyframe it needs has landed, and for a body without clouds.
+    pub fn weather(
+        &mut self,
+        name: &str,
+        now_s: f64,
+        radius_m: f64,
+        bakes: &mut Bakes,
+    ) -> Option<Weather> {
+        let body = self.by_body.get_mut(name)?;
+        let deck = body.deck.as_mut()?;
+        let pair = blend(now_s);
+        let k = pair[0].0;
+        // The two being blended, and the next, baked while they are drawn.
+        for j in k..k + 3 {
+            let slot = slot_of(j);
+            if deck.holds[slot] != Some(j) {
+                deck.holds[slot] = Some(j);
+                bakes.request(
+                    deck.graph.clone(),
+                    keyframe_seed(deck.seed, j),
+                    WEATHER,
+                    body.images.weather[slot].clone(),
+                );
+            }
+        }
+        let mut weights = [0.0; 3];
+        let mut drift = [0.0; 3];
+        for (j, weight) in pair {
+            let slot = slot_of(j);
+            if bakes.settled(&body.images.weather[slot]) {
+                weights[slot] = weight as f32;
+            }
+            // Zero when drawn alone, so no keyframe shears past a period's worth.
+            drift[slot] = (EASTERLIES_M_S * (now_s - j as f64 * CLOUD_PERIOD_S) / radius_m) as f32;
+        }
+        // A keyframe that has not landed leaves the other drawn alone, at full contrast.
+        let norm = weights.iter().map(|w| w * w).sum::<f32>().sqrt();
+        if norm == 0.0 {
+            return None;
+        }
+        let [a, b, c] = weights.map(|w| w / norm);
+        Some(Weather {
+            weights: Vec4::new(a, b, c, WEATHER_MEAN),
+            drift: Vec3::from_array(drift).extend(0.0),
+        })
+    }
+}
+
+/// The keyframes drawn at `now_s`, weighted so the squares sum to one: plain weights lose a third
+/// of the contrast half-way.
+fn blend(now_s: f64) -> [(i64, f64); 2] {
+    let at = now_s / CLOUD_PERIOD_S;
+    let k = at.floor();
+    let angle = (at - k) * FRAC_PI_2;
+    let k = k as i64;
+    [(k, angle.cos()), (k + 1, angle.sin())]
+}
+
+fn slot_of(keyframe: i64) -> usize {
+    keyframe.rem_euclid(3) as usize
+}
+
+fn keyframe_seed(seed: u32, keyframe: i64) -> u32 {
+    seed ^ ((keyframe as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) as u32
 }
 
 /// Stable per body and independent of everything else, so a world looks the same every time it
@@ -217,9 +333,9 @@ fn route(
             continue;
         };
         let seed = seed_of(name);
+        let graph = |path: &str| assets.load(format!("textures/{path}"));
         let mut bake = |path: &str, target, image: &Handle<Image>| {
-            let graph = assets.load(format!("textures/{path}"));
-            bakes.request(graph, seed, target, image.clone());
+            bakes.request(graph(path), seed, target, image.clone());
         };
         let pattern = Target::new(Shape::Cube(FACE));
         let color = Target::new(Shape::Cube(COLOR_FACE)).color();
@@ -228,7 +344,12 @@ fn route(
             Ground::Color(path) => bake(path, color, &body.images.color),
         }
         if let Some(path) = look.clouds {
-            bake(path, color, &body.images.clouds);
+            bake(path, CLIMATE, &body.images.climate);
+            body.deck = Some(Deck {
+                graph: graph(path),
+                seed,
+                holds: [None; 3],
+            });
         }
         body.drawn = Some((matches!(look.ground, Ground::Color(_)), look.clouds.is_some()));
     }
@@ -324,11 +445,128 @@ mod tests {
                 .bake_scalar_cube(&g, g.output.color.unwrap(), 8, ScalarFormat::R8Unorm, &eval)
                 .unwrap_or_else(|e| panic!("{path}: {e}"));
         }
-        for path in manifest.bodies.values().chain(manifest.clouds.values()) {
+        for path in manifest.bodies.values() {
             baker
                 .bake_color_cube(&graph(path), 8, &eval)
                 .unwrap_or_else(|e| panic!("{path}: {e}"));
         }
+        for path in manifest.clouds.values() {
+            let g = graph(path);
+            for name in [WEATHER.layer, CLIMATE.layer].map(Option::unwrap) {
+                let layer = g.layers.iter().find(|l| l.name == name).unwrap().id;
+                baker
+                    .bake_scalar_cube(&g, layer, 8, ScalarFormat::R8Unorm, &eval)
+                    .unwrap_or_else(|e| panic!("{path}, {name}: {e}"));
+            }
+        }
+    }
+
+    /// body_surface.wgsl's `deck`, from the drive to linear gray and cover.
+    fn shader_deck(drive: f32) -> (f32, f32) {
+        const DENSITY_FROM: f32 = 0.58;
+        const DENSITY_TO: f32 = 0.8;
+        const CLOUD_KNEE: f32 = 0.4;
+        const CLOUD_ALPHA: [f32; 3] = [0.0, 0.45, 0.92];
+        const CLOUD_L: [f32; 3] = [0.92, 0.91, 0.94];
+        let density = ((drive - DENSITY_FROM) / (DENSITY_TO - DENSITY_FROM)).clamp(0.0, 1.0);
+        let (i, t) = if density < CLOUD_KNEE {
+            (0, density / CLOUD_KNEE)
+        } else {
+            (1, (density - CLOUD_KNEE) / (1.0 - CLOUD_KNEE))
+        };
+        let lerp = |v: [f32; 3]| v[i] + (v[i + 1] - v[i]) * t;
+        (lerp(CLOUD_L).powi(3), lerp(CLOUD_ALPHA))
+    }
+
+    /// Weather plus climate is the graph's drive, and the shader's cover and color are the
+    /// graph's, so an edit to the graph the shader would not follow fails here.
+    #[test]
+    fn the_shaders_deck_is_the_graphs_deck() {
+        let manifest = manifest();
+        let path = manifest.clouds.get("Earth").expect("Earth has clouds");
+        let g = graph(path);
+        let clouds = g.output.color.unwrap();
+        let mut covered = 0;
+        for seed in [1, 0xdead_beef] {
+            let ctx = EvalCtx {
+                seed,
+                ..EvalCtx::default()
+            };
+            let layer = |name, s| {
+                let id = g.layers.iter().find(|l| l.name == name).unwrap().id;
+                eval::evaluate(&g, id, s, &ctx).l
+            };
+            for s in points() {
+                let weather = layer(WEATHER.layer.unwrap(), s);
+                let drive = weather + layer(CLIMATE.layer.unwrap(), s);
+                assert!((drive - layer("drive", s)).abs() < 1e-5, "drive at {s:?}");
+                let (gray, cover) = shader_deck(drive);
+                let want = eval::evaluate(&g, clouds, s, &ctx);
+                assert!(
+                    (cover - want.alpha).abs() < 2e-3,
+                    "cover at {s:?}: {cover} against {}",
+                    want.alpha
+                );
+                assert!((gray - want.l.powi(3)).abs() < 2e-3, "gray at {s:?}");
+                covered += usize::from(cover > 0.1);
+            }
+        }
+        assert!(
+            covered > 20,
+            "the points hardly reached the clouds: {covered}"
+        );
+    }
+
+    /// A byte clips at one, and the blend is about [`WEATHER_MEAN`].
+    #[test]
+    fn the_weather_has_the_mean_and_range_the_blend_assumes() {
+        let g = graph(manifest().clouds.get("Earth").unwrap());
+        let id = g
+            .layers
+            .iter()
+            .find(|l| Some(l.name.as_str()) == WEATHER.layer)
+            .unwrap()
+            .id;
+        for keyframe in [0, 1, 2, -7] {
+            let ctx = EvalCtx {
+                seed: keyframe_seed(seed_of("Earth"), keyframe),
+                ..EvalCtx::default()
+            };
+            let n = 32;
+            let values: Vec<f32> = (0..6)
+                .flat_map(|face| (0..n * n).map(move |k| (face, k)))
+                .map(|(face, k)| {
+                    let (u, v) = ((k % n) as f32 + 0.5, (k / n) as f32 + 0.5);
+                    eval::evaluate(&g, id, cube_sample(face, u / n as f32, v / n as f32), &ctx).l
+                })
+                .collect();
+            let mean = values.iter().sum::<f32>() / values.len() as f32;
+            let max = values.iter().copied().fold(0.0, f32::max);
+            assert!(
+                (mean - WEATHER_MEAN).abs() < 0.015,
+                "keyframe {keyframe}: mean {mean}"
+            );
+            assert!(max < 0.98, "keyframe {keyframe}: reaches {max}");
+        }
+    }
+
+    /// No jump at a keyframe, and no loss of contrast between them.
+    #[test]
+    fn the_blend_is_continuous_and_keeps_its_contrast() {
+        for k in [-3i64, 0, 1, 4000] {
+            let at = k as f64 * CLOUD_PERIOD_S;
+            let before = blend(at - 1e-3);
+            let after = blend(at);
+            assert_eq!(after, [(k, 1.0), (k + 1, 0.0)]);
+            assert_eq!(before[1].0, k);
+            assert!((before[1].1 - 1.0).abs() < 1e-6 && before[0].1.abs() < 1e-6);
+            for f in [0.1, 0.5, 0.9] {
+                let [(_, a), (_, b)] = blend(at + f * CLOUD_PERIOD_S);
+                assert!((a * a + b * b - 1.0).abs() < 1e-12);
+            }
+        }
+        assert_ne!(keyframe_seed(7, 0), keyframe_seed(7, 1));
+        assert_eq!([0, 1, 2, -1, -3].map(slot_of), [0, 1, 2, 2, 0]);
     }
 
     /// The banded graphs are body_surface.wgsl's bands as they stood, exactly: the same sum of
@@ -409,3 +647,4 @@ mod tests {
         assert_eq!(manifest.look_for("Mercury", Surface::Rock), None);
     }
 }
+

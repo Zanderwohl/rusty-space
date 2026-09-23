@@ -507,12 +507,23 @@ expressed as graphs, and a test holds each to the formula the shader used to eva
 the noise underneath them is new. `src/surfaces.rs` is the routing; `src/procedural.rs` the bake.
 
 **A body can have a world of its own.** One named under `[bodies]` takes that graph in color, and
-its color replaces the class's pattern and palette; one named under `[clouds]` has a second
-graph's color drawn over the surface with its alpha as the cover. Both bake into six 1024² sRGB
-faces. The graphs under `textures/worlds/` are types of planet — an earthlike, a marslike and an
-earthlike cloud deck — rather than maps, and the bundled system's Earth and Mars wear them until
-something generates surfaces of its own. The clouds are painted on the surface, not a shell above
-it, and turn with it.
+its color replaces the class's pattern and palette, baked into six 1024² sRGB faces. One named
+under `[clouds]` has a cloud deck drawn over the surface. The graphs under `textures/worlds/` are
+types of planet — an earthlike, a marslike and an earthlike cloud deck — rather than maps, and the
+bundled system's Earth and Mars wear them until something generates surfaces of its own. The
+clouds are painted on the surface, not a shell above it, and turn with it.
+
+**A cloud deck evolves.** Its graph is not baked in color. Its weather, the `zonal` layer, is
+baked again every two game days with a new seed, one byte a texel into one of three 1024² slots;
+its belts, the `drive term 1` layer, are baked once. The shader blends two neighboring keyframes
+with weights `cos θ` and `sin θ` about the weather's mean — plain weights would lose a third of
+the contrast half-way — and only then takes the cover, so clouds grow, part and merge rather
+than cross-dissolving. Each keyframe is carried on a wind whose angular rate is `-cos 3φ` in
+latitude: easterlies at the equator, westerlies at mid-latitudes. Its drift is zero when it is
+drawn alone, so the shear never exceeds a period's worth. Keyframes come from coordinate time,
+so every client draws the same weather. The shader holds the graph's density ramp and cloud
+palette as constants, and `surfaces.rs`'s tests hold those to the graph's own output: an edit to
+that end of the graph fails there rather than silently not showing.
 
 Any graph here is sampled on the sphere, so it may use only what means the same thing there:
 Color, Noise, Coordinate, Mix, MinMax and Wave; a Map, whose palette texture-graph bakes on a
