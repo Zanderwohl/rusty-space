@@ -177,6 +177,20 @@ the state every test runs in.
 
 ---
 
+## Shipping the icons
+
+The favicons are `web/icons/`: each SVG original and an `.ico` built from it, all published to
+`icons/` on the CDN. The site uses the blue one; `/play`, once the game is launching, the green.
+
+```bash
+tools/build-icons.sh      # after editing an SVG; needs Google Chrome, commits nothing
+tools/publish-icons.sh    # skips anything already on the CDN
+```
+
+The CDN serves `immutable`, so a changed icon needs a new file name and the site pointed at it.
+
+---
+
 ## Shipping the site
 
 Content and code roll back together, because both are baked into the image.

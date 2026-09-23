@@ -2,90 +2,96 @@ use maud::{Markup, html};
 
 use super::{Head, shell};
 
-const DESCRIPTION: &str = "A real-time strategy sandbox across a volume of real stars, where \
-                           information propagates at the speed of light and never faster.";
+const DESCRIPTION: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do \
+                           eiusmod tempor incididunt ut labore et dolore magna aliqua.";
 
 pub async fn page() -> Markup {
     shell(
-        Head::new("Information travels at c", DESCRIPTION),
+        Head::site(DESCRIPTION),
         html! {
             section class="stack" {
                 h1 { "Everything you know is out of date." }
                 p class="lede" {
-                    "Lightcone Frontier is a real-time strategy sandbox set across a volume of real stars. "
-                    "You control one ship. It mines, refines, builds, and launches further ships — "
-                    "and every action it takes is an event with a place and a time, which nobody "
-                    "else learns about until its light reaches them."
+                    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor. "
+                    "Ut enim ad minim veniam. Quis nostrud exercitation ullamco laboris nisi ut aliquip, "
+                    "ex ea commodo consequat — duis aute irure dolor in reprehenderit in voluptate "
+                    "velit esse cillum dolore eu fugiat nulla pariatur."
                 }
                 p {
-                    "What you see of a distant star is what it emitted years ago. What a rival "
-                    "sees of your fleet is where it was, not where it is. There is no scanner "
-                    "that fixes this, because the limit is not a game mechanic. It is the speed "
-                    "of light, and it is the game."
+                    "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia "
+                    "deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste "
+                    "natus error sit voluptatem accusantium doloremque laudantium. Totam rem "
+                    "aperiam, eaque ipsa quae ab illo."
                 }
             }
 
             section class="stack" {
                 h2 { "One in-game year per real hour" }
                 p {
-                    "The server runs at 8766×. That single number decides the genre, because it "
-                    "sets what a light-year costs you in wall-clock time."
+                    "Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, "
+                    "sed quia consequuntur magni dolores eos qui ratione voluptatem."
                 }
                 table {
                     caption { "Travel and signal times at the default rate" }
-                    thead { tr { th scope="col" { "In-game" } th scope="col" { "Real time" } } }
+                    thead {
+                        tr {
+                            td {}
+                            th scope="col" { "Game Time" }
+                            th scope="col" { "Real-Life Time" }
+                        }
+                    }
                     tbody {
-                        tr { td { "Sun to Earth (499 s)" } td { "57 ms" } }
-                        tr { td { "Sun to Neptune (4.2 h)" } td { "1.7 s" } }
-                        tr { td { "Sun to 1000 AU" } td { "5.7 min" } }
-                        tr { td { "Proxima Centauri, one way" } td { "4.25 h" } }
-                        tr { td { "Proxima Centauri, round trip" } td { "8.5 h" } }
+                        tr { th scope="row" { "Moon to Earth transmission" } td { "1.3 s" } td { "0.15 ms" } }
+                        tr { th scope="row" { "Sun to Earth at C" } td { "8 min 19 s" } td { "57 ms" } }
+                        tr { th scope="row" { "Earth to Voyager 1 transmission" } td { "23 h 51 min" } td { "9.8 s" } }
+                        tr { th scope="row" { "Sun to Proxima Centauri at C" } td { "4.25 years" } td { "4.25 h" } }
+                        tr { th scope="row" { "Across the game galaxy at C" } td { "36,000 years" } td { "4.1 years" } }
                     }
                 }
                 p {
-                    "So in-system play is immediate and interstellar play is asynchronous, "
-                    "measured in hours. An order sent to a probe at Proxima is confirmed "
-                    "tomorrow. That is not a limitation being engineered around."
+                    "Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, "
+                    "consectetur, adipisci velit. Sed quia non numquam eius modi tempora "
+                    "incidunt. Ut labore et dolore magnam aliquam quaerat voluptatem."
                 }
             }
 
             section class="stack" {
-                h2 { "What that costs, and what it buys" }
+                h2 { "Lorem ipsum dolor sit amet" }
                 div class="columns" {
                     div class="stack" {
-                        h3 { "In" }
+                        h3 { "Lorem" }
                         ul {
-                            li { "Special relativity: light delay, Doppler, aberration, proper time." }
-                            li { "Real Keplerian orbits, on real catalogue stars." }
-                            li { "Passive observation — photometry, transits, spectroscopy." }
-                            li { "Radio and tight-beam, and the difference in who hears you." }
-                            li { "Extraction, construction, self-replicating probes." }
+                            li { "Ut enim ad minima veniam, quis nostrum exercitationem ullam." }
+                            li { "Corporis suscipit laboriosam, nisi ut aliquid." }
+                            li { "Quis autem vel eum iure — reprehenderit, qui in ea." }
+                            li { "Voluptate velit esse quam nihil molestiae consequatur." }
+                            li { "Vel illum qui dolorem eum fugiat, quo voluptas nulla." }
                         }
                     }
                     div class="stack" {
-                        h3 { "Out" }
+                        h3 { "Ipsum" }
                         ul {
-                            li { "FTL of any kind, including sensors." }
-                            li { "General relativity. No lensing, no curvature." }
-                            li { "Avatar-scale play. The smallest unit is a ship." }
-                            li { "Combat as the primary loop." }
+                            li { "At vero eos et accusamus et iusto odio." }
+                            li { "Dignissimos ducimus qui blanditiis. Praesentium voluptatum." }
+                            li { "Deleniti atque corrupti. Quos dolores et quas." }
+                            li { "Molestias excepturi sint occaecati." }
                         }
                     }
                 }
             }
 
             section class="stack" {
-                h2 { "What there is so far" }
+                h2 { "Lorem ipsum dolor" }
                 p {
-                    "The physics, the photometry and the client run in a browser today: a sky "
-                    "of real stars, a telescope, and a ship whose clock disagrees with yours. "
-                    "What does not exist yet is the server, and so the other players — for now "
-                    "the universe is yours alone and nobody is coming."
+                    "Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit "
+                    "quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda "
+                    "est. Omnis dolor repellendus — temporibus autem quibusdam et aut officiis "
+                    "debitis aut rerum necessitatibus."
                 }
                 p {
-                    "The "
-                    a href=(super::REPO) { "design documents" }
-                    " are public, and they are ahead of the code."
+                    "Itaque earum "
+                    a href=(super::REPO) { "rerum hic tenetur" }
+                    " a sapiente delectus, ut aut reiciendis."
                 }
                 p {
                     a class="cta" href="/play" { "Play in your browser" }
