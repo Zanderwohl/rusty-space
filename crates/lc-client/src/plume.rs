@@ -145,17 +145,14 @@ pub const TRAVERSES_AT_REAL_TIME: f64 = 0.12;
 /// stopped clock is a still plume, which is what every `--rate 0` photograph depends on.
 pub const CHURN_EXPONENT: f64 = 0.125;
 
-/// One craft's exhaust, by its place in this frame's lit set — matching [`crate::hull::Hull`],
-/// and stable for the same reason: the set is compared against [`Plumes::drawn`] every frame
-/// and respawned whenever it differs.
+/// Which craft's exhaust this is, as [`crate::hull::Hull`] keys a hull.
 #[derive(Component)]
-pub struct Plume(pub usize);
+pub struct Plume(pub Option<ShipId>);
 
-/// The shared proxy, which craft currently have a plume, and where the churn has got to.
+/// The shared proxy, and where the churn has got to.
 #[derive(Resource, Default)]
 pub struct Plumes {
     proxy: Option<Handle<Mesh>>,
-    drawn: Vec<Option<ShipId>>,
     /// How far aft the streaks have traveled, in lattice cells, wrapped at [`CHURN_PERIOD`].
     phase: f64,
     /// The coordinate clock last frame. `None` until the first, which therefore advances by
@@ -357,73 +354,75 @@ pub fn update_plumes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PlumeMaterial>>,
     churn: Res<crate::procedural::PlumeChurn>,
-    existing: Query<(Entity, &Plume)>,
-    mut placed: Query<(&mut Transform, &MeshMaterial3d<PlumeMaterial>, &Plume)>,
+    mut placed: Query<(Entity, &mut Transform, &MeshMaterial3d<PlumeMaterial>, &Plume)>,
 ) {
     let look = ui.look.forward();
     let want = burning(&game.0, &uplink, &eye, look);
 
     // Taken from the clock itself rather than from the rate knob, so a correction from the
     // server moves the churn with everything else and the churn does not need to know who owns
-    // the rate. Ahead of the early return below: a frame that respawns is still a frame.
+    // the rate.
     let now = game.0.coordinate_time_s();
     let simulated = plumes.clock_s.map_or(0.0, |was| now - was);
     plumes.clock_s = Some(now);
     let traveled = churn_step(time.delta_secs_f64(), simulated) * CHURN_ALONG as f64;
     plumes.phase = (plumes.phase + traveled).rem_euclid(CHURN_PERIOD as f64);
 
-    // Compared against the drawn set without building it: this runs every frame, and the keys
-    // are only wanted on the frame that respawns.
-    if !want.iter().map(|(id, _)| id).eq(plumes.drawn.iter()) {
-        for (entity, _) in &existing {
-            commands.entity(entity).despawn();
-        }
-        let proxy = plumes.proxy.get_or_insert_with(|| meshes.add(proxy())).clone();
-        for index in 0..want.len() {
-            commands.spawn((
-                Mesh3d(proxy.clone()),
-                MeshMaterial3d(materials.add(PlumeMaterial {
-                    uniforms: PlumeUniform::default(),
-                    churn: churn.image.clone(),
-                })),
-                Transform::default(),
-                // Placed by hand at a scale where the mesh's own bounds say nothing about
-                // where it lands, exactly as a hull is.
-                bevy::camera::visibility::NoFrustumCulling,
-                Plume(index),
-            ));
-        }
-        plumes.drawn = want.iter().map(|(id, _)| *id).collect();
-        // Placed next frame, when the spawns exist. One frame at the origin is one frame with
-        // a plume inside the camera.
-        return;
-    }
-
-    for (mut transform, material, marker) in placed.iter_mut() {
-        let Some((id, lit)) = want.get(marker.0) else { continue };
+    let place = |lit: &Burning| {
         let wall = lit.mouth_m * MARGIN;
         // The nozzle is at the hull's tail — half a hull aft of its center — and the proxy's
         // own center is half a plume further aft again. Measuring from the hull's center put
         // the gas half inside the ship.
-        let tail = lit.offset_m
-            - lit.facing * (lit.hull_m * 0.5 + lit.long_m * 0.5);
-        transform.translation = sim_to_render(tail / UNIT_M).as_vec3();
-        transform.rotation = along_exhaust(lit.facing);
-        transform.scale = Vec3::new(
-            (wall / UNIT_M) as f32,
-            (lit.long_m / UNIT_M) as f32,
-            (wall / UNIT_M) as f32,
-        );
-
-        let Some(mut asset) = materials.get_mut(&material.0) else { continue };
+        let tail = lit.offset_m - lit.facing * (lit.hull_m * 0.5 + lit.long_m * 0.5);
+        Transform {
+            translation: sim_to_render(tail / UNIT_M).as_vec3(),
+            rotation: along_exhaust(lit.facing),
+            scale: Vec3::new(
+                (wall / UNIT_M) as f32,
+                (lit.long_m / UNIT_M) as f32,
+                (wall / UNIT_M) as f32,
+            ),
+        }
+    };
+    let churned = plumes.phase;
+    let shade = |id: Option<ShipId>, lit: &Burning, transform: &Transform| {
         // The eye is at the render origin, so where it sits in the proxy's own space is the
         // transform undone. The march needs it there and nowhere else.
         let eye_local = transform.to_matrix().inverse().transform_point3(Vec3::ZERO);
-        let phase = (plumes.phase + seed(*id)).rem_euclid(CHURN_PERIOD as f64);
-        let next = uniforms(lit, &game.0, eye_local, phase);
+        let phase = (churned + seed(id)).rem_euclid(CHURN_PERIOD as f64);
+        uniforms(lit, &game.0, eye_local, phase)
+    };
+
+    let mut kept = Vec::with_capacity(want.len());
+    for (entity, mut transform, material, marker) in placed.iter_mut() {
+        let Some((id, lit)) = want.iter().find(|(id, _)| *id == marker.0) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        kept.push(*id);
+        *transform = place(lit);
+        let Some(mut asset) = materials.get_mut(&material.0) else { continue };
+        let next = shade(*id, lit, &transform);
         if asset.uniforms != next {
             asset.uniforms = next;
         }
+    }
+
+    for (id, lit) in want.iter().filter(|(id, _)| !kept.contains(id)) {
+        let proxy = plumes.proxy.get_or_insert_with(|| meshes.add(proxy())).clone();
+        let transform = place(lit);
+        commands.spawn((
+            Mesh3d(proxy),
+            MeshMaterial3d(materials.add(PlumeMaterial {
+                uniforms: shade(*id, lit, &transform),
+                churn: churn.image.clone(),
+            })),
+            transform,
+            // Placed by hand at a scale where the mesh's own bounds say nothing about
+            // where it lands, exactly as a hull is.
+            bevy::camera::visibility::NoFrustumCulling,
+            Plume(*id),
+        ));
     }
 }
 
