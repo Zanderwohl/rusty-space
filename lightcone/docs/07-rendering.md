@@ -508,10 +508,49 @@ the noise underneath them is new. `src/surfaces.rs` is the routing; `src/procedu
 
 **A body can have a world of its own.** One named under `[bodies]` takes that graph in color, and
 its color replaces the class's pattern and palette, baked into six 1024² sRGB faces. One named
-under `[clouds]` has a cloud deck drawn over the surface. The graphs under `textures/worlds/` are
-types of planet — an earthlike, a marslike and an earthlike cloud deck — rather than maps, and the
-bundled system's Earth and Mars wear them until something generates surfaces of its own. The
-clouds are painted on the surface, not a shell above it, and turn with it.
+under `[clouds]` has a cloud deck drawn over the surface. The clouds are painted on the surface,
+not a shell above it, and turn with it.
+
+**Every rocky world with air is one graph.** Earth and Mars used to be two graphs, an earthlike
+and a marslike, and they are really two points on one spectrum. `worlds/rocky.tgraph` is that
+spectrum: its parameters are sea level, ice, life, rust, sand, aridity and dark provinces, and
+the client binds them per body before the bake. What they are bound *to* is
+`lc_world::climate`, which derives them from what the world is — the sea's share of the surface
+from the water's share of the mass (logistic in its logarithm, through Earth's 71 per cent at
+Earth's 2.3e-4), the ice from the surface temperature capped by how much water there is to
+freeze, the green from a temperate sea, the rust from dry ground under air. The generator states
+a planet's water and its life as `em-sim` tags beside its air and top, so a generated world
+arrives with all of it; a body whose life nobody stated is taken to be alive where its sea is
+temperate.
+
+**Growth is the color its star leaves.** A pigment is worth making where the photons are, so
+what a plant reflects is what its star sends least usefully — the argument of Kiang et al.
+(2007), taken for its ordering rather than its spectra. `climate::foliage` puts gold under a hot
+white star, green under the Sun, crimson under a cool orange one and near-black under a red
+dwarf, which gives little of anything, so a dimmer star makes darker growth. The anchors lerp in
+Oklab rather than round the hue circle, which would put a blue forest between green and red, and
+both ends are kept off rust's hue, or growth reads as bare red ground. It reaches the graph as two
+color parameters, `foliage` and `foliage high`.
+
+![Growth under stars from 3600 K to 9200 K](../images/foliage.png) Earth, Mars, Venus and Titan are measured instead, for the reason `worlds` measures them.
+
+A parameter is not a share, so the client carries two measured tables — `SEA_LEVELS` and
+`ICE_LEVELS` in `surfaces.rs` — from each parameter to the share of the sphere it covers, and a
+test evaluates the graph over the sphere and several seeds and holds the tables to it. An edit
+to the graph that moves the coastline fails there. The ice's edge is at `|sin latitude| = 1 -
+ice` only on average; a coarse and a fine noise rag it, and high ground holds it further out.
+
+Every world with air wears the same cloud deck, `worlds/earthlike-clouds.tgraph`, and its climate
+says how much of it: a `cover` added to the deck's drive (zero is Earth, a fifth below is the
+scattered wisps of a dry world, one is a deck with no break in it), an `opacity`, and a tint. Mars
+is at `-0.17` and half opacity, which is more than Mars really has; exaggerated a little so the
+wisps show. Venus and Titan are the unbroken decks, pale yellow and orange.
+
+`--wear "<generated planet>"` dresses the body `--at` names in a generated planet's climate, so
+the generator's worlds can be photographed without flying to them; `--standoff <radii>` brings
+the camera in.
+
+![A smattering of generated worlds](../images/rocky-worlds.png)
 
 **A cloud deck evolves.** Its graph is not baked in color. Its weather, the `zonal` layer, is
 baked again every two game days with a new seed, one byte a texel into one of three 1024² slots;
@@ -524,6 +563,82 @@ drawn alone, so the shear never exceeds a period's worth. Keyframes come from co
 so every client draws the same weather. The shader holds the graph's density ramp and cloud
 palette as constants, and `surfaces.rs`'s tests hold those to the graph's own output: an edit to
 that end of the graph fails there rather than silently not showing.
+
+**Every band sees its own ground.** The color cubemap says what a world looks like to an eye and
+nothing about the bands past it: that a forest is the brightest ground there is in I (the red
+edge), that the sea is black past the visible, that snow goes dark in K. So beside the color the
+client bakes four of rocky.tgraph's own layers as masks — `land`, `ice`, `green` and `sand
+amount` — and the shader mixes six kinds of ground by them, in the graph's own order: ice over
+everything, land over water, growth over dry ground, sand over rock. Each ground's reflectance
+per band is `lc_world::ground`, shaped after laboratory spectra, and rock runs from basalt to
+Mars's dust by the world's `rust`. The host puts each through the current band mapping and
+through the natural one, and the shader scales the color by the ratio of the two mixes: the
+color keeps its detail, is exactly itself in the natural mapping, and a channel carrying I
+rather than R takes the forest's red edge instead of its red. The cloud deck takes the same ratio
+for water cloud, which is why clouds go cyan with K on the red channel.
+
+![Earth, a gold-forested world and Mars through four band mappings](../images/bands.png)
+
+**Every fragment has its own temperature.** A world with a climate no longer glows as one
+blackbody. Each ground has an emissivity per band — Kirchhoff's `1 - reflectance` where it
+reflects, measured values at ten microns and 21 cm — and a thermal inertia, the share of a day's
+swing it damps: the sea almost all of it, dry sand almost none. The air evens things further by
+the climate's `evens`, all the way for Venus and hardly at all for Mars. The shader works out the
+ground's temperature from the sun over it, blending the instantaneous balance toward its
+latitude's daily mean by that damping. The hottest hour lands after noon, east of the point
+under the star, by as much as the ground is damped, and the day's heat drains away after sunset
+over a width that grows with it. Cloud tops are cold, and a cloud's emissivity is its opacity,
+so it hides the ground at ten microns and not at 21 cm.
+
+Each band then radiates its Planck ratio against the body's mean temperature, weighted by the
+host's table of what that band alone adds to each display channel: at the mean temperature with
+unit emissivity the table sums to exactly the blackbody the host used to send, under every
+mapping, and a test holds it there. The ratio is written so neither exponent overflows, because
+the blue end at a hundred kelvin is `exp(300)`, and so radio's tiny exponent does not round away.
+A world with its own temperatures is metered on its day side: metered at its mean, the day side
+sat three stops over and the disc was one clipped circle.
+
+So the sea and its air keep a world glowing through the night, and a desert goes dark at dusk.
+`--phase <deg>` stands `--at` at that angle between the star and the camera, so the night side
+can be photographed.
+
+![Day and night at ten microns](../images/thermal.png)
+
+**The air is per band too.** A climate states its gas and haze in V, and `Air::in_band` carries
+them to every band: gas as Rayleigh's inverse fourth power, haze nearly gray, and neither
+scattering at ten microns or 21 cm. The host averages each band's depths onto the display
+channels by the starlight the current mapping puts on each from it, so the shader's march is
+unchanged and still three channels wide — but a channel carrying K sees through the sky, and the
+blue limb is blue only where blue is. What the air does at ten microns is absorb: its `infrared`
+depth takes the ground's heat along the ray and gives out its own, at 0.85 of the body's mean
+temperature, in its place. Earth's is small, because ten microns is the window its water and
+carbon dioxide leave open; Venus's is opaque, so its disc is its air's. The shell draws the same
+glow along the limb, where the column is sixteen times deeper, so the limb glows at ten microns
+as it scatters in the visible.
+
+![The air through four band mappings](../images/air.png)
+
+**Air.** A world with a climate has air, drawn as single scattering in two parts: gas, blue as the
+inverse fourth power of the wavelength, and a haze that scatters forward in its own color —
+Mars's dust, which eats blue, Titan's tholins, and thin water haze everywhere else. Both are
+exponential in height, with a scale height exaggerated about twentyfold, so a limb shows at the
+distances a ship sees planets from. `scatter.wgsl` is the integral, shared by two draws:
+
+- the surface, which scatters it over the disc — dimming what leaves the ground, reddening the
+  beam that reaches it, and adding what the air sends the eye — before its own tone map, so the
+  terminator and the limb are one curve;
+- a shell six scale heights up, drawn additively on back faces with no depth write, for the limb
+  against space. Over the disc its back faces are behind the body, which writes depth, so it
+  draws only the limb and needs no test of its own.
+
+Three things here were found by looking. The planet's shadow has to be soft: a hard test lights
+each of a march's samples wholly or not at all, and the terminator came out in bands, one a
+sample. A ray through the body now just keeps descending into air the exponential makes as dense
+as it likes. Air scattered from white starlight was three times too bright against a ground whose
+albedo is its cubemap times its class's, so the air takes the ground's own scale. And single
+scattering loses what the beam gives the sky, so clouds seen through air came out the color of a
+sunset: most of what the air takes from the beam is handed back to the ground, and a share of
+haze's phase is isotropic for the same reason, or a dusty limb reads darker than the ground under it.
 
 Any graph here is sampled on the sphere, so it may use only what means the same thing there:
 Color, Noise, Coordinate, Mix, MinMax and Wave; a Map, whose palette texture-graph bakes on a

@@ -280,6 +280,8 @@ fn stated(id: &str, mass: f64, major: bool, tags: &[&str], planet: &Planet) -> B
         planet.top,
         planet.class == Class::GasGiant,
     ));
+    info.tags.push(crate::climate::water_tag(planet.water_fraction));
+    info.tags.push(crate::climate::life_tag(planet.life));
     info
 }
 

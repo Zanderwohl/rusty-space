@@ -10,6 +10,7 @@
 
 pub mod attitude;
 pub mod boost;
+pub mod climate;
 pub mod coast;
 pub mod consort;
 pub mod cost;
@@ -21,6 +22,7 @@ pub mod escort;
 pub mod fitting;
 pub mod flicker;
 pub mod flight;
+pub mod ground;
 pub mod ignition;
 pub mod injection;
 pub mod instrument;

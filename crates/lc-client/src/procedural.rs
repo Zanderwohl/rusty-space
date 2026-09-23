@@ -29,7 +29,7 @@ use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::plume_material::PlumeMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
-use texture_graph_core::{CUBE_FACES, EvalCtx, Graph, LoadError, load_from_str};
+use texture_graph_core::{CUBE_FACES, EvalCtx, Graph, LoadError, ParamValue, load_from_str};
 use texture_graph_gpu::{
     Baker, DeviceCtx, ScalarFormat, read_rgba8_layers_async, read_scalar_volume_async,
 };
@@ -242,12 +242,16 @@ fn image_of(target: Target, bytes: Vec<u8>) -> Image {
     image
 }
 
+/// Bindings for a graph's parameters. One left out takes its declared default.
+pub type Params = Vec<(&'static str, ParamValue)>;
+
 /// The texels, in the target's format.
 type Readback = Pin<Box<dyn Future<Output = Vec<u8>> + Send>>;
 
 struct Request {
     graph: Handle<TextureGraph>,
     seed: u32,
+    params: Params,
     target: Target,
     image: Handle<Image>,
 }
@@ -279,10 +283,23 @@ impl Bakes {
         target: Target,
         image: Handle<Image>,
     ) {
+        self.request_with(graph, seed, Params::new(), target, image);
+    }
+
+    /// The same, with the graph's parameters bound.
+    pub fn request_with(
+        &mut self,
+        graph: Handle<TextureGraph>,
+        seed: u32,
+        params: Params,
+        target: Target,
+        image: Handle<Image>,
+    ) {
         *self.unsettled.entry(image.id()).or_default() += 1;
         self.waiting.push(Request {
             graph,
             seed,
+            params,
             target,
             image,
         });
@@ -347,7 +364,7 @@ fn run_bakes(
             bakes.waiting.push(request);
             continue;
         };
-        match start(baker, graph, request.seed, request.target) {
+        match start(baker, graph, request.seed, &request.params, request.target) {
             Ok(readback) => bakes.reading.push(Reading {
                 readback: Mutex::new(readback),
                 target: request.target,
@@ -395,9 +412,19 @@ fn run_bakes(
     }
 }
 
-fn start(baker: &mut Baker, graph: &Graph, seed: u32, target: Target) -> Result<Readback, String> {
+fn start(
+    baker: &mut Baker,
+    graph: &Graph,
+    seed: u32,
+    params: &Params,
+    target: Target,
+) -> Result<Readback, String> {
     let eval = EvalCtx {
         seed,
+        params: params
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), *value))
+            .collect(),
         ..EvalCtx::default()
     };
     let format = match target.format {

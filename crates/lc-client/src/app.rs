@@ -113,6 +113,7 @@ impl Plugin for ClientPlugin {
             PopulationMaterialPlugin,
             em_render::plume_material::PlumeMaterialPlugin,
             BodySurfaceMaterialPlugin,
+            em_render::atmosphere_material::AtmosphereMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
             crate::procedural::ProceduralTexturesPlugin,
             crate::library::LibraryPlugin,
@@ -211,6 +212,7 @@ impl Plugin for ClientPlugin {
                     aim_camera,
                     update_sky,
                     update_bodies,
+                    crate::dev::dress_worn,
                     // After the bodies, because it meters them; before the surfaces, because
                     // they are shaded against what it places.
                     crate::resolved::sample_scene,
