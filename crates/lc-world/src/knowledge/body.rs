@@ -218,20 +218,42 @@ impl Knowledge {
     /// Any epoch's list answers the same, because only an orbit's orientation is read and that
     /// does not move with time.
     pub fn plane_of(beliefs: &[BodyBelief]) -> SystemPlane {
+        let voting: Vec<&BodyBelief> = beliefs.iter().filter(|b| in_the_system_plane(b)).collect();
+        // One pole that disagrees with every other is a body fitted to the wrong primary, not
+        // evidence that the system has no plane. A moon whose primary has not been worked out
+        // yet still reads as orbiting the star, and folding it in took a solved plane to
+        // nothing at all: four bodies agreeing to two degrees plus one thirty degrees off
+        // reported no plane, and the player had *more* of the system than before.
+        //
+        // Clipped about the pole the **most** bodies agree with, not about their mean: a mean
+        // is dragged by the very body being looked for, and one at a right angle pulled it far
+        // enough that the bodies that did agree fell outside the cut with it.
+        let kept = match most_agreed(&voting) {
+            Some(seed) => {
+                let near: Vec<&BodyBelief> =
+                    voting.iter().copied().filter(|b| off_by(b, seed) <= STRAY_RAD).collect();
+                // Never below what can outvote a stray. Two bodies at right angles are two
+                // claims about the plane and not one claim and one mistake.
+                if near.len() >= ENOUGH_TO_CLIP { near } else { voting }
+            }
+            None => voting,
+        };
+
         let mut sum = DVec3::ZERO;
         let mut weight = 0.0;
         let mut circle: Option<DVec3> = None;
         for belief in beliefs.iter().filter(|b| in_the_system_plane(b)) {
-            match belief.orientation {
-                Orientation::Known { pole, sigma_rad, .. } => {
-                    // A giant's pole is the invariable plane's; a rock's is near it. Squared
-                    // sigma because that is how independent errors combine.
-                    let w = class_weight(belief) / sigma_rad.max(1.0e-6).powi(2);
-                    sum += folded(pole) * w;
-                    weight += w;
-                }
-                Orientation::EdgeOnTo { toward } => circle = circle.or(Some(toward)),
-                Orientation::Unknown => {}
+            if let Orientation::EdgeOnTo { toward } = belief.orientation {
+                circle = circle.or(Some(toward));
+            }
+        }
+        for belief in kept.iter().copied() {
+            if let Orientation::Known { pole, sigma_rad, .. } = belief.orientation {
+                // A giant's pole is the invariable plane's; a rock's is near it. Squared sigma
+                // because that is how independent errors combine.
+                let w = class_weight(belief) / sigma_rad.max(1.0e-6).powi(2);
+                sum += folded(pole) * w;
+                weight += w;
             }
         }
         if weight <= 0.0 {
@@ -241,7 +263,7 @@ impl Knowledge {
         if pole == DVec3::ZERO {
             return circle.map_or(SystemPlane::Unknown, SystemPlane::Circle);
         }
-        let sigma_rad = plane_scatter(beliefs, pole, weight);
+        let sigma_rad = plane_scatter(&kept, pole, weight);
         if sigma_rad > PLANE_SCATTER_LIMIT_RAD {
             return circle.map_or(SystemPlane::Unknown, SystemPlane::Circle);
         }
@@ -264,10 +286,10 @@ fn class_weight(belief: &BodyBelief) -> f64 {
 /// The larger of the weighted scatter and what the individual sigmas allow: a single orbit has
 /// no scatter to measure and must still report its own error, and two orbits that disagree must
 /// not report the confidence their sigmas claim.
-fn plane_scatter(beliefs: &[BodyBelief], pole: DVec3, weight: f64) -> f64 {
+fn plane_scatter(beliefs: &[&BodyBelief], pole: DVec3, weight: f64) -> f64 {
     let mut spread = 0.0;
     let mut count = 0usize;
-    for belief in beliefs.iter().filter(|b| in_the_system_plane(b)) {
+    for belief in beliefs.iter().copied() {
         if let Orientation::Known { pole: p, .. } = belief.orientation {
             let off = pole.dot(folded(p)).clamp(-1.0, 1.0).acos();
             spread += off * off;
@@ -277,6 +299,43 @@ fn plane_scatter(beliefs: &[BodyBelief], pole: DVec3, weight: f64) -> f64 {
     let scatter = if count > 1 { (spread / count as f64).sqrt() } else { 0.0 };
     scatter.max((1.0 / weight).sqrt())
 }
+
+/// How far a belief's pole lies from a plane, radians. Folded, so direction of travel is not
+/// mistaken for disagreement.
+fn off_by(belief: &BodyBelief, pole: DVec3) -> f64 {
+    match belief.orientation {
+        Orientation::Known { pole: p, .. } => pole.dot(folded(p)).clamp(-1.0, 1.0).acos(),
+        _ => 0.0,
+    }
+}
+
+/// The pole the most of these beliefs lie within [`STRAY_RAD`] of.
+///
+/// A mode rather than a mean, because it is what a stray cannot move: the body being looked
+/// for is exactly the one that drags an average, and it drags it toward itself.
+fn most_agreed(beliefs: &[&BodyBelief]) -> Option<DVec3> {
+    let poles: Vec<DVec3> = beliefs
+        .iter()
+        .filter_map(|b| match b.orientation {
+            Orientation::Known { pole, .. } => Some(folded(pole)),
+            _ => None,
+        })
+        .collect();
+    poles
+        .iter()
+        .copied()
+        .max_by_key(|p| poles.iter().filter(|o| p.dot(**o).clamp(-1.0, 1.0).acos() <= STRAY_RAD).count())
+}
+
+/// Further than this from the provisional plane and a pole is read as a mistake.
+///
+/// Fifteen degrees, because a planet of one disc is not that far out: generated inclinations
+/// are gaussian at two degrees, and Sol's worst offender, Mercury, is seven off the invariable
+/// plane. A moon read as orbiting the star is anywhere at all.
+const STRAY_RAD: f64 = 15.0 * std::f64::consts::PI / 180.0;
+
+/// Poles that must survive the cut before any of them are dropped.
+const ENOUGH_TO_CLIP: usize = 3;
 
 /// Whether a body's orbit says anything about the plane the *system* lies in.
 ///
@@ -769,6 +828,51 @@ mod tests {
         assert!((after_sigma - sigma_rad).abs() < 1.0e-9, "and it must not move the scatter");
     }
 
+    /// **Finding one more body must never take a solved plane away.** A body whose primary has
+    /// not been worked out yet reads as orbiting the star, so a moon arrives with its planet's
+    /// equator as its pole -- and one of those, thirty degrees off, took four bodies agreeing
+    /// to two degrees down to no plane at all.
+    #[test]
+    fn one_stray_pole_does_not_unsolve_a_plane() {
+        let tilt = |deg: f64| {
+            let r: f64 = deg.to_radians();
+            DVec3::new(r.sin(), 0.0, r.cos())
+        };
+        let agreeing = [
+            ("b", orbit(1.0, known(tilt(1.0), 0.02), Some(0.0))),
+            ("c", orbit(2.0, known(tilt(-2.0), 0.02), Some(0.0))),
+            ("d", orbit(4.0, known(tilt(2.0), 0.02), Some(0.0))),
+            ("e", orbit(8.0, known(tilt(-1.0), 0.02), Some(0.0))),
+        ];
+        let SystemPlane::Known { pole: before, .. } = knowledge_with(&agreeing).system_plane(star())
+        else {
+            panic!("four bodies two degrees apart are a plane")
+        };
+
+        for stray in [30.0, 60.0, 90.0] {
+            let mut with = agreeing.to_vec();
+            with.push(("f", orbit(0.5, known(tilt(stray), 0.02), Some(0.0))));
+            let after = knowledge_with(&with).system_plane(star());
+            let SystemPlane::Known { pole, sigma_rad, .. } = after else {
+                panic!("{stray} degrees off unsolved the plane: {after:?}")
+            };
+            assert!(pole.dot(before).abs() > 0.999, "the stray moved the plane: {pole}");
+            assert!(sigma_rad < 0.1, "and it must not widen it: {sigma_rad}");
+        }
+    }
+
+    /// Clipping is for a stray among bodies that agree, not for a system nobody has pinned
+    /// down. Two orbits at right angles are two claims about the plane, and the answer is that
+    /// there is no plane rather than that one of them is wrong.
+    #[test]
+    fn disagreement_between_a_few_is_still_no_plane() {
+        let k = knowledge_with(&[
+            ("b", orbit(1.0, known(DVec3::Z, 0.01), Some(0.0))),
+            ("c", orbit(5.0, known(DVec3::X, 0.01), Some(0.0))),
+        ]);
+        assert_eq!(k.system_plane(star()), SystemPlane::Unknown);
+    }
+
     /// The basis may not turn on which body was found first. Folding onto "whichever half the
     /// first one picked" flipped it whenever a newly found inner body ran the other way, and
     /// zero longitude moved to the other node with it.
@@ -817,4 +921,5 @@ mod tests {
             lineage: Vec::new(),
         }
     }
+
 }
