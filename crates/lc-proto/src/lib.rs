@@ -271,7 +271,7 @@ pub struct Motion {
     /// Which way the nose points. Carried because a turn takes time and is as often as not
     /// half finished — nothing in a trajectory says where a nose had got to.
     pub attitude: [f64; 3],
-    /// Seconds on the ship's own clock, which no resynchronising may change.
+    /// Seconds on the ship's own clock, which no resynchronizing may change.
     pub clock_s: f64,
     pub drive: Drive,
     pub motive: Motive,

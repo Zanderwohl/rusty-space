@@ -396,7 +396,7 @@ easy to get wrong: `permission >= 1` reads as "is an administrator" and is right
 `permission > other` reads as "outranks" and is exactly backwards. Nothing above the schema
 compares them directly. `lc_identity::level::Level` carries the ordering and offers
 `outranks` as its only comparison — deliberately no `Ord`, because a derived one would make
-`a > b` a compiling, plausible, wrong authorisation check.
+`a > b` a compiling, plausible, wrong authorization check.
 
 `lc_server::ability::Level` is the same type again, on the far side of the workspace boundary.
 It is duplicated for the reason the ticket's claim set is duplicated: the game server must not
@@ -550,7 +550,7 @@ is that a field renamed on one side silently stops arriving on the other, with n
 between — so the console's test holds a payload **printed by the shard's own serializer**, not
 one written by hand, and that test is the only place in either build that will notice.
 
-**A game ticket authorises it.** The same object a client presents to open a socket: signed by
+**A game ticket authorizes it.** The same object a client presents to open a socket: signed by
 the broker, audience-scoped to the shard, sixty seconds, carrying the level. No shared secret
 between the console and the shard, no second key to rotate, and the gate is
 `lc_server::ability`. The console mints one per request through `/ticket` on behalf of the

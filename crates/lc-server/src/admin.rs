@@ -6,7 +6,7 @@
 //!
 //! On **its own port**, which no proxy route reaches — see `lightcone/docs/15-runbook.md`.
 //!
-//! Authorised by a **game ticket**: no shared secret to invent, no second key to rotate, and
+//! Authorized by a **game ticket**: no shared secret to invent, no second key to rotate, and
 //! the gate is `crate::ability`. The console mints one per request on behalf of the
 //! administrator reading the page, so the ticket says which one is asking. Its own [`Spent`]
 //! map rather than the tick loop's, which would be a lock for no gain.

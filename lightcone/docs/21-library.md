@@ -604,7 +604,7 @@ thought to write down, and on the first run they found two.
 
 Uploading your own epubs. It is the obvious next ask and it is a different feature: arbitrary
 user files reaching an asset loader is the exact thing `WebAssetPlugin` warns about, and it
-would need a size cap, a sanitiser and somewhere to put the bytes that is not the shared CDN.
+would need a size cap, a sanitizer and somewhere to put the bytes that is not the shared CDN.
 
 ## A note on Project Gutenberg
 

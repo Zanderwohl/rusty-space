@@ -6,7 +6,7 @@
 //! the point itself, is somewhere you can see out from.
 //!
 //! [`em_foundations::lagrange`] has the mechanics. This is the curve those numbers describe,
-//! placed in a real system: the linearised Lissajous of the circular restricted three-body
+//! placed in a real system: the linearized Lissajous of the circular restricted three-body
 //! problem, written in the rotating frame of the two bodies and read back out into simulation
 //! space.
 //!
@@ -27,7 +27,7 @@ use crate::system::{LocalSystem, M_PER_LY};
 ///
 /// A fifth puts a Sun-Earth libration orbit about three hundred thousand kilometers across the
 /// radial direction and nine hundred thousand along track, which is the size JWST's actually
-/// is. Large enough to be a place rather than a dot; small enough that the linearisation the
+/// is. Large enough to be a place rather than a dot; small enough that the linearization the
 /// whole thing rests on still holds.
 pub const DEFAULT_AMPLITUDE: f64 = 0.2;
 

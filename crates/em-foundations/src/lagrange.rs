@@ -3,7 +3,7 @@
 //! L1 and L2 are equilibria of the circular restricted three-body problem, and they are
 //! unstable ones — a craft placed exactly there falls off in weeks. What real spacecraft do
 //! instead is *orbit the point*: SOHO round Sun-Earth L1, JWST round L2. Those orbits are not
-//! conics and have no closed form, but the linearised motion about a collinear point does, and
+//! conics and have no closed form, but the linearized motion about a collinear point does, and
 //! it is what the real trajectories are built on.
 //!
 //! Everything here is dimensionless. The unit of length is the separation of the two primaries
@@ -23,7 +23,7 @@ pub enum Collinear {
     L2,
 }
 
-/// How the linearised motion about a collinear point goes, in multiples of the mean motion.
+/// How the linearized motion about a collinear point goes, in multiples of the mean motion.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Frequencies {
     /// In-plane oscillation rate. About `2.09` for Sun-Earth.
@@ -106,7 +106,7 @@ pub fn c2(mass_ratio: f64, gamma: f64, point: Collinear) -> f64 {
     (mu + (1.0 - mu) * gamma.powi(3) / far.powi(3)) / gamma.powi(3)
 }
 
-/// The linearised motion about a collinear point, from its `c_2`.
+/// The linearized motion about a collinear point, from its `c_2`.
 ///
 /// The planar rate is the oscillatory root of `λ⁴ + (c2 - 2)λ² - (c2 - 1)(1 + 2 c2) = 0`; the
 /// other root pair is real, and *that* is the instability these orbits have to be kept against.

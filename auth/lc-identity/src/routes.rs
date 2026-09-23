@@ -497,7 +497,7 @@ async fn grant(
     State(broker): State<Broker>,
     axum::Json(request): axum::Json<GrantRequest>,
 ) -> Response {
-    // No shared secret: a native client cannot keep one. What authorises this is the code,
+    // No shared secret: a native client cannot keep one. What authorizes this is the code,
     // which is single use, sixty seconds old, and bound to the loopback it was issued for.
     let digest = signin::digest_of(&request.code);
     let account_id = match broker

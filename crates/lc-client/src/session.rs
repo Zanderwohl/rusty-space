@@ -776,7 +776,7 @@ fn luminance_of(radiance: &PerBand<f32>, mapping: &BandMapping) -> f32 {
     rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722
 }
 
-/// An idealised instrument, for evaluating what leaves a system rather than what an
+/// An idealized instrument, for evaluating what leaves a system rather than what an
 /// instrument would record of it.
 fn full_spectrum() -> Instrument {
     Instrument::BASELINE
@@ -821,7 +821,7 @@ const SPECTRA_KEPT: usize = 4096;
 /// was most of a frame on its own and the largest thing in a profile of a frozen browser.
 ///
 /// Doppler shifts the temperature, so this is not constant while under way — but it moves
-/// slowly, and quantising it means a ship at rest computes each spectrum once ever.
+/// slowly, and quantizing it means a ship at rest computes each spectrum once ever.
 fn spectrum_at(teff_k: f64) -> PerBand<f32> {
     thread_local! {
         static SPECTRA: std::cell::RefCell<HashMap<u64, PerBand<f32>>> =

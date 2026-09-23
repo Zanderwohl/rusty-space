@@ -160,8 +160,13 @@ pub struct Moons {
     /// makes a generated giant's retinue the right size without any other tuning.
     pub regular_mass_ratio: f64,
     pub regular_count: (u32, u32),
-    /// Inner bound on a regular moon, in planetary radii.
-    pub inner_radii: f64,
+    /// The fluid Roche limit, in units of `R_p (rho_p / rho_m)^(1/3)`.
+    ///
+    /// 2.456 for a body held together by its own gravity alone, which a moon of any size is.
+    /// A flat multiple of the planet's radius will not do: the limit moves with the density
+    /// ratio, and an icy moon around a rocky planet is torn apart half again as far out as a
+    /// rocky one would be.
+    pub roche_coefficient: f64,
     /// Outer bound, as a share of the Hill radius. Regular satellites form in a disc well
     /// inside it: the Galileans sit within a fiftieth of Jupiter's.
     pub regular_outer_hill: f64,
@@ -195,8 +200,6 @@ pub struct Belts {
     pub belt_survival: f64,
     /// The same for the trans-planetary belt, which was stirred far less.
     pub kuiper_survival: f64,
-    /// Bulk density of a belt element, kg/m^3.
-    pub element_density: f64,
     /// Share of the icy reservoir a system's giants throw into the Oort cloud.
     ///
     /// A system with no giant has no scatterer, so its cloud is nearly empty -- which is a
@@ -219,8 +222,6 @@ pub struct Belts {
     pub belt_element_m: f64,
     pub kuiper_element_m: f64,
     pub oort_element_m: f64,
-    /// How many dwarf planets condense out of the trans-planetary belt.
-    pub dwarfs: (u32, u32),
 }
 
 /// The generator's knobs, whole.
@@ -280,7 +281,7 @@ impl Default for Tuning {
             moons: Moons {
                 regular_mass_ratio: 1.0e-4,
                 regular_count: (2, 6),
-                inner_radii: 2.5,
+                roche_coefficient: 2.456,
                 regular_outer_hill: 0.05,
                 impact_moon_chance: 0.15,
                 impact_mass_ratio: (1.0e-3, 2.0e-2),
@@ -295,7 +296,6 @@ impl Default for Tuning {
             belts: Belts {
                 belt_survival: 5.0e-4,
                 kuiper_survival: 0.002,
-                element_density: 2000.0,
                 oort_efficiency: 0.3,
                 oort_saturation_jupiters: 1.0,
                 oort_au: (2_000.0, 100_000.0),
@@ -306,7 +306,6 @@ impl Default for Tuning {
                 belt_element_m: 1.0e3,
                 kuiper_element_m: 5.0e4,
                 oort_element_m: 1.0e3,
-                dwarfs: (0, 4),
             },
         }
     }

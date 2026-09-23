@@ -301,7 +301,7 @@ pub fn containment_chain(system: &System, point: DVec3, time: Instant) -> Vec<Bo
 
 /// The crossing search used to live here, and every caller still spells it
 /// `influence::crossings`. It is [`crate::crossing`] now — the same functions, with the
-/// traveler generalised from a body index to anything evaluable.
+/// traveler generalized from a body index to anything evaluable.
 pub use crate::crossing::{
     BodyPath, Crossing, SAMPLES_PER_REVOLUTION, Traveler, boundary_distance, boundary_distance_of,
     crossings, crossings_of, default_horizon, default_horizon_of, first_crossing_of, next_crossing,

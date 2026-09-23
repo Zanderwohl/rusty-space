@@ -320,7 +320,7 @@ impl Listing {
         }
     }
 
-    /// Rendered into the page so `ts/params.ts` canonicalises against this same table.
+    /// Rendered into the page so `ts/params.ts` canonicalizes against this same table.
     pub fn defaults_json() -> serde_json::Value {
         let fallback = Listing::default();
         serde_json::json!({
@@ -490,7 +490,7 @@ mod tests {
         assert_eq!(first.at_page(0).page, 1, "page zero was admitted");
     }
 
-    /// The browser canonicalises against this, so it has to name every parameter
+    /// The browser canonicalizes against this, so it has to name every parameter
     /// `query_string` knows about and agree about their order.
     #[test]
     fn the_defaults_the_browser_reads_are_the_defaults_here() {

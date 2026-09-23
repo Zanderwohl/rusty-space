@@ -206,7 +206,7 @@ impl Population {
     ///
     /// This is the observable, and it is what a shell should bake. The disc has finite
     /// angular size, so an observer integrates the sky density over a cone rather than
-    /// sampling it at a point, which is what regularises the caustic at the inclination
+    /// sampling it at a point, which is what regularizes the caustic at the inclination
     /// limit.
     pub fn mean_count_cone(&self, direction: DVec3, star: &Star) -> f64 {
         let phi = self.latitude(direction);
@@ -359,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn the_cone_average_regularises_the_caustic() {
+    fn the_cone_average_regularizes_the_caustic() {
         // At the inclination limit the point-sampled density diverges; the observable does
         // not, because the stellar disc has finite angular size.
         let star = Star::SOL;

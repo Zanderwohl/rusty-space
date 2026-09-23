@@ -79,7 +79,7 @@ position residual. Two things matter:
 **Fit mean motion, not `a`.** The objective is wildly multimodal in the mean motion — if
 the period is off by even 0.1%, phase error exceeds a full revolution within decades and
 the residuals go uncorrelated, so a gradient method collapses to a degenerate circle
-(`e → 0`). Parameterise by mean motion `n` directly, and use **span continuation**: fit
+(`e → 0`). Parameterize by mean motion `n` directly, and use **span continuation**: fit
 over ~1.5 years first, where phase is unambiguous, then widen to 3, 6, 12, 25, 50.
 Convert back with `a = (μ/n²)^⅓` at the end.
 

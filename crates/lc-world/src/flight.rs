@@ -320,7 +320,7 @@ impl Cruise {
     /// A burn at constant proper acceleration starting at speed `b0` is the same burn started
     /// from rest, entered part-way through: if a ship boosting from rest reaches `b0` at time
     /// `t0`, then this ship's trajectory is that one's from `t0` onward. So the whole profile
-    /// generalises by an offset and the closed forms below are unchanged.
+    /// generalizes by an offset and the closed forms below are unchanged.
     ///
     /// The offset is on the **boost only**. The brake ends at rest, so it is the rest profile run
     /// backwards from the peak whatever the ship was doing when the crossing began — which makes

@@ -111,7 +111,7 @@ A class names **what a thing is**, never what it looks like. `.post-meta`, `.rel
 utility vocabulary moves the styling into the markup, which means every template change is
 also a design change and the stylesheet stops describing anything.
 
-**A class used once is a bug.** Either the name is too specific and wants generalising, or the
+**A class used once is a bug.** Either the name is too specific and wants generalizing, or the
 thing wanted an element selector and not a class at all. This is checkable rather than
 aspirational, because maud writes classes as string literals:
 

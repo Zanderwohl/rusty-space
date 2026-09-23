@@ -149,7 +149,7 @@ impl BodyRotation {
             RotationMode::TidallyLocked { pole, .. } => {
                 let to_primary = (primary_pos - body_pos).normalize();
                 
-                // Right-handed basis: X at the primary, Z the orthogonalised pole,
+                // Right-handed basis: X at the primary, Z the orthogonalized pole,
                 // Y = Z × X.
                 let forward = to_primary;
                 let up = (*pole - forward * forward.dot(*pole)).normalize();

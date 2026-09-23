@@ -41,6 +41,16 @@ impl Moon {
 const PROGRADE_STABLE: f64 = 0.4;
 const RETROGRADE_STABLE: f64 = 0.6;
 
+/// Where a moon of a given density is pulled apart, meters.
+///
+/// The fluid limit: a satellite has no tensile strength worth the name, so what holds it
+/// together is its own gravity. Inside this there is a ring rather than a moon.
+fn roche_m(planet: &Planet, moon_density: f64, coefficient: f64) -> f64 {
+    let volume = 4.0 / 3.0 * std::f64::consts::PI * planet.radius_m.powi(3);
+    let planet_density = planet.mass_kg / volume.max(f64::MIN_POSITIVE);
+    coefficient * planet.radius_m * (planet_density / moon_density.max(1.0)).cbrt()
+}
+
 /// Radius of the sphere a planet holds against its star, meters.
 pub fn hill_radius_m(semi_major_m: f64, mass_kg: f64, star_mass_solar: f64) -> f64 {
     semi_major_m * (mass_kg / (3.0 * star_mass_solar.max(1.0e-3) * SOLAR_MASS_KG)).cbrt()
@@ -50,9 +60,8 @@ pub fn hill_radius_m(semi_major_m: f64, mass_kg: f64, star_mass_solar: f64) -> f
 pub fn moons_of(planet: &Planet, star_mass_solar: f64, seed: u64, index: usize, tuning: &Tuning) -> Vec<Moon> {
     let h = |tag: u64| rng::hash(&[seed, 0x_6d30_306e, index as u64, tag]);
     let hill = hill_radius_m(planet.semi_major_m, planet.mass_kg, star_mass_solar);
-    let inner = planet.radius_m * tuning.moons.inner_radii;
 
-    let mut out = regular(planet, inner, hill, h(1), tuning);
+    let mut out = regular(planet, hill, h(1), tuning);
     out.extend(irregular(planet, hill, star_mass_solar, h(2), tuning));
     out.sort_by(|a, b| a.semi_major_m.total_cmp(&b.semi_major_m));
     for (j, moon) in out.iter_mut().enumerate() {
@@ -67,14 +76,16 @@ pub fn moons_of(planet: &Planet, star_mass_solar: f64, seed: u64, index: usize, 
 /// across Jupiter, Saturn and Uranus. A rocky planet has no disc to grow one in, so its only
 /// route is a giant impact -- which is rare, and which is why Luna has no counterpart anywhere
 /// else in the inner solar system.
-fn regular(planet: &Planet, inner: f64, hill: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
+fn regular(planet: &Planet, hill: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
     let t = &tuning.moons;
     // A giant's moons condensed in a disc that reached a twentieth of the way to the Hill
     // radius. Everything else got its moon some other way and put it wherever one stays: an
     // impact moon tidally recedes, and Luna is already a quarter of the way out.
     let disc = planet.class.is_giant() && !planet.migrated;
     let outer = hill * if disc { t.regular_outer_hill } else { PROGRADE_STABLE };
-    if outer <= inner {
+    // The lightest moon this planet could draw is torn apart furthest out, so testing against
+    // that one is what makes every moon below fit between its own limit and `outer`.
+    if outer <= roche_m(planet, t.density.0, t.roche_coefficient) {
         return Vec::new();
     }
 
@@ -100,6 +111,8 @@ fn regular(planet: &Planet, inner: f64, hill: f64, h: u64, tuning: &Tuning) -> V
         .map(|j| {
             let g = |tag: u64| rng::hash(&[h, j as u64, tag]);
             let mass = planet.mass_kg * share * weights[j as usize] / total;
+            let density = rng::uniform_in(g(3), t.density.0, t.density.1);
+            let inner = roche_m(planet, density, t.roche_coefficient);
             Moon {
                 name: String::new(),
                 // Log-spaced, so a retinue spreads out the way a real one does rather than
@@ -109,7 +122,7 @@ fn regular(planet: &Planet, inner: f64, hill: f64, h: u64, tuning: &Tuning) -> V
                 inclination_rad: rng::gaussian(g(6)).abs() * 0.02,
                 node_rad: rng::uniform_in(g(7), 0.0, std::f64::consts::TAU),
                 mean_anomaly_deg: rng::uniform_in(g(5), 0.0, 360.0),
-                radius_m: radius_of(mass, rng::uniform_in(g(3), tuning.moons.density.0, tuning.moons.density.1)),
+                radius_m: radius_of(mass, density),
                 mass_kg: mass,
                 regular: true,
             }
@@ -211,6 +224,41 @@ mod tests {
                 planets
             })
             .collect()
+    }
+
+    /// Inside the Roche limit a body is a ring, not a moon. The limit moves with the density
+    /// ratio, so a flat multiple of the planet's radius lets icy moons sit where they would be
+    /// torn up.
+    #[test]
+    fn no_regular_moon_sits_inside_its_own_roche_limit() {
+        let t = Tuning::default();
+        let mut counted = 0;
+        for planets in systems(40) {
+            for p in &planets {
+                for m in p.moons.iter().filter(|m| m.regular) {
+                    counted += 1;
+                    let density = m.mass_kg
+                        / (4.0 / 3.0 * std::f64::consts::PI * m.radius_m.powi(3));
+                    let limit = roche_m(p, density, t.moons.roche_coefficient);
+                    let periapsis = m.semi_major_m * (1.0 - m.eccentricity);
+                    assert!(periapsis > limit, "{} passes inside its Roche limit", m.name);
+                }
+            }
+        }
+        assert!(counted > 20, "only {counted} regular moons to check");
+    }
+
+    /// The density ratio is the whole point: the same planet tears an icy moon apart further
+    /// out than a rocky one.
+    #[test]
+    fn a_lighter_moon_is_torn_apart_further_out() {
+        let planets = systems(1).remove(0);
+        let p = planets.first().expect("a planet");
+        let icy = roche_m(p, 1200.0, 2.456);
+        let rocky = roche_m(p, 3500.0, 2.456);
+        // The cube root of the density ratio, and nothing else.
+        assert!((icy / rocky - (3500.0f64 / 1200.0).cbrt()).abs() < 1.0e-9);
+        assert!(icy > rocky * 1.4, "icy {icy:.3e} is not well outside rocky {rocky:.3e}");
     }
 
     /// A moon has to be outside the planet and inside the sphere the planet holds against its

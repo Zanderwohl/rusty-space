@@ -15,14 +15,11 @@ use super::File;
 /// What writes a file's bytes today.
 pub const FILE_FORMAT: i32 = 9;
 
-/// The oldest format still read. Anything older is refused.
-pub const OLDEST_FILE_FORMAT: i32 = FILE_FORMAT;
-
 /// A file's bytes, in whichever format wrote them.
 pub fn decode(format: i32, bytes: &[u8]) -> Result<File, String> {
     match format {
         FILE_FORMAT => lc_proto::decode(bytes).map_err(|why| why.to_string()),
-        other => Err(format!("knowledge format {other} is not {OLDEST_FILE_FORMAT} to {FILE_FORMAT}")),
+        other => Err(format!("knowledge format {other} is not {FILE_FORMAT}")),
     }
 }
 

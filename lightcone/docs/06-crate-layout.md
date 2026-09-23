@@ -59,7 +59,7 @@ whether a module belongs: **does it know any game or TTRPG rule?** If not, it mo
 | `src/presentation/chain_path.rs` | yes | trajectory polylines from `em_sim::trajectory::Path` |
 | `src/presentation/celestial_markers.rs` | yes | generic orbital markers |
 | `src/presentation/encounter_marker.rs`, `encounter_marker_material.rs` | judgment | encounter markers are patched-conic concepts, which `em-sim` owns, so they move |
-| `src/camera/freecam.rs`, `planetarium.rs` | yes | controllers parameterised by scale |
+| `src/camera/freecam.rs`, `planetarium.rs` | yes | controllers parameterized by scale |
 | `src/catalog/` | **no, revised** | see below |
 | `src/gui/` | no | egui panels encode Exotic Matters' workflows; the game needs different ones |
 

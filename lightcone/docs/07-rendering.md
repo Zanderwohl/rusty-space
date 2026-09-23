@@ -881,7 +881,7 @@ from — a ray grazing the side crosses almost nothing. Two traps, both paid for
   meters long an astronomical unit from the render origin, so the eye is of order `1e8` in the
   proxy's own units and `eye + direction * t` asks `f32` for a point near the origin as the
   difference of two numbers near `1e8`, where its spacing is about eight. Every sample comes out
-  quantised to nothing and the plume does not appear at all.
+  quantized to nothing and the plume does not appear at all.
 - The density is bounded by one. An earlier version had both a taper along the length *and* a
   `1/r²`, which between them made the column a hundred times deeper at the nozzle than at the
   mouth — every part of the cone landed above the top of the window and the whole thing was one

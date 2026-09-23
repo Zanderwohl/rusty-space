@@ -416,7 +416,7 @@ itself the observable**:
 | reddening — much deeper in B than K, absent in radio | dust, debris, a natural cloud |
 | gray in the optical with an IR excess | solid, and absorbing rather than merely blocking — engineering |
 
-A civilisation that wants its swarm mistaken for a dust cloud has to make it reddening, which
+A civilization that wants its swarm mistaken for a dust cloud has to make it reddening, which
 means making it out of small particles, which means giving up the structural integrity that
 made it a collector. The disguise has a physical price, and the game does not have to invent
 one.
@@ -436,7 +436,7 @@ Checked against real values: `B-V = 0.65` returns 5778 K for the Sun against an 
 **One color index cannot separate a cool star from a reddened one.** Dust and temperature move
 `B - V` the same direction, so an A0 at 10 125 K behind `E(B-V) = 0.3` reads as 7462 K, an F
 star. This is the real degeneracy of real photometry, and it is a deception vector: a
-civilisation that wants to look like something else can lean on it.
+civilization that wants to look like something else can lean on it.
 
 Breaking it needs a second color, so that reddening and cooling can be told apart by
 *direction* rather than magnitude. In a color-color diagram the reddening vector points one
@@ -464,7 +464,7 @@ angle.
 So the blind zone is not an instrument tier to buy past. It is a genuine hole in what
 continuum photometry can know, and closing it needs spectroscopy — line features rather than
 the shape of the continuum. That gives the spectrograph of
-[05-observation.md](05-observation.md) a specific job, and it gives a civilisation that wants
+[05-observation.md](05-observation.md) a specific job, and it gives a civilization that wants
 to hide behind dust a reason to prefer a late-K star.
 
 The radio band also stops the game from being a pure line-of-sight problem. A system behind a

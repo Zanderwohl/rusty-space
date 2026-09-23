@@ -32,7 +32,7 @@ pub struct Snapshot {
     /// half-finished as often as not and there is nothing in a trajectory that says where a
     /// nose had got to.
     pub attitude: DVec3,
-    /// Seconds on the ship's own clock. Never recomputed from the world's: no resynchronising
+    /// Seconds on the ship's own clock. Never recomputed from the world's: no resynchronizing
     /// un-ages a crew. See `lightcone/docs/17-reconciliation.md`.
     pub clock_s: f64,
     pub drive: Drive,

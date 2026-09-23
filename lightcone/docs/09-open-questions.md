@@ -175,7 +175,7 @@ These change what the game is, not what the code must do first.
   establish a presence in one system and see a signal leave it, not enough to reach another
   star. The onboarding has to work inside that budget.
 - **Persistence across wipes.** A world whose events accumulate forever eventually has a
-  light horizon full of dead civilisations, which is either the best feature or an
+  light horizon full of dead civilizations, which is either the best feature or an
   unmaintainable archive.
 
 ## Method

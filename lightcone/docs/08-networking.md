@@ -269,7 +269,7 @@ says where, and a solve that falls off the end returns nothing rather than a gue
 too far away to be answered honestly sees nothing at all, which is the only safe way to not
 know.
 
-The lesson generalises: **anything computed from a worldline has to be computed from the
+The lesson generalizes: **anything computed from a worldline has to be computed from the
 worldline as it was**, and a type that cannot represent "as it was" will let a gate pass
 something that should never have left.
 

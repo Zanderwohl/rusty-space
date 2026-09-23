@@ -220,7 +220,7 @@ its frames throttled, so its clock nearly stops while the world does not. It com
 behind and is pulled straight.
 
 A correction moves the **world's** clock and not the crew's. The ship's proper time is however
-long they have actually lived through, and no amount of resynchronising un-ages anybody — which
+long they have actually lived through, and no amount of resynchronizing un-ages anybody — which
 is a distinct method for exactly that reason.
 
 ## A crossing starts from whatever the ship is doing
@@ -230,7 +230,7 @@ moving, and neither was.
 
 **The speed along the line is carried.** A burn at constant proper acceleration starting at `b0`
 *is* the burn from rest entered part-way through — if a ship boosting from rest reaches `b0` at
-`t0`, this ship's trajectory is that one's from `t0` onward. So the generalisation is an offset
+`t0`, this ship's trajectory is that one's from `t0` onward. So the generalization is an offset
 and every closed form is unchanged, the brake included, since it still ends at rest. Signed, so
 a target behind the ship is the same trajectory entered before it turns around.
 

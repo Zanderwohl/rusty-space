@@ -137,7 +137,7 @@ mod tests {
     /// The test that keeps the two implementations of causality honest.
     ///
     /// `lc_precedes` in SQL and `precedes` in `lc-spacetime` are the same predicate written
-    /// twice, and a rule built on one has to mean the same thing to the other. Randomised over
+    /// twice, and a rule built on one has to mean the same thing to the other. Randomized over
     /// the whole coordinate range, with the interesting cases forced in: a `numeric` that
     /// rounded, or a `bigint` difference that overflowed, would show as a disagreement here and
     /// nowhere else until a query silently dropped an event.

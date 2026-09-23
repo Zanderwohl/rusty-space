@@ -75,7 +75,7 @@ const PROFILE_RADIAL: i32 = 1;
 /// Steps per sightline.
 ///
 /// Fixed rather than derived from the span, because a step count that varies between
-/// neighboring pixels quantises them differently and the seam is visible. The span is clipped
+/// neighboring pixels quantizes them differently and the seam is visible. The span is clipped
 /// to the material before it is divided, so a thin belt gets the same thirty-two steps
 /// concentrated in the thin part.
 ///
@@ -194,7 +194,7 @@ fn slab_span(origin: vec3<f32>, direction: vec3<f32>, half_height: f32) -> vec2<
 }
 
 /// A per-pixel offset in `0..1`, so the steps of neighboring pixels do not line up and the
-/// quantisation reads as film grain rather than as shells. Deliberately not a function of
+/// quantization reads as film grain rather than as shells. Deliberately not a function of
 /// time: two frames of a `--burst` have to be comparable.
 fn dither(pixel: vec2<f32>) -> f32 {
     return fract(52.9829189 * fract(dot(pixel, vec2<f32>(0.06711056, 0.00583715))));

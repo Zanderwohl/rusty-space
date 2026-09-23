@@ -427,7 +427,7 @@ pub enum Rejected {
 /// Fold one event into a ship.
 ///
 /// **This is the function both sides run.** Anything that decides where a ship goes has to
-/// happen here or in what it calls, because a rule applied on one side only is a desynchronised
+/// happen here or in what it calls, because a rule applied on one side only is a desynchronized
 /// client waiting to happen.
 pub fn apply(
     state: &mut ShipState,

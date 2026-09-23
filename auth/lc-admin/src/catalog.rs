@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(other.dir, Dir::Asc);
     }
 
-    /// The browser canonicalises against this, so it has to name every parameter
+    /// The browser canonicalizes against this, so it has to name every parameter
     /// `query_string` knows about and agree about their order.
     #[test]
     fn the_defaults_the_browser_reads_are_the_defaults_here() {

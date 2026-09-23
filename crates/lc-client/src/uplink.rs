@@ -1238,7 +1238,7 @@ mod tests {
     }
 
     /// A correction moves the world's clock and **not** the crew's. The ship's proper time is
-    /// however long they have actually lived through, and no amount of resynchronising the
+    /// however long they have actually lived through, and no amount of resynchronizing the
     /// coordinate clock un-ages anybody.
     #[test]
     fn a_correction_does_not_un_age_the_crew() {

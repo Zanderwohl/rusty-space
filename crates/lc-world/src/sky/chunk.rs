@@ -433,7 +433,7 @@ mod equivalence {
             worst_teff = worst_teff.max((a.star.teff_k - b.star.teff_k).abs() / a.star.teff_k);
         }
         assert!(worst_position < 1e-6, "position drifted by {worst_position:e} relative");
-        // Color index is quantised to a thousandth, and temperature follows from it. Near
+        // Color index is quantized to a thousandth, and temperature follows from it. Near
         // the Sun that is about two kelvin, so the bound is the quantum and not a guess.
         assert!(worst_teff < 2e-3, "temperature drifted by {worst_teff:e} relative");
     }

@@ -295,7 +295,7 @@ The free-space microwave window is about 3 to 30 GHz, with a floor near 3.2 K.
 **1420 MHz is not in it.** The hydrogen line sits at 12.5 K, four times the floor, which costs
 a factor of 15 in transmitter power or in integration time for the same detection. It is the
 worst good choice and the best obvious one — everyone knows where it is, so it is where a
-civilisation broadcasts if it wants to be found and where it listens if it expects company. A
+civilization broadcasts if it wants to be found and where it listens if it expects company. A
 transmitter that wants to be heard pays the 15x. A transmitter that wants privacy moves to
 8 GHz and accepts that nobody is listening there unless told to.
 

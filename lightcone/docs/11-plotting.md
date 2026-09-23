@@ -109,7 +109,7 @@ so a debug view of a star's shell is the shell, not a copy of it.
 Density mode over the bundled catalog: 107 859 stars binned to cells and colored by count.
 The main sequence, the red giant clump, the subgiant branch joining them, the M dwarf tail and
 a faint white dwarf sequence are all where they should be, and the vertical striping near
-`B-V` 1.4 is real quantisation in HYG's source catalogs rather than a rendering artifact.
+`B-V` 1.4 is real quantization in HYG's source catalogs rather than a rendering artifact.
 
 ```bash
 awk -F',' 'NR==1{print "ci,absmag"; next} $10>0 && $10<100000 && $17!="" {print $17","$15}' \

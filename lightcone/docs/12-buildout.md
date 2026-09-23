@@ -43,7 +43,7 @@ existing app, so it can run in parallel throughout.
 **Done when:**
 
 - `cargo test -p lc-spacetime` passes, including: the interval classification table; the
-  single-root property over randomised sub-luminal worldlines; the straight-line retarded-time
+  single-root property over randomized sub-luminal worldlines; the straight-line retarded-time
   closed form checked against bisection; `i128` non-overflow at the `2^60` bound.
 - `cargo tree -p lc-spacetime | grep -i bevy` is empty.
 - `em-foundations` is untouched.
@@ -231,7 +231,7 @@ scheduling, and the light-cone cursor.
   by assertion.
 - The cursor yields receptions in arrival order without sorting the full result, and early
   termination does the work of the terminated case and not more.
-- `lc_precedes` agrees with `lc-spacetime`'s `precedes` on a randomised corpus. Two
+- `lc_precedes` agrees with `lc-spacetime`'s `precedes` on a randomized corpus. Two
   implementations of causality is one too many, and this is the test that keeps them honest.
 
 **Do not:** shard.

@@ -231,7 +231,7 @@ Each of these cost real time. None of them are visible from the code that hits t
   by driving a browser and none by a test:
   - `hx-trigger="input changed ..."` on a `<form>` **never fires**. `changed` compares the value
     of the element the trigger is on and a form has no value. The search box did nothing.
-  - `target:(#q)` — the parenthesised selector form the documentation gives for selectors
+  - `target:(#q)` — the parenthesized selector form the documentation gives for selectors
     *containing whitespace* — matches nothing; the parentheses are not stripped. `target:#q`
     works.
   - `htmx:after:swap`'s `event.target` is the element that **issued** the request, not the one

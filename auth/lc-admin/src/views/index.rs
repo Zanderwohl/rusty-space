@@ -60,7 +60,7 @@ pub fn region(page: &Page, now: DateTime<Utc>) -> Markup {
 fn filters(listing: &Listing) -> Markup {
     html! {
         form id="filters" class="filters"
-            // What the browser needs to canonicalise the address bar: the paths, the target,
+            // What the browser needs to canonicalize the address bar: the paths, the target,
             // and the very defaults `Listing::query_string` drops parameters against. In an
             // attribute rather than in a `<script type="application/json">` block, because a
             // script element's content is raw text — entities are not decoded inside one, so
@@ -77,7 +77,7 @@ fn filters(listing: &Listing) -> Markup {
             hx-swap="outerHTML"
             // **Two spellings are silently wrong and both were written first.** `input
             // changed` never fires: `changed` compares the value of the element the trigger
-            // is on, and a form has none. And `target:(#q)` — the parenthesised form the docs
+            // is on, and a form has none. And `target:(#q)` — the parenthesized form the docs
             // give for selectors with whitespace — matches nothing, the parentheses not being
             // stripped. Both look like a search box that does nothing.
             //
@@ -434,7 +434,7 @@ mod tests {
         );
         assert!(
             !form.contains("target:("),
-            "a parenthesised trigger selector matches nothing: {form}",
+            "a parenthesized trigger selector matches nothing: {form}",
         );
         // And the selector has something to find.
         assert!(form.contains(r#"id="q""#), "{form}");
