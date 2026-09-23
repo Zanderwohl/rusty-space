@@ -6,7 +6,7 @@ a system reads the generator. This extends the transit search in
 [24-standing-instruments.md](24-standing-instruments.md) from "there is probably a planet" to a
 body with a name, an orbit and a place in a plane that was itself worked out.
 
-Status: **design**, with phases 1 and 2 built. Nothing below is built except where it says so,
+Status: **design**, with phases 1, 2 and 4 built. Nothing below is built except where it says so,
 and what is carries a mark. Every claim about what exists was checked against the code on
 2026-09-22, and the symbols named are real; where a draft of this document guessed wrong, the
 correction is in the text rather than quietly removed, because the wrong guess was usually "that
@@ -164,9 +164,12 @@ fit needs it as a parameter; a moon's orbit measures it. It cannot come from tru
   Inside a system the distance is a parallax against the ship's own motion, short-baseline but
   very close, and `astrometry::triangulate` already computes exactly that from bearings. It is the
   **first** thing a new ship measures, because every other number in the system hangs off it.
-- **A transit `Conclusion` records the host mass it used.** Otherwise a craft receiving a relayed
-  period cannot turn it into the same radius the sender did, and two craft would disagree about a
-  planet's distance for a reason neither could see.
+- ~~**A transit `Conclusion` records the host mass it used.**~~ **Dropped in phase 4.** The
+  argument was that a receiver could not otherwise turn a relayed period into the same radius the
+  sender did. It does not have to: the `Orbit` carries the axis itself, so a receiver reads the
+  distance rather than recomputing it, and the two cannot disagree. The mass would matter only
+  for re-deriving an axis, which nothing does. What the prior's error does feed is the sigma on
+  that axis, and `Prior::host_mass` supplies it at the moment the orbit is minted.
 
 ### From inside: surveying a system
 
@@ -903,8 +906,25 @@ knowledge. Today:
    shells, distance error bars along the presumed plane, the System plane option from belief, and
    the detail section with sources. `em_map::Plane` gains a fieldless `System` variant, and
    `Plane::other()` becomes a cycle.
-4. **Transits make bodies.** A settled transit calls `found_planet`, the period gives a distance
-   through the mass prior, and the result is `EdgeOnTo`, crossed with other craft's.
+4. **Transits make bodies.** ✅ **Built** (2026-09-22). A settled transit calls `found_planet`,
+   the period gives a distance through the mass prior, and the result is `EdgeOnTo`, crossed
+   with other craft's. What it came to:
+
+   - `lc-server/src/planets.rs`, because identity is the one part truth must answer and every
+     number stays the craft's own. `read_logs` had been discarding the conclusion it got back.
+   - `identify` matches within three sigma **or** two percent, whichever is wider: a box
+     least-squares period from a long log can have a sigma of minutes, which the search's own
+     grid does not deserve to be held to. A system's planets are decades apart in period, so
+     nothing else sits inside that window.
+   - `BodyId::phantom` is keyed by the witness as well as the star, so two craft's false
+     positives never merge while one craft's repeated transits of its own land on one body.
+   - `Prior::host_mass` **measures its own error** rather than stating one: the spread of `mu`
+     across sampled stars within a factor of two in band luminosity. That error is what carries
+     into the distance of every planet found by transit.
+   - **Changed from the plan:** the doc wanted the host mass recorded on the `Conclusion` so a
+     receiver could reproduce the radius. It is not, and does not need to be — the `Orbit`
+     carries the axis itself, so a receiver reads the distance rather than recomputing it. The
+     mass would only matter for re-deriving one, which nothing does.
 5. **What a body is, in the truth.** The three still absent, the star's own pole having been
    phase 1's: reflectance per band, an atmosphere and what shows at the top of it, and rotation
    for generated bodies. Then the authored Sol table, which lives in `lc-world` beside `rings.rs`,
