@@ -294,7 +294,7 @@ pub fn open_panels(
                     &mut out,
                     &mut curve,
                 ),
-            Panel::System => system(
+            Panel::System => crate::system_panel::system(
                 ui,
                 &ui_state,
                 &game,
@@ -501,115 +501,13 @@ fn flight(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Re
     ui.weak(format!("at {:.3}, {:.3}, {:.3} ly", p.x, p.y, p.z));
 }
 
-/// The system window: what is here, and where the ship can be sent.
-///
-/// Two sections. The inventory runs outward from the star with each body's satellites behind
-/// it; picking one opens its courses. Nothing is flown until Go, so a player can read the
-/// options without committing to one.
-#[allow(clippy::too_many_arguments)]
-fn system(
-    ui: &mut egui::Ui,
-    state: &Ui,
-    game: &Game,
-    uplink: &crate::uplink::Uplink,
-    tab: &mut SystemTab,
-    show_all: &mut bool,
-    revealed: &mut Option<Target>,
-    out: &mut MessageWriter<Requested>,
-) {
-    let Some(system) = game.system.as_ref() else {
-        ui.label("Between systems. There is nothing local to go to.");
-        return;
-    };
-    ui.horizontal(|ui| {
-        ui.selectable_value(tab, SystemTab::Bodies, format!("{} bodies", system.len()));
-        // Counted in the tab, because whether anyone is here at all is the first thing worth
-        // knowing and opening the other list to find out would be one click too many.
-        ui.selectable_value(tab, SystemTab::Ships, match uplink.contacts.len() {
-            0 => "no ships".to_string(),
-            1 => "1 ship".to_string(),
-            n => format!("{n} ships"),
-        });
-    });
-    station(ui, state, game, out);
-    ui.separator();
-    if *tab == SystemTab::Ships {
-        ships(ui, game, uplink, out);
-        return;
-    }
-    let labels = game.home_labels();
-    let called = |target: &lc_world::navigation::Target, fallback: &str| match target {
-        lc_world::navigation::Target::Body(key) => labels.of(key),
-        // A band's designation is made from its shape, not from anybody's name.
-        lc_world::navigation::Target::Band(_) => fallback.to_string(),
-    };
-    ui.horizontal(|ui| {
-        ui.label(game.name_of(system.star));
-        ui.checkbox(show_all, "all");
-    });
-
-    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-        for entry in system.inventory().iter().filter(|e| *show_all || e.major) {
-            let picked = state.focus.as_ref() == Some(&entry.target);
-            ui.horizontal(|ui| {
-                ui.add_space(entry.depth as f32 * 12.0);
-                let row = ui.selectable_label(picked, called(&entry.target, &entry.designation));
-                if row.clicked() {
-                    let next = (!picked).then(|| entry.target.clone());
-                    ask(out, Action::FocusTarget(next));
-                }
-                // Once, when the focus changes. Every frame would fight the player's own
-                // scrolling, and never would hide a body picked from anywhere but this list.
-                if picked && revealed.as_ref() != Some(&entry.target) {
-                    *revealed = Some(entry.target.clone());
-                    row.scroll_to_me(Some(egui::Align::Center));
-                }
-                ui.weak(span_m(entry.orbit_radius_m));
-            });
-        }
-    });
-    ui.separator();
-
-    let Some(target) = state.focus.as_ref() else {
-        ui.label("Pick something to go to.");
-        return;
-    };
-    let Some(entry) = system.inventory().iter().find(|e| &e.target == target) else { return };
-    ui.heading(called(&entry.target, &entry.designation));
-    ui.weak(match entry.orbit_radius_m {
-        r if r > 0.0 => format!(
-            "{} — {} out, {} away",
-            entry.kind.label(),
-            span_m(r),
-            span(range_to(game, system, target)),
-        ),
-        _ => format!("{} — {} away", entry.kind.label(), span(range_to(game, system, target))),
-    });
-
-    for (label, course) in crate::navigation::options_for(system, target) {
-        let armed = state.course.as_ref() == Some(&course);
-        if ui.selectable_label(armed, &label).clicked() {
-            ask(out, Action::ChooseCourse((!armed).then_some(course)));
-        }
-    }
-    ui.separator();
-    ui.horizontal(|ui| {
-        let ready = state.course.is_some();
-        if ui.add_enabled(ready, egui::Button::new("Go")).clicked() {
-            if let Some(course) = state.course.clone() {
-                ask(out, Action::SetCourse(course));
-            }
-        }
-        ui.weak(format!("brachistochrone at {:.0} g", game.ship.motion.drive.accel_g));
-    });
-}
 
 /// Who else is here, and how old the news of them is.
 ///
 /// Every row is a *sighting*, and the age of the light is a column rather than a footnote:
 /// across a system it runs from seconds to hours, and a range read as though it were current
 /// is the one mistake this list exists to stop a player making.
-fn ships(
+pub(crate) fn ships(
     ui: &mut egui::Ui,
     game: &Game,
     uplink: &crate::uplink::Uplink,
@@ -685,7 +583,7 @@ fn ships(
 }
 
 /// Where the ship is holding, if it is holding anywhere.
-fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+pub(crate) fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let Some(system) = game.system.as_ref() else { return };
     let Some(waypoint) = game.station() else {
         match game.coast() {
@@ -726,7 +624,7 @@ fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<R
 }
 
 /// How far the ship is from a target, light-years.
-fn range_to(game: &Game, system: &crate::system::LocalSystem, target: &Target) -> f64 {
+pub(crate) fn range_to(game: &Game, system: &crate::system::LocalSystem, target: &Target) -> f64 {
     // At the ship's own time. Read out of the arena, which no longer advances, a three-radii
     // orbit of Earth read as five hundred thousand kilometers after five hours -- which is
     // exactly how far Earth had gone in the meantime.
@@ -751,11 +649,11 @@ pub(crate) fn duration(seconds: f64) -> String {
 }
 
 /// A distance in whatever unit makes it readable.
-fn span(light_years: f64) -> String {
+pub(crate) fn span(light_years: f64) -> String {
     span_m(light_years * crate::system::M_PER_LY)
 }
 
-fn span_m(meters: f64) -> String {
+pub(crate) fn span_m(meters: f64) -> String {
     match meters {
         // The primary orbits nothing, and "0 thousand km" reads as a measurement.
         m if m <= 0.0 => "the center".to_string(),

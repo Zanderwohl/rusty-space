@@ -55,6 +55,7 @@ pub mod signin_ui;
 pub mod sky_asset;
 pub mod surfaces;
 pub mod starfield;
+pub mod system_panel;
 pub mod telescope_panel;
 pub mod tonemap;
 pub mod ui;
