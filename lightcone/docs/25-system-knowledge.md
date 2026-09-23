@@ -7,8 +7,8 @@ a system reads the generator. This extends the transit search in
 body with a name, an orbit and a place in a plane that was itself worked out.
 
 Status: **design**, with phases 1 to 5 built, bar a deferred item in each of 3 and 5. Nothing
-below is built except where it says so, and what is carries a mark. Every claim about what exists was checked against the code on
-2026-09-22, and the symbols named are real; where a draft of this document guessed wrong, the
+below is built except where it says so, and what is carries a mark. Every claim about what
+exists was checked against the code on 2026-09-22, and the symbols named are real; where a draft of this document guessed wrong, the
 correction is in the text rather than quietly removed, because the wrong guess was usually "that
 already exists" about something that does not.
 
