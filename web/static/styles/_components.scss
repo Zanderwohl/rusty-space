@@ -6,11 +6,11 @@
   display: inline-flex;
   font-family: var(--font-display);
   font-palette: --wordmark-on-dark;
-  // A step above the heading scale's second rung, because Nabla's depth lives inside the
-  // glyph: at the size a heading is set at the extrusion closes up and the letters go muddy.
-  font-size: var(--step-2);
-  // Nabla carries one weight and its own depth. A synthesised bold and a tightened track both
-  // fight the extrusion, which is the shape doing the work here; the colour and the weight
+  // Off the heading scale and above it, because Nabla's depth lives inside the glyph: at a
+  // heading's size the extrusion closes up and the letters go muddy.
+  font-size: 2.5rem;
+  // Nabla carries one weight and its own depth. A synthesized bold and a tightened track both
+  // fight the extrusion, which is the shape doing the work here; the color and the weight
   // below are what the fallback stack gets when the face has not arrived.
   font-weight: 400;
   gap: 0.25em;
