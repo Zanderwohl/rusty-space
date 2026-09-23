@@ -57,7 +57,8 @@ pub fn foliage(teff_k: f64) -> Foliage {
         // Hues kept off rust's 40 degrees at both ends, or growth reads as bare red ground.
         (3000.0, Foliage { low: [0.24, 0.04, 330.0], high: [0.30, 0.04, 335.0] }),
         (4300.0, Foliage { low: [0.38, 0.11, 355.0], high: [0.43, 0.09, 350.0] }),
-        (5772.0, Foliage { low: [0.54, 0.10, 138.0], high: [0.50, 0.09, 132.0] }),
+        // Forest rather than meadow: the deep green of a Blue Marble photograph.
+        (5772.0, Foliage { low: [0.40, 0.12, 145.0], high: [0.43, 0.10, 130.0] }),
         (7000.0, Foliage { low: [0.70, 0.13, 95.0], high: [0.66, 0.11, 85.0] }),
     ];
     let i = ANCHORS.windows(2).position(|w| teff_k <= w[1].0).unwrap_or(ANCHORS.len() - 2);
@@ -102,8 +103,11 @@ pub struct Air {
     pub height: f32,
 }
 
-/// Vertical optical depth of an Earth's worth of nitrogen, per channel at 680, 550 and 440 nm.
-const EARTH_GAS: [f32; 3] = [0.045, 0.1, 0.24];
+/// Vertical optical depth of an Earth's worth of nitrogen, per channel at 680, 550 and 440 nm:
+/// half the true figures. The scale height is exaggerated, so the full depth washed the disc
+/// out to a pastel; at half the limb still shows, because a tangent ray crosses sixteen times
+/// the vertical depth.
+const EARTH_GAS: [f32; 3] = [0.022, 0.05, 0.12];
 
 /// The water tag the generator writes, since a share of the mass is not something a class says.
 pub const WATER: &str = "Water:";
@@ -352,7 +356,7 @@ fn measured(id: &str) -> Option<Climate> {
             aridity: 0.0,
             dark: 0.0,
             clouds: Clouds { cover: 0.0, opacity: 1.0, tint: [1.0; 3] },
-            air: Air { gas: EARTH_GAS, haze: 0.03, haze_albedo: [0.9, 0.9, 0.9], height: 0.025 },
+            air: Air { gas: EARTH_GAS, haze: 0.01, haze_albedo: [0.9, 0.9, 0.9], height: 0.025 },
         },
         // Its clouds are water ice, faint and sparse; exaggerated a little so the wisps show.
         "Mars" => Climate {
@@ -413,7 +417,8 @@ mod tests {
     #[test]
     fn growth_is_the_colour_its_star_leaves() {
         let sun = foliage(5772.0);
-        let off = sun.low.iter().zip([0.54, 0.10, 138.0]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let off = sun.low.iter().zip([0.40, 0.12, 145.0]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        // rocky.tgraph's defaults, which are the Sun's.
         assert!(off < 1e-3, "the Sun's is the graph's own green: {:?}", sun.low);
         let hot = foliage(7000.0).low;
         assert!((40.0..100.0).contains(&hot[2]), "hot-star growth is gold: hue {}", hot[2]);
