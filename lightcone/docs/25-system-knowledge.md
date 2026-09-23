@@ -277,10 +277,28 @@ bodies of one system in turn, **brightest first**, for `SURVEY_DWELL_S` each. Wh
   `look` can only be asked about it if it is a source like any other. A star light-years off
   cannot outshine a planet at 5 AU, so it can neither glare on one nor hide behind one.
 
-Measured: a ship 5 AU out holds 7 bodies after one tick and 213 of Sol's 221 after forty, each
-with a bearing, a brightness and a disc, under the `BodyId` a navigation order names. Mars is not
-in the first seven, which is the physics and not a fault: the Galilean moons and Titan are all
-brighter than it is from there.
+- **The star is measured every tick, and does not take a turn.** It is not a target of the
+  survey; it is the reference the survey is measured against, in every frame because it is the
+  brightest thing in the sky and what every phase angle is reckoned from. So it costs no dwell
+  of its own, and its parallax accumulates with the ship's motion tick by tick — without which
+  nothing in the system has a distance and no mass prior runs. Putting it in the source list for
+  its glare and never pointing at it is what the first version did, and a test asking for its
+  triangulated distance is what caught that.
+
+Measured: a ship 5 AU out holds 7 bodies and its star after one tick, and 213 of Sol's 221 after
+forty, each with a bearing, a brightness and a disc, under the `BodyId` a navigation order names.
+Mars is not in the first seven, which is the physics and not a fault: the Galilean moons and
+Titan are all brighter than it is from there.
+
+**A body is never given a distance by being watched move.** `astrometry::triangulate` fits a
+static point to whatever bearings it is handed, and every bearing to a body is taken from inside
+its own system, where it moves appreciably between them. So it returns a place the body was never
+at, with the error bar of a fit that converged: a ship on a 5 AU orbit surveying Sol put **Jupiter
+at 1.63 AU plus or minus 9e-7**, sixteen million sigma from where it was, which is far worse than
+no answer. `Knowledge::believe` now returns `Distance::Unknown` for a `Subject::Body` and a body's
+distance comes from its orbit, which is what this section always said it would. The ship's own sun
+is measured from the same bearings, because it is the one thing in the system that holds still —
+and that is the whole difference.
 
 **The local star is in the way.** ✅ **Built** (2026-09-22), and the diagnosis it was built from
 was half wrong, so both halves are recorded here.

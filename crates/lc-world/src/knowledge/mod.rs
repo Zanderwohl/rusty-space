@@ -206,7 +206,17 @@ impl File {
         witnesses.sort_unstable();
         witnesses.dedup();
         // Measured here beats a claim whatever error bars either carries: only one can be checked.
-        let measured = astrometry::triangulate(&bearings);
+        //
+        // Except for a body, which is never a static point. `triangulate` fits one to whatever
+        // bearings it is given, and a body's bearings are all taken from inside its own system
+        // where it moves appreciably between them -- so it returns a place the body was never
+        // at, with the error bar of a fit that converged. Measured: a ship on a 5 AU orbit
+        // surveying Sol put Jupiter at 1.63 AU plus or minus 9e-7, sixteen million sigma from
+        // where it was. A body's distance comes from its orbit; see `knowledge::body`.
+        let measured = match subject {
+            Subject::Body { .. } => Distance::Unknown,
+            _ => astrometry::triangulate(&bearings),
+        };
         let taken = matches!(measured, Distance::Measured { .. });
         let claimed = self.claims.iter().min_by(|a, b| sigma_of(a).total_cmp(&sigma_of(b)));
         let believed_claim = claimed.filter(|_| !taken);

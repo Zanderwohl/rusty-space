@@ -274,6 +274,26 @@ pub fn survey_between(
 
     let bodies = sources.len() - star_last;
     let witness = knowledge.owner;
+
+    // The star every tick, and not as a turn in the rotation. It is not a target of the survey;
+    // it is the reference the survey is measured against, in every frame because it is the
+    // brightest thing in the sky and what the phase angle of everything else is reckoned from.
+    // So it costs no dwell of its own, and its parallax accumulates with the ship's motion --
+    // without which nothing here has a distance and no mass prior runs.
+    if star_last > 0
+        && let Some(seen) = survey::look(
+            &optics,
+            &sources,
+            0,
+            survey::SURVEY_DWELL_S,
+            at.position_ly,
+            to_s,
+            witness,
+        )
+    {
+        knowledge.sighted(Subject::Star(system.star), seen);
+    }
+
     for slot in duty.visits(bodies, from_s, to_s) {
         let index = star_last + slot;
         if let Some(seen) =
@@ -487,11 +507,13 @@ mod tests {
         o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
         assert_eq!(o.duty.label(), "surveying");
 
-        // One tick brings round seven bodies, brightest first, so the first of them is the
-        // brightest thing in the system. Jupiter, from here.
+        // One tick brings round seven bodies, brightest first, plus the star, which is measured
+        // every tick rather than taking a turn. The first body is the brightest thing in the
+        // system: Jupiter, from here.
         o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S);
         let first = k.len();
-        assert_eq!(first, 7, "one tick is seven turns of SURVEY_DWELL_S");
+        assert_eq!(first, 8, "seven turns of SURVEY_DWELL_S, and the star besides");
+        assert!(k.belief(Subject::Star(system.star)).is_some(), "the star is measured first of all");
         let jupiter = Subject::Body {
             star: system.star,
             body: crate::knowledge::BodyId::of(system.star, "Jupiter"),
@@ -516,8 +538,57 @@ mod tests {
         // Mars is not among the first seven, and that is the physics rather than a fault: from
         // five AU the Galilean moons and Titan are all brighter than it is.
         let held = k.len();
-        assert!(held > 100, "only {held} bodies after a real second");
-        assert_eq!(k.bodies_of(system.star, TICK_S * 20.0).len(), held, "every one is readable");
+        assert!(held > 100, "only {held} subjects after a real second");
+        // Everything but the star itself is a body, and every one of them reads back.
+        assert_eq!(k.bodies_of(system.star, TICK_S * 20.0).len(), held - 1, "a body did not read back");
+    }
+
+    /// **A moving ship's bearings on a moving planet are not a distance.** `triangulate` fits a
+    /// static point to whatever it is given, and a body's bearings are all taken from inside its
+    /// own system where it moves appreciably between them. Before this was guarded, a ship on a
+    /// 5 AU orbit surveying Sol put Jupiter at 1.63 AU plus or minus 9e-7 -- sixteen million
+    /// sigma from where it was, which is worse than no answer.
+    #[test]
+    fn a_body_never_gets_a_distance_from_being_watched_move() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(2));
+        let mut o = Observatory::default();
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+
+        // A circular 5 AU orbit about a solar mass, which is what `Course::Orbit` would fly.
+        let period_s = std::f64::consts::TAU * ((5.0 * AU_M).powi(3) / 1.327e20f64).sqrt();
+        let orbit = |t: f64| {
+            let phase = std::f64::consts::TAU * t / period_s;
+            system.star_position_ly()
+                + DVec3::new(phase.cos(), phase.sin(), 0.0) * 5.0 * AU_M / M_PER_LY
+        };
+        for step in 1..=120 {
+            let t = TICK_S * step as f64;
+            o.tick(&mut sky, Some(&system), &mut k, at(orbit(t)), t);
+        }
+
+        let mut checked = 0;
+        for name in ["Venus", "Earth", "Mars", "Jupiter", "Saturn"] {
+            let subject = Subject::Body {
+                star: system.star,
+                body: crate::knowledge::BodyId::of(system.star, name),
+            };
+            let Some(belief) = k.belief(subject) else { continue };
+            assert!(belief.sightings > 1, "{name} was only seen once");
+            assert_eq!(
+                belief.distance,
+                crate::knowledge::Distance::Unknown,
+                "{name} was given a distance by watching it move"
+            );
+            assert!(!belief.triangulated);
+            checked += 1;
+        }
+        assert_eq!(checked, 5, "only {checked} planets came round twice in 120 ticks");
+
+        // The ship's own sun, from the same bearings, is measured: it is the one thing in the
+        // system that holds still, which is the whole difference.
+        let host = k.belief(Subject::Star(system.star)).expect("the sun was surveyed too");
+        assert!(host.triangulated, "{:?}", host.distance);
     }
 
     /// A survey of a system the craft has not been handed does nothing rather than inventing
