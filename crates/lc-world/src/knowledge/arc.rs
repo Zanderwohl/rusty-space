@@ -29,6 +29,8 @@
 //! against the bearings themselves: propagate the orbit to each observation time and measure
 //! the angle it misses by. See `lightcone/docs/25-system-knowledge.md`.
 
+use std::f64::consts::PI;
+
 use em_foundations::kepler;
 use glam::{DMat3, DVec3};
 
@@ -741,8 +743,12 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
     // Chi-square one worse, expressed in the weighted RMS this file works in.
     let worse = (fitted.residual_rad * fitted.residual_rad + 1.0 / total).sqrt();
 
-    let walk = |hold: usize, nudge: &dyn Fn(&Fitted, f64) -> Fitted, unit: f64| -> f64 {
-        let mut step = unit;
+    // `ceiling` is where an element stops meaning anything rather than where the data stops
+    // constraining it: an eccentricity walked past one is a hyperbola, and a pole is at most
+    // half a turn from any other. Reporting the bound beats reporting infinity, which reads as
+    // "unmeasured" when what is true is "unmeasured, and it cannot be worse than this".
+    let walk = |hold: usize, nudge: &dyn Fn(&Fitted, f64) -> Fitted, unit: f64, ceiling: f64| -> f64 {
+        let mut step = unit.min(ceiling);
         for _ in 0..WALKS {
             let mut trial = nudge(fitted, step);
             // The nudged orbit carries the *old* residual in its field, and everything in this
@@ -754,24 +760,49 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
             if settle_but(trial, looks, PROFILINGS, hold).residual_rad > worse {
                 return step;
             }
-            step *= 1.6;
+            if step >= ceiling {
+                return ceiling;
+            }
+            step = (step * 1.6).min(ceiling);
         }
         f64::INFINITY
     };
 
-    let (u, _) = basis(fitted.pole);
+    // A pole's error is two-dimensional, and an arc pins the two directions differently: one
+    // seen edge-on fixes the plane's tilt and says almost nothing about its twist. Walking one
+    // basis vector reported whichever of the two that vector happened to be.
+    let (u, v) = basis(fitted.pole);
+    let pole_rad = [u, v]
+        .into_iter()
+        .map(|axis| {
+            walk(2, &|f, d| Fitted { pole: (f.pole + axis * d).normalize(), ..*f }, 1.0e-9, PI)
+        })
+        .fold(0.0f64, f64::max);
+
     Spread {
         semi_major_m: walk(
             0,
             &|f, d| Fitted { semi_major_m: f.semi_major_m * (1.0 + d), ..*f },
             1.0e-9,
+            f64::INFINITY,
         ) * fitted.semi_major_m,
-        eccentricity: walk(1, &|f, d| Fitted { eccentricity: f.eccentricity + d, ..*f }, 1.0e-9),
-        pole_rad: walk(2, &|f, d| Fitted { pole: (f.pole + u * d).normalize(), ..*f }, 1.0e-9),
-        period_s: walk(6, &|f, d| Fitted { period_s: f.period_s * (1.0 + d), ..*f }, 1.0e-9)
+        eccentricity: walk(
+            1,
+            &|f, d| Fitted { eccentricity: (f.eccentricity + d).min(PARABOLIC), ..*f },
+            1.0e-9,
+            (PARABOLIC - fitted.eccentricity).max(0.0),
+        ),
+        pole_rad,
+        period_s: walk(6, &|f, d| Fitted { period_s: f.period_s * (1.0 + d), ..*f }, 1.0e-9, f64::INFINITY)
             * fitted.period_s,
     }
 }
+
+/// The closest to parabolic an ellipse is allowed to get.
+///
+/// Not one: at one the semi-latus rectum is finite and the axis is not, so every element the
+/// fit reports goes with it.
+const PARABOLIC: f64 = 0.999;
 
 impl Fitted {
     /// The fit as a record, in the elements [`crate::knowledge::Orientation`] is defined in.
@@ -1275,6 +1306,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// An error bar has to stay inside what the element means. An eccentricity walked past one
+    /// is a hyperbola, and a pole is at most half a turn from any other, so a bar that runs off
+    /// to infinity in either is reporting a shape the fit does not describe.
+    #[test]
+    fn an_error_bar_stays_inside_what_the_element_means() {
+        // Noisy, so the elements are loosely constrained and the walks run long.
+        let mut checked = 0;
+        for (au, e) in [(1.0, 0.0167), (5.2, 0.049), (0.4, 0.7)] {
+            let truth = like(au, e);
+            let seen = looks(&truth, 5.0, 48, 3.0 * DAY_S, SIGMA * 6.0);
+            let Some(fitted) = fit(&seen) else { continue };
+            checked += 1;
+            let spread = spread(&fitted, &seen);
+            assert!(
+                spread.eccentricity <= PARABOLIC + 1.0e-12,
+                "e bar of {} at {au} AU",
+                spread.eccentricity
+            );
+            assert!(fitted.eccentricity + spread.eccentricity <= 1.0, "the bar reaches a hyperbola");
+            assert!(spread.pole_rad <= PI + 1.0e-12, "pole bar of {} rad", spread.pole_rad);
+        }
+        assert!(checked > 0, "no arc fitted, so nothing was checked");
+    }
+
+    /// A pole's error is two-dimensional and an arc pins the two directions differently. The
+    /// bar is the worse of them: walking one basis vector reported whichever that happened to
+    /// be, which for an edge-on arc is the direction that says nothing.
+    #[test]
+    fn the_pole_bar_is_the_worse_of_the_two_directions() {
+        let truth = like(1.0, 0.0167);
+        let seen = looks(&truth, 5.0, 48, 3.0 * DAY_S, SIGMA);
+        let fitted = fit(&seen).expect("fits");
+        let reported = spread(&fitted, &seen).pole_rad;
+
+        let worse = (fitted.residual_rad * fitted.residual_rad
+            + 1.0 / seen.iter().map(|l| 1.0 / (l.sigma_rad * l.sigma_rad)).sum::<f64>())
+        .sqrt();
+        let (u, v) = basis(fitted.pole);
+        let one_way = |axis: DVec3| {
+            let mut step = 1.0e-9;
+            for _ in 0..WALKS {
+                let mut trial = Fitted { pole: (fitted.pole + axis * step).normalize(), ..fitted };
+                let Some(fresh) = residual(&trial, &seen, f64::INFINITY) else { return step };
+                trial.residual_rad = fresh;
+                if settle_but(trial, &seen, PROFILINGS, 2).residual_rad > worse {
+                    return step;
+                }
+                step = (step * 1.6).min(PI);
+            }
+            PI
+        };
+        let (along_u, along_v) = (one_way(u), one_way(v));
+        assert!(
+            (reported - along_u.max(along_v)).abs() < 1.0e-9,
+            "reported {reported}, u {along_u}, v {along_v}",
+        );
     }
 
     /// An element's error bar is how far it can move before the fit is a chi-square worse, with

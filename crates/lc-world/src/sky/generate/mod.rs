@@ -123,7 +123,10 @@ pub fn system_for(star: &CatalogStar) -> GeneratedSystem {
 pub fn system_with(star: &CatalogStar, tuning: &Tuning) -> GeneratedSystem {
     let seed = star.seed();
     let name = star.provenance.name.clone().unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
-    let pole = pole_for(seed);
+    // Sol's is the ecliptic, not a seeded one: `CatalogStar::system_pole` is where that split
+    // lives, and reading it here is what keeps this system's belts and the arena's bodies in
+    // one plane.
+    let pole = star.system_pole();
     let arch = architecture(star, tuning);
 
     let mut planets = planet::planets(&name, &arch, star, tuning);
@@ -133,7 +136,7 @@ pub fn system_with(star: &CatalogStar, tuning: &Tuning) -> GeneratedSystem {
 
     // Sol's bodies are measured, so its belts are too -- see [`belt::solar`].
     let mut populations = match star.provenance.name.as_deref() {
-        Some(crate::system::SOL) => belt::solar(DVec3::Z, tuning),
+        Some(crate::system::SOL) => belt::solar(pole, tuning),
         _ => belt::populations(&arch, pole, seed, tuning),
     };
     populations.extend(swarm(seed, star));
@@ -594,6 +597,11 @@ mod tests {
         let other = sun_like();
         assert_eq!(other.system_pole(), pole_for(other.seed()));
         assert!(other.system_pole().dot(DVec3::Z).abs() < 0.999, "a generated pole that is +Z");
+
+        // And the system reports the same one. It used to carry its seed's pole whatever the
+        // star was, so Sol's belts were drawn in the ecliptic and its system said otherwise.
+        assert_eq!(system_for(&sol).pole, DVec3::Z);
+        assert_eq!(system_for(&other).pole, other.system_pole());
     }
 
     /// A star spins near its planets' plane but not exactly in it, and the same star always

@@ -6,7 +6,6 @@
 
 use em_sim::id::BodyIndex;
 use em_sim::system::System;
-use em_sim::universe::UniverseFileContents;
 use em_foundations::time::Instant;
 use glam::DVec3;
 use crate::sky::{CatalogStar, StarId, generate};
@@ -125,8 +124,17 @@ pub struct LocalSystem {
 impl LocalSystem {
     /// Load the system around a star, real where there is real data and generated otherwise.
     pub fn for_star(star: &CatalogStar) -> Option<Self> {
-        let populations = generate::system_for(star).populations;
-        let contents = Self::contents_for(star);
+        // Once. Generating a system is the expensive part of loading one, and the populations
+        // and the bodies both come out of the same pass.
+        let generated = generate::system_for(star);
+        let contents = match star.provenance.name.as_deref() {
+            // The one system with measured data rather than generated: two hundred and thirty
+            // bodies fitted against JPL, moons and comets included. Its belts are still the
+            // generator's, which knows they are Sol's.
+            Some(SOL) => em_sim::presets::solar_system(),
+            _ => generated.to_universe(),
+        };
+        let populations = generated.populations;
         let sim = System::from_contents(&contents).ok()?;
         // The most massive body is the primary. Not the first: a multiple is a barycenter with
         // children, and the barycenter is massless.
@@ -154,15 +162,6 @@ impl LocalSystem {
         system.inventory =
             build_inventory(&system.sim, primary, &system.star_name, &system.populations);
         Some(system)
-    }
-
-    fn contents_for(star: &CatalogStar) -> UniverseFileContents {
-        match star.provenance.name.as_deref() {
-            // The one system with measured data rather than generated: two hundred and thirty
-            // bodies fitted against JPL, moons and comets included.
-            Some(SOL) => em_sim::presets::solar_system(),
-            _ => generate::system_for(star).to_universe(),
-        }
     }
 
     /// Propagate to a coordinate time, in seconds since the world origin.
