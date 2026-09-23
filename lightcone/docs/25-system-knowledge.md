@@ -6,8 +6,8 @@ a system reads the generator. This extends the transit search in
 [24-standing-instruments.md](24-standing-instruments.md) from "there is probably a planet" to a
 body with a name, an orbit and a place in a plane that was itself worked out.
 
-Status: **design**, with phases 1, 2 and 4 built. Nothing below is built except where it says so,
-and what is carries a mark. Every claim about what exists was checked against the code on
+Status: **design**, with phases 1, 2 and 4 built and 3 part built. Nothing below is built
+except where it says so, and what is carries a mark. Every claim about what exists was checked against the code on
 2026-09-22, and the symbols named are real; where a draft of this document guessed wrong, the
 correction is in the text rather than quietly removed, because the wrong guess was usually "that
 already exists" about something that does not.
@@ -902,10 +902,32 @@ knowledge. Today:
      a plane nothing lies in.
    - **Changed from the plan:** nothing in the shape, but `found_planet` now takes an `Orbit` and
      still stamps the witness itself, since it records what *this* craft found.
-3. **The panel and the map read beliefs.** Known bodies only, candidates in fainter green,
-   shells, distance error bars along the presumed plane, the System plane option from belief, and
-   the detail section with sources. `em_map::Plane` gains a fieldless `System` variant, and
-   `Plane::other()` becomes a cycle.
+3. **The panel and the map read beliefs.** 🔶 **Part built** (2026-09-22). Known bodies only,
+   candidates in fainter green, shells, distance error bars along the presumed plane, the System
+   plane option from belief, and the detail section with sources.
+
+   - ✅ **The plane option.** `em_map::Plane::Ecliptic` became `Plane::System`, *replaced* rather
+     than added beside — em-map is used only by `lc-client`, so nothing would have asked for a
+     fixed `+Z` frame again, and keeping one for a consumer that does not exist is speculation.
+     So `other()` stays a two-way toggle rather than becoming a cycle, which is where this
+     departs from the plan. `MapView` carries the `SystemPlane` belief rather than a bare pole,
+     because the panel has to say *why* the option is unavailable, and the two ways of not having
+     a plane read differently: nothing solved, against a pole known to lie on a circle.
+   - ✅ **The System panel.** Reads `bodies_of`, with the detail section, unsettled candidates
+     dimmed beneath, and the plane line above. Two lines exist to stop a number reading as more
+     than it is: *edge-on to one line of sight*, and a transit's distance marked as resting on a
+     prior. Courses still join back to a truth target by hashing generator keys, until phase 7.
+     Belts are still the generator's, until phase 8.
+   - ⬜ **The map.** Still draws truth's bodies. Needs the primitives listed under *The map*: a
+     camera-facing dashed ring for a `Shell`, faintness for a candidate, and a radial error bar.
+     `Form` in `map.rs` has `Sphere`, `Circle` and `Dot`, none of which is a ring at an orbit
+     radius, so this is the one part of phase 3 that is new renderer work rather than new reads.
+
+   **The sky stays truth, and only the map is a chart of knowledge.** Not stated before and
+   load-bearing: a craft discovers a planet by *seeing* it, so the starfield draws what is there.
+   `starfield::Bodies` therefore keeps reading `drawables_at`, and it is the map — a diagram of
+   what is known — that draws beliefs. A sky filtered by knowledge would be a sky in which
+   nothing could ever be found.
 4. **Transits make bodies.** ✅ **Built** (2026-09-22). A settled transit calls `found_planet`,
    the period gives a distance through the mass prior, and the result is `EdgeOnTo`, crossed
    with other craft's. What it came to:
