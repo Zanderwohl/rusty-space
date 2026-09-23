@@ -62,8 +62,7 @@ reason `ability::allows` opens development there: the population is whoever ran 
 at, and a test holds the two tables to each other.
 
 `teleport`, `energize` and `finish-refit` act on the asker's own ship from debug (3). Their `ship:`
-argument, which
-names any ship, starts at admin (2), so admins and superadmins act on anyone's.
+argument, which names any ship, starts at admin (2), so admins and superadmins act on anyone's.
 
 ## The queue
 
