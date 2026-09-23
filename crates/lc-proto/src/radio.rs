@@ -112,7 +112,7 @@ pub struct Reported {
 }
 
 /// Bump it when `lc_world::knowledge::Report` changes shape.
-pub const REPORT_FORMAT: u32 = 4;
+pub const REPORT_FORMAT: u32 = 5;
 
 /// How many of the addressee's messages an outgoing one acknowledges. There is no
 /// retransmission behind it: a lost message is undetectable at either end.

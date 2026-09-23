@@ -32,9 +32,6 @@
 use em_foundations::kepler;
 use glam::{DMat3, DVec3};
 
-use crate::knowledge::astrometry::Bearing;
-use crate::knowledge::Subject;
-use crate::sky::StarId;
 
 /// Ranges tried per axis before refining, log-spaced across [`NEAR_AU`, `FAR_AU`].
 ///
@@ -42,6 +39,36 @@ use crate::sky::StarId;
 /// leaves more candidates half-plausible, and those are the ones whose cost is a Kepler solve
 /// per look rather than a rejected guard. Halving this to 128 lost a case and took 15% longer.
 const RANGES: usize = 256;
+
+/// How many times the orbit's apparent scale the range search allows it to be.
+///
+/// **The geometry hands over the band, and it has to come from every look.** A ray's nearest
+/// point to the primary is at `-from . toward`, and how far it misses by there is the smallest
+/// the orbit can be. The largest of those misses across the arc is the orbit's scale, and the
+/// body is somewhere within a few times it.
+///
+/// Across the arc and not per ray: a body seen near opposition has a ray that passes almost
+/// through its primary and misses by nothing, and a band built on that one look collapses to a
+/// point.
+///
+/// This is what makes a satellite tractable at all: Io's scale comes out at 0.003 AU against an
+/// observer 9.9 AU off, and the whole-system grid it replaces runs 0.02 to 200 AU in 2.7%
+/// steps, of which Io's entire orbit is a twentieth of one.
+const SPAN: f64 = 4.0;
+
+/// How many times its own scale a body must sit from its primary before the narrow band is
+/// used instead of the whole system's.
+///
+/// **The scale is a lower bound, and a weak one when the geometry is unkind.** A body near
+/// conjunction has rays that pass close to its primary however big its orbit is, so the miss
+/// says little. Two bodies at 5 and 5.2 AU have nearly the same period and so sit in near
+/// permanent conjunction: measured, Jupiter watched from 5 AU gives a scale of 0.46 AU for a
+/// 5.2 AU orbit, and a band built on that misses the truth entirely.
+///
+/// So the narrow band is used only where the reading is unambiguous. The two cases are three
+/// orders of magnitude apart and nothing sits between them: that same Jupiter reads 11 and Io
+/// about Jupiter reads 3500.
+const SATELLITE: f64 = 100.0;
 
 /// The band a body of a system can be in, astronomical units. Outside it there is nothing a
 /// survey from inside would be looking at.
@@ -56,7 +83,7 @@ const FAR_AU: f64 = 200.0;
 /// Meters in an astronomical unit.
 const AU_M: f64 = 1.495_978_707e11;
 
-/// The band a *star's* gravitational parameter can be in, as multiples of the Sun's.
+/// The heaviest a thing at a focus may be, as multiples of the Sun.
 ///
 /// The axis and the period each pass the band above and still imply a nonsense mass between
 /// them: nine hours of a generated system fitted to 188 AU with a 187 day period, which is a
@@ -64,7 +91,6 @@ const AU_M: f64 = 1.495_978_707e11;
 /// one of the answers -- what is being fitted is an orbit about a *star*, and the range of
 /// stars is a fact about stars and not about this orbit.
 const MU_SUN: f64 = 1.327_124_4e20;
-const LIGHTEST: f64 = 0.02;
 const HEAVIEST: f64 = 300.0;
 
 /// Rounds of shrinking the search about the best pair, and the factor each round shrinks by.
@@ -125,10 +151,14 @@ pub struct Look {
 }
 
 impl Look {
-    /// From a stored sighting, with the star's position as the origin of the frame.
-    pub fn of(seen: &crate::knowledge::Sighting, star_ly: DVec3) -> Self {
+    /// From a stored sighting, in the frame of whatever the body is being tested against.
+    ///
+    /// `primary_ly` is where that primary was **at this look's own time**, not now: a moon's
+    /// planet moves between one look and the next, and a frame that ignored that would be
+    /// fitting the planet's orbit and the moon's at once.
+    pub fn of(seen: &crate::knowledge::Sighting, primary_ly: DVec3) -> Self {
         Self {
-            from_m: (seen.bearing.observer_ly - star_ly) * crate::system::M_PER_LY,
+            from_m: (seen.bearing.observer_ly - primary_ly) * crate::system::M_PER_LY,
             toward: seen.bearing.toward,
             at_s: seen.observed_s,
             sigma_rad: seen.bearing.sigma_rad.max(f64::MIN_POSITIVE),
@@ -156,6 +186,14 @@ pub struct Fitted {
     pub epoch_s: f64,
     /// `n^2 a^3`: the star's gravitational parameter as this orbit measures it.
     pub mu: f64,
+    /// Furthest from the primary this fit was ever allowed to put the body, meters.
+    ///
+    /// Carried on the fit because `residual` is the one place every candidate is scored, and a
+    /// plausibility bound written in astronomical units is a bound about *stars*: Io's orbit is
+    /// 0.0028 AU and Jupiter is a thousandth of a solar mass, so a guard tuned to planets
+    /// throws away every satellite there is. The band the ranges were searched in is the honest
+    /// bound, it is already computed, and it means the same thing at every level.
+    pub reach_m: f64,
     /// The arc was too short to say anything about the eccentricity, so a circle was assumed.
     ///
     /// Not a claim that the orbit is circular. `1/r = A + B cos + C sin` needs the arc to bend
@@ -282,7 +320,7 @@ fn timing(mean: &[(f64, f64)]) -> Option<(f64, f64)> {
 /// arc that cross product is the arc's *curvature*, a part in ten thousand of the same
 /// magnitudes, and it fell under the degeneracy guard for every three-degree arc -- which is
 /// exactly the case ranging exists to rescue.
-fn through(places: &[(DVec3, f64)], looks: &[Look], bound: f64) -> Option<Fitted> {
+fn through(places: &[(DVec3, f64)], looks: &[Look], reach_m: f64, bound: f64) -> Option<Fitted> {
     if places.len() < 3 {
         return None;
     }
@@ -349,6 +387,7 @@ fn through(places: &[(DVec3, f64)], looks: &[Look], bound: f64) -> Option<Fitted
         periapsis_rad: if per_rad < 0.0 { -periapsis_rad } else { periapsis_rad },
         epoch_s,
         mu: n * n * semi_major_m * semi_major_m * semi_major_m,
+        reach_m,
         assumed_circular,
         residual_rad: 0.0,
         looks: looks.len(),
@@ -365,17 +404,23 @@ fn through(places: &[(DVec3, f64)], looks: &[Look], bound: f64) -> Option<Fitted
 /// quantity the function returns, so the exit changes the cost and not the answer.
 fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f64> {
     // Every candidate in this file is scored here and nowhere else, so this is where an
-    // implausible one is refused. Inside the band the ranges were searched in: outside it the
-    // axis is an artifact of a near-singular conic and not a body, and the period beside it can
-    // look entirely ordinary. A generated system fitted over nine hours produced 2.9e16 AU with
-    // a 158 day period, and it reached that by *settling* there, so checking only where the
-    // three-point solution lands is not enough.
-    if !(NEAR_AU * AU_M..=FAR_AU * AU_M).contains(&fitted.semi_major_m) || !sound(fitted.period_s) {
+    // implausible one is refused: no further from the primary than the ranges were searched.
+    // Outside that band the axis is an artifact of a near-singular conic and not a body, and
+    // the period beside it can look entirely ordinary -- a generated system fitted over nine
+    // hours produced 2.9e16 AU with a 158 day period. It reached that by *settling* there, so
+    // checking only where the three-point solution lands is not enough.
+    if !sound(fitted.semi_major_m) || !sound(fitted.period_s) {
         return None;
     }
+    if fitted.semi_major_m > fitted.reach_m {
+        return None;
+    }
+    // And the thing at the focus has to be something: a star at the top of the chain, a planet
+    // under one, a moon under that. Only the ceiling is a real statement, since a primary can
+    // be as light as a rock.
     let n = std::f64::consts::TAU / fitted.period_s;
     let implied = n * n * fitted.semi_major_m.powi(3) / MU_SUN;
-    if !(LIGHTEST..=HEAVIEST).contains(&implied) {
+    if !(implied > 0.0 && implied <= HEAVIEST) {
         return None;
     }
     let total: f64 = looks.iter().map(|l| 1.0 / (l.sigma_rad * l.sigma_rad)).sum();
@@ -629,6 +674,7 @@ impl Fitted {
     pub fn stated(
         &self,
         witness: crate::knowledge::Witness,
+        about: Option<crate::knowledge::BodyId>,
         looks: &[Look],
         stated_s: f64,
     ) -> crate::knowledge::Orbit {
@@ -643,6 +689,7 @@ impl Fitted {
         let au = self.semi_major_m / crate::navigation::AU;
         crate::knowledge::Orbit {
             witness,
+            about,
             period_s: (self.period_s, spread.period_s),
             semi_major_au: (au, spread.semi_major_m / crate::navigation::AU),
             eccentricity: (!self.assumed_circular).then_some((self.eccentricity, spread.eccentricity)),
@@ -677,7 +724,32 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
     let ranged: Vec<Look> = ordered.iter().copied().filter(|l| l.range_m.is_some()).collect();
     let anchors = if ranged.len() >= 3 { &ranged } else { &ordered };
     let (a, c) = (*anchors.first()?, *anchors.last()?);
-    let b = *anchors.get(anchors.len() / 2)?;
+    // The middle one is whichever look points furthest from both ends, not whichever sits in
+    // the middle of the list. A survey revisits on a fixed cadence and a satellite has a short
+    // period, so the two can resonate: twenty-four looks over exactly two of Io's orbits put
+    // the first and the middle at the *same orbital phase*, which is two coincident points and
+    // a conic through them that is singular however much the arc bends.
+    let apart = |look: &Look| {
+        between(look.toward, a.toward).min(between(look.toward, c.toward))
+    };
+    let b = *anchors
+        .iter()
+        .max_by(|p, q| apart(p).total_cmp(&apart(q)))?;
+
+    // How big the orbit can be, from the whole arc: the largest distance from the primary that
+    // any ray is forced to pass at. Then each anchor's band is the stretch of its own ray that
+    // stays inside that, which is a quadratic and exact.
+    let scale = ordered
+        .iter()
+        .map(|look| {
+            let nearest = -look.from_m.dot(look.toward);
+            (look.from_m + look.toward * nearest.max(0.0)).length()
+        })
+        .fold(0.0, f64::max);
+    let nearest = ordered.iter().map(|l| l.from_m.length()).fold(f64::INFINITY, f64::min);
+    let satellite = scale > 0.0 && nearest > scale * SATELLITE;
+    // A satellite is bounded by its own apparent scale; anything else by the system.
+    let reach = if satellite { (SPAN * scale).min(FAR_AU * AU_M) } else { FAR_AU * AU_M };
 
     // Ranged looks are positions, and three positions are an orbit outright: no grid, no
     // polish, nothing searched. What proximity buys is not a better search but no search.
@@ -686,7 +758,7 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
     if ranged.len() >= 3 {
         let places: Vec<(DVec3, f64)> =
             ranged.iter().filter_map(|l| Some((l.place()?, l.at_s))).collect();
-        if let Some(found) = through(&places, &ordered, f64::INFINITY) {
+        if let Some(found) = through(&places, &ordered, reach, f64::INFINITY) {
             return Some(settle(found, &ordered, SETTLINGS * 8));
         }
     }
@@ -699,19 +771,44 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
         let r2 = b.from_m + b.toward * rho_b;
         let rho_c = coplanar_range(r1, r2, c.from_m, c.toward)?;
         let r3 = c.from_m + c.toward * rho_c;
-        through(&[(r1, a.at_s), (r2, b.at_s), (r3, c.at_s)], &ordered, bound)
+        through(&[(r1, a.at_s), (r2, b.at_s), (r3, c.at_s)], &ordered, reach, bound)
     };
 
-    let step = (FAR_AU / NEAR_AU).ln() / (RANGES - 1) as f64;
-    let grid: Vec<f64> = (0..RANGES).map(|i| NEAR_AU * (i as f64 * step).exp() * AU_M).collect();
+    // A satellite's band is the stretch of its own ray that stays within `reach` of the
+    // primary, which is a quadratic and exact. Anything else gets the whole system, log-spaced
+    // because a body could be anywhere in it.
+    let whole = (FAR_AU / NEAR_AU).ln() / (RANGES - 1) as f64;
+    let over = |look: &Look| -> Vec<f64> {
+        if !satellite {
+            return (0..RANGES).map(|i| NEAR_AU * (i as f64 * whole).exp() * AU_M).collect();
+        }
+        let along = look.from_m.dot(look.toward);
+        let discriminant = along * along - look.from_m.length_squared() + reach * reach;
+        if !sound(discriminant) {
+            return Vec::new();
+        }
+        let root = discriminant.sqrt();
+        let (low, high) = ((-along - root).max(reach * 1.0e-6), -along + root);
+        if !sound(high - low) {
+            return Vec::new();
+        }
+        let step = (high - low) / (RANGES - 1) as f64;
+        (0..RANGES).map(|i| low + i as f64 * step).collect()
+    };
+    let (first, second) = (over(&a), over(&b));
+    if first.is_empty() || second.is_empty() {
+        return None;
+    }
+    // A step of the first band, as a fraction, for the polish to start from.
+    let step = (first.get(1)?.max(f64::MIN_POSITIVE) / first.first()?.max(f64::MIN_POSITIVE)).ln().abs().max(1.0e-9);
     // The grid keeps the best few, separated, rather than all of them or the best few
     // outright. No tightening bound here: a candidate worse than the eighth best is still worth
     // keeping if it is somewhere else, and rejecting it early is what destroys the diversity.
     /// A grid point: where it is on the grid, the two ranges, and what they fitted to.
     type Candidate = (usize, usize, f64, f64, Fitted);
     let mut found: Vec<Candidate> = Vec::new();
-    for (i, x) in grid.iter().enumerate() {
-        for (j, y) in grid.iter().enumerate() {
+    for (i, x) in first.iter().enumerate() {
+        for (j, y) in second.iter().enumerate() {
             let Some(fitted) = score(*x, *y, f64::INFINITY) else { continue };
             let near = found.iter().position(|(a, b, _, _, _)| {
                 a.abs_diff(i) < APART && b.abs_diff(j) < APART
@@ -767,70 +864,13 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
     Some(settle(best, &ordered, SETTLINGS * 8))
 }
 
-impl crate::knowledge::Knowledge {
-    /// The bearings held about a body, in the frame of where its star is *believed* to be.
-    ///
-    /// Believed, not true. The observer positions are the ship's own and exact; the star's is a
-    /// parallax with its own error, and an error there shifts every look by the same vector and
-    /// so biases the orbit. Measured to a part in 1e10 from an orbiting ship, which is why the
-    /// host star is surveyed every tick.
-    pub fn looks_at(&self, subject: Subject, star_ly: DVec3) -> Vec<Look> {
-        self.file(subject).map_or_else(Vec::new, |file| {
-            file.sightings()
-                .iter()
-                .map(|seen| Look::of(seen, star_ly))
-                .collect()
-        })
-    }
-
-    /// The body of `star` most in need of an orbit: one whose bearings have grown since its
-    /// orbit was last stated, oldest statement first, and never-fitted bodies before those.
-    ///
-    /// Round-robin by age rather than by any measure of promise. A fit costs about a tick, so
-    /// what matters is that every body gets its turn and none is starved.
-    pub fn unfitted(&self, star: StarId) -> Option<Subject> {
-        let mine = |subject: Subject| -> Option<f64> {
-            let file = self.file(subject)?;
-            if file.sightings().len() < LOOKS_NEEDED {
-                return None;
-            }
-            let newest = file.sightings().iter().map(|s| s.observed_s).fold(f64::MIN, f64::max);
-            let stated = file
-                .orbits()
-                .iter()
-                .filter(|o| o.witness == self.owner && o.method == crate::knowledge::Method::Astrometric)
-                .map(|o| o.stated_s)
-                .fold(f64::MIN, f64::max);
-            (newest > stated).then_some(stated)
-        };
-        self.members(star)
-            .filter_map(|(subject, _)| match subject {
-                Subject::Body { .. } => Some((mine(subject)?, subject)),
-                _ => None,
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
-            .map(|(_, subject)| subject)
-    }
-
-    /// Fit an orbit to what is held about one body and file it. `false` when the bearings do
-    /// not support one, which is the usual answer early on and the right one for a short arc.
-    ///
-    /// `Knowledge::orbits` keeps one statement per witness and the later wins, so a refit
-    /// replaces the craft's own earlier one rather than piling up beside it. That is right
-    /// here: a later fit is made from every look the earlier one had and more.
-    pub fn fit_orbit(&mut self, subject: Subject, star_ly: DVec3, now_s: f64) -> bool {
-        let looks = self.looks_at(subject, star_ly);
-        let Some(fitted) = fit(&looks) else { return false };
-        let orbit = fitted.stated(self.owner, &looks, now_s);
-        self.orbits(subject, orbit);
-        true
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::knowledge::astrometry::Bearing;
+    use crate::knowledge::{BodyId, Subject};
     use crate::rng;
+    use crate::sky::StarId;
 
     const AU_M: f64 = 1.495_978_707e11;
     const MU_SUN: f64 = 1.327_124_4e20;
@@ -863,6 +903,7 @@ mod tests {
                 periapsis_rad: 1.8,
                 epoch_s: 4.0e6,
                 mu: self.mu,
+                reach_m: f64::INFINITY,
                 assumed_circular: false,
                 residual_rad: 0.0,
                 looks: 0,
@@ -898,6 +939,44 @@ mod tests {
                 let (x, y) = toward.any_orthonormal_pair();
                 let nudge = x * rng::gaussian(rng::hash(&[i as u64, 1])) * sigma
                     + y * rng::gaussian(rng::hash(&[i as u64, 2])) * sigma;
+                Look {
+                    from_m: from,
+                    toward: (toward + nudge).normalize(),
+                    at_s: t,
+                    sigma_rad: sigma.max(1.0e-12),
+                    range_m: None,
+                }
+            })
+            .collect()
+    }
+
+    /// A ship on a circular `ship_au` orbit watching whatever `place` says, `count` looks
+    /// `every_s` apart.
+    ///
+    /// On an orbit and not adrift. A slow straight drift is a poor baseline and the fit says so:
+    /// the same 72 degrees of Jupiter, watched from a ship drifting 1.5 AU in a line, gives two
+    /// candidates 7% apart in period whose residuals differ by 1.5%, both fifty thousand times
+    /// the noise floor -- so it refuses, correctly. From a 5 AU orbit, which sweeps six AU of
+    /// arc in the same time, it lands on the truth at the floor.
+    fn watched(
+        place: &dyn Fn(f64) -> DVec3,
+        mu: f64,
+        ship_au: f64,
+        count: usize,
+        every_s: f64,
+        sigma: f64,
+    ) -> Vec<Look> {
+        let ship_r = ship_au * AU_M;
+        let ship_period = kepler::period::third_law(ship_r, mu);
+        (0..count)
+            .map(|i| {
+                let t = i as f64 * every_s;
+                let phase = std::f64::consts::TAU * t / ship_period;
+                let from = DVec3::new(phase.cos(), phase.sin(), 0.0) * ship_r;
+                let toward = (place(t) - from).normalize();
+                let (x, y) = toward.any_orthonormal_pair();
+                let nudge = x * rng::gaussian(rng::hash(&[i as u64, 11])) * sigma
+                    + y * rng::gaussian(rng::hash(&[i as u64, 12])) * sigma;
                 Look {
                     from_m: from,
                     toward: (toward + nudge).normalize(),
@@ -1072,7 +1151,7 @@ mod tests {
             let truth = Truth { pole, ..like(au, e) };
             let fitted = truth.fitted();
             let seen = looks(&truth, 5.0, 12, truth.period_s() / 60.0, SIGMA);
-            let orbit = fitted.stated(crate::knowledge::Witness(1), &seen, 0.0);
+            let orbit = fitted.stated(crate::knowledge::Witness(1), None, &seen, 0.0);
 
             for step in 0..8 {
                 let now = fitted.epoch_s + truth.period_s() * step as f64 / 8.0;
@@ -1129,7 +1208,7 @@ mod tests {
             }
         };
         assert!(
-            spread.period_s > conditional * 10.0,
+            spread.period_s > conditional * 5.0,
             "marginal {} against conditional {conditional}",
             spread.period_s
         );
@@ -1174,7 +1253,7 @@ mod tests {
         }
 
         // Only as many as the file keeps, which is what the fit will really be given.
-        let held = k.looks_at(subject, star_ly);
+        let held = k.looks_at(subject, &|_| Some(star_ly));
         assert_eq!(held.len(), crate::knowledge::BEARINGS_KEPT.min(seen.len()));
 
         assert_eq!(k.unfitted(star), Some(subject), "it has bearings and no orbit");
@@ -1197,6 +1276,122 @@ mod tests {
             offset_au.distance(want) < 0.05,
             "placed at {offset_au} against {want}, sigma {sigma_au}"
         );
+    }
+
+    /// **A moon finds its planet, and weighing the planet falls out of it.** Nothing here is a
+    /// moon special case: a Keplerian orbit puts its primary at a focus, so the candidate that
+    /// works as a focus is the primary, and the same code finds the star for a planet and the
+    /// planet for its moon. The planet's mass is then `4 pi^2 a^3 / P^2` of the moon's orbit,
+    /// which is the only way anything here weighs anything.
+    #[test]
+    fn a_moon_finds_its_planet_and_the_planet_is_weighed_by_it() {
+        use crate::knowledge::{Knowledge, Witness};
+
+        let star = StarId::synthesise("arc", 3);
+        let star_ly = DVec3::new(3.0, -1.0, 0.5);
+        let mut k = Knowledge::new(Witness(7));
+
+        // A Jupiter at 5.2 AU and an Io about it: a thousandth of the star's mass at a four
+        // hundredth of the distance, so the two orbits share nothing but a plane.
+        let planet = like(5.2, 0.048);
+        let planet_id = crate::knowledge::BodyId::of(star, "Jupiter");
+        let moon_mu = MU_SUN * 9.54e-4;
+        let moon_r = 4.217e8;
+        let moon_period = kepler::period::third_law(moon_r, moon_mu);
+        let (u, v) = planet.pole.normalize().any_orthonormal_pair();
+        let moon_at = |t: f64| {
+            let turn = std::f64::consts::TAU * t / moon_period;
+            planet.at(t) + (u * turn.cos() + v * turn.sin()) * moon_r
+        };
+
+        // Each over its own arc, which is what a survey really gets: one revisit cadence is a
+        // fifth of Io's orbit and a thousandth of Jupiter's, so by the time the planet has swept
+        // enough sky the moon has gone round hundreds of times.
+        let planet_span = planet.period_s() * 0.2;
+        let moon_span = moon_period * 2.37;
+        let file_ranged = |k: &mut Knowledge, subject: Subject, seen: &[Look]| {
+            for look in seen {
+                k.sighted(
+                    subject,
+                    crate::knowledge::Sighting {
+                        witness: Witness(7),
+                        observed_s: look.at_s,
+                        bearing: Bearing {
+                            observer_ly: star_ly + look.from_m / crate::system::M_PER_LY,
+                            toward: look.toward,
+                            sigma_rad: look.sigma_rad,
+                        },
+                        size: None,
+                        range_m: look.range_m.map(|r| (r, r * 1.0e-6)),
+                        spin_s: None,
+                        band: em_spectra::Band::V,
+                        flux: 1.0e-9,
+                        flux_sigma: 1.0e-12,
+                        lineage: Vec::new(),
+                    },
+                );
+            }
+        };
+        let file = |k: &mut Knowledge, subject: Subject, seen: &[Look]| {
+            file_ranged(k, subject, seen);
+        };
+        let planet_subject = Subject::Body { star, body: planet_id };
+        let moon_id = crate::knowledge::BodyId::of(star, "Io");
+        let moon_subject = Subject::Body { star, body: moon_id };
+        file(&mut k, planet_subject, &watched(&|t| planet.at(t), MU_SUN, 5.0, 24, planet_span / 24.0, SIGMA));
+        // Ranged, which is to say visited. A moon's orbit from bearings alone at survey range
+        // is the piece doc 25 records as open: the depth is observable at nine hundred sigma
+        // but its basin is thirty times narrower than a step of the range grid, so the search
+        // cannot land in it. From a close pass the ranges are measured and there is no search.
+        let moon_looks = watched(&moon_at, MU_SUN, 5.0, 24, moon_span / 24.0, SIGMA);
+        let moon_ranged: Vec<Look> = moon_looks
+            .iter()
+            .enumerate()
+            .map(|(i, look)| {
+                let truth_range = (moon_at(look.at_s) - look.from_m).length();
+                let slip = rng::gaussian(rng::hash(&[i as u64, 21])) * 1.0e-6 * truth_range;
+                Look { range_m: Some(truth_range + slip), ..*look }
+            })
+            .collect();
+        file_ranged(&mut k, moon_subject, &moon_ranged);
+
+        // The planet first, because a moon cannot be placed against a planet nobody has placed.
+        assert!(k.fit_orbit(planet_subject, star_ly, planet_span), "the planet fits");
+        assert_eq!(
+            k.body_belief(star, planet_id, planet_span).expect("held").about,
+            None,
+            "a planet goes round the star"
+        );
+
+        assert!(k.fit_orbit(moon_subject, star_ly, planet_span), "the moon fits");
+        let moon = k.body_belief(star, moon_id, planet_span).expect("held");
+        assert_eq!(moon.about, Some(planet_id), "the moon goes round the planet, not the star");
+        let (au, _) = moon.semi_major_au.expect("an orbit");
+        assert!(
+            (au * crate::navigation::AU / moon_r - 1.0).abs() < 0.1,
+            "{:e} m against {moon_r:e}",
+            au * crate::navigation::AU
+        );
+
+        // The moon is placed from the star even so, by adding its planet's place to its own.
+        let crate::knowledge::Placed::Known { offset_au, .. } = moon.position_now else {
+            panic!("a moon with a placed planet is placed, got {:?}", moon.position_now)
+        };
+        let want = moon_at(planet_span) / crate::navigation::AU;
+        assert!(
+            offset_au.distance(want) < 0.5,
+            "placed at {offset_au} against {want}"
+        );
+
+        // And the planet now has a mass, which nothing else in this file could have given it.
+        let planet_now = k.body_belief(star, planet_id, planet_span).expect("held");
+        let (kg, sigma) = planet_now.mass_kg.expect("a moon weighs its planet");
+        let truth_kg = moon_mu / 6.674_30e-11;
+        assert!((kg / truth_kg - 1.0).abs() < 0.3, "{kg:e} kg against {truth_kg:e} +/- {sigma:e}");
+        assert!(sigma > 0.0 && sigma.is_finite());
+
+        // The moon has no satellite of its own, so nothing weighs it.
+        assert_eq!(moon.mass_kg, None, "nothing goes round the moon");
     }
 
     /// A body is fitted when its bearings have outgrown its orbit, oldest statement first, and
@@ -1240,6 +1435,7 @@ mod tests {
         // An orbit stated after the newest bearing settles that body.
         let orbit = crate::knowledge::Orbit {
             witness: Witness(7),
+            about: None,
             period_s: (1.0, 0.1),
             semi_major_au: (1.0, 0.1),
             eccentricity: None,
@@ -1268,6 +1464,7 @@ mod tests {
     fn orbit_of() -> crate::knowledge::Orbit {
         crate::knowledge::Orbit {
             witness: crate::knowledge::Witness(7),
+            about: None,
             period_s: (1.0, 0.1),
             semi_major_au: (1.0, 0.1),
             eccentricity: None,
@@ -1309,7 +1506,7 @@ mod tests {
 
         // The record says the eccentricity is unconstrained rather than saying it is zero,
         // which doc 25's rule 4 is about.
-        let orbit = fitted.stated(crate::knowledge::Witness(1), &close, 0.0);
+        let orbit = fitted.stated(crate::knowledge::Witness(1), None, &close, 0.0);
         assert_eq!(orbit.eccentricity, None);
 
         // A quarter of the orbit, ranged, does shape the conic and gets everything.

@@ -429,15 +429,69 @@ the range. On the shard, ten hours of bearings on a **moon at 0.0097 AU fitted a
 AU**, agreed with by every separated start, implying a star of 299 suns and so squeaking past the
 mass bound by one. `knowledge::arc` now refuses a circle that nothing ranged.
 
-**Which exposed something this document has not dealt with: a moon does not orbit the star.**
-`fit_orbit` puts every body's bearings in the star's frame and fits an orbit about it, and the
-survey files moons as readily as planets — Sol has 221 bodies and most of them are moons. A
-moon's own orbit is about its planet, and which planet that is has to be *learned*: it is the
-"points moving with it, which are its moons" in the visit list above, and it is not built. Until
-it is, a moon's bearings are being offered to a fit that cannot use them, and the guards above
-are what stop that becoming a wrong answer rather than no answer. **Open.** The association is
-the missing piece, and a moon's orbit about its primary is what gives that primary's mass — so
-this blocks the mass row of the visit table too.
+### The primary is at a focus
+
+✅ **Built** (2026-09-23), and the whole of it follows from one fact the design had not used: a
+Keplerian orbit puts its primary **at a focus**. So the candidate that works as a focus *is* the
+primary, and the same test finds the star for a planet, the planet for a moon and the moon for a
+moon's moon. **There is no moon case in the code.** `Orbit` carries `about: Option<BodyId>`,
+`None` being the star, and `fit_orbit` fits against each candidate in turn and keeps whichever
+explains the bearings best.
+
+- **Candidates are ranked by the mean bearing,** because the mean of a body's directions over its
+  orbit points at what it goes round: seen from outside, a satellite's apparent path is a closed
+  loop about its primary and the middle of that loop is the primary. That ranks correctly at both
+  levels — a planet's mean bearing points at the star, a moon's at its planet — and the star is
+  always tried besides, which is what stops a planet being handed to a neighbor.
+- **A satellite's frame moves.** The looks go into the frame of where the primary was *at each
+  look's own time*, not now: a moon's planet moves between one look and the next, and a frame
+  that ignored that would be fitting the planet's orbit and the moon's at once.
+- **Places compose.** `Placed` is still an offset from the **star** even for a moon, because one
+  reader should not have to know how deep a body sits. `body_belief` walks the chain and adds
+  each step, errors in quadrature, which is why a moon is always placed worse than its planet.
+  A cycle guard bounds the walk: two bodies each fitted as the other's primary would otherwise
+  recur until the stack ran out.
+- **And this is what weighs anything.** A satellite's orbit is its primary's mass by Kepler's
+  third law, `mu = 4 pi^2 a^3 / P^2`, and nothing a telescope does measures a mass directly. So
+  `BodyBelief::mass_kg` comes from whatever goes round a body and a planet with no moon has none
+  — which is the honest answer and the one this document already gives for Venus. The errors come
+  in cubed in the axis and squared in the period, so a percent on the axis is three on the mass.
+
+**Three guards turned out to be about stars rather than about orbits,** and each would have
+thrown away every satellite there is:
+
+- The plausibility bound ran 0.02 to 200 **AU**; Io's orbit is 0.0028 AU. It is now the band the
+  ranges were actually searched in, carried on the fit, which means the same thing at every level.
+- The mass bound ran 0.02 to 300 **solar**; Jupiter is 0.00095. Only the ceiling was a real
+  statement, since a primary can be as light as a rock, so the floor is gone.
+- The range grid ran the whole system, log-spaced. **The geometry hands over a better band**: a
+  ray's nearest point to the primary is at `-from . toward`, and how far it misses by there is
+  the smallest the orbit can be — so the largest such miss across the arc *is* the orbit's scale.
+  That gives 0.003 AU for Io where the old grid stepped 2.7% of a decade, of which Io's entire
+  orbit is a twentieth of one step.
+
+  Across the arc and not per ray: a body near opposition has a ray passing almost through its
+  primary, and a band built on that one look collapses to a point. And the narrow band is used
+  only where the reading is unambiguous, because the scale is a *lower* bound and a weak one when
+  a body sits near conjunction — two bodies at 5 and 5.2 AU have nearly the same period and so
+  sit in near-permanent conjunction, which measured gives a scale of 0.46 AU for a 5.2 AU orbit.
+  The two cases are three orders apart with nothing between them: that Jupiter reads 11 and Io
+  about Jupiter reads 3500.
+
+**A survey can resonate with a satellite.** The middle anchor is now whichever look points
+furthest from both ends rather than whichever sits in the middle of the list. A survey revisits
+on a fixed cadence and a satellite has a short period, so twenty-four looks over exactly two of
+Io's orbits put the first and the middle at the *same orbital phase* — two coincident points, and
+a conic through them singular however much the arc bends.
+
+**Open: a satellite's orbit from bearings alone at survey range.** The depth along the line of
+sight is observable — measured at nine hundred sigma, since the observer's own motion is larger
+than the moon's orbit — but its basin is about thirty times narrower than one step of the range
+grid, so the search cannot land in it and the near-equal candidates it finds are refused as
+rivals. From a close pass the ranges are measured and there is no search at all, so **a planet is
+weighed by visiting it**, which is a fair price and of a piece with the rest of this section. The
+fix, if it is wanted, is the classic visual-binary one: fit the *projected* ellipse in the plane
+of the sky, where the size and the inclination survive and only the depth's sign is lost.
 
 **Not oblateness.** The arena's bodies are spheres, so there is no figure to measure and none is
 invented. Same decision as rings for generated planets in phase 5, for the same reason.
@@ -492,7 +546,7 @@ Per body:
 | size | angular diameter times distance; the distance comes from the orbit fit | seconds, then as good as the orbit |
 | rotation period | the periodogram of its flux: Earth's clouds and continents, Jupiter's bands | Earth and Mars within a minute; Jupiter sooner |
 | orbit: period, size, eccentricity, plane | ✅ `lc_world::knowledge::arc`, below | inner planets within a few minutes; **not Saturn**, see below |
-| mass | its moons, by Kepler's third law: Io goes round in 17 real seconds, Callisto in under three minutes, the Moon in four and a half, Titan in under three | minutes, for anything with a moon |
+| mass | ✅ its moons, by Kepler's third law — and a close pass to range them, see below: Io goes round in 17 real seconds, Callisto in under three minutes, the Moon in four and a half, Titan in under three | minutes, for anything with a moon |
 | density, so rock or gas | mass over volume | as soon as both are held |
 | albedo and color | flux against the starlight falling on a disc of known size, per band | as soon as the size is held |
 | temperature | thermal flux against the temperature it would have with no atmosphere | minutes |
@@ -1400,6 +1454,7 @@ game has no players — so each of these is a change in place, not a versioned a
 | 2 | ✅ **Done.** `Orbit` grew, `Orientation` and `Method` are new, and `formats.rs`' three back-readers `FileV3`/`FileV2`/`FileV1` were deleted rather than repointed at a frozen `OrbitV4`. `FILE_FORMAT` and `OLDEST_FILE_FORMAT` are both 5 |
 | 2 | `REPORT_FORMAT` stays 2. It carries the new `Orbit` by carrying `Part`, whose shape is unchanged, and the one shard is redeployed whole — a bump would only drop reports already in flight |
 | 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
+| 6 | ✅ **`Orbit` grew `about: Option<BodyId>`** — what it goes round, `None` being the star — and `BodyBelief` grew `about` and `mass_kg` beside it. `FILE_FORMAT` is 8 and `REPORT_FORMAT` is 5 |
 | 6 | ✅ **`Sighting` grew `range_m` and `spin_s`,** both `Option<(f64, f64)>`, beside `size`: the three things a close look measures and a distant one cannot. `Drawable` grew `spin_s` to have a rotation to measure, worked out from the arena's lock for a tidally locked body. `FILE_FORMAT` is 7 and `REPORT_FORMAT` is 4 |
 | 6 | ✅ **`Sighting` grew a `size: Option<(f64, f64)>`** — an angular diameter and its sigma, `None` for a point source. `FILE_FORMAT` was 6 and `REPORT_FORMAT` 3. The report format *does* move here where phase 2 left it alone, because `Part` carries `Sighting` by value and its shape is what changed; `Reported::format` is checked strictly on landing, so reports in flight across the deploy fail to land, which is the right trade for one shard with no players |
 | 6 | ✅ **`survey::Source` carries a `Subject` and a `diameter_rad`** rather than a `StarId`. Stars and bodies then live in one sky, which they have to: the host star glares on its own planets and only one list can be asked which of two sources outshines the other. `hidden_by` and `blended_with` return a `Subject`. Not stored and not on the wire — `Source` is built per look from the catalogue and from `visit::sources` |

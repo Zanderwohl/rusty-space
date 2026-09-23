@@ -24,6 +24,7 @@ pub mod formats;
 pub mod moments;
 pub mod names;
 pub mod observatory;
+pub mod primary;
 pub mod prior;
 pub mod record;
 pub mod report;
@@ -660,6 +661,7 @@ mod tests {
         let a_m = au * crate::navigation::AU;
         let period = em_foundations::kepler::period::third_law(a_m, crate::star::Star::SOL.mu);
         Orbit {
+            about: None,
             witness: Witness(0),
             period_s: (period, period * 1.0e-3),
             semi_major_au: (au, au * 1.0e-2),

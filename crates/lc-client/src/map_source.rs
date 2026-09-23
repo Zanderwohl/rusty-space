@@ -608,6 +608,7 @@ mod tests {
             star.id,
             body,
             lc_world::knowledge::Orbit {
+                about: None,
                 witness: session.knowledge.owner,
                 period_s: (period, period * 1.0e-3),
                 semi_major_au: (1.5, 0.15),

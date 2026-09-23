@@ -12,11 +12,16 @@ use crate::sky::StarId;
 use super::subject::BodyId;
 use super::{Knowledge, Subject, Witness};
 
-/// Where a body is believed to be now, as an offset from its own star.
+/// Where a body is believed to be now, as an offset from its own **star**.
 ///
 /// From the star rather than from the world origin: what an orbit says is where a body sits
 /// about its primary, and the star's own position is a separate belief with its own error. A
 /// reader that wants an absolute position adds the two and carries both errors.
+///
+/// From the star even for a moon, whose orbit is about its planet: `body_belief` walks the
+/// chain and adds each step, so one reader does not have to know how deep a body sits. The
+/// errors add in quadrature along the way, which is why a moon is always placed worse than its
+/// planet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Placed {
     /// A full orientation and an epoch: enough to say where on the orbit it is.
@@ -83,14 +88,36 @@ pub struct BodyBelief {
     /// Meters a second in the star's frame, and one sigma, from the orbit rather than from any
     /// measurement: elements and a time are a velocity, and nothing else here is.
     pub velocity_m_s: Option<(DVec3, f64)>,
+    /// What it is believed to go round. `None` is the system's star.
+    pub about: Option<BodyId>,
+    /// Kilograms and one sigma, from whatever goes round *this* body: a satellite's orbit is
+    /// its primary's mass by Kepler's third law and there is no other way to weigh one.
+    pub mass_kg: Option<(f64, f64)>,
     /// Whose word the orbit is on, and how many hands it passed through.
     pub stated_by: Option<Witness>,
     pub hops: usize,
 }
 
 impl Knowledge {
+    /// How far a chain of primaries is walked before it is called a cycle.
+    ///
+    /// A moon's moon is the deepest thing a system holds, so three steps is already generous.
+    /// The guard is not about depth but about a *loop*: two bodies each fitted as the other's
+    /// primary would otherwise recur until the stack ran out.
+    const CHAIN: usize = 4;
+
     /// What is believed about one body, or `None` when nothing is held about it.
     pub fn body_belief(&self, star: StarId, body: BodyId, now_s: f64) -> Option<BodyBelief> {
+        self.body_belief_within(star, body, now_s, Self::CHAIN)
+    }
+
+    fn body_belief_within(
+        &self,
+        star: StarId,
+        body: BodyId,
+        now_s: f64,
+        depth: usize,
+    ) -> Option<BodyBelief> {
         let subject = Subject::Body { star, body };
         let file = self.file(subject)?;
         let orbit = file.orbits().iter().max_by(|a, b| {
@@ -113,7 +140,18 @@ impl Knowledge {
             semi_major_au: orbit.map(|o| o.semi_major_au),
             orientation: orbit.map_or(Orientation::Unknown, |o| o.orientation),
             method: orbit.map(|o| o.method),
-            position_now: orbit.map_or(Placed::Unknown, |o| placed_at(o, now_s)),
+            position_now: orbit.map_or(Placed::Unknown, |o| {
+                let here = placed_at(o, now_s);
+                match o.about {
+                    // Its own offset is from its primary, so the primary's own place is added.
+                    // A step with nowhere to stand on is a body whose place is not known.
+                    Some(primary) if depth > 0 => self
+                        .body_belief_within(star, primary, now_s, depth - 1)
+                        .map_or(Placed::Unknown, |up| added(up.position_now, here)),
+                    Some(_) => Placed::Unknown,
+                    None => here,
+                }
+            }),
             radius_m: measured_radius(file),
             spin_s: file
                 .sightings()
@@ -122,6 +160,8 @@ impl Knowledge {
                 .min_by(|a, b| a.1 .1.total_cmp(&b.1 .1))
                 .map(|(_, spin)| spin),
             velocity_m_s: orbit.and_then(|o| moving_at(o, now_s)),
+            about: orbit.and_then(|o| o.about),
+            mass_kg: self.weighed(star, body),
             stated_by: orbit.map(|o| o.witness),
             hops: orbit.map_or(0, |o| o.lineage.len()),
         })
@@ -281,6 +321,65 @@ fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     Placed::Known { offset_au, sigma_au: (sigma_au * sigma_au + along_au * along_au).sqrt() }
 }
 
+/// One place on top of another, carrying both errors.
+fn added(primary: Placed, own: Placed) -> Placed {
+    match (primary, own) {
+        (Placed::Known { offset_au: up, sigma_au: a }, Placed::Known { offset_au: here, sigma_au: b }) => {
+            Placed::Known { offset_au: up + here, sigma_au: (a * a + b * b).sqrt() }
+        }
+        // A shell about a primary whose own place is known is still a shell, just a wider one:
+        // the body is somewhere on a sphere about a point that is itself uncertain.
+        (Placed::Known { sigma_au: a, .. }, Placed::Shell { radius_au, sigma_au: b }) => {
+            Placed::Shell { radius_au, sigma_au: (a * a + b * b).sqrt() }
+        }
+        _ => Placed::Unknown,
+    }
+}
+
+impl Knowledge {
+    /// What a body weighs, from whatever is believed to go round it.
+    ///
+    /// **The only way to weigh anything.** A satellite's period and orbit radius are its
+    /// primary's mass by Kepler's third law, `mu = 4 pi^2 a^3 / P^2`, and nothing a telescope
+    /// does measures a mass directly. So a planet with no moon has no mass, which is the honest
+    /// answer and the one doc 25 states for Venus.
+    ///
+    /// The tightest satellite's answer rather than an average: the errors are dominated by how
+    /// well that one orbit is known, and a badly-known moon would only widen a well-known one.
+    fn weighed(&self, star: StarId, body: BodyId) -> Option<(f64, f64)> {
+        self.members(star)
+            .filter_map(|(subject, file)| {
+                let Subject::Body { body: satellite, .. } = subject else { return None };
+                if satellite == body {
+                    return None;
+                }
+                let orbit = file
+                    .orbits()
+                    .iter()
+                    .filter(|o| o.about == Some(body))
+                    .max_by(|a, b| a.stated_s.total_cmp(&b.stated_s))?;
+                let (au, sigma_au) = orbit.semi_major_au;
+                let (period_s, sigma_s) = orbit.period_s;
+                if !(au > 0.0 && period_s > 0.0) {
+                    return None;
+                }
+                let a_m = au * crate::navigation::AU;
+                let n = std::f64::consts::TAU / period_s;
+                let mu = n * n * a_m * a_m * a_m;
+                // Cubed in the axis and squared in the period, so the errors come in at those
+                // weights: a percent on the axis is three on the mass.
+                let fraction =
+                    3.0 * (sigma_au / au).abs() + 2.0 * (sigma_s / period_s).abs();
+                let kg = mu / GRAVITY;
+                Some((kg, kg * fraction))
+            })
+            .min_by(|a, b| (a.1 / a.0).total_cmp(&(b.1 / b.0)))
+    }
+}
+
+/// Newton's constant, for turning a measured `mu` into a mass anyone can read.
+const GRAVITY: f64 = 6.674_30e-11;
+
 /// A radius, from the sighting with the best-known one: an angular diameter and a range from
 /// the same look, so neither has to be carried across time while the body moves.
 ///
@@ -369,6 +468,7 @@ mod tests {
 
     fn orbit(au: f64, orientation: Orientation, epoch_s: Option<f64>) -> Orbit {
         Orbit {
+            about: None,
             witness: Witness(1),
             period_s: (YEAR_S, YEAR_S * 1.0e-3),
             semi_major_au: (au, au * 0.01),

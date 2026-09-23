@@ -8,6 +8,7 @@ use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 use super::astrometry::{Bearing, Distance};
+use super::subject::BodyId;
 
 /// Whoever took a measurement: a ship, a probe, a telescope.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -246,6 +247,13 @@ pub enum Method {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Orbit {
     pub witness: Witness,
+    /// What it goes round. `None` is the system's star, which is what a planet goes round.
+    ///
+    /// **The primary is not assumed, it is found.** A Keplerian orbit puts its primary at a
+    /// focus, so a candidate that works as a focus *is* the primary, and the same test finds
+    /// the star for a planet, the planet for a moon and the moon for a moon's moon. Nothing
+    /// here is a special case for moons; see `knowledge::arc::fit_orbit`.
+    pub about: Option<BodyId>,
     /// Seconds, and one sigma.
     pub period_s: (f64, f64),
     /// AU, and one sigma.
@@ -285,6 +293,7 @@ impl Orbit {
             + mu_fraction.abs() / 3.0;
         Self {
             witness,
+            about: None,
             period_s,
             semi_major_au: (a_au, a_au * spread),
             eccentricity: None,

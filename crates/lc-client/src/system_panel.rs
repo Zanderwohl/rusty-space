@@ -372,6 +372,8 @@ mod tests {
             radius_m: None,
             spin_s: None,
             velocity_m_s: None,
+            about: None,
+            mass_kg: None,
             stated_by,
             hops,
         }
