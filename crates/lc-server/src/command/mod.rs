@@ -5,7 +5,7 @@
 //! queued when it arrives and run at one point in the tick, after the intents, and its answer
 //! goes to the connection that sent it. See `lightcone/docs/26-console.md`.
 
-mod energize;
+mod fitting;
 mod parse;
 mod spec;
 mod teleport;
@@ -117,6 +117,19 @@ pub const COMMANDS: &[Spec] = &[
         ],
     },
     Spec {
+        name: "finish-refit",
+        verb: Verb::FinishRefit,
+        level: Level::DEBUG,
+        summary: "complete a refit under way, at once",
+        args: &[ArgSpec {
+            name: "ship",
+            kind: Kind::Id,
+            need: Need::Optional,
+            level: Level::ADMIN,
+            help: "the ship to finish; default your own",
+        }],
+    },
+    Spec {
         name: "stage",
         verb: Verb::Stage,
         level: Level::DEBUG,
@@ -196,6 +209,10 @@ impl<J: Journal> Server<J> {
             Verb::Energize => {
                 let ship = self.ship_named(command.from, &args)?;
                 self.energize(ship, args.number("amount"), wire)
+            }
+            Verb::FinishRefit => {
+                let ship = self.ship_named(command.from, &args)?;
+                self.finish_refit(ship, wire)
             }
             Verb::Stage => {
                 let name = args.word("scene").unwrap_or_default();

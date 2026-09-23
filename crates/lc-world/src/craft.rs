@@ -587,6 +587,14 @@ impl Craft {
         Ok(())
     }
 
+    /// Complete a refit now, at the energy it would have cost. `false` if none was under way.
+    pub fn finish_refit(&mut self, now_s: f64) -> bool {
+        self.settle(now_s);
+        let finished = self.fitting.as_mut().is_some_and(Fitting::finish_refit);
+        self.sync_length();
+        finished
+    }
+
     /// Stop a refit where it is, reversing the step in progress.
     pub fn cancel_refit(&mut self, now_s: f64) {
         self.settle(now_s);

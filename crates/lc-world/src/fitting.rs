@@ -495,6 +495,18 @@ impl Fitting {
         self.refit = Some(refit);
     }
 
+    /// Jump a refit to its end: the target loadout, and the energy the steps not yet run would
+    /// have taken. Only the time is skipped. Settle first. `false` if there was none.
+    pub fn finish_refit(&mut self) -> bool {
+        let Some(refit) = self.refit.take() else { return false };
+        let end = refit.at(refit.order().start_s + refit.duration_s());
+        let remaining_j = end.consumed_j - refit.at(self.since_s).consumed_j;
+        self.loadout = end.loadout;
+        let capacity = self.balance.capacity_j(&self.loadout);
+        self.stored_j = (self.stored_j - remaining_j).clamp(0.0, capacity.max(0.0));
+        true
+    }
+
     /// Stop a refit where it is. Settle first. The step in progress is reversed.
     pub fn cancel_refit(&mut self, now_s: f64) {
         let Some(refit) = self.refit.take() else { return };
@@ -711,6 +723,37 @@ mod tests {
         // Long enough and it is empty, and stays there.
         let forever = 1.0e6 * year;
         assert_eq!(fitting.stored_j_at(&motion, forever), 0.0);
+    }
+
+    #[test]
+    fn finishing_a_refit_lands_where_running_it_out_would() {
+        // No drain, because a finish skips the time and nothing else: the crew's upkeep over
+        // the rest of the refit is simply not charged, where running it out charges it.
+        let b = Balance { living_drain_w: 0.0, ..Balance::DEFAULT };
+        let target = Loadout { engines: 7, ..Loadout::STARTING };
+        let begun = |fitting: &mut Fitting| {
+            let order = crate::refit::Order {
+                from: Loadout::STARTING,
+                target,
+                stored_j: fitting.stored_j,
+                start_s: 0.0,
+            };
+            fitting.begin_refit(order.solve(&b).unwrap());
+        };
+        let motion = ShipState::at(glam::DVec3::ZERO);
+        let mut ran = Fitting::full(Loadout::STARTING, b, 0.0);
+        begun(&mut ran);
+        let end_s = ran.refit().unwrap().duration_s();
+        let mut finished = ran.clone();
+
+        // Part-way, then finished at once.
+        finished.settle(&motion, end_s * 0.3);
+        assert!(finished.finish_refit());
+        assert!(!finished.finish_refit(), "a second finish found another refit");
+        ran.settle(&motion, end_s);
+        assert!(ran.refit().is_none(), "premise: running it out ends it");
+        assert_eq!(finished.loadout, target);
+        assert!((finished.stored_j - ran.stored_j).abs() <= 1e-9 * ran.stored_j.abs().max(1.0));
     }
 
     #[test]

@@ -33,6 +33,7 @@ pub enum Verb {
     Teleport,
     Where,
     Energize,
+    FinishRefit,
     Stage,
 }
 

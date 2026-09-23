@@ -104,7 +104,7 @@ async fn an_answer_names_the_line_it_answers_and_a_mistake_says_what_it_was() {
 #[tokio::test]
 async fn debug_acts_on_its_own_ship_and_admins_on_anyone_s() {
     let far = stars()[2].id.get();
-    for line in [format!("teleport {far} ship:2"), "energize ship:2".to_string()] {
+    for line in [format!("teleport {far} ship:2"), "energize ship:2".into(), "finish-refit ship:2".into()] {
         let (mut server, mut wire) = shard(Level::DEBUG);
         let (ok, why) = ask(&mut server, &mut wire, 1, &line).await;
         assert!(!ok && why.contains("no argument 'ship'"), "{line}: {why}");
@@ -158,6 +158,33 @@ async fn energize_adds_what_is_asked_and_never_more_than_fits() {
     assert!(ok, "{why}");
     let (stored, capacity) = held(&server);
     assert!((stored - capacity).abs() < 1e-6, "an overcharge left {stored} of {capacity}");
+}
+
+/// Ship 2's refit is finished by an admin: the target loadout at once, and its owner told.
+#[tokio::test]
+async fn finish_refit_completes_a_refit_under_way_and_only_one() {
+    use lc_world::fitting::Loadout;
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    emptied(&mut server);
+    let (ok, why) = ask(&mut server, &mut wire, 1, "finish-refit ship:2").await;
+    assert!(!ok && why.contains("not refitting"), "{why}");
+
+    let (ok, why) = ask(&mut server, &mut wire, 2, "energize ship:2").await;
+    assert!(ok, "{why}");
+    let target = Loadout { engines: 7, ..Loadout::STARTING };
+    let now_s = server.now_t() as f64 * 1.0e-6;
+    let craft = server.fleet.get_mut(CraftId(2)).unwrap();
+    craft.begin_refit(target, now_s).expect("the refit plans");
+    server.refitting.insert(CraftId(2));
+    wire.take(ClientId(2));
+
+    let (ok, why) = ask(&mut server, &mut wire, 3, "finish-refit ship:2").await;
+    assert!(ok, "{why}");
+    let now_s = server.now_t() as f64 * 1.0e-6;
+    let craft = server.fleet.get(CraftId(2)).unwrap();
+    assert!(!craft.is_refitting(now_s));
+    assert_eq!(craft.fitting().unwrap().loadout, target);
+    assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
 }
 
 #[tokio::test]

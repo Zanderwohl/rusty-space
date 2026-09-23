@@ -1,4 +1,4 @@
-//! `energize`: energy out of nothing, into a ship's storage.
+//! `energize` and `finish-refit`: a ship's energy and modules, by fiat.
 
 use lc_world::craft::CraftId;
 
@@ -34,5 +34,18 @@ impl<J: Journal> Server<J> {
             (before_j + added_j) / me_j,
             capacity_j / me_j,
         ))
+    }
+
+    pub(super) fn finish_refit(&mut self, id: CraftId, wire: &mut impl Transport) -> Result<String, String> {
+        let now_s = self.now_t() as f64 * 1.0e-6;
+        let craft = self.fleet.get_mut(id).ok_or("no such ship")?;
+        let name = craft.designation();
+        if !craft.finish_refit(now_s) {
+            return Err(format!("{name} is not refitting"));
+        }
+        // Told here rather than by `keep_accounts`, which would find nothing left to finish.
+        self.refitting.remove(&id);
+        self.tell_fitted(wire, id);
+        Ok(format!("{name}: refit finished"))
     }
 }
