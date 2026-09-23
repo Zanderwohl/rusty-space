@@ -33,13 +33,19 @@ pub async fn page() -> Markup {
                 }
                 table {
                     caption { "Travel and signal times at the default rate" }
-                    thead { tr { th scope="col" { "In-game" } th scope="col" { "Real time" } } }
+                    thead {
+                        tr {
+                            td {}
+                            th scope="col" { "Game Time" }
+                            th scope="col" { "Real-Life Time" }
+                        }
+                    }
                     tbody {
-                        tr { td { "Moon to Earth, a transmission (1.3 s)" } td { "0.15 ms" } }
-                        tr { td { "Sun to Earth, light (499 s)" } td { "57 ms" } }
-                        tr { td { "Earth to Voyager 2 in 2026 (about 20 h)" } td { "8.2 s" } }
-                        tr { td { "Sun to Proxima Centauri (4.25 years)" } td { "4.25 h" } }
-                        tr { td { "Across the galaxy (36,000 light-years)" } td { "4.1 years" } }
+                        tr { th scope="row" { "Moon to Earth transmission" } td { "1.3 s" } td { "0.15 ms" } }
+                        tr { th scope="row" { "Sun to Earth light" } td { "8 min 19 s" } td { "57 ms" } }
+                        tr { th scope="row" { "Earth to Voyager 1 transmission" } td { "23 h 51 min" } td { "9.8 s" } }
+                        tr { th scope="row" { "Sun to Proxima Centauri light" } td { "4.25 years" } td { "4.25 h" } }
+                        tr { th scope="row" { "Across the game galaxy at C" } td { "36,000 years" } td { "4.1 years" } }
                     }
                 }
                 p {
