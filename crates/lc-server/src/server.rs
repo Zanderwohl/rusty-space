@@ -425,6 +425,7 @@ impl<J: Journal> Server<J> {
         // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
         // the range it has already made and this is a comparison until the window moves.
         self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
+        self.stages.mark("prepare");
         // 2. Drain intents, validate, write events, schedule deliveries.
         let mut events = Vec::new();
         let mut deliveries = Vec::new();

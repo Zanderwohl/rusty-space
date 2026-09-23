@@ -1089,6 +1089,7 @@ mod tests {
         let mut total = std::time::Duration::ZERO;
         let mut worst: Option<crate::timing::Stages> = None;
         let mut slow = 0;
+        let mut checkpointed: Option<(std::time::Duration, usize, usize)> = None;
         for _ in 0..TICKS {
             server.tick(&mut wire).await.unwrap();
             for n in 0..CRAFT as u64 {
@@ -1100,11 +1101,26 @@ mod tests {
             if worst.as_ref().is_none_or(|w| tick.total() > w.total()) {
                 worst = Some(tick.clone());
             }
+            // The part of a checkpoint the tick waits for: the snapshot and the encoded files.
+            if server.now_t() % (400 * TICK_US) == 0 {
+                let started = std::time::Instant::now();
+                let taken = server.checkpoint();
+                let remembered = server.take_knowledge();
+                let took = started.elapsed();
+                let files = remembered.files.len();
+                let bytes: usize = remembered.files.iter().map(|f| f.file.len()).sum::<usize>() + taken.ships.len();
+                if checkpointed.is_none_or(|(worst, _, _)| took > worst) {
+                    checkpointed = Some((took, files, bytes));
+                }
+            }
         }
         eprintln!(
             "{CRAFT} craft surveying for {TICKS} ticks: mean {:?}, {slow} over budget, worst {}",
             total / TICKS,
             worst.map_or_else(String::new, |w| w.to_string()),
         );
+        if let Some((took, files, bytes)) = checkpointed {
+            eprintln!("worst checkpoint snapshot {took:?}: {files} files, {bytes} bytes");
+        }
     }
 }

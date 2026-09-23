@@ -261,6 +261,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
     let mut since_save = 0u32;
+    // A checkpoint being written. The connection is inside it until it finishes.
+    let mut saving: Option<
+        tokio::task::JoinHandle<(tokio_postgres::Client, Taken, Result<(), tokio_postgres::Error>)>,
+    > = None;
     // Consecutive ticks whose journal write failed, so a store that has gone away is reported
     // rather than repeated twenty times a second.
     let mut failing = 0u32;
@@ -298,28 +302,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("WARNING: {line}");
         }
 
+        // A finished write hands the connection back, and on failure what it was writing.
+        if saving.as_ref().is_some_and(|task| task.is_finished())
+            && let Some(task) = saving.take()
+        {
+            store = Some(finish_checkpoint(task.await?, &mut server));
+        }
+
         since_save += 1;
         if since_save >= SAVE_EVERY_TICKS
-            && let Some(client) = &mut store
+            && let Some(client) = store.take()
         {
             since_save = 0;
-            // A failed checkpoint is not a reason to stop the world. It is a reason to say so
-            // every time, because a shard that has quietly stopped saving looks exactly like one
-            // that is fine.
-            let started = std::time::Instant::now();
-            if let Err(why) = checkpoint(client, shard_id, &mut server).await {
-                eprintln!("ERROR: checkpoint failed: {why}");
-            }
-            let took = started.elapsed();
-            if took > Duration::from_millis(TICK_MS as u64) {
-                eprintln!("WARNING: checkpoint held the tick for {:.1} ms", took.as_secs_f64() * 1.0e3);
-            }
+            // The snapshot is taken here, on the tick, so it is the shard at one tick; only the
+            // writing is moved off it. It used to hold the tick for the whole transaction.
+            let taken = take(&mut server);
+            saving = Some(tokio::spawn(write(client, shard_id, taken)));
         }
     }
 
-    if let Some(client) = &mut store {
+    if let Some(task) = saving.take() {
+        store = Some(finish_checkpoint(task.await?, &mut server));
+    }
+    if let Some(client) = store.take() {
         eprintln!("stopping; writing a last checkpoint");
-        checkpoint(client, shard_id, &mut server).await?;
+        let (_, taken, written) = write(client, shard_id, take(&mut server)).await;
+        if let Err(why) = written {
+            give_back(&mut server, taken);
+            return Err(why.into());
+        }
     }
     Ok(())
 }
@@ -335,19 +346,38 @@ const SAVE_EVERY_TICKS: u32 = 400;
 /// enough that an operator sees a store outage going on, rarely enough to read.
 const COMPLAIN_EVERY_TICKS: u32 = 400;
 
-async fn checkpoint(
-    client: &mut tokio_postgres::Client,
+/// A checkpoint as taken, for [`write`] to write and [`give_back`] to return if it could not.
+struct Taken {
+    checkpoint: lc_server::persist::Checkpoint,
+    /// What changed since the last checkpoint: files touched, samples taken and consumed.
+    /// Drained, and handed back if the write fails, so nothing is lost to a failure but time: a
+    /// file that never changes again would otherwise never be written.
+    remembered: lc_server::archive::Remembered,
+    marks: Vec<(String, lc_proto::Bookmark)>,
+}
+
+fn take(server: &mut Server<Store>) -> Taken {
+    Taken {
+        checkpoint: server.checkpoint(),
+        remembered: server.take_knowledge(),
+        marks: server.library.take_dirty(),
+    }
+}
+
+fn give_back(server: &mut Server<Store>, taken: Taken) {
+    server.untake_knowledge(taken.remembered);
+    server.library.redirty(&taken.marks);
+}
+
+/// Owns the connection while it writes, so it can run beside the tick; hands both back.
+async fn write(
+    mut client: tokio_postgres::Client,
     shard_id: i64,
-    // `&mut` because a checkpoint drains what changed since the last one.
-    server: &mut Server<Store>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let taken = server.checkpoint();
-    // What changed since the last checkpoint: files touched, samples taken and consumed, shelves
-    // read. Drained here and handed back if the write fails, so nothing is lost to a failure but
-    // time: a file that never changes again would otherwise never be written.
-    let remembered = server.take_knowledge();
-    let marks: Vec<(String, lc_proto::Bookmark)> = server.library.take_dirty();
-    let rows: Vec<lc_store::reading::Bookmark> = marks
+    taken: Taken,
+) -> (tokio_postgres::Client, Taken, Result<(), tokio_postgres::Error>) {
+    let started = std::time::Instant::now();
+    let rows: Vec<lc_store::reading::Bookmark> = taken
+        .marks
         .iter()
         .map(|(account, mark)| lc_store::reading::Bookmark {
             account: account.clone(),
@@ -362,27 +392,38 @@ async fn checkpoint(
     // written and their deletions not, say — would be reloaded as something that never was.
     let written = async {
         let transaction = client.transaction().await?;
-        lc_store::ships::save_ships(&transaction, &taken.ships).await?;
+        lc_store::ships::save_ships(&transaction, &taken.checkpoint.ships).await?;
         // The partitions the samples land in exist, because the journal keeps them ready ahead of
         // the clock every tick and nothing is learned in the future.
-        lc_store::knowledge::save_files(&transaction, &remembered.files).await?;
-        lc_store::knowledge::save_samples(&transaction, &remembered.samples).await?;
-        lc_store::knowledge::delete_samples(&transaction, &remembered.discarded).await?;
+        lc_store::knowledge::save_files(&transaction, &taken.remembered.files).await?;
+        lc_store::knowledge::save_samples(&transaction, &taken.remembered.samples).await?;
+        lc_store::knowledge::delete_samples(&transaction, &taken.remembered.discarded).await?;
         lc_store::ships::save_shard(&transaction, shard_id, lc_store::ships::Shard {
-            now_t: taken.now_t,
-            next_ship: taken.next_ship,
+            now_t: taken.checkpoint.now_t,
+            next_ship: taken.checkpoint.next_ship,
         })
         .await?;
         lc_store::reading::save(&transaction, &rows).await?;
         transaction.commit().await
     }
     .await;
-    if let Err(why) = written {
-        server.untake_knowledge(remembered);
-        server.library.redirty(&marks);
-        return Err(why.into());
+    if written.is_ok() {
+        eprintln!("checkpoint written in {:.0} ms", started.elapsed().as_secs_f64() * 1.0e3);
     }
-    Ok(())
+    (client, taken, written)
+}
+
+/// A failed checkpoint is not a reason to stop the world. It is a reason to say so every time,
+/// because a shard that has quietly stopped saving looks exactly like one that is fine.
+fn finish_checkpoint(
+    (client, taken, written): (tokio_postgres::Client, Taken, Result<(), tokio_postgres::Error>),
+    server: &mut Server<Store>,
+) -> tokio_postgres::Client {
+    if let Err(why) = written {
+        eprintln!("ERROR: checkpoint failed: {why}");
+        give_back(server, taken);
+    }
+    client
 }
 
 /// Connect, and drive the connection in the background.
