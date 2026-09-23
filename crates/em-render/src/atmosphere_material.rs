@@ -22,11 +22,18 @@ pub struct AtmosphereUniform {
     pub starlight: Vec4,
     /// `(surface_reference, stops, 0, 0)`: the tone map, as the surface evaluates it.
     pub exposure: Vec4,
-    /// Vertical optical depth of the gas per channel; `w` is its scale height as a share of the
-    /// body's radius.
+    /// Each is per display channel, averaged over the bands the current mapping puts there.
+    ///
+    /// Vertical optical depth of the gas; `w` is its scale height as a share of the body's
+    /// radius.
     pub gas: Vec4,
-    /// The haze's single-scattering albedo per channel; `w` is its vertical optical depth.
+    /// Vertical optical depth of the haze; `w` is the air's vertical depth at ten microns, which
+    /// absorbs and does not scatter.
     pub haze: Vec4,
+    /// The haze's single-scattering albedo.
+    pub albedo: Vec4,
+    /// Display light from the air's own heat where it is opaque at ten microns.
+    pub glow: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]

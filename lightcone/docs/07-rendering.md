@@ -604,8 +604,19 @@ can be photographed.
 
 ![Day and night at ten microns](../images/thermal.png)
 
-What this does not yet do: the air's optical depths are still per display channel, so an
-infrared mapping keeps a blue limb, and a thick atmosphere does not yet radiate from its own top.
+**The air is per band too.** A climate states its gas and haze in V, and `Air::in_band` carries
+them to every band: gas as Rayleigh's inverse fourth power, haze nearly gray, and neither
+scattering at ten microns or 21 cm. The host averages each band's depths onto the display
+channels by the starlight the current mapping puts on each from it, so the shader's march is
+unchanged and still three channels wide — but a channel carrying K sees through the sky, and the
+blue limb is blue only where blue is. What the air does at ten microns is absorb: its `infrared`
+depth takes the ground's heat along the ray and gives out its own, at 0.85 of the body's mean
+temperature, in its place. Earth's is small, because ten microns is the window its water and
+carbon dioxide leave open; Venus's is opaque, so its disc is its air's. The shell draws the same
+glow along the limb, where the column is sixteen times deeper, so the limb glows at ten microns
+as it scatters in the visible.
+
+![The air through four band mappings](../images/air.png)
 
 **Air.** A world with a climate has air, drawn as single scattering in two parts: gas, blue as the
 inverse fourth power of the wavelength, and a haze that scatters forward in its own color —

@@ -28,6 +28,8 @@ struct AtmosphereUniform {
     exposure: vec4<f32>,
     gas: vec4<f32>,
     haze: vec4<f32>,
+    albedo: vec4<f32>,
+    glow: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: AtmosphereUniform;
@@ -48,7 +50,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let air = air_of(material.gas, material.haze);
+    let air = air_of(material.gas, material.haze, material.albedo);
     let radius = in.top / top_of(air);
     let o = (view.world_position - in.center) / radius;
     let d = normalize(in.world_position - view.world_position);
@@ -61,7 +63,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         t1 = body.x;
     }
     let s = scatter(o, d, max(shell.x, 0.0), t1, normalize(material.to_star.xyz), air);
-    let linear = s.light * material.starlight.rgb;
+    // What the air takes at ten microns it gives back at its own temperature: the limb glows.
+    let linear = s.light * material.starlight.rgb + material.glow.rgb * (1.0 - exp(-air.infrared * s.column));
 
     let reference = material.exposure.x;
     let stops = material.exposure.y;

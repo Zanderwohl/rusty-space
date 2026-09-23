@@ -11,6 +11,8 @@
 //! atmosphere's scale height is exaggerated about twentyfold so a limb shows at the distances a
 //! ship sees planets from. Nothing a survey measures reads them.
 
+use em_spectra::Band;
+
 use crate::worlds::{Atmosphere, Top, World};
 
 /// Where the paint of a rocky world with air comes from.
@@ -89,14 +91,16 @@ pub struct Clouds {
 }
 
 /// Single scattering, in two parts: gas, which scatters as the inverse fourth power of the
-/// wavelength and so is blue, and haze, which scatters forward in whatever color it is.
+/// wavelength and so is blue, and haze, which scatters forward in whatever color it is. Both
+/// are stated in V and carried to every band by [`Air::in_band`], and the air's own heat by
+/// [`Air::infrared`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Air {
-    /// Vertical optical depth of the gas, in (R, G, B).
-    pub gas: [f32; 3],
-    /// Vertical optical depth of the haze, the same in every channel.
+    /// Vertical optical depth of the gas in V.
+    pub gas: f32,
+    /// Vertical optical depth of the haze in V.
     pub haze: f32,
-    /// What share of the light the haze meets it scatters rather than absorbs, per channel:
+    /// What share of the light the haze meets it scatters rather than absorbs, in (R, V, B):
     /// the haze's color. Mars's dust eats blue.
     pub haze_albedo: [f32; 3],
     /// Scale height as a share of the radius. See the module doc.
@@ -104,13 +108,42 @@ pub struct Air {
     /// How far the air evens out day and night, `[0, 1]`: carrying heat round to the night side
     /// and holding it there. Venus's night is as hot as its day; Mars's air does almost nothing.
     pub evens: f32,
+    /// Vertical optical depth at ten microns, which is absorption rather than scattering: what
+    /// the air takes of the ground's heat, and gives out at its own colder temperature. Earth's
+    /// is small, because ten microns is the window its water and carbon dioxide leave open;
+    /// Venus's is opaque.
+    pub infrared: f32,
 }
 
-/// Vertical optical depth of an Earth's worth of nitrogen, per channel at 680, 550 and 440 nm:
-/// half the true figures. The scale height is exaggerated, so the full depth washed the disc
-/// out to a pastel; at half the limb still shows, because a tangent ray crosses sixteen times
-/// the vertical depth.
-const EARTH_GAS: [f32; 3] = [0.022, 0.05, 0.12];
+/// Haze's fall with wavelength, `tau ~ lambda^-ANGSTROM`: aerosol and dust grains the size of
+/// the light, nearly gray. Gas is Rayleigh's four.
+const ANGSTROM: f64 = 0.5;
+
+impl Air {
+    /// In `band`: the gas's vertical optical depth, the haze's, and the haze's albedo. Nothing
+    /// scatters at ten microns or 21 cm; what the air does there is [`Air::infrared`].
+    pub fn in_band(&self, band: Band) -> (f32, f32, f32) {
+        if matches!(band, Band::ThermalIr | Band::Radio) {
+            return (0.0, 0.0, 0.0);
+        }
+        let v = Band::V.center_m();
+        let ratio = v / band.center_m();
+        let [r, g, b] = self.haze_albedo;
+        // Past R a grain's albedo holds at its red value: dust and haze are bright in the
+        // near infrared, where iron and organics stop absorbing.
+        let albedo = match band {
+            Band::B => b,
+            Band::V => g,
+            _ => r,
+        };
+        (self.gas * ratio.powi(4) as f32, self.haze * ratio.powf(ANGSTROM) as f32, albedo)
+    }
+}
+
+/// Vertical optical depth of an Earth's worth of nitrogen in V: half the true figure. The scale
+/// height is exaggerated, so the full depth washed the disc out to a pastel; at half the limb
+/// still shows, because a tangent ray crosses sixteen times the vertical depth.
+const EARTH_GAS: f32 = 0.05;
 
 /// The water tag the generator writes, since a share of the mass is not something a class says.
 pub const WATER: &str = "Water:";
@@ -252,7 +285,7 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Option<Climate> {
     });
     let thick = atmosphere == Atmosphere::Thick;
     let air_scale = if thick { 0.6 + 0.8 * a } else { 0.08 + 0.12 * a };
-    let gas = EARTH_GAS.map(|g| g * air_scale);
+    let gas = EARTH_GAS * air_scale;
 
     if top == Top::Cloud {
         // Venus where it is warm and Titan's orange where it is not: one deck with no break.
@@ -274,7 +307,7 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Option<Climate> {
             clouds: Clouds { cover: 1.0, opacity: 1.1, tint },
             // The haze above the deck, not the deck: the deck is the ground here, and a haze
             // as deep as the whole cloud would put out the light before the terminator.
-            air: Air { gas, haze: 0.25 + 0.5 * b, haze_albedo, height: 0.035, evens: 1.0 },
+            air: Air { gas, haze: 0.25 + 0.5 * b, haze_albedo, height: 0.035, evens: 1.0, infrared: 3.0 },
         });
     }
 
@@ -335,6 +368,12 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Option<Climate> {
             haze_albedo,
             height: if thick { 0.025 } else { 0.018 },
             evens: if thick { 0.5 } else { 0.05 },
+            // Thick and cold is a haze that is opaque well into the infrared, as Titan's is.
+            infrared: match (thick, t < 150.0) {
+                (true, true) => 0.6,
+                (true, false) => 0.3,
+                (false, _) => 0.03,
+            },
         },
     })
 }
@@ -365,7 +404,14 @@ fn measured(id: &str) -> Option<Climate> {
             aridity: 0.0,
             dark: 0.0,
             clouds: Clouds { cover: 0.0, opacity: 1.0, tint: [1.0; 3] },
-            air: Air { gas: EARTH_GAS, haze: 0.01, haze_albedo: [0.9, 0.9, 0.9], height: 0.025, evens: 0.5 },
+            air: Air {
+                gas: EARTH_GAS,
+                haze: 0.01,
+                haze_albedo: [0.9, 0.9, 0.9],
+                height: 0.025,
+                evens: 0.5,
+                infrared: 0.3,
+            },
         },
         // Its clouds are water ice, faint and sparse; exaggerated a little so the wisps show.
         "Mars" => Climate {
@@ -379,21 +425,36 @@ fn measured(id: &str) -> Option<Climate> {
             dark: 0.15,
             clouds: Clouds { cover: -0.17, opacity: 0.5, tint: [0.95, 0.97, 1.03] },
             air: Air {
-                gas: EARTH_GAS.map(|g| g * 0.1),
+                gas: EARTH_GAS * 0.1,
                 haze: 0.12,
                 haze_albedo: [0.95, 0.66, 0.42],
                 height: 0.02,
                 evens: 0.05,
+                infrared: 0.05,
             },
         },
         "Venus" => Climate {
             clouds: Clouds { cover: 1.0, opacity: 1.1, tint: [1.0, 0.93, 0.7] },
-            air: Air { gas: EARTH_GAS.map(|g| g * 1.2), haze: 0.35, haze_albedo: [0.98, 0.93, 0.74], height: 0.03, evens: 1.0 },
+            air: Air {
+                gas: EARTH_GAS * 1.2,
+                haze: 0.35,
+                haze_albedo: [0.98, 0.93, 0.74],
+                height: 0.03,
+                evens: 1.0,
+                infrared: 5.0,
+            },
             ..derived(&deck(328.0), variety(id))?
         },
         "Titan" => Climate {
             clouds: Clouds { cover: 1.0, opacity: 1.1, tint: [0.68, 0.42, 0.16] },
-            air: Air { gas: [0.0; 3], haze: 1.0, haze_albedo: [0.95, 0.6, 0.26], height: 0.035, evens: 1.0 },
+            air: Air {
+                gas: 0.0,
+                haze: 1.0,
+                haze_albedo: [0.95, 0.6, 0.26],
+                height: 0.035,
+                evens: 1.0,
+                infrared: 1.5,
+            },
             ..derived(&deck(90.0), variety(id))?
         },
         _ => return None,
@@ -410,6 +471,18 @@ mod tests {
 
     fn made(atmosphere: Atmosphere, top: Top, k: f64, water: Option<f64>) -> Climate {
         derived(&inputs(atmosphere, top, k, water), variety("test")).expect("has air")
+    }
+
+    /// Blue in B, nothing past K, and Earth's old three channels where the eye's three bands are.
+    #[test]
+    fn the_air_is_blue_only_where_the_bands_are() {
+        let earth = of("Earth", crate::worlds::for_body("Earth").unwrap(), 278.0, 5772.0, &[]).unwrap().air;
+        let (b, v, r) = (earth.in_band(Band::B).0, earth.in_band(Band::V).0, earth.in_band(Band::R).0);
+        assert!(b > 2.0 * v && v > 1.8 * r, "{b} {v} {r}");
+        assert!(earth.in_band(Band::K).0 < v / 100.0, "K sees through Rayleigh");
+        assert_eq!(earth.in_band(Band::ThermalIr), (0.0, 0.0, 0.0));
+        let venus = of("Venus", crate::worlds::for_body("Venus").unwrap(), 328.0, 5772.0, &[]).unwrap().air;
+        assert!(venus.infrared > 10.0 * earth.infrared, "ten microns is Earth's window and not Venus's");
     }
 
     /// A stated life is the life drawn, dead or alive, and unstated the rules stand in.
@@ -473,7 +546,7 @@ mod tests {
         assert!(mars.rust > earth.rust);
         assert!(mars.clouds.cover < earth.clouds.cover - 0.1);
         assert!(mars.air.haze > earth.air.haze);
-        assert!(mars.air.gas[2] < earth.air.gas[2] / 3.0, "thin air has a faint limb");
+        assert!(mars.air.gas < earth.air.gas / 3.0, "thin air has a faint limb");
     }
 
     #[test]

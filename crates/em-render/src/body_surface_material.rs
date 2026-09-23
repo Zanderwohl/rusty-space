@@ -49,6 +49,8 @@ pub struct BodySurfaceUniform {
     /// See [`crate::atmosphere_material::AtmosphereUniform`]. Zero for a body without air.
     pub air_gas: Vec4,
     pub air_haze: Vec4,
+    pub air_albedo: Vec4,
+    pub air_glow: Vec4,
     /// Each kind of ground's albedo through the current band mapping, as display channels:
     /// water, ice, growth, sand, rock and cloud.
     pub ground: [Vec4; GROUNDS],
@@ -90,6 +92,8 @@ impl Default for BodySurfaceUniform {
             starlight: Vec4::ZERO,
             air_gas: Vec4::ZERO,
             air_haze: Vec4::ZERO,
+            air_albedo: Vec4::ZERO,
+            air_glow: Vec4::ZERO,
             ground: [Vec4::ONE; GROUNDS],
             ground_natural: [Vec4::ONE; GROUNDS],
             bands: [Vec4::ZERO; BANDS],

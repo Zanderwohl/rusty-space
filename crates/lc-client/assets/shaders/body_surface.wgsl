@@ -59,6 +59,9 @@ struct BodySurfaceUniform {
     /// scatter.wgsl's `Air`, packed: zero for a body without any.
     air_gas: vec4<f32>,
     air_haze: vec4<f32>,
+    air_albedo: vec4<f32>,
+    /// Display light from the air's own heat, where it is opaque at ten microns.
+    air_glow: vec4<f32>,
     /// Each ground's albedo through the current mapping, then through the natural one: water,
     /// ice, growth, sand, rock, cloud.
     ground: array<vec4<f32>, 6>,
@@ -91,6 +94,8 @@ const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 @group(#{MATERIAL_BIND_GROUP}) @binding(11) var mask_sand: texture_cube<f32>;
 
 const CLOUD: i32 = 5;
+/// em_spectra's index of the ten-micron band.
+const THERMAL_IR: i32 = 5;
 
 // Where the deck's drive becomes cover, and the cover's color: earthlike-clouds.tgraph's
 // "density ramp" and "cloud palette", which surfaces.rs's tests hold these to.
@@ -193,7 +198,7 @@ fn ground_k(n: vec3<f32>, sin_lat: f32, to_star: vec3<f32>, pole: vec3<f32>, dam
 
 /// What the ground and the cloud over it radiate, as display light. A cloud's emissivity is its
 /// opacity, so it hides the ground at ten microns and not at 21 cm, and its tops are cold.
-fn glow(dir: vec3<f32>, n: vec3<f32>, to_star: vec3<f32>, pole: vec3<f32>, cloud: f32) -> vec3<f32> {
+fn glow(dir: vec3<f32>, n: vec3<f32>, to_star: vec3<f32>, pole: vec3<f32>, cloud: f32, infrared: f32) -> vec3<f32> {
     let w = grounds(dir);
     var inertia = 0.0;
     for (var k = 0; k < 5; k++) {
@@ -212,7 +217,7 @@ fn glow(dir: vec3<f32>, n: vec3<f32>, to_star: vec3<f32>, pole: vec3<f32>, cloud
         let um = material.bands[b].w;
         let cover = cloud * emissivity_of(CLOUD, b);
         let radiated = (1.0 - cover) * e * planck_ratio(um, t_ground, t0) + cover * planck_ratio(um, t_cloud, t0);
-        out += material.bands[b].rgb * radiated;
+        out += material.bands[b].rgb * radiated * select(1.0, infrared, b == THERMAL_IR);
     }
     return out;
 }
@@ -277,9 +282,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The air between the eye and the ground: it reddens the light reaching the ground near
     // the terminator, dims what leaves it, and adds what it scatters, which is the blue of a
     // day side and the brightening toward the limb.
-    let air = air_of(material.air_gas, material.air_haze);
+    let air = air_of(material.air_gas, material.air_haze, material.air_albedo);
     var scattered = vec3<f32>(0.0);
     var through = vec3<f32>(1.0);
+    var column = 0.0;
     if (air.height > 0.0) {
         let o = (view.world_position - in.center) / in.radius;
         let n = normalize(in.world_position - in.center);
@@ -295,6 +301,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         light *= beam + (1.0 - beam) * SKYLIGHT;
         scattered = s.light * material.starlight.rgb;
         through = s.through;
+        column = s.column;
     }
 
     // The body's own light, which does not care where the star is. In the optical it is zero
@@ -307,7 +314,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let inversion = material.emitted.w;
     var emitted = material.emitted.rgb * mix(1.0 + inversion, 1.0 - inversion, t);
     if (material.thermal.w > 0.5) {
-        emitted = glow(in.local_direction, normalize(in.world_normal), to_star, normalize(in.pole), cloud.a * material.params.z);
+        // At ten microns the air between is absorbing: the ground's heat is taken and the air's
+        // own, colder, given out instead. Only there, because nothing else here absorbs.
+        let infrared = exp(-air.infrared * column);
+        emitted = glow(in.local_direction, normalize(in.world_normal), to_star, normalize(in.pole), cloud.a * material.params.z, infrared)
+            + material.air_glow.rgb * (1.0 - infrared);
     }
     let linear = (material.reflected.rgb * albedo * light + emitted) * through + scattered;
 

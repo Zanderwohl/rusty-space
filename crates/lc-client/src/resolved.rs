@@ -306,15 +306,36 @@ pub fn emitted_radiance(body: &Drawable) -> PerBand<f32> {
     blackbody_at(body.effective_k)
 }
 
-/// A climate's air, as scatter.wgsl packs it: gas depths and scale height, then the haze's
-/// albedo and depth. Zero without air.
-fn air_of(body: &Drawable) -> (Vec4, Vec4) {
-    let Some(c) = &body.climate else { return (Vec4::ZERO, Vec4::ZERO) };
+/// The air's own temperature where it radiates to space, over the body's mean: colder than the
+/// ground, which is what makes it a screen at ten microns rather than a mirror.
+const AIR_K: f64 = 0.85;
+
+/// A climate's air as scatter.wgsl packs it, per display channel: gas depths and scale height;
+/// haze depths and ten-micron depth; haze albedo; and the air's own glow. Zero without air.
+///
+/// A channel's depth is its bands' depths averaged by the starlight the mapping puts on it
+/// from each, so a channel carrying K sees through Rayleigh and one carrying ten microns
+/// scatters nothing. A channel with no starlight on it has no air to scatter.
+fn air_of(body: &Drawable, mapping: &BandMapping, star: &PerBand<f32>) -> [Vec4; 4] {
+    let Some(c) = &body.climate else { return [Vec4::ZERO; 4] };
     let a = c.air;
-    (
-        Vec3::from_array(a.gas).extend(a.height),
-        Vec3::from_array(a.haze_albedo).extend(a.haze),
-    )
+    let alone = |b: usize, value: f32| {
+        Vec3::from_array(mapping.apply(&PerBand::new(std::array::from_fn(|i| if i == b { value } else { 0.0 }))))
+    };
+    let (mut weight, mut gas, mut haze, mut scattered) = (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
+    for (b, band) in Band::ALL.into_iter().enumerate() {
+        let w = alone(b, star[band]);
+        let (g, h, albedo) = a.in_band(band);
+        weight += w;
+        gas += w * g;
+        haze += w * h;
+        scattered += w * h * albedo;
+    }
+    let per = |sum: Vec3, over: Vec3| Vec3::select(over.cmpgt(Vec3::ZERO), sum / over, Vec3::ZERO);
+    let haze = per(haze, weight);
+    let albedo = per(scattered, haze * weight);
+    let glow = alone(Band::ThermalIr.index(), blackbody::band_radiance(Band::ThermalIr, body.effective_k * AIR_K) as f32);
+    [per(gas, weight).extend(a.height), haze.extend(a.infrared), albedo.extend(0.0), glow.extend(0.0)]
 }
 
 /// What the surface reflects and what it emits, each as linear display light.
@@ -411,12 +432,13 @@ fn uniforms(
     emitted: glam::Vec3,
     drawn: crate::surfaces::Drawn,
     grounds: Option<Grounds>,
+    air: [Vec4; 4],
     weather: Option<crate::surfaces::Weather>,
 ) -> BodySurfaceUniform {
     let as_weight = |on: bool| f32::from(u8::from(on));
     let (color, clouds) = (as_weight(drawn.color), as_weight(drawn.clouds));
     let flat = BodySurfaceUniform::default();
-    let (air_gas, air_haze) = air_of(body);
+    let [air_gas, air_haze, air_albedo, air_glow] = air;
     let deck = body.climate.map(|c| c.clouds);
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
@@ -444,6 +466,8 @@ fn uniforms(
         starlight: reflected.extend(0.0),
         air_gas,
         air_haze,
+        air_albedo,
+        air_glow,
         ground: grounds.map_or(flat.ground, |g| g.now),
         ground_natural: grounds.map_or(flat.ground_natural, |g| g.natural),
         bands: grounds.map_or(flat.bands, |g| g.bands),
@@ -459,6 +483,8 @@ fn air_uniforms(surface: &BodySurfaceUniform) -> AtmosphereUniform {
         exposure: surface.exposure,
         gas: surface.air_gas,
         haze: surface.air_haze,
+        albedo: surface.air_albedo,
+        glow: surface.air_glow,
     }
 }
 
@@ -512,12 +538,14 @@ pub fn update_resolved(
         let (reflected, emitted) =
             surface_shading(&session.0, body, star_radius, star_teff, star_distance);
         let drawn = surfaces.drawn(&body.name);
-        let ground = body.climate.filter(|_| drawn.grounds).map(|c| {
-            let star = lit_radiance(1.0, star_radius, star_teff, star_distance);
-            Grounds::of(&session.0.mapping, &star, &c, body.effective_k)
-        });
+        let star = lit_radiance(1.0, star_radius, star_teff, star_distance);
+        let ground = body
+            .climate
+            .filter(|_| drawn.grounds)
+            .map(|c| Grounds::of(&session.0.mapping, &star, &c, body.effective_k));
+        let air = air_of(body, &session.0.mapping, &star);
         let weather = surfaces.weather(&body.name, now_s, body.radius_m, &mut bakes);
-        uniforms(body, star_ly, &session.tone, reflected, emitted, drawn, ground, weather)
+        uniforms(body, star_ly, &session.tone, reflected, emitted, drawn, ground, air, weather)
     };
 
     let want: Vec<&Drawable> = bodies
@@ -636,6 +664,23 @@ mod tests {
             let want = Vec3::from_array(mapping.apply(&blackbody));
             assert!((sum - want).abs().max_element() <= want.max_element() * 1e-5, "{sum} against {want}");
         }
+    }
+
+    /// The natural mapping keeps the air it had; K on the red channel makes it clear there, and
+    /// ten microns on red scatters nothing and glows instead.
+    #[test]
+    fn each_channel_scatters_what_its_bands_would() {
+        let mut earth = body(6.371e6, DVec3::X * 1.0e-9);
+        earth.effective_k = 255.0;
+        earth.climate = lc_world::climate::of("Earth", lc_world::worlds::for_body("Earth").unwrap(), 278.0, 5772.0, &[]);
+        let star = lit_radiance(1.0, 6.957e8, 5772.0, AU);
+        let [gas, ..] = air_of(&earth, &presets::natural(), &star);
+        assert!(gas.z > 2.0 * gas.y && gas.y > 1.5 * gas.x, "blue sky: {gas}");
+        let [gas, ..] = air_of(&earth, &BandMapping::direct(Band::K, Band::V, Band::B), &star);
+        assert!(gas.x < gas.y / 50.0, "K sees through Rayleigh: {gas}");
+        let [gas, haze, _, glow] = air_of(&earth, &presets::thermal(), &star);
+        assert_eq!((gas.x, haze.x), (0.0, 0.0), "nothing scatters at ten microns");
+        assert!(glow.x > 0.0 && glow.y == 0.0, "the air glows only where ten microns is: {glow}");
     }
 
     /// A Jupiter-like body at Jupiter's distance, so the numbers mean something.

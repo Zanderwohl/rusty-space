@@ -20,19 +20,23 @@ const HAZE_DIFFUSE: f32 = 0.4;
 /// the exponential finite: the shadow it makes is already black a few heights down.
 const DEEPEST: f32 = 60.0;
 
+/// Every depth is per display channel: the host averages each band's over the bands the mapping
+/// puts on that channel, so a channel carrying K sees through Rayleigh.
 struct Air {
-    /// Vertical optical depth of the gas per channel.
+    /// Vertical optical depth of the gas.
     gas: vec3<f32>,
     /// Scale height, radii.
     height: f32,
-    haze_albedo: vec3<f32>,
     /// Vertical optical depth of the haze.
-    haze: f32,
+    haze: vec3<f32>,
+    /// Vertical optical depth at ten microns, absorbing.
+    infrared: f32,
+    haze_albedo: vec3<f32>,
 }
 
-/// From the uniforms' packing: `gas.w` is the height, `haze.w` the haze's depth.
-fn air_of(gas: vec4<f32>, haze: vec4<f32>) -> Air {
-    return Air(gas.xyz, gas.w, haze.xyz, haze.w);
+/// From the uniforms' packing: `gas.w` is the height and `haze.w` the infrared depth.
+fn air_of(gas: vec4<f32>, haze: vec4<f32>, albedo: vec4<f32>) -> Air {
+    return Air(gas.xyz, gas.w, haze.xyz, haze.w, albedo.xyz);
 }
 
 fn top_of(air: Air) -> f32 {
@@ -59,7 +63,7 @@ fn density(p: vec3<f32>, air: Air) -> f32 {
 
 /// Per radius, at the surface's density.
 fn extinction(air: Air) -> vec3<f32> {
-    return (air.gas + vec3<f32>(air.haze)) / air.height;
+    return (air.gas + air.haze) / air.height;
 }
 
 /// Optical depth from `p` out toward the star along `l`.
@@ -92,6 +96,8 @@ struct Scattered {
     light: vec3<f32>,
     /// What survives of whatever is behind.
     through: vec3<f32>,
+    /// How much air the ray crossed, in vertical columns: what ten microns' absorption reads.
+    column: f32,
 }
 
 /// Along `d` from `t0` to `t1`, lit from `l`.
@@ -99,6 +105,7 @@ fn scatter(o: vec3<f32>, d: vec3<f32>, t0: f32, t1: f32, l: vec3<f32>, air: Air)
     var out: Scattered;
     out.light = vec3<f32>(0.0);
     out.through = vec3<f32>(1.0);
+    out.column = 0.0;
     if (t1 <= t0 || air.height <= 0.0) {
         return out;
     }
@@ -117,7 +124,9 @@ fn scatter(o: vec3<f32>, d: vec3<f32>, t0: f32, t1: f32, l: vec3<f32>, air: Air)
         let lit = exp(-(depth + 0.5 * step) - star_depth(p, l, air, true));
         out.light += phased * rho * ds * lit;
         depth += step;
+        out.column += rho * ds;
     }
+    out.column /= air.height;
     // Starlight on a white Lambertian surface is the irradiance over pi.
     out.light *= PI;
     out.through = exp(-depth);
