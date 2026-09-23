@@ -97,7 +97,7 @@ impl World {
     /// star rather than a position: a client can ask for a star this shard holds and nothing
     /// else. Both ends hold the same catalog — see the shard's `--sky`.
     pub fn star_at(&self, id: u64) -> Option<DVec3> {
-        self.stars.iter().find(|s| s.id.get() == id).map(|s| s.position_ly)
+        self.star_by_id(StarId::from_raw(id)).map(|s| s.position_ly)
     }
 
     /// Where a star is, by the name the catalog knows it under.

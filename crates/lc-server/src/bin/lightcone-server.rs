@@ -262,9 +262,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminate = signal(SignalKind::terminate())?;
     let mut since_save = 0u32;
     // A checkpoint being written. The connection is inside it until it finishes.
-    let mut saving: Option<
-        tokio::task::JoinHandle<(tokio_postgres::Client, Taken, Result<(), tokio_postgres::Error>)>,
-    > = None;
+    let mut saving: Option<tokio::task::JoinHandle<Written>> = None;
     // Consecutive ticks whose journal write failed, so a store that has gone away is reported
     // rather than repeated twenty times a second.
     let mut failing = 0u32;
@@ -369,12 +367,11 @@ fn give_back(server: &mut Server<Store>, taken: Taken) {
     server.library.redirty(&taken.marks);
 }
 
+/// A checkpoint write's outcome, with the connection and what was being written handed back.
+type Written = (tokio_postgres::Client, Taken, Result<(), tokio_postgres::Error>);
+
 /// Owns the connection while it writes, so it can run beside the tick; hands both back.
-async fn write(
-    mut client: tokio_postgres::Client,
-    shard_id: i64,
-    taken: Taken,
-) -> (tokio_postgres::Client, Taken, Result<(), tokio_postgres::Error>) {
+async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) -> Written {
     let started = std::time::Instant::now();
     let rows: Vec<lc_store::reading::Bookmark> = taken
         .marks
@@ -415,10 +412,7 @@ async fn write(
 
 /// A failed checkpoint is not a reason to stop the world. It is a reason to say so every time,
 /// because a shard that has quietly stopped saving looks exactly like one that is fine.
-fn finish_checkpoint(
-    (client, taken, written): (tokio_postgres::Client, Taken, Result<(), tokio_postgres::Error>),
-    server: &mut Server<Store>,
-) -> tokio_postgres::Client {
+fn finish_checkpoint((client, taken, written): Written, server: &mut Server<Store>) -> tokio_postgres::Client {
     if let Err(why) = written {
         eprintln!("ERROR: checkpoint failed: {why}");
         give_back(server, taken);

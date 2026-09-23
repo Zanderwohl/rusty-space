@@ -101,7 +101,7 @@ impl Sky {
     /// Built the first time anything points at it.
     pub fn target(&mut self, id: StarId) -> Option<&Target> {
         if !self.targets.contains_key(&id) {
-            let star = self.stars.iter().find(|s| s.id == id)?;
+            let star = self.stars.get(self.index_of(id)?)?;
             self.targets.insert(id, build_target(star));
         }
         self.targets.get(&id)
