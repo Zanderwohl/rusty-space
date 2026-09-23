@@ -104,6 +104,24 @@ impl World {
         self.loaded.insert(star.id, system.clone());
         Some(system)
     }
+
+    /// One star's system, by its catalogue id, loaded if nothing has asked yet.
+    ///
+    /// The same cache [`World::system_at`] fills, so a system a craft is flying in is not built
+    /// a second time to answer a question about it.
+    pub fn system_for(&mut self, id: StarId) -> Option<Arc<LocalSystem>> {
+        if let Some(system) = self.loaded.get(&id) {
+            return Some(system.clone());
+        }
+        let star = self.stars.iter().find(|star| star.id == id)?.clone();
+        let system = Arc::new(LocalSystem::for_star(&star)?);
+        self.loaded.insert(id, system.clone());
+        Some(system)
+    }
+
+    pub fn star_by_id(&self, id: StarId) -> Option<&CatalogueStar> {
+        self.stars.iter().find(|star| star.id == id)
+    }
 }
 
 /// Microseconds of coordinate time in one second.

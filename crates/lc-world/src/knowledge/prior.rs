@@ -178,6 +178,46 @@ impl Prior {
             .map(|(star, _)| *star)
     }
 
+    /// How wide a band of luminosity counts as "a star like this one" when the spread of their
+    /// masses is being measured. A factor either way, not a fraction.
+    ///
+    /// Wide, because the mass–luminosity relation is steep: a factor of two in luminosity is
+    /// only about a fifth in mass, so a narrow window would report a confidence the relation
+    /// does not have and a wide one costs little.
+    const LIKE_ENOUGH: f64 = 2.0;
+
+    /// A host's gravitational parameter and how well it is known, as a fraction.
+    ///
+    /// The fraction is **measured from the prior's own sample** rather than stated: the spread of
+    /// `mu` across the stars whose luminosity in this band is within [`Prior::LIKE_ENOUGH`] of
+    /// the one asked about. That is exactly the thing a craft does not know when all it has is a
+    /// brightness and a distance, and it is what carries into the distance of every planet found
+    /// by transit. See `lightcone/docs/25-system-knowledge.md#from-outside-transits`.
+    ///
+    /// `None` when the luminosity is not positive, as for [`Prior::host_like`]. A sample of one
+    /// reports no spread, which is honest about the sample and not about the relation — callers
+    /// with one host are reading a prior built from one star.
+    #[allow(clippy::indexing_slicing)] // band indices come from `Band::index`, below seven
+    pub fn host_mass(&self, band: Band, luminosity_w: f64) -> Option<(f64, f64)> {
+        let host = self.host_like(band, luminosity_w)?;
+        let like: Vec<f64> = self
+            .hosts
+            .iter()
+            .filter(|(_, l)| {
+                let ratio = l[band.index()] / luminosity_w;
+                ratio > 1.0 / Self::LIKE_ENOUGH && ratio < Self::LIKE_ENOUGH
+            })
+            .map(|(star, _)| star.mu)
+            .collect();
+        if like.len() < 2 {
+            return Some((host.mu, 0.0));
+        }
+        let mean = like.iter().sum::<f64>() / like.len() as f64;
+        let variance =
+            like.iter().map(|mu| (mu - mean) * (mu - mean)).sum::<f64>() / (like.len() - 1) as f64;
+        Some((host.mu, variance.sqrt() / mean.max(f64::MIN_POSITIVE)))
+    }
+
     /// Chance a star has at least one transiting planet in the periods.
     pub fn planet_prior(&self, periods_s: (f64, f64)) -> f64 {
         if self.systems.is_empty() {

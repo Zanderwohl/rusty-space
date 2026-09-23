@@ -23,6 +23,7 @@ pub(crate) mod instruments;
 pub mod journal;
 pub mod library;
 pub mod persist;
+pub mod planets;
 pub mod radio;
 pub mod rate;
 pub mod server;

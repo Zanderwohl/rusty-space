@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::record::Witness;
 use crate::rng;
 use crate::sky::StarId;
 
@@ -21,6 +22,17 @@ impl BodyId {
             (h ^ b as u64).wrapping_mul(0x100_0000_01b3)
         });
         Self(rng::hash(&[star.get(), tag]))
+    }
+
+    /// A body only one craft believes in: a transit that matched no real planet.
+    ///
+    /// Keyed by the witness as well as the star, so two craft with the same false positive get
+    /// different ids and never merge. That is the honest outcome — they have no shared object to
+    /// agree about — and it is why this cannot be [`BodyId::of`] with a made-up key. `bucket`
+    /// groups near-equal periods, so one craft's repeated transits of its own phantom land on
+    /// one body. See `lightcone/docs/25-system-knowledge.md#which-body-a-transit-is`.
+    pub fn phantom(star: StarId, witness: Witness, bucket: i64) -> Self {
+        Self(rng::hash(&[star.get(), witness.0, bucket as u64, 0xfa_1_5e]))
     }
 
     #[inline]

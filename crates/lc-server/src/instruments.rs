@@ -56,7 +56,7 @@ pub(crate) struct Instruments {
     /// Built lazily and shared by every craft: a star's output does not depend on who looks.
     sky: Option<Sky>,
     /// The generator's planet population, which a log is read against. Built lazily.
-    prior: Option<Prior>,
+    pub(crate) prior: Option<Prior>,
     /// Round-robin cursor for [`READS_PER_TICK`].
     reader: Option<CraftId>,
     /// Round-robin cursor for the one full recount per tick.
@@ -194,9 +194,18 @@ impl<J: Journal> Server<J> {
             let instruments = &mut self.instruments;
             let prior = instruments.prior.get_or_insert_with(|| Prior::measure(stars.iter()));
             let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
-            aboard.knowledge.read_log(subject, observer, prior, now_s);
+            let settled = aboard
+                .knowledge
+                .read_log(subject, observer, prior, now_s)
+                .as_ref()
+                .and_then(crate::planets::settled_planet);
             instruments.reader = Some(id);
             reads += 1;
+            // A settled transit is a body from here on: lettered, with the orbit its period
+            // implies. See `crate::planets`, and doc 25's "Transits make bodies".
+            if let Some(transit) = settled {
+                self.found_by_transit(id, subject, &transit, now_s);
+            }
             self.fit(id, true);
         }
     }
