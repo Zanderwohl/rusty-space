@@ -7,10 +7,9 @@
 //! is a list of types with probabilities, and the prior is the generator itself -- the same
 //! code that made the body, sampled over a neighborhood of stars.
 //!
-//! This is the same shape as [`super::prior::Prior::rocky_given`] and for the same reason, one
-//! dimension at a time: what makes it work is that the *spread* is modeled, not just the
-//! measurement. Two ocean worlds are not the same color, and a classification that assumed
-//! they were would be certain and wrong.
+//! Same shape as [`super::prior::Prior::rocky_given`] and for the same reason: the *spread* is
+//! modeled, not just the measurement. Two ocean worlds are not the same color, and a
+//! classification that assumed they were would be certain and wrong.
 
 use em_spectra::Band;
 use serde::{Deserialize, Serialize};
@@ -39,8 +38,8 @@ const COLOR_WIDTH: f64 = 0.07;
 
 /// What kind of world, in the terms a survey can tell apart.
 ///
-/// Derived from what the generator decided and from nothing else, so there is one definition of
-/// each and no threshold is applied twice. See `lightcone/docs/26-system-generation.md`.
+/// Derived from what the generator decided and nothing else, so no threshold is applied twice.
+/// See `lightcone/docs/26-system-generation.md`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Sort {
     /// A core that reached runaway and took all the hydrogen it could. Banded.
@@ -48,7 +47,7 @@ pub enum Sort {
     /// A core that took a little. Methane-blue, and darker in the near infrared for it.
     IceGiant,
     /// A rocky or icy core that kept the hydrogen it was born under. The commonest planet
-    /// there is, and the reason a habitable world has to be a small one.
+    /// there is.
     Subneptune,
     /// Liquid water at the top.
     Ocean,
@@ -109,8 +108,7 @@ impl Sort {
             Top::Ocean => Sort::Ocean,
             Top::Cloud => Sort::Greenhouse,
             Top::Ice => Sort::IceWorld,
-            // The same threshold the surface classification uses, so bare rock is called hot in
-            // one place rather than two.
+            // The surface classification's own threshold, so hot is decided in one place.
             Top::Rock if equilibrium_k > crate::surface::SCORCHED_K => Sort::Molten,
             Top::Rock if atmosphere == Atmosphere::None => Sort::Barren,
             Top::Rock => Sort::Desert,
@@ -153,15 +151,13 @@ impl Measured {
     /// What a craft's own file on a body says, read as the six numbers.
     ///
     /// Nothing here is a new measurement: every number is already in the file with a witness on
-    /// it, so a type is derived rather than stated and needs no record of its own. It moves the
-    /// moment a better measurement arrives.
+    /// it, so a type needs no record of its own and moves when a better measurement arrives.
     ///
-    /// Colors divide the star out. A craft measures a flux ratio between two bands, and what
-    /// it wants is the body's reflectance ratio -- the range to the body and the star's output
-    /// both cancel, which is why a color is the one thing a distant craft can read cleanly.
+    /// Colors divide the star out: the range to the body and the star's output both cancel in a
+    /// flux ratio, which is why a color is what a distant craft reads cleanly.
     ///
     /// The albedo is left unmeasured. It needs the body's distance from its star *and* the
-    /// range to the craft, and a belief carries neither; see `lightcone/docs/25-system-knowledge.md`.
+    /// range to the craft, and a belief carries neither.
     pub fn from_belief(belief: &super::BodyBelief, star: &crate::star::Star) -> Self {
         let radius_earths = belief.radius_m.map(|(r, s)| (r / disc::EARTH_RADIUS, s / disc::EARTH_RADIUS));
         let density = match (belief.radius_m, belief.mass_kg) {
@@ -197,8 +193,8 @@ impl Measured {
 
     /// What a survey reads off a body it has been close to.
     ///
-    /// The radius and the density are what proximity gives; the temperature is the orbit and
-    /// the star; the colors are the per-band photometry with the star divided out.
+    /// Radius and density come from proximity, temperature from the orbit and the star, colors
+    /// from the per-band photometry with the star divided out.
     pub fn of(world: &World, radius_earths: f64, density_kg_m3: f64, equilibrium_k: f64) -> Self {
         let reflect = |b: Band| world.reflectance_in(b);
         Self {
@@ -254,10 +250,9 @@ impl Sorts {
 
     /// What kind of world this is, most probable first.
     ///
-    /// Every drawn body is weighted by how well it matches on every observable there is, and
-    /// the weights are summed by type. Returns nothing when nothing has been measured, and
-    /// nothing when the generator makes nothing like this -- which is a real answer and not the
-    /// same as an even split.
+    /// Every drawn body is weighted by how well it matches on every observable there is and
+    /// the weights are summed by type. Nothing when nothing has been measured, and nothing when
+    /// the generator makes nothing like this -- which is an answer, not an even split.
     pub fn given(&self, measured: &Measured) -> Vec<(Sort, f64)> {
         if measured.is_empty() || self.drawn.is_empty() {
             return Vec::new();
@@ -295,8 +290,8 @@ impl Drawn {
         let radius_earths = planet.radius_earths();
         let volume = 4.0 / 3.0 * std::f64::consts::PI * planet.radius_m.powi(3);
         let surface = Surface::classify(planet.radius_m, planet.mass_kg, planet.equilibrium_k);
-        // The same reflectance the body will actually have: `to_universe` names it this and
-        // `worlds::of` keys its variation on that name, so this is not a second opinion.
+        // The reflectance the body will actually have: `to_universe` names it this and
+        // `worlds::of` keys its variation on the name.
         let world = crate::worlds::of(
             &planet.name,
             surface,
@@ -315,8 +310,7 @@ impl Drawn {
 
     /// How well this body matches what was measured, as a product of gaussians in log.
     ///
-    /// Log because every one of these is a positive quantity spanning decades, and because a
-    /// fractional error is what a survey actually delivers.
+    /// Log because each is positive, spans decades, and is delivered as a fractional error.
     fn likelihood(&self, measured: &Measured) -> f64 {
         let mut chi2 = 0.0;
         let mut compare = |seen: Option<(f64, f64)>, drawn: Option<f64>, floor: f64| {
@@ -404,9 +398,8 @@ mod tests {
     use super::*;
     use super::tests_support::*;
 
-    /// **The test this whole module exists for.** Build the prior from one set of stars, then
-    /// classify the planets of stars it has never seen. Held out, because a classifier scored
-    /// on its own training set is scored on nothing.
+    /// The test this module exists for: build the prior from one set of stars, then classify
+    /// the planets of stars it has never seen.
     #[test]
     fn a_measured_world_is_recognized_for_what_it_is() {
         let prior = Sorts::measure(&neighborhood(0..400));
@@ -456,17 +449,13 @@ mod tests {
         }
     }
 
-    /// **Where the color earns its place, and it is one place.**
+    /// Where the color earns its place, and it is one place.
     ///
-    /// The types are very nearly a function of radius, density and temperature alone, because
-    /// the retention chain that decides a body's air is a function of exactly those. Bulk
-    /// properties get nineteen of every twenty bodies right with no color at all.
-    ///
-    /// The exception is Venus against Earth. The two are the same size, the same density and
-    /// nearly the same temperature, and what separates them is whether there is water under
-    /// the air -- which is decided by a magnetic field, which leaves no mark on any of the
-    /// three. A color takes that error from one in five to one in two hundred, and that is
-    /// what the per-band photometry in `lightcone/docs/25-system-knowledge.md` is for.
+    /// Radius, density and temperature get nineteen in twenty right on their own, because the
+    /// retention chain is a function of exactly those. The exception is Venus against Earth:
+    /// same size, same density, nearly the same temperature, separated by whether there is
+    /// water under the air, which a magnetic field decides and none of the three shows. A
+    /// color takes that error from one in five to one in two hundred.
     #[test]
     fn color_is_what_tells_an_ocean_from_a_deck() {
         let prior = Sorts::measure(&neighborhood(0..400));
@@ -492,8 +481,8 @@ mod tests {
         );
     }
 
-    /// A poor measurement gives a broad answer rather than a confident one. This is what stops
-    /// the panel stating a type off one distant glance.
+    /// A poor measurement gives a broad answer, which is what stops the panel naming a type
+    /// off one distant glance.
     #[test]
     fn a_loose_measurement_settles_nothing() {
         let prior = Sorts::measure(&neighborhood(0..300));

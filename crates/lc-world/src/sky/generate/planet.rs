@@ -1,10 +1,9 @@
 //! What a rung turns into once it has an orbit, a spin and an age.
 //!
-//! Air, water and habitability are not drawn. They are one chain: a body's equilibrium
-//! temperature sets its exosphere, the exosphere and the escape velocity decide which
-//! molecules are still there, and what is still there decides whether anything could live on
-//! it. Venus, Earth, Mars, Titan and Triton all fall out of the same three lines, which is the
-//! test this file is calibrated against.
+//! Air, water and habitability are not drawn. They are one chain: equilibrium temperature sets
+//! the exosphere, the exosphere and the escape velocity decide which molecules are still
+//! there, and what is still there decides whether anything could live on it. Calibrated on
+//! nine solar-system bodies given nothing but mass, radius and distance.
 
 use super::architecture::{Architecture, Class, Rung};
 use super::disc::{self, EARTH_MASS, EARTH_RADIUS};
@@ -45,8 +44,8 @@ pub struct Planet {
     pub mean_anomaly_deg: f64,
     pub radius_m: f64,
     pub mass_kg: f64,
-    /// How it formed, which is not the same as what it is now: a rocky planet that kept a
-    /// hydrogen envelope is still a rocky planet with a rock under the cloud.
+    /// How it formed, not what it is now: a rocky planet that kept a hydrogen envelope is
+    /// still rocky under the cloud.
     pub class: Class,
     /// A giant that ended up far inside where it formed, dragging its retinue into a Hill
     /// sphere a tenth the size.
@@ -59,12 +58,12 @@ pub struct Planet {
     pub obliquity_rad: f64,
     /// Which way it leans, measured about the system pole, radians.
     pub spin_node_rad: f64,
-    /// Where its orbit crosses the system's plane, radians. Without one every planet's
-    /// inclination would tilt it the same way and a system would be a fan rather than a disc.
+    /// Where its orbit crosses the system's plane, radians. Without one every inclination
+    /// would tilt the same way and a system would be a fan rather than a disc.
     pub orbit_node_rad: f64,
     /// Zero-albedo equilibrium temperature, kelvin.
     pub equilibrium_k: f64,
-    /// Whether a convecting core gives it a field. What decides if its water survives.
+    /// Whether a convecting core gives it a field, which is what decides if its water stays.
     pub magnetic: bool,
     pub atmosphere: Atmosphere,
     pub top: Top,
@@ -72,9 +71,8 @@ pub struct Planet {
     pub water_fraction: f64,
     /// In the habitable zone, with a surface, air over it and water on it.
     pub habitable: bool,
-    /// What orbits it. **A planet with no moon has no mass anybody can measure**: mass comes
-    /// from a satellite's period through Kepler's third law, which is the only route a
-    /// telescope has to it. See `lightcone/docs/25-system-knowledge.md`.
+    /// What orbits it. **A planet with no moon has no mass anybody can measure**: a
+    /// satellite's period through Kepler's third law is the only route a telescope has to it.
     pub moons: Vec<super::moon::Moon>,
 }
 
@@ -89,12 +87,11 @@ impl Planet {
 
 /// Temperature of the exosphere, kelvin, where escape actually happens.
 ///
-/// The equilibrium temperature plus stellar extreme-ultraviolet heating, which falls as the
-/// inverse square of the distance while the equilibrium temperature falls as its square root.
-/// Written in temperature alone -- `(T/T_ref)^4` is the inverse square of the radius -- so it
-/// needs nothing about the star. Earth's 278 K equilibrium becomes the 1085 K exosphere that
-/// is measured to about a thousand kelvin, and Titan's 90 K stays at 99 K, which is why Titan
-/// has air and Ganymede does not.
+/// Equilibrium temperature plus extreme-ultraviolet heating, which falls as the inverse square
+/// of the distance while equilibrium temperature falls as its square root. Written in
+/// temperature alone -- `(T/T_ref)^4` is the inverse square of the radius -- so it needs
+/// nothing about the star. Earth's 278 K becomes 1085 K against a measured ~1000 K; Titan's
+/// 90 K stays at 99 K.
 pub fn exosphere_k(equilibrium_k: f64, tuning: &Tuning) -> f64 {
     let heating = (tuning.world.exosphere_factor - 1.0) * REFERENCE_K;
     equilibrium_k + heating * (equilibrium_k / REFERENCE_K).powi(4)
@@ -102,9 +99,8 @@ pub fn exosphere_k(equilibrium_k: f64, tuning: &Tuning) -> f64 {
 
 /// How far a body is from losing a gas: escape velocity over what it takes to hold one.
 ///
-/// Above one the gas stays for the age of the system. The margin rather than the bare test,
-/// because a trace atmosphere and an opaque one are the same answer to the test and different
-/// answers to a telescope.
+/// Above one the gas stays for the age of the system. The margin rather than the bare test: a
+/// trace atmosphere and an opaque one pass the same test and look nothing alike.
 pub fn retention_margin(molar_g: f64, mass_earths: f64, radius_earths: f64, exosphere_k: f64, tuning: &Tuning) -> f64 {
     let escape = disc::escape_speed(mass_earths, radius_earths);
     let needed = tuning.world.retention * disc::thermal_speed(molar_g, exosphere_k);
@@ -113,11 +109,9 @@ pub fn retention_margin(molar_g: f64, mass_earths: f64, radius_earths: f64, exos
 
 /// What a body has over its surface, from what it can hold on to.
 ///
-/// Three outcomes from one margin, because a telescope can tell a trace apart from an opaque
-/// deck and cannot tell either apart from a number. Calibrated against the solar system: Venus
-/// and Earth opaque, Mars and Triton traces, Mercury and Luna bare, Titan opaque although it
-/// is smaller than Luna -- because it is cold, which is the whole point of putting the
-/// exosphere in the middle of the chain.
+/// Three outcomes from one margin, because a telescope tells a trace from an opaque deck.
+/// Calibrated: Venus and Earth opaque, Mars and Triton traces, Mercury and Luna bare, Titan
+/// opaque although it is lighter than Luna, because it is cold.
 pub fn air(mass_earths: f64, radius_earths: f64, equilibrium_k: f64, envelope: bool, tuning: &Tuning) -> Atmosphere {
     if envelope {
         return Atmosphere::Envelope;
@@ -132,9 +126,8 @@ pub fn air(mass_earths: f64, radius_earths: f64, equilibrium_k: f64, envelope: b
 
 /// Whether a body has a core convecting fast enough to run a dynamo.
 ///
-/// Mass keeps the core molten and rotation organizes the flow, so a small body has no field
-/// and a slow one has no field however big it is. Venus is the case that fixes the rotation
-/// term: it has Earth's mass, 243 days of rotation and no field at all.
+/// Mass keeps the core molten and rotation organizes the flow. Venus fixes the rotation term:
+/// Earth's mass, 243 days, no field.
 pub fn dynamo(mass_earths: f64, spin_s: f64, h: u64, tuning: &Tuning) -> bool {
     let t = &tuning.world;
     let by_mass = (mass_earths / t.dynamo_mass_earths).powf(1.5).min(1.0);
@@ -188,9 +181,8 @@ fn of(
     let exosphere = exosphere_k(rung.equilibrium_k, tuning);
     let margin = |molar: f64, radius: f64| retention_margin(molar, mass_earths, radius, exosphere, tuning);
 
-    // A rocky core heavy enough to have bound nebular gas, cold enough to still hold it, is a
-    // sub-Neptune -- the commonest planet there is, and the reason a habitable world has to be
-    // a small one.
+    // Heavy enough to have bound nebular gas and cold enough to still hold it: a sub-Neptune,
+    // which is why a habitable world has to be a small one.
     let envelope = rung.class.is_giant()
         || (rung.core_earths >= tuning.ladder.ice_giant_core_earths && margin(HYDROGEN, rung.radius_earths) > 1.0);
     let composition = 10f64.powf(rng::gaussian(h(16)) * t.radius_spread_dex);
@@ -235,13 +227,12 @@ fn of(
 
 /// How much water a planet has, as a share of its mass.
 ///
-/// Past the snow line water is what the body is made of. Inside it there was never any, so all
-/// of it arrived: icy bodies thrown inward by whatever giants the system has, which is why a
-/// system with no giant is a dry one.
+/// Past the snow line water is what the body is made of. Inside it all the water arrived,
+/// thrown in by the system's giants, so a system with no giant is dry.
 ///
-/// Then it can be lost. An unmagnetized planet warm enough for its water to be vapor loses it
-/// to the stellar wind unless its gravity is far above what thermal escape alone would need --
-/// which is Venus, dry under an atmosphere it had no trouble keeping.
+/// Then it can be lost: an unmagnetized planet warm enough for vapor loses it to the stellar
+/// wind unless its gravity is far above what thermal escape alone would need. That is Venus,
+/// dry under an atmosphere it had no trouble keeping.
 fn water(
     rung: &Rung,
     arch: &Architecture,
@@ -275,14 +266,13 @@ fn water(
 
 /// What is at the top, which is what reflects.
 ///
-/// Water beats cloud where there is any: Earth has as thick an atmosphere as Venus and reads
-/// blue, because the ocean is what a telescope sees. Cloud is what is left when a thick
-/// atmosphere has no water under it to be seen through, which is Venus exactly.
+/// Water beats cloud where there is any: Earth's atmosphere is as thick as Venus's and reads
+/// blue, because the ocean is what a telescope sees. Cloud is a thick atmosphere with no water
+/// under it, which is Venus.
 ///
-/// A habitable planet has liquid water whatever its equilibrium temperature says, because that
-/// is what the zone *means*: its outer edge is the furthest a thick enough atmosphere can still
-/// hold a surface above freezing. The greenhouse that does it is a free parameter of the planet
-/// and is not modeled, so the zone stands in for it.
+/// A habitable planet has liquid water whatever its equilibrium temperature says, because the
+/// zone's outer edge is the furthest a thick enough atmosphere holds a surface above freezing.
+/// That greenhouse is not modeled, so the zone stands in for it.
 fn top_of(class: Class, atmosphere: Atmosphere, equilibrium_k: f64, water_fraction: f64, habitable: bool) -> Top {
     const FREEZING_K: f64 = 273.0;
     match atmosphere {
@@ -298,8 +288,8 @@ fn top_of(class: Class, atmosphere: Atmosphere, equilibrium_k: f64, water_fracti
 
 /// One turn, seconds, log-uniform inside the class's range.
 ///
-/// Log rather than linear, because the range spans three orders of magnitude and a linear draw
-/// would make almost every rocky planet a slow one.
+/// Log rather than linear: the range spans three orders of magnitude, and a linear draw makes
+/// almost every rocky planet a slow one.
 pub fn spin_of(h: u64, giant: bool, t: &super::tuning::World) -> f64 {
     let (lo, hi) = if giant { t.giant_spin_s } else { t.rocky_spin_s };
     (rng::uniform_in(h, lo.ln(), hi.ln())).exp()
@@ -307,11 +297,9 @@ pub fn spin_of(h: u64, giant: bool, t: &super::tuning::World) -> f64 {
 
 /// How far this one leans, radians, in `0..=PI`.
 pub fn obliquity_of(h: u64, t: &super::tuning::World) -> f64 {
-    // Salted, and it has to be: `rng::gaussian` draws its first uniform from `mix(h)`, so
-    // testing `uniform(mix(h))` here would be reading the gaussian's own input. A planet that
-    // failed the tumble test would then be one whose first uniform is at least the tumble
-    // chance, which caps the gaussian at 2.15 sigma -- and the heavy tail this is supposed to
-    // have would stop at 43 degrees.
+    // Salted: `rng::gaussian` draws its first uniform from `mix(h)`, so testing
+    // `uniform(mix(h))` here reads the gaussian's own input and caps it at 2.15 sigma, which
+    // cuts the heavy tail off at 43 degrees.
     let lean = if rng::uniform(rng::hash(&[h, 0x7017])) < t.tumbled_chance {
         // On its side or retrograde, as Uranus and Venus are.
         rng::uniform_in(h, std::f64::consts::FRAC_PI_2, std::f64::consts::PI)
@@ -347,10 +335,8 @@ mod tests {
             .collect()
     }
 
-    /// **The calibration.** Nine real bodies, each given only its mass, its radius and its
-    /// distance from the Sun, all classified by the same three lines. The pairs are what
-    /// matter: Venus and Mars differ only in size, Titan and Luna only in temperature, and the
-    /// chain gets both the right way round.
+    /// The calibration. Nine real bodies given only mass, radius and distance. The pairs are
+    /// what matter: Venus against Mars is size alone, Titan against Luna is temperature alone.
     #[test]
     fn the_solar_system_comes_out_of_the_retention_chain() {
         let t = Tuning::default();
@@ -421,9 +407,8 @@ mod tests {
         assert!(baked.iter().filter(|p| p.mass_earths() < 3.0).all(|p| p.atmosphere == Atmosphere::None));
     }
 
-    /// **What the generator is tuned for.** A habitable planet is a rocky one in the zone with
-    /// air over a surface and water on it, and four independent rules have to agree before one
-    /// appears -- so the rate is a real measurement of the tuning rather than a dial.
+    /// What the generator is tuned for. Four independent rules have to agree before a
+    /// habitable planet appears, so the rate measures the tuning rather than setting it.
     #[test]
     fn about_one_star_in_two_gets_a_habitable_world() {
         let t = Tuning::default();

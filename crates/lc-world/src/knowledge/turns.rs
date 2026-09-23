@@ -21,19 +21,12 @@ const AMBIGUOUS_STEP_RAD: f64 = std::f64::consts::FRAC_PI_2;
 
 /// Every rate and epoch the anomalies could be saying, best guess first.
 ///
-/// **How many turns passed between two looks is not observable from the anomalies alone**, and
-/// it cannot be settled by how well they regress either: putting each look on the turn nearest
-/// a candidate rate makes *every* rate fit well, which is the aliasing it was meant to resolve.
-/// What tells one candidate from another is the orbit's own residual against the bearings, so
-/// the candidates are handed back and [`through`] scores them.
-///
-/// Twelve looks seven tenths of an orbit apart is the case this exists for: the forward walk
+/// The case this exists for: twelve looks seven tenths of an orbit apart: the forward walk
 /// reads each step as three tenths *backwards* and reports a period 2.33 times the truth, at a
 /// residual thirty-five thousand times the bearing noise, and nothing downstream refused it.
 ///
-/// Searched only when a step is over [`AMBIGUOUS_STEP_RAD`], because mean anomaly advances
-/// uniformly and a well-sampled arc has nothing to search. A survey's cadence is nowhere near
-/// this for anything with a period worth fitting, so the usual cost is one candidate.
+/// Searched only when a step is over [`AMBIGUOUS_STEP_RAD`], so a well-sampled arc costs one
+/// candidate. A survey's cadence is nowhere near this for a period worth fitting.
 pub(crate) fn unwrappings(mean: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let mut out: Vec<(f64, f64)> = Vec::new();
     let walk = walked(mean);
@@ -79,8 +72,8 @@ fn walked(mean: &[(f64, f64)]) -> Vec<(f64, f64)> {
     unwrapped
 }
 
-/// The anomalies unwrapped against a rate: each put on the turn nearest where that rate says it
-/// should be. `rate` is seconds per radian, as [`timing`] returns.
+/// The anomalies unwrapped against a rate: each put on the turn nearest where that rate says
+/// it should be. `rate` is seconds per radian.
 fn placed(mean: &[(f64, f64)], first: (f64, f64), rate: f64) -> Vec<(f64, f64)> {
     mean.iter()
         .map(|(m, t)| {
@@ -114,8 +107,8 @@ fn regress(unwrapped: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
         return None;
     }
     let epoch_s = mean_t - per_rad * mean_m;
-    // Scaled by the rate, so a tight fit to a short period is not flattered against a loose
-    // fit to a long one: what is compared is the anomaly left over, in radians.
+    // Scaled by the rate, so what is compared is the anomaly left over in radians rather than
+    // a time, which would flatter a short period.
     let left: f64 = unwrapped
         .iter()
         .map(|(m, t)| {
@@ -132,18 +125,12 @@ mod tests {
     use super::*;
     use em_foundations::kepler;
 
-    /// **An arc sampled too coarsely to unwrap one way is unwrapped every way and scored.**
-    ///
-    /// The forward walk takes the shortest way round, so looks seven tenths of an orbit apart
-    /// read as three tenths backwards and give a period 2.33 times the truth. The anomalies
-    /// cannot say which unwrapping is right -- putting each look on the turn nearest a
-    /// candidate rate makes every rate regress well -- so every candidate is handed to
-    /// [`through`] and the bearings choose.
+    /// An arc too coarse to unwrap one way is unwrapped every way and scored.
     ///
     /// What this does not fix, and cannot: an arc sampled at a *fixed* fraction of the period
     /// is stroboscopic, and for a circular orbit the aliases put the body in the same places at
-    /// the same times. No unwrapping tells those apart because nothing does. What breaks the
-    /// degeneracy is irregular or denser sampling, which a real survey has.
+    /// the same times. Irregular or denser sampling is what breaks that, and a real survey has
+    /// it.
     #[test]
     fn a_coarsely_sampled_arc_offers_every_unwrapping() {
         let period = 3.156e7;

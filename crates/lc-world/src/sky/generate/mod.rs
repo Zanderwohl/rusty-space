@@ -82,8 +82,7 @@ impl GeneratedSystem {
 /// The normal of a system's orbital plane: a direction uniform over the sky, from its seed.
 ///
 /// Every planet and belt shares it, so from most directions nothing transits and from a few
-/// the whole system does -- the orientation the photometry's priors integrate over. See
-/// `lightcone/docs/24-standing-instruments.md`.
+/// the whole system does. See `lightcone/docs/24-standing-instruments.md`.
 pub fn pole_for(seed: u64) -> DVec3 {
     let h = rng::hash(&[seed, 0x9013]);
     let z = rng::uniform(h) * 2.0 - 1.0;
@@ -94,9 +93,8 @@ pub fn pole_for(seed: u64) -> DVec3 {
 
 /// How far a star's spin axis can lie from the plane its planets orbit in.
 ///
-/// The Sun's is 7.25 degrees off the ecliptic, so a star spinning exactly with its planets
-/// would be the odd one out. Not a measured distribution: one solar system's worth of evidence
-/// does not have a spread in it.
+/// The Sun's is 7.25 degrees off the ecliptic. Not a measured spread: there is one system's
+/// worth of evidence.
 pub const SPIN_TILT_MAX_RAD: f64 = 12.0 * std::f64::consts::PI / 180.0;
 
 /// A star's own spin axis: its system's pole, tilted by a few degrees.
@@ -123,9 +121,8 @@ pub fn system_for(star: &CatalogStar) -> GeneratedSystem {
 pub fn system_with(star: &CatalogStar, tuning: &Tuning) -> GeneratedSystem {
     let seed = star.seed();
     let name = star.provenance.name.clone().unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
-    // Sol's is the ecliptic, not a seeded one: `CatalogStar::system_pole` is where that split
-    // lives, and reading it here is what keeps this system's belts and the arena's bodies in
-    // one plane.
+    // Sol's is the ecliptic. Reading `CatalogStar::system_pole`, where that split lives,
+    // keeps these belts and the arena's bodies in one plane.
     let pole = star.system_pole();
     let arch = architecture(star, tuning);
 
@@ -176,10 +173,8 @@ pub fn binary_for(primary: &CatalogStar, secondary: &CatalogStar) -> GeneratedSy
 /// The planets a star is given, without their moons or the rest of its system.
 ///
 /// What the photometry's priors are measured from, so they are the generator's own
-/// distribution rather than a second opinion about it. Planets rather than rungs, because a
-/// rung's radius is its solid body and a planet's is what transits: a sub-Neptune's envelope
-/// is most of what a telescope sees of it, and a prior built on the rung would look for
-/// something that is not there.
+/// distribution. Planets rather than rungs: a rung's radius is its solid body and a planet's is
+/// what transits, and a sub-Neptune's envelope is most of what a telescope sees of it.
 pub fn planets_of(star: &CatalogStar) -> Vec<Planet> {
     let tuning = Tuning::default();
     let name = star.provenance.name.clone().unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
@@ -188,8 +183,7 @@ pub fn planets_of(star: &CatalogStar) -> Vec<Planet> {
 
 /// Fraction of systems carrying an engineered swarm.
 ///
-/// Low on purpose. What makes a technosignature worth anything is that most stars do not have
-/// one; a sky where every third star is engineered is a sky nobody searches.
+/// Low on purpose: a sky where every third star is engineered is a sky nobody searches.
 pub const SWARM_FRACTION: f64 = 0.03;
 
 /// Whether a star has a swarm, without generating its whole system.
@@ -202,14 +196,13 @@ pub fn swarm_for(star: &CatalogStar) -> Option<Population> {
 
 /// An engineered swarm, if this star has one.
 ///
-/// Coverage is log-uniform from a thousandth to nine tenths, which is the range that makes the
-/// instrument worth having. At the bottom it is a few tenths of a percent of gray deficit and a
-/// thermal excess that needs integrating to see at all. At the top the star is most of a
-/// magnitude down in V and brighter at ten microns than in the visible.
+/// Coverage is log-uniform from a thousandth to nine tenths. At the bottom that is a few
+/// tenths of a percent of gray deficit; at the top the star is most of a magnitude down in V
+/// and brighter at ten microns than in the visible.
 ///
-/// Isotropic, circular and gray. Those three together are the signature, and no natural
-/// population has all three: an isotropic natural population is an Oort cloud, which is
-/// eccentric and made of dust, and dust reddens where panels do not.
+/// Isotropic, circular and gray together are the signature: the isotropic natural population
+/// is the Oort cloud, which is eccentric and made of dust, and dust reddens where panels do
+/// not.
 fn swarm(seed: u64, star: &CatalogStar) -> Option<Population> {
     if rng::uniform(rng::hash(&[seed, 0x5761_726d])) > SWARM_FRACTION {
         return None;
@@ -236,10 +229,8 @@ fn swarm(seed: u64, star: &CatalogStar) -> Option<Population> {
 
 /// A unit normal leaned `lean` radians away from `axis`, in the direction `node` picks out.
 ///
-/// The one construction for tilting a plane off another plane. Inclinations cannot simply be
-/// added: two tilts compose that way only when they share a node line, and here they never do
-/// -- the system's node is measured against the ecliptic and a planet's against its own pole.
-/// Composing the normals is exact and needs no case.
+/// Inclinations cannot be added: two tilts compose that way only when they share a node line,
+/// and here they never do. Composing the normals is exact.
 fn tilted(axis: DVec3, lean: f64, node: f64) -> DVec3 {
     let axis = axis.normalize_or(DVec3::Z);
     let (u, v) = axis.any_orthonormal_pair();
@@ -259,15 +250,13 @@ fn spin_axis_of(system_pole: DVec3, planet: &Planet) -> DVec3 {
 
 /// A planet's rotation, as `em-sim` states one.
 ///
-/// The axis is the system's pole leaned by the planet's own obliquity, so a system's planets
-/// mostly spin near their orbital plane and occasionally do not. Built as the quaternion that
-/// carries `+Z` onto that axis, because [`crate::system::pole_of`] reads the axis back out as
-/// `orientation * DVec3::Z` and the two have to agree.
+/// The system's pole leaned by the planet's obliquity. Built as the quaternion carrying `+Z`
+/// onto that axis, because [`crate::system::pole_of`] reads it back as `orientation * DVec3::Z`.
 fn spin_of_planet(system_pole: DVec3, planet: &Planet) -> em_sim::body::BodyRotation {
     use em_sim::body::{BodyRotation, RotationEpoch};
     let orientation = glam::DQuat::from_rotation_arc(DVec3::Z, spin_axis_of(system_pole, planet));
-    // Radians per second. Always positive: which way it turns is the axis's own sign, and an
-    // obliquity past a right angle is what retrograde means here.
+    // Radians per second, always positive: direction is the axis's sign, and an obliquity past
+    // a right angle is what retrograde means here.
     let rate = std::f64::consts::TAU / planet.spin_s.max(1.0);
     BodyRotation::spinning(orientation, rate, RotationEpoch::J2000)
 }
@@ -282,8 +271,8 @@ fn debug_ball(radius: f64, rgb: (u16, u16, u16)) -> Appearance {
 
 /// The same, with the generator's own statement about the body appended.
 ///
-/// What `worlds::of` reads: a generated ocean is blue because the generator said it is an
-/// ocean, rather than because radius, mass and temperature were made to imply one.
+/// What `worlds::of` reads: a generated ocean is blue because the generator said so, not
+/// because radius, mass and temperature were made to imply it.
 fn stated(id: &str, mass: f64, major: bool, tags: &[&str], planet: &Planet) -> BodyInfo {
     let mut info = info(id, mass, major, tags);
     info.tags.extend(crate::worlds::Stated::tags(
@@ -403,18 +392,14 @@ impl GeneratedSystem {
                 appearance: debug_ball(p.radius_m, (140, 140, 160)),
                 rotation: Some(spin_of_planet(self.pole, p)),
             }));
-            // A regular moon sits in its planet's equatorial plane, which is where it formed
-            // -- and is what makes a planet's obliquity measurable from the outside: the tilt
-            // of its retinue's orbits *is* the tilt of the planet. A captured one remembers
-            // nothing of that plane and is leaned out of it by its own inclination.
+            // A regular moon sits in its planet's equatorial plane, which is what makes the
+            // obliquity measurable from outside. A captured one is leaned out of it.
             //
             // Off the planet's *spin axis*, not off the system's plane with the obliquity
-            // added: the two tilts are measured about different nodes and adding them puts a
-            // moon nowhere near the equator it formed in.
+            // added: those two tilts are measured about different nodes.
             let equator = spin_axis_of(self.pole, p);
             for moon in &p.moons {
-                // Captured stragglers are loose bodies a planet happens to hold, and the map
-                // and the inventory should treat them as such rather than as a retinue.
+                // Loose bodies a planet happens to hold, not a retinue.
                 let tags: &[&str] = if moon.regular { &["Moon"] } else { &["Irregular"] };
                 bodies.push(SomeBody::KeplerEntry(KeplerEntry {
                     info: info(&moon.name, moon.mass_kg, false, tags),
@@ -467,9 +452,8 @@ mod tests {
         System::from_contents(&system.to_universe()).expect("generated system must load")
     }
 
-    /// **The one route a telescope has to a planet's mass**: a moon's period and distance give
-    /// it through Kepler's third law, so a generated giant with no moon is a giant whose mass
-    /// can never be measured. Recovered here from the geometry alone, the way a survey would.
+    /// **The one route a telescope has to a planet's mass**: a moon's period and distance,
+    /// through Kepler's third law. Recovered here from the geometry alone, as a survey would.
     #[test]
     fn a_moons_orbit_gives_its_planets_mass() {
         const G: f64 = 6.674_301_5e-11;
@@ -525,9 +509,8 @@ mod tests {
         assert_eq!(giants_with_moons, giants, "a giant with no moon has no measurable mass");
     }
 
-    /// **A generated planet with no rotation is one whose spin can never be measured**, which
-    /// is what phase 6 reads off the periodogram of its flux. Every one has a spin now, and the
-    /// axis reads back out the way `system::pole_of` extracts it.
+    /// **A planet with no rotation has a spin nothing can measure**, and the periodogram of its
+    /// flux is what reads one. The axis has to read back out the way `system::pole_of` takes it.
     #[test]
     fn every_generated_planet_spins_about_a_readable_axis() {
         let star = sun_like();
@@ -567,8 +550,8 @@ mod tests {
         }
     }
 
-    /// Spins are log-uniform over three orders of magnitude, so a sample has to hold both fast
-    /// and slow ones -- a linear draw would make almost everything slow.
+    /// Spins are log-uniform over three orders of magnitude; a linear draw makes almost
+    /// everything slow.
     #[test]
     fn generated_spins_span_hours_to_months() {
         let world = Tuning::default().world;

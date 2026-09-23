@@ -104,9 +104,8 @@ fn run(into: &str) -> Result<usize, String> {
 
 /// Where the planets are and how heavy, in units of each star's own snow line.
 ///
-/// Every star in the sample, not only the sun-like ones: measuring the axis in snow lines is
-/// what lets a red dwarf's system and a blue star's lie on the same picture, because that is
-/// the one radius the whole architecture is built around.
+/// Every star in the sample. Measuring the axis in snow lines puts a red dwarf's system and a
+/// blue star's on the same picture.
 fn architecture(into: &str, sample: &[(CatalogStar, GeneratedSystem)]) -> Result<(), String> {
     let mut by_class: [Vec<(f64, f64)>; 4] = Default::default();
     let (mut stalled, mut stirred) = (Vec::new(), Vec::new());

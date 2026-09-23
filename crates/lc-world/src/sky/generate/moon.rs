@@ -1,11 +1,9 @@
 //! Satellites, of two origins that look nothing alike.
 //!
-//! A regular moon condensed out of a disc around its planet, so it sits close in, in the
-//! planet's equatorial plane, on a circle, going the same way the planet turns. A captured one
-//! was a passing body the planet caught, so it sits far out at any inclination, on an ellipse,
-//! and more often than not going backwards. Telling the two apart from their orbits alone is
-//! the point: a retinue's plane *is* its planet's obliquity, and a swarm of retrograde
-//! stragglers is a planet that has been catching things for four billion years.
+//! A regular moon condensed out of a disc around its planet: close in, in the planet's
+//! equatorial plane, on a circle, prograde. A captured one was a passing body: far out, any
+//! inclination, eccentric, more often than not retrograde. The two are meant to be told apart
+//! from their orbits alone.
 
 use super::disc::{EARTH_MASS, SOLAR_MASS_KG};
 use super::planet::Planet;
@@ -26,7 +24,7 @@ pub struct Moon {
     pub mean_anomaly_deg: f64,
     pub radius_m: f64,
     pub mass_kg: f64,
-    /// Condensed in a disc rather than caught. What the difference in the orbits means.
+    /// Condensed in a disc rather than caught.
     pub regular: bool,
 }
 
@@ -43,8 +41,8 @@ const RETROGRADE_STABLE: f64 = 0.6;
 
 /// Where a moon of a given density is pulled apart, meters.
 ///
-/// The fluid limit: a satellite has no tensile strength worth the name, so what holds it
-/// together is its own gravity. Inside this there is a ring rather than a moon.
+/// The fluid limit: what holds a satellite together is its own gravity. Inside this there is a
+/// ring rather than a moon.
 fn roche_m(planet: &Planet, moon_density: f64, coefficient: f64) -> f64 {
     let volume = 4.0 / 3.0 * std::f64::consts::PI * planet.radius_m.powi(3);
     let planet_density = planet.mass_kg / volume.max(f64::MIN_POSITIVE);
@@ -132,17 +130,14 @@ fn regular(planet: &Planet, hill: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
 
 /// The stragglers a planet caught.
 ///
-/// How many is set by the size of the sphere it holds against its star: capture is a
-/// cross-section, so the count goes as the square of the Hill radius. A Jupiter at five
-/// astronomical units reaches the ninety-odd the real one has; the mean over all giants is
-/// nearer forty, because most of them hold a smaller sphere.
+/// Capture is a cross-section, so the count goes as the square of the Hill radius. A Jupiter
+/// at 5 AU reaches the ninety-odd the real one has.
 fn irregular(planet: &Planet, hill: f64, star_mass_solar: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
     let t = &tuning.moons;
     if !planet.class.is_giant() {
         return Vec::new();
     }
-    // Against Jupiter's own Hill radius, so the scaling is anchored on the system that has
-    // been counted.
+    // Anchored on Jupiter, the one that has been counted.
     let reference = hill_radius_m(5.2 * super::AU, 317.83 * EARTH_MASS, star_mass_solar.max(1.0e-3));
     let scale = (hill / reference).powi(2).min(1.5);
     let count = (t.irregular_most as f64 * scale * rng::uniform(h).powf(t.irregular_index)) as u32;
@@ -152,8 +147,7 @@ fn irregular(planet: &Planet, hill: f64, star_mass_solar: f64, h: u64, tuning: &
         .map(|j| {
             let g = |tag: u64| rng::hash(&[h, 0xcab7, j as u64, tag]);
             let retrograde = rng::uniform(g(8)) < t.retrograde_share;
-            // Isotropic within its half of the sky: a captured body remembers nothing about
-            // the plane its planet formed in.
+            // Isotropic within its half: a capture remembers nothing of the planet's plane.
             let cosine = rng::uniform_in(g(6), 0.0, 1.0);
             let tilt = cosine.acos();
             let radius = rng::uniform_in(g(3), t.irregular_radius_m.0.ln(), t.irregular_radius_m.1.ln()).exp();

@@ -4,8 +4,8 @@
 //! `lightcone/docs/26-system-generation.md` are made by varying these and running the same
 //! code. [`Tuning::default`] is what the game ships.
 //!
-//! Where a figure is a measurement it says so. Where it is a choice it says that too, because
-//! this is a game and the choice is usually to be more generous than the galaxy is.
+//! Where a figure is a measurement it says so. Where it is a choice it says that too: the
+//! choice is usually to be more generous than the galaxy is.
 
 /// The disc a system condenses out of.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -13,17 +13,14 @@ pub struct Disc {
     /// Temperature at which silicates condense, kelvin. Inside this radius the disc holds no
     /// solids, so it is where the innermost body can be.
     pub sublimation_k: f64,
-    /// Temperature at which water ice condenses, kelvin. The snow line, and the single most
-    /// consequential radius in the system: outside it every body gets ices as well as rock,
-    /// which is roughly four times the solid mass and is what lets a core grow big enough to
-    /// take an envelope.
+    /// Temperature at which water ice condenses, kelvin. Outside the snow line a body gets
+    /// ices as well as rock, roughly four times the solid mass, which is what lets a core grow
+    /// big enough to take an envelope.
     pub snow_k: f64,
     /// Equilibrium temperatures bounding the habitable zone, kelvin, warm end first.
     ///
-    /// Zero-albedo equilibrium, which is what [`super::disc::Disc::radius_at`] inverts, so a
-    /// dim star's zone follows from its own light with no separate formula. The default is the
-    /// optimistic zone -- recent Venus to early Mars, 0.75 to 1.77 astronomical units for the
-    /// Sun -- rather than the conservative one.
+    /// Zero-albedo, so a dim star's zone follows from its own light. The default is the
+    /// optimistic zone: recent Venus to early Mars, 0.75 to 1.77 AU for the Sun.
     pub habitable_k: (f64, f64),
     /// Disc outer edge, in snow lines. Fifteen puts the Sun's at 40 astronomical units, which
     /// is the Kuiper belt's outer edge.
@@ -46,11 +43,9 @@ pub struct Disc {
     pub ice_boost: f64,
     /// Share of the icy reservoir that drifts inside the snow line before the planets form.
     ///
-    /// Solids do not stay where they condensed: gas drag makes pebbles spiral inward, and that
-    /// is the standard explanation for the compact systems of several Earth masses each that
-    /// most stars turn out to have. Without it the ice step leaves nineteen twentieths of the
-    /// mass outside and every inner planet is a Mercury -- which is what the solar system looks
-    /// like and not what the galaxy does.
+    /// Gas drag spirals pebbles inward. Without it the ice step leaves nineteen twentieths of
+    /// the mass outside and every inner planet is a Mercury, which is the solar system and not
+    /// the galaxy.
     pub drift: f64,
 }
 
@@ -67,12 +62,12 @@ pub struct Ladder {
     /// number repeated.
     pub spacing: (f64, f64),
     pub max_rungs: usize,
-    /// Mutual Hill radii two giants must be apart, or the pair is not a pair for long.
+    /// Mutual Hill radii two giants must be apart.
     ///
-    /// `2*sqrt(3)` is where two planets stop being analytically stable; a system that has to
-    /// last billions of years wants nearer ten. The ladder's spacing is a ratio and takes no
-    /// account of mass, so it puts neighboring giants far inside this -- a third of adjacent
-    /// pairs came out under ten, the worst at 2.5 -- and the pair that cannot last merges.
+    /// `2*sqrt(3)` is where two planets stop being analytically stable; lasting billions of
+    /// years wants nearer ten. Rung spacing is a ratio and takes no account of mass, so it put
+    /// a third of adjacent pairs under ten and the worst at 2.5. The pair that cannot last
+    /// merges: see [`super::architecture::settle_giants`].
     pub hill_separation: f64,
     /// Share of a feeding zone's solids that ends up in the body, drawn per rung.
     pub efficiency: (f64, f64),
@@ -85,8 +80,7 @@ pub struct Ladder {
     /// Radius out to which a rung finishes assembling, in snow lines.
     ///
     /// Accretion slows as the cube of the orbit, so past this the disc runs out of time and
-    /// leaves its solids where they lie. That leftover *is* the trans-planetary belt, which is
-    /// why the Kuiper analog costs nothing to place: mass conservation puts it there.
+    /// leaves its solids where they lie. That leftover is the trans-planetary belt.
     pub growth_over_snow: f64,
     /// Core mass above which a body beyond the snow line holds an ice envelope, Earth masses.
     pub ice_giant_core_earths: f64,
@@ -109,10 +103,8 @@ pub struct Ladder {
     pub migrating_fraction: f64,
     /// Width of a giant's resonance web, as `C` in `a(1 +- C mu^0.2)`.
     ///
-    /// Not a clearing radius -- the giant's own chaotic zone is far narrower. This is the reach
-    /// of its mean-motion resonances, which is what stops a belt accreting. Jupiter's `mu` puts
-    /// the inner edge at 0.40 of its own axis, or 2.1 astronomical units, which is where the
-    /// asteroid belt starts.
+    /// Not a clearing radius: the chaotic zone is far narrower. Jupiter's `mu` puts the inner
+    /// edge at 0.40 of its own axis, 2.1 AU, where the asteroid belt starts.
     pub resonance_reach: f64,
 }
 
@@ -121,18 +113,15 @@ pub struct Ladder {
 pub struct World {
     /// Spread in radius at a given mass, dex.
     ///
-    /// What a planet is made of. Two bodies of one mass differ by a good deal if one is mostly
-    /// iron and the other mostly water, and the measured relation is a band rather than a
-    /// curve. Without this every generated planet sits exactly on the fit, which is the one
-    /// thing no real population does.
+    /// Composition: one mass is a range of radii between iron and water, and the measured
+    /// relation is a band rather than a curve.
     pub radius_spread_dex: f64,
-    /// How much hotter than its equilibrium temperature a body at one astronomical unit from
-    /// the Sun runs where escape happens, as a multiple of that temperature.
+    /// How much hotter than equilibrium a body at 1 AU from the Sun runs where escape happens,
+    /// as a multiple of that temperature.
     ///
     /// Not a ratio applied everywhere: extreme-ultraviolet heating falls as the inverse square
-    /// of the distance while the equilibrium temperature falls as its square root, so what
-    /// this sets is the *size* of an additive term that dies away outward. See
-    /// [`super::planet::exosphere_k`]. Earth's measured exosphere is about a thousand kelvin.
+    /// while equilibrium temperature falls as the square root, so this sizes an additive term
+    /// that dies away outward. See [`super::planet::exosphere_k`]. Earth's is about 1000 K.
     pub exosphere_factor: f64,
     /// Escape velocity over thermal speed at which a gas is held for the age of the system.
     /// Six is the textbook figure and it puts hydrogen off Earth and nitrogen on it.
@@ -162,17 +151,14 @@ pub struct World {
 pub struct Moons {
     /// Mass of a giant's regular satellite system over the planet's own.
     ///
-    /// Measured, and remarkably constant: Jupiter's Galileans, Saturn's mid-sized moons and
-    /// Uranus's all come to about a ten-thousandth of their planet. That one number is what
-    /// makes a generated giant's retinue the right size without any other tuning.
+    /// Measured, and constant across Jupiter, Saturn and Uranus at about a ten-thousandth.
     pub regular_mass_ratio: f64,
     pub regular_count: (u32, u32),
     /// The fluid Roche limit, in units of `R_p (rho_p / rho_m)^(1/3)`.
     ///
-    /// 2.456 for a body held together by its own gravity alone, which a moon of any size is.
-    /// A flat multiple of the planet's radius will not do: the limit moves with the density
-    /// ratio, and an icy moon around a rocky planet is torn apart half again as far out as a
-    /// rocky one would be.
+    /// 2.456 for a body held together by its own gravity, which a moon is. A flat multiple of
+    /// the planet's radius will not do: an icy moon around a rocky planet is torn apart half
+    /// again as far out as a rocky one.
     pub roche_coefficient: f64,
     /// Outer bound, as a share of the Hill radius. Regular satellites form in a disc well
     /// inside it: the Galileans sit within a fiftieth of Jupiter's.
@@ -183,9 +169,8 @@ pub struct Moons {
     pub impact_mass_ratio: (f64, f64),
     /// Most captured irregulars a planet may hold, and the power law that decides how many.
     ///
-    /// The cap is what a Jupiter reaches; the power law puts the mean nearer forty, because
-    /// most giants are smaller and hold a smaller sphere. They are captured rather than
-    /// formed, so they sit far out, at every inclination, and more than half go backwards.
+    /// The cap is what a Jupiter reaches; the mean lands nearer forty, because most giants
+    /// hold a smaller sphere.
     pub irregular_most: u32,
     pub irregular_index: f64,
     /// Where an irregular sits, as a share of the Hill radius.
@@ -209,8 +194,7 @@ pub struct Belts {
     pub kuiper_survival: f64,
     /// Share of the icy reservoir a system's giants throw into the Oort cloud.
     ///
-    /// A system with no giant has no scatterer, so its cloud is nearly empty -- which is a
-    /// statement about where comets come from rather than a rule invented here.
+    /// A system with no giant has no scatterer and so nearly no cloud.
     pub oort_efficiency: f64,
     /// Giant mass, in Jupiters, at which scattering is as efficient as it gets.
     pub oort_saturation_jupiters: f64,
@@ -218,10 +202,9 @@ pub struct Belts {
     pub oort_eccentricity: (f64, f64),
     /// Geometric cross-section a population presents per kilogram it holds, m^2/kg.
     ///
-    /// Mass says how much is there; this says how much of it is surface, which is what a
-    /// telescope measures. The three differ by orders of magnitude because their size
-    /// distributions do: the asteroid belt's mass is in a handful of large bodies and the Oort
-    /// cloud's is in a great many small ones. Measured from the real three.
+    /// Surface, not mass, is what a telescope measures. Measured from the real three, which
+    /// differ by orders of magnitude because their size distributions do: the asteroid belt's
+    /// mass is in a few large bodies, the Oort cloud's in very many small ones.
     pub belt_area_per_kg: f64,
     pub kuiper_area_per_kg: f64,
     pub oort_area_per_kg: f64,

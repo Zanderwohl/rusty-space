@@ -2,8 +2,7 @@
 //!
 //! [`Knowledge::bodies_of`] walks every file a system holds and rebuilds each body's belief out
 //! of its evidence, and [`Knowledge::system_plane`] folds the result again. The map, the system
-//! panel and the telescope all want the same answer in the same frame, and each was paying for
-//! it: eight rebuilds a frame for one list.
+//! panel and the telescope all want the same answer in the same frame.
 //!
 //! Keyed by the star and the coordinate second. Both readers run after the clock has advanced,
 //! so the second ask in a frame is a read, and a frame that asks for neither builds nothing.
@@ -30,9 +29,9 @@ impl Held {
     /// Which truth target a believed body is, where it is one the generator made.
     ///
     /// A [`BodyId`] is a hash and cannot be turned back into the generator's key, so the
-    /// inventory is hashed forward once instead of being scanned per row. `None` for a body no
-    /// generator made -- a transit's false positive -- which has nowhere to be flown to. Both
-    /// halves of that go away in phase 7, when a course carries a subject.
+    /// inventory is hashed forward once rather than scanned per row. `None` for a body no
+    /// generator made, which has nowhere to be flown to. Goes away in phase 7, when a course
+    /// carries a subject.
     pub fn target(&self, body: BodyId) -> Option<&Target> {
         self.targets.get(&body)
     }

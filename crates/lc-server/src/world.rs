@@ -35,8 +35,8 @@ pub struct World {
     /// bodies out of a preset, and every craft in the same system points at the same copy —
     /// which is only possible because a system is never propagated.
     ///
-    /// Swept by [`World::sweep`]. A craft can ask about a star it will never visit — a survey
-    /// names one from anywhere — so without a sweep this grew for as long as the shard ran.
+    /// Swept by [`World::sweep`]: a survey names a star from anywhere, so a craft loads systems
+    /// it will never visit.
     loaded: HashMap<StarId, Held>,
     /// Where each star sits in `stars`. Built once, because the catalog never changes.
     index: HashMap<StarId, usize>,
@@ -52,13 +52,10 @@ struct Held {
 /// Coordinate seconds a system stays loaded after the last craft stopped asking for it.
 ///
 /// One survey rotation over the largest system the generator makes: 256 bodies at
-/// [`SURVEY_DWELL_S`] apiece, against a measured maximum of 234. A live survey asks every tick,
-/// so this is hysteresis and not a deadline — it is the span after which nothing plausibly
-/// still wants the system.
+/// [`SURVEY_DWELL_S`] apiece, against a measured maximum of 234.
 ///
-/// **Tuned against the survey and not on its own.** If [`SURVEY_DWELL_S`] moves, or how many
-/// bodies a generated system holds moves, this moves with them; a window shorter than a
-/// rotation would drop a system a survey is working through and rebuild it.
+/// **Tuned against the survey and not on its own.** A window shorter than a rotation drops a
+/// system a survey is working through and rebuilds it.
 ///
 /// [`SURVEY_DWELL_S`]: lc_world::knowledge::survey::SURVEY_DWELL_S
 const KEEP_LOADED_S: f64 = 256.0 * lc_world::knowledge::survey::SURVEY_DWELL_S;
@@ -157,9 +154,9 @@ impl World {
 
     /// Drop systems nothing wants any more.
     ///
-    /// `occupied` is the star of every craft that is in one — the fleet is the record of who is
-    /// where, so that is what is read rather than a reference count, which a caller holding an
-    /// `Arc` in a local for two lines would raise just as far.
+    /// `occupied` is the star of every craft that is in one. The fleet is the record of who is
+    /// where; a reference count is not, since a caller holding an `Arc` in a local raises it
+    /// just as far.
     ///
     /// **A system a craft is in is never dropped**, whatever the cap says. Evicting it would
     /// leave the craft pointing at a copy nothing else shares, and the next tick would build a

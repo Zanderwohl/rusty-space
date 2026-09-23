@@ -2,7 +2,7 @@
 //!
 //! One radius-temperature relation does all the geometry. The sublimation edge, the snow line
 //! and both ends of the habitable zone are the same curve read at four temperatures, so a red
-//! dwarf's system is scaled by its own light without a second formula anywhere.
+//! dwarf's system scales by its own light with no second formula.
 
 use super::tuning::Tuning;
 use crate::rng;
@@ -31,9 +31,8 @@ pub struct Disc {
     pub solid_earths: f64,
     index: f64,
     ice_boost: f64,
-    /// What the inner disc's weight is multiplied by once the drifted ices are added to it,
-    /// and what is left of the outer disc's. Held rather than recomputed because the pair has
-    /// to stay consistent: between them they conserve the disc.
+    /// What the inner disc's weight is multiplied by once the drifted ices arrive, and what is
+    /// left of the outer's. Held as a pair because between them they conserve the disc.
     drifted: (f64, f64),
 }
 
@@ -69,9 +68,9 @@ impl Disc {
 
     /// What drifting `share` of the ices inward does to the two halves of the disc.
     ///
-    /// The ices that move land in the inner disc following its own profile, so the inner
-    /// weight is scaled up by what arrives and the outer weight down by what left. Their sum
-    /// is unchanged, which is what makes this a redistribution rather than a bonus.
+    /// The ices that move follow the inner disc's own profile, so one weight goes up by what
+    /// arrives and the other down by what left. The sum is unchanged: a redistribution, not a
+    /// bonus.
     fn drift_weights(&self, share: f64) -> (f64, f64) {
         let rocky = self.band(self.inner_m, self.snow_m);
         let icy = self.ice_boost * self.band(self.snow_m, self.outer_m);
@@ -83,8 +82,7 @@ impl Disc {
 
     /// Solid mass between two radii, Earth masses.
     ///
-    /// The surface density is a power law with a step at the snow line, so the annulus
-    /// integral is closed form and no rung has to be quadratured.
+    /// A power law with a step at the snow line, so the annulus integral is closed form.
     pub fn solids_between(&self, a_m: f64, b_m: f64) -> f64 {
         let total = self.integral(self.inner_m, self.outer_m);
         if total <= 0.0 {
@@ -123,8 +121,8 @@ impl Disc {
         a_m >= self.habitable_m.0 && a_m <= self.habitable_m.1
     }
 
-    /// Total mass of ices beyond the snow line, Earth masses. What a system has to throw
-    /// around: comets, the Kuiper analog and the Oort cloud all come out of it.
+    /// Total mass of ices beyond the snow line, Earth masses. Comets, the Kuiper analog and
+    /// the Oort cloud all come out of it.
     pub fn icy_reservoir(&self) -> f64 {
         self.solids_between(self.snow_m, self.outer_m)
     }
@@ -146,10 +144,9 @@ pub fn temperature_at(star: &Star, a_m: f64) -> f64 {
 
 /// Radius from mass, Earth units.
 ///
-/// Piecewise power law anchored on Earth, Neptune and Jupiter, which is the shape the
-/// exoplanet mass-radius relation actually has: rock compresses slowly, a volatile envelope
-/// buys radius cheaply, and past about four hundred Earth masses degeneracy pressure takes
-/// the radius back down. `icy` lifts a small body for a composition that is half water.
+/// Piecewise power law anchored on Earth, Neptune and Jupiter: rock compresses slowly, a
+/// volatile envelope buys radius cheaply, and past about four hundred Earth masses degeneracy
+/// pressure takes the radius back down. `icy` lifts a small body for a half-water composition.
 pub fn radius_earths(mass_earths: f64, icy: bool) -> f64 {
     const TERRAN_TOP: f64 = 2.04;
     const NEPTUNIAN_TOP: f64 = 132.0;
@@ -161,10 +158,9 @@ pub fn radius_earths(mass_earths: f64, icy: bool) -> f64 {
     } else {
         11.64 * (m / NEPTUNIAN_TOP).powf(-0.03)
     };
-    // Ice is about half the density of rock, and a body big enough to hold an envelope stops
-    // showing it: the envelope is what sets the radius by then. Tapered rather than switched
-    // off at the branch, because a step there made an icy body *shrink* by a sixth as it grew
-    // past two Earth masses.
+    // Ice is about half the density of rock, and an envelope sets the radius once there is
+    // one. Tapered rather than switched off at the branch: a step there made an icy body
+    // shrink by a sixth as it grew past two Earth masses.
     let icy_lift = if icy { 1.0 + 0.2 * (1.0 - (m / TERRAN_TOP).min(1.0)) } else { 1.0 };
     r * icy_lift
 }
@@ -197,8 +193,7 @@ mod tests {
         s
     }
 
-    /// The one relation the whole geometry rests on, checked against the numbers it is
-    /// supposed to reproduce: the snow line at 2.7 astronomical units and Earth at 278 K.
+    /// The relation the whole geometry rests on: the snow line at 2.7 AU, Earth at 278 K.
     #[test]
     fn the_temperature_curve_puts_the_snow_line_where_it_belongs() {
         assert!((radius_at(&Star::SOL, 170.0) / AU - 2.69).abs() < 0.05);
@@ -218,8 +213,8 @@ mod tests {
         assert!(disc.habitable(AU) && !disc.habitable(5.0 * AU));
     }
 
-    /// A dim star's disc is the Sun's scaled by its own light, everywhere at once. Nothing
-    /// carries a separate red-dwarf case, and this is what says so.
+    /// A dim star's disc is the Sun's scaled by its own light, everywhere at once. There is no
+    /// separate red-dwarf case anywhere.
     #[test]
     fn a_dim_star_gets_the_same_disc_pulled_inward() {
         let mut red = sun_like();
@@ -240,8 +235,7 @@ mod tests {
         }
     }
 
-    /// Mass has to be conserved across the feeding zones, or a ladder invents or loses
-    /// planets. Tiling the disc has to give the disc back.
+    /// Tiling the disc has to give the disc back, or the ladder invents or loses planets.
     #[test]
     fn the_feeding_zones_tile_the_disc() {
         let disc = Disc::of(&sun_like(), &Tuning::default());
@@ -256,8 +250,8 @@ mod tests {
         assert_eq!(disc.solids_between(disc.outer_m * 2.0, disc.outer_m * 3.0), 0.0);
     }
 
-    /// Most of the solid is past the snow line -- which is why giants form out there -- and
-    /// the drift is what stops that being nineteen twentieths of it.
+    /// Most of the solid is past the snow line, which is why giants form there. Drift is what
+    /// stops it being nineteen twentieths.
     #[test]
     fn the_ice_step_puts_the_mass_outside_and_the_drift_brings_some_back() {
         let disc = Disc::of(&sun_like(), &Tuning::default());
@@ -274,8 +268,7 @@ mod tests {
         assert!((bare + dry.icy_reservoir() / dry.solid_earths - 1.0).abs() < 1.0e-9);
     }
 
-    /// Metals are the rock. A tenth of the metallicity is a tenth of the disc, and that is
-    /// what makes a metal-rich star worth flying to.
+    /// A tenth of the metallicity is a tenth of the disc.
     #[test]
     fn metallicity_sets_the_mass_budget() {
         let mut poor = sun_like();
@@ -297,8 +290,7 @@ mod tests {
         assert!(radius_earths(0.5, true) > radius_earths(0.5, false));
     }
 
-    /// Earth's own numbers, which is what the retention test is calibrated against: it loses
-    /// hydrogen and keeps nitrogen, and the same two lines have to say so.
+    /// Earth loses hydrogen and keeps nitrogen, from the same two lines.
     #[test]
     fn escape_and_thermal_speeds_put_hydrogen_off_earth_and_nitrogen_on_it() {
         let v_esc = escape_speed(1.0, 1.0);

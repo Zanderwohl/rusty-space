@@ -2,8 +2,7 @@
 //!
 //! None of these is placed. A belt is a rung a giant stirred past accreting, the
 //! trans-planetary disc is the outer rungs that ran out of time, and the Oort cloud is what
-//! the giants threw. A system with no giant therefore has no belt and nearly no cloud, which
-//! is a statement about where comets come from rather than a rule invented here.
+//! the giants threw. A system with no giant has no belt and nearly no cloud.
 
 use em_spectra::{PerBand, extinction};
 use glam::DVec3;
@@ -22,16 +21,14 @@ pub fn populations(arch: &Architecture, pole: DVec3, seed: u64, tuning: &Tuning)
     let mut out = Vec::new();
     let mut thrown = 0.0;
 
-    // Where the outer disc begins: past the growth radius nothing finished assembling. A disc
-    // that ends inside its own growth radius still has an outer edge with debris at it, so the
-    // outermost rung is always on the far side of this whatever the radius says.
+    // Where the outer disc begins. Clamped to the outermost rung: a disc that ends inside its
+    // own growth radius still has debris at its edge.
     let outermost = arch.rungs.last().map(|r| r.semi_major_m).unwrap_or(f64::MAX);
     let edge = (tuning.ladder.growth_over_snow * arch.disc.snow_m).min(outermost);
 
     for (k, rung) in arch.belts().filter(|r| r.semi_major_m < edge).enumerate() {
-        // Why it never grew decides how much of it is still there. A giant's resonances throw
-        // a belt out over the age of the system; a rung that simply never had the mass to
-        // assemble was left alone and still holds most of what it started with.
+        // A stirred belt was thrown out over the age of the system; one that never had the
+        // mass to assemble was left alone and still holds most of it.
         let survival = if rung.stirred { t.belt_survival } else { t.kuiper_survival };
         let mass = rung.debris_earths * EARTH_MASS * survival;
         thrown += rung.debris_earths * (1.0 - survival);
@@ -89,9 +86,8 @@ pub fn populations(arch: &Architecture, pole: DVec3, seed: u64, tuning: &Tuning)
 
 /// The cloud the giants threw.
 ///
-/// Scattering needs something massive on a wide orbit to do the scattering, so the share that
-/// ends up bound at a hundred thousand astronomical units rather than on the star or out of
-/// the system goes with how much giant the system has.
+/// Scattering needs something massive on a wide orbit, so the share that ends up bound at a
+/// hundred thousand AU rather than on the star or out of the system goes with giant mass.
 fn oort(arch: &Architecture, thrown_earths: f64, seed: u64, tuning: &Tuning) -> Option<Population> {
     let t = &tuning.belts;
     let scatterers = (arch.giant_jupiters() / t.oort_saturation_jupiters).min(1.0);
@@ -117,10 +113,8 @@ fn oort(arch: &Architecture, thrown_earths: f64, seed: u64, tuning: &Tuning) -> 
 
 /// The solar system's own three, measured rather than generated.
 ///
-/// Sol's bodies come from a preset fitted against JPL, so its belts have no business being
-/// drawn from a seed -- an asteroid belt somewhere other than between Mars and Jupiter would
-/// be the one wrong thing in the one system that is right. Masses are the published estimates;
-/// what turns each into a cross-section is the same measured ratio the generator uses.
+/// Sol's bodies come from a preset fitted against JPL, so its belts are measured too. Masses
+/// are the published estimates; the cross-section ratio is the generator's own.
 pub fn solar(pole: DVec3, tuning: &Tuning) -> Vec<Population> {
     let t = &tuning.belts;
     let mut dust = PerBand::splat(0.0f32);
@@ -145,9 +139,9 @@ pub fn solar(pole: DVec3, tuning: &Tuning) -> Vec<Population> {
 
 /// One population, from the mass it holds and the surface that mass presents.
 ///
-/// `area_per_kg` is what turns a mass into something a telescope sees; the element radius only
-/// decides what one transit looks like. Splitting the two is what lets the asteroid belt and
-/// the Oort cloud hold comparable mass and be nothing alike to look at.
+/// `area_per_kg` turns a mass into something a telescope sees; the element radius decides only
+/// what one transit looks like. Split so the asteroid belt and the Oort cloud can hold
+/// comparable mass and look nothing alike.
 #[allow(clippy::too_many_arguments)]
 fn belt(
     pole: DVec3,

@@ -2,8 +2,8 @@
 //!
 //! Nothing here is drawn independently. A rung's mass is the solid in the annulus it sweeps,
 //! its class follows from that mass and whether it is past the snow line, and the belts are
-//! what the rungs failed to assemble. Mass is conserved across the whole ladder, which is what
-//! makes the asteroid belt and the Kuiper analog consequences rather than decorations.
+//! what the rungs failed to assemble. **Mass is conserved across the whole ladder**, which is
+//! what the belts rest on.
 
 use super::disc::{self, Disc, JUPITER_EARTHS};
 use super::tuning::Tuning;
@@ -61,9 +61,8 @@ pub struct Rung {
     pub debris_earths: f64,
     /// Never assembled into a planet. This rung is a belt.
     pub sterile: bool,
-    /// And it is a belt because a giant's resonances stirred it, rather than for want of mass.
-    /// Which one decides how much is left: a stirred belt was thrown out, a stalled one is
-    /// still there.
+    /// Stirred by a giant rather than short of mass. Decides how much is left: a stirred belt
+    /// was thrown out, a stalled one is still there.
     pub stirred: bool,
     /// A giant that ended up far inside where it formed.
     pub migrated: bool,
@@ -100,8 +99,8 @@ impl Architecture {
         self.rungs.iter().filter(|r| r.sterile)
     }
 
-    /// Total giant mass, in Jupiters. What decides how hard the system throws: the Oort cloud
-    /// and the delivery of water to the inner planets both scale with it.
+    /// Total giant mass, in Jupiters. The Oort cloud and the water delivered inward both
+    /// scale with it.
     pub fn giant_jupiters(&self) -> f64 {
         self.planets().filter(|r| r.class.is_giant()).map(|r| r.mass_earths).sum::<f64>() / JUPITER_EARTHS
     }
@@ -131,9 +130,7 @@ fn rungs_of(disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64) -> Vec<
         a *= rng::uniform_in(rng::hash(&[seed, 0x1add, axes.len() as u64]), t.spacing.0, t.spacing.1);
     }
 
-    // Growth slows as the cube of the orbit, so the outer disc never finishes assembling and
-    // what it leaves behind is the trans-planetary belt. Measured in snow lines, so a dim
-    // star's whole system is pulled inward together.
+    // In snow lines, so a dim star's whole system is pulled inward together.
     let growth_m = t.growth_over_snow * disc.snow_m;
 
     axes.iter()
@@ -190,11 +187,9 @@ fn envelope(class: Class, core: f64, h: u64, t: &super::tuning::Ladder) -> f64 {
 
 /// Merge giants the ladder put closer together than they could stay.
 ///
-/// The rungs are spaced by a ratio, which takes no account of mass, so two giants land inside
-/// each other's reach often enough to matter. Two that close scatter, and the outcome a system
-/// old enough to look at has already had is one planet: the lighter goes into the heavier,
-/// carrying its core, its envelope and the debris of its zone, so the ladder's mass is still
-/// conserved and the survivor sweeps both annuli.
+/// Rungs are spaced by a ratio and take no account of mass, so two giants land inside each
+/// other's reach often enough to matter. The lighter goes into the heavier with its core, its
+/// envelope and its debris, so mass is conserved and the survivor sweeps both annuli.
 fn settle_giants(rungs: &mut Vec<Rung>, disc: &Disc, star: &CatalogStar, tuning: &Tuning) {
     while let Some(k) = crowded(rungs, star, tuning.ladder.hill_separation) {
         let (lighter, heavier) = match rungs[k].mass_earths <= rungs[k + 1].mass_earths {
@@ -232,8 +227,8 @@ fn crowded(rungs: &[Rung], star: &CatalogStar, wanted: f64) -> Option<usize> {
 
 /// Send a few giants inward, and let them take out everything they cross.
 ///
-/// This is where hot Jupiters come from, and it is also why a system that has one has almost
-/// nothing else: a giant crossing the inner disc does not leave it behind.
+/// A giant crossing the inner disc does not leave it behind, which is why a system with a hot
+/// Jupiter has almost nothing else.
 fn migrate(rungs: &mut Vec<Rung>, disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64) {
     let t = &tuning.ladder;
     let Some(k) = rungs
@@ -261,9 +256,8 @@ fn sterilize(rungs: &mut [Rung], star: &CatalogStar, tuning: &Tuning) {
         .filter(|r| r.class.is_giant())
         .map(|r| {
             let mu = r.mass_earths * disc::EARTH_MASS / (star.mass_solar.max(0.05) * disc::SOLAR_MASS_KG);
-            // Capped short of one, or the heaviest planets reach the star: at thirteen Jupiter
-            // masses the raw width is exactly one and the band's inner edge lands on zero,
-            // which would sterilize every rung a system has.
+            // Capped short of one: at thirteen Jupiter masses the raw width is exactly one,
+            // the band's inner edge lands on zero, and every rung is sterilized.
             (r.semi_major_m, (tuning.ladder.resonance_reach * mu.powf(0.2)).min(0.85))
         })
         .collect();
@@ -312,9 +306,8 @@ mod tests {
         (0..count).map(|k| architecture(&sun_like(k), tuning)).collect()
     }
 
-    /// **The claim the belts rest on.** Every rung's core plus its debris is the solid in its
-    /// own annulus, and the annuli tile the disc, so nothing is invented and nothing vanishes.
-    /// The Kuiper analog exists because this holds, not because it was placed.
+    /// The claim the belts rest on: every rung's core plus its debris is the solid in its own
+    /// annulus, and the annuli tile the disc.
     #[test]
     fn the_ladder_conserves_the_disc() {
         let mut tuning = Tuning::default();
@@ -361,12 +354,9 @@ mod tests {
         assert!(checked > 5, "only {checked} migrations in three hundred systems");
     }
 
-    /// The asteroid belt, as a consequence. A giant's resonances stir the rung inside it past
-    /// assembling, so the belt turns up between the rocky planets and the innermost giant --
-    /// which is where the real one is.
-    ///
-    /// Only a *gas* giant does it. An ice giant's reach is a third as wide and the rung inside
-    /// it assembles unbothered, which is why Neptune has no belt in front of it.
+    /// A giant's resonances stir the rung inside it past assembling, so a belt turns up
+    /// between the rocky planets and the innermost giant. Only a gas giant does it: an ice
+    /// giant's reach is a third as wide, which is why Neptune has no belt in front of it.
     #[test]
     fn a_belt_appears_inside_the_innermost_gas_giant() {
         let mut found = 0;
@@ -404,9 +394,8 @@ mod tests {
         }
     }
 
-    /// **The optimism this generator is tuned for.** The habitable zone is supposed to be
-    /// occupied most of the time, and by something of roughly Earth's size rather than by
-    /// whatever happened to land there.
+    /// The optimism this generator is tuned for: the habitable zone is occupied most of the
+    /// time, and by something of roughly Earth's size.
     #[test]
     fn most_sun_like_stars_get_a_planet_in_the_habitable_zone() {
         let systems = census(300, &Tuning::default());
@@ -521,10 +510,9 @@ mod tests {
         assert!(mean * AU > 0.0);
     }
 
-    /// Two giants closer than a few mutual Hill radii scatter; a system old enough to be
-    /// looked at has already had that happen. The ladder spaces rungs by a ratio and takes no
-    /// account of mass, so it put a third of adjacent giant pairs inside ten mutual Hill radii
-    /// and the tightest at 2.5 -- below the limit where two planets are stable at all.
+    /// Two giants closer than a few mutual Hill radii scatter. Before the merge a third of
+    /// adjacent pairs were inside ten, the tightest at 2.5, below the limit where two planets
+    /// are stable at all.
     #[test]
     fn no_two_giants_are_closer_than_they_could_stay() {
         let t = Tuning::default();
@@ -543,8 +531,7 @@ mod tests {
         assert!(worst >= t.ladder.hill_separation, "a pair {worst:.2} mutual Hill radii apart");
     }
 
-    /// Merging conserves the ladder's mass, which is what makes the belts consequences of the
-    /// disc rather than decorations.
+    /// Merging conserves the ladder's mass, which the belts rest on.
     #[test]
     fn a_merge_keeps_the_mass_it_started_with() {
         let t = Tuning::default();
