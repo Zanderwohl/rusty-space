@@ -6,7 +6,6 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
-use std::ops::RangeInclusive;
 
 use lc_world::craft::Craft;
 use lc_world::fitting::{Balance, Loadout, Module};
@@ -39,7 +38,7 @@ pub struct Preview {
     /// Steps and how long they take, or why it cannot be done.
     pub planned: Result<(usize, f64), Shortage>,
     /// Why Apply cannot be pressed, when it cannot.
-    pub blocked: Option<&'static str>,
+    pub blocked: Option<String>,
 }
 
 /// What `draft` would take this ship through. `None` for a ship with no fitting.
@@ -56,13 +55,13 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
         .solve(&balance)
         .map(|refit| (refit.steps().count(), refit.duration_s()));
     let blocked = if !remote {
-        Some("no server: refits are the shard's to run")
+        Some("no server: refits are the shard's to run".into())
     } else if ship.is_refitting(now_s) {
-        Some("a refit is already running")
+        Some("a refit is already running".into())
     } else if ship.motion.is_under_way() {
-        Some("under way: cut the drive before refitting")
+        Some("under way: cut the drive before refitting".into())
     } else if draft == current {
-        Some("nothing to change")
+        Some("nothing to change".into())
     } else if let Err(short) = planned {
         Some(shortfall(short))
     } else {
@@ -87,74 +86,12 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
 /// Stored energy, plus what dismantling returns, less what building costs, if `draft` were built
 /// from `current`. Negative when it cannot be paid for.
 fn budget_j(balance: &Balance, current: Loadout, draft: Loadout, stored_j: f64) -> f64 {
-    let module_j = balance.module_energy_j();
     let mut budget = stored_j;
     for module in Module::ALL {
-        budget += moved(current.count(module), draft.count(module), module_j, balance.recovery);
+        let each_j = balance.build_energy_j(module);
+        budget += moved(current.count(module), draft.count(module), each_j, balance.recovery);
     }
     budget + moved(current.slots, draft.slots, balance.slot_energy_j(), balance.recovery)
-}
-
-/// Whether a loadout could be ended at: every module has a slot, the builds are paid for, and
-/// what is left fits in the storage it ends with.
-fn ends_well(balance: &Balance, current: Loadout, draft: Loadout, stored_j: f64) -> bool {
-    let budget = budget_j(balance, current, draft, stored_j);
-    draft.modules() <= draft.slots && budget >= 0.0 && budget <= balance.capacity_j(&draft)
-}
-
-/// A slider on the refit panel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Knob {
-    Module(Module),
-    Slots,
-}
-
-impl Knob {
-    fn get(self, loadout: &Loadout) -> u32 {
-        match self {
-            Knob::Module(module) => loadout.count(module),
-            Knob::Slots => loadout.slots,
-        }
-    }
-
-    fn with(self, loadout: Loadout, value: u32) -> Loadout {
-        let mut out = loadout;
-        match self {
-            Knob::Module(module) => *out.count_mut(module) = value,
-            Knob::Slots => out.slots = value,
-        }
-        out
-    }
-}
-
-/// How far a slider may move from where the draft has it without leaving a loadout that could
-/// not be ended at, within `limits`.
-///
-/// Walked out one step at a time from the draft's own value, so the range is always the
-/// contiguous run the player can actually reach. A draft that is already out of bounds — the
-/// ship's own loadout on a ship holding more than it could — is given the whole of `limits`, or
-/// no slider could be moved at all.
-pub fn reach(
-    balance: &Balance,
-    current: Loadout,
-    draft: Loadout,
-    stored_j: f64,
-    knob: Knob,
-    limits: RangeInclusive<u32>,
-) -> RangeInclusive<u32> {
-    let ok = |value: u32| ends_well(balance, current, knob.with(draft, value), stored_j);
-    let at = knob.get(&draft).clamp(*limits.start(), *limits.end());
-    if !ok(at) {
-        return limits;
-    }
-    let (mut lo, mut hi) = (at, at);
-    while lo > *limits.start() && ok(lo - 1) {
-        lo -= 1;
-    }
-    while hi < *limits.end() && ok(hi + 1) {
-        hi += 1;
-    }
-    lo..=hi
 }
 
 /// Energy a change of count returns, positive, or costs, negative.
@@ -167,12 +104,14 @@ fn moved(from: u32, to: u32, each_j: f64, recovery: f64) -> f64 {
 }
 
 /// What a shortage reads as. Something to act on, per `lightcone/docs/18-ui-style.md`.
-pub fn shortfall(short: Shortage) -> &'static str {
+pub fn shortfall(short: Shortage) -> String {
     match short {
-        Shortage::Unbuildable => "more modules than slots, or no drone left to build with",
-        Shortage::Energy => "not enough energy, even taking apart what is not wanted",
-        Shortage::Capacity => "a dismantling would return more than storage can hold",
-        Shortage::NoDrones => "no drones to do the work",
+        Shortage::Unbuildable => "more modules than slots, or no drone left to build with".into(),
+        Shortage::Energy => "not enough energy, even taking apart what is not wanted".into(),
+        Shortage::Capacity => "a dismantling would return more than storage can hold".into(),
+        Shortage::NoDrones => "no drones to do the work".into(),
+        Shortage::CannotBuild(module) => format!("cannot build {}", module.name()),
+        Shortage::CannotDismantle(module) => format!("cannot take apart {}", module.name()),
     }
 }
 
@@ -277,22 +216,17 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     let current = fitting.loadout_at(now);
     let draft = state.refit_draft.unwrap_or(current);
     let balance = fitting.balance;
-    // Each slider ends where the budget does, and a drag below the lowest loadout the ship could
-    // end at stops there. The left end stays put, so a handle does not jump as the range moves.
+    // The sliders go anywhere a hull could hold; whether the ship can get there is the planner's
+    // to say, and Apply says why not. A second, looser judge here once pinned sliders silently.
     ui.strong("Plan");
     let mut changed = draft;
-    let knob = |ui: &mut egui::Ui, knob: Knob, floor: u32, most: u32, value: &mut u32, name: &str| {
-        let range = reach(&balance, current, draft, stored, knob, floor..=most);
-        ui.add(egui::Slider::new(value, floor..=*range.end()).text(name));
-        *value = (*value).clamp(*range.start(), *range.end());
-    };
     for module in Module::ALL {
         let floor = if module == Module::Drone { 1 } else { 0 };
         let most = draft.slots.max(floor);
-        knob(ui, Knob::Module(module), floor, most, changed.count_mut(module), module.name());
+        ui.add(egui::Slider::new(changed.count_mut(module), floor..=most).text(module.name()));
     }
     let most = (current.slots * 2).max(40);
-    knob(ui, Knob::Slots, 1, most, &mut changed.slots, "hull slots");
+    ui.add(egui::Slider::new(&mut changed.slots, 1..=most).text("hull slots"));
     if changed != draft {
         ask(out, Action::DraftRefit(changed));
     }
@@ -333,7 +267,7 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
             ask(out, Action::ResetRefitDraft);
         }
     });
-    if let Some(why) = view.blocked {
+    if let Some(why) = &view.blocked {
         ui.weak(why);
     }
 }
@@ -399,45 +333,35 @@ mod tests {
         let view = preview(&ship(), full, true, 0.0).unwrap();
         assert_eq!(view.blocked, Some(shortfall(Shortage::Capacity)));
         let same = preview(&ship(), Loadout::STARTING, true, 0.0).unwrap();
-        assert_eq!(same.blocked, Some("nothing to change"));
+        assert_eq!(same.blocked.as_deref(), Some("nothing to change"));
         let offline = preview(&ship(), Loadout { engines: 6, ..Loadout::STARTING }, false, 0.0);
         assert!(offline.unwrap().blocked.unwrap().starts_with("no server"));
     }
 
-    /// **The sliders cannot reach an unaffordable loadout.** Checked against the budget worked
-    /// out by hand, not against `ends_well`, which is what is being tested.
+    /// A full ship cannot take a drone apart, and the panel says so rather than pinning the slider.
     #[test]
-    fn a_slider_stops_where_the_energy_runs_out() {
+    fn a_full_ship_is_told_why_it_cannot_take_a_drone_apart() {
+        let fewer = Loadout { drones: 1, ..Loadout::STARTING };
+        let view = preview(&ship(), fewer, true, 0.0).unwrap();
+        assert_eq!(view.blocked, Some(shortfall(Shortage::Capacity)));
+
         let b = Balance::DEFAULT;
-        let me = b.module_energy_j();
-        let start = Loadout::STARTING;
-        let engines = Knob::Module(Module::Engine);
+        let mut craft = ship();
+        let account = lc_world::fitting::Account {
+            stored_j: 20.0 * b.module_energy_j(),
+            ..craft.fitting().unwrap().account()
+        };
+        craft.fit(Some(Fitting::from_account(&account, b)));
+        assert_eq!(preview(&craft, fewer, true, 0.0).unwrap().blocked, None);
+    }
 
-        // Three module-energies stored and five slots free: three more engines, not five.
-        let range = reach(&b, start, start, 3.0 * me, engines, 0..=20);
-        assert_eq!(*range.end(), 8);
-        // And every engine can come out: storage has room for all five refunds.
-        assert_eq!(*range.start(), 0);
-
-        // With plenty stored it is the free slots that stop it.
-        assert_eq!(*reach(&b, start, start, 25.0 * me, engines, 0..=20).end(), 10);
-
-        // Full, so living space cannot be taken apart — its refund has nowhere to go — but the
-        // five free slots can all be filled.
-        let living = Knob::Module(Module::Living);
-        assert_eq!(reach(&b, start, start, 30.0 * me, living, 0..=20), 1..=6);
-
-        // And the hull cannot shrink below its modules, or grow past what it can pay for.
-        let slots = reach(&b, start, start, 0.5 * me, Knob::Slots, 1..=40);
-        assert_eq!(*slots.start(), 15);
-        let growth = (0.5 / (b.slot_energy_j() / me)).floor() as u32;
-        assert_eq!(*slots.end(), 20 + growth);
-
-        // Nothing inside the range is a loadout the budget cannot pay for.
-        for n in range_of(reach(&b, start, start, 3.0 * me, engines, 0..=20)) {
-            let draft = Loadout { engines: n, ..start };
-            assert!(budget_j(&b, start, draft, 3.0 * me) >= 0.0, "{n} engines");
-        }
+    #[test]
+    fn a_data_module_is_budgeted_at_half_a_module_energy() {
+        let b = Balance::DEFAULT;
+        let view = preview(&ship(), Loadout { data: 2, ..Loadout::STARTING }, true, 0.0).unwrap();
+        let spent = (view.stored_j - view.available_j) / b.module_energy_j();
+        assert!((spent - 0.5).abs() < 1.0e-12, "{spent}");
+        assert_eq!(view.blocked, None);
     }
 
     /// Checked against the rocket law's low-speed form, `m Δv c / ε`, and the engine rating.
@@ -446,7 +370,7 @@ mod tests {
         let b = Balance::DEFAULT;
         let view = preview(&ship(), Loadout::STARTING, true, 0.0).unwrap();
         assert!((view.g_wet - 5.0).abs() < 1.0e-9, "{}", view.g_wet);
-        assert!((view.g_dry - 13.56).abs() < 0.01, "{}", view.g_dry);
+        assert!((view.g_dry - 13.81).abs() < 0.01, "{}", view.g_dry);
         let linear = view.mass_after_kg * 1.0e3 * lc_world::flight::C_M_S / b.drive_efficiency;
         assert!((view.energy_per_km_s_j / linear - 1.0).abs() < 1.0e-5);
     }
@@ -473,10 +397,6 @@ mod tests {
         assert_eq!(length(500.0), "500 m");
         assert_eq!(length(Balance::DEFAULT.length_m(22)), "516 m");
         assert_eq!(length(50_000.0), "50.00 km");
-    }
-
-    fn range_of(range: RangeInclusive<u32>) -> Vec<u32> {
-        range.collect()
     }
 
     #[test]

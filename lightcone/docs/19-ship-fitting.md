@@ -22,11 +22,11 @@ A hull is divided into **slots**, and each module fills one. There are four kind
 | **drone** | builds and dismantles modules; the refit rate is proportional to how many there are |
 | **living** | drains `living_drain_w`, continuously, per module. Nothing else yet |
 | **engine** | a fixed thrust each; acceleration is total thrust over mass |
-| **data** | holds a craft's knowledge — files and raw logs — up to `data_per_module` each, with a fullness exactly as storage has; see [24-standing-instruments.md](24-standing-instruments.md) |
+| **data** | holds a craft's knowledge — files and raw logs — up to `data_per_module` each, with a fullness exactly as storage has; see [24-standing-instruments.md](24-standing-instruments.md). Half the mass of any other module, so half the energy to build, and three times as long |
 
 A `Loadout` is five counts and a slot total. The starting ship has one data module, in
-the slot a second living module used to fill: living space does nothing yet but drain, and a swap
-keeps the module count, so the ship's mass and every acceleration tuned to it are unchanged. It belongs to a `Craft`, not to its `ShipState`:
+the slot a second living module used to fill: living space does nothing yet but drain. The
+engine rating is derived from the starting ship's full mass, so it still pulls 5 g full. It belongs to a `Craft`, not to its `ShipState`:
 `motion::apply` is pure motion and stays that way. Only a player's ship gets a loadout. Craft a
 scene stages have none and keep flying on `Kind::drive()`, so the director and every demo work
 as they do now.
@@ -44,7 +44,8 @@ The 500 m ovoid holds **20 slots**. A slot is a twentieth of that hull:
 | **one module-energy** | **1.397 × 10²⁵ J** | dry mass × c² |
 
 A module costs its own mass-energy to build. That is the unit every other energy in this doc is
-quoted in, abbreviated **ME**.
+quoted in, abbreviated **ME**. A data module weighs `data_mass_fraction` of the others, so it
+costs that fraction of an ME.
 
 **The slot count is the truth and the length follows from it**, not the other way round:
 `length_m` is derived as the ovoid whose volume is `slots × slot_volume`. Dividing a volume by a
@@ -166,13 +167,18 @@ one slot. It is greedy:
 5. **Shrink the hull** once enough slots are free.
 6. **Dismantle drones last.**
 
+The two orders are `BUILD_ORDER` and `DISMANTLE_ORDER`. A target that wants a module built or
+taken apart that its order has no place for is refused naming it (`CannotBuild`,
+`CannotDismantle`) rather than falling through to a shortage it is not short of.
+
 If no step is possible, the target is refused with the reason. **A target must keep at least one
 drone**, since dismantling the last one would leave nothing to finish the job.
 
 ### Timing
 
 A step moves `E` joules at `drones × drone_power_w`, so it takes `E / (drones × drone_power_w)`
-seconds and the whole refit is a closed form in time. Energy moves continuously through a step, so
+seconds and the whole refit is a closed form in time. A data module is the exception: it takes
+`data_work_factor` times as long as any other module, whatever it costs. Energy moves continuously through a step, so
 stored energy has no jumps. The server folds completed steps as the clock passes them.
 
 Steps and the living drain are both measured in **coordinate** time. A refit only runs when the
@@ -220,6 +226,8 @@ keeps the welcome's shape and puts the numbers next to what they govern.
 | `engine_thrust_n` | 7.24 × 10¹⁰ N | 1 g of the starting ship, full, per engine, so five engines give today's 5 g |
 | `drone_power_w` | 2.31 × 10¹⁹ W | one drone builds one module in a week of proper time — about 69 s of real time at the design rate |
 | `living_drain_w` | 4.43 × 10¹⁵ W | one living module drains 1 ME a century |
+| `data_mass_fraction` | 0.5 | a data module's mass, and so its build energy, over any other module's |
+| `data_work_factor` | 3 | how many times longer a data module takes to build or take apart than any other |
 | `data_per_module` | 2.1 MB | a year of a thirty-minute stare in every band: a surveyed sky's files fit several times over, and raw logs are what fill it. A craft with none still has a 1 MiB onboard store |
 | `transmit_gain` | *anchored* | physical link-budget energy to stored energy; see [23-factions.md](23-factions.md#cost) |
 | `hull_density` | 50 kg/m³ | frame mass per slot, and so what growing the hull costs |
@@ -232,12 +240,12 @@ The starting ship: 5 engines, 6 storage, 2 drones, 1 living, 1 data, 5 slots emp
 
 | | |
 |---|---|
-| dry / wet mass | 2.72 × 10⁹ / 7.39 × 10⁹ kg |
+| dry / wet mass | 2.65 × 10⁹ / 7.31 × 10⁹ kg |
 | stored | 30 ME |
-| acceleration, full / empty | 5 g / 13.6 g |
-| Δη for a full tank | 1.00 |
-| fastest crossing | 0.46c |
-| 1 AU in-system at 5 g | 1.3 days, 0.85 ME |
+| acceleration, full / empty | 5 g / 13.8 g |
+| Δη for a full tank | 1.02 |
+| fastest crossing | 0.47c |
+| 1 AU in-system at 5 g | 1.3 days, 0.84 ME |
 | fastest any ship can cross | 0.71c |
 
 | `storage_per_module` | ε | starting ship's crossing | fastest possible |
@@ -279,11 +287,15 @@ when the visuals should follow.
 
 - **HUD**: stored / capacity, and the commitment while one is outstanding.
 - **Refit panel** (`Panel::Refit`, key `R`, `--panel refit`):
-  - a slider per module kind, and one for slots, which cannot go below what the target occupies
+  - a slider per module kind, and one for slots. They move over everything a hull could hold;
+    the planner alone judges whether the draft can be reached, and Apply says why not. A looser
+    budget check once bounded them instead, disagreed with the planner, and pinned sliders
+    with no reason given
   - the preview, from the planner run locally: energy available (stored + refunds − builds −
     hull), capacity after, step count, duration, and whether it can be done
   - **Apply**, disabled *with the reason shown* when it cannot be done or the ship is under way
-    ([18-ui-style.md](18-ui-style.md)); **Cancel** while a refit runs, with progress
+    ([18-ui-style.md](18-ui-style.md)). The draft survives Apply, so a refused refit leaves the
+    sliders where they were; **Cancel** while a refit runs, with progress
 - **Dev actions panel** (`Panel::DevActions`, key `F5`, `--panel dev`): *+1 ME*, *+10 ME*, *fill
   storage*. Development only, and a shard takes them only from an admin.
 - **Flight panel**: the acceleration buttons offer what the ship is rated for now, not fixed

@@ -833,6 +833,18 @@ pub enum Shortfall {
     Energy,
     Capacity,
     NoDrones,
+    CannotBuild(Module),
+    CannotDismantle(Module),
+}
+
+/// Mirrors `lc_world::fitting::Module`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Module {
+    Storage,
+    Drone,
+    Living,
+    Engine,
+    Data,
 }
 
 /// Module counts and hull slots. Mirrors `lc_world::fitting::Loadout`.
@@ -862,6 +874,8 @@ pub struct Balance {
     pub solar_efficiency: f64,
     pub solar_gain: f64,
     pub data_per_module: f64,
+    pub data_mass_fraction: f64,
+    pub data_work_factor: f64,
 }
 
 /// A refit as the arguments it is planned from. Mirrors `lc_world::refit::Order`.
@@ -1200,6 +1214,8 @@ mod tests {
                     solar_efficiency: 0.7,
                     solar_gain: 1.18e9,
                     data_per_module: 2.1e6,
+                    data_mass_fraction: 0.5,
+                    data_work_factor: 3.0,
                 },
                 loadout,
                 stored_j: 4.2e26,

@@ -125,6 +125,10 @@ pub struct Balance {
     pub solar_gain: f64,
     /// Bytes of knowledge one data module holds. See [`DATA_ANCHOR_S`].
     pub data_per_module: f64,
+    /// A data module's mass over any other module's, and so its build energy over theirs.
+    pub data_mass_fraction: f64,
+    /// How many times longer a data module takes to build or take apart than any other module.
+    pub data_work_factor: f64,
 }
 
 /// What [`Balance::data_per_module`] is anchored to: one module holds a year of a
@@ -148,9 +152,11 @@ impl Balance {
         let module_density_kg_m3 = 30_480.0 / (12.192 * 2.438 * 2.591);
         let hull_density_kg_m3 = 50.0;
         let storage_per_module = 5.0;
+        let data_mass_fraction = 0.5;
         let start = Loadout::STARTING;
         let module_kg = slot_volume_m3 * module_density_kg_m3;
-        let full_kg = (start.modules() as f64 + start.storage as f64 * storage_per_module)
+        let start_modules = (start.modules() - start.data) as f64 + start.data as f64 * data_mass_fraction;
+        let full_kg = (start_modules + start.storage as f64 * storage_per_module)
             * module_kg
             + start.slots as f64 * slot_volume_m3 * hull_density_kg_m3;
         let week_s = 7.0 * 86_400.0;
@@ -182,6 +188,8 @@ impl Balance {
             data_per_module: DATA_ANCHOR_S / DATA_ANCHOR_CADENCE_S
                 * em_spectra::Band::ALL.len() as f64
                 * crate::knowledge::SAMPLE_BYTES,
+            data_mass_fraction,
+            data_work_factor: 3.0,
         }
     };
 
@@ -189,9 +197,31 @@ impl Balance {
         self.slot_volume_m3 * self.module_density_kg_m3
     }
 
-    /// What building one module costs, joules.
+    /// One module-energy, joules: what building any module but a data module costs.
     pub fn module_energy_j(&self) -> f64 {
         self.module_mass_kg() * C2
+    }
+
+    pub fn mass_of_kg(&self, module: Module) -> f64 {
+        match module {
+            Module::Data => self.data_mass_fraction * self.module_mass_kg(),
+            _ => self.module_mass_kg(),
+        }
+    }
+
+    /// What building one `module` costs, joules.
+    pub fn build_energy_j(&self, module: Module) -> f64 {
+        self.mass_of_kg(module) * C2
+    }
+
+    /// How long building or taking apart one `module` keeps drones of `power_w` busy, seconds.
+    /// Not proportional to its energy: a data module is cheap and slow.
+    pub fn build_s(&self, module: Module, power_w: f64) -> f64 {
+        let factor = match module {
+            Module::Data => self.data_work_factor,
+            _ => 1.0,
+        };
+        factor * self.module_energy_j() / power_w
     }
 
     pub fn slot_structure_kg(&self) -> f64 {
@@ -204,7 +234,7 @@ impl Balance {
     }
 
     pub fn dry_mass_kg(&self, loadout: &Loadout) -> f64 {
-        loadout.modules() as f64 * self.module_mass_kg()
+        Module::ALL.iter().map(|&m| loadout.count(m) as f64 * self.mass_of_kg(m)).sum::<f64>()
             + loadout.slots as f64 * self.slot_structure_kg()
     }
 
@@ -504,6 +534,8 @@ impl From<lc_proto::Balance> for Balance {
             solar_efficiency: b.solar_efficiency,
             solar_gain: b.solar_gain,
             data_per_module: b.data_per_module,
+            data_mass_fraction: b.data_mass_fraction,
+            data_work_factor: b.data_work_factor,
         }
     }
 }
@@ -523,6 +555,8 @@ impl From<Balance> for lc_proto::Balance {
             solar_efficiency: b.solar_efficiency,
             solar_gain: b.solar_gain,
             data_per_module: b.data_per_module,
+            data_mass_fraction: b.data_mass_fraction,
+            data_work_factor: b.data_work_factor,
         }
     }
 }
@@ -576,6 +610,32 @@ impl From<crate::refit::Shortage> for lc_proto::Shortfall {
             Shortage::Energy => Self::Energy,
             Shortage::Capacity => Self::Capacity,
             Shortage::NoDrones => Self::NoDrones,
+            Shortage::CannotBuild(m) => Self::CannotBuild(m.into()),
+            Shortage::CannotDismantle(m) => Self::CannotDismantle(m.into()),
+        }
+    }
+}
+
+impl From<Module> for lc_proto::Module {
+    fn from(m: Module) -> Self {
+        match m {
+            Module::Storage => Self::Storage,
+            Module::Drone => Self::Drone,
+            Module::Living => Self::Living,
+            Module::Engine => Self::Engine,
+            Module::Data => Self::Data,
+        }
+    }
+}
+
+impl From<lc_proto::Module> for Module {
+    fn from(m: lc_proto::Module) -> Self {
+        match m {
+            lc_proto::Module::Storage => Self::Storage,
+            lc_proto::Module::Drone => Self::Drone,
+            lc_proto::Module::Living => Self::Living,
+            lc_proto::Module::Engine => Self::Engine,
+            lc_proto::Module::Data => Self::Data,
         }
     }
 }
@@ -588,6 +648,8 @@ impl From<lc_proto::Shortfall> for crate::refit::Shortage {
             Shortfall::Energy => Self::Energy,
             Shortfall::Capacity => Self::Capacity,
             Shortfall::NoDrones => Self::NoDrones,
+            Shortfall::CannotBuild(m) => Self::CannotBuild(m.into()),
+            Shortfall::CannotDismantle(m) => Self::CannotDismantle(m.into()),
         }
     }
 }
@@ -626,7 +688,7 @@ mod tests {
         let g = b.accel_g(&start, full);
         assert!((g / 5.0 - 1.0).abs() < 1.0e-12, "{g}");
         let empty = b.accel_g(&start, dry);
-        assert!((empty - 13.56).abs() < 0.01, "{empty}");
+        assert!((empty - 13.81).abs() < 0.01, "{empty}");
     }
 
     #[test]

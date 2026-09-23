@@ -697,7 +697,8 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::DraftRefit(loadout) => ui.refit_draft = Some(loadout),
         Action::ResetRefitDraft => ui.refit_draft = None,
         Action::ApplyRefit => {
-            if let Some(target) = ui.refit_draft.take() {
+            // Kept, so a refused refit leaves the sliders where they were.
+            if let Some(target) = ui.refit_draft {
                 effects.push(Effect::Send(lc_proto::Order::Refit { target: target.into() }));
             }
         }
