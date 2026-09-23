@@ -1028,21 +1028,11 @@ TextureGraphFile(
                         ),
                         ColorStop(
                             t: 0.02,
-                            color: Const(Oklch(
-                                l: 0.54,
-                                chroma: 0.1,
-                                hue: OklabHue(138.0),
-                                alpha: 1.0,
-                            )),
+                            color: Param("foliage"),
                         ),
                         ColorStop(
                             t: 0.25,
-                            color: Const(Oklch(
-                                l: 0.5,
-                                chroma: 0.09,
-                                hue: OklabHue(132.0),
-                                alpha: 1.0,
-                            )),
+                            color: Param("foliage high"),
                         ),
                         ColorStop(
                             t: 0.5,
@@ -1619,6 +1609,28 @@ TextureGraphFile(
                 default: Scalar(0.0),
                 description: Some("More dark basaltic provinces when positive."),
             ),
+            "foliage": ParamDecl(
+                name: "foliage",
+                kind: Color,
+                default: Color(Oklch(
+                    l: 0.54,
+                    chroma: 0.1,
+                    hue: OklabHue(138.0),
+                    alpha: 1.0,
+                )),
+                description: Some("Lowland growth. A host picks it from the star: gold under a hot one, dark under a red dwarf."),
+            ),
+            "foliage high": ParamDecl(
+                name: "foliage high",
+                kind: Color,
+                default: Color(Oklch(
+                    l: 0.5,
+                    chroma: 0.09,
+                    hue: OklabHue(132.0),
+                    alpha: 1.0,
+                )),
+                description: Some("The sparser growth higher up."),
+            ),
             "ice": ParamDecl(
                 name: "ice",
                 kind: Scalar(
@@ -1635,7 +1647,7 @@ TextureGraphFile(
                     max: 1.0,
                 ),
                 default: Scalar(0.0),
-                description: Some("How much of the wet land is green."),
+                description: Some("How much of the wet land is alive."),
             ),
             "rust": ParamDecl(
                 name: "rust",

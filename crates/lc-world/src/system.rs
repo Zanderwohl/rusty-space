@@ -254,7 +254,7 @@ impl LocalSystem {
                     surface,
                     // Keyed by the arena's id, which is what `rings::for_body` is keyed by and
                     // is not always the display name -- see `worlds`.
-                    climate: crate::climate::of(self.sim.name(i), &world, equilibrium_k, &self.sim.info(i).tags),
+                    climate: crate::climate::of(self.sim.name(i), &world, equilibrium_k, self.star_teff_k, &self.sim.info(i).tags),
                     world,
                     pole,
                     spin_s,

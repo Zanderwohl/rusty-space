@@ -72,6 +72,9 @@ pub struct Planet {
     pub water_fraction: f64,
     /// In the habitable zone, with a surface, air over it and water on it.
     pub habitable: bool,
+    /// How much of its wet land is alive, `[0, 1]`. Zero wherever nothing lives, which is
+    /// every planet that is not habitable and some that are.
+    pub life: f64,
     /// What orbits it. **A planet with no moon has no mass anybody can measure**: mass comes
     /// from a satellite's period through Kepler's third law, which is the only route a
     /// telescope has to it. See `lightcone/docs/25-system-knowledge.md`.
@@ -193,6 +196,7 @@ fn of(
         && atmosphere != Atmosphere::None
         && water_fraction > WET;
     let top = top_of(rung.class, atmosphere, rung.equilibrium_k, water_fraction, habitable);
+    let life = if habitable && rng::uniform(h(19)) < t.life_fraction { rng::uniform_in(h(20), 0.3, 1.0) } else { 0.0 };
 
     Planet {
         name,
@@ -214,6 +218,7 @@ fn of(
         top,
         water_fraction,
         habitable,
+        life,
         moons: Vec::new(),
     }
 }
@@ -320,6 +325,17 @@ mod tests {
         s.mass_solar = 1.0;
         s.metallicity = 0.0;
         s
+    }
+
+    /// Life is a draw on habitable worlds and nowhere else, and it comes up at the tuned rate.
+    #[test]
+    fn about_half_the_habitable_worlds_are_alive() {
+        let planets = census(400);
+        assert!(planets.iter().all(|p| p.habitable || p.life == 0.0));
+        let habitable: Vec<_> = planets.iter().filter(|p| p.habitable).collect();
+        let alive = habitable.iter().filter(|p| p.life > 0.0).count() as f64 / habitable.len() as f64;
+        assert!(habitable.len() > 50, "only {} habitable worlds", habitable.len());
+        assert!((alive - 0.5).abs() < 0.12, "{alive} of the habitable worlds are alive");
     }
 
     fn census(count: u64) -> Vec<Planet> {

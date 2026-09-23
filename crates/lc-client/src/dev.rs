@@ -231,22 +231,24 @@ pub(crate) fn run_dev_actions(
     }
 }
 
-/// The climate a generated planet named `name` has, from the nearest stars whose name it
-/// begins with.
+/// The climate a generated planet named `name` has, under its own star, from the stars whose
+/// name it begins with.
 fn generated_climate(stars: &[lc_world::sky::CatalogueStar], name: &str) -> Option<lc_world::climate::Climate> {
+    use lc_world::climate::{Inputs, derived, variety};
     stars
         .iter()
         .filter(|s| s.provenance.name.as_deref().is_some_and(|n| name.starts_with(n)))
-        .flat_map(lc_world::sky::generate::planets_of)
-        .find(|p| p.name == name)
-        .and_then(|p| {
-            lc_world::climate::derived(
-                p.atmosphere,
-                p.top,
-                p.equilibrium_k,
-                Some(p.water_fraction),
-                lc_world::climate::variety(&p.name),
-            )
+        .find_map(|s| {
+            let p = lc_world::sky::generate::planets_of(s).into_iter().find(|p| p.name == name)?;
+            let inputs = Inputs {
+                atmosphere: p.atmosphere,
+                top: p.top,
+                equilibrium_k: p.equilibrium_k,
+                water_fraction: Some(p.water_fraction),
+                life: Some(p.life),
+                star_teff_k: s.star.teff_k,
+            };
+            derived(&inputs, variety(&p.name))
         })
 }
 

@@ -163,6 +163,12 @@ planets. That is generous — real occurrence rates are nothing like it — and 
 The knobs that move it are the disc's solid mass, the drift share and the habitable zone's two
 temperatures.
 
+Life, unlike habitability, *is* a dial: `life_fraction`, the share of habitable worlds something
+lives on, is a half. Nobody knows the real number, and a half is a universe worth the trip. A
+living world draws how much of its wet land is alive, between three tenths and all of it, and
+states it as a `Life:` tag beside its water. A habitable world nothing lives on keeps its sea
+and its air and has bare ground under them.
+
 ![Semi-major axis against stellar luminosity](plots/habitable.png)
 
 The zone is a clean diagonal because it scales as the square root of the luminosity, and it is

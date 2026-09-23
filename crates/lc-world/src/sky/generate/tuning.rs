@@ -141,6 +141,9 @@ pub struct World {
     /// Obliquity: a gaussian at this sigma, with a tail that lands on its side.
     pub typical_obliquity_rad: f64,
     pub tumbled_chance: f64,
+    /// Share of habitable planets on which something lives. Nobody knows; a half is a
+    /// universe that is worth the trip.
+    pub life_fraction: f64,
 }
 
 /// Moons, of both origins.
@@ -269,6 +272,7 @@ impl Default for Tuning {
                 rocky_spin_s: (4.0 * 3600.0, 250.0 * 86_400.0),
                 typical_obliquity_rad: 0.35,
                 tumbled_chance: 0.1,
+                life_fraction: 0.5,
             },
             moons: Moons {
                 regular_mass_ratio: 1.0e-4,

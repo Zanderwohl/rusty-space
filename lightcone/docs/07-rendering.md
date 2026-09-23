@@ -519,8 +519,20 @@ the client binds them per body before the bake. What they are bound *to* is
 from the water's share of the mass (logistic in its logarithm, through Earth's 71 per cent at
 Earth's 2.3e-4), the ice from the surface temperature capped by how much water there is to
 freeze, the green from a temperate sea, the rust from dry ground under air. The generator states
-a planet's water as an `em-sim` tag beside its air and top, so a generated world arrives with all
-of it. Earth, Mars, Venus and Titan are measured instead, for the reason `worlds` measures them.
+a planet's water and its life as `em-sim` tags beside its air and top, so a generated world
+arrives with all of it; a body whose life nobody stated is taken to be alive where its sea is
+temperate.
+
+**Growth is the color its star leaves.** A pigment is worth making where the photons are, so
+what a plant reflects is what its star sends least usefully — the argument of Kiang et al.
+(2007), taken for its ordering rather than its spectra. `climate::foliage` puts gold under a hot
+white star, green under the Sun, crimson under a cool orange one and near-black under a red
+dwarf, which gives little of anything, so a dimmer star makes darker growth. The anchors lerp in
+Oklab rather than round the hue circle, which would put a blue forest between green and red, and
+both ends are kept off rust's hue, or growth reads as bare red ground. It reaches the graph as two
+color parameters, `foliage` and `foliage high`.
+
+![Growth under stars from 3600 K to 9200 K](../images/foliage.png) Earth, Mars, Venus and Titan are measured instead, for the reason `worlds` measures them.
 
 A parameter is not a share, so the client carries two measured tables — `SEA_LEVELS` and
 `ICE_LEVELS` in `surfaces.rs` — from each parameter to the share of the sphere it covers, and a

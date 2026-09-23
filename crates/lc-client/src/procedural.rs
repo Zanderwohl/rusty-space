@@ -242,8 +242,8 @@ fn image_of(target: Target, bytes: Vec<u8>) -> Image {
     image
 }
 
-/// Scalar bindings for a graph's parameters. One left out takes its declared default.
-pub type Params = Vec<(&'static str, f32)>;
+/// Bindings for a graph's parameters. One left out takes its declared default.
+pub type Params = Vec<(&'static str, ParamValue)>;
 
 /// The texels, in the target's format.
 type Readback = Pin<Box<dyn Future<Output = Vec<u8>> + Send>>;
@@ -423,7 +423,7 @@ fn start(
         seed,
         params: params
             .iter()
-            .map(|&(name, value)| (name.to_owned(), ParamValue::Scalar(value)))
+            .map(|(name, value)| ((*name).to_owned(), *value))
             .collect(),
         ..EvalCtx::default()
     };

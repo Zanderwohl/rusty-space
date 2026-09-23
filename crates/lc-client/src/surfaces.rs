@@ -24,6 +24,8 @@ use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use lc_world::climate::Climate;
 use lc_world::surface::Surface;
 use serde::Deserialize;
+use texture_graph_core::ParamValue;
+use texture_graph_core::color::oklcha;
 
 use crate::procedural::{Bakes, Params, Shape, Target, TextureGraph, placeholder};
 
@@ -449,14 +451,18 @@ fn ice_level(share: f32) -> f32 {
 
 /// rocky.tgraph's parameters, from what the world is.
 fn ground_params(c: &Climate) -> Params {
+    let scalar = ParamValue::Scalar;
+    let color = |[l, c, h]: [f32; 3]| ParamValue::Color(oklcha(l, c, h, 1.0));
     vec![
-        ("sea", sea_level(c.ocean)),
-        ("ice", ice_level(c.ice)),
-        ("life", c.life),
-        ("rust", c.rust),
-        ("sand", c.sand),
-        ("aridity", c.aridity),
-        ("dark", c.dark),
+        ("sea", scalar(sea_level(c.ocean))),
+        ("ice", scalar(ice_level(c.ice))),
+        ("life", scalar(c.life)),
+        ("rust", scalar(c.rust)),
+        ("sand", scalar(c.sand)),
+        ("aridity", scalar(c.aridity)),
+        ("dark", scalar(c.dark)),
+        ("foliage", color(c.foliage.low)),
+        ("foliage high", color(c.foliage.high)),
     ]
 }
 
