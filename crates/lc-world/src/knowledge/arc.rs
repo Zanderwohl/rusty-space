@@ -382,12 +382,9 @@ fn through(places: &[(DVec3, f64)], looks: &[Look], reach_m: f64, bound: f64) ->
 /// candidates are hopeless within two or three of them. The bound is compared against the same
 /// quantity the function returns, so the exit changes the cost and not the answer.
 fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f64> {
-    // Every candidate in this file is scored here and nowhere else, so this is where an
-    // implausible one is refused: no further from the primary than the ranges were searched.
-    // Outside that band the axis is an artifact of a near-singular conic and not a body, and
-    // the period beside it can look entirely ordinary -- a generated system fitted over nine
-    // hours produced 2.9e16 AU with a 158 day period. It reached that by *settling* there, so
-    // checking only where the three-point solution lands is not enough.
+    // Every candidate in this file is scored here and nowhere else, which is why the band of
+    // [`FAR_AU`] is enforced here rather than where the three-point solution lands: a fit
+    // settles its way out of the band, so checking only the starting point misses it.
     if !sound(fitted.semi_major_m) || !sound(fitted.period_s) {
         return None;
     }

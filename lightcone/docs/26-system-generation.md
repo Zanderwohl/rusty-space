@@ -111,8 +111,23 @@ astronomical units, where the asteroid belt starts. Not the giant's chaotic zone
 narrower; this is the reach of the resonance web.
 
 Only a *gas* giant does it. An ice giant's reach is a third as wide and the rung inside it
-assembles unbothered, which is why Neptune has no belt in front of it. About a third of gas
+assembles unbothered, which is why Neptune has no belt in front of it. About two in five gas
 giants that stayed where they formed leave a belt inside them.
+
+### Giants that could not stay
+
+Rung spacing is a ratio and knows nothing about mass, so it will happily put two giants closer
+together than two giants can be. A third of adjacent pairs came out inside ten mutual Hill
+radii and the tightest at 2.5, which is below `2*sqrt(3)` — the separation at which two planets
+stop being stable at all, never mind for the billions of years it takes to be worth looking at.
+
+So the pair that cannot last does what such a pair does: the lighter goes into the heavier,
+carrying its core, its envelope and the debris of its zone. Mass is still conserved, the
+survivor sweeps both annuli, and because it is heavier its resonance web is wider — which is
+part of why two in five stayers leave a belt rather than one in three.
+
+Most systems merge something. It is the single largest correction the ladder needs, and it is
+the price of spacing rungs by a ratio instead of by what is standing on them.
 
 ## What a planet turns out to be
 
@@ -193,6 +208,12 @@ planet — measured, and remarkably constant across Jupiter, Saturn and Uranus �
 number sizes a generated retinue with no other tuning. It sits within a twentieth of the Hill
 radius, flat, circular and prograde. A rocky planet has no such disc, so its only route is a
 giant impact: rare, and a quarter of Earth's Hill radius out, which is where Luna is.
+
+Inward, a moon stops at its own **Roche limit** — `2.456 R_p (rho_p / rho_m)^(1/3)`, the fluid
+one, because a satellite has no tensile strength worth the name and what holds it together is
+its own gravity. The density ratio is why this is not a flat multiple of the planet's radius:
+an icy moon around a rocky planet is pulled apart half again as far out as a rocky one, and
+inside that limit there is a ring rather than a moon.
 
 A **catch** was a passing body the planet held. How many is a cross-section, so the count goes
 as the square of the Hill radius — a Jupiter analog reaches the ninety-odd the real one has,

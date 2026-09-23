@@ -416,10 +416,9 @@ fn span_days(seconds: f64) -> String {
 #[cfg(test)]
 mod tests {
     use glam::DVec3;
-    use lc_world::knowledge::Witness;
+    use lc_world::knowledge::{BodyId, Witness};
 
     use super::*;
-    use lc_world::knowledge::BodyId;
 
     fn belief(method: Option<Method>, stated_by: Option<Witness>, hops: usize) -> BodyBelief {
         BodyBelief {
