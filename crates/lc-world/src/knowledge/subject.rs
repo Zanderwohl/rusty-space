@@ -77,6 +77,19 @@ impl Subject {
         }
     }
 
+    /// A stable number for seeding a measurement's noise, distinct across the variants.
+    ///
+    /// A star's is its own id unchanged, so what a telescope saw before this existed is what it
+    /// sees now.
+    pub fn key(self) -> u64 {
+        match self {
+            Self::Star(star) => star.get(),
+            Self::Body { star, body } => rng::hash(&[star.get(), body.get()]),
+            Self::Population { star, index } => rng::hash(&[star.get(), index as u64, 0x_b_e_1_7]),
+            Self::Craft(id) => rng::hash(&[id as u64, 0x_c_2_a_f_7]),
+        }
+    }
+
     pub fn as_star(self) -> Option<StarId> {
         match self {
             Self::Star(star) => Some(star),

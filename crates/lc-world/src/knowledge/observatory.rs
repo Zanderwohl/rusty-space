@@ -12,7 +12,7 @@ use glam::DVec3;
 use lc_spacetime::{Coord, Micros, frame::SystemFrame};
 
 use super::survey::{self, Duty, Optics, Source, Sweep};
-use super::{Bearing, Claim, Distance, Hop, Knowledge, NameKind, Naming, Sample, Sighting, Witness};
+use super::{Bearing, Claim, Distance, Hop, Knowledge, NameKind, Naming, Sample, Sighting, Subject, Witness};
 use crate::instrument::Instrument;
 use crate::observation::{Target, observe};
 use crate::rng;
@@ -74,7 +74,18 @@ impl Sky {
                 } else {
                     0.0
                 };
-                Source { star: star.id, toward: offset.normalize_or_zero(), flux_w_m2: flux }
+                Source {
+                    subject: Subject::Star(star.id),
+                    toward: offset.normalize_or_zero(),
+                    flux_w_m2: flux,
+                    // A star is a point at any interstellar range and a disc from inside its
+                    // own system, which is the ship's own sun and nothing else.
+                    diameter_rad: if distance_m > 0.0 {
+                        2.0 * star.star.radius_m / distance_m
+                    } else {
+                        0.0
+                    },
+                }
             })
             .collect()
     }
@@ -242,7 +253,7 @@ pub fn fix(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, id: StarId, ex
     let optics = at.optics();
     let Some(band) = optics.band() else { return };
     let sources = sky.sources(band, at.position_ly);
-    let Some(index) = sources.iter().position(|s| s.star == id) else { return };
+    let Some(index) = sources.iter().position(|s| s.subject == Subject::Star(id)) else { return };
     let witness = knowledge.owner;
     if let Some(seen) =
         survey::look(&optics, &sources, index, exposure_s, at.position_ly, now_s, witness)
@@ -283,7 +294,7 @@ pub fn sweep_between(
             survey::look(&optics, &sources, index, sweep.exposure_s(), at.position_ly, when, witness)
             && let Some(source) = sources.get(index)
         {
-            knowledge.sighted(source.star, seen);
+            knowledge.sighted(source.subject, seen);
         }
     }
 }
@@ -317,6 +328,8 @@ pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach
                 witness: CHARTS,
                 observed_s: now_s,
                 bearing: Bearing { observer_ly: from, toward: source.toward, sigma_rad: sigma_ly / distance },
+                // A chart gives a place and a brightness and never a size.
+                size: None,
                 band,
                 flux: source.flux_w_m2,
                 flux_sigma: source.flux_w_m2 * CHART_ERROR,

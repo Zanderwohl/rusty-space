@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::instrument::{Instrument, PHOTOMETRY_FLOOR};
 use crate::knowledge::astrometry::{self, Bearing};
-use crate::knowledge::{Sighting, Witness};
+use crate::knowledge::{Sighting, Subject, Witness};
 use crate::rng;
 use crate::sky::StarId;
 use crate::star::Star;
@@ -106,13 +106,20 @@ impl Optics {
     }
 }
 
-/// A point source as it arrives at the observer, in the band being surveyed.
+/// One source as it arrives at the observer, in the band being surveyed.
+///
+/// A star and a planet are the same kind of thing here on purpose. The host star glares on its
+/// own planets and a planet can pass in front of a star behind it, so both belong in one sky
+/// and both go through the same glare and blend rules rather than down parallel paths.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Source {
-    pub star: StarId,
+    pub subject: Subject,
     /// Unit vector, aberration already removed.
     pub toward: DVec3,
     pub flux_w_m2: f64,
+    /// Angular diameter, radians. Effectively zero for anything interstellar; a body inside the
+    /// system, and the system's own star, are discs.
+    pub diameter_rad: f64,
 }
 
 /// W/m^2. The same geometry `observation::observe` uses.
@@ -170,13 +177,13 @@ pub fn blended_with(
     band: Band,
     sky: &[Source],
     index: usize,
-) -> Option<StarId> {
+) -> Option<Subject> {
     let target = *sky.get(index)?;
     let resolution = optics.resolution_rad(band);
     sky.iter()
-        .filter(|s| s.star != target.star && s.flux_w_m2 > target.flux_w_m2)
+        .filter(|s| s.subject != target.subject && s.flux_w_m2 > target.flux_w_m2)
         .find(|s| s.toward.angle_between(target.toward) < resolution)
-        .map(|s| s.star)
+        .map(|s| s.subject)
 }
 
 /// The source most in the way of `index`, when glare is what loses it: it would be detected in
@@ -191,7 +198,7 @@ pub fn hidden_by(
     sky: &[Source],
     index: usize,
     exposure_s: f64,
-) -> Option<StarId> {
+) -> Option<Subject> {
     let target = *sky.get(index)?;
     if let Some(blend) = blended_with(optics, band, sky, index) {
         return Some(blend);
@@ -203,7 +210,7 @@ pub fn hidden_by(
         return None;
     }
     sky.iter()
-        .filter(|s| s.star != target.star && s.flux_w_m2 > target.flux_w_m2)
+        .filter(|s| s.subject != target.subject && s.flux_w_m2 > target.flux_w_m2)
         .max_by(|a, b| {
             let halo = |s: &Source| {
                 optics.halo_counts(
@@ -214,7 +221,7 @@ pub fn hidden_by(
             };
             halo(a).total_cmp(&halo(b))
         })
-        .map(|s| s.star)
+        .map(|s| s.subject)
 }
 
 /// Noise is seeded from the witness, the star and the arrival time, so a server can recompute
@@ -243,7 +250,7 @@ pub fn look(
     }
     let resolution = optics.resolution_rad(band);
 
-    let seed = rng::hash(&[witness.0, target.star.get(), observed_s.to_bits()]);
+    let seed = rng::hash(&[witness.0, target.subject.key(), observed_s.to_bits()]);
     let sigma_rad = astrometry::centroid_sigma_rad(resolution, snr);
     let (x, y) = target.toward.any_orthonormal_pair();
     let scatter = x * rng::gaussian(rng::hash(&[seed, 1])) * sigma_rad
@@ -259,11 +266,25 @@ pub fn look(
             toward: (target.toward + scatter).normalize(),
             sigma_rad,
         },
+        size: disc(target.diameter_rad, resolution, sigma_rad, rng::hash(&[seed, 4])),
         band,
         flux: target.flux_w_m2 + rng::gaussian(rng::hash(&[seed, 3])) * flux_sigma,
         flux_sigma,
         lineage: Vec::new(),
     })
+}
+
+/// The measured angular diameter of a resolved disc, or `None` for a point source.
+///
+/// A diameter is the separation of two limbs, each found the way a centroid is, hence the
+/// `sqrt(2)`. It is held at [`astrometry::LIMB_FLOOR`] of itself, because the limb of a real
+/// body is not a step and how it darkens toward the edge is a model rather than a measurement.
+fn disc(diameter_rad: f64, resolution_rad: f64, sigma_rad: f64, seed: u64) -> Option<(f64, f64)> {
+    if diameter_rad <= resolution_rad {
+        return None;
+    }
+    let sigma = (std::f64::consts::SQRT_2 * sigma_rad).max(diameter_rad * astrometry::LIMB_FLOOR);
+    Some((diameter_rad + rng::gaussian(seed) * sigma, sigma))
 }
 
 /// A region of sky visited field by field in a fixed order, each for its dwell: a star is found
@@ -520,9 +541,10 @@ mod tests {
 
     fn source(key: u64, toward: DVec3, flux: f64) -> Source {
         Source {
-            star: StarId::synthesise("test", key),
+            subject: Subject::Star(StarId::synthesise("test", key)),
             toward: toward.normalize(),
             flux_w_m2: flux,
+            diameter_rad: 0.0,
         }
     }
 
@@ -713,7 +735,7 @@ mod tests {
         assert!(host.bearing.sigma_rad <= clear.bearing.sigma_rad);
         assert_eq!(
             hidden_by(&optics, Band::V, &sky, 1, 600.0),
-            Some(sky[0].star)
+            Some(sky[0].subject)
         );
         assert_eq!(hidden_by(&optics, Band::V, &sky, 2, 600.0), None);
         assert_eq!(hidden_by(&optics, Band::V, &sky, 0, 600.0), None);
@@ -730,13 +752,13 @@ mod tests {
             source(2, DVec3::new(1.0, resolution * 0.5, 0.0), bright * 0.5),
             source(3, DVec3::new(1.0, resolution * 4.0, 0.0), bright * 0.5),
         ];
-        assert_eq!(blended_with(&optics, Band::V, &sky, 1), Some(sky[0].star));
+        assert_eq!(blended_with(&optics, Band::V, &sky, 1), Some(sky[0].subject));
         assert_eq!(blended_with(&optics, Band::V, &sky, 2), None);
         assert_eq!(blended_with(&optics, Band::V, &sky, 0), None, "the brighter one is the image");
 
         assert!(look(&optics, &sky, 1, 1.0e6, DVec3::ZERO, 0.0, Witness(1)).is_none());
         assert!(look(&optics, &sky, 2, DWELL_S, DVec3::ZERO, 0.0, Witness(1)).is_some());
-        assert_eq!(hidden_by(&optics, Band::V, &sky, 1, DWELL_S), Some(sky[0].star));
+        assert_eq!(hidden_by(&optics, Band::V, &sky, 1, DWELL_S), Some(sky[0].subject));
     }
 
     #[test]
@@ -758,7 +780,7 @@ mod tests {
         assert!(look(&swarm, &sky, 1, 600.0, DVec3::ZERO, 0.0, Witness(1)).is_some());
         assert_eq!(
             hidden_by(&lone, Band::V, &sky, 1, 600.0),
-            Some(sky[0].star)
+            Some(sky[0].subject)
         );
     }
 
@@ -781,6 +803,41 @@ mod tests {
             (precision - PHOTOMETRY_FLOOR).abs() < PHOTOMETRY_FLOOR * 1e-9,
             "{precision} against a floor of {PHOTOMETRY_FLOOR}"
         );
+    }
+
+    /// A resolved disc is a measurement; a point source is not, and claiming one would give a
+    /// radius out of nothing. The ship's own sun is the only star that is ever a disc.
+    #[test]
+    fn a_resolved_disc_is_measured_and_a_point_source_is_not() {
+        let optics = Optics::of(Instrument::SHIP);
+        let resolution = optics.resolution_rad(Band::V);
+        let host = flux_from(&sun(), Band::V, 5.0 * AU_M);
+
+        // The Sun's disc from 5 AU: 1.86e-3 rad, six thousand resolution elements across.
+        let disc = 2.0 * sun().radius_m / (5.0 * AU_M);
+        assert!(disc / resolution > 6000.0, "{} elements", disc / resolution);
+        let sky = [Source {
+            subject: Subject::Star(StarId::synthesise("test", 1)),
+            toward: DVec3::X,
+            flux_w_m2: host,
+            diameter_rad: disc,
+        }];
+        let seen = look(&optics, &sky, 0, DWELL_S, DVec3::ZERO, 0.0, Witness(1)).expect("seen");
+        let (measured, sigma) = seen.size.expect("a resolved star has a size");
+        assert!((measured / disc - 1.0).abs() < 5.0 * sigma / disc, "{measured} against {disc}");
+        // Held at the limb floor, not at the centroid's, so it is a part in a thousand and not
+        // the part in ten million the photons alone would claim.
+        assert!(
+            (sigma / disc - astrometry::LIMB_FLOOR).abs() < astrometry::LIMB_FLOOR * 1e-9,
+            "{} against a floor of {}",
+            sigma / disc,
+            astrometry::LIMB_FLOOR
+        );
+
+        // The same star ten light-years off is a point and reports no size at all.
+        let far = [source(2, DVec3::X, flux_from(&sun(), Band::V, 10.0 * M_PER_LY))];
+        let point = look(&optics, &far, 0, DWELL_S, DVec3::ZERO, 0.0, Witness(1)).expect("seen");
+        assert_eq!(point.size, None);
     }
 
     #[test]

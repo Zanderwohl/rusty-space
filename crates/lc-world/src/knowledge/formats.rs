@@ -13,7 +13,7 @@
 use super::File;
 
 /// What writes a file's bytes today.
-pub const FILE_FORMAT: i32 = 5;
+pub const FILE_FORMAT: i32 = 6;
 
 /// The oldest format still read. Anything older is refused.
 pub const OLDEST_FILE_FORMAT: i32 = FILE_FORMAT;

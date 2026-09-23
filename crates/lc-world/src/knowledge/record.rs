@@ -39,6 +39,10 @@ pub struct Sighting {
     /// Coordinate seconds the light arrived, not when it left.
     pub observed_s: f64,
     pub bearing: Bearing,
+    /// Angular diameter and its sigma, radians, once the disc is resolved. `None` for a point
+    /// source, which is everything interstellar and anything small enough or far enough inside
+    /// a system. A radius needs this and a distance; neither alone says anything.
+    pub size: Option<(f64, f64)>,
     pub band: Band,
     /// Flux in `band`, W/m^2.
     pub flux: f64,

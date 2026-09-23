@@ -670,6 +670,7 @@ mod tests {
                 toward: toward.normalize(),
                 sigma_rad: 1e-9,
             },
+            size: None,
             band: Band::V,
             flux: 1e-12,
             flux_sigma: 1e-15,

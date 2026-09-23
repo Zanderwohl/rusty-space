@@ -11,7 +11,8 @@
 use em_spectra::{Band, PerBand, blackbody};
 use glam::DVec3;
 
-use crate::knowledge::survey;
+use crate::knowledge::survey::{self, Source};
+use crate::knowledge::{BodyId, Subject};
 use crate::star::Star;
 use crate::system::{Drawable, LocalSystem, M_PER_LY, phase_factor};
 
@@ -117,6 +118,27 @@ pub fn all(system: &LocalSystem, band: Band, from_ly: DVec3, now_s: f64) -> Vec<
         .collect();
     seen.sort_unstable_by(|a, b| b.flux[band].total_cmp(&a.flux[band]));
     seen
+}
+
+/// Every body of a system as a source the telescope can be pointed at, in `band`.
+///
+/// **The one place a body in the truth becomes a subject in a belief.** `BodyId::of` hashes the
+/// same key `Target::Body` holds, so a survey's sighting and a navigation order name one body.
+/// The star's own sources come from [`crate::knowledge::observatory::Sky`] and belong in the
+/// same list: a planet is lost in its star's glare, and only one sky can say so.
+pub fn sources(system: &LocalSystem, band: Band, from_ly: DVec3, now_s: f64) -> Vec<Source> {
+    all(system, band, from_ly, now_s)
+        .into_iter()
+        .map(|seen| Source {
+            subject: Subject::Body {
+                star: system.star,
+                body: BodyId::of(system.star, &seen.body),
+            },
+            toward: seen.toward,
+            flux_w_m2: seen.flux[band],
+            diameter_rad: seen.diameter_rad,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -326,6 +348,73 @@ mod tests {
                 visit.body
             );
         }
+    }
+
+    /// **One sky, stars and planets together, measured through the host's glare.** This is what
+    /// the whole of phase 6 rests on: a ship five AU out, looking at its own system, with the
+    /// sun in the same source list as the planets so the glare rules can be asked about both.
+    #[test]
+    fn a_ship_inside_a_system_measures_its_planets() {
+        let Some(system) = sol() else { return };
+        let optics = crate::knowledge::survey::Optics::of(crate::instrument::Instrument::SHIP);
+        let band = Band::V;
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+
+        // The host star's source, worked the way the catalogue path works it.
+        let star_at = system.star_position_ly();
+        let range_m = (star_at - from).length() * M_PER_LY;
+        let host = crate::knowledge::survey::Source {
+            subject: Subject::Star(system.star),
+            toward: (star_at - from).normalize(),
+            flux_w_m2: survey::flux_from(&star_of(&system), band, range_m),
+            diameter_rad: 2.0 * system.star_radius_m() / range_m,
+        };
+        let mut sky = vec![host];
+        sky.extend(sources(&system, band, from, 0.0));
+
+        let wanted = ["Venus", "Earth", "Mars", "Jupiter", "Saturn"];
+        let keys: Vec<Subject> = wanted
+            .iter()
+            .map(|name| Subject::Body { star: system.star, body: BodyId::of(system.star, name) })
+            .collect();
+
+        // At this epoch all five are clear of the sun, so each of them is a measurement and a
+        // miss is a defect rather than a phase. Their diameters run from Mars at 2.6 arcsec to
+        // Jupiter at 62, against a resolution of 0.061.
+        let mut measured = 0;
+        for (name, key) in wanted.iter().zip(&keys) {
+            let index = sky.iter().position(|s| s.subject == *key).expect("in the sky");
+            let Some(seen) = survey::look(
+                &optics,
+                &sky,
+                index,
+                crate::knowledge::survey::DWELL_S,
+                from,
+                0.0,
+                crate::knowledge::Witness(1),
+            ) else {
+                // Behind the star or at conjunction is a legitimate miss; being lost everywhere
+                // is not, and the count below is what catches that.
+                continue;
+            };
+            let (diameter, sigma) = seen.size.unwrap_or_else(|| panic!("{name} is a disc at 5 AU"));
+            assert!(sigma / diameter < 2.0e-3, "{name}'s size is only good to {}", sigma / diameter);
+            measured += 1;
+        }
+        assert_eq!(measured, wanted.len(), "a planet went missing in the glare");
+
+        // And the host is measured too, which is what every distance in the system hangs off.
+        let seen = survey::look(
+            &optics,
+            &sky,
+            0,
+            crate::knowledge::survey::DWELL_S,
+            from,
+            0.0,
+            crate::knowledge::Witness(1),
+        )
+        .expect("nothing outshines the sun");
+        assert!(seen.size.is_some(), "its disc is six thousand elements across");
     }
 
     /// Brightest first, because the glare rules are asked which of two sources outshines the

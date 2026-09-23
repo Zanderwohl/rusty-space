@@ -13,6 +13,15 @@ pub const CENTROID_FLOOR: f64 = 1e-3;
 /// Parallax signal-to-noise below which a distance is only a lower bound.
 pub const PARALLAX_SNR: f64 = 2.0;
 
+/// Best fractional precision on a resolved disc's angular diameter.
+///
+/// The counterpart of [`CENTROID_FLOOR`] for a size rather than a position, and a floor for a
+/// different reason: the limb of a real body is not a step, and how it darkens toward the edge
+/// is a model rather than a measurement. Real interferometric stellar diameters do worse than
+/// this; a planet's sharp edge does better, and one number for both is as much as an instrument
+/// that cannot tell which it is looking at can claim.
+pub const LIMB_FLOOR: f64 = 1.0e-3;
+
 /// Diameter of a filled circular aperture of this area.
 pub fn diameter_m(aperture_m2: f64) -> f64 {
     2.0 * (aperture_m2.max(0.0) / std::f64::consts::PI).sqrt()

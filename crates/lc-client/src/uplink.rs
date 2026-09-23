@@ -1383,6 +1383,7 @@ mod tests {
                 witness: Witness(me.0 as u64),
                 observed_s: 1.0,
                 bearing: Bearing { observer_ly: glam::DVec3::ZERO, toward: glam::DVec3::X, sigma_rad: 1e-9 },
+                size: None,
                 band: em_spectra::Band::V,
                 flux: 1e-12,
                 flux_sigma: 1e-15,
