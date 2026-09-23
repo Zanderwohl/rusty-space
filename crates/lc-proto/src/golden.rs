@@ -222,6 +222,11 @@ pub const OBSERVING: &[u8] = &[
     64, 159, 64,
 ];
 
+/// `Outbound::Observing { Survey { star 11, started 5 }, integration 2000 }`
+pub const SURVEYING: &[u8] = &[
+    16, 4, 11, 0, 0, 0, 0, 0, 0, 20, 64, 0, 0, 0, 0, 0, 64, 159, 64,
+];
+
 /// `Outbound::Learned { report: "{}" }`
 pub const LEARNED: &[u8] = &[
     15, 2, 123, 125,

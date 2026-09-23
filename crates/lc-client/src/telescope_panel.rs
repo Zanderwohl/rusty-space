@@ -211,6 +211,26 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
                 targets.len() as f64 * dwell_s / 3600.0
             ));
         }
+        Duty::Survey { star, .. } => {
+            let bodies = game
+                .system
+                .as_ref()
+                .filter(|s| s.star == *star)
+                .map_or(0, |s| s.len());
+            ui.label(format!("Surveying {}", game.name_of(*star)));
+            // How long a body waits for its turn, which is what sets how fast an orbit fills
+            // in. Unknown until the system is loaded, and that is worth saying rather than
+            // showing a zero.
+            if bodies > 0 {
+                ui.weak(format!(
+                    "{bodies} bodies, {:.0} s each: one comes round every {:.1} hours",
+                    lc_world::knowledge::survey::SURVEY_DWELL_S,
+                    bodies as f64 * lc_world::knowledge::survey::SURVEY_DWELL_S / 3600.0
+                ));
+            } else {
+                ui.weak("not in that system");
+            }
+        }
     }
     if let (Some(on), Some(looking)) = (game.observatory.pointing(), game.described)
         && on != looking
@@ -226,6 +246,15 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
         }
         if ui.button("Survey ahead").on_hover_text("Survey cone in direction of travel to discover stars").clicked() {
             ask(out, Action::SurveyAhead);
+        }
+        let here = game.system.is_some();
+        if ui
+            .add_enabled(here, egui::Button::new("Survey system"))
+            .on_hover_text("Measure the bodies of this system, brightest first")
+            .on_disabled_hover_text("Only from inside a system")
+            .clicked()
+        {
+            ask(out, Action::SurveySystem);
         }
         if ui.button("Stop").on_hover_text("Stop all observations").clicked() {
             ask(out, Action::StopSurvey);

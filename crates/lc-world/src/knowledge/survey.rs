@@ -29,6 +29,21 @@ pub const FIELD_RAD: f64 = 0.035;
 /// Coordinate seconds a sweep spends on each field.
 pub const DWELL_S: f64 = 60.0;
 
+/// Coordinate seconds a survey spends on each body.
+///
+/// A body inside the system is bright and resolved, so this is not a depth: a planet gives
+/// 1e13 counts in a minute from 5 AU. It is how long the telescope is committed elsewhere,
+/// which is what sets how often anything comes round.
+pub const SURVEY_DWELL_S: f64 = 60.0;
+
+/// Bodies a survey measures in one tick, so a long gap costs a bounded amount.
+///
+/// At the design rate a tick is 438 coordinate seconds, so seven bodies fit in one and a
+/// system of Sol's two hundred takes about four game hours to come round. A generated system
+/// of eight planets and their moons takes minutes. The doc's "about once a game hour" was
+/// written before anybody counted the bodies in the preset.
+pub const VISITS_PER_TICK: usize = 32;
+
 /// A telescope, or several acting as one.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Optics {
@@ -442,6 +457,16 @@ pub enum Duty {
         dwell_s: f64,
         started_s: f64,
     },
+    /// Every body of one star's system in turn, brightest first, for [`SURVEY_DWELL_S`] each.
+    ///
+    /// Unlike a [`Duty::Watch`] this does not name its targets, because the craft does not know
+    /// them: finding them is the duty. It rotates over whatever the system holds, so a body too
+    /// faint or too close to the star is simply not detected on that pass and is there on a
+    /// later one when the geometry has moved.
+    Survey {
+        star: StarId,
+        started_s: f64,
+    },
 }
 
 impl From<&Duty> for lc_proto::Duty {
@@ -460,6 +485,9 @@ impl From<&Duty> for lc_proto::Duty {
                 dwell_s: *dwell_s,
                 started_s: *started_s,
             },
+            Duty::Survey { star, started_s } => {
+                Self::Survey { star: star.get(), started_s: *started_s }
+            }
         }
     }
 }
@@ -477,6 +505,9 @@ impl From<&lc_proto::Duty> for Duty {
                 dwell_s: dwell_s.max(1.0),
                 started_s: *started_s,
             },
+            lc_proto::Duty::Survey { star, started_s } => {
+                Self::Survey { star: StarId::from_raw(*star), started_s: *started_s }
+            }
         }
     }
 }
@@ -512,12 +543,45 @@ impl Duty {
         }
     }
 
+    /// The star whose system a survey is of. `None` for every other duty.
+    pub fn surveying(&self) -> Option<StarId> {
+        match self {
+            Self::Survey { star, .. } => Some(*star),
+            _ => None,
+        }
+    }
+
+    /// Which bodies of a sorted list a survey measures between two times, as indices into it.
+    ///
+    /// Brightest first and rotating, so the first tick of a new survey lands on the brightest
+    /// things in the system: from 5 AU every major planet is in the first handful, which is how
+    /// each of them has a position inside the first real second. Read from the clock rather
+    /// than from a stored cursor, so two sides that ticked differently agree.
+    pub fn visits(&self, count: usize, from_s: f64, to_s: f64) -> Vec<usize> {
+        let Self::Survey { started_s, .. } = self else { return Vec::new() };
+        if count == 0 || to_s <= from_s {
+            return Vec::new();
+        }
+        // Each turn is stamped at the *end* of its dwell, when the exposure it reports exists,
+        // as a sweep's fields are. Turn zero is the brightest body and ends one dwell in, so
+        // counting from the elapsed time instead would skip it on the first tick and not come
+        // back to it for a whole cycle.
+        let ends = |k: i64| started_s + (k + 1) as f64 * SURVEY_DWELL_S;
+        let first = ((from_s - started_s) / SURVEY_DWELL_S).max(0.0).floor() as i64;
+        (first..=(first + VISITS_PER_TICK as i64))
+            .filter(|k| ends(*k) > from_s && ends(*k) <= to_s)
+            .take(VISITS_PER_TICK)
+            .map(|k| k.rem_euclid(count as i64) as usize)
+            .collect()
+    }
+
     pub fn label(&self) -> &'static str {
         match self {
             Self::Idle => "idle",
             Self::Stare(_) => "staring",
             Self::Sweep(_) => "sweeping",
             Self::Watch { .. } => "watching",
+            Self::Survey { .. } => "surveying",
         }
     }
 }
@@ -855,6 +919,34 @@ mod tests {
         assert_ne!(duty.slot_at(50.0), duty.slot_at(150.0));
         assert_eq!(Duty::Idle.target_at(0.0), None);
         assert_eq!(Duty::Stare(ids[0]).target_at(1e9), Some(ids[0]));
+    }
+
+    /// Turns are read from the clock and not from a cursor, so two sides that ticked
+    /// differently agree; each turn is stamped at the end of its dwell, so turn zero -- the
+    /// brightest body -- is measured on the first tick rather than a whole cycle later.
+    #[test]
+    fn a_survey_takes_the_bodies_in_turn_from_the_clock() {
+        let duty = Duty::Survey { star: StarId::synthesise("t", 1), started_s: 0.0 };
+        let tick = 438.3;
+
+        let first = duty.visits(213, 0.0, tick);
+        assert_eq!(first, vec![0, 1, 2, 3, 4, 5, 6], "seven turns of a minute fit in a tick");
+        let second = duty.visits(213, tick, tick * 2.0);
+        assert_eq!(second, vec![7, 8, 9, 10, 11, 12, 13], "no gap and no repeat");
+
+        // Round again, and a body comes back where it started.
+        let wrapped = duty.visits(5, 0.0, tick);
+        assert_eq!(wrapped, vec![0, 1, 2, 3, 4, 0, 1], "a short list comes round often");
+
+        // A gap costs a bounded amount rather than every turn it covers.
+        let gap = duty.visits(213, 0.0, tick * 1000.0);
+        assert_eq!(gap.len(), VISITS_PER_TICK);
+
+        assert!(duty.visits(0, 0.0, tick).is_empty(), "no bodies, no turns");
+        assert!(duty.visits(10, tick, 0.0).is_empty(), "time does not run backwards");
+        assert!(Duty::Idle.visits(10, 0.0, tick).is_empty(), "only a survey has turns");
+        assert_eq!(duty.surveying(), Some(StarId::synthesise("t", 1)));
+        assert_eq!(Duty::Idle.surveying(), None);
     }
 
     #[test]

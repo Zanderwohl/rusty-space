@@ -149,12 +149,14 @@ impl<J: Journal> Server<J> {
 
     pub(crate) fn run_instruments(&mut self) {
         let now_s = self.now_t as f64 * 1.0e-6;
-        let busy: Vec<CraftId> = self
+        // The surveyed star comes along because loading its system needs the world mutably and
+        // the tick below needs the instruments mutably.
+        let busy: Vec<(CraftId, Option<lc_world::sky::StarId>)> = self
             .instruments
             .aboard
             .iter()
             .filter(|(_, a)| a.observatory.duty != Duty::Idle)
-            .map(|(id, _)| *id)
+            .map(|(id, a)| (*id, a.observatory.duty.surveying()))
             .collect();
         let mut ids: Vec<CraftId> = self.instruments.aboard.keys().copied().collect();
         ids.sort_unstable_by_key(|id| id.0);
@@ -163,14 +165,18 @@ impl<J: Journal> Server<J> {
             self.fit(id, true);
             self.instruments.recounted = Some(id);
         }
-        for id in busy {
+        for (id, surveyed) in busy {
             self.fit(id, false);
             let Some(at) = self.station(id) else { continue };
+            // The system the *duty* names, not the one the craft is in. A survey ordered from
+            // outside is then refused by the physics -- the bodies are points in the star's
+            // glare -- rather than by a silent special case here.
+            let system = surveyed.and_then(|star| self.world.system_for(star));
             let stars = self.world.stars();
             let instruments = &mut self.instruments;
             let sky = instruments.sky.get_or_insert_with(|| Sky::new(stars));
             let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
-            aboard.observatory.tick(sky, &mut aboard.knowledge, at, now_s);
+            aboard.observatory.tick(sky, system.as_deref(), &mut aboard.knowledge, at, now_s);
         }
         self.read_logs(now_s);
     }
@@ -572,6 +578,50 @@ mod tests {
         });
         let started = started.expect("accepted");
         assert!(started > 0.0 && started <= server.now_t() as f64 * 1.0e-6 + TICK_US as f64, "{started}");
+    }
+
+    /// **A survey ordered through the shard finds the bodies of a generated system.** A new
+    /// craft starts `START_OFFSET_AU` from the first star, which is where the duty is for, and
+    /// the whole path runs: the order, `World::system_for` loading the system, `visit::sources`
+    /// placing its bodies, and the sightings landing under `Subject::Body`.
+    #[tokio::test]
+    async fn a_survey_finds_the_bodies_of_the_system_the_craft_is_in() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let star = sky()[0].id;
+
+        let duty = lc_proto::Duty::Survey { star: star.get(), started_s: -1.0e12 };
+        wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
+        server.tick(&mut wire).await.unwrap();
+        assert!(
+            wire.take(ClientId(1)).iter().any(|m| matches!(
+                m,
+                Outbound::Accepted { order: Order::SetDuty { duty: lc_proto::Duty::Survey { .. }, .. }, .. }
+            )),
+            "the survey was not accepted"
+        );
+
+        let before = server.instruments.aboard[&CraftId(ship.0)].knowledge.len();
+        for _ in 0..40 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let knowledge = &server.instruments.aboard[&CraftId(ship.0)].knowledge;
+        let bodies = knowledge.bodies_of(star, server.now_t() as f64 * 1.0e-6);
+        assert!(
+            bodies.len() > 5,
+            "forty ticks of surveying found {} bodies; it held {before} subjects to begin with",
+            bodies.len()
+        );
+        // Under the star whose system it is, and nothing under any other.
+        for other in &sky()[1..] {
+            assert!(
+                knowledge.bodies_of(other.id, server.now_t() as f64 * 1.0e-6).is_empty(),
+                "a body turned up under {:?}",
+                other.id
+            );
+        }
     }
 
     #[tokio::test]

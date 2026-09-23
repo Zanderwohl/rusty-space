@@ -1252,6 +1252,10 @@ mod tests {
         Outbound::Observing { duty: Duty::Watch { stars: vec![3, 4], dwell_s: 90.0, started_s: 5.0 }, integration_s: 2.0e3 }
     }
 
+    fn surveying() -> Outbound {
+        Outbound::Observing { duty: Duty::Survey { star: 11, started_s: 5.0 }, integration_s: 2.0e3 }
+    }
+
     fn learned() -> Outbound {
         Outbound::Learned { report: "{}".into() }
     }
@@ -1359,6 +1363,7 @@ mod tests {
             ("Order::SetDuty", encode(&set_duty()), golden::SET_DUTY),
             ("Order::NameIt", encode(&name_it()), golden::NAME_IT),
             ("Outbound::Observing", encode(&observing()), golden::OBSERVING),
+            ("Outbound::Observing (survey)", encode(&surveying()), golden::SURVEYING),
             ("Outbound::Learned", encode(&learned()), golden::LEARNED),
         ] {
             assert_eq!(bytes, pinned, "{what} changed shape at protocol version {PROTOCOL_VERSION}");
@@ -1492,6 +1497,14 @@ mod tests {
                 order: Order::SetDuty {
                     duty: Duty::Watch { stars: vec![1, 2, u64::MAX], dwell_s: 400.0, started_s: 9.0 },
                     integration_s: 0.0,
+                },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::SetDuty {
+                    duty: Duty::Survey { star: 11, started_s: 0.0 },
+                    integration_s: 1.0e4,
                 },
                 issued_at_client_t: 0,
             }),

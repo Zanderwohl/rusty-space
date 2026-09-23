@@ -249,9 +249,38 @@ in the sky after the star, and the ship's telescope resolves them outright. The 
 at 550 nm is 0.06 arcseconds. From 5 AU, Venus is a disc of about 3 arcseconds and Jupiter about
 40. So this is not the transit search's statistics at the noise floor. It is looking.
 
-**The duty.** A new duty, **Survey system**, revisits each body it holds about once a game hour,
-every eight ticks or so, and spends the rest of its time sweeping the space around the star for
-new ones, against the star's glare, which the next subsection settles.
+**The duty.** ✅ **Built** (2026-09-22). `Duty::Survey { star, started_s }`, which takes the
+bodies of one system in turn, **brightest first**, for `SURVEY_DWELL_S` each. What it settled:
+
+- **It does not name its targets,** unlike a `Duty::Watch`, because the craft does not know
+  them: finding them is the duty. It rotates over whatever the system holds, so a body too faint
+  or too close to the star is simply not detected on that pass and is there on a later one when
+  the geometry has moved. Sweeping for new ones and revisiting what you hold turned out to be the
+  same loop — you do not know what you hold until you look.
+- **Brightest first is what the done-when needs.** Seven bodies come round per tick at the design
+  rate, so ordering by brightness is what gets every major planet a position inside the first
+  real second rather than four game hours in. From 5 AU the first turn is Jupiter.
+- **Turns are read from the clock, not from a cursor,** so two sides that ticked differently
+  agree, and each turn is stamped at the *end* of its dwell, as a sweep's fields are. Counting
+  from elapsed time instead skipped turn zero on the first tick and did not come back to it for a
+  whole cycle — caught by a probe that asked which planets were held after one tick and found
+  Jupiter, the brightest thing in the system, missing.
+- **One game hour was wrong about the preset.** Sol carries 221 bodies, so a full round is about
+  four game hours; a generated system of eight planets and their moons takes minutes. The figure
+  in this paragraph was written before anybody counted.
+- **The system reaches the tick as an `Option`,** the way `motion::state_at` takes it, and the
+  server loads the system the *duty* names rather than the one the craft is in. A survey ordered
+  from outside is then refused by the physics — the bodies are points in the star's glare —
+  rather than by a silent special case.
+- **The sky the survey looks at is the system's bodies plus its own star, and not the catalogue.**
+  The star belongs *in* that list because it is the only meaningful glare in the system and
+  `look` can only be asked about it if it is a source like any other. A star light-years off
+  cannot outshine a planet at 5 AU, so it can neither glare on one nor hide behind one.
+
+Measured: a ship 5 AU out holds 7 bodies after one tick and 213 of Sol's 221 after forty, each
+with a bearing, a brightness and a disc, under the `BodyId` a navigation order names. Mars is not
+in the first seven, which is the physics and not a fault: the Galilean moons and Titan are all
+brighter than it is from there.
 
 **The local star is in the way.** ✅ **Built** (2026-09-22), and the diagnosis it was built from
 was half wrong, so both halves are recorded here.
@@ -1207,7 +1236,8 @@ game has no players — so each of these is a change in place, not a versioned a
 | 3 | `em_map::Plane` gains a fieldless `System` variant; `Plane::other()` becomes a cycle. It is `Copy + Eq + Hash` and a variant carrying a basis would break those derives and the ten `[Ecliptic, Galactic]` iterations. The basis is supplied by the caller through `MapFrame`. Only `lc-client` uses `em-map` |
 | 6 | ✅ **`Sighting` grew a `size: Option<(f64, f64)>`** — an angular diameter and its sigma, `None` for a point source. `FILE_FORMAT` is 6 and `REPORT_FORMAT` is 3. The report format *does* move here where phase 2 left it alone, because `Part` carries `Sighting` by value and its shape is what changed; `Reported::format` is checked strictly on landing, so reports in flight across the deploy fail to land, which is the right trade for one shard with no players |
 | 6 | ✅ **`survey::Source` carries a `Subject` and a `diameter_rad`** rather than a `StarId`. Stars and bodies then live in one sky, which they have to: the host star glares on its own planets and only one list can be asked which of two sources outshines the other. `hidden_by` and `blended_with` return a `Subject`. Not stored and not on the wire — `Source` is built per look from the catalogue and from `visit::sources` |
-| 6 | a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
+| 6 | ✅ **`Duty::Survey { star, started_s }`** through every site this row lists, plus `Duty::surveying` and `Duty::visits`, an `Action::SurveySystem` and its button, and a pinned `golden::SURVEYING`. `PROTOCOL_VERSION` stays 36: a new variant appends a discriminant, so every pinned vector above it is byte-identical |
+| 6 | the sites that were listed for a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
 | 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |
 | 9 | `Order::SendReport` gains `about: Option<Subject>`, refused with `Impossible` when the craft does not `knows` that system. One new `Knowledge` method beside `report_upto`. **`REPORT_FORMAT` does not move**: `Report`, `Entry` and `Part` are unchanged, which is the point — and it must not move, because `Reported::format` is checked strictly on landing (`instruments.rs:215`), so a bump would make every report already in flight fail to land |
 

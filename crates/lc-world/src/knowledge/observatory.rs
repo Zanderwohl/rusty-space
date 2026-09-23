@@ -12,6 +12,7 @@ use glam::DVec3;
 use lc_spacetime::{Coord, Micros, frame::SystemFrame};
 
 use super::survey::{self, Duty, Optics, Source, Sweep};
+use crate::system::LocalSystem;
 use super::{Bearing, Claim, Distance, Hop, Knowledge, NameKind, Naming, Sample, Sighting, Subject, Witness};
 use crate::instrument::Instrument;
 use crate::observation::{Target, observe};
@@ -174,7 +175,7 @@ impl Observatory {
     pub fn take_up(&mut self, mut duty: Duty, now_s: f64) {
         match &mut duty {
             Duty::Sweep(sweep) => sweep.started_s = now_s,
-            Duty::Watch { started_s, .. } => *started_s = now_s,
+            Duty::Watch { started_s, .. } | Duty::Survey { started_s, .. } => *started_s = now_s,
             _ => {}
         }
         self.sampled_s = now_s;
@@ -186,7 +187,18 @@ impl Observatory {
 
     /// Exposure is elapsed coordinate time, so no measurement claims an integration it did not
     /// get.
-    pub fn tick(&mut self, sky: &mut Sky, knowledge: &mut Knowledge, at: Station, now_s: f64) {
+    ///
+    /// `system` is the one the craft is inside, `None` between the stars. Optional for the same
+    /// reason `motion::state_at` takes it that way: a survey of a system nobody has loaded has
+    /// no bodies to point at and no answer to give, and the other duties never look at it.
+    pub fn tick(
+        &mut self,
+        sky: &mut Sky,
+        system: Option<&LocalSystem>,
+        knowledge: &mut Knowledge,
+        at: Station,
+        now_s: f64,
+    ) {
         match self.duty.clone() {
             Duty::Idle => {}
             Duty::Stare(id) => {
@@ -221,8 +233,63 @@ impl Observatory {
                 sweep_between(sky, knowledge, at, &sweep, self.swept_s, now_s);
                 self.swept_s = now_s;
             }
+            duty @ Duty::Survey { star, .. } => {
+                self.pointing = Some(star);
+                if let Some(system) = system.filter(|s| s.star == star) {
+                    survey_between(sky, system, knowledge, at, &duty, self.swept_s, now_s);
+                }
+                self.swept_s = now_s;
+            }
         }
     }
+}
+
+/// One tick of a survey: the bodies whose turn it is, measured against a sky that holds the
+/// system's own star as well as its bodies.
+///
+/// The star belongs in that list and not beside it. It is the brightest thing by nine orders of
+/// magnitude, so it is the only meaningful glare in the system, and `survey::look` can only be
+/// asked about it if it is a source like any other. The rest of the catalogue is left out: a
+/// star light-years off cannot outshine a planet at 5 AU, so it can neither glare on one nor
+/// hide behind one.
+pub fn survey_between(
+    sky: &mut Sky,
+    system: &LocalSystem,
+    knowledge: &mut Knowledge,
+    at: Station,
+    duty: &Duty,
+    from_s: f64,
+    to_s: f64,
+) {
+    let optics = at.optics();
+    let Some(band) = optics.band() else { return };
+    let mut sources = host_source(sky, system, band, at.position_ly)
+        .into_iter()
+        .collect::<Vec<Source>>();
+    let star_last = sources.len();
+    sources.extend(crate::visit::sources(system, band, at.position_ly, to_s));
+    // Brightest first over the bodies only, so the star keeps its place at the front and the
+    // rotation below is over a list whose order is a property of the system.
+    sources[star_last..].sort_unstable_by(|a, b| b.flux_w_m2.total_cmp(&a.flux_w_m2));
+
+    let bodies = sources.len() - star_last;
+    let witness = knowledge.owner;
+    for slot in duty.visits(bodies, from_s, to_s) {
+        let index = star_last + slot;
+        if let Some(seen) =
+            survey::look(&optics, &sources, index, survey::SURVEY_DWELL_S, at.position_ly, to_s, witness)
+            && let Some(source) = sources.get(index)
+        {
+            knowledge.sighted(source.subject, seen);
+        }
+    }
+}
+
+/// The system's own star as a source, worked the way the catalogue path works it so the two
+/// cannot disagree about how bright the ship's own sun is.
+fn host_source(sky: &mut Sky, system: &LocalSystem, band: Band, from: DVec3) -> Option<Source> {
+    let index = sky.stars().iter().position(|s| s.id == system.star)?;
+    sky.sources(band, from).get(index).copied()
 }
 
 /// Noise is seeded from the witness and the star, so two craft see different noise and a shard
@@ -367,6 +434,9 @@ mod tests {
     use crate::sky::{AuthoredStars, StarProvider};
 
     const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
+    const AU_M: f64 = 1.495_978_707e11;
+    /// Coordinate seconds in one tick at the design rate: 50 ms of real time at 8766x.
+    const TICK_S: f64 = 438.3;
 
     /// Three stars at 4.2 ly, one along each axis, so none hides behind another.
     fn spread() -> Sky {
@@ -388,12 +458,99 @@ mod tests {
         Station { position_ly, instrument: Instrument::SHIP }
     }
 
+    /// Sol loaded, and a sky with only its own star in it.
+    fn sol() -> Option<(Sky, LocalSystem)> {
+        let provider =
+            crate::sky::hyg::HygProvider::load("../../assets/catalogs/hygdata_v42_dist_sort.csv")
+                .ok()?;
+        let sun = provider
+            .stars()
+            .iter()
+            .find(|s| s.provenance.name.as_deref() == Some(crate::system::SOL))?
+            .clone();
+        let system = LocalSystem::for_star(&sun)?;
+        Some((Sky::new(Arc::new(vec![sun])), system))
+    }
+
+    /// **What phase 6 is for.** A ship five AU out, told to survey its own system, comes to
+    /// hold its planets: each a subject with a bearing, a brightness and a measured disc, under
+    /// the same `BodyId` a navigation order would name.
+    ///
+    /// The claim pinned is the done-when's: *every one of them has a position within the first
+    /// real second*. At the design rate that is twenty ticks of 438 coordinate seconds.
+    #[test]
+    fn a_survey_finds_the_planets_of_the_system_it_is_in() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        assert_eq!(o.duty.label(), "surveying");
+
+        // One tick brings round seven bodies, brightest first, so the first of them is the
+        // brightest thing in the system. Jupiter, from here.
+        o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S);
+        let first = k.len();
+        assert_eq!(first, 7, "one tick is seven turns of SURVEY_DWELL_S");
+        let jupiter = Subject::Body {
+            star: system.star,
+            body: crate::knowledge::BodyId::of(system.star, "Jupiter"),
+        };
+        assert!(k.file(jupiter).is_some(), "the brightest body comes round first");
+
+        // A real second, at which point the done-when wants every major planet placed.
+        for step in 2..=20 {
+            o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S * step as f64);
+        }
+        for name in ["Venus", "Earth", "Mars", "Jupiter", "Saturn"] {
+            let subject = Subject::Body {
+                star: system.star,
+                body: crate::knowledge::BodyId::of(system.star, name),
+            };
+            let file = k.file(subject).unwrap_or_else(|| panic!("{name} has no position yet"));
+            let seen = file.sightings().first().unwrap_or_else(|| panic!("{name} has no sighting"));
+            let (diameter, sigma) = seen.size.unwrap_or_else(|| panic!("{name} has no disc"));
+            assert!(diameter > 0.0 && sigma > 0.0 && sigma < diameter);
+        }
+
+        // Mars is not among the first seven, and that is the physics rather than a fault: from
+        // five AU the Galilean moons and Titan are all brighter than it is.
+        let held = k.len();
+        assert!(held > 100, "only {held} bodies after a real second");
+        assert_eq!(k.bodies_of(system.star, TICK_S * 20.0).len(), held, "every one is readable");
+    }
+
+    /// A survey of a system the craft has not been handed does nothing rather than inventing
+    /// it, which is the same reason `motion::state_at` takes its system as an `Option`.
+    #[test]
+    fn a_survey_without_its_system_learns_nothing() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        for step in 1..=8 {
+            o.tick(&mut sky, None, &mut k, at(from), 438.3 * step as f64);
+        }
+        assert!(k.is_empty(), "it found {} bodies out of nothing", k.len());
+    }
+
+    /// A survey takes its start from when it was told, not from the number in the order: an
+    /// instrument cannot have begun before it was ordered to.
+    #[test]
+    fn a_survey_starts_when_it_is_taken_up() {
+        let mut o = Observatory::default();
+        o.take_up(Duty::Survey { star: StarId::synthesise("t", 1), started_s: -1.0e9 }, 400.0);
+        let Duty::Survey { started_s, .. } = o.duty else { panic!("the duty did not take") };
+        assert_eq!(started_s, 400.0);
+    }
+
     #[test]
     fn an_idle_instrument_learns_nothing() {
         let mut sky = spread();
         let mut k = Knowledge::new(Witness(1));
         let mut o = Observatory::default();
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), YEAR_S);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), YEAR_S);
         assert!(k.is_empty());
     }
 
@@ -406,7 +563,7 @@ mod tests {
         let pass = Sweep::all_sky(0.0).pass_s();
         let mut found = Vec::new();
         for step in 1..=40 {
-            o.tick(&mut sky, &mut k, at(DVec3::ZERO), pass * step as f64 / 20.0);
+            o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), pass * step as f64 / 20.0);
             found.push(k.len());
         }
         assert_eq!(k.len(), 3, "two passes reach every field");
@@ -429,9 +586,9 @@ mod tests {
         let mut k = Knowledge::new(Witness(1));
         let mut o = Observatory { integration_s: 1.0e4, ..Default::default() };
         o.take_up(Duty::Stare(id), 0.0);
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), 5.0e3);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), 5.0e3);
         assert!(k.own_series(id, Band::V).is_none(), "half an integration is not a sample");
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), 1.0e4);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), 1.0e4);
         assert_eq!(k.own_series(id, Band::V).unwrap().len(), 1);
         assert_eq!(k.belief(id).unwrap().sightings, 1);
         assert_eq!(o.pointing(), Some(id));
@@ -448,7 +605,7 @@ mod tests {
         o.take_up(Duty::Stare(id), 0.0);
         for step in 1..=6 {
             let t = step as f64 * 2.0e4;
-            o.tick(&mut sky, &mut k, at(DVec3::Z * 0.02 * step as f64), t);
+            o.tick(&mut sky, None, &mut k, at(DVec3::Z * 0.02 * step as f64), t);
         }
         let belief = k.belief(id).unwrap();
         assert!(belief.triangulated, "{:?}", belief.distance);
@@ -463,7 +620,7 @@ mod tests {
         let mut o = Observatory::default();
         o.take_up(Duty::Watch { targets: ids.clone(), dwell_s: 4000.0, started_s: 0.0 }, 0.0);
         for step in 1..=30 {
-            o.tick(&mut sky, &mut k, at(DVec3::ZERO), step as f64 * 4000.0);
+            o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), step as f64 * 4000.0);
         }
         for id in &ids {
             assert!(k.own_series(*id, Band::V).is_some_and(|s| !s.is_empty()));
@@ -479,8 +636,8 @@ mod tests {
         let mut o = Observatory::default();
         let dwell = 4000.0;
         o.take_up(Duty::Watch { targets: ids.clone(), dwell_s: dwell, started_s: YEAR_S }, YEAR_S);
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), YEAR_S + 1.0);
-        o.tick(&mut sky, &mut k, at(DVec3::ZERO), YEAR_S + 9.5 * dwell);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), YEAR_S + 1.0);
+        o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), YEAR_S + 9.5 * dwell);
         for (n, id) in ids.iter().enumerate() {
             let times: Vec<f64> = k.own_series(*id, Band::V).unwrap().samples().iter().map(|s| s.observed_s).collect();
             let expected: Vec<f64> = (0..9).filter(|t| t % 3 == n).map(|t| YEAR_S + (t + 1) as f64 * dwell).collect();

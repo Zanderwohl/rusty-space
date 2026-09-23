@@ -86,6 +86,8 @@ pub enum Action {
     SurveySky,
     /// Sweep the patch of sky the view is pointed at, which comes round far more often.
     SurveyAhead,
+    /// Survey the bodies of the system the ship is in, brightest first.
+    SurveySystem,
     /// Put the whole exposure on the selected star.
     StareSelected,
     /// Add the selected star to the watch rotation, or drop it from one.
@@ -350,6 +352,21 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             effects.push(Effect::Notify(format!(
                 "surveying: a pass every {hours:.1} hours"
             )));
+        }
+        Action::SurveySystem => {
+            let now = session.coordinate_time_s();
+            // Only the system the ship is actually in. A survey of somewhere else is refused by
+            // the physics rather than here, but offering it would be offering nothing.
+            match session.system.as_ref().map(|s| s.star) {
+                Some(star) => {
+                    let bodies = session.system.as_ref().map_or(0, |s| s.len());
+                    set_duty(ui, session, Duty::Survey { star, started_s: now }, &mut effects);
+                    effects.push(Effect::Notify(format!(
+                        "surveying {bodies} bodies, brightest first"
+                    )));
+                }
+                None => effects.push(Effect::Notify("no system here to survey".into())),
+            }
         }
         Action::NameSelected(name) => match ui.selected {
             // A name is the shard's to record, like a course: sent, and back in what the craft
@@ -1316,6 +1333,10 @@ mod tests {
         assert_eq!(s.observatory.duty, Duty::Idle, "and nothing is taken up until the shard says so");
         let sent = orders(&apply(Action::SurveySky, &mut ui, &mut s));
         assert!(matches!(sent.as_slice(), [lc_proto::Order::SetDuty { duty: lc_proto::Duty::Sweep { .. }, .. }]));
+        // A survey of the system needs a system. The fixture is between the stars, so this
+        // orders nothing rather than ordering a survey of nowhere.
+        assert!(s.system.is_none(), "the fixture is not in a system");
+        assert!(orders(&apply(Action::SurveySystem, &mut ui, &mut s)).is_empty());
         let sent = orders(&apply(Action::NameSelected("Kettle".into()), &mut ui, &mut s));
         assert!(matches!(sent.as_slice(), [lc_proto::Order::NameIt { .. }]), "{sent:?}");
         assert_ne!(s.name_of(id), "Kettle", "named when the shard says so, not before");
