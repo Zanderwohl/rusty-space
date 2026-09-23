@@ -29,8 +29,12 @@ pub fn populations(arch: &Architecture, pole: DVec3, seed: u64, tuning: &Tuning)
     let edge = (tuning.ladder.growth_over_snow * arch.disc.snow_m).min(outermost);
 
     for (k, rung) in arch.belts().filter(|r| r.semi_major_m < edge).enumerate() {
-        let mass = rung.debris_earths * EARTH_MASS * t.belt_survival;
-        thrown += rung.debris_earths * (1.0 - t.belt_survival);
+        // Why it never grew decides how much of it is still there. A giant's resonances throw
+        // a belt out over the age of the system; a rung that simply never had the mass to
+        // assemble was left alone and still holds most of what it started with.
+        let survival = if rung.stirred { t.belt_survival } else { t.kuiper_survival };
+        let mass = rung.debris_earths * EARTH_MASS * survival;
+        thrown += rung.debris_earths * (1.0 - survival);
         if let Some(p) = belt(
             pole,
             mass,
@@ -67,6 +71,15 @@ pub fn populations(arch: &Architecture, pole: DVec3, seed: u64, tuning: &Tuning)
             out.push(p);
         }
     }
+
+    // What the planets themselves left behind on the way. It is not a belt -- a rung that
+    // assembled a planet swept most of its annulus -- but it is not nothing either, and a
+    // ladder that conserves its disc cannot quietly drop it before the cloud is weighed.
+    thrown += arch
+        .planets()
+        .filter(|r| r.semi_major_m < edge)
+        .map(|r| r.debris_earths)
+        .sum::<f64>();
 
     if let Some(cloud) = oort(arch, thrown, seed, tuning) {
         out.push(cloud);
@@ -205,7 +218,7 @@ mod tests {
         for k in 0..60u64 {
             let (arch, pops) = of(&sun_like(k), &t);
             let outermost = arch.planets().last().map(|r| r.semi_major_m).unwrap_or(0.0);
-            // Reaching past the outermost planet, not centred past it: the outer disc starts
+            // Reaching past the outermost planet, not centered past it: the outer disc starts
             // among the last planets and runs to the edge.
             let trans = pops.iter().find(|p| {
                 p.semi_major.mean() < 1000.0 * AU

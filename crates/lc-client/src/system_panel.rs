@@ -114,7 +114,7 @@ pub(crate) fn system(
             }
         }
 
-        // The generator's, and labelled as the odd ones out until phase 8 makes them knowledge.
+        // The generator's, and labeled as the odd ones out until phase 8 makes them knowledge.
         let bands: Vec<_> = system
             .inventory()
             .iter()
@@ -255,7 +255,7 @@ fn with_error(value: f64, sigma: f64, unit: &str) -> String {
 /// The hypotheses, most probable first, as percentages.
 ///
 /// What a body has been measured to be beats what its transits implied: a radius, a density and
-/// a colour say what kind of world it is, and a transit only says rocky or giant. The transit
+/// a color say what kind of world it is, and a transit only says rocky or giant. The transit
 /// reading is what is left when nothing has been measured. See `lc_world::knowledge::sort`.
 fn type_text(belief: &BodyBelief, game: &Game) -> String {
     let star = game.system.as_ref().and_then(|s| game.stars.iter().find(|c| c.id == s.star));
@@ -302,7 +302,7 @@ fn orientation_text(orientation: Orientation) -> String {
     }
 }
 
-/// Where a body's orbit came from and how far it travelled to get here.
+/// Where a body's orbit came from and how far it traveled to get here.
 fn sources(belief: &BodyBelief, owner: lc_world::knowledge::Witness) -> Vec<String> {
     let mut notes = Vec::new();
     match belief.method {

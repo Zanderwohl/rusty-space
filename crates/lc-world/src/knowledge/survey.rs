@@ -56,10 +56,9 @@ pub const RANGE_FLOOR: f64 = 1.0e-6;
 
 /// Bodies a survey measures in one tick, so a long gap costs a bounded amount.
 ///
-/// At the design rate a tick is 438 coordinate seconds, so seven bodies fit in one and a
-/// system of Sol's two hundred takes about four game hours to come round. A generated system
-/// of eight planets and their moons takes minutes. The doc's "about once a game hour" was
-/// written before anybody counted the bodies in the preset.
+/// At the design rate a tick is 438 coordinate seconds and a dwell is 60, so a tick covers
+/// the seven turns that fit in it and this is the ceiling rather than the rate. Sol's two
+/// hundred bodies come round in about four game hours.
 pub const VISITS_PER_TICK: usize = 32;
 
 /// A telescope, or several acting as one.

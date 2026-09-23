@@ -121,7 +121,8 @@ fn regular(planet: &Planet, inner: f64, hill: f64, h: u64, tuning: &Tuning) -> V
 ///
 /// How many is set by the size of the sphere it holds against its star: capture is a
 /// cross-section, so the count goes as the square of the Hill radius. A Jupiter at five
-/// astronomical units comes out near the ninety-odd the real one has.
+/// astronomical units reaches the ninety-odd the real one has; the mean over all giants is
+/// nearer forty, because most of them hold a smaller sphere.
 fn irregular(planet: &Planet, hill: f64, star_mass_solar: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
     let t = &tuning.moons;
     if !planet.class.is_giant() {

@@ -1,6 +1,6 @@
 //! What kind of world a body is, as a posterior over what the generator makes.
 //!
-//! A survey measures a radius, a density, a temperature and a colour. None of those is a type,
+//! A survey measures a radius, a density, a temperature and a color. None of those is a type,
 //! and no threshold on any of them is one either: a 1.4-Earth-radius body is a super-Earth or a
 //! small sub-Neptune depending on its density, an ocean and an ice world differ only in how
 //! bright and how blue they are, and every one of those numbers has an error bar. So the answer
@@ -9,7 +9,7 @@
 //!
 //! This is the same shape as [`super::prior::Prior::rocky_given`] and for the same reason, one
 //! dimension at a time: what makes it work is that the *spread* is modelled, not just the
-//! measurement. Two ocean worlds are not the same colour, and a classification that assumed
+//! measurement. Two ocean worlds are not the same color, and a classification that assumed
 //! they were would be certain and wrong.
 
 use em_spectra::Band;
@@ -158,7 +158,7 @@ impl Measured {
     ///
     /// Colours divide the star out. A craft measures a flux ratio between two bands, and what
     /// it wants is the body's reflectance ratio -- the range to the body and the star's output
-    /// both cancel, which is why a colour is the one thing a distant craft can read cleanly.
+    /// both cancel, which is why a color is the one thing a distant craft can read cleanly.
     ///
     /// The albedo is left unmeasured. It needs the body's distance from its star *and* the
     /// range to the craft, and a belief carries neither; see `lightcone/docs/25-system-knowledge.md`.
@@ -198,7 +198,7 @@ impl Measured {
     /// What a survey reads off a body it has been close to.
     ///
     /// The radius and the density are what proximity gives; the temperature is the orbit and
-    /// the star; the colours are the per-band photometry with the star divided out.
+    /// the star; the colors are the per-band photometry with the star divided out.
     pub fn of(world: &World, radius_earths: f64, density_kg_m3: f64, equilibrium_k: f64) -> Self {
         let reflect = |b: Band| world.reflectance_in(b);
         Self {
@@ -456,16 +456,16 @@ mod tests {
         }
     }
 
-    /// **Where the colour earns its place, and it is one place.**
+    /// **Where the color earns its place, and it is one place.**
     ///
     /// The types are very nearly a function of radius, density and temperature alone, because
     /// the retention chain that decides a body's air is a function of exactly those. Bulk
-    /// properties get nineteen of every twenty bodies right with no colour at all.
+    /// properties get nineteen of every twenty bodies right with no color at all.
     ///
     /// The exception is Venus against Earth. The two are the same size, the same density and
     /// nearly the same temperature, and what separates them is whether there is water under
     /// the air -- which is decided by a magnetic field, which leaves no mark on any of the
-    /// three. A colour takes that error from one in five to one in two hundred, and that is
+    /// three. A color takes that error from one in five to one in two hundred, and that is
     /// what the per-band photometry in `lightcone/docs/25-system-knowledge.md` is for.
     #[test]
     fn colour_is_what_tells_an_ocean_from_a_deck() {
@@ -487,7 +487,7 @@ mod tests {
         assert!(blind * 10 < cases.len() * 9, "bulk properties alone should miss some: {blind}");
         assert!(
             seeing * 100 > cases.len() * 97,
-            "colour should settle it: {seeing} against {blind} of {}",
+            "color should settle it: {seeing} against {blind} of {}",
             cases.len()
         );
     }
@@ -516,7 +516,7 @@ mod tests {
 
     /// **The regime a craft is actually in, and what it costs.** A transit gives a radius and
     /// an orbit gives a temperature, and that is everything until somebody goes there: no
-    /// mass, so no density, and nothing resolved, so no colour.
+    /// mass, so no density, and nothing resolved, so no color.
     ///
     /// Two numbers go a long way. They settle whether a body has a surface nearly always, and
     /// they name it outright more often than not -- a small hot body is molten and an

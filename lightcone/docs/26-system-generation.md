@@ -64,7 +64,7 @@ zone becomes ordinary rather than lucky.
 ## The ladder
 
 Rungs are laid from the inner edge outward, each a uniform 1.35 to 2.1 times the last. Each
-sweeps the annulus between the geometric midpoints with its neighbours, and the annuli tile the
+sweeps the annulus between the geometric midpoints with its neighbors, and the annuli tile the
 disc exactly, so **mass is conserved across the whole ladder**. That is the claim everything
 else rests on: the belts are not placed, they are what is left.
 
@@ -120,7 +120,7 @@ Air, water and habitability are one chain, not three tables.
 
 1. The equilibrium temperature sets the **exosphere**: `T + 807 K × (T/278.3)^4`. Stellar
    extreme ultraviolet heats it, and that falls as the inverse square of the distance while the
-   equilibrium temperature falls as its square root. Earth's 278 K becomes the 1000 K exosphere
+   equilibrium temperature falls as its square root. Earth's 278 K becomes the thousand-kelvin exosphere
    that is measured; Titan's 90 K stays at 99 K.
 2. The exosphere and the escape velocity give a **retention margin** per molecule: escape
    velocity over six times the thermal speed. Above one the gas stays for the age of the system.
@@ -145,11 +145,11 @@ Past the snow line water is what the body is made of. Inside it there was never 
 it arrived: icy bodies thrown inward by whatever giants the system has, which makes a system
 with no giant a dry one.
 
-Then it can be lost, and **the field decides that, not the air**. An unmagnetised planet warm
-enough for its water to be vapour loses it unless its gravity is far above what thermal escape
+Then it can be lost, and **the field decides that, not the air**. An unmagnetized planet warm
+enough for its water to be vapor loses it unless its gravity is far above what thermal escape
 alone would need. Venus is the case: the same size as Earth, an atmosphere it had no trouble
 keeping, and bone dry. A dynamo needs a core hot enough to convect and fast enough rotation to
-organise it, so mass and spin both gate it — Venus fails on the spin at 243 days and Mars on the
+organize it, so mass and spin both gate it — Venus fails on the spin at 243 days and Mars on the
 mass at a tenth of an Earth.
 
 A planet is habitable when it is in the zone, has a surface, has air over it and water on it.
@@ -192,11 +192,11 @@ A **retinue** condensed in a disc around its planet. Its total mass is a ten-tho
 planet — measured, and remarkably constant across Jupiter, Saturn and Uranus — and that one
 number sizes a generated retinue with no other tuning. It sits within a twentieth of the Hill
 radius, flat, circular and prograde. A rocky planet has no such disc, so its only route is a
-giant impact: rare, and a fifth of Earth's Hill radius out, which is where Luna is.
+giant impact: rare, and a quarter of Earth's Hill radius out, which is where Luna is.
 
 A **catch** was a passing body the planet held. How many is a cross-section, so the count goes
-as the square of the Hill radius — a Jupiter analogue comes out near the ninety-odd the real one
-has. They sit far out, eccentric, at any inclination, and two thirds go backwards.
+as the square of the Hill radius — a Jupiter analogue reaches the ninety-odd the real one has,
+and the mean over all giants is nearer forty because most of them hold a smaller sphere. They sit far out, eccentric, at any inclination, and two thirds go backwards.
 
 ![Moon semi-major axis against inclination](plots/moons.png)
 
@@ -264,7 +264,7 @@ moons where the count is a performance question as much as a physical one.
 ## Reading it back
 
 The generator is also the prior a craft classifies against. A survey measures a radius, a
-density, a temperature and a colour, and `knowledge::sort` weighs those against this same code's
+density, a temperature and a color, and `knowledge::sort` weighs those against this same code's
 own population of worlds to answer what kind of body it is — as a list of types with
 probabilities, because none of those numbers is a type and every one has an error bar.
 
@@ -272,14 +272,14 @@ Two consequences are worth stating here, because they are properties of the rule
 than of the classifier. The types are very nearly a function of radius, density and temperature,
 since the retention chain that decides a body's air is a function of exactly those. And the one
 pair that escapes it is Venus against Earth, which differ only in whether there is water under
-the air — so telling a habitable world from a dead one needs a colour, and a colour needs a
+the air — so telling a habitable world from a dead one needs a color, and a color needs a
 visit. See [25-system-knowledge.md](25-system-knowledge.md).
 
 ## Open
 
 - **Extreme ultraviolet is taken as bolometric.** M dwarfs are XUV-loud out of proportion to
   their light, so their planets' exospheres should be hotter than this model makes them and
-  their atmospheres harder to keep. Modelling it would cost the galaxy a good share of its
+  their atmospheres harder to keep. Modeling it would cost the galaxy a good share of its
   habitable worlds, which is a reason to do it carefully rather than not at all.
 - **Rings are not generated.** [`crate::rings`](../../crates/lc-world/src/rings.rs) has the real
   ones and nothing gives a generated giant its own.

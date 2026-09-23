@@ -68,8 +68,8 @@ fn star(key: u64, luminosity: f64) -> CatalogueStar {
         em_spectra::stellar::radius_from_luminosity(luminosity * em_spectra::stellar::SOLAR_LUMINOSITY, teff);
     s.mass_solar = em_spectra::stellar::main_sequence_mass_solar(luminosity);
     s.star.mu = em_spectra::stellar::mu_from_mass_solar(s.mass_solar);
-    // Peculiar speeds as the local disc actually has them: a Maxwellian around forty
-    // kilometres a second, with a tail into the halo.
+    // Peculiar speeds as the local disc has them: a half-normal at forty kilometers a second,
+    // which puts the mean near thirty and leaves a tail into the halo.
     let speed = lc_world::rng::gaussian(lc_world::rng::hash(&[key, 0xfe])).abs() * 42_000.0;
     s.metallicity = lc_world::sky::metallicity::from_speed(speed, key);
     s
@@ -466,7 +466,7 @@ fn band(chart: &Chart, span: (f64, f64), color: Rgba) -> Primitives {
     Primitives { quads: vec![Quad { min: lo, max: hi, color }], ..Primitives::default() }
 }
 
-/// A labelled vertical line, for a radius that means something.
+/// A labeled vertical line, for a radius that means something.
 fn rule(chart: &Chart, at: f64, text: &str) -> Primitives {
     let top = chart_point(chart, at, chart.y.range.1, 0.0, 0.0);
     let bottom = chart_point(chart, at, chart.y.range.0, 0.0, 0.0);

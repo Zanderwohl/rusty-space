@@ -22,14 +22,14 @@ const HYDROGEN: f64 = 2.0;
 const NITROGEN: f64 = 28.0;
 const WATER: f64 = 18.0;
 
-/// Above this equilibrium temperature a body's water is vapour and can be stripped; below it,
+/// Above this equilibrium temperature a body's water is vapor and can be stripped; below it,
 /// the water is ice and stays whatever the star does. Kelvin.
 const WATER_MOBILE_K: f64 = 200.0;
 
 /// Retention margin above which an atmosphere is opaque rather than a trace.
 const THICK_MARGIN: f64 = 1.5;
 
-/// Retention margin at which an unmagnetised body keeps its water anyway.
+/// Retention margin at which an unmagnetized body keeps its water anyway.
 const UNSHIELDED_WATER_MARGIN: f64 = 2.0;
 
 /// Smallest water fraction that counts as having any.
@@ -93,8 +93,8 @@ impl Planet {
 /// inverse square of the distance while the equilibrium temperature falls as its square root.
 /// Written in temperature alone -- `(T/T_ref)^4` is the inverse square of the radius -- so it
 /// needs nothing about the star. Earth's 278 K equilibrium becomes the 1085 K exosphere that
-/// is measured, and Titan's 90 K stays at 99 K, which is why Titan has air and Ganymede does
-/// not.
+/// is measured to about a thousand kelvin, and Titan's 90 K stays at 99 K, which is why Titan
+/// has air and Ganymede does not.
 pub fn exosphere_k(equilibrium_k: f64, tuning: &Tuning) -> f64 {
     let heating = (tuning.world.exosphere_factor - 1.0) * REFERENCE_K;
     equilibrium_k + heating * (equilibrium_k / REFERENCE_K).powi(4)
@@ -132,7 +132,7 @@ pub fn air(mass_earths: f64, radius_earths: f64, equilibrium_k: f64, envelope: b
 
 /// Whether a body has a core convecting fast enough to run a dynamo.
 ///
-/// Mass keeps the core molten and rotation organises the flow, so a small body has no field
+/// Mass keeps the core molten and rotation organizes the flow, so a small body has no field
 /// and a slow one has no field however big it is. Venus is the case that fixes the rotation
 /// term: it has Earth's mass, 243 days of rotation and no field at all.
 pub fn dynamo(mass_earths: f64, spin_s: f64, h: u64, tuning: &Tuning) -> bool {
@@ -224,7 +224,7 @@ fn of(
 /// of it arrived: icy bodies thrown inward by whatever giants the system has, which is why a
 /// system with no giant is a dry one.
 ///
-/// Then it can be lost. An unmagnetised planet warm enough for its water to be vapour loses it
+/// Then it can be lost. An unmagnetized planet warm enough for its water to be vapor loses it
 /// to the stellar wind unless its gravity is far above what thermal escape alone would need --
 /// which is Venus, dry under an atmosphere it had no trouble keeping.
 fn water(
@@ -396,7 +396,7 @@ mod tests {
         assert!(cold.len() > 20, "only {} cold bodies", cold.len());
         assert!(cold.iter().all(|p| p.water_fraction > 0.1), "a cold body keeps its ice");
 
-        // Rocky bodies only: a hot Jupiter's gravity holds water vapour at any temperature the
+        // Rocky bodies only: a hot Jupiter's gravity holds water vapor at any temperature the
         // inner disc reaches, and what it holds is the ice in its core.
         let baked: Vec<&Planet> =
             planets.iter().filter(|p| p.equilibrium_k > 600.0 && !p.class.is_giant()).collect();

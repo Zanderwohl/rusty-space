@@ -4,7 +4,7 @@
 //! looks at one, and a seed is eight bytes; what a player *changes* becomes an event, and
 //! replaying those over this baseline reconstructs the system exactly.
 //!
-//! This module is the join. The model is in its four neighbours, and it runs one way:
+//! This module is the join. The model is in its four neighbors, and it runs one way:
 //! [`disc`] says what the star's disc is like, [`architecture`] cuts it into rungs and decides
 //! what each assembled, [`planet`] gives a rung air and water, [`moon`] gives it satellites and
 //! [`belt`] makes populations of everything that never assembled. Every number any of them

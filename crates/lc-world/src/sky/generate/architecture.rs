@@ -216,7 +216,10 @@ fn sterilize(rungs: &mut [Rung], star: &CatalogueStar, tuning: &Tuning) {
         .filter(|r| r.class.is_giant())
         .map(|r| {
             let mu = r.mass_earths * disc::EARTH_MASS / (star.mass_solar.max(0.05) * disc::SOLAR_MASS_KG);
-            (r.semi_major_m, tuning.ladder.resonance_reach * mu.powf(0.2))
+            // Capped short of one, or the heaviest planets reach the star: at thirteen Jupiter
+            // masses the raw width is exactly one and the band's inner edge lands on zero,
+            // which would sterilise every rung a system has.
+            (r.semi_major_m, (tuning.ladder.resonance_reach * mu.powf(0.2)).min(0.85))
         })
         .collect();
 

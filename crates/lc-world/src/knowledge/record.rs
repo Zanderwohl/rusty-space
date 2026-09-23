@@ -300,7 +300,7 @@ impl Colors {
         Some((self.mean[band], (variance / n as f64).sqrt()))
     }
 
-    /// The ratio of two bands' means, and its fractional error: the colour, which is what a
+    /// The ratio of two bands' means, and its fractional error: the color, which is what a
     /// type hypothesis reads and what no single band can say.
     pub fn color(&self, over: Band, under: Band) -> Option<(f64, f64)> {
         let ((a, sa), (b, sb)) = (self.flux_in(over)?, self.flux_in(under)?);
@@ -326,7 +326,7 @@ pub struct Orbit {
     /// **The primary is not assumed, it is found.** A Keplerian orbit puts its primary at a
     /// focus, so a candidate that works as a focus *is* the primary, and the same test finds
     /// the star for a planet, the planet for a moon and the moon for a moon's moon. Nothing
-    /// here is a special case for moons; see `knowledge::arc::fit_orbit`.
+    /// here is a special case for moons; see `knowledge::primary::fit_orbit`.
     pub about: Option<BodyId>,
     /// Seconds, and one sigma.
     pub period_s: (f64, f64),

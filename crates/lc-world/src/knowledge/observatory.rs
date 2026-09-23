@@ -654,7 +654,7 @@ mod tests {
         assert_eq!(k.bytes(), 0.0, "a survey fills no store");
     }
 
-    /// **The colours a type hypothesis reads.** Every band the instrument has, measured on the
+    /// **The colors a type hypothesis reads.** Every band the instrument has, measured on the
     /// same frames the survey band decided the detection on. Venus is bright and nearly gray,
     /// Earth is blue, Mars is red -- the three statements `worlds` exists to make, now arriving
     /// through a telescope rather than read off the table.

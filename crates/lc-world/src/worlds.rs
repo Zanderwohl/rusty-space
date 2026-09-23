@@ -368,8 +368,8 @@ pub fn of(id: &str, surface: Surface, tags: &[String]) -> World {
 /// across the optical run.
 ///
 /// **Not decoration.** Without it the reflectance is a pure function of the type, so measuring
-/// a colour would identify the type exactly and a hypothesis would never have more than one
-/// entry in it. Two ocean worlds are not the same colour, and the spread is what makes the
+/// a color would identify the type exactly and a hypothesis would never have more than one
+/// entry in it. Two ocean worlds are not the same color, and the spread is what makes the
 /// classification an inference rather than a lookup. Keyed by the body's id, so it does not
 /// shimmer between frames.
 fn varied(id: &str) -> (f64, f64) {
@@ -389,11 +389,11 @@ fn varied(id: &str) -> (f64, f64) {
 /// Every row is one of the measured bodies above, which is where its shape comes from: a
 /// generated ocean is Earth's curve, a generated ice world is between Europa's and Callisto's,
 /// a generated gas giant is Jupiter's and an ice giant is Uranus's. The third digit is not the
-/// point; the ordering and the colour are.
+/// point; the ordering and the color are.
 fn reflectance_of(top: Top, atmosphere: Atmosphere, surface: Surface, gas_giant: bool, varied: (f64, f64)) -> [f64; BANDS] {
     let base = match (top, atmosphere) {
         // A giant's deck. Jupiter is banded and warm; Uranus is methane-blue and eats the red
-        // end, which is the one colour difference that tells the two kinds of giant apart.
+        // end, which is the one color difference that tells the two kinds of giant apart.
         (Top::Cloud, Atmosphere::Envelope) if gas_giant => optical(0.47, 0.50, 0.53, 0.54, 0.27),
         (Top::Cloud, Atmosphere::Envelope) => optical(0.52, 0.46, 0.38, 0.24, 0.05),
         // A rocky body's deck: Venus where it is warm, Titan's orange haze where it is not.
@@ -402,7 +402,7 @@ fn reflectance_of(top: Top, atmosphere: Atmosphere, surface: Surface, gas_giant:
         (Top::Ocean, _) => optical(0.43, 0.37, 0.33, 0.31, 0.29),
         (Top::Ice, _) => optical(0.60, 0.60, 0.58, 0.55, 0.48),
         // Scorched rock is darker and flatter than weathered rock, which is red because it is
-        // oxidised, which needs air.
+        // oxidized, which needs air.
         (Top::Rock, _) if surface == Surface::Scorched => optical(0.06, 0.08, 0.10, 0.11, 0.11),
         (Top::Rock, Atmosphere::None) => optical(0.09, 0.13, 0.15, 0.16, 0.16),
         (Top::Rock, _) => optical(0.09, 0.17, 0.25, 0.29, 0.30),
@@ -557,9 +557,9 @@ mod tests {
     }
 
     /// **What a type hypothesis has to work on.** A generated body says what it is through its
-    /// tags, and what it says decides its colour: an ocean is blue, an ice world is bright, a
+    /// tags, and what it says decides its color: an ocean is blue, an ice world is bright, a
     /// deck is bright and flat, and bare rock is dark. Without this every generated body is
-    /// flat at its class albedo and a colour measures nothing.
+    /// flat at its class albedo and a color measures nothing.
     #[test]
     fn a_generated_body_is_the_colour_of_what_it_is_made_of() {
         let made = |top: Top, air: Atmosphere, surface| {
@@ -586,7 +586,7 @@ mod tests {
         assert!(gas.reflectance_in(Band::K) > icy.reflectance_in(Band::K) * 3.0, "methane eats K");
     }
 
-    /// Two ocean worlds are not the same colour. Without the spread a colour would identify a
+    /// Two ocean worlds are not the same color. Without the spread a color would identify a
     /// type exactly and a hypothesis would never hold more than one entry.
     #[test]
     fn two_bodies_of_a_type_are_not_the_same_body() {
@@ -595,7 +595,7 @@ mod tests {
         assert_ne!(a.reflectance, b.reflectance);
         // Same every time it is asked, or a body would shimmer between frames.
         assert_eq!(a.reflectance, of("Kettle e", Surface::Weathered, &tags).reflectance);
-        // And still recognisably its type.
+        // And still recognizably its type.
         assert!((a.gray_albedo() / b.gray_albedo()).ln().abs() < 0.4);
     }
 

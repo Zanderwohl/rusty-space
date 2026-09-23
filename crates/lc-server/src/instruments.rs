@@ -697,7 +697,7 @@ mod tests {
     /// **The fitting chain is alive on the shard, and refuses where it should.** A drifting
     /// craft surveying its own system triangulates its sun, which is what puts the bearings in
     /// a frame at all, and the fit is then offered bodies whose arcs are hours long. Hours is
-    /// nothing of any orbit, so it declines them -- and declining is the behaviour worth
+    /// nothing of any orbit, so it declines them -- and declining is the behavior worth
     /// pinning here, since `knowledge::arc` covers the arcs that do settle.
     #[tokio::test]
     async fn a_surveying_craft_measures_its_sun_and_declines_the_short_arcs() {

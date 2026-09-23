@@ -685,7 +685,7 @@ What it does log is one row of per-band fluxes a visit, and that is what the dig
   eight, one digest per witness however many visits, and the arc beside it never past its cap.
 - **A band nothing was measured in is `None`, not a zero.** An instrument that lacks the band and
   a body too faint in it are both "no measurement", and a zero would be a reading.
-- **`Optics::band` picks one band to survey in; the colours are every band the instrument has,**
+- **`Optics::band` picks one band to survey in; the colors are every band the instrument has,**
   read off the same frames. The survey band decides the detection; the rest are measured
   alongside. Glare is not carried per band: it was already spent on that decision, the bright
   thing casting it is the same star in every filter, and seven copies would cost seven times the
@@ -1118,7 +1118,7 @@ stars, since "told you about 1 star" is a poor description of a survey of Sol.
 
 ## What kind of world it is
 
-A survey measures a radius, a density, a temperature and a colour. None of those is a type, and
+A survey measures a radius, a density, a temperature and a color. None of those is a type, and
 no threshold on any of them is one either: a 1.4-Earth-radius body is a super-Earth or a small
 sub-Neptune depending on its density, an ocean and a greenhouse world differ only in how bright
 and how blue they are, and every one of those numbers has an error bar.
@@ -1146,7 +1146,7 @@ moment a better measurement arrives, and two craft holding different evidence ho
 
 Colours divide the star out. A craft measures a flux ratio between two bands and wants the
 body's reflectance ratio; the range to the body and the star's own output both cancel, which is
-why a colour is the one thing a distant craft reads cleanly. The albedo does not cancel — it
+why a color is the one thing a distant craft reads cleanly. The albedo does not cancel — it
 needs the body's distance from its star *and* the range to the craft — so it is left unmeasured
 for now.
 
@@ -1164,19 +1164,19 @@ are the same size at the same distance**, and from across the system they stay a
 split. That is the reason to fly there, and it is a consequence of the chain in
 [26-system-generation.md](26-system-generation.md) rather than a rule written to produce it.
 
-**A visit** adds a mass, and so a density, and resolves the body enough to read its colour.
+**A visit** adds a mass, and so a density, and resolves the body enough to read its color.
 Held out and measured this well, the classifier recovers 998 of every 1000, and every call it
 reports as settled is right.
 
-**Colour earns its place in exactly one spot**, and it is the one that matters. The types are
+**Color earns its place in exactly one spot**, and it is the one that matters. The types are
 very nearly a function of radius, density and temperature, because the retention chain that
 decides a body's air is a function of exactly those. The exception is Venus against Earth: the
 same size, the same density, nearly the same temperature, separated only by whether there is
 water under the air — which a magnetic field decides, and which leaves no mark on any of the
-three. Colour takes that error from one in five to one in two hundred. That is what the per-band
+three. Color takes that error from one in five to one in two hundred. That is what the per-band
 photometry above is for.
 
-### Why a generated body has a colour at all
+### Why a generated body has a color at all
 
 It did not, until this. Every generated body was flat at its class albedo, so a generated ocean,
 ice world and bare rock of one radius, mass and temperature were the same body in every band.
@@ -1188,7 +1188,7 @@ from the measured bodies: an ocean is Earth's curve, a deck is Venus's where it 
 Titan's where it is not, a gas giant is Jupiter's and an ice giant is Uranus's.
 
 Each body departs from its type's curve by a brightness factor and a tilt, keyed by its id.
-**Not decoration.** Without it the reflectance is a pure function of the type, a colour would
+**Not decoration.** Without it the reflectance is a pure function of the type, a color would
 identify the type exactly, and a hypothesis would never hold more than one entry.
 
 ## The system's plane

@@ -63,7 +63,7 @@ pub struct Ladder {
     /// wherever one happened to assemble. Mercury is eleven sublimation radii out, and a
     /// planet on a twelve-hour year is one.
     pub first_rung: (f64, f64),
-    /// Ratio between neighbouring rungs. Drawn per step, so a system's spacing is not one
+    /// Ratio between neighboring rungs. Drawn per step, so a system's spacing is not one
     /// number repeated.
     pub spacing: (f64, f64),
     pub max_rungs: usize,
@@ -119,8 +119,13 @@ pub struct World {
     /// curve. Without this every generated planet sits exactly on the fit, which is the one
     /// thing no real population does.
     pub radius_spread_dex: f64,
-    /// Exosphere temperature over equilibrium temperature. Earth's 255 K equilibrium sits
-    /// under a 1000 K exosphere, which is what actually sets what escapes.
+    /// How much hotter than its equilibrium temperature a body at one astronomical unit from
+    /// the Sun runs where escape happens, as a multiple of that temperature.
+    ///
+    /// Not a ratio applied everywhere: extreme-ultraviolet heating falls as the inverse square
+    /// of the distance while the equilibrium temperature falls as its square root, so what
+    /// this sets is the *size* of an additive term that dies away outward. See
+    /// [`super::planet::exosphere_k`]. Earth's measured exosphere is about a thousand kelvin.
     pub exosphere_factor: f64,
     /// Escape velocity over thermal speed at which a gas is held for the age of the system.
     /// Six is the textbook figure and it puts hydrogen off Earth and nitrogen on it.
@@ -130,8 +135,10 @@ pub struct World {
     /// Rotation period beyond which a dynamo stalls, seconds. Venus turns in 243 days and has
     /// no field.
     pub dynamo_spin_s: f64,
-    /// Chance an airless-by-stripping planet keeps its air anyway, and its opposite: nothing
-    /// here is a hard gate.
+    /// Smallest chance of a dynamo, whatever the mass and the rotation say.
+    ///
+    /// Nothing here is a hard gate: Mercury is a twentieth of an Earth and turns in 59 days,
+    /// and it has a field anyway.
     pub dynamo_floor: f64,
     /// How much of the icy reservoir reaches an inner planet, when a giant is there to throw it.
     pub delivered_water: (f64, f64),
@@ -158,15 +165,15 @@ pub struct Moons {
     /// Outer bound, as a share of the Hill radius. Regular satellites form in a disc well
     /// inside it: the Galileans sit within a fiftieth of Jupiter's.
     pub regular_outer_hill: f64,
-    /// Chance a rocky planet took a giant impact and kept the debris. Luna is an eighth of a
-    /// percent of Earth by mass and nothing else in the inner system has anything like it.
+    /// Chance a rocky planet took a giant impact and kept the debris. Luna is an eightieth of
+    /// Earth by mass and nothing else in the inner system has anything like it.
     pub impact_moon_chance: f64,
     pub impact_mass_ratio: (f64, f64),
     /// Most captured irregulars a planet may hold, and the power law that decides how many.
     ///
-    /// Jupiter has ninety-odd known irregulars and the count is still climbing. They are
-    /// captured rather than formed, so they sit far out, at every inclination, and more than
-    /// half of them go backwards.
+    /// The cap is what a Jupiter reaches; the power law puts the mean nearer forty, because
+    /// most giants are smaller and hold a smaller sphere. They are captured rather than
+    /// formed, so they sit far out, at every inclination, and more than half go backwards.
     pub irregular_most: u32,
     pub irregular_index: f64,
     /// Where an irregular sits, as a share of the Hill radius.
@@ -183,7 +190,7 @@ pub struct Moons {
 /// Belts, the Kuiper analogue and the Oort cloud.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Belts {
-    /// Share of a sterilised rung's solids still there to be seen. The asteroid belt holds
+    /// Share of a sterilized rung's solids still there to be seen. The asteroid belt holds
     /// about a two-thousandth of what its feeding zone started with; the rest was thrown out.
     pub belt_survival: f64,
     /// The same for the trans-planetary belt, which was stirred far less.

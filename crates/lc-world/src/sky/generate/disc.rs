@@ -9,7 +9,7 @@ use crate::rng;
 use crate::sky::CatalogueStar;
 use crate::star::Star;
 
-/// Earth masses.
+/// Kilograms in one Earth mass, and the other constants the generator measures against.
 pub const EARTH_MASS: f64 = 5.9722e24;
 pub const EARTH_RADIUS: f64 = 6.371e6;
 pub const SOLAR_MASS_KG: f64 = 1.988_41e30;
@@ -148,8 +148,8 @@ pub fn temperature_at(star: &Star, a_m: f64) -> f64 {
 ///
 /// Piecewise power law anchored on Earth, Neptune and Jupiter, which is the shape the
 /// exoplanet mass-radius relation actually has: rock compresses slowly, a volatile envelope
-/// buys radius cheaply, and past a Jupiter mass degeneracy pressure takes the radius back
-/// down. `icy` lifts a small body for a composition that is half water.
+/// buys radius cheaply, and past about four hundred Earth masses degeneracy pressure takes
+/// the radius back down. `icy` lifts a small body for a composition that is half water.
 pub fn radius_earths(mass_earths: f64, icy: bool) -> f64 {
     const TERRAN_TOP: f64 = 2.04;
     const NEPTUNIAN_TOP: f64 = 132.0;
@@ -161,9 +161,12 @@ pub fn radius_earths(mass_earths: f64, icy: bool) -> f64 {
     } else {
         11.64 * (m / NEPTUNIAN_TOP).powf(-0.03)
     };
-    // Ice is about half the density of rock, and only a body too small to hold an envelope
-    // still shows it in its radius.
-    if icy && m < TERRAN_TOP { r * 1.2 } else { r }
+    // Ice is about half the density of rock, and a body big enough to hold an envelope stops
+    // showing it: the envelope is what sets the radius by then. Tapered rather than switched
+    // off at the branch, because a step there made an icy body *shrink* by a sixth as it grew
+    // past two Earth masses.
+    let icy_lift = if icy { 1.0 + 0.2 * (1.0 - (m / TERRAN_TOP).min(1.0)) } else { 1.0 };
+    r * icy_lift
 }
 
 /// Escape velocity, m/s, from a mass and radius in Earth units.
