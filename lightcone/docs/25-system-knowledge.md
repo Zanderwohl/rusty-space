@@ -427,12 +427,61 @@ Per body:
 | existence and position | the first visit | the first second |
 | size | angular diameter times distance; the distance comes from the orbit fit | seconds, then as good as the orbit |
 | rotation period | the periodogram of its flux: Earth's clouds and continents, Jupiter's bands | Earth and Mars within a minute; Jupiter sooner |
-| orbit: period, size, eccentricity, plane, velocity | an angles-only fit (Gauss, then least squares) with the star's gravity; the star's mass is itself refined once two orbits are held | inner planets within a few minutes; Saturn's 3° arc to about a percent by 15 |
+| orbit: period, size, eccentricity, plane | ✅ `lc_world::knowledge::arc`, below | inner planets within a few minutes; **not Saturn**, see below |
 | mass | its moons, by Kepler's third law: Io goes round in 17 real seconds, Callisto in under three minutes, the Moon in four and a half, Titan in under three | minutes, for anything with a moon |
 | density, so rock or gas | mass over volume | as soon as both are held |
 | albedo and color | flux against the starlight falling on a disc of known size, per band | as soon as the size is held |
 | temperature | thermal flux against the temperature it would have with no atmosphere | minutes |
 | a surface under cloud | radio: thermal emission from a surface the clouds hide | minutes |
+
+**The orbit fit.** ✅ **Built** (2026-09-22) as `knowledge::arc`. Gauss, then least squares, and
+what it came to:
+
+- **The ranges are searched, not the plane.** Crossing each ray with a candidate plane looks like
+  the cheap way in and does not work at all: a ship inside a system and the planets it watches
+  are within a few degrees of one plane, so every ray lies nearly *in* the candidate plane and
+  crosses it nowhere that is not rounding. A plane tells you nothing about a body you are
+  coplanar with.
+- **Only two numbers are searched.** Guess the range at two of three spread looks; the third is
+  closed form, because an orbit's plane contains the star, so `det[r1 r2 r3] = 0` and that
+  determinant is linear in the third range. The three positions then give the plane outright, a
+  conic with its focus at the star is the linear solve `1/r = A + B cos + C sin`, and regressing
+  the times on the mean anomalies is a straight line whose slope is the period.
+- **The period is measured and the star's mass falls out of it,** `mu = n^2 a^3`. No mass goes
+  in. This is what this section wanted from "the star's mass is itself refined", and it arrives
+  earlier than expected — with the first orbit rather than the second. Recovered to a part in
+  1000 for the Sun and exactly for a star three times heavier.
+- **Least squares is not optional.** A three-point solution passes *exactly* through three noisy
+  rays, so it is an interpolation carrying their noise as a systematic: it sits 420 times its own
+  noise floor until the six elements are settled against every look.
+- **Arc, not noise, is what an orbit costs.** Over 71° the period comes out to 0.075% and
+  bearings a hundred times worse change that by nothing, because the error is the fit's own
+  convergence. Over 142° it is 8e-8, four orders better, at the noise floor. Nobody should buy a
+  better telescope to get a better orbit; they should watch for longer.
+- **A short arc gives no orbit, and that is the answer.** Three game months is 0.85% of Saturn's
+  orbit, about three degrees, and the separated starts land on 2.7, 5.0, 2.6 and 230 AU with
+  residuals within a factor of three of each other. **So the row above is wrong about Saturn**:
+  three degrees does not give a percent, it gives four different answers. The fit refuses rather
+  than reporting whichever scored best. Saturn needs a longer watch, and the done-when below is
+  corrected to say so.
+- **The test is rivalry, not the residual.** An earlier rule asked that the best fit sit near the
+  bearings' own noise and it threw away the best orbits the fit makes — 284° of arc fits to
+  a = 1.0001 with the runner-up five thousand times worse, decisive by any reading, and was
+  refused for being three thousand times the noise floor. That is a statement about how far the
+  search converged, not about what the arc supports.
+- **Two attractors worth naming.** A short arc pulls toward *the ship's own orbit*: put the body
+  on top of the observer and the range goes to zero, the parallax with it, and any orbit explains
+  the bearings. Three of eight starts landed there, at exactly the 5 AU circle the ship was
+  flying. And a finer grid is a *worse* search unless the kept starts are forced apart, because
+  every one of the best eight is then a neighbor of the same spurious minimum.
+- **`DVec3::angle_between` cannot be used for any of this.** It is an `acos` of a dot product,
+  and for an angle of 3e-10 radians that product is `1 - 4.5e-20`, which is exactly 1.0 in f64.
+  It returns zero for every bearing this fit tries to resolve, so the objective was blind below
+  about 1e-8 radians — thirty times the noise it was meant to be measuring — and every fit
+  plateaued there. `atan2` of the cross product keeps its digits all the way down.
+
+One fit costs about 100 ms in a debug build, where this crate's own code is unoptimized, so it
+belongs on a per-tick budget of one the way `READS_PER_TICK` bounds log reading.
 
 A body with no moon has no mass from this. Venus then stays of unknown mass, and its type comes
 from everything else.
@@ -1182,9 +1231,12 @@ knowledge. Today:
    works does a new ship stop being issued charts, on every path listed under *Nothing on
    creation*, together with the photograph flag that replaces them.
    **Done when:** a ship in orbit 5 AU from Sol, surveying for three game months (15 real minutes
-   at the design rate), believes Venus, Earth, Mars, Jupiter and Saturn with periods to 0.1%
-   (Saturn's to 1%), radii to 1%, masses to 1% where a moon gives one, the leading type above
-   99% and matching the table above, and the system plane to 0.1°. Every one of them has a
+   at the design rate), believes Venus, Earth, Mars and Jupiter with periods to 0.1%, radii to
+   1%, masses to 1% where a moon gives one, the leading type above
+   99% and matching the table above, and the system plane to 0.1°. **Saturn is not in that
+   list any more:** three game months is three degrees of its orbit and the fit refuses an arc
+   that short, correctly. What it should hold of Saturn by then is a place and a size and no
+   orbit, and an orbit once it has watched a good deal longer. Every one of them has a
    position within the first real second. Run it against the in-process shard (`local.rs`), not
    the offline client, which does not read logs. **Let it run to thirty minutes and check the
    ship is still not full** — fifteen minutes on the planets alone fits inside the starting store

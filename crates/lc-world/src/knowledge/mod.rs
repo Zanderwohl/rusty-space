@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::sky::StarId;
 
+pub mod arc;
 pub mod astrometry;
 pub mod body;
 pub mod conclusion;
