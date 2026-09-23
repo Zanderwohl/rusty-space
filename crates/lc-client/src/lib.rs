@@ -17,6 +17,7 @@ pub mod auth;
 pub mod broker;
 pub mod app;
 pub mod bench;
+pub mod beliefs;
 pub mod bookshelf;
 pub mod chat;
 pub mod curve;

@@ -284,6 +284,7 @@ pub struct MapPlugin;
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::map_line::MapLinePlugin)
+            .init_resource::<crate::beliefs::Beliefs>()
             .add_systems(Startup, setup)
             // **After the scene the snapshot is built from.** Taken in `Stage::Act`, it held
             // the previous frame's eye while the contacts in it were this frame's, so this
@@ -409,22 +410,19 @@ fn survey(
     uplink: Res<crate::uplink::Uplink>,
     eye: Res<crate::hull::Eye>,
     mut map: ResMut<Map>,
+    mut beliefs: ResMut<crate::beliefs::Beliefs>,
 ) {
     if !map.shown {
         return;
     }
+    let held = beliefs.held(&game.0);
     // Before anything is composed: the plane the camera's angles are measured against is the
     // one this craft has solved for the system it is in, and a ship that crossed to another
     // star is in another one. Truth's pole is deliberately not read here -- what the map draws
     // is what the crew worked out. See `lightcone/docs/25-system-knowledge.md`.
-    ui.map.system_plane = game
-        .0
-        .system
-        .as_ref()
-        .map(|system| game.0.knowledge.system_plane(system.star))
-        .unwrap_or_default();
+    ui.map.system_plane = held.plane;
     let picture = match ui.map.source {
-        Source::Observed => crate::map_source::observed(&game.0, &uplink, eye.at_ly),
+        Source::Observed => crate::map_source::observed(&game.0, &uplink, eye.at_ly, held),
         #[cfg(feature = "godview")]
         Source::God => crate::map_source::coordinate(&game.0, &uplink, eye.at_ly),
     };

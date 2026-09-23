@@ -202,14 +202,26 @@ impl Knowledge {
 
     /// The plane a system's bodies are believed to share.
     ///
-    /// The mean of the orbit poles, weighted by `1 / sigma^2` and by class so a giant counts for
-    /// more, which approximates the invariable plane without knowing a single mass. Recomputed
-    /// on every call and stored nowhere: it moves whenever an orbit does.
+    /// Recomputed on every call and stored nowhere: it moves whenever an orbit does. A caller
+    /// that already holds the list should call [`plane_of`] instead of paying for a second one.
+    ///
+    /// [`plane_of`]: Self::plane_of
     pub fn system_plane(&self, star: StarId) -> SystemPlane {
+        Self::plane_of(&self.bodies_of(star, 0.0))
+    }
+
+    /// The plane a list of beliefs shares.
+    ///
+    /// The mean of the orbit poles, weighted by `1 / sigma^2` and by class so a giant counts for
+    /// more, which approximates the invariable plane without knowing a single mass.
+    ///
+    /// Any epoch's list answers the same, because only an orbit's orientation is read and that
+    /// does not move with time.
+    pub fn plane_of(beliefs: &[BodyBelief]) -> SystemPlane {
         let mut sum = DVec3::ZERO;
         let mut weight = 0.0;
         let mut circle: Option<DVec3> = None;
-        for belief in self.bodies_of(star, 0.0).iter().filter(|b| in_the_system_plane(b)) {
+        for belief in beliefs.iter().filter(|b| in_the_system_plane(b)) {
             match belief.orientation {
                 Orientation::Known { pole, sigma_rad, .. } => {
                     // A giant's pole is the invariable plane's; a rock's is near it. Squared
@@ -229,7 +241,7 @@ impl Knowledge {
         if pole == DVec3::ZERO {
             return circle.map_or(SystemPlane::Unknown, SystemPlane::Circle);
         }
-        let sigma_rad = plane_scatter(self, star, pole, weight);
+        let sigma_rad = plane_scatter(beliefs, pole, weight);
         if sigma_rad > PLANE_SCATTER_LIMIT_RAD {
             return circle.map_or(SystemPlane::Unknown, SystemPlane::Circle);
         }
@@ -252,10 +264,10 @@ fn class_weight(belief: &BodyBelief) -> f64 {
 /// The larger of the weighted scatter and what the individual sigmas allow: a single orbit has
 /// no scatter to measure and must still report its own error, and two orbits that disagree must
 /// not report the confidence their sigmas claim.
-fn plane_scatter(knowledge: &Knowledge, star: StarId, pole: DVec3, weight: f64) -> f64 {
+fn plane_scatter(beliefs: &[BodyBelief], pole: DVec3, weight: f64) -> f64 {
     let mut spread = 0.0;
     let mut count = 0usize;
-    for belief in knowledge.bodies_of(star, 0.0).iter().filter(|b| in_the_system_plane(b)) {
+    for belief in beliefs.iter().filter(|b| in_the_system_plane(b)) {
         if let Orientation::Known { pole: p, .. } = belief.orientation {
             let off = pole.dot(folded(p)).clamp(-1.0, 1.0).acos();
             spread += off * off;

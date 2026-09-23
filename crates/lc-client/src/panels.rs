@@ -262,6 +262,7 @@ pub fn open_panels(
     mut contexts: EguiContexts,
     ui_state: Res<Ui>,
     mut game: ResMut<Game>,
+    mut beliefs: ResMut<crate::beliefs::Beliefs>,
     uplink: Res<crate::uplink::Uplink>,
     mut out: MessageWriter<Requested>,
     mut curve: Local<CurvePlot>,
@@ -275,7 +276,12 @@ pub fn open_panels(
     mut seal: Local<bool>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
-    for panel in ui_state.open_panels().to_vec() {
+    let panels = ui_state.open_panels().to_vec();
+    // Once for every panel drawn this frame, and the map already asked for the same second,
+    // so this is a read.
+    let wants = panels.iter().any(|p| matches!(p, Panel::System | Panel::Telescope));
+    let held = beliefs.held_if(wants, &game.0);
+    for panel in panels {
         // The book brings its own window: it is not a readout, and egui's chrome around it
         // would be a dark title bar over a white page. See `crate::reader`.
         if panel == Panel::Reader {
@@ -290,6 +296,7 @@ pub fn open_panels(
                     ui,
                     &ui_state,
                     &mut game,
+                    held,
                     &mut name_draft,
                     &mut out,
                     &mut curve,
@@ -298,6 +305,7 @@ pub fn open_panels(
                 ui,
                 &ui_state,
                 &game,
+                held,
                 &uplink,
                 &mut tab,
                 &mut show_all,

@@ -18,6 +18,7 @@ use lc_world::knowledge::Placed;
 #[cfg(feature = "godview")]
 use lc_world::navigation::Kind;
 
+use crate::beliefs::Held;
 use crate::pick::Subject;
 use crate::session::Session;
 use crate::uplink::Uplink;
@@ -116,11 +117,11 @@ fn kind_of(kind: Kind) -> ItemKind {
 /// Contacts are retarded — a ship is drawn where the light arriving now left from — and stars
 /// are older still. Bodies in the observer's own system are at coordinate time: across one
 /// system the delay is under a pixel.
-pub fn observed(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> Picture {
+pub fn observed(session: &Session, uplink: &Uplink, eye_ly: DVec3, held: &Held) -> Picture {
     let mut build = Build::with_capacity(uplink.contacts.len() + 64);
     build.push(observer(session, uplink, eye_ly), None);
     push_local_system(&mut build, session);
-    push_believed(&mut build, session);
+    push_believed(&mut build, session, held);
     push_stars(&mut build, session, eye_ly);
 
     for contact in &uplink.contacts {
@@ -286,25 +287,30 @@ fn key_of(system: &lc_world::system::LocalSystem, index: em_sim::id::BodyIndex) 
 ///
 /// Nothing here carries a radius or a mass: a transit says a body exists and roughly where, not
 /// how big it is. Both arrive with imaging, in phase 6.
-fn push_believed(build: &mut Build, session: &Session) {
+fn push_believed(build: &mut Build, session: &Session, held: &Held) {
     let Some(system) = session.system.as_ref() else { return };
-    let now = session.coordinate_time_s();
     let star_ly = system.star_position_ly();
     // The galactic normal where no plane is solved, for the reason `MapView::resolved_plane`
     // gives: `+Z` is Sol's plane and drawing another star's error bars about it is a
     // measurement of one system shown around another.
-    let pole = match session.knowledge.system_plane(system.star) {
+    let pole = match held.plane {
         lc_world::knowledge::SystemPlane::Known { pole, .. } => pole,
         _ => em_map::Plane::Galactic.about(DVec3::Z).normal(),
     };
-    for belief in session.knowledge.bodies_of(system.star, now) {
-        let key = believed_key(system, system.star, belief.body);
+    for belief in &held.bodies {
+        let named = match held.target(belief.body) {
+            Some(lc_world::navigation::Target::Body(name)) => Some(name.clone()),
+            _ => None,
+        };
+        let key = named
+            .as_deref()
+            .map(ItemKey::from_name)
+            .unwrap_or_else(|| ItemKey::from_id("phantom", belief.body.get()));
         let label = belief.name.clone().unwrap_or_else(|| "unnamed body".to_string());
         // Keyed by what the body is targeted by, never by what it is called. Two bodies
         // nobody has named are both "unnamed body", so a label as a key made every one of
         // them the same subject: picking one focused nothing and hovering one lit them all.
-        let subject = believed_target(system, system.star, belief.body)
-            .map(|target| Subject::Body(target, label.clone()));
+        let subject = named.map(|target| Subject::Body(target, label.clone()));
         match belief.position_now {
             // Where on the ring it is, with the error drawn along the ring rather than across
             // it: what is uncertain is how far round it has got.
@@ -346,36 +352,6 @@ fn push_believed(build: &mut Build, session: &Session) {
 
 /// Light-years in an astronomical unit.
 const AU_LY: f64 = lc_world::navigation::AU / lc_world::system::M_PER_LY;
-
-/// The name a believed body is targeted by, where it is one the system holds.
-///
-/// `None` for a body nothing in the arena answers to, which is what a transit's false positive
-/// is: there is a belief and there is nowhere to send a ship.
-fn believed_target(
-    system: &lc_world::system::LocalSystem,
-    star: lc_world::sky::StarId,
-    body: lc_world::knowledge::BodyId,
-) -> Option<String> {
-    system.inventory().iter().find_map(|entry| match &entry.target {
-        lc_world::navigation::Target::Body(name)
-            if lc_world::knowledge::BodyId::of(star, name) == body =>
-        {
-            Some(name.clone())
-        }
-        _ => None,
-    })
-}
-
-/// A believed body's map key: the generator's, where the body is one the generator made.
-fn believed_key(
-    system: &lc_world::system::LocalSystem,
-    star: lc_world::sky::StarId,
-    body: lc_world::knowledge::BodyId,
-) -> ItemKey {
-    believed_target(system, star, body)
-        .map(|name| ItemKey::from_name(&name))
-        .unwrap_or_else(|| ItemKey::from_id("phantom", body.get()))
-}
 
 /// The local system's own star and its belts. `drawables_at` returns neither: the primary is
 /// excluded by construction and a population is not a body.
@@ -496,7 +472,7 @@ mod tests {
     #[test]
     fn the_observer_is_in_every_snapshot() {
         let session = session();
-        let snapshot = observed(&session, &Uplink::default(), DVec3::ZERO)
+        let snapshot = observed(&session, &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session))
             .snapshot;
         let observer = snapshot.observer().expect("the observer is not on their own map");
         assert_eq!(observer.position_ly, DVec3::ZERO);
@@ -509,7 +485,7 @@ mod tests {
     fn the_reach_is_a_sphere_about_the_observer() {
         let session = session();
         let count = |eye: DVec3| {
-            observed(&session, &Uplink::default(), eye)
+            observed(&session, &Uplink::default(), eye, &crate::beliefs::of(&session))
                 .snapshot
                 .items
                 .iter()
@@ -529,7 +505,7 @@ mod tests {
     fn an_unsurveyed_sky_puts_no_stars_on_the_map() {
         let blank = Session::new(&AuthoredStars::sample(), 3);
         let snapshot =
-            observed(&blank, &Uplink::default(), DVec3::ZERO).snapshot;
+            observed(&blank, &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&blank)).snapshot;
         assert!(!snapshot.items.iter().any(|i| i.kind == ItemKind::Star));
         assert!(
             snapshot.observer().is_some(),
@@ -543,9 +519,11 @@ mod tests {
     fn a_star_is_drawn_where_it_is_believed_to_be() {
         let session = session();
         let star = &session.stars[1];
-        let snapshot = observed(&session,
+        let snapshot = observed(
+            &session,
             &Uplink::default(),
             DVec3::ZERO,
+            &crate::beliefs::of(&session),
         )
         .snapshot;
         let drawn = snapshot
@@ -598,7 +576,7 @@ mod tests {
         assert!(!system.inventory().is_empty(), "the generator made bodies to not draw");
 
         let planets = |session: &Session| {
-            observed(session, &Uplink::default(), star.position_ly)
+            observed(session, &Uplink::default(), star.position_ly, &crate::beliefs::of(session))
                 .snapshot
                 .items
                 .iter()
@@ -643,7 +621,7 @@ mod tests {
 
         // And it is drawn as a shell, not as a ring in a plane nobody solved: an orbit of known
         // size and unknown orientation is a sphere of that radius.
-        let snapshot = observed(&session, &Uplink::default(), star.position_ly).snapshot;
+        let snapshot = observed(&session, &Uplink::default(), star.position_ly, &crate::beliefs::of(&session)).snapshot;
         let shell = snapshot
             .items
             .iter()
@@ -672,7 +650,7 @@ mod tests {
         session.sync_system();
         let system = session.system.clone().expect("the ship is at a star");
         let snapshot =
-            observed(&session, &Uplink::default(), star.position_ly).snapshot;
+            observed(&session, &Uplink::default(), star.position_ly, &crate::beliefs::of(&session)).snapshot;
         let star = snapshot
             .items
             .iter()
@@ -691,7 +669,7 @@ mod tests {
     /// rather than a word for "you".
     #[test]
     fn this_ship_is_named_and_weighed_like_a_ship() {
-        let snapshot = observed(&session(), &Uplink::default(), DVec3::ZERO)
+        let snapshot = observed(&session(), &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session()))
             .snapshot;
         let observer = snapshot.observer().expect("the observer is not on their own map");
         assert!(!observer.label.is_empty(), "nothing to draw");
@@ -705,7 +683,7 @@ mod tests {
     /// Two things sharing a key share an entity and a selection.
     #[test]
     fn nothing_shares_a_key() {
-        let snapshot = observed(&session(), &Uplink::default(), DVec3::ZERO)
+        let snapshot = observed(&session(), &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session()))
             .snapshot;
         let mut seen = keys(&snapshot);
         let before = seen.len();
@@ -720,9 +698,9 @@ mod tests {
     #[test]
     fn a_snapshot_is_stated_at_one_epoch() {
         let session = session();
-        let once = observed(&session, &Uplink::default(), DVec3::ZERO)
+        let once = observed(&session, &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session))
             .snapshot;
-        let twice = observed(&session, &Uplink::default(), DVec3::ZERO)
+        let twice = observed(&session, &Uplink::default(), DVec3::ZERO, &crate::beliefs::of(&session))
             .snapshot;
         assert_eq!(once.epoch_s, session.coordinate_time_s());
         assert_eq!(once, twice);

@@ -22,6 +22,7 @@ pub fn telescope(
     ui: &mut egui::Ui,
     state: &Ui,
     game: &mut Game,
+    held: &crate::beliefs::Held,
     draft: &mut String,
     out: &mut MessageWriter<Requested>,
     plot: &mut CurvePlot,
@@ -36,7 +37,7 @@ pub fn telescope(
     });
     ui.separator();
 
-    duty(ui, game, out);
+    duty(ui, game, held, out);
     room(ui, game, out);
     ui.separator();
 
@@ -176,7 +177,12 @@ fn described(game: &Game) -> Option<StarId> {
     game.described.or(game.pointing)
 }
 
-fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+fn duty(
+    ui: &mut egui::Ui,
+    game: &Game,
+    held: &crate::beliefs::Held,
+    out: &mut MessageWriter<Requested>,
+) {
     let now = game.coordinate_time_s();
     match &game.observatory.duty {
         Duty::Idle => {
@@ -217,7 +223,7 @@ fn duty(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
             // not report two hundred.
             let here = game.system.as_ref().filter(|s| s.star == *star).is_some();
             let bodies = match here {
-                true => game.knowledge.bodies_of(*star, game.coordinate_time_s()).len(),
+                true => held.bodies.len(),
                 false => 0,
             };
             ui.label(format!("Surveying {}", game.name_of(*star)));

@@ -10,7 +10,7 @@ use bevy_egui::egui;
 use lc_world::knowledge::conclusion::{Kind, SETTLED};
 use lc_world::knowledge::record::{Method, Orientation};
 use lc_world::knowledge::sort::Measured;
-use lc_world::knowledge::{BodyBelief, BodyId, Placed, SystemPlane};
+use lc_world::knowledge::{BodyBelief, Placed, SystemPlane};
 use lc_world::navigation::Target;
 use lc_world::sky::StarId;
 
@@ -35,6 +35,7 @@ pub(crate) fn system(
     ui: &mut egui::Ui,
     state: &Ui,
     game: &Game,
+    held: &crate::beliefs::Held,
     uplink: &crate::uplink::Uplink,
     tab: &mut SystemTab,
     show_all: &mut bool,
@@ -45,8 +46,7 @@ pub(crate) fn system(
         ui.label("Between systems. There is nothing local to go to.");
         return;
     };
-    let now = game.coordinate_time_s();
-    let known = game.knowledge.bodies_of(system.star, now);
+    let known = &held.bodies;
     ui.horizontal(|ui| {
         ui.selectable_value(tab, SystemTab::Bodies, match known.len() {
             1 => "1 body".to_string(),
@@ -72,15 +72,15 @@ pub(crate) fn system(
         ui.label(game.name_of(system.star));
         ui.checkbox(show_all, "all");
     });
-    ui.weak(plane_text(game.knowledge.system_plane(system.star)));
+    ui.weak(plane_text(held.plane));
     ui.separator();
 
     egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
         if known.is_empty() {
             ui.weak("Nothing known here yet. What the telescope finds appears in this list.");
         }
-        for belief in &known {
-            let target = truth_target(system, system.star, belief.body);
+        for belief in known {
+            let target = held.target(belief.body).cloned();
             let picked = target.is_some() && state.focus.as_ref() == target.as_ref();
             ui.horizontal(|ui| {
                 let row = ui.selectable_label(picked, name_of(belief));
@@ -147,8 +147,7 @@ pub(crate) fn system(
     // *body* with none is one this craft has never detected, and its designation, its orbit
     // and its range are all the arena's rather than anything anybody measured. Reachable
     // through a sky pick or `--focus`, so it has to be refused here and not only not offered.
-    match known.iter().find(|b| truth_target(system, system.star, b.body).as_ref() == Some(target))
-    {
+    match held.at(target) {
         Some(belief) => details(ui, belief, game, system, target),
         None if entry.kind == lc_world::navigation::Kind::Band => {
             ui.heading(&entry.designation);
@@ -222,19 +221,6 @@ fn details(
             ui.weak(note);
         }
     });
-}
-
-/// Which truth target a believed body is, if any.
-///
-/// A join over the inventory, because a [`BodyId`] is a hash and cannot be turned back into the
-/// generator's key. `None` for a body no generator made — a transit's false positive — which
-/// therefore has nowhere to be flown to. Both halves of that go away in phase 7, when a course
-/// carries a subject and the shard plans it from knowledge.
-fn truth_target(system: &lc_world::system::LocalSystem, star: StarId, body: BodyId) -> Option<Target> {
-    system.inventory().iter().find_map(|entry| match &entry.target {
-        Target::Body(key) if BodyId::of(star, key) == body => Some(entry.target.clone()),
-        _ => None,
-    })
 }
 
 fn name_of(belief: &BodyBelief) -> String {
@@ -383,6 +369,7 @@ mod tests {
     use lc_world::knowledge::Witness;
 
     use super::*;
+    use lc_world::knowledge::BodyId;
 
     fn belief(method: Option<Method>, stated_by: Option<Witness>, hops: usize) -> BodyBelief {
         BodyBelief {
@@ -453,25 +440,5 @@ mod tests {
         assert!(known.contains("1.1°"), "{known}");
         assert!(plane_text(SystemPlane::Circle(DVec3::X)).contains("circle"));
         assert!(plane_text(SystemPlane::Unknown).contains("unknown"));
-    }
-
-    /// A body no generator made has nowhere to be flown to, which is what a false positive
-    /// should mean rather than a crash or a course into empty space.
-    #[test]
-    fn a_phantom_body_joins_to_no_target() {
-        let stars = lc_world::sky::AuthoredStars::sample();
-        let star = lc_world::sky::StarProvider::stars(&stars)[2].clone();
-        let system = lc_world::system::LocalSystem::for_star(&star).expect("a generated system");
-
-        let real = system
-            .inventory()
-            .iter()
-            .find_map(|e| match &e.target {
-                Target::Body(key) => Some(key.clone()),
-                _ => None,
-            })
-            .expect("a body");
-        assert!(truth_target(&system, star.id, BodyId::of(star.id, &real)).is_some());
-        assert_eq!(truth_target(&system, star.id, BodyId::from_raw(7)), None, "a phantom");
     }
 }
