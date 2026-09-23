@@ -209,17 +209,13 @@ impl Knowledge {
         let mut sum = DVec3::ZERO;
         let mut weight = 0.0;
         let mut circle: Option<DVec3> = None;
-        for belief in self.bodies_of(star, 0.0) {
+        for belief in self.bodies_of(star, 0.0).iter().filter(|b| in_the_system_plane(b)) {
             match belief.orientation {
                 Orientation::Known { pole, sigma_rad, .. } => {
                     // A giant's pole is the invariable plane's; a rock's is near it. Squared
                     // sigma because that is how independent errors combine.
-                    let w = class_weight(&belief) / sigma_rad.max(1.0e-6).powi(2);
-                    // The sign of a pole is the direction of travel, which an edge-on
-                    // measurement does not settle. Fold onto whichever half the first one
-                    // picked, or two counter-orbiting readings of one plane would cancel.
-                    let signed = if sum.dot(pole) < 0.0 { -pole } else { pole };
-                    sum += signed * w;
+                    let w = class_weight(belief) / sigma_rad.max(1.0e-6).powi(2);
+                    sum += folded(pole) * w;
                     weight += w;
                 }
                 Orientation::EdgeOnTo { toward } => circle = circle.or(Some(toward)),
@@ -259,16 +255,48 @@ fn class_weight(belief: &BodyBelief) -> f64 {
 fn plane_scatter(knowledge: &Knowledge, star: StarId, pole: DVec3, weight: f64) -> f64 {
     let mut spread = 0.0;
     let mut count = 0usize;
-    for belief in knowledge.bodies_of(star, 0.0) {
+    for belief in knowledge.bodies_of(star, 0.0).iter().filter(|b| in_the_system_plane(b)) {
         if let Orientation::Known { pole: p, .. } = belief.orientation {
-            let signed = if pole.dot(p) < 0.0 { -p } else { p };
-            let off = pole.dot(signed).clamp(-1.0, 1.0).acos();
+            let off = pole.dot(folded(p)).clamp(-1.0, 1.0).acos();
             spread += off * off;
             count += 1;
         }
     }
     let scatter = if count > 1 { (spread / count as f64).sqrt() } else { 0.0 };
     scatter.max((1.0 / weight).sqrt())
+}
+
+/// Whether a body's orbit says anything about the plane the *system* lies in.
+///
+/// Only one that goes round the star. A moon's orbit is its planet's equator, which is tilted
+/// by that planet's obliquity and says nothing about the system: Uranus's retinue is 98 degrees
+/// off, Triton goes backwards, and a moon fitted on a close pass has so small a sigma that its
+/// weight swamps every planet. Averaging them in pushed Sol's own scatter past the limit and
+/// left the system reading as having no solved plane at all.
+fn in_the_system_plane(belief: &BodyBelief) -> bool {
+    belief.about.is_none()
+}
+
+/// A pole folded onto one hemisphere, so an average is not cancelled by direction of travel.
+///
+/// **Onto a fixed one.** The sign of a pole is which way the body goes round, and an edge-on
+/// measurement does not settle it, so the two readings of one plane have to be brought
+/// together. Folding onto "whichever half the first one picked" made that depend on the order
+/// bodies were found in -- and `bodies_of` runs inward-out, so a newly found inner body with
+/// the opposite sign flipped the whole basis and moved zero longitude to the other node, which
+/// `25-system-knowledge.md` forbids.
+fn folded(pole: DVec3) -> DVec3 {
+    let north = em_foundations::reference_frame::galactic::north_pole();
+    let along = pole.dot(north);
+    // Perpendicular to galactic north within a milliradian: fall back to a second fixed axis
+    // rather than letting the sign turn on the last digit.
+    if along.abs() > 1.0e-3 {
+        if along < 0.0 { -pole } else { pole }
+    } else if pole.dot(DVec3::X) < 0.0 {
+        -pole
+    } else {
+        pole
+    }
 }
 
 /// Zero longitude for a plane: the ascending node on the galactic plane.
@@ -638,5 +666,97 @@ mod tests {
             ("c", orbit(5.0, known(DVec3::X, 0.01), Some(0.0))),
         ]);
         assert_eq!(k.system_plane(star()), SystemPlane::Unknown, "sixty degrees apart is a plane");
+    }
+
+    /// **A moon's plane is its planet's equator, not the system's.** Uranus's retinue is 98
+    /// degrees off the ecliptic and Triton goes backwards; averaging them into the system's
+    /// plane pushed the scatter past the limit and left Sol reading as unsolved.
+    #[test]
+    fn a_moons_orbit_says_nothing_about_the_system_plane() {
+        let star = StarId::synthesise("plane", 61);
+        let mut k = Knowledge::new(Witness(1));
+        let pole = DVec3::new(0.1, 0.2, 0.97).normalize();
+        let known = |p: DVec3| Orientation::Known { pole: p, sigma_rad: 0.01, node: 0.0, periapsis: 0.0 };
+
+        let planet = crate::knowledge::BodyId::of(star, "planet");
+        for (k_i, tilt) in [0.0f64, 0.01, -0.012].iter().enumerate() {
+            let body = crate::knowledge::BodyId::of(star, &format!("p{k_i}"));
+            let leaned = (pole + DVec3::X * *tilt).normalize();
+            k.orbits(
+                Subject::Body { star, body },
+                Orbit { orientation: known(leaned), about: None, ..an_orbit() },
+            );
+        }
+        let clean = k.system_plane(star);
+        let SystemPlane::Known { pole: solved, sigma_rad, .. } = clean else {
+            panic!("three planets is a plane: {clean:?}")
+        };
+        assert!(solved.dot(pole).abs() > 0.999, "{solved} against {pole}");
+
+        // A moon of one of them, on its side and fitted from a close pass, must not move it.
+        let sideways = pole.any_orthonormal_vector();
+        k.orbits(
+            Subject::Body { star, body: crate::knowledge::BodyId::of(star, "moon") },
+            Orbit {
+                orientation: Orientation::Known { pole: sideways, sigma_rad: 1.0e-5, node: 0.0, periapsis: 0.0 },
+                about: Some(planet),
+                ..an_orbit()
+            },
+        );
+        let after = k.system_plane(star);
+        let SystemPlane::Known { pole: still, sigma_rad: after_sigma, .. } = after else {
+            panic!("a moon must not unsolve a system: {after:?}")
+        };
+        assert!(still.dot(solved).abs() > 0.9999, "a moon moved the system plane");
+        assert!((after_sigma - sigma_rad).abs() < 1.0e-9, "and it must not move the scatter");
+    }
+
+    /// The basis may not turn on which body was found first. Folding onto "whichever half the
+    /// first one picked" flipped it whenever a newly found inner body ran the other way, and
+    /// zero longitude moved to the other node with it.
+    #[test]
+    fn the_plane_does_not_flip_when_a_body_is_found_inside_another() {
+        let star = StarId::synthesise("plane", 62);
+        let pole = DVec3::new(0.0, 0.3, 0.954).normalize();
+        let known = |p: DVec3| Orientation::Known { pole: p, sigma_rad: 0.01, node: 0.0, periapsis: 0.0 };
+        let solve = |orders: &[(&str, f64, DVec3)]| {
+            let mut k = Knowledge::new(Witness(1));
+            for (name, au, p) in orders {
+                let body = crate::knowledge::BodyId::of(star, name);
+                k.orbits(
+                    Subject::Body { star, body },
+                    Orbit {
+                        orientation: known(*p),
+                        semi_major_au: (*au, 0.01),
+                        about: None,
+                        ..an_orbit()
+                    },
+                );
+            }
+            match k.system_plane(star) {
+                SystemPlane::Known { pole, zero, .. } => (pole, zero),
+                other => panic!("{other:?}"),
+            }
+        };
+        // The same three bodies, one of them counter-orbiting, found outermost first and then
+        // innermost first.
+        let outward = solve(&[("a", 1.0, pole), ("b", 2.0, -pole), ("c", 5.0, pole)]);
+        let inward = solve(&[("c", 5.0, pole), ("b", 2.0, -pole), ("a", 1.0, pole)]);
+        assert_eq!(outward, inward, "the basis turned on discovery order");
+    }
+
+    fn an_orbit() -> Orbit {
+        Orbit {
+            witness: Witness(1),
+            about: None,
+            period_s: (3.0e7, 1.0e5),
+            semi_major_au: (1.0, 0.01),
+            eccentricity: None,
+            orientation: Orientation::Unknown,
+            epoch_s: Some(0.0),
+            method: crate::knowledge::Method::Astrometric,
+            stated_s: 1.0,
+            lineage: Vec::new(),
+        }
     }
 }

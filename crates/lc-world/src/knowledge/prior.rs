@@ -58,6 +58,12 @@ struct Seen {
 /// what it shows crossing wherever it actually does. A factor of about 1.7, one sigma.
 const DEPTH_WIDTH: f64 = 0.55;
 
+/// Fractional error on a host's mass when the neighbourhood holds nothing to compare it with.
+///
+/// The main-sequence mass-luminosity relation scatters by about this much at a fixed
+/// luminosity, from rotation, age and metallicity, so this is what one star alone is worth.
+const LONE_HOST_SPREAD: f64 = 0.3;
+
 impl Prior {
     /// Pass the stars a craft cannot tell this one apart from; knowing nothing, the catalogue.
     pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogueStar>) -> Self {
@@ -214,7 +220,11 @@ impl Prior {
             .map(|(star, _)| star.mu)
             .collect();
         if like.len() < 2 {
-            return Some((host.mu, 0.0));
+            // Not zero. One comparison star says nothing about the spread, and a mass with no
+            // error on it hands a transit's distance the period's precision -- which
+            // `25-system-knowledge.md` rule 4 says it never has, because the error *is* mostly
+            // the mass's. The main-sequence relation's own scatter is what is left to report.
+            return Some((host.mu, LONE_HOST_SPREAD));
         }
         let mean = like.iter().sum::<f64>() / like.len() as f64;
         let variance =
