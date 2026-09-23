@@ -76,12 +76,16 @@ pub(crate) fn system(
     ui.separator();
 
     // The star is a row rather than a heading, because it is a thing in the system like the
-    // rest and a player who can pick a moon expects to be able to pick its sun. Picking it is
-    // `SelectTarget`, the same as picking it out of the sky: a star is what the telescope
-    // stares at, and the body list's own pick is a `BodyId`, which a star has none of.
-    let star_picked = state.selected == Some(system.star);
+    // rest and a player who can pick a moon expects to be able to pick its sun.
+    //
+    // Focused, not selected. A star is two things at once -- somewhere to cross to, and the
+    // body at the middle of the system you are in -- and this list is the second. Selecting it
+    // put it in the *interstellar* field, which offers no local course and left a star and a
+    // planet picked at the same time in two fields that know nothing of each other.
+    let here = star_target(system);
+    let star_picked = here.as_ref().is_some_and(|t| state.focus.as_ref() == Some(t));
     if ui.selectable_label(star_picked, game.name_of(system.star)).clicked() {
-        ask(out, Action::SelectTarget((!star_picked).then_some(system.star)));
+        ask(out, Action::FocusTarget((!star_picked).then_some(here).flatten()));
     }
 
     *picked = settle_pick(state.focus.as_ref(), *picked, known, held);
@@ -167,6 +171,19 @@ pub(crate) fn system(
     // `--focus`, so it has to be refused here and not only not offered.
     if picked.is_none() {
         match entry.kind {
+            // The star's file is under `Subject::Star`, so it is not in the body list and
+            // `held.at` never finds it. Without this it read as "Nothing detected here" --
+            // about the one body the craft is sitting inside.
+            lc_world::navigation::Kind::Star => {
+                ui.heading(game.name_of(system.star));
+                ui.weak(match game.knowledge.belief(system.star) {
+                    Some(belief) => format!(
+                        "star — {}",
+                        crate::range::short(Some(belief), game.ship.motion.position_ly)
+                    ),
+                    None => "star — nothing measured".to_string(),
+                });
+            }
             lc_world::navigation::Kind::Band => {
                 ui.heading(&entry.designation);
                 ui.weak(format!(
@@ -210,15 +227,13 @@ fn details(
     target: Option<&Target>,
 ) {
     ui.heading(name_of(belief));
-    // A body nothing in the arena answers to has no place to measure from, so the range is the
-    // one its own orbit implies: what the crew would say, and all there is to say.
-    match target {
-        Some(target) => ui.weak(format!("{} away", span(range_to(game, system, target)))),
-        None => ui.weak(match believed_range(belief, game, system) {
-            Some(range) => format!("about {} away", span(range)),
-            None => "nowhere in particular".to_string(),
-        }),
-    };
+    // The range its own orbit implies, never the one the arena holds. A body the list calls
+    // "distance unknown" has no range to give, and printing the true one here said what the
+    // craft has not measured.
+    ui.weak(match believed_range(belief, game, system) {
+        Some(range) => format!("about {} away", span(range)),
+        None => "range unknown".to_string(),
+    });
 
     if let Some((period_s, sigma_s)) = belief.period_s {
         ui.label(format!("Year: {}", with_error(period_s / 86_400.0, sigma_s / 86_400.0, "d")));
@@ -248,6 +263,12 @@ fn details(
             ui.weak(note);
         }
     });
+}
+
+/// The star as something local to fly to, which is how the inventory lists it.
+fn star_target(system: &lc_world::system::LocalSystem) -> Option<Target> {
+    system.inventory().iter().find(|e| e.depth == 0 && e.kind == lc_world::navigation::Kind::Star)
+        .map(|e| e.target.clone())
 }
 
 /// Which body the list has picked.
@@ -532,5 +553,35 @@ mod tests {
         let gone = BodyId::phantom(star, Witness(1), 7);
         let held = crate::beliefs::Held::from_parts(Vec::new(), Default::default());
         assert_eq!(settle_pick(None, Some(gone), &[], &held), None);
+    }
+
+    /// A body the list calls "distance unknown" has no range to give. The detail pane used to
+    /// read the arena for one, which told the player what the craft has not measured.
+    #[test]
+    fn a_body_with_no_believed_place_has_no_range() {
+        let stars = lc_world::sky::AuthoredStars::sample();
+        let star = lc_world::sky::StarProvider::stars(&stars)[2].clone();
+        let system = lc_world::system::LocalSystem::for_star(&star).expect("a system");
+        let mut game = Game(crate::session::Session::new(&stars, 3));
+        game.0.ship.motion.position_ly = star.position_ly;
+        game.0.sync_system();
+
+        let nowhere = belief(None, None, 0);
+        assert_eq!(nowhere.position_now, Placed::Unknown, "the fixture moved");
+        assert_eq!(believed_range(&nowhere, &game, &system), None);
+    }
+
+    /// The star is something local to fly to, not only something to cross to. Without an entry
+    /// for it the panel offered no course to the body the craft is sitting inside.
+    #[test]
+    fn the_star_is_a_local_target_with_courses() {
+        let stars = lc_world::sky::AuthoredStars::sample();
+        let star = lc_world::sky::StarProvider::stars(&stars)[2].clone();
+        let system = lc_world::system::LocalSystem::for_star(&star).expect("a system");
+        let target = star_target(&system).expect("the star is in the inventory");
+        assert!(
+            !crate::navigation::options_for(&system, &target).is_empty(),
+            "the star has nowhere to be orbited from",
+        );
     }
 }
