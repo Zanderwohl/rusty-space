@@ -245,7 +245,7 @@ impl Knowledge {
         if sigma_rad > PLANE_SCATTER_LIMIT_RAD {
             return circle.map_or(SystemPlane::Unknown, SystemPlane::Circle);
         }
-        SystemPlane::Known { pole, sigma_rad, zero: zero_longitude(pole) }
+        SystemPlane::Known { pole, sigma_rad, zero: em_foundations::reference_frame::galactic::zero_longitude(pole) }
     }
 }
 
@@ -309,20 +309,6 @@ fn folded(pole: DVec3) -> DVec3 {
     } else {
         pole
     }
-}
-
-/// Zero longitude for a plane: the ascending node on the galactic plane.
-///
-/// The same rule `em_map::Plane::about` draws with, and deliberately not a call into it — the
-/// map is a reader of this crate and not the other way about.
-fn zero_longitude(pole: DVec3) -> DVec3 {
-    let north = em_foundations::reference_frame::galactic::north_pole();
-    let node = north.cross(pole);
-    if node.length() > 1.745e-2 {
-        return node.normalize();
-    }
-    let center = em_foundations::reference_frame::galactic::center();
-    (center - pole * center.dot(pole)).normalize_or(pole.any_orthonormal_vector())
 }
 
 /// What Kepler's equation is solved to, radians, and how many steps it may take.

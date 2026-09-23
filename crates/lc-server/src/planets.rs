@@ -283,7 +283,6 @@ mod tests {
     #[test]
     fn a_period_matching_nothing_is_one_crafts_phantom() {
         let (star, system) = system();
-        let mu = star.star.mu;
         // Far inside the innermost planet, where the generator puts nothing.
         let nonsense = candidate(600.0, 3);
 

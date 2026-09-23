@@ -112,6 +112,9 @@ pub fn architecture(star: &CatalogStar, tuning: &Tuning) -> Architecture {
     let disc = Disc::of(star, tuning);
     let seed = star.seed();
     let mut rungs = rungs_of(&disc, star, tuning, seed);
+    // Before anything else reads a mass: what merges changes how far the survivor's
+    // resonances reach and which giant is there to migrate.
+    settle_giants(&mut rungs, &disc, star, tuning);
     migrate(&mut rungs, &disc, star, tuning, seed);
     sterilize(&mut rungs, star, tuning);
     Architecture { disc, rungs }
@@ -183,6 +186,48 @@ fn envelope(class: Class, core: f64, h: u64, t: &super::tuning::Ladder) -> f64 {
             (core * multiple).min(t.heaviest_jupiters * JUPITER_EARTHS)
         }
     }
+}
+
+/// Merge giants the ladder put closer together than they could stay.
+///
+/// The rungs are spaced by a ratio, which takes no account of mass, so two giants land inside
+/// each other's reach often enough to matter. Two that close scatter, and the outcome a system
+/// old enough to look at has already had is one planet: the lighter goes into the heavier,
+/// carrying its core, its envelope and the debris of its zone, so the ladder's mass is still
+/// conserved and the survivor sweeps both annuli.
+fn settle_giants(rungs: &mut Vec<Rung>, disc: &Disc, star: &CatalogStar, tuning: &Tuning) {
+    while let Some(k) = crowded(rungs, star, tuning.ladder.hill_separation) {
+        let (lighter, heavier) = match rungs[k].mass_earths <= rungs[k + 1].mass_earths {
+            true => (k, k + 1),
+            false => (k + 1, k),
+        };
+        let gone = rungs.remove(lighter);
+        let kept = &mut rungs[if heavier > lighter { heavier - 1 } else { heavier }];
+        kept.core_earths += gone.core_earths;
+        kept.mass_earths += gone.mass_earths;
+        kept.debris_earths += gone.debris_earths;
+        kept.zone_m = (kept.zone_m.0.min(gone.zone_m.0), kept.zone_m.1.max(gone.zone_m.1));
+        kept.radius_earths = disc::radius_earths(kept.mass_earths, disc.icy(kept.semi_major_m));
+    }
+}
+
+/// The adjacent pair of giants with the least room between them, when that is too little.
+fn crowded(rungs: &[Rung], star: &CatalogStar, wanted: f64) -> Option<usize> {
+    let mut worst: Option<(f64, usize)> = None;
+    let giants: Vec<usize> = (0..rungs.len()).filter(|&k| rungs[k].class.is_giant()).collect();
+    for pair in giants.windows(2) {
+        let (lo, hi) = (&rungs[pair[0]], &rungs[pair[1]]);
+        let mutual = ((lo.mass_earths + hi.mass_earths) * disc::EARTH_MASS
+            / (3.0 * star.mass_solar.max(0.05) * disc::SOLAR_MASS_KG))
+            .cbrt()
+            * 0.5
+            * (lo.semi_major_m + hi.semi_major_m);
+        let apart = (hi.semi_major_m - lo.semi_major_m) / mutual.max(f64::MIN_POSITIVE);
+        if apart < wanted && worst.is_none_or(|(least, _)| apart < least) {
+            worst = Some((apart, pair[0]));
+        }
+    }
+    worst.map(|(_, k)| k)
 }
 
 /// Send a few giants inward, and let them take out everything they cross.
@@ -475,5 +520,62 @@ mod tests {
         assert!(mean < 0.1, "a red dwarf's zone is at {mean} AU, which is not close in");
         assert!(mean * AU > 0.0);
     }
+
+    /// Two giants closer than a few mutual Hill radii scatter; a system old enough to be
+    /// looked at has already had that happen. The ladder spaces rungs by a ratio and takes no
+    /// account of mass, so it put a third of adjacent giant pairs inside ten mutual Hill radii
+    /// and the tightest at 2.5 -- below the limit where two planets are stable at all.
+    #[test]
+    fn no_two_giants_are_closer_than_they_could_stay() {
+        let t = Tuning::default();
+        let mut pairs = 0;
+        let mut worst = f64::INFINITY;
+        for k in 0..600u64 {
+            let s = sun_like(k);
+            let a = architecture(&s, &t);
+            let giants: Vec<&Rung> = a.planets().filter(|r| r.class.is_giant()).collect();
+            for w in giants.windows(2) {
+                pairs += 1;
+                worst = worst.min(mutual_hill_apart(w[0], w[1], s.mass_solar));
+            }
+        }
+        assert!(pairs > 200, "only {pairs} giant pairs to check");
+        assert!(worst >= t.ladder.hill_separation, "a pair {worst:.2} mutual Hill radii apart");
+    }
+
+    /// Merging conserves the ladder's mass, which is what makes the belts consequences of the
+    /// disc rather than decorations.
+    #[test]
+    fn a_merge_keeps_the_mass_it_started_with() {
+        let t = Tuning::default();
+        let mut merged = 0;
+        for k in 0..400u64 {
+            let s = sun_like(k);
+            let disc = Disc::of(&s, &t);
+            let before = rungs_of(&disc, &s, &t, s.seed());
+            let mut after = before.clone();
+            settle_giants(&mut after, &disc, &s, &t);
+            if after.len() == before.len() {
+                continue;
+            }
+            merged += 1;
+            let total = |rungs: &[Rung]| -> f64 {
+                rungs.iter().map(|r| r.mass_earths + r.debris_earths).sum()
+            };
+            let (a, b) = (total(&before), total(&after));
+            assert!((a - b).abs() < 1.0e-9 * a.max(1.0), "{a} became {b}");
+        }
+        assert!(merged > 20, "only {merged} systems merged anything");
+    }
+
+    fn mutual_hill_apart(lo: &Rung, hi: &Rung, star_mass_solar: f64) -> f64 {
+        let mutual = ((lo.mass_earths + hi.mass_earths) * disc::EARTH_MASS
+            / (3.0 * star_mass_solar * disc::SOLAR_MASS_KG))
+            .cbrt()
+            * 0.5
+            * (lo.semi_major_m + hi.semi_major_m);
+        (hi.semi_major_m - lo.semi_major_m) / mutual
+    }
 }
+
 

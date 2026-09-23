@@ -142,6 +142,21 @@ pub fn dynamo(mass_earths: f64, spin_s: f64, h: u64, tuning: &Tuning) -> bool {
     rng::uniform(h) < (by_mass * by_spin).max(t.dynamo_floor)
 }
 
+/// A planet's letter, outward from `b`.
+///
+/// Rolls over to `aa` past `z` rather than repeating one, because a name is what
+/// [`crate::knowledge::BodyId::of`] hashes: two planets called `z` would be one body.
+fn letter(k: usize) -> String {
+    const LETTERS: usize = 25;
+    match k < LETTERS {
+        true => ((b'b' + k as u8) as char).to_string(),
+        false => {
+            let k = k - LETTERS;
+            format!("{}{}", (b'a' + (k / 26) as u8) as char, (b'a' + (k % 26) as u8) as char)
+        }
+    }
+}
+
 /// The planets of one architecture, innermost first.
 pub fn planets(system: &str, arch: &Architecture, star: &crate::sky::CatalogStar, tuning: &Tuning) -> Vec<Planet> {
     let seed = star.seed();
@@ -149,7 +164,7 @@ pub fn planets(system: &str, arch: &Architecture, star: &crate::sky::CatalogStar
     arch.planets()
         .enumerate()
         .map(|(k, rung)| {
-            let name = format!("{system} {}", (b'b' + k.min(24) as u8) as char);
+            let name = format!("{system} {}", letter(k));
             of(name, k, rung, arch, giants, seed, tuning)
         })
         .collect()
@@ -450,5 +465,18 @@ mod tests {
                 assert_eq!(p.atmosphere, Atmosphere::Envelope, "{} is a giant with no envelope", p.name);
             }
         }
+    }
+
+    /// A letter is what a body's id is hashed from, so two planets must never share one. The
+    /// ladder stops at 24 rungs today; a cap that silently repeated `z` past that would have
+    /// merged two bodies into one.
+    #[test]
+    fn no_two_planets_share_a_letter() {
+        let names: Vec<String> = (0..120).map(letter).collect();
+        let unique: std::collections::BTreeSet<&String> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "a letter repeats");
+        assert_eq!(names[0], "b", "the first planet is b, not a");
+        assert_eq!(names[24], "z");
+        assert_eq!(names[25], "aa");
     }
 }

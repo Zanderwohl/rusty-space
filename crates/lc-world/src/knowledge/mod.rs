@@ -259,7 +259,20 @@ impl File {
         })
     }
 
-    /// Keep the bearings that are farthest apart.
+    /// Keep the bearings that are farthest apart, in place **and** in time.
+    ///
+    /// Both baselines move a bearing, and which one is doing the work depends on what the craft
+    /// was doing. Parallax needs the observer to have gone somewhere; a body's own motion needs
+    /// only for time to have passed. A craft parked in a system has no spatial spread at all,
+    /// so scoring on position alone left every pair tied at zero. Each gap is therefore measured
+    /// against the widest of its own kind among the bearings held, which needs no scale chosen
+    /// between a light-year and a year.
+    ///
+    /// What goes is the look whose removal costs the least spread: the sum of the distances to
+    /// its two nearest neighbors. Not the older of the closest *pair* -- on an even cadence
+    /// every pair ties, so that ate the watch from its oldest end and left the last sixteen
+    /// minutes of a year-long arc. By this measure an interior look sits between two neighbors
+    /// and an end one has only a far side, so the ends are what survive.
     fn decimate(&mut self, witness: Witness) {
         while self.sightings.iter().filter(|s| s.witness == witness).count() > BEARINGS_KEPT {
             let held: Vec<(usize, &Sighting)> =
@@ -268,19 +281,38 @@ impl File {
             let Some(&(newest, _)) = held.iter().max_by(|a, b| a.1.observed_s.total_cmp(&b.1.observed_s)) else {
                 return;
             };
-            let Some(&(first, _)) = held.first() else { return };
-            let mut drop = (f64::INFINITY, first);
-            for (n, &(i, a)) in held.iter().enumerate() {
-                for &(j, b) in held.iter().skip(n + 1) {
-                    let gap = a.bearing.observer_ly.distance(b.bearing.observer_ly);
-                    let older = if a.observed_s < b.observed_s { i } else { j };
-                    let loser = if older == newest { if i == newest { j } else { i } } else { older };
-                    if gap < drop.0 {
-                        drop = (gap, loser);
-                    }
+            let apart = |a: &Sighting, b: &Sighting| {
+                (a.bearing.observer_ly.distance(b.bearing.observer_ly), (a.observed_s - b.observed_s).abs())
+            };
+            let (mut widest_ly, mut widest_s) = (0.0f64, 0.0f64);
+            for (n, &(_, a)) in held.iter().enumerate() {
+                for &(_, b) in held.iter().skip(n + 1) {
+                    let (ly, s) = apart(a, b);
+                    widest_ly = widest_ly.max(ly);
+                    widest_s = widest_s.max(s);
                 }
             }
-            self.sightings.remove(drop.1);
+            // A baseline nobody has is a baseline nothing is lost by ignoring.
+            let share = |v: f64, widest: f64| if widest > 0.0 { v / widest } else { 0.0 };
+
+            let mut drop: Option<(f64, usize)> = None;
+            for &(i, a) in held.iter().filter(|&&(i, _)| i != newest) {
+                let mut near: Vec<f64> = held
+                    .iter()
+                    .filter(|&&(j, _)| j != i)
+                    .map(|&(_, b)| {
+                        let (ly, s) = apart(a, b);
+                        share(ly, widest_ly).hypot(share(s, widest_s))
+                    })
+                    .collect();
+                near.sort_by(f64::total_cmp);
+                let cost: f64 = near.iter().take(2).sum();
+                if drop.is_none_or(|(least, _)| cost < least) {
+                    drop = Some((cost, i));
+                }
+            }
+            let Some((_, loser)) = drop else { return };
+            self.sightings.remove(loser);
         }
     }
 
@@ -825,6 +857,34 @@ mod tests {
         let kept = k.file(star).unwrap().sightings();
         assert_eq!(kept.len(), BEARINGS_KEPT);
         assert!(kept.iter().any(|s| s.observed_s == 0.0), "the oldest look, and the widest, is kept");
+    }
+
+    /// A craft parked in a system moves nowhere, so every pair of its looks is tied at zero
+    /// parallax and the arc it spent months collecting was thrown away from the middle out.
+    /// Time is a baseline too.
+    #[test]
+    fn a_parked_craft_keeps_the_span_of_its_watch() {
+        let mut k = Knowledge::new(Witness(1));
+        let star = star_id(3);
+        let truth = DVec3::new(0.0, 0.0, 6.0);
+        let at = DVec3::X * AU_LY;
+        let last = (BEARINGS_KEPT as u64 + 40) as f64 * 1.0e6;
+        for i in 0..=(BEARINGS_KEPT as u64 + 40) {
+            k.sighted(star, sighting(1, at, truth - at, i as f64 * 1.0e6));
+        }
+        let kept = k.file(star).unwrap().sightings();
+        assert_eq!(kept.len(), BEARINGS_KEPT);
+
+        let times: Vec<f64> = kept.iter().map(|s| s.observed_s).collect();
+        let (oldest, newest) = (
+            times.iter().cloned().fold(f64::INFINITY, f64::min),
+            times.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        );
+        assert_eq!(newest, last, "the newest look is what the display reads");
+        assert_eq!(oldest, 0.0, "the watch's own span was decimated away");
+        // And spread across it, not clustered at one end.
+        let middle = times.iter().filter(|t| (last * 0.25..last * 0.75).contains(t)).count();
+        assert!(middle >= 4, "only {middle} of {BEARINGS_KEPT} in the middle half: {times:?}");
     }
 
     #[test]

@@ -107,11 +107,6 @@ fn page<T>(mut limit: usize, build: impl Fn(usize) -> (Option<String>, Option<T>
 }
 
 impl<J: Journal> Server<J> {
-    fn sky(&mut self) -> &mut Sky {
-        let stars = self.world.stars();
-        self.instruments.sky.get_or_insert_with(|| Sky::new(stars))
-    }
-
     fn station(&self, id: CraftId) -> Option<Station> {
         let craft = self.fleet.get(id)?;
         let position_ly = craft.position_at(self.now_t as f64) / LIGHT_US_PER_LY;

@@ -48,33 +48,12 @@ impl Plane {
             Self::Galactic => galactic::basis(),
             Self::System => {
                 let n = system_pole.normalize_or(DVec3::Z);
-                let u = zero_longitude(n);
+                let u = galactic::zero_longitude(n);
                 (u, n.cross(u), n)
             }
         };
         Datum { plane: self, u, v, n }
     }
-}
-
-/// Where a system's longitudes start: the ascending node of its plane on the galactic plane.
-///
-/// Computable by anyone from the plane alone, so two craft that solved the same system agree
-/// on it, and it moves only with the plane's own error rather than with which planet was found
-/// first. There is no vernal equinox to borrow. See
-/// `lightcone/docs/25-system-knowledge.md#where-longitude-starts`.
-///
-/// `g.cross(n)` lies in both planes, and is the ascending rather than the descending node
-/// because a body at it is moving north: `(n × u) · g = 1 - (n · g)²`, positive unless the two
-/// planes coincide. Within about a degree of coinciding the cross product is too short to
-/// normalize, and the zero falls back to the galactic center projected into the plane.
-fn zero_longitude(n: DVec3) -> DVec3 {
-    const COINCIDENT: f64 = 1.745e-2;
-    let node = galactic::north_pole().cross(n);
-    if node.length() > COINCIDENT {
-        return node.normalize();
-    }
-    let center = galactic::center();
-    (center - n * center.dot(n)).normalize_or(n.any_orthonormal_vector())
 }
 
 /// A [`Plane`] resolved against one system: the frame the map actually measures in.

@@ -46,6 +46,26 @@ pub fn center() -> DVec3 {
     equatorial::ecliptic_direction(CENTER_RA, CENTER_DEC)
 }
 
+/// Where longitude starts in a plane whose normal is `n`: its ascending node on the galactic
+/// plane.
+///
+/// Computable by anyone from the plane alone, so two observers who solved the same plane agree
+/// on it, and it moves only with the plane's own error. There is no vernal equinox to borrow.
+///
+/// `g.cross(n)` lies in both planes, and is the ascending rather than the descending node
+/// because a body at it is moving north: `(n x u) . g = 1 - (n . g)^2`, positive unless the two
+/// planes coincide. Within about a degree of coinciding the cross product is too short to
+/// normalize, and the zero falls back to the galactic center projected into the plane.
+pub fn zero_longitude(n: DVec3) -> DVec3 {
+    const COINCIDENT: f64 = 1.745e-2;
+    let node = north_pole().cross(n);
+    if node.length() > COINCIDENT {
+        return node.normalize();
+    }
+    let center = center();
+    (center - n * center.dot(n)).normalize_or(n.any_orthonormal_vector())
+}
+
 /// A right-handed orthonormal basis for the galactic frame, in simulation space: `(u, v, n)`.
 ///
 /// `n` is the north pole and `u` points at the galactic center. The two published directions

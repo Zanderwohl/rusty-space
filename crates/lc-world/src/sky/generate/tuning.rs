@@ -67,6 +67,13 @@ pub struct Ladder {
     /// number repeated.
     pub spacing: (f64, f64),
     pub max_rungs: usize,
+    /// Mutual Hill radii two giants must be apart, or the pair is not a pair for long.
+    ///
+    /// `2*sqrt(3)` is where two planets stop being analytically stable; a system that has to
+    /// last billions of years wants nearer ten. The ladder's spacing is a ratio and takes no
+    /// account of mass, so it puts neighboring giants far inside this -- a third of adjacent
+    /// pairs came out under ten, the worst at 2.5 -- and the pair that cannot last merges.
+    pub hill_separation: f64,
     /// Share of a feeding zone's solids that ends up in the body, drawn per rung.
     pub efficiency: (f64, f64),
     /// Smallest body that counts as a planet, Earth masses.
@@ -254,6 +261,7 @@ impl Default for Tuning {
                 first_rung: (1.0, 10.0),
                 spacing: (1.35, 2.1),
                 max_rungs: 24,
+                hill_separation: 8.0,
                 efficiency: (0.35, 1.0),
                 smallest_earths: 0.02,
                 growth_over_snow: 4.5,
