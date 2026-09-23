@@ -9,6 +9,7 @@ use bevy_egui::egui;
 
 use lc_world::knowledge::conclusion::{Kind, SETTLED};
 use lc_world::knowledge::record::{Method, Orientation};
+use lc_world::knowledge::sort::Measured;
 use lc_world::knowledge::{BodyBelief, BodyId, Placed, SystemPlane};
 use lc_world::navigation::Target;
 use lc_world::sky::StarId;
@@ -206,7 +207,7 @@ fn details(
         ui.label(format!("Speed: {}", with_error(velocity.length() / 1000.0, sigma / 1000.0, "km/s")))
             .on_hover_text("From the orbit, not from any measurement of its own");
     }
-    ui.label(format!("Type: {}", type_text(belief)));
+    ui.label(format!("Type: {}", type_text(belief, game)));
     ui.label(format!("Orientation: {}", orientation_text(belief.orientation)));
 
     egui::CollapsingHeader::new("Sources").default_open(true).show(ui, |ui| {
@@ -252,7 +253,25 @@ fn with_error(value: f64, sigma: f64, unit: &str) -> String {
 }
 
 /// The hypotheses, most probable first, as percentages.
-fn type_text(belief: &BodyBelief) -> String {
+///
+/// What a body has been measured to be beats what its transits implied: a radius, a density and
+/// a colour say what kind of world it is, and a transit only says rocky or giant. The transit
+/// reading is what is left when nothing has been measured. See `lc_world::knowledge::sort`.
+fn type_text(belief: &BodyBelief, game: &Game) -> String {
+    let star = game.system.as_ref().and_then(|s| game.stars.iter().find(|c| c.id == s.star));
+    if let Some(star) = star {
+        let measured = Measured::from_belief(belief, &star.star);
+        let named: Vec<String> = game
+            .sorts()
+            .given(&measured)
+            .into_iter()
+            .filter(|(_, p)| *p >= WORTH_LISTING)
+            .map(|(sort, p)| format!("{} {:.0}%", sort.label(), p * 100.0))
+            .collect();
+        if !named.is_empty() {
+            return named.join(", ");
+        }
+    }
     let named: Vec<String> = belief
         .kind
         .iter()

@@ -150,6 +150,51 @@ impl Measured {
             .into_iter()
     }
 
+    /// What a craft's own file on a body says, read as the six numbers.
+    ///
+    /// Nothing here is a new measurement: every number is already in the file with a witness on
+    /// it, so a type is derived rather than stated and needs no record of its own. It moves the
+    /// moment a better measurement arrives.
+    ///
+    /// Colours divide the star out. A craft measures a flux ratio between two bands, and what
+    /// it wants is the body's reflectance ratio -- the range to the body and the star's output
+    /// both cancel, which is why a colour is the one thing a distant craft can read cleanly.
+    ///
+    /// The albedo is left unmeasured. It needs the body's distance from its star *and* the
+    /// range to the craft, and a belief carries neither; see `lightcone/docs/25-system-knowledge.md`.
+    pub fn from_belief(belief: &super::BodyBelief, star: &crate::star::Star) -> Self {
+        let radius_earths = belief.radius_m.map(|(r, s)| (r / disc::EARTH_RADIUS, s / disc::EARTH_RADIUS));
+        let density = match (belief.radius_m, belief.mass_kg) {
+            (Some((r, rs)), Some((m, ms))) if r > 0.0 && m > 0.0 => {
+                let volume = 4.0 / 3.0 * std::f64::consts::PI * r.powi(3);
+                let value = m / volume;
+                // Three radii in the volume, so its fractional error counts three times.
+                let fraction = ((ms / m).powi(2) + 9.0 * (rs / r).powi(2)).sqrt();
+                Some((value, value * fraction))
+            }
+            _ => None,
+        };
+        let equilibrium = belief.semi_major_au.map(|(a, sigma)| {
+            let value = equilibrium_at(star, a * crate::sky::generate::AU);
+            // Temperature goes as the inverse square root of the radius.
+            (value, value * 0.5 * (sigma / a.max(f64::MIN_POSITIVE)).abs())
+        });
+        let color = |over: Band, under: Band| {
+            let (ratio, sigma) = belief.colors.as_ref()?.color(over, under)?;
+            let sun = em_spectra::blackbody::band_radiance(over, star.teff_k)
+                / em_spectra::blackbody::band_radiance(under, star.teff_k);
+            (sun > 0.0 && sun.is_finite()).then_some((ratio / sun, sigma / sun))
+        };
+        Self {
+            radius_earths,
+            density_kg_m3: density,
+            equilibrium_k: equilibrium,
+            albedo: None,
+            red: color(Band::R, Band::B),
+            methane: color(Band::K, Band::R),
+        }
+    }
+
     /// What a survey reads off a body it has been close to.
     ///
     /// The radius and the density are what proximity gives; the temperature is the orbit and
@@ -301,12 +346,12 @@ pub fn equilibrium_at(star: &crate::star::Star, semi_major_m: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests_support {
     use super::*;
     use crate::sky::{AuthoredStars, StarId, StarProvider};
 
     /// A main-sequence star of this luminosity, with the columns a catalogue would give it.
-    fn star_of(key: u64, luminosity: f64) -> CatalogueStar {
+    pub fn star_of(key: u64, luminosity: f64) -> CatalogueStar {
         let teff = 5772.0 * luminosity.powf(0.13);
         let mut s = AuthoredStars::sample().stars()[1].clone();
         s.id = StarId::synthesise("sorts", key);
@@ -322,7 +367,7 @@ mod tests {
         s
     }
 
-    fn neighborhood(keys: std::ops::Range<u64>) -> Vec<CatalogueStar> {
+    pub fn neighborhood(keys: std::ops::Range<u64>) -> Vec<CatalogueStar> {
         keys.map(|k| {
             let u = crate::rng::uniform(crate::rng::hash(&[k, 0x1u64]));
             star_of(k, 10f64.powf(-2.0 + 3.0 * u * u))
@@ -331,7 +376,7 @@ mod tests {
     }
 
     /// Truth and a perfect reading of it, for every planet of these stars.
-    fn truths(stars: &[CatalogueStar]) -> Vec<(Sort, Measured)> {
+    pub fn truths(stars: &[CatalogueStar]) -> Vec<(Sort, Measured)> {
         stars
             .iter()
             .flat_map(|s| {
@@ -351,6 +396,13 @@ mod tests {
             })
             .collect()
     }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::tests_support::*;
 
     /// **The test this whole module exists for.** Build the prior from one set of stars, then
     /// classify the planets of stars it has never seen. Held out, because a classifier scored
@@ -548,5 +600,122 @@ mod tests {
             assert!(!sort.label().is_empty());
         }
         assert!(!Sort::GasGiant.has_a_surface() && Sort::Ocean.has_a_surface());
+    }
+}
+
+#[cfg(test)]
+mod from_a_file {
+    use super::*;
+    use super::tests_support::*;
+    use crate::knowledge::{BodyId, Knowledge, Witness};
+
+    /// **What a craft's own file reads as.** The chain has to survive the round trip: a body is
+    /// visited, its measurements go into the file with a witness on each, and reading them back
+    /// out has to give the same answer as reading the body directly.
+    #[test]
+    fn a_file_reads_as_the_body_it_is_about() {
+        let star = star_of(7, 1.0);
+        let prior = Sorts::measure(&neighborhood(0..400));
+        let planets = planets_of(&star);
+        let mut checked = 0;
+
+        for planet in planets.iter().filter(|p| p.radius_earths() < 6.0) {
+            let truth = Sort::of(planet.class, planet.atmosphere, planet.top, planet.equilibrium_k);
+            let world = crate::worlds::of(
+                &planet.name,
+                Surface::classify(planet.radius_m, planet.mass_kg, planet.equilibrium_k),
+                &Stated::tags(planet.atmosphere, planet.top, planet.class == Class::GasGiant),
+            );
+
+            // What a file would hold: a radius, a mass, an orbit and per-band photometry.
+            let mut colors = crate::knowledge::Colors::new(Witness(1));
+            for visit in 0..8 {
+                let flux = em_spectra::PerBand::new(std::array::from_fn(|i| {
+                    let band = Band::ALL[i];
+                    let reflect = world.reflectance_in(band);
+                    (reflect > 0.0).then(|| {
+                        reflect * em_spectra::blackbody::band_radiance(band, star.star.teff_k)
+                    })
+                }));
+                colors.fold(visit as f64, &flux);
+            }
+            let volume = 4.0 / 3.0 * std::f64::consts::PI * planet.radius_m.powi(3);
+            let belief = crate::knowledge::BodyBelief {
+                radius_m: Some((planet.radius_m, planet.radius_m * 0.01)),
+                mass_kg: Some((planet.mass_kg, planet.mass_kg * 0.03)),
+                semi_major_au: Some((planet.semi_major_m / crate::sky::generate::AU, 0.001)),
+                colors: Some(colors),
+                ..empty_belief(star.id)
+            };
+
+            let measured = Measured::from_belief(&belief, &star.star);
+            // The same numbers, by a different route.
+            let direct = Measured::of(
+                &world,
+                planet.radius_earths(),
+                planet.mass_kg / volume,
+                planet.equilibrium_k,
+            );
+            for (a, b) in [
+                (measured.radius_earths, direct.radius_earths),
+                (measured.density_kg_m3, direct.density_kg_m3),
+                (measured.equilibrium_k, direct.equilibrium_k),
+                (measured.red, direct.red),
+                (measured.methane, direct.methane),
+            ] {
+                let (Some((a, _)), Some((b, _))) = (a, b) else { panic!("{} lost a reading", planet.name) };
+                assert!((a / b - 1.0).abs() < 0.02, "{}: {a} against {b}", planet.name);
+            }
+            // Leading, or a serious share of the posterior. A body sitting on a threshold --
+            // 500 K is where bare rock starts to run -- is genuinely two things at once, and
+            // the answer says so rather than picking.
+            let out = prior.given(&measured);
+            let held = out.iter().find(|(s, _)| *s == truth).map_or(0.0, |(_, p)| *p);
+            assert!(held > 0.25, "{}: {truth:?} holds only {held:.2} of {out:?}", planet.name);
+            checked += 1;
+        }
+        assert!(checked > 3, "only {checked} bodies");
+    }
+
+    /// A file with nothing in it says nothing, and a file with only an orbit says only what an
+    /// orbit is worth.
+    #[test]
+    fn an_empty_file_is_not_a_guess() {
+        let star = star_of(7, 1.0);
+        let prior = Sorts::measure(&neighborhood(0..200));
+        let bare = empty_belief(star.id);
+        assert!(Measured::from_belief(&bare, &star.star).is_empty());
+        assert!(prior.given(&Measured::from_belief(&bare, &star.star)).is_empty());
+
+        let orbit_only = crate::knowledge::BodyBelief { semi_major_au: Some((1.0, 0.01)), ..bare };
+        let measured = Measured::from_belief(&orbit_only, &star.star);
+        assert!(measured.equilibrium_k.is_some() && measured.radius_earths.is_none());
+        let out = prior.given(&measured);
+        assert!(out.len() > 3, "a distance alone should rule almost nothing out: {out:?}");
+    }
+
+    fn empty_belief(star: crate::sky::StarId) -> crate::knowledge::BodyBelief {
+        let body = BodyId::of(star, "one");
+        let k = Knowledge::new(Witness(1));
+        let _ = &k;
+        crate::knowledge::BodyBelief {
+            subject: crate::knowledge::Subject::Body { star, body },
+            body,
+            name: None,
+            kind: Vec::new(),
+            period_s: None,
+            semi_major_au: None,
+            orientation: crate::knowledge::Orientation::Unknown,
+            method: None,
+            position_now: crate::knowledge::Placed::Unknown,
+            radius_m: None,
+            spin_s: None,
+            velocity_m_s: None,
+            about: None,
+            colors: None,
+            mass_kg: None,
+            stated_by: None,
+            hops: 0,
+        }
     }
 }

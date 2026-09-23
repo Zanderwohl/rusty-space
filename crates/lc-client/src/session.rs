@@ -94,6 +94,13 @@ pub struct Scene {
 
 pub struct Session {
     pub stars: Vec<CatalogueStar>,
+    /// The generator's own population of worlds, as a prior over what a measured body is.
+    ///
+    /// Built from this craft's sky the first time a type is asked for and not before: it costs
+    /// a few hundred generated systems, and a player who never opens the System window never
+    /// pays for it. Derived from the same stars every other belief is read against, so no craft
+    /// is classifying against a sky it cannot see.
+    sorts: std::sync::OnceLock<lc_world::knowledge::sort::Sorts>,
     pub observer: Coord,
     pub telescope: Instrument,
     pub mapping: BandMapping,
@@ -142,6 +149,11 @@ pub struct Session {
 }
 
 impl Session {
+    /// What kind of world a measured body is, against this craft's own sky.
+    pub fn sorts(&self) -> &lc_world::knowledge::sort::Sorts {
+        self.sorts.get_or_init(|| lc_world::knowledge::sort::Sorts::measure(self.stars.iter()))
+    }
+
     /// Take the nearest stars to the origin and model a few of them.
     pub fn new(provider: &dyn StarProvider, count: usize) -> Self {
         let mut stars: Vec<CatalogueStar> = provider.stars().to_vec();
@@ -155,6 +167,7 @@ impl Session {
 
         let sky_model = Sky::new(Arc::new(stars.clone()));
         let mut session = Self {
+            sorts: std::sync::OnceLock::new(),
             stars,
             observer: Coord::ORIGIN,
             telescope: SHIP_SENSOR,

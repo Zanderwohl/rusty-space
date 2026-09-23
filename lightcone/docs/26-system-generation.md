@@ -261,6 +261,20 @@ solar-metallicity disc, where the minimum-mass nebula is fifty. Twelve percent d
 optimistic habitable zone. A runaway core of eight Earths rather than ten. A hundred captured
 moons where the count is a performance question as much as a physical one.
 
+## Reading it back
+
+The generator is also the prior a craft classifies against. A survey measures a radius, a
+density, a temperature and a colour, and `knowledge::sort` weighs those against this same code's
+own population of worlds to answer what kind of body it is — as a list of types with
+probabilities, because none of those numbers is a type and every one has an error bar.
+
+Two consequences are worth stating here, because they are properties of the rules above rather
+than of the classifier. The types are very nearly a function of radius, density and temperature,
+since the retention chain that decides a body's air is a function of exactly those. And the one
+pair that escapes it is Venus against Earth, which differ only in whether there is water under
+the air — so telling a habitable world from a dead one needs a colour, and a colour needs a
+visit. See [25-system-knowledge.md](25-system-knowledge.md).
+
 ## Open
 
 - **Extreme ultraviolet is taken as bolometric.** M dwarfs are XUV-loud out of proportion to

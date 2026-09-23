@@ -1116,6 +1116,81 @@ amber unacknowledged triangle a message gets would be a lie here. A player who w
 sends it again. That notification should name the system for a scoped report rather than counting
 stars, since "told you about 1 star" is a poor description of a survey of Sol.
 
+## What kind of world it is
+
+A survey measures a radius, a density, a temperature and a colour. None of those is a type, and
+no threshold on any of them is one either: a 1.4-Earth-radius body is a super-Earth or a small
+sub-Neptune depending on its density, an ocean and a greenhouse world differ only in how bright
+and how blue they are, and every one of those numbers has an error bar.
+
+So the answer is a list of types with probabilities, and **the prior is the generator itself** —
+the same code that made the body, sampled over the stars this craft can see. `knowledge::sort`
+holds it. Nine types, each derived in one place from what the generator decided:
+
+| type | what it is |
+|---|---|
+| gas giant | a core that reached runaway and took all the hydrogen it could |
+| ice giant | a core that took a little; methane-blue, and dark in the near infrared for it |
+| sub-Neptune | a rocky or icy core that kept the hydrogen it was born under |
+| ocean | liquid water at the top |
+| greenhouse | an opaque deck with nothing wet under it — Venus |
+| desert | a trace of air over dry ground — Mars |
+| ice world | ice at the top, whatever is under it |
+| barren | airless rock |
+| molten | airless rock hot enough to run |
+
+**Nothing is stated.** Every number the classification reads — the radius, the mass, the orbit,
+the per-band photometry — is already in the file with a witness on it, so a type is derived
+rather than recorded and needs no record, no wire format and no lineage of its own. It moves the
+moment a better measurement arrives, and two craft holding different evidence honestly disagree.
+
+Colours divide the star out. A craft measures a flux ratio between two bands and wants the
+body's reflectance ratio; the range to the body and the star's own output both cancel, which is
+why a colour is the one thing a distant craft reads cleanly. The albedo does not cancel — it
+needs the body's distance from its star *and* the range to the craft — so it is left unmeasured
+for now.
+
+### What it costs to find out
+
+Three measurements, and they are the argument for going anywhere.
+
+**A transit and an orbit** give a radius and a temperature, and that is everything until
+somebody goes. Two numbers go a long way: they settle whether a body has a surface nearly
+always, and they name it outright more often than not — a small hot body is molten and an
+eleven-Earth-radius body is a giant, and neither needs a second opinion.
+
+What they cannot do is tell a habitable world from a dead one. **Ocean, greenhouse and desert
+are the same size at the same distance**, and from across the system they stay a three-way
+split. That is the reason to fly there, and it is a consequence of the chain in
+[26-system-generation.md](26-system-generation.md) rather than a rule written to produce it.
+
+**A visit** adds a mass, and so a density, and resolves the body enough to read its colour.
+Held out and measured this well, the classifier recovers 998 of every 1000, and every call it
+reports as settled is right.
+
+**Colour earns its place in exactly one spot**, and it is the one that matters. The types are
+very nearly a function of radius, density and temperature, because the retention chain that
+decides a body's air is a function of exactly those. The exception is Venus against Earth: the
+same size, the same density, nearly the same temperature, separated only by whether there is
+water under the air — which a magnetic field decides, and which leaves no mark on any of the
+three. Colour takes that error from one in five to one in two hundred. That is what the per-band
+photometry above is for.
+
+### Why a generated body has a colour at all
+
+It did not, until this. Every generated body was flat at its class albedo, so a generated ocean,
+ice world and bare rock of one radius, mass and temperature were the same body in every band.
+
+The generator already decides an atmosphere and a top, and now says so through `em-sim`'s tags —
+the same channel `navigation::Kind` uses, for the same reason: the data states what a body is
+and nothing downstream re-derives it. `worlds::of` reads the tags and shapes a reflectance run
+from the measured bodies: an ocean is Earth's curve, a deck is Venus's where it is warm and
+Titan's where it is not, a gas giant is Jupiter's and an ice giant is Uranus's.
+
+Each body departs from its type's curve by a brightness factor and a tilt, keyed by its id.
+**Not decoration.** Without it the reflectance is a pure function of the type, a colour would
+identify the type exactly, and a hypothesis would never hold more than one entry.
+
 ## The system's plane
 
 A belief on the **star's** subject, recomputed whenever an orbit changes, never stored:
