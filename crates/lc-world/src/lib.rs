@@ -48,6 +48,7 @@ pub mod surface;
 pub mod system;
 pub mod transfer;
 pub mod worldline;
+pub mod visit;
 pub mod worlds;
 
 pub use distribution::{Distribution, Inclination};

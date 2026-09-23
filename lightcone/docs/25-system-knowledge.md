@@ -264,13 +264,20 @@ pair, floored at the resolution so it could only ever widen.
 
 What that actually came to, measured rather than assumed:
 
-| what is being looked for, from 5 AU | old blind spot around the sun |
-|---|---|
-| Jupiter, reflecting in V | 0.017° |
-| Saturn | 0.067° |
-| Mars | 0.18° |
-| a Sun-like star 100 ly off | 0.68° |
-| the faintest source the instrument reaches at all | the whole sky |
+| what is being looked for, from 5 AU | old blind spot | new one |
+|---|---|---|
+| Jupiter, reflecting in V | 0.0083° | one resolution element |
+| Venus | 0.012° | one resolution element |
+| Earth | 0.021° | one resolution element |
+| Saturn, at 9 AU range | 0.035° | one resolution element |
+| Mars | 0.088° | one resolution element |
+| a Sun-like star 100 ly off | 0.68° | 1.6 resolution elements |
+| the faintest source the instrument reaches at all | the whole sky | 4.3° |
+
+A planet's reflected flux there is `incident_in_band * geometric_albedo * (radius / range)^2`,
+which is what a geometric albedo is defined against. Getting that relation wrong in either
+direction is easy and the check is a known magnitude: Jupiter comes out at 2.6e-8 W/m^2 in V
+from 5 AU, against 2.7e-8 read off its -2.7 at opposition. See [`visit`].
 
 So **Jupiter was never hidden,** and neither was any other major planet: the radius already had
 the faint source's own brightness in it, and a planet at 5 AU is a billion times brighter than a
@@ -329,7 +336,36 @@ Two floors it is deliberately not:
 Mercury and Venus at inner elongations stay hidden, which is correct and is the same reason they
 are hard from Earth.
 
-**What one visit measures,** per body:
+**What one visit measures,** per body. ✅ The *truth* side is **built** (2026-09-22) as
+`lc_world::visit`: `Visit { body, toward, range_m, diameter_rad, phase_rad, flux }` for every
+body of a system as its light arrives at a point, brightest first. What it settled:
+
+- **Reflected light is `incident_in_band * geometric_albedo * (radius / range)^2`,** which is
+  what a geometric albedo is defined against — a flat disc of the body's own radius, no factor
+  of pi. Easy to get wrong by four or by pi in either direction, so the test is an independent
+  number rather than the formula again: Jupiter comes out at 2.6e-8 W/m² in V from 5 AU, against
+  2.7e-8 read off its V of -2.7 at opposition. An earlier pass here was four times low and put
+  four times too small a number in the glare table above.
+- **The band flux, not the bolometric one.** `survey::flux_from` already gives it. The Sun is
+  153 W/m² at 1 AU in V against 1361 bolometric, and using the wrong one is a factor of nine.
+- **Thermal emission carries no phase factor,** because it comes off the whole sphere rather
+  than the lit crescent. It is the one thing a body still gives at conjunction, and the reason
+  the radio band can find a surface under cloud at all.
+- **A giant's temperature is its own.** `Drawable::effective_k` already held this from phase 5,
+  and Jupiter radiates above what its distance would allow.
+- **Rings reflect,** over whatever of their cross-section is turned toward both the star and the
+  ship, at their own albedo. The geometry was already worked out in `drawables_at` for the
+  renderer's gray path; not carrying it over would have made the one body in Sol with rings the
+  one whose brightness is wrong.
+- **The join key is `Drawable::name`,** which is the same expression `build_inventory` puts in
+  `Target::Body` — so `BodyId::of(star, &visit.body)` names the same body the navigation list
+  does. It is *not* the `em-sim` arena id that `worlds` and `rings` are keyed by, which differs
+  for Luna among others. Both keys are live and a test asserts every visit matches an inventory
+  entry, because the wrong one would silently name nothing.
+
+Still to come is the knowledge side: turning these into sightings under `Subject::Body`.
+
+Per body:
 
 - a bearing, to the centroid precision the disc's brightness allows (`astrometry`);
 - the angular diameter, once resolved, and its oblateness;

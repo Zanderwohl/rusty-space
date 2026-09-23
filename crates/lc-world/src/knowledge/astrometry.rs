@@ -348,6 +348,44 @@ mod tests {
         assert!(position_ly.distance(star) < 1.0e-3, "{position_ly} against {star}");
     }
 
+    /// A wider orbit is a wider baseline and buys precision on everything out in the sky,
+    /// linearly. The host star is the one thing it does not help: it sits at the center of the
+    /// orbit, so the baseline and the range to it grow together.
+    #[test]
+    fn a_wider_orbit_buys_the_sky_and_not_the_sun() {
+        let star = DVec3::new(2.0, -1.0, 0.5);
+        let far = star + DVec3::X * 10.0;
+        let sigma = 2.979e-7 * CENTROID_FLOOR;
+        let round = |radius: f64, target: DVec3, salt: u64| -> f64 {
+            let bearings: Vec<Bearing> = (0..16u64)
+                .map(|i| {
+                    let phase = std::f64::consts::TAU * i as f64 / 16.0;
+                    let at = star + DVec3::new(phase.cos(), phase.sin(), 0.0) * radius;
+                    sighted(target, at, sigma, i + salt)
+                })
+                .collect();
+            match triangulate(&bearings) {
+                Distance::Measured { sigma_ly, .. } => sigma_ly,
+                other => panic!("{radius} ly orbit gave {other:?}"),
+            }
+        };
+
+        let (near, wide) = (1.0 * AU_LY, 30.0 * AU_LY);
+        let gain = round(near, far, 500) / round(wide, far, 500);
+        assert!(
+            (gain - 30.0).abs() < 1.0,
+            "thirty times the baseline is {gain} times the precision"
+        );
+
+        // And the sun's own fractional precision is the same from either orbit.
+        let host = |radius: f64| radius / round(radius, star, 0);
+        let (close, out) = (host(near), host(wide));
+        assert!(
+            (close / out - 1.0).abs() < 0.2,
+            "a part in {close:e} from 1 AU against {out:e} from 30"
+        );
+    }
+
     #[test]
     fn half_an_orbit_measures_a_nearby_star() {
         let star = DVec3::new(3.0, 2.5, 1.0);

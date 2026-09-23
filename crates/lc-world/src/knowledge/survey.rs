@@ -665,10 +665,12 @@ mod tests {
             faintest.to_degrees()
         );
 
-        // Jupiter's reflected V flux from 5 AU off, worked from the same sun: a disc of
-        // 7e7 m at 5.2 AU returning half of what falls on it.
-        let sunlight = flux_from(&sun(), Band::V, 5.2 * AU_M);
-        let jupiter = sunlight * 0.5 * (6.99e7 * 6.99e7) / (4.0 * (5.0 * AU_M) * (5.0 * AU_M));
+        // Jupiter's reflected V flux from 5 AU off, worked from the same sun. A geometric
+        // albedo is defined against a flat disc of the body's own radius, so this is
+        // `incident * albedo * (radius / range)^2` -- `visit::of` is where it belongs, and
+        // getting the factor wrong here would have understated the hole by four.
+        let sunlight = flux_from(&sun(), Band::V, 5.203 * AU_M);
+        let jupiter = sunlight * 0.52 * (6.991e7 / (5.0 * AU_M)) * (6.991e7 / (5.0 * AU_M));
         let hole = glare_radius_rad(resolution, host, optics.counts(Band::V, jupiter, DWELL_S));
         assert!(
             (hole - resolution).abs() < resolution * 1e-6,
