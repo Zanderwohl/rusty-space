@@ -219,8 +219,8 @@ impl<J: Journal> Server<J> {
             let Some(subject) = aboard.knowledge.unfitted(star) else { continue };
             self.instruments.fitter = Some(id);
             fits += 1;
+            // No recount after: a fit changes no samples, and a recount is a pass over every file.
             aboard.knowledge.fit_orbit(subject, star_ly, now_s);
-            self.fit(id, true);
         }
     }
 
@@ -1041,5 +1041,52 @@ mod tests {
         }
         let per_tick = started.elapsed() / TICKS;
         eprintln!("a tick with 100 craft sweeping, 10 000 files each: {per_tick:?}");
+    }
+
+    /// Ten craft surveying one system for a coordinate week, drifting so they measure parallax
+    /// and fit orbits. A timing, not a check: `cargo test -p lc-server --lib a_surveying_shard
+    /// -- --ignored --nocapture`. See `lightcone/docs/plans/server-tick-lag.md`.
+    #[tokio::test]
+    #[ignore]
+    async fn a_surveying_shard_is_measured() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.load_world(World::new(sky()));
+        let mut wire = Loopback::new();
+        let star = sky()[0].id;
+        let at = sky()[0].position_ly;
+        let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
+        const CRAFT: i64 = 10;
+        for n in 0..CRAFT {
+            let ship = ShipId(1_000 + n);
+            // A few AU out, spread round the star, each drifting across its own line of sight.
+            let u = n as f64 / CRAFT as f64 * std::f64::consts::TAU;
+            let offset = DVec3::new(u.cos(), u.sin(), 0.0) * 3.0 * 1.58e-5;
+            server.admit(ClientId(n as u64 + 1), crate::world::still(ship, at + offset), 0.0);
+            if let Some(craft) = server.fleet_mut().get_mut(CraftId(ship.0)) {
+                craft.motion.beta = DVec3::new(-u.sin(), u.cos(), 0.0) * 1.0e-6;
+            }
+            wire.client_says(ClientId(n as u64 + 1), act(ship, Order::SetDuty { duty: duty.clone(), integration_s: 1.0e4 }));
+        }
+        const TICKS: u32 = 1_400;
+        let mut total = std::time::Duration::ZERO;
+        let mut worst: Option<crate::timing::Stages> = None;
+        let mut slow = 0;
+        for _ in 0..TICKS {
+            server.tick(&mut wire).await.unwrap();
+            for n in 0..CRAFT as u64 {
+                wire.take(ClientId(n + 1));
+            }
+            let tick = server.last_tick();
+            total += tick.total();
+            slow += usize::from(tick.total() > std::time::Duration::from_millis(crate::server::TICK_MS as u64));
+            if worst.as_ref().is_none_or(|w| tick.total() > w.total()) {
+                worst = Some(tick.clone());
+            }
+        }
+        eprintln!(
+            "{CRAFT} craft surveying for {TICKS} ticks: mean {:?}, {slow} over budget, worst {}",
+            total / TICKS,
+            worst.map_or_else(String::new, |w| w.to_string()),
+        );
     }
 }

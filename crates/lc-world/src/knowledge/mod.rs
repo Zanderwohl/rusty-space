@@ -353,7 +353,7 @@ pub struct Knowledge {
     /// so ranking the queue by what has been stated leaves that body at the front of it
     /// forever and every other body in the system is never fitted at all. Not compared, not
     /// saved and not reported, because an attempt is not something a craft knows.
-    tried: BTreeMap<Subject, f64>,
+    tried: BTreeMap<Subject, primary::Attempt>,
     /// See [`room`].
     capacity_bytes: f64,
     occupied_bytes: f64,

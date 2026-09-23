@@ -1619,17 +1619,28 @@ mod tests {
 
         // Every body is served in turn, although not one of them can be fitted.
         let mut served = Vec::new();
-        for tick in 0..6 {
-            let due = k.unfitted(star).expect("something is always due here");
+        for tick in 0..3 {
+            let due = k.unfitted(star).expect("each body is due once");
             served.push(due);
             assert!(!k.fit_orbit(due, DVec3::X, 100.0 + tick as f64), "none of these can be fitted");
         }
         for n in 1..=3u64 {
             assert!(served.contains(&subject(n)), "{:?} never got a turn: {served:?}", subject(n));
         }
-        // And it is a rotation rather than a shuffle: three bodies, so the fourth turn is the
-        // first body again.
-        assert_eq!(served[0], served[3], "{served:?}");
+
+        // Then nothing, however many ticks go by: the same arc fails the same way, and
+        // retrying it every tick is what held a whole shard's tick for as long as anyone
+        // surveyed.
+        assert_eq!(k.unfitted(star), None, "a failed fit is offered again with nothing new");
+
+        // A look that barely lengthens the arc is not enough either.
+        let span = (LOOKS_NEEDED - 1) as f64;
+        k.sighted(subject(2), sighting(span * 1.2));
+        assert_eq!(k.unfitted(star), None, "a fifth longer is not a new arc");
+
+        // A longer one is.
+        k.sighted(subject(2), sighting(span * 2.0));
+        assert_eq!(k.unfitted(star), Some(subject(2)), "the arc grew and it gets another turn");
     }
 
     fn orbit_of() -> crate::knowledge::Orbit {

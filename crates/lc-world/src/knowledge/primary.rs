@@ -23,6 +23,25 @@ use crate::sky::StarId;
 /// bearing points at the star, a moon's at its planet.
 const PRIMARIES_TRIED: usize = 3;
 
+/// How much longer an arc must be than at the last attempt before a body is fitted again.
+const REFIT_GROWTH: f64 = 1.5;
+
+/// A fit attempted, and how long an arc it had. See [`Knowledge::unfitted`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Attempt {
+    pub at_s: f64,
+    pub span_s: f64,
+}
+
+/// Seconds from the oldest look held to the newest. Decimation keeps the ends, so this only
+/// grows.
+fn span_s(sightings: &[super::Sighting]) -> f64 {
+    let (first, last) = sightings
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(lo, hi), s| (lo.min(s.observed_s), hi.max(s.observed_s)));
+    (last - first).max(0.0)
+}
+
 impl crate::knowledge::Knowledge {
     /// The bearings held about a body, in the frame of a primary that was at `primary_at` at
     /// each look's own time.
@@ -42,22 +61,27 @@ impl crate::knowledge::Knowledge {
         })
     }
 
-    /// The body of `star` most in need of an orbit: one whose bearings have grown since its
-    /// orbit was last stated, longest since its last attempt first.
-    ///
-    /// Round-robin by age rather than by any measure of promise. A fit costs about a tick, so
-    /// what matters is that every body gets its turn and none is starved.
+    /// The body of `star` most in need of an orbit: one whose arc has grown since it was last
+    /// attempted, longest since that attempt first.
     ///
     /// **By attempt, not by statement.** An arc that cannot yet shape an orbit states nothing,
     /// so ranking by what was stated leaves that body at the front of the queue on every tick
     /// and nothing else in the system is ever fitted. Saturn on a three-month arc is enough to
     /// starve Venus, Earth, Mars and Jupiter indefinitely.
+    ///
+    /// **And gated on growth, not on a new look.** A survey adds a look to every body each
+    /// rotation, so "anything newer" re-armed the whole system forever and a fit -- far more
+    /// than a tick's work -- ran on every tick while anyone surveyed. The arc's span has to
+    /// reach [`REFIT_GROWTH`] times what the last attempt saw, which is a handful of refits per
+    /// decade of arc: a failed fit waits for its inputs to change, and a good one is revisited
+    /// as the arc it stands on lengthens.
     pub fn unfitted(&self, star: StarId) -> Option<Subject> {
         let mine = |subject: Subject| -> Option<f64> {
             let file = self.file(subject)?;
             if file.sightings().len() < LOOKS_NEEDED {
                 return None;
             }
+            let span = span_s(file.sightings());
             let newest = file.sightings().iter().map(|s| s.observed_s).fold(f64::MIN, f64::max);
             let stated = file
                 .orbits()
@@ -65,8 +89,12 @@ impl crate::knowledge::Knowledge {
                 .filter(|o| o.witness == self.owner && o.method == crate::knowledge::Method::Astrometric)
                 .map(|o| o.stated_s)
                 .fold(f64::MIN, f64::max);
-            let tried = self.tried.get(&subject).copied().unwrap_or(f64::MIN);
-            (newest > stated).then_some(stated.max(tried))
+            let tried = self.tried.get(&subject);
+            if tried.is_some_and(|t| span < t.span_s * REFIT_GROWTH) {
+                return None;
+            }
+            let tried_s = tried.map_or(f64::MIN, |t| t.at_s);
+            (newest > stated).then_some(stated.max(tried_s))
         };
         self.members(star)
             .filter_map(|(subject, _)| match subject {
@@ -149,7 +177,8 @@ impl crate::knowledge::Knowledge {
             })
             .min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad));
         // Recorded whatever comes of it, so the queue moves on. See [`Knowledge::unfitted`].
-        self.tried.insert(subject, now_s);
+        let span_s = self.file(subject).map_or(0.0, |file| span_s(file.sightings()));
+        self.tried.insert(subject, Attempt { at_s: now_s, span_s });
         let Some((about, fitted, looks)) = best else { return false };
         let orbit = fitted.stated(self.owner, about, &looks, now_s);
         self.orbits(subject, orbit);
