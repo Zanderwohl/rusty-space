@@ -12,13 +12,19 @@ exists was checked against the code on 2026-09-22, and the symbols named are rea
 of this document guessed wrong, the correction is in the text rather than quietly removed,
 because the wrong guess was usually "that already exists" about something that does not.
 
-## Where it is today
+## Where it was when this was written
+
+**Superseded.** Every bullet below has since been built out; the corrections are in the text
+under each phase. Kept because the plan that follows only makes sense against what it started
+from.
 
 - The System panel lists `LocalSystem::inventory()`: every body the generator made, with its true
-  orbit radius. The map draws the same truth, and courses resolve against it.
+  orbit radius. The map draws the same truth, and courses resolve against it. *Now: both read
+  belief, and only band rows come from the inventory.*
 - The transit search concludes *a rocky or giant planet on a P-day orbit* about a **star**. No
   body is ever created from it: `Knowledge::found_planet` exists, letters a planet, and has no
-  caller outside tests, not one. `Orbit` carries a single element, `semi_major_au`.
+  caller outside tests, not one. `Orbit` carries a single element, `semi_major_au`. *Now: the
+  shard calls it, and `Orbit` carries nine fields.*
 - ~~The map's **Ecliptic** plane is `+Z`, the ecliptic of J2000, in every system~~ **Fixed,
   phase 1.** It was `+Z` in `normal()`, `basis()` and a comment, so a generated system's planets
   and belts — which orbit `generate::pole_for(seed)` — were tilted out of the plane drawn under
@@ -91,10 +97,12 @@ attitude, and the axes are the arena's. Display longitudes are computed from the
 when the panel asks, which is also what keeps them stable as the plane refines.
 
 `Orbit` is changed in place. The old shape gets no back-reader: the game has no players, so a
-stored knowledge file is worth less than the ceremony of keeping it. `FILE_FORMAT` is 4, decoded
-natively, and its three back-readers `FileV3`, `FileV2` and `FileV1` each embed `Orbit` by name,
-so keeping them would mean freezing an `OrbitV4` beside them and repointing all three. Delete
-those readers with the shape they read, and `OLDEST_FILE_FORMAT` becomes the new one.
+stored knowledge file is worth less than the ceremony of keeping it. `FILE_FORMAT` was 4 when
+this was written, decoded natively, and its three back-readers `FileV3`, `FileV2` and `FileV1`
+each embedded `Orbit` by name, so keeping them would have meant freezing an `OrbitV4` beside
+them and repointing all three. They were deleted with the shape they read. `formats.rs` now
+declares one constant and refuses everything else — there is no oldest format, because there is
+only one.
 
 ## How each thing is learned
 
@@ -220,8 +228,10 @@ fit needs it as a parameter; a moon's orbit measures it. It cannot come from tru
      the regression exactly as before.
 
      Keeping the bearings whose *observer positions* are farthest apart then turns out to be
-     right for a host star after all, so `File::decimate` is untouched: a wide spread is what
-     the new solver wants.
+     right for a host star after all: a wide spread is what the new solver wants. `File::decimate`
+     was left alone for that reason, and changed later for a different one — a craft parked in a
+     system has no spatial spread at all, so it now scores time as a baseline beside position, and
+     drops by least cost to the spread rather than by the older of the closest pair.
 - ~~**A transit `Conclusion` records the host mass it used.**~~ **Dropped in phase 4.** The
   argument was that a receiver could not otherwise turn a relayed period into the same radius the
   sender did. It does not have to: the `Orbit` carries the axis itself, so a receiver reads the
@@ -717,9 +727,11 @@ The cadence below is part of the design, not an afterthought:
   it gets its own budget per tick, apart from the one read a tick the transit search gets
   (`READS_PER_TICK`).
 
-**Fitting the orbit,** which does not exist anywhere in the code today. The only fits in Rust are
-`astrometry::triangulate` and the transit search's box least squares; there is no orbit
-determination of any kind. What to build, and where:
+**Fitting the orbit.** ~~Which does not exist anywhere in the code today.~~ **Built**, as
+`knowledge::arc` — and in `lc-world::knowledge` rather than the `em-foundations` this section
+proposes, for the reason recorded further down: the code took the second option before the
+question was put. What follows is the design as it was argued; read it for the why, and
+`arc.rs` for the answer.
 
 - **Initial orbit determination from three bearings,** by Gauss's method. Three lines of sight
   from known observer positions and an assumed `mu` give a state vector, and
@@ -787,7 +799,7 @@ is already there, and an earlier draft of this section underestimated it badly. 
 | internal heat, as a per-class ratio | `Surface::internal_heat_ratio`, feeding `Surface::effective_temperature`; `effective_k` against `equilibrium_k`, the gray balance |
 | rings, with real radii, optical depths and particle albedo | `lc-world/src/rings.rs`, IAU and Cassini values — **Sol only**: `rings::for_body` is keyed on real body names, so no generated body has rings |
 | rotation period and pole, for Sol | `em-sim/src/presets.rs`, 48 bodies with `BodyRotation::spinning` or `tidally_locked` |
-| eccentricity, for generated planets | `sky/generate.rs:162`, `uniform_in(0.0, 0.12)`; belts have their own |
+| eccentricity, for generated planets | `sky/generate/planet.rs:215`, `uniform_in(0.0, 0.12)`; belts have their own |
 
 `em_spectra::Band` already runs `B, V, R, I, K, ThermalIr, Radio`, and the starfield shader
 already evaluates every one of them and adds a second, thermal blackbody on top
@@ -808,10 +820,9 @@ the rest in phase 5 — and they are kept here because the reasoning is what a l
   at 230 K, a 700 K surface under them — **cannot** come from the classifier. It has to be
   authored, which is what the Sol table below is for, and generated systems need an atmosphere
   drawn from mass and insolation rather than inferred from the class.
-- **Rotation for generated bodies.** Every one is `rotation: None` (`sky/generate.rs:341, 364,
-  374, 395`). Sol has rotation and generated systems have none, so the rotation-period row of the
-  survey table works for Sol and finds nothing anywhere else. Generated rings are absent the same
-  way, and for the same reason.
+- ~~**Rotation for generated bodies.** Every one is `rotation: None`.~~ **Fixed.** A generated
+  planet carries `rotation: Some(spin_of_planet(..))` (`sky/generate/mod.rs:404`); moons and the
+  rest are still `None` (`:348, 371, 381`). Generated rings are still absent.
 - ~~**The star's own spin axis.**~~ **Done in phase 1:** `CatalogStar::spin_axis`, its
   system's pole tilted up to 12°. It went on `CatalogStar` rather than on `Star`, which is also
   a template for `Prior::host_like` and has no business carrying an orientation. Nothing reads it
@@ -1413,12 +1424,12 @@ knowledge. Today:
      departs from the plan. `MapView` carries the `SystemPlane` belief rather than a bare pole,
      because the panel has to say *why* the option is unavailable, and the two ways of not having
      a plane read differently: nothing solved, against a pole known to lie on a circle.
-   - ✅ **The System panel.** Reads `bodies_of`, with the detail section, unsettled candidates
+   - ✅ **The System panel.** Reads the per-frame `beliefs::Held`, which holds one `bodies_of`, with the detail section, unsettled candidates
      dimmed beneath, and the plane line above. Two lines exist to stop a number reading as more
      than it is: *edge-on to one line of sight*, and a transit's distance marked as resting on a
      prior. Courses still join back to a truth target by hashing generator keys, until phase 7.
      Belts are still the generator's, until phase 8.
-   - ✅ **The map.** Draws `bodies_of`. **No new renderer work was needed**, against the
+   - ✅ **The map.** Draws the same `beliefs::Held`. **No new renderer work was needed**, against the
      expectation above: `outline::torus` at a right half-angle already produces a dashed sphere
      outline — the Oort cloud draws one — and its inner and outer radii carry the distance error
      as the shell's own thickness. So the *camera-facing dashed circle* and the *radial error

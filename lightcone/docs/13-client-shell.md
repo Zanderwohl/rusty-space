@@ -103,7 +103,7 @@ Some controls change *what a player can know*, and those are gameplay, not prefe
 
 | control | binding | why it is not in Settings |
 |---|---|---|
-| band mapping preset | `1`-`4` | see [07-rendering.md](07-rendering.md); the composition preset is a diagnostic |
+| band mapping preset | `1`-`6` | see [07-rendering.md](07-rendering.md); the composition preset is a diagnostic |
 | exposure, stops from auto | `[` / `]` | the tone map has no absolute reference, so exposure is a camera control |
 | telescope target and integration | panel | the core loop |
 | scale tier | `Tab`, and automatic by distance | the three tiers behave differently enough to be worth showing |
@@ -116,7 +116,7 @@ with.
 | window | opened by | contents |
 |---|---|---|
 | telescope | `T` | target, band, exposure time, survey regime, the light curve, uncertainty |
-| system | `Y` | bodies and populations of the selected system, at the retarded time |
+| system | `Y` | what this craft believes is in the system it is *in*, not the selected one, with the generator's populations until phase 8 |
 | sky | always | the all-sky map; selection happens here |
 | notifications | automatic | target out of range, observation returned nothing, instrument saturated |
 | communications | `C` | one conversation at a time, chosen from a list of everyone heard from and everyone in sight |
@@ -390,7 +390,7 @@ seven hours twenty times a second having never drifted at all.
 | `--swarm` | target the nearest star carrying a swarm |
 | `--curve <n>` | which band the light curve measures |
 | `--map <bearing:elevation:au>` | pin the map's camera. A light-year is 63 241 astronomical units |
-| `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
+| `--map-plane <system\|galactic>` | which plane the map lays its rings in; `ecliptic` is taken as the old name for `system` |
 | `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto; `local` is the primary in the frame that turns with the ship. A pin, like `--map`, which holds the ship on its own |
 | `--tune` | open the starfield tuning panel |
 | `--frames <n>` | frames before the shutter |
@@ -751,8 +751,10 @@ left it rather than snapping back. The
 button is grayed where nothing holds the ship, which is between the stars; it is not hidden,
 because a control that vanishes shuffles the two either side of it out from under the cursor.
 
-The reference plane is the **local ecliptic or the disc of the galaxy**, and the toggle tilts
-the whole view because the camera's own angles are measured in the plane's basis. Concentric
+The reference plane is the **system's own plane or the disc of the galaxy**, and the toggle
+tilts the whole view because the camera's own angles are measured in the plane's basis. That
+plane is the one this craft has *solved* from the orbits it has fitted, so the toggle is refused
+with a reason until there is one. Concentric
 rings mark order-of-magnitude distances; anything off the plane hangs from a dashed drop-line.
 The reach is a fixed sphere of twenty-five light-years — a reach that moved with the zoom would
 change what exists as well as what is framed.
@@ -946,9 +948,9 @@ of "what is selected" to keep in step with the first.
 That is a statement about state, not about code sharing, but the code follows it: `pick.rs` and
 `map_pick.rs` both reduce what their view drew to `em_ui::picking::Candidate` and both ask
 `em_ui::picking::pick` which one was meant. Neither knows how the other drew anything, which is
-the point — the sky puts stars at their aberrated direction and the map puts them at their true
-one, and picking agrees with each picture because each candidate carries the position its own
-pass used.
+the point — the sky puts stars at their aberrated direction and the map puts them where this craft
+believes they are — a star with no measured distance is not on the map at all — and picking
+agrees with each picture because each candidate carries the position its own pass used.
 
 The quality-of-life rules come with it, unchanged, because they are one function:
 

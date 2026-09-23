@@ -78,15 +78,30 @@ moving further. Three consequences worth keeping:
 
 Least squares over every bearing held, in a frame whose `z` is the mean bearing, as a
 **centered regression of transverse position on slope**. The obvious formulation — the normal
-system `sum (I - u u^T) x = sum (I - u u^T) p` — is numerically hopeless here: its smallest
-eigenvalue *is* the parallax squared, which at an AU of baseline over 25 light-years is 1e-12
-of the others, and inverting that in f64 returns noise. Centering the slopes puts the same
-information in small numbers that subtract cleanly.
+system `sum (I - u u^T) x = sum (I - u u^T) p` — is numerically hopeless *for a distant source*:
+its smallest eigenvalue *is* the parallax squared, which at an AU of baseline over 25
+light-years is 1e-12 of the others, and inverting that in f64 returns noise. Centering the
+slopes puts the same information in small numbers that subtract cleanly.
 
-Bearings are kept per star per witness, capped, and the cap drops **the closest pair** rather
-than the oldest. A reservoir that kept the most recent sixteen would throw away the baseline
-and with it the distance; sixteen well-spread bearings measure a parallax as well as a
-thousand.
+That is the narrow-angle case, and it is not the only one. Past `WIDE_RAD` — a bearing that has
+swung more than about three degrees, which is what a host star 5 AU away does — the source is
+seen from *around* rather than from a baseline, the eigenvalue is no longer tiny, and
+`astrometry::intersect` solves the 3x3 system directly. `triangulate` picks between them on the
+widest bearing it holds.
+
+Bearings are kept per star per witness, capped, and what the cap drops is **the one whose
+removal costs the least spread** — the sum of the distances to its two nearest neighbors. A
+reservoir that kept the most recent sixteen would throw away the baseline and with it the
+distance; sixteen well-spread bearings measure a parallax as well as a thousand. Dropping the
+older of the closest *pair* looks equivalent and is not: on an even cadence every pair ties,
+so that ate a watch from its oldest end. The newest is pinned either way, because it is what
+the display reads.
+
+Spread is measured in two baselines, not one. Parallax needs the observer to have gone
+somewhere; a body's own motion needs only for time to have passed, and a craft parked in a
+system has no spatial baseline at all. Each gap is scored against the widest of its own kind
+among the bearings held, so nothing has to choose a rate of exchange between a light-year and
+a year.
 
 ## A sky has blind spots
 
@@ -98,26 +113,34 @@ been at it. A star is found when the sweep reaches the patch of sky it happens t
 is why the sky fills in gradually and in a pattern, rather than appearing when a panel opens.
 An all-sky pass at two degrees a field and a minute a dwell is about a week of in-game time.
 
-**Glare.** A fainter source inside a brighter one's scattered-light halo is not detected at all.
-With a scatter fraction `k` and resolution `theta`, the faint source is lost within
+**Glare.** A brighter source's scattered-light halo is a background a fainter one has to be
+found against. With a scatter fraction `k = 1e-3`, the halo's surface brightness falls as
+`k * counts / theta^3`, and the radius inside which it buries a source of `faint_counts` is
 
 ```
-theta_block = theta * sqrt(k * F_bright / F_faint)
+theta_block = theta_res * cbrt(k * bright_counts / (2 pi * noise^2)),  noise = faint_counts / 5
 ```
 
-and the same formula covers both cases that matter:
+never less than one resolution element, where the two are one image whatever their contrast.
+The cube root is that falloff read backwards: nine orders of magnitude of contrast cost three
+of separation.
 
-| geometry | ratio | blind radius, 4 m^2 mirror |
-|---|---|---|
-| a neighboring star, 4 ly off, against one at 100 ly | 6e2 | under a milliarcsecond — a close pair, not a blind spot |
-| the sun the telescope is orbiting, at 1 AU, against a star at 100 ly | 4e13 | a few degrees |
-| the same sun against something genuinely faint | 1e16+ | tens of degrees |
+**It is a background, not a veto.** A source near something bright *degrades* — its counts go
+into the noise and its bearing widens — rather than vanishing at a radius. `hidden_by` answers
+which source is in the way, for a reader who wants to be told; the measuring path does not
+consult it. A separate rule does bite absolutely: two sources inside one resolution element are
+one image, whatever their brightness.
 
-So a ship inside a system has a hole in its sky around its own star, and the hole is bigger for
-fainter targets. It is not a rule anybody wrote down; it falls out of one constant. And it
-moves: the star's direction from a ship in orbit sweeps right round over a year, so the way to
-fill the hole is to survey the same sky at a different time from a different place — which is
-what observatories actually do.
+What that comes to, measured rather than assumed, is in
+[25-system-knowledge.md](25-system-knowledge.md) — every major planet observed from 5 AU is
+lost only inside one resolution element, and only the faintest source the instrument reaches at
+all is blind across degrees.
+
+So a ship inside a system has a hole in its sky around its own star for the faintest things
+only, and it is a gradient rather than an edge. It is not a rule anybody wrote down; it falls
+out of one constant. And it moves: the star's direction from a ship in orbit sweeps right round
+over a year, so the way to fill the hole is to survey the same sky at a different time from a
+different place — which is what observatories actually do.
 
 Both are beaten by the same thing: **resolution is a baseline, not an aperture.** Instruments
 combining into one image resolve `lambda / B` for the widest separation `B` between elements,
@@ -213,12 +236,12 @@ anyone has identified its source — and the telescope is what turns it from a l
 
 ## Starting from nothing
 
-**Superseded (2026-09-22):** a new ship is issued nothing at all, not even charts. It knows only
-what it looks at or is told by another craft. See
-[25-system-knowledge.md](25-system-knowledge.md). What follows is the charting office as it was
-designed and is still built, until phase 6 there removes it — the same phase that builds the
-survey which replaces it, so that a new ship is never left with neither. The office survives as a
-test and photograph fixture even then.
+**Superseded:** a new ship is issued nothing at all, not even charts. It knows only what it
+looks at or is told by another craft. See [25-system-knowledge.md](25-system-knowledge.md).
+Phase 6 there has landed, and nothing a player reaches issues a chart: `issue_charts` survives
+only as a test and photograph fixture, and behind the client's `charted` dev flag. What follows
+is the charting office as it was designed, kept because the mechanism it describes — a claim
+held on its witness's name — is the one the survey uses.
 
 A new ship is not issued the sky. It is issued the **charts of the volume it launched from**:
 claims from a charting office it will never meet, one hop of lineage, error growing with range,
@@ -269,9 +292,11 @@ behaves.
 Everything else it inherits: it is aimed or shouted, it crosses at `c`, the shard schedules it
 to whoever the beam covers, and it arrives when its light does.
 
-**A report carries conclusions, not logs.** Its parts hold sightings, claims, names, orbits and
-conclusions — never a craft's photometric samples, which are enormous next to what was learned
-from them and cost energy to send in proportion. A conclusion keeps the name of the observer
+**A report carries conclusions, not logs.** Its parts hold sightings, claims, names, orbits,
+conclusions and folded colors — never a craft's photometric samples, which are enormous next to
+what was learned from them and cost energy to send in proportion. A color digest is the
+distinction drawn exactly: hundreds of visits reduced to a mean and a scatter per band, which
+is what was learned from the rows rather than the rows. A conclusion keeps the name of the observer
 whose log it came from, and a receiver holds each observer's separately, with where it looked
 from: a transit seen from one direction may be invisible from another, so two can disagree and
 both be right. What a craft believes is a fold over them.
@@ -308,12 +333,25 @@ In `lc-world::knowledge`, engine-free and tested:
 
 | module | holds |
 |---|---|
-| `knowledge` | `File`, `Belief`, `Knowledge`, and `Report` with its `Entry` per system and `Part` per subject |
-| `knowledge::record` | `Witness`, `Hop`, `Sighting`, `Sample`, `Series`, `Claim`, `Naming`, `Orbit` |
+| `knowledge` | `File`, `Belief`, `Knowledge` |
+| `knowledge::record` | `Witness`, `Hop`, `Sighting`, `Sample`, `Series`, `Claim`, `Naming`, `Orbit`, `Colors` |
+| `knowledge::report` | `Report` with its `Entry` per system and `Part` per subject |
 | `knowledge::subject` | `Subject` — star, body, population, craft — and `BodyId` |
 | `knowledge::names` | designations, discovery designations, and planet letters against the `SPACING` table |
-| `knowledge::astrometry` | bearings, centroid precision, the triangulation, `Distance` |
+| `knowledge::astrometry` | bearings, centroid precision, the two triangulations, `Distance` |
 | `knowledge::survey` | `Optics`, detection and glare, the `Sweep` and its field order, `Duty` |
+| `knowledge::body` | `BodyBelief`, `Placed`, and the system plane folded out of the orbits |
+| `knowledge::arc` | the orbit fit: `Look`, `Fitted`, `fit`, `spread` |
+| `knowledge::turns` | which turn a look is on, when the cadence cannot say |
+| `knowledge::primary` | what a body goes round, and which body is due a fit |
+| `knowledge::transit` | the box least squares and its candidates |
+| `knowledge::conclusion` | `Conclusion`, `Hypothesis`, what a craft concluded and why |
+| `knowledge::prior` | the generator's own distributions, as priors |
+| `knowledge::sort` | the nine type hypotheses and their posterior |
+| `knowledge::observatory` | `Sky`, `Station`, photometry against a source |
+| `knowledge::moments` | Welford, shared by everything that folds |
+| `knowledge::room` | what a craft has space to keep |
+| `knowledge::formats` | `FILE_FORMAT`, and refusing anything else |
 
 On the shard, since phase 11b: every craft's `Knowledge` and telescope live in
 `lc-server::instruments` and run whether or not anybody is flying them, and a report lands there.
