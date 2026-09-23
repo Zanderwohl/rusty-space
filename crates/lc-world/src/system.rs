@@ -227,9 +227,11 @@ impl LocalSystem {
                 // What actually reflects: the lit disc, plus whatever of the rings is turned
                 // toward both the star and the observer.
                 let mut area = std::f64::consts::PI * radius_m * radius_m * phase;
-                // Its own albedo, not one number for everything. Ice reflects six times what
-                // bare rock does and the classification already knows which this is.
-                let mut albedo = surface.albedo();
+                // Its own albedo, not one number for everything, and the same one a survey
+                // reads per band: a second opinion about how bright a body is would be a
+                // second chance to have it wrong.
+                let world = crate::worlds::of(self.sim.name(i), surface, &self.sim.info(i).tags);
+                let mut albedo = world.gray_albedo();
                 if let Some(rings) = rings {
                     let lit = rings.pole.dot(to_star.normalize_or_zero()).abs();
                     let seen = rings.pole.dot(to_observer.normalize_or_zero()).abs();
@@ -250,7 +252,7 @@ impl LocalSystem {
                     surface,
                     // Keyed by the arena's id, which is what `rings::for_body` is keyed by and
                     // is not always the display name -- see `worlds`.
-                    world: crate::worlds::of(self.sim.name(i), surface),
+                    world,
                     pole,
                     spin_s,
                     position_ly: self.origin_ly + at / M_PER_LY,

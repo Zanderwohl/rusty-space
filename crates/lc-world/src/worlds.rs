@@ -41,6 +41,20 @@ pub enum Atmosphere {
 }
 
 impl Atmosphere {
+    /// The tag spelling, which is not the label: one is data and the other is prose.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Thin => "Thin",
+            Self::Thick => "Thick",
+            Self::Envelope => "Envelope",
+        }
+    }
+
+    pub fn named(text: &str) -> Option<Self> {
+        [Self::None, Self::Thin, Self::Thick, Self::Envelope].into_iter().find(|a| a.name() == text)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::None => "airless",
@@ -70,6 +84,19 @@ pub enum Top {
 }
 
 impl Top {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rock => "Rock",
+            Self::Ice => "Ice",
+            Self::Ocean => "Ocean",
+            Self::Cloud => "Cloud",
+        }
+    }
+
+    pub fn named(text: &str) -> Option<Self> {
+        [Self::Rock, Self::Ice, Self::Ocean, Self::Cloud].into_iter().find(|t| t.name() == text)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Rock => "rock",
@@ -271,27 +298,130 @@ pub fn for_body(id: &str) -> Option<&'static World> {
     ALL.iter().find(|w| w.body_id == id)
 }
 
-/// What a body is, measured where anybody has been and derived from its class everywhere else.
+/// What the generator stated about a body, as `em-sim` tags carry it.
 ///
-/// The derived answer is deliberately duller than any authored one: flat reflectance at the
-/// class's own albedo, and an atmosphere read off the class. A generated planet cannot be a
-/// Venus, because nothing about its radius, mass and temperature says it is one — which is the
-/// honest position rather than a shortcoming. What it can be is the thing its class describes.
-pub fn of(id: &str, surface: Surface) -> World {
+/// Tags rather than a second lookup, for the reason [`crate::navigation::Kind`] uses them: the
+/// data says what a body is and nothing downstream re-derives it. A body with no tags -- every
+/// body of the solar-system preset, and anything authored -- falls back to its class.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Stated {
+    pub atmosphere: Option<Atmosphere>,
+    pub top: Option<Top>,
+    /// Whether the body's envelope is over a core that reached runaway, which is the
+    /// difference between a banded giant and a methane-blue one.
+    pub gas_giant: bool,
+}
+
+impl Stated {
+    pub const AIR: &'static str = "Air:";
+    pub const TOP: &'static str = "Top:";
+    pub const GAS_GIANT: &'static str = "GasGiant";
+
+    pub fn from_tags(tags: &[String]) -> Self {
+        let mut out = Self::default();
+        for tag in tags {
+            if let Some(rest) = tag.strip_prefix(Self::AIR) {
+                out.atmosphere = Atmosphere::named(rest);
+            } else if let Some(rest) = tag.strip_prefix(Self::TOP) {
+                out.top = Top::named(rest);
+            } else if tag == Self::GAS_GIANT {
+                out.gas_giant = true;
+            }
+        }
+        out
+    }
+
+    /// The tags that state this, for the generator to write.
+    pub fn tags(atmosphere: Atmosphere, top: Top, gas_giant: bool) -> Vec<String> {
+        let mut out = vec![format!("{}{}", Self::AIR, atmosphere.name()), format!("{}{}", Self::TOP, top.name())];
+        if gas_giant {
+            out.push(Self::GAS_GIANT.to_string());
+        }
+        out
+    }
+}
+
+/// What a body is: measured where anybody has been, stated by the generator where it made one,
+/// and derived from its class otherwise.
+///
+/// The measured table wins because Venus is in it and no rule reaches Venus. Below that, a
+/// generated body says what it is rather than having it guessed from radius, mass and
+/// temperature -- which is what makes a generated ocean read blue and a generated ice world
+/// read bright, and so what gives a type hypothesis anything to work on.
+pub fn of(id: &str, surface: Surface, tags: &[String]) -> World {
     if let Some(known) = for_body(id) {
         return *known;
     }
-    let flat = surface.albedo();
+    let stated = Stated::from_tags(tags);
+    let atmosphere = stated.atmosphere.unwrap_or_else(|| derived_atmosphere(surface));
+    let top = stated.top.unwrap_or_else(|| derived_top(surface));
     World {
         body_id: "",
-        reflectance: optical(flat, flat, flat, flat, flat),
-        atmosphere: derived_atmosphere(surface),
-        top: derived_top(surface),
+        reflectance: reflectance_of(top, atmosphere, surface, stated.gas_giant, varied(id)),
+        atmosphere,
+        top,
         heat_ratio: surface.internal_heat_ratio(),
     }
 }
 
-/// The air a class implies, where nothing has been measured.
+/// How far this particular body departs from the type's curve: a brightness factor and a tilt
+/// across the optical run.
+///
+/// **Not decoration.** Without it the reflectance is a pure function of the type, so measuring
+/// a colour would identify the type exactly and a hypothesis would never have more than one
+/// entry in it. Two ocean worlds are not the same colour, and the spread is what makes the
+/// classification an inference rather than a lookup. Keyed by the body's id, so it does not
+/// shimmer between frames.
+fn varied(id: &str) -> (f64, f64) {
+    // FNV-1a: the ids are short and this needs no allocation in a per-frame loop.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in id.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x1000_0000_01b3);
+    }
+    let brightness = crate::rng::uniform_in(crate::rng::hash(&[h, 1]), 0.85, 1.15);
+    let tilt = crate::rng::uniform_in(crate::rng::hash(&[h, 2]), -0.08, 0.08);
+    (brightness, tilt)
+}
+
+/// The reflectance a type has, before this body's own variation.
+///
+/// Every row is one of the measured bodies above, which is where its shape comes from: a
+/// generated ocean is Earth's curve, a generated ice world is between Europa's and Callisto's,
+/// a generated gas giant is Jupiter's and an ice giant is Uranus's. The third digit is not the
+/// point; the ordering and the colour are.
+fn reflectance_of(top: Top, atmosphere: Atmosphere, surface: Surface, gas_giant: bool, varied: (f64, f64)) -> [f64; BANDS] {
+    let base = match (top, atmosphere) {
+        // A giant's deck. Jupiter is banded and warm; Uranus is methane-blue and eats the red
+        // end, which is the one colour difference that tells the two kinds of giant apart.
+        (Top::Cloud, Atmosphere::Envelope) if gas_giant => optical(0.47, 0.50, 0.53, 0.54, 0.27),
+        (Top::Cloud, Atmosphere::Envelope) => optical(0.52, 0.46, 0.38, 0.24, 0.05),
+        // A rocky body's deck: Venus where it is warm, Titan's orange haze where it is not.
+        (Top::Cloud, _) if surface == Surface::Ice => optical(0.12, 0.22, 0.29, 0.33, 0.20),
+        (Top::Cloud, _) => optical(0.60, 0.67, 0.70, 0.72, 0.60),
+        (Top::Ocean, _) => optical(0.43, 0.37, 0.33, 0.31, 0.29),
+        (Top::Ice, _) => optical(0.60, 0.60, 0.58, 0.55, 0.48),
+        // Scorched rock is darker and flatter than weathered rock, which is red because it is
+        // oxidised, which needs air.
+        (Top::Rock, _) if surface == Surface::Scorched => optical(0.06, 0.08, 0.10, 0.11, 0.11),
+        (Top::Rock, Atmosphere::None) => optical(0.09, 0.13, 0.15, 0.16, 0.16),
+        (Top::Rock, _) => optical(0.09, 0.17, 0.25, 0.29, 0.30),
+    };
+    let (brightness, tilt) = varied;
+    // Every band the row states, not only the four a silicon detector sees: K is reflected
+    // light too, and it is where methane tells the two kinds of giant apart.
+    let optical = base.iter().filter(|r| **r > 0.0).count().max(2);
+    let mut out = [0.0; BANDS];
+    for (k, value) in base.iter().enumerate().filter(|(_, r)| **r > 0.0) {
+        // Tilt about the middle of the optical run, so it reddens or blues without changing
+        // how bright the body is overall.
+        let across = k as f64 / (optical - 1) as f64 - 0.5;
+        out[k] = (value * brightness * (1.0 + tilt * 2.0 * across)).clamp(0.0, 1.0);
+    }
+    out
+}
+
+/// The air a class implies, where the generator stated nothing.
 fn derived_atmosphere(surface: Surface) -> Atmosphere {
     match surface {
         Surface::GasGiant | Surface::IceGiant => Atmosphere::Envelope,
@@ -338,7 +468,7 @@ mod tests {
     #[test]
     fn venus_is_what_its_class_could_never_have_said() {
         let venus = world("Venus");
-        let classed = of("some generated rock", Surface::Weathered);
+        let classed = of("some generated rock", Surface::Weathered, &[]);
         assert!(
             venus.gray_albedo() > classed.gray_albedo() * 2.0,
             "authored {} against derived {}",
@@ -417,14 +547,69 @@ mod tests {
     /// world is an envelope rather than bare rock.
     #[test]
     fn an_unvisited_body_falls_back_to_its_class() {
-        let giant = of("generated-3", Surface::IceGiant);
+        let giant = of("generated-3", Surface::IceGiant, &[]);
         assert_eq!((giant.atmosphere, giant.top), (Atmosphere::Envelope, Top::Cloud));
         assert!(giant.heat_ratio >= 1.0);
 
-        let ice = of("generated-4", Surface::Ice);
+        let ice = of("generated-4", Surface::Ice, &[]);
         assert_eq!((ice.atmosphere, ice.top), (Atmosphere::None, Top::Ice));
-        // Flat, because a class says how bright and nothing about color.
-        let r = |b| ice.reflectance_in(b);
-        assert_eq!(r(Band::B), r(Band::R));
+        assert!(ice.gray_albedo() > giant.gray_albedo() * 0.8, "ice is bright");
+    }
+
+    /// **What a type hypothesis has to work on.** A generated body says what it is through its
+    /// tags, and what it says decides its colour: an ocean is blue, an ice world is bright, a
+    /// deck is bright and flat, and bare rock is dark. Without this every generated body is
+    /// flat at its class albedo and a colour measures nothing.
+    #[test]
+    fn a_generated_body_is_the_colour_of_what_it_is_made_of() {
+        let made = |top: Top, air: Atmosphere, surface| {
+            of("generated-body", surface, &Stated::tags(air, top, false))
+        };
+        let slope = |w: &World| w.reflectance_in(Band::R) - w.reflectance_in(Band::B);
+
+        let ocean = made(Top::Ocean, Atmosphere::Thick, Surface::Weathered);
+        let deck = made(Top::Cloud, Atmosphere::Thick, Surface::Weathered);
+        let ice = made(Top::Ice, Atmosphere::None, Surface::Ice);
+        let bare = made(Top::Rock, Atmosphere::None, Surface::Rock);
+        let dusty = made(Top::Rock, Atmosphere::Thin, Surface::Weathered);
+
+        assert!(slope(&ocean) < 0.0, "an ocean is blue");
+        assert!(slope(&dusty) > 0.1, "weathered rock is red");
+        assert!(slope(&bare).abs() < 0.1, "bare rock is nearly gray");
+        assert!(deck.gray_albedo() > ocean.gray_albedo(), "a deck is brighter than an ocean");
+        assert!(ice.gray_albedo() > ocean.gray_albedo(), "and so is ice");
+        assert!(bare.gray_albedo() < 0.25, "bare rock is dark");
+
+        // And the two kinds of giant differ where methane does.
+        let gas = of("g", Surface::GasGiant, &Stated::tags(Atmosphere::Envelope, Top::Cloud, true));
+        let icy = of("g", Surface::IceGiant, &Stated::tags(Atmosphere::Envelope, Top::Cloud, false));
+        assert!(gas.reflectance_in(Band::K) > icy.reflectance_in(Band::K) * 3.0, "methane eats K");
+    }
+
+    /// Two ocean worlds are not the same colour. Without the spread a colour would identify a
+    /// type exactly and a hypothesis would never hold more than one entry.
+    #[test]
+    fn two_bodies_of_a_type_are_not_the_same_body() {
+        let tags = Stated::tags(Atmosphere::Thick, Top::Ocean, false);
+        let (a, b) = (of("Kettle e", Surface::Weathered, &tags), of("Kettle f", Surface::Weathered, &tags));
+        assert_ne!(a.reflectance, b.reflectance);
+        // Same every time it is asked, or a body would shimmer between frames.
+        assert_eq!(a.reflectance, of("Kettle e", Surface::Weathered, &tags).reflectance);
+        // And still recognisably its type.
+        assert!((a.gray_albedo() / b.gray_albedo()).ln().abs() < 0.4);
+    }
+
+    /// Tags are the channel, so they have to survive the round trip.
+    #[test]
+    fn what_the_generator_states_is_what_is_read_back() {
+        for air in [Atmosphere::None, Atmosphere::Thin, Atmosphere::Thick, Atmosphere::Envelope] {
+            for top in [Top::Rock, Top::Ice, Top::Ocean, Top::Cloud] {
+                let stated = Stated::from_tags(&Stated::tags(air, top, true));
+                assert_eq!((stated.atmosphere, stated.top, stated.gas_giant), (Some(air), Some(top), true));
+            }
+        }
+        // Tags that say nothing leave it to the class, which is every body of the preset.
+        let bare = Stated::from_tags(&["Planet".to_string(), "Moon".to_string()]);
+        assert_eq!((bare.atmosphere, bare.top, bare.gas_giant), (None, None, false));
     }
 }

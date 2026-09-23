@@ -445,7 +445,7 @@ mod tests {
             kind: lc_world::navigation::Kind::Planet,
             rings: None,
             surface: Surface::Rock,
-            world: lc_world::worlds::of("test", Surface::Rock),
+            world: lc_world::worlds::of("test", Surface::Rock, &[]),
             pole: DVec3::Z,
             spin_s: None,
             position_ly: at,

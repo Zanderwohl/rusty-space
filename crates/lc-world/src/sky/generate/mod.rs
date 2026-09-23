@@ -259,6 +259,20 @@ fn debug_ball(radius: f64, rgb: (u16, u16, u16)) -> Appearance {
     })
 }
 
+/// The same, with the generator's own statement about the body appended.
+///
+/// What `worlds::of` reads: a generated ocean is blue because the generator said it is an
+/// ocean, rather than because radius, mass and temperature were made to imply one.
+fn stated(id: &str, mass: f64, major: bool, tags: &[&str], planet: &Planet) -> BodyInfo {
+    let mut info = info(id, mass, major, tags);
+    info.tags.extend(crate::worlds::Stated::tags(
+        planet.atmosphere,
+        planet.top,
+        planet.class == Class::GasGiant,
+    ));
+    info
+}
+
 fn info(id: &str, mass: f64, major: bool, tags: &[&str]) -> BodyInfo {
     BodyInfo {
         name: Some(id.to_string()),
@@ -353,7 +367,7 @@ impl GeneratedSystem {
         let node_deg = self.pole.x.atan2(-self.pole.y).to_degrees();
         for p in &self.planets {
             bodies.push(SomeBody::KeplerEntry(KeplerEntry {
-                info: info(&p.name, p.mass_kg, false, &["Planet"]),
+                info: stated(&p.name, p.mass_kg, false, &["Planet"], p),
                 params: kepler(
                     &center,
                     p.semi_major_m,
