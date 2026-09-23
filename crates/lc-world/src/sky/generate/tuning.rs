@@ -28,6 +28,8 @@ pub struct Disc {
     /// Disc outer edge, in snow lines. Fifteen puts the Sun's at 40 astronomical units, which
     /// is the Kuiper belt's outer edge.
     pub outer_over_snow: f64,
+    /// Log-uniform. Observed discs run from ten astronomical units across to several hundred,
+    /// so this is wide on purpose: it is most of what decides how many rungs a star gets.
     pub outer_jitter: (f64, f64),
     /// Solid mass in the disc of a solar-mass star at solar metallicity, Earth masses.
     ///
@@ -42,12 +44,24 @@ pub struct Disc {
     pub surface_index: f64,
     /// How much more solid there is past the snow line, where ices condense too.
     pub ice_boost: f64,
+    /// Share of the icy reservoir that drifts inside the snow line before the planets form.
+    ///
+    /// Solids do not stay where they condensed: gas drag makes pebbles spiral inward, and that
+    /// is the standard explanation for the compact systems of several Earth masses each that
+    /// most stars turn out to have. Without it the ice step leaves nineteen twentieths of the
+    /// mass outside and every inner planet is a Mercury -- which is what the solar system looks
+    /// like and not what the galaxy does.
+    pub drift: f64,
 }
 
 /// How the disc is cut into bodies.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ladder {
-    /// Where the innermost rung sits, in sublimation radii.
+    /// Where the innermost rung sits, in sublimation radii, log-uniform.
+    ///
+    /// Not one: the disc's inner edge is where solids can exist and the innermost body is
+    /// wherever one happened to assemble. Mercury is eleven sublimation radii out, and a
+    /// planet on a twelve-hour year is one.
     pub first_rung: (f64, f64),
     /// Ratio between neighbouring rungs. Drawn per step, so a system's spacing is not one
     /// number repeated.
@@ -55,6 +69,12 @@ pub struct Ladder {
     pub max_rungs: usize,
     /// Share of a feeding zone's solids that ends up in the body, drawn per rung.
     pub efficiency: (f64, f64),
+    /// Smallest body that counts as a planet, Earth masses.
+    ///
+    /// Below this the rung never got past a swarm of planetesimals and stays one. This is what
+    /// ties the number of planets to the mass of the disc, and so to the star's metals: a
+    /// metal-poor system is not only a system of smaller planets, it is a system of fewer.
+    pub smallest_earths: f64,
     /// Radius out to which a rung finishes assembling, in snow lines.
     ///
     /// Accretion slows as the cube of the orbit, so past this the disc runs out of time and
@@ -68,6 +88,10 @@ pub struct Ladder {
     /// The critical core mass is about ten in the standard picture, and lower in a colder or
     /// denser disc. Lowering it is the most direct way to make giants common.
     pub runaway_core_earths: f64,
+    /// Spread in that threshold from one rung to the next, dex. The critical mass depends on
+    /// the opacity and the accretion rate where the core sits, so a single number for a whole
+    /// disc puts a hard edge in the mass distribution that nothing in nature has.
+    pub runaway_spread_dex: f64,
     /// Envelope mass as a multiple of the core, log-uniform.
     pub envelope: (f64, f64),
     /// Heaviest a planet may be, Jupiter masses. Above thirteen it burns deuterium and is a
@@ -88,6 +112,13 @@ pub struct Ladder {
 /// What a planet turns out to be, given where it formed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct World {
+    /// Spread in radius at a given mass, dex.
+    ///
+    /// What a planet is made of. Two bodies of one mass differ by a good deal if one is mostly
+    /// iron and the other mostly water, and the measured relation is a band rather than a
+    /// curve. Without this every generated planet sits exactly on the fit, which is the one
+    /// thing no real population does.
+    pub radius_spread_dex: f64,
     /// Exosphere temperature over equilibrium temperature. Earth's 255 K equilibrium sits
     /// under a 1000 K exosphere, which is what actually sets what escapes.
     pub exosphere_factor: f64,
@@ -203,27 +234,31 @@ impl Default for Tuning {
                 snow_k: 170.0,
                 habitable_k: (321.0, 209.0),
                 outer_over_snow: 15.0,
-                outer_jitter: (0.7, 1.5),
+                outer_jitter: (0.3, 2.0),
                 solid_earths: 75.0,
                 solids_per_stellar_mass: 1.0,
                 solid_spread_dex: 0.25,
                 surface_index: 1.5,
                 ice_boost: 4.0,
+                drift: 0.12,
             },
             ladder: Ladder {
-                first_rung: (1.0, 4.0),
+                first_rung: (1.0, 10.0),
                 spacing: (1.35, 2.1),
                 max_rungs: 24,
                 efficiency: (0.35, 1.0),
+                smallest_earths: 0.02,
                 growth_over_snow: 4.5,
                 ice_giant_core_earths: 3.0,
                 runaway_core_earths: 8.0,
+                runaway_spread_dex: 0.16,
                 envelope: (2.0, 60.0),
                 heaviest_jupiters: 13.0,
                 migrating_fraction: 0.08,
                 resonance_reach: 2.4,
             },
             world: World {
+                radius_spread_dex: 0.055,
                 exosphere_factor: 3.9,
                 retention: 6.0,
                 dynamo_mass_earths: 0.5,

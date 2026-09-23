@@ -601,19 +601,27 @@ mod tests {
             .collect()
     }
 
-    /// A red dwarf five light-years out with an inner planet under five days, placed edge-on
-    /// (its planets transit) or along its pole (they never do), and its planets' periods.
+    /// A late M dwarf five light-years out with an inner planet under five days and deep
+    /// enough to see, placed edge-on (its planets transit) or along its pole (they never do), and its
+    /// planets' periods.
+    ///
+    /// Both conditions are searched for rather than assumed. The generator makes plenty of
+    /// planets no sixty-day log would ever find, and a test of what a log concludes needs one
+    /// it can conclude something about. A late M dwarf because that is what makes an
+    /// Earth-sized planet a percent-deep transit, which is why the real search uses them too.
     fn red_dwarf(edge_on: bool) -> (CatalogueStar, Vec<f64>) {
         (100_000..)
             .find_map(|key| {
-                let mut s = star(key, 0.01, DVec3::ZERO);
+                let mut s = star(key, 0.001, DVec3::ZERO);
                 let pole = crate::sky::generate::pole_for(s.seed());
                 s.position_ly = if edge_on { pole.any_orthonormal_vector() } else { pole } * 5.0;
-                let periods: Vec<f64> = planets_of(&s)
+                let planets = planets_of(&s);
+                let ratio = planets.first()?.radius_m / s.star.radius_m;
+                let periods: Vec<f64> = planets
                     .iter()
                     .map(|r| std::f64::consts::TAU * (r.semi_major_m.powi(3) / s.star.mu).sqrt())
                     .collect();
-                (*periods.first()? < 5.0 * 86_400.0).then_some((s, periods))
+                (*periods.first()? < 5.0 * 86_400.0 && ratio * ratio > 1.2e-3).then_some((s, periods))
             })
             .unwrap()
     }
@@ -635,7 +643,7 @@ mod tests {
     #[test]
     fn a_generated_planet_is_the_most_probable_reading_of_its_transits() {
         let (target, periods) = red_dwarf(true);
-        let (mut knowledge, now) = stare(&target, 60.0);
+        let (mut knowledge, now) = stare(&target, 110.0);
         let mut replica = Knowledge::new(Witness(1));
         replica.absorb(&knowledge.report(crate::knowledge::Mark::default(), now));
         replica.copy_logs(&knowledge.logs_upto(f64::NEG_INFINITY, usize::MAX).0);
@@ -647,7 +655,16 @@ mod tests {
         let conclusion = knowledge.read_log(subject, Witness(1), &prior, now).expect("a log to read");
         let leading = conclusion.leading().unwrap();
         let Kind::Planet { transit, .. } = leading.kind else { panic!("{:?}", conclusion.transits) };
-        assert!(leading.probability > SETTLED);
+        // That there is a planet is settled. Which kind it is need not be: a 1.3-Earth-radius
+        // body and a small ice giant make transits of nearly the same depth, and the prior
+        // says so rather than pretending otherwise.
+        let a_planet: f64 = conclusion
+            .transits
+            .iter()
+            .filter(|h| matches!(h.kind, Kind::Planet { .. }))
+            .map(|h| h.probability)
+            .sum();
+        assert!(a_planet > SETTLED, "{:?}", conclusion.transits);
         let off = periods.iter().map(|p| (transit.period_s - p).abs()).fold(f64::INFINITY, f64::min);
         assert!(off < 3.0 * transit.period_sigma_s, "{} against {periods:?}, sigma {}", transit.period_s, transit.period_sigma_s);
 
@@ -692,7 +709,7 @@ mod tests {
     #[test]
     fn a_star_seen_along_its_pole_is_quiet_only_as_far_as_the_log_could_see() {
         let (target, _) = red_dwarf(false);
-        let (mut knowledge, now) = stare(&target, 60.0);
+        let (mut knowledge, now) = stare(&target, 110.0);
         let prior = Prior::measure(&neighborhood());
         let conclusion = knowledge.read_log(Subject::Star(target.id), Witness(1), &prior, now).unwrap();
         let chance = |f: fn(&Kind) -> bool| -> f64 {

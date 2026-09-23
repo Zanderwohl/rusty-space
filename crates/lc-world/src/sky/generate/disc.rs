@@ -31,6 +31,10 @@ pub struct Disc {
     pub solid_earths: f64,
     index: f64,
     ice_boost: f64,
+    /// What the inner disc's weight is multiplied by once the drifted ices are added to it,
+    /// and what is left of the outer disc's. Held rather than recomputed because the pair has
+    /// to stay consistent: between them they conserve the disc.
+    drifted: (f64, f64),
 }
 
 impl Disc {
@@ -41,14 +45,15 @@ impl Disc {
         let at = |k: f64| radius_at(&star.star, k);
 
         let snow_m = at(t.snow_k);
-        let jitter = rng::uniform_in(rng::hash(&[seed, 0xd15c, 1]), t.outer_jitter.0, t.outer_jitter.1);
+        let jitter =
+            rng::uniform_in(rng::hash(&[seed, 0xd15c, 1]), t.outer_jitter.0.ln(), t.outer_jitter.1.ln()).exp();
         let spread = rng::gaussian(rng::hash(&[seed, 0xd15c, 2])) * t.solid_spread_dex;
         let solid_earths = t.solid_earths
             * star.mass_solar.max(0.05).powf(t.solids_per_stellar_mass)
             * crate::sky::metallicity::solid_mass_factor(star.metallicity)
             * 10f64.powf(spread);
 
-        Self {
+        let mut disc = Self {
             inner_m: at(t.sublimation_k),
             snow_m,
             outer_m: snow_m * t.outer_over_snow * jitter,
@@ -56,7 +61,24 @@ impl Disc {
             solid_earths,
             index: t.surface_index,
             ice_boost: t.ice_boost,
+            drifted: (1.0, 1.0),
+        };
+        disc.drifted = disc.drift_weights(t.drift);
+        disc
+    }
+
+    /// What drifting `share` of the ices inward does to the two halves of the disc.
+    ///
+    /// The ices that move land in the inner disc following its own profile, so the inner
+    /// weight is scaled up by what arrives and the outer weight down by what left. Their sum
+    /// is unchanged, which is what makes this a redistribution rather than a bonus.
+    fn drift_weights(&self, share: f64) -> (f64, f64) {
+        let rocky = self.band(self.inner_m, self.snow_m);
+        let icy = self.ice_boost * self.band(self.snow_m, self.outer_m);
+        if !(rocky > 0.0) || !(icy > 0.0) {
+            return (1.0, 1.0);
         }
+        (1.0 + share * icy / rocky, 1.0 - share)
     }
 
     /// Solid mass between two radii, Earth masses.
@@ -77,13 +99,18 @@ impl Disc {
 
     /// Unnormalized `integral of Sigma * 2 pi r dr` between two radii.
     fn integral(&self, a_m: f64, b_m: f64) -> f64 {
+        let rocky = self.band(a_m.min(self.snow_m), b_m.min(self.snow_m));
+        let icy = self.ice_boost * self.band(a_m.max(self.snow_m), b_m.max(self.snow_m));
+        rocky * self.drifted.0 + icy * self.drifted.1
+    }
+
+    /// The power law's own weight between two radii, with no ice step and no drift.
+    fn band(&self, a_m: f64, b_m: f64) -> f64 {
         let w = |r: f64| {
             let p = 2.0 - self.index;
             if p.abs() < 1.0e-9 { r.max(1.0).ln() } else { r.powf(p) / p }
         };
-        let rocky = w(b_m.min(self.snow_m)) - w(a_m.min(self.snow_m));
-        let icy = w(b_m.max(self.snow_m)) - w(a_m.max(self.snow_m));
-        rocky.max(0.0) + self.ice_boost * icy.max(0.0)
+        (w(b_m) - w(a_m)).max(0.0)
     }
 
     /// Whether a radius is past the snow line, and so forms with ices.
@@ -226,14 +253,22 @@ mod tests {
         assert_eq!(disc.solids_between(disc.outer_m * 2.0, disc.outer_m * 3.0), 0.0);
     }
 
-    /// Most of the solid is past the snow line, which is the whole reason giants form out
-    /// there and not in here.
+    /// Most of the solid is past the snow line -- which is why giants form out there -- and
+    /// the drift is what stops that being nineteen twentieths of it.
     #[test]
-    fn the_ice_step_puts_the_mass_outside() {
+    fn the_ice_step_puts_the_mass_outside_and_the_drift_brings_some_back() {
         let disc = Disc::of(&sun_like(), &Tuning::default());
-        let inside = disc.solids_between(disc.inner_m, disc.snow_m);
-        assert!(inside / disc.solid_earths < 0.15, "inner disc holds {inside} of {}", disc.solid_earths);
-        assert!(disc.icy_reservoir() > 0.8 * disc.solid_earths);
+        let share = disc.solids_between(disc.inner_m, disc.snow_m) / disc.solid_earths;
+        assert!((0.1..0.3).contains(&share), "the inner disc holds {share} of the solids");
+        assert!(disc.icy_reservoir() > 0.6 * disc.solid_earths);
+
+        // With no drift the inner disc is nearly empty, and the two halves still sum to one.
+        let mut still = Tuning::default();
+        still.disc.drift = 0.0;
+        let dry = Disc::of(&sun_like(), &still);
+        let bare = dry.solids_between(dry.inner_m, dry.snow_m) / dry.solid_earths;
+        assert!(bare < share / 1.8, "with nothing drifting the inner disc holds {bare} against {share}");
+        assert!((bare + dry.icy_reservoir() / dry.solid_earths - 1.0).abs() < 1.0e-9);
     }
 
     /// Metals are the rock. A tenth of the metallicity is a tenth of the disc, and that is

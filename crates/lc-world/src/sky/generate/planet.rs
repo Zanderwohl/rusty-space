@@ -175,10 +175,12 @@ fn of(
     // a small one.
     let envelope = rung.class.is_giant()
         || (rung.core_earths >= tuning.ladder.ice_giant_core_earths && margin(HYDROGEN, rung.radius_earths) > 1.0);
-    let radius_earths = match (envelope, rung.class.is_giant()) {
-        (true, false) => rung.radius_earths * rng::uniform_in(h(14), 1.4, 2.5),
-        _ => rung.radius_earths,
-    };
+    let composition = 10f64.powf(rng::gaussian(h(16)) * t.radius_spread_dex);
+    let radius_earths = composition
+        * match (envelope, rung.class.is_giant()) {
+            (true, false) => rung.radius_earths * rng::uniform_in(h(14), 1.4, 2.5),
+            _ => rung.radius_earths,
+        };
 
     let atmosphere = air(mass_earths, radius_earths, rung.equilibrium_k, envelope, tuning);
 
@@ -379,7 +381,10 @@ mod tests {
         assert!(cold.len() > 20, "only {} cold bodies", cold.len());
         assert!(cold.iter().all(|p| p.water_fraction > 0.1), "a cold body keeps its ice");
 
-        let baked: Vec<&Planet> = planets.iter().filter(|p| p.equilibrium_k > 600.0).collect();
+        // Rocky bodies only: a hot Jupiter's gravity holds water vapour at any temperature the
+        // inner disc reaches, and what it holds is the ice in its core.
+        let baked: Vec<&Planet> =
+            planets.iter().filter(|p| p.equilibrium_k > 600.0 && !p.class.is_giant()).collect();
         assert!(baked.iter().all(|p| p.water_fraction == 0.0), "nothing holds water at 600 K");
         // Air is a different question: a heavy enough body keeps nitrogen at any temperature
         // the inner disc reaches, which is what a hot super-Earth is.

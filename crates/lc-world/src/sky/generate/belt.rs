@@ -22,7 +22,13 @@ pub fn populations(arch: &Architecture, pole: DVec3, seed: u64, tuning: &Tuning)
     let mut out = Vec::new();
     let mut thrown = 0.0;
 
-    for (k, rung) in arch.belts().enumerate() {
+    // Where the outer disc begins: past the growth radius nothing finished assembling. A disc
+    // that ends inside its own growth radius still has an outer edge with debris at it, so the
+    // outermost rung is always on the far side of this whatever the radius says.
+    let outermost = arch.rungs.last().map(|r| r.semi_major_m).unwrap_or(f64::MAX);
+    let edge = (tuning.ladder.growth_over_snow * arch.disc.snow_m).min(outermost);
+
+    for (k, rung) in arch.belts().filter(|r| r.semi_major_m < edge).enumerate() {
         let mass = rung.debris_earths * EARTH_MASS * t.belt_survival;
         thrown += rung.debris_earths * (1.0 - t.belt_survival);
         if let Some(p) = belt(
@@ -40,10 +46,10 @@ pub fn populations(arch: &Architecture, pole: DVec3, seed: u64, tuning: &Tuning)
         }
     }
 
-    // Everything the outer disc never got round to. One population rather than one per rung:
-    // it is a single continuous disc and nothing separates its parts.
-    let edge = tuning.ladder.growth_over_snow * arch.disc.snow_m;
-    let outer: Vec<_> = arch.planets().filter(|r| r.semi_major_m > edge).collect();
+    // Everything the outer disc never got round to, whether the rung is a belt or a planet
+    // with leftovers around it. One population rather than one per rung: it is a single
+    // continuous disc and nothing separates its parts.
+    let outer: Vec<_> = arch.rungs.iter().filter(|r| r.semi_major_m >= edge).collect();
     let leftover: f64 = outer.iter().map(|r| r.debris_earths).sum();
     if let Some(inner) = outer.first() {
         thrown += leftover * (1.0 - t.kuiper_survival);
@@ -198,8 +204,13 @@ mod tests {
         let t = Tuning::default();
         for k in 0..60u64 {
             let (arch, pops) = of(&sun_like(k), &t);
-            let edge = t.ladder.growth_over_snow * arch.disc.snow_m;
-            let trans = pops.iter().find(|p| p.semi_major.mean() > edge && p.semi_major.mean() < 1000.0 * AU);
+            let outermost = arch.planets().last().map(|r| r.semi_major_m).unwrap_or(0.0);
+            // Reaching past the outermost planet, not centred past it: the outer disc starts
+            // among the last planets and runs to the edge.
+            let trans = pops.iter().find(|p| {
+                p.semi_major.mean() < 1000.0 * AU
+                    && p.extent().is_some_and(|e| e.outer_m > outermost)
+            });
             assert!(trans.is_some(), "system {k} has no trans-planetary belt");
         }
     }

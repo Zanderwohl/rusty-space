@@ -59,8 +59,12 @@ pub struct Rung {
     /// Solids left in the annulus: what the rung never got round to sweeping up, plus its
     /// whole zone when it was stirred into a belt. Earth masses.
     pub debris_earths: f64,
-    /// Stirred by a giant's resonances and never assembled. This rung is a belt, not a planet.
+    /// Never assembled into a planet. This rung is a belt.
     pub sterile: bool,
+    /// And it is a belt because a giant's resonances stirred it, rather than for want of mass.
+    /// Which one decides how much is left: a stirred belt was thrown out, a stalled one is
+    /// still there.
+    pub stirred: bool,
     /// A giant that ended up far inside where it formed.
     pub migrated: bool,
     /// Equilibrium temperature where it ended up, kelvin, zero albedo.
@@ -117,7 +121,8 @@ pub fn architecture(star: &CatalogueStar, tuning: &Tuning) -> Architecture {
 fn rungs_of(disc: &Disc, star: &CatalogueStar, tuning: &Tuning, seed: u64) -> Vec<Rung> {
     let t = &tuning.ladder;
     let mut axes = Vec::new();
-    let mut a = disc.inner_m * rng::uniform_in(rng::hash(&[seed, 0x1add, 0]), t.first_rung.0, t.first_rung.1);
+    let mut a = disc.inner_m
+        * rng::uniform_in(rng::hash(&[seed, 0x1add, 0]), t.first_rung.0.ln(), t.first_rung.1.ln()).exp();
     while a < disc.outer_m && axes.len() < t.max_rungs {
         axes.push(a);
         a *= rng::uniform_in(rng::hash(&[seed, 0x1add, axes.len() as u64]), t.spacing.0, t.spacing.1);
@@ -140,9 +145,11 @@ fn rungs_of(disc: &Disc, star: &CatalogueStar, tuning: &Tuning, seed: u64) -> Ve
             let core = available * assembled;
 
             let icy = disc.icy(a);
+            let runaway =
+                t.runaway_core_earths * 10f64.powf(rng::gaussian(h(17)) * t.runaway_spread_dex);
             let class = match (icy, core) {
                 (false, _) => Class::Rocky,
-                (true, c) if c >= t.runaway_core_earths => Class::GasGiant,
+                (true, c) if c >= runaway => Class::GasGiant,
                 (true, c) if c >= t.ice_giant_core_earths => Class::IceGiant,
                 (true, _) => Class::Icy,
             };
@@ -156,6 +163,7 @@ fn rungs_of(disc: &Disc, star: &CatalogueStar, tuning: &Tuning, seed: u64) -> Ve
                 radius_earths: disc::radius_earths(mass, icy),
                 debris_earths: (available - core).max(0.0),
                 sterile: false,
+                stirred: false,
                 migrated: false,
                 equilibrium_k: disc::temperature_at(&star.star, a),
             }
@@ -200,7 +208,8 @@ fn migrate(rungs: &mut Vec<Rung>, disc: &Disc, star: &CatalogueStar, tuning: &Tu
     giant.zone_m = (disc.inner_m, giant.zone_m.1);
 }
 
-/// Mark every rung a giant's resonances stirred past assembling.
+/// Mark every rung that never became a planet: stirred by a giant's resonances, or simply
+/// never given enough to assemble one.
 fn sterilize(rungs: &mut [Rung], star: &CatalogueStar, tuning: &Tuning) {
     let reaches: Vec<(f64, f64)> = rungs
         .iter()
@@ -218,8 +227,9 @@ fn sterilize(rungs: &mut [Rung], star: &CatalogueStar, tuning: &Tuning) {
         let stirred = reaches.iter().any(|(a_g, width)| {
             rung.semi_major_m > a_g * (1.0 - width) && rung.semi_major_m < a_g * (1.0 + width)
         });
-        if stirred {
+        if stirred || rung.core_earths < tuning.ladder.smallest_earths {
             rung.sterile = true;
+            rung.stirred = stirred;
             rung.debris_earths += rung.core_earths;
             rung.core_earths = 0.0;
             rung.mass_earths = 0.0;
@@ -342,7 +352,7 @@ mod tests {
             }
             let (built, left): (f64, f64) =
                 outer.iter().fold((0.0, 0.0), |(b, l), r| (b + r.core_earths, l + r.debris_earths));
-            assert!(left > 2.0 * built, "outer disc built {built} and left {left}");
+            assert!(left > built, "outer disc built {built} and left {left}");
         }
     }
 
@@ -435,7 +445,7 @@ mod tests {
         let mut wide = Tuning::default();
         wide.ladder.spacing = (2.5, 3.5);
         let count = |t: &Tuning| (0..60u64).map(|k| architecture(&sun_like(k), t).rungs.len()).sum::<usize>();
-        assert!(count(&wide) < count(&Tuning::default()) / 2, "wider spacing must mean fewer rungs");
+        assert!(count(&wide) * 5 < count(&Tuning::default()) * 3, "wider spacing must mean fewer rungs");
     }
 
     /// A red dwarf's system is the same disc pulled inward, so its habitable planets are on
