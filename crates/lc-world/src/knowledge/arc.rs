@@ -145,9 +145,13 @@ pub struct Look {
     pub toward: DVec3,
     pub at_s: f64,
     pub sigma_rad: f64,
-    /// Meters, where the look was close enough to range the body. A bearing with a range is a
-    /// *position*, so three of them make this no longer a search: see [`fit`].
-    pub range_m: Option<f64>,
+    /// Meters and one sigma, where the look was close enough to range the body. A bearing with
+    /// a range is a *position*, so three of them make this no longer a search: see [`fit`].
+    ///
+    /// The sigma is kept because the range is scored: see [`residual`]. Dropping it left a
+    /// measured distance seeding the search and then constraining nothing, so the settle was
+    /// free to slide the size and the depth away from the very solution the range had found.
+    pub range_m: Option<(f64, f64)>,
 }
 
 impl Look {
@@ -162,13 +166,13 @@ impl Look {
             toward: seen.bearing.toward,
             at_s: seen.observed_s,
             sigma_rad: seen.bearing.sigma_rad.max(f64::MIN_POSITIVE),
-            range_m: seen.range_m.map(|(range, _)| range),
+            range_m: seen.range_m,
         }
     }
 
     /// Where the body was, for a look that ranged it.
     fn place(&self) -> Option<DVec3> {
-        self.range_m.map(|range| self.from_m + self.toward * range)
+        self.range_m.map(|(range, _)| self.from_m + self.toward * range)
     }
 }
 
@@ -275,18 +279,63 @@ fn conic(points: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
     Some((1.0 / a, eccentricity, c.atan2(b)))
 }
 
-/// Regress the times on the mean anomalies: `t = epoch + M / n`, linear in `1/n`.
+/// Turn counts tried when the forward walk is not obviously right. See [`unwrappings`].
+const TURNS_TRIED: u32 = 12;
+
+/// An anomaly step this large between consecutive looks makes the shortest way round a guess
+/// rather than a reading, and the turn count has to be searched.
+const AMBIGUOUS_STEP_RAD: f64 = std::f64::consts::FRAC_PI_2;
+
+/// Every rate and epoch the anomalies could be saying, best guess first.
 ///
-/// The anomalies are unwrapped in time order, which assumes consecutive looks are less than an
-/// orbit apart. A survey revisiting a body every few game hours is nowhere near that for
-/// anything with a period worth fitting.
+/// **How many turns passed between two looks is not observable from the anomalies alone**, and
+/// it cannot be settled by how well they regress either: putting each look on the turn nearest
+/// a candidate rate makes *every* rate fit well, which is the aliasing it was meant to resolve.
+/// What tells one candidate from another is the orbit's own residual against the bearings, so
+/// the candidates are handed back and [`through`] scores them.
 ///
-/// Returns seconds per radian of mean anomaly, and the epoch. A negative rate is a prograde
-/// orbit seen from the wrong side of its plane, which the caller fixes by flipping the pole.
-fn timing(mean: &[(f64, f64)]) -> Option<(f64, f64)> {
+/// Twelve looks seven tenths of an orbit apart is the case this exists for: the forward walk
+/// reads each step as three tenths *backwards* and reports a period 2.33 times the truth, at a
+/// residual thirty-five thousand times the bearing noise, and nothing downstream refused it.
+///
+/// Searched only when a step is over [`AMBIGUOUS_STEP_RAD`], because mean anomaly advances
+/// uniformly and a well-sampled arc has nothing to search. A survey's cadence is nowhere near
+/// this for anything with a period worth fitting, so the usual cost is one candidate.
+fn unwrappings(mean: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    let walk = walked(mean);
+    if let Some(found) = regress(&walk) {
+        out.push((found.0, found.1));
+    }
+    let ambiguous = walk
+        .windows(2)
+        .any(|pair| matches!(pair, [a, b] if (b.0 - a.0).abs() > AMBIGUOUS_STEP_RAD));
+    let (Some(first), Some(last), true) = (mean.first(), walk.last(), ambiguous) else {
+        return out;
+    };
+    let span_s = last.1 - first.1;
+    let reach = last.0 - first.0;
+    for turns in 1..=TURNS_TRIED {
+        for direction in [1.0, -1.0] {
+            let total = reach + direction * std::f64::consts::TAU * f64::from(turns);
+            let rate = span_s / total;
+            if !sound(rate.abs()) {
+                continue;
+            }
+            if let Some(found) = regress(&placed(mean, *first, rate)) {
+                out.push((found.0, found.1));
+            }
+        }
+    }
+    out
+}
+
+/// The anomalies unwrapped by walking forward, which is right when consecutive looks are under
+/// half an orbit apart.
+fn walked(mean: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let mut unwrapped: Vec<(f64, f64)> = Vec::with_capacity(mean.len());
     let mut turns = 0.0;
-    let mut last = mean.first()?.0;
+    let Some(mut last) = mean.first().map(|(m, _)| *m) else { return unwrapped };
     for (m, t) in mean {
         if *m + turns < last - std::f64::consts::PI {
             turns += std::f64::consts::TAU;
@@ -294,12 +343,33 @@ fn timing(mean: &[(f64, f64)]) -> Option<(f64, f64)> {
         last = m + turns;
         unwrapped.push((last, *t));
     }
+    unwrapped
+}
+
+/// The anomalies unwrapped against a rate: each put on the turn nearest where that rate says it
+/// should be. `rate` is seconds per radian, as [`timing`] returns.
+fn placed(mean: &[(f64, f64)], first: (f64, f64), rate: f64) -> Vec<(f64, f64)> {
+    mean.iter()
+        .map(|(m, t)| {
+            let expected = first.0 + (t - first.1) / rate;
+            let turns = ((expected - m) / std::f64::consts::TAU).round();
+            (m + turns * std::f64::consts::TAU, *t)
+        })
+        .collect()
+}
+
+/// Least squares of `t` on `M`. Returns seconds per radian, the epoch, and the root mean square
+/// of what is left, which is what tells one unwrapping from another.
+fn regress(unwrapped: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
     let count = unwrapped.len() as f64;
+    if count < 2.0 {
+        return None;
+    }
     let mean_m = unwrapped.iter().map(|(m, _)| m).sum::<f64>() / count;
     let mean_t = unwrapped.iter().map(|(_, t)| t).sum::<f64>() / count;
     let mut var = 0.0;
     let mut cov = 0.0;
-    for (m, t) in &unwrapped {
+    for (m, t) in unwrapped {
         var += (m - mean_m) * (m - mean_m);
         cov += (m - mean_m) * (t - mean_t);
     }
@@ -307,7 +377,20 @@ fn timing(mean: &[(f64, f64)]) -> Option<(f64, f64)> {
         return None;
     }
     let per_rad = cov / var;
-    sound(per_rad.abs()).then_some((per_rad, mean_t - per_rad * mean_m))
+    if !sound(per_rad.abs()) {
+        return None;
+    }
+    let epoch_s = mean_t - per_rad * mean_m;
+    // Scaled by the rate, so a tight fit to a short period is not flattered against a loose
+    // fit to a long one: what is compared is the anomaly left over, in radians.
+    let left: f64 = unwrapped
+        .iter()
+        .map(|(m, t)| {
+            let miss = (t - epoch_s) / per_rad - m;
+            miss * miss
+        })
+        .sum();
+    Some((per_rad, epoch_s, (left / count).sqrt()))
 }
 
 /// The orbit through a sequence of positions at their times, scored against every look.
@@ -371,29 +454,35 @@ fn through(places: &[(DVec3, f64)], looks: &[Look], reach_m: f64, bound: f64) ->
         .zip(places)
         .map(|((theta, _), (_, t))| (anomaly(*theta), *t))
         .collect();
-    let (per_rad, epoch_s) = timing(&means)?;
-    let period_s = per_rad.abs() * std::f64::consts::TAU;
-    if !sound(period_s) {
-        return None;
+    // The anomalies may be saying more than one thing; the bearings say which. See
+    // [`unwrappings`].
+    let mut best: Option<Fitted> = None;
+    for (per_rad, epoch_s) in unwrappings(&means) {
+        let period_s = per_rad.abs() * std::f64::consts::TAU;
+        if !sound(period_s) {
+            continue;
+        }
+        let n = std::f64::consts::TAU / period_s;
+        let against = best.as_ref().map_or(bound, |held| held.residual_rad.min(bound));
+        let mut fitted = Fitted {
+            semi_major_m,
+            eccentricity,
+            period_s,
+            // A negative rate is a prograde orbit seen from the wrong side of its plane.
+            pole: if per_rad < 0.0 { -pole } else { pole },
+            periapsis_rad: if per_rad < 0.0 { -periapsis_rad } else { periapsis_rad },
+            epoch_s,
+            mu: n * n * semi_major_m * semi_major_m * semi_major_m,
+            reach_m,
+            assumed_circular,
+            residual_rad: 0.0,
+            looks: looks.len(),
+        };
+        let Some(found) = residual(&fitted, looks, against) else { continue };
+        fitted.residual_rad = found;
+        best = Some(fitted);
     }
-    let n = std::f64::consts::TAU / period_s;
-
-    let mut fitted = Fitted {
-        semi_major_m,
-        eccentricity,
-        period_s,
-        // A negative rate is a prograde orbit seen from the wrong side of its plane.
-        pole: if per_rad < 0.0 { -pole } else { pole },
-        periapsis_rad: if per_rad < 0.0 { -periapsis_rad } else { periapsis_rad },
-        epoch_s,
-        mu: n * n * semi_major_m * semi_major_m * semi_major_m,
-        reach_m,
-        assumed_circular,
-        residual_rad: 0.0,
-        looks: looks.len(),
-    };
-    fitted.residual_rad = residual(&fitted, looks, bound)?;
-    Some(fitted)
+    best
 }
 
 /// Weighted RMS of the angle between where the orbit says the body was and where it was seen.
@@ -423,10 +512,20 @@ fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f64> {
     if !(implied > 0.0 && implied <= HEAVIEST) {
         return None;
     }
-    let total: f64 = looks.iter().map(|l| 1.0 / (l.sigma_rad * l.sigma_rad)).sum();
-    if !sound(total) {
+    let bearings: f64 = looks.iter().map(|l| 1.0 / (l.sigma_rad * l.sigma_rad)).sum();
+    if !sound(bearings) {
         return None;
     }
+    // A ranged look is two measurements rather than one, so it carries its bearing's weight
+    // twice. Both terms below are squared standardized residuals -- how many sigma out -- so
+    // they add in one metric although one is an angle and the other a distance, and dividing
+    // by the summed bearing weight leaves the answer in radians as before.
+    let ranged: f64 = looks
+        .iter()
+        .filter(|l| l.range_m.is_some())
+        .map(|l| 1.0 / (l.sigma_rad * l.sigma_rad))
+        .sum();
+    let total = bearings + ranged;
     let ceiling = bound * bound * total;
     let mut sum = 0.0;
     for look in looks {
@@ -436,6 +535,13 @@ fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f64> {
         }
         let miss = between(offset.normalize(), look.toward);
         sum += miss * miss / (look.sigma_rad * look.sigma_rad);
+        if let Some((range, sigma)) = look.range_m {
+            // **Proximity is the instrument.** A range measured on a close pass is the one
+            // thing that fixes the size of an orbit rather than its shape, and a fit that does
+            // not score it can walk away from it: see `lightcone/docs/25-system-knowledge.md`.
+            let out = (offset.length() - range) / sigma.max(range * super::survey::RANGE_FLOOR);
+            sum += out * out;
+        }
         if sum > ceiling {
             return None;
         }
@@ -578,7 +684,12 @@ fn settle_but(mut held: Fitted, looks: &[Look], rounds: usize, hold: usize) -> F
                 |f, d, _, _| Fitted { period_s: f.period_s * (1.0 + d * 1.0e-4), ..*f },
             ];
             for (k, way) in ways.into_iter().enumerate() {
-                if k == hold {
+                // A circle assumed because the arc could not shape a conic has no eccentricity
+                // to move and no periapsis to move it about. Left free, the settle walked the
+                // eccentricity off zero and `stated` then reported none while keeping the
+                // periapsis and epoch that had been fitted *with* it -- which draws the body up
+                // to two eccentricities of arc from where it was seen.
+                if k == hold || (held.assumed_circular && (k == 1 || k == 4)) {
                     continue;
                 }
                 let tried = way(&held, step, u, v);
@@ -995,7 +1106,7 @@ mod tests {
             .map(|(i, look)| {
                 let truth_range = (truth.at(look.at_s) - look.from_m).length();
                 let slip = rng::gaussian(rng::hash(&[i as u64, 3])) * fraction * truth_range;
-                Look { range_m: Some(truth_range + slip), ..*look }
+                Look { range_m: Some((truth_range + slip, fraction * truth_range)), ..*look }
             })
             .collect()
     }
@@ -1322,7 +1433,7 @@ mod tests {
                             sigma_rad: look.sigma_rad,
                         },
                         size: None,
-                        range_m: look.range_m.map(|r| (r, r * 1.0e-6)),
+                        range_m: look.range_m,
                         spin_s: None,
                         band: em_spectra::Band::V,
                         flux: 1.0e-9,
@@ -1350,7 +1461,7 @@ mod tests {
             .map(|(i, look)| {
                 let truth_range = (moon_at(look.at_s) - look.from_m).length();
                 let slip = rng::gaussian(rng::hash(&[i as u64, 21])) * 1.0e-6 * truth_range;
-                Look { range_m: Some(truth_range + slip), ..*look }
+                Look { range_m: Some((truth_range + slip, 1.0e-6 * truth_range)), ..*look }
             })
             .collect();
         file_ranged(&mut k, moon_subject, &moon_ranged);
@@ -1607,6 +1718,114 @@ mod tests {
             better.eccentricity,
             truth.eccentricity
         );
+    }
+
+    /// **An arc sampled too coarsely to unwrap one way is unwrapped every way and scored.**
+    ///
+    /// The forward walk takes the shortest way round, so looks seven tenths of an orbit apart
+    /// read as three tenths backwards and give a period 2.33 times the truth. The anomalies
+    /// cannot say which unwrapping is right -- putting each look on the turn nearest a
+    /// candidate rate makes every rate regress well -- so every candidate is handed to
+    /// [`through`] and the bearings choose.
+    ///
+    /// What this does not fix, and cannot: an arc sampled at a *fixed* fraction of the period
+    /// is stroboscopic, and for a circular orbit the aliases put the body in the same places at
+    /// the same times. No unwrapping tells those apart because nothing does. What breaks the
+    /// degeneracy is irregular or denser sampling, which a real survey has.
+    #[test]
+    fn a_coarsely_sampled_arc_offers_every_unwrapping() {
+        let period = 3.156e7;
+        let at = |fraction: f64| {
+            (0..12)
+                .map(|k| {
+                    let t = k as f64 * period * fraction;
+                    (kepler::anomaly::wrap_pi(std::f64::consts::TAU * t / period), t)
+                })
+                .collect::<Vec<(f64, f64)>>()
+        };
+        let implied = |rate: f64| rate.abs() * std::f64::consts::TAU / period;
+
+        // A tenth of an orbit apart: nothing to search, and the one answer is the right one.
+        let dense = unwrappings(&at(0.1));
+        assert_eq!(dense.len(), 1, "a tight arc is not ambiguous and must not cost a search");
+        assert!((implied(dense[0].0) - 1.0).abs() < 1.0e-9, "{}", implied(dense[0].0));
+
+        // Seven tenths apart: the forward walk cannot see it, and the truth is in the set
+        // behind it for the bearings to pick out.
+        let coarse = unwrappings(&at(0.7));
+        assert!(coarse.len() > 1, "an ambiguous arc has to be searched");
+        assert!((implied(coarse[0].0) - 1.0).abs() > 0.1, "the forward walk is the wrong one");
+        let closest =
+            coarse.iter().map(|(r, _)| (implied(*r) - 1.0).abs()).fold(f64::INFINITY, f64::min);
+        assert!(closest < 1.0e-6, "the truth is not among the candidates: off by {closest}");
+    }
+
+    /// **A circle assumed is a circle kept.** Where the arc cannot shape a conic the fit says
+    /// so and reports no eccentricity -- but the settle was still free to walk one off zero,
+    /// and `stated` then dropped it while keeping the periapsis and the epoch that had been
+    /// fitted *with* it. The body was drawn up to two eccentricities of arc from where it was
+    /// seen, which for Saturn on a three-month arc is most of an astronomical unit.
+    #[test]
+    fn a_circle_assumed_is_a_circle_fitted() {
+        let truth = like(9.537, 0.0565);
+        let bearings = looks(&truth, 5.0, 24, 0.25 * YEAR_S / 24.0, SIGMA);
+        let close = ranged(&truth, &bearings, 1.0e-3);
+        let fitted = fit(&close).expect("positions over three degrees are an orbit");
+        assert!(fitted.assumed_circular);
+        assert_eq!(fitted.eccentricity, 0.0, "a circle has no eccentricity to fit");
+        assert_eq!(fitted.periapsis_rad, 0.0, "nor a periapsis to put it at");
+
+        // And what is reported places the body where it was actually seen. This is the whole
+        // consequence: a shape that is not reported must not be a shape that was used.
+        let orbit = fitted.stated(crate::knowledge::Witness(1), None, &close, 0.0);
+        assert_eq!(orbit.eccentricity, None);
+        for look in &close {
+            let (range, _) = look.range_m.expect("these were ranged");
+            let offset = fitted.at(look.at_s) - look.from_m;
+            let out = (offset.length() - range).abs() / range;
+            assert!(out < 0.005, "drawn {out} of the way off its measured range");
+            // Not at the bearing noise, and it cannot be: a circle fitted through an arc of an
+            // eccentricity-0.057 ellipse is the wrong shape by construction, and what it buys
+            // for that is a size and a plane it can state. Microradians, not milliradians.
+            let miss = between(offset.normalize(), look.toward);
+            assert!(miss < 1.0e-5, "drawn {miss} rad from where it was seen");
+        }
+    }
+
+    /// **Proximity is the instrument, so a measured range has to be scored.** It seeded the
+    /// search and then constrained nothing, which left the settle free to slide the size and
+    /// the depth away from the very positions that had found them.
+    ///
+    /// The objective is what changed, so the objective is what is tested: a range the fit
+    /// disagrees with has to cost it, and one it agrees with has to cost nothing.
+    #[test]
+    fn a_range_the_fit_disagrees_with_costs_it() {
+        let truth = like(5.203, 0.0489);
+        let bearings = looks(&truth, 5.0, 24, truth.period_s() / 96.0, SIGMA);
+        let right = truth.fitted();
+        // A part in ten thousand, which is far looser than a close pass gives.
+        let with = |scale: f64| -> Vec<Look> {
+            bearings
+                .iter()
+                .map(|l| {
+                    let d = (right.at(l.at_s) - l.from_m).length();
+                    Look { range_m: Some((d * scale, d * 1.0e-4)), ..*l }
+                })
+                .collect()
+        };
+
+        let blind = residual(&right, &bearings, f64::INFINITY).expect("the truth fits itself");
+        let agreeing = residual(&right, &with(1.0), f64::INFINITY).expect("and agrees with its own ranges");
+        let disagreeing = residual(&right, &with(0.99), f64::INFINITY).expect("this one it does not");
+
+        // A hundredth out on each range is a hundred sigma, and the objective has to see it.
+        assert!(
+            disagreeing > 10.0 * agreeing,
+            "a violated range cost {disagreeing} against {agreeing}, which is nothing"
+        );
+        // A range that agrees adds a measurement and no miss, so the weighted answer falls.
+        assert!(agreeing < blind, "{agreeing} against {blind}");
+        assert!(agreeing > blind * 0.5, "and it is still the same fit: {agreeing} against {blind}");
     }
 
     /// And it is quick, because there is nothing to search: the three positions are the answer
