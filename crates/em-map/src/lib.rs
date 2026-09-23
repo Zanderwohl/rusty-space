@@ -51,7 +51,7 @@ mod standalone {
         let snapshot = MapSnapshot::observed(0.0, vec![MapItem::body(
             ItemKey::from_name("Earth"), "Earth", ItemKind::Planet, earth, 6.371e6, DVec3::Z)]);
         let orbit = Orbit::framing(DVec3::ZERO, 3.0e11);
-        let frame = compose(&snapshot, &orbit, Plane::Ecliptic.about(DVec3::Z), 1.495_978_707e11);
+        let frame = compose(&snapshot, &orbit, Plane::System.about(DVec3::Z), 1.495_978_707e11);
 
         assert_eq!(frame.placements.len(), 1);
         assert!(frame.placements[0].at.is_finite());

@@ -415,8 +415,15 @@ fn survey(
         return;
     }
     // Before anything is composed: the plane the camera's angles are measured against is the
-    // local system's, and a ship that crossed to another star is in another one.
-    ui.map.system_pole = game.0.system.as_ref().map_or(DVec3::ZERO, |system| system.pole);
+    // one this craft has solved for the system it is in, and a ship that crossed to another
+    // star is in another one. Truth's pole is deliberately not read here -- what the map draws
+    // is what the crew worked out. See `lightcone/docs/25-system-knowledge.md`.
+    ui.map.system_plane = game
+        .0
+        .system
+        .as_ref()
+        .map(|system| game.0.knowledge.system_plane(system.star))
+        .unwrap_or_default();
     let picture = match ui.map.source {
         Source::Observed => crate::map_source::observed(&game.0, &bodies, &uplink, eye.at_ly),
         #[cfg(feature = "godview")]
@@ -968,7 +975,7 @@ mod tests {
         assert_eq!(orbit.focus_ly, ship, "following did not reach the interface's copy");
 
         // Now the drag. A small pan has to leave the camera near the ship, not near zero.
-        orbit.pan(em_map::Plane::Ecliptic.about(DVec3::Z), 0.05, 0.0);
+        orbit.pan(em_map::Plane::System.about(DVec3::Z), 0.05, 0.0);
         let moved = orbit.focus_ly.distance(ship);
         assert!(moved > 0.0, "the pan moved nothing");
         assert!(
@@ -1054,7 +1061,7 @@ mod tests {
     fn locked_on(frame: Frame) -> crate::ui::MapView {
         crate::ui::MapView {
             focus: MapFocus::Primary(frame),
-            plane: em_map::Plane::Ecliptic,
+            plane: em_map::Plane::System,
             ..Default::default()
         }
     }

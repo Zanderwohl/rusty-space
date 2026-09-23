@@ -131,7 +131,9 @@ pub fn parse(args: &[String]) -> Entry {
     if let Some(name) = after("--map-plane") {
         let plane = match name.as_str() {
             "galactic" => Some(em_map::Plane::Galactic),
-            "ecliptic" => Some(em_map::Plane::Ecliptic),
+            // "ecliptic" was this option's name before a system's plane became something a
+            // craft solves; kept so older shot scripts still take the same picture.
+            "system" | "ecliptic" => Some(em_map::Plane::System),
             _ => None,
         };
         if let Some(plane) = plane {

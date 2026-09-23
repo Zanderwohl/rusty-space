@@ -223,7 +223,7 @@ mod tests {
     /// plane's normal, so nothing passes by agreeing with a hard-wired axis.
     fn datums() -> [Datum; 2] {
         let pole = DVec3::new(0.3, -0.5, 0.81).normalize();
-        [Plane::Ecliptic.about(pole), Plane::Galactic.about(pole)]
+        [Plane::System.about(pole), Plane::Galactic.about(pole)]
     }
 
     /// Projecting must be the exact inverse of casting, or a label lands away from the body
@@ -268,15 +268,15 @@ mod tests {
     fn the_undivided_form_still_says_which_way_a_thing_lies() {
         let fov = std::f64::consts::FRAC_PI_4;
         let orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
-        let (forward, right, up) = orbit.view_basis(Plane::Ecliptic.about(DVec3::Z));
+        let (forward, right, up) = orbit.view_basis(Plane::System.about(DVec3::Z));
 
         // Behind and to the right: `w` negative, `x` positive, which is the pair a caller
         // reads.
         let behind = -forward * 2.0 + right * 0.5 + up * 0.25;
-        let clip = orbit.clip(Plane::Ecliptic.about(DVec3::Z), behind, fov, 1.6);
+        let clip = orbit.clip(Plane::System.about(DVec3::Z), behind, fov, 1.6);
         assert!(clip.w < 0.0, "{clip:?}");
         assert!(clip.x > 0.0 && clip.y > 0.0, "{clip:?}");
-        assert!(orbit.project(Plane::Ecliptic.about(DVec3::Z), behind, fov, 1.6).is_none());
+        assert!(orbit.project(Plane::System.about(DVec3::Z), behind, fov, 1.6).is_none());
     }
 
     /// In front it is the projection exactly. The labels project and the marks clip over one
@@ -387,7 +387,7 @@ mod tests {
             orbit.turn(0.0, 1.0);
         }
         assert!(orbit.elevation <= ELEVATION_LIMIT);
-        let (forward, up) = orbit.orientation(Plane::Ecliptic.about(DVec3::Z));
+        let (forward, up) = orbit.orientation(Plane::System.about(DVec3::Z));
         assert!(forward.cross(up).length() > 1e-4, "forward and up have become parallel");
     }
 
@@ -396,7 +396,7 @@ mod tests {
     #[test]
     fn the_plane_decides_where_the_camera_stands() {
         let orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
-        let ecliptic = orbit.eye_ly(Plane::Ecliptic.about(DVec3::Z));
+        let ecliptic = orbit.eye_ly(Plane::System.about(DVec3::Z));
         let galactic = orbit.eye_ly(Plane::Galactic.about(DVec3::Z));
         assert!(ecliptic.distance(galactic) > 1e-9, "the two planes put the eye in one place");
         // And the stand-off is the plane's business only in direction, never in distance.
@@ -408,7 +408,7 @@ mod tests {
     fn a_pan_is_a_fraction_of_the_view() {
         let moved_at = |meters| {
             let mut orbit = Orbit::framing(DVec3::ZERO, meters);
-            orbit.pan(Plane::Ecliptic.about(DVec3::Z), 0.25, 0.0);
+            orbit.pan(Plane::System.about(DVec3::Z), 0.25, 0.0);
             orbit.focus_ly.length() * M_PER_LY / meters
         };
         assert!((moved_at(M_PER_AU) - moved_at(1.0e4 * M_PER_AU)).abs() < 1e-9);
@@ -496,7 +496,7 @@ mod tests {
     #[test]
     fn a_ray_that_meets_nothing_says_so() {
         let orbit = Orbit::framing(DVec3::ZERO, M_PER_AU);
-        let plane = Plane::Ecliptic.about(DVec3::Z);
+        let plane = Plane::System.about(DVec3::Z);
         let eye = orbit.eye_ly(plane);
         assert!(plane.intersect(eye, DVec3::Z, orbit.focus_ly).is_none(), "away from the plane");
         assert!(plane.intersect(eye, DVec3::X, orbit.focus_ly).is_none(), "along the plane");

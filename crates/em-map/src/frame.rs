@@ -189,7 +189,7 @@ mod tests {
     /// plane's normal, so nothing passes by agreeing with a hard-wired axis.
     fn datums() -> [Datum; 2] {
         let pole = DVec3::new(0.3, -0.5, 0.81).normalize();
-        [Plane::Ecliptic.about(pole), Plane::Galactic.about(pole)]
+        [Plane::System.about(pole), Plane::Galactic.about(pole)]
     }
     use crate::snapshot::{M_PER_AU, MapItem};
 
@@ -211,7 +211,7 @@ mod tests {
         let snapshot = MapSnapshot::observed(0.0, vec![at(1, au(1.0, 0.0, 0.1), 6.4e6),
             at(2, far, 7.0e8)]);
         let orbit = Orbit::framing(DVec3::ZERO, 10.0 * M_PER_AU);
-        let frame = compose(&snapshot, &orbit, Plane::Ecliptic.about(DVec3::Z), M_PER_AU);
+        let frame = compose(&snapshot, &orbit, Plane::System.about(DVec3::Z), M_PER_AU);
 
         assert_eq!(frame.placements.len(), 1, "the thousand-light-year star should be culled");
         for p in &frame.placements {
@@ -264,8 +264,8 @@ mod tests {
         let orbit = Orbit { focus_ly: DVec3::ZERO, azimuth: 0.0, elevation: 0.2,
             log_distance_m: (1.0e-6 * M_PER_AU).log10() };
 
-        let a = compose(&near, &orbit, Plane::Ecliptic.about(DVec3::Z), M_PER_AU).placements[0].angular_radius;
-        let b = compose(&far, &orbit, Plane::Ecliptic.about(DVec3::Z), M_PER_AU).placements[0].angular_radius;
+        let a = compose(&near, &orbit, Plane::System.about(DVec3::Z), M_PER_AU).placements[0].angular_radius;
+        let b = compose(&far, &orbit, Plane::System.about(DVec3::Z), M_PER_AU).placements[0].angular_radius;
         assert!((a / b - 2.0).abs() < 0.01, "{a} against {b}");
     }
 
@@ -274,7 +274,7 @@ mod tests {
     fn the_rings_reach_the_edge_of_the_view() {
         let snapshot = MapSnapshot::observed(0.0, vec![at(1, au(1.0, 0.0, 0.0), 6.4e6)]);
         let orbit = Orbit::framing(DVec3::ZERO, 1.0e4 * M_PER_AU);
-        let frame = compose(&snapshot, &orbit, Plane::Ecliptic.about(DVec3::Z), M_PER_AU);
+        let frame = compose(&snapshot, &orbit, Plane::System.about(DVec3::Z), M_PER_AU);
 
         assert!(!frame.rings.is_empty());
         let outermost = frame.rings.iter().map(|r| r.radius).fold(0.0f32, f32::max);
@@ -294,7 +294,7 @@ mod tests {
         ]);
         // The camera is looking at the star, which is where the rings must *not* be.
         let orbit = Orbit::framing(star, 10.0 * M_PER_AU);
-        let frame = compose(&snapshot, &orbit, Plane::Ecliptic.about(DVec3::Z), M_PER_AU);
+        let frame = compose(&snapshot, &orbit, Plane::System.about(DVec3::Z), M_PER_AU);
 
         let ship_at = frame.placements.iter().find(|p| p.kind == ItemKind::Observer).unwrap().at;
         assert!(
@@ -314,7 +314,7 @@ mod tests {
     fn rings_without_an_observer_fall_back_to_the_focus() {
         let snapshot = MapSnapshot::observed(0.0, vec![at(1, au(1.0, 0.0, 0.0), 6.4e6)]);
         let orbit = Orbit::framing(au(1.0, 0.0, 0.0), 10.0 * M_PER_AU);
-        let frame = compose(&snapshot, &orbit, Plane::Ecliptic.about(DVec3::Z), M_PER_AU);
+        let frame = compose(&snapshot, &orbit, Plane::System.about(DVec3::Z), M_PER_AU);
         assert_eq!(frame.rings_at, frame.focus);
     }
 
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn nothing_to_draw_is_still_a_frame() {
         let frame = compose(&MapSnapshot::observed(0.0, Vec::new()), &Orbit::default(),
-            Plane::Ecliptic.about(DVec3::Z), M_PER_AU);
+            Plane::System.about(DVec3::Z), M_PER_AU);
         assert!(frame.placements.is_empty());
         assert!(frame.focus.is_finite());
         for ring in &frame.rings {

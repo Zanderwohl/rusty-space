@@ -28,9 +28,10 @@ pub enum Placed {
 }
 
 /// What the system's plane is known to be, folded from the orbits held about its bodies.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum SystemPlane {
     /// Nothing constrains it.
+    #[default]
     Unknown,
     /// Only edge-on constraints: the pole lies on this great circle, whose own normal is the
     /// line of sight the transits were seen along. One craft watching from one place can get no
