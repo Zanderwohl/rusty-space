@@ -868,7 +868,7 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
 mod tests {
     use super::*;
     use crate::knowledge::astrometry::Bearing;
-    use crate::knowledge::{BodyId, Subject};
+    use crate::knowledge::Subject;
     use crate::rng;
     use crate::sky::StarId;
 

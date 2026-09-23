@@ -4,6 +4,10 @@
 //! looks at one, and a seed is eight bytes; what a player *changes* becomes an event, and
 //! replaying those over this baseline reconstructs the system exactly.
 
+pub mod architecture;
+pub mod disc;
+pub mod tuning;
+
 use em_sim::appearance::{Appearance, DebugBall, AppearanceColor};
 use em_sim::body::BodyInfo;
 use em_sim::motive::kepler::{
