@@ -35,16 +35,24 @@ pub struct World {
     /// bodies out of a preset, and every craft in the same system points at the same copy —
     /// which is only possible because a system is never propagated.
     loaded: HashMap<StarId, Arc<LocalSystem>>,
+    /// Where each star sits in `stars`. Built once, because the catalogue never changes.
+    index: HashMap<StarId, usize>,
+}
+
+/// The index every lookup goes through.
+fn index_of(stars: &[CatalogueStar]) -> HashMap<StarId, usize> {
+    stars.iter().enumerate().map(|(k, star)| (star.id, k)).collect()
 }
 
 impl World {
     pub fn new(stars: Vec<CatalogueStar>) -> Self {
-        Self { stars: Arc::new(stars), loaded: HashMap::new() }
+        let stars = Arc::new(stars);
+        Self { index: index_of(&stars), stars, loaded: HashMap::new() }
     }
 
     /// So the process carries one catalogue however many readers it has.
     pub fn from_shared(stars: Arc<Vec<CatalogueStar>>) -> Self {
-        Self { stars, loaded: HashMap::new() }
+        Self { index: index_of(&stars), stars, loaded: HashMap::new() }
     }
 
     pub fn stars(&self) -> Arc<Vec<CatalogueStar>> {
@@ -113,14 +121,25 @@ impl World {
         if let Some(system) = self.loaded.get(&id) {
             return Some(system.clone());
         }
-        let star = self.stars.iter().find(|star| star.id == id)?.clone();
+        let star = self.star_by_id(id)?.clone();
         let system = Arc::new(LocalSystem::for_star(&star)?);
         self.loaded.insert(id, system.clone());
         Some(system)
     }
 
+    /// A star by its catalogue id.
+    ///
+    /// Through the index rather than by scanning. The catalogue does not change, so the map is
+    /// built once, and the alternative was a hundred thousand comparisons every tick a craft
+    /// asked about a star that is not there -- which nothing else would have stopped, because
+    /// a miss caches nothing to remember it by.
     pub fn star_by_id(&self, id: StarId) -> Option<&CatalogueStar> {
-        self.stars.iter().find(|star| star.id == id)
+        self.stars.get(*self.index.get(&id)?)
+    }
+
+    /// Whether the catalogue holds this star at all. What an order naming one is refused by.
+    pub fn holds(&self, id: StarId) -> bool {
+        self.index.contains_key(&id)
     }
 }
 

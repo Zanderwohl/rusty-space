@@ -384,6 +384,20 @@ impl<J: Journal> Server<J> {
                 if !integration_ok || !duty.is_valid() {
                     return Err(Refusal::Impossible);
                 }
+                // `Duty::is_valid` cannot check a star id, because `lc-proto` has no catalogue
+                // to check it against. Refused here instead: a duty pointed at a star nobody
+                // has is a duty that finds nothing every tick forever, and a survey's does not
+                // even cache the miss.
+                let named = match lc_world::knowledge::survey::Duty::from(duty) {
+                    lc_world::knowledge::survey::Duty::Survey { star, .. } => Some(star),
+                    lc_world::knowledge::survey::Duty::Stare(star) => Some(star),
+                    _ => None,
+                };
+                if let Some(star) = named
+                    && !self.world.holds(star)
+                {
+                    return Err(Refusal::Impossible);
+                }
                 let aboard = self.aboard(id);
                 aboard.observatory.integration_s = integration_s.max(1.0);
                 aboard.observatory.take_up(duty.into(), at_s);
@@ -699,6 +713,42 @@ mod tests {
     /// a frame at all, and the fit is then offered bodies whose arcs are hours long. Hours is
     /// nothing of any orbit, so it declines them -- and declining is the behavior worth
     /// pinning here, since `knowledge::arc` covers the arcs that do settle.
+    /// **A duty pointed at a star nobody has is refused.** `Duty::is_valid` cannot check an
+    /// id -- `lc-proto` carries no catalogue to check it against -- so a bogus one was taken
+    /// up and then looked for on every tick forever, and a survey's lookup caches no miss to
+    /// remember it by.
+    #[tokio::test]
+    async fn a_duty_naming_a_star_nobody_has_is_refused() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) =
+            sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+
+        let nowhere = StarId::synthesise("no-such-catalogue", 7);
+        for duty in [
+            lc_proto::Duty::Survey { star: nowhere.get(), started_s: 0.0 },
+            lc_proto::Duty::Stare { star: nowhere.get() },
+        ] {
+            let order = Order::SetDuty { duty: duty.clone(), integration_s: 1.0e4 };
+            assert!(
+                matches!(
+                    server.act_on_knowledge(CraftId(ship.0), &order, 0.0),
+                    Err(lc_proto::Refusal::Impossible)
+                ),
+                "{duty:?} was taken up although no such star exists"
+            );
+        }
+
+        // And a star the catalogue does hold is taken up as before.
+        let real = sky()[0].id;
+        let order = Order::SetDuty {
+            duty: lc_proto::Duty::Survey { star: real.get(), started_s: 0.0 },
+            integration_s: 1.0e4,
+        };
+        assert!(server.act_on_knowledge(CraftId(ship.0), &order, 0.0).is_ok());
+    }
+
     #[tokio::test]
     async fn a_surveying_craft_measures_its_sun_and_declines_the_short_arcs() {
         let broker = Broker::new([1u8; 32]);
