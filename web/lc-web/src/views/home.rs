@@ -32,14 +32,14 @@ pub async fn page() -> Markup {
                     "sed quia consequuntur magni dolores eos qui ratione voluptatem."
                 }
                 table {
-                    caption { "Lorem ipsum dolor sit amet" }
-                    thead { tr { th scope="col" { "Lorem" } th scope="col" { "Ipsum dolor" } } }
+                    caption { "Travel and signal times at the default rate" }
+                    thead { tr { th scope="col" { "In-game" } th scope="col" { "Real time" } } }
                     tbody {
-                        tr { td { "Lorem ipsum (000 s)" } td { "00 ms" } }
-                        tr { td { "Dolor sit amet (0.0 h)" } td { "0.0 s" } }
-                        tr { td { "Consectetur 0000 AU" } td { "0.0 min" } }
-                        tr { td { "Adipiscing elit, sed do" } td { "0.00 h" } }
-                        tr { td { "Eiusmod tempor, incididunt" } td { "0.0 h" } }
+                        tr { td { "Moon to Earth, a transmission (1.3 s)" } td { "0.15 ms" } }
+                        tr { td { "Sun to Earth, light (499 s)" } td { "57 ms" } }
+                        tr { td { "Earth to Voyager 2 in 2026 (about 20 h)" } td { "8.2 s" } }
+                        tr { td { "Sun to Proxima Centauri (4.25 years)" } td { "4.25 h" } }
+                        tr { td { "Across the galaxy (36,000 light-years)" } td { "4.1 years" } }
                     }
                 }
                 p {
