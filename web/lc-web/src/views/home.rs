@@ -42,9 +42,9 @@ pub async fn page() -> Markup {
                     }
                     tbody {
                         tr { th scope="row" { "Moon to Earth transmission" } td { "1.3 s" } td { "0.15 ms" } }
-                        tr { th scope="row" { "Sun to Earth light" } td { "8 min 19 s" } td { "57 ms" } }
+                        tr { th scope="row" { "Sun to Earth at C" } td { "8 min 19 s" } td { "57 ms" } }
                         tr { th scope="row" { "Earth to Voyager 1 transmission" } td { "23 h 51 min" } td { "9.8 s" } }
-                        tr { th scope="row" { "Sun to Proxima Centauri light" } td { "4.25 years" } td { "4.25 h" } }
+                        tr { th scope="row" { "Sun to Proxima Centauri at C" } td { "4.25 years" } td { "4.25 h" } }
                         tr { th scope="row" { "Across the game galaxy at C" } td { "36,000 years" } td { "4.1 years" } }
                     }
                 }
