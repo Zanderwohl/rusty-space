@@ -41,14 +41,7 @@ impl<J: Journal> Server<J> {
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
     ) -> Result<String, String> {
-        let ship = match args.id("ship") {
-            Some(raw) => i64::try_from(raw)
-                .ok()
-                .map(CraftId)
-                .filter(|id| self.fleet.get(*id).is_some())
-                .ok_or_else(|| format!("no ship {raw}"))?,
-            None => self.owned_by(from).ok_or("you have no ship to move")?,
-        };
+        let ship = self.ship_named(from, args)?;
         let target = args.id("target").ok_or("a target is required")?;
         let place = self.locate(target, args.id("star"))?;
         self.teleport(ship, place, args.number("altitude").unwrap_or(2.0), wire, events, deliveries)

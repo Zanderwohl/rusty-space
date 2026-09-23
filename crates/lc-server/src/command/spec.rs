@@ -32,7 +32,7 @@ pub enum Verb {
     Help,
     Teleport,
     Where,
-    Grant,
+    Energize,
     Stage,
 }
 

@@ -5,7 +5,7 @@ and the shard parses it, checks it against the asker's level, runs it at a fixed
 tick and answers the connection that sent it. The client knows nothing about any command. Code
 is `lc_server::command` and `lc_client::console`.
 
-Status: **built** — `help`, `teleport`, `where`, `grant`, `stage`.
+Status: **built** — `help`, `teleport`, `where`, `energize`, `stage`.
 
 ## Why text on the wire
 
@@ -58,14 +58,23 @@ take.
 
 On a directing shard, which covers `--local` and `--demo`, everyone is a superadmin, for the
 reason `ability::allows` opens development there: the population is whoever ran `cargo run`.
-`grant` and `stage` sit at the levels the old `Inbound::Grant` and `Inbound::Stage` are allowed
+`energize` and `stage` sit at the levels the old `Inbound::Grant` and `Inbound::Stage` are allowed
 at, and a test holds the two tables to each other.
+
+`teleport` and `energize` act on the asker's own ship from debug (3). Their `ship:` argument, which
+names any ship, starts at admin (2), so admins and superadmins act on anyone's.
 
 ## The queue
 
 A line is charged against the sender's rate budget like any other message, held, and run once a
 tick **after the intents**. A command therefore sees every order that arrived with it already
 flown, and nothing it does is re-solved by a pursuit before the tick is out.
+
+## Energize
+
+`energize [amount:<ME>] [ship:<id>]` adds energy to a ship's storage. With no amount it fills the
+ship, and an amount past what fits tops it off at capacity rather than being refused. The ship's
+account is settled first, so "what fits" counts everything collected and spent up to now.
 
 ## Teleport
 
@@ -75,7 +84,7 @@ looked for only in systems already loaded, unless `star:` says which. Loading ev
 system to search would generate the whole catalog in one tick. `where` prints the ids. It
 never prints names: the generator's keys must not reach a player.
 
-Moving somebody else's ship takes `ship:`, which only a superadmin has. The burn-attribution
+Moving somebody else's ship takes `ship:`. The burn-attribution
 concern in `ability.rs` does not arise here. A teleport's events are kinds no order produces, so
 nothing in the record reads as the owner having done it.
 

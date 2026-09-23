@@ -100,21 +100,74 @@ async fn an_answer_names_the_line_it_answers_and_a_mistake_says_what_it_was() {
     assert!(!wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Answered { .. })));
 }
 
+/// Level 3 moves and fills its own ship only; levels 1 and 2 any ship.
 #[tokio::test]
-async fn somebody_else_s_ship_is_only_a_superadmin_s_to_move() {
+async fn debug_acts_on_its_own_ship_and_admins_on_anyone_s() {
     let far = stars()[2].id.get();
-    let (mut server, mut wire) = shard(Level::ADMIN);
-    let (ok, why) = ask(&mut server, &mut wire, 1, &format!("teleport {far} ship:2")).await;
-    assert!(!ok && why.contains("no argument 'ship'"), "{why}");
+    for line in [format!("teleport {far} ship:2"), "energize ship:2".to_string()] {
+        let (mut server, mut wire) = shard(Level::DEBUG);
+        let (ok, why) = ask(&mut server, &mut wire, 1, &line).await;
+        assert!(!ok && why.contains("no argument 'ship'"), "{line}: {why}");
+    }
 
-    let (mut server, mut wire) = shard(Level::SUPERADMIN);
-    let (ok, why) = ask(&mut server, &mut wire, 1, &format!("teleport {far} ship:2")).await;
+    let (mut server, mut wire) = shard(Level::DEBUG);
+    let (ok, why) = ask(&mut server, &mut wire, 1, &format!("teleport {far}")).await;
     assert!(ok, "{why}");
-    let moved = server.fleet.get(CraftId(2)).unwrap();
-    assert_eq!(moved.system.as_ref().map(|s| s.star.get()), Some(far));
-    // Its owner is told what it is doing now; the asker's own ship stayed where it was.
-    assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Flying { .. })));
-    assert!(server.fleet.get(CraftId(1)).unwrap().motion.position_ly.x < 5.0);
+    assert_eq!(server.fleet.get(CraftId(1)).unwrap().system.as_ref().map(|s| s.star.get()), Some(far));
+
+    for level in [Level::ADMIN, Level::SUPERADMIN] {
+        let (mut server, mut wire) = shard(level);
+        let (ok, why) = ask(&mut server, &mut wire, 1, &format!("teleport {far} ship:2")).await;
+        assert!(ok, "{why}");
+        let moved = server.fleet.get(CraftId(2)).unwrap();
+        assert_eq!(moved.system.as_ref().map(|s| s.star.get()), Some(far));
+        // Its owner is told what it is doing now; the asker's own ship stayed where it was.
+        assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Flying { .. })));
+        assert!(server.fleet.get(CraftId(1)).unwrap().motion.position_ly.x < 5.0);
+    }
+}
+
+/// Ship 2 fitted and empty, and what it holds and can hold, in ME.
+fn emptied(server: &mut Server<Memory>) {
+    use lc_world::fitting::{Fitting, Loadout};
+    let balance = server.balance();
+    let mut account = Fitting::full(Loadout::STARTING, balance, 0.0).account();
+    account.stored_j = 0.0;
+    server.fleet.get_mut(CraftId(2)).unwrap().fit(Some(Fitting::from_account(&account, balance)));
+}
+
+fn held(server: &Server<Memory>) -> (f64, f64) {
+    let now_s = server.now_t() as f64 * 1.0e-6;
+    let craft = server.fleet.get(CraftId(2)).unwrap();
+    let fitting = craft.fitting().unwrap();
+    let me = fitting.balance.module_energy_j();
+    (fitting.stored_j_at(&craft.motion, now_s) / me, fitting.capacity_j_at(now_s) / me)
+}
+
+#[tokio::test]
+async fn energize_adds_what_is_asked_and_never_more_than_fits() {
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    emptied(&mut server);
+    let (ok, why) = ask(&mut server, &mut wire, 1, "energize 2 ship:2").await;
+    assert!(ok, "{why}");
+    let (stored, capacity) = held(&server);
+    assert!((stored - 2.0).abs() < 1e-3, "{stored} of {capacity}: {why}");
+    assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+
+    let (ok, why) = ask(&mut server, &mut wire, 2, "energize amount:1e6 ship:2").await;
+    assert!(ok, "{why}");
+    let (stored, capacity) = held(&server);
+    assert!((stored - capacity).abs() < 1e-6, "an overcharge left {stored} of {capacity}");
+}
+
+#[tokio::test]
+async fn energize_with_no_amount_fills_the_ship() {
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    emptied(&mut server);
+    let (ok, why) = ask(&mut server, &mut wire, 1, "energize ship:2").await;
+    assert!(ok, "{why}");
+    let (stored, capacity) = held(&server);
+    assert!(capacity > 0.0 && (stored - capacity).abs() < 1e-6, "{stored} of {capacity}");
 }
 
 /// `where` prints ids and a teleport takes them: a body of the system the ship is in, found by
@@ -196,7 +249,7 @@ async fn a_ship_that_jumps_is_seen_to_go_only_when_the_light_of_it_arrives() {
 #[test]
 fn development_commands_agree_with_the_ability_table() {
     use crate::ability::{Act, Asking, Directing, Standing, allows};
-    for (name, act) in [("grant", Act::GrantEnergy), ("stage", Act::Stage)] {
+    for (name, act) in [("energize", Act::GrantEnergy), ("stage", Act::Stage)] {
         for level in Level::ALL {
             for directing in [Directing(true), Directing(false)] {
                 let by_command = find(name, crate::ability::commanding(level, directing)).is_some();

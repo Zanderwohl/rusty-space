@@ -5,6 +5,7 @@
 //! queued when it arrives and run at one point in the tick, after the intents, and its answer
 //! goes to the connection that sent it. See `lightcone/docs/26-console.md`.
 
+mod energize;
 mod parse;
 mod spec;
 mod teleport;
@@ -13,6 +14,7 @@ use std::collections::VecDeque;
 use std::fmt::Write as _;
 
 use lc_proto::{COMMAND_LIMIT, ClientId, Outbound};
+use lc_world::craft::CraftId;
 
 pub use parse::{Arg, ParseError, Parsed, parse};
 pub use spec::{ArgSpec, BindError, Bound, Kind, Limit, Need, Spec, Value, Verb, bind};
@@ -43,38 +45,38 @@ pub const COMMANDS: &[Spec] = &[
     Spec {
         name: "teleport",
         verb: Verb::Teleport,
-        level: Level::ADMIN,
+        level: Level::DEBUG,
         summary: "put a ship on station about a star or a body, without flying there",
         args: &[
             ArgSpec {
                 name: "target",
                 kind: Kind::Id,
                 need: Need::Required,
-                level: Level::ADMIN,
+                level: Level::DEBUG,
                 help: "a star's catalog id or a body's id",
             },
             ArgSpec {
                 name: "altitude",
                 kind: Kind::Number(&[
-                    Limit { level: Level::ADMIN, min: 0.1, max: 100.0 },
+                    Limit { level: Level::DEBUG, min: 0.1, max: 100.0 },
                     Limit { level: Level::SUPERADMIN, min: 0.01, max: 10_000.0 },
                 ]),
                 need: Need::Default("2"),
-                level: Level::ADMIN,
+                level: Level::DEBUG,
                 help: "radii above the surface",
             },
             ArgSpec {
                 name: "star",
                 kind: Kind::Id,
                 need: Need::Optional,
-                level: Level::ADMIN,
+                level: Level::DEBUG,
                 help: "the star the body belongs to",
             },
             ArgSpec {
                 name: "ship",
                 kind: Kind::Id,
                 need: Need::Optional,
-                level: Level::SUPERADMIN,
+                level: Level::ADMIN,
                 help: "the ship to move; default your own",
             },
         ],
@@ -93,21 +95,26 @@ pub const COMMANDS: &[Spec] = &[
         }],
     },
     Spec {
-        name: "grant",
-        verb: Verb::Grant,
+        name: "energize",
+        verb: Verb::Energize,
         level: Level::DEBUG,
-        summary: "put energy in your own ship",
-        args: &[ArgSpec {
-            name: "modules",
-            kind: Kind::Number(&[
-                Limit { level: Level::DEBUG, min: 0.0, max: 100.0 },
-                Limit { level: Level::ADMIN, min: 0.0, max: 10_000.0 },
-                Limit { level: Level::SUPERADMIN, min: 0.0, max: 1.0e6 },
-            ]),
-            need: Need::Default("1"),
-            level: Level::DEBUG,
-            help: "energy, in modules of storage (ME)",
-        }],
+        summary: "put energy in a ship's storage, up to what it holds",
+        args: &[
+            ArgSpec {
+                name: "amount",
+                kind: Kind::Number(&[Limit { level: Level::DEBUG, min: 0.0, max: 1.0e9 }]),
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "energy in ME; default enough to fill it",
+            },
+            ArgSpec {
+                name: "ship",
+                kind: Kind::Id,
+                need: Need::Optional,
+                level: Level::ADMIN,
+                help: "the ship to fill; default your own",
+            },
+        ],
     },
     Spec {
         name: "stage",
@@ -186,12 +193,9 @@ impl<J: Journal> Server<J> {
             Verb::Help => help(args.text("command"), level),
             Verb::Teleport => self.teleport_command(command.from, &args, wire, events, deliveries),
             Verb::Where => self.where_command(command.from, args.word("show") == Some("all")),
-            Verb::Grant => {
-                let modules = args.number("modules").unwrap_or_default();
-                let joules = modules * self.balance.module_energy_j();
-                let ship = self.grant(command.from, joules).ok_or("you have no fitted ship to fill")?;
-                self.tell_fitted(wire, ship);
-                Ok(format!("granted {modules} ME"))
+            Verb::Energize => {
+                let ship = self.ship_named(command.from, &args)?;
+                self.energize(ship, args.number("amount"), wire)
             }
             Verb::Stage => {
                 let name = args.word("scene").unwrap_or_default();
@@ -199,6 +203,18 @@ impl<J: Journal> Server<J> {
                 self.stage(scene).map_err(|_| format!("this shard does not hold the star {name} is set at"))?;
                 Ok(format!("staged {name}"))
             }
+        }
+    }
+
+    /// The ship a command acts on: `ship:` when given, and otherwise the asker's own.
+    fn ship_named(&self, from: ClientId, args: &Bound) -> Result<CraftId, String> {
+        match args.id("ship") {
+            Some(raw) => i64::try_from(raw)
+                .ok()
+                .map(CraftId)
+                .filter(|id| self.fleet.get(*id).is_some())
+                .ok_or_else(|| format!("no ship {raw}")),
+            None => self.owned_by(from).ok_or_else(|| "you have no ship".to_string()),
         }
     }
 
