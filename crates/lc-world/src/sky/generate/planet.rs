@@ -185,11 +185,11 @@ fn of(
     let atmosphere = air(mass_earths, radius_earths, rung.equilibrium_k, envelope, tuning);
 
     let water_fraction = water(rung, arch, magnetic, margin(WATER, radius_earths), giant_jupiters, h(15), tuning);
-    let top = top_of(rung.class, atmosphere, rung.equilibrium_k, water_fraction);
     let habitable = arch.disc.habitable(rung.semi_major_m)
         && atmosphere != Atmosphere::Envelope
         && atmosphere != Atmosphere::None
         && water_fraction > WET;
+    let top = top_of(rung.class, atmosphere, rung.equilibrium_k, water_fraction, habitable);
 
     Planet {
         name,
@@ -259,10 +259,16 @@ fn water(
 /// Water beats cloud where there is any: Earth has as thick an atmosphere as Venus and reads
 /// blue, because the ocean is what a telescope sees. Cloud is what is left when a thick
 /// atmosphere has no water under it to be seen through, which is Venus exactly.
-fn top_of(class: Class, atmosphere: Atmosphere, equilibrium_k: f64, water_fraction: f64) -> Top {
+///
+/// A habitable planet has liquid water whatever its equilibrium temperature says, because that
+/// is what the zone *means*: its outer edge is the furthest a thick enough atmosphere can still
+/// hold a surface above freezing. The greenhouse that does it is a free parameter of the planet
+/// and is not modelled, so the zone stands in for it.
+fn top_of(class: Class, atmosphere: Atmosphere, equilibrium_k: f64, water_fraction: f64, habitable: bool) -> Top {
     const FREEZING_K: f64 = 273.0;
     match atmosphere {
         Atmosphere::Envelope => Top::Cloud,
+        _ if habitable => Top::Ocean,
         _ if water_fraction > WET && equilibrium_k < FREEZING_K => Top::Ice,
         _ if water_fraction > WET => Top::Ocean,
         Atmosphere::Thick => Top::Cloud,
