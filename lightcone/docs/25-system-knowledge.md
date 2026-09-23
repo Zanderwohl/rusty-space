@@ -183,9 +183,10 @@ fit needs it as a parameter; a moon's orbit measures it. It cannot come from tru
 
      What is wrong is the word **parked** in the done-when below. A ship holding still 5 AU out
      can never learn how far away its own sun is, and should not. The scenario has to be a ship
-     **in orbit** at 5 AU, which sweeps 0.7 AU of baseline in three game months; against a
-     centroid floored at `resolution * CENTROID_FLOOR`, 3e-10 rad, that is a distance to about a
-     part in 1e8, and the 1% planet radii the done-when asks for need it.
+     **in orbit** at 5 AU, which is `Course::Orbit`. Measured, with sixteen bearings round the
+     orbit and a centroid at the `resolution * CENTROID_FLOOR` floor of 3e-10 rad: a sigma of
+     6.2e-15 ly, a part in 1.3e10 of 5 AU. The 1% planet radii the done-when asks for need
+     nothing like that much, and nothing else comes close to it.
 
      An angular diameter was considered as a route that works at rest, and is not one. The
      disc is 6,244 resolution elements across at 5 AU, so the *diameter* is easy; turning it
@@ -201,10 +202,26 @@ fit needs it as a parameter; a moon's orbit measures it. It cannot come from tru
      zero, so most are dropped and the distance silently returns to `Unknown` — the ship would
      measure its own sun early, then stop being able to.
 
-     So decimation has to prefer a wide baseline *among bearings that still share a direction*,
-     or triangulate has to solve in windows. This is the same conditioning that
-     `triangulate`'s own doc warns about, approached from the other end: there the parallax was
-     too small to invert, here it is too large for the small-angle frame the solver works in.
+     ✅ **Built** (2026-09-22), and decimation was not what had to change. This is the same
+     conditioning `triangulate`'s own doc warns about, approached from the other end: there the
+     parallax is too small to invert the 3x3 system `sum (I - u u^T) x = sum (I - u u^T) p`,
+     whose smallest eigenvalue is the parallax squared. Here it is too large for the projection
+     the regression works in. **So the two solvers fail in each other's regime and nowhere
+     else**, and for a source seen from around, the 3x3 system is not the unstable one — it is
+     the right one, because what makes that matrix invertible is exactly the bearings pointing
+     in genuinely different directions.
+
+     `astrometry::intersect` is that solver, and `triangulate` hands over to it when the
+     *widest* bearing is more than `WIDE_RAD` from the mean. Widest rather than an average,
+     because one bearing past the 60° gate is one the regression drops in silence. Two passes,
+     since the measurement is an angle and the residual is a length: the first finds roughly
+     where the source is, the second weights each bearing by `sigma_rad * range`, which is what
+     its miss distance is worth. Every interstellar case is far below the threshold and goes to
+     the regression exactly as before.
+
+     Keeping the bearings whose *observer positions* are farthest apart then turns out to be
+     right for a host star after all, so `File::decimate` is untouched: a wide spread is what
+     the new solver wants.
 - ~~**A transit `Conclusion` records the host mass it used.**~~ **Dropped in phase 4.** The
   argument was that a receiver could not otherwise turn a relayed period into the same radius the
   sender did. It does not have to: the `Orbit` carries the axis itself, so a receiver reads the
