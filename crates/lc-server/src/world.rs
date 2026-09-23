@@ -97,10 +97,25 @@ impl World {
             .iter()
             .find(|star| star.position_ly.distance(position_ly) < LOCAL_SHELL_LY)?
             .clone();
+        self.load(&star)
+    }
+
+    /// The system of the star with this catalogue id, loaded if nobody has been there.
+    pub fn system_of(&mut self, id: u64) -> Option<Arc<LocalSystem>> {
+        let star = self.stars.iter().find(|s| s.id.get() == id)?.clone();
+        self.load(&star)
+    }
+
+    /// Every system something has been in since the shard started.
+    pub fn loaded(&self) -> impl Iterator<Item = &Arc<LocalSystem>> {
+        self.loaded.values()
+    }
+
+    fn load(&mut self, star: &CatalogueStar) -> Option<Arc<LocalSystem>> {
         if let Some(system) = self.loaded.get(&star.id) {
             return Some(system.clone());
         }
-        let system = Arc::new(LocalSystem::for_star(&star)?);
+        let system = Arc::new(LocalSystem::for_star(star)?);
         self.loaded.insert(star.id, system.clone());
         Some(system)
     }

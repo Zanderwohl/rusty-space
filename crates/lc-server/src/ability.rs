@@ -1,7 +1,9 @@
 //! Who may do what, on this shard.
 //!
 //! One table in one function rather than a condition at each call site: a rule spread over six
-//! of them is one nobody can state, and so one nobody can check.
+//! of them is one nobody can state, and so one nobody can check. Console commands are the one
+//! other table, `crate::command::COMMANDS`, which states a level per command and per argument
+//! and is read through [`commanding`].
 //!
 //! [`Level`] mirrors `lc_identity::level::Level` and is duplicated deliberately — this crate
 //! must not depend on the broker, so the two agree by `lightcone/docs/16-identity.md` as the
@@ -138,6 +140,12 @@ pub fn allows(act: Act, who: Asking, directing: Directing) -> bool {
         // this is the level, from a ticket the broker signed.
         Act::GrantEnergy | Act::Stage => directing.0 || who.level.is_admin(),
     }
+}
+
+/// The level a console command is checked against. On a directing shard everyone is the most
+/// senior, for the reason [`allows`] opens development there: the population is whoever ran it.
+pub fn commanding(level: Level, directing: Directing) -> Level {
+    if directing.0 { Level::SUPERADMIN } else { level }
 }
 
 #[cfg(test)]

@@ -420,6 +420,11 @@ pub mod kind {
     /// [`super::Body::Key`] — it lands in the same conversation, because that is where a player
     /// looks for it. Receiving one is what puts the source in the receiver's keyring.
     pub const KEY: i16 = 6;
+    /// A craft was taken from here by fiat, stamped where it was. See [`super::Inbound::Command`].
+    pub const VANISH: i16 = 8;
+    /// The same craft put down, stamped where it landed and at the same coordinate time. The two
+    /// are seen apart, each at its own light delay: nothing flew between them.
+    pub const APPEAR: i16 = 9;
 }
 
 /// What a craft's drive became at a [`kind::DRIVE`] event.
@@ -783,7 +788,13 @@ pub enum Outbound {
     /// Every craft this ship answers automatically, whole. Sent on signing in and after each
     /// [`Order::AutoAck`]. Appended last.
     AutoAcking { ship_id: ShipId, with: Vec<ShipId> },
+    /// What became of [`Inbound::Command`] number `seq`, to the connection that sent it and no
+    /// other. `text` is for a person to read and nothing parses it. Appended last.
+    Answered { seq: u32, ok: bool, text: String },
 }
+
+/// The longest command line a shard will read, in bytes.
+pub const COMMAND_LIMIT: usize = 1024;
 
 /// The largest frame and message either end of a connection accepts, bytes. Stated rather than
 /// left to the library's default, so that the shard's pages can be bounded against the same
@@ -927,6 +938,13 @@ pub enum Inbound {
     /// Where the player has got to. Debounced by the client: a page turn every few seconds must
     /// not be a message every few seconds.
     SetReading(Bookmark),
+    /// A line typed into the console, exactly as typed.
+    ///
+    /// **Text, not a parsed command.** Parsing, permission and validation are the shard's, so a
+    /// client that sent a structure could send one no parser would ever have produced. `seq` is
+    /// the client's own count, echoed in [`Outbound::Answered`] so the answer finds its line.
+    /// Appended last.
+    Command { seq: u32, line: String },
 }
 
 /// Encode anything the protocol carries.

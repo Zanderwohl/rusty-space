@@ -10,7 +10,6 @@
 //! `Server::steer_pursuits` is what acts on it.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use lc_proto::{Cleared, ClientId, Presence, ShipId, Withheld};
 use lc_spacetime::Worldline;
@@ -141,9 +140,13 @@ fn burn_changed(pursuer: &Craft, burn: Option<glam::DVec3>) -> bool {
 ///
 /// A *visibility* rule and not a causality one. What it decides is which craft are worth
 /// solving for; whether the light has arrived is [`Cleared::clear`]'s alone.
+///
+/// Against every system the other has been in that it still remembers, and not only its current
+/// one. A craft that jumped out of a system is still arriving there as old light, and dropping it
+/// the moment it left would tell everybody there it had gone before that light did.
 pub fn in_sight(observer: &Craft, other: &Craft) -> bool {
     match (&observer.system, &other.system) {
-        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (Some(a), _) => other.has_been_in(a),
         (None, None) => {
             observer.motion.position_ly.distance(other.motion.position_ly) < LOCAL_SHELL_LY
         }
@@ -165,9 +168,9 @@ pub fn sighting(
     }
     let here = observer.position_at(now_t as f64);
     let worldline = quarry.worldline();
-    // No root means light that has not arrived or has already gone past; there is never more
-    // than one for anything sub-luminal.
-    let emitted = retarded_times_at(now_t as f64, here, &worldline).first().copied()?;
+    // No root means light that has not arrived or has already gone past. There is one per piece
+    // of a worldline that jumped, and the newest is where the craft appears to be now.
+    let emitted = retarded_times_at(now_t as f64, here, &worldline).last().copied()?;
     Some(pursuit::Sighting {
         target: lc_world::motion::ShipId(quarry.id.0),
         position_ly: worldline.position_at(emitted) / LIGHT_US_PER_LY,

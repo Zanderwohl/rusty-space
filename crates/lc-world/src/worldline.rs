@@ -1,7 +1,10 @@
 //! A ship's worldline with its history, for the light-delay solve.
 
+use std::sync::Arc;
+
 use glam::DVec3;
 use lc_spacetime::Worldline;
+use smallvec::SmallVec;
 
 use crate::motion::{LIGHT_US_PER_LY, ShipState, state_at};
 use crate::system::LocalSystem;
@@ -9,11 +12,29 @@ use crate::system::LocalSystem;
 /// A stretch of a worldline that is over: what a ship was doing, and when it stopped.
 ///
 /// See [`Flight`] for why a craft keeps these at all.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct Past {
     /// Coordinate seconds at which this stopped being in force.
     pub until_s: f64,
     pub motion: ShipState,
+    /// The system it was flown in. A station is defined against bodies, and read against
+    /// whatever system the craft is in *now* it froze where it left the moment the craft went
+    /// anywhere else — which an observer still watching the old light could see at once.
+    pub system: Option<Arc<LocalSystem>>,
+    /// Whether it ended in a jump rather than joining the next stretch. See
+    /// [`Worldline::breaks`].
+    pub broken: bool,
+}
+
+impl std::fmt::Debug for Past {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Past")
+            .field("until_s", &self.until_s)
+            .field("motion", &self.motion)
+            .field("star", &self.system.as_ref().map(|s| s.star))
+            .field("broken", &self.broken)
+            .finish()
+    }
 }
 
 /// A ship's worldline, for the light-delay solve.
@@ -71,16 +92,20 @@ impl<'a> Flight<'a> {
         Self { state, system, past, known_from_s }
     }
 
-    /// What the ship was doing at a coordinate second.
+    /// What the ship was doing at a coordinate microsecond.
     ///
     /// The first stretch that had not ended yet, or the current motive when none of them
     /// apply. `past` is ordered, so the first match is the right one.
-    fn doing_at(&self, s: f64) -> &ShipState {
+    ///
+    /// Compared in microseconds, the unit [`Worldline::breaks`] states them in: a break read back
+    /// through seconds can round to just before itself, and the piece after a jump then starts
+    /// on the position it jumped from.
+    fn doing_at(&self, t_us: f64) -> (&ShipState, Option<&LocalSystem>) {
         self.past
             .iter()
-            .find(|entry| s < entry.until_s)
-            .map(|entry| &entry.motion)
-            .unwrap_or(self.state)
+            .find(|entry| t_us < entry.until_s * 1.0e6)
+            .map(|entry| (&entry.motion, entry.system.as_deref()))
+            .unwrap_or((self.state, self.system))
     }
 
     /// Position and beta at a coordinate microsecond, in light-years.
@@ -90,8 +115,8 @@ impl<'a> Flight<'a> {
     /// keep what is known rather than invent a position from nothing.
     fn read(&self, t_us: f64) -> (DVec3, DVec3) {
         let s = t_us * 1.0e-6;
-        let state = self.doing_at(s);
-        state_at(state, self.system, s).unwrap_or((state.position_ly, state.beta))
+        let (state, system) = self.doing_at(t_us);
+        state_at(state, system, s).unwrap_or((state.position_ly, state.beta))
     }
 }
 
@@ -113,5 +138,9 @@ impl Worldline for Flight<'_> {
     /// the light it wants left before the shard remembers simply sees nothing.
     fn defined_over(&self) -> (f64, f64) {
         (self.known_from_s * 1.0e6, f64::INFINITY)
+    }
+
+    fn breaks(&self) -> SmallVec<[f64; 2]> {
+        self.past.iter().filter(|entry| entry.broken).map(|entry| entry.until_s * 1.0e6).collect()
     }
 }

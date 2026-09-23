@@ -19,6 +19,7 @@ use glam::DVec3;
 use crate::fitting::Fitting;
 use crate::instrument::Instrument;
 use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
+use crate::navigation::Waypoint;
 use crate::system::LocalSystem;
 
 /// A craft, by the identifier whoever owns it uses. Opaque here.
@@ -231,7 +232,13 @@ impl Craft {
     /// step: the comparison is what decides, and a craft that went on doing what it was doing
     /// keeps its history exactly as it was.
     fn remembering<T>(&mut self, at_s: f64, change: impl FnOnce(&mut Self) -> T) -> T {
+        self.remember(at_s, false, change)
+    }
+
+    /// [`Craft::remembering`], saying whether the stretch it closes ends in a jump.
+    fn remember<T>(&mut self, at_s: f64, broken: bool, change: impl FnOnce(&mut Self) -> T) -> T {
         let before = self.motion.clone();
+        let flown_in = self.system.clone();
         // Where the turn the old motive had ordered got to. The new one starts from there,
         // because a ship does not snap back to where it was pointing when it was given a new
         // order — this is the one place the two motives are both in hand, so it is the only
@@ -247,7 +254,13 @@ impl Craft {
         // idle ship's nose could move on its own, which is what turning broadside does.
         let previous = std::mem::replace(&mut self.motion.attitude, nose);
         let out = change(self);
-        if before.same_worldline_as(&self.motion) {
+        // The same station in another system is still a jump: two systems can name a body alike.
+        let elsewhere = broken
+            && match (&flown_in, &self.system) {
+                (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+                (a, b) => a.is_some() != b.is_some(),
+            };
+        if before.same_worldline_as(&self.motion) && !elsewhere {
             // Nothing happened, so nothing may be recorded — including the attitude, which
             // would otherwise creep forward on every step and restart every turn from where it
             // had got to.
@@ -259,7 +272,7 @@ impl Craft {
             }
             // A new motive may collect where the old one could not, or stop collecting.
             self.begin_solar_segment(at_s);
-            self.past.push(Past { until_s: at_s, motion: before });
+            self.past.push(Past { until_s: at_s, motion: before, system: flown_in, broken });
             self.forget_before(at_s);
         }
         out
@@ -602,6 +615,33 @@ impl Craft {
             craft.motion.set_adrift(now_s);
             craft.solve_patch(now_s);
         });
+    }
+
+    /// Put it somewhere by fiat, holding `waypoint` in `system`, without flying there.
+    ///
+    /// The worldline **jumps**, and the stretch before is marked as ending in one so the
+    /// light-delay solve splits there rather than bisecting onto the step. Nothing about the
+    /// old stretch is lost: an observer still receiving its light goes on seeing it, where it
+    /// was, until that light has passed. Returns where it landed, or `None` with nothing
+    /// changed when the waypoint cannot be placed in that system.
+    pub fn teleport(&mut self, system: Arc<LocalSystem>, waypoint: Waypoint, now_s: f64) -> Option<DVec3> {
+        let at = waypoint.place_at(&system, now_s)?;
+        self.remember(now_s, true, |craft| {
+            craft.system = Some(system);
+            craft.motion.position_ly = at;
+            craft.motion.begin_holding(waypoint);
+            craft.solve_patch(now_s);
+        });
+        Some(at)
+    }
+
+    /// Whether any stretch it still remembers was flown in `system`, the current one included.
+    ///
+    /// What an observer in that system may still be receiving light from, and so what decides
+    /// whether it is worth solving for at all.
+    pub fn has_been_in(&self, system: &Arc<LocalSystem>) -> bool {
+        self.system.as_ref().is_some_and(|s| Arc::ptr_eq(s, system))
+            || self.past.iter().any(|entry| entry.system.as_ref().is_some_and(|s| Arc::ptr_eq(s, system)))
     }
 
     /// Put it on an approach, and drop whatever the old motive had predicted.
@@ -1351,6 +1391,48 @@ mod tests {
         assert_eq!(at(150.0), 1.0e-6);
         assert_eq!(at(250.0), 2.0e-6);
         assert_eq!(at(350.0), 3.0e-6, "past the last change it is the current motive");
+    }
+
+    /// A system from the authored sample, and a station about its star.
+    fn station(at: usize) -> (Arc<LocalSystem>, Waypoint) {
+        use crate::sky::AuthoredStars;
+        let star = AuthoredStars::sample().stars()[at].clone();
+        let system = Arc::new(LocalSystem::for_star(&star).expect("a generated system"));
+        let key = system.sim().name(system.primary()).to_string();
+        let course = Course::Orbit { body: key, altitude_radii: 2.0, plane: Plane::Equatorial };
+        let waypoint = course.resolve(&system, system.origin_ly, 0.0).expect("an orbit of the star");
+        (system, waypoint)
+    }
+
+    /// The stretch before a teleport is read in the system it was flown in, and ends in a jump.
+    /// Read in the new one, a station about a body the new system does not have froze where it
+    /// was — an observer watching the old light would have seen it stop at once.
+    #[test]
+    fn a_teleport_leaves_the_old_stretch_where_it_was_and_breaks_there() {
+        use lc_spacetime::Worldline;
+        let (here, orbit_here) = station(0);
+        let (there, orbit_there) = station(2);
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, here.origin_ly);
+        craft.teleport(here.clone(), orbit_here.clone(), 0.0).expect("placed here");
+        let landed = craft.teleport(there.clone(), orbit_there, 1_000.0).expect("placed there");
+
+        let line = craft.worldline();
+        let was = orbit_here.place_at(&here, 500.0).expect("the old station") * crate::motion::LIGHT_US_PER_LY;
+        assert!(line.position_at(500.0e6).distance(was) < 1.0, "the old stretch moved");
+        assert!(line.breaks().contains(&1_000.0e6), "{:?}", line.breaks());
+        assert_eq!(craft.motion.position_ly, landed);
+        assert!(craft.has_been_in(&here) && craft.has_been_in(&there));
+    }
+
+    /// Onto the station it already holds, nothing happens and nothing is recorded.
+    #[test]
+    fn a_teleport_to_where_it_already_is_is_no_jump() {
+        let (here, orbit) = station(0);
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, here.origin_ly);
+        craft.teleport(here.clone(), orbit.clone(), 0.0).expect("placed");
+        let remembered = craft.remembered();
+        craft.teleport(here, orbit, 10.0).expect("placed again");
+        assert_eq!(craft.remembered(), remembered);
     }
 
     /// Mass follows size, and size is cubic — which is the fact to have in mind before being
