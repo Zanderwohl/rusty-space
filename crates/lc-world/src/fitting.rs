@@ -4,7 +4,7 @@
 //! a *module-energy* is one module's dry mass times `c²`, and it is the unit balance is argued in.
 //!
 //! Only a player's ship carries a [`Fitting`]. Everything else flies on
-//! [`Kind::drive`](crate::craft::Kind::drive) as before.
+//! [`Kind::drive`](crate::craft::Kind::drive).
 
 use crate::cost;
 use crate::flight::{C_M_S, G0};
@@ -96,8 +96,7 @@ impl Loadout {
     }
 }
 
-/// Every tunable number. A server states its own in `Welcome`, so nothing here is assumed by a
-/// client.
+/// Every tunable number. A server states its own with every account, so a client assumes none.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Balance {
     /// ε in `m' = m exp(−Δη/ε)`. One is a perfect photon rocket; above one is unphysical, and
@@ -175,8 +174,7 @@ impl Balance {
             drive_efficiency: 1.0,
             recovery: 0.95,
             storage_per_module,
-            // One g of the starting ship with its storage full, so five engines are the 5 g every
-            // ship flew at before it had engines.
+            // One g of the starting ship with its storage full, so its five engines give 5 g.
             engine_thrust_n: G0 * full_kg,
             drone_power_w: module_kg * C2 / week_s,
             living_drain_w,
@@ -238,7 +236,6 @@ impl Balance {
             + loadout.slots as f64 * self.slot_structure_kg()
     }
 
-    /// Bytes of knowledge a craft with this loadout can hold.
     pub fn data_capacity(&self, loadout: &Loadout) -> f64 {
         ONBOARD_DATA_BYTES + loadout.data as f64 * self.data_per_module
     }

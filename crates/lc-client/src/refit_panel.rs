@@ -41,7 +41,7 @@ pub struct Preview {
     pub planned: Result<(usize, f64), Shortage>,
     /// Why Apply cannot be pressed, when it cannot.
     pub blocked: Option<String>,
-    /// What Apply would cost that the player might not want to pay. Does not stop it.
+    /// A cost the player may not want. Does not block Apply.
     pub warning: Option<String>,
 }
 
@@ -52,8 +52,8 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
     let current = fitting.loadout_at(now_s);
     let stored_j = fitting.stored_j_at(&ship.motion, now_s);
     let refit = lc_world::refit::Order { from: current, target: draft, stored_j, start_s: now_s }.solve(&balance);
-    // The plan's own account where there is one, since it knows what storage cannot keep. The
-    // arithmetic is only for saying how far short a plan that fails is.
+    // The plan knows what storage cannot keep; the arithmetic only says how far short a failed
+    // plan is.
     let (available_j, vented_j) = match &refit {
         Ok(refit) => (stored_j - refit.net_j(), refit.vented_j()),
         Err(_) => (budget_j(&balance, current, draft, stored_j), 0.0),
@@ -100,7 +100,7 @@ pub fn preview(ship: &Craft, draft: Loadout, remote: bool, now_s: f64) -> Option
 }
 
 /// Stored energy, plus what dismantling returns, less what building costs, if `draft` were built
-/// from `current`. Negative when it cannot be paid for.
+/// from `current`. Negative when it cannot be paid for; blind to what storage cannot keep.
 fn budget_j(balance: &Balance, current: Loadout, draft: Loadout, stored_j: f64) -> f64 {
     let mut budget = stored_j;
     for module in Module::ALL {
@@ -144,7 +144,6 @@ fn step_name(step: Step) -> String {
     }
 }
 
-/// What changing a ship of `mass_kg`'s velocity by one kilometer a second costs, joules.
 pub fn energy_per_km_s_j(balance: &Balance, mass_kg: f64) -> f64 {
     let rapidity = lc_world::cost::rapidity_between(
         glam::DVec3::ZERO,
@@ -231,8 +230,8 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     let current = fitting.loadout_at(now);
     let draft = state.refit_draft.unwrap_or(current);
     let balance = fitting.balance;
-    // The sliders go anywhere a hull could hold; whether the ship can get there is the planner's
-    // to say, and Apply says why not. A second, looser judge here once pinned sliders silently.
+    // The sliders go anywhere a hull could hold. Whether the ship can get there is the planner's
+    // to say, so there is one judge and Apply shows its reason.
     ui.strong("Plan");
     let mut changed = draft;
     for module in Module::ALL {

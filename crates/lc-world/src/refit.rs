@@ -15,18 +15,14 @@ pub enum Step {
     Shrink,
 }
 
-/// Why a target cannot be reached from here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shortage {
     /// A module without a slot, or no drone left to build with.
     Unbuildable,
     /// Nothing left to dismantle and still not enough to build.
     Energy,
-    /// No drones to do the work.
     NoDrones,
-    /// The planner has no place for this module in [`BUILD_ORDER`].
     CannotBuild(Module),
-    /// The planner has no place for this module in [`DISMANTLE_ORDER`].
     CannotDismantle(Module),
 }
 
@@ -66,11 +62,9 @@ struct Planned {
     duration_s: f64,
     /// Energy the step moves, joules: what a build takes, or what a dismantled thing was worth.
     gross_j: f64,
-    /// What the step does to stored energy, joules, before drain. A refund storage has no room
-    /// for is thrown away, so a dismantling can keep less than its refund, or lose energy outright
-    /// when it is a storage module and full.
+    /// What the step does to stored energy, joules, before drain. Less than a refund, or negative,
+    /// when storage has no room.
     stored_j: f64,
-    /// The loadout once this step is done.
     after: Loadout,
 }
 
@@ -81,7 +75,6 @@ pub struct Refit {
     steps: Vec<Planned>,
 }
 
-/// Where a refit has got to at an instant.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Progress {
     /// Counting only finished steps.
@@ -92,7 +85,7 @@ pub struct Progress {
     /// built, or (negative) the half of one already taken apart.
     pub in_hand_kg: f64,
     /// What canceling now would return to storage, joules. Negative for a dismantling under way,
-    /// whose refund so far goes back into the module.
+    /// whose kept refund goes back into the module.
     pub reversal_j: f64,
     /// The step under way, and how far through it is.
     pub current: Option<(Step, f64)>,
@@ -196,13 +189,12 @@ impl Refit {
         now_s >= self.order.start_s + self.duration_s()
     }
 
-    /// Stored energy at the end, before drain, joules.
+    /// Energy taken from storage over the whole refit, before drain, joules.
     pub fn net_j(&self) -> f64 {
         -self.steps.iter().map(|p| p.stored_j).sum::<f64>()
     }
 
-    /// Energy the refit throws away for want of room in storage, joules. Not the 5% every
-    /// dismantling radiates: that is lost whatever storage holds.
+    /// Joules thrown away for want of room in storage, not counting the 5% a dismantling radiates.
     pub fn vented_j(&self) -> f64 {
         self.steps
             .iter()
@@ -238,7 +230,7 @@ impl Refit {
                         progress.in_hand_kg = moved / C2;
                         progress.reversal_j = self.recovery * moved;
                     }
-                    // Only what storage kept is taken back. What was thrown away stays gone.
+                    // What was thrown away is not given back.
                     Step::Dismantle(_) | Step::Shrink => {
                         progress.in_hand_kg = -moved / C2;
                         progress.reversal_j = -planned.stored_j.max(0.0) * fraction;
@@ -265,8 +257,7 @@ mod tests {
         order(from, target, stored_me).solve(&B)
     }
 
-    /// The loadout these were worked out by hand against, which was the starting one until a
-    /// data module took a living module's slot.
+    /// The loadout the expected numbers below were worked out by hand against.
     const WORKED: Loadout = Loadout { living: 2, data: 0, ..Loadout::STARTING };
 
     #[test]
@@ -353,8 +344,6 @@ mod tests {
         assert_eq!(plan(bare, Loadout { engines: 1, ..bare }, 0.0).unwrap_err(), Shortage::Energy);
     }
 
-    /// The report that found the data module missing from the planner: 75 ME stored and full,
-    /// and refused one data module for want of energy.
     #[test]
     fn a_data_module_costs_half_and_takes_three_times_as_long() {
         let from = Loadout { storage: 15, slots: 30, ..Loadout::STARTING };
