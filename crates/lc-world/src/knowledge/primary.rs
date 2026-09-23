@@ -159,30 +159,77 @@ impl crate::knowledge::Knowledge {
     ///
     /// `Knowledge::orbits` keeps one statement per witness and the later wins, so a refit
     /// replaces the craft's own earlier one rather than piling up beside it.
+    ///
+    /// All three steps at once. A shard runs [`FitJob::solve`] off its tick instead, because a
+    /// fit costs seconds.
     pub fn fit_orbit(&mut self, subject: Subject, star_ly: DVec3, now_s: f64) -> bool {
-        let Some(star) = subject.star() else { return false };
-        let best = self
+        let Some(job) = self.fit_job(subject, star_ly, now_s) else { return false };
+        match job.solve() {
+            Some(solved) => self.file_fit(solved),
+            None => false,
+        }
+    }
+
+    /// Everything a fit of `subject` needs, taken now and owned, and the attempt recorded so
+    /// the queue moves on. See [`Knowledge::unfitted`].
+    pub fn fit_job(&mut self, subject: Subject, star_ly: DVec3, now_s: f64) -> Option<FitJob> {
+        let star = subject.star()?;
+        let frames = self
             .primaries(star, subject, now_s)
             .into_iter()
-            .filter_map(|about| {
+            .map(|about| {
                 let at = |t: f64| match about {
                     None => Some(star_ly),
-                    Some(body) => Some(
-                        star_ly + self.placed(star, body, t)? / crate::system::M_PER_LY,
-                    ),
+                    Some(body) => Some(star_ly + self.placed(star, body, t)? / crate::system::M_PER_LY),
                 };
-                let looks = self.looks_at(subject, &at);
-                let fitted = arc::fit(&looks)?;
-                Some((about, fitted, looks))
+                (about, self.looks_at(subject, &at))
             })
-            .min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad));
-        // Recorded whatever comes of it, so the queue moves on. See [`Knowledge::unfitted`].
+            .collect();
         let span_s = self.file(subject).map_or(0.0, |file| span_s(file.sightings()));
         self.tried.insert(subject, Attempt { at_s: now_s, span_s });
-        let Some((about, fitted, looks)) = best else { return false };
-        let orbit = fitted.stated(self.owner, about, &looks, now_s);
-        self.orbits(subject, orbit);
+        Some(FitJob { subject, owner: self.owner, frames, stated_s: now_s })
+    }
+
+    /// File what a [`FitJob`] found. `false` if the body has since been forgotten, since
+    /// filing would bring back a file the store let go of.
+    pub fn file_fit(&mut self, solved: Solved) -> bool {
+        if self.file(solved.subject).is_none() {
+            return false;
+        }
+        self.orbits(solved.subject, solved.orbit);
         true
+    }
+}
+
+/// One body's fit, with nothing borrowed: the looks in each candidate primary's frame.
+///
+/// Stamped with the time the looks were taken, so the orbit it states is the same whichever
+/// tick files it, and one overtaken by a later fit is refused by `Knowledge::orbits`.
+#[derive(Clone, Debug)]
+pub struct FitJob {
+    pub subject: Subject,
+    owner: super::Witness,
+    frames: Vec<(Option<BodyId>, Vec<Look>)>,
+    stated_s: f64,
+}
+
+/// An orbit found by a [`FitJob`], for [`Knowledge::file_fit`].
+#[derive(Clone, Debug)]
+pub struct Solved {
+    pub subject: Subject,
+    orbit: super::Orbit,
+}
+
+impl FitJob {
+    /// The fit itself: pure, and the whole of the cost.
+    pub fn solve(self) -> Option<Solved> {
+        let (about, fitted, looks) = self
+            .frames
+            .into_iter()
+            .filter_map(|(about, looks)| Some((about, arc::fit(&looks)?, looks)))
+            .min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad))?;
+        let orbit = fitted.stated(self.owner, about, &looks, self.stated_s);
+        Some(Solved { subject: self.subject, orbit })
     }
 }
 

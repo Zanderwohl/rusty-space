@@ -18,6 +18,7 @@ pub mod admin;
 pub mod chase;
 pub mod director;
 pub mod drive;
+pub(crate) mod fits;
 pub mod fitting;
 pub(crate) mod instruments;
 pub mod journal;
