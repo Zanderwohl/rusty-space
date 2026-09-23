@@ -1,7 +1,9 @@
 // Named things. Each one names what it is, never what it looks like.
 
 .wordmark {
+  align-items: center;
   color: var(--ink);
+  display: inline-flex;
   font-family: var(--font-display);
   font-palette: --wordmark-on-dark;
   // A step above the heading scale's second rung, because Nabla's depth lives inside the
@@ -11,7 +13,13 @@
   // fight the extrusion, which is the shape doing the work here; the colour and the weight
   // below are what the fallback stack gets when the face has not arrived.
   font-weight: 400;
+  gap: 0.25em;
   text-decoration: none;
+
+  img {
+    height: 1em;
+    width: auto;
+  }
 }
 
 @media (prefers-color-scheme: light) {

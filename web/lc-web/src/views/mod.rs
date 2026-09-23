@@ -118,7 +118,12 @@ pub fn document(head: Head<'_>, body: Markup) -> Markup {
 
 fn masthead() -> Markup {
     html! {
-        a class="wordmark" href="/" { (SITE_NAME) }
+        a class="wordmark" href="/" {
+            @if let Some(cdn) = CDN_BASE.get() {
+                img src={ (cdn) "/icons/lightcone-blue.svg" } alt="" width="128" height="128";
+            }
+            (SITE_NAME)
+        }
         nav {
             a href="/play" { "Play" }
             a href="/blog" { "Devlog" }
