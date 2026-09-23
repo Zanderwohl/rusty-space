@@ -734,12 +734,41 @@ impl Fitted {
     }
 }
 
+/// How much worse than it was an orbit may explain a longer arc and still be carried onto it
+/// by [`refit`] rather than searched for again.
+const STILL_AGREES: f64 = 3.0;
+
+/// An orbit already fitted, carried onto a longer arc of the same body: the search seeded with
+/// where that orbit puts the body rather than run over the whole grid. `None` when the arc no
+/// longer agrees with it, which is the caller's cue to [`fit`] from scratch.
+///
+/// **This is most of the fitting a survey does.** A body is refitted each time its arc grows by
+/// half, and the grid is sixty-five thousand range pairs; a seeded polish is a few hundred. The
+/// grid is what finds an orbit, not what improves one.
+///
+/// Not a settle from the old elements: measured on half an arc carried onto the whole of it,
+/// that stalls three hundred times worse than the search, because the pattern search over six
+/// elements cannot follow the valley the two ranges run along. Polishing the ranges can.
+///
+/// A circle assumed for want of arc is never carried: a longer arc is exactly what may shape
+/// the conic it could not.
+pub fn refit(held: &Fitted, looks: &[Look]) -> Option<Fitted> {
+    if held.assumed_circular {
+        return None;
+    }
+    fit_from(looks, Some(held))
+}
+
 /// The orbit that best explains an arc of bearings, or `None` if they do not support one.
 ///
 /// Two ranges are searched, log-spaced because a body could be anywhere from just off the star
 /// to the far edge of the system and a linear grid would spend every point in the outer system.
 /// Everything after those two is closed form.
 pub fn fit(looks: &[Look]) -> Option<Fitted> {
+    fit_from(looks, None)
+}
+
+fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     if looks.len() < LOOKS_NEEDED {
         return None;
     }
@@ -828,6 +857,17 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
     }
     // A step of the first band, as a fraction, for the polish to start from.
     let step = (first.get(1)?.max(f64::MIN_POSITIVE) / first.first()?.max(f64::MIN_POSITIVE)).ln().abs().max(1.0e-9);
+
+    if let Some(held) = seed {
+        // The range along each anchor's own ray to where the held orbit puts the body then.
+        let along = |look: &Look| (held.at(look.at_s) - look.from_m).dot(look.toward);
+        let (x, y) = (along(&a), along(&b));
+        let start = score(x, y, f64::INFINITY)?;
+        let polished = settle(polish(x, y, start, step, &score).2, &ordered, SETTLINGS);
+        let settled = settle(polished, &ordered, SETTLINGS * 8);
+        let circle = settled.assumed_circular && ranged.len() < 3;
+        return (!circle && settled.residual_rad <= held.residual_rad * STILL_AGREES).then_some(settled);
+    }
     // The grid keeps the best few, separated, rather than all of them or the best few
     // outright. No tightening bound here: a candidate worse than the eighth best is still worth
     // keeping if it is somewhere else, and rejecting it early is what destroys the diversity.
@@ -840,6 +880,7 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
             let near = found.iter().position(|(a, b, _, _, _)| {
                 a.abs_diff(i) < APART && b.abs_diff(j) < APART
             });
+
             match near.and_then(|k| found.get_mut(k)) {
                 Some(held) if fitted.residual_rad < held.4.residual_rad => {
                     *held = (i, j, *x, *y, fitted);
@@ -858,6 +899,7 @@ pub fn fit(looks: &[Look]) -> Option<Fitted> {
         .into_iter()
         .map(|(x, y, fitted)| settle(polish(x, y, fitted, step, &score).2, &ordered, SETTLINGS))
         .collect();
+
     polished.sort_by(|p, q| p.residual_rad.total_cmp(&q.residual_rad));
 
     // Unrivalled, or nothing. A separated solution that disagrees and explains the bearings
@@ -1092,6 +1134,36 @@ mod tests {
             fitted.eccentricity,
             truth.eccentricity
         );
+    }
+
+    /// **A refit carries an orbit onto a longer arc and lands where a search would.** Half the
+    /// arc fitted from scratch, then the whole of it once by search and once carried: the two
+    /// answers agree to the fit's own accuracy, and the carried one cost a settle.
+    #[test]
+    fn a_refit_lands_where_a_search_would() {
+        let truth = like(1.524, 0.0934);
+        let seen = looks(&truth, 5.0, 48, 5.0 * DAY_S, SIGMA);
+        let half = fit(&seen[..24]).expect("half the arc fits");
+        let searched = fit(&seen).expect("the whole arc fits");
+        let carried = refit(&half, &seen).expect("the longer arc agrees with the shorter one's orbit");
+        let period = off(carried.period_s, searched.period_s);
+        assert!(period < 2.0e-3, "carried period off the searched one by {period}");
+        assert!(off(carried.semi_major_m, searched.semi_major_m) < 2.0e-3);
+        assert!(off(carried.period_s, truth.period_s()) < 2.0e-3);
+    }
+
+    /// **And never carries a wrong orbit forward**: seeded from one, it either finds its way to
+    /// the truth or refuses, and a refusal sends the caller back to the full search.
+    #[test]
+    fn a_refit_never_carries_a_wrong_orbit() {
+        let truth = like(1.524, 0.0934);
+        let seen = looks(&truth, 5.0, 24, 5.0 * DAY_S, SIGMA);
+        let right = fit(&seen).expect("fits");
+        let wrong = Fitted { period_s: right.period_s * 1.3, semi_major_m: right.semi_major_m * 1.2, ..right };
+        if let Some(carried) = refit(&wrong, &seen) {
+            let period = off(carried.period_s, truth.period_s());
+            assert!(period < 2.0e-3, "carried a wrong orbit: period off by {period}");
+        }
     }
 
     /// **A short arc gives no orbit, and that is the answer.** Three game months is 0.85% of

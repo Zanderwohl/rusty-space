@@ -22,12 +22,29 @@ surveying one system for 1,400 ticks, workspace code optimized.
 | Phase 2 | 3.0 ms | 0 | 3.5 ms, survey |
 | Phase 6 | 1.15 ms | 0 | 1.6 ms, survey |
 
-Done: 0, 1, 2, 4, 5 (backlog and empty pages), 6, and from 7 `next_due`, the prior off the
-tick, surveyed systems pinned, and indexed star lookups.
+Done: 0, 1, 2, 3 (warm refits only; see below), 4, 5 (backlog and empty pages), 6, and from
+7 `next_due`, the prior off the tick, surveyed systems pinned, and indexed star lookups.
+Deployed to rocinante as `lightcone-shard:79c9548d` before Phase 3.
 
-Open: 3 (a cheaper fit — off the tick now, so this is throughput and CPU, not lag); from 5,
-refreshing once per subject in `receive` and paging in one pass; from 7, a maintained
-`retained_subjects`; and the pre-existing list at the end.
+Open: from 5, refreshing once per subject in `receive` and paging in one pass; from 7, a
+maintained `retained_subjects`; and the pre-existing list at the end.
+
+**Phase 3, as measured.** Profiled on real survey jobs: the range grid is 79% of a fit, the
+polish of its eight starts 16%, `spread` 5%, and the grid's de-duplication 1%. A cold fit
+averages about 130 ms, the worst seen 606 ms, and most early fits fail because the arc cannot
+yet shape an orbit. With Phase 1's gate one surveying craft ran 14 fits in 8,000 ticks, about
+half a percent of a core.
+
+So only the warm start was done: `arc::refit` seeds the range polish from the orbit already
+held and skips the grid, 53 ms against 380 ms for a search on the same arc, and falls back to
+the search when the longer arc no longer agrees. It pays once a system's bodies are fitted and
+are refitted as their arcs grow. A plain settle from the old elements was tried first and
+stalls three hundred times worse than the search.
+
+Not done, on purpose: a coarser grid (the file records that halving it lost a case), a
+bounded grid (it changes which separated starts survive, which is the diversity the grid
+exists for), the de-duplication index (1%), and `spread`'s starting step (5%, and it moves
+the reported sigmas).
 
 Taking the checkpoint snapshot costs about 1 ms for ten surveying craft (721 files, 1.2 MB).
 It stays on the tick, so the checkpoint is still the shard at one tick.

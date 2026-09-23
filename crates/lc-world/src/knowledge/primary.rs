@@ -10,7 +10,7 @@
 
 use glam::DVec3;
 
-use super::arc::{self, Look, LOOKS_NEEDED};
+use super::arc::{self, Fitted, Look, LOOKS_NEEDED};
 use super::{BodyId, Subject};
 use crate::sky::StarId;
 
@@ -26,11 +26,16 @@ const PRIMARIES_TRIED: usize = 3;
 /// How much longer an arc must be than at the last attempt before a body is fitted again.
 const REFIT_GROWTH: f64 = 1.5;
 
-/// A fit attempted, and how long an arc it had. See [`Knowledge::unfitted`].
+/// A fit attempted, how long an arc it had, and the last orbit fitted and the primary it is
+/// about, which a refit starts from. See [`Knowledge::unfitted`] and [`arc::refit`].
+///
+/// Not saved: after a restart the first fit of each body searches from scratch, which costs
+/// time and not correctness.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Attempt {
     pub at_s: f64,
     pub span_s: f64,
+    pub last: Option<(Option<BodyId>, Fitted)>,
 }
 
 /// Seconds from the oldest look held to the newest. Decimation keeps the ends, so this only
@@ -186,8 +191,9 @@ impl crate::knowledge::Knowledge {
             })
             .collect();
         let span_s = self.file(subject).map_or(0.0, |file| span_s(file.sightings()));
-        self.tried.insert(subject, Attempt { at_s: now_s, span_s });
-        Some(FitJob { subject, owner: self.owner, frames, stated_s: now_s })
+        let last = self.tried.get(&subject).and_then(|t| t.last);
+        self.tried.insert(subject, Attempt { at_s: now_s, span_s, last });
+        Some(FitJob { subject, owner: self.owner, frames, warm: last, stated_s: now_s })
     }
 
     /// File what a [`FitJob`] found. `false` if the body has since been forgotten, since
@@ -195,6 +201,9 @@ impl crate::knowledge::Knowledge {
     pub fn file_fit(&mut self, solved: Solved) -> bool {
         if self.file(solved.subject).is_none() {
             return false;
+        }
+        if let Some(attempt) = self.tried.get_mut(&solved.subject) {
+            attempt.last = Some((solved.about, solved.fitted));
         }
         self.orbits(solved.subject, solved.orbit);
         true
@@ -210,6 +219,8 @@ pub struct FitJob {
     pub subject: Subject,
     owner: super::Witness,
     frames: Vec<(Option<BodyId>, Vec<Look>)>,
+    /// The last orbit fitted, to carry onto this arc before searching for a new one.
+    warm: Option<(Option<BodyId>, Fitted)>,
     stated_s: f64,
 }
 
@@ -217,19 +228,28 @@ pub struct FitJob {
 #[derive(Clone, Debug)]
 pub struct Solved {
     pub subject: Subject,
+    about: Option<BodyId>,
+    fitted: Fitted,
     orbit: super::Orbit,
 }
 
 impl FitJob {
     /// The fit itself: pure, and the whole of the cost.
     pub fn solve(self) -> Option<Solved> {
-        let (about, fitted, looks) = self
-            .frames
-            .into_iter()
-            .filter_map(|(about, looks)| Some((about, arc::fit(&looks)?, looks)))
-            .min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad))?;
+        let carried = self.warm.and_then(|(about, held)| {
+            let (_, looks) = self.frames.iter().find(|(frame, _)| *frame == about)?;
+            Some((about, arc::refit(&held, looks)?, looks.clone()))
+        });
+        let (about, fitted, looks) = match carried {
+            Some(carried) => carried,
+            None => self
+                .frames
+                .into_iter()
+                .filter_map(|(about, looks)| Some((about, arc::fit(&looks)?, looks)))
+                .min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad))?,
+        };
         let orbit = fitted.stated(self.owner, about, &looks, self.stated_s);
-        Some(Solved { subject: self.subject, orbit })
+        Some(Solved { subject: self.subject, about, fitted, orbit })
     }
 }
 
