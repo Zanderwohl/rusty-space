@@ -58,7 +58,6 @@ pub fn settled_planet(conclusion: &Conclusion) -> Option<Candidate> {
 pub fn identify(
     system: &LocalSystem,
     star: StarId,
-    star_mu: f64,
     witness: Witness,
     transit: &Candidate,
 ) -> BodyId {
@@ -66,11 +65,15 @@ pub fn identify(
     let best = system
         .inventory()
         .iter()
-        .filter(|entry| entry.kind == BodyKind::Planet && entry.orbit_radius_m > 0.0)
+        .filter(|entry| entry.kind == BodyKind::Planet)
         .filter_map(|entry| {
             let Target::Body(key) = &entry.target else { return None };
-            let period =
-                em_foundations::kepler::period::third_law(entry.orbit_radius_m, star_mu);
+            // The orbit's own period, from its semi-major axis. Not from how far out the body
+            // happened to be when the inventory was taken: those differ by `1 +- e`, so the
+            // period is out by `(1 +- e)^1.5`, which is thirty per cent for Mercury and enough
+            // past an eccentricity of 0.013 to miss this window entirely -- and a real planet
+            // that misses it is minted as a phantom that never merges with the surveyed body.
+            let period = system.period_of_target(key)?;
             let miss = (period - transit.period_s).abs();
             (miss <= window).then_some((miss, key))
         })
@@ -119,7 +122,7 @@ impl<J: Journal> Server<J> {
 
         let star_mu = self.world.star_by_id(star)?.star.mu;
         let system = self.world.system_for(star)?;
-        let body = identify(&system, star, star_mu, witness, transit);
+        let body = identify(&system, star, witness, transit);
 
         let orbit = Orbit::from_period(
             witness,
@@ -214,25 +217,66 @@ mod tests {
 
     /// A transit whose period is a real planet's is *that* planet, so a craft that images it
     /// later folds into one body rather than two.
+    ///
+    /// **Every planet, and by its own period.** This checked one, with a period worked out the
+    /// same wrong way the code did -- from how far out the body happened to be rather than from
+    /// its semi-major axis -- so the two agreed and the test could not see that both were
+    /// wrong. A body's distance and its axis differ by `1 +- e`.
     #[test]
     fn a_matching_period_is_the_planet_it_matches() {
         let (star, system) = system();
-        let mu = star.star.mu;
-        let planet = system
+        let planets: Vec<_> = system
             .inventory()
             .iter()
-            .find(|e| e.kind == BodyKind::Planet)
-            .expect("a planet")
-            .clone();
-        let Target::Body(key) = &planet.target else { panic!("a planet is a body") };
-        let period = em_foundations::kepler::period::third_law(planet.orbit_radius_m, mu);
+            .filter(|e| e.kind == BodyKind::Planet)
+            .cloned()
+            .collect();
+        assert!(planets.len() > 3, "only {} planets to match", planets.len());
 
-        let found = identify(&system, star.id, mu, Witness(1), &candidate(period, 3));
-        assert_eq!(found, BodyId::of(star.id, key), "the real planet's own id");
+        for planet in &planets {
+            let Target::Body(key) = &planet.target else { panic!("a planet is a body") };
+            let period = system.period_of_target(key).expect("a planet has a period");
+            let found = identify(&system, star.id, Witness(1), &candidate(period, 3));
+            assert_eq!(found, BodyId::of(star.id, key), "{key} did not match its own period");
 
-        // And a little off is still it: the search's period is never exact.
-        let near = identify(&system, star.id, mu, Witness(1), &candidate(period * 1.005, 3));
-        assert_eq!(near, found, "a half-percent miss is the same planet");
+            // And a little off is still it: the search's period is never exact.
+            let near = identify(&system, star.id, Witness(1), &candidate(period * 1.005, 3));
+            assert_eq!(near, found, "{key}: a half-percent miss is the same planet");
+        }
+    }
+
+    /// **The distance is not the axis.** A period taken from where a body happens to be is out
+    /// by `(1 +- e)^1.5`, which past an eccentricity of about 0.013 is wider than the window a
+    /// transit is matched in -- so the real planet missed its own entry and was minted as a
+    /// phantom that no later imaging could ever merge with.
+    #[test]
+    fn an_eccentric_planet_still_matches_itself() {
+        let (star, system) = system();
+        let mut checked = 0;
+        for entry in system.inventory().iter().filter(|e| e.kind == BodyKind::Planet) {
+            let Target::Body(key) = &entry.target else { continue };
+            let truth = system.period_of_target(key).expect("a planet has a period");
+            // What the old reading gave: the third law on the distance at the inventory epoch.
+            let from_distance =
+                em_foundations::kepler::period::third_law(entry.orbit_radius_m, star.star.mu);
+            if (from_distance / truth - 1.0).abs() < 0.02 {
+                continue;
+            }
+            checked += 1;
+            // Its own period finds it.
+            assert_eq!(
+                identify(&system, star.id, Witness(1), &candidate(truth, 3)),
+                BodyId::of(star.id, key),
+                "{key} does not match its own period"
+            );
+            // The distance's period is a different body or none, which is the whole defect.
+            assert_ne!(
+                identify(&system, star.id, Witness(1), &candidate(from_distance, 3)),
+                BodyId::of(star.id, key),
+                "{key}: the distance's period should not have found it"
+            );
+        }
+        assert!(checked > 0, "no planet here is eccentric enough to show it");
     }
 
     /// A transit matching no planet is a false positive: a body only this craft believes in,
@@ -244,13 +288,13 @@ mod tests {
         // Far inside the innermost planet, where the generator puts nothing.
         let nonsense = candidate(600.0, 3);
 
-        let mine = identify(&system, star.id, mu, Witness(1), &nonsense);
-        let theirs = identify(&system, star.id, mu, Witness(2), &nonsense);
+        let mine = identify(&system, star.id, Witness(1), &nonsense);
+        let theirs = identify(&system, star.id, Witness(2), &nonsense);
         assert_ne!(mine, theirs, "two craft's phantoms must never merge");
 
         // But one craft's own repeated transits of its own phantom are one body.
-        assert_eq!(mine, identify(&system, star.id, mu, Witness(1), &nonsense));
-        let again = identify(&system, star.id, mu, Witness(1), &candidate(601.0, 4));
+        assert_eq!(mine, identify(&system, star.id, Witness(1), &nonsense));
+        let again = identify(&system, star.id, Witness(1), &candidate(601.0, 4));
         assert_eq!(mine, again, "the same phantom found twice is one body");
 
         // And it is not any real planet.

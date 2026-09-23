@@ -334,14 +334,48 @@ impl LocalSystem {
             }
             // Locked is a statement about the orbit, not a rate: one turn per orbit about the
             // primary it is locked to.
-            RotationMode::TidallyLocked { .. } => {
-                let parent = self.sim.parent(i)?;
-                let radius = self.sim.local_position(i)?.length();
-                let mu = self.sim.mu(parent);
-                (radius > 0.0 && mu > 0.0)
-                    .then(|| em_foundations::kepler::period::third_law(radius, mu))
-            }
+            RotationMode::TidallyLocked { .. } => self.period_of(i),
         }
+    }
+
+    /// The semi-major axis of a body's orbit about whatever it goes round, meters.
+    ///
+    /// **Not how far away it is now.** Those differ by a factor of `1 +- e`, so a period taken
+    /// from the distance rather than the axis is out by `(1 +- e)^1.5` -- thirty per cent for
+    /// Mercury, and enough for anything past an eccentricity of about 0.013 to miss the window
+    /// a transit is identified by. [`crate::navigation::Entry::orbit_radius_m`] is the distance
+    /// and says so; this is the element.
+    ///
+    /// `None` for a body whose motion is not Keplerian, which nothing generated or preset is.
+    pub fn semi_major_of(&self, i: BodyIndex) -> Option<f64> {
+        let when = Instant::from_seconds_since_j2000(INVENTORY_EPOCH_S);
+        match &self.sim.motive(i).motive_at(when).1 {
+            em_sim::motive::MotiveSelection::Keplerian(kepler) => {
+                let a = kepler.semi_major_axis();
+                (a.is_finite() && a > 0.0).then_some(a)
+            }
+            _ => None,
+        }
+    }
+
+    /// How long a body takes to go once round its primary, seconds.
+    ///
+    /// The primary's own `mu` where the arena carries one -- Sol's preset states them -- and
+    /// `G` times its stated mass otherwise, which is what a generated system gives.
+    pub fn period_of(&self, i: BodyIndex) -> Option<f64> {
+        const G: f64 = 6.674_301_5e-11;
+        let parent = self.sim.parent(i)?;
+        let mu = match self.sim.mu(parent) {
+            stated if stated > 0.0 => stated,
+            _ => G * self.sim.info(parent).mass,
+        };
+        let a = self.semi_major_of(i)?;
+        (mu > 0.0).then(|| em_foundations::kepler::period::third_law(a, mu))
+    }
+
+    /// The same, for a body named by what a course targets it as.
+    pub fn period_of_target(&self, key: &str) -> Option<f64> {
+        self.period_of(self.sim.by_name(key)?)
     }
 
     pub fn star_position_at(&self, seconds: f64) -> Option<DVec3> {
