@@ -45,6 +45,22 @@ pub struct Planet {
     pub obliquity_rad: f64,
     /// Which way it leans, measured about the system pole, radians.
     pub spin_node_rad: f64,
+    /// What orbits it. **A planet with no moon has no mass anybody can measure**: mass comes
+    /// from a satellite's period through Kepler's third law, which is the only route a
+    /// telescope has to it. See `lightcone/docs/25-system-knowledge.md`.
+    pub moons: Vec<Moon>,
+}
+
+/// A satellite of a generated planet.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Moon {
+    pub name: String,
+    /// Meters from the planet.
+    pub semi_major_m: f64,
+    pub eccentricity: f64,
+    pub mean_anomaly_deg: f64,
+    pub radius_m: f64,
+    pub mass_kg: f64,
 }
 
 /// One star or a barycenter with two, plus everything orbiting it.
@@ -84,6 +100,23 @@ pub fn pole_for(seed: u64) -> DVec3 {
     let r = (1.0 - z * z).max(0.0).sqrt();
     DVec3::new(r * phi.cos(), r * phi.sin(), z)
 }
+
+/// How many moons a planet gets, by class.
+///
+/// A giant gets a retinue and a rocky planet usually gets nothing: Jupiter has four worth
+/// seeing and Venus and Mercury have none. Every giant gets at least one, because a giant with
+/// no satellite is a giant whose mass can never be measured and the survey leans on that.
+const GIANT_MOONS: (u32, u32) = (1, 5);
+const ROCKY_MOONS: (u32, u32) = (0, 2);
+
+/// Where a moon can sit: past this many planetary radii, and inside this share of the Hill
+/// radius.
+///
+/// The inner bound keeps a moon outside the planet it orbits and outside the rough Roche
+/// distance for a rubble body. The outer one keeps it bound: past about a third of the Hill
+/// radius the star strips it, which is why the Galileans sit inside a fiftieth of Jupiter's.
+const MOON_INNER_RADII: f64 = 2.5;
+const MOON_OUTER_HILL: f64 = 0.33;
 
 /// How long a generated body takes to turn once, seconds.
 ///
@@ -214,6 +247,15 @@ fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
                 spin_s: spin_of(h(7), rung.rocky),
                 obliquity_rad: obliquity_of(h(8)),
                 spin_node_rad: rng::uniform_in(h(9), 0.0, std::f64::consts::TAU),
+                moons: moons_of(
+                    h(10),
+                    &format!("{} {}", star.provenance.name.as_deref().unwrap_or("b"), (b'b' + k as u8) as char),
+                    rung.rocky,
+                    rung.mass_earths * EARTH_MASS,
+                    rung.radius_earths * EARTH_RADIUS,
+                    rung.semi_major_m,
+                    star.mass_solar,
+                ),
             }
         })
         .collect()
@@ -237,6 +279,63 @@ fn spin_of_planet(system_pole: DVec3, planet: &Planet) -> em_sim::body::BodyRota
     // obliquity past a right angle is what retrograde means here.
     let rate = std::f64::consts::TAU / planet.spin_s.max(1.0);
     BodyRotation::spinning(orientation, rate, RotationEpoch::J2000)
+}
+
+/// The moons one planet gets, innermost first.
+///
+/// Radii are drawn against the planet's own, so a giant's moons are worlds and a rocky
+/// planet's are rocks. Masses follow from a density in the range real satellites occupy --
+/// icy ones near 1500 and rocky ones near 3300 -- rather than from a mass drawn on its own,
+/// which would let a moon be denser than iron.
+fn moons_of(
+    h: u64,
+    planet: &str,
+    rocky: bool,
+    planet_mass_kg: f64,
+    planet_radius_m: f64,
+    planet_semi_major_m: f64,
+    star_mass_solar: f64,
+) -> Vec<Moon> {
+    const SOLAR_MASS_KG: f64 = 1.988_41e30;
+    let (lo, hi) = if rocky { ROCKY_MOONS } else { GIANT_MOONS };
+    let count = lo + (rng::uniform(h) * (hi - lo + 1) as f64) as u32;
+    let count = count.min(hi);
+
+    // Where the star would take one away.
+    let hill_m = planet_semi_major_m
+        * (planet_mass_kg / (3.0 * star_mass_solar.max(1.0e-3) * SOLAR_MASS_KG)).cbrt();
+    let inner = planet_radius_m * MOON_INNER_RADII;
+    let outer = hill_m * MOON_OUTER_HILL;
+    if !(outer > inner) {
+        return Vec::new();
+    }
+
+    let mut out = Vec::with_capacity(count as usize);
+    for j in 0..count {
+        let g = |tag: u64| rng::hash(&[h, j as u64, tag]);
+        // Log-spaced across the band, so a retinue spreads out the way a real one does rather
+        // than clumping at one radius.
+        let a = (rng::uniform_in(g(1), inner.ln(), outer.ln())).exp();
+        let radius_m = planet_radius_m * rng::uniform_in(g(2), 0.005, 0.045);
+        let density = rng::uniform_in(g(3), 1200.0, 3600.0);
+        let volume = 4.0 / 3.0 * std::f64::consts::PI * radius_m.powi(3);
+        out.push(Moon {
+            name: format!("{planet} {}", roman(j + 1)),
+            semi_major_m: a,
+            eccentricity: rng::uniform_in(g(4), 0.0, 0.02),
+            mean_anomaly_deg: rng::uniform_in(g(5), 0.0, 360.0),
+            radius_m,
+            mass_kg: density * volume,
+        });
+    }
+    out.sort_by(|a, b| a.semi_major_m.total_cmp(&b.semi_major_m));
+    out
+}
+
+/// Satellite numbering, as the IAU does it: Io is Jupiter I.
+fn roman(n: u32) -> &'static str {
+    const NUMERALS: [&str; 5] = ["I", "II", "III", "IV", "V"];
+    NUMERALS.get((n as usize).saturating_sub(1)).copied().unwrap_or("VI")
 }
 
 /// One turn, seconds, log-uniform inside the class's range.
@@ -484,6 +583,26 @@ impl GeneratedSystem {
                 appearance: debug_ball(p.radius_m, (140, 140, 160)),
                 rotation: Some(spin_of_planet(self.pole, p)),
             }));
+            // A moon sits in its planet's equatorial plane, which is where a regular satellite
+            // forms -- and is what makes a planet's obliquity measurable from the outside: the
+            // tilt of its moons' orbits *is* the tilt of the planet.
+            let moon_tilt_deg = (tilt_deg + p.obliquity_rad.to_degrees()).rem_euclid(360.0);
+            for moon in &p.moons {
+                bodies.push(SomeBody::KeplerEntry(KeplerEntry {
+                    info: info(&moon.name, moon.mass_kg, false, &["Moon"]),
+                    params: kepler(
+                        &p.name,
+                        moon.semi_major_m,
+                        moon.eccentricity,
+                        moon_tilt_deg,
+                        p.spin_node_rad.to_degrees(),
+                        moon.mean_anomaly_deg,
+                        None,
+                    ),
+                    appearance: debug_ball(moon.radius_m, (120, 120, 130)),
+                    rotation: None,
+                }));
+            }
         }
 
         UniverseFileContents {
@@ -514,6 +633,64 @@ mod tests {
 
     fn build(system: &GeneratedSystem) -> System {
         System::from_contents(&system.to_universe()).expect("generated system must load")
+    }
+
+    /// **The one route a telescope has to a planet's mass**: a moon's period and distance give
+    /// it through Kepler's third law, so a generated giant with no moon is a giant whose mass
+    /// can never be measured. Recovered here from the geometry alone, the way a survey would.
+    #[test]
+    fn a_moons_orbit_gives_its_planets_mass() {
+        const G: f64 = 6.674_301_5e-11;
+        let mut checked = 0;
+        for key in 0..40u64 {
+            let star = AuthoredStars::sample().stars()[2].clone();
+            let seeded = CatalogueStar { id: crate::sky::StarId::synthesise("moons", key), ..star };
+            let system = system_for(&seeded);
+            for planet in &system.planets {
+                for moon in &planet.moons {
+                    // What an observer measures: the moon's distance and how long it takes.
+                    let period = std::f64::consts::TAU
+                        * (moon.semi_major_m.powi(3) / (G * planet.mass_kg)).sqrt();
+                    let recovered = 4.0
+                        * std::f64::consts::PI
+                        * std::f64::consts::PI
+                        * moon.semi_major_m.powi(3)
+                        / (G * period * period);
+                    let miss = (recovered - planet.mass_kg).abs() / planet.mass_kg;
+                    assert!(miss < 1.0e-9, "{}: mass off by {miss}", planet.name);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 20, "only {checked} moons across forty systems");
+    }
+
+    /// A moon has to be outside the planet and inside the star's reach, or it is not a moon.
+    #[test]
+    fn a_moon_sits_where_one_can_stay() {
+        const SOLAR_MASS_KG: f64 = 1.988_41e30;
+        let mut giants_with_moons = 0;
+        let mut giants = 0;
+        for key in 0..40u64 {
+            let star = AuthoredStars::sample().stars()[2].clone();
+            let seeded = CatalogueStar { id: crate::sky::StarId::synthesise("hills", key), ..star };
+            let system = system_for(&seeded);
+            for planet in &system.planets {
+                let giant = planet.mass_kg > 20.0 * EARTH_MASS;
+                giants += u32::from(giant);
+                giants_with_moons += u32::from(giant && !planet.moons.is_empty());
+                let hill = planet.semi_major_m
+                    * (planet.mass_kg / (3.0 * seeded.mass_solar * SOLAR_MASS_KG)).cbrt();
+                for moon in &planet.moons {
+                    assert!(moon.semi_major_m > planet.radius_m, "{}: inside its planet", moon.name);
+                    assert!(moon.semi_major_m < hill, "{}: outside the Hill radius", moon.name);
+                    assert!(moon.mass_kg < planet.mass_kg * 0.05, "{}: not a moon", moon.name);
+                    assert!(moon.radius_m > 0.0 && moon.radius_m < planet.radius_m);
+                }
+            }
+        }
+        assert!(giants > 0, "no giants in forty systems");
+        assert_eq!(giants_with_moons, giants, "a giant with no moon has no measurable mass");
     }
 
     /// **A generated planet with no rotation is one whose spin can never be measured**, which
