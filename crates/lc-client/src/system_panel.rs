@@ -143,11 +143,14 @@ pub(crate) fn system(
     };
     let Some(entry) = system.inventory().iter().find(|e| &e.target == target) else { return };
 
-    // A body's detail is its belief; a band has none yet, so it reads as it always did.
+    // A body's detail is its belief. A band has none yet, so it reads as it always did; a
+    // *body* with none is one this craft has never detected, and its designation, its orbit
+    // and its range are all the arena's rather than anything anybody measured. Reachable
+    // through a sky pick or `--focus`, so it has to be refused here and not only not offered.
     match known.iter().find(|b| truth_target(system, system.star, b.body).as_ref() == Some(target))
     {
         Some(belief) => details(ui, belief, game, system, target),
-        None => {
+        None if entry.kind == lc_world::navigation::Kind::Band => {
             ui.heading(&entry.designation);
             ui.weak(format!(
                 "{} — {} out, {} away",
@@ -155,6 +158,10 @@ pub(crate) fn system(
                 span_m(entry.orbit_radius_m),
                 span(range_to(game, system, target)),
             ));
+        }
+        None => {
+            ui.heading("Nothing detected here");
+            ui.weak("This craft holds no evidence of a body at this target.");
         }
     }
 

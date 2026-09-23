@@ -237,6 +237,21 @@ pub enum Method {
     Claim,
 }
 
+impl Method {
+    /// How much an orbit found this way is worth against one found another way.
+    ///
+    /// A fit to bearings taken from inside the system has a measured distance and a solved
+    /// orientation; a transit has a period and a distance no better than the host star's mass,
+    /// and states the pole only as a circle. A claim has no raw data behind it at all.
+    pub fn standing(self) -> u8 {
+        match self {
+            Self::Astrometric => 2,
+            Self::Transit => 1,
+            Self::Claim => 0,
+        }
+    }
+}
+
 /// What a body has been measured at, band by band, folded from every visit.
 ///
 /// **The per-visit digest.** One visit is one row -- a flux in every band the instrument has --

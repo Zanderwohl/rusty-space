@@ -522,11 +522,20 @@ impl Knowledge {
         self.refresh(subject);
     }
 
-    /// File where somebody says a body orbits. One statement per witness, the later winning.
+    /// File where somebody says a body orbits. One statement per witness *per method*, the
+    /// later winning.
+    ///
+    /// Per method, as [`Knowledge::named`] is per kind and for the same reason: a craft that
+    /// has both watched a body transit and fitted its arc holds two different statements about
+    /// it, made two different ways, and neither is a correction of the other. Keyed by witness
+    /// alone they overwrote each other on every pass -- a fit replaced by a transit's shell,
+    /// which made the body look unfitted, which refitted it, forever -- and a transit's
+    /// edge-on constraint could never tighten a fitted pole because the two were never held at
+    /// once.
     pub fn orbits(&mut self, subject: impl Into<Subject>, orbit: Orbit) {
         let subject = subject.into();
         let file = self.files.entry(subject).or_default();
-        match file.orbits.iter_mut().find(|o| o.witness == orbit.witness) {
+        match file.orbits.iter_mut().find(|o| o.witness == orbit.witness && o.method == orbit.method) {
             Some(held) if held.stated_s >= orbit.stated_s => {}
             Some(held) => *held = orbit,
             None => file.orbits.push(orbit),

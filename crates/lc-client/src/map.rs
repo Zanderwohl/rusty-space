@@ -1061,6 +1061,15 @@ mod tests {
         crate::ui::MapView {
             focus: MapFocus::Primary(frame),
             plane: em_map::Plane::System,
+            // Solved, and solved as `+Z`, because these ships are placed in the `xy` plane: a
+            // quarter of an orbit is a quarter turn of the camera only when the orbit lies in
+            // the plane the camera is angled against. A craft that has solved nothing gets the
+            // galactic frame, which this motion is not in.
+            system_plane: lc_world::knowledge::SystemPlane::Known {
+                pole: DVec3::Z,
+                sigma_rad: 0.0,
+                zero: DVec3::X,
+            },
             ..Default::default()
         }
     }

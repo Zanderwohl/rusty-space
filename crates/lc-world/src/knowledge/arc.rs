@@ -1461,6 +1461,46 @@ mod tests {
         assert_eq!(fresh.unfitted(star), Some(subject(3)), "a transit is not an astrometric fit");
     }
 
+    /// **A transit and a fit are two statements, not one.**
+    ///
+    /// A craft that has watched a body transit and then fitted its arc holds both, and neither
+    /// is a correction of the other. Held one per witness they overwrote each other every
+    /// pass: a fit replaced by a transit's mass-prior shell, which made the body look unfitted,
+    /// which refitted it, which the next log re-read undid.
+    #[test]
+    fn a_transit_and_a_fit_are_both_kept() {
+        use crate::knowledge::{Knowledge, Method, Witness};
+
+        let star = StarId::synthesise("arc", 4);
+        let subject = Subject::Body { star, body: crate::knowledge::BodyId::of(star, "one") };
+        let mut k = Knowledge::new(Witness(7));
+        let stated = |method, at_s: f64| crate::knowledge::Orbit {
+            method,
+            stated_s: at_s,
+            semi_major_au: (if method == Method::Transit { 1.2 } else { 1.0 }, 0.1),
+            ..orbit_of()
+        };
+
+        k.orbits(subject, stated(Method::Transit, 10.0));
+        k.orbits(subject, stated(Method::Astrometric, 20.0));
+        assert_eq!(k.file(subject).unwrap().orbits().len(), 2, "both statements are held");
+
+        // A later transit does not take the fit away, and the belief keeps reading the fit.
+        k.orbits(subject, stated(Method::Transit, 30.0));
+        let held = k.file(subject).unwrap().orbits();
+        assert_eq!(held.len(), 2, "a later transit replaces the earlier transit only");
+        assert_eq!(held.iter().filter(|o| o.method == Method::Astrometric).count(), 1);
+
+        let belief = k.body_belief(star, crate::knowledge::BodyId::of(star, "one"), 100.0).unwrap();
+        assert_eq!(belief.method, Some(Method::Astrometric), "a fit stands above a transit shell");
+        assert_eq!(belief.semi_major_au.map(|(a, _)| a), Some(1.0));
+
+        // And a newer fit still wins over itself.
+        k.orbits(subject, crate::knowledge::Orbit { semi_major_au: (1.1, 0.01), ..stated(Method::Astrometric, 40.0) });
+        let belief = k.body_belief(star, crate::knowledge::BodyId::of(star, "one"), 100.0).unwrap();
+        assert_eq!(belief.semi_major_au.map(|(a, _)| a), Some(1.1));
+    }
+
     /// **A body that cannot be fitted must not hold the queue.**
     ///
     /// An arc too short to shape an orbit states nothing, so a queue ranked by what has been

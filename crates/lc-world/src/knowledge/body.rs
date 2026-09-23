@@ -123,9 +123,13 @@ impl Knowledge {
     ) -> Option<BodyBelief> {
         let subject = Subject::Body { star, body };
         let file = self.file(subject)?;
+        // This craft's own before anybody else's, then the method that stands highest, then
+        // the later statement. A craft holds one orbit per witness per method now, so without
+        // the middle term a transit's shell would shadow a fit made before it.
         let orbit = file.orbits().iter().max_by(|a, b| {
             (a.witness == self.owner)
                 .cmp(&(b.witness == self.owner))
+                .then(a.method.standing().cmp(&b.method.standing()))
                 .then(a.stated_s.total_cmp(&b.stated_s))
         });
         let kind = file

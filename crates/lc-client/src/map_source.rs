@@ -290,14 +290,21 @@ fn push_believed(build: &mut Build, session: &Session) {
     let Some(system) = session.system.as_ref() else { return };
     let now = session.coordinate_time_s();
     let star_ly = system.star_position_ly();
+    // The galactic normal where no plane is solved, for the reason `MapView::resolved_plane`
+    // gives: `+Z` is Sol's plane and drawing another star's error bars about it is a
+    // measurement of one system shown around another.
     let pole = match session.knowledge.system_plane(system.star) {
         lc_world::knowledge::SystemPlane::Known { pole, .. } => pole,
-        _ => DVec3::Z,
+        _ => em_map::Plane::Galactic.about(DVec3::Z).normal(),
     };
     for belief in session.knowledge.bodies_of(system.star, now) {
         let key = believed_key(system, system.star, belief.body);
         let label = belief.name.clone().unwrap_or_else(|| "unnamed body".to_string());
-        let subject = Some(Subject::Body(label.clone(), label.clone()));
+        // Keyed by what the body is targeted by, never by what it is called. Two bodies
+        // nobody has named are both "unnamed body", so a label as a key made every one of
+        // them the same subject: picking one focused nothing and hovering one lit them all.
+        let subject = believed_target(system, system.star, belief.body)
+            .map(|target| Subject::Body(target, label.clone()));
         match belief.position_now {
             // Where on the ring it is, with the error drawn along the ring rather than across
             // it: what is uncertain is how far round it has got.
@@ -340,23 +347,33 @@ fn push_believed(build: &mut Build, session: &Session) {
 /// Light-years in an astronomical unit.
 const AU_LY: f64 = lc_world::navigation::AU / lc_world::system::M_PER_LY;
 
+/// The name a believed body is targeted by, where it is one the system holds.
+///
+/// `None` for a body nothing in the arena answers to, which is what a transit's false positive
+/// is: there is a belief and there is nowhere to send a ship.
+fn believed_target(
+    system: &lc_world::system::LocalSystem,
+    star: lc_world::sky::StarId,
+    body: lc_world::knowledge::BodyId,
+) -> Option<String> {
+    system.inventory().iter().find_map(|entry| match &entry.target {
+        lc_world::navigation::Target::Body(name)
+            if lc_world::knowledge::BodyId::of(star, name) == body =>
+        {
+            Some(name.clone())
+        }
+        _ => None,
+    })
+}
+
 /// A believed body's map key: the generator's, where the body is one the generator made.
 fn believed_key(
     system: &lc_world::system::LocalSystem,
     star: lc_world::sky::StarId,
     body: lc_world::knowledge::BodyId,
 ) -> ItemKey {
-    system
-        .inventory()
-        .iter()
-        .find_map(|entry| match &entry.target {
-            lc_world::navigation::Target::Body(name)
-                if lc_world::knowledge::BodyId::of(star, name) == body =>
-            {
-                Some(ItemKey::from_name(name))
-            }
-            _ => None,
-        })
+    believed_target(system, star, body)
+        .map(|name| ItemKey::from_name(&name))
         .unwrap_or_else(|| ItemKey::from_id("phantom", body.get()))
 }
 

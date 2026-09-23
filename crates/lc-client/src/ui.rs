@@ -204,8 +204,21 @@ impl MapView {
     ///
     /// Everything that casts a ray, measures a height or reads a bearing goes through this, so
     /// the camera and the plane it is angled against cannot disagree.
+    ///
+    /// **A system plane nobody has solved falls back to the galactic one**, which this craft
+    /// knows from the catalogue and which needs nothing measured. Falling back to `+Z` laid
+    /// every unsolved system's rings in the ecliptic of J2000 -- Sol's plane, shown around a
+    /// star nobody has surveyed, which is the exact mistake `25-system-knowledge.md` opens by
+    /// describing.
+    pub fn resolved_plane(&self) -> em_map::Plane {
+        match (self.plane, self.believed_pole()) {
+            (em_map::Plane::System, None) => em_map::Plane::Galactic,
+            (plane, _) => plane,
+        }
+    }
+
     pub fn datum(&self) -> em_map::Datum {
-        self.plane.about(self.believed_pole().unwrap_or(DVec3::Z))
+        self.resolved_plane().about(self.believed_pole().unwrap_or(DVec3::Z))
     }
 
     /// The believed pole, or `None` when this craft has not solved one.
@@ -604,12 +617,19 @@ mod tests {
         assert!((view.datum().normal() - pole).length() < 1.0e-12);
 
         // A pole somewhere on a circle is not a pole: it cannot be laid rings in.
+        // A pole somewhere on a circle is not a pole. The map falls back to the galactic
+        // plane, which needs nothing solved -- not to +Z, which is Sol's plane and would be a
+        // measurement of one system shown around another.
+        let galactic_normal = em_map::Plane::Galactic.about(DVec3::Z).normal();
         view.system_plane = SystemPlane::Circle(DVec3::X);
         assert_eq!(view.believed_pole(), None);
-        assert_eq!(view.datum().normal(), DVec3::Z, "a fallback frame, not a degenerate one");
+        assert_eq!(view.resolved_plane(), em_map::Plane::Galactic);
+        assert_eq!(view.datum().normal(), galactic_normal, "a frame it knows, not Sol's");
 
         view.system_plane = SystemPlane::Unknown;
         assert_eq!(view.believed_pole(), None);
+        assert_eq!(view.datum().normal(), galactic_normal);
+        assert!((galactic_normal - DVec3::Z).length() > 0.5, "the two frames are not the same");
 
         // The galactic frame needs nothing solved and is the same in every system.
         view.plane = em_map::Plane::Galactic;
