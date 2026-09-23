@@ -60,6 +60,10 @@ pub struct Drawable {
     pub rings: Option<Rings>,
     /// What it looks like, from what it is.
     pub surface: crate::surface::Surface,
+    /// What it is made of and wrapped in: measured where anybody has been, and derived from
+    /// [`Drawable::surface`] everywhere else. This is what a survey reads per band, and the one
+    /// place Venus is allowed to differ from Mars. See [`crate::worlds`].
+    pub world: crate::worlds::World,
     /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub pole: DVec3,
     /// Where it is, light-years from the world origin, simulation axes.
@@ -238,6 +242,9 @@ impl LocalSystem {
                     kind,
                     rings,
                     surface,
+                    // Keyed by the arena's id, which is what `rings::for_body` is keyed by and
+                    // is not always the display name -- see `worlds`.
+                    world: crate::worlds::of(self.sim.name(i), surface),
                     pole,
                     position_ly: self.origin_ly + at / M_PER_LY,
                     radius_m,
