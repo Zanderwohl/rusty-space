@@ -54,6 +54,7 @@ cross-reference except where a shared crate is the subject.
 | [23-factions.md](docs/23-factions.md) | factions as keys rather than lists, rotation and traitors, relays over a network that moves, and what anything is called |
 | [24-standing-instruments.md](docs/24-standing-instruments.md) | instruments that run while nobody is watching, what a craft's knowledge is stored as, and logs consumed into conclusions |
 | [25-system-knowledge.md](docs/25-system-knowledge.md) | planets, their orbits and a system's plane as knowledge: how each is learned, and what the System panel, the map and courses read |
+| [26-console.md](docs/26-console.md) | commands typed after `/`, parsed and level-checked on the shard, and teleport as a worldline that jumps |
 
 ## Status
 

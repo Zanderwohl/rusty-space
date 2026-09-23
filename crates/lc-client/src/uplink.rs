@@ -253,6 +253,8 @@ pub struct Uplink {
     pub fitting: Option<lc_proto::Fitting>,
     /// Every conversation this ship is in. See [`crate::chat`].
     pub chat: crate::chat::Chat,
+    /// What was typed at the shard and what it said. See [`crate::console`].
+    pub console: crate::console::Console,
 }
 
 /// The rate a shard runs at, and what a server that says nothing is taken to mean.
@@ -631,6 +633,20 @@ fn fold(
                 };
                 ui.0.heard(from, notice, arrived_s);
             }
+            // Each end of a jump is its own news, arriving at its own light delay: a ship far
+            // from both hears of the vanishing and the appearance at different times, and a
+            // ship near one end may never hear of the other.
+            // Not this ship's own: its console already said where it went.
+            let me = uplink.joined().map(|joined| joined.ship_id);
+            for sighting in seen.iter().filter(|s| matches!(s.kind, lc_proto::kind::VANISH | lc_proto::kind::APPEAR)) {
+                let from = ShipId(sighting.source_id);
+                if Some(from) == me {
+                    continue;
+                }
+                let who = uplink.name_of(from);
+                let what = if sighting.kind == lc_proto::kind::VANISH { "vanished" } else { "appeared" };
+                ui.0.heard(from, format!("{who} {what}"), sighting.arrive_t as f64 * 1e-6);
+            }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
                 let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else {
                     continue;
@@ -853,6 +869,7 @@ fn fold(
                 uplink.chat.auto_acking(with);
             }
         }
+        Outbound::Answered { seq, ok, text } => uplink.console.answered(seq, ok, text),
         Outbound::Backlog { messages, keys } => {
             // Nothing is announced. A transcript is what was *already* said, and a box of
             // notifications about years-old messages on every sign-in would bury whatever is

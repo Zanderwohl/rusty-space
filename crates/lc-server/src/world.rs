@@ -100,7 +100,7 @@ impl World {
         self.load(&star)
     }
 
-    /// The system of the star with this catalogue id, loaded if nobody has been there.
+    /// The system of the star with this catalog id, loaded if nobody has been there.
     pub fn system_of(&mut self, id: u64) -> Option<Arc<LocalSystem>> {
         let star = self.stars.iter().find(|s| s.id.get() == id)?.clone();
         self.load(&star)

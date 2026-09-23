@@ -58,6 +58,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--map-plane <ecliptic\|galactic>` | which plane the map lays its rings in |
 | `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto. A pin: `--map` on its own holds the ship, so a hand on the mouse cannot pan a shot two runs are meant to agree about |
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`, `corona`. Brings its own shard |
+| `--console <line>` | type a line at the console once the shard has welcomed the client, with the console open. With `--local` the shard is directing, so every command is available |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run, so two shots of a scene are the same shot |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable. Offline only — a shard states its own. **The default is the design rate**, so a run without this flag is as slow as the game. A frozen clock also freezes the telescope, which records a sample only once an integration's worth of time has passed, so `--rate 0 --panel telescope` photographs an empty curve — correctly |
 

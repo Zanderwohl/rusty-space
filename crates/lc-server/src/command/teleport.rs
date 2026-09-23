@@ -54,9 +54,9 @@ impl<J: Journal> Server<J> {
         self.teleport(ship, place, args.number("altitude").unwrap_or(2.0), wire, events, deliveries)
     }
 
-    /// A star by its catalogue id, or a body by its id: in `star`'s system when that is given,
+    /// A star by its catalog id, or a body by its id: in `star`'s system when that is given,
     /// and otherwise in any system already loaded. Loading every star's system to look would be
-    /// the whole catalogue generated in one tick.
+    /// the whole catalog generated in one tick.
     fn locate(&mut self, id: u64, star: Option<u64>) -> Result<Place, String> {
         if star.is_none()
             && let Some(system) = self.world.system_of(id)

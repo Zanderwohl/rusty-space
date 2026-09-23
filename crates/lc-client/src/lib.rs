@@ -19,6 +19,7 @@ pub mod app;
 pub mod bench;
 pub mod bookshelf;
 pub mod chat;
+pub mod console;
 pub mod curve;
 pub mod demos;
 pub mod dev;

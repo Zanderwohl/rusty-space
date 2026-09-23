@@ -182,6 +182,7 @@ impl Plugin for ClientPlugin {
                     // mouse or by a crossing aiming itself, on the same frame.
                     crate::dev::frame_the_cast.run_if(in_state(AppState::InGame)),
                     crate::dev::open_the_radio.run_if(in_state(AppState::InGame)),
+                    crate::dev::type_at_the_console.run_if(in_state(AppState::InGame)),
                     // After the framing, because a pin overrules everything including that.
                     crate::dev::pin_camera.run_if(in_state(AppState::InGame)),
                     crate::dev::pin_view.run_if(in_state(AppState::InGame)),
@@ -254,7 +255,7 @@ impl Plugin for ClientPlugin {
                     crate::faces::settle,
                     panels::loading.run_if(in_state(AppState::Loading)),
                     (panels::hud, crate::map_panel::draw, panels::open_panels,
-                        crate::reader::draw)
+                        crate::reader::draw, crate::console::draw)
                         .run_if(in_state(AppState::InGame)),
                     panels::unreachable.run_if(in_state(AppState::Unreachable)),
                 )
@@ -550,6 +551,14 @@ fn dispatch(
                 Effect::Grant(joules) => {
                     uplink.say(lc_proto::Inbound::Grant { joules });
                     uplink.asked(time.elapsed_secs_f64());
+                }
+                Effect::Command(line) => {
+                    if uplink.joined().is_some() {
+                        let seq = uplink.console.sent(line.clone());
+                        uplink.say(lc_proto::Inbound::Command { seq, line });
+                    } else {
+                        uplink.console.unsent(line, "not connected to a shard");
+                    }
                 }
                 Effect::Send(order) => {
                     // A ship the server has not named is a ship this client does not have, so

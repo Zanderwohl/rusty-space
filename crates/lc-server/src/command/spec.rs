@@ -61,7 +61,7 @@ pub enum Kind {
     Word(&'static [&'static str]),
     /// A number, inside the widest of these ranges the asker's level reaches.
     Number(&'static [Limit]),
-    /// A catalogue or body identifier, as `where` prints them: decimal, or hexadecimal with
+    /// A catalog or body identifier, as `where` prints them: decimal, or hexadecimal with
     /// `0x`.
     Id,
     /// Anything at all.

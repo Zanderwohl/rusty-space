@@ -89,6 +89,9 @@ pub struct DevEntry {
     /// shard, so an action run on entering the sky has nobody to talk to yet — this is polled,
     /// like `--at` and the framing, until there is somebody in the contact list.
     pub say: Option<String>,
+    /// A console line, sent once the shard has welcomed this client, with the console open.
+    /// The only way to photograph a command's answer.
+    pub console: Option<String>,
     /// Run once on reaching the sky. Actions rather than flags, so a development entry can
     /// reach anything the interface can and needs no plumbing of its own.
     pub actions: Vec<Action>,
@@ -317,6 +320,22 @@ pub(crate) fn open_the_radio(
         body: words.clone(),
         idem: None,
     }));
+}
+
+/// Development entry: type a line at the console once there is a shard to answer it.
+pub(crate) fn type_at_the_console(
+    dev: Res<DevEntry>,
+    uplink: Res<crate::uplink::Uplink>,
+    mut out: MessageWriter<Requested>,
+    mut done: Local<bool>,
+) {
+    let Some(line) = dev.console.as_ref() else { return };
+    if *done || uplink.joined().is_none() {
+        return;
+    }
+    *done = true;
+    out.write(Requested(Action::OpenPanel(crate::ui::Panel::Console)));
+    out.write(Requested(Action::RunCommand(line.clone())));
 }
 
 /// Hold the camera still, so two runs photograph the same view.

@@ -48,14 +48,14 @@ pub const COMMANDS: &[Spec] = &[
         summary: "put a ship on station about a star or a body, without flying there",
         help: "The ship vanishes where it was and appears on an equatorial orbit of the target. \
                Each is an event seen at its own light delay: anyone near where it left goes on \
-               seeing it there until that light has passed. `where` prints the ids.",
+               seeing it there until that light has passed. The where command prints the ids.",
         args: &[
             ArgSpec {
                 name: "target",
                 kind: Kind::Id,
                 need: Need::Required,
                 level: Level::ADMIN,
-                help: "a star's catalogue id or a body's id",
+                help: "a star's catalog id or a body's id",
             },
             ArgSpec {
                 name: "altitude",
