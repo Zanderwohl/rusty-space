@@ -818,11 +818,14 @@ reading the generator, and a fit against known observer positions is the real pr
 
 **Where charts are issued today,** and what happens to each in phase 6:
 
+✅ **Done** (2026-09-23). Two calls went, being the two a player reaches; the method and the
+fixtures stayed, as this table always said they would.
+
 | site | what it is | phase 6 |
 |---|---|---|
-| `lc-server/src/instruments.rs:117` | the shard, on a craft's first tick | **removed.** The one that matters |
-| `lc-client/src/watch.rs:36` `Session::issue_charts` | the offline client's own call | **removed** |
-| `lc-client/src/app.rs:510` | the offline client's startup | **removed** |
+| `lc-server/src/instruments.rs` | the shard, on a craft's first tick | ✅ **removed.** The one that matters |
+| `lc-client/src/app.rs` | the offline client's startup | ✅ **removed**, behind `--charted` |
+| `lc-client/src/watch.rs` `Session::issue_charts` | the offline client's method | ✅ **kept.** The row above was the call; nine fixtures and the dev flag are the method |
 | `lc-client/src/bin/snapshot.rs:69` | photographs | kept, behind the dev flag |
 | `lc-client/examples/crossing.rs:52` | the crossing example | kept |
 | `lc-client/tests/knows.rs:19,62` | two integration tests | kept |
@@ -1433,11 +1436,27 @@ phase 6. Two flags break in a way worth naming:
 - **`--station rings:Saturn`** still resolves, because `Course::parse` and `Course::resolve` go
   through truth, but it leaves `ui.focus` on a row the panel no longer lists.
 
-So phase 6 needs a dev flag that seeds a craft's knowledge from truth, and the mechanism already
-exists: `observatory::issue_charts` is exactly that, which is the second reason it survives the
-phase that stops calling it on player paths. The flag is the charting office kept as a dev tool.
-It goes in AGENTS.md's table under **Checking your work**, beside `--at`, `--station` and
-`--focus`.
+✅ **Built** as `--charted` (2026-09-23), in AGENTS.md's table beside `--at` and `--focus`.
+`observatory::issue_charts` is exactly the mechanism, which is the second reason it survives the
+phase that stopped calling it: the charting office kept as a dev tool.
+
+**Three server tests were about charts and now say the opposite,** which is the change stated
+where it is enforced rather than only here:
+
+- `a_new_craft_starts_with_the_charts_of_where_it_is` is now
+  `a_new_craft_knows_nothing_at_all`, and goes on to stare at the star and watch it arrive.
+- `a_craft_restored_without_knowledge_is_issued_its_charts` is now
+  `..._comes_back_empty_and_still_looking`: what a craft gets back is the telescope pointed
+  where it was.
+- `a_craft_names_only_what_it_knows` has to *look* at one of its two stars first, since the
+  distinction it pins is between what a craft has seen and what it has not, and a craft is now
+  handed neither.
+
+And two client tests moved with them. `a_report_crosses_the_seam_and_is_learned_at_the_far_end`
+now stares before it names, because a report about a star nobody has looked at is a report about
+nothing — and it asks what the receiver *calls* the star rather than reading the first naming in
+the file, because a craft that detects a star designates it before anybody names it, so the file
+carries two namings from the same witness and only the ranking tells them apart.
 
 Note that `observe_immediately` is not this. Despite the name it only skips the main menu
 (`app.rs:401`); its user-facing spelling is `--observe` and it is not in the AGENTS.md table

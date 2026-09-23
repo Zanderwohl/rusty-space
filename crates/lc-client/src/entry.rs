@@ -175,6 +175,7 @@ pub fn parse(args: &[String]) -> Entry {
             .map(|_| crate::ui::ViewMode::Map),
         at_body: after("--at"),
         station: after("--station"),
+        charted: flag("--charted"),
         map_camera: after("--map").and_then(|spec| {
             let mut fields = spec.split(':').map(|f| f.parse::<f64>());
             match (fields.next(), fields.next(), fields.next()) {

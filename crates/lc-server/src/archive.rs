@@ -267,9 +267,11 @@ mod tests {
         }
         let after = new.knowledge_of(SHIP).unwrap();
         assert_eq!(after.stars().count(), sky().len(), "the sweep carried on and finished the pass");
+        // Found by sweeping, and on nobody's word: a craft is issued no charts at all now, so
+        // the claim that used to be here on a restart is not there on the first pass either.
         let home = sky()[0].id;
-        let charts = after.file(home).unwrap().claims().len();
-        assert_eq!(charts, 1, "a restored craft is not issued its charts a second time");
+        assert!(after.knows(home), "the sweep reached the home star");
+        assert!(after.file(home).unwrap().claims().is_empty(), "a craft is issued no charts");
     }
 
     /// A second checkpoint writes only what changed since the first.
@@ -413,17 +415,30 @@ mod tests {
         assert!(retried.samples.starts_with(&failed.samples), "and every sample, in order");
     }
 
-    /// A craft whose knowledge rows are missing comes back with its charts.
+    /// A craft whose knowledge rows are missing comes back empty and keeps its duty.
+    ///
+    /// It used to come back with its charts, because `aboard` issued them to anything it had
+    /// not seen before. Nothing issues them now, so a craft that lost its files has lost them:
+    /// what it gets back is the telescope pointed where it was, and it looks again.
     #[tokio::test]
-    async fn a_craft_restored_without_knowledge_is_issued_its_charts() {
+    async fn a_craft_restored_without_knowledge_comes_back_empty_and_still_looking() {
         let (old, _) = running().await;
         let checkpoint = old.checkpoint();
         let mut new = a_shard();
         assert!(new.adopt(checkpoint).is_empty());
         assert!(new.adopt_knowledge(&[], &[]).is_empty());
         let knowledge = new.knowledge_of(SHIP).expect("aboard");
-        assert!(knowledge.knows(sky()[0].id), "the charts were issued");
-        assert_eq!(new.duty_of(SHIP), old.duty_of(SHIP), "and the duty kept");
+        assert!(!knowledge.knows(sky()[0].id), "nothing is handed back");
+        assert_eq!(new.duty_of(SHIP), old.duty_of(SHIP), "but the duty is kept");
+
+        let mut wire = Loopback::new();
+        for _ in 0..3000 {
+            new.tick(&mut wire).await.unwrap();
+        }
+        assert!(
+            new.knowledge_of(SHIP).unwrap().knows(sky()[0].id),
+            "and looking is what brings it back"
+        );
     }
 
     #[test]

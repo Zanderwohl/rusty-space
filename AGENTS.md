@@ -45,6 +45,7 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
 | `--bench <n>` | time `n` frames after `--frames` of warm-up and quit: frame time, main-world CPU, render passes. See `src/bench.rs` |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
+| `--charted` | seed what the ship knows from truth. **A ship knows nothing on creation, so it photographs nothing**: without this every body shot is a ship staring at an empty panel and `--focus` names a body the panel does not list. The charting office kept as a dev tool |
 | `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
 | `--panel <name>` / `--tune` | open a panel. `--panel map` is the exception: the map is a mode of the main view, so this is a pin holding it there |
 | `--focus <body>` / `--focus band:<n>` | what is **selected**, as a click on either view would leave it. Everything else that aims is a camera, so this is the only way to photograph a reticle. `--station` sets the focus itself and stands aside when this is given |

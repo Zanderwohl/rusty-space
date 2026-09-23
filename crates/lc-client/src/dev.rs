@@ -44,6 +44,14 @@ pub struct DevEntry {
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
     pub station: Option<String>,
+    /// Seed what the ship knows from truth, the way the charting office used to.
+    ///
+    /// A ship knows nothing on creation now, so it photographs nothing: every body shot is a
+    /// ship staring at an empty panel, and `--focus` names a body the panel does not list.
+    /// `observatory::issue_charts` is exactly the mechanism that used to do this, which is the
+    /// second reason it survived the phase that stopped calling it. The charting office kept as
+    /// a dev tool.
+    pub charted: bool,
     /// What the map's camera is to hold onto, written every frame like the rest of the pin.
     pub map_focus: Option<WantedFocus>,
 

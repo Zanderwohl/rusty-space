@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use lc_proto::{Order, Outbound, Refusal, ShipId};
 use lc_world::craft::CraftId;
 use lc_world::fitting::ONBOARD_DATA_BYTES;
-use lc_world::knowledge::observatory::{self, CHARTED_LY, Observatory, Sky, Station};
+use lc_world::knowledge::observatory::{Observatory, Sky, Station};
 use lc_world::knowledge::survey::Duty;
 use lc_world::knowledge::prior::Prior;
 use lc_world::knowledge::{ENTRIES_PER_REPORT, Knowledge, Mark, Report, Reporting, Subject, Witness};
@@ -118,22 +118,20 @@ impl<J: Journal> Server<J> {
         Some(Station { position_ly, instrument: craft.sensor })
     }
 
-    /// A craft's instruments, issuing a new craft the charts of the volume it is in. See
-    /// `lightcone/docs/22-provenance.md`.
+    /// A craft's instruments. **A new craft knows nothing** -- not its home system's planets and
+    /// not the stars around it either. Everything it holds it looked at or was told.
+    ///
+    /// This is where the charting office of `lightcone/docs/22-provenance.md` used to hand a new
+    /// ship twenty light-years of star distances. The survey from inside replaced the argument
+    /// for it: a ship that knows nothing is not idle, it is in a system full of unexamined
+    /// planets that pay out in the first real minute. `observatory::issue_charts` stays for
+    /// photographs and tests; nothing a player reaches calls it.
     pub(crate) fn aboard(&mut self, id: CraftId) -> &mut Aboard {
-        let fresh = (!self.instruments.aboard.contains_key(&id)).then(|| {
-            let mut knowledge = Knowledge::new(witness(id));
-            if let Some(at) = self.station(id) {
-                let now_s = self.now_t as f64 * 1.0e-6;
-                observatory::issue_charts(self.sky(), &mut knowledge, at, CHARTED_LY, now_s);
-            }
-            Aboard { knowledge, observatory: Observatory::default(), reporting: Reporting::default() }
-        });
-        self.instruments.aboard.entry(id).or_insert_with(|| fresh.unwrap_or_else(|| Aboard {
+        self.instruments.aboard.entry(id).or_insert_with(|| Aboard {
             knowledge: Knowledge::new(witness(id)),
             observatory: Observatory::default(),
             reporting: Reporting::default(),
-        }))
+        })
     }
 
     /// Bytes: data modules plus the onboard store.
@@ -531,16 +529,39 @@ mod tests {
         Inbound::Act(Intent { ship_id: ship, order, issued_at_client_t: i64::MAX })
     }
 
+    /// **A new craft knows nothing** (decided 2026-09-22): not its home system's planets, and
+    /// not the star it is standing next to either. Everything it holds it looked at or was
+    /// told, and the first minutes of a new ship are looking.
+    ///
+    /// This is the charting office of `lightcone/docs/22-provenance.md` gone. It used to hand a
+    /// new ship twenty light-years of star distances, and the argument was that a player who
+    /// starts with nothing has no reason to fly anywhere. The survey from inside answers that:
+    /// a ship that knows nothing is in a system full of unexamined planets.
     #[tokio::test]
-    async fn a_new_craft_starts_with_the_charts_of_where_it_is() {
+    async fn a_new_craft_knows_nothing_at_all() {
         let broker = Broker::new([1u8; 32]);
         let mut server = server(&broker);
         let mut wire = Loopback::new();
         let (ship, said) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let copy = replica(ship, &said);
-        let home = sky()[0].id;
-        assert!(copy.knows(home), "the home star is charted");
-        assert_eq!(copy.stars().count(), 1, "and nothing past twenty light-years is");
+        assert!(!copy.knows(sky()[0].id), "not even the star it is standing next to");
+        assert_eq!(copy.stars().count(), 0, "nor any other");
+
+        // And looking is what changes that: one stare and it holds the star.
+        wire.client_says(
+            ClientId(1),
+            act(ship, Order::SetDuty {
+                duty: lc_proto::Duty::Stare { star: sky()[0].id.get() },
+                integration_s: 1.0,
+            }),
+        );
+        for _ in 0..4 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(
+            server.instruments.aboard[&CraftId(ship.0)].knowledge.knows(sky()[0].id),
+            "a stare finds what a chart used to be given"
+        );
     }
 
     /// With nobody signed in, a craft keeps sweeping and receives a report when its light lands;
@@ -726,6 +747,20 @@ mod tests {
         let mut server = server(&broker);
         let mut wire = Loopback::new();
         let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        // One star looked at and one not, since a craft is handed nothing on creation and the
+        // distinction this pins is between what it has seen and what it has not.
+        wire.client_says(
+            ClientId(1),
+            act(ship, Order::SetDuty {
+                duty: lc_proto::Duty::Stare { star: sky()[0].id.get() },
+                integration_s: 1.0,
+            }),
+        );
+        for _ in 0..4 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let _ = wire.take(ClientId(1));
+
         let home = lc_proto::Subject::Star(sky()[0].id.get());
         let far = lc_proto::Subject::Star(sky()[1].id.get());
         wire.client_says(ClientId(1), act(ship, Order::NameIt { subject: home, name: "Hearth".into() }));
