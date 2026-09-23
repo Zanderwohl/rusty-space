@@ -11,9 +11,9 @@
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 use em_render::atmosphere_material::{AtmosphereMaterial, AtmosphereUniform, TOP_HEIGHTS};
-use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
+use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform, GROUNDS};
 use em_render::render_space::sim_to_render;
-use em_spectra::{Band, PerBand, blackbody};
+use em_spectra::{Band, BandMapping, PerBand, blackbody, presets};
 use glam::DVec3;
 
 use crate::session::{Disc, Scene, Session};
@@ -322,15 +322,41 @@ pub fn surface_shading(
     (through(reflected), through(emitted))
 }
 
+/// Each ground's albedo through `mapping`, as display channels: the mapped light it reflects
+/// over the mapped light a white surface would. Water, ice, growth, sand, rock `rust` of the way
+/// to Mars, and cloud, which is [`BodySurfaceUniform::ground`]'s order.
+fn grounds(mapping: &BandMapping, star: &PerBand<f32>, rust: f32) -> [Vec4; GROUNDS] {
+    use lc_world::ground::{Ground, rock};
+    let white = mapping.apply(star);
+    [
+        Ground::Water.reflectance(),
+        Ground::Ice.reflectance(),
+        Ground::Growth.reflectance(),
+        Ground::Sand.reflectance(),
+        rock(rust),
+        Ground::Cloud.reflectance(),
+    ]
+    .map(|r| {
+        let lit = mapping.apply(&PerBand::new(std::array::from_fn(|i| r[i] * star[Band::ALL[i]])));
+        let albedo: [f32; 3] =
+            std::array::from_fn(|c| if white[c] > 0.0 { lit[c] / white[c] } else { 0.0 });
+        Vec3::from_array(albedo).extend(1.0)
+    })
+}
+
 fn uniforms(
     body: &Drawable,
     star_ly: DVec3,
     tone: &crate::tonemap::ToneMap,
     reflected: glam::Vec3,
     emitted: glam::Vec3,
-    (color, clouds): (f32, f32),
+    drawn: crate::surfaces::Drawn,
+    ground: Option<([Vec4; GROUNDS], [Vec4; GROUNDS])>,
     weather: Option<crate::surfaces::Weather>,
 ) -> BodySurfaceUniform {
+    let as_weight = |on: bool| f32::from(u8::from(on));
+    let (color, clouds) = (as_weight(drawn.color), as_weight(drawn.clouds));
+    let (ground, ground_natural) = ground.unwrap_or(([Vec4::ONE; GROUNDS], [Vec4::ONE; GROUNDS]));
     let (air_gas, air_haze) = air_of(body);
     let deck = body.climate.map(|c| c.clouds);
     let (dark, light, contrast) = body.surface.palette();
@@ -343,7 +369,7 @@ fn uniforms(
             color,
             contrast,
             if weather.is_some() { clouds } else { 0.0 },
-            0.0,
+            as_weight(drawn.grounds),
         ),
         reflected: reflected.extend(0.0),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
@@ -359,6 +385,8 @@ fn uniforms(
         starlight: reflected.extend(0.0),
         air_gas,
         air_haze,
+        ground,
+        ground_natural,
     }
 }
 
@@ -422,8 +450,12 @@ pub fn update_resolved(
         let (reflected, emitted) =
             surface_shading(&session.0, body, star_radius, star_teff, star_distance);
         let drawn = surfaces.drawn(&body.name);
+        let ground = body.climate.filter(|_| drawn.grounds).map(|c| {
+            let star = lit_radiance(1.0, star_radius, star_teff, star_distance);
+            (grounds(&session.0.mapping, &star, c.rust), grounds(&presets::natural(), &star, c.rust))
+        });
         let weather = surfaces.weather(&body.name, now_s, body.radius_m, &mut bakes);
-        uniforms(body, star_ly, &session.tone, reflected, emitted, drawn, weather)
+        uniforms(body, star_ly, &session.tone, reflected, emitted, drawn, ground, weather)
     };
 
     let want: Vec<&Drawable> = bodies
@@ -510,6 +542,23 @@ mod tests {
             equilibrium_k: 250.0,
             effective_k: Surface::Rock.effective_temperature(250.0),
         }
+    }
+
+    /// With I on the red channel a forest is bright and the sea black, which the color map
+    /// painted in the natural mapping cannot say; in the natural mapping nothing moves.
+    #[test]
+    fn each_band_sees_its_own_ground() {
+        let star = lit_radiance(1.0, 6.957e8, 5772.0, AU);
+        let natural = grounds(&presets::natural(), &star, 0.3);
+        let infrared = grounds(&BandMapping::direct(Band::I, Band::V, Band::B), &star, 0.3);
+        let [water, _, growth, ..] = [0, 1, 2].map(|k| infrared[k].x / natural[k].x);
+        assert!(growth > 5.0, "the red edge: {growth}");
+        assert!(water < 0.7, "water darkens past the eye: {water}");
+        // Blue and green carry the same bands in both, so they do not move.
+        assert!((infrared[2].y - natural[2].y).abs() < 1e-6);
+        // K on red: snow goes dark.
+        let k = grounds(&BandMapping::direct(Band::K, Band::V, Band::B), &star, 0.3);
+        assert!(k[1].x < natural[1].x / 4.0, "snow in K: {} against {}", k[1].x, natural[1].x);
     }
 
     /// A Jupiter-like body at Jupiter's distance, so the numbers mean something.

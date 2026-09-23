@@ -57,6 +57,10 @@ struct BodySurfaceUniform {
     /// scatter.wgsl's `Air`, packed: zero for a body without any.
     air_gas: vec4<f32>,
     air_haze: vec4<f32>,
+    /// Each ground's albedo through the current mapping, then through the natural one: water,
+    /// ice, growth, sand, rock, cloud.
+    ground: array<vec4<f32>, 6>,
+    ground_natural: array<vec4<f32>, 6>,
 }
 
 /// Share of what the air scatters out of the beam that reaches the ground anyway.
@@ -73,6 +77,12 @@ const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var weather_1: texture_cube<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var weather_2: texture_cube<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(7) var climate: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var mask_land: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(9) var mask_ice: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var mask_growth: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var mask_sand: texture_cube<f32>;
+
+const CLOUD: i32 = 5;
 
 // Where the deck's drive becomes cover, and the cover's color: earthlike-clouds.tgraph's
 // "density ramp" and "cloud palette", which surfaces.rs's tests hold these to.
@@ -112,6 +122,30 @@ fn deck(dir: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(vec3<f32>(l * l * l) * material.deck_tint.rgb, saturate(alpha * material.deck.y));
 }
 
+/// What the current band mapping sees of a color painted in the natural one, where the texel
+/// is the grounds its masks say. rocky.tgraph's own mix: ice over everything, then land over
+/// water, growth over dry ground, sand over rock.
+///
+/// The color is scaled by the ratio of the mix through the two mappings, so it keeps its detail
+/// and in the natural mapping is exactly itself. A channel carrying I rather than red takes the
+/// forest's red edge instead of its red.
+fn banded(dir: vec3<f32>, own: vec3<f32>) -> vec3<f32> {
+    let land = textureSample(mask_land, pattern_sampler, dir).r;
+    let ice = textureSample(mask_ice, pattern_sampler, dir).r;
+    let growth = textureSample(mask_growth, pattern_sampler, dir).r;
+    let sand = textureSample(mask_sand, pattern_sampler, dir).r;
+    let ground = land * (1.0 - ice);
+    let dry = ground * (1.0 - growth);
+    let w = array<f32, 5>((1.0 - land) * (1.0 - ice), ice, ground * growth, dry * sand, dry * (1.0 - sand));
+    var now = vec3<f32>(0.0);
+    var natural = vec3<f32>(0.0);
+    for (var k = 0; k < 5; k++) {
+        now += w[k] * material.ground[k].rgb;
+        natural += w[k] * material.ground_natural[k].rgb;
+    }
+    return own * now / max(natural, vec3<f32>(1.0e-4));
+}
+
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
@@ -134,8 +168,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = textureSample(pattern, pattern_sampler, in.local_direction).r;
     let t = mix(0.5, surface, contrast);
     var albedo = mix(material.dark.rgb, material.light.rgb, t);
-    let own = textureSample(color, pattern_sampler, in.local_direction).rgb;
-    let cloud = deck(in.local_direction);
+    var own = textureSample(color, pattern_sampler, in.local_direction).rgb;
+    var cloud = deck(in.local_direction);
+    if (material.params.w > 0.5) {
+        own = banded(in.local_direction, own);
+        cloud = vec4<f32>(cloud.rgb * material.ground[CLOUD].rgb / max(material.ground_natural[CLOUD].rgb, vec3<f32>(1.0e-4)), cloud.a);
+    }
     albedo = mix(albedo, own, material.params.x);
     albedo = mix(albedo, cloud.rgb, cloud.a * material.params.z);
 

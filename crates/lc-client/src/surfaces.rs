@@ -161,6 +161,8 @@ pub struct BodyImages {
     pub color: Handle<Image>,
     pub weather: [Handle<Image>; 3],
     pub climate: Handle<Image>,
+    /// [`MASKS`], in order.
+    pub masks: [Handle<Image>; 4],
 }
 
 impl BodyImages {
@@ -171,12 +173,18 @@ impl BodyImages {
             color: images.add(placeholder(cube.color())),
             weather: std::array::from_fn(|_| images.add(placeholder(WEATHER))),
             climate: images.add(placeholder(CLIMATE)),
+            masks: std::array::from_fn(|_| images.add(placeholder(cube))),
         }
     }
 
     pub fn material(&self, uniforms: BodySurfaceUniform) -> BodySurfaceMaterial {
         let [weather_0, weather_1, weather_2] = self.weather.clone();
+        let [land, ice, growth, sand] = self.masks.clone();
         BodySurfaceMaterial {
+            land,
+            ice,
+            growth,
+            sand,
             uniforms,
             pattern: self.pattern.clone(),
             color: self.color.clone(),
@@ -187,6 +195,20 @@ impl BodyImages {
         }
     }
 }
+
+/// What of a body's own a material draws. All false until the manifest has said, and for a body
+/// it gives nothing.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct Drawn {
+    pub color: bool,
+    pub clouds: bool,
+    /// Whether the [`MASKS`] are baked, so each band can see its own ground.
+    pub grounds: bool,
+}
+
+/// rocky.tgraph's layers that say what its ground is made of, as body_surface.wgsl's `banded`
+/// mixes them: land over water, ice over everything, growth over dry land, sand over rock.
+pub const MASKS: [&str; 4] = ["land", "ice", "green", "sand amount"];
 
 /// See [`BodySurfaceUniform`]'s `weather` and `drift`.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -206,8 +228,8 @@ struct Body {
     images: BodyImages,
     class: Surface,
     climate: Option<Climate>,
-    /// Whether `color` and clouds are drawn; `None` until the manifest has said.
-    drawn: Option<(bool, bool)>,
+    /// `None` until the manifest has said.
+    drawn: Option<Drawn>,
     deck: Option<Deck>,
 }
 
@@ -255,14 +277,13 @@ impl Surfaces {
             .clone()
     }
 
-    /// Whether `name`'s color and cloud cubemaps are drawn, as the material's weights for them.
-    pub fn drawn(&self, name: &str) -> (f32, f32) {
-        let (color, clouds) = self
-            .by_body
-            .get(name)
-            .and_then(|b| b.drawn)
-            .unwrap_or_default();
-        (f32::from(u8::from(color)), f32::from(u8::from(clouds)))
+    pub fn drawn(&self, name: &str) -> Drawn {
+        self.by_body.get(name).and_then(|b| b.drawn).unwrap_or_default()
+    }
+
+    /// `name`'s climate, as it was when the body was first resolved.
+    pub fn climate(&self, name: &str) -> Option<Climate> {
+        self.by_body.get(name)?.climate
     }
 
     /// `name`'s cloud deck at `now_s`, coordinate time, asking for whichever keyframes it lacks.
@@ -351,7 +372,7 @@ fn route(
         if let LoadState::Failed(e) = assets.load_state(&surfaces.manifest) {
             warn!("the surface manifest did not load, drawing bodies flat: {e}");
             for body in surfaces.by_body.values_mut() {
-                body.drawn = Some((false, false));
+                body.drawn = Some(Drawn::default());
             }
         }
         return;
@@ -359,7 +380,7 @@ fn route(
     for (name, body) in surfaces.by_body.iter_mut().filter(|(_, b)| b.drawn.is_none()) {
         let Some(look) = manifest.look_for(name, body.class, body.climate.is_some()) else {
             warn!("no surface graph for {name} or its class, {:?}", body.class);
-            body.drawn = Some((false, false));
+            body.drawn = Some(Drawn::default());
             continue;
         };
         let seed = seed_of(name);
@@ -375,6 +396,12 @@ fn route(
         };
         let pattern = Target::new(Shape::Cube(FACE));
         let color = Target::new(Shape::Cube(COLOR_FACE)).color();
+        let grounds = !params.is_empty();
+        if let (Ground::Color(path), true) = (&look.ground, grounds) {
+            for (layer, image) in MASKS.into_iter().zip(&body.images.masks) {
+                bake(path, pattern.layer(layer), image, params.clone());
+            }
+        }
         match look.ground {
             Ground::Pattern(path) => bake(path, pattern, &body.images.pattern, params),
             Ground::Color(path) => bake(path, color, &body.images.color, params),
@@ -387,7 +414,11 @@ fn route(
                 holds: [None; 3],
             });
         }
-        body.drawn = Some((matches!(look.ground, Ground::Color(_)), look.clouds.is_some()));
+        body.drawn = Some(Drawn {
+            color: matches!(look.ground, Ground::Color(_)),
+            clouds: look.clouds.is_some(),
+            grounds,
+        });
     }
 }
 
@@ -562,9 +593,16 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{path}: {e}"));
         }
         let rocky = manifest.rocky.as_ref().expect("rocky worlds are routed");
+        let ground = graph(&rocky.ground);
         baker
-            .bake_color_cube(&graph(&rocky.ground), 8, &eval)
+            .bake_color_cube(&ground, 8, &eval)
             .unwrap_or_else(|e| panic!("{}: {e}", rocky.ground));
+        for name in MASKS {
+            let layer = ground.layers.iter().find(|l| l.name == name).unwrap_or_else(|| panic!("no mask {name}")).id;
+            baker
+                .bake_scalar_cube(&ground, layer, 8, ScalarFormat::R8Unorm, &eval)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
         for path in manifest.clouds.values().chain([&rocky.clouds]) {
             let g = graph(path);
             for name in [WEATHER.layer, CLIMATE.layer].map(Option::unwrap) {

@@ -14,9 +14,9 @@ pub struct BodySurfaceUniform {
     pub light: Vec4,
     /// World direction to the star; `w` is the ambient floor on the night side.
     pub to_star: Vec4,
-    /// `(color, contrast, clouds, unused)`. `color` is 1 where [`BodySurfaceMaterial::color`]
-    /// replaces the pattern and palette, and `clouds` is 1 where a cloud deck is drawn over the
-    /// surface.
+    /// `(color, contrast, clouds, grounds)`. `color` is 1 where [`BodySurfaceMaterial::color`]
+    /// replaces the pattern and palette, `clouds` is 1 where a cloud deck is drawn over the
+    /// surface, and `grounds` is 1 where the masks and [`Self::ground`] say what each band sees.
     pub params: Vec4,
     /// Starlight the surface reflects, as linear display light before the tone map. `w` unused.
     pub reflected: Vec4,
@@ -49,7 +49,16 @@ pub struct BodySurfaceUniform {
     /// See [`crate::atmosphere_material::AtmosphereUniform`]. Zero for a body without air.
     pub air_gas: Vec4,
     pub air_haze: Vec4,
+    /// Each kind of ground's albedo through the current band mapping, as display channels:
+    /// water, ice, growth, sand, rock and cloud.
+    pub ground: [Vec4; GROUNDS],
+    /// The same through the natural mapping, which is what the color cubemap was painted in.
+    /// The color is scaled by the ratio of the two, so in the natural mapping nothing changes.
+    pub ground_natural: [Vec4; GROUNDS],
 }
+
+/// Kinds of ground a surface mixes: see [`BodySurfaceUniform::ground`].
+pub const GROUNDS: usize = 6;
 
 impl Default for BodySurfaceUniform {
     fn default() -> Self {
@@ -68,6 +77,8 @@ impl Default for BodySurfaceUniform {
             starlight: Vec4::ZERO,
             air_gas: Vec4::ZERO,
             air_haze: Vec4::ZERO,
+            ground: [Vec4::ONE; GROUNDS],
+            ground_natural: [Vec4::ONE; GROUNDS],
         }
     }
 }
@@ -95,6 +106,16 @@ pub struct BodySurfaceMaterial {
     /// The deck's fixed belts.
     #[texture(7, dimension = "cube", visibility(fragment))]
     pub climate: Handle<Image>,
+    /// How much of each texel is land, ice, growth and sand, single-channel: what the color
+    /// cubemap's ground is made of.
+    #[texture(8, dimension = "cube", visibility(fragment))]
+    pub land: Handle<Image>,
+    #[texture(9, dimension = "cube", visibility(fragment))]
+    pub ice: Handle<Image>,
+    #[texture(10, dimension = "cube", visibility(fragment))]
+    pub growth: Handle<Image>,
+    #[texture(11, dimension = "cube", visibility(fragment))]
+    pub sand: Handle<Image>,
 }
 
 impl Material for BodySurfaceMaterial {

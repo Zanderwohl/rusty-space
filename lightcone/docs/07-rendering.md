@@ -564,6 +564,25 @@ so every client draws the same weather. The shader holds the graph's density ram
 palette as constants, and `surfaces.rs`'s tests hold those to the graph's own output: an edit to
 that end of the graph fails there rather than silently not showing.
 
+**Every band sees its own ground.** The color cubemap says what a world looks like to an eye and
+nothing about the bands past it: that a forest is the brightest ground there is in I (the red
+edge), that the sea is black past the visible, that snow goes dark in K. So beside the color the
+client bakes four of rocky.tgraph's own layers as masks — `land`, `ice`, `green` and `sand
+amount` — and the shader mixes six kinds of ground by them, in the graph's own order: ice over
+everything, land over water, growth over dry ground, sand over rock. Each ground's reflectance
+per band is `lc_world::ground`, shaped after laboratory spectra, and rock runs from basalt to
+Mars's dust by the world's `rust`. The host puts each through the current band mapping and
+through the natural one, and the shader scales the color by the ratio of the two mixes: the
+color keeps its detail, is exactly itself in the natural mapping, and a channel carrying I
+rather than R takes the forest's red edge instead of its red. The cloud deck takes the same ratio
+for water cloud, which is why clouds go cyan with K on the red channel.
+
+![Earth, a gold-forested world and Mars through four band mappings](../images/bands.png)
+
+What this does not yet do: the ten-micron term is still one blackbody over the whole disc, so a
+thermal mapping shows a flat disc with no day and night and no sea against land, and the air's
+optical depths are still per display channel, so an infrared mapping keeps a blue limb.
+
 **Air.** A world with a climate has air, drawn as single scattering in two parts: gas, blue as the
 inverse fourth power of the wavelength, and a haze that scatters forward in its own color —
 Mars's dust, which eats blue, Titan's tholins, and thin water haze everywhere else. Both are
