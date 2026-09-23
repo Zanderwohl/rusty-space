@@ -10,7 +10,7 @@ use glam::DVec3;
 use crate::population::Population;
 use crate::rng;
 use crate::sky::CatalogueStar;
-use crate::sky::generate::{self, ladder};
+use crate::sky::generate::{self, planets_of};
 use crate::star::Star;
 use crate::system::M_PER_LY;
 
@@ -54,6 +54,10 @@ struct Seen {
     swarm: bool,
 }
 
+/// Spread in log depth between what a planet would show crossing the middle of its star and
+/// what it shows crossing wherever it actually does. A factor of about 1.7, one sigma.
+const DEPTH_WIDTH: f64 = 0.55;
+
 impl Prior {
     /// Pass the stars a craft cannot tell this one apart from; knowing nothing, the catalogue.
     pub fn measure<'a>(stars: impl IntoIterator<Item = &'a CatalogueStar>) -> Self {
@@ -64,16 +68,16 @@ impl Prior {
             .step_by(stride)
             .map(|star| {
                 let radius = star.star.radius_m;
-                ladder(star.seed(), star.luminosity_solar, star.metallicity)
+                planets_of(star)
                     .iter()
-                    .map(|rung| {
-                        let period = std::f64::consts::TAU * (rung.semi_major_m.powi(3) / star.star.mu).sqrt();
-                        let ratio = rung.radius_earths * 6.371e6 / radius;
+                    .map(|p| {
+                        let period = std::f64::consts::TAU * (p.semi_major_m.powi(3) / star.star.mu).sqrt();
+                        let ratio = p.radius_m / radius;
                         Drawn {
                             ln_period: period.ln(),
                             ln_depth: (ratio * ratio).min(1.0).ln(),
-                            rocky: rung.rocky,
-                            reach: (radius / rung.semi_major_m).min(1.0),
+                            rocky: p.class.is_rocky(),
+                            reach: (radius / p.semi_major_m).min(1.0),
                         }
                     })
                     .collect()
@@ -262,15 +266,27 @@ impl Prior {
 
     /// Chance a transit of this period and depth is of a rocky planet rather than a giant;
     /// `None` when the generator makes nothing like it.
+    ///
+    /// Compared in log depth, at a width that is not the measurement's. A generated planet's
+    /// depth is its central one and a real transit crosses at whatever impact parameter it
+    /// happens to have, so a measured depth is anywhere from that down to nothing -- a
+    /// half-milli-magnitude measurement of a grazing transit is a precise number for a planet
+    /// half the size. [`DEPTH_WIDTH`] is that spread, and it is far wider than the error bar.
+    /// Rocky and giant are two orders of magnitude apart, so it costs nothing to tell them
+    /// apart and everything to be strict about it.
     pub fn rocky_given(&self, period_s: f64, depth: f64, depth_sigma: f64) -> Option<f64> {
-        let lp = period_s.ln();
+        if !(depth > 0.0) {
+            return None;
+        }
+        let (lp, ld) = (period_s.ln(), depth.ln());
+        let width = DEPTH_WIDTH.max(depth_sigma / depth);
         let (mut rocky, mut all) = (0.0, 0.0);
         for d in self.systems.iter().flatten() {
             let near = (d.ln_period - lp) / 0.15;
             if near.abs() > 4.0 {
                 continue;
             }
-            let miss = (d.ln_depth.exp() - depth) / depth_sigma.max(depth * 0.05);
+            let miss = (d.ln_depth - ld) / width;
             let w = d.reach * (-0.5 * (near * near + miss * miss)).exp();
             all += w;
             if d.rocky {
@@ -400,3 +416,4 @@ mod tests {
         assert!(long <= 1.0);
     }
 }
+

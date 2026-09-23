@@ -157,6 +157,8 @@ pub struct Belts {
     pub belt_survival: f64,
     /// The same for the trans-planetary belt, which was stirred far less.
     pub kuiper_survival: f64,
+    /// Bulk density of a belt element, kg/m^3.
+    pub element_density: f64,
     /// Share of the icy reservoir a system's giants throw into the Oort cloud.
     ///
     /// A system with no giant has no scatterer, so its cloud is nearly empty -- which is a
@@ -166,12 +168,19 @@ pub struct Belts {
     pub oort_saturation_jupiters: f64,
     pub oort_au: (f64, f64),
     pub oort_eccentricity: (f64, f64),
-    /// Typical radius of a belt element, meters. Sets the count a given mass implies.
+    /// Geometric cross-section a population presents per kilogram it holds, m^2/kg.
+    ///
+    /// Mass says how much is there; this says how much of it is surface, which is what a
+    /// telescope measures. The three differ by orders of magnitude because their size
+    /// distributions do: the asteroid belt's mass is in a handful of large bodies and the Oort
+    /// cloud's is in a great many small ones. Measured from the real three.
+    pub belt_area_per_kg: f64,
+    pub kuiper_area_per_kg: f64,
+    pub oort_area_per_kg: f64,
+    /// Radius of one element, meters. Sets what a single transit looks like, not the total.
     pub belt_element_m: f64,
     pub kuiper_element_m: f64,
     pub oort_element_m: f64,
-    /// Bulk density of a belt element, kg/m^3.
-    pub element_density: f64,
     /// How many dwarf planets condense out of the trans-planetary belt.
     pub dwarfs: (u32, u32),
 }
@@ -243,15 +252,18 @@ impl Default for Tuning {
             },
             belts: Belts {
                 belt_survival: 5.0e-4,
-                kuiper_survival: 0.02,
+                kuiper_survival: 0.002,
+                element_density: 2000.0,
                 oort_efficiency: 0.3,
                 oort_saturation_jupiters: 1.0,
                 oort_au: (2_000.0, 100_000.0),
                 oort_eccentricity: (0.6, 0.95),
+                belt_area_per_kg: 1.0e-9,
+                kuiper_area_per_kg: 1.0e-8,
+                oort_area_per_kg: 3.7e-7,
                 belt_element_m: 1.0e3,
                 kuiper_element_m: 5.0e4,
                 oort_element_m: 1.0e3,
-                element_density: 2000.0,
                 dwarfs: (0, 4),
             },
         }

@@ -562,7 +562,7 @@ mod tests {
     use crate::instrument::Instrument;
     use crate::knowledge::observatory::{Sky, Station, photometry};
     use crate::rng;
-    use crate::sky::generate::ladder;
+    use crate::sky::generate::planets_of;
     use crate::sky::{CatalogueStar, Component, Provenance, StarId};
     use crate::star::Star;
 
@@ -609,7 +609,7 @@ mod tests {
                 let mut s = star(key, 0.01, DVec3::ZERO);
                 let pole = crate::sky::generate::pole_for(s.seed());
                 s.position_ly = if edge_on { pole.any_orthonormal_vector() } else { pole } * 5.0;
-                let periods: Vec<f64> = ladder(s.seed(), s.luminosity_solar, s.metallicity)
+                let periods: Vec<f64> = planets_of(&s)
                     .iter()
                     .map(|r| std::f64::consts::TAU * (r.semi_major_m.powi(3) / s.star.mu).sqrt())
                     .collect();

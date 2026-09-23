@@ -311,7 +311,7 @@ mod tests {
                     teff,
                 );
                 star.star.mu = em_spectra::stellar::mu_from_mass_solar(mass);
-                let periods: Vec<f64> = lc_world::sky::generate::ladder(star.seed(), luminosity, 0.0)
+                let periods: Vec<f64> = lc_world::sky::generate::planets_of(&star)
                     .iter()
                     .map(|r| std::f64::consts::TAU * (r.semi_major_m.powi(3) / star.star.mu).sqrt())
                     .collect();

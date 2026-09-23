@@ -3,10 +3,24 @@
 //! Nothing here is stored. A world of a hundred thousand systems costs nothing until someone
 //! looks at one, and a seed is eight bytes; what a player *changes* becomes an event, and
 //! replaying those over this baseline reconstructs the system exactly.
+//!
+//! This module is the join. The model is in its four neighbours, and it runs one way:
+//! [`disc`] says what the star's disc is like, [`architecture`] cuts it into rungs and decides
+//! what each assembled, [`planet`] gives a rung air and water, [`moon`] gives it satellites and
+//! [`belt`] makes populations of everything that never assembled. Every number any of them
+//! draws from is in [`tuning`]. See `lightcone/docs/26-system-generation.md`.
 
 pub mod architecture;
+pub mod belt;
 pub mod disc;
+pub mod moon;
+pub mod planet;
 pub mod tuning;
+
+pub use architecture::{Architecture, Class, Rung, architecture};
+pub use moon::Moon;
+pub use planet::Planet;
+pub use tuning::Tuning;
 
 use em_sim::appearance::{Appearance, DebugBall, AppearanceColor};
 use em_sim::body::BodyInfo;
@@ -18,54 +32,16 @@ use em_sim::universe::{
     FixedEntry, KeplerEntry, SomeBody, UniverseFileContents, UniverseFileTime, UniversePhysics,
     ViewSettings,
 };
-use em_spectra::{PerBand, extinction};
+use em_spectra::PerBand;
 use glam::DVec3;
 
-use super::{CatalogueStar, metallicity};
+use super::CatalogueStar;
 use crate::distribution::{Distribution, Inclination};
 use crate::population::Population;
 use crate::rng;
 use crate::star::Star;
 
 pub const AU: f64 = 1.495_978_707e11;
-const EARTH_MASS: f64 = 5.9722e24;
-const EARTH_RADIUS: f64 = 6.371e6;
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Planet {
-    pub name: String,
-    pub semi_major_m: f64,
-    pub eccentricity: f64,
-    pub inclination_deg: f64,
-    pub mean_anomaly_deg: f64,
-    pub radius_m: f64,
-    pub mass_kg: f64,
-    /// How long one turn takes, seconds. What a survey reads off the periodogram of a body's
-    /// own flux, so a generated planet without one is a planet whose rotation can never be
-    /// measured. See `lightcone/docs/25-system-knowledge.md`.
-    pub spin_s: f64,
-    /// How far the spin axis leans from the system's pole, radians. Earth is 0.41 and Uranus
-    /// is 1.71, so the distribution has to allow both.
-    pub obliquity_rad: f64,
-    /// Which way it leans, measured about the system pole, radians.
-    pub spin_node_rad: f64,
-    /// What orbits it. **A planet with no moon has no mass anybody can measure**: mass comes
-    /// from a satellite's period through Kepler's third law, which is the only route a
-    /// telescope has to it. See `lightcone/docs/25-system-knowledge.md`.
-    pub moons: Vec<Moon>,
-}
-
-/// A satellite of a generated planet.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Moon {
-    pub name: String,
-    /// Meters from the planet.
-    pub semi_major_m: f64,
-    pub eccentricity: f64,
-    pub mean_anomaly_deg: f64,
-    pub radius_m: f64,
-    pub mass_kg: f64,
-}
 
 /// One star or a barycenter with two, plus everything orbiting it.
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +53,8 @@ pub struct GeneratedSystem {
     pub separation_m: f64,
     pub planets: Vec<Planet>,
     pub populations: Vec<Population>,
+    /// The disc these came out of, and every rung it was cut into, belts included.
+    pub architecture: Architecture,
     /// The normal of the plane every planet and belt orbits in: see [`pole_for`].
     pub pole: DVec3,
 }
@@ -90,12 +68,21 @@ impl GeneratedSystem {
     pub fn mass_solar(&self) -> f64 {
         self.stars.iter().map(|(_, _, m)| m).sum()
     }
+
+    /// Every planet in the habitable zone with a surface, air and water on it.
+    pub fn habitable(&self) -> impl Iterator<Item = &Planet> {
+        self.planets.iter().filter(|p| p.habitable)
+    }
+
+    pub fn moons(&self) -> impl Iterator<Item = &Moon> {
+        self.planets.iter().flat_map(|p| p.moons.iter())
+    }
 }
 
 /// The normal of a system's orbital plane: a direction uniform over the sky, from its seed.
 ///
 /// Every planet and belt shares it, so from most directions nothing transits and from a few
-/// the whole system does — the orientation the photometry's priors integrate over. See
+/// the whole system does -- the orientation the photometry's priors integrate over. See
 /// `lightcone/docs/24-standing-instruments.md`.
 pub fn pole_for(seed: u64) -> DVec3 {
     let h = rng::hash(&[seed, 0x9013]);
@@ -104,39 +91,6 @@ pub fn pole_for(seed: u64) -> DVec3 {
     let r = (1.0 - z * z).max(0.0).sqrt();
     DVec3::new(r * phi.cos(), r * phi.sin(), z)
 }
-
-/// How many moons a planet gets, by class.
-///
-/// A giant gets a retinue and a rocky planet usually gets nothing: Jupiter has four worth
-/// seeing and Venus and Mercury have none. Every giant gets at least one, because a giant with
-/// no satellite is a giant whose mass can never be measured and the survey leans on that.
-const GIANT_MOONS: (u32, u32) = (1, 5);
-const ROCKY_MOONS: (u32, u32) = (0, 2);
-
-/// Where a moon can sit: past this many planetary radii, and inside this share of the Hill
-/// radius.
-///
-/// The inner bound keeps a moon outside the planet it orbits and outside the rough Roche
-/// distance for a rubble body. The outer one keeps it bound: past about a third of the Hill
-/// radius the star strips it, which is why the Galileans sit inside a fiftieth of Jupiter's.
-const MOON_INNER_RADII: f64 = 2.5;
-const MOON_OUTER_HILL: f64 = 0.33;
-
-/// How long a generated body takes to turn once, seconds.
-///
-/// Log-uniform between these, by class. A giant is fast because it kept its accretion angular
-/// momentum -- Jupiter is 9.9 hours and Saturn 10.6 -- and a rocky planet is anywhere from
-/// hours to months, with Venus's 243 days the slow end of what the solar system offers.
-const GIANT_SPIN_S: (f64, f64) = (7.0 * 3600.0, 20.0 * 3600.0);
-const ROCKY_SPIN_S: (f64, f64) = (4.0 * 3600.0, 250.0 * 86_400.0);
-
-/// How far a planet's spin axis leans from its system's pole, radians.
-///
-/// Most lean a little and a few lean absurdly: the solar system has six planets under 30
-/// degrees and Uranus at 98. Drawn as a gaussian with a heavy tail rather than uniformly,
-/// because a system where every planet is on its side would be as wrong as one where none is.
-const TYPICAL_OBLIQUITY_RAD: f64 = 0.35;
-const TUMBLED_CHANCE: f64 = 0.1;
 
 /// How far a star's spin axis can lie from the plane its planets orbit in.
 ///
@@ -162,18 +116,37 @@ pub fn spin_axis_for(system_pole: DVec3, seed: u64) -> DVec3 {
 
 /// Generate the system around one catalogue star.
 pub fn system_for(star: &CatalogueStar) -> GeneratedSystem {
+    system_with(star, &Tuning::default())
+}
+
+/// The same, under a tuning of the caller's choosing. What the documentation's plots sweep.
+pub fn system_with(star: &CatalogueStar, tuning: &Tuning) -> GeneratedSystem {
     let seed = star.seed();
     let name = star.provenance.name.clone().unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
-    let mut system = GeneratedSystem {
+    let pole = pole_for(seed);
+    let arch = architecture(star, tuning);
+
+    let mut planets = planet::planets(&name, &arch, star, tuning);
+    for (k, p) in planets.iter_mut().enumerate() {
+        p.moons = moon::moons_of(p, star.mass_solar, seed, k, tuning);
+    }
+
+    // Sol's bodies are measured, so its belts are too -- see [`belt::solar`].
+    let mut populations = match star.provenance.name.as_deref() {
+        Some(crate::system::SOL) => belt::solar(DVec3::Z, tuning),
+        _ => belt::populations(&arch, pole, seed, tuning),
+    };
+    populations.extend(swarm(seed, star));
+
+    GeneratedSystem {
         stars: vec![(name.clone(), star.star, star.mass_solar)],
         separation_m: 0.0,
-        planets: planets(seed, star),
-        populations: Vec::new(),
-        pole: pole_for(seed),
+        planets,
+        populations,
+        architecture: arch,
+        pole,
         name,
-    };
-    system.populations = populations(seed, star, &system.planets);
-    system
+    }
 }
 
 /// A multiple, as a barycenter with two children.
@@ -197,232 +170,17 @@ pub fn binary_for(primary: &CatalogueStar, secondary: &CatalogueStar) -> Generat
     system
 }
 
-/// One planet's place in a system, before it is given an orbit's other elements. What the
-/// photometry's priors are measured from, so they are the generator's own distribution.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rung {
-    pub semi_major_m: f64,
-    pub rocky: bool,
-    pub mass_earths: f64,
-    pub radius_earths: f64,
-}
-
-/// The planets a star with this seed, luminosity and metallicity is given, innermost first.
-pub fn ladder(seed: u64, luminosity_solar: f64, metallicity: f64) -> Vec<Rung> {
-    let count = (rng::uniform(rng::hash(&[seed, 0x9001])) * 9.0) as usize;
-    let factor = metallicity::solid_mass_factor(metallicity);
-    // The habitable-ish scale moves out with luminosity, so hotter stars get wider systems.
-    let scale = AU * luminosity_solar.max(1e-4).sqrt();
-
-    let mut out = Vec::with_capacity(count);
-    let mut a = scale * rng::uniform_in(rng::hash(&[seed, 0x9002]), 0.2, 0.6);
-    for k in 0..count {
-        let h = |tag: u64| rng::hash(&[seed, 0x91a4, k as u64, tag]);
-        // Geometric spacing, jittered: a Titius-Bode-like ladder without the numerology.
-        a *= rng::uniform_in(h(1), 1.4, 2.3);
-        let rocky = a < 2.5 * scale;
-        let mass_earths = if rocky {
-            rng::uniform_in(h(2), 0.02, 6.0) * factor
-        } else {
-            rng::uniform_in(h(3), 5.0, 400.0) * factor
-        };
-        // Rocky bodies scale as M^0.27, gas giants barely at all.
-        let radius_earths =
-            if rocky { mass_earths.powf(0.27) } else { 4.0 * mass_earths.powf(0.08) };
-        out.push(Rung { semi_major_m: a, rocky, mass_earths, radius_earths });
-    }
-    out
-}
-
-fn planets(seed: u64, star: &CatalogueStar) -> Vec<Planet> {
-    ladder(seed, star.luminosity_solar, star.metallicity)
-        .into_iter()
-        .enumerate()
-        .map(|(k, rung)| {
-            let h = |tag: u64| rng::hash(&[seed, 0x91a4, k as u64, tag]);
-            Planet {
-                name: format!("{} {}", star.provenance.name.as_deref().unwrap_or("b"), (b'b' + k as u8) as char),
-                semi_major_m: rung.semi_major_m,
-                eccentricity: rng::uniform_in(h(4), 0.0, 0.12),
-                inclination_deg: rng::gaussian(h(5)) * 2.0,
-                mean_anomaly_deg: rng::uniform_in(h(6), 0.0, 360.0),
-                radius_m: rung.radius_earths * EARTH_RADIUS,
-                mass_kg: rung.mass_earths * EARTH_MASS,
-                spin_s: spin_of(h(7), rung.rocky),
-                obliquity_rad: obliquity_of(h(8)),
-                spin_node_rad: rng::uniform_in(h(9), 0.0, std::f64::consts::TAU),
-                moons: moons_of(
-                    h(10),
-                    &format!("{} {}", star.provenance.name.as_deref().unwrap_or("b"), (b'b' + k as u8) as char),
-                    rung.rocky,
-                    rung.mass_earths * EARTH_MASS,
-                    rung.radius_earths * EARTH_RADIUS,
-                    rung.semi_major_m,
-                    star.mass_solar,
-                ),
-            }
-        })
-        .collect()
-}
-
-/// A planet's rotation, as `em-sim` states one.
+/// The planets a star is given, without their moons or the rest of its system.
 ///
-/// The axis is the system's pole leaned by the planet's own obliquity, so a system's planets
-/// mostly spin near their orbital plane and occasionally do not. Built as the quaternion that
-/// carries `+Z` onto that axis, because [`crate::system::pole_of`] reads the axis back out as
-/// `orientation * DVec3::Z` and the two have to agree.
-fn spin_of_planet(system_pole: DVec3, planet: &Planet) -> em_sim::body::BodyRotation {
-    use em_sim::body::{BodyRotation, RotationEpoch};
-    let pole = system_pole.normalize_or(DVec3::Z);
-    let (u, v) = pole.any_orthonormal_pair();
-    let lean = u * planet.spin_node_rad.cos() + v * planet.spin_node_rad.sin();
-    let axis = (pole * planet.obliquity_rad.cos() + lean * planet.obliquity_rad.sin())
-        .normalize_or(pole);
-    let orientation = glam::DQuat::from_rotation_arc(DVec3::Z, axis);
-    // Radians per second. Always positive: which way it turns is the axis's own sign, and an
-    // obliquity past a right angle is what retrograde means here.
-    let rate = std::f64::consts::TAU / planet.spin_s.max(1.0);
-    BodyRotation::spinning(orientation, rate, RotationEpoch::J2000)
-}
-
-/// The moons one planet gets, innermost first.
-///
-/// Radii are drawn against the planet's own, so a giant's moons are worlds and a rocky
-/// planet's are rocks. Masses follow from a density in the range real satellites occupy --
-/// icy ones near 1500 and rocky ones near 3300 -- rather than from a mass drawn on its own,
-/// which would let a moon be denser than iron.
-fn moons_of(
-    h: u64,
-    planet: &str,
-    rocky: bool,
-    planet_mass_kg: f64,
-    planet_radius_m: f64,
-    planet_semi_major_m: f64,
-    star_mass_solar: f64,
-) -> Vec<Moon> {
-    const SOLAR_MASS_KG: f64 = 1.988_41e30;
-    let (lo, hi) = if rocky { ROCKY_MOONS } else { GIANT_MOONS };
-    let count = lo + (rng::uniform(h) * (hi - lo + 1) as f64) as u32;
-    let count = count.min(hi);
-
-    // Where the star would take one away.
-    let hill_m = planet_semi_major_m
-        * (planet_mass_kg / (3.0 * star_mass_solar.max(1.0e-3) * SOLAR_MASS_KG)).cbrt();
-    let inner = planet_radius_m * MOON_INNER_RADII;
-    let outer = hill_m * MOON_OUTER_HILL;
-    if !(outer > inner) {
-        return Vec::new();
-    }
-
-    let mut out = Vec::with_capacity(count as usize);
-    for j in 0..count {
-        let g = |tag: u64| rng::hash(&[h, j as u64, tag]);
-        // Log-spaced across the band, so a retinue spreads out the way a real one does rather
-        // than clumping at one radius.
-        let a = (rng::uniform_in(g(1), inner.ln(), outer.ln())).exp();
-        let radius_m = planet_radius_m * rng::uniform_in(g(2), 0.005, 0.045);
-        let density = rng::uniform_in(g(3), 1200.0, 3600.0);
-        let volume = 4.0 / 3.0 * std::f64::consts::PI * radius_m.powi(3);
-        out.push(Moon {
-            name: format!("{planet} {}", roman(j + 1)),
-            semi_major_m: a,
-            eccentricity: rng::uniform_in(g(4), 0.0, 0.02),
-            mean_anomaly_deg: rng::uniform_in(g(5), 0.0, 360.0),
-            radius_m,
-            mass_kg: density * volume,
-        });
-    }
-    out.sort_by(|a, b| a.semi_major_m.total_cmp(&b.semi_major_m));
-    out
-}
-
-/// Satellite numbering, as the IAU does it: Io is Jupiter I.
-fn roman(n: u32) -> &'static str {
-    const NUMERALS: [&str; 5] = ["I", "II", "III", "IV", "V"];
-    NUMERALS.get((n as usize).saturating_sub(1)).copied().unwrap_or("VI")
-}
-
-/// One turn, seconds, log-uniform inside the class's range.
-///
-/// Log rather than linear, because the range spans three orders of magnitude and a linear draw
-/// would make almost every rocky planet a slow one.
-fn spin_of(h: u64, rocky: bool) -> f64 {
-    let (lo, hi) = if rocky { ROCKY_SPIN_S } else { GIANT_SPIN_S };
-    (rng::uniform_in(h, lo.ln(), hi.ln())).exp()
-}
-
-/// How far this one leans, radians, in `0..=PI`.
-fn obliquity_of(h: u64) -> f64 {
-    let tumbled = rng::uniform(rng::mix(h)) < TUMBLED_CHANCE;
-    let lean = match tumbled {
-        // On its side or retrograde, as Uranus and Venus are.
-        true => rng::uniform_in(h, std::f64::consts::FRAC_PI_2, std::f64::consts::PI),
-        false => (rng::gaussian(h) * TYPICAL_OBLIQUITY_RAD).abs(),
-    };
-    lean.clamp(0.0, std::f64::consts::PI)
-}
-
-/// The belt, Kuiper analogue and Oort cloud every system gets.
-///
-/// Masses scale with metallicity: a tenth of the metals is a tenth of the rock. The Oort
-/// cloud is photometrically invisible and earns its record by defining the shell radius and
-/// holding the volatiles.
-fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Population> {
-    let pole = pole_for(seed);
-    let factor = metallicity::solid_mass_factor(star.metallicity);
-    let scale = AU * star.luminosity_solar.max(1e-4).sqrt();
-    let outer = planets.last().map(|p| p.semi_major_m).unwrap_or(5.0 * scale);
-
-    let mut dust_response = PerBand::splat(0.0f32);
-    for b in em_spectra::Band::ALL {
-        dust_response[b] = extinction::RATIO[b] as f32;
-    }
-
-    vec![
-        // Asteroid belt: narrow, low inclination, mildly eccentric.
-        Population {
-            pole,
-            semi_major: Distribution::normal(outer * 0.4, outer * 0.08, 9),
-            eccentricity: Distribution::uniform(0.0, 0.25, 5),
-            inclination: Inclination::uniform_angle(0.0, 0.2, 12),
-            count: 1e6 * factor,
-            cross_section: 3.0e6,
-            band_response: PerBand::splat(1.0),
-            radiating_ratio: Population::SPHERICAL,
-        },
-        // Kuiper analogue: wide, cold, many small bodies.
-        Population {
-            pole,
-            semi_major: Distribution::uniform(outer * 1.2, outer * 3.0, 9),
-            eccentricity: Distribution::uniform(0.0, 0.2, 5),
-            inclination: Inclination::uniform_angle(0.0, 0.35, 12),
-            count: 1e9 * factor,
-            cross_section: 7.8e9,
-            band_response: PerBand::splat(1.0),
-            radiating_ratio: Population::SPHERICAL,
-        },
-        // Oort cloud: isotropic, very wide, nearly parabolic. Invisible, and the reason the
-        // shell radius is where it is.
-        Population {
-            pole: DVec3::Z,
-            semi_major: Distribution::uniform(2_000.0 * AU, 100_000.0 * AU, 9),
-            eccentricity: Distribution::uniform(0.6, 0.95, 5),
-            inclination: Inclination::isotropic(),
-            count: 1e12 * factor,
-            cross_section: 3.1e6,
-            band_response: dust_response,
-            radiating_ratio: Population::SPHERICAL,
-        },
-    ]
-    .into_iter()
-    .map(|mut p| {
-        p.count *= rng::uniform_in(rng::hash(&[seed, 0xc10d, p.count.to_bits()]), 0.5, 2.0);
-        p
-    })
-    // After the jitter: a swarm's coverage is drawn deliberately and is not a natural
-    // population with an uncertain mass.
-    .chain(swarm(seed, star))
-    .collect()
+/// What the photometry's priors are measured from, so they are the generator's own
+/// distribution rather than a second opinion about it. Planets rather than rungs, because a
+/// rung's radius is its solid body and a planet's is what transits: a sub-Neptune's envelope
+/// is most of what a telescope sees of it, and a prior built on the rung would look for
+/// something that is not there.
+pub fn planets_of(star: &CatalogueStar) -> Vec<Planet> {
+    let tuning = Tuning::default();
+    let name = star.provenance.name.clone().unwrap_or_else(|| format!("Star {:016x}", star.id.get()));
+    planet::planets(&name, &architecture(star, &tuning), star, &tuning)
 }
 
 /// Fraction of systems carrying an engineered swarm.
@@ -431,7 +189,15 @@ fn populations(seed: u64, star: &CatalogueStar, planets: &[Planet]) -> Vec<Popul
 /// one; a sky where every third star is engineered is a sky nobody searches.
 pub const SWARM_FRACTION: f64 = 0.03;
 
-/// An engineered swarm, if this star has one. See [`swarm_for`] for the public entry.
+/// Whether a star has a swarm, without generating its whole system.
+///
+/// The renderer needs this for every star in the sky and a full system for almost none of them,
+/// so the draw is separable: one hash per star rather than a planet set and three populations.
+pub fn swarm_for(star: &CatalogueStar) -> Option<Population> {
+    swarm(star.seed(), star)
+}
+
+/// An engineered swarm, if this star has one.
 ///
 /// Coverage is log-uniform from a thousandth to nine tenths, which is the range that makes the
 /// instrument worth having. At the bottom it is a few tenths of a percent of gray deficit and a
@@ -441,14 +207,6 @@ pub const SWARM_FRACTION: f64 = 0.03;
 /// Isotropic, circular and gray. Those three together are the signature, and no natural
 /// population has all three: an isotropic natural population is an Oort cloud, which is
 /// eccentric and made of dust, and dust reddens where panels do not.
-/// Whether a star has a swarm, without generating its whole system.
-///
-/// The renderer needs this for every star in the sky and a full system for almost none of them,
-/// so the draw is separable: one hash per star rather than a planet set and three populations.
-pub fn swarm_for(star: &CatalogueStar) -> Option<Population> {
-    swarm(star.seed(), star)
-}
-
 fn swarm(seed: u64, star: &CatalogueStar) -> Option<Population> {
     if rng::uniform(rng::hash(&[seed, 0x5761_726d])) > SWARM_FRACTION {
         return None;
@@ -471,6 +229,26 @@ fn swarm(seed: u64, star: &CatalogueStar) -> Option<Population> {
         band_response: PerBand::splat(1.0),
         radiating_ratio: Population::PANEL,
     })
+}
+
+/// A planet's rotation, as `em-sim` states one.
+///
+/// The axis is the system's pole leaned by the planet's own obliquity, so a system's planets
+/// mostly spin near their orbital plane and occasionally do not. Built as the quaternion that
+/// carries `+Z` onto that axis, because [`crate::system::pole_of`] reads the axis back out as
+/// `orientation * DVec3::Z` and the two have to agree.
+fn spin_of_planet(system_pole: DVec3, planet: &Planet) -> em_sim::body::BodyRotation {
+    use em_sim::body::{BodyRotation, RotationEpoch};
+    let pole = system_pole.normalize_or(DVec3::Z);
+    let (u, v) = pole.any_orthonormal_pair();
+    let lean = u * planet.spin_node_rad.cos() + v * planet.spin_node_rad.sin();
+    let axis = (pole * planet.obliquity_rad.cos() + lean * planet.obliquity_rad.sin())
+        .normalize_or(pole);
+    let orientation = glam::DQuat::from_rotation_arc(DVec3::Z, axis);
+    // Radians per second. Always positive: which way it turns is the axis's own sign, and an
+    // obliquity past a right angle is what retrograde means here.
+    let rate = std::f64::consts::TAU / planet.spin_s.max(1.0);
+    BodyRotation::spinning(orientation, rate, RotationEpoch::J2000)
 }
 
 fn debug_ball(radius: f64, rgb: (u16, u16, u16)) -> Appearance {
@@ -523,7 +301,8 @@ impl GeneratedSystem {
     /// in that case and the primary otherwise.
     pub fn to_universe(&self) -> UniverseFileContents {
         const SOLAR_MASS: f64 = 1.988_41e30;
-        let mut bodies = Vec::with_capacity(self.planets.len() + self.stars.len() + 1);
+        let moons: usize = self.planets.iter().map(|p| p.moons.len()).sum();
+        let mut bodies = Vec::with_capacity(self.planets.len() + moons + self.stars.len() + 1);
 
         let center = if self.is_multiple() {
             let name = format!("{} Barycenter", self.name);
@@ -587,19 +366,23 @@ impl GeneratedSystem {
                 appearance: debug_ball(p.radius_m, (140, 140, 160)),
                 rotation: Some(spin_of_planet(self.pole, p)),
             }));
-            // A moon sits in its planet's equatorial plane, which is where a regular satellite
-            // forms -- and is what makes a planet's obliquity measurable from the outside: the
-            // tilt of its moons' orbits *is* the tilt of the planet.
-            let moon_tilt_deg = (tilt_deg + p.obliquity_rad.to_degrees()).rem_euclid(360.0);
+            // A regular moon sits in its planet's equatorial plane, which is where it formed
+            // -- and is what makes a planet's obliquity measurable from the outside: the tilt
+            // of its retinue's orbits *is* the tilt of the planet. A captured one remembers
+            // nothing of that plane and is tilted out of it by its own inclination.
+            let equator_deg = tilt_deg + p.obliquity_rad.to_degrees();
             for moon in &p.moons {
+                // Captured stragglers are loose bodies a planet happens to hold, and the map
+                // and the inventory should treat them as such rather than as a retinue.
+                let tags: &[&str] = if moon.regular { &["Moon"] } else { &["Irregular"] };
                 bodies.push(SomeBody::KeplerEntry(KeplerEntry {
-                    info: info(&moon.name, moon.mass_kg, false, &["Moon"]),
+                    info: info(&moon.name, moon.mass_kg, false, tags),
                     params: kepler(
                         &p.name,
                         moon.semi_major_m,
                         moon.eccentricity,
-                        moon_tilt_deg,
-                        p.spin_node_rad.to_degrees(),
+                        (equator_deg + moon.inclination_rad.to_degrees()).rem_euclid(360.0),
+                        (p.spin_node_rad + moon.node_rad).to_degrees(),
                         moon.mean_anomaly_deg,
                         None,
                     ),
@@ -680,7 +463,7 @@ mod tests {
             let seeded = CatalogueStar { id: crate::sky::StarId::synthesise("hills", key), ..star };
             let system = system_for(&seeded);
             for planet in &system.planets {
-                let giant = planet.mass_kg > 20.0 * EARTH_MASS;
+                let giant = planet.class.is_giant();
                 giants += u32::from(giant);
                 giants_with_moons += u32::from(giant && !planet.moons.is_empty());
                 let hill = planet.semi_major_m
@@ -743,13 +526,14 @@ mod tests {
     /// and slow ones -- a linear draw would make almost everything slow.
     #[test]
     fn generated_spins_span_hours_to_months() {
+        let world = Tuning::default().world;
         let mut fast = 0;
         let mut slow = 0;
         for key in 0..400u64 {
-            if spin_of(rng::hash(&[key, 7]), true) < 12.0 * 3600.0 {
+            if planet::spin_of(rng::hash(&[key, 7]), true, &world) < 12.0 * 3600.0 {
                 fast += 1;
             }
-            if spin_of(rng::hash(&[key, 7]), true) > 30.0 * 86_400.0 {
+            if planet::spin_of(rng::hash(&[key, 7]), false, &world) > 30.0 * 86_400.0 {
                 slow += 1;
             }
         }
@@ -813,15 +597,17 @@ mod tests {
         }
     }
 
+    /// A system's populations are what its ladder did not assemble, so how many there are
+    /// varies -- but the outer disc always leaves one, and it is never where the planets are.
     #[test]
-    fn every_system_gets_a_belt_a_kuiper_analogue_and_an_oort_cloud() {
+    fn a_system_keeps_a_population_outside_its_planets() {
         let sys = system_for(&sun_like());
-        assert_eq!(sys.populations.len(), 3);
-        let oort = sys.populations.last().unwrap();
-        assert!(oort.semi_major.mean() > 1000.0 * AU, "the Oort cloud must be far out");
-        // Invisible, which is the correct answer and costs one record to say.
-        let deficit = oort.mean_deficit(DVec3::X, &sys.stars[0].1);
-        assert!(deficit < 1e-10, "an Oort cloud should not be detectable: {deficit}");
+        assert!(!sys.populations.is_empty());
+        let widest = sys.planets.last().map(|p| p.semi_major_m).unwrap_or(AU);
+        assert!(sys.populations.iter().any(|p| p.semi_major.mean() > widest));
+        for p in &sys.populations {
+            assert!(p.count >= 1.0 && p.count.is_finite());
+        }
     }
 
     #[test]
@@ -839,7 +625,7 @@ mod tests {
     fn a_single_system_loads_and_propagates() {
         let sys = system_for(&sun_like());
         let mut sim = build(&sys);
-        assert_eq!(sim.len(), sys.planets.len() + 1);
+        assert_eq!(sim.len(), sys.planets.len() + sys.moons().count() + 1);
         for days in [0.0, 100.0, 3650.0] {
             em_sim::propagate::evaluate_at(&mut sim, Instant::from_seconds_since_j2000(days * 86_400.0));
             for i in sim.indices() {
@@ -893,3 +679,5 @@ mod tests {
         }
     }
 }
+
+

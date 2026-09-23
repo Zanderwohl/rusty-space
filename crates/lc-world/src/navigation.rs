@@ -1233,8 +1233,10 @@ mod tests {
             .filter_map(|i| Course::Belt(i).resolve(&system, DVec3::ZERO, 0.0))
             .count();
         assert_eq!(belts, system.populations.len(), "every population is somewhere to go");
-        let flat = system.populations.iter().filter(|p| is_flat(p)).count();
-        assert_eq!(flat, system.populations.len() - 1, "all but the cloud are flat");
+        // How many populations a system has is what its ladder left behind, so the count
+        // varies. What does not is that only a cloud is round.
+        let round = system.populations.iter().filter(|p| !is_flat(p)).count();
+        assert!(round <= 1, "{round} isotropic populations, and only a cloud may be one");
     }
 
     #[test]

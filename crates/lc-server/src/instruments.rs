@@ -730,14 +730,26 @@ mod tests {
         let now_s = server.now_t() as f64 * 1.0e-6;
         let bodies = knowledge.bodies_of(star, now_s);
         assert!(bodies.len() > 5, "only {} bodies", bodies.len());
-        // Ten hours is nothing of any orbit, and no range from this far out, so nothing is
-        // fitted. It was: a circle assumed where the arc could not shape a conic fitted a moon
-        // at 0.0097 AU to 63 AU, which is what `knowledge::arc` now refuses.
-        assert!(
-            bodies.iter().all(|b| b.method.is_none()),
-            "an orbit was minted from {:.0} hours of arc",
-            now_s / 3600.0
-        );
+        // Ten hours is a fraction of any orbit here but the innermost, so that is the only
+        // one that settles -- and from inside the system, with the host star's distance
+        // measured, it settles correctly. The next planet out is a twenty-seventh of an orbit
+        // and gets nothing. It was: a circle assumed where the arc could not shape a conic
+        // fitted a moon at 0.0097 AU to 63 AU, which is what `knowledge::arc` now refuses.
+        let truth: Vec<f64> = lc_world::sky::generate::planets_of(&sky()[0])
+            .iter()
+            .map(|p| std::f64::consts::TAU * (p.semi_major_m.powi(3) / sky()[0].star.mu).sqrt())
+            .collect();
+        for fitted in bodies.iter().filter(|b| b.method.is_some()) {
+            let (period, _) = fitted.period_s.expect("a fitted orbit states its period");
+            let miss = truth.iter().map(|t| (period / t - 1.0).abs()).fold(f64::INFINITY, f64::min);
+            assert!(miss < 0.05, "a {:.0} hour orbit that is nothing in this system", period / 3600.0);
+            assert!(
+                period < 15.0 * now_s,
+                "an orbit of {:.0} hours was minted from {:.0} hours of arc",
+                period / 3600.0,
+                now_s / 3600.0
+            );
+        }
         assert!(knowledge.unfitted(star).is_some(), "the fitter has work and is being offered it");
     }
 
