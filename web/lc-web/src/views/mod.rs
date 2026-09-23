@@ -5,6 +5,8 @@ pub mod home;
 pub mod page;
 pub mod play;
 
+use std::sync::OnceLock;
+
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::assets;
@@ -12,17 +14,54 @@ use crate::assets;
 /// The design documents are the only thing to read until the devlog has more in it.
 pub const REPO: &str = "https://github.com/Zanderwohl/rusty-space/tree/master/lightcone";
 
+const SITE_NAME: &str = "Lightcone Frontier";
+
+/// Where `icons/` lives. Set once at boot; a page rendered before then has no favicon.
+static CDN_BASE: OnceLock<String> = OnceLock::new();
+
+pub fn set_cdn_base(base: &str) {
+    let _ = CDN_BASE.set(base.to_owned());
+}
+
+/// The site is blue; the game, while it is running, is green.
+#[derive(Clone, Copy, Default)]
+pub enum Icon {
+    #[default]
+    Site,
+    Game,
+}
+
+impl Icon {
+    fn file(self) -> &'static str {
+        match self {
+            Icon::Site => "lightcone-blue.ico",
+            Icon::Game => "lightcone-green.ico",
+        }
+    }
+}
+
 /// What goes in `<head>`, gathered in one place so no page half-fills it.
 pub struct Head<'a> {
-    pub title: &'a str,
+    /// `None` titles the page with the site name alone.
+    pub title: Option<&'a str>,
     pub description: &'a str,
     /// Set for posts. Turns the card into an article and carries the date.
     pub published: Option<String>,
+    pub icon: Icon,
 }
 
 impl<'a> Head<'a> {
     pub fn new(title: &'a str, description: &'a str) -> Self {
-        Head { title, description, published: None }
+        Head { title: Some(title), description, published: None, icon: Icon::Site }
+    }
+
+    pub fn site(description: &'a str) -> Self {
+        Head { title: None, description, published: None, icon: Icon::Site }
+    }
+
+    pub fn game(mut self) -> Self {
+        self.icon = Icon::Game;
+        self
     }
 
     pub fn article(mut self, published: String) -> Self {
@@ -52,16 +91,22 @@ pub fn document(head: Head<'_>, body: Markup) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (head.title) " — Lightcone Frontier" }
+                title {
+                    @if let Some(title) = head.title { (title) " — " }
+                    (SITE_NAME)
+                }
                 meta name="description" content=(head.description);
-                meta property="og:site_name" content="Lightcone Frontier";
-                meta property="og:title" content=(head.title);
+                meta property="og:site_name" content=(SITE_NAME);
+                meta property="og:title" content=(head.title.unwrap_or(SITE_NAME));
                 meta property="og:description" content=(head.description);
                 meta property="og:type" content=(if head.published.is_some() { "article" } else { "website" });
                 @if let Some(published) = &head.published {
                     meta property="article:published_time" content=(published);
                 }
                 meta name="twitter:card" content="summary";
+                @if let Some(cdn) = CDN_BASE.get() {
+                    link rel="icon" href={ (cdn) "/icons/" (head.icon.file()) };
+                }
                 link rel="stylesheet" href=(assets::url(assets::STYLESHEET));
                 link rel="alternate" type="application/rss+xml" title="Lightcone Frontier devlog" href="/feed.xml";
                 link rel="alternate" type="application/feed+json" title="Lightcone Frontier devlog" href="/feed.json";
@@ -73,7 +118,12 @@ pub fn document(head: Head<'_>, body: Markup) -> Markup {
 
 fn masthead() -> Markup {
     html! {
-        a class="wordmark" href="/" { "Lightcone Frontier" }
+        a class="wordmark" href="/" {
+            @if let Some(cdn) = CDN_BASE.get() {
+                img src={ (cdn) "/icons/lightcone-blue.svg" } alt="" width="128" height="128";
+            }
+            (SITE_NAME)
+        }
         nav {
             a href="/play" { "Play" }
             a href="/blog" { "Devlog" }

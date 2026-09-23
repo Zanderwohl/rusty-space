@@ -593,7 +593,7 @@ pub(crate) fn ships(
 }
 
 /// Where the ship is holding, if it is holding anywhere.
-pub(crate) fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+pub(crate) fn station(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let Some(system) = game.system.as_ref() else { return };
     let Some(waypoint) = game.station() else {
         match game.coast() {
@@ -614,14 +614,6 @@ pub(crate) fn station(ui: &mut egui::Ui, state: &Ui, game: &Game, out: &mut Mess
     ui.label(format!("holding: {}", waypoint.label()));
     if let Some(period) = waypoint.period_s(system, game.coordinate_time_s()) {
         ui.weak(format!("one turn in {}", duration(period)));
-        // The clock outruns an orbit by default and the view is then a strobe. Say so where the
-        // decision is made rather than leaving it to be discovered.
-        if period < state.time_rate * crate::session::TIME_RATE * 4.0 {
-            ui.colored_label(
-                egui::Color32::from_rgb(220, 170, 90),
-                "faster than the clock — slow time down to watch it",
-            );
-        }
     }
     ui.horizontal(|ui| {
         if ui.button("Look at it").clicked() {

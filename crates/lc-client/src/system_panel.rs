@@ -61,7 +61,7 @@ pub(crate) fn system(
             n => format!("{n} ships"),
         });
     });
-    station(ui, state, game, out);
+    station(ui, game, out);
     ui.separator();
     if *tab == SystemTab::Ships {
         ships(ui, game, uplink, out);

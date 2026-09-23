@@ -302,15 +302,15 @@ mod tests {
     async fn a_refit_that_cannot_be_done_says_why() {
         let (mut server, mut wire, from, _) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
-        // Full, so taking apart storage has nowhere to put the refund.
-        let target = lc_proto::Loadout { storage: 5, drones: 2, living: 1, engines: 5, slots: 20, data: 1 };
+        // Forty engines and the slots for them: more than thirty stored module-energies pay for.
+        let target = lc_proto::Loadout { storage: 6, drones: 2, living: 1, engines: 40, slots: 60, data: 1 };
         wire.client_says(from, act(Order::Refit { target }));
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
         assert!(
             said.iter().any(|m| matches!(
                 m,
-                Outbound::Refused { reason: Refusal::Short(lc_proto::Shortfall::Capacity), .. }
+                Outbound::Refused { reason: Refusal::Short(lc_proto::Shortfall::Energy), .. }
             )),
             "{said:?}"
         );

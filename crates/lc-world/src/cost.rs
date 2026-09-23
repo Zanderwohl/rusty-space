@@ -129,7 +129,7 @@ mod tests {
         let dry = b.dry_mass_kg(&Loadout::STARTING);
         let eta = affordable_rapidity(mass(), b.capacity_j(&Loadout::STARTING), 1.0);
         assert!((eta - (mass() / dry).ln()).abs() < 1.0e-12);
-        assert!(((eta / 2.0).tanh() - 0.461).abs() < 1.0e-3);
+        assert!(((eta / 2.0).tanh() - 0.468).abs() < 1.0e-3);
         let _ = fitting;
     }
 

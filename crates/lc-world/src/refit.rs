@@ -15,17 +15,26 @@ pub enum Step {
     Shrink,
 }
 
-/// Why a target cannot be reached from here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shortage {
     /// A module without a slot, or no drone left to build with.
     Unbuildable,
     /// Nothing left to dismantle and still not enough to build.
     Energy,
-    /// A dismantling would return more than storage could hold.
-    Capacity,
-    /// No drones to do the work.
     NoDrones,
+    CannotBuild(Module),
+    CannotDismantle(Module),
+}
+
+/// Drones first, so every later step is faster for them. The hull grows after the drones.
+pub const BUILD_ORDER: [Module; 5] = [Module::Drone, Module::Storage, Module::Engine, Module::Living, Module::Data];
+/// Drones last, so there is always one left to finish the job.
+pub const DISMANTLE_ORDER: [Module; 5] =
+    [Module::Living, Module::Data, Module::Engine, Module::Storage, Module::Drone];
+
+/// The first module `more` has more of than `fewer` that `order` has no place for.
+fn unlisted(order: &[Module], fewer: &Loadout, more: &Loadout) -> Option<Module> {
+    Module::ALL.into_iter().find(|&m| fewer.count(m) < more.count(m) && !order.contains(&m))
 }
 
 /// A refit as the arguments it is planned from.
@@ -53,7 +62,9 @@ struct Planned {
     duration_s: f64,
     /// Energy the step moves, joules: what a build takes, or what a dismantled thing was worth.
     gross_j: f64,
-    /// The loadout once this step is done.
+    /// What the step does to stored energy, joules, before drain. Less than a refund, or negative,
+    /// when storage has no room.
+    stored_j: f64,
     after: Loadout,
 }
 
@@ -64,7 +75,6 @@ pub struct Refit {
     steps: Vec<Planned>,
 }
 
-/// Where a refit has got to at an instant.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Progress {
     /// Counting only finished steps.
@@ -75,7 +85,7 @@ pub struct Progress {
     /// built, or (negative) the half of one already taken apart.
     pub in_hand_kg: f64,
     /// What canceling now would return to storage, joules. Negative for a dismantling under way,
-    /// whose refund so far goes back into the module.
+    /// whose kept refund goes back into the module.
     pub reversal_j: f64,
     /// The step under way, and how far through it is.
     pub current: Option<(Step, f64)>,
@@ -88,6 +98,12 @@ impl Refit {
         if !target.is_buildable() {
             return Err(Shortage::Unbuildable);
         }
+        if let Some(module) = unlisted(&BUILD_ORDER, &order.from, &target) {
+            return Err(Shortage::CannotBuild(module));
+        }
+        if let Some(module) = unlisted(&DISMANTLE_ORDER, &target, &order.from) {
+            return Err(Shortage::CannotDismantle(module));
+        }
         let mut current = order.from;
         let mut stored = order.stored_j;
         let mut elapsed = 0.0;
@@ -99,77 +115,54 @@ impl Refit {
             }
             let power = balance.refit_power_w(&current);
             let drain = balance.drain_w(&current);
-            let module_j = balance.module_energy_j();
+            let slot_j = balance.slot_energy_j();
             // Builds pay as they go, so the drain over the step has to be affordable too.
-            let affords = |gross: f64| stored - gross - drain * gross / power >= 0.0;
-            // A refund has to fit in what storage there will be once the step is done.
-            let holds = |refund: f64, after: &Loadout| {
-                stored + refund <= balance.capacity_j(after) * (1.0 + 1.0e-12)
-            };
+            let affords = |gross: f64, duration_s: f64| stored - gross - drain * duration_s >= 0.0;
             let wants = |module: Module, loadout: &Loadout| loadout.count(module) < target.count(module);
             let spares = |module: Module, loadout: &Loadout| loadout.count(module) > target.count(module);
 
-            let mut chosen: Option<(Step, f64)> = None;
+            let mut chosen: Option<(Step, f64, f64)> = None;
             let room = current.free_slots() > 0;
-            for module in [Module::Drone, Module::Storage, Module::Engine, Module::Living] {
-                if chosen.is_none() && wants(module, &current) && room && affords(module_j) {
-                    chosen = Some((Step::Build(module), module_j));
+            for module in BUILD_ORDER {
+                let (gross, duration_s) = (balance.build_energy_j(module), balance.build_s(module, power));
+                if chosen.is_none() && wants(module, &current) && room && affords(gross, duration_s) {
+                    chosen = Some((Step::Build(module), gross, duration_s));
                 }
-                // Drones before growing, the rest after.
                 if module == Module::Drone
                     && chosen.is_none()
                     && current.slots < target.slots
-                    && affords(balance.slot_energy_j())
+                    && affords(slot_j, slot_j / power)
                 {
-                    chosen = Some((Step::Grow, balance.slot_energy_j()));
+                    chosen = Some((Step::Grow, slot_j, slot_j / power));
                 }
             }
             if chosen.is_none() && current.slots > target.slots && room {
-                let mut after = current;
-                after.slots -= 1;
-                if holds(balance.recovery * balance.slot_energy_j(), &after) {
-                    chosen = Some((Step::Shrink, balance.slot_energy_j()));
-                }
+                chosen = Some((Step::Shrink, slot_j, slot_j / power));
             }
             if chosen.is_none() {
-                for module in [Module::Living, Module::Engine, Module::Storage, Module::Drone] {
-                    if chosen.is_some() || !spares(module, &current) {
-                        continue;
-                    }
-                    let mut after = current;
-                    *after.count_mut(module) -= 1;
-                    if holds(balance.recovery * module_j, &after) {
-                        chosen = Some((Step::Dismantle(module), module_j));
-                    }
-                }
+                chosen = DISMANTLE_ORDER.into_iter().find(|&m| spares(m, &current)).map(|module| {
+                    (Step::Dismantle(module), balance.build_energy_j(module), balance.build_s(module, power))
+                });
             }
-            let Some((step, gross_j)) = chosen else {
-                let blocked_by_capacity = Module::ALL.iter().any(|m| spares(*m, &current));
-                return Err(if blocked_by_capacity { Shortage::Capacity } else { Shortage::Energy });
+            let Some((step, gross_j, duration_s)) = chosen else {
+                return Err(Shortage::Energy);
             };
 
-            let duration_s = gross_j / power;
             let mut after = current;
             match step {
-                Step::Build(module) => {
-                    *after.count_mut(module) += 1;
-                    stored -= gross_j;
-                }
-                Step::Dismantle(module) => {
-                    *after.count_mut(module) -= 1;
-                    stored += balance.recovery * gross_j;
-                }
-                Step::Grow => {
-                    after.slots += 1;
-                    stored -= gross_j;
-                }
-                Step::Shrink => {
-                    after.slots -= 1;
-                    stored += balance.recovery * gross_j;
-                }
+                Step::Build(module) => *after.count_mut(module) += 1,
+                Step::Dismantle(module) => *after.count_mut(module) -= 1,
+                Step::Grow => after.slots += 1,
+                Step::Shrink => after.slots -= 1,
             }
-            stored = (stored - drain * duration_s).max(0.0);
-            steps.push(Planned { step, begins_s: elapsed, duration_s, gross_j, after });
+            let stored_j = match step {
+                Step::Build(_) | Step::Grow => -gross_j,
+                Step::Dismantle(_) | Step::Shrink => {
+                    (stored + balance.recovery * gross_j).min(balance.capacity_j(&after)) - stored
+                }
+            };
+            stored = (stored + stored_j - drain * duration_s).max(0.0);
+            steps.push(Planned { step, begins_s: elapsed, duration_s, gross_j, stored_j, after });
             elapsed += duration_s;
             current = after;
         }
@@ -196,16 +189,18 @@ impl Refit {
         now_s >= self.order.start_s + self.duration_s()
     }
 
-    /// Stored energy at the end, before drain, joules.
+    /// Energy taken from storage over the whole refit, before drain, joules.
     pub fn net_j(&self) -> f64 {
-        self.steps.iter().map(|p| self.signed(p)).sum()
+        -self.steps.iter().map(|p| p.stored_j).sum::<f64>()
     }
 
-    fn signed(&self, planned: &Planned) -> f64 {
-        match planned.step {
-            Step::Build(_) | Step::Grow => planned.gross_j,
-            Step::Dismantle(_) | Step::Shrink => -self.recovery * planned.gross_j,
-        }
+    /// Joules thrown away for want of room in storage, not counting the 5% a dismantling radiates.
+    pub fn vented_j(&self) -> f64 {
+        self.steps
+            .iter()
+            .filter(|p| matches!(p.step, Step::Dismantle(_) | Step::Shrink))
+            .map(|p| self.recovery * p.gross_j - p.stored_j)
+            .sum()
     }
 
     pub fn at(&self, now_s: f64) -> Progress {
@@ -221,23 +216,24 @@ impl Refit {
         for planned in &self.steps {
             if since >= planned.begins_s + planned.duration_s {
                 progress.loadout = planned.after;
-                progress.consumed_j += self.signed(planned);
+                progress.consumed_j -= planned.stored_j;
                 progress.finished += 1;
                 continue;
             }
             if since > planned.begins_s {
                 let fraction = (since - planned.begins_s) / planned.duration_s;
                 let moved = planned.gross_j * fraction;
-                progress.consumed_j += self.signed(planned) * fraction;
+                progress.consumed_j -= planned.stored_j * fraction;
                 progress.current = Some((planned.step, fraction));
                 match planned.step {
                     Step::Build(_) | Step::Grow => {
                         progress.in_hand_kg = moved / C2;
                         progress.reversal_j = self.recovery * moved;
                     }
+                    // What was thrown away is not given back.
                     Step::Dismantle(_) | Step::Shrink => {
                         progress.in_hand_kg = -moved / C2;
-                        progress.reversal_j = -self.recovery * moved;
+                        progress.reversal_j = -planned.stored_j.max(0.0) * fraction;
                     }
                 }
             }
@@ -261,8 +257,7 @@ mod tests {
         order(from, target, stored_me).solve(&B)
     }
 
-    /// The loadout these were worked out by hand against, which was the starting one until a
-    /// data module took a living module's slot.
+    /// The loadout the expected numbers below were worked out by hand against.
     const WORKED: Loadout = Loadout { living: 2, data: 0, ..Loadout::STARTING };
 
     #[test]
@@ -317,15 +312,24 @@ mod tests {
     }
 
     #[test]
-    fn no_refund_overflows_storage() {
-        // Full, and asked to take apart engines: the refund has nowhere to go.
+    fn a_refund_storage_has_no_room_for_is_thrown_away() {
+        let me = B.module_energy_j();
+        // Full, and asked to take apart two engines: both refunds go.
         let from = WORKED;
-        let refused = plan(from, Loadout { engines: 3, ..from }, 30.0);
-        assert_eq!(refused.unwrap_err(), Shortage::Capacity);
-        // With a little room it goes through.
-        assert!(plan(from, Loadout { engines: 3, ..from }, 27.0).is_ok());
-        // Taking apart storage while full of energy cannot be done either.
-        assert_eq!(plan(from, Loadout { storage: 5, ..from }, 30.0).unwrap_err(), Shortage::Capacity);
+        let full = plan(from, Loadout { engines: 3, ..from }, 30.0).unwrap();
+        // Less the little room the living drain makes during the first.
+        assert!((full.vented_j() / me - 2.0 * 0.95).abs() < 1.0e-3);
+        assert!(full.net_j().abs() < 1.0e-3 * me);
+        // With a little room, nothing is.
+        assert!(plan(from, Loadout { engines: 3, ..from }, 27.0).unwrap().vented_j() < 1.0e-9 * me);
+        // A full storage module taken apart loses what it held as well as its refund.
+        let storage = plan(from, Loadout { storage: 5, ..from }, 30.0).unwrap();
+        assert!((storage.vented_j() / me - (5.0 + 0.95)).abs() < 1.0e-12);
+        assert!((storage.net_j() / me - 5.0).abs() < 1.0e-12);
+        // And canceling it halfway does not give back what was thrown away.
+        let half = storage.at(100.0 + 0.5 * storage.duration_s());
+        assert!(half.reversal_j.abs() < 1.0e-12 * me);
+        assert!((half.consumed_j / me - 2.5).abs() < 1.0e-12);
     }
 
     #[test]
@@ -338,6 +342,38 @@ mod tests {
         assert_eq!(plan(from, Loadout { drones: 0, ..from }, 30.0).unwrap_err(), Shortage::Unbuildable);
         let bare = Loadout { storage: 0, drones: 1, living: 0, engines: 0, slots: 20, data: 0 };
         assert_eq!(plan(bare, Loadout { engines: 1, ..bare }, 0.0).unwrap_err(), Shortage::Energy);
+    }
+
+    #[test]
+    fn a_data_module_costs_half_and_takes_three_times_as_long() {
+        let from = Loadout { storage: 15, slots: 30, ..Loadout::STARTING };
+        let refit = plan(from, Loadout { data: 2, ..from }, 75.0).unwrap();
+        assert_eq!(refit.steps().collect::<Vec<_>>(), [Step::Build(Module::Data)]);
+        assert!((refit.net_j() / B.module_energy_j() - 0.5).abs() < 1.0e-12);
+        let engine = plan(from, Loadout { engines: 6, ..from }, 75.0).unwrap();
+        assert!((refit.duration_s() / engine.duration_s() - 3.0).abs() < 1.0e-12);
+
+        let apart = plan(from, Loadout { data: 0, ..from }, 70.0).unwrap();
+        assert_eq!(apart.steps().collect::<Vec<_>>(), [Step::Dismantle(Module::Data)]);
+        assert!((apart.net_j() / B.module_energy_j() + 0.95 * 0.5).abs() < 1.0e-12);
+        assert!((apart.duration_s() / engine.duration_s() - 3.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn every_module_has_a_place_to_be_built_and_taken_apart() {
+        for module in Module::ALL {
+            assert!(BUILD_ORDER.contains(&module), "{module:?} cannot be built");
+            assert!(DISMANTLE_ORDER.contains(&module), "{module:?} cannot be taken apart");
+        }
+    }
+
+    #[test]
+    fn a_module_the_planner_has_no_place_for_is_named() {
+        let from = WORKED;
+        let more = Loadout { engines: 6, ..from };
+        assert_eq!(unlisted(&[Module::Drone], &from, &more), Some(Module::Engine));
+        assert_eq!(unlisted(&[Module::Drone], &more, &from), None);
+        assert_eq!(unlisted(&BUILD_ORDER, &from, &more), None);
     }
 
     #[test]

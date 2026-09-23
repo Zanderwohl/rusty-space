@@ -1,17 +1,30 @@
 // Named things. Each one names what it is, never what it looks like.
 
 .wordmark {
+  align-items: baseline;
   color: var(--ink);
+  display: inline-flex;
   font-family: var(--font-display);
   font-palette: --wordmark-on-dark;
-  // A step above the heading scale's second rung, because Nabla's depth lives inside the
-  // glyph: at the size a heading is set at the extrusion closes up and the letters go muddy.
-  font-size: var(--step-2);
+  // Off the heading scale and above it, because Nabla's depth lives inside the glyph: at a
+  // heading's size the extrusion closes up and the letters go muddy.
+  font-size: 2.5rem;
   // Nabla carries one weight and its own depth. A synthesized bold and a tightened track both
   // fight the extrusion, which is the shape doing the work here; the color and the weight
   // below are what the fallback stack gets when the face has not arrived.
   font-weight: 400;
+  gap: 0.25em;
   text-decoration: none;
+
+  // Fitted by eye so the cone's ink, which fills about 80% of its box, spans Nabla's cap height
+  // and extrusion. An offset rather than a margin: under baseline alignment a margin moves the
+  // letters with it.
+  img {
+    height: 1.16em;
+    position: relative;
+    top: 0.16em;
+    width: auto;
+  }
 }
 
 @media (prefers-color-scheme: light) {

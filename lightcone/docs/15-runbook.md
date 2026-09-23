@@ -97,8 +97,11 @@ names one build's chunk, and a shard reading one sky while players download anot
 with them about which system every ship is in. See
 [the broker and a shard](#the-broker-and-a-shard-on-rocinante).
 
-Builds staged before 2026-09-17 named the chunk `assets/sky/hyg-v42.lcsky`. A shard pointed at
-one of those keeps working; the new name only matters when you repoint it at a newer build.
+The chunk has had three names: `assets/sky/hyg-v42.lcsky` before 2026-09-17,
+`assets/sky/catalogue.lcsky` until the spelling sweep, and `assets/sky/catalog.lcsky` since. A
+shard pointed at an older build keeps working, because a build id on the CDN is never
+overwritten. The name only matters when repointing at a newer one — and a `--sky` line copied
+forward from the previous shard will 404 against a build that spells it differently.
 
 `build-wasm.sh` refuses nothing but takes about four minutes cold. `publish-build.sh` refuses a
 `-dirty` build id: a build that exists on one laptop is not something anyone can roll back to.
@@ -174,6 +177,20 @@ lightcone-server --library crates/lc-client/assets/books/books.toml \
 `--library` without `--shelf-base` refuses to start: a catalog nobody can fetch from is a list
 of titles that do nothing. Neither is a list of books a shard simply has none to lend, which is
 the state every test runs in.
+
+---
+
+## Shipping the icons
+
+The favicons are `web/icons/`: each SVG original and an `.ico` built from it, all published to
+`icons/` on the CDN. The site uses the blue one; `/play`, once the game is launching, the green.
+
+```bash
+tools/build-icons.sh      # after editing an SVG; needs Google Chrome, commits nothing
+tools/publish-icons.sh    # skips anything already on the CDN
+```
+
+The CDN serves `immutable`, so a changed icon needs a new file name and the site pointed at it.
 
 ---
 

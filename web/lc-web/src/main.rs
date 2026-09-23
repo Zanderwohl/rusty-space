@@ -152,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    views::set_cdn_base(&config.cdn_base);
     let state = AppState {
         assets: assets.clone(),
         content: Arc::new(RwLock::new(Arc::new(content))),

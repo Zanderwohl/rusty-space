@@ -113,11 +113,15 @@ table {
     text-align: start;
   }
 
-  th {
+  th[scope="col"] {
     color: var(--ink-dim);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  th[scope="row"] {
+    font-weight: normal;
   }
 }
 
