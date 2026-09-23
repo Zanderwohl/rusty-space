@@ -923,11 +923,12 @@ knowledge. Today:
      `Form` in `map.rs` has `Sphere`, `Circle` and `Dot`, none of which is a ring at an orbit
      radius, so this is the one part of phase 3 that is new renderer work rather than new reads.
 
-   **The sky stays truth, and only the map is a chart of knowledge.** Not stated before and
-   load-bearing: a craft discovers a planet by *seeing* it, so the starfield draws what is there.
-   `starfield::Bodies` therefore keeps reading `drawables_at`, and it is the map — a diagram of
-   what is known — that draws beliefs. A sky filtered by knowledge would be a sky in which
-   nothing could ever be found.
+   **The sky stays truth, and only the map is a chart of knowledge** (decided 2026-09-22). Not
+   stated before and load-bearing. **The sky is a camera:** it reflects local truth without
+   interpretation, which is what makes it the thing a craft discovers planets *with*.
+   `starfield::Bodies` therefore keeps reading `drawables_at`. The map is the other kind of
+   surface — a diagram of what has been worked out — and it is the one that draws beliefs. A sky
+   filtered by knowledge would be a sky in which nothing could ever be found.
 4. **Transits make bodies.** ✅ **Built** (2026-09-22). A settled transit calls `found_planet`,
    the period gives a distance through the mass prior, and the result is `EdgeOnTo`, crossed
    with other craft's. What it came to:
@@ -1043,6 +1044,8 @@ game has no players — so each of these is a change in place, not a versioned a
 - **Unconfirmed candidates are drawn,** fainter, with distance error bars along the presumed plane
   (2026-09-22).
 - **Courses fly against believed positions,** and re-plan as the belief improves (2026-09-22).
+- **The sky is a camera and the map is a chart.** The sky reflects local truth without
+  interpretation; only the map draws beliefs (2026-09-22).
 - **A player can report one system on purpose,** to a craft or to nobody, beamed or shouted,
   sealed or open. A targeted report does not move the recipient's mark and is not refused for
   having nothing new (2026-09-22).

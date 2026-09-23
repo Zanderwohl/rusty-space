@@ -1,4 +1,12 @@
 //! The tick loop, intent validation, and the one place anything is released to a client.
+//!
+//! Line limit: 2000. The one module allowed past the thousand-line cap, because it is the
+//! shard's core assembly: the tick, what an intent is allowed to do, and the single gate every
+//! release to a client passes through. Splitting those apart would put the gate somewhere other
+//! than the loop it guards, and a second place a release could be written from is exactly the
+//! thing this file exists to prevent. Everything that can live elsewhere already does —
+//! `instruments`, `radio`, `planets`, `chase`, `drive`, `fitting`, `persist` — so what is left
+//! is the part with nowhere else to be.
 
 use std::collections::HashMap;
 

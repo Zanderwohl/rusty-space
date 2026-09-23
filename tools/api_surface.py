@@ -11,6 +11,14 @@ from pathlib import Path
 
 LIMIT = 1000
 
+# A module may raise its own cap by saying so, in its own module doc, with a reason:
+#
+#     //! Line limit: 2000. <why this module is the exception>
+#
+# Read from the file rather than listed here, so the number and the justification cannot drift
+# apart and a reviewer meets the reason where the code is.
+RAISED = re.compile(r"^//!\s*Line limit:\s*(?P<limit>\d+)\b")
+
 ITEM = re.compile(
     r"^(?P<indent>\s*)(?P<sig>pub(?:\s*\([^)]*\))?\s+"
     r"(?:const\s+fn|async\s+fn|unsafe\s+fn|fn|struct|enum|trait|type|const|static|mod|union)\b.*)$"
@@ -75,8 +83,16 @@ def main(roots):
             code = strip_tests(raw)
             loc = len(code)
             total += loc
-            flag = "  ** OVER LIMIT **" if loc > LIMIT else ""
-            if loc > LIMIT:
+            limit = LIMIT
+            for line in raw[:40]:
+                raised = RAISED.match(line.strip())
+                if raised:
+                    limit = int(raised.group("limit"))
+                    break
+            flag = f"  ** OVER LIMIT **" if loc > limit else ""
+            if limit != LIMIT:
+                flag += f"  (own limit {limit})"
+            if loc > limit:
                 oversize.append((path, loc))
             rel = path.relative_to(Path(root) / "src")
             print(f"\n-- {rel}  ({loc} loc, {len(raw)} with tests){flag}")
