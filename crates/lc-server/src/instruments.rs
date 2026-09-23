@@ -342,11 +342,15 @@ impl<J: Journal> Server<J> {
             let knowledge = &self.aboard(CraftId(ship.0)).knowledge;
             let learned = page(PAGE, |limit| {
                 let (report, through) = knowledge.report_upto(since, now_s, limit);
-                (serde_json::to_string(&report).ok(), through)
+                // Nothing new is the usual answer, and not worth encoding an empty report for.
+                (through.and_then(|_| serde_json::to_string(&report).ok()), through)
             });
             let retained = knowledge.retained_subjects();
             let logs = page(LOG_PAGE, |limit| {
                 let (logs, through) = knowledge.logs_upto(logged, limit);
+                if through.is_none() {
+                    return (None, None);
+                }
                 let page = lc_world::knowledge::Logs { logs, retained: retained.clone() };
                 (serde_json::to_string(&page).ok(), through)
             });

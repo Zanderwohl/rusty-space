@@ -1395,6 +1395,24 @@ mod tests {
         assert!(probe.report(Mark::default(), 99.0).is_empty(), "nor anything learned after it was sent");
     }
 
+    /// **The backlog is what the files hold, not everything they ever held.** A survey sights
+    /// a body every rotation and decimation drops the look in the middle, so a backlog that kept
+    /// every time grew for as long as the survey ran and a first report walked all of it.
+    #[test]
+    fn the_backlog_forgets_what_decimation_dropped() {
+        let mut probe = Knowledge::new(Witness(2));
+        for k in 0..500u64 {
+            let toward = DVec3::new((k as f64 * 0.01).cos(), (k as f64 * 0.01).sin(), 0.0);
+            probe.sighted(star_id(1), sighting(2, DVec3::ZERO, toward, k as f64));
+        }
+        let held = probe.file(star_id(1)).unwrap().sightings().len();
+        assert!(held < 500, "decimation kept all {held}");
+        // A name is filed with the first look, so the backlog is one more than the looks held.
+        let entries = probe.backlog.len();
+        assert!(entries <= held + 1, "{entries} backlog entries for {held} looks");
+        assert_eq!(probe.report(Mark::default(), 1_000.0).stars(), 1, "and it still reports");
+    }
+
     /// Oldest first, resumed where the last report ended, and pages through ties at one instant.
     #[test]
     fn a_capped_report_drains_the_backlog_in_order() {

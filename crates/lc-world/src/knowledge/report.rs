@@ -227,17 +227,32 @@ impl Recent {
 /// Every reportable thing a craft holds, in the order a report drains it, so a page costs what
 /// it carries, not what the craft knows.
 ///
-/// Entries are never removed. One left by a replaced record costs a lookup that finds nothing.
+/// Exactly the learned times the files hold now. It kept every time it had ever been handed, and
+/// a survey replaces records every visit, so it grew for as long as anyone surveyed and a
+/// report from the start walked all of it.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Backlog {
     items: BTreeSet<(At, Subject, Subject)>,
+    filed: BTreeMap<Subject, BTreeSet<At>>,
 }
 
 impl Backlog {
     pub(super) fn file(&mut self, subject: Subject, file: &File) {
-        for t in file.learned_times() {
-            self.items.insert((At(t), subject.system(), subject));
+        let now: BTreeSet<At> = file.learned_times().map(At).collect();
+        let system = subject.system();
+        let was = self.filed.entry(subject).or_default();
+        for gone in was.difference(&now) {
+            self.items.remove(&(*gone, system, subject));
         }
+        for new in now.difference(was) {
+            self.items.insert((*new, system, subject));
+        }
+        *was = now;
+    }
+
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.items.len()
     }
 
     /// Entries after `since` and not after `until_s`, oldest first.
