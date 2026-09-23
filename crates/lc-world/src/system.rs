@@ -185,6 +185,16 @@ impl LocalSystem {
     /// analytically here is what lets a system be shared, immutable, between every craft in
     /// it — nothing has to advance one to ask it a question any more.
     pub fn drawables_at(&self, observer_ly: DVec3, seconds: f64) -> Vec<Drawable> {
+        self.drawn_at(observer_ly, seconds, true)
+    }
+
+    /// [`LocalSystem::drawables_at`] without the climate, which only paints a surface. For a
+    /// survey, which asks every tick and never paints anything.
+    pub fn drawables_unpainted_at(&self, observer_ly: DVec3, seconds: f64) -> Vec<Drawable> {
+        self.drawn_at(observer_ly, seconds, false)
+    }
+
+    fn drawn_at(&self, observer_ly: DVec3, seconds: f64, painted: bool) -> Vec<Drawable> {
         let time = Instant::from_seconds_since_j2000(seconds);
         let star_at = match em_sim::propagate::position_at(&self.sim, self.primary, time) {
             Some(at) => at,
@@ -253,7 +263,9 @@ impl LocalSystem {
                     surface,
                     // Keyed by the arena's id, which is what `rings::for_body` is keyed by and
                     // is not always the display name -- see `worlds`.
-                    climate: crate::climate::of(self.sim.name(i), &world, equilibrium_k, self.star_teff_k, &self.sim.info(i).tags),
+                    climate: painted
+                        .then(|| crate::climate::of(self.sim.name(i), &world, equilibrium_k, self.star_teff_k, &self.sim.info(i).tags))
+                        .flatten(),
                     world,
                     pole,
                     spin_s,

@@ -51,6 +51,25 @@ pub struct Visit {
 /// Rings reflect too, over whatever of their cross-section is turned toward both the star and
 /// the observer, at their own albedo. Saturn's ice is brighter than Saturn.
 pub fn of(star: &Star, star_at_ly: DVec3, body: &Drawable, from_ly: DVec3) -> Visit {
+    of_in(star, &radiance_of(star), star_at_ly, body, from_ly, None)
+}
+
+/// A star's band radiance, which every body it lights is lit by.
+fn radiance_of(star: &Star) -> PerBand<f64> {
+    PerBand::new(std::array::from_fn(|i| blackbody::band_radiance(Band::ALL[i], star.teff_k)))
+}
+
+/// [`of`], with the star's radiance worked out once for every body, and in `only` a single band
+/// with the others left at zero. Each band is two Planck integrals, and a survey that only
+/// ranks bodies by brightness needs one band of every body and every band of a few.
+fn of_in(
+    star: &Star,
+    star_radiance: &PerBand<f64>,
+    star_at_ly: DVec3,
+    body: &Drawable,
+    from_ly: DVec3,
+    only: Option<Band>,
+) -> Visit {
     let offset = body.position_ly - from_ly;
     let range_m = offset.length() * M_PER_LY;
     let orbit_m = (body.position_ly - star_at_ly).length() * M_PER_LY;
@@ -67,7 +86,7 @@ pub fn of(star: &Star, star_at_ly: DVec3, body: &Drawable, from_ly: DVec3) -> Vi
 
     let flux = PerBand::new(std::array::from_fn(|i| {
         let band = Band::ALL[i];
-        if range_m <= 0.0 {
+        if range_m <= 0.0 || only.is_some_and(|only| only != band) {
             return 0.0;
         }
         // A geometric albedo is defined against a flat disc of the body's own radius, so the
@@ -75,7 +94,7 @@ pub fn of(star: &Star, star_at_ly: DVec3, body: &Drawable, from_ly: DVec3) -> Vi
         let full = std::f64::consts::PI * body.radius_m * body.radius_m;
         let reflected = if orbit_m > 0.0 && full > 0.0 {
             let returned = body.world.reflectance_in(band) * disc + ring_albedo * ring_m2;
-            survey::flux_from(star, band, orbit_m) * returned / full
+            survey::flux_at(star.radius_m, star_radiance[band], orbit_m) * returned / full
                 * (body.radius_m / range_m)
                 * (body.radius_m / range_m)
         } else {
@@ -110,20 +129,53 @@ pub fn of(star: &Star, star_at_ly: DVec3, body: &Drawable, from_ly: DVec3) -> Vi
 /// Ordered because the glare rules in [`survey`] are asked which of two sources is brighter,
 /// and a caller that has already sorted need not re-derive it.
 pub fn all(system: &LocalSystem, band: Band, from_ly: DVec3, now_s: f64) -> Vec<Visit> {
-    let star = Star {
-        radius_m: system.star_radius_m(),
-        teff_k: system.star_teff_k(),
-        mu: 0.0,
-        limb_darkening: (0.0, 0.0),
-    };
+    let star = star_of(system);
+    let radiance = radiance_of(&star);
     let at = system.star_position_at(now_s).unwrap_or(system.star_position_ly());
     let mut seen: Vec<Visit> = system
-        .drawables_at(from_ly, now_s)
+        .drawables_unpainted_at(from_ly, now_s)
         .iter()
-        .map(|body| of(&star, at, body, from_ly))
+        .map(|body| of_in(&star, &radiance, at, body, from_ly, None))
         .collect();
     seen.sort_unstable_by(|a, b| b.flux[band].total_cmp(&a.flux[band]));
     seen
+}
+
+/// Every body of a system in one band, brightest first, for a survey: what it ranks and aims by
+/// every tick, and what it needs to work out every band of the few it measures.
+pub struct Lit {
+    star: Star,
+    star_at_ly: DVec3,
+    radiance: PerBand<f64>,
+    /// Flux in the survey's band only; see [`Lit::every_band`].
+    pub seen: Vec<Visit>,
+    drawn: Vec<Drawable>,
+}
+
+impl Lit {
+    pub fn new(system: &LocalSystem, band: Band, from_ly: DVec3, now_s: f64) -> Self {
+        let star = star_of(system);
+        let radiance = radiance_of(&star);
+        let star_at_ly = system.star_position_at(now_s).unwrap_or(system.star_position_ly());
+        let mut both: Vec<(Visit, Drawable)> = system
+            .drawables_unpainted_at(from_ly, now_s)
+            .into_iter()
+            .map(|body| (of_in(&star, &radiance, star_at_ly, &body, from_ly, Some(band)), body))
+            .collect();
+        both.sort_unstable_by(|a, b| b.0.flux[band].total_cmp(&a.0.flux[band]));
+        let (seen, drawn) = both.into_iter().unzip();
+        Self { star, star_at_ly, radiance, seen, drawn }
+    }
+
+    /// The `k`th body's flux in every band, as [`all`] would have given it.
+    pub fn every_band(&self, k: usize, from_ly: DVec3) -> Option<PerBand<f64>> {
+        let body = self.drawn.get(k)?;
+        Some(of_in(&self.star, &self.radiance, self.star_at_ly, body, from_ly, None).flux)
+    }
+}
+
+fn star_of(system: &LocalSystem) -> Star {
+    Star { radius_m: system.star_radius_m(), teff_k: system.star_teff_k(), mu: 0.0, limb_darkening: (0.0, 0.0) }
 }
 
 impl Visit {

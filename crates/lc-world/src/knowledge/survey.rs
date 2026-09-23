@@ -168,11 +168,16 @@ pub struct Source {
 
 /// W/m^2. The same geometry `observation::observe` uses.
 pub fn flux_from(star: &Star, band: Band, distance_m: f64) -> f64 {
+    flux_at(star.radius_m, blackbody::band_radiance(band, star.teff_k), distance_m)
+}
+
+/// [`flux_from`] with the band radiance already worked out, for a caller asking about many
+/// distances from one star.
+pub fn flux_at(radius_m: f64, radiance: f64, distance_m: f64) -> f64 {
     if distance_m <= 0.0 {
         return 0.0;
     }
-    let radiance = blackbody::band_radiance(band, star.teff_k);
-    std::f64::consts::PI * star.radius_m * star.radius_m * radiance / (distance_m * distance_m)
+    std::f64::consts::PI * radius_m * radius_m * radiance / (distance_m * distance_m)
 }
 
 /// How close a source giving `faint_counts` may come to one giving `bright_counts` before the

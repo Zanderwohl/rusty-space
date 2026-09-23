@@ -274,13 +274,11 @@ pub fn survey_between(
         .into_iter()
         .collect::<Vec<Source>>();
     let star_last = sources.len();
-    // The visits are kept beside their sources, not thrown away for one band's flux: a visit
-    // carries every band, and the digest below is what those are for.
-    let mut seen = crate::visit::all(system, band, at.position_ly, to_s);
     // Brightest first over the bodies only, so the star keeps its place at the front and the
-    // rotation below is over a list whose order is a property of the system.
-    seen.sort_unstable_by(|a, b| b.flux[band].total_cmp(&a.flux[band]));
-    sources.extend(seen.iter().map(|visit| visit.source(system.star, band)));
+    // rotation below is over a list whose order is a property of the system. One band for all
+    // of them; every band only for the few measured below, which is what the digest needs.
+    let lit = crate::visit::Lit::new(system, band, at.position_ly, to_s);
+    sources.extend(lit.seen.iter().map(|visit| visit.source(system.star, band)));
 
     let bodies = sources.len() - star_last;
     let witness = knowledge.owner;
@@ -306,18 +304,19 @@ pub fn survey_between(
 
     for slot in duty.visits(bodies, from_s, to_s) {
         let index = star_last + slot;
-        let (Some(source), Some(visit)) = (sources.get(index), seen.get(slot)) else { continue };
+        let Some(source) = sources.get(index) else { continue };
         let Some(sighting) =
             survey::look(&optics, &sources, index, survey::SURVEY_DWELL_S, at.position_ly, to_s, witness)
         else {
             continue;
         };
+        let Some(flux) = lit.every_band(slot, at.position_ly) else { continue };
         // One visit, one row, folded and freed: the per-band fluxes go into a digest that is
         // the same size after a thousand visits as after one, which is what lets a survey run
         // for game months inside a fixed store.
         let colors = survey::colors(
             &optics,
-            &visit.flux,
+            &flux,
             survey::SURVEY_DWELL_S,
             crate::rng::hash(&[witness.0, source.subject.key(), to_s.to_bits()]),
         );
