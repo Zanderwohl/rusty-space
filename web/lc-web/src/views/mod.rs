@@ -5,6 +5,8 @@ pub mod home;
 pub mod page;
 pub mod play;
 
+use std::sync::OnceLock;
+
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::assets;
@@ -14,6 +16,30 @@ pub const REPO: &str = "https://github.com/Zanderwohl/rusty-space/tree/master/li
 
 const SITE_NAME: &str = "Lightcone Frontier";
 
+/// Where `icons/` lives. Set once at boot; a page rendered before then has no favicon.
+static CDN_BASE: OnceLock<String> = OnceLock::new();
+
+pub fn set_cdn_base(base: &str) {
+    let _ = CDN_BASE.set(base.to_owned());
+}
+
+/// The site is blue; the game, while it is running, is green.
+#[derive(Clone, Copy, Default)]
+pub enum Icon {
+    #[default]
+    Site,
+    Game,
+}
+
+impl Icon {
+    fn file(self) -> &'static str {
+        match self {
+            Icon::Site => "lightcone-blue.ico",
+            Icon::Game => "lightcone-green.ico",
+        }
+    }
+}
+
 /// What goes in `<head>`, gathered in one place so no page half-fills it.
 pub struct Head<'a> {
     /// `None` titles the page with the site name alone.
@@ -21,15 +47,21 @@ pub struct Head<'a> {
     pub description: &'a str,
     /// Set for posts. Turns the card into an article and carries the date.
     pub published: Option<String>,
+    pub icon: Icon,
 }
 
 impl<'a> Head<'a> {
     pub fn new(title: &'a str, description: &'a str) -> Self {
-        Head { title: Some(title), description, published: None }
+        Head { title: Some(title), description, published: None, icon: Icon::Site }
     }
 
     pub fn site(description: &'a str) -> Self {
-        Head { title: None, description, published: None }
+        Head { title: None, description, published: None, icon: Icon::Site }
+    }
+
+    pub fn game(mut self) -> Self {
+        self.icon = Icon::Game;
+        self
     }
 
     pub fn article(mut self, published: String) -> Self {
@@ -72,6 +104,9 @@ pub fn document(head: Head<'_>, body: Markup) -> Markup {
                     meta property="article:published_time" content=(published);
                 }
                 meta name="twitter:card" content="summary";
+                @if let Some(cdn) = CDN_BASE.get() {
+                    link rel="icon" href={ (cdn) "/icons/" (head.icon.file()) };
+                }
                 link rel="stylesheet" href=(assets::url(assets::STYLESHEET));
                 link rel="alternate" type="application/rss+xml" title="Lightcone Frontier devlog" href="/feed.xml";
                 link rel="alternate" type="application/feed+json" title="Lightcone Frontier devlog" href="/feed.json";

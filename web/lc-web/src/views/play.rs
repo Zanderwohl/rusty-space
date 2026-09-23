@@ -85,7 +85,7 @@ pub async fn page(
     };
 
     document(
-        Head::new("Play", DESCRIPTION),
+        Head::new("Play", DESCRIPTION).game(),
         html! {
             // The canvas the client draws into. It is sized by CSS, and `fit_canvas_to_parent`
             // on the Bevy side follows that rather than the other way round.
