@@ -257,7 +257,26 @@ pub enum SystemTab {
     Ships,
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What the panels remember between frames.
+///
+/// One `Local` rather than ten: a Bevy system takes sixteen parameters and [`open_panels`] had
+/// reached them, so the next scrap of panel state would not have compiled.
+#[derive(Default)]
+pub struct Remembered {
+    curve: CurvePlot,
+    show_all: bool,
+    /// The body list's own pick, and the last one it scrolled to.
+    picked: Option<lc_world::knowledge::BodyId>,
+    revealed: Option<lc_world::knowledge::BodyId>,
+    /// The same, for the telescope's list of stars.
+    revealed_star: Option<lc_world::sky::StarId>,
+    tab: SystemTab,
+    draft: String,
+    name_draft: String,
+    aimed: crate::radio_panel::Aimed,
+    seal: bool,
+}
+
 pub fn open_panels(
     mut contexts: EguiContexts,
     ui_state: Res<Ui>,
@@ -265,17 +284,21 @@ pub fn open_panels(
     mut beliefs: ResMut<crate::beliefs::Beliefs>,
     uplink: Res<crate::uplink::Uplink>,
     mut out: MessageWriter<Requested>,
-    mut curve: Local<CurvePlot>,
     sky: Option<Res<crate::starfield::Starfield>>,
-    mut show_all: Local<bool>,
-    mut picked: Local<Option<lc_world::knowledge::BodyId>>,
-    mut revealed: Local<Option<lc_world::knowledge::BodyId>>,
-    mut tab: Local<SystemTab>,
-    mut draft: Local<String>,
-    mut name_draft: Local<String>,
-    mut aimed: Local<crate::radio_panel::Aimed>,
-    mut seal: Local<bool>,
+    mut held_over: Local<Remembered>,
 ) {
+    let Remembered {
+        curve,
+        show_all,
+        picked,
+        revealed,
+        revealed_star,
+        tab,
+        draft,
+        name_draft,
+        aimed,
+        seal,
+    } = &mut *held_over;
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let panels = ui_state.open_panels().to_vec();
     // Once for every panel drawn this frame, and the map already asked for the same second,
@@ -298,9 +321,10 @@ pub fn open_panels(
                     &ui_state,
                     &mut game,
                     held,
-                    &mut name_draft,
+                    revealed_star,
+                    name_draft,
                     &mut out,
-                    &mut curve,
+                    curve,
                 ),
             Panel::System => crate::system_panel::system(
                 ui,
@@ -308,10 +332,10 @@ pub fn open_panels(
                 &game,
                 held,
                 &uplink,
-                &mut tab,
-                &mut show_all,
-                &mut picked,
-                &mut revealed,
+                tab,
+                show_all,
+                picked,
+                revealed,
                 &mut out,
             ),
             Panel::Flight => flight(ui, &ui_state, &game, &mut out),
@@ -327,9 +351,9 @@ pub fn open_panels(
                 &ui_state,
                 &game,
                 &uplink,
-                &mut draft,
-                &mut aimed,
-                &mut seal,
+                draft,
+                aimed,
+                seal,
                 &mut out,
             ),
         });

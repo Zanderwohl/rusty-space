@@ -23,6 +23,7 @@ pub fn telescope(
     state: &Ui,
     game: &mut Game,
     held: &crate::beliefs::Held,
+    revealed: &mut Option<StarId>,
     draft: &mut String,
     out: &mut MessageWriter<Requested>,
     plot: &mut CurvePlot,
@@ -50,8 +51,17 @@ pub fn telescope(
         .max_height(160.0)
         .show_rows(ui, row_height, order.len(), |ui, rows| {
             for &(_, id) in order.get(rows).unwrap_or_default() {
-                if row(ui, game, id, state.selected == Some(id), row_height).clicked() {
+                let on = state.selected == Some(id);
+                let response = row(ui, game, id, on, row_height);
+                if response.clicked() {
                     ask(out, Action::SelectTarget(Some(id)));
+                }
+                // Once, when the selection changes. A star picked out of the sky is selected
+                // here already, but in a list of thousands it is selected somewhere the player
+                // cannot see, which reads as the pick having done nothing.
+                if on && *revealed != Some(id) {
+                    *revealed = Some(id);
+                    response.scroll_to_me(Some(egui::Align::Center));
                 }
             }
         });

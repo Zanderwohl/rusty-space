@@ -68,13 +68,21 @@ pub(crate) fn system(
         return;
     }
 
-    // The star, and the plane its bodies are believed to share.
+    // The plane its bodies are believed to share.
     ui.horizontal(|ui| {
-        ui.label(game.name_of(system.star));
+        ui.weak(plane_text(held.plane));
         ui.checkbox(show_all, "all");
     });
-    ui.weak(plane_text(held.plane));
     ui.separator();
+
+    // The star is a row rather than a heading, because it is a thing in the system like the
+    // rest and a player who can pick a moon expects to be able to pick its sun. Picking it is
+    // `SelectTarget`, the same as picking it out of the sky: a star is what the telescope
+    // stares at, and the body list's own pick is a `BodyId`, which a star has none of.
+    let star_picked = state.selected == Some(system.star);
+    if ui.selectable_label(star_picked, game.name_of(system.star)).clicked() {
+        ask(out, Action::SelectTarget((!star_picked).then_some(system.star)));
+    }
 
     *picked = settle_pick(state.focus.as_ref(), *picked, known, held);
 
