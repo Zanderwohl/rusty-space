@@ -9,10 +9,12 @@
 #
 # A rocky world with air -- anything lc_world::climate gives a climate, measured or generated --
 # takes the [rocky] graphs, with the ground graph's parameters bound from that climate. Earth and
-# Mars are two settings of it. A body named under [bodies] still takes its own graph over that.
+# Mars are two settings of it. A bare rocky world -- anything lc_world::airless paints -- takes
+# the [airless] graph the same way, and its "height" layer lights its craters. A body named
+# under [bodies] still takes its own graph over either.
 #
 # Surfaces are baked on a sphere, so a graph here may use only Color, Noise, Coordinate, Mix,
-# MinMax and Wave; Map, with a palette of any kind; and a passthrough Transform set to Extend.
+# MinMax, Wave and Craters; Map, with a palette of any kind; and a passthrough Transform set to Extend.
 
 [classes]
 GasGiant = "surfaces/gas_giant.tgraph"
@@ -25,3 +27,6 @@ Scorched = "surfaces/scorched.tgraph"
 [rocky]
 ground = "worlds/rocky.tgraph"
 clouds = "worlds/earthlike-clouds.tgraph"
+
+[airless]
+ground = "worlds/airless.tgraph"

@@ -18,7 +18,9 @@ pub struct BodySurfaceUniform {
     /// replaces the pattern and palette, `clouds` is 1 where a cloud deck is drawn over the
     /// surface, and `grounds` is 1 where the masks and [`Self::ground`] say what each band sees.
     pub params: Vec4,
-    /// Starlight the surface reflects, as linear display light before the tone map. `w` unused.
+    /// Starlight the surface reflects, as linear display light before the tone map. `w` is how
+    /// steeply [`BodySurfaceMaterial::height`] tilts the surface toward or away from the star:
+    /// slope per unit of height per unit of arc on the unit sphere. Zero is a smooth sphere.
     pub reflected: Vec4,
     /// Light the body makes itself, in the same units; `w` is how far the pattern inverts in it.
     ///
@@ -136,6 +138,9 @@ pub struct BodySurfaceMaterial {
     pub growth: Handle<Image>,
     #[texture(11, dimension = "cube", visibility(fragment))]
     pub sand: Handle<Image>,
+    /// The ground's relief, single-channel, for `reflected.w` to light.
+    #[texture(12, dimension = "cube", visibility(fragment))]
+    pub height: Handle<Image>,
 }
 
 impl Material for BodySurfaceMaterial {

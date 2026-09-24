@@ -8,7 +8,9 @@
 //!
 //! A rocky world with air -- anything [`lc_world::climate`] has a climate for -- takes the
 //! manifest's `[rocky]` graphs instead, with the graph's parameters bound from its climate: one
-//! graph for Earth, Mars and every world the generator makes between and beyond them.
+//! graph for Earth, Mars and every world the generator makes between and beyond them. A rocky
+//! world without air takes `[airless]`'s the same way, from [`lc_world::airless`], and its
+//! [`RELIEF`] layer is baked too so body_surface.wgsl can light its craters.
 //!
 //! A cloud deck's [`WEATHER`] is rebaked every [`CLOUD_PERIOD_S`] with a new seed and blended
 //! in body_surface.wgsl; its [`CLIMATE`] is baked once. Keyframes follow coordinate time, so
@@ -21,9 +23,11 @@ use bevy::asset::io::Reader;
 use bevy::asset::{AssetLoader, LoadContext, LoadState};
 use bevy::prelude::*;
 use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
+use lc_world::airless::Airless;
 use lc_world::climate::Climate;
 use lc_world::surface::Surface;
 use serde::Deserialize;
+use texture_graph_gpu::ScalarFormat;
 use texture_graph_core::ParamValue;
 use texture_graph_core::color::oklcha;
 
@@ -43,6 +47,13 @@ pub const COLOR_FACE: u32 = 1024;
 const WEATHER: Target = Target::new(Shape::Cube(COLOR_FACE)).layer("zonal");
 
 const CLIMATE: Target = Target::new(Shape::Cube(64)).layer("drive term 1");
+
+/// airless.tgraph's relief about zero, where a byte would lose all but the largest craters.
+const RELIEF: Target = Target::new(Shape::Cube(COLOR_FACE)).layer("height").format(ScalarFormat::R16Float);
+
+/// airless.tgraph's heights per unit of its sample space, in which the sphere's radius is a half:
+/// the `relief` of its Craters nodes, which a test holds it to.
+pub const RELIEF_SCALE: f32 = 8.0;
 
 /// [`WEATHER`]'s mean over the sphere, measured; it varies about half a percent by seed.
 const WEATHER_MEAN: f32 = 0.556;
@@ -64,6 +75,7 @@ pub struct SurfaceManifest {
     #[serde(default)]
     pub clouds: HashMap<String, String>,
     pub rocky: Option<Rocky>,
+    pub airless: Option<Bare>,
 }
 
 /// The graphs every rocky world with air is drawn from.
@@ -71,6 +83,20 @@ pub struct SurfaceManifest {
 pub struct Rocky {
     pub ground: String,
     pub clouds: String,
+}
+
+/// The graph every rocky world without air is drawn from.
+#[derive(Debug, Deserialize)]
+pub struct Bare {
+    pub ground: String,
+}
+
+/// Which of a body's descriptions it is painted from, before the manifest has its say.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Paint {
+    Climate,
+    Airless,
+    Class,
 }
 
 /// The graphs a body is drawn from, as paths under `textures/`.
@@ -87,13 +113,21 @@ pub enum Ground<'a> {
 }
 
 impl SurfaceManifest {
-    /// A body named in the manifest takes its own graphs over anything a climate would give it.
-    pub fn look_for(&self, name: &str, class: Surface, climate: bool) -> Option<Look<'_>> {
-        if let (Some(rocky), true, false) = (&self.rocky, climate, self.bodies.contains_key(name)) {
-            return Some(Look {
-                ground: Ground::Color(&rocky.ground),
-                clouds: Some(&rocky.clouds),
-            });
+    /// A body named in the manifest takes its own graphs over anything its paint would give it.
+    pub fn look_for(&self, name: &str, class: Surface, paint: Paint) -> Option<Look<'_>> {
+        if !self.bodies.contains_key(name) {
+            match (paint, &self.rocky, &self.airless) {
+                (Paint::Climate, Some(rocky), _) => {
+                    return Some(Look {
+                        ground: Ground::Color(&rocky.ground),
+                        clouds: Some(&rocky.clouds),
+                    });
+                }
+                (Paint::Airless, _, Some(bare)) => {
+                    return Some(Look { ground: Ground::Color(&bare.ground), clouds: None });
+                }
+                _ => {}
+            }
         }
         let ground = match self.bodies.get(name) {
             Some(path) => Ground::Color(path),
@@ -163,6 +197,8 @@ pub struct BodyImages {
     pub climate: Handle<Image>,
     /// [`MASKS`], in order.
     pub masks: [Handle<Image>; 4],
+    /// [`RELIEF`]: flat until an airless world's lands.
+    pub height: Handle<Image>,
 }
 
 impl BodyImages {
@@ -174,6 +210,7 @@ impl BodyImages {
             weather: std::array::from_fn(|_| images.add(placeholder(WEATHER))),
             climate: images.add(placeholder(CLIMATE)),
             masks: std::array::from_fn(|_| images.add(placeholder(cube))),
+            height: images.add(placeholder(Target::new(Shape::Cube(1)).format(ScalarFormat::R16Float))),
         }
     }
 
@@ -192,6 +229,7 @@ impl BodyImages {
             weather_1,
             weather_2,
             climate: self.climate.clone(),
+            height: self.height.clone(),
         }
     }
 }
@@ -204,6 +242,8 @@ pub struct Drawn {
     pub clouds: bool,
     /// Whether the [`MASKS`] are baked, so each band can see its own ground.
     pub grounds: bool,
+    /// Whether [`RELIEF`] is baked, so the ground is lit by its own slopes.
+    pub relief: bool,
 }
 
 /// rocky.tgraph's layers that say what its ground is made of, as body_surface.wgsl's `banded`
@@ -228,6 +268,7 @@ struct Body {
     images: BodyImages,
     class: Surface,
     climate: Option<Climate>,
+    airless: Option<Airless>,
     /// `None` until the manifest has said.
     drawn: Option<Drawn>,
     deck: Option<Deck>,
@@ -262,6 +303,7 @@ impl Surfaces {
         name: &str,
         class: Surface,
         climate: Option<Climate>,
+        airless: Option<Airless>,
         images: &mut Assets<Image>,
     ) -> BodyImages {
         self.by_body
@@ -270,6 +312,7 @@ impl Surfaces {
                 images: BodyImages::placeholders(images),
                 class,
                 climate,
+                airless,
                 drawn: None,
                 deck: None,
             })
@@ -283,7 +326,9 @@ impl Surfaces {
         let Some(body) = self.by_body.get(name) else { return true };
         let Some(drawn) = body.drawn else { return false };
         let ground = if drawn.color { &body.images.color } else { &body.images.pattern };
-        bakes.settled(ground) && (!drawn.clouds || bakes.settled(&body.images.climate))
+        bakes.settled(ground)
+            && (!drawn.clouds || bakes.settled(&body.images.climate))
+            && (!drawn.relief || bakes.settled(&body.images.height))
     }
 
     pub fn drawn(&self, name: &str) -> Drawn {
@@ -387,25 +432,33 @@ fn route(
         return;
     };
     for (name, body) in surfaces.by_body.iter_mut().filter(|(_, b)| b.drawn.is_none()) {
-        let Some(look) = manifest.look_for(name, body.class, body.climate.is_some()) else {
+        let paint = match (body.climate, body.airless) {
+            (Some(_), _) => Paint::Climate,
+            (None, Some(_)) => Paint::Airless,
+            (None, None) => Paint::Class,
+        };
+        let Some(look) = manifest.look_for(name, body.class, paint) else {
             warn!("no surface graph for {name} or its class, {:?}", body.class);
             body.drawn = Some(Drawn::default());
             continue;
         };
         let seed = seed_of(name);
         let graph = |path: &str| assets.load(format!("textures/{path}"));
-        let params = match (&manifest.rocky, body.climate) {
-            (Some(rocky), Some(climate)) if matches!(look.ground, Ground::Color(p) if p == rocky.ground) => {
-                ground_params(&climate)
-            }
-            _ => Params::new(),
+        let chosen = |path: &str| matches!(look.ground, Ground::Color(p) if p == path);
+        let (params, relief) = match (&manifest.rocky, body.climate, &manifest.airless, body.airless) {
+            (Some(rocky), Some(climate), ..) if chosen(&rocky.ground) => (ground_params(&climate), false),
+            (_, _, Some(bare), Some(airless)) if chosen(&bare.ground) => (airless_params(&airless), true),
+            _ => (Params::new(), false),
         };
         let mut bake = |path: &str, target, image: &Handle<Image>, params: Params| {
             bakes.request_with(graph(path), seed, params, target, image.clone());
         };
         let pattern = Target::new(Shape::Cube(FACE));
         let color = Target::new(Shape::Cube(COLOR_FACE)).color();
-        let grounds = !params.is_empty();
+        let grounds = !params.is_empty() && !relief;
+        if let (Ground::Color(path), true) = (&look.ground, relief) {
+            bake(path, RELIEF, &body.images.height, params.clone());
+        }
         if let (Ground::Color(path), true) = (&look.ground, grounds) {
             for (layer, image) in MASKS.into_iter().zip(&body.images.masks) {
                 bake(path, pattern.layer(layer), image, params.clone());
@@ -427,6 +480,7 @@ fn route(
             color: matches!(look.ground, Ground::Color(_)),
             clouds: look.clouds.is_some(),
             grounds,
+            relief,
         });
     }
 }
@@ -503,6 +557,46 @@ fn ground_params(c: &Climate) -> Params {
         ("dark", scalar(c.dark)),
         ("foliage", color(c.foliage.low)),
         ("foliage high", color(c.foliage.high)),
+    ]
+}
+
+/// The share of airless.tgraph's surface its lava floods across its `maria` parameter,
+/// measured like [`SEA_LEVELS`]; `the_maria_cover_what_the_table_says`.
+const MARIA_LEVELS: [(f32, f32); 14] = [
+    (0.10, 0.0),
+    (0.15, 0.0),
+    (0.20, 0.003),
+    (0.25, 0.018),
+    (0.30, 0.052),
+    (0.35, 0.108),
+    (0.40, 0.219),
+    (0.45, 0.398),
+    (0.50, 0.569),
+    (0.55, 0.723),
+    (0.60, 0.833),
+    (0.65, 0.912),
+    (0.70, 0.97),
+    (0.80, 1.0),
+];
+
+/// airless.tgraph's parameters, from what the world is.
+fn airless_params(a: &Airless) -> Params {
+    let scalar = ParamValue::Scalar;
+    let color = |[l, c, h]: [f32; 3]| ParamValue::Color(oklcha(l, c, h, 1.0));
+    let [ancient, later, fresh] = a.craters;
+    let maria = match a.maria {
+        s if s <= 0.0 => 0.0,
+        s => level(&MARIA_LEVELS, s),
+    };
+    vec![
+        ("ancient craters", scalar(ancient)),
+        ("later craters", scalar(later)),
+        ("fresh craters", scalar(fresh)),
+        ("maria", scalar(maria)),
+        ("rays", scalar(a.rays)),
+        ("highland", color(a.highland)),
+        ("mare", color(a.mare)),
+        ("ejecta", color(a.ejecta)),
     ]
 }
 
@@ -612,6 +706,12 @@ mod tests {
                 .bake_scalar_cube(&ground, layer, 8, ScalarFormat::R8Unorm, &eval)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
         }
+        let bare = graph(&manifest.airless.as_ref().expect("airless worlds are routed").ground);
+        baker.bake_color_cube(&bare, 8, &eval).unwrap_or_else(|e| panic!("airless: {e}"));
+        let height = bare.layers.iter().find(|l| Some(l.name.as_str()) == RELIEF.layer).expect("a height layer").id;
+        baker
+            .bake_scalar_cube(&bare, height, 8, ScalarFormat::R16Float, &eval)
+            .unwrap_or_else(|e| panic!("airless height: {e}"));
         for path in manifest.clouds.values().chain([&rocky.clouds]) {
             let g = graph(path);
             for name in [WEATHER.layer, CLIMATE.layer].map(Option::unwrap) {
@@ -791,31 +891,40 @@ mod tests {
             [rocky]
             ground = "worlds/rocky.tgraph"
             clouds = "worlds/clouds.tgraph"
+            [airless]
+            ground = "worlds/airless.tgraph"
             "#,
         )
         .unwrap();
         assert_eq!(
-            manifest.look_for("Kettle e", Surface::Weathered, true),
+            manifest.look_for("Kettle e", Surface::Weathered, Paint::Climate),
             Some(Look {
                 ground: Ground::Color("worlds/rocky.tgraph"),
                 clouds: Some("worlds/clouds.tgraph"),
             })
         );
         assert_eq!(
-            manifest.look_for("Earth", Surface::Weathered, true),
+            manifest.look_for("Earth", Surface::Weathered, Paint::Climate),
             Some(Look {
                 ground: Ground::Color("worlds/earthlike.tgraph"),
                 clouds: Some("worlds/earthlike-clouds.tgraph"),
             })
         );
         assert_eq!(
-            manifest.look_for("Mercury", Surface::Weathered, false),
+            manifest.look_for("Mercury", Surface::Weathered, Paint::Airless),
+            Some(Look {
+                ground: Ground::Color("worlds/airless.tgraph"),
+                clouds: None,
+            })
+        );
+        assert_eq!(
+            manifest.look_for("Europa", Surface::Weathered, Paint::Class),
             Some(Look {
                 ground: Ground::Pattern("surfaces/weathered.tgraph"),
                 clouds: None,
             })
         );
-        assert_eq!(manifest.look_for("Mercury", Surface::Rock, false), None);
+        assert_eq!(manifest.look_for("Europa", Surface::Ice, Paint::Class), None);
     }
 
     /// The share of rocky.tgraph's surface where `layer` is above a half, with `name` bound to
@@ -868,5 +977,27 @@ mod tests {
         assert_eq!(share(&g, "ice", "ice", ice_level(0.0)), 0.0, "no ice is none");
         assert_eq!(share(&g, "ice", "ice", ice_level(1.0)), 1.0, "all ice is all");
     }
-}
 
+    #[test]
+    fn the_maria_cover_what_the_table_says() {
+        let g = graph(&manifest().airless.unwrap().ground);
+        holds(&MARIA_LEVELS, |maria| share(&g, "mare", "maria", maria), |share| level(&MARIA_LEVELS, share));
+    }
+
+    /// The shader turns the height into slopes with [`RELIEF_SCALE`], so every series of
+    /// craters in the graph must be drawn at it.
+    #[test]
+    fn the_relief_is_drawn_at_the_scale_the_shader_assumes() {
+        let g = graph(&manifest().airless.unwrap().ground);
+        let mut series = 0;
+        for layer in &g.layers {
+            if let texture_graph_core::LayerKind::Craters(c) = &layer.kind {
+                if c.output == texture_graph_core::CraterOutput::Height {
+                    assert_eq!(c.relief, RELIEF_SCALE, "{}", layer.name);
+                    series += 1;
+                }
+            }
+        }
+        assert_eq!(series, 3);
+    }
+}

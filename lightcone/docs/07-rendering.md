@@ -552,6 +552,29 @@ the camera in.
 
 ![A smattering of generated worlds](../images/rocky-worlds.png)
 
+**Every airless rocky world is one graph too.** `worlds/airless.tgraph` draws a surface that is a
+record of impacts, and nothing else. It is three series of craters, made with texture-graph's
+`Craters` node, each a node that takes the one before as its `under` and overprints it: an
+ancient series that saturates any old surface; a flood of dark lava that pools in the lowest
+ground, which is the old basins' floors, filling their craters to a level and leaving the rims
+standing as ghosts; a later series that lands on the maria too; and a fresh series whose ejecta
+and rays have not yet darkened. A crater erases what it lands on inside its rim, and less across
+its blanket, so a later series genuinely wipes out an earlier one rather than adding to it.
+`lc_world::airless` binds the parameters per body: each series' density, the maria's share,
+how bright the rays are, and the colors of highland, mare and ejecta. The maria need heat, so
+their share grows with the radius from nothing under 800 km. Luna, Mercury and Io are measured;
+Io is sulfur plains and volcanic centers with not a crater on it. `MARIA_LEVELS` carries the
+maria's parameter to their share the way `SEA_LEVELS` does the sea's.
+
+**An airless world is lit by its own slopes.** Craters are relief, and relief only shows at the
+terminator, so the graph's `height` layer, the relief about zero, is baked beside the color into
+a 1024² half-float cubemap: a byte would keep only the largest craters. The shader takes a
+finite difference east and north on the body-fixed sphere and tilts the Lambert normal by it.
+`RELIEF_SCALE` is the graph's heights per unit of its sample space, and a test holds every series
+in the graph to it; `BUMP` in `resolved.rs` draws the relief at its true slopes, which are already
+a fresh crater's rather than a worn one's. Every other body binds a flat placeholder and a zero
+slope, and its shading is what it was.
+
 **A cloud deck evolves.** Its graph is not baked in color. Its weather, the `zonal` layer, is
 baked again every two game days with a new seed, one byte a texel into one of three 1024² slots;
 its belts, the `drive term 1` layer, are baked once. The shader blends two neighboring keyframes

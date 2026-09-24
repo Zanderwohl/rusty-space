@@ -46,9 +46,11 @@ pub struct DevEntry {
     /// The angle `--at` stands at between the star and itself, seen from the body, degrees.
     /// Past ninety it is looking at the night side.
     pub phase_deg: Option<f64>,
-    /// Dress the `--at` body in the climate of a generated planet, by its name: `--wear "Wolf 359
+    /// Dress the `--at` body in the paint of a generated planet, by its name: `--wear "Wolf 359
     /// c"`. Its surface, clouds and air are derived exactly as that planet's would be; only the
     /// sphere they are drawn on is borrowed. A generated system is otherwise a crossing away.
+    /// On an airless body a name no planet has is a seed instead: another member of the class,
+    /// on the same sphere.
     pub wear: Option<String>,
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
@@ -242,9 +244,15 @@ pub(crate) fn run_dev_actions(
     }
 }
 
-/// The climate a generated planet named `name` has, under its own star, from the stars whose
-/// name it begins with.
-fn generated_climate(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<lc_world::climate::Climate> {
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Worn {
+    Climate(lc_world::climate::Climate),
+    Airless(lc_world::airless::Airless),
+}
+
+/// The paint a generated planet named `name` has, under its own star, from the stars whose name
+/// it begins with.
+fn generated_paint(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<Worn> {
     use lc_world::climate::{Inputs, derived, variety};
     stars
         .iter()
@@ -259,7 +267,12 @@ fn generated_climate(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option
                 life: Some(p.life),
                 star_teff_k: s.star.teff_k,
             };
-            derived(&inputs, variety(&p.name))
+            if let Some(climate) = derived(&inputs, variety(&p.name)) {
+                return Some(Worn::Climate(climate));
+            }
+            let bare = (p.atmosphere, p.top) == (lc_world::worlds::Atmosphere::None, lc_world::worlds::Top::Rock);
+            let surface = lc_world::surface::Surface::classify(p.radius_m, p.mass_kg, p.equilibrium_k);
+            bare.then(|| Worn::Airless(lc_world::airless::derived(surface, p.radius_m, variety(&p.name))))
         })
 }
 
@@ -269,20 +282,26 @@ pub(crate) fn dress_worn(
     dev: Res<DevEntry>,
     game: Res<Game>,
     mut bodies: ResMut<crate::starfield::Bodies>,
-    mut worn: Local<Option<Option<lc_world::climate::Climate>>>,
+    mut worn: Local<Option<Option<Worn>>>,
 ) {
     let (Some(name), Some(at)) = (&dev.wear, &dev.at_body) else { return };
-    let climate = *worn.get_or_insert_with(|| {
-        let found = generated_climate(&game.stars, name);
+    let Some(body) = bodies.drawn.iter_mut().find(|d| &d.name == at) else { return };
+    let paint = *worn.get_or_insert_with(|| {
+        let found = generated_paint(&game.stars, name).or_else(|| {
+            body.airless?;
+            let v = lc_world::climate::variety(name);
+            Some(Worn::Airless(lc_world::airless::derived(body.surface, body.radius_m, v)))
+        });
         match &found {
-            Some(c) => info!("wearing {name}: {c:?}"),
-            None => warn!("no generated planet with air is named {name}"),
+            Some(p) => info!("wearing {name}: {p:?}"),
+            None => warn!("no generated planet is named {name}, and {at} is not airless"),
         }
         found
     });
-    let Some(climate) = climate else { return };
-    if let Some(body) = bodies.drawn.iter_mut().find(|d| &d.name == at) {
-        body.climate = Some(climate);
+    match paint {
+        Some(Worn::Climate(c)) => (body.climate, body.airless) = (Some(c), None),
+        Some(Worn::Airless(a)) => (body.climate, body.airless) = (None, Some(a)),
+        None => {}
     }
 }
 
