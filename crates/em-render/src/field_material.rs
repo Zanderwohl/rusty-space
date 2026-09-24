@@ -28,12 +28,13 @@ pub const HOT_SPOTS: usize = 4;
 /// Temperatures in [`FieldUniform::spectrum`], log-spaced from [`RAMP_MIN_K`] to [`RAMP_MAX_K`].
 pub const RAMP: usize = 32;
 
-/// Below any field that is not dead.
-pub const RAMP_MIN_K: f32 = 100.0;
+/// Below any field that is not dead. Whole kelvin, because the shader is handed it as a
+/// shader def and those are integers.
+pub const RAMP_MIN_K: u32 = 100;
 
 /// A collapse's spike is far hotter than this; in any optical or infrared band it is on the
 /// Rayleigh-Jeans side already, so its color has stopped changing.
-pub const RAMP_MAX_K: f32 = 1.0e6;
+pub const RAMP_MAX_K: u32 = 1_000_000;
 
 /// Mode values in [`FieldUniform::mode`].
 pub const CLEAR: f32 = 0.0;
@@ -42,7 +43,8 @@ pub const BLACK: f32 = 1.0;
 /// The temperature at ramp entry `i`, kelvin.
 pub fn ramp_kelvin(i: usize) -> f32 {
     let t = i as f32 / (RAMP - 1) as f32;
-    (RAMP_MIN_K.ln() + t * (RAMP_MAX_K.ln() - RAMP_MIN_K.ln())).exp()
+    let (lo, hi) = ((RAMP_MIN_K as f32).ln(), (RAMP_MAX_K as f32).ln());
+    (lo + t * (hi - lo)).exp()
 }
 
 /// One ramp entry from linear display light: `log2` per channel.
@@ -84,6 +86,10 @@ pub struct FieldUniform {
     pub hot_spots: [Vec4; HOT_SPOTS],
     /// `(since_s, flash_s, afterglow_s, reach)`. `since_s` negative is a field still standing.
     ///
+    /// **Real seconds**, like `clock_s`: a flash counted in game seconds is over before a frame
+    /// is drawn. The host converts the afterglow's game duration and picks a flash long enough
+    /// to see.
+    ///
     /// The envelope turns into a sphere of debris that grows to `reach` times its size by the
     /// end of the afterglow, and is gone after it.
     pub collapse: Vec4,
@@ -92,23 +98,6 @@ pub struct FieldUniform {
     pub collapse_k: Vec4,
     /// A blackbody at each [`ramp_kelvin`], through the host's bands: see [`ramp_entry`].
     pub spectrum: [Vec4; RAMP],
-}
-
-impl Default for FieldUniform {
-    fn default() -> Self {
-        Self {
-            state: Vec4::new(400.0, 0.0, 0.3, 0.0),
-            mode: Vec4::new(CLEAR, CLEAR, 1.0, 1.0),
-            origin: Vec4::ZERO,
-            to_star: Vec4::Z,
-            starlight: Vec4::ZERO,
-            exposure: Vec4::new(1.0, 5.0, 0.25, 0.0),
-            hot_spots: [Vec4::ZERO; HOT_SPOTS],
-            collapse: Vec4::new(-1.0, 0.5, 30.0, 4.0),
-            collapse_k: Vec4::new(1.0e6, 4600.0, 1.0, 0.0),
-            spectrum: [Vec4::splat(-1000.0); RAMP],
-        }
-    }
 }
 
 /// Which of the three draws a material is. Their order is the order they are drawn in.
@@ -197,12 +186,20 @@ impl Material for FieldMaterial {
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
             depth_stencil.depth_write_enabled = Some(false);
         }
-        let layer = key.bind_group_data.layer as u8 as u32;
-        // Both stages: they are one file, and the preprocessor refuses an undefined name.
-        let def = ShaderDefVal::UInt("FIELD_LAYER".into(), layer);
-        descriptor.vertex.shader_defs.push(def.clone());
+        // The sizes and bounds the shader shares with this file, handed over rather than
+        // mirrored: a ramp bound that drifted would look every temperature up in the wrong place
+        // and nothing would say so. Both stages, since they are one file and the preprocessor
+        // refuses an undefined name.
+        let defs = [
+            ShaderDefVal::UInt("FIELD_LAYER".into(), key.bind_group_data.layer as u8 as u32),
+            ShaderDefVal::UInt("HOT_SPOTS".into(), HOT_SPOTS as u32),
+            ShaderDefVal::UInt("RAMP".into(), RAMP as u32),
+            ShaderDefVal::UInt("RAMP_MIN_K".into(), RAMP_MIN_K),
+            ShaderDefVal::UInt("RAMP_MAX_K".into(), RAMP_MAX_K),
+        ];
+        descriptor.vertex.shader_defs.extend(defs.iter().cloned());
         if let Some(fragment) = descriptor.fragment.as_mut() {
-            fragment.shader_defs.push(def);
+            fragment.shader_defs.extend(defs);
         }
         Ok(())
     }
@@ -222,13 +219,25 @@ mod tests {
 
     #[test]
     fn the_ramp_spans_its_ends() {
-        assert!((ramp_kelvin(0) - RAMP_MIN_K).abs() < 1e-3);
-        assert!((ramp_kelvin(RAMP - 1) / RAMP_MAX_K - 1.0).abs() < 1e-4);
+        assert!((ramp_kelvin(0) - RAMP_MIN_K as f32).abs() < 1e-3);
+        assert!((ramp_kelvin(RAMP - 1) / RAMP_MAX_K as f32 - 1.0).abs() < 1e-4);
     }
 
     #[test]
     fn the_layers_sort_far_to_near() {
-        let [far, inner, near] = FieldMaterial::layers(FieldUniform::default(), 100.0);
+        let uniforms = FieldUniform {
+            state: Vec4::ZERO,
+            mode: Vec4::ZERO,
+            origin: Vec4::ZERO,
+            to_star: Vec4::Z,
+            starlight: Vec4::ZERO,
+            exposure: Vec4::ZERO,
+            hot_spots: [Vec4::ZERO; HOT_SPOTS],
+            collapse: Vec4::NEG_ONE,
+            collapse_k: Vec4::ZERO,
+            spectrum: [Vec4::ZERO; RAMP],
+        };
+        let [far, inner, near] = FieldMaterial::layers(uniforms, 100.0);
         assert!(far.depth_bias() < inner.depth_bias());
         assert!(inner.depth_bias() < near.depth_bias());
     }

@@ -168,11 +168,23 @@ surface across the envelope over `field_switch_s`, from the Mind outward.
 | past 80% of `Q_max` | the glow goes uneven and begins to flicker, faster as it nears the limit |
 | collapse | below |
 
+![A field at 400, 2 400 and 4 600 K, Clear left and Black right](../images/field-temperatures.png)
+
+At 400 K the glow is nothing in the visible: Clear shows the ship and the world behind it through
+the sheen, and Black is a hole in the world. At 2 400 K it is red-orange, Clear's limb the brighter.
+At 4 600 K it is the brightest thing in the frame, and uneven.
+
+![Four consecutive frames of a field at its limit](../images/field-flicker.png)
+
+![A beam's hot spot, and a switch from Clear to Black half swept from the Mind](../images/field-beams-and-switch.png)
+
 **Collapse** is a white flash and a sphere of hot debris expanding and cooling through the colors
 of the afterglow over `collapse_afterglow_s`. Nearby fields brighten when the spike lands on them,
 each at its own retarded time, so a cascade is seen spreading at c. From a distance, a collapse is
 drawn by the photometry: a new point in the sky, as bright as [30-the-field.md](30-the-field.md)
 says.
+
+![A collapse: the flash, then the debris at 40, 180 and 270 s of a 300 s afterglow](../images/field-collapse.png)
 
 ## Beams and plumes
 

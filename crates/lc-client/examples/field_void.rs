@@ -13,23 +13,28 @@
 //! |---|---|
 //! | `--field-k <kelvin>` | the field's temperature; 400 by default |
 //! | `--mode clear\|black` | the field's mode |
-//! | `--fill <fraction>` | heat over the limit; by default `(T / LIMIT_K)⁴`, since heat goes as `T⁴` |
-//! | `--spot <strength>` | one beam's hot spot, from the upper left, as a multiple of the field's own power |
+//! | `--fill <fraction>` | heat over the limit; by default `(T / LIMIT_K)⁴`, heat going as `T⁴` |
+//! | `--spot <strength>` | a beam's hot spot from the upper left, as a multiple of the field's power |
 //! | `--switch <progress>` | a switch into `--mode` from the other, frozen at this progress |
-//! | `--collapse <seconds>` | the field collapsed this long ago; `--afterglow <s>` sets how long the afterglow runs |
+//! | `--collapse <seconds>` | the field collapsed this long ago, in real seconds |
+//! | `--afterglow <seconds>` | how long the afterglow runs; 300 by default |
 //! | `--au <distance>` | from a Sun-like star; 1 by default |
 //! | `--mapping <name>` | one of `em_spectra::presets::all()` |
 //! | `--yaw <deg>` | turn the ship |
-//! | `--shot <path> --frames <n> --burst <n>` | photograph `n` consecutive frames after `--frames`, as the client does |
+//! | `--shot <path> --frames <n> --burst <n>` | as the client: `n` consecutive frames after `--frames` |
 
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
+use bevy::render::render_resource::{
+    Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+};
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-use bevy::asset::RenderAssetUsages;
-use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceMaterialPlugin, BodySurfaceUniform};
+use em_render::body_surface_material::{
+    BodySurfaceMaterial, BodySurfaceMaterialPlugin, BodySurfaceUniform,
+};
 use em_render::field_material::{
     BLACK, CLEAR, FieldMaterial, FieldMaterialPlugin, FieldUniform, RAMP, ramp_entry, ramp_kelvin,
 };
@@ -87,7 +92,9 @@ impl Args {
         let value = |flag: &str| {
             args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
         };
-        let number = |flag: &str| value(flag).map(|v| v.parse::<f64>().unwrap_or_else(|_| panic!("{flag} {v}")));
+        let number = |flag: &str| {
+            value(flag).map(|v| v.parse::<f64>().unwrap_or_else(|_| panic!("{flag} {v}")))
+        };
         let mapping = value("--mapping").map_or_else(presets::natural, |name| {
             presets::all()
                 .into_iter()
@@ -107,7 +114,9 @@ impl Args {
             spot: number("--spot").unwrap_or(0.0) as f32,
             switch: number("--switch").map(|p| p as f32),
             collapse: number("--collapse").map(|s| s as f32),
-            afterglow: number("--afterglow").unwrap_or(30.0) as f32,
+            // 30-the-field.md's `collapse_afterglow_s` is thirty game days, about 300 s at the
+            // design rate.
+            afterglow: number("--afterglow").unwrap_or(300.0) as f32,
             au: number("--au").unwrap_or(1.0),
             mapping,
             yaw: number("--yaw").unwrap_or(0.0) as f32,
@@ -232,7 +241,9 @@ fn stage(
     let own_rgb = mapped(&args.mapping, &own);
     let hull_lum = luminance(std::array::from_fn(|c| lit_rgb[c] + own_rgb[c]));
 
-    let sr = |radius: f32, distance: f32| std::f64::consts::PI * (radius as f64 / distance as f64).powi(2);
+    let sr = |radius: f32, distance: f32| {
+        std::f64::consts::PI * (radius as f64 / distance as f64).powi(2)
+    };
     let envelope = envelope_extents();
     let mut samples = [
         (hull_lum, sr(hull_extents().z * 0.6, CAMERA_M)),
@@ -242,7 +253,9 @@ fn stage(
     let reference = meter(&mut samples);
     let stops = 5.0;
 
-    let spectrum = std::array::from_fn(|i| ramp_entry(mapped(&args.mapping, &planck(ramp_kelvin(i) as f64))));
+    let spectrum = std::array::from_fn(|i| {
+        ramp_entry(mapped(&args.mapping, &planck(ramp_kelvin(i) as f64)))
+    });
     let lighting = Lighting {
         to_star,
         starlight: Vec3::from_array(white.map(|c| c as f32)),
@@ -298,13 +311,14 @@ fn stage(
     }
     commands.insert_resource(lighting);
 
+    let standoff = if args.collapse.is_some() { 5.0 } else { 1.0 };
     commands.spawn((
         Camera3d::default(),
         Hdr,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
         // Stood back for a collapse, which grows past where the camera otherwise is.
-        Transform::from_translation(CAMERA_DIR.normalize() * CAMERA_M * if args.collapse.is_some() { 5.0 } else { 1.0 })
+        Transform::from_translation(CAMERA_DIR.normalize() * CAMERA_M * standoff)
             .looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }

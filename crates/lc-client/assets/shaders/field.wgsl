@@ -41,12 +41,11 @@ struct FieldUniform {
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: FieldUniform;
 
 const LUMA = vec3<f32>(0.2126, 0.7152, 0.0722);
-// Mirrored by em_render::field_material::{HOT_SPOTS, RAMP}.
-const HOT_SPOTS: i32 = 4;
-const RAMP: i32 = 32;
-// Mirrored by em_render::field_material::{RAMP_MIN_K, RAMP_MAX_K}.
-const RAMP_MIN_K: f32 = 100.0;
-const RAMP_MAX_K: f32 = 1.0e6;
+// Handed over as shader defs by em_render::field_material, which owns them.
+const HOT_SPOTS: i32 = #{HOT_SPOTS};
+const RAMP: i32 = #{RAMP};
+const RAMP_MIN_K: f32 = f32(#{RAMP_MIN_K});
+const RAMP_MAX_K: f32 = f32(#{RAMP_MAX_K});
 const TAU: f32 = 6.2831853;
 
 // The fill past which the field goes uneven; 30-the-field.md's 80%.
@@ -91,7 +90,9 @@ fn value_noise(p: vec3<f32>) -> f32 {
 }
 
 fn fbm(p: vec3<f32>) -> f32 {
-    return 0.55 * value_noise(p) + 0.3 * value_noise(p * 2.03 + 17.0) + 0.15 * value_noise(p * 4.1 + 41.0);
+    return 0.55 * value_noise(p)
+        + 0.3 * value_noise(p * 2.03 + 17.0)
+        + 0.15 * value_noise(p * 4.1 + 41.0);
 }
 
 /// A blackbody at `kelvin` through the host's bands, linear display light.
@@ -147,7 +148,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         normal = normalize(mix(normal, dir, rounding));
     }
     let world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
-    let world = mesh_functions::mesh_position_local_to_world(world_from_local, vec4<f32>(local, 1.0));
+    let world = mesh_functions::mesh_position_local_to_world(
+        world_from_local,
+        vec4<f32>(local, 1.0),
+    );
     out.clip_position = position_world_to_clip(world.xyz);
     out.world_position = world.xyz;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(normal, vertex.instance_index);
@@ -232,7 +236,9 @@ fn film(local: vec3<f32>, mu: f32) -> vec3<f32> {
     let cos_t = sqrt(max(1.0 - sin_i2 / (FILM_INDEX * FILM_INDEX), 0.0));
     let path = 2.0 * FILM_INDEX * thickness * cos_t;
     let lambda = vec3<f32>(610.0, 550.0, 465.0);
-    let s = sin(TAU * path / lambda);
+    // The two reflections differ by a half wave, so reflectance goes as sin² of half the
+    // round-trip phase.
+    let s = sin(0.5 * TAU * path / lambda);
     return 2.0 * s * s;
 }
 
