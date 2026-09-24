@@ -61,6 +61,9 @@ pub struct DevEntry {
     /// second reason it survived the phase that stopped calling it. The charting office kept as
     /// a dev tool.
     pub charted: bool,
+    /// Hold the beauty shots on one kind of subject, by [`crate::beauty::Subject::kind`], so
+    /// a run photographs the one being looked at rather than whichever the rotation is on.
+    pub beauty_kind: Option<String>,
     /// What the map's camera is to hold onto, written every frame like the rest of the pin.
     pub map_focus: Option<WantedFocus>,
 

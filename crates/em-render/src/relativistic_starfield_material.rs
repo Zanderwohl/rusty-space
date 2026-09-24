@@ -98,6 +98,10 @@ pub struct RelativisticStarfieldUniform {
     pub log_t_min: f32,
     pub log_t_scale: f32,
     pub lut_samples: f32,
+    /// The radians per physical pixel the radii above were converted at. A view drawing at a
+    /// different scale — a telescope's narrow field — rescales them by its own, so a star is
+    /// the same number of pixels in every view. Zero leaves the radii as they are.
+    pub drawn_rad_per_px: f32,
 }
 
 /// How far a corona reaches, in stellar radii.
@@ -141,6 +145,7 @@ impl Default for RelativisticStarfieldUniform {
             log_t_min: 0.0,
             log_t_scale: 1.0,
             lut_samples: 1.0,
+            drawn_rad_per_px: 0.0,
         }
     }
 }

@@ -8,7 +8,7 @@
 //! A resolved body is a sphere instead, with a generated surface and a real terminator. The
 //! crossover is angular: past a few pixels the disc is drawn, below it the point is.
 
-use bevy::camera::visibility::NoFrustumCulling;
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
 use em_render::atmosphere_material::{AtmosphereMaterial, AtmosphereUniform, TOP_HEIGHTS};
 use em_render::body_surface_material::{BANDS, BodySurfaceMaterial, BodySurfaceUniform, GROUNDS};
@@ -47,9 +47,9 @@ const INVERSION: f32 = 0.3;
 #[derive(Component)]
 pub struct ResolvedBody(pub String);
 
-/// The shell a resolved body's air is drawn on, a child of its sphere.
+/// The shell a resolved body's air is drawn on, and that child of the sphere.
 #[derive(Component)]
-pub struct ResolvedAir(pub Handle<AtmosphereMaterial>);
+pub struct ResolvedAir(pub Handle<AtmosphereMaterial>, pub Entity);
 
 /// The unit sphere every resolved body shares.
 #[derive(Resource, Default)]
@@ -497,6 +497,32 @@ fn placement(body: &Drawable, eye_ly: DVec3) -> Transform {
     }
 }
 
+/// Where a lit surface sits in its window when a photograph is exposed for it, as a fraction.
+/// Under the top, so a bright cloud deck keeps its structure.
+const SUBJECT_VALUE: f32 = 0.9;
+
+/// The surface reference that puts `radiance`, full on, at [`SUBJECT_VALUE`] of the window.
+pub fn metered_for(tone: &crate::tonemap::ToneMap, radiance: &PerBand<f32>, mapping: &BandMapping)
+    -> f32 {
+    let shaded = tone.shade_surface(radiance, mapping);
+    if !shaded.stops.is_finite() || tone.surface_stops <= 0.0 {
+        return tone.surface_reference;
+    }
+    tone.surface_reference * (shaded.stops + (1.0 - SUBJECT_VALUE) * tone.surface_stops).exp2()
+}
+
+/// Which layer a body's sphere is drawn on, if it has one: the sky's when the sky resolves it,
+/// and otherwise the telescope's alone when the shot being taken does.
+fn sphere_layer(body: &Drawable, eye_ly: DVec3, rad_per_px: f32, shot: &crate::beauty::ShotBody)
+    -> Option<usize> {
+    if is_resolved(body, eye_ly, rad_per_px) {
+        return Some(0);
+    }
+    (shot.name.as_deref() == Some(body.name.as_str())
+        && is_resolved(body, eye_ly, shot.rad_per_px))
+        .then_some(crate::beauty::SHOT_LAYER)
+}
+
 /// Keep a sphere for every body close enough to be one.
 ///
 /// A sphere lives exactly as long as its body stays resolved, and is placed on the frame it is
@@ -514,10 +540,12 @@ pub fn update_resolved(
     mut surfaces: ResMut<crate::surfaces::Surfaces>,
     mut images: ResMut<Assets<Image>>,
     mut bakes: ResMut<crate::procedural::Bakes>,
+    shot: Res<crate::beauty::ShotBody>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut placed: Query<(
         Entity,
         &mut Transform,
+        &mut RenderLayers,
         &MeshMaterial3d<BodySurfaceMaterial>,
         &ResolvedBody,
         Option<&ResolvedAir>,
@@ -533,8 +561,16 @@ pub fn update_resolved(
     let star_ly = system.star_position_ly();
     let (star_radius, star_teff) = (system.star_radius_m(), system.star_teff_k());
     let now_s = session.0.coordinate_time_s();
-    let mut shade = |body: &Drawable, surfaces: &mut crate::surfaces::Surfaces| {
+    // A sphere only the telescope draws is exposed for itself: the sky's exposure was placed for
+    // a point, and the surface's window is logarithmic, so nothing done after it can recover a
+    // disc it clipped.
+    let mut shade = |body: &Drawable, surfaces: &mut crate::surfaces::Surfaces, own: bool| {
         let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
+        let mut tone = session.tone;
+        if own {
+            let radiance = surface_radiance(body, star_radius, star_teff, star_distance);
+            tone.surface_reference = metered_for(&tone, &radiance, &session.0.mapping);
+        }
         let (reflected, emitted) =
             surface_shading(&session.0, body, star_radius, star_teff, star_distance);
         let drawn = surfaces.drawn(&body.name);
@@ -545,25 +581,31 @@ pub fn update_resolved(
             .map(|c| Grounds::of(&session.0.mapping, &star, &c, body.effective_k));
         let air = air_of(body, &session.0.mapping, &star);
         let weather = surfaces.weather(&body.name, now_s, body.radius_m, &mut bakes);
-        uniforms(body, star_ly, &session.tone, reflected, emitted, drawn, ground, air, weather)
+        uniforms(body, star_ly, &tone, reflected, emitted, drawn, ground, air, weather)
     };
 
-    let want: Vec<&Drawable> = bodies
+    let want: Vec<(&Drawable, RenderLayers)> = bodies
         .drawn
         .iter()
-        .filter(|d| is_resolved(d, eye.at_ly, rad_per_px))
+        .filter_map(|d| Some((d, RenderLayers::layer(sphere_layer(d, eye.at_ly, rad_per_px, &shot)?))))
         .collect();
     // Linear searches: only a handful of bodies are ever resolved at once.
     let mut kept: Vec<&str> = Vec::with_capacity(want.len());
-    for (entity, mut transform, material, marker, air) in placed.iter_mut() {
-        let Some(body) = want.iter().find(|d| d.name == marker.0).copied() else {
+    for (entity, mut transform, mut layers, material, marker, air) in placed.iter_mut() {
+        let Some((body, layer)) = want.iter().find(|(d, _)| d.name == marker.0) else {
             commands.entity(entity).despawn();
             continue;
         };
         kept.push(&body.name);
         *transform = placement(body, eye.at_ly);
+        if *layers != *layer {
+            *layers = layer.clone();
+            if let Some(air) = air {
+                commands.entity(air.1).insert(layer.clone());
+            }
+        }
         if let Some(mut asset) = materials.get_mut(&material.0) {
-            let next = shade(body, &mut surfaces);
+            let next = shade(body, &mut surfaces, *layer != RenderLayers::layer(0));
             if let Some(mut shell) = air.and_then(|a| airs.get_mut(&a.0)) {
                 let next = air_uniforms(&next);
                 if shell.uniforms != next {
@@ -576,30 +618,37 @@ pub fn update_resolved(
         }
     }
 
-    for body in want.iter().filter(|d| !kept.contains(&d.name.as_str())) {
+    for (body, layer) in want.iter().filter(|(d, _)| !kept.contains(&d.name.as_str())) {
         let mesh = resolved
             .mesh
             .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
             .clone();
         let own = surfaces.images(&body.name, body.surface, body.climate, &mut images);
-        let uniforms = shade(body, &mut surfaces);
+        let uniforms = shade(body, &mut surfaces, *layer != RenderLayers::layer(0));
         let air = air_uniforms(&uniforms);
-        let mut sphere = commands.spawn((
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(materials.add(own.material(uniforms))),
-            placement(body, eye.at_ly),
-            NoFrustumCulling,
-            ResolvedBody(body.name.clone()),
-        ));
+        let sphere = commands
+            .spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(materials.add(own.material(uniforms))),
+                placement(body, eye.at_ly),
+                NoFrustumCulling,
+                layer.clone(),
+                ResolvedBody(body.name.clone()),
+            ))
+            .id();
         if let Some(climate) = body.climate {
             let shell = airs.add(AtmosphereMaterial { uniforms: air });
-            sphere.insert(ResolvedAir(shell.clone()));
-            sphere.with_child((
-                Mesh3d(mesh),
-                MeshMaterial3d(shell),
-                Transform::from_scale(Vec3::splat(1.0 + TOP_HEIGHTS * climate.air.height)),
-                NoFrustumCulling,
-            ));
+            let child = commands
+                .spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(shell.clone()),
+                    Transform::from_scale(Vec3::splat(1.0 + TOP_HEIGHTS * climate.air.height)),
+                    NoFrustumCulling,
+                    layer.clone(),
+                    ChildOf(sphere),
+                ))
+                .id();
+            commands.entity(sphere).insert(ResolvedAir(shell, child));
         }
     }
 }

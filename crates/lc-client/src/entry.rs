@@ -82,6 +82,9 @@ pub fn parse(args: &[String]) -> Entry {
     if let Some(pages) = value::<i32>(args, "--pages") {
         actions.push(Action::TurnPage(pages));
     }
+    if flag("--beauty") {
+        actions.push(Action::SetBeautyShots(true));
+    }
     if flag("--tune") {
         actions.push(Action::OpenPanel(crate::ui::Panel::Tuning));
     }
@@ -179,6 +182,7 @@ pub fn parse(args: &[String]) -> Entry {
         phase_deg: value(args, "--phase"),
         station: after("--station"),
         charted: flag("--charted"),
+        beauty_kind: after("--beauty-kind"),
         map_camera: after("--map").and_then(|spec| {
             let mut fields = spec.split(':').map(|f| f.parse::<f64>());
             match (fields.next(), fields.next(), fields.next()) {

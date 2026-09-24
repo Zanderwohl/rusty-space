@@ -64,7 +64,7 @@ const LABEL_CLEARANCE_PX: f32 = 6.0;
 /// The corner square's side and its inset from the bottom left, in points. The event log
 /// takes the bottom right with the same inset (`panels.rs`).
 const CORNER_SIDE: f32 = 190.0;
-const CORNER_INSET: f32 = 12.0;
+pub(crate) const CORNER_INSET: f32 = 12.0;
 
 /// The whole of a texture.
 const WHOLE_TEXTURE: egui::Rect =
@@ -351,7 +351,7 @@ fn corner_id() -> egui::Id {
 ///
 /// Shrunk to fit a window too small to hold it. Nothing here may leave the window: the world's
 /// viewport is cut from this.
-fn corner(viewport: egui::Rect) -> egui::Rect {
+pub(crate) fn corner(viewport: egui::Rect) -> egui::Rect {
     let side = CORNER_SIDE
         .min(viewport.width() - 2.0 * CORNER_INSET)
         .min(viewport.height() - 2.0 * CORNER_INSET)
@@ -524,7 +524,7 @@ fn meters_per_point(rect: egui::Rect, view: crate::ui::MapView) -> Option<f32> {
 
 /// The interface's palette, converted at the toolkit boundary. One source, per
 /// `lightcone/docs/18-ui-style.md`.
-fn color_of(color: bevy::prelude::Color) -> egui::Color32 {
+pub(crate) fn color_of(color: bevy::prelude::Color) -> egui::Color32 {
     let rgba = color.to_srgba();
     egui::Color32::from_rgb(
         (rgba.red * 255.0).round().clamp(0.0, 255.0) as u8,

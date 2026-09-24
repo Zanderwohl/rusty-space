@@ -430,6 +430,7 @@ pub fn update_hulls(
             // The same reason a resolved body carries it: these are placed by hand at a
             // scale where a mesh's own bounds say nothing useful about where it lands.
             NoFrustumCulling,
+            bevy::camera::visibility::RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
             Hull(*id),
         ));
     }

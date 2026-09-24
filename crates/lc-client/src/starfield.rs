@@ -472,6 +472,15 @@ pub fn camera_scale(camera: &Query<(&Projection, &Camera), With<crate::app::SkyC
     radians_per_pixel(perspective.fov, height)
 }
 
+/// Radians per *physical* pixel for the sky's camera, which is what a shader can measure a view
+/// against. See `drawn_rad_per_px`.
+pub fn physical_scale(camera: &Query<(&Projection, &Camera), With<crate::app::SkyCamera>>) -> f32 {
+    let Ok((projection, camera)) = camera.single() else { return 0.0 };
+    let Projection::Perspective(perspective) = projection else { return 0.0 };
+    let height = camera.physical_viewport_size().map(|s| s.y as f32).unwrap_or(0.0);
+    radians_per_pixel(perspective.fov, height)
+}
+
 pub fn spawn_sky(
     mut commands: Commands,
     session: Res<crate::app::Game>,
@@ -488,6 +497,7 @@ pub fn spawn_sky(
     }
     let origin_ly = session.ship.motion.position_ly;
     let rad_per_px = camera_scale(&camera);
+    let drawn_rad_per_px = physical_scale(&camera);
     // One table, shared: it is a function of temperature and nothing else.
     let lut = images.add(band_lut());
     let (distant_stars, local_stars) = partition(&session.0);
@@ -496,7 +506,10 @@ pub fn spawn_sky(
         let style = style_for(&ui.0, which);
         // The ship's own position, not the eye's: this runs on entering the world, before
         // anything has placed one, and the boom is corrected on the very next frame anyway.
-        let uniform = uniforms(&session.0, origin_ly, origin_ly, lut_scale(), rad_per_px, style);
+        let uniform = RelativisticStarfieldUniform {
+            drawn_rad_per_px,
+            ..uniforms(&session.0, origin_ly, origin_ly, lut_scale(), rad_per_px, style)
+        };
         let mesh = meshes.add(build_mesh(stars, origin_ly));
         let material = materials.add(RelativisticStarfieldMaterial {
             uniforms: uniform.clone(),
@@ -597,10 +610,14 @@ pub fn update_sky(
     }
 
     let rad_per_px = camera_scale(&camera);
+    let drawn_rad_per_px = physical_scale(&camera);
     let origin = sky.origin_ly;
     for pass in sky.passes() {
         let style = style_for(&ui.0, pass.which);
-        let next = uniforms(&session.0, eye.at_ly, origin, lut_scale(), rad_per_px, style);
+        let next = RelativisticStarfieldUniform {
+            drawn_rad_per_px,
+            ..uniforms(&session.0, eye.at_ly, origin, lut_scale(), rad_per_px, style)
+        };
         if next == pass.sent {
             continue;
         }

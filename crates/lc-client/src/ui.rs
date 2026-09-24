@@ -464,6 +464,8 @@ pub struct UiState {
     pub preset: usize,
     pub integration_s: f64,
     pub god_view: bool,
+    /// See [`crate::beauty`].
+    pub beauty_shots: bool,
     /// Development only; the server owns the rate.
     pub time_rate: f64,
     pub notifications: Vec<Notification>,
@@ -542,6 +544,7 @@ impl Default for UiState {
             preset: 0,
             integration_s: 1.0e4,
             god_view: false,
+            beauty_shots: false,
             time_rate: DESIGN_TIME_RATE,
             notifications: Vec::new(),
             reading: Reading::default(),
