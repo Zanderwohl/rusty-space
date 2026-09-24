@@ -250,7 +250,7 @@ graph LR
 
 ### F2 · Placement
 
-- status: active claude/keen-mendeleev-c6fd09
+- status: done #72
 - needs: F1
 - touches: `crates/lc-world/src/form/place.rs`
 - read: 29 §Placement is relative
