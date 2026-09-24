@@ -72,6 +72,11 @@ const NEIGHBOR_MIN_RAD: f64 = 1.5e-4;
 const MAX_COVERED: f64 = 0.7;
 /// The least of a target's face that must be lit. A crescent passes; a new moon does not.
 const MIN_LIT: f64 = 0.3;
+/// The faintest rings worth a photograph, as the renderer draws them. Uranus's pass; Jupiter's,
+/// which took Voyager to find, do not.
+const MIN_RING_OPACITY: f32 = 0.05;
+/// Within this many of its outer radii of a ring system, a stretch of it gets a shot of its own.
+const RINGSIDE_RADII: f64 = 6.0;
 /// A star's disc is almost never resolved, so this is the patch of sky around it.
 const STAR_FIELD_RAD: f64 = 0.01;
 
@@ -95,6 +100,10 @@ pub enum Subject {
     Destination(DVec3),
     /// The body a survey last measured.
     Surveyed(String),
+    /// A body's rings, framed whole.
+    Rings(String),
+    /// The nearest stretch of a body's rings, across their width.
+    Ringside(String),
     /// A body big on the sky that none of the above is about, picked at random each time.
     Neighbor(String),
     /// The star a stare or a watch is on.
@@ -113,6 +122,8 @@ impl Subject {
             Self::Approach(_) => "approach",
             Self::Destination(_) => "destination",
             Self::Surveyed(_) => "survey",
+            Self::Rings(_) => "rings",
+            Self::Ringside(_) => "ringside",
             Self::Neighbor(_) => "neighbor",
             Self::Star(_) => "star",
             Self::Field { .. } => "field",
@@ -474,6 +485,26 @@ pub fn subjects(session: &Session, drawn: &[Drawable], eye_ly: DVec3, seed: u64)
         }
     }
 
+    for body in drawn {
+        let Some(rings) = body.rings else { continue };
+        if crate::envelope::ring_opacity(rings.system) < MIN_RING_OPACITY {
+            continue;
+        }
+        let outer = rings.system.outer_m();
+        let distance = body.position_ly.distance(eye_ly) * M_PER_LY;
+        if distance < RINGSIDE_RADII * outer {
+            out.push(Subject::Ringside(body.name.clone()));
+        }
+        // Framed whole only from far enough out that the frame holds them.
+        let wide = 2.0 * (outer / distance.max(outer)).asin();
+        if wide > NEIGHBOR_MIN_RAD
+            && wide * FRAME_MARGIN <= MAX_FIELD_RAD
+            && covered(body.position_ly, outer, eye_ly, &occluders) <= MAX_COVERED
+        {
+            out.push(Subject::Rings(body.name.clone()));
+        }
+    }
+
     let neighbors: Vec<&Drawable> = drawn
         .iter()
         .filter(|d| d.radius_m > 0.0 && held.as_deref() != Some(d.name.as_str()))
@@ -605,6 +636,23 @@ pub fn aim(
             let caption = format!("{} · horizon", session.body_label(name));
             (forward, up, field, Some(name.clone()), caption)
         }
+        Subject::Rings(name) => {
+            let b = body(name)?;
+            let rings = b.rings?;
+            let (forward, field) = framed(to_m(b.position_ly), rings.system.outer_m());
+            let caption = format!("{} · rings", session.body_label(name));
+            // Square to the pole, the rings' long axis lies level.
+            (forward, upright(forward, rings.pole), field, Some(name.clone()), caption)
+        }
+        Subject::Ringside(name) => {
+            let b = body(name)?;
+            let rings = b.rings?;
+            let (inner, outer) = (rings.system.inner_m(), rings.system.outer_m());
+            let (forward, up, field) =
+                ringside(to_m(b.position_ly), inner, outer, rings.pole, toward_star)?;
+            let caption = format!("{} · rings, close", session.body_label(name));
+            (forward, up, field, Some(name.clone()), caption)
+        }
         Subject::Nadir(name) => {
             let b = body(name)?;
             let to = to_m(b.position_ly);
@@ -714,6 +762,27 @@ pub fn horizon(to_center_m: DVec3, radius_m: f64, toward_star: DVec3)
     let lift = field * HORIZON_LIFT;
     let forward = (limb * lift.cos() + up_at(limb) * lift.sin()).normalize();
     Some((forward, up_at(forward), field))
+}
+
+/// Across the stretch of a ring whose center is `to_center_m` away that is nearest the ship,
+/// taking in the ring's whole width: the view, its up, and its field. `None` looking from the
+/// stretch itself.
+///
+/// Up is the pole on the ship's side, as a camera held level would have it, so the bands lie
+/// level and the far side of the ring is at the top. `fallback` picks the stretch from over the
+/// pole, where no stretch is nearer than another.
+pub fn ringside(to_center_m: DVec3, inner_m: f64, outer_m: f64, pole: DVec3, fallback: DVec3)
+    -> Option<(DVec3, DVec3, f64)> {
+    let in_plane = |v: DVec3| (v - pole * v.dot(pole)).try_normalize();
+    let out = in_plane(-to_center_m)
+        .or_else(|| in_plane(fallback))
+        .unwrap_or_else(|| pole.any_orthonormal_vector());
+    let stretch = to_center_m + out * 0.5 * (inner_m + outer_m);
+    let distance = stretch.length();
+    let forward = stretch.try_normalize()?;
+    let field = (2.0 * ((outer_m - inner_m) / (2.0 * distance)).atan()).min(MAX_FIELD_RAD);
+    let side = if to_center_m.dot(pole) > 0.0 { -pole } else { pole };
+    Some((forward, upright(forward, side), field))
 }
 
 /// An up for `forward`, as close to `pole` as it can be, falling back to anything square to it.
@@ -953,6 +1022,44 @@ mod tests {
 
         let (_, middle) = fidelity(1.0e-4, resolution, 400);
         assert!(middle > MIN_SIDE_PX && middle < 400, "{middle} pixels between the two");
+    }
+
+    const SATURN_RINGS: (f64, f64) = (7.46e7, 1.368e8);
+
+    /// Seen from above and outside, the bands lie level, the ring's width fills the frame, and the
+    /// far side is up.
+    #[test]
+    fn a_ring_close_up_lies_level_across_the_rings_width() {
+        let (inner, outer) = SATURN_RINGS;
+        let pole = DVec3::Z;
+        let eye_from_center = DVec3::new(1.2 * outer, 0.0, 0.4 * outer);
+        let (forward, up, field) =
+            ringside(-eye_from_center, inner, outer, pole, DVec3::X).expect("off the ring");
+        let middle = DVec3::X * 0.5 * (inner + outer);
+        assert!(angle(forward, middle - eye_from_center) < 1e-12, "aimed at the middle of the width");
+        let along = pole.cross(DVec3::X);
+        assert!(up.dot(along).abs() < 1e-12 && forward.dot(along).abs() < 1e-12, "bands level");
+        assert!(up.z > 0.0 && up.x < 0.0, "above and outside, the planet's side is up");
+        let width = 2.0 * ((outer - inner) / 2.0 / (middle - eye_from_center).length()).atan();
+        assert!((field - width).abs() < 1e-12);
+    }
+
+    /// Below the plane, up is the pole's other end, so the picture is not upside down.
+    #[test]
+    fn a_ring_close_up_from_below_is_the_right_way_up() {
+        let (inner, outer) = SATURN_RINGS;
+        let eye_from_center = DVec3::new(1.2 * outer, 0.0, -0.4 * outer);
+        let (_, up, _) = ringside(-eye_from_center, inner, outer, DVec3::Z, DVec3::X).unwrap();
+        assert!(up.z < 0.0, "{up}");
+    }
+
+    /// Straight over the pole every stretch is as near as another, and the fallback picks one.
+    #[test]
+    fn a_ring_close_up_over_the_pole_takes_the_fallback_side() {
+        let (inner, outer) = SATURN_RINGS;
+        let (forward, _, _) =
+            ringside(DVec3::new(0.0, 0.0, -outer), inner, outer, DVec3::Z, DVec3::Y).unwrap();
+        assert!(forward.y > 0.0 && forward.x.abs() < 1e-12, "{forward}");
     }
 
     #[test]
