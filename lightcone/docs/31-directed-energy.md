@@ -5,7 +5,7 @@ Engines, radios, weapons and power lines are one thing: energy sent in a chosen 
 **Status: designed, not built.** This is the Kzinti Lesson (Niven): a reaction drive is a weapon
 in exact proportion to how good a drive it is. Here the drive is a photon rocket
 ([19-ship-fitting.md](19-ship-fitting.md)), so the lesson is literal. What a ship sends out is
-light, and light lands on someone. [29-the-field.md](29-the-field.md) is where the energy comes
+light, and light lands on someone. [30-the-field.md](30-the-field.md) is where the energy comes
 from and where it goes when it arrives. [05-observation.md](05-observation.md) is the aiming and
 the geometry, already built for radio in `lc_world::signal`.
 
@@ -21,7 +21,7 @@ Every source is an emitter and every ship is a receiver.
 | an engine | its ship |
 | a radio dish | its ship |
 
-There is one intake, the field ([29-the-field.md](29-the-field.md)), and it does not care which
+There is one intake, the field ([30-the-field.md](30-the-field.md)), and it does not care which
 kind of emitter the light came from. Solar collection, refueling from an ally, and being attacked
 differ only in the source and the numbers.
 
@@ -33,13 +33,13 @@ which is its 5 g. The rating bounds three things at once:
 
 - the drive's exhaust power
 - anything the ship emits on purpose
-- conversion into storage, by reciprocity ([29-the-field.md](29-the-field.md))
+- conversion into storage, by reciprocity ([30-the-field.md](30-the-field.md))
 
 An engine part's **aperture diameter** is the width of its open face: a frustum's wide end, a
 cylinder's end. That sets the diffraction floor, so a broad drive section beams tighter than a
 narrow one.
 
-**Engine parts point fore or aft** ([28-ship-form.md](28-ship-form.md)):
+**Engine parts point fore or aft** ([29-ship-form.md](29-ship-form.md)):
 
 - **Aft engines drive.** Acceleration is aft thrust over mass. Only aft engines count toward the
   rated acceleration.
@@ -98,7 +98,7 @@ What follows:
   receivers are only those within the distance where the flux falls to a millionth of the cooking
   flux, a thousand times the cooking distance.
 - **The drawn cone is `drive_spread_rad`**, so what a player sees is the cone that hurts
-  ([31-ship-rendering.md](31-ship-rendering.md#the-exhaust-cone)).
+  ([32-ship-rendering.md](32-ship-rendering.md#the-exhaust-cone)).
 
 ## Maneuvering near others
 
@@ -225,7 +225,7 @@ shadow toward the emitter covers, at most all of it:
 **P_received = P · min(1, A_shadow / (π (spread · d)²))**
 
 and the receiver's field absorbs `α` of that: all of it Black, 30% Clear
-([29-the-field.md](29-the-field.md#clear-and-black)).
+([30-the-field.md](30-the-field.md#clear-and-black)).
 
 Taking a 100 m aperture at the diffraction floor, the fraction a receiver collects:
 
@@ -325,7 +325,7 @@ adds to radio is power large enough to matter and no message.
 per unit area. Nothing downstream multiplies again: not conversion, not beams, not a collapse.
 
 That gives starlight two faces. **An instrument sees `L★`.** A field receives `G · L★`. It is the
-same split the field has between `Q / τ` and σT⁴A ([29-the-field.md](29-the-field.md)). Engines and
+same split the field has between `Q / τ` and σT⁴A ([30-the-field.md](30-the-field.md)). Engines and
 collapses have no gain. What they carry is mass-energy, and it is physical in both faces.
 
 What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred with the swarms.
@@ -367,7 +367,7 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 - **Map**: your own beams as cones, and received beams as bearing lines from where they came. A
   beam you are not in and did not send is not drawn, because you do not know about it.
 - **The plume** brightens under a dump. A fore emission lights the bow. How that is drawn is in
-  [31-ship-rendering.md](31-ship-rendering.md).
+  [32-ship-rendering.md](32-ship-rendering.md).
 
 ## Where it goes
 
@@ -399,7 +399,7 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 ## Open
 
 - **Direction of intake.** Whether catching a beam means pointing apertures at it, per
-  [29-the-field.md](29-the-field.md).
+  [30-the-field.md](30-the-field.md).
 - **Wavelength has no cost.** A 1 nm beam is always at least as good as a longer one against a
   cooperative target. A conversion efficiency that depends on wavelength would make it a trade.
 - **Occlusion.** A planet between emitter and receiver does not block a beam yet, as it does not

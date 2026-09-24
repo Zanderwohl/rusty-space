@@ -3,8 +3,8 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: designed, not built.** [28-ship-form.md](28-ship-form.md) is what is drawn,
-[29-the-field.md](29-the-field.md) is the field's physics, and [30-directed-energy.md](30-directed-energy.md)
+**Status: designed, not built.** [29-ship-form.md](29-ship-form.md) is what is drawn,
+[30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
 ## Two looks
@@ -70,7 +70,7 @@ else, so they show on a night side and vanish in sunlight as they should.
 
 **What is drawn is a pure function of the refit's recipe and the time `t`.** No animation state is
 stored, and nothing is sent. Each planner step is one part's whole change, and says which part, which
-phase of the round, and the interval it occupies ([28-ship-form.md](28-ship-form.md#refits)).
+phase of the round, and the interval it occupies ([29-ship-form.md](29-ship-form.md#refits)).
 
 Each part's volume at `t` is its volume at the round's start plus completed steps plus the completed
 fraction of the current one. The step in progress acts on a **sliver**: the shell between the part at
@@ -135,7 +135,7 @@ to keep in step, and no dependency such as `bevy_hanabi` to check against Bevy 0
 
 ## The field
 
-The envelope from [28-ship-form.md](28-ship-form.md), meshed coarsely, drawn as **two layers**
+The envelope from [29-ship-form.md](29-ship-form.md), meshed coarsely, drawn as **two layers**
 whatever is decided about air:
 
 - **Inner: clear.** A fresnel rim, faint, with the ship plainly visible through it. If air is ever
@@ -163,14 +163,14 @@ surface across the envelope over `field_switch_s`, from the Mind outward.
 **Collapse** is a white flash and a sphere of hot debris expanding and cooling through the colors
 of the afterglow over `collapse_afterglow_s`. Nearby fields brighten when the spike lands on them,
 each at its own retarded time, so a cascade is seen spreading at c. From a distance, a collapse is
-drawn by the photometry: a new point in the sky, as bright as [29-the-field.md](29-the-field.md)
+drawn by the photometry: a new point in the sky, as bright as [30-the-field.md](30-the-field.md)
 says.
 
 ## Beams and plumes
 
 - **A beam is invisible**, because vacuum scatters nothing. The one exception is an observer inside
   the cone, who sees the emitter as a blinding point in the beam's band. The map draws your own
-  beams and the bearings of beams landing on you ([30-directed-energy.md](30-directed-energy.md)).
+  beams and the bearings of beams landing on you ([31-directed-energy.md](31-directed-energy.md)).
 - A **fore** emission lights the bow's apertures as a drive lights the stern's.
 
 ### The exhaust cone
@@ -202,7 +202,7 @@ inside, and for a selected ship. It uses the hazard color from [18-ui-style.md](
 palette, and is brightest where it would cook. The map draws the same cone as lines.
 
 An observer inside someone's cone gets the blinding point, from the photometry, as for a beam
-([30-directed-energy.md](30-directed-energy.md)).
+([31-directed-energy.md](31-directed-energy.md)).
 - God view may draw every beam's cone, as a debug overlay, like the causality lines of
   [07-rendering.md](07-rendering.md).
 
@@ -232,7 +232,7 @@ photographed:
 | flag | shows |
 |---|---|
 | `--form <plate\|spindle\|cluster\|default>` | the ship in a preset form |
-| `--view form` | the editor ([28-ship-form.md](28-ship-form.md)) |
+| `--view form` | the editor ([29-ship-form.md](29-ship-form.md)) |
 | `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point |
 | `--demo collapse` | a ship collapsing beside two others, one close enough to follow it |
 | `--field-k <kelvin>` | the player's field held at a temperature, for the shader |
@@ -250,7 +250,7 @@ photographed:
 Materials go in `em-render` because nothing in them is specific to Lightcone. A hull with regions
 and a reveal mask is as much Exotic Matters' as anyone's.
 
-## Order of work, across 28 to 31
+## Order of work, across 29 to 32
 
 Each step leaves the game playable and adds one thing a player can see or feel.
 

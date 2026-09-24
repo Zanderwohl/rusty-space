@@ -7,12 +7,12 @@ fails, the ship is gone and the whole system sees it happen.
 with a heat account. It turns the hull collectors of [20-solar-power.md](20-solar-power.md) into
 the field receiving starlight. The field is part Culture and part the Langston Field of *The Mote
 in God's Eye*: a skin that absorbs what hits it, glows as it fills, and collapses when it is
-full. Where the energy it sheds goes is [30-directed-energy.md](30-directed-energy.md).
+full. Where the energy it sheds goes is [31-directed-energy.md](31-directed-energy.md).
 
 ## What the field is
 
 - **Its shape is always derived from the hull.** It is the envelope of
-  [28-ship-form.md](28-ship-form.md): the hull's distance field offset by a margin and smoothed,
+  [29-ship-form.md](29-ship-form.md): the hull's distance field offset by a margin and smoothed,
   so it covers everything and follows the ship loosely. A player shapes the hull and gets the
   field that covers it. A large or sprawling hull pays for its field automatically.
 - **Everything that reaches the ship reaches the field first:** starlight, beams, the glow of a
@@ -23,7 +23,7 @@ full. Where the energy it sheds goes is [30-directed-energy.md](30-directed-ener
 - **Heat leaves in three ways:** radiation, which is always on; the drive, which spends heat as
   exhaust before it spends storage; and collapse.
 
-There is one field in the simulation. It is drawn as two layers ([31-ship-rendering.md](31-ship-rendering.md)):
+There is one field in the simulation. It is drawn as two layers ([32-ship-rendering.md](32-ship-rendering.md)):
 a clear inner one and the glowing radiator. Whether the inner one holds air is still open.
 
 ## The heat account
@@ -67,7 +67,7 @@ Constant over a segment unless marked as a burst. A burst jumps `Q` at the insta
 | the living drain | all of it |
 | the drive below ε = 1 | `1 − ε` of the exhaust power. Nothing at the default ε = 1 |
 | dismantling | the 5% a dismantling loses, spread over the step as the energy moves |
-| **vented storage** | **a burst**: what a refit round's dismantling returns and storage has no room for, at the end of the step that frees it ([28-ship-form.md](28-ship-form.md#refits)) |
+| **vented storage** | **a burst**: what a refit round's dismantling returns and storage has no room for, at the end of the step that frees it ([29-ship-form.md](29-ship-form.md#refits)) |
 | **a collapse's spike** | **a burst**, on arrival: see below |
 
 ### Conversion
@@ -75,7 +75,7 @@ Constant over a segment unless marked as a burst. A burst jumps `Q` at the insta
 What arrives is converted to storage at up to the **conversion rating**, at
 `conversion_efficiency`, while storage has room. The rest is heat.
 
-- **The rating is the engines'.** Engine volume is aperture ([30-directed-energy.md](30-directed-energy.md)),
+- **The rating is the engines'.** Engine volume is aperture ([31-directed-energy.md](31-directed-energy.md)),
   and what can send that much can take that much in. The starting drive section is rated
   1.1 × 10²⁰ W.
 - **`conversion_efficiency`**, 0.7, applies to everything that arrives, starlight included. The 30%
@@ -154,7 +154,7 @@ is. All three assume a Black field, since Black is the mode that collects.
 | anchor | sets |
 |---|---|
 | **The starting ship, idle and far from any star, sits at 400 K.** Its living drain alone holds it there, so `HULL_K`'s value is derived rather than set | `q_idle` |
-| **The starting ship's field holds 10 ME** from empty to collapse. The starting ship is [28-ship-form.md](28-ship-form.md)'s starting form | `field_capacity`, the capacity per unit envelope area |
+| **The starting ship's field holds 10 ME** from empty to collapse. The starting ship is [29-ship-form.md](29-ship-form.md)'s starting form | `field_capacity`, the capacity per unit envelope area |
 | **A full starting ship broadside at 0.05 AU from a Sun-like star is exactly at its rated load**: it would reach collapse only in the limit | `τ` |
 
 Capacity per unit area is the same for every ship, so **every field fails at the same
@@ -242,8 +242,8 @@ receiver's shadow toward the source.
 - **A collapse's spike** is a burst: all of it becomes heat on arrival, whatever storage is empty.
 - **A neighbor's exhaust** is directed, spreads at `drive_spread_rad`, and cooks a full ship within a
   few kilometers behind a starting ship's drive and within 84 km behind a 5 km ship's. See
-  [30-directed-energy.md](30-directed-energy.md#exhaust-lands-on-whatever-is-behind).
-- **Beams** are directed, and are [30-directed-energy.md](30-directed-energy.md).
+  [31-directed-energy.md](31-directed-energy.md#exhaust-lands-on-whatever-is-behind).
+- **Beams** are directed, and are [31-directed-energy.md](31-directed-energy.md).
 
 A spike is lethal to a ship with headroom `H` and absorptivity `α` inside
 
@@ -319,7 +319,7 @@ infer from it:
 | `collapse_afterglow_s` | 30 game days | how long the rest takes |
 
 The star's gain stays `solar_gain` and moves from collection to **the star's energy output**
-([30-directed-energy.md](30-directed-energy.md)). Nothing downstream of a star is multiplied again.
+([31-directed-energy.md](31-directed-energy.md)). Nothing downstream of a star is multiplied again.
 
 ## Where it goes
 
@@ -328,7 +328,7 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 | `lc-world` | `field.rs`: the account, its closed forms, time to collapse, temperature, the lethal radius | `solar.rs` becomes intake: starlight onto the shadow, gained at the star. `fitting.rs` folds heat beside stored energy. `refit.rs` reports each step's heat, and whether the plan crosses `Q_max` |
 | `lc-proto` | `Outbound::Collapsed`, `Order::FieldMode { Clear \| Black \| Auto { clear_above, black_below, refill_below } }`, `Refusal::Switching` | `Fitted` gains `Q` and its time, and the mode with any switch under way. `Presence` gains field temperature and mode |
 | `lc-server` | collapse scheduling and delivery, respawn | the tick settles heat. Refit and order acceptance warn |
-| `lc-client` | | `hud.rs` gains `Field`, `panels.rs` draws the bar. The refit panel, photometry. The field shader is [31-ship-rendering.md](31-ship-rendering.md) |
+| `lc-client` | | `hud.rs` gains `Field`, `panels.rs` draws the bar. The refit panel, photometry. The field shader is [32-ship-rendering.md](32-ship-rendering.md) |
 
 ## Client
 

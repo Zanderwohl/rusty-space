@@ -5,8 +5,8 @@ What a ship is made of, what shape it is, and what it costs to change either.
 **Status: designed, not built.** It replaces the loadout of [19-ship-fitting.md](19-ship-fitting.md):
 **a ship is its parts**, and each part's volume is how much of its kind the ship has. 19's energy,
 mass and drive rules stand.
-[29-the-field.md](29-the-field.md) and [30-directed-energy.md](30-directed-energy.md) are what the
-shape does in play, and [31-ship-rendering.md](31-ship-rendering.md) is how it is drawn.
+[30-the-field.md](30-the-field.md) and [31-directed-energy.md](31-directed-energy.md) are what the
+shape does in play, and [32-ship-rendering.md](32-ship-rendering.md) is how it is drawn.
 
 ## Why parts
 
@@ -44,7 +44,7 @@ value over its 392 699 m³ slot.
 | **mind** | nothing | module density | the root. See below |
 | **storage** | 1.27 × 10⁻⁵ ME of capacity | module density | |
 | **drone** | 5.88 × 10¹³ W of building power | module density | at least `min_drone_m3` must remain |
-| **engine** | 5.53 × 10¹³ W of aperture | module density | points fore or aft. See [30-directed-energy.md](30-directed-energy.md) |
+| **engine** | 5.53 × 10¹³ W of aperture | module density | points fore or aft. See [31-directed-energy.md](31-directed-energy.md) |
 | **living** | 1.13 × 10¹⁰ W of drain | module density | parks and population later |
 | **data** | 7.5 bytes | half | three times as slow to build |
 | **bay** | a mouth, whose smaller dimension is the largest hull it can launch | a tenth | a shell with a procedural interior. After construction exists |
@@ -145,7 +145,7 @@ complete.
 |---|---|---|
 | **shadow table** | area of the grid's projection along each of the 162 vertices of a twice-subdivided icosahedron, interpolated between them | starlight and beams arriving, brightness |
 | **broadside** | the direction of largest shadow, and the roll that presents it | the idle attitude of [20-solar-power.md](20-solar-power.md) |
-| **envelope** | the union's distance field offset by `envelope_margin` and blended with a large radius | the field's area and volume, [29-the-field.md](29-the-field.md) |
+| **envelope** | the union's distance field offset by `envelope_margin` and blended with a large radius | the field's area and volume, [30-the-field.md](30-the-field.md) |
 | **moments of inertia** | the filled cells, weighted by each part's density | slew rate |
 | **extent** | the envelope's longest dimension | `length_m`: the camera, the zoom limits, `Presence` |
 
@@ -201,7 +201,7 @@ each step's start, so drones built first speed up everything after them.
 
 **The target is refused if the build phase cannot be paid for** from what the dismantle phase leaves in
 storage. The target is **not** refused for venting. A player may vent heat on purpose, and
-[29-the-field.md](29-the-field.md) says what happens when the vent is too big.
+[30-the-field.md](30-the-field.md) says what happens when the vent is too big.
 
 ### Why strict phases
 
@@ -233,7 +233,7 @@ Flying and refitting still exclude each other, as in 19.
 - **drones**, a capsule under the keel: 7.85 × 10⁵ m³
 - **living**, a slab across the dorsal face, and **data**, a small capsule forward: 3.93 × 10⁵ m³ each
 
-The anchors of 20 and 29 are derived from this form.
+The anchors of 20 and 30 are derived from this form.
 
 The editor also offers **built-in presets**, each rearranging the ship's current volumes:
 
@@ -431,7 +431,7 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |
 | `lc-client` | `form_view.rs`, `form_panel.rs`, `snap.rs`, `form_history.rs`, `presets_panel.rs` | `ui.rs` gains the view mode. The refit window becomes the ledger |
 
-`form_grid.rs` and the client's mesher ([31-ship-rendering.md](31-ship-rendering.md)) both evaluate the
+`form_grid.rs` and the client's mesher ([32-ship-rendering.md](32-ship-rendering.md)) both evaluate the
 distance field that `form.rs` defines, so the grid the server reasons about and the surface the player
 sees are one definition.
 
@@ -439,7 +439,7 @@ sees are one definition.
 
 - **Parks**: a living variant that must face outward, and whether it holds air under the field.
 - **What the Mind is for**, beyond the root. Whether it carries the craft's knowledge, and survives
-  anything, is a question for [22-provenance.md](22-provenance.md) and [29-the-field.md](29-the-field.md)'s
+  anything, is a question for [22-provenance.md](22-provenance.md) and [30-the-field.md](30-the-field.md)'s
   rule on death.
 - **Radiator fins** as a kind, if the square–cube pressure needs one.
 - **Whether moves should cost anything at all** once waiting has a price.

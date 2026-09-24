@@ -130,7 +130,7 @@ last drive event, or the last statement.
 ### Intercept: a standing order
 
 Near the quarry, how an approach avoids cooking it is
-[30-directed-energy.md](30-directed-energy.md#maneuvering-near-others).
+[31-directed-energy.md](31-directed-energy.md#maneuvering-near-others).
 
 `Order::Intercept` is the first order that is a **policy** rather than an event. Every other
 one happens at an instant and a trajectory follows from it; this one is re-solved by the
