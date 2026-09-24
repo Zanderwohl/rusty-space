@@ -73,6 +73,9 @@ It is there for two reasons:
   its frame.
 - **Lore.** A Culture ship is its Mind, and the rest is what the Mind has built around itself.
 
+**The Mind's stored primitive and volume are ignored.** Everything that sizes, weighs or draws it uses
+the cube of `min_part_m3`, so a form cannot carry a larger Mind.
+
 The Mind is usually enclosed by the first part built around it, so it is inside the ship. The
 editor shows it through the hull.
 
@@ -125,8 +128,18 @@ parent.
 
 The Mind's frame is the ship's frame: its axis is the nose, `lc_world::motion::facing`.
 
+**A part's axis is its local x**: a capsule's, cylinder's or frustum's length, a torus's axis of
+symmetry, an ellipsoid's first semi-axis and a slab's first edge. A frustum's first end is at −x. At
+zero twist and tilt, a child's axis lies along the normal (attached) or its parent's axis (enclosing),
+and its y along the parent's y projected across that, or the parent's z where the y is parallel. Twist
+turns it about its axis. Tilt then rotates it by a rotation vector whose two components are along the
+twisted y and z.
+
 Part ids are small integers assigned by whoever adds the part, checked for uniqueness by the
 server, and stable across refits. Steps and animation refer to parts by id.
+
+`Form::validate` also refuses any number that is NaN, infinite, or of a sign its meaning forbids,
+naming the part and the field, because forms arrive from clients.
 
 ## What the server computes from a form
 
@@ -193,8 +206,9 @@ in three phases, strictly in order:
 | smaller, same proportions | dismantle the difference | 95% back | energy ÷ drone power |
 | new | build | its mass-energy | energy ÷ drone power |
 | removed | dismantle | 95% back | energy ÷ drone power |
-| **proportions or primitive** | dismantle all, then build all | the 5% loss on all of it | both |
-| **anchor, mode, twist, tilt, standoff, blend, mirror or parent** | move, carrying its subtree | none | `move_work_factor` of what building the subtree would take |
+| **proportions, primitive, or a spar's mode** | dismantle all, then build all | the 5% loss on all of it | both |
+| **anchor, mount, twist, tilt, standoff, blend, mirror or parent** | move, carrying its subtree | none | `move_work_factor` of what building the subtree would take |
+| **kind**, other than a spar's mode | removed, then new | as those two | as those two |
 
 Data takes `data_work_factor` times as long as its energy says, as in 19. Drone power is measured at
 each step's start, so drones built first speed up everything after them.
@@ -315,7 +329,8 @@ Apply asks once more when the vent would collapse the field.
 | size | grows or shrinks it **at fixed proportions**, snapped |
 | arrows on each axis | stretch the proportions **at fixed volume**, snapped. This is a reshape, so the part is rebuilt |
 | standoff arrow | out along the normal, or in to embed |
-| mode | attached or enclosing |
+| mount | attached or enclosing. While a part is enclosing, the editor keeps its last anchor and standoff so switching back restores them. They are editor state, not part of the form |
+| spar mode | saddle or strap. A reshape: the cut changes, the charged volume does not |
 | mirror | for the subtree |
 | add | a primitive and a kind, attached where the pointer is |
 | delete | the part and its subtree. Refused for the Mind and for the last drones |
@@ -361,8 +376,8 @@ entry records what changed, before and after, on the parts it touched:
 | add | nothing | the new part |
 | remove | the part and its subtree | nothing |
 | resize | volume | volume |
-| reshape | primitive and proportions | primitive and proportions |
-| move | placement: parent, mode, anchor, twist, tilt, standoff, blend | placement |
+| reshape | primitive and proportions, or a spar's mode | the same |
+| move | placement: parent, mount, anchor, twist, tilt, standoff, blend | placement |
 | mirror | on or off | on or off |
 | apply a preset | the whole draft | the whole draft |
 | reset the draft to the ship | the whole draft | the whole draft |

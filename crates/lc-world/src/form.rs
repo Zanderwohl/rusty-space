@@ -49,20 +49,21 @@ pub enum Kind {
 }
 
 /// Shape without size: every field is a dimensionless ratio, and scale is solved from the
-/// part's volume.
+/// part's volume. A part's axis is its local x.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Primitive {
     /// Semi-axes along the part's x, y and z, relative to one another.
     Ellipsoid { axes: DVec3 },
-    /// Length of the straight section over the radius.
+    /// Length of the straight section over the radius. Zero is a sphere.
     Capsule { length: f64 },
     /// Edges relative to one another, and the corner radius as a fraction of the shortest edge.
     Slab { edges: DVec3, corner: f64 },
-    /// Length over radius.
+    /// Length over radius, along the axis.
     Cylinder { length: f64 },
-    /// Major radius over minor.
+    /// Major radius over minor, about the axis.
     Torus { major: f64 },
-    /// Length over the first end's radius, and the second end's radius over the first's.
+    /// Length over the radius of the end at −x, and the +x end's radius over it. Zero taper is a
+    /// cone.
     Frustum { length: f64, taper: f64 },
 }
 
@@ -79,10 +80,12 @@ pub enum Mount {
 pub struct Placement {
     pub parent: PartId,
     pub mount: Mount,
-    /// Radians, about the surface normal, or about the parent's axis when enclosing.
+    /// Radians, about the surface normal, or about the parent's axis when enclosing. At zero the
+    /// child's axis lies along that normal or axis and its y along the parent's y projected
+    /// across it, or the parent's z where the y is parallel.
     pub twist: f64,
-    /// The child's axis away from that normal or axis, as a rotation vector in the plane across
-    /// it. Radians.
+    /// A rotation vector across the normal or axis, in the child's y and z after twist, applied
+    /// after twist. Radians.
     pub tilt: DVec2,
     /// Smooth-union radius with the parent, as a fraction of the smaller part. Ignored at a spar.
     pub blend: f64,
@@ -111,6 +114,8 @@ pub enum FormError {
     DuplicateId(PartId),
     NoMind,
     SecondMind { first: PartId, second: PartId },
+    /// Not finite, or out of the sign its meaning allows. Checked because a client sends forms.
+    Malformed { part: PartId, field: &'static str },
     MindPlaced(PartId),
     /// A part other than the Mind hangs from nothing.
     Unplaced(PartId),
@@ -126,6 +131,7 @@ impl std::fmt::Display for FormError {
             Self::DuplicateId(id) => write!(f, "{id} appears twice"),
             Self::NoMind => write!(f, "no Mind"),
             Self::SecondMind { first, second } => write!(f, "{second} is a second Mind beside {first}"),
+            Self::Malformed { part, field } => write!(f, "{part} has a malformed {field}"),
             Self::MindPlaced(id) => write!(f, "the Mind, {id}, has a parent"),
             Self::Unplaced(id) => write!(f, "{id} has no parent"),
             Self::MissingParent { part, parent } => write!(f, "{part} hangs from {parent}, which does not exist"),
@@ -133,18 +139,13 @@ impl std::fmt::Display for FormError {
         }
     }
 }
+
 impl std::error::Error for FormError {}
 
 impl Form {
-    pub fn part(&self, id: PartId) -> Option<&Part> {
-        self.parts.iter().find(|p| p.id == id)
-    }
-
-    pub fn mind(&self) -> Option<&Part> {
-        self.parts.iter().find(|p| p.kind == Kind::Mind)
-    }
-
-    /// Structure only: one Mind at the root, one tree, unique ids, at most [`MAX_PARTS`].
+    /// Structure and well-formed numbers only: one Mind at the root, one tree, unique ids, at
+    /// most [`MAX_PARTS`], and nothing NaN, infinite or of the wrong sign. Sizes and the
+    /// placement rules are [`rules`].
     pub fn validate(&self) -> Result<(), FormError> {
         if self.parts.len() > MAX_PARTS {
             return Err(FormError::TooManyParts { found: self.parts.len() });
@@ -167,6 +168,11 @@ impl Form {
         }
         if mind.is_none() {
             return Err(FormError::NoMind);
+        }
+        for part in &self.parts {
+            if let Some(field) = part.malformed() {
+                return Err(FormError::Malformed { part: part.id, field });
+            }
         }
 
         for part in &self.parts {
@@ -202,6 +208,59 @@ impl Form {
             }
         }
         Ok(())
+    }
+}
+
+impl Part {
+    /// The first field that is not finite or has a sign its meaning forbids. `NaN > 0.0` is
+    /// false, so every test is written to refuse NaN.
+    fn malformed(&self) -> Option<&'static str> {
+        let positive = |x: f64| x.is_finite() && x > 0.0;
+        let non_negative = |x: f64| x.is_finite() && x >= 0.0;
+        let all_positive = |v: DVec3| v.to_array().into_iter().all(positive);
+        if !positive(self.volume_m3) {
+            return Some("volume");
+        }
+        let shape = match self.primitive {
+            Primitive::Ellipsoid { axes } => (!all_positive(axes)).then_some("axes"),
+            Primitive::Capsule { length } => (!non_negative(length)).then_some("length"),
+            Primitive::Slab { edges, corner } => {
+                if !all_positive(edges) {
+                    Some("edges")
+                } else {
+                    (!non_negative(corner)).then_some("corner")
+                }
+            }
+            Primitive::Cylinder { length } => (!positive(length)).then_some("length"),
+            Primitive::Torus { major } => (!positive(major)).then_some("major radius"),
+            Primitive::Frustum { length, taper } => {
+                if !positive(length) {
+                    Some("length")
+                } else {
+                    (!non_negative(taper)).then_some("taper")
+                }
+            }
+        };
+        if shape.is_some() {
+            return shape;
+        }
+        let place = self.placement?;
+        if !place.twist.is_finite() {
+            return Some("twist");
+        }
+        if !place.tilt.is_finite() {
+            return Some("tilt");
+        }
+        if !non_negative(place.blend) {
+            return Some("blend");
+        }
+        match place.mount {
+            Mount::Attached { anchor, .. } if !(anchor.is_finite() && anchor.length_squared() > 0.0) => {
+                Some("anchor")
+            }
+            Mount::Attached { standoff, .. } if !standoff.is_finite() => Some("standoff"),
+            _ => None,
+        }
     }
 }
 
@@ -277,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_root_is_refused_by_name() {
+    fn a_part_with_no_parent_is_refused_by_name() {
         let mut form = ship();
         form.parts[2].placement = None;
         assert_eq!(form.validate(), Err(FormError::Unplaced(PartId(2))));
@@ -304,6 +363,37 @@ mod tests {
         let mut form = ship();
         form.parts[4].placement.as_mut().unwrap().parent = PartId(4);
         assert_eq!(form.validate(), Err(FormError::Cycle(PartId(4))));
+    }
+
+    #[test]
+    fn a_malformed_number_is_refused_by_part_and_field() {
+        let cases: [(usize, fn(&mut Part), &str); 10] = [
+            (2, |p| p.volume_m3 = f64::NAN, "volume"),
+            (2, |p| p.volume_m3 = 0.0, "volume"),
+            (2, |p| p.primitive = Primitive::Ellipsoid { axes: DVec3::new(1.0, -1.0, 1.0) }, "axes"),
+            (2, |p| p.primitive = Primitive::Slab { edges: DVec3::ONE, corner: f64::NAN }, "corner"),
+            (2, |p| p.primitive = Primitive::Frustum { length: f64::INFINITY, taper: 0.5 }, "length"),
+            (2, |p| p.placement.as_mut().unwrap().tilt = DVec2::new(0.0, f64::NAN), "tilt"),
+            (2, |p| p.placement.as_mut().unwrap().blend = -0.1, "blend"),
+            (2, |p| p.placement.as_mut().unwrap().blend = f64::INFINITY, "blend"),
+            (2, |p| p.placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::ZERO, standoff: 0.0 }, "anchor"),
+            (0, |p| p.volume_m3 = f64::NAN, "volume"),
+        ];
+        for (index, spoil, field) in cases {
+            let mut form = ship();
+            spoil(&mut form.parts[index]);
+            let part = form.parts[index].id;
+            assert_eq!(form.validate(), Err(FormError::Malformed { part, field }), "{field}");
+        }
+    }
+
+    #[test]
+    fn edge_values_that_mean_something_are_accepted() {
+        let mut form = ship();
+        form.parts[2].primitive = Primitive::Capsule { length: 0.0 };
+        form.parts[3].primitive = Primitive::Frustum { length: 2.0, taper: 0.0 };
+        form.parts[4].placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::X, standoff: -0.5 };
+        assert_eq!(form.validate(), Ok(()));
     }
 
     #[test]
