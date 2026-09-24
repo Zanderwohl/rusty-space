@@ -85,7 +85,7 @@ pub struct MapItem {
     pub radius_m: f64,
     /// What wins when two labels want the same pixels, and how big a mark is drawn.
     /// Kilograms for a body. Zero means unstated, which is named only where there is room to
-    /// spare and drawn at full size. See [`crate::weight`].
+    /// spare and drawn at half size. See [`crate::weight`].
     pub weight: f64,
     /// Spin axis, or the normal of a ring or belt. Ecliptic north where nothing says otherwise.
     pub pole: DVec3,

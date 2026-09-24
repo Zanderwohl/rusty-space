@@ -16,6 +16,10 @@ pub const SPAN: f32 = 10.0;
 /// under this.
 pub const MIN_SCALE: f32 = 1.0 / SPAN;
 
+/// A mark for something nothing has weighed: neither claiming to be the heaviest thing on the map
+/// nor the lightest.
+pub const UNKNOWN_SCALE: f32 = 0.5;
+
 /// How big a thing's mark is, as a fraction of full size: the heaviest beside it is full size.
 ///
 /// The cube root of the mass -- the size a body of the same density would be -- until that would
@@ -23,9 +27,16 @@ pub const MIN_SCALE: f32 = 1.0 / SPAN;
 /// so it lands exactly there. Squeezed only when it must be: two stars a third apart in mass are
 /// a tenth apart in size, not the whole span.
 ///
-/// Unstated and infinite weights are drawn whole: neither is in the comparison.
+/// An infinite weight -- a ship -- is drawn whole and an unstated one at [`UNKNOWN_SCALE`]:
+/// neither is in the comparison.
 pub fn scale(weight: f64, lightest: f64, heaviest: f64) -> f32 {
-    if !(weight.is_finite() && weight > 0.0 && heaviest > 0.0 && lightest > 0.0) {
+    if weight == f64::INFINITY {
+        return 1.0;
+    }
+    if !(weight.is_finite() && weight > 0.0) {
+        return UNKNOWN_SCALE;
+    }
+    if !(heaviest > 0.0 && lightest > 0.0) {
         return 1.0;
     }
     let decades = (heaviest / lightest).log10().max(0.0);
@@ -81,13 +92,15 @@ mod tests {
         assert_eq!(scale(EARTH, EARTH, EARTH), 1.0, "one weight is drawn whole");
     }
 
-    /// Unstated and infinite weights are not shrunk.
+    /// An unstated weight is drawn at half size, claiming neither end of the scale; a ship's
+    /// infinite one is drawn whole.
     #[test]
-    fn an_unstated_weight_is_drawn_whole() {
-        for weight in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            assert_eq!(scale(weight, MOON, SUN), 1.0, "{weight} should be drawn whole");
+    fn an_unstated_weight_is_drawn_at_half_size() {
+        for weight in [0.0, -1.0, f64::NAN, f64::NEG_INFINITY] {
+            assert_eq!(scale(weight, MOON, SUN), UNKNOWN_SCALE, "{weight} should be drawn at half size");
         }
-        assert_eq!(scale(EARTH, f64::INFINITY, 0.0), 1.0, "and with nothing stated, everything is");
+        assert_eq!(scale(f64::INFINITY, MOON, SUN), 1.0, "a ship is drawn whole");
+        assert_eq!(scale(0.0, f64::INFINITY, 0.0), UNKNOWN_SCALE, "with nothing weighed at all too");
     }
 
     /// Neither bound is set by a ship's infinite weight or an unstated one.
