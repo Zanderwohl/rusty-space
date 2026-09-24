@@ -168,6 +168,8 @@ says.
   beams and the bearings of beams landing on you ([30-directed-energy.md](30-directed-energy.md)).
 - **The plume brightens under a dump** by the same rule it already has: more power through the same
   nozzle is hotter and longer. A **fore** emission lights a plume at the bow.
+- **The plume flares at `drive_spread_rad`**, so the cone drawn is the cone that heats whatever is in
+  it ([30-directed-energy.md](30-directed-energy.md#exhaust-lands-on-whatever-is-behind)).
 - God view may draw every beam's cone, as a debug overlay, like the causality lines of
   [07-rendering.md](07-rendering.md).
 

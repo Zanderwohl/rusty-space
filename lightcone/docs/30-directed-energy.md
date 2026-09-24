@@ -65,6 +65,40 @@ exhaust comes from field heat first, and from storage only for what heat cannot 
 - The field's account gains a constant sink while lit: `dQ/dt = P_in − Q/τ − P_exhaust`, floored
   at zero. It is still closed form, with one more split where `Q` reaches the floor.
 
+### Exhaust lands on whatever is behind
+
+The exhaust is an emission like any other, so **it heats every craft in its cone.** The drive is not
+focused: it spreads at `drive_spread_rad`, a fixed half-angle wider than any deliberate beam needs,
+and focusing is what `Order::Emit` is for. The received power follows the beam formula below.
+
+Where a full receiver, broadside to the drive, would sit exactly at its rated load, at the default
+5°:
+
+| burning ship, at 5 g | exhaust | cooking distance |
+|---|---|---|
+| 500 m | 1.1 × 10²⁰ W | 2.7 km |
+| 5 km | 1.1 × 10²³ W | 84 km |
+| 50 km | 1.1 × 10²⁶ W | 2 700 km |
+
+A receiver's shadow and its rated load both scale with its size squared, so **the distance does not
+depend on the receiver's size**. The same is true of a collapse's lethal radius. Inside that
+distance, a receiver with nowhere to convert the heat walks up to collapse on the field's time
+constant, a few real minutes.
+
+What follows:
+
+- **Every burn points at something.** A ship braking into a rendezvous points its exhaust at it. A
+  starting ship's exhaust is safe for a companion at the usual 5 km standoff. A GSV leaving at 5 g
+  cooks anything within 84 km behind it. Approach paths matter, and crowded space needs rules, which
+  gives factions something real to legislate.
+- **Empty storage helps here too.** Exhaust arrives as sustained power, so a receiver with room
+  converts it up to its rating, and being behind an ally's drive can refuel you.
+- **Delivery** is the fan-out below, with the burn as a continuous emission between ignition and
+  cutoff. A receiver's heat input changes at the retarded times of those two events. Candidate
+  receivers are only those within the distance where the flux falls to a millionth of the cooking
+  flux, a thousand times the cooking distance.
+- **The drawn plume's flare is `drive_spread_rad`**, so what a player sees is the cone that hurts.
+
 ## Emitting on purpose
 
 `Order::Emit`:
@@ -219,6 +253,12 @@ same split the field has between `Q / τ` and σT⁴A ([29-the-field.md](29-the-
 collapses have no gain. What they carry is mass-energy, and it is physical in both faces.
 
 What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred with the swarms.
+
+## Balance
+
+| setting | first guess | meaning |
+|---|---|---|
+| `drive_spread_rad` | 5° | the drive's exhaust half-angle |
 
 ## Protocol
 

@@ -182,6 +182,9 @@ receiver's shadow toward the source.
 - **A neighbor's glow** is `Q / τ` of the neighbor's field, isotropic. It is negligible except in
   contact or inside a bay.
 - **A collapse's spike** is a burst: all of it becomes heat on arrival, whatever storage is empty.
+- **A neighbor's exhaust** is directed, spreads at `drive_spread_rad`, and cooks a full ship within a
+  few kilometers behind a starting ship's drive and within 84 km behind a 5 km ship's. See
+  [30-directed-energy.md](30-directed-energy.md#exhaust-lands-on-whatever-is-behind).
 - **Beams** are directed, and are [30-directed-energy.md](30-directed-energy.md).
 
 A spike is lethal to a ship with headroom `H` inside
