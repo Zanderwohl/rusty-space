@@ -191,6 +191,8 @@ pub fn parse(args: &[String]) -> Entry {
         station: after("--station"),
         charted: flag("--charted"),
         beauty_kind: after("--beauty-kind"),
+        beauty_dir: after("--beauty-dir"),
+        beauty_period_s: value(args, "--beauty-period"),
         map_camera: after("--map").and_then(|spec| {
             let mut fields = spec.split(':').map(|f| f.parse::<f64>());
             match (fields.next(), fields.next(), fields.next()) {

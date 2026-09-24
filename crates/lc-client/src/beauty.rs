@@ -165,7 +165,7 @@ pub struct BeautyCamera;
 enum Phase {
     Waiting { at_s: f32 },
     Aiming { subject: Subject, frames: u32, since_s: f32 },
-    Developing { frames: u32, caption: String, spikes: Option<Vec3> },
+    Developing { frames: u32, caption: String, spikes: Option<Vec3>, kind: &'static str },
 }
 
 #[derive(Resource)]
@@ -273,6 +273,7 @@ fn put_away(
 
 #[allow(clippy::too_many_arguments)]
 fn shoot(
+    mut commands: Commands,
     time: Res<Time<Real>>,
     ui: Res<Ui>,
     game: Res<Game>,
@@ -359,18 +360,30 @@ fn shoot(
             exposure.ev100 = Exposure::default().ev100 - shot.stops;
             *target = RenderTarget::Image(beauty.images[back].clone().into());
             camera.is_active = true;
+            // On the shutter's own frame: a screenshot of an image captures what is drawn into
+            // it that frame, and taken later it captured nothing and wrote that back over it.
+            if let Some(dir) = dev.beauty_dir.as_deref() {
+                let path = format!("{dir}/{:03}-{}.png", beauty.taken, subject.kind());
+                info!("beauty shot {path}: {}", shot.caption);
+                commands
+                    .spawn(bevy::render::view::screenshot::Screenshot::image(
+                        beauty.images[back].clone(),
+                    ))
+                    .observe(bevy::render::view::screenshot::save_to_disk(path));
+            }
             beauty.phase = Phase::Developing {
                 frames: DEVELOP_FRAMES,
                 caption: shot.caption,
                 spikes: shot.spikes,
+                kind: subject.kind(),
             };
         }
-        Phase::Developing { frames, caption, spikes } => {
+        Phase::Developing { frames, caption, spikes, kind } => {
             if camera.is_active {
                 camera.is_active = false;
             }
             if frames > 0 {
-                beauty.phase = Phase::Developing { frames: frames - 1, caption, spikes };
+                beauty.phase = Phase::Developing { frames: frames - 1, caption, spikes, kind };
                 return;
             }
             let back = beauty.front.map_or(0, |(i, _)| 1 - i);
@@ -379,7 +392,8 @@ fn shoot(
             beauty.spikes = spikes;
             beauty.taken += 1;
             shot_body.name = None;
-            beauty.phase = Phase::Waiting { at_s: now + PERIOD_S };
+            beauty.phase =
+                Phase::Waiting { at_s: now + dev.beauty_period_s.unwrap_or(PERIOD_S) };
         }
     }
 }

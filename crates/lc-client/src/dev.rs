@@ -64,6 +64,11 @@ pub struct DevEntry {
     /// Hold the beauty shots on one kind of subject, by [`crate::beauty::Subject::kind`], so
     /// a run photographs the one being looked at rather than whichever the rotation is on.
     pub beauty_kind: Option<String>,
+    /// Save every beauty shot into this directory as it is taken, numbered and named by kind,
+    /// so one run gives the whole series rather than whichever shot `--shot` lands on.
+    pub beauty_dir: Option<String>,
+    /// Seconds between beauty shots, instead of the ten a player gets.
+    pub beauty_period_s: Option<f32>,
     /// What the map's camera is to hold onto, written every frame like the rest of the pin.
     pub map_focus: Option<WantedFocus>,
 
