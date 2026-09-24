@@ -268,7 +268,7 @@ graph LR
 
 ### F4 · Capacities and mass
 
-- status: active claude/vigilant-feynman-fafcb8
+- status: done #71
 - needs: F1, K2
 - touches: `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/fitting.rs`
 - read: 29 §Kinds, §Hull structure follows area
