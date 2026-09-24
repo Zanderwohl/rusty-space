@@ -498,7 +498,7 @@ graph LR
 
 ### R5 · Drones, in a void
 
-- status: active claude/brave-wilbur-eea15e
+- status: done https://github.com/Zanderwohl/rusty-space/pull/64
 - needs: —
 - touches: `crates/em-render/src/drone_material.rs`, `crates/lc-client/assets/shaders/drones.wgsl`, `crates/lc-client/examples/drones_void.rs`, `lightcone/images/drones-*.png`
 - read: 32 §Drones
