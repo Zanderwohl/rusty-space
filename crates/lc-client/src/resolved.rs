@@ -272,7 +272,17 @@ pub fn reflected_radiance(
     star_teff_k: f64,
     star_distance_m: f64,
 ) -> PerBand<f32> {
-    lit_radiance(body.surface.albedo(), star_radius_m, star_teff_k, star_distance_m)
+    lit_radiance(mean_albedo(body), star_radius_m, star_teff_k, star_distance_m)
+}
+
+/// A giant's comes from its chemistry: a cloudless one is a tenth of a water-cloud one's.
+fn mean_albedo(body: &Drawable) -> f64 {
+    if body.giant.is_some() { body.world.gray_albedo() } else { body.surface.albedo() }
+}
+
+/// What the shader multiplies its texel by. A giant's cubemap is its albedo.
+fn shading_albedo(body: &Drawable, drawn: crate::surfaces::Drawn) -> f64 {
+    if drawn.layers { 1.0 } else { body.surface.albedo() }
 }
 
 /// The same law with the albedo given rather than looked up, for anything lit that is not a
@@ -351,22 +361,20 @@ fn air_of(body: &Drawable, mapping: &BandMapping, star: &PerBand<f32>) -> [Vec4;
 pub fn surface_shading(
     session: &Session,
     body: &Drawable,
+    albedo: f64,
     star_radius_m: f64,
     star_teff_k: f64,
     star_distance_m: f64,
 ) -> (glam::Vec3, glam::Vec3) {
-    let reflected = reflected_radiance(body, star_radius_m, star_teff_k, star_distance_m);
+    let reflected = lit_radiance(albedo, star_radius_m, star_teff_k, star_distance_m);
     let emitted = emitted_radiance(body);
     let through = |r| glam::Vec3::from_array(session.mapping.apply(&r));
     (through(reflected), through(emitted))
 }
 
-/// Each ground's albedo through `mapping`, as display channels: the mapped light it reflects
-/// over the mapped light a white surface would. Water, ice, growth, sand, rock `rust` of the way
-/// to Mars, and cloud, which is [`BodySurfaceUniform::ground`]'s order.
+/// Each ground's albedo through `mapping`, in [`BodySurfaceUniform::ground`]'s order.
 fn grounds(mapping: &BandMapping, star: &PerBand<f32>, rust: f32) -> [Vec4; GROUNDS] {
     use lc_world::ground::{Ground, rock};
-    let white = mapping.apply(star);
     [
         Ground::Water.reflectance(),
         Ground::Ice.reflectance(),
@@ -375,12 +383,19 @@ fn grounds(mapping: &BandMapping, star: &PerBand<f32>, rust: f32) -> [Vec4; GROU
         rock(rust),
         Ground::Cloud.reflectance(),
     ]
-    .map(|r| {
-        let lit = mapping.apply(&PerBand::new(std::array::from_fn(|i| r[i] * star[Band::ALL[i]])));
-        let albedo: [f32; 3] =
-            std::array::from_fn(|c| if white[c] > 0.0 { lit[c] / white[c] } else { 0.0 });
-        Vec3::from_array(albedo).extend(1.0)
-    })
+    .map(|r| albedo_through(mapping, star, &r))
+}
+
+/// The same for a giant's layers; the slots past them are weighted zero.
+fn giant_layers(mapping: &BandMapping, star: &PerBand<f32>, giant: &lc_world::giant::Giant) -> [Vec4; GROUNDS] {
+    std::array::from_fn(|k| giant.layers.get(k).map_or(Vec4::ONE, |r| albedo_through(mapping, star, r)))
+}
+
+fn albedo_through(mapping: &BandMapping, star: &PerBand<f32>, r: &[f32; em_spectra::BANDS]) -> Vec4 {
+    let white = mapping.apply(star);
+    let lit = mapping.apply(&PerBand::new(std::array::from_fn(|i| r[i] * star[Band::ALL[i]])));
+    let albedo: [f32; 3] = std::array::from_fn(|c| if white[c] > 0.0 { lit[c] / white[c] } else { 0.0 });
+    Vec3::from_array(albedo).extend(1.0)
 }
 
 /// What a surface that knows its grounds is drawn with, in every band.
@@ -426,6 +441,18 @@ impl Grounds {
             emissivity,
         }
     }
+
+    /// No temperatures of its own: a giant glows as one blackbody whose belts invert.
+    fn giant(mapping: &BandMapping, star: &PerBand<f32>, giant: &lc_world::giant::Giant) -> Self {
+        let flat = BodySurfaceUniform::default();
+        Self {
+            now: giant_layers(mapping, star, giant),
+            natural: giant_layers(&presets::natural(), star, giant),
+            bands: flat.bands,
+            thermal: Vec4::ZERO,
+            emissivity: flat.emissivity,
+        }
+    }
 }
 
 fn uniforms(
@@ -454,7 +481,8 @@ fn uniforms(
             color,
             contrast,
             if weather.is_some() { clouds } else { 0.0 },
-            as_weight(drawn.grounds),
+            // body_surface.wgsl's `MODE_GROUNDS` and `MODE_LAYERS`.
+            if drawn.layers { 2.0 } else { as_weight(drawn.grounds) },
         ),
         reflected: reflected.extend(if drawn.relief { BUMP / crate::surfaces::RELIEF_SCALE } else { 0.0 }),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
@@ -573,14 +601,22 @@ pub fn update_resolved(
             let radiance = surface_radiance(body, star_radius, star_teff, star_distance);
             tone.surface_reference = metered_for(&tone, &radiance, &session.0.mapping);
         }
-        let (reflected, emitted) =
-            surface_shading(&session.0, body, star_radius, star_teff, star_distance);
         let drawn = surfaces.drawn(&body.name);
+        let (reflected, emitted) = surface_shading(
+            &session.0,
+            body,
+            shading_albedo(body, drawn),
+            star_radius,
+            star_teff,
+            star_distance,
+        );
         let star = lit_radiance(1.0, star_radius, star_teff, star_distance);
-        let ground = body
-            .climate
-            .filter(|_| drawn.grounds)
-            .map(|c| Grounds::of(&session.0.mapping, &star, &c, body.effective_k));
+        let mapping = &session.0.mapping;
+        let ground = match (body.climate, body.giant) {
+            (Some(c), _) if drawn.grounds => Some(Grounds::of(mapping, &star, &c, body.effective_k)),
+            (_, Some(g)) if drawn.layers => Some(Grounds::giant(mapping, &star, &g)),
+            _ => None,
+        };
         let air = air_of(body, &session.0.mapping, &star);
         let weather = surfaces.weather(&body.name, now_s, body.radius_m, &mut bakes);
         uniforms(body, star_ly, &tone, reflected, emitted, drawn, ground, air, weather)
@@ -625,7 +661,7 @@ pub fn update_resolved(
             .mesh
             .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
             .clone();
-        let own = surfaces.images(&body.name, body.surface, body.climate, body.airless, &mut images);
+        let own = surfaces.images(&body.name, body.surface, body.climate, body.giant, body.airless, &mut images);
         let uniforms = shade(body, &mut surfaces, *layer != RenderLayers::layer(0));
         let air = air_uniforms(&uniforms);
         let sphere = commands
@@ -673,8 +709,9 @@ mod tests {
             kind: lc_world::navigation::Kind::Planet,
             rings: None,
             surface: Surface::Rock,
-            world: lc_world::worlds::of("test", Surface::Rock, &[]),
+            world: lc_world::worlds::of("test", Surface::Rock, &[], None),
             climate: None,
+            giant: None,
             airless: None,
             pole: DVec3::Z,
             spin_s: None,

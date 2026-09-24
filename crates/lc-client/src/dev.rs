@@ -46,9 +46,8 @@ pub struct DevEntry {
     /// The angle `--at` stands at between the star and itself, seen from the body, degrees.
     /// Past ninety it is looking at the night side.
     pub phase_deg: Option<f64>,
-    /// Dress the `--at` body in the paint of a generated planet, by its name: `--wear "Wolf 359
-    /// c"`. Its surface, clouds and air are derived exactly as that planet's would be; only the
-    /// sphere they are drawn on is borrowed. A generated system is otherwise a crossing away.
+    /// Dress the `--at` body as a generated planet, by its name: `--wear "Wolf 359 c"`. Only the
+    /// sphere is borrowed; a generated system is otherwise a crossing away.
     /// On an airless body a name no planet has is a seed for another airless look.
     pub wear: Option<String>,
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
@@ -243,14 +242,7 @@ pub(crate) fn run_dev_actions(
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Worn {
-    Climate(lc_world::climate::Climate),
-    Airless(lc_world::airless::Airless),
-}
-
-/// The paint a generated planet named `name` has, under its own star, from the stars whose name
-/// it begins with.
+/// Found among the stars whose name `name` begins with.
 fn generated_paint(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<Worn> {
     use lc_world::climate::{Inputs, derived, variety};
     stars
@@ -266,13 +258,19 @@ fn generated_paint(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<W
                 life: Some(p.life),
                 star_teff_k: s.star.teff_k,
             };
-            if let Some(climate) = derived(&inputs, variety(&p.name)) {
-                return Some(Worn::Climate(climate));
-            }
             let bare = (p.atmosphere, p.top) == (lc_world::worlds::Atmosphere::None, lc_world::worlds::Top::Rock);
             let surface = lc_world::surface::Surface::classify(p.radius_m, p.mass_kg, p.equilibrium_k);
-            bare.then(|| Worn::Airless(lc_world::airless::derived(surface, p.radius_m, variety(&p.name))))
+            let airless = bare.then(|| lc_world::airless::derived(surface, p.radius_m, variety(&p.name)));
+            Some(Worn { climate: derived(&inputs, variety(&p.name)), giant: p.giant(s), airless, world: p.world(s) })
         })
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Worn {
+    climate: Option<lc_world::climate::Climate>,
+    giant: Option<lc_world::giant::Giant>,
+    airless: Option<lc_world::airless::Airless>,
+    world: lc_world::worlds::World,
 }
 
 /// See [`DevEntry::wear`]. Every frame, because the bodies are rebuilt every frame; after them
@@ -286,21 +284,25 @@ pub(crate) fn dress_worn(
     let (Some(name), Some(at)) = (&dev.wear, &dev.at_body) else { return };
     let Some(body) = bodies.drawn.iter_mut().find(|d| &d.name == at) else { return };
     let paint = *worn.get_or_insert_with(|| {
-        let found = generated_paint(&game.stars, name).or_else(|| {
-            body.airless?;
-            let v = lc_world::climate::variety(name);
-            Some(Worn::Airless(lc_world::airless::derived(body.surface, body.radius_m, v)))
-        });
+        let found = generated_paint(&game.stars, name)
+            .filter(|w| w.climate.is_some() || w.giant.is_some() || w.airless.is_some())
+            .or_else(|| {
+                body.airless?;
+                let airless = lc_world::airless::derived(body.surface, body.radius_m, lc_world::climate::variety(name));
+                Some(Worn { climate: None, giant: None, airless: Some(airless), world: body.world })
+            });
         match &found {
-            Some(p) => info!("wearing {name}: {p:?}"),
-            None => warn!("no generated planet is named {name}, and {at} is not airless"),
+            Some(w) => info!("wearing {name}: {w:?}"),
+            None => warn!("no generated planet named {name} has paint to wear, and {at} is not airless"),
         }
         found
     });
-    match paint {
-        Some(Worn::Climate(c)) => (body.climate, body.airless) = (Some(c), None),
-        Some(Worn::Airless(a)) => (body.climate, body.airless) = (None, Some(a)),
-        None => {}
+    let Some(paint) = paint else { return };
+    {
+        body.climate = paint.climate;
+        body.giant = paint.giant;
+        body.airless = paint.airless;
+        body.world = paint.world;
     }
 }
 

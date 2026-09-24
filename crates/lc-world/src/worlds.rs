@@ -342,22 +342,26 @@ impl Stated {
 }
 
 /// What a body is: measured where anybody has been, stated by the generator where it made one,
-/// and derived from its class otherwise.
+/// and derived from its class otherwise. A giant's reflectance is its paint's.
 ///
 /// The measured table wins because Venus is in it and no rule reaches Venus. Below that, a
 /// generated body says what it is rather than having it guessed from radius, mass and
 /// temperature -- which is what makes a generated ocean read blue and a generated ice world
 /// read bright, and so what gives a type hypothesis anything to work on.
-pub fn of(id: &str, surface: Surface, tags: &[String]) -> World {
+pub fn of(id: &str, surface: Surface, tags: &[String], giant: Option<&crate::giant::Giant>) -> World {
     if let Some(known) = for_body(id) {
         return *known;
     }
     let stated = Stated::from_tags(tags);
     let atmosphere = stated.atmosphere.unwrap_or_else(|| derived_atmosphere(surface));
     let top = stated.top.unwrap_or_else(|| derived_top(surface));
+    let reflectance = match giant {
+        Some(giant) if atmosphere == Atmosphere::Envelope => giant.reflectance(),
+        _ => reflectance_of(top, atmosphere, surface, stated.gas_giant, varied(id)),
+    };
     World {
         body_id: "",
-        reflectance: reflectance_of(top, atmosphere, surface, stated.gas_giant, varied(id)),
+        reflectance,
         atmosphere,
         top,
         heat_ratio: surface.internal_heat_ratio(),
@@ -468,7 +472,7 @@ mod tests {
     #[test]
     fn venus_is_what_its_class_could_never_have_said() {
         let venus = world("Venus");
-        let classed = of("some generated rock", Surface::Weathered, &[]);
+        let classed = of("some generated rock", Surface::Weathered, &[], None);
         assert!(
             venus.gray_albedo() > classed.gray_albedo() * 2.0,
             "authored {} against derived {}",
@@ -547,11 +551,11 @@ mod tests {
     /// world is an envelope rather than bare rock.
     #[test]
     fn an_unvisited_body_falls_back_to_its_class() {
-        let giant = of("generated-3", Surface::IceGiant, &[]);
+        let giant = of("generated-3", Surface::IceGiant, &[], None);
         assert_eq!((giant.atmosphere, giant.top), (Atmosphere::Envelope, Top::Cloud));
         assert!(giant.heat_ratio >= 1.0);
 
-        let ice = of("generated-4", Surface::Ice, &[]);
+        let ice = of("generated-4", Surface::Ice, &[], None);
         assert_eq!((ice.atmosphere, ice.top), (Atmosphere::None, Top::Ice));
         assert!(ice.gray_albedo() > giant.gray_albedo() * 0.8, "ice is bright");
     }
@@ -563,7 +567,7 @@ mod tests {
     #[test]
     fn a_generated_body_is_the_color_of_what_it_is_made_of() {
         let made = |top: Top, air: Atmosphere, surface| {
-            of("generated-body", surface, &Stated::tags(air, top, false))
+            of("generated-body", surface, &Stated::tags(air, top, false), None)
         };
         let slope = |w: &World| w.reflectance_in(Band::R) - w.reflectance_in(Band::B);
 
@@ -581,8 +585,8 @@ mod tests {
         assert!(bare.gray_albedo() < 0.25, "bare rock is dark");
 
         // And the two kinds of giant differ where methane does.
-        let gas = of("g", Surface::GasGiant, &Stated::tags(Atmosphere::Envelope, Top::Cloud, true));
-        let icy = of("g", Surface::IceGiant, &Stated::tags(Atmosphere::Envelope, Top::Cloud, false));
+        let gas = of("g", Surface::GasGiant, &Stated::tags(Atmosphere::Envelope, Top::Cloud, true), None);
+        let icy = of("g", Surface::IceGiant, &Stated::tags(Atmosphere::Envelope, Top::Cloud, false), None);
         assert!(gas.reflectance_in(Band::K) > icy.reflectance_in(Band::K) * 3.0, "methane eats K");
     }
 
@@ -591,10 +595,10 @@ mod tests {
     #[test]
     fn two_bodies_of_a_type_are_not_the_same_body() {
         let tags = Stated::tags(Atmosphere::Thick, Top::Ocean, false);
-        let (a, b) = (of("Kettle e", Surface::Weathered, &tags), of("Kettle f", Surface::Weathered, &tags));
+        let (a, b) = (of("Kettle e", Surface::Weathered, &tags, None), of("Kettle f", Surface::Weathered, &tags, None));
         assert_ne!(a.reflectance, b.reflectance);
         // Same every time it is asked, or a body would shimmer between frames.
-        assert_eq!(a.reflectance, of("Kettle e", Surface::Weathered, &tags).reflectance);
+        assert_eq!(a.reflectance, of("Kettle e", Surface::Weathered, &tags, None).reflectance);
         // And still recognizably its type.
         assert!((a.gray_albedo() / b.gray_albedo()).ln().abs() < 0.4);
     }

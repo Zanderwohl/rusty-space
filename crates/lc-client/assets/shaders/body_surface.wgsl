@@ -2,7 +2,8 @@
 //
 // The pattern is a texture graph baked onto a cubemap -- see lc-client's surfaces module for
 // which graph -- and the palette is the body's class's, from lc_world::surface. A body with a
-// graph of its own has a color cubemap instead, and may have a cloud deck. Every cubemap is
+// graph of its own has a color cubemap instead, and may have a cloud deck; masks beside it say
+// which of a rocky world's grounds each texel is, or which of a giant's layers. Every cubemap is
 // sampled on the body-fixed direction, which is what the mesh's local position already is, so
 // the surface turns with the body and does not swim with the camera. The mesh's +Y is the pole.
 // The cloud deck is lightcone/docs/07-rendering.md's "A cloud deck evolves", and the air over
@@ -41,7 +42,8 @@ struct BodySurfaceUniform {
     light: vec4<f32>,
     /// World direction to the star. `w` is the ambient floor on the night side.
     to_star: vec4<f32>,
-    /// `(color, contrast, clouds, unused)`: whether the color and cloud cubemaps are drawn.
+    /// `(color, contrast, clouds, mode)`: whether the color and cloud cubemaps are drawn, and what
+    /// the masks are: none, `MODE_GROUNDS` or `MODE_LAYERS`.
     params: vec4<f32>,
     /// Starlight the surface reflects, as linear display light before the tone map. `w` is the
     /// relief's slope per unit of height per radian; zero is smooth.
@@ -67,7 +69,7 @@ struct BodySurfaceUniform {
     /// Display light from the air's own heat, where it is opaque at ten microns.
     air_glow: vec4<f32>,
     /// Each ground's albedo through the current mapping, then through the natural one: water,
-    /// ice, growth, sand, rock, cloud.
+    /// ice, growth, sand, rock, cloud. A giant's layers in their place: zone, belt, storm, polar.
     ground: array<vec4<f32>, 6>,
     ground_natural: array<vec4<f32>, 6>,
     /// Per band: display light from a blackbody at `thermal.x`, and its center in microns.
@@ -103,6 +105,9 @@ const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 const RELIEF_STEP: f32 = 0.0015;
 
 const CLOUD: i32 = 5;
+/// `params.w`: the masks are a rocky world's grounds, or a giant's layers.
+const MODE_GROUNDS: f32 = 1.0;
+const MODE_LAYERS: f32 = 2.0;
 /// em_spectra's index of the ten-micron band.
 const THERMAL_IR: i32 = 5;
 
@@ -153,6 +158,28 @@ fn grounds(dir: vec3<f32>) -> array<f32, 5> {
     let ground = land * (1.0 - ice);
     let dry = ground * (1.0 - growth);
     return array<f32, 5>((1.0 - land) * (1.0 - ice), ice, ground * growth, dry * sand, dry * (1.0 - sand));
+}
+
+/// A giant's zone, belt, storm and polar haze at `dir`, summing to one, in giant.tgraph's own
+/// order: haze over storms over belts over zones.
+fn layers(dir: vec3<f32>) -> array<f32, 4> {
+    let belt = textureSample(mask_land, pattern_sampler, dir).r;
+    let storm = textureSample(mask_ice, pattern_sampler, dir).r;
+    let polar = textureSample(mask_growth, pattern_sampler, dir).r;
+    let open = (1.0 - storm) * (1.0 - polar);
+    return array<f32, 4>((1.0 - belt) * open, belt * open, storm * (1.0 - polar), polar);
+}
+
+/// `banded` for a giant's layers.
+fn layered(dir: vec3<f32>, own: vec3<f32>) -> vec3<f32> {
+    let w = layers(dir);
+    var now = vec3<f32>(0.0);
+    var natural = vec3<f32>(0.0);
+    for (var k = 0; k < 4; k++) {
+        now += w[k] * material.ground[k].rgb;
+        natural += w[k] * material.ground_natural[k].rgb;
+    }
+    return own * now / max(natural, vec3<f32>(1.0e-4));
 }
 
 /// Ground `k`'s emissivity in band `b`, or its inertia at `b = 7`.
@@ -291,13 +318,18 @@ fn relief_normal(in: VertexOutput) -> vec3<f32> {
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let contrast = material.params.y;
     let surface = textureSample(pattern, pattern_sampler, in.local_direction).r;
-    let t = mix(0.5, surface, contrast);
+    var t = mix(0.5, surface, contrast);
     var albedo = mix(material.dark.rgb, material.light.rgb, t);
     var own = textureSample(color, pattern_sampler, in.local_direction).rgb;
     var cloud = deck(in.local_direction);
-    if (material.params.w > 0.5) {
+    let mode = material.params.w;
+    if (abs(mode - MODE_GROUNDS) < 0.5) {
         own = banded(in.local_direction, own);
         cloud = vec4<f32>(cloud.rgb * material.ground[CLOUD].rgb / max(material.ground_natural[CLOUD].rgb, vec3<f32>(1.0e-4)), cloud.a);
+    } else if (abs(mode - MODE_LAYERS) < 0.5) {
+        own = layered(in.local_direction, own);
+        // A belt is what glows.
+        t = 1.0 - layers(in.local_direction)[1];
     }
     albedo = mix(albedo, own, material.params.x);
     albedo = mix(albedo, cloud.rgb, cloud.a * material.params.z);

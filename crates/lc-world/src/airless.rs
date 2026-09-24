@@ -108,7 +108,7 @@ mod tests {
         assert!(of("Mercury", world("Mercury"), Surface::Scorched, 2.44e6).is_some());
         assert!(of("Mars", world("Mars"), Surface::Weathered, 3.39e6).is_none(), "Mars has air");
         assert!(of("Europa", world("Europa"), Surface::Ice, 1.56e6).is_none(), "Europa is ice");
-        let generated = crate::worlds::of("Kettle b", Surface::Rock, &[]);
+        let generated = crate::worlds::of("Kettle b", Surface::Rock, &[], None);
         assert!(of("Kettle b", &generated, Surface::Rock, 5.0e5).is_some());
     }
 
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn maria_are_darker_than_highland_and_ejecta_brighter() {
         for id in ["a", "b", "c", "d", "e", "Luna", "Mercury"] {
-            let p = of(id, &crate::worlds::of(id, Surface::Rock, &[]), Surface::Rock, 2.0e6).unwrap();
+            let p = of(id, &crate::worlds::of(id, Surface::Rock, &[], None), Surface::Rock, 2.0e6).unwrap();
             assert!(p.mare[0] < p.highland[0] && p.highland[0] < p.ejecta[0], "{id}: {p:?}");
             assert!(p.craters.windows(2).all(|w| w[1] <= w[0]), "{id}: the old series is the densest");
         }

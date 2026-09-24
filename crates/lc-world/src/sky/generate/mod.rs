@@ -282,6 +282,9 @@ fn stated(id: &str, mass: f64, major: bool, tags: &[&str], planet: &Planet) -> B
     ));
     info.tags.push(crate::climate::water_tag(planet.water_fraction));
     info.tags.push(crate::climate::life_tag(planet.life));
+    if planet.atmosphere == crate::worlds::Atmosphere::Envelope {
+        info.tags.push(crate::giant::metals_tag(planet.metals));
+    }
     info
 }
 

@@ -13,6 +13,9 @@
 # the [airless] graph the same way, and its "height" layer lights its craters. A body named
 # under [bodies] still takes its own graph over either.
 #
+# A giant takes the [giants] graph the same way, with its parameters bound from lc_world::giant:
+# its bands from how fast it turns, its colors from what its cloud tops are made of.
+#
 # Surfaces are baked on a sphere, so a graph here may use only Color, Noise, Coordinate, Mix,
 # MinMax, Wave and Craters; Map, with a palette of any kind; and a passthrough Transform set to Extend.
 
@@ -27,6 +30,9 @@ Scorched = "surfaces/scorched.tgraph"
 [rocky]
 ground = "worlds/rocky.tgraph"
 clouds = "worlds/earthlike-clouds.tgraph"
+
+[giants]
+graph = "worlds/giant.tgraph"
 
 [airless]
 ground = "worlds/airless.tgraph"

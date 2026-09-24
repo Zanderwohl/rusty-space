@@ -4,8 +4,8 @@ Every ten seconds of real time, the client takes a photograph through the ship's
 of something worth looking at, and shows it in a square beside the map's. Code is
 `lc_client::beauty`.
 
-Status: **experimental**, off by default. The telescope window's *Beauty shots* box turns it
-on, and so does `--beauty`.
+Status: **experimental**, off by default. `|` (`Shift`+`\`) toggles it, and so do the
+telescope window's *Beauty shots* box and `--beauty`.
 
 ## What is photographed
 
@@ -22,6 +22,8 @@ Everything that applies now, in turn, one per shot:
 | whole | held by a body other than the star | the body, framed |
 | horizon | the same, within thirty of its radii | along the limb on the star's side, looking just over it |
 | below | the same, over the day side | straight down |
+| rings | any ring system wider than 150 microradians, from far enough out to frame it whole | the rings, framed, lying level |
+| ringside | within six of its outer radii of a ring system | the nearest stretch of it, across its whole width |
 | neighbor | any other body wider than 150 microradians on the sky | one of them at random, framed |
 
 A body or star is left out when more than 70% of its disc is behind nearer bodies (or the star),
@@ -29,6 +31,12 @@ and a body when less than 30% of its face is lit. A moonrise and a crescent are 
 behind its planet and a new moon are not. The covering is worked on angles as if the sky were
 flat, which is close for a moon and rough for a planet filling half the view, and overlapping
 occluders are both counted, so it errs toward calling a target hidden.
+
+Rings are photographed only when the renderer draws them at 5% opacity or more
+(`envelope::ring_opacity`): Saturn's, Uranus's and Neptune's, and not Jupiter's. The close-up is
+held the way a camera held level would be, pole up on the ship's side, so the bands lie level and
+the far side of the ring is at the top. Rings are drawn unlit, so no ring shot is left out for
+being dark, and the planet's shadow is not on them.
 
 The neighbor threshold takes in the Moon from Earth at nine milliradians, and Jupiter or Venus
 near their closest; Mars at opposition falls just short. A body first resolved for the shot is
