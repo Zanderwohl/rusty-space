@@ -418,7 +418,7 @@ graph LR
 
 ### E1 · Beam and courtesy math
 
-- status: todo
+- status: done #70
 - needs: K2
 - touches: `crates/lc-world/src/signal.rs`, `crates/lc-world/src/emit.rs`, `crates/lc-world/src/courtesy.rs`
 - read: 31 §Spread, §What arrives, §Courtesy
@@ -524,8 +524,8 @@ graph LR
 - needs: E1
 - touches: `crates/em-render/src/exhaust_cone_material.rs`, `crates/lc-client/assets/shaders/exhaust_cone.wgsl`, `crates/em-render/src/plume_material.rs`
 - read: 32 §The exhaust cone
-- deliver: the cone shaded in closed form per pixel from the flux at the ray's closest approach to the axis, one draw, precise at 27 000 km; the aperture glow at `F c` over its area.
-- done when: photographed from beside, behind and inside the cone, at 27 km and at 27 000 km.
+- deliver: the cone shaded in closed form per pixel from the flux at the ray's closest approach to the axis, one draw, precise at 26 000 km; the aperture glow at `F c` over its area.
+- done when: photographed from beside, behind and inside the cone, at 26 km and at 26 000 km.
 
 ### R8 · Truss and plating
 

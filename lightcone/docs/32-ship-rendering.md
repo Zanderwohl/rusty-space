@@ -231,8 +231,8 @@ says.
 A photon drive's exhaust has no gas in it. Seen from the side, it is invisible; seen from inside, it
 is a blinding point. `plume.wgsl` draws a reaction drive: a glowing column of fuel-rich gas 1.5 hull
 lengths long, with soot lanes, heated by the jet power `½ F v`. None of that exists here. And the
-cone that matters is thousands of times longer than any hull: 27 km of courtesy radius behind a
-starting ship, 27 000 km behind a GSV.
+cone that matters is thousands of times longer than any hull: 26 km of courtesy radius behind a
+starting ship, 26 000 km behind a GSV.
 
 The current shader is not the cost problem it might look like. It is one draw per burning ship: a
 proxy cone, with each covered pixel marching 24 samples back along its ray. Cost goes with the pixels
@@ -248,7 +248,7 @@ replaced by two things:
   the axis, so the shading is **closed form per pixel**: take the point where the view ray passes
   closest to the axis, and read the flux there. There is no march and no loop, one draw per cone,
   and the fragment works in the proxy's own coordinates from the surface back, as `plume.wgsl` does,
-  so `f32` holds at 27 000 km.
+  so `f32` holds at 26 000 km.
 
 The cone is drawn for your own ship whenever it burns, for any ship whose courtesy radius you are
 inside, and for a selected ship. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s
