@@ -513,6 +513,7 @@ graph LR
 - read: 32 §The field
 - deliver: two layers on any envelope mesh; Clear's thin-film shimmer and Black's matte surface; the blackbody glow from temperature at physical brightness through the exposure; hot spots from bearings; the flicker past 80%; the switch sweep; the collapse flash and afterglow; `--field-k`.
 - done when: photographed at 400, 2 400 and 4 600 K in both modes, and `--burst` shows the flicker.
+- note: photographed through `examples/field_void.rs`, which has its own `--field-k`, `--mode` and `--burst`. The binary's `--field-k` holds the player's field, and there is none until R11: **R11 adds it**.
 
 ### R7 · Exhaust cone, in a void
 

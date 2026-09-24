@@ -147,6 +147,14 @@ whatever is decided about air:
   the color is a consequence, not a setting. At 400 K the outer layer is invisible in the visible
   bands. At 2 400 K on a dive it glows red-orange. At 4 600 K it is the brightest thing on screen.
 
+**How it is drawn.** One mesh, three draws: the far wall, the inner rim, then the near wall, which
+alone has alpha and so is the only one that can hide anything. By Kirchhoff each mode's emissivity is
+its absorptivity, and a thin shell's grows toward one along a grazing path, so a Clear field is
+limb-brightened and a Black one glows evenly. The same number is how much of what is behind a wall it
+takes out: Clear shows the ship, Black hides it. The shader takes kelvin and fractions and a table of
+blackbody colors the host has already put through the observer's bands, so nothing in
+`em_render::field_material` knows a `Balance`.
+
 **The mode sets the surface.** Clear is a shimmering, mostly transparent skin: thin-film color bands
 that drift across it like a soap bubble's, over the fresnel rim, with the heat glow showing through
 as a tint. Black is matte and dark, and the heat glow is all there is to see. A switch sweeps the new
@@ -236,6 +244,10 @@ photographed:
 | `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point |
 | `--demo collapse` | a ship collapsing beside two others, one close enough to follow it |
 | `--field-k <kelvin>` | the player's field held at a temperature, for the shader |
+
+Until the player has a field, the shader is photographed in a void: `cargo run -p lc-client
+--example field_void -- --field-k <kelvin> --mode clear|black`, around a stand-in hull, with its
+own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the example's module doc.
 
 `--burst` is the only way to see the saturation flicker, as it is for any flicker.
 
