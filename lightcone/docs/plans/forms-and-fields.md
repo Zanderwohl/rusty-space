@@ -209,7 +209,7 @@ graph LR
 
 ### K1 · Form types
 
-- status: active claude/hopeful-maxwell-c3bf0b
+- status: done #62
 - needs: —
 - touches: `crates/lc-world/src/form.rs`, `crates/lc-world/src/lib.rs`
 - read: 29 §Parts, §Kinds, §The Mind, §Placement is relative
