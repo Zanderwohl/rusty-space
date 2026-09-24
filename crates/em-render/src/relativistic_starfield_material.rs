@@ -98,13 +98,11 @@ pub struct RelativisticStarfieldUniform {
     pub log_t_min: f32,
     pub log_t_scale: f32,
     pub lut_samples: f32,
-    /// The radians per physical pixel the radii above were converted at. A view drawing at a
-    /// different scale — a telescope's narrow field — rescales them by its own, so a star is
-    /// the same number of pixels in every view. Zero leaves the radii as they are.
+    /// Radians per physical pixel the radii above were converted at. A view at another scale
+    /// rescales them by its own, so a star is the same pixels in every view. Zero: as they are.
     pub drawn_rad_per_px: f32,
-    /// The exposure, in Bevy's sense, of the view the window above was placed for. A view
-    /// exposed differently — a telescope metered on one faint star — moves the window by the
-    /// ratio. Zero leaves it where it is.
+    /// Bevy exposure of the view the window above was placed for. A view exposed differently
+    /// moves the window by the ratio. Zero: where it is.
     pub drawn_exposure: f32,
 }
 

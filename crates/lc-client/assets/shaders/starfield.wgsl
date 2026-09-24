@@ -190,9 +190,8 @@ fn band_radiance(band: u32, teff: f32) -> f32 {
     return exp2(mix(a, b, frac));
 }
 
-/// How many of the radii's pixels one of this view's is. The radii are set for the sky's
-/// camera, and a telescope drawing the same meshes through a narrow field would otherwise blow
-/// every star up to a disc.
+/// This view's pixel over the sky camera's, which the radii were set in. Without it a narrow
+/// field draws every star as a disc.
 fn pixel_scale() -> f32 {
     if (material.drawn_rad_per_px <= 0.0) {
         return 1.0;

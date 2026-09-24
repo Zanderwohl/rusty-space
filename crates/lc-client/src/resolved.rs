@@ -511,8 +511,7 @@ pub fn metered_for(tone: &crate::tonemap::ToneMap, radiance: &PerBand<f32>, mapp
     tone.surface_reference * (shaded.stops + (1.0 - SUBJECT_VALUE) * tone.surface_stops).exp2()
 }
 
-/// Which layer a body's sphere is drawn on, if it has one: the sky's when the sky resolves it,
-/// and otherwise the telescope's alone when the shot being taken does.
+/// The layer a body's sphere is drawn on, if it has one.
 fn sphere_layer(body: &Drawable, eye_ly: DVec3, rad_per_px: f32, shot: &crate::beauty::ShotBody)
     -> Option<usize> {
     if is_resolved(body, eye_ly, rad_per_px) {
@@ -561,9 +560,8 @@ pub fn update_resolved(
     let star_ly = system.star_position_ly();
     let (star_radius, star_teff) = (system.star_radius_m(), system.star_teff_k());
     let now_s = session.0.coordinate_time_s();
-    // A sphere only the telescope draws is exposed for itself: the sky's exposure was placed for
-    // a point, and the surface's window is logarithmic, so nothing done after it can recover a
-    // disc it clipped.
+    // A sphere only the telescope draws is exposed for itself. The surface's window is
+    // logarithmic, so no later exposure recovers a disc it clipped.
     let mut shade = |body: &Drawable, surfaces: &mut crate::surfaces::Surfaces, own: bool| {
         let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
         let mut tone = session.tone;

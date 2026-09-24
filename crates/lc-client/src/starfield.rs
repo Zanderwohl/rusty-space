@@ -477,8 +477,7 @@ fn sky_exposure() -> f32 {
     bevy::camera::Exposure::default().exposure()
 }
 
-/// Radians per *physical* pixel for the sky's camera, which is what a shader can measure a view
-/// against. See `drawn_rad_per_px`.
+/// Radians per *physical* pixel for the sky's camera: a shader sees physical pixels.
 pub fn physical_scale(camera: &Query<(&Projection, &Camera), With<crate::app::SkyCamera>>) -> f32 {
     let Ok((projection, camera)) = camera.single() else { return 0.0 };
     let Projection::Perspective(perspective) = projection else { return 0.0 };

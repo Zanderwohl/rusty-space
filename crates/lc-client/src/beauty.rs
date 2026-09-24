@@ -2,11 +2,8 @@
 //! of something worth looking at, shown in a square beside the map's. Experimental, and off
 //! unless asked for. `lightcone/docs/28-beauty-shots.md` is the design.
 //!
-//! The camera stands where the sky's does, at the render origin, and draws the same layer, so a
-//! photograph costs no second scene: only one extra pass, one frame in [`PERIOD_S`]. What the
-//! two views cannot share is handled where it lives — a star's size in pixels by
-//! `drawn_rad_per_px` in the starfield's uniform, a body only the telescope resolves by
-//! [`ShotBody`], and the ship's own hull by `app::SKY_ONLY_LAYER`.
+//! The camera draws the sky's own scene from the render origin, one frame per shot. The doc
+//! says what the two views cannot share and where each difference is handled.
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{Exposure, Hdr, RenderTarget};
@@ -30,7 +27,7 @@ use crate::system::{Drawable, M_PER_LY};
 pub const SHOT_LAYER: usize = 4;
 
 const PERIOD_S: f32 = 10.0;
-/// Until the first, so a run photographed a second or two in has one.
+/// Short, so a `--shot` run a second or two in has one.
 const FIRST_S: f32 = 1.0;
 /// When there is nothing to photograph, how soon to look again.
 const RETRY_S: f32 = 2.0;
@@ -40,34 +37,30 @@ const SETTLE_FRAMES: u32 = 2;
 /// Frames between the shutter and showing the picture. Rendering is pipelined: the frame the
 /// camera was active on is drawn while the next is being built.
 const DEVELOP_FRAMES: u32 = 2;
-/// The longest the shutter waits for a sphere's surface to finish baking. A body first resolved
-/// for the shot is flat until it has; a bake that never lands must not hold the rotation.
+/// How long the shutter waits for a sphere's surface to bake; it is drawn flat until then. A bake
+/// that never lands must not stall the rotation.
 const BAKE_WAIT_S: f32 = 3.0;
 const FADE_S: f32 = 0.6;
 
-/// The fewest pixels across a shot is drawn at. A field too small to hold this many of the
-/// telescope's resolution elements is widened until it does, which is how a far target comes
-/// out as a few soft pixels rather than a sharp disc the optics could never have delivered.
+/// The fewest pixels across a shot. A field holding fewer of the telescope's resolution elements
+/// is widened, so a far target comes out as a few soft pixels.
 const MIN_SIDE_PX: u32 = 12;
 /// Until the interface has said how big the square is.
 const DEFAULT_SIDE_PX: u32 = 384;
 
-/// The widest shot. Framing a planet from low orbit asks for nearly a hemisphere, and past this
-/// a perspective lens is mostly stretched edge.
+/// The widest shot. Past this a perspective lens is mostly stretched edge.
 const MAX_FIELD_RAD: f64 = 1.75;
 /// How much sky around a framed disc, as a multiple of its diameter.
 const FRAME_MARGIN: f64 = 1.3;
-/// How much of the limb the horizon shot spans, and how much ground the shot below does, in the
-/// body's radii. Lengths rather than angles, so a higher orbit is a longer lens on the same
-/// scene. Both were an angle once, set from low orbit, and from twenty radii out each one took
-/// in the whole disc.
+/// Limb spanned by the horizon shot and ground spanned by the shot below, in the body's radii.
+/// Lengths, not angles, so a higher orbit is a longer lens on the same scene.
 const HORIZON_SPAN_RADII: f64 = 0.228;
 const NADIR_SPAN_RADII: f64 = 0.18;
 /// How far above the limb the horizon shot looks, as a fraction of its field, so the limb sits
 /// in the lower part of the frame with sky over it.
 const HORIZON_LIFT: f64 = 0.25;
-/// Past this many of its radii from its center a body is not *below*: its horizon and the
-/// ground under the ship are both most of the disc again, and the whole-disc shot says it.
+/// Past this many radii from its center a body is not below the ship, and gets only the
+/// whole-disc shot.
 const BELOW_RADII: f64 = 30.0;
 /// A body within this many of its radii of where the ship is going is what it is going to.
 const ARRIVING_RADII: f64 = 50.0;
@@ -75,22 +68,19 @@ const ARRIVING_RADII: f64 = 50.0;
 /// The Moon from Earth is nine milliradians; Venus and Jupiter at their closest are a little
 /// over this, and Mars at opposition a little under.
 const NEIGHBOR_MIN_RAD: f64 = 1.5e-4;
-/// The most of a target's disc that may be hidden behind something nearer. A moonrise is a
-/// picture; a moon wholly behind its planet is a black frame.
+/// The most of a target's disc that may be behind something nearer. A moonrise passes.
 const MAX_COVERED: f64 = 0.7;
-/// The least of a target's face that must be lit. A thin crescent is a picture; a new moon is
-/// not.
+/// The least of a target's face that must be lit. A crescent passes; a new moon does not.
 const MIN_LIT: f64 = 0.3;
 /// A star's disc is almost never resolved, so this is the patch of sky around it.
 const STAR_FIELD_RAD: f64 = 0.01;
 
-/// Where a shot of the sky puts the star it is metered on, in stops over the top of the window:
-/// over, so it is a point with its glare round it rather than a dim dot.
+/// Where a shot of the sky puts the star it is metered on, in stops over the top of the window,
+/// so it draws with its glare rather than as a dim dot.
 const POINT_ABOVE: f32 = 8.0;
 /// How far a shot's exposure may move from the view's, in stops.
 const MAX_STOPS: f32 = 24.0;
 
-/// What a photograph is of.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Subject {
     /// The body the ship is held by, framed whole.
@@ -143,8 +133,7 @@ pub struct Shot {
     /// How much brighter than the view the starfield is exposed. A body the shot resolves is
     /// metered for itself instead; see `resolved::metered_for`.
     pub stops: f32,
-    /// The color of a star at the middle of the frame, which is drawn with the diffraction
-    /// spikes the secondary mirror's supports throw.
+    /// The color of the star at the middle of the frame, which gets diffraction spikes.
     pub spikes: Option<Vec3>,
     pub caption: String,
 }
@@ -157,7 +146,6 @@ pub struct ShotBody {
     pub rad_per_px: f32,
 }
 
-/// The telescope's camera.
 #[derive(Component)]
 pub struct BeautyCamera;
 
@@ -196,8 +184,8 @@ impl Plugin for BeautyPlugin {
                 Update,
                 shoot
                     .in_set(Stage::Scene)
-                    // Which places the eye first; the eye itself is placed in the menu too, and
-                    // a system added twice cannot be ordered against.
+                    // Which places the eye first. `place_eye` runs in the menu too, and a system
+                    // added twice cannot be ordered against.
                     .after(crate::starfield::update_bodies)
                     .before(crate::resolved::update_resolved)
                     .run_if(in_state(AppState::InGame)),
@@ -360,8 +348,8 @@ fn shoot(
             exposure.ev100 = Exposure::default().ev100 - shot.stops;
             *target = RenderTarget::Image(beauty.images[back].clone().into());
             camera.is_active = true;
-            // On the shutter's own frame: a screenshot of an image captures what is drawn into
-            // it that frame, and taken later it captured nothing and wrote that back over it.
+            // On the shutter's frame: an image screenshot captures what is drawn into it that
+            // frame, and writes that back.
             if let Some(dir) = dev.beauty_dir.as_deref() {
                 let path = format!("{dir}/{:03}-{}.png", beauty.taken, subject.kind());
                 info!("beauty shot {path}: {}", shot.caption);
@@ -515,9 +503,8 @@ pub fn subjects(session: &Session, drawn: &[Drawable], eye_ly: DVec3, seed: u64)
 /// How much of a disc of `radius_m` at `at_ly` is behind nearer discs, seen from `eye_ly`, as
 /// a fraction.
 ///
-/// Flat geometry on angles, which is exact for small discs and good enough at the threshold for
-/// a planet filling half the sky. Where two occluders overlap each other their shares are both
-/// counted, which errs toward calling the target hidden.
+/// Flat geometry on angles: exact for small discs, rough for a planet filling half the sky.
+/// Overlapping occluders are both counted, which errs toward hidden.
 pub fn covered(at_ly: DVec3, radius_m: f64, eye_ly: DVec3, occluders: &[(DVec3, f64)]) -> f64 {
     let to = (at_ly - eye_ly) * M_PER_LY;
     let distance = to.length();
@@ -664,7 +651,6 @@ fn shaded(session: &Session, star: &lc_world::sky::CatalogStar) -> Option<crate:
     (shaded.stops != 0.0 || shaded.value > 0.0).then_some(shaded)
 }
 
-/// The brightest star in a square field, if there is one in it.
 fn brightest(session: &Session, forward: DVec3, field_rad: f64) -> Option<crate::tonemap::Shaded> {
     // The square's corners are this far out: half its diagonal.
     let reach = (field_rad * std::f64::consts::FRAC_1_SQRT_2).cos();
@@ -676,11 +662,8 @@ fn brightest(session: &Session, forward: DVec3, field_rad: f64) -> Option<crate:
         .max_by(|a, b| a.stops.total_cmp(&b.stops))
 }
 
-/// The field actually taken and the pixels across it, for the optics' resolution.
-///
-/// The field is widened to hold [`MIN_SIDE_PX`] resolution elements, and the pixels are as many
-/// as the optics can fill, up to what the square shows. A distant planet therefore comes out as
-/// a few soft pixels, and sharpens as the ship closes.
+/// The field actually taken, widened to hold [`MIN_SIDE_PX`] resolution elements, and as many
+/// pixels across as the optics fill, up to `max_side_px`.
 pub fn fidelity(field_rad: f64, resolution_rad: f64, max_side_px: u32) -> (f64, u32) {
     let max_side_px = max_side_px.max(MIN_SIDE_PX);
     if !(resolution_rad > 0.0) {
@@ -814,9 +797,8 @@ const SPIKE_REACH: f32 = 0.45;
 const SPIKE_WIDTH: f32 = 1.2;
 const GLOW_RADIUS: f32 = 5.0;
 
-/// Four spikes and a glow at the middle of the frame, each fading to nothing. Drawn over the
-/// photograph rather than in it: the starfield's glare is round by design, and the spikes are a
-/// property of this instrument, not of how the sky is drawn.
+/// Four spikes and a glow at the middle of the frame. Drawn over the photograph because the
+/// starfield's glare is round by design; the spikes belong to this instrument.
 fn spikes(painter: &egui::Painter, rect: egui::Rect, chroma: Vec3, alpha: f32) {
     let c = chroma.clamp(Vec3::ZERO, Vec3::ONE);
     let color = |a: f32| {
@@ -888,8 +870,7 @@ mod tests {
         assert!((limb_off_down - dip - lifted).abs() < 1e-9, "{limb_off_down} vs {dip}");
     }
 
-    /// Further out is a longer lens on the same scene: the ground below and the stretch of limb
-    /// in frame are the same size from every orbit.
+    /// The ground below and the limb in frame are the same size from every orbit.
     #[test]
     fn a_higher_orbit_is_a_longer_lens_on_the_same_scene() {
         for radii in [1.15, 5.0, 20.0] {
@@ -905,8 +886,7 @@ mod tests {
         assert!(nadir_field(EARTH_M * 20.0, EARTH_M) < nadir_field(EARTH_M * 5.0, EARTH_M));
     }
 
-    /// Lower still, the ground below would want a lens wider than any shot takes, and gets the
-    /// widest instead: less ground, not a stretched picture.
+    /// Too low for the span, the shot below takes the widest lens instead.
     #[test]
     fn skimming_the_surface_holds_the_widest_lens() {
         assert_eq!(nadir_field(EARTH_M * 1.02, EARTH_M), Some(MAX_FIELD_RAD));
@@ -928,7 +908,7 @@ mod tests {
         covered(moon, MOON_M, eye, &[(earth, EARTH_M), (moon, MOON_M)])
     }
 
-    /// A moonrise is kept and a moon behind the planet is not: the cut is at how much is hidden.
+    /// A moonrise is kept and a moon behind the planet is not.
     #[test]
     fn a_moon_rising_is_kept_and_one_behind_the_planet_is_not() {
         assert_eq!(moon_behind_earth(3.0), 0.0, "clear of the limb");
@@ -960,8 +940,7 @@ mod tests {
         assert!(horizon(DVec3::new(0.0, 0.0, -1.0), EARTH_M, DVec3::X).is_none());
     }
 
-    /// The whole of what distance does to a picture: a field the optics cannot fill is widened
-    /// and drawn at fewer pixels, so a far target is a soft blob rather than a sharp disc.
+    /// A field the optics cannot fill is widened and drawn at fewer pixels.
     #[test]
     fn a_far_target_is_drawn_at_what_the_optics_resolve() {
         let resolution = 6.0e-7;
