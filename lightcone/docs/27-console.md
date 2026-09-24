@@ -5,8 +5,8 @@ and the shard parses it, checks it against the asker's level, runs it at a fixed
 tick and answers the connection that sent it. The client knows nothing about any command. Code
 is `lc_server::command` and `lc_client::console`.
 
-Status: **built** — `help`, `teleport`, `where`, `who-is`, `energize`, `drain`, `chart`, `refit-finish`,
-`refit-magic`, `stage`.
+Status: **built** — `help`, `teleport`, `where`, `who-is`, `energize`, `drain`, `chart`,
+`refit-finish`, `refit-magic`, `stage`.
 
 ## Why text on the wire
 
