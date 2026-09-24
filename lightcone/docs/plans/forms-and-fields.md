@@ -238,7 +238,7 @@ graph LR
 
 ### F1 · Primitives
 
-- status: active claude/elegant-boyd-8f7031
+- status: done #65
 - needs: K1
 - touches: `crates/lc-world/src/form/primitive.rs`, `crates/lc-world/src/form.rs`
 - read: 29 §Parts
