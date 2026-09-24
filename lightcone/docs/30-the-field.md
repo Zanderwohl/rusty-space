@@ -3,11 +3,12 @@
 Every ship is wrapped in a field. It is the collector, the radiator and the shield, and when it
 fails, the ship is gone and the whole system sees it happen.
 
-**Status: designed.** The account is `lc_world::field`, which nothing reads yet. It replaces the fixed 400 K hull (`lc_world::craft::HULL_K`)
-with a heat account. It turns the hull collectors of [20-solar-power.md](20-solar-power.md) into
-the field receiving starlight. The field is part Culture and part the Langston Field of *The Mote
-in God's Eye*: a skin that absorbs what hits it, glows as it fills, and collapses when it is
-full. Where the energy it sheds goes is [31-directed-energy.md](31-directed-energy.md).
+**Status: designed.** The account is `lc_world::field`, which nothing reads yet. It replaces the
+fixed 400 K hull (`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
+[20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
+Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
+glows as it fills, and collapses when it is full. Where the energy it sheds goes is
+[31-directed-energy.md](31-directed-energy.md).
 
 ## What the field is
 
@@ -81,13 +82,16 @@ What arrives is converted to storage at up to the **conversion rating**, at
 - **`conversion_efficiency`**, 0.7, applies to everything that arrives, starlight included. The 30%
   lost is heat, which is where the sun-diving limit comes from.
 - **Heat never converts back.** Once energy is in `Q`, it leaves by radiation, exhaust or collapse.
-- **Full storage converts nothing**, so everything that arrives becomes heat. A full ship is a
-  hotter ship at the same distance.
+- **Full storage stays full.** It converts only what the draw on it takes out, the living drain
+  and the drones, and everything else that arrives becomes heat. So a full ship sheds all it absorbs
+  as heat, and is a hotter ship at the same distance. A draw larger than conversion empties storage
+  however full it was, and conversion runs throughout.
 - A burst arrives faster than any rating, so **all of it is heat**. Empty storage stops sustained
   power, never a burst.
 
 Storage filling partway through a segment splits it. The fill time is linear in the segment's
-inputs, so the split is closed form too.
+inputs, so the split is closed form too. Holding full storage full, rather than switching
+conversion off, is what makes a settlement independent of where its segments are cut.
 
 ## Clear and Black
 
@@ -99,7 +103,7 @@ A field runs in one of two modes, and the player chooses.
 | reflects | the rest | nothing |
 | looks like | a shimmering, mostly transparent skin: the sheen of a soap bubble, which is thin-film reflection | matte black, with the heat glow the only thing on it |
 | starlight income | 30% | full |
-| a beam, exhaust, a collapse's spike | heats at 30% | heats in full, and converts to storage while there is room |
+| a beam, exhaust, a collapse's spike | heats at 30% | heats in full; a beam or exhaust converts to storage while there is room, and a spike, being a burst, converts nothing |
 | in reflected light | bright | invisible |
 
 **Absorptivity multiplies everything arriving at the field**, before conversion. Reflected light does
@@ -136,8 +140,9 @@ The defaults are a half and three tenths of `Q_max`, about 3 850 K and 3 400 K, 
 collapse, with storage refilling below 95%. The gaps between the pairs are hysteresis, so the field
 does not chatter at a boundary. A player can move either threshold. They travel with the order.
 
-A ship left in Auto at 0.1 AU fills Black, turns Clear when full and sits there at about 2 400 K,
-goes Black again when its living drain has taken 5% of storage, and repeats.
+A ship left in Auto at 0.1 AU fills Black, turns Clear when full and sits there at about 2 400 K.
+Clear starlight there more than pays the living drain, so storage stays full and the ship stays
+Clear. It turns Black again only where Clear no longer pays: farther out, or with a bigger draw.
 
 **Auto runs on the authority**, like every standing order: logging off does not stop the world. It
 needs no polling. The heat account and the fill time are closed form, so the authority works out when
@@ -171,8 +176,8 @@ power that would bring a field to `Q_max`, is `Q_max / τ`.
 
 | | filling | full |
 |---|---|---|
-| 5 AU | 444 K | 513 K |
-| 1 AU | 772 K | 1 029 K |
+| 5 AU | 444 K | 458 K |
+| 1 AU | 772 K | 1 024 K |
 | 0.1 AU | 2 396 K | 3 237 K |
 | 0.05 AU | 3 388 K | **4 577 K, at the limit** |
 
@@ -193,14 +198,15 @@ rest. With the scaled ships of [20-solar-power.md](20-solar-power.md) (10% of vo
 | hull | idle, far from a star | full, 0.1 AU |
 |---|---|---|
 | 500 m | 476 K | 3 237 K |
-| 5 km | 846 K | 3 240 K |
-| 50 km | 1 504 K | 3 274 K |
+| 5 km | 846 K | 3 237 K |
+| 50 km | 1 504 K | 3 237 K |
 
 At the default living drain, **square–cube shows up in the signature, not the survival limit.**
-Starlight and beams scale with shadow, the same as the field, so the sun-diving limit hardly moves
-with size. What moves is how brightly a ship glows at rest: a GSV at 1 500 K is visible in the
-near infrared to anyone looking, and it cannot go dark. The survival pressure will arrive with
-anything that makes heat in proportion to volume. The drive below ε = 1 already would.
+Starlight and beams scale with shadow, the same as the field, and a full ship sheds everything it
+absorbs whatever its drain, so the sun-diving limit does not move with size at all. What moves is
+how brightly a ship glows at rest: a GSV at 1 500 K is visible in the near infrared to anyone
+looking, and it cannot go dark. The survival pressure will arrive with anything that makes heat in
+proportion to volume. The drive below ε = 1 already would.
 
 ## Collapse
 
