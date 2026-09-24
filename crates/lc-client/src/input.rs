@@ -54,6 +54,25 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
     ]
 }
 
+/// Bindings taken with Shift held, over the same key's plain one.
+pub fn shifted_bindings() -> Vec<(KeyCode, Action)> {
+    vec![
+        // `|`: `\` is automatic exposure.
+        (KeyCode::Backslash, Action::ToggleBeautyShots),
+    ]
+}
+
+/// `table` with the shifted bindings laid over it while Shift is held.
+pub fn with_shift(mut table: Vec<(KeyCode, Action)>, shift: bool) -> Vec<(KeyCode, Action)> {
+    if !shift {
+        return table;
+    }
+    let overlay = shifted_bindings();
+    table.retain(|(key, _)| !overlay.iter().any(|(claimed, _)| claimed == key));
+    table.extend(overlay);
+    table
+}
+
 /// Turn the wheel into notches of zoom.
 ///
 /// Pixel-precision devices report a continuous scroll rather than detents, so they are divided
@@ -268,7 +287,11 @@ pub fn read_keys(
     if egui.wants_any_keyboard_input() {
         return;
     }
-    let table = bindings_in_force(state.is_open(Panel::Reader), state.reading.book.is_some());
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let table = with_shift(
+        bindings_in_force(state.is_open(Panel::Reader), state.reading.book.is_some()),
+        shift,
+    );
     for (key, action) in table {
         if keys.just_pressed(key) {
             out.write(Requested(action));
@@ -288,6 +311,20 @@ mod tests {
         keys.sort_by_key(|k| format!("{k:?}"));
         keys.dedup();
         assert_eq!(keys.len(), before, "a key is bound to two actions");
+    }
+
+    #[test]
+    fn shift_backslash_is_beauty_shots_and_backslash_alone_is_still_exposure() {
+        let acts = |table: &[(KeyCode, Action)], key: KeyCode| {
+            table.iter().find(|(k, _)| *k == key).map(|(_, a)| a.clone())
+        };
+        let plain = with_shift(bindings(), false);
+        let shifted = with_shift(bindings(), true);
+        assert_eq!(acts(&plain, KeyCode::Backslash), Some(Action::ExposureAuto));
+        assert_eq!(acts(&shifted, KeyCode::Backslash), Some(Action::ToggleBeautyShots));
+        let keys: Vec<KeyCode> = shifted.iter().map(|(k, _)| *k).collect();
+        assert_eq!(keys.iter().filter(|k| **k == KeyCode::Backslash).count(), 1);
+        assert_eq!(acts(&shifted, KeyCode::KeyT), acts(&plain, KeyCode::KeyT), "the rest are as they were");
     }
 
     #[test]
