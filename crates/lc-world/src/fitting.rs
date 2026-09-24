@@ -190,6 +190,10 @@ pub const ONBOARD_DATA_BYTES: f64 = 1_048_576.0;
 pub const SOLAR_ANCHOR_AU: f64 = 0.1;
 pub const SOLAR_ANCHOR_S: f64 = crate::flight::JULIAN_YEAR_S;
 
+/// The distance, AU from a Sun-like star, at which the starting ship full and broadside is exactly
+/// at its rated load. H2 anchors the field's time constant on it, and it fixes the cooking flux.
+pub const RATED_LOAD_AU: f64 = 0.05;
+
 impl Balance {
     pub const DEFAULT: Self = {
         let slot_volume_m3 = REFERENCE_HULL_M3 / Loadout::STARTING.slots as f64;

@@ -56,9 +56,14 @@ pub fn received_fraction(half_angle_rad: f64, shadow_m2: f64, distance_m: f64) -
 /// How far from its predicted place a target free to thrust at `accel_m_s2` can be, meters, when
 /// the prediction is `blind_s` old at the beam's arrival.
 ///
-/// Newtonian: over a light-minute at 5 g the velocity it can change by is a millionth of `c`.
+/// Hyperbolic motion from rest, `(c²/a)(√(1 + x²) − 1)` with `x = a t / c`, so it never passes
+/// `c t`: `½ a t²` does after 71 days at 5 g, and at four light-years says twenty times what light
+/// could cover. Written as `a t² / (√(1 + x²) + 1)` because the first form cancels to nothing at
+/// the light-seconds 31 tabulates, where `x²` is 10⁻¹³.
 pub fn lead_uncertainty_m(accel_m_s2: f64, blind_s: f64) -> f64 {
-    0.5 * accel_m_s2.abs() * blind_s * blind_s
+    let a = accel_m_s2.abs();
+    let x = a * blind_s / C_M_S;
+    a * blind_s * blind_s / ((1.0 + x * x).sqrt() + 1.0)
 }
 
 /// How long a target is unwatched when the freshest sighting of it is aimed at: its light's
@@ -123,6 +128,21 @@ mod tests {
             let digits = if want.contains('.') { 1 } else { 0 };
             assert_eq!(format!("{got:.digits$e}"), want, "{light_s} light-seconds");
         }
+    }
+
+    /// Past a few light-days, a target can be anywhere light could have reached, less the time it
+    /// spends getting up to speed: `c t − c²/a` in the limit.
+    #[test]
+    fn lead_uncertainty_is_bounded_by_light() {
+        let a = 5.0 * G0;
+        let t = blind_s(4.0 * LY_M);
+        let got = lead_uncertainty_m(a, t);
+        assert!(got < C_M_S * t, "{got:e} past light's {:e}", C_M_S * t);
+        let limit = C_M_S * t - C_M_S * C_M_S / a;
+        assert!((got - limit).abs() / limit < 1.0e-3, "{got:e} against {limit:e}");
+        // And still ½ a t² where the table lives, to a part in 10⁶.
+        let t = blind_s(C_M_S);
+        assert!((lead_uncertainty_m(a, t) / (0.5 * a * t * t) - 1.0).abs() < 1.0e-6);
     }
 
     #[test]

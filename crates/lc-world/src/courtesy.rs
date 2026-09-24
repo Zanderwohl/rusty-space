@@ -6,14 +6,10 @@
 //! emitter a cone as [`crate::emit`] models it.
 
 use crate::emit::{distance_at_flux_m, thrust_power_w};
-use crate::fitting::Balance;
+use crate::fitting::{Balance, RATED_LOAD_AU};
 use crate::flight::G0;
 use crate::signal::cone_solid_angle_sr;
 use crate::solar::SOLAR_CONSTANT_W_M2;
-
-/// A full starting ship broadside to a Sun-like star is at its rated load this far out, AU. It is
-/// what sets the field's time constant (`lightcone/docs/30-the-field.md`), and so the cooking flux.
-pub const RATED_LOAD_AU: f64 = 0.05;
 
 /// The flux a full, Black receiver of any size sits at its rated load in, W/m².
 ///

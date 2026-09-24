@@ -15,9 +15,9 @@ use glam::DVec3;
 /// What a craft transmits with: a wavelength and an aperture to launch it from.
 ///
 /// The aperture is a radio dish or an engine's open face; `lightcone/docs/31-directed-energy.md`
-/// makes them one thing. Both are needed and neither is a tier. Beamwidth is `lambda / D`, so a shorter wavelength
-/// and a wider dish buy the same thing — a tighter beam — and a design that offered "narrow"
-/// and "wide" would be hiding the trade rather than posing it.
+/// makes them one thing. Both are needed and neither is a tier. Beamwidth is `lambda / D`, so a
+/// shorter wavelength and a wider dish buy the same thing — a tighter beam — and a design that
+/// offered "narrow" and "wide" would be hiding the trade rather than posing it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transmitter {
     /// Meters. 0.03 m is 10 GHz, inside the free-space microwave window.
@@ -92,10 +92,6 @@ impl Beam {
             axis: axis.normalize_or(DVec3::X),
             half_angle_rad: half_angle_rad.clamp(0.0, std::f64::consts::PI),
         }
-    }
-
-    pub fn solid_angle_sr(&self) -> f64 {
-        cone_solid_angle_sr(self.half_angle_rad)
     }
 
     pub fn is_omni(&self) -> bool {
@@ -187,9 +183,9 @@ mod tests {
         use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, PI};
         assert!((cone_solid_angle_sr(FRAC_PI_3) - PI).abs() < 1.0e-12);
         assert!((cone_solid_angle_sr(FRAC_PI_2) - 2.0 * PI).abs() < 1.0e-12);
-        assert!((Beam::OMNI.solid_angle_sr() - 4.0 * PI).abs() < 1.0e-12);
+        assert!((cone_solid_angle_sr(PI) - 4.0 * PI).abs() < 1.0e-12);
         let narrow = Beam::along(DVec3::X, 1.0e-6);
-        assert!((narrow.solid_angle_sr() * narrow.gain() - 4.0 * PI).abs() < 1.0e-12);
+        assert!((cone_solid_angle_sr(narrow.half_angle_rad) * narrow.gain() - 4.0 * PI).abs() < 1.0e-12);
     }
 
     /// An engine's open face is an aperture like a dish, and an emit's spread is never under
