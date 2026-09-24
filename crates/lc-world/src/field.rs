@@ -95,7 +95,7 @@ impl Field {
     }
 
     /// `τ ln((P τ − Q₀) / (P τ − Q_threshold))` as `τ ln(1 + gap / beyond)`: both positive when the
-    /// threshold is reachable, and `ln_1p` keeps a threshold just ahead of `Q₀` from cancelling.
+    /// threshold is reachable, and `ln_1p` keeps a threshold just ahead of `Q₀` from canceling.
     /// An equilibrium on the threshold is an asymptote, and `beyond` too small to divide by is the
     /// same asymptote, so both are `None`.
     fn time_between(&self, gap_j: f64, beyond_j: f64) -> Option<f64> {
@@ -106,22 +106,27 @@ impl Field {
         t.is_finite().then_some(t)
     }
 
-    /// The segment's net heat power, before storage fills and after.
-    pub fn heat_w(&self, segment: &Segment, filled: bool) -> f64 {
-        let absorbed = segment.absorbed_w();
-        let stored = if filled { 0.0 } else { segment.stored_w() };
-        absorbed - stored + segment.internal_w
+    /// Net heat power while storage has room.
+    pub fn heat_filling_w(&self, segment: &Segment) -> f64 {
+        segment.absorbed_w() - segment.stored_w() + segment.internal_w
+    }
+
+    /// Net heat power once storage is full and held there: conversion stores only what the draw
+    /// takes out, and the rest of what is absorbed is heat.
+    pub fn heat_full_w(&self, segment: &Segment) -> f64 {
+        segment.absorbed_w() - segment.draw_w + segment.internal_w
     }
 
     /// Settles `dt_s` of `segment` from `heat_j`, splitting it where storage fills.
     pub fn settle(&self, segment: &Segment, heat_j: f64, dt_s: f64) -> Settled {
         let fill = segment.fill_s().filter(|&t| t < dt_s);
         let before_s = fill.unwrap_or(dt_s);
-        let mut heat = self.heat_after_j(heat_j, self.heat_w(segment, false), before_s);
+        let mut heat = self.heat_after_j(heat_j, self.heat_filling_w(segment), before_s);
         if fill.is_some() {
-            heat = self.heat_after_j(heat, self.heat_w(segment, true), dt_s - before_s);
+            heat = self.heat_after_j(heat, self.heat_full_w(segment), dt_s - before_s);
         }
-        Settled { heat_j: heat, stored_j: segment.stored_w() * before_s, filled_s: fill }
+        let storage_j = (segment.stored_w() - segment.draw_w) * before_s;
+        Settled { heat_j: heat, storage_j, filled_s: fill }
     }
 
     /// When heat first reaches `threshold_j` from below under `segment` left running, fill split
@@ -145,15 +150,15 @@ impl Field {
         heat_j: f64,
         time_to: impl Fn(&Self, f64, f64) -> Option<f64>,
     ) -> Option<f64> {
+        let filling = self.heat_filling_w(segment);
         let Some(fill_s) = segment.fill_s() else {
-            return time_to(self, heat_j, self.heat_w(segment, false));
+            return time_to(self, heat_j, filling);
         };
-        let filling = self.heat_w(segment, false);
         if let Some(t) = time_to(self, heat_j, filling).filter(|&t| t <= fill_s) {
             return Some(t);
         }
         let at_fill = self.heat_after_j(heat_j, filling, fill_s);
-        time_to(self, at_fill, self.heat_w(segment, true)).map(|t| fill_s + t)
+        time_to(self, at_fill, self.heat_full_w(segment)).map(|t| fill_s + t)
     }
 }
 
@@ -173,8 +178,8 @@ pub struct Segment {
     pub efficiency: f64,
     /// What storage can still take at the segment's start. Zero or less is full.
     pub room_j: f64,
-    /// Drawn out of storage meanwhile, which only delays its filling. Heat from the same draw is
-    /// the caller's to put in `internal_w`.
+    /// Drawn out of storage meanwhile: it delays filling, and once full it is all conversion stores.
+    /// Heat from the same draw is the caller's to put in `internal_w`.
     pub draw_w: f64,
 }
 
@@ -193,16 +198,16 @@ impl Segment {
         self.efficiency * self.converted_w()
     }
 
-    /// When storage fills, from the segment's start: zero if it starts full, `None` if it never
-    /// fills because the draw keeps up. Conversion stops at that instant and everything absorbed
-    /// is heat from then on.
+    /// When storage fills, from the segment's start, after which it is held full: zero if it starts
+    /// full, `None` if the draw keeps up with conversion, which leaves storage room all segment long
+    /// however full it started.
     pub fn fill_s(&self) -> Option<f64> {
-        if self.room_j <= 0.0 {
-            return Some(0.0);
-        }
         let net_w = self.stored_w() - self.draw_w;
         if net_w <= 0.0 {
             return None;
+        }
+        if self.room_j <= 0.0 {
+            return Some(0.0);
         }
         let t = self.room_j / net_w;
         t.is_finite().then_some(t)
@@ -231,8 +236,9 @@ impl Burst {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settled {
     pub heat_j: f64,
-    /// Put into storage by conversion, before the segment's draw is taken out.
-    pub stored_j: f64,
+    /// Net change in storage: conversion less the draw. Negative when the draw outruns conversion,
+    /// and emptying storage is the caller's to handle.
+    pub storage_j: f64,
     /// When storage filled, if it did within the step.
     pub filled_s: Option<f64>,
 }
@@ -274,10 +280,11 @@ mod tests {
     }
 
     /// 30's three anchors, put in by hand: idle at `field_idle_k` on the living drain alone, 10 ME
-    /// from empty to collapse, and full at 0.05 AU exactly at rated load.
+    /// from empty to collapse, and full at 0.05 AU exactly at rated load. Storage held full turns
+    /// everything absorbed into heat, drain or no drain.
     fn anchored(b: &Balance) -> Field {
         let heat_max_j = 10.0 * module_energy_j(b);
-        let tau_s = heat_max_j / (starlight_w(b, 0.05) + b.living_drain_w);
+        let tau_s = heat_max_j / starlight_w(b, 0.05);
         Field {
             area_m2: AREA_M2,
             capacity_j_m2: heat_max_j / AREA_M2,
@@ -287,8 +294,8 @@ mod tests {
         }
     }
 
-    fn equilibrium_k(field: &Field, segment: &Segment, filled: bool) -> f64 {
-        field.temperature_k(field.equilibrium_j(field.heat_w(segment, filled)))
+    fn equilibrium_k(field: &Field, power_w: f64) -> f64 {
+        field.temperature_k(field.equilibrium_j(power_w))
     }
 
     fn close(got: f64, want: f64, rel: f64) -> bool {
@@ -310,11 +317,12 @@ mod tests {
         assert!((field.temperature_k(b.living_drain_w * field.tau_s) - 400.0).abs() < 1e-9);
 
         for (d_au, filling_k, full_k) in
-            [(5.0, 444.0, 513.0), (1.0, 772.0, 1_029.0), (0.1, 2_396.0, 3_237.0), (0.05, 3_388.0, 4_577.0)]
+            [(5.0, 444.0, 458.0), (1.0, 772.0, 1_024.0), (0.1, 2_396.0, 3_237.0), (0.05, 3_388.0, 4_577.0)]
         {
             let segment = starting_segment(&b, d_au, 30.0 * me);
-            let filling = equilibrium_k(&field, &segment, false);
-            let full = equilibrium_k(&field, &segment, true);
+            assert!(segment.stored_w() > segment.draw_w, "{d_au} AU cannot hold storage full");
+            let filling = equilibrium_k(&field, field.heat_filling_w(&segment));
+            let full = equilibrium_k(&field, field.heat_full_w(&segment));
             assert!((filling - filling_k).abs() < 0.5, "{d_au} AU filling {filling}");
             assert!((full - full_k).abs() < 0.5, "{d_au} AU full {full}");
         }
@@ -327,13 +335,13 @@ mod tests {
         assert!((clear_above - 3_850.0).abs() < 5.0, "{clear_above}");
         assert!((black_below - 3_400.0).abs() < 15.0, "{black_below}");
 
-        let filling_j = field.equilibrium_j(field.heat_w(&starting_segment(&b, 0.1, 30.0 * me), false));
+        let filling_j = field.equilibrium_j(field.heat_filling_w(&starting_segment(&b, 0.1, 30.0 * me)));
         assert!(filling_j + 5.0 * me < field.heat_max_j());
         assert!(filling_j + 10.0 * me > field.heat_max_j());
 
         // A full Clear ship at rated load: absorbed starlight goes as 1/d².
         let clear = b.clear_absorptivity * starlight_w(&b, 0.05);
-        let d_au = 0.05 * (clear / (field.rated_load_w() - b.living_drain_w)).sqrt();
+        let d_au = 0.05 * (clear / field.rated_load_w()).sqrt();
         assert!((d_au - 0.027).abs() < 5e-4, "{d_au}");
     }
 
@@ -342,12 +350,18 @@ mod tests {
     fn bigger_ships_idle_hotter_and_dive_the_same() {
         let b = Balance::DEFAULT;
         let start = anchored(&b);
-        for (length_m, idle_k, full_k) in [(500.0, 476.0, 3_237.0), (5_000.0, 846.0, 3_240.0), (50_000.0, 1_504.0, 3_274.0)] {
+        for (length_m, idle_k, full_k) in [(500.0, 476.0, 3_237.0), (5_000.0, 846.0, 3_237.0), (50_000.0, 1_504.0, 3_237.0)] {
             let scale = length_m / 500.0;
             let field = Field { area_m2: start.area_m2 * scale * scale, ..start };
             let living_w = 2.0 * scale.powi(3) * b.living_drain_w;
-            let idle = field.temperature_k(field.equilibrium_j(living_w));
-            let full = field.temperature_k(field.equilibrium_j(starlight_w(&b, 0.1) * scale * scale + living_w));
+            let segment = Segment {
+                arriving_w: starlight_w(&b, 0.1) * scale * scale,
+                internal_w: living_w,
+                draw_w: living_w,
+                ..starting_segment(&b, 0.1, 0.0)
+            };
+            let idle = equilibrium_k(&field, living_w);
+            let full = equilibrium_k(&field, field.heat_full_w(&segment));
             assert!((idle - idle_k).abs() < 0.5, "{length_m} m idle {idle}");
             assert!((full - full_k).abs() < 0.5, "{length_m} m full {full}");
         }
@@ -411,23 +425,29 @@ mod tests {
         let hair = field.time_to_rise_s(0.0, eq * (1.0 - 1e-15), p).unwrap();
         assert!(hair.is_finite() && hair > 30.0 * field.tau_s);
         assert_eq!(field.time_to_rise_s(0.0, 1.0, f64::MIN_POSITIVE), None);
-        // A threshold a hair ahead is about gap over rate, not a cancelled logarithm.
+        // A threshold a hair ahead is about gap over rate, not a canceled logarithm.
         let near = field.time_to_rise_s(0.0, 1.0, p).unwrap();
         assert!(close(near, 1.0 / p, 1e-9), "{near}");
     }
 
     #[test]
-    fn full_storage_converts_nothing_and_the_draw_delays_filling() {
+    fn full_storage_holds_full_and_the_draw_delays_filling() {
         let b = Balance::DEFAULT;
         let me = module_energy_j(&b);
+        let field = test_field();
         let open = starting_segment(&b, 0.1, me);
         assert_eq!(open.converted_w(), open.absorbed_w());
         let full = Segment { room_j: 0.0, ..open };
         assert_eq!(full.fill_s(), Some(0.0));
-        let settled = test_field().settle(&full, 0.0, 1.0e5);
-        assert_eq!(settled.stored_j, 0.0);
-        let starved = Segment { draw_w: open.stored_w(), ..open };
+        let settled = field.settle(&full, 0.0, 1.0e5);
+        assert_eq!(settled.storage_j, 0.0);
+        assert_eq!(field.heat_full_w(&full), full.absorbed_w());
+        // A draw that outruns conversion empties even full storage, which converts all segment long.
+        let starved = Segment { draw_w: 2.0 * open.stored_w(), ..full };
         assert_eq!(starved.fill_s(), None);
+        let settled = field.settle(&starved, 0.0, 1.0e5);
+        assert!(close(settled.storage_j, -starved.stored_w() * 1.0e5, 1e-12));
+        assert!(close(settled.heat_j, field.heat_after_j(0.0, field.heat_filling_w(&starved), 1.0e5), 1e-12));
         let over = Segment { rating_w: 0.25 * open.absorbed_w(), ..open };
         assert_eq!(over.converted_w(), over.rating_w);
         assert!(close(open.fill_s().unwrap(), me / (open.stored_w() - open.draw_w), 1e-15));
@@ -453,13 +473,12 @@ mod tests {
         assert!(close(sustained, 0.3 * burst, 1e-6), "{sustained} {burst}");
     }
 
-    /// An independent stepper: RK4 on `dQ/dt = P − Q/τ`, with storage tracked on its own and
-    /// conversion stopped for good once it reaches capacity.
+    /// An independent stepper: RK4 on `dQ/dt = P − Q/τ`, with storage tracked on its own and never
+    /// let past capacity. Storage at capacity takes in only what the draw takes out.
     struct Stepper {
         heat_j: f64,
         stored_j: f64,
         capacity_j: f64,
-        full: bool,
         t_s: f64,
         filled_at_s: Option<f64>,
     }
@@ -470,7 +489,10 @@ mod tests {
             let rate = |q: f64, p: f64| p - q / field.tau_s;
             for _ in 0..steps {
                 let absorbed = s.arriving_w * s.absorptivity;
-                let into_storage = if self.full { 0.0 } else { s.efficiency * absorbed.min(s.rating_w) };
+                let mut into_storage = s.efficiency * absorbed.min(s.rating_w);
+                if self.stored_j >= self.capacity_j {
+                    into_storage = into_storage.min(s.draw_w);
+                }
                 let p = absorbed - into_storage + s.internal_w;
                 let q = self.heat_j;
                 let k1 = rate(q, p);
@@ -480,10 +502,9 @@ mod tests {
                 self.heat_j = q + h / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
                 self.stored_j += (into_storage - s.draw_w) * h;
                 self.t_s += h;
-                if !self.full && self.stored_j >= self.capacity_j {
+                if self.stored_j >= self.capacity_j {
                     self.stored_j = self.capacity_j;
-                    self.full = true;
-                    self.filled_at_s = Some(self.t_s);
+                    self.filled_at_s.get_or_insert(self.t_s);
                 }
                 if stop(self.heat_j) {
                     return Some(self.t_s);
@@ -494,14 +515,14 @@ mod tests {
     }
 
     #[test]
-    fn the_closed_form_agrees_with_stepping_through_starlight_a_vent_and_a_fill() {
+    fn the_closed_form_agrees_with_stepping_through_starlight_bursts_and_a_fill() {
         let b = Balance::DEFAULT;
         let field = anchored(&b);
         let me = module_energy_j(&b);
         let capacity_j = 30.0 * me;
         let idle_j = b.living_drain_w * field.tau_s;
         let mut stepper =
-            Stepper { heat_j: idle_j, stored_j: 0.0, capacity_j, full: false, t_s: 0.0, filled_at_s: None };
+            Stepper { heat_j: idle_j, stored_j: 0.0, capacity_j, t_s: 0.0, filled_at_s: None };
         let steps_per_s = 1.0 / 5.0;
 
         // Starlight at 0.05 AU, not yet full.
@@ -511,12 +532,13 @@ mod tests {
         stepper.run(&field, &first, first_s, (first_s * steps_per_s) as usize, |_| false);
         assert_eq!(settled.filled_s, None);
         assert!(close(settled.heat_j, stepper.heat_j, 1e-6), "{} {}", settled.heat_j, stepper.heat_j);
-        let stored_j = settled.stored_j - first.draw_w * first_s;
+        let stored_j = settled.storage_j;
         assert!(close(stored_j, stepper.stored_j, 1e-6));
 
-        // A 5 ME vent.
-        let heat_j = settled.heat_j + Burst::Vent(5.0 * me).heat_j(first.absorptivity);
-        stepper.heat_j += 5.0 * me;
+        // A 5 ME vent, and a 3 ME pulse arriving at a Clear field.
+        let clear = Mode::Clear.absorptivity(b.clear_absorptivity);
+        let heat_j = settled.heat_j + Burst::Vent(5.0 * me).heat_j(clear) + Burst::Arriving(3.0 * me).heat_j(clear);
+        stepper.heat_j += 5.0 * me + b.clear_absorptivity * 3.0 * me;
 
         // Closer in, where storage fills partway and the full field goes past its rated load.
         let second = Segment { arriving_w: starlight_w(&b, 0.045), room_j: capacity_j - stored_j, ..first };
@@ -541,6 +563,31 @@ mod tests {
         let mut rest = stepper;
         rest.run(&field, &second, second_s - stepped_collapse_s, ((second_s - stepped_collapse_s) * steps_per_s) as usize, |_| false);
         assert!(close(settled.heat_j, rest.heat_j, 1e-6), "{} {}", settled.heat_j, rest.heat_j);
+        assert!(close(stored_j + settled.storage_j, rest.stored_j, 1e-9), "{} {}", stored_j + settled.storage_j, rest.stored_j);
+    }
+
+    /// Settling `2T` in one leap and as two `T`s agree, filling or full, with the draw under
+    /// conversion and over it: the answer may not depend on where the caller cuts.
+    #[test]
+    fn where_segments_are_cut_does_not_matter() {
+        let b = Balance::DEFAULT;
+        let field = anchored(&b);
+        let me = module_energy_j(&b);
+        let t_s = 3.0e6;
+        let heat_j = 2.0 * me;
+        for room_j in [0.0, 0.5 * me, 100.0 * me] {
+            for draw_w in [b.living_drain_w, 3.0 * starlight_w(&b, 0.1)] {
+                let segment = Segment { room_j, draw_w, ..starting_segment(&b, 0.1, 0.0) };
+                let leap = field.settle(&segment, heat_j, 2.0 * t_s);
+                let half = field.settle(&segment, heat_j, t_s);
+                let rest = Segment { room_j: room_j - half.storage_j, ..segment };
+                let halves = field.settle(&rest, half.heat_j, t_s);
+                let case = format!("room {room_j:e}, draw {draw_w:e}");
+                assert!(close(leap.heat_j, halves.heat_j, 1e-12), "{case}: {} {}", leap.heat_j, halves.heat_j);
+                let storage_j = half.storage_j + halves.storage_j;
+                assert!((leap.storage_j - storage_j).abs() <= 1e-12 * me, "{case}: {} {storage_j}", leap.storage_j);
+            }
+        }
     }
 
     #[test]
@@ -562,7 +609,7 @@ mod tests {
         let fall = field.segment_time_to_fall_s(&segment, heat_j, 0.5 * (heat_j + low_j)).unwrap();
         assert!(fall < fill_s);
         assert_eq!(field.segment_time_to_fall_s(&segment, heat_j, 0.9 * low_j), None);
-        let full_j = field.equilibrium_j(field.heat_w(&segment, true));
+        let full_j = field.equilibrium_j(field.heat_full_w(&segment));
         let rise = field.segment_time_to_rise_s(&segment, low_j, 0.5 * (low_j + full_j)).unwrap();
         assert!(rise > fill_s);
     }
