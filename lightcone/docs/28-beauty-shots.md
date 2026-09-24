@@ -4,8 +4,8 @@ Every ten seconds of real time, the client takes a photograph through the ship's
 of something worth looking at, and shows it in a square beside the map's. Code is
 `lc_client::beauty`.
 
-Status: **experimental**, off by default. The telescope window's *Beauty shots* box turns it
-on, and so does `--beauty`.
+Status: **experimental**, off by default. `|` (`Shift`+`\`) toggles it, and so do the
+telescope window's *Beauty shots* box and `--beauty`.
 
 ## What is photographed
 

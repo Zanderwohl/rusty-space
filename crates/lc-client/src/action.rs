@@ -155,6 +155,7 @@ pub enum Action {
     SetTimeRate(f64),
     /// Photograph what the ship is near, every few seconds, beside the map. Experimental.
     SetBeautyShots(bool),
+    ToggleBeautyShots,
     /// Step one rung along [`crate::ui::RATE_LADDER`].
     TimeRateUp,
     TimeRateDown,
@@ -663,6 +664,11 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::SetTimeRate(rate) => ui.time_rate = rate.max(0.0),
         Action::SetBeautyShots(on) => ui.beauty_shots = on,
+        Action::ToggleBeautyShots => {
+            ui.beauty_shots = !ui.beauty_shots;
+            let state = if ui.beauty_shots { "on" } else { "off" };
+            effects.push(Effect::Notify(format!("beauty shots {state}")));
+        }
         Action::TimeRateUp | Action::TimeRateDown => {
             ui.time_rate = crate::ui::rate_step(ui.time_rate, action == Action::TimeRateUp);
             effects.push(Effect::Notify(format!("clock: {}", crate::ui::rate_label(ui.time_rate))));
