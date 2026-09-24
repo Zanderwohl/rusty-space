@@ -828,8 +828,7 @@ fn fold(
                 Refusal::Switching => "the field is already switching".into(),
                 Refusal::NoAperture => "engines at one end only: emit fore or aft".into(),
                 Refusal::OverRating => "more power than those apertures are rated for".into(),
-                // Naming the part is the ledger's, with C5; no shard validates a form before S1.
-                Refusal::Form(_) => "that form cannot be built".into(),
+                Refusal::Form(fault) => crate::refit_panel::form_fault(fault),
             });
         }
         Outbound::Throttled { retry_after_ticks } => {

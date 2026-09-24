@@ -833,9 +833,14 @@ pub enum Outbound {
     /// This client's ship reached `Q_max` at `at_t` and released `released_j` as light. The
     /// account now flies `successor`, a new starting ship. Observers learn of it from the light.
     Collapsed { ship_id: ShipId, at_t: i64, released_j: f64, successor: ShipId },
-    /// A beam landing on this ship, told when its light arrives and not before. `power_w` is what
-    /// reaches the field, before its absorptivity. `bearing` is a unit vector toward the source.
-    Illuminated { ship_id: ShipId, bearing: [f64; 3], wavelength_m: f64, power_w: f64, arrive_t: i64, until_t: i64 },
+    /// A beam's power at this ship changed at `arrive_t`, told when that light arrives and not
+    /// before: first when it lands, again whenever the emitter's power changes, and with
+    /// `power_w` zero when it stops. `power_w` reaches the field before its absorptivity.
+    ///
+    /// No end time: an emitter can stop early, and when it meant to stop is its own business
+    /// until the light of stopping arrives. `beam` is the emit's event id, so two beams on one
+    /// bearing stay apart. `bearing` is a unit vector toward the source, in world axes.
+    Illuminated { ship_id: ShipId, beam: i64, bearing: [f64; 3], wavelength_m: f64, power_w: f64, arrive_t: i64 },
     /// The account's presets, whole. Sent after `Welcome` and after each change.
     Presets(Vec<Preset>),
 }
@@ -1306,11 +1311,11 @@ mod tests {
     fn illuminated() -> Outbound {
         Outbound::Illuminated {
             ship_id: ShipId(42),
+            beam: 9,
             bearing: [0.0, 0.6, 0.8],
             wavelength_m: 1.0e-6,
             power_w: 2.5e17,
             arrive_t: 1_000_000,
-            until_t: 4_600_000_000,
         }
     }
 
@@ -1396,7 +1401,7 @@ mod tests {
                     broadside_roll_rad: 0.25,
                     envelope_area_m2: 2.2e5,
                     envelope_volume_m3: 5.8e6,
-                    moments_kg_m2: [2.0e13, 7.5e13, 8.5e13],
+                    inertia_kg_m2: [2.0e13, 7.5e13, 8.5e13, 0.0, -1.5e12, 0.0],
                     extent_m: 530.0,
                 },
             }),
@@ -1568,6 +1573,12 @@ mod tests {
                 "Inbound::SavePreset",
                 encode(&Inbound::SavePreset { name: "Plate".into(), form: two_parts() }),
                 golden::SAVE_PRESET,
+            ),
+            ("Inbound::DeletePreset", encode(&Inbound::DeletePreset { name: "Plate".into() }), golden::DELETE_PRESET),
+            (
+                "Outbound::Presets",
+                encode(&Outbound::Presets(vec![Preset { name: "Plate".into(), form: two_parts() }])),
+                golden::PRESETS,
             ),
             (
                 "Outbound::Refused (form)",

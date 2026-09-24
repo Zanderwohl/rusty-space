@@ -159,7 +159,7 @@ complete.
 | **shadow table** | area of the grid's projection along each of the 162 vertices of a twice-subdivided icosahedron, interpolated between them | starlight and beams arriving, brightness |
 | **broadside** | the direction of largest shadow, and the roll that presents it | the idle attitude of [20-solar-power.md](20-solar-power.md) |
 | **envelope** | the union's distance field offset by `envelope_margin` and blended with a large radius | the field's area and volume, [30-the-field.md](30-the-field.md) |
-| **moments of inertia** | the filled cells, weighted by each part's density | slew rate |
+| **inertia tensor** | the filled cells, weighted by each part's density, as the full symmetric tensor: a form is symmetric only port to starboard, so the xz product is generally not zero | slew rate |
 | **extent** | the envelope's longest dimension | `length_m`: the camera, the zoom limits, `Presence` |
 
 **The shadow handles concave shapes.** A stack of plates shades

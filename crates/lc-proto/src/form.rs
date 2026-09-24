@@ -113,8 +113,9 @@ pub struct Geometry {
     pub broadside_roll_rad: f64,
     pub envelope_area_m2: f64,
     pub envelope_volume_m3: f64,
-    /// About the ship's x, y and z.
-    pub moments_kg_m2: [f64; 3],
+    /// The inertia tensor about the center of mass in the ship's frame: xx, yy, zz, xy, xz, yz.
+    /// Only port–starboard symmetry is guaranteed, so xz is generally not zero.
+    pub inertia_kg_m2: [f64; 6],
     pub extent_m: f64,
 }
 
