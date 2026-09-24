@@ -480,7 +480,7 @@ graph LR
 
 ### R3 · Hull material, in a void
 
-- status: active claude/elegant-ishizaka-4a9803
+- status: done #67
 - needs: —
 - touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/assets/textures/`, `crates/lc-client/examples/hull_void.rs`, `crates/lc-client/src/procedural.rs` (a plane bake)
 - read: 32 §Details are sized in meters, §Materials by kind
