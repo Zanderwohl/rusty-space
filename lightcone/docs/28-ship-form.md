@@ -51,7 +51,7 @@ from 19's per-module values over its 392 699 m³ slot, so the numbers a ship fli
 | **living** | 1.13 × 10¹⁰ W of drain | module density | parks and population later |
 | **data** | 7.5 bytes | half | three times as slow to build |
 | **bay** | a mouth, whose smaller dimension is the largest hull it can launch | a tenth | a shell with a procedural interior. After construction exists |
-| **spar** | nothing | a twentieth | truss, for holding parts apart: cluster spokes, booms. Pays for its area like anything else |
+| **spar** | nothing | a twentieth | structure for holding parts apart: cluster spokes, booms, straps. Conforms to what it touches; see below |
 
 Module density stays 395.8 kg/m³. **ME stays the unit of energy**, 1.397 × 10²⁵ J, which is what
 one 19-era module weighed. It no longer means anything but the number.
@@ -79,6 +79,29 @@ It is there for two reasons:
 
 The Mind is usually enclosed by the first part built around it, so it is inside the ship. The
 editor shows it through the hull.
+
+### Spars conform
+
+A spar is shaped by the parts it joins, as if it were bolted to them. Its distance field is its own
+primitive combined with its **tree neighbors** (its parent and its children) by boolean operations,
+in one of two ways:
+
+- **Saddle.** Each neighbor, grown by `spar_gap`, is subtracted from the spar. Where a boom meets a
+  hull, its end is cut to the hull's curve and sits flush against it. The spar is embedded into its
+  neighbors a little so there is something to cut.
+- **Strap.** The spar is intersected with a shell of `spar_thickness` around its parent, so it follows
+  the parent's surface wherever its primitive passes: a band around a tank, a rib along a hull.
+
+A spar joins its neighbors **hard, never blended**. `blend` is ignored on a spar and on its children's
+joint with it, so the join reads as bolted rather than welded.
+
+Only tree neighbors cut a spar. That keeps each spar's evaluation local, and it means a spar never
+changes shape because an unrelated part moved past it.
+
+**A spar's volume is its uncut primitive's.** The cut shape has no closed form. It is charged as the
+stock it was cut from, which slightly overstates a strap's mass at a twentieth of module density, and
+never understates it. A strap thinner than a grid cell does not show up in the shadow table. At that
+size it does not matter.
 
 ## Placement is relative
 
@@ -325,6 +348,8 @@ photographs it, and `--form <preset>` stages a draft.
 | `mass_fraction` | data 0.5, bay 0.1, spar 0.05, others 1 | of module density |
 | `min_part_m3` | 1 000 | the smallest part, and the Mind's size: a 10 m cube |
 | `min_drone_m3` | 10 000 | the least drone a ship may keep |
+| `spar_gap` | 0.5 m | how far a saddle stands off the neighbor it is cut to |
+| `spar_thickness` | 2% of the parent's smallest dimension | a strap's depth |
 | `move_work_factor` | 0.25 | a move's time over building what it carries |
 | `hull_areal_density` | *anchored* | structure per m² of part surface |
 | `envelope_margin` | 0.05 | the envelope's offset over the cube root of hull volume |

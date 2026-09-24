@@ -61,7 +61,7 @@ part a point is nearest. Fillets blend between the two regions.
 | engine | an emitter grid on the open face, glowing with exhaust power |
 | data | fine dense panels |
 | mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
-| spar | truss only, never plated |
+| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
@@ -185,6 +185,8 @@ placeholder, so the rest can be built and a refit visibly changes the ship strai
   during the truss phase, crossfading to solid.
 - **Drones as instanced motes** on straight lines.
 - **The field as a fresnel sphere** around the bounds, tinted by temperature once there is one.
+- **Spars uncut**: the plain primitive. The saddles and straps arrive with the distance-field
+  mesher.
 
 Every placeholder is replaced independently. None of them is on the server's side of anything.
 
