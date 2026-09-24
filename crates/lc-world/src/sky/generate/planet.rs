@@ -74,9 +74,7 @@ pub struct Planet {
     /// How much of its wet land is alive, `[0, 1]`. Zero wherever nothing lives, which is
     /// every planet that is not habitable and some that are.
     pub life: f64,
-    /// `[M/H]` of its envelope, dex: its star's, raised by how little hydrogen it took, give or
-    /// take what it happened to swallow. See [`crate::giant::enrichment`]. Meaningless without an
-    /// envelope.
+    /// `[M/H]` of its envelope, dex. See [`crate::giant::enrichment`]. Meaningless without one.
     pub metals: f64,
     /// What orbits it. **A planet with no moon has no mass anybody can measure**: a
     /// satellite's period through Kepler's third law is the only route a telescope has to it.
@@ -91,16 +89,13 @@ impl Planet {
         self.radius_m / EARTH_RADIUS
     }
 
-    /// What it will be drawn as and what a survey of it reads, under `star`: the join
-    /// `system::LocalSystem` makes from the body `to_universe` names this, which keys its
-    /// variation on the name.
+    /// What a survey of it reads under `star`: the same join `system::LocalSystem` makes.
     pub fn world(&self, star: &crate::sky::CatalogStar) -> crate::worlds::World {
         let surface = crate::surface::Surface::classify(self.radius_m, self.mass_kg, self.equilibrium_k);
         let tags = crate::worlds::Stated::tags(self.atmosphere, self.top, self.class == Class::GasGiant);
         crate::worlds::of(&self.name, surface, &tags, self.giant(star).as_ref())
     }
 
-    /// Its paint under `star`, if it is a giant.
     pub fn giant(&self, star: &crate::sky::CatalogStar) -> Option<crate::giant::Giant> {
         let surface = crate::surface::Surface::classify(self.radius_m, self.mass_kg, self.equilibrium_k);
         surface.is_banded().then(|| {

@@ -342,8 +342,7 @@ impl Stated {
 }
 
 /// What a body is: measured where anybody has been, stated by the generator where it made one,
-/// and derived from its class otherwise. A giant's reflectance is its paint's, so a survey reads
-/// the colors the renderer draws.
+/// and derived from its class otherwise. A giant's reflectance is its paint's.
 ///
 /// The measured table wins because Venus is in it and no rule reaches Venus. Below that, a
 /// generated body says what it is rather than having it guessed from radius, mass and

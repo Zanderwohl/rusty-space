@@ -1,37 +1,22 @@
-//! What a giant looks like from orbit, from what it is.
-//!
-//! Every giant is one function of four things. How warm its cloud tops are picks what condenses
-//! there, after Sudarsky, Burrows and Hubeny (2000): ammonia ice below about 150 K, water to
-//! 350, nothing at all to 800 -- a clear column, Rayleigh-blue -- then sodium and potassium
-//! vapor that swallow the visible, and past 1400 K cloud of silicate and iron. How much heavier
-//! elements its envelope carries -- its star's metallicity, raised by how little hydrogen the
-//! planet took -- sets how much methane lies over the cloud and so how blue and how dark in the
-//! near infrared it is, and how deep the chromophores stain its belts. How much ultraviolet
-//! reaches it sets how fast those chromophores and its haze are made. How fast it turns sets how
-//! many bands it has.
-//!
-//! The spectra here are per band, so what the graph paints and what every band sees agree: a
-//! belt is a gap down to deeper cloud, under more methane, and so dark in K where a storm's high
-//! tops are bright. Jupiter, Saturn, Uranus and Neptune are what the constants are drawn
-//! through, and a test holds the rule to their measured colors. The ordering is what has to be
-//! right; the third digit is not. See `lightcone/docs/07-rendering.md`, "Giants".
+//! What a giant looks like from orbit, from what it is: cloud-top temperature picks what
+//! condenses (Sudarsky et al. 2000), envelope metals set methane and belt stain, ultraviolet sets
+//! how fast stain and haze are made, and spin sets the band count. Spectra are per band and per
+//! layer, so every band mapping and the survey read the same thing the graph paints. The
+//! constants are fitted to the four solar giants' measured colors; the ordering matters, not the
+//! third digit. See `lightcone/docs/07-rendering.md`.
 
 use em_spectra::{BANDS, Band};
 
 use crate::surface::Surface;
 
-/// The layers a giant's graph paints and the shader mixes by its masks, in this order.
+/// In the order the shader mixes them.
 pub const LAYERS: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layer {
-    /// The bright high deck.
     Zone,
-    /// A gap down to deeper, stained cloud.
     Belt,
-    /// An oval whose tops stand above the rest.
     Storm,
-    /// The haze over the poles.
     Polar,
 }
 
@@ -39,31 +24,29 @@ impl Layer {
     pub const ALL: [Layer; LAYERS] = [Layer::Zone, Layer::Belt, Layer::Storm, Layer::Polar];
 }
 
-/// A giant's paint.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Giant {
-    /// Reflectance per band of each [`Layer`], in its order. Zero in the emissive bands.
+    /// Per band, per [`Layer`]. Zero in the emissive bands.
     pub layers: [[f32; BANDS]; LAYERS],
     pub colors: Colors,
     /// Belt-zone pairs pole to pole: Jupiter's is about six.
     pub bands: f32,
-    /// How far a belt departs from a zone, `[0, 1]`: what share of a belt the belt layer is.
+    /// `[0, 1]`.
     pub contrast: f32,
-    /// How far eddies rag the band edges, `[0, 1]`.
+    /// `[0, 1]`.
     pub turbulence: f32,
-    /// How many ovals, `[0, 1]`.
+    /// `[0, 1]`.
     pub storms: f32,
     /// Share of the sphere under polar haze.
     pub polar: f32,
-    /// Where the band pattern starts, `[0, 1]`: a body's own layout.
+    /// Band phase, `[0, 1]` of a cycle.
     pub shift: f32,
-    /// The storms' color, from white ovals at 0 to the stained color of a great red spot at 1.
+    /// How much great spot, and how stained the ovals are, `[0, 1]`.
     pub spot: f32,
 }
 
-/// What the graph is painted with, Oklch `(L, C, hue in degrees)`: each layer's reflectance in the
-/// natural mapping, plus [`Colors::tint`], a belt stained twice as deep, which the graph puts in
-/// some belts and the great spots. Raised to how a giant is seen: see [`look`].
+/// The graph's colors, Oklch `(L, C, hue in degrees)`. `tint` is a belt stained twice as deep.
+/// These are the look, not the measurement: see [`look`] and [`painted`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Colors {
     pub zone: [f32; 3],
@@ -74,10 +57,7 @@ pub struct Colors {
 }
 
 impl Giant {
-    /// Share of the sphere each layer covers, as the graph lays them: polar haze over
-    /// everything, storms over the bands, and belts at [`Giant::contrast`] of what is left of
-    /// the bands, less what the wisps draw out of them. Measured off the graph; a test in the
-    /// client holds it there.
+    /// Share of the sphere each layer covers, fitted to the graph; a client test holds it there.
     pub fn shares(&self) -> [f32; LAYERS] {
         let polar = self.polar;
         let storm = (1.0 - polar) * storm_share(self.storms);
@@ -85,7 +65,7 @@ impl Giant {
         [1.0 - polar - storm - belt, belt, storm, polar]
     }
 
-    /// The whole disc's reflectance, in [`Band`] order: what a survey reads.
+    /// What a survey reads, in [`Band`] order.
     pub fn reflectance(&self) -> [f64; BANDS] {
         let shares = self.shares();
         std::array::from_fn(|b| {
@@ -94,27 +74,25 @@ impl Giant {
     }
 }
 
-/// Share of the bands the graph's belt pattern covers before contrast and wisps: its bands are
-/// symmetric, but a belt fades along its length.
+/// Share of the bands the graph's belt pattern covers before contrast and wisps, measured.
 const BELTED: f32 = 0.42;
 
-/// Mean share of the bands the graph's ovals cover, at a `storms` of `[0, 1]`.
+/// Share of the bands the graph's ovals cover, measured.
 pub fn storm_share(storms: f32) -> f32 {
     0.005 + 0.045 * storms.clamp(0.0, 1.0)
 }
 
-/// What a giant's paint is derived from. What is `None` was not stated, and the rules stand in.
+/// `None` was not stated, and the rules stand in.
 #[derive(Clone, Copy, Debug)]
 pub struct Inputs {
     pub mass_kg: f64,
     pub radius_m: f64,
-    /// What its cloud tops radiate at: sunlight kept plus its own heat. Kelvin.
+    /// Cloud-top temperature, kelvin.
     pub effective_k: f64,
-    /// The zero-albedo balance, which stands for how much starlight reaches it.
+    /// Kelvin; stands for how much starlight reaches it.
     pub equilibrium_k: f64,
     /// `[M/H]` of the envelope, dex over solar.
     pub metals: Option<f64>,
-    /// Whether its core reached runaway and took its envelope from the nebula.
     pub runaway: bool,
     pub star_feh: f64,
     pub star_teff_k: f64,
@@ -126,7 +104,7 @@ pub const JUPITER_MASS: f64 = 1.898e27;
 const JUPITER_RADIUS: f64 = 6.9911e7;
 const JUPITER_SPIN_S: f64 = 35_730.0;
 
-/// The generator's statement of a giant's envelope, `[M/H]` in dex, as a tag.
+/// The generator's tag for the envelope's `[M/H]`, dex.
 pub const METALS: &str = "Metals:";
 
 pub fn metals_tag(metals: f64) -> String {
@@ -137,21 +115,15 @@ pub fn metals_of(tags: &[String]) -> Option<f64> {
     tags.iter().find_map(|t| t.strip_prefix(METALS)?.parse().ok())
 }
 
-/// How many times its star's metals a giant's envelope carries: `4 (M / M_J)^-0.9`.
-///
-/// The less hydrogen a planet took, the more of what it is made of was solids, and the more of
-/// those its envelope dissolved. Jupiter's carbon is about four times solar, Saturn's ten and
-/// Uranus's and Neptune's near eighty, and one power law runs through all of them (Welbanks et
-/// al. 2019 find the same slope among exoplanets). But a core that reached runaway took its
-/// envelope from the nebula, which dilutes it however small it stayed, and one that did not
-/// holds a thin envelope thick with what it is made of: so a runaway is held under Saturn's
-/// twelve, and a core without one over thirty.
+/// Envelope metals over the star's: `4 (M / M_J)^-0.9`, through Jupiter's 4, Saturn's 10 and the
+/// ice giants' ~80 (Welbanks et al. 2019). A runaway core's envelope is nebular gas however
+/// small it stayed, so it is held under 12; otherwise over 30. That split is what keeps a small
+/// gas giant and an ice giant apart by color.
 pub fn enrichment(mass_kg: f64, runaway: bool) -> f64 {
     let law = 4.0 * (mass_kg / JUPITER_MASS).max(1.0e-6).powf(-0.9);
     if runaway { law.clamp(1.0, 12.0) } else { law.clamp(30.0, 150.0) }
 }
 
-/// The envelope's `[M/H]`, where the generator stated nothing.
 pub fn metals(mass_kg: f64, runaway: bool, star_feh: f64) -> f64 {
     star_feh + enrichment(mass_kg, runaway).log10()
 }
@@ -169,7 +141,7 @@ impl Inputs {
     ) -> Self {
         let stated = crate::worlds::Stated::from_tags(tags);
         Self {
-            // What the generator said, and where it said nothing, the class's own threshold.
+            // Untagged bodies fall back to the class's mass threshold.
             runaway: if stated.atmosphere.is_some() { stated.gas_giant } else { surface == Surface::GasGiant },
             mass_kg,
             radius_m,
@@ -183,13 +155,12 @@ impl Inputs {
     }
 }
 
-/// Per-body departures from the type, keyed by id so a giant looks the same on every approach.
-/// Each is uniform in `[0, 1]`.
+/// Per-body variation, uniform in `[0, 1]` and keyed by id so it is stable.
 #[derive(Clone, Copy, Debug)]
 pub struct Variety([f32; 9]);
 
 pub fn variety(id: &str) -> Variety {
-    // FNV-1a, as `worlds::varied` uses, salted apart from it and from the climate's.
+    // Salted apart from `worlds::varied` and the climate's.
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in id.as_bytes() {
         h ^= *b as u64;
@@ -198,54 +169,45 @@ pub fn variety(id: &str) -> Variety {
     Variety(std::array::from_fn(|k| crate::rng::uniform(crate::rng::hash(&[h, 0x61a, k as u64])) as f32))
 }
 
-/// A giant's paint: measured for the solar system's four, derived otherwise.
 pub fn of(id: &str, inputs: &Inputs) -> Giant {
     let derived = derived(inputs, variety(id));
     measured(id, derived).unwrap_or(derived)
 }
 
-// Per band, B V R I K. The emissive two are zero throughout, and filled in by `spectrum`.
+// Per band, B V R I K.
 
-/// Ammonia ice: white, and dark past two microns where it absorbs.
 const AMMONIA: [f32; 5] = [0.84, 0.88, 0.9, 0.88, 0.56];
-/// Water ice cloud, which goes dark sooner in K.
 const WATER: [f32; 5] = [0.84, 0.87, 0.87, 0.82, 0.3];
-/// Silicate and iron grains: gray, reddening, and bright in the near infrared.
 const SILICATE: [f32; 5] = [0.38, 0.48, 0.58, 0.64, 0.68];
-/// A clear hydrogen column seen from above: scattering as the inverse fourth power.
+/// A clear hydrogen column seen from above.
 const RAYLEIGH: [f32; 5] = [0.60, 0.30, 0.14, 0.05, 0.008];
-/// A photochemical haze before it is stained: nearly gray.
 const HAZE: [f32; 5] = [0.58, 0.64, 0.67, 0.68, 0.6];
-/// The haze over a pole, which is dark and absorbing in the visible and, standing above the
-/// methane, bright in K: why a giant's poles are dim to an eye and light in a methane band.
+/// Dark in the visible, and bright in K because it is above the methane.
 const POLAR_HAZE: [f32; 5] = [0.24, 0.32, 0.38, 0.44, 0.5];
 
-/// Absorption per unit column. Methane has nothing in B, weak bands in R, a strong one at 890
-/// nm and a stronger at 2.3 microns: why a giant under a lot of it is blue and black in K.
+// Absorption per unit column.
+
 const METHANE: [f32; 5] = [0.0, 0.03, 0.12, 0.42, 1.8];
-/// The chromophores that stain Jupiter's belts, whatever they are: they take blue, and some
-/// green. How much green is a body's own, from sulfur yellow to Jupiter's red-brown; see
-/// [`chromophore`].
 const CHROMOPHORE: [f32; 5] = [1.0, 0.55, 0.22, 0.05, 0.0];
 
-/// [`CHROMOPHORE`] with its green taken `hue` of the way from sulfur's to a deep red-brown's.
+/// `hue` runs from sulfur yellow to a deep red-brown.
 fn chromophore(hue: f32) -> [f32; 5] {
     let [b, v, r, i, k] = CHROMOPHORE;
     let deeper = 0.55 + 0.7 * (hue - 0.5);
     [b, deeper, r * deeper / v, i, k]
 }
-/// Sodium at 589 nm and potassium at 770, pressure-broadened across the visible.
+
+/// Sodium and potassium, pressure-broadened across the visible.
 const ALKALI: [f32; 5] = [0.7, 1.6, 1.3, 0.8, 0.05];
 
-/// A layer's part in the column, before the regime says what its cloud is.
+/// A layer's place in the column.
 struct Part {
-    /// How much of the layer is cloud, over the zone's cover or the belt's.
     deck: Deck,
-    /// Methane column over it, in units of a zone's.
+    /// Gas column over it, relative.
     depth: f32,
-    /// Chromophore column, in units of a belt's.
+    /// Chromophore column, in belts.
     stain: f32,
-    /// Polar haze over the planet's own.
+    /// Share of polar haze on top.
     haze: f32,
 }
 
@@ -256,8 +218,8 @@ enum Deck {
     Full,
 }
 
-/// What condenses, by cloud-top temperature: `(ammonia, water, clear, alkali, silicate)`,
-/// summing to one. Smooth, so no two giants either side of a threshold look like two classes.
+/// `(ammonia, water, clear, alkali, silicate)`, summing to one. Smooth, so giants either side of
+/// a threshold do not look like two classes.
 fn regimes(k: f64) -> [f32; 5] {
     let up = |a: f64, b: f64| {
         let t = ((k - a) / (b - a)).clamp(0.0, 1.0);
@@ -267,7 +229,6 @@ fn regimes(k: f64) -> [f32; 5] {
     [1.0 - a, a * (1.0 - b), b * (1.0 - c), c * (1.0 - d), d]
 }
 
-/// From what the giant is.
 pub fn derived(inputs: &Inputs, variety: Variety) -> Giant {
     let Variety([a, b, c, d, e, f, g, h, i]) = variety;
     let t = inputs.effective_k.max(10.0);
@@ -276,36 +237,29 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Giant {
     let metals = inputs.metals.unwrap_or_else(|| metals(inputs.mass_kg, inputs.runaway, inputs.star_feh));
     let x = 10f64.powf(metals).clamp(0.05, 300.0) as f32;
 
-    // Ultraviolet at the planet against Jupiter's: the starlight's inverse square, which is the
-    // equilibrium temperature's fourth power, times the share of a star's light that is far
-    // ultraviolet, which falls steeply with its temperature (Wien at 250 nm, softened: a red
-    // dwarf's chromosphere makes more than its photosphere would).
+    // Ultraviolet against Jupiter's: T_eq^4 for distance, times Wien at 250 nm for the star,
+    // softened because a red dwarf's chromosphere makes more than its photosphere.
     let wien = |k: f64| (-57_552.0 / k.max(2000.0)).exp();
     let uv = (inputs.equilibrium_k / 122.0).powi(4) * (wien(inputs.star_teff_k) / wien(5772.0)).powf(0.6);
     let photochemistry = uv.clamp(1.0e-3, 30.0).powf(0.3) as f32;
 
-    // Colder is deeper: a deck condenses where its temperature is, and that is further down
-    // the colder the tops. Only a condensing regime has a deck to sink.
+    // A colder deck condenses further down.
     let sink = (124.0 / t as f32).clamp(0.5, 3.0).powf(1.5);
     let sink = (ammonia + water) * sink + (1.0 - ammonia - water);
-    // Methane only where it survives: hot, carbon is carbon monoxide.
+    // Hot, carbon is carbon monoxide.
     let methane = 0.106 * x.powf(0.7) * (1.0 - smooth(800.0, 1100.0, t)) * sink;
-    // Scaled by Jupiter's own metals, so Jupiter's belts are what the constants say.
-    // Below about 80 K the top deck is hydrogen sulfide over the ammonia, and nothing stains it.
+    // Below about 80 K the top deck is hydrogen sulfide, which nothing stains.
     let stained_deck = smooth(60.0, 110.0, t);
-    // Capped: past about three Jupiters' worth a belt is as dark and red as a stain makes it.
+    // Capped, or under a hot star belts and ovals go black.
     let stain = (0.6 * (0.6 + 0.8 * a) * photochemistry * (x / 4.0).sqrt().min(2.5) * (ammonia * stained_deck + 0.35 * water))
         .min(1.5);
-    // Clear gas over a sunken deck scatters blue before the deck is reached.
     let gas = (0.15 * (sink - 1.0)).clamp(0.0, 0.5);
-    // What the deep gas absorbs of the light that goes down to a sunken deck and back.
     let dim = sink.powf(-0.15);
     let alkali_depth = 1.6 * (alkali + 0.05 * silicate + 0.3 * clear) * (x / 4.0).powf(0.3);
-    // A cold deck is under the haze its own chemistry makes; a hot one has little.
     let cold = 1.0 - smooth(55.0, 135.0, t);
     let haze = ammonia * (0.1 + 0.4 * cold * photochemistry.min(1.0)) + 0.08 * (water + silicate) + 0.02 * (clear + alkali);
 
-    // Where nothing condenses, what there is of a zone is a thin haze.
+    // Where nothing condenses, a zone is a thin haze.
     let cloud: [f32; 5] = std::array::from_fn(|k| {
         ammonia * AMMONIA[k] + water * WATER[k] + silicate * SILICATE[k] + (clear + alkali) * HAZE[k]
     });
@@ -319,15 +273,13 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Giant {
             Deck::Belt => belt_cover,
             Deck::Full => zone_cover.max(0.97 * (ammonia + water + silicate)),
         };
-        // Light from a deeper deck crosses more gas that takes a little of everything.
         let gray = (-0.35 * part.depth * sink.min(2.0)).exp();
         let mut out = [0.0; BANDS];
         for k in 0..5 {
             let stained = (-stain * part.stain * chromophore[k]).exp();
             let under = (1.0 - gas) * (cover * cloud[k] * stained + (1.0 - cover) * RAYLEIGH[k]) + gas * RAYLEIGH[k];
             let under = under * gray * (-methane * part.depth * METHANE[k]).exp() * (-alkali_depth * ALKALI[k]).exp();
-            // The haze sits above most of the methane, and is stained a little by what it is made
-            // from.
+            // The haze is above most of the methane.
             let above = HAZE[k] * (-0.12 * methane * METHANE[k]).exp() * (-0.5 * stain * chromophore[k]).exp();
             let top = haze * above + (1.0 - haze) * under;
             let polar = POLAR_HAZE[k] * (-0.12 * methane * METHANE[k]).exp();
@@ -340,25 +292,20 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Giant {
     let tint = layer(Part { deck: Deck::Belt, depth: 1.0, stain: 2.2, haze: 0.0 });
     let spot = f32::from(h < 0.35) * (0.4 + 0.6 * e);
     let storm = layer(Part { deck: Deck::Full, depth: 0.08, stain: 0.08 + 1.2 * spot, haze: 0.0 });
-    // Polar haze is made by the ultraviolet and the aurora; far out there is little of either.
     let polar = layer(Part { deck: Deck::Zone, depth: 0.6, stain: 0.6, haze: 0.6 * photochemistry.min(1.0) });
 
-    // Jets pole to pole go as the square root of how fast the equator turns over a wind speed,
-    // Rhines's scale; Jupiter's make about six belt-zone pairs.
+    // Rhines: jets go as the square root of the equator's speed.
     let spin = inputs.spin_s.unwrap_or(JUPITER_SPIN_S).max(3600.0);
     let turning = (inputs.radius_m / JUPITER_RADIUS) * (JUPITER_SPIN_S / spin);
     let bands = (5.7 * turning.sqrt() as f32 * (0.85 + 0.3 * c)).clamp(1.2, 12.0);
 
-    // Belts show where a deck has gaps to show: most under ammonia, least where there is no
-    // deck, and least again where the haze of a cold one veils them.
+    // A cold deck's haze veils its belts.
     let veiled = 1.0 - 0.7 * cold * ammonia;
     let contrast = ((0.95 * ammonia + 0.45 * water + 0.35 * clear + 0.35 * alkali + 0.7 * silicate) * veiled
         * (0.75 + 0.5 * d))
         .clamp(0.05, 1.0);
     let turbulence = ((0.35 + 0.65 * (inputs.mass_kg / JUPITER_MASS).sqrt() as f32).min(1.0) * (0.6 + 0.6 * f)).clamp(0.1, 1.0);
     let storms = (contrast * (0.4 + 0.8 * g)).clamp(0.0, 1.0);
-    // Where a pole's haze is made: most under ammonia, and more where the band pattern gives
-    // out sooner.
     let polar_share = (0.06 + 0.1 * a) * (ammonia + water);
 
     Giant {
@@ -369,7 +316,7 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Giant {
                 zone: painted(look(zone_c, zone_c)),
                 belt: painted(look(display(&belt), zone_c)),
                 tint: painted(look(display(&tint), zone_c)),
-                // Chroma only: a stained oval darkened further went black.
+                // Chroma only, or a stained oval goes black.
                 storm: painted(look(display(&storm), [0.0; 3])),
                 polar: painted(look(display(&polar), zone_c)),
             }
@@ -389,18 +336,13 @@ fn smooth(a: f64, b: f64, x: f64) -> f32 {
     (t * t * (3.0 - 2.0 * t)) as f32
 }
 
-/// A reflectance run as the natural mapping puts it, `(R, V, B)` on red, green and blue, in
-/// Oklch: as a photograph balanced to white light would show it.
+/// `(R, V, B)` as Oklch: the natural mapping under white light.
 pub fn display(r: &[f32; BANDS]) -> [f32; 3] {
     oklch([r[Band::R.index()], r[Band::V.index()], r[Band::B.index()]].map(|c| c.clamp(0.0, 1.0)))
 }
 
-/// A color to paint so that under the Sun it is seen as `seen`.
-///
-/// The natural mapping's Sun is not white: R is the widest of its three bands, so sunlight comes
-/// out `(1.37, 1, 1.04)`, and a pale cyan Uranus painted as it measures was drawn lavender. So the
-/// paint is divided by it at the same brightness, and a giant under the Sun looks as a balanced
-/// photograph of it does. Under another star it takes that star's color from the light.
+/// What to paint so that under the Sun it is seen as `seen`. The natural mapping's Sun is
+/// `(1.37, 1, 1.04)`, R being the widest band; other stars still tint through the light.
 fn painted(seen: [f32; 3]) -> [f32; 3] {
     let sun = [Band::R, Band::V, Band::B].map(|b| em_spectra::blackbody::band_radiance(b, 5772.0) as f32);
     let luma = 0.2126 * sun[0] + 0.7152 * sun[1] + 0.0722 * sun[2];
@@ -408,14 +350,11 @@ fn painted(seen: [f32; 3]) -> [f32; 3] {
     oklch(std::array::from_fn(|c| (rgb[c] * luma / sun[c]).clamp(0.0, 1.0)))
 }
 
-/// A color as a giant is seen rather than as it measures. Jupiter's belts are within a few
-/// hundredths of gray and a tenth of a stop from its zones, and every photograph of it raises
-/// both, so the eye expects them raised: chroma more than doubled, short of neon, and a darker
-/// layer taken two and a half times as far below the `zone`, which is what shows in a surface's tone window. Only the cubemap is raised. The layers'
-/// spectra stay as measured, so every other band mapping and the survey see the true ratios.
+/// How a giant is seen rather than measured, as photographs raise it: measured belts are nearly
+/// gray and vanish in a surface's tone window. Only the cubemap is raised; the spectra are not.
 fn look([l, c, h]: [f32; 3], [zone_l, ..]: [f32; 3]) -> [f32; 3] {
     let l = if l < zone_l { zone_l + 2.5 * (l - zone_l) } else { l };
-    // A dark color raised as far reads as neon: the cap falls with lightness.
+    // Raised as far, a dark color reads as neon.
     [l.max(0.0), (2.4 * c).min(c.max(0.2 * l.min(0.85))), h]
 }
 
@@ -444,17 +383,12 @@ fn oklch([r, g, b]: [f32; 3]) -> [f32; 3] {
     [lab_l, lab_a.hypot(lab_b), lab_b.atan2(lab_a).to_degrees().rem_euclid(360.0)]
 }
 
-/// The solar system's four: the rule's own output with their inputs, and the layout each is
-/// known by where the rule has nothing to say about it.
+/// The rule's own colors, with the layout each is known by.
 fn measured(id: &str, derived: Giant) -> Option<Giant> {
     Some(match id {
-        // Many bands, strongly stained belts, and the spot.
         "Jupiter" => Giant { bands: 5.7, contrast: 0.9, turbulence: 0.9, storms: 0.45, spot: 1.0, shift: 0.0, ..derived },
-        // The same chemistry under more haze: butterscotch, broad and faint.
         "Saturn" => Giant { bands: 4.5, contrast: 0.35, turbulence: 0.3, storms: 0.1, spot: 0.0, ..derived },
-        // Nearly featureless.
         "Uranus" => Giant { bands: 2.0, contrast: 0.08, turbulence: 0.15, storms: 0.05, spot: 0.0, ..derived },
-        // A few bands, a dark spot's worth of weather and bright methane-ice streaks.
         "Neptune" => Giant { bands: 2.6, contrast: 0.25, turbulence: 0.4, storms: 0.4, spot: 0.0, ..derived },
         _ => return None,
     })
@@ -466,7 +400,6 @@ mod tests {
 
     const EARTH_MASS: f64 = 5.9722e24;
 
-    /// The solar system's four, with what the rule is given for each.
     fn inputs(id: &str) -> Inputs {
         // (mass kg, radius m, equilibrium K, spin s, surface)
         let (mass, radius, eq, spin, surface) = match id {
@@ -487,15 +420,13 @@ mod tests {
         r[over.index()] / r[under.index()]
     }
 
-    /// A belt's R over B: how deep its stain is.
+    /// A belt's R over B.
     fn redness(g: &Giant) -> f32 {
         let belt = g.layers[Layer::Belt as usize];
         belt[Band::R.index()] / belt[Band::B.index()]
     }
 
-    /// The rule, given the four giants' masses, temperatures and the Sun, comes out the colors
-    /// they are measured to be: red over blue and K over R within a fifth, and V within a
-    /// quarter. It is the rule that is checked, not the measured layouts.
+    /// Given the four solar giants' inputs, the rule lands on their measured colors.
     #[test]
     fn the_rule_reaches_the_solar_systems_giants() {
         let mut misses = Vec::new();
@@ -517,8 +448,7 @@ mod tests {
         assert!(misses.is_empty(), "{misses:#?}");
     }
 
-    /// Saturn is Jupiter under haze: the same hue, fainter belts. The ice giants are blue and
-    /// nearly black in K.
+    /// Saturn's belts are fainter than Jupiter's; an ice giant is blue and nearly black in K.
     #[test]
     fn the_giants_are_ordered_as_they_are_seen() {
         let [jupiter, saturn, uranus] = ["Jupiter", "Saturn", "Uranus"].map(giant);
@@ -546,8 +476,7 @@ mod tests {
         )
     }
 
-    /// Sudarsky's sequence: water cloud is the brightest thing a giant can be, a clear column is
-    /// blue, alkali vapor is nearly black, and silicate cloud brings the light back.
+    /// Sudarsky's sequence: water cloud brightest, clear column blue, alkali dark, silicate bright.
     #[test]
     fn warmer_cloud_tops_run_through_the_five_classes() {
         let v = |g: Giant| g.reflectance()[Band::V.index()];
@@ -559,8 +488,7 @@ mod tests {
         assert!(ratio(silicate.reflectance(), Band::K, Band::V) > 0.8, "and there is no methane to darken K");
     }
 
-    /// More metals, more methane and more stain: the same giant from a metal-rich star is darker
-    /// in K and its belts more colored.
+    /// A metal-rich star's giant is darker in K and redder in its belts.
     #[test]
     fn metals_deepen_the_methane_and_the_stain() {
         let at = |feh: f64| {
@@ -576,7 +504,7 @@ mod tests {
         assert!(metals(16.0 * EARTH_MASS, true, 0.0) < 1.1, "a runaway is diluted however small");
     }
 
-    /// A hot star's light makes the chromophores and a red dwarf's does not.
+    /// A hot star stains belts more than a red dwarf does.
     #[test]
     fn a_hot_star_stains_the_belts_and_a_cool_one_leaves_them_pale() {
         let at = |teff: f64| {

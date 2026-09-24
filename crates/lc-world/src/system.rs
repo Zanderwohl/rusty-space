@@ -65,8 +65,7 @@ pub struct Drawable {
     pub world: crate::worlds::World,
     /// What a rocky world with air is painted with. See [`crate::climate`].
     pub climate: Option<crate::climate::Climate>,
-    /// What a giant is painted with, and the reflectance [`Drawable::world`] carries for it.
-    /// See [`crate::giant`].
+    /// Also what [`Drawable::world`]'s reflectance is, for a giant.
     pub giant: Option<crate::giant::Giant>,
     /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub pole: DVec3,
@@ -124,7 +123,6 @@ pub struct LocalSystem {
     star_radius_m: f64,
     star_teff_k: f64,
     star_luminosity_w: f64,
-    /// `[Fe/H]`, which a giant's envelope inherits.
     star_feh: f64,
 }
 

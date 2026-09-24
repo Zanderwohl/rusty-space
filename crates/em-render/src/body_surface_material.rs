@@ -53,8 +53,7 @@ pub struct BodySurfaceUniform {
     pub air_albedo: Vec4,
     pub air_glow: Vec4,
     /// Each kind of ground's albedo through the current band mapping, as display channels:
-    /// water, ice, growth, sand, rock and cloud. A giant's layers in their place, in
-    /// `lc_world::giant::Layer` order.
+    /// water, ice, growth, sand, rock and cloud; or a giant's layers.
     pub ground: [Vec4; GROUNDS],
     /// The same through the natural mapping, which is what the color cubemap was painted in.
     /// The color is scaled by the ratio of the two, so in the natural mapping nothing changes.

@@ -46,10 +46,8 @@ pub struct DevEntry {
     /// The angle `--at` stands at between the star and itself, seen from the body, degrees.
     /// Past ninety it is looking at the night side.
     pub phase_deg: Option<f64>,
-    /// Dress the `--at` body in the climate of a generated planet, or a generated giant's paint,
-    /// by its name: `--wear "Wolf 359 c"`. Its surface, clouds and air are derived exactly as that
-    /// planet's would be; only the sphere they are drawn on is borrowed. A generated system is
-    /// otherwise a crossing away.
+    /// Dress the `--at` body as a generated planet, by its name: `--wear "Wolf 359 c"`. Only the
+    /// sphere is borrowed; a generated system is otherwise a crossing away.
     pub wear: Option<String>,
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
@@ -243,9 +241,7 @@ pub(crate) fn run_dev_actions(
     }
 }
 
-/// What a generated planet named `name` is painted with, under its own star, from the stars
-/// whose name it begins with: a climate if it is a rocky world with air, a giant's paint if it is
-/// a giant, and the world a survey would read of it.
+/// Found among the stars whose name `name` begins with.
 fn generated_paint(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<Worn> {
     use lc_world::climate::{Inputs, derived, variety};
     stars

@@ -271,15 +271,12 @@ pub fn reflected_radiance(
     lit_radiance(mean_albedo(body), star_radius_m, star_teff_k, star_distance_m)
 }
 
-/// What the disc reflects on average. A giant's paint states its own, from its chemistry: a
-/// cloudless one is a tenth of a water-cloud one's, and the class's one number would meter
-/// both alike.
+/// A giant's comes from its chemistry: a cloudless one is a tenth of a water-cloud one's.
 fn mean_albedo(body: &Drawable) -> f64 {
     if body.giant.is_some() { body.world.gray_albedo() } else { body.surface.albedo() }
 }
 
-/// What the shader multiplies its texel by. A giant's color cubemap is its albedo, so one; any
-/// other texel is a variation on the class's.
+/// What the shader multiplies its texel by. A giant's cubemap is its albedo.
 fn shading_albedo(body: &Drawable, drawn: crate::surfaces::Drawn) -> f64 {
     if drawn.layers { 1.0 } else { body.surface.albedo() }
 }
@@ -371,8 +368,7 @@ pub fn surface_shading(
     (through(reflected), through(emitted))
 }
 
-/// Each ground's albedo through `mapping`, as display channels. Water, ice, growth, sand, rock
-/// `rust` of the way to Mars, and cloud, which is [`BodySurfaceUniform::ground`]'s order.
+/// Each ground's albedo through `mapping`, in [`BodySurfaceUniform::ground`]'s order.
 fn grounds(mapping: &BandMapping, star: &PerBand<f32>, rust: f32) -> [Vec4; GROUNDS] {
     use lc_world::ground::{Ground, rock};
     [
@@ -386,13 +382,11 @@ fn grounds(mapping: &BandMapping, star: &PerBand<f32>, rust: f32) -> [Vec4; GROU
     .map(|r| albedo_through(mapping, star, &r))
 }
 
-/// A giant's layers the same way, in [`lc_world::giant::Layer`] order; the slots past them are
-/// white and weighted zero.
+/// The same for a giant's layers; the slots past them are weighted zero.
 fn giant_layers(mapping: &BandMapping, star: &PerBand<f32>, giant: &lc_world::giant::Giant) -> [Vec4; GROUNDS] {
     std::array::from_fn(|k| giant.layers.get(k).map_or(Vec4::ONE, |r| albedo_through(mapping, star, r)))
 }
 
-/// The mapped light a reflectance run sends over the mapped light a white surface would.
 fn albedo_through(mapping: &BandMapping, star: &PerBand<f32>, r: &[f32; em_spectra::BANDS]) -> Vec4 {
     let white = mapping.apply(star);
     let lit = mapping.apply(&PerBand::new(std::array::from_fn(|i| r[i] * star[Band::ALL[i]])));
@@ -444,8 +438,7 @@ impl Grounds {
         }
     }
 
-    /// A giant's: its layers, and no temperatures of their own, so it glows as one blackbody
-    /// whose belts invert.
+    /// No temperatures of its own: a giant glows as one blackbody whose belts invert.
     fn giant(mapping: &BandMapping, star: &PerBand<f32>, giant: &lc_world::giant::Giant) -> Self {
         let flat = BodySurfaceUniform::default();
         Self {

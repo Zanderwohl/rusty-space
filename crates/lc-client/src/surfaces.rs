@@ -69,7 +69,6 @@ pub struct SurfaceManifest {
     pub giants: Option<Giants>,
 }
 
-/// The graph every giant is drawn from.
 #[derive(Debug, Deserialize)]
 pub struct Giants {
     pub graph: String,
@@ -96,8 +95,7 @@ pub enum Ground<'a> {
 }
 
 impl SurfaceManifest {
-    /// A body named in the manifest takes its own graphs over anything a climate or a giant's
-    /// paint would give it.
+    /// A body named in the manifest takes its own graphs over a climate's or a giant's.
     pub fn look_for(&self, name: &str, class: Surface, climate: bool, giant: bool) -> Option<Look<'_>> {
         let named = self.bodies.contains_key(name);
         if let (Some(rocky), true, false) = (&self.rocky, climate, named) {
@@ -221,7 +219,7 @@ pub struct Drawn {
     pub clouds: bool,
     /// Whether the [`MASKS`] are baked, so each band can see its own ground.
     pub grounds: bool,
-    /// Whether the [`GIANT_MASKS`] are, so each band can see a giant's own layers.
+    /// Whether the [`GIANT_MASKS`] are.
     pub layers: bool,
 }
 
@@ -229,8 +227,7 @@ pub struct Drawn {
 /// mixes them: land over water, ice over everything, growth over dry land, sand over rock.
 pub const MASKS: [&str; 4] = ["land", "ice", "green", "sand amount"];
 
-/// giant.tgraph's layers, as body_surface.wgsl's `layered` mixes them: polar haze over
-/// everything, storms over the bands, belts over zones. Into the first three mask slots.
+/// giant.tgraph's layers, into the first three mask slots.
 pub const GIANT_MASKS: [&str; 3] = ["belt", "storm", "polar"];
 
 /// See [`BodySurfaceUniform`]'s `weather` and `drift`.
@@ -538,7 +535,6 @@ fn ground_params(c: &Climate) -> Params {
     ]
 }
 
-/// giant.tgraph's parameters, from what the giant is.
 fn giant_params(g: &Giant) -> Params {
     let scalar = ParamValue::Scalar;
     let color = |[l, c, h]: [f32; 3]| ParamValue::Color(oklcha(l, c, h, 1.0));
@@ -881,10 +877,9 @@ mod tests {
         assert_eq!(manifest.look_for("Mercury", Surface::Rock, false, false), None);
     }
 
-    /// giant.tgraph's masks bake as the CPU evaluates them. texture-graph's two evaluators part
-    /// outside `[0, 1]` -- the GPU clamps a Map's value and the CPU does not, and the CPU caps a
-    /// Multiply at one and the GPU does not -- and a graph that strays there looks right in every
-    /// CPU test here and wrong on screen. Skipped without a GPU.
+    /// giant.tgraph's masks bake as the CPU evaluates them. Outside `[0, 1]` texture-graph's GPU
+    /// clamps a Map's value and its CPU caps a Multiply, so a graph that strays there passes every
+    /// CPU test and draws wrong. Skipped without a GPU.
     #[test]
     fn the_giant_bakes_as_it_evaluates() {
         use lc_world::giant::{self, Inputs};
@@ -901,7 +896,7 @@ mod tests {
             ctx.params.insert(k.into(), v);
         }
         let resolved = g.resolve_params(&ctx);
-        // Fine enough that the palette a Map bakes beside the faces resolves its narrowest ramp.
+        // Coarser, a Map's baked palette smears the narrowest ramp.
         const FACE: u32 = 256;
         const STEP: u32 = 16;
         for name in GIANT_MASKS {
@@ -921,9 +916,7 @@ mod tests {
         }
     }
 
-    /// What giant.tgraph covers with each layer, as body_surface.wgsl's `layers` weighs its masks,
-    /// is what `Giant::shares` says it covers: the survey reads a giant's disc through those
-    /// shares, so a graph that drew more belt than it says would be measured as another color.
+    /// giant.tgraph covers what `Giant::shares` says, or the survey reads a giant as another color.
     #[test]
     fn a_giant_covers_what_its_paint_says() {
         use lc_world::giant::{self, Inputs};
@@ -954,8 +947,7 @@ mod tests {
                 for k in 0..n * n {
                     let (u, v) = (((k % n) as f32 + 0.5) / n as f32, ((k / n) as f32 + 0.5) / n as f32);
                     let s = cube_sample(face, u, v);
-                    // A texel's solid angle, which is largest at a face's center: unweighted,
-                    // the poles are undercounted.
+                    // Solid angle: unweighted, the poles are undercounted.
                     let [a, b] = [2.0 * u - 1.0, 2.0 * v - 1.0];
                     let da = (1.0 + a * a + b * b).powf(-1.5);
                     let mask = |layer| eval::evaluate(&g, layer, s, &ctx).l.clamp(0.0, 1.0);

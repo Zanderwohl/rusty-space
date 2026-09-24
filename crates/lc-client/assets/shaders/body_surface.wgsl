@@ -151,9 +151,8 @@ fn grounds(dir: vec3<f32>) -> array<f32, 5> {
     return array<f32, 5>((1.0 - land) * (1.0 - ice), ice, ground * growth, dry * sand, dry * (1.0 - sand));
 }
 
-/// How much of the texel at `dir` is a giant's zone, belt, storm and polar haze, summing to one:
-/// giant.tgraph's own mix, haze over storms over belts over zones. The masks are its `belt`,
-/// `storm` and `polar` layers, in the first three slots.
+/// A giant's zone, belt, storm and polar haze at `dir`, summing to one, in giant.tgraph's own
+/// order: haze over storms over belts over zones.
 fn layers(dir: vec3<f32>) -> array<f32, 4> {
     let belt = textureSample(mask_land, pattern_sampler, dir).r;
     let storm = textureSample(mask_ice, pattern_sampler, dir).r;
@@ -162,7 +161,7 @@ fn layers(dir: vec3<f32>) -> array<f32, 4> {
     return array<f32, 4>((1.0 - belt) * open, belt * open, storm * (1.0 - polar), polar);
 }
 
-/// `banded` for a giant: its layers in place of grounds.
+/// `banded` for a giant's layers.
 fn layered(dir: vec3<f32>, own: vec3<f32>) -> vec3<f32> {
     let w = layers(dir);
     var now = vec3<f32>(0.0);
@@ -299,7 +298,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         cloud = vec4<f32>(cloud.rgb * material.ground[CLOUD].rgb / max(material.ground_natural[CLOUD].rgb, vec3<f32>(1.0e-4)), cloud.a);
     } else if (abs(mode - MODE_LAYERS) < 0.5) {
         own = layered(in.local_direction, own);
-        // A zone is the bright end, as the class pattern's is, so a belt is what glows.
+        // A belt is what glows.
         t = 1.0 - layers(in.local_direction)[1];
     }
     albedo = mix(albedo, own, material.params.x);
