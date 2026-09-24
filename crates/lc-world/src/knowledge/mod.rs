@@ -28,6 +28,7 @@ pub mod observatory;
 pub mod primary;
 pub mod prior;
 pub mod sort;
+mod state;
 pub mod record;
 pub mod report;
 pub mod room;

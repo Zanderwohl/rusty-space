@@ -434,6 +434,16 @@ degree, the size to 2% and the period to about a tenth. Two things had to change
   record states its eccentricity as `None` — which rule 4 distinguishes from stating a circle.
   What it calls the axis is then the radius the body is *at*: Saturn at 0.0565 runs from 9.0 to
   10.1 AU, and three degrees near the near end reports 9.0.
+- **Or the body's motion, where that reads better.** ✅ (2026-09-24) Positions good to meters
+  give the velocity and the acceleration too: a cubic in time through them, at the middle of
+  the arc, and the pull toward the primary is the primary's mass. Position, velocity and mass
+  are the whole orbit, eccentricity included. Both are tried and the better kept, since a cubic
+  stops describing the path long before a conic does. Two days from low Earth orbit give
+  1.00003 AU and an eccentricity of 0.0167, where the circle gave 0.983 AU — and the error bar
+  on that axis still claims a kilometer, because the Moon's pull on Earth's center over two
+  days is smooth enough that the orbit absorbs it rather than misfitting. The bar now scales
+  with the reduced chi-square, which is right where a fit misfits and cannot see this.
+  `lc_world::knowledge::state`.
 
 **A circle is only an answer when the positions were known,** and finding that out cost a real
 defect. Assuming one drops two parameters, so an arc too short to shape a conic can still be

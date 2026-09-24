@@ -700,10 +700,11 @@ mod tests {
         assert_eq!(k.bodies_of(system.star, TICK_S * 20.0).len(), held - 1, "a body did not read back");
     }
 
-    /// **A ship in low orbit places the planet under it.** Every look ranges the planet, and a
-    /// guard written against fits from bearings alone refused any orbit that brought the body
-    /// within one percent of the ship's own distance from the sun -- a million and a half
-    /// kilometers here, against seven thousand. Earth stayed "distance unknown" from low orbit.
+    /// **A ship in low orbit places the planet under it, and reads its whole orbit.** Every look
+    /// ranges the planet, and a guard written against fits from bearings alone refused any orbit
+    /// that brought the body within one percent of the ship's own distance from the sun -- a
+    /// million and a half kilometers here, against seven thousand. Earth stayed "distance
+    /// unknown" from low orbit.
     #[test]
     fn a_ship_in_low_orbit_places_the_planet_under_it() {
         let Some((mut sky, system)) = sol() else { return };
@@ -729,6 +730,14 @@ mod tests {
         let truth_au = (system.body_position_at("Earth", t).unwrap() - system.star_position_ly()) * M_PER_LY / AU_M;
         let miss_au = offset_au.distance(truth_au);
         assert!(miss_au < 0.01, "Earth placed {miss_au} AU from where it is");
+
+        // The whole orbit, from a few days: not a circle at the radius Earth happens to be at,
+        // which near perihelion read 0.983 AU.
+        let (semi_major_au, _) = belief.semi_major_au.expect("an axis");
+        assert!((semi_major_au - 1.0).abs() < 1.0e-3, "{semi_major_au} AU");
+        let orbit = k.file(Subject::Body { star: system.star, body: earth }).unwrap().orbits().last().unwrap().clone();
+        let (eccentricity, _) = orbit.eccentricity.expect("a shape, not a circle assumed");
+        assert!((eccentricity - 0.0167).abs() < 2.0e-3, "e {eccentricity}");
     }
 
     /// **A parked ship ranges its own sun.** It is a resolved disc from anywhere in the

@@ -239,7 +239,7 @@ impl Fitted {
 }
 
 /// A right-handed basis for the plane whose normal is `pole`.
-fn basis(pole: DVec3) -> (DVec3, DVec3) {
+pub(super) fn basis(pole: DVec3) -> (DVec3, DVec3) {
     let u = pole.any_orthonormal_vector();
     (u, pole.cross(u))
 }
@@ -389,7 +389,7 @@ fn through(places: &[(DVec3, f64)], looks: &[Look], reach_m: f64, bound: f64) ->
 /// cannot win, so the rest of its looks are not worth solving Kepler's equation for -- and most
 /// candidates are hopeless within two or three of them. The bound is compared against the same
 /// quantity the function returns, so the exit changes the cost and not the answer.
-fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f64> {
+pub(super) fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f64> {
     // Every candidate in this file is scored here and nowhere else, which is why the band of
     // [`FAR_AU`] is enforced here rather than where the three-point solution lands: a fit
     // settles its way out of the band, so checking only the starting point misses it.
@@ -629,12 +629,21 @@ pub struct Spread {
 /// for weighting one orbit's pole against another's, and for a reader deciding whether to care;
 /// not good enough to do statistics with.
 pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
-    let total: f64 = looks.iter().map(|l| 1.0 / (l.sigma_rad * l.sigma_rad)).sum();
+    // Weighted as `residual` weighs them, a ranged look counting twice.
+    let weight = |l: &Look| if l.range_m.is_some() { 2.0 } else { 1.0 } / (l.sigma_rad * l.sigma_rad);
+    let total: f64 = looks.iter().map(weight).sum();
     if !sound(total) {
         return Spread { period_s: f64::INFINITY, semi_major_m: f64::INFINITY, eccentricity: f64::INFINITY, pole_rad: std::f64::consts::PI };
     }
-    // Chi-square one worse, expressed in the weighted RMS this file works in.
-    let worse = (fitted.residual_rad * fitted.residual_rad + 1.0 / total).sqrt();
+    // Chi-square one worse, expressed in the weighted RMS this file works in -- or, where the
+    // best fit misses by more than the measurements' own errors allow, one *reduced* chi-square
+    // worse. A two-body orbit is not the whole of any body's motion: Earth's center swings 4700
+    // km about the barycenter it shares with the Moon, and against ranges good to meters the
+    // unscaled bar claimed a part in a billion on an axis four thousand kilometers out.
+    let measured = looks.len() + looks.iter().filter(|l| l.range_m.is_some()).count();
+    let freedom = measured.saturating_sub(ELEMENTS).max(1) as f64;
+    let squared = fitted.residual_rad * fitted.residual_rad;
+    let worse = (squared + (1.0 / total).max(squared / freedom)).sqrt();
 
     // `ceiling` is where an element stops meaning anything rather than where the data stops
     // constraining it: an eccentricity walked past one is a hyperbola, and a pole is at most
@@ -690,6 +699,9 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
             * fitted.period_s,
     }
 }
+
+/// What a fit solves for: the six elements, the period standing in for the primary's mass.
+const ELEMENTS: usize = 6;
 
 /// The closest to parabolic an ellipse is allowed to get.
 ///
@@ -819,11 +831,21 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     // polish, nothing searched. What proximity buys is not a better search but no search.
     // Every ranged look, not three of them: the plane a short arc gives is only as good as the
     // number of positions defining it.
+    //
+    // Two ways from positions to an orbit, and the better kept. The conic through them needs
+    // the arc to bend and, over the few degrees a close pass covers, assumes a circle at the
+    // radius the body is at; the body's motion at the middle of the arc reads the whole orbit
+    // but only while a cubic in time still describes the path. See `super::state`.
     if ranged.len() >= RANGED_NEEDED {
         let places: Vec<(DVec3, f64)> =
             ranged.iter().filter_map(|l| Some((l.place()?, l.at_s))).collect();
-        if let Some(found) = through(&places, &ordered, reach, f64::INFINITY) {
-            return Some(settle(found, &ordered, SETTLINGS * 8));
+        let best = [through(&places, &ordered, reach, f64::INFINITY), super::state::from_motion(&places, &ordered, reach)]
+            .into_iter()
+            .flatten()
+            .map(|found| settle(found, &ordered, SETTLINGS * 8))
+            .min_by(|a, b| a.residual_rad.total_cmp(&b.residual_rad));
+        if best.is_some() {
+            return best;
         }
     }
 
