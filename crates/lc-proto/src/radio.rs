@@ -1,6 +1,9 @@
 //! What goes on the air: aim, messages, survey reports, and transcript lines. Everything here is
 //! re-exported at the crate root.
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::ShipId;
@@ -102,8 +105,9 @@ pub struct Reported {
     #[serde(default)]
     pub idem: MessageKey,
     pub sealed: bool,
-    /// The serialized `lc_world::knowledge::Report`. Its shape is part of this protocol: a change
-    /// to it is a version bump. `None` when this receiver may not read it.
+    /// The `lc_world::knowledge::Report`, as [`encode_report`] writes it. Its shape is part of
+    /// this protocol: a change to it is a [`REPORT_FORMAT`] bump. `None` when this receiver may
+    /// not read it.
     pub body: Option<String>,
     /// [`REPORT_FORMAT`] when written. Reports outlive the shard that wrote them in the journal,
     /// so a reader must detect a format it cannot parse. Zero predates the field.
@@ -111,8 +115,21 @@ pub struct Reported {
     pub format: u32,
 }
 
-/// Bump it when `lc_world::knowledge::Report` changes shape.
-pub const REPORT_FORMAT: u32 = 7;
+/// Bump it when `lc_world::knowledge::Report` changes shape, or how [`encode_report`] writes it.
+pub const REPORT_FORMAT: u32 = 8;
+
+/// A report as [`Reported::body`] carries it: postcard, then base64 so it rides in the JSON a
+/// journaled payload must be.
+/// Not JSON, which has no infinity: an orbit states an unbounded element's error as infinite.
+pub fn encode_report<T: Serialize>(report: &T) -> String {
+    STANDARD.encode(crate::encode(report))
+}
+
+/// The report [`encode_report`] wrote, or why not.
+pub fn decode_report<T: DeserializeOwned>(body: &str) -> Result<T, String> {
+    let bytes = STANDARD.decode(body).map_err(|why| why.to_string())?;
+    crate::decode(&bytes).map_err(|why| why.to_string())
+}
 
 /// How many of the addressee's messages an outgoing one acknowledges. There is no
 /// retransmission behind it: a lost message is undetectable at either end.

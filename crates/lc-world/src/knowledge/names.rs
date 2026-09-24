@@ -20,8 +20,12 @@ pub fn designation(toward: DVec3) -> String {
 /// A small body's designation: the coordinate year it was found in, and its place in that
 /// year's finds around the same star.
 pub fn discovery_designation(discovered_s: f64, order: u32) -> String {
-    let year = (discovered_s / JULIAN_YEAR_S).floor() as i64;
-    format!("{year}-{order}")
+    format!("{}-{order}", discovery_year(discovered_s))
+}
+
+/// The coordinate year a find at `discovered_s` is designated in.
+pub fn discovery_year(discovered_s: f64) -> i64 {
+    (discovered_s / JULIAN_YEAR_S).floor() as i64
 }
 
 /// Where a system's planets are expected to be, for stars up to a luminosity.
