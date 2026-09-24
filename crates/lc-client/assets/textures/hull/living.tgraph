@@ -1,0 +1,309 @@
+TextureGraphFile(
+    format_version: 2,
+    metadata: FileMetadata(
+        name: "living hull",
+        description: Some("Living: decks every 4 m, each a band of windows 2.4 m by 1.4 m; lit in clusters, as occupied sections are. One tile is 64 m of hull and must repeat: integer frequencies, and noise with period == frequency. Output color is albedo; the layer named lights is the lit share of each texel. See em_render::hull_material."),
+        authors: [
+            "Alexander Lowry",
+        ],
+        modified: "2026-09-24T00:00:00Z",
+        written_by: "texture-graph-core 12498d1",
+    ),
+    graph: Graph(
+        layers: [
+            Layer(
+                id: 1,
+                name: "u",
+                kind: Coordinate(Coordinate(
+                    axis: U,
+                )),
+            ),
+            Layer(
+                id: 2,
+                name: "v",
+                kind: Coordinate(Coordinate(
+                    axis: V,
+                )),
+            ),
+            Layer(
+                id: 3,
+                name: "base",
+                kind: Color(Oklch(
+                    l: 0.684,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 4,
+                name: "window u wave",
+                kind: Wave(Wave(
+                    input: Layer(1),
+                    shape: Triangle,
+                    frequency: 16.0,
+                    phase: 0.75,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 5,
+                name: "window u edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.56875,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.63125,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 6,
+                name: "window u",
+                kind: Map(Map(
+                    value: Some(4),
+                    palette: Some(5),
+                )),
+            ),
+            Layer(
+                id: 7,
+                name: "window v wave",
+                kind: Wave(Wave(
+                    input: Layer(2),
+                    shape: Triangle,
+                    frequency: 16.0,
+                    phase: 0.75,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 8,
+                name: "window v edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.31875,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.38125,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 9,
+                name: "window v",
+                kind: Map(Map(
+                    value: Some(7),
+                    palette: Some(8),
+                )),
+            ),
+            Layer(
+                id: 10,
+                name: "windows",
+                kind: Mix(Mix(
+                    a: Some(6),
+                    b: Some(9),
+                    mode: Multiply,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 11,
+                name: "deck belt wave",
+                kind: Wave(Wave(
+                    input: Layer(2),
+                    shape: Triangle,
+                    frequency: 16.0,
+                    phase: 1.1,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 12,
+                name: "deck belt edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.04375,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.10625,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 13,
+                name: "deck belt",
+                kind: Map(Map(
+                    value: Some(11),
+                    palette: Some(12),
+                )),
+            ),
+            Layer(
+                id: 14,
+                name: "belt",
+                kind: Color(Oklch(
+                    l: 0.6214,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 15,
+                name: "hull",
+                kind: Mix(Mix(
+                    a: Some(3),
+                    b: Some(14),
+                    mode: Blend,
+                    factor: Layer(13),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 16,
+                name: "glass",
+                kind: Color(Oklch(
+                    l: 0.3271,
+                    chroma: 0.02,
+                    hue: OklabHue(240.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 17,
+                name: "albedo",
+                kind: Mix(Mix(
+                    a: Some(15),
+                    b: Some(16),
+                    mode: Blend,
+                    factor: Layer(10),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 18,
+                name: "occupancy",
+                kind: Noise(Noise(
+                    dims: D2,
+                    seed_offset: 3,
+                    frequency: 8.0,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (8, 8, 0),
+                    fractal: Fractal(
+                        octaves: 1,
+                        lacunarity: 2.0,
+                        gain: 0.5,
+                        mode: Standard,
+                        normalize: true,
+                    ),
+                )),
+            ),
+            Layer(
+                id: 19,
+                name: "occupied ramp",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.45,
+                            color: Const(Oklch(
+                                l: 0.05,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.62,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 20,
+                name: "occupied",
+                kind: Map(Map(
+                    value: Some(18),
+                    palette: Some(19),
+                )),
+            ),
+            Layer(
+                id: 21,
+                name: "lights",
+                kind: Mix(Mix(
+                    a: Some(10),
+                    b: Some(20),
+                    mode: Multiply,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+        ],
+        list_order: [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+        ],
+        canvases: {},
+        output: Output(
+            color: Some(17),
+            roughness: Const(0.5),
+            metallic: Const(0.0),
+            normal: None,
+        ),
+        params: {},
+        next_id: 22,
+    ),
+)

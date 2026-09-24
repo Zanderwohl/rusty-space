@@ -31,7 +31,8 @@ use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use texture_graph_core::{CUBE_FACES, EvalCtx, Graph, LoadError, ParamValue, load_from_str};
 use texture_graph_gpu::{
-    Baker, DeviceCtx, ScalarFormat, read_rgba8_layers_async, read_scalar_volume_async,
+    Baker, DeviceCtx, ScalarFormat, read_rgba8_async, read_rgba8_layers_async,
+    read_scalar_volume_async,
 };
 
 /// Where the population grain graph lives under the asset root.
@@ -114,6 +115,8 @@ pub enum Shape {
     Volume(u32),
     /// A cubemap, `n` texels a face edge, sampled by direction: the graph on a sphere.
     Cube(u32),
+    /// A repeating square, `n` texels a side: the graph's unit square as one tile.
+    Plane(u32),
 }
 
 /// What each texel holds.
@@ -122,7 +125,7 @@ pub enum Format {
     /// One byte a texel unless a field leaves `[0, 1]`: the population grain was compared at
     /// sixteen bits and came out identical.
     Scalar(ScalarFormat),
-    /// The graph's color output, sRGB with straight alpha. On a sphere only.
+    /// The graph's color output, sRGB with straight alpha. On a sphere or a plane.
     Color,
 }
 
@@ -173,9 +176,10 @@ pub fn placeholder(target: Target) -> Image {
     let shape = match target.shape {
         Shape::Volume(_) => Shape::Volume(1),
         Shape::Cube(_) => Shape::Cube(1),
+        Shape::Plane(_) => Shape::Plane(1),
     };
     let texels = match shape {
-        Shape::Volume(_) => 1,
+        Shape::Volume(_) | Shape::Plane(_) => 1,
         Shape::Cube(_) => CUBE_FACES as usize,
     };
     let half: &[u8] = match target.format {
@@ -206,6 +210,14 @@ fn image_of(target: Target, bytes: Vec<u8>) -> Image {
             },
             TextureDimension::D2,
         ),
+        Shape::Plane(n) => (
+            Extent3d {
+                width: n,
+                height: n,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+        ),
     };
     let mut image = Image::new(
         size,
@@ -222,7 +234,7 @@ fn image_of(target: Target, bytes: Vec<u8>) -> Image {
     );
     // A volume repeats, which the population grain depends on. A cube has no edge to repeat.
     let wrap = match shape {
-        Shape::Volume(_) => ImageAddressMode::Repeat,
+        Shape::Volume(_) | Shape::Plane(_) => ImageAddressMode::Repeat,
         Shape::Cube(_) => ImageAddressMode::ClampToEdge,
     };
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
@@ -430,8 +442,22 @@ fn start(
     let format = match target.format {
         Format::Scalar(format) => format,
         Format::Color => {
-            let (Shape::Cube(n), None) = (target.shape, target.layer) else {
-                return Err("a color bake is of a graph's output, on a sphere".into());
+            if target.layer.is_some() {
+                return Err("a color bake is of a graph's output".into());
+            }
+            let n = match target.shape {
+                Shape::Cube(n) => n,
+                Shape::Plane(n) => {
+                    // Straight alpha, not composited over the preview's checker.
+                    let out = baker
+                        .bake_output(graph, (n, n), &eval, true)
+                        .map_err(|e| e.to_string())?;
+                    let ctx = baker.ctx().clone();
+                    return Ok(Box::pin(async move {
+                        read_rgba8_async(&ctx, &out.color, (n, n)).await.pixels
+                    }));
+                }
+                Shape::Volume(_) => return Err("a color bake is on a sphere or a plane".into()),
             };
             let cube = baker
                 .bake_color_cube(graph, n, &eval)
@@ -469,6 +495,12 @@ fn start(
                 .bake_scalar_cube(graph, layer, n, format, &eval)
                 .map_err(|e| e.to_string())?;
             (cube.texture, (n, n, CUBE_FACES))
+        }
+        Shape::Plane(n) => {
+            let texture = baker
+                .bake_scalar(graph, layer, (n, n), format, &eval)
+                .map_err(|e| e.to_string())?;
+            (texture, (n, n, 1))
         }
     };
     Ok(Box::pin(async move {
@@ -573,8 +605,8 @@ impl Plugin for ProceduralTexturesPlugin {
 mod tests {
     use em_render::population_material::GRAIN_TILE;
     use texture_graph_core::{
-        BlendMode, FractalMode, LayerKind, Noise, NoiseDims, NoiseKernel, NoiseRange, cube_sample,
-        eval,
+        BlendMode, FractalMode, LayerKind, Noise, NoiseDims, NoiseKernel, NoiseRange, Sample,
+        cube_sample, eval,
     };
 
     use super::*;
@@ -727,5 +759,43 @@ mod tests {
             noise.period, [GRAIN_TILE as u32; 3],
             "seamless on the cube is period == frequency"
         );
+    }
+
+    /// What hull.wgsl assumes of every hull graph: albedo on the output, a `lights` layer beside
+    /// it, and both repeating on the unit square, or every tile's edge is a seam across the hull.
+    #[test]
+    fn every_hull_graph_tiles_with_albedo_and_lights() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/textures/hull");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let g = load_from_str(&std::fs::read_to_string(&path).unwrap())
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+                .graph;
+            let albedo = g.output.color.expect("albedo on the output");
+            let lights = g.layers.iter().find(|l| l.name == "lights").expect("a lights layer").id;
+            let ctx = EvalCtx::default();
+            for layer in [albedo, lights] {
+                // Low-discrepancy, not a grid: a grid shares the tile's own pitches and can land
+                // every point between the windows.
+                for k in 0..256 {
+                    let u = (k as f32 * 0.618_034).fract();
+                    let v = (k as f32 * 0.754_878).fract();
+                    let at = |u, v| eval::evaluate(&g, layer, Sample::new(u, v, 0.5), &ctx);
+                    let here = at(u, v);
+                    for there in [at(u + 1.0, v), at(u, v + 1.0)] {
+                        assert!(
+                            (here.l - there.l).abs() < 1e-4,
+                            "{} does not repeat at ({u}, {v}): {} against {}",
+                            path.display(),
+                            here.l,
+                            there.l
+                        );
+                    }
+                }
+            }
+            seen += 1;
+        }
+        assert_eq!(seen, 8, "one graph a kind");
     }
 }

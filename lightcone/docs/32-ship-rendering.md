@@ -3,7 +3,7 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: designed, not built.** [29-ship-form.md](29-ship-form.md) is what is drawn,
+**Status: partly built.** The hull material, the drones and the field shader are in, each in a void; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
 [30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
@@ -47,24 +47,44 @@ At a distance where detail would be smaller than a pixel, it fades into a textur
 it, to stop the shimmer. A distance-field mesh has no UV coordinates, so materials are mapped
 **triplanar**, from world position in the ship's frame.
 
+As built (`em_render::hull_material`): each kind's graph is baked as one repeating tile of 64 m,
+and the fade is the tile's mip chain, built on the CPU in linear light, so a window too small to
+see becomes its own average — a lit window's power spread over the pixel, not lost from it.
+`cargo run -p lc-client --example hull_void` photographs it on a sphere of any size.
+
+![The hull material on spheres of 500 m and 50 km, and the shimmer the mips remove](../images/hull-material.png)
+
 ### Materials by kind
 
 One texture-graph graph per kind, delivered like the planet graphs, with the region set by which
 part a point is nearest. Fillets blend between the two regions.
+
+The mesher hands the material each vertex's weight for every region, a byte apiece, read off the
+per-part distances it already evaluates, and the shader draws the two heaviest. Weights rather
+than two indices and a share, because a triangle whose corners name different pairs cannot
+interpolate a share, and every triangle crossing the edge of a fillet is one: that was tried, and
+drew the edges as stairs. The material knows regions only as indices
+into the caller's palette of graphs; which kind is which is Lightcone's. A graph's output color is
+albedo, and a layer named `lights` beside it is the lit share of each texel, which the caller
+scales by a power per region.
 
 | kind | look |
 |---|---|
 | storage | dark and smooth, faint seams. The mass of the ship |
 | drone | hangar doors in rows, docks lit when drones are home |
 | living | window bands. Lit on the night side, where they are the brightest thing on the hull |
-| engine | an emitter grid on the open face, glowing with exhaust power |
+| engine | an emitter grid on the open face, glowing with exhaust power. As built the grid is lit over the whole region, which is right in a void; which face is open is the form's, and R13 limits it there |
 | data | fine dense panels |
 | mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
-| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own |
+| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over; the angle about the joining part's axis times its radius should serve for the primitives 29 allows. R10's mesher has to supply both, since the material will not build a pipeline for a mesh without them |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
 else, so they show on a night side and vanish in sunlight as they should.
+
+![Every kind by day and by night](../images/hull-kinds.png)
+
+![The spar's bolt row on both spheres, and the plating reveal mask partway](../images/hull-seams.png)
 
 ## Building, as a function of time
 

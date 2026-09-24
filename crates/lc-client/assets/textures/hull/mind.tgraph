@@ -1,0 +1,278 @@
+TextureGraphFile(
+    format_version: 2,
+    metadata: FileMetadata(
+        name: "mind hull",
+        description: Some("Mind: almost black, faint seams every 8 m, one faint light a tile. One tile is 64 m of hull and must repeat: integer frequencies, and noise with period == frequency. Output color is albedo; the layer named lights is the lit share of each texel. See em_render::hull_material."),
+        authors: [
+            "Alexander Lowry",
+        ],
+        modified: "2026-09-24T00:00:00Z",
+        written_by: "texture-graph-core 12498d1",
+    ),
+    graph: Graph(
+        layers: [
+            Layer(
+                id: 1,
+                name: "u",
+                kind: Coordinate(Coordinate(
+                    axis: U,
+                )),
+            ),
+            Layer(
+                id: 2,
+                name: "v",
+                kind: Coordinate(Coordinate(
+                    axis: V,
+                )),
+            ),
+            Layer(
+                id: 3,
+                name: "base",
+                kind: Color(Oklch(
+                    l: 0.2714,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 4,
+                name: "seam u wave",
+                kind: Wave(Wave(
+                    input: Layer(1),
+                    shape: Triangle,
+                    frequency: 8.0,
+                    phase: 0.75,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 5,
+                name: "seam u edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.0,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.028125,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 6,
+                name: "seam u",
+                kind: Map(Map(
+                    value: Some(4),
+                    palette: Some(5),
+                )),
+            ),
+            Layer(
+                id: 7,
+                name: "seam v wave",
+                kind: Wave(Wave(
+                    input: Layer(2),
+                    shape: Triangle,
+                    frequency: 8.0,
+                    phase: 0.75,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 8,
+                name: "seam v edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.0,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.028125,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 9,
+                name: "seam v",
+                kind: Map(Map(
+                    value: Some(7),
+                    palette: Some(8),
+                )),
+            ),
+            Layer(
+                id: 10,
+                name: "seams",
+                kind: MinMax(MinMax(
+                    a: Some(6),
+                    b: Some(9),
+                    mode: Max,
+                    criterion: Luma,
+                )),
+            ),
+            Layer(
+                id: 11,
+                name: "seam",
+                kind: Color(Oklch(
+                    l: 0.2289,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 12,
+                name: "albedo",
+                kind: Mix(Mix(
+                    a: Some(3),
+                    b: Some(11),
+                    mode: Blend,
+                    factor: Layer(10),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 13,
+                name: "light u wave",
+                kind: Wave(Wave(
+                    input: Layer(1),
+                    shape: Triangle,
+                    frequency: 1.0,
+                    phase: 0.75,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 14,
+                name: "light u edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.016797,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.020703,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 15,
+                name: "light u",
+                kind: Map(Map(
+                    value: Some(13),
+                    palette: Some(14),
+                )),
+            ),
+            Layer(
+                id: 16,
+                name: "light v wave",
+                kind: Wave(Wave(
+                    input: Layer(2),
+                    shape: Triangle,
+                    frequency: 1.0,
+                    phase: 0.75,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 17,
+                name: "light v edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.016797,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.020703,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 18,
+                name: "light v",
+                kind: Map(Map(
+                    value: Some(16),
+                    palette: Some(17),
+                )),
+            ),
+            Layer(
+                id: 19,
+                name: "lights",
+                kind: Mix(Mix(
+                    a: Some(15),
+                    b: Some(18),
+                    mode: Multiply,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+        ],
+        list_order: [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        ],
+        canvases: {},
+        output: Output(
+            color: Some(12),
+            roughness: Const(0.5),
+            metallic: Const(0.0),
+            normal: None,
+        ),
+        params: {},
+        next_id: 20,
+    ),
+)
