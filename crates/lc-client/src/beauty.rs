@@ -58,8 +58,8 @@ const FRAME_MARGIN: f64 = 1.3;
 /// body's radii. Lengths rather than angles, so a higher orbit is a longer lens on the same
 /// scene. Both were an angle once, set from low orbit, and from twenty radii out each one took
 /// in the whole disc.
-const HORIZON_SPAN_RADII: f64 = 0.114;
-const NADIR_SPAN_RADII: f64 = 0.09;
+const HORIZON_SPAN_RADII: f64 = 0.228;
+const NADIR_SPAN_RADII: f64 = 0.18;
 /// How far above the limb the horizon shot looks, as a fraction of its field, so the limb sits
 /// in the lower part of the frame with sky over it.
 const HORIZON_LIFT: f64 = 0.25;
@@ -756,7 +756,7 @@ mod tests {
     /// in frame are the same size from every orbit.
     #[test]
     fn a_higher_orbit_is_a_longer_lens_on_the_same_scene() {
-        for radii in [1.05, 1.15, 5.0, 20.0] {
+        for radii in [1.15, 5.0, 20.0] {
             let distance = radii * EARTH_M;
             let below = nadir_field(distance, EARTH_M).unwrap();
             let ground = 2.0 * (distance - EARTH_M) * (below / 2.0).tan();
@@ -767,6 +767,13 @@ mod tests {
             assert!((limb / EARTH_M - HORIZON_SPAN_RADII).abs() < 1e-9, "{limb} m at {radii}");
         }
         assert!(nadir_field(EARTH_M * 20.0, EARTH_M) < nadir_field(EARTH_M * 5.0, EARTH_M));
+    }
+
+    /// Lower still, the ground below would want a lens wider than any shot takes, and gets the
+    /// widest instead: less ground, not a stretched picture.
+    #[test]
+    fn skimming_the_surface_holds_the_widest_lens() {
+        assert_eq!(nadir_field(EARTH_M * 1.02, EARTH_M), Some(MAX_FIELD_RAD));
     }
 
     #[test]

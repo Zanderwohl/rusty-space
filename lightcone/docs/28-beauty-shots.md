@@ -24,10 +24,12 @@ Everything that applies now, in turn, one per shot:
 | below | the same | straight down |
 
 The horizon and the ground below are framed by **length, not angle**: a stretch of limb and a
-patch of ground a fixed share of the body's radius across, about 730 and 570 km on Earth. A
+patch of ground a fixed share of the body's radius across, about 1450 and 1150 km on Earth. A
 higher orbit is therefore a longer lens on the same scene. Straight down, the photograph from
 twenty radii matches the one from low orbit; the horizon keeps its size but not its perspective,
 because from far out the limb is seen edge-on rather than across the ground in front of it.
+Under about 480 km on Earth the ground below would want a lens wider than 100°, the widest any
+shot takes, and gets that instead: less ground rather than a stretched picture.
 
 Rotating rather than ranking was a choice: a survey that runs for days would otherwise hold the
 square on one kind of picture for all of them. `--beauty-kind <kind>` holds the rotation on one
