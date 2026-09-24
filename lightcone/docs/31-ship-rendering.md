@@ -147,6 +147,11 @@ whatever is decided about air:
   the color is a consequence, not a setting. At 400 K the outer layer is invisible in the visible
   bands. At 2 400 K on a dive it glows red-orange. At 4 600 K it is the brightest thing on screen.
 
+**The mode sets the surface.** Clear is a shimmering, mostly transparent skin: thin-film color bands
+that drift across it like a soap bubble's, over the fresnel rim, with the heat glow showing through
+as a tint. Black is matte and dark, and the heat glow is all there is to see. A switch sweeps the new
+surface across the envelope over `field_switch_s`, from the Mind outward.
+
 | field state | drawn |
 |---|---|
 | idle | a faint rim, a slow shimmer |

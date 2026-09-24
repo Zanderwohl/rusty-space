@@ -71,8 +71,8 @@ The exhaust is an emission like any other, so **it heats every craft in its cone
 focused: it spreads at `drive_spread_rad`, a fixed half-angle wider than any deliberate beam needs,
 and focusing is what `Order::Emit` is for. The received power follows the beam formula below.
 
-Where a full receiver, broadside to the drive, would sit exactly at its rated load, at the default
-5°:
+Where a full, Black receiver, broadside to the drive, would sit exactly at its rated load, at the
+default 5°:
 
 | burning ship, at 5 g | exhaust | cooking distance |
 |---|---|---|
@@ -80,8 +80,8 @@ Where a full receiver, broadside to the drive, would sit exactly at its rated lo
 | 5 km | 1.1 × 10²³ W | 84 km |
 | 50 km | 1.1 × 10²⁶ W | 2 700 km |
 
-A receiver's shadow and its rated load both scale with its size squared, so **the distance does not
-depend on the receiver's size**. The same is true of a collapse's lethal radius. Inside that
+A Clear receiver's distance is a little over half of these. A receiver's shadow and its rated load
+both scale with its size squared, so **the distance does not depend on the receiver's size**. The same is true of a collapse's lethal radius. Inside that
 distance, a receiver with nowhere to convert the heat walks up to collapse on the field's time
 constant, a few real minutes.
 
@@ -153,6 +153,9 @@ shadow toward the emitter covers, at most all of it:
 
 **P_received = P · min(1, A_shadow / (π (spread · d)²))**
 
+and the receiver's field absorbs `α` of that: all of it Black, 30% Clear
+([29-the-field.md](29-the-field.md#clear-and-black)).
+
 Taking a 100 m aperture at the diffraction floor, the fraction a receiver collects:
 
 | distance | wavelength | spot | 500 m ship | 5 km | 50 km |
@@ -190,8 +193,9 @@ knows.
 
 ### Feeding an ally
 
-Aim at their craft, with their course known. What arrives is converted at their rating and their
-efficiency, while their storage has room. Past that it is heat.
+Aim at their craft, with their course known. They should be Black: a Clear receiver reflects 70% of
+the gift. What arrives is converted at their rating and their efficiency, while their storage has
+room. Past that it is heat.
 
 - **The line between feeding and attacking is the receiver's conversion rating.** An ally who
   beams you harder than you can convert is hurting you, and **nobody can refuse light.** Being
@@ -216,7 +220,7 @@ beaming from its aft engines is flying away from its target at 5 g for as long a
 hold range it must balance: fore engines on the target, the same power out of the aft engines
 into empty space. **Holding range costs twice what lands.**
 
-An attacker with engines at both ends, delivering 1.1 × 10²⁰ W onto a starting ship from 1
+An attacker with engines at both ends, delivering 1.1 × 10²⁰ W onto a Black starting ship from 1
 light-second:
 
 | defender | outcome |
@@ -225,7 +229,8 @@ light-second:
 | storage full | all 1.1 × 10²⁰ W is heat. Collapse in about 25 game days, 4 real minutes |
 | empty, two such attackers | 1.1 × 10²⁰ W over the rating becomes heat outright. Collapse in about 16 days |
 
-Killing a full ship that way costs a balanced attacker about 34 ME, which is more than a starting
+A full defender that has gone Clear absorbs 3.3 × 10¹⁹ W of it, under its rated load, and never
+dies of it. Killing a full Black ship costs a balanced attacker about 34 ME, which is more than a starting
 ship holds, so a lone ship cannot beam a full peer to death. **Numbers win by focusing fire:**
 rates add at the receiver, the defender's outflows do not grow, and each attacker pays only its
 own share.

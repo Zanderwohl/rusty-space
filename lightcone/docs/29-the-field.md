@@ -16,7 +16,8 @@ full. Where the energy it sheds goes is [30-directed-energy.md](30-directed-ener
   so it covers everything and follows the ship loosely. A player shapes the hull and gets the
   field that covers it. A large or sprawling hull pays for its field automatically.
 - **Everything that reaches the ship reaches the field first:** starlight, beams, the glow of a
-  neighbor, a collapse. What the field can pass into storage it passes, and the rest stays as heat.
+  neighbor, a collapse. It absorbs a fraction set by its mode, Clear or Black, and reflects the
+  rest. What it absorbs and can pass into storage it passes, and the rest stays as heat.
 - **Everything the ship wastes ends up in the field:** what conversion loses, what dismantling
   loses, the living drain, and storage vented for lack of room.
 - **Heat leaves in three ways:** radiation, which is always on; the drive, which spends heat as
@@ -88,10 +89,45 @@ What arrives is converted to storage at up to the **conversion rating**, at
 Storage filling partway through a segment splits it. The fill time is linear in the segment's
 inputs, so the split is closed form too.
 
+## Clear and Black
+
+A field runs in one of two modes, and the player chooses.
+
+| | **Clear** | **Black** |
+|---|---|---|
+| absorbs | `clear_absorptivity`, 0.3 | everything |
+| reflects | the rest | nothing |
+| looks like | a shimmering, mostly transparent skin: the sheen of a soap bubble, which is thin-film reflection | matte black, with the heat glow the only thing on it |
+| starlight income | 30% | full |
+| a beam, exhaust, a collapse's spike | heats at 30% | heats in full, and converts to storage while there is room |
+| in reflected light | bright | invisible |
+
+**Absorptivity multiplies everything arriving at the field**, before conversion. Reflected light does
+nothing to the ship.
+
+In this model a field is hurt only by what it absorbs, so **neither mode is simply the safe one**:
+
+- **Storage empty, facing sustained power:** Black. The attack becomes fuel, up to the conversion
+  rating.
+- **Storage full, or facing a burst:** Clear. Nothing can be stored, so reflecting is the only
+  defense.
+- **Sun-diving:** Black to fill. Clear once storage is nearly full, to stay close longer: a full Clear
+  ship reaches its rated load at about 0.027 AU instead of 0.05.
+- **Hiding:** Black in visible light. Nothing hides a ship in the infrared.
+- **Flying near others:** Clear. It forgives other people's exhaust.
+
+**Switching takes `field_switch_s`**, one game day, about 200 ticks or ten real seconds. The new
+absorptivity applies when the switch completes, which is a settlement boundary like any other. A
+beam arrives with its own warning, so a switch started when it lands is too late. Mode is posture,
+chosen beforehand.
+
+A switch can be ordered at any time, under way or refitting, and is refused only while another is
+running. A new ship starts Black.
+
 ## The anchors
 
 Three numbers set the field. Each is anchored to a situation rather than chosen, as `solar_gain`
-is.
+is. All three assume a Black field, since Black is the mode that collects.
 
 | anchor | sets |
 |---|---|
@@ -187,21 +223,22 @@ receiver's shadow toward the source.
   [30-directed-energy.md](30-directed-energy.md#exhaust-lands-on-whatever-is-behind).
 - **Beams** are directed, and are [30-directed-energy.md](30-directed-energy.md).
 
-A spike is lethal to a ship with headroom `H` inside
+A spike is lethal to a ship with headroom `H` and absorptivity `α` inside
 
-**r = √(E · A_shadow / (4π H))**
+**r = √(α · E · A_shadow / (4π H))**
 
 Shadow and headroom both go as the receiver's size squared, so **the lethal radius does not depend
 on the victim's size**. It depends only on the dying ship's energy and on the victim's headroom
 per unit area, which is how hot it already is.
 
-| collapsing ship | lethal radius, victim idle | company standoff, 5 combined lengths, beside a 500 m ship |
+| collapsing ship | lethal radius, victim idle and Black | company standoff, 5 combined lengths, beside a 500 m ship |
 |---|---|---|
 | 500 m | 190 m | 5 km |
 | 5 km | 5.4 km | 27.5 km |
 | 50 km | 170 km | 250 km |
 
-So at the defaults, **ships in company are safe and ships in contact are not**. Docked ships, tight
+A Clear victim's radius is √0.3 of these, a little over half. So at the defaults, **ships in
+company are safe and ships in contact are not**. Docked ships, tight
 formations and anything inside a bay die with the ship next to them, and a cascade needs that
 density. A hot victim has less headroom and a larger lethal radius, so a fleet sun-diving together
 is a fleet at risk. `field_capacity` is the lever: lowering it widens every lethal radius and
@@ -219,7 +256,8 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
 
 `HULL_K` retires. A ship's appearance in each band has two terms:
 
-- **Reflected**: `field_albedo` × starlight × shadow toward the observer, with the phase angle.
+- **Reflected**: `1 − α` of the starlight × shadow toward the observer, with the phase angle. A
+  Clear ship reflects 70%, twice what today's gray hull does. A Black ship reflects nothing.
 - **Thermal**: a blackbody at the field's temperature over the envelope's area. Physical flux,
   σT⁴A, with no gain. This is the second face of the field, exactly as starlight has one: `Q / τ`
   is energy moving at game scale, and σT⁴A is what an instrument sees.
@@ -231,7 +269,7 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
 | 2 400 K, diving | 1.2 µm | the near infrared, and red |
 | 4 600 K, failing | 630 nm | the visible, as an orange-yellow point |
 
-A craft's field temperature goes on `Presence`, arriving with its light. What a player can
+A craft's field temperature and mode go on `Presence`, arriving with its light. What a player can
 infer from it:
 
 - **How full someone is.** Temperature at a known distance from a known star reads back to
@@ -249,7 +287,8 @@ infer from it:
 | `field_capacity` | *anchored*: 10 ME on the starting envelope | heat per m² of envelope at collapse |
 | `field_tau_s` | *anchored*: 1.84 × 10⁶ | the time constant |
 | `conversion_efficiency` | 0.7 | what arrives and is converted, over what is stored |
-| `field_albedo` | 0.35 | the field's reflectance |
+| `clear_absorptivity` | 0.3 | what a Clear field absorbs. Black absorbs everything |
+| `field_switch_s` | 86 400 | one game day to change mode |
 | `collapse_spike_fraction` | 0.9 | of `E`, released at once |
 | `collapse_spike_k` | 10⁷ | the spike's color temperature: X-rays |
 | `collapse_afterglow_s` | 30 game days | how long the rest takes |
@@ -262,7 +301,7 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 | crate | new | changed |
 |---|---|---|
 | `lc-world` | `field.rs`: the account, its closed forms, time to collapse, temperature, the lethal radius | `solar.rs` becomes intake: starlight onto the shadow, gained at the star. `fitting.rs` folds heat beside stored energy. `refit.rs` reports each step's heat, and whether the plan crosses `Q_max` |
-| `lc-proto` | `Outbound::Collapsed` | `Fitted` gains `Q` and its time. `Presence` gains field temperature |
+| `lc-proto` | `Outbound::Collapsed`, `Order::FieldMode`, `Refusal::Switching` | `Fitted` gains `Q` and its time, and the mode with any switch under way. `Presence` gains field temperature and mode |
 | `lc-server` | collapse scheduling and delivery, respawn | the tick settles heat. Refit and order acceptance warn |
 | `lc-client` | | `hud.rs` gains `Field`, `panels.rs` draws the bar. The refit panel, photometry. The field shader is [31-ship-rendering.md](31-ship-rendering.md) |
 
@@ -288,6 +327,8 @@ A second bar in the top header, beside the energy bar and built the same way: `H
 - **The text beside it**: temperature, net heat flow, and **a countdown whenever a collapse is
   scheduled** — `3 240 K ↑ 1.2 ME/yr — collapse in 4:10`. That is the one number a player must never
   have to compute.
+- **The mode, `CLEAR` or `BLACK`,** is a label at the bar's left, reading `→ BLACK` while a switch
+  runs. Clicking it orders the switch.
 - **Color is never the only signal.** The countdown and the numbers say everything the hue does, for
   a player who cannot tell red from orange.
 
@@ -319,6 +360,8 @@ puts a countdown in the text.
   fail, per [AGENTS.md](../../AGENTS.md).
 - **Burst versus rate.** A beam under the conversion rating with storage empty adds only its
   conversion loss. The same energy as a burst adds all of it.
+- **Modes.** A Clear field takes `clear_absorptivity` of a beam and a Black one all of it. A switch
+  changes nothing until `field_switch_s` has passed, and a second switch meanwhile is refused.
 
 ## Open
 
@@ -329,6 +372,4 @@ puts a countdown in the text.
   Whether that is a real rule or only a look is undecided. The two layers are drawn either way.
 - **Direction of intake.** Reciprocity says an aperture receives best along its own axis. The
   rating here ignores direction. Whether catching a beam means facing it is a later refinement.
-- **Opacity.** A field could be run clear (reflects, collects less) or black (absorbs everything,
-  dark in visible light). One `field_albedo` for now.
 - **Eclipses** still do not shade, as in [20-solar-power.md](20-solar-power.md).
