@@ -238,9 +238,9 @@ graph LR
 
 ### F1 · Primitives
 
-- status: todo
+- status: done #65
 - needs: K1
-- touches: `crates/lc-world/src/form/primitive.rs`
+- touches: `crates/lc-world/src/form/primitive.rs`, `crates/lc-world/src/form.rs`
 - read: 29 §Parts
 - deliver: for each of the six primitives, volume from scale and proportions, scale solved from volume, and surface area (closed form, or the standard approximation for the ellipsoid). The Mind as a cube of `min_part_m3`.
 - done when: scale solved from a volume gives the volume back to a part in 10¹², and each area is checked against a fine tessellation.

@@ -228,11 +228,13 @@ impl Part {
                 if !all_positive(edges) {
                     Some("edges")
                 } else {
-                    (!non_negative(corner)).then_some("corner")
+                    // Past half the shortest edge the rounding of opposite faces would cross.
+                    (!(non_negative(corner) && corner <= 0.5)).then_some("corner")
                 }
             }
             Primitive::Cylinder { length } => (!positive(length)).then_some("length"),
-            Primitive::Torus { major } => (!positive(major)).then_some("major radius"),
+            // Below one the tube crosses the axis, and the closed forms count that twice.
+            Primitive::Torus { major } => (!(major.is_finite() && major >= 1.0)).then_some("major radius"),
             Primitive::Frustum { length, taper } => {
                 if !positive(length) {
                     Some("length")
@@ -243,6 +245,9 @@ impl Part {
         };
         if shape.is_some() {
             return shape;
+        }
+        if !self.primitive.at(self.primitive.scale(self.volume_m3)).exists() {
+            return Some("proportions");
         }
         let place = self.placement?;
         if !place.twist.is_finite() {
@@ -367,11 +372,19 @@ mod tests {
 
     #[test]
     fn a_malformed_number_is_refused_by_part_and_field() {
-        let cases: [(usize, fn(&mut Part), &str); 10] = [
+        let cases: [(usize, fn(&mut Part), &str); 15] = [
             (2, |p| p.volume_m3 = f64::NAN, "volume"),
             (2, |p| p.volume_m3 = 0.0, "volume"),
             (2, |p| p.primitive = Primitive::Ellipsoid { axes: DVec3::new(1.0, -1.0, 1.0) }, "axes"),
             (2, |p| p.primitive = Primitive::Slab { edges: DVec3::ONE, corner: f64::NAN }, "corner"),
+            (2, |p| p.primitive = Primitive::Slab { edges: DVec3::new(1.0, 2.0, 3.0), corner: 0.500_001 }, "corner"),
+            (2, |p| p.primitive = Primitive::Torus { major: 0.99 }, "major radius"),
+            (2, |p| p.primitive = Primitive::Torus { major: f64::NAN }, "major radius"),
+            (2, |p| p.primitive = Primitive::Ellipsoid { axes: DVec3::new(1.0, 1e-160, 1e-160) }, "proportions"),
+            (2, |p| {
+                p.primitive = Primitive::Cylinder { length: 1e-200 };
+                p.volume_m3 = 1e300;
+            }, "proportions"),
             (2, |p| p.primitive = Primitive::Frustum { length: f64::INFINITY, taper: 0.5 }, "length"),
             (2, |p| p.placement.as_mut().unwrap().tilt = DVec2::new(0.0, f64::NAN), "tilt"),
             (2, |p| p.placement.as_mut().unwrap().blend = -0.1, "blend"),
@@ -392,6 +405,8 @@ mod tests {
         let mut form = ship();
         form.parts[2].primitive = Primitive::Capsule { length: 0.0 };
         form.parts[3].primitive = Primitive::Frustum { length: 2.0, taper: 0.0 };
+        form.parts[1].primitive = Primitive::Slab { edges: DVec3::new(1.0, 2.0, 3.0), corner: 0.5 };
+        form.parts[4].primitive = Primitive::Torus { major: 1.0 };
         form.parts[4].placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::X, standoff: -0.5 };
         assert_eq!(form.validate(), Ok(()));
     }
