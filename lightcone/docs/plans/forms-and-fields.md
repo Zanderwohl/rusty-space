@@ -350,7 +350,7 @@ graph LR
 
 ### H1 · The field's account
 
-- status: active claude/h1-field-account
+- status: done #69
 - needs: K2
 - touches: `crates/lc-world/src/field.rs`
 - read: 30 §The heat account, §Conversion, §Clear and Black
