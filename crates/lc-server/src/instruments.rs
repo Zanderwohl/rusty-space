@@ -476,8 +476,9 @@ impl<J: Journal> Server<J> {
                     return Err(Refusal::Impossible);
                 }
                 let subject = Subject::from(*subject);
+                let here = self.fleet.get(id).and_then(|craft| craft.system.clone());
                 let knowledge = &mut self.aboard(id).knowledge;
-                if !knowledge.knows(subject) {
+                if !knowledge.nameable(subject, here.as_deref()) {
                     return Err(Refusal::Impossible);
                 }
                 knowledge.name_it(subject, name, at_s);
@@ -901,6 +902,36 @@ mod tests {
         let mut all = said;
         all.extend(wire.take(ClientId(1)));
         assert_eq!(replica(ship, &all).name_of(sky()[0].id).as_deref(), Some("Hearth"));
+    }
+
+    /// A belt has no file until it is named, so what may be named is a belt of the system the
+    /// craft is in — and not one around another star, or one past the end of the list.
+    #[tokio::test]
+    async fn a_craft_names_the_belts_of_its_own_system() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        server.tick(&mut wire).await.unwrap();
+        let _ = wire.take(ClientId(1));
+        let belts = server.ship(ship).and_then(|c| c.system.as_ref()).map(|s| s.populations.len());
+        assert!(belts.is_some_and(|n| n > 0), "premise: the craft starts in a system with a belt");
+
+        let belt = |star: StarId, index| lc_proto::Subject::Population { star: star.get(), index };
+        let named = |subject| act(ship, Order::NameIt { subject, name: "Shoals".into() });
+        wire.client_says(ClientId(1), named(belt(sky()[0].id, 0)));
+        wire.client_says(ClientId(1), named(belt(sky()[1].id, 0)));
+        wire.client_says(ClientId(1), named(belt(sky()[0].id, belts.unwrap() as u32)));
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(ClientId(1));
+        let accepted = said.iter().filter(|m| matches!(m, Outbound::Accepted { order: Order::NameIt { .. }, .. })).count();
+        let refused = said.iter().filter(|m| matches!(m, Outbound::Refused { reason: Refusal::Impossible, .. })).count();
+        assert_eq!((accepted, refused), (1, 2), "{said:?}");
+        server.tick(&mut wire).await.unwrap();
+        let mut all = said;
+        all.extend(wire.take(ClientId(1)));
+        let at_home = Subject::Population { star: sky()[0].id, index: 0 };
+        assert_eq!(replica(ship, &all).name_of(at_home).as_deref(), Some("Shoals"));
     }
 
     /// A craft that knows more than one frame holds is paged all of it, every page inside

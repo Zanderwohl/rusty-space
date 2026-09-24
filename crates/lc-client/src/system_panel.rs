@@ -10,7 +10,7 @@ use bevy_egui::egui;
 use lc_world::knowledge::conclusion::{Kind, SETTLED};
 use lc_world::knowledge::record::{Method, Orientation};
 use lc_world::knowledge::sort::Measured;
-use lc_world::knowledge::{BodyBelief, BodyId, Placed, SystemPlane};
+use lc_world::knowledge::{BodyBelief, BodyId, Placed, Subject, SystemPlane};
 use lc_world::navigation::Target;
 use lc_world::sky::StarId;
 
@@ -41,6 +41,7 @@ pub(crate) fn system(
     show_all: &mut bool,
     picked: &mut Option<BodyId>,
     revealed: &mut Option<BodyId>,
+    draft: &mut String,
     out: &mut MessageWriter<Requested>,
 ) {
     let Some(system) = game.system.as_ref() else {
@@ -140,9 +141,10 @@ pub(crate) fn system(
         if !bands.is_empty() {
             ui.separator();
             for entry in bands {
+                let Target::Band(index) = entry.target else { continue };
                 let picked = state.focus.as_ref() == Some(&entry.target);
                 ui.horizontal(|ui| {
-                    if ui.selectable_label(picked, &entry.designation).clicked() {
+                    if ui.selectable_label(picked, game.band_label(index)).clicked() {
                         let next = (!picked).then(|| entry.target.clone());
                         ask(out, Action::FocusTarget(next));
                     }
@@ -155,7 +157,7 @@ pub(crate) fn system(
 
     // A body's detail is its belief, whether or not anything in the arena answers to it.
     if let Some(belief) = picked.and_then(|body| known.iter().find(|b| b.body == body)) {
-        details(ui, belief, game, system, held.target(belief.body));
+        details(ui, belief, game, system, draft, out);
     }
     let Some(target) = state.focus.as_ref() else {
         if picked.is_none() {
@@ -185,7 +187,10 @@ pub(crate) fn system(
                 });
             }
             lc_world::navigation::Kind::Band => {
-                ui.heading(&entry.designation);
+                let Target::Band(index) = entry.target else { return };
+                ui.heading(game.band_label(index));
+                let subject = Subject::Population { star: system.star, index: index as u32 };
+                name_field(ui, game, subject, draft, out);
                 ui.weak(format!(
                     "{} — {} out, {} away",
                     entry.kind.label(),
@@ -224,9 +229,11 @@ fn details(
     belief: &BodyBelief,
     game: &Game,
     system: &lc_world::system::LocalSystem,
-    target: Option<&Target>,
+    draft: &mut String,
+    out: &mut MessageWriter<Requested>,
 ) {
     ui.heading(name_of(belief));
+    name_field(ui, game, belief.subject, draft, out);
     // The range its own orbit implies, never the one the arena holds. A body the list calls
     // "distance unknown" has no range to give, and printing the true one here said what the
     // craft has not measured.
@@ -263,6 +270,24 @@ fn details(
             ui.weak(note);
         }
     });
+}
+
+/// Somewhere to type a name for `subject`, sent on Enter. Nothing for what this ship may not name.
+fn name_field(
+    ui: &mut egui::Ui,
+    game: &Game,
+    subject: Subject,
+    draft: &mut String,
+    out: &mut MessageWriter<Requested>,
+) {
+    if !game.nameable(subject) {
+        return;
+    }
+    let field = ui.add(egui::TextEdit::singleline(draft).hint_text("Add Name").desired_width(150.0));
+    let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    if entered && !draft.trim().is_empty() {
+        ask(out, Action::Name(subject, std::mem::take(draft)));
+    }
 }
 
 /// The star as something local to fly to, which is how the inventory lists it.

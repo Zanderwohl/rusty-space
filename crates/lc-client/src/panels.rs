@@ -273,6 +273,8 @@ pub struct Remembered {
     tab: SystemTab,
     draft: String,
     name_draft: String,
+    /// The System panel's, apart from the telescope's so two open fields do not type as one.
+    body_draft: String,
     aimed: crate::radio_panel::Aimed,
     seal: bool,
 }
@@ -296,6 +298,7 @@ pub fn open_panels(
         tab,
         draft,
         name_draft,
+        body_draft,
         aimed,
         seal,
     } = &mut *held_over;
@@ -336,6 +339,7 @@ pub fn open_panels(
                 show_all,
                 picked,
                 revealed,
+                body_draft,
                 &mut out,
             ),
             Panel::Flight => flight(ui, &ui_state, &game, &mut out),

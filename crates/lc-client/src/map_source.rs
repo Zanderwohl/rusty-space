@@ -374,10 +374,11 @@ fn push_local_system(build: &mut Build, session: &Session) {
     let origin = system.star_position_ly();
     for (index, population) in system.populations.iter().enumerate() {
         let Some(extent) = population.extent() else { continue };
-        let name = lc_world::navigation::band_designation(population);
+        let name = session.band_label(index);
         build.push(
             MapItem::annulus(
-                ItemKey::from_name(&name),
+                // By index, so naming a belt does not move its key out from under a pin.
+                ItemKey::from_id("band", index as u64),
                 name.clone(),
                 origin,
                 population.pole,
