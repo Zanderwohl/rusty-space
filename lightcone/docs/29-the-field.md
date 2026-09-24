@@ -264,12 +264,41 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 | `lc-world` | `field.rs`: the account, its closed forms, time to collapse, temperature, the lethal radius | `solar.rs` becomes intake: starlight onto the shadow, gained at the star. `fitting.rs` folds heat beside stored energy. `refit.rs` reports each step's heat, and whether the plan crosses `Q_max` |
 | `lc-proto` | `Outbound::Collapsed` | `Fitted` gains `Q` and its time. `Presence` gains field temperature |
 | `lc-server` | collapse scheduling and delivery, respawn | the tick settles heat. Refit and order acceptance warn |
-| `lc-client` | | HUD, refit panel, photometry. The field shader is [31-ship-rendering.md](31-ship-rendering.md) |
+| `lc-client` | | `hud.rs` gains `Field`, `panels.rs` draws the bar. The refit panel, photometry. The field shader is [31-ship-rendering.md](31-ship-rendering.md) |
 
 ## Client
 
-- **HUD:** field temperature, headroom as a bar, net heat flow, and **a countdown whenever a
-  collapse is scheduled**. That is the one number a player must never have to compute.
+### The field bar
+
+A second bar in the top header, beside the energy bar and built the same way: `Hud` gains a
+`field: Option<Field>` with a fraction and a line of text, and `panels.rs` draws it as an
+`egui::ProgressBar` of the same width.
+
+- **The fill is heat over capacity**, `Q / Q_max`: how much of the headroom is used.
+- **The color follows the field.** Below 798 K, the Draper point where hot things start to glow
+  visibly, the bar is a calm blue. Above it, the bar takes the color of a blackbody at the field's
+  temperature, the same color the shader gives the ship's field, blended in from the blue over the
+  next 200 K so the change is not a jump. Red on a dive, orange past
+  2 500 K, and yellow-white near collapse, brightening as it goes. The bar and the ship tell the
+  player the same thing.
+- **Past 80% of `Q_max` it pulses**, faster as it nears the limit, as the shader flickers.
+- **A tick marks where the field is heading**: the equilibrium `P_in τ` for the inputs in force.
+  A tick below the fill means the field is cooling, and above it, heating. When the equilibrium is past
+  `Q_max`, the tick is pinned at the end and the text shows the countdown.
+- **The text beside it**: temperature, net heat flow, and **a countdown whenever a collapse is
+  scheduled** — `3 240 K ↑ 1.2 ME/yr — collapse in 4:10`. That is the one number a player must never
+  have to compute.
+- **Color is never the only signal.** The countdown and the numbers say everything the hue does, for
+  a player who cannot tell red from orange.
+
+The blue is a palette entry and is passed in, as [18-ui-style.md](18-ui-style.md) says, not typed as
+a hex value. The blackbody color comes from `em_spectra::blackbody`, normalized to full brightness,
+so it follows the physics rather than a table. `Field` is a pure function of `Session`, as `Energy`
+is, and is tested the same way: a hot ship's bar is past the Draper point, and a scheduled collapse
+puts a countdown in the text.
+
+### Elsewhere
+
 - **Refit panel:** what the plan does to the field: the peak temperature it reaches, and at which
   step. A plan that crosses `Q_max` shows it in red and
   asks once more before Apply. **It is not refused.** A player may choose to die.
