@@ -56,6 +56,7 @@ cross-reference except where a shared crate is the subject.
 | [25-system-knowledge.md](docs/25-system-knowledge.md) | planets, their orbits and a system's plane as knowledge: how each is learned, what the System panel, the map and courses read, and how a player reports one system to another craft |
 | [26-system-generation.md](docs/26-system-generation.md) | what a star's seed turns into: the disc, the ladder of feeding zones, air and water from one retention chain, moons of two origins, and the belts that are what never assembled |
 | [27-console.md](docs/27-console.md) | commands typed after `/`, parsed and level-checked on the shard, and teleport as a worldline that jumps |
+| [28-beauty-shots.md](docs/28-beauty-shots.md) | a photograph through the ship's telescope every ten seconds, beside the map: a second camera on the sky's own scene |
 
 ## Status
 

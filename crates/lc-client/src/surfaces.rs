@@ -277,6 +277,15 @@ impl Surfaces {
             .clone()
     }
 
+    /// Whether `name` would be drawn as itself rather than flat: its graphs are chosen and their
+    /// bakes have landed. True for a body nothing has asked to draw.
+    pub fn ready(&self, name: &str, bakes: &Bakes) -> bool {
+        let Some(body) = self.by_body.get(name) else { return true };
+        let Some(drawn) = body.drawn else { return false };
+        let ground = if drawn.color { &body.images.color } else { &body.images.pattern };
+        bakes.settled(ground) && (!drawn.clouds || bakes.settled(&body.images.climate))
+    }
+
     pub fn drawn(&self, name: &str) -> Drawn {
         self.by_body.get(name).and_then(|b| b.drawn).unwrap_or_default()
     }

@@ -421,6 +421,7 @@ pub fn update_plumes(
             // Placed by hand at a scale where the mesh's own bounds say nothing about
             // where it lands, exactly as a hull is.
             bevy::camera::visibility::NoFrustumCulling,
+            bevy::camera::visibility::RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
             Plume(*id),
         ));
     }

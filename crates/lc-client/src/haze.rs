@@ -150,6 +150,7 @@ fn setup(
         MeshMaterial3d(composite.clone()),
         Transform::default(),
         NoFrustumCulling,
+        RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
     ));
 
     commands.insert_resource(Haze { image, composite, size });

@@ -153,6 +153,8 @@ pub enum Action {
     // --- development ------------------------------------------------------------------
     ToggleGodView,
     SetTimeRate(f64),
+    /// Photograph what the ship is near, every few seconds, beside the map. Experimental.
+    SetBeautyShots(bool),
     /// Step one rung along [`crate::ui::RATE_LADDER`].
     TimeRateUp,
     TimeRateDown,
@@ -660,6 +662,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             effects.push(Effect::Notify("the server keeps the clock".into()));
         }
         Action::SetTimeRate(rate) => ui.time_rate = rate.max(0.0),
+        Action::SetBeautyShots(on) => ui.beauty_shots = on,
         Action::TimeRateUp | Action::TimeRateDown => {
             ui.time_rate = crate::ui::rate_step(ui.time_rate, action == Action::TimeRateUp);
             effects.push(Effect::Notify(format!("clock: {}", crate::ui::rate_label(ui.time_rate))));

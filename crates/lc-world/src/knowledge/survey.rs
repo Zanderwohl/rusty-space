@@ -496,6 +496,12 @@ impl Sweep {
         let passes = ((now_s - self.started_s) / self.pass_s()).max(0.0);
         (passes as u64, passes.fract())
     }
+
+    /// The field being exposed at `now_s`, of [`Plan::fields`].
+    pub fn field_at(&self, plan: &Plan, now_s: f64) -> u64 {
+        let dwells = ((now_s - self.started_s) / self.dwell_s).max(0.0) as u64;
+        dwells % plan.fields.max(1)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -514,6 +520,20 @@ impl Plan {
 
     pub fn fields(&self) -> u64 {
         self.fields
+    }
+
+    /// The middle of a field: the inverse of [`Plan::field_of`].
+    pub fn center_of(&self, field: u64) -> Option<DVec3> {
+        let j = self.rings.iter().rposition(|&(offset, _)| offset <= field)?;
+        let (offset, n) = self.rings[j];
+        if field >= offset + n {
+            return None;
+        }
+        let polar = ((j as f64 + 0.5) * self.sweep.field_rad).min(self.sweep.radius_rad);
+        let azimuth = ((field - offset) as f64 + 0.5) / n as f64 * std::f64::consts::TAU;
+        let (x, y) = self.basis;
+        let across = x * azimuth.cos() + y * azimuth.sin();
+        Some(self.sweep.center * polar.cos() + across * polar.sin())
     }
 
     pub fn field_of(&self, toward: DVec3) -> Option<u64> {
@@ -785,6 +805,34 @@ mod tests {
             "{first} then {second}"
         );
         assert!(sweep.observed_between(DVec3::Y, 0.0, pass * 3.0).is_none());
+    }
+
+    #[test]
+    fn a_fields_middle_is_in_that_field() {
+        for sweep in [Sweep::all_sky(0.0), Sweep::region(DVec3::new(1.0, 2.0, 0.5), 0.3, 0.0)] {
+            let plan = sweep.plan();
+            for field in 0..plan.fields() {
+                let middle = plan.center_of(field).expect("every field has a middle");
+                assert!((middle.length() - 1.0).abs() < 1e-9);
+                assert_eq!(plan.field_of(middle), Some(field));
+            }
+            assert_eq!(plan.center_of(plan.fields()), None);
+        }
+    }
+
+    /// The field being exposed is the one [`Plan::observed_between`] stamps at the end of the
+    /// same dwell.
+    #[test]
+    fn the_field_exposed_now_is_the_one_observed_at_the_end_of_this_dwell() {
+        let sweep = Sweep::region(DVec3::X, 0.2, 100.0);
+        let plan = sweep.plan();
+        for k in [0.0, 0.5, 7.3, plan.fields() as f64 + 2.5] {
+            let now = sweep.started_s + k * sweep.dwell_s;
+            let field = sweep.field_at(&plan, now);
+            let middle = plan.center_of(field).unwrap();
+            let stamped = plan.observed_between(middle, now, now + sweep.dwell_s);
+            assert_eq!(stamped.len(), 1, "at {k} dwells");
+        }
     }
 
     /// With a long exposure a four square meter mirror detects a sun across the galaxy.

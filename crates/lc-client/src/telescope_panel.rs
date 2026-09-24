@@ -40,6 +40,10 @@ pub fn telescope(
 
     duty(ui, game, held, out);
     room(ui, game, out);
+    let mut beauty = state.beauty_shots;
+    if ui.checkbox(&mut beauty, "Beauty shots (experimental)").changed() {
+        ask(out, Action::SetBeautyShots(beauty));
+    }
     ui.separator();
 
     let order = known(game);

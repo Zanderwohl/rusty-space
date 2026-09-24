@@ -61,6 +61,9 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`, `corona`. Brings its own shard |
 | `--console <line>` | type a line at the console once the shard has welcomed the client, with the console open. With `--local` the shard is directing, so every command is available |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run, so two shots of a scene are the same shot |
+| `--beauty` / `--beauty-kind <kind>` | turn on the beauty shots, and hold them on one kind of subject (`whole`, `horizon`, `nadir`, `approach`, `destination`, `survey`, `neighbor`, `star`, `field`). The first is taken a second in, so `--frames 240` photographs it |
+| `--beauty-dir <dir>` / `--beauty-period <s>` | save every beauty shot into `dir` as it is taken, numbered and named by kind, and take one every `s` seconds instead of ten. One run is then the whole series; `--shot` still ends it |
+| `--stare` / `--sweep` | set the telescope to stare at the nearest star, or to sweep the sky ahead |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable. Offline only — a shard states its own. **The default is the design rate**, so a run without this flag is as slow as the game. A frozen clock also freezes the telescope, which records a sample only once an integration's worth of time has passed, so `--rate 0 --panel telescope` photographs an empty curve — correctly |
 
 `--turn`, `--pitch` and `--zoom` are applied **last**, after anything that aims — `--fly` ends
@@ -161,6 +164,11 @@ Each of these cost real time. None of them are visible from the code that hits t
   match gets a texture of its own, and `ClearColorConfig::None` means nothing ever clears it:
   every frame is laid over the last. It reads as smeared text and stale windows, with the
   loading screen still underneath a thousand frames later, and there is nothing in the log.
+- **A second camera on the sky's layer shares every material's uniforms.** Anything the host
+  converts from the sky camera's pixels, or places against its exposure, is wrong in the other
+  view. The starfield measures its own view in the shader (`drawn_rad_per_px`,
+  `drawn_exposure`); a resolved body needs a material of its own. See
+  `lightcone/docs/28-beauty-shots.md`.
 - **A render target that will be resized needs `COPY_SRC`.** `Image::new_target_texture` sets
   three usages and not that one, and `Image::resize` copies the old contents forward. The first
   resize is a wgpu validation failure, and it takes the application down long after the frame

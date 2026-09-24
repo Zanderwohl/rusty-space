@@ -61,6 +61,12 @@ pub struct DevEntry {
     /// second reason it survived the phase that stopped calling it. The charting office kept as
     /// a dev tool.
     pub charted: bool,
+    /// Hold the beauty shots on one [`crate::beauty::Subject::kind`].
+    pub beauty_kind: Option<String>,
+    /// Save every beauty shot into this directory, numbered and named by kind.
+    pub beauty_dir: Option<String>,
+    /// Seconds between beauty shots.
+    pub beauty_period_s: Option<f32>,
     /// What the map's camera is to hold onto, written every frame like the rest of the pin.
     pub map_focus: Option<WantedFocus>,
 
