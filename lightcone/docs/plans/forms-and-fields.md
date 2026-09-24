@@ -500,7 +500,7 @@ graph LR
 
 - status: active claude/brave-wilbur-eea15e
 - needs: —
-- touches: `crates/em-render/src/drone_material.rs`, `crates/lc-client/assets/shaders/drones.wgsl`, `crates/lc-client/examples/drones_void.rs`
+- touches: `crates/em-render/src/drone_material.rs`, `crates/lc-client/assets/shaders/drones.wgsl`, `crates/lc-client/examples/drones_void.rs`, `lightcone/images/drones-*.png`
 - read: 32 §Drones
 - deliver: stateless particles: position a closed form of index, seed and `t`, in the vertex shader over instanced quads; arcs to fixture targets, dwell, return; idle patrol; haze at a distance.
 - done when: `--burst` shows smooth motion, and a paused clock photographs the same frame twice.

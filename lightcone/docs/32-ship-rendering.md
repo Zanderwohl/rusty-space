@@ -138,8 +138,10 @@ drone's index in a vertex, since Bevy's shared vertex buffers offset `vertex_ind
 targets are fixed arrays in the material's uniform, which the host fills. A hash of the index picks
 each drone's role against two fractions, working and patrolling, so raising either adds drones
 without reshuffling the rest. A working drone takes a new target every trip, switching while it is
-docked. Haze is the same light spread over a wider disc, so the swarm's total brightness does not
-change as it recedes. `crates/lc-client/examples/drones_void.rs` photographs it.
+docked. Haze is a mote's light spread over a disc about the spacing between drones. Each drone keeps
+the light it had when it became haze, since true point sources that far off would add up to nothing,
+until the haze disc is narrower than a few pixels too. From there the haze dims as the hull does.
+`crates/lc-client/examples/drones_void.rs` photographs it.
 
 ## The field
 

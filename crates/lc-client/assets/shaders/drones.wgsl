@@ -198,18 +198,25 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let mote = material.mote_m * scale;
     let mote_px = mote * px_per_m;
 
-    // Haze before a mote falls below a pixel: the same light spread over a disc wide enough to
-    // overlap its neighbors, and never narrower than `haze_px`.
-    let hazed = 1.0 - smoothstep(material.haze_px / 3.0, material.haze_px, mote_px);
+    // Haze before a mote falls below a pixel: its light spread over a disc wide enough to
+    // overlap its neighbors, and never narrower than `haze_px`. The light is held at what the mote
+    // had when it became haze rather than falling with it, or a distant swarm is not a haze but
+    // nothing at all.
+    let fully_hazed_px = material.haze_px / 3.0;
+    let hazed = 1.0 - smoothstep(fully_hazed_px, material.haze_px, mote_px);
     let haze = max(max(material.haze_m * scale, material.haze_px / px_per_m), mote);
     let size = mix(mote, haze, hazed);
-    let conserve = (mote / size) * (mote / size);
+    // Once the haze disc itself is narrower than `haze_px`, it dims as the hull does, or a far
+    // swarm outshines the ship it is working on.
+    let receding = min(material.haze_m * scale * px_per_m / material.haze_px, 1.0);
+    let lit = max(mote_px, fully_hazed_px * receding) / (size * px_per_m);
+    let conserve = lit * lit;
 
     let right = view.world_from_view[0].xyz;
     let up = view.world_from_view[1].xyz;
     let world = center + (right * vertex.position.x + up * vertex.position.y) * (0.5 * size);
     out.clip_position = position_world_to_clip(world);
-    out.rgb = (material.color.rgb + material.carry_color.rgb * placed.glow) * placed.presence * conserve;
+    out.rgb = mix(material.color.rgb, material.carry_color.rgb, placed.glow) * placed.presence * conserve;
     return out;
 }
 
