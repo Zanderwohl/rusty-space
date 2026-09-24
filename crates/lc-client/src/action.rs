@@ -6,6 +6,7 @@
 //! be driven from a test with no window.
 
 use em_spectra::{Band, presets};
+use lc_world::knowledge::Subject;
 use lc_world::knowledge::survey::{Duty, Sweep};
 use lc_world::sky::StarId;
 
@@ -94,6 +95,7 @@ pub enum Action {
     WatchSelected,
     /// Call the selected star something. A name is this ship's, not the star's.
     NameSelected(String),
+    Name(Subject, String),
     /// Keep a star's raw log whatever is concluded from it, or let it go once it has been read.
     RetainRaw(StarId, bool),
     /// Read every log this ship holds into a conclusion and free its room.
@@ -151,6 +153,9 @@ pub enum Action {
     // --- development ------------------------------------------------------------------
     ToggleGodView,
     SetTimeRate(f64),
+    /// Photograph what the ship is near, every few seconds, beside the map. Experimental.
+    SetBeautyShots(bool),
+    ToggleBeautyShots,
     /// Step one rung along [`crate::ui::RATE_LADDER`].
     TimeRateUp,
     TimeRateDown,
@@ -363,28 +368,19 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             // the physics rather than here, but offering it would be offering nothing.
             match session.system.as_ref().map(|s| s.star) {
                 Some(star) => {
-                    let bodies = session.system.as_ref().map_or(0, |s| s.len());
                     set_duty(ui, session, Duty::Survey { star, started_s: now }, &mut effects);
-                    effects.push(Effect::Notify(format!(
-                        "surveying {bodies} bodies, brightest first"
-                    )));
+                    // No count: `session.system` is the truth, and how many bodies there are is
+                    // what the survey is for.
+                    effects.push(Effect::Notify("surveying local system for bodies".into()));
                 }
                 None => effects.push(Effect::Notify("no system here to survey".into())),
             }
         }
         Action::NameSelected(name) => match ui.selected {
-            // A name is the shard's to record, like a course: sent, and back in what the craft
-            // is told it knows.
-            Some(id) if session.remote && session.knows(id) => {
-                let name = name.trim().to_string();
-                effects.push(Effect::Send(lc_proto::Order::NameIt { subject: lc_proto::Subject::Star(id.get()), name }));
-            }
-            Some(id) if !session.remote && session.name_star(id, &name) => {
-                effects.push(Effect::Notify(format!("noted: {}", session.name_of(id))));
-            }
-            Some(_) => effects.push(Effect::Notify("nothing detected there to name".into())),
+            Some(id) => name_it(session, id.into(), &name, &mut effects),
             None => effects.push(Effect::Notify("nothing selected to name".into())),
         },
+        Action::Name(subject, name) => name_it(session, subject, &name, &mut effects),
         // Only a shard reads logs, so with none there is nothing to analyze.
         Action::Analyze => {
             if session.remote {
@@ -667,6 +663,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             effects.push(Effect::Notify("the server keeps the clock".into()));
         }
         Action::SetTimeRate(rate) => ui.time_rate = rate.max(0.0),
+        Action::SetBeautyShots(on) => ui.beauty_shots = on,
+        Action::ToggleBeautyShots => {
+            ui.beauty_shots = !ui.beauty_shots;
+            let state = if ui.beauty_shots { "on" } else { "off" };
+            effects.push(Effect::Notify(format!("beauty shots {state}")));
+        }
         Action::TimeRateUp | Action::TimeRateDown => {
             ui.time_rate = crate::ui::rate_step(ui.time_rate, action == Action::TimeRateUp);
             effects.push(Effect::Notify(format!("clock: {}", crate::ui::rate_label(ui.time_rate))));
@@ -752,6 +754,21 @@ fn set_duty(ui: &UiState, session: &mut Session, duty: Duty, effects: &mut Vec<E
     match duty {
         Duty::Stare(id) => session.point_at(Some(id)),
         duty => session.take_up(duty),
+    }
+}
+
+/// With a shard, the name is held only once the shard's report brings it back.
+fn name_it(session: &mut Session, subject: Subject, name: &str, effects: &mut Vec<Effect>) {
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    if !session.nameable(subject) {
+        effects.push(Effect::Notify("nothing detected there to name".into()));
+    } else if session.remote {
+        effects.push(Effect::Send(lc_proto::Order::NameIt { subject: subject.into(), name: name.to_string() }));
+    } else if session.name_it(subject, name) {
+        effects.push(Effect::Notify(format!("noted: {name}")));
     }
 }
 
@@ -1314,6 +1331,47 @@ mod tests {
         );
     }
 
+    /// A belt has no file until it is named, so only the ship's own system's belts can be.
+    #[test]
+    fn a_body_and_a_belt_take_a_name() {
+        let (mut ui, mut s) = fixture();
+        let star = lc_world::sky::StarProvider::stars(&AuthoredStars::sample())[2].clone();
+        s.ship.motion.position_ly = star.position_ly;
+        s.sync_system();
+        let system = s.system.clone().expect("a system at the star");
+        assert!(!system.populations.is_empty(), "the fixture has no belt");
+        lc_world::knowledge::observatory::chart_system(&mut s.knowledge, &system, 0.0);
+
+        let (key, body) = system
+            .inventory()
+            .iter()
+            .filter(|e| e.depth > 0)
+            .find_map(|e| match &e.target {
+                Target::Body(key) => Some((key.clone(), Subject::Body { star: system.star, body: lc_world::knowledge::BodyId::of(system.star, key) })),
+                _ => None,
+            })
+            .filter(|(_, body)| s.knowledge.knows(*body))
+            .expect("a charted body");
+        apply(Action::Name(body, " Kettle ".into()), &mut ui, &mut s);
+        assert_eq!(s.body_label(&key), "Kettle");
+
+        let belt = Subject::Population { star: system.star, index: 0 };
+        apply(Action::Name(belt, "The Shoals".into()), &mut ui, &mut s);
+        assert_eq!(s.band_label(0), "The Shoals");
+
+        let none = Subject::Population { star: system.star, index: system.populations.len() as u32 };
+        let effects = apply(Action::Name(none, "Nowhere".into()), &mut ui, &mut s);
+        assert!(matches!(effects.as_slice(), [Effect::Notify(t)] if t.contains("nothing detected")));
+
+        s.remote = true;
+        let effects = apply(Action::Name(belt, "Reef".into()), &mut ui, &mut s);
+        assert!(
+            matches!(effects.as_slice(), [Effect::Send(lc_proto::Order::NameIt { subject: lc_proto::Subject::Population { index: 0, .. }, .. })]),
+            "{effects:?}",
+        );
+        assert_eq!(s.band_label(0), "The Shoals", "renamed when the shard says so, not before");
+    }
+
     /// With a shard, the telescope and the knowledge are the shard's: selecting a star, surveying,
     /// naming and reporting all become orders, and the client keeps no marks of its own.
     #[test]
@@ -1355,7 +1413,7 @@ mod tests {
         assert!(!s.knowledge.retained(id), "kept when the shard says so, not before");
         let sent = orders(&apply(Action::Analyze, &mut ui, &mut s));
         assert!(matches!(sent.as_slice(), [lc_proto::Order::Analyze]), "{sent:?}");
-        assert_eq!(s.knowledge.analyzing(), 0, "analyzing when the shard says so, not before");
+        assert_eq!(s.analyzing, 0, "analyzing when the shard says so, not before");
     }
 
 

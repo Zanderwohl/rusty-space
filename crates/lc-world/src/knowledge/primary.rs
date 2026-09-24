@@ -10,7 +10,7 @@
 
 use glam::DVec3;
 
-use super::arc::{self, Fitted, Look, LOOKS_NEEDED};
+use super::arc::{self, Fitted, Look, LOOKS_NEEDED, RANGED_NEEDED};
 use super::{BodyId, Subject};
 use crate::sky::StarId;
 
@@ -22,6 +22,9 @@ use crate::sky::StarId;
 /// and the body's own mean bearing puts the right one first, at both levels -- a planet's mean
 /// bearing points at the star, a moon's at its planet.
 const PRIMARIES_TRIED: usize = 3;
+
+/// How far after the orbit it replaces a fit is stated, when both are filed at one instant.
+const FILED_AFTER_S: f64 = 1.0e-3;
 
 /// How much longer an arc must be than at the last attempt before a body is fitted again.
 const REFIT_GROWTH: f64 = 1.5;
@@ -35,6 +38,11 @@ const REFIT_GROWTH: f64 = 1.5;
 pub(crate) struct Attempt {
     pub at_s: f64,
     pub span_s: f64,
+    /// Ranged looks it had. More of them re-arms it whatever the span: see [`newly_ranged`].
+    pub ranged: usize,
+    /// When the looks behind the newest fit filed were taken. A fit on older looks that finishes
+    /// after it is refused rather than filed over it.
+    pub filed_taken_s: f64,
     pub last: Option<(Option<BodyId>, Fitted)>,
 }
 
@@ -45,6 +53,17 @@ fn span_s(sightings: &[super::Sighting]) -> f64 {
         .iter()
         .fold((f64::MAX, f64::MIN), |(lo, hi), s| (lo.min(s.observed_s), hi.max(s.observed_s)));
     (last - first).max(0.0)
+}
+
+fn ranged(sightings: &[super::Sighting]) -> usize {
+    sightings.iter().filter(|s| s.range_m.is_some()).count()
+}
+
+/// Whether a body has become solvable outright since it was last tried. A close pass can do
+/// that in minutes of an arc hundreds of hours long, and waiting for the span to grow would
+/// leave a planet the ship is looking at unplaced.
+fn newly_ranged(now: usize, tried: Option<&Attempt>) -> bool {
+    now >= RANGED_NEEDED && tried.is_none_or(|t| now > t.ranged)
 }
 
 impl crate::knowledge::Knowledge {
@@ -80,8 +99,11 @@ impl crate::knowledge::Knowledge {
     /// reach [`REFIT_GROWTH`] times what the last attempt saw, which is a handful of refits per
     /// decade of arc: a failed fit waits for its inputs to change, and a good one is revisited
     /// as the arc it stands on lengthens.
+    ///
+    /// **Except for new ranges**, which make a fit a solution rather than a search: a body with
+    /// more of them than when last tried goes back in, ahead of the rest.
     pub fn unfitted(&self, star: StarId) -> Option<Subject> {
-        let mine = |subject: Subject| -> Option<f64> {
+        let mine = |subject: Subject| -> Option<(bool, f64)> {
             let file = self.file(subject)?;
             if file.sightings().len() < LOOKS_NEEDED {
                 return None;
@@ -95,18 +117,19 @@ impl crate::knowledge::Knowledge {
                 .map(|o| o.stated_s)
                 .fold(f64::MIN, f64::max);
             let tried = self.tried.get(&subject);
-            if tried.is_some_and(|t| span < t.span_s * REFIT_GROWTH) {
+            let fresh = newly_ranged(ranged(file.sightings()), tried);
+            if !fresh && tried.is_some_and(|t| span < t.span_s * REFIT_GROWTH) {
                 return None;
             }
             let tried_s = tried.map_or(f64::MIN, |t| t.at_s);
-            (newest > stated).then_some(stated.max(tried_s))
+            (fresh || newest > stated).then_some((!fresh, stated.max(tried_s)))
         };
         self.members(star)
             .filter_map(|(subject, _)| match subject {
                 Subject::Body { .. } => Some((mine(subject)?, subject)),
                 _ => None,
             })
-            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+            .min_by(|a, b| a.0.0.cmp(&b.0.0).then(a.0.1.total_cmp(&b.0.1)).then(a.1.cmp(&b.1)))
             .map(|(_, subject)| subject)
     }
 
@@ -170,7 +193,7 @@ impl crate::knowledge::Knowledge {
     pub fn fit_orbit(&mut self, subject: Subject, star_ly: DVec3, now_s: f64) -> bool {
         let Some(job) = self.fit_job(subject, star_ly, now_s) else { return false };
         match job.solve() {
-            Some(solved) => self.file_fit(solved),
+            Some(solved) => self.file_fit(solved, now_s),
             None => false,
         }
     }
@@ -190,30 +213,51 @@ impl crate::knowledge::Knowledge {
                 (about, self.looks_at(subject, &at))
             })
             .collect();
-        let span_s = self.file(subject).map_or(0.0, |file| span_s(file.sightings()));
-        let last = self.tried.get(&subject).and_then(|t| t.last);
-        self.tried.insert(subject, Attempt { at_s: now_s, span_s, last });
-        Some(FitJob { subject, owner: self.owner, frames, warm: last, stated_s: now_s })
+        let (span_s, ranged) =
+            self.file(subject).map_or((0.0, 0), |file| (span_s(file.sightings()), ranged(file.sightings())));
+        let held = self.tried.get(&subject);
+        let (last, filed_taken_s) = (held.and_then(|t| t.last), held.map_or(f64::NEG_INFINITY, |t| t.filed_taken_s));
+        self.tried.insert(subject, Attempt { at_s: now_s, span_s, ranged, filed_taken_s, last });
+        Some(FitJob { subject, owner: self.owner, frames, warm: last, taken_s: now_s })
     }
 
-    /// File what a [`FitJob`] found. `false` if the body has since been forgotten, since
-    /// filing would bring back a file the store let go of.
-    pub fn file_fit(&mut self, solved: Solved) -> bool {
+    /// File what a [`FitJob`] found, as learned at `now_s`. `false` if the body has since been
+    /// forgotten, since filing would bring back a file the store let go of, or if a fit on later
+    /// looks has already been filed.
+    ///
+    /// Stated when filed, not when its looks were taken: a report carries what was learned after
+    /// the reader's mark, and a fit solved off the tick lands after every client's mark has passed
+    /// the moment its job began.
+    pub fn file_fit(&mut self, solved: Solved, now_s: f64) -> bool {
         if self.file(solved.subject).is_none() {
             return false;
         }
         if let Some(attempt) = self.tried.get_mut(&solved.subject) {
+            if solved.taken_s < attempt.filed_taken_s {
+                return false;
+            }
+            attempt.filed_taken_s = solved.taken_s;
             attempt.last = Some((solved.about, solved.fitted));
         }
-        self.orbits(solved.subject, solved.orbit);
+        // Strictly after whatever it replaces, which `Knowledge::orbits` requires: two fits of
+        // one body can land on one tick.
+        let held_s = self
+            .file(solved.subject)
+            .into_iter()
+            .flat_map(|file| file.orbits())
+            .filter(|o| o.witness == self.owner && o.method == solved.orbit.method)
+            .map(|o| o.stated_s)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let stated_s = now_s.max(solved.taken_s).max(held_s + FILED_AFTER_S);
+        self.orbits(solved.subject, super::Orbit { stated_s, ..solved.orbit });
         true
     }
 }
 
 /// One body's fit, with nothing borrowed: the looks in each candidate primary's frame.
 ///
-/// Stamped with the time the looks were taken, so the orbit it states is the same whichever
-/// tick files it, and one overtaken by a later fit is refused by `Knowledge::orbits`.
+/// Carries the time the looks were taken, so that a fit overtaken by one on later looks is
+/// refused by [`Knowledge::file_fit`] whichever order the two finish in.
 #[derive(Clone, Debug)]
 pub struct FitJob {
     pub subject: Subject,
@@ -221,7 +265,7 @@ pub struct FitJob {
     frames: Vec<(Option<BodyId>, Vec<Look>)>,
     /// The last orbit fitted, to carry onto this arc before searching for a new one.
     warm: Option<(Option<BodyId>, Fitted)>,
-    stated_s: f64,
+    taken_s: f64,
 }
 
 /// An orbit found by a [`FitJob`], for [`Knowledge::file_fit`].
@@ -231,6 +275,14 @@ pub struct Solved {
     about: Option<BodyId>,
     fitted: Fitted,
     orbit: super::Orbit,
+    taken_s: f64,
+}
+
+impl Solved {
+    /// When the looks it was fitted to were taken.
+    pub fn taken_s(&self) -> f64 {
+        self.taken_s
+    }
 }
 
 impl FitJob {
@@ -248,8 +300,113 @@ impl FitJob {
                 .filter_map(|(about, looks)| Some((about, arc::fit(&looks)?, looks)))
                 .min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad))?,
         };
-        let orbit = fitted.stated(self.owner, about, &looks, self.stated_s);
-        Some(Solved { subject: self.subject, about, fitted, orbit })
+        let orbit = fitted.stated(self.owner, about, &looks, self.taken_s);
+        Some(Solved { subject: self.subject, about, fitted, orbit, taken_s: self.taken_s })
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::knowledge::{Bearing, Knowledge, Lineage, Sighting, Witness};
+    use em_spectra::Band;
+
+    fn look(at_s: f64, range_m: Option<(f64, f64)>) -> Sighting {
+        Sighting {
+            witness: Witness(1),
+            observed_s: at_s,
+            bearing: Bearing { observer_ly: DVec3::ZERO, toward: DVec3::new(1.0, at_s * 1.0e-9, 0.0), sigma_rad: 1.0e-7 },
+            size: None,
+            range_m,
+            spin_s: None,
+            band: Band::V,
+            flux: 1.0e-12,
+            flux_sigma: 1.0e-15,
+            lineage: Lineage::new(),
+        }
+    }
+
+    /// A result as a shard's fitting thread hands one back, for looks taken at `taken_s`.
+    fn solved(subject: Subject, taken_s: f64, semi_major_au: f64) -> Solved {
+        let fitted = Fitted {
+            semi_major_m: semi_major_au * crate::navigation::AU,
+            eccentricity: 0.0,
+            period_s: 3.0e7,
+            pole: DVec3::Z,
+            periapsis_rad: 0.0,
+            epoch_s: 0.0,
+            mu: 1.3e20,
+            reach_m: f64::INFINITY,
+            assumed_circular: true,
+            residual_rad: 1.0e-7,
+            looks: LOOKS_NEEDED,
+        };
+        let orbit = fitted.stated(Witness(1), None, &[], taken_s);
+        Solved { subject, about: None, fitted, orbit, taken_s }
+    }
+
+    /// A fit filed after the reader's mark reaches the reader, however long before it the looks
+    /// were taken.
+    #[test]
+    fn a_fit_filed_late_is_still_news() {
+        let star = StarId::synthesize("primary", 2);
+        let subject = Subject::Body { star, body: BodyId::of(star, "late") };
+        let mut k = Knowledge::new(Witness(1));
+        for i in 0..LOOKS_NEEDED {
+            k.sighted(subject, look(10.0 * i as f64, None));
+        }
+        let job = k.fit_job(subject, DVec3::ZERO, 100.0).expect("a job");
+        // The client is told everything up to now while the fit is still running.
+        let (_, mark) = k.report_upto(crate::knowledge::Mark::default(), 101.0, usize::MAX);
+        let mark = mark.expect("sightings to report");
+
+        assert!(k.file_fit(solved(job.subject, 100.0, 1.0), 105.0));
+        let (report, _) = k.report_upto(mark, 105.0, usize::MAX);
+        let sent = report.entries.iter().flat_map(|e| &e.parts).flat_map(|p| &p.orbits).count();
+        assert_eq!(sent, 1, "the orbit never left the craft");
+    }
+
+    /// Two fits of one body, finishing out of order: the one on later looks stands.
+    #[test]
+    fn a_fit_on_older_looks_never_overwrites_a_newer_one() {
+        let star = StarId::synthesize("primary", 3);
+        let subject = Subject::Body { star, body: BodyId::of(star, "twice") };
+        let mut k = Knowledge::new(Witness(1));
+        for i in 0..LOOKS_NEEDED {
+            k.sighted(subject, look(10.0 * i as f64, None));
+        }
+        k.fit_job(subject, DVec3::ZERO, 100.0);
+        assert!(k.file_fit(solved(subject, 200.0, 2.0), 210.0));
+        assert!(!k.file_fit(solved(subject, 100.0, 1.0), 220.0), "an older fit was filed over a newer one");
+        // And two filed at one instant, in order, leave the later.
+        assert!(k.file_fit(solved(subject, 300.0, 3.0), 400.0));
+        assert!(k.file_fit(solved(subject, 310.0, 4.0), 400.0));
+        let held = k.file(subject).unwrap().orbits().iter().find(|o| o.witness == Witness(1)).unwrap().semi_major_au.0;
+        assert_eq!(held, 4.0);
+    }
+
+    /// A body tried on bearings alone waits for its arc to grow half again, but a close pass
+    /// that ranges it puts it back at the front at once: three ranges are a solution.
+    #[test]
+    fn new_ranges_rearm_a_body_whose_arc_has_not_grown() {
+        let star = StarId::synthesize("primary", 1);
+        let (quiet, ranged) = (BodyId::of(star, "quiet"), BodyId::of(star, "ranged"));
+        let mut k = Knowledge::new(Witness(1));
+        for body in [quiet, ranged] {
+            for i in 0..LOOKS_NEEDED {
+                k.sighted(Subject::Body { star, body }, look(1000.0 * i as f64, None));
+            }
+        }
+        while let Some(subject) = k.unfitted(star) {
+            k.fit_job(subject, DVec3::ZERO, 10_000.0);
+        }
+
+        for i in 0..RANGED_NEEDED {
+            k.sighted(Subject::Body { star, body: ranged }, look(4100.0 + i as f64, Some((1.0e11, 1.0e6))));
+        }
+        assert_eq!(k.unfitted(star), Some(Subject::Body { star, body: ranged }));
+        k.fit_job(Subject::Body { star, body: ranged }, DVec3::ZERO, 10_001.0);
+        assert_eq!(k.unfitted(star), None, "tried with those ranges, so not again until more come");
+    }
+}

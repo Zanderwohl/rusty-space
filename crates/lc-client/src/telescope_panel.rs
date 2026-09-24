@@ -40,6 +40,10 @@ pub fn telescope(
 
     duty(ui, game, held, out);
     room(ui, game, out);
+    let mut beauty = state.beauty_shots;
+    if ui.checkbox(&mut beauty, "Beauty shots (experimental)").changed() {
+        ask(out, Action::SetBeautyShots(beauty));
+    }
     ui.separator();
 
     let order = known(game);
@@ -125,7 +129,7 @@ fn room(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
         if used >= capacity {
             ui.colored_label(egui::Color32::from_rgb(230, 150, 60), "Data full.");
         }
-        match game.knowledge.analyzing() {
+        match game.analyzing {
             0 => {
                 let button = ui.add_enabled(used > 0.0, egui::Button::new("Analyze"));
                 if button.on_hover_text("Read every log into a conclusion and free its room").clicked() {
@@ -226,7 +230,7 @@ fn duty(
         }
         Duty::Survey { star, .. } => {
             let here = game.system.as_ref().filter(|s| s.star == *star).is_some();
-            ui.label(format!("Surveying {}", game.name_of(*star)));
+            ui.label(format!("Surveying bodies local to {}{}", game.name_of(*star), doing_text(game)));
             if !here {
                 ui.weak("not in that system");
             } else if held.bodies.is_empty() {
@@ -262,6 +266,20 @@ fn duty(
             ask(out, Action::StopSurvey);
         }
     });
+}
+
+/// ": Fitting A, B; Observing C", from what the shard last said, or nothing.
+fn doing_text(game: &Game) -> String {
+    let doing = &game.doing;
+    let mut parts = Vec::new();
+    if !doing.fitting.is_empty() {
+        let names: Vec<String> = doing.fitting.iter().map(|s| game.name_subject(*s)).collect();
+        parts.push(format!("Fitting {}", names.join(", ")));
+    }
+    if let Some(subject) = doing.observing {
+        parts.push(format!("Observing {}", game.name_subject(subject)));
+    }
+    if parts.is_empty() { String::new() } else { format!(": {}", parts.join("; ")) }
 }
 
 /// Nearest believed first. No labels: only the rows on screen get those.

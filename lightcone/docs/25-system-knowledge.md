@@ -290,8 +290,11 @@ bodies of one system in turn, **brightest first**, for `SURVEY_DWELL_S` each. Wh
 - **The star is measured every tick, and does not take a turn.** It is not a target of the
   survey; it is the reference the survey is measured against, in every frame because it is the
   brightest thing in the sky and what every phase angle is reckoned from. So it costs no dwell
-  of its own, and its parallax accumulates with the ship's motion tick by tick — without which
-  nothing in the system has a distance and no mass prior runs. Putting it in the source list for
+  of its own. **Its distance is its range**: from inside its system it is a resolved disc, and
+  a disc is ranged like any body's, so one look places it. Without that distance nothing in
+  the system has a place and no orbit is fitted. It was parallax alone at first, and a parked
+  ship's bearings -- one place, and a sun wobbling about its barycenter -- triangulated the sun
+  to the ship itself, to sixteen decimal places, so an hour of real time fitted nothing. Putting it in the source list for
   its glare and never pointing at it is what the first version did, and a test asking for its
   triangulated distance is what caught that.
 
@@ -307,8 +310,8 @@ at, with the error bar of a fit that converged: a ship on a 5 AU orbit surveying
 at 1.63 AU plus or minus 9e-7**, sixteen million sigma from where it was, which is far worse than
 no answer. `Knowledge::believe` now returns `Distance::Unknown` for a `Subject::Body` and a body's
 distance comes from its orbit, which is what this section always said it would. The ship's own sun
-is measured from the same bearings, because it is the one thing in the system that holds still —
-and that is the whole difference.
+is the one thing in the system that holds still, so its bearings would triangulate — but its
+range, from its disc, is what places it, and needs no motion.
 
 **The local star is in the way.** ✅ **Built** (2026-09-22), and the diagnosis it was built from
 was half wrong, so both halves are recorded here.
@@ -431,6 +434,16 @@ degree, the size to 2% and the period to about a tenth. Two things had to change
   record states its eccentricity as `None` — which rule 4 distinguishes from stating a circle.
   What it calls the axis is then the radius the body is *at*: Saturn at 0.0565 runs from 9.0 to
   10.1 AU, and three degrees near the near end reports 9.0.
+- **Or the body's motion, where that reads better.** ✅ (2026-09-24) Positions good to meters
+  give the velocity and the acceleration too: a cubic in time through them, at the middle of
+  the arc, and the pull toward the primary is the primary's mass. Position, velocity and mass
+  are the whole orbit, eccentricity included. Both are tried and the better kept, since a cubic
+  stops describing the path long before a conic does. Two days from low Earth orbit give
+  1.00003 AU and an eccentricity of 0.0167, where the circle gave 0.983 AU — and the error bar
+  on that axis still claims a kilometer, because the Moon's pull on Earth's center over two
+  days is smooth enough that the orbit absorbs it rather than misfitting. The bar now scales
+  with the reduced chi-square, which is right where a fit misfits and cannot see this.
+  `lc_world::knowledge::state`.
 
 **A circle is only an answer when the positions were known,** and finding that out cost a real
 defect. Assuming one drops two parameters, so an arc too short to shape a conic can still be

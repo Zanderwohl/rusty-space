@@ -82,6 +82,9 @@ pub fn parse(args: &[String]) -> Entry {
     if let Some(pages) = value::<i32>(args, "--pages") {
         actions.push(Action::TurnPage(pages));
     }
+    if flag("--beauty") {
+        actions.push(Action::SetBeautyShots(true));
+    }
     if flag("--tune") {
         actions.push(Action::OpenPanel(crate::ui::Panel::Tuning));
     }
@@ -93,6 +96,14 @@ pub fn parse(args: &[String]) -> Entry {
     if flag("--watch") || flag("--swarm") {
         actions.push(Action::SelectNearest);
         actions.push(Action::OpenPanel(crate::ui::Panel::Telescope));
+    }
+    // Telescope duties, so a beauty shot of each can be photographed.
+    if flag("--stare") {
+        actions.push(Action::SelectNearest);
+        actions.push(Action::StareSelected);
+    }
+    if flag("--sweep") {
+        actions.push(Action::SurveyAhead);
     }
     if let Some(b) = value::<usize>(args, "--curve")
         && let Some(band) = em_spectra::Band::ALL.get(b)
@@ -179,6 +190,9 @@ pub fn parse(args: &[String]) -> Entry {
         phase_deg: value(args, "--phase"),
         station: after("--station"),
         charted: flag("--charted"),
+        beauty_kind: after("--beauty-kind"),
+        beauty_dir: after("--beauty-dir"),
+        beauty_period_s: value(args, "--beauty-period"),
         map_camera: after("--map").and_then(|spec| {
             let mut fields = spec.split(':').map(|f| f.parse::<f64>());
             match (fields.next(), fields.next(), fields.next()) {

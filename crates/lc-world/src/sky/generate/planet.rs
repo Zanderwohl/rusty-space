@@ -74,6 +74,8 @@ pub struct Planet {
     /// How much of its wet land is alive, `[0, 1]`. Zero wherever nothing lives, which is
     /// every planet that is not habitable and some that are.
     pub life: f64,
+    /// `[M/H]` of its envelope, dex. See [`crate::giant::enrichment`]. Meaningless without one.
+    pub metals: f64,
     /// What orbits it. **A planet with no moon has no mass anybody can measure**: a
     /// satellite's period through Kepler's third law is the only route a telescope has to it.
     pub moons: Vec<super::moon::Moon>,
@@ -85,6 +87,31 @@ impl Planet {
     }
     pub fn radius_earths(&self) -> f64 {
         self.radius_m / EARTH_RADIUS
+    }
+
+    /// What a survey of it reads under `star`: the same join `system::LocalSystem` makes.
+    pub fn world(&self, star: &crate::sky::CatalogStar) -> crate::worlds::World {
+        let surface = crate::surface::Surface::classify(self.radius_m, self.mass_kg, self.equilibrium_k);
+        let tags = crate::worlds::Stated::tags(self.atmosphere, self.top, self.class == Class::GasGiant);
+        crate::worlds::of(&self.name, surface, &tags, self.giant(star).as_ref())
+    }
+
+    pub fn giant(&self, star: &crate::sky::CatalogStar) -> Option<crate::giant::Giant> {
+        let surface = crate::surface::Surface::classify(self.radius_m, self.mass_kg, self.equilibrium_k);
+        surface.is_banded().then(|| {
+            let inputs = crate::giant::Inputs {
+                mass_kg: self.mass_kg,
+                radius_m: self.radius_m,
+                effective_k: surface.effective_temperature(self.equilibrium_k),
+                equilibrium_k: self.equilibrium_k,
+                metals: Some(self.metals),
+                runaway: self.class == Class::GasGiant,
+                star_feh: star.metallicity,
+                star_teff_k: star.star.teff_k,
+                spin_s: Some(self.spin_s),
+            };
+            crate::giant::of(&self.name, &inputs)
+        })
     }
 }
 
@@ -161,7 +188,7 @@ pub fn planets(system: &str, arch: &Architecture, star: &crate::sky::CatalogStar
         .enumerate()
         .map(|(k, rung)| {
             let name = format!("{system} {}", letter(k));
-            of(name, k, rung, arch, giants, seed, tuning)
+            of(name, k, rung, arch, giants, star.metallicity, seed, tuning)
         })
         .collect()
 }
@@ -172,6 +199,7 @@ fn of(
     rung: &Rung,
     arch: &Architecture,
     giant_jupiters: f64,
+    star_feh: f64,
     seed: u64,
     tuning: &Tuning,
 ) -> Planet {
@@ -226,6 +254,8 @@ fn of(
         water_fraction,
         habitable,
         life,
+        metals: crate::giant::metals(mass_earths * EARTH_MASS, rung.class == Class::GasGiant, star_feh)
+            + 0.15 * rng::gaussian(h(21)),
         moons: Vec::new(),
     }
 }

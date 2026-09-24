@@ -5028,6 +5028,7 @@ dependencies = [
 name = "lc-proto"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "postcard",
  "serde",
 ]
@@ -7684,7 +7685,7 @@ dependencies = [
 [[package]]
 name = "texture-graph-core"
 version = "0.1.0"
-source = "git+https://github.com/Zanderwohl/texture-graph.git?rev=a26a390#a26a3908ddfba1e579a1f2eb0b337618dbd5cae6"
+source = "git+https://github.com/Zanderwohl/texture-graph.git?rev=12498d1#12498d19b1bba97d208cf6dc116eaa94ce182cd3"
 dependencies = [
  "palette",
  "ron 0.12.2",
@@ -7695,13 +7696,12 @@ dependencies = [
 [[package]]
 name = "texture-graph-gpu"
 version = "0.1.0"
-source = "git+https://github.com/Zanderwohl/texture-graph.git?rev=a26a390#a26a3908ddfba1e579a1f2eb0b337618dbd5cae6"
+source = "git+https://github.com/Zanderwohl/texture-graph.git?rev=12498d1#12498d19b1bba97d208cf6dc116eaa94ce182cd3"
 dependencies = [
  "bytemuck",
  "glam",
  "log",
  "texture-graph-core",
- "wasm-bindgen-futures",
  "wgpu 29.0.4",
 ]
 

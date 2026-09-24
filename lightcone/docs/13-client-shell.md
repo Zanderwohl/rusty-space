@@ -104,7 +104,8 @@ Some controls change *what a player can know*, and those are gameplay, not prefe
 | control | binding | why it is not in Settings |
 |---|---|---|
 | band mapping preset | `1`-`6` | see [07-rendering.md](07-rendering.md); the composition preset is a diagnostic |
-| exposure, stops from auto | `[` / `]` | the tone map has no absolute reference, so exposure is a camera control |
+| exposure, stops from auto | `[` / `]`, and `\` for auto | the tone map has no absolute reference, so exposure is a camera control |
+| beauty shots | `\|` (`Shift`+`\`) | see [28-beauty-shots.md](28-beauty-shots.md) |
 | telescope target and integration | panel | the core loop |
 | scale tier | `Tab`, and automatic by distance | the three tiers behave differently enough to be worth showing |
 
@@ -116,7 +117,7 @@ with.
 | window | opened by | contents |
 |---|---|---|
 | telescope | `T` | target, band, exposure time, survey regime, the light curve, uncertainty |
-| system | `Y` | what this craft believes is in the system it is *in*, not the selected one, with the generator's populations until phase 8 |
+| system | `Y` | what this craft believes is in the system it is *in*, not the selected one, with the generator's populations until phase 8. A picked body or population can be named there, as a star can in the telescope panel |
 | sky | always | the all-sky map; selection happens here |
 | notifications | automatic | target out of range, observation returned nothing, instrument saturated |
 | communications | `C` | one conversation at a time, chosen from a list of everyone heard from and everyone in sight |

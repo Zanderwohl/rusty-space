@@ -8,7 +8,7 @@
 //! A resolved body is a sphere instead, with a generated surface and a real terminator. The
 //! crossover is angular: past a few pixels the disc is drawn, below it the point is.
 
-use bevy::camera::visibility::NoFrustumCulling;
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
 use em_render::atmosphere_material::{AtmosphereMaterial, AtmosphereUniform, TOP_HEIGHTS};
 use em_render::body_surface_material::{BANDS, BodySurfaceMaterial, BodySurfaceUniform, GROUNDS};
@@ -43,13 +43,17 @@ pub const NIGHT: f32 = 0.012;
 /// changing how much light the body sends.
 const INVERSION: f32 = 0.3;
 
+/// `reflected.w` times [`crate::surfaces::RELIEF_SCALE`]. Two because the unit sphere's
+/// diameter is one graph sample unit, so this draws the relief at its true slopes.
+const BUMP: f32 = 2.0;
+
 /// Which body a resolved sphere stands for.
 #[derive(Component)]
 pub struct ResolvedBody(pub String);
 
-/// The shell a resolved body's air is drawn on, a child of its sphere.
+/// The shell a resolved body's air is drawn on, and that child of the sphere.
 #[derive(Component)]
-pub struct ResolvedAir(pub Handle<AtmosphereMaterial>);
+pub struct ResolvedAir(pub Handle<AtmosphereMaterial>, pub Entity);
 
 /// The unit sphere every resolved body shares.
 #[derive(Resource, Default)]
@@ -268,7 +272,17 @@ pub fn reflected_radiance(
     star_teff_k: f64,
     star_distance_m: f64,
 ) -> PerBand<f32> {
-    lit_radiance(body.surface.albedo(), star_radius_m, star_teff_k, star_distance_m)
+    lit_radiance(mean_albedo(body), star_radius_m, star_teff_k, star_distance_m)
+}
+
+/// A giant's comes from its chemistry: a cloudless one is a tenth of a water-cloud one's.
+fn mean_albedo(body: &Drawable) -> f64 {
+    if body.giant.is_some() { body.world.gray_albedo() } else { body.surface.albedo() }
+}
+
+/// What the shader multiplies its texel by. A giant's cubemap is its albedo.
+fn shading_albedo(body: &Drawable, drawn: crate::surfaces::Drawn) -> f64 {
+    if drawn.layers { 1.0 } else { body.surface.albedo() }
 }
 
 /// The same law with the albedo given rather than looked up, for anything lit that is not a
@@ -347,22 +361,20 @@ fn air_of(body: &Drawable, mapping: &BandMapping, star: &PerBand<f32>) -> [Vec4;
 pub fn surface_shading(
     session: &Session,
     body: &Drawable,
+    albedo: f64,
     star_radius_m: f64,
     star_teff_k: f64,
     star_distance_m: f64,
 ) -> (glam::Vec3, glam::Vec3) {
-    let reflected = reflected_radiance(body, star_radius_m, star_teff_k, star_distance_m);
+    let reflected = lit_radiance(albedo, star_radius_m, star_teff_k, star_distance_m);
     let emitted = emitted_radiance(body);
     let through = |r| glam::Vec3::from_array(session.mapping.apply(&r));
     (through(reflected), through(emitted))
 }
 
-/// Each ground's albedo through `mapping`, as display channels: the mapped light it reflects
-/// over the mapped light a white surface would. Water, ice, growth, sand, rock `rust` of the way
-/// to Mars, and cloud, which is [`BodySurfaceUniform::ground`]'s order.
+/// Each ground's albedo through `mapping`, in [`BodySurfaceUniform::ground`]'s order.
 fn grounds(mapping: &BandMapping, star: &PerBand<f32>, rust: f32) -> [Vec4; GROUNDS] {
     use lc_world::ground::{Ground, rock};
-    let white = mapping.apply(star);
     [
         Ground::Water.reflectance(),
         Ground::Ice.reflectance(),
@@ -371,12 +383,19 @@ fn grounds(mapping: &BandMapping, star: &PerBand<f32>, rust: f32) -> [Vec4; GROU
         rock(rust),
         Ground::Cloud.reflectance(),
     ]
-    .map(|r| {
-        let lit = mapping.apply(&PerBand::new(std::array::from_fn(|i| r[i] * star[Band::ALL[i]])));
-        let albedo: [f32; 3] =
-            std::array::from_fn(|c| if white[c] > 0.0 { lit[c] / white[c] } else { 0.0 });
-        Vec3::from_array(albedo).extend(1.0)
-    })
+    .map(|r| albedo_through(mapping, star, &r))
+}
+
+/// The same for a giant's layers; the slots past them are weighted zero.
+fn giant_layers(mapping: &BandMapping, star: &PerBand<f32>, giant: &lc_world::giant::Giant) -> [Vec4; GROUNDS] {
+    std::array::from_fn(|k| giant.layers.get(k).map_or(Vec4::ONE, |r| albedo_through(mapping, star, r)))
+}
+
+fn albedo_through(mapping: &BandMapping, star: &PerBand<f32>, r: &[f32; em_spectra::BANDS]) -> Vec4 {
+    let white = mapping.apply(star);
+    let lit = mapping.apply(&PerBand::new(std::array::from_fn(|i| r[i] * star[Band::ALL[i]])));
+    let albedo: [f32; 3] = std::array::from_fn(|c| if white[c] > 0.0 { lit[c] / white[c] } else { 0.0 });
+    Vec3::from_array(albedo).extend(1.0)
 }
 
 /// What a surface that knows its grounds is drawn with, in every band.
@@ -422,6 +441,18 @@ impl Grounds {
             emissivity,
         }
     }
+
+    /// No temperatures of its own: a giant glows as one blackbody whose belts invert.
+    fn giant(mapping: &BandMapping, star: &PerBand<f32>, giant: &lc_world::giant::Giant) -> Self {
+        let flat = BodySurfaceUniform::default();
+        Self {
+            now: giant_layers(mapping, star, giant),
+            natural: giant_layers(&presets::natural(), star, giant),
+            bands: flat.bands,
+            thermal: Vec4::ZERO,
+            emissivity: flat.emissivity,
+        }
+    }
 }
 
 fn uniforms(
@@ -450,9 +481,10 @@ fn uniforms(
             color,
             contrast,
             if weather.is_some() { clouds } else { 0.0 },
-            as_weight(drawn.grounds),
+            // body_surface.wgsl's `MODE_GROUNDS` and `MODE_LAYERS`.
+            if drawn.layers { 2.0 } else { as_weight(drawn.grounds) },
         ),
-        reflected: reflected.extend(0.0),
+        reflected: reflected.extend(if drawn.relief { BUMP / crate::surfaces::RELIEF_SCALE } else { 0.0 }),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
         emitted: emitted.extend(if body.surface.is_banded() { INVERSION } else { 0.0 }),
         exposure: Vec4::new(tone.surface_reference, tone.surface_stops, 0.0, 0.0),
@@ -497,6 +529,31 @@ fn placement(body: &Drawable, eye_ly: DVec3) -> Transform {
     }
 }
 
+/// Where a lit surface sits in its window when a photograph is exposed for it, as a fraction.
+/// Under the top, so a bright cloud deck keeps its structure.
+const SUBJECT_VALUE: f32 = 0.9;
+
+/// The surface reference that puts `radiance`, full on, at [`SUBJECT_VALUE`] of the window.
+pub fn metered_for(tone: &crate::tonemap::ToneMap, radiance: &PerBand<f32>, mapping: &BandMapping)
+    -> f32 {
+    let shaded = tone.shade_surface(radiance, mapping);
+    if !shaded.stops.is_finite() || tone.surface_stops <= 0.0 {
+        return tone.surface_reference;
+    }
+    tone.surface_reference * (shaded.stops + (1.0 - SUBJECT_VALUE) * tone.surface_stops).exp2()
+}
+
+/// The layer a body's sphere is drawn on, if it has one.
+fn sphere_layer(body: &Drawable, eye_ly: DVec3, rad_per_px: f32, shot: &crate::beauty::ShotBody)
+    -> Option<usize> {
+    if is_resolved(body, eye_ly, rad_per_px) {
+        return Some(0);
+    }
+    (shot.name.as_deref() == Some(body.name.as_str())
+        && is_resolved(body, eye_ly, shot.rad_per_px))
+        .then_some(crate::beauty::SHOT_LAYER)
+}
+
 /// Keep a sphere for every body close enough to be one.
 ///
 /// A sphere lives exactly as long as its body stays resolved, and is placed on the frame it is
@@ -514,10 +571,12 @@ pub fn update_resolved(
     mut surfaces: ResMut<crate::surfaces::Surfaces>,
     mut images: ResMut<Assets<Image>>,
     mut bakes: ResMut<crate::procedural::Bakes>,
+    shot: Res<crate::beauty::ShotBody>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut placed: Query<(
         Entity,
         &mut Transform,
+        &mut RenderLayers,
         &MeshMaterial3d<BodySurfaceMaterial>,
         &ResolvedBody,
         Option<&ResolvedAir>,
@@ -533,37 +592,58 @@ pub fn update_resolved(
     let star_ly = system.star_position_ly();
     let (star_radius, star_teff) = (system.star_radius_m(), system.star_teff_k());
     let now_s = session.0.coordinate_time_s();
-    let mut shade = |body: &Drawable, surfaces: &mut crate::surfaces::Surfaces| {
+    // A sphere only the telescope draws is exposed for itself. The surface's window is
+    // logarithmic, so no later exposure recovers a disc it clipped.
+    let mut shade = |body: &Drawable, surfaces: &mut crate::surfaces::Surfaces, own: bool| {
         let star_distance = star_ly.distance(body.position_ly) * M_PER_LY;
-        let (reflected, emitted) =
-            surface_shading(&session.0, body, star_radius, star_teff, star_distance);
+        let mut tone = session.tone;
+        if own {
+            let radiance = surface_radiance(body, star_radius, star_teff, star_distance);
+            tone.surface_reference = metered_for(&tone, &radiance, &session.0.mapping);
+        }
         let drawn = surfaces.drawn(&body.name);
+        let (reflected, emitted) = surface_shading(
+            &session.0,
+            body,
+            shading_albedo(body, drawn),
+            star_radius,
+            star_teff,
+            star_distance,
+        );
         let star = lit_radiance(1.0, star_radius, star_teff, star_distance);
-        let ground = body
-            .climate
-            .filter(|_| drawn.grounds)
-            .map(|c| Grounds::of(&session.0.mapping, &star, &c, body.effective_k));
+        let mapping = &session.0.mapping;
+        let ground = match (body.climate, body.giant) {
+            (Some(c), _) if drawn.grounds => Some(Grounds::of(mapping, &star, &c, body.effective_k)),
+            (_, Some(g)) if drawn.layers => Some(Grounds::giant(mapping, &star, &g)),
+            _ => None,
+        };
         let air = air_of(body, &session.0.mapping, &star);
         let weather = surfaces.weather(&body.name, now_s, body.radius_m, &mut bakes);
-        uniforms(body, star_ly, &session.tone, reflected, emitted, drawn, ground, air, weather)
+        uniforms(body, star_ly, &tone, reflected, emitted, drawn, ground, air, weather)
     };
 
-    let want: Vec<&Drawable> = bodies
+    let want: Vec<(&Drawable, RenderLayers)> = bodies
         .drawn
         .iter()
-        .filter(|d| is_resolved(d, eye.at_ly, rad_per_px))
+        .filter_map(|d| Some((d, RenderLayers::layer(sphere_layer(d, eye.at_ly, rad_per_px, &shot)?))))
         .collect();
     // Linear searches: only a handful of bodies are ever resolved at once.
     let mut kept: Vec<&str> = Vec::with_capacity(want.len());
-    for (entity, mut transform, material, marker, air) in placed.iter_mut() {
-        let Some(body) = want.iter().find(|d| d.name == marker.0).copied() else {
+    for (entity, mut transform, mut layers, material, marker, air) in placed.iter_mut() {
+        let Some((body, layer)) = want.iter().find(|(d, _)| d.name == marker.0) else {
             commands.entity(entity).despawn();
             continue;
         };
         kept.push(&body.name);
         *transform = placement(body, eye.at_ly);
+        if *layers != *layer {
+            *layers = layer.clone();
+            if let Some(air) = air {
+                commands.entity(air.1).insert(layer.clone());
+            }
+        }
         if let Some(mut asset) = materials.get_mut(&material.0) {
-            let next = shade(body, &mut surfaces);
+            let next = shade(body, &mut surfaces, *layer != RenderLayers::layer(0));
             if let Some(mut shell) = air.and_then(|a| airs.get_mut(&a.0)) {
                 let next = air_uniforms(&next);
                 if shell.uniforms != next {
@@ -576,30 +656,37 @@ pub fn update_resolved(
         }
     }
 
-    for body in want.iter().filter(|d| !kept.contains(&d.name.as_str())) {
+    for (body, layer) in want.iter().filter(|(d, _)| !kept.contains(&d.name.as_str())) {
         let mesh = resolved
             .mesh
             .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
             .clone();
-        let own = surfaces.images(&body.name, body.surface, body.climate, &mut images);
-        let uniforms = shade(body, &mut surfaces);
+        let own = surfaces.images(&body.name, body.surface, body.climate, body.giant, body.airless, &mut images);
+        let uniforms = shade(body, &mut surfaces, *layer != RenderLayers::layer(0));
         let air = air_uniforms(&uniforms);
-        let mut sphere = commands.spawn((
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(materials.add(own.material(uniforms))),
-            placement(body, eye.at_ly),
-            NoFrustumCulling,
-            ResolvedBody(body.name.clone()),
-        ));
+        let sphere = commands
+            .spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(materials.add(own.material(uniforms))),
+                placement(body, eye.at_ly),
+                NoFrustumCulling,
+                layer.clone(),
+                ResolvedBody(body.name.clone()),
+            ))
+            .id();
         if let Some(climate) = body.climate {
             let shell = airs.add(AtmosphereMaterial { uniforms: air });
-            sphere.insert(ResolvedAir(shell.clone()));
-            sphere.with_child((
-                Mesh3d(mesh),
-                MeshMaterial3d(shell),
-                Transform::from_scale(Vec3::splat(1.0 + TOP_HEIGHTS * climate.air.height)),
-                NoFrustumCulling,
-            ));
+            let child = commands
+                .spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(shell.clone()),
+                    Transform::from_scale(Vec3::splat(1.0 + TOP_HEIGHTS * climate.air.height)),
+                    NoFrustumCulling,
+                    layer.clone(),
+                    ChildOf(sphere),
+                ))
+                .id();
+            commands.entity(sphere).insert(ResolvedAir(shell, child));
         }
     }
 }
@@ -622,8 +709,10 @@ mod tests {
             kind: lc_world::navigation::Kind::Planet,
             rings: None,
             surface: Surface::Rock,
-            world: lc_world::worlds::of("test", Surface::Rock, &[]),
+            world: lc_world::worlds::of("test", Surface::Rock, &[], None),
             climate: None,
+            giant: None,
+            airless: None,
             pole: DVec3::Z,
             spin_s: None,
             position_ly: at,

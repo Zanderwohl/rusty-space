@@ -440,7 +440,7 @@ fn sight(
                 .collect();
             let Some(first) = outline.iter().flatten().next().copied() else { continue };
             out.push(Sighted {
-                subject: Subject::Swarm(index, swarm_name(population)),
+                subject: Subject::Swarm(index, game.band_label(index)),
                 // Filled in against the cursor; a torus has no one place it is.
                 clip: first,
                 radius_px: 0.0,
@@ -451,16 +451,6 @@ fn sight(
     }
 
     out
-}
-
-/// What the interface calls a population, matching its row in the system list.
-fn swarm_name(population: &lc_world::population::Population) -> String {
-    let radius = population.thermal_radius();
-    format!(
-        "{} at {:.1} AU",
-        if lc_world::navigation::is_flat(population) { "belt" } else { "cloud" },
-        radius / lc_world::navigation::AU,
-    )
 }
 
 /// The wire shape of a swarm: two edge circles and four cross-sections.

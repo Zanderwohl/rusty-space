@@ -120,6 +120,13 @@ pub fn hud(
                 ui.separator();
                 ui.colored_label(connection_color(note), words);
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                for toggle in hud::toggles(&ui_state.0).into_iter().rev() {
+                    if ui.selectable_label(toggle.on, toggle_text(ui, &toggle)).clicked() {
+                        ask(&mut out, toggle.action);
+                    }
+                }
+            });
         });
         if let Some(target) = &lines.target {
             ui.colored_label(egui::Color32::from_rgb(240, 190, 110), target);
@@ -194,6 +201,30 @@ pub fn hud(
     }
 }
 
+
+/// The label with its key's letter underlined, as a menu bar marks its accelerators.
+///
+/// In the placeholder color, which the button replaces with its own: a fixed color would not
+/// follow it through hovered and selected.
+fn toggle_text(ui: &egui::Ui, toggle: &hud::Toggle) -> egui::text::LayoutJob {
+    let plain = egui::TextFormat {
+        font_id: egui::TextStyle::Button.resolve(ui.style()),
+        color: egui::Color32::PLACEHOLDER,
+        ..Default::default()
+    };
+    let marked = egui::TextFormat { underline: egui::Stroke::new(1.0, plain.color), ..plain.clone() };
+    let mut job = egui::text::LayoutJob::default();
+    match toggle.underline {
+        Some(i) => {
+            let end = i + toggle.label[i..].chars().next().map_or(0, char::len_utf8);
+            job.append(&toggle.label[..i], 0.0, plain.clone());
+            job.append(&toggle.label[i..end], 0.0, marked);
+            job.append(&toggle.label[end..], 0.0, plain);
+        }
+        None => job.append(toggle.label, 0.0, plain),
+    }
+    job
+}
 
 /// How wide the events box is. See [`notice_link`] for why it is stated rather than measured.
 const NOTICE_WIDTH: f32 = 300.0;
@@ -273,6 +304,8 @@ pub struct Remembered {
     tab: SystemTab,
     draft: String,
     name_draft: String,
+    /// Separate from the telescope's, so two open fields do not share text.
+    body_draft: String,
     aimed: crate::radio_panel::Aimed,
     seal: bool,
 }
@@ -296,6 +329,7 @@ pub fn open_panels(
         tab,
         draft,
         name_draft,
+        body_draft,
         aimed,
         seal,
     } = &mut *held_over;
@@ -336,6 +370,7 @@ pub fn open_panels(
                 show_all,
                 picked,
                 revealed,
+                body_draft,
                 &mut out,
             ),
             Panel::Flight => flight(ui, &ui_state, &game, &mut out),

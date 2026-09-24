@@ -121,6 +121,7 @@ impl Plugin for ClientPlugin {
             crate::map::MapPlugin,
             crate::bench::BenchPlugin,
             crate::haze::HazePlugin,
+            crate::beauty::BeautyPlugin,
         ))
             // **Which camera egui draws on is not left to spawn order.**
             //
@@ -256,7 +257,7 @@ impl Plugin for ClientPlugin {
                     // rather than the frame after it.
                     crate::faces::settle,
                     panels::loading.run_if(in_state(AppState::Loading)),
-                    (panels::hud, crate::map_panel::draw, panels::open_panels,
+                    (panels::hud, crate::map_panel::draw, crate::beauty::draw, panels::open_panels,
                         crate::reader::draw, crate::console::draw)
                         .run_if(in_state(AppState::InGame)),
                     panels::unreachable.run_if(in_state(AppState::Unreachable)),
@@ -296,6 +297,10 @@ fn flying(ui: Res<Ui>) -> bool {
 #[derive(Component)]
 pub struct SkyCamera;
 
+/// What only the sky's camera draws: hulls, their exhaust, and the haze added back. The
+/// telescope's shot is taken from the ship, and would otherwise be of its hull.
+pub const SKY_ONLY_LAYER: usize = 3;
+
 /// Camera near plane, in render units of one astronomical unit. Fifteen meters.
 ///
 /// Anything nearer than this is clipped, so it is the closest a ship can come to a surface.
@@ -333,6 +338,7 @@ fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         SkyCamera,
+        bevy::camera::visibility::RenderLayers::from_layers(&[0, SKY_ONLY_LAYER]),
         // A system spans a hundred thousand astronomical units and the render unit is one, so
         // the default thousand-unit far plane would clip everything past Saturn.
         //

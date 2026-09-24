@@ -313,10 +313,16 @@ Knowledge today is keyed by star. It has to be keyed by **subject**:
 | subject | identity | assigned name, until somebody chooses one |
 |---|---|---|
 | star | synthetic star id | the bearing it was found along |
-| planet | star + its place in the generated system | `{what we call the star} {letter}` |
-| small body, comet | star + its place in the generated system | discovery time, `{year}-{order}` |
+| planet found by transit | star + its place in the generated system | `{what we call the star} {letter}` |
+| any other body | star + its place in the generated system | discovery time, `{year}-{order}` |
 | population | star + population index | `{what we call the star} {belt / cloud} {n}` |
 | craft not ours | ship id | whatever it calls itself, from the first transmission heard; discovery time before that |
+
+**A body is shown with what it is believed to be in front of its designation**, until somebody
+names it: `Object 2-14`, then `Planetoid 2-14` once an orbit is fitted, then `Cold Jupiter 2-14`
+once a radius is measured, then whatever type the evidence settles. That descriptor is derived at
+every read from the body's belief and never filed, so it promotes itself and two craft can
+disagree on it; only the designation is stored. The ladder is `lc_world::knowledge::called`.
 
 **An assigned name is a rule, not a string.** "Kettle b" is stored as "the planet in letter slot
 `b` of the star this ship calls the Kettle", so renaming the star renames its planets with it. A

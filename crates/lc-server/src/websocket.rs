@@ -284,13 +284,13 @@ mod tests {
         let (mut client, _) =
             tokio_tungstenite::connect_async_with_config(&url, Some(config()), false).await.expect("connected");
         let id = until(|| wire.accepted()).await[0];
-        let under = "x".repeat(lc_proto::FRAME_LIMIT - 1024);
+        let under = vec![b'x'; lc_proto::FRAME_LIMIT - 1024];
         wire.send(id, Outbound::Learned { report: under.clone() });
         let frame = tokio::time::timeout(std::time::Duration::from_secs(5), client.next()).await;
         let Ok(Some(Ok(Message::Binary(bytes)))) = frame else { panic!("a frame under the limit did not arrive") };
         assert!(matches!(lc_proto::decode(&bytes), Ok(Outbound::Learned { report }) if report == under));
 
-        wire.send(id, Outbound::Learned { report: "x".repeat(lc_proto::FRAME_LIMIT + 1024) });
+        wire.send(id, Outbound::Learned { report: vec![b'x'; lc_proto::FRAME_LIMIT + 1024] });
         let frame = tokio::time::timeout(std::time::Duration::from_secs(5), client.next()).await;
         assert!(!matches!(frame, Ok(Some(Ok(Message::Binary(_))))), "a frame over the limit was taken");
     }

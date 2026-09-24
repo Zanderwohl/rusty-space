@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod airless;
 pub mod attitude;
 pub mod boost;
 pub mod climate;
@@ -22,6 +23,7 @@ pub mod escort;
 pub mod fitting;
 pub mod flicker;
 pub mod flight;
+pub mod giant;
 pub mod ground;
 pub mod ignition;
 pub mod injection;

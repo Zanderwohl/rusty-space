@@ -14,11 +14,13 @@ pub struct BodySurfaceUniform {
     pub light: Vec4,
     /// World direction to the star; `w` is the ambient floor on the night side.
     pub to_star: Vec4,
-    /// `(color, contrast, clouds, grounds)`. `color` is 1 where [`BodySurfaceMaterial::color`]
+    /// `(color, contrast, clouds, masks)`. `color` is 1 where [`BodySurfaceMaterial::color`]
     /// replaces the pattern and palette, `clouds` is 1 where a cloud deck is drawn over the
-    /// surface, and `grounds` is 1 where the masks and [`Self::ground`] say what each band sees.
+    /// surface, and `masks` says what the masks and [`Self::ground`] are: 1 for a rocky world's
+    /// grounds, 2 for a giant's layers, 0 for neither.
     pub params: Vec4,
-    /// Starlight the surface reflects, as linear display light before the tone map. `w` unused.
+    /// Starlight the surface reflects, as linear display light before the tone map. `w` is the
+    /// slope of [`BodySurfaceMaterial::height`] per unit of height per radian; zero is smooth.
     pub reflected: Vec4,
     /// Light the body makes itself, in the same units; `w` is how far the pattern inverts in it.
     ///
@@ -52,7 +54,7 @@ pub struct BodySurfaceUniform {
     pub air_albedo: Vec4,
     pub air_glow: Vec4,
     /// Each kind of ground's albedo through the current band mapping, as display channels:
-    /// water, ice, growth, sand, rock and cloud.
+    /// water, ice, growth, sand, rock and cloud; or a giant's layers.
     pub ground: [Vec4; GROUNDS],
     /// The same through the natural mapping, which is what the color cubemap was painted in.
     /// The color is scaled by the ratio of the two, so in the natural mapping nothing changes.
@@ -127,7 +129,7 @@ pub struct BodySurfaceMaterial {
     #[texture(7, dimension = "cube", visibility(fragment))]
     pub climate: Handle<Image>,
     /// How much of each texel is land, ice, growth and sand, single-channel: what the color
-    /// cubemap's ground is made of.
+    /// cubemap's ground is made of. A giant's belt, storm and polar haze in the first three.
     #[texture(8, dimension = "cube", visibility(fragment))]
     pub land: Handle<Image>,
     #[texture(9, dimension = "cube", visibility(fragment))]
@@ -136,6 +138,9 @@ pub struct BodySurfaceMaterial {
     pub growth: Handle<Image>,
     #[texture(11, dimension = "cube", visibility(fragment))]
     pub sand: Handle<Image>,
+    /// Single-channel.
+    #[texture(12, dimension = "cube", visibility(fragment))]
+    pub height: Handle<Image>,
 }
 
 impl Material for BodySurfaceMaterial {

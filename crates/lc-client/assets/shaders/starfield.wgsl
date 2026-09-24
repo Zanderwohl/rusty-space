@@ -65,6 +65,8 @@ struct StarfieldUniform {
     log_t_min: f32,
     log_t_scale: f32,
     lut_samples: f32,
+    drawn_rad_per_px: f32,
+    drawn_exposure: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: StarfieldUniform;
@@ -188,6 +190,25 @@ fn band_radiance(band: u32, teff: f32) -> f32 {
     return exp2(mix(a, b, frac));
 }
 
+/// This view's pixel over the sky camera's, which the radii were set in. Without it a narrow
+/// field draws every star as a disc.
+fn pixel_scale() -> f32 {
+    if (material.drawn_rad_per_px <= 0.0) {
+        return 1.0;
+    }
+    // clip_from_view[1][1] is 1 / tan(fov_y / 2) for a perspective lens.
+    let here = 2.0 / (view.clip_from_view[1][1] * view.viewport.w);
+    return here / material.drawn_rad_per_px;
+}
+
+/// How much brighter this view is exposed than the one the window was placed for.
+fn exposure_gain() -> f32 {
+    if (material.drawn_exposure <= 0.0) {
+        return 1.0;
+    }
+    return view.exposure / material.drawn_exposure;
+}
+
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
@@ -236,7 +257,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let peak = max(linear.r, max(linear.g, linear.b));
     var above = -1e9;
     if (luminance > 0.0 && material.reference > 0.0) {
-        above = log2(luminance / material.reference);
+        above = log2(luminance * exposure_gain() / material.reference);
     }
     let chroma = select(vec3<f32>(1.0), linear / peak, peak > 0.0);
     let level = clamp(1.0 + above / max(material.point_stops, 1e-6), 0.0, 1.0);
@@ -250,10 +271,12 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // The source itself: its disc if that is resolvable, otherwise the smallest thing worth
     // drawing. At sixty astronomical units a sun is a fiftieth of a pixel across, and it is
     // bright rather than big.
-    let core_rad = max(disc_rad, material.min_radius_rad);
+    let scale = pixel_scale();
+    let min_rad = material.min_radius_rad * scale;
+    let core_rad = max(disc_rad, min_rad);
     // The glare around it, which is what grows with brightness.
-    let glare_rad = mix(material.min_radius_rad, material.max_radius_rad, level)
-        + material.glow_radius_gain * glow * material.min_radius_rad;
+    let glare_rad = mix(min_rad, material.max_radius_rad * scale, level)
+        + material.glow_radius_gain * glow * min_rad;
 
     // The corona, which is a world size: a fixed number of stellar radii, so it subtends less
     // as the ship draws away and more as it closes, exactly as the disc does. Tying it to the

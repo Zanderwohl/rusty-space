@@ -625,7 +625,7 @@ fn fold(
                 };
                 // Only counted here. The shard folds it into this craft's knowledge when its light
                 // lands, signed in or not, and what it taught arrives in the next `Learned`.
-                let stars = serde_json::from_str::<lc_world::knowledge::Report>(body).map(|r| r.stars());
+                let stars = lc_proto::decode_report::<lc_world::knowledge::Report>(body).map(|r| r.stars());
                 let notice = match stars {
                     Ok(n) => format!("{who}: told you about {n} stars"),
                     Err(_) => format!("{who} sent a report that made no sense"),
@@ -687,11 +687,8 @@ fn fold(
                     game.0.knowledge.retain_raw(lc_world::knowledge::Subject::from(*subject), *keep);
                     None
                 }
-                // Mirrored, so the panel can count down as the shard's conclusions consume them.
-                Order::Analyze => {
-                    game.0.knowledge.analyze();
-                    None
-                }
+                // The count arrives as `Outbound::Analyzing`: only the shard knows which logs it holds.
+                Order::Analyze => None,
                 Order::SetCourse { course, accel_g, max_beta } => {
                     let course: lc_world::navigation::Course = course.clone().into();
                     match game.0.set_course_at(at_s, &course, *accel_g, *max_beta) {
@@ -839,12 +836,12 @@ fn fold(
         Outbound::Library { base, books } => uplink.shelf = Some((base, books)),
         Outbound::Reading(marks) => uplink.bookmarks = Some(marks),
         // A report from this craft itself: what it has learned since the last one, with no hop.
-        Outbound::Learned { report } => match serde_json::from_str::<lc_world::knowledge::Report>(&report) {
+        Outbound::Learned { report } => match lc_proto::decode::<lc_world::knowledge::Report>(&report) {
             Ok(report) => game.0.knowledge.absorb(&report),
             Err(why) => warn!(%why, "a knowledge page that would not parse"),
         },
         // Its own photometry, which no report carries.
-        Outbound::Logged { logs } => match serde_json::from_str::<lc_world::knowledge::Logs>(&logs) {
+        Outbound::Logged { logs } => match lc_proto::decode::<lc_world::knowledge::Logs>(&logs) {
             Ok(page) => {
                 game.0.knowledge.copy_logs(&page.logs);
                 for subject in page.retained {
@@ -867,6 +864,13 @@ fn fold(
             }
         }
         Outbound::Answered { seq, ok, text } => uplink.console.answered(seq, ok, text),
+        Outbound::Analyzing { left } => game.0.analyzing = left as usize,
+        Outbound::Doing { observing, fitting } => {
+            game.0.doing = crate::session::Doing {
+                observing: observing.map(Into::into),
+                fitting: fitting.into_iter().map(Into::into).collect(),
+            };
+        }
         Outbound::Backlog { messages, keys } => {
             // Nothing is announced. A transcript is what was *already* said, and a box of
             // notifications about years-old messages on every sign-in would bury whatever is
@@ -1406,7 +1410,7 @@ mod tests {
                 lineage: Vec::new(),
             },
         );
-        let report = serde_json::to_string(&held.report(lc_world::knowledge::Mark::default(), 1.0)).unwrap();
+        let report = lc_proto::encode(&held.report(lc_world::knowledge::Mark::default(), 1.0));
         fold(&mut uplink, &mut game, &mut ui, Outbound::Learned { report });
         assert_eq!(game.0.knowledge.belief(star).unwrap().hops, 0, "its own, not relayed");
     }
@@ -1424,7 +1428,7 @@ mod tests {
             beamed: false,
             idem: 3,
             sealed: false,
-            body: Some(serde_json::to_string(&report).unwrap()),
+            body: Some(lc_proto::encode_report(&report)),
             format: lc_proto::REPORT_FORMAT,
         };
         let sighting = Sighting {

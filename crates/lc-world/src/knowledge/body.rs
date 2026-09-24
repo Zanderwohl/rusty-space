@@ -70,9 +70,11 @@ pub const PLANE_SCATTER_LIMIT_RAD: f64 = 20.0 * std::f64::consts::PI / 180.0;
 pub struct BodyBelief {
     pub subject: Subject,
     pub body: BodyId,
-    /// What this craft calls it: a letter until somebody names it, and `None` when nothing
-    /// has assigned even that. See [`Knowledge::name_of`].
-    pub name: Option<String>,
+    /// A name somebody chose for it, which beats anything [`super::called`] would say.
+    pub given: Option<String>,
+    /// What a rule assigned when it was found — a planet letter or a `{year}-{order}` — frozen
+    /// whatever it is since named. `None` for a body nothing here has detected itself.
+    pub designation: Option<String>,
     /// What kind of thing it is, most probable first. Empty when nothing has concluded.
     pub kind: Vec<Hypothesis>,
     pub period_s: Option<(f64, f64)>,
@@ -141,7 +143,8 @@ impl Knowledge {
         Some(BodyBelief {
             subject,
             body,
-            name: self.name_of(subject),
+            given: self.given_name_of(subject),
+            designation: self.designation_of(subject),
             kind,
             period_s: orbit.map(|o| o.period_s),
             semi_major_au: orbit.map(|o| o.semi_major_au),
@@ -195,7 +198,7 @@ impl Knowledge {
             .collect();
         found.sort_by(|a, b| {
             let key = |belief: &BodyBelief| belief.semi_major_au.map_or(f64::INFINITY, |(au, _)| au);
-            key(a).total_cmp(&key(b)).then_with(|| a.name.cmp(&b.name)).then(a.body.cmp(&b.body))
+            key(a).total_cmp(&key(b)).then_with(|| a.designation.cmp(&b.designation)).then(a.body.cmp(&b.body))
         });
         found
     }
@@ -622,7 +625,7 @@ mod tests {
             ("c", orbit(4.0, Orientation::Unknown, None)),
             ("b", orbit(0.5, Orientation::Unknown, None)),
         ]);
-        let names: Vec<_> = k.bodies_of(star(), 0.0).into_iter().filter_map(|b| b.name).collect();
+        let names: Vec<_> = k.bodies_of(star(), 0.0).into_iter().filter_map(|b| b.designation).collect();
         // A relative name reads after whatever this craft calls the star, which is nothing yet.
         assert_eq!(names, ["? b", "? c"]);
     }

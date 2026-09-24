@@ -137,7 +137,7 @@ pub(crate) fn witness(id: CraftId) -> Witness {
 /// A single item larger than a page is sent alone if it fits a frame. One that does not is
 /// skipped (body `None`, mark moved past it), because sending it would close the connection on
 /// every reconnection.
-fn page<T>(mut limit: usize, build: impl Fn(usize) -> (Option<String>, Option<T>)) -> Option<(Option<String>, T)> {
+fn page<T>(mut limit: usize, build: impl Fn(usize) -> (Option<Vec<u8>>, Option<T>)) -> Option<(Option<Vec<u8>>, T)> {
     loop {
         let (body, through) = build(limit);
         let (body, through) = (body?, through?);
@@ -251,9 +251,6 @@ impl<J: Journal> Server<J> {
             if started == FITS_PER_TICK || self.instruments.fits.full() {
                 break;
             }
-            if self.instruments.fits.busy(id) {
-                continue;
-            }
             let Some(aboard) = self.instruments.aboard.get_mut(&id) else { continue };
             let Some(star) = aboard.observatory.duty.surveying() else { continue };
             let Some(star_ly) = aboard
@@ -272,10 +269,13 @@ impl<J: Journal> Server<J> {
     }
 
     /// No recount after: a fit changes no samples, and a recount is a pass over every file.
-    fn file_fits(&mut self, finished: Vec<(CraftId, lc_world::knowledge::primary::Solved)>) {
+    fn file_fits(&mut self, mut finished: Vec<(CraftId, lc_world::knowledge::primary::Solved)>) {
+        let now_s = self.now_t as f64 * 1.0e-6;
+        // Oldest looks first, so of two fits of one body the later one is filed last and stands.
+        finished.sort_by(|a, b| a.1.taken_s().total_cmp(&b.1.taken_s()));
         for (id, solved) in finished {
             if let Some(aboard) = self.instruments.aboard.get_mut(&id) {
-                aboard.knowledge.file_fit(solved);
+                aboard.knowledge.file_fit(solved, now_s);
             }
         }
     }
@@ -364,7 +364,7 @@ impl<J: Journal> Server<J> {
             if landing.strength < floor {
                 continue;
             }
-            let Ok(report) = serde_json::from_str::<Report>(&landing.body) else {
+            let Ok(report) = lc_proto::decode_report::<Report>(&landing.body) else {
                 eprintln!("WARNING: a report landing on craft {} would not parse", landing.observer.0);
                 continue;
             };
@@ -386,10 +386,11 @@ impl<J: Journal> Server<J> {
             .collect();
         for (client, ship, since, logged, retained_sent) in connected {
             let knowledge = &self.aboard(CraftId(ship.0)).knowledge;
+            let left = knowledge.analyzing();
             let learned = page(PAGE, |limit| {
                 let (report, through) = knowledge.report_upto(since, now_s, limit);
                 // Nothing new is the usual answer, and not worth encoding an empty report for.
-                (through.and_then(|_| serde_json::to_string(&report).ok()), through)
+                (through.map(|_| lc_proto::encode(&report)), through)
             });
             let retained = knowledge.retained_subjects();
             let logs = page(LOG_PAGE, |limit| {
@@ -398,18 +399,22 @@ impl<J: Journal> Server<J> {
                     return (None, None);
                 }
                 let page = lc_world::knowledge::Logs { logs, retained: retained.clone() };
-                (serde_json::to_string(&page).ok(), through)
+                (Some(lc_proto::encode(&page)), through)
             });
             // Send what the craft keeps raw once even with no logs; later log pages and accepted
             // orders carry it after that.
             let logs = match logs {
-                None if !retained_sent && !retained.is_empty() => serde_json::to_string(&lc_world::knowledge::Logs { logs: Vec::new(), retained })
-                    .ok()
-                    .map(|body| (Some(body), logged)),
+                None if !retained_sent && !retained.is_empty() => {
+                    Some((Some(lc_proto::encode(&lc_world::knowledge::Logs { logs: Vec::new(), retained })), logged))
+                }
                 other => other,
             };
             if let Some(state) = self.clients.get_mut(&client) {
                 state.retained_sent = true;
+                if state.analyzing_sent != left {
+                    state.analyzing_sent = left;
+                    wire.send(client, Outbound::Analyzing { left: u32::try_from(left).unwrap_or(u32::MAX) });
+                }
             }
             if let Some((body, through)) = learned {
                 if let Some(report) = body {
@@ -426,6 +431,24 @@ impl<J: Journal> Server<J> {
                 if let Some(state) = self.clients.get_mut(&client) {
                     state.logged_s = through;
                 }
+            }
+        }
+    }
+
+    /// Tell each client what its craft's instruments are at, where that changed: see
+    /// [`Outbound::Doing`]. Called once a real second.
+    pub(crate) fn tell_doing(&mut self, wire: &mut impl Transport) {
+        let clients: Vec<(lc_proto::ClientId, ShipId)> = self.clients.iter().map(|(c, s)| (*c, s.ship)).collect();
+        for (client, ship) in clients {
+            let id = CraftId(ship.0);
+            let observing = self.instruments.aboard.get(&id).and_then(|a| a.observatory.observed()).map(Into::into);
+            let fitting = self.instruments.fits.fitting(id).iter().map(|s| (*s).into()).collect();
+            let doing = Outbound::Doing { observing, fitting };
+            if let Some(state) = self.clients.get_mut(&client)
+                && state.doing_sent.as_ref() != Some(&doing)
+            {
+                state.doing_sent = Some(doing.clone());
+                wire.send(client, doing);
             }
         }
     }
@@ -476,8 +499,9 @@ impl<J: Journal> Server<J> {
                     return Err(Refusal::Impossible);
                 }
                 let subject = Subject::from(*subject);
+                let here = self.fleet.get(id).and_then(|craft| craft.system.clone());
                 let knowledge = &mut self.aboard(id).knowledge;
-                if !knowledge.knows(subject) {
+                if !knowledge.nameable(subject, here.as_deref()) {
                     return Err(Refusal::Impossible);
                 }
                 knowledge.name_it(subject, name, at_s);
@@ -511,7 +535,7 @@ impl<J: Journal> Server<J> {
         loop {
             let (report, through) = aboard.knowledge.report_upto(since, at_s, limit);
             let through = through.ok_or(Refusal::NothingNew)?;
-            let body = serde_json::to_string(&report).map_err(|_| Refusal::Impossible)?;
+            let body = lc_proto::encode_report(&report);
             if body.len() <= lc_proto::REPORT_LIMIT {
                 return Ok((body, through));
             }
@@ -597,7 +621,7 @@ mod tests {
         let mut copy = Knowledge::new(witness(CraftId(ship.0)));
         for message in messages {
             if let Outbound::Learned { report } = message {
-                copy.absorb(&serde_json::from_str(report).expect("a report"));
+                copy.absorb(&lc_proto::decode(report).expect("a report"));
             }
         }
         copy
@@ -772,8 +796,8 @@ mod tests {
         }
     }
 
-    /// **The fitting chain is alive on the shard, and refuses where it should.** A drifting
-    /// craft surveying its own system triangulates its sun, which is what puts the bearings in
+    /// **The fitting chain is alive on the shard, and refuses where it should.** A parked
+    /// craft surveying its own system ranges its sun, which is what puts the bearings in
     /// a frame at all, and the fit is then offered bodies whose arcs are hours long. Hours is
     /// nothing of any orbit, so it declines them -- and declining is the behavior worth
     /// pinning here, since `knowledge::arc` covers the arcs that do settle.
@@ -821,13 +845,7 @@ mod tests {
         let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let star = sky()[0].id;
 
-        // Adrift rather than at rest: a ship that holds still measures no parallax, so its own
-        // sun has no distance and nothing downstream of that runs at all. Across the line of
-        // sight and not along it -- a craft starts on the +X axis from its star, and drifting
-        // straight out along it sweeps no baseline at all.
-        if let Some(craft) = server.fleet_mut().get_mut(CraftId(ship.0)) {
-            craft.motion.beta = DVec3::new(0.0, 1.0e-6, 0.0);
-        }
+        // At rest, as a new craft is: its sun is ranged from its disc, not from parallax.
         let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
         wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
         for _ in 0..80 {
@@ -840,7 +858,7 @@ mod tests {
         let host = knowledge
             .belief(lc_world::knowledge::Subject::Star(star))
             .expect("its own sun is surveyed every tick");
-        assert!(host.triangulated, "a drifting ship should measure it: {:?}", host.distance);
+        assert!(host.triangulated, "a parked ship should measure it: {:?}", host.distance);
 
         // Bodies enough to fit, and no orbit from any of them yet.
         let now_s = server.now_t() as f64 * 1.0e-6;
@@ -903,10 +921,39 @@ mod tests {
         assert_eq!(replica(ship, &all).name_of(sky()[0].id).as_deref(), Some("Hearth"));
     }
 
-    /// A craft that knows more than one frame holds is paged all of it, every page inside
+    /// Only a belt of the craft's own system can be named, since no craft holds a file on one.
+    #[tokio::test]
+    async fn a_craft_names_the_belts_of_its_own_system() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        server.tick(&mut wire).await.unwrap();
+        let _ = wire.take(ClientId(1));
+        let belts = server.ship(ship).and_then(|c| c.system.as_ref()).map(|s| s.populations.len());
+        assert!(belts.is_some_and(|n| n > 0), "premise: the craft starts in a system with a belt");
+
+        let belt = |star: StarId, index| lc_proto::Subject::Population { star: star.get(), index };
+        let named = |subject| act(ship, Order::NameIt { subject, name: "Shoals".into() });
+        wire.client_says(ClientId(1), named(belt(sky()[0].id, 0)));
+        wire.client_says(ClientId(1), named(belt(sky()[1].id, 0)));
+        wire.client_says(ClientId(1), named(belt(sky()[0].id, belts.unwrap() as u32)));
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(ClientId(1));
+        let accepted = said.iter().filter(|m| matches!(m, Outbound::Accepted { order: Order::NameIt { .. }, .. })).count();
+        let refused = said.iter().filter(|m| matches!(m, Outbound::Refused { reason: Refusal::Impossible, .. })).count();
+        assert_eq!((accepted, refused), (1, 2), "{said:?}");
+        server.tick(&mut wire).await.unwrap();
+        let mut all = said;
+        all.extend(wire.take(ClientId(1)));
+        let at_home = Subject::Population { star: sky()[0].id, index: 0 };
+        assert_eq!(replica(ship, &all).name_of(at_home).as_deref(), Some("Shoals"));
+    }
+
+    /// A craft that knows more than a page holds is paged all of it, every page inside
     /// [`PAGE_BYTES`], until its copy matches the original.
     #[tokio::test]
-    async fn a_craft_that_knows_more_than_a_frame_is_paged_all_of_it() {
+    async fn a_craft_that_knows_more_than_a_page_is_paged_all_of_it() {
         let broker = Broker::new([1u8; 32]);
         let mut server = server(&broker);
         let mut wire = Loopback::new();
@@ -938,8 +985,8 @@ mod tests {
             let sample = lc_world::knowledge::Sample { observed_s: now_s + n as f64 * 1e-3, deficit: 1e-4, sigma: 1e-5 };
             knowledge.measured(watched, witness(id), em_spectra::Band::V, sample);
         }
-        let whole = serde_json::to_string(&knowledge.report(Mark::default(), now_s + 2.0)).unwrap().len();
-        assert!(whole > lc_proto::FRAME_LIMIT, "the test needs more than a frame of files: {whole}");
+        let whole = lc_proto::encode(&knowledge.report(Mark::default(), now_s + 2.0)).len();
+        assert!(whole > 3 * PAGE_BYTES, "the test needs several pages of files: {whole}");
 
         for _ in 0..200 {
             server.tick(&mut wire).await.unwrap();
@@ -950,11 +997,11 @@ mod tests {
         for message in &said {
             let body = match message {
                 Outbound::Learned { report } => {
-                    copy.absorb(&serde_json::from_str(report).unwrap());
+                    copy.absorb(&lc_proto::decode(report).unwrap());
                     report
                 }
                 Outbound::Logged { logs } => {
-                    let page: lc_world::knowledge::Logs = serde_json::from_str(logs).unwrap();
+                    let page: lc_world::knowledge::Logs = lc_proto::decode(logs).unwrap();
                     copy.copy_logs(&page.logs);
                     for subject in page.retained {
                         copy.retain_raw(subject, true);
@@ -966,7 +1013,7 @@ mod tests {
             pages += 1;
             assert!(body.len() <= PAGE_BYTES, "a page of {} bytes", body.len());
         }
-        assert!(pages > 16, "it took pages, not one message: {pages}");
+        assert!(pages > 8, "it took pages, not one message: {pages}");
         let original = server.knowledge_of(ship).unwrap();
         assert!(original.own_series(watched, em_spectra::Band::V).unwrap().len() > 40_000, "a log longer than a page");
         assert_eq!(copy.len(), original.len(), "every file arrived");
@@ -1048,6 +1095,45 @@ mod tests {
         }
         let belief = new.knowledge_of(near).and_then(|k| k.belief(secret).cloned()).expect("it landed after the restart");
         assert!(belief.learned_s > now_s + 3_000.0, "when its light got there: {}", belief.learned_s);
+    }
+
+    /// A report carrying an infinite error lands; as JSON it could not be read back.
+    #[tokio::test]
+    async fn a_reported_orbit_with_an_unbounded_error_is_filed_by_its_receiver() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.load_world(World::new(sky()));
+        let mut wire = Loopback::new();
+        let (near, far) = (ShipId(40), ShipId(41));
+        server.admit(ClientId(1), crate::world::still(near, DVec3::ZERO), 0.0);
+        server.admit(ClientId(2), crate::world::still(far, DVec3::X * 1.0e6), 0.0);
+        let star = sky()[0].id;
+        let subject = Subject::Body { star, body: lc_world::knowledge::BodyId::of(star, "loose") };
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        server.aboard(CraftId(far.0)).knowledge.orbits(
+            subject,
+            lc_world::knowledge::Orbit {
+                witness: witness(CraftId(far.0)),
+                about: None,
+                period_s: (3.0e7, f64::INFINITY),
+                semi_major_au: (1.0, f64::INFINITY),
+                eccentricity: Some((0.1, f64::NAN)),
+                orientation: lc_world::knowledge::Orientation::Unknown,
+                epoch_s: Some(0.0),
+                method: lc_world::knowledge::Method::Astrometric,
+                stated_s: now_s,
+                lineage: Vec::new(),
+            },
+        );
+        let report = Order::SendReport { to: Some(near), aim: lc_proto::Aim::Omni, secrecy: lc_proto::Secrecy::Open, idem: 4 };
+        wire.client_says(ClientId(2), act(far, report));
+        // A light-second apart, and a tick is minutes of coordinate time.
+        for _ in 0..3 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let held = server.knowledge_of(near).and_then(|k| k.file(subject)).expect("the report landed");
+        let orbit = held.orbits().first().expect("with its orbit");
+        assert_eq!(orbit.semi_major_au.1, f64::INFINITY);
+        assert_eq!(orbit.lineage.len(), 1, "heard, not measured");
     }
 
     /// A tick with a hundred craft sweeping, each holding ten thousand files. A timing, not a
@@ -1172,5 +1258,109 @@ mod tests {
         if let Some((took, files, bytes)) = checkpointed {
             eprintln!("worst checkpoint snapshot {took:?}: {files} files, {bytes} bytes");
         }
+    }
+
+    /// What the instruments are at is said at most once a second, only when it changed, and only
+    /// about subjects the craft holds: naming any other would leak what it has not found.
+    #[tokio::test]
+    async fn what_the_instruments_are_at_is_said_once_a_second_and_only_about_what_is_held() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let star = sky()[0].id;
+        let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
+        wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
+        let ticks = 5 * crate::server::TICKS_PER_SECOND as usize;
+        let mut said = Vec::new();
+        for _ in 0..ticks {
+            server.tick(&mut wire).await.unwrap();
+            said.extend(wire.take(ClientId(1)).into_iter().filter(|m| matches!(m, Outbound::Doing { .. })));
+        }
+        assert!(!said.is_empty(), "a surveying craft said nothing of what it was doing");
+        assert!(said.len() <= 6, "{} in five seconds", said.len());
+        assert!(said.windows(2).all(|pair| pair[0] != pair[1]), "the same thing said twice");
+
+        let knowledge = server.knowledge_of(ship).unwrap();
+        let observed: Vec<Subject> = said
+            .iter()
+            .filter_map(|m| match m {
+                Outbound::Doing { observing, .. } => observing.map(Subject::from),
+                _ => None,
+            })
+            .collect();
+        assert!(observed.iter().any(|s| matches!(s, Subject::Body { .. })), "never a body: {observed:?}");
+        for subject in observed {
+            assert!(knowledge.file(subject).is_some(), "named {subject:?}, which the craft does not hold");
+        }
+    }
+
+    /// The client's Analyze count comes from the shard, and reaches zero.
+    #[tokio::test]
+    async fn an_analysis_counts_down_to_nothing_on_the_client() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let mut heard = Vec::new();
+        let run = async |server: &mut Server<Memory>, wire: &mut Loopback, ticks: usize, heard: &mut Vec<u32>| {
+            for _ in 0..ticks {
+                server.tick(wire).await.unwrap();
+                heard.extend(wire.take(ClientId(1)).into_iter().filter_map(|m| match m {
+                    Outbound::Analyzing { left } => Some(left),
+                    _ => None,
+                }));
+            }
+        };
+        let sweep = lc_proto::Duty::Sweep { center: [0.0, 0.0, 1.0], radius_rad: 3.2, dwell_s: 60.0, started_s: 0.0 };
+        wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty: sweep, integration_s: 1.0e4 }));
+        run(&mut server, &mut wire, 200, &mut heard).await;
+        // Three logs, since a tick reads one and a count that is gone by the end of its tick is
+        // never said.
+        for star in &sky()[1..] {
+            let stare = lc_proto::Duty::Stare { star: star.id.get() };
+            wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty: stare, integration_s: 1.0e4 }));
+            run(&mut server, &mut wire, 100, &mut heard).await;
+        }
+        assert!(heard.is_empty(), "nothing to say until the count changes: {heard:?}");
+
+        wire.client_says(ClientId(1), act(ship, Order::Analyze));
+        run(&mut server, &mut wire, 100, &mut heard).await;
+        assert!(heard.iter().any(|&left| left > 0), "the analysis was never counted: {heard:?}");
+        assert_eq!(heard.last(), Some(&0), "the count never reached zero: {heard:?}");
+    }
+
+    /// An orbit with an infinite error reaches the client; as JSON the page could not be read
+    /// back, and the mark had already moved past it.
+    #[test]
+    fn an_unbounded_error_crosses_the_wire() {
+        let star = sky()[0].id;
+        let subject = lc_world::knowledge::Subject::Body { star, body: lc_world::knowledge::BodyId::of(star, "loose") };
+        let mut knowledge = Knowledge::new(witness(CraftId(1)));
+        knowledge.orbits(
+            subject,
+            lc_world::knowledge::Orbit {
+                witness: witness(CraftId(1)),
+                about: None,
+                period_s: (3.0e7, f64::INFINITY),
+                semi_major_au: (1.0, f64::INFINITY),
+                eccentricity: Some((0.1, f64::NAN)),
+                orientation: lc_world::knowledge::Orientation::Unknown,
+                epoch_s: Some(0.0),
+                method: lc_world::knowledge::Method::Astrometric,
+                stated_s: 10.0,
+                lineage: Vec::new(),
+            },
+        );
+        let (report, _) = knowledge.report_upto(Mark::default(), 20.0, PAGE);
+        let Some(Outbound::Learned { report }) =
+            lc_proto::decode(&lc_proto::encode(&Outbound::Learned { report: lc_proto::encode(&report) })).ok()
+        else {
+            panic!("the message did not survive the wire")
+        };
+        let mut copy = Knowledge::new(witness(CraftId(1)));
+        copy.absorb(&lc_proto::decode(&report).expect("a page the client can read"));
+        let held = copy.file(subject).expect("the body arrived").orbits().first().expect("its orbit arrived").clone();
+        assert_eq!(held.semi_major_au.1, f64::INFINITY);
     }
 }
