@@ -250,12 +250,12 @@ graph LR
 
 ### F2 · Placement
 
-- status: todo
+- status: done #72
 - needs: F1
 - touches: `crates/lc-world/src/form/place.rs`
 - read: 29 §Placement is relative
 - deliver: every part's transform in the ship's frame, from the tree: attached (the anchor ray's last exit from the parent's surface, twist, tilt, standoff) and enclosing (centered on the parent), with mirrored subtrees.
-- done when: an attached child touches its parent at the anchor for every primitive pair, a child moves out with its parent when the parent grows, and a torus's child hangs off the rim.
+- done when: an attached child touches its parent at the anchor for every primitive pair (a torus child, whose foot is the center of its hole, lies tangent to the anchor's plane), a child moves out with its parent when the parent grows, and a torus's child hangs off the rim.
 
 ### F3 · Distance field
 
