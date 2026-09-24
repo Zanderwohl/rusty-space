@@ -566,6 +566,14 @@ impl Craft {
         }
     }
 
+    /// Take energy out of storage, down to empty and no further.
+    pub fn drain(&mut self, joules: f64, now_s: f64) {
+        self.settle(now_s);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.drain(joules);
+        }
+    }
+
     /// Begin rebuilding toward `target`. Refused while under way, and when it cannot be done.
     pub fn begin_refit(
         &mut self,
@@ -650,6 +658,18 @@ impl Craft {
             craft.solve_patch(now_s);
         });
         Some(at)
+    }
+
+    /// [`Craft::teleport`] onto a straight line: at `at_ly` moving at `beta`, in `system` or in
+    /// none. What a craft put beside one that is not holding a station is given.
+    pub fn teleport_drifting(&mut self, system: Option<Arc<LocalSystem>>, at_ly: DVec3, beta: DVec3, now_s: f64) {
+        self.remember(now_s, true, |craft| {
+            craft.system = system;
+            craft.motion.position_ly = at_ly;
+            craft.motion.beta = beta;
+            craft.motion.set_adrift(now_s);
+            craft.solve_patch(now_s);
+        });
     }
 
     /// Whether any stretch it still remembers was flown in `system`, the current one included.

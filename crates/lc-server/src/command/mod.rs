@@ -5,6 +5,7 @@
 //! queued when it arrives and run at one point in the tick, after the intents, and its answer
 //! goes to the connection that sent it. See `lightcone/docs/27-console.md`.
 
+mod chart;
 mod fitting;
 mod parse;
 mod spec;
@@ -51,7 +52,7 @@ pub const COMMANDS: &[Spec] = &[
             ArgSpec {
                 name: "target",
                 kind: Kind::Id,
-                need: Need::Required,
+                need: Need::Optional,
                 level: Level::DEBUG,
                 help: "a star's catalog id or a body's id",
             },
@@ -71,6 +72,13 @@ pub const COMMANDS: &[Spec] = &[
                 need: Need::Optional,
                 level: Level::DEBUG,
                 help: "the star the body belongs to",
+            },
+            ArgSpec {
+                name: "beside",
+                kind: Kind::Id,
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "a ship's id, to be put beside it instead of a target",
             },
             ArgSpec {
                 name: "ship",
@@ -127,6 +135,41 @@ pub const COMMANDS: &[Spec] = &[
             need: Need::Optional,
             level: Level::ADMIN,
             help: "the ship to finish; default your own",
+        }],
+    },
+    Spec {
+        name: "drain",
+        verb: Verb::Drain,
+        level: Level::DEBUG,
+        summary: "take energy out of a ship's storage, down to empty",
+        args: &[
+            ArgSpec {
+                name: "amount",
+                kind: Kind::Number(&[Limit { level: Level::DEBUG, min: 0.0, max: 1.0e9 }]),
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "energy in ME; default all of it",
+            },
+            ArgSpec {
+                name: "ship",
+                kind: Kind::Id,
+                need: Need::Optional,
+                level: Level::ADMIN,
+                help: "the ship to drain; default your own",
+            },
+        ],
+    },
+    Spec {
+        name: "chart",
+        verb: Verb::Chart,
+        level: Level::DEBUG,
+        summary: "learn every body's orbit in a system, as the charting office would have it",
+        args: &[ArgSpec {
+            name: "star",
+            kind: Kind::Id,
+            need: Need::Optional,
+            level: Level::DEBUG,
+            help: "the star whose system to chart; default the one you are in",
         }],
     },
     Spec {
@@ -269,6 +312,14 @@ impl<J: Journal> Server<J> {
             Verb::Energize => {
                 let ship = self.ship_named(command.from, &args)?;
                 self.energize(ship, args.number("amount"), wire)
+            }
+            Verb::Drain => {
+                let ship = self.ship_named(command.from, &args)?;
+                self.drain(ship, args.number("amount"), wire)
+            }
+            Verb::Chart => {
+                let ship = self.owned_by(command.from).ok_or("you have no ship")?;
+                self.chart(ship, args.id("star"))
             }
             Verb::RefitMagic => {
                 let ship = self.ship_named(command.from, &args)?;

@@ -1,6 +1,7 @@
 use glam::DVec3;
 use lc_proto::{ClientId, Inbound, Outbound, Presence, ShipId, Sighting, kind};
 use lc_world::craft::{Craft, CraftId, Kind as Hull};
+use lc_world::navigation::Waypoint;
 use lc_world::sky::{AuthoredStars, CatalogStar, StarProvider};
 
 use super::*;
@@ -109,6 +110,7 @@ async fn debug_acts_on_its_own_ship_and_admins_on_anyone_s() {
         "energize ship:2".into(),
         "refit-finish ship:2".into(),
         "refit-magic ship:2".into(),
+        "drain ship:2".into(),
     ] {
         let (mut server, mut wire) = shard(Level::DEBUG);
         let (ok, why) = ask(&mut server, &mut wire, 1, &line).await;
@@ -238,6 +240,111 @@ async fn refit_magic_replaces_a_refit_under_way() {
     // Storage shrank, and what it holds with it.
     let (stored, capacity) = held(&server);
     assert!(stored <= capacity + 1e-9, "{stored} of {capacity}");
+}
+
+#[tokio::test]
+async fn drain_takes_what_is_asked_and_never_below_empty() {
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    emptied(&mut server);
+    assert!(ask(&mut server, &mut wire, 1, "energize 5 ship:2").await.0);
+    let (ok, why) = ask(&mut server, &mut wire, 2, "drain 2 ship:2").await;
+    assert!(ok, "{why}");
+    let (stored, _) = held(&server);
+    assert!((stored - 3.0).abs() < 1e-3, "{stored}: {why}");
+    assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+
+    let (ok, why) = ask(&mut server, &mut wire, 3, "drain amount:1e6 ship:2").await;
+    assert!(ok, "{why}");
+    assert!(held(&server).0 < 1e-3, "an overdraw left {}", held(&server).0);
+}
+
+#[tokio::test]
+async fn drain_with_no_amount_empties_the_ship() {
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    emptied(&mut server);
+    assert!(ask(&mut server, &mut wire, 1, "energize ship:2").await.0);
+    assert!(held(&server).0 > 1.0, "premise: something to drain");
+    let (ok, why) = ask(&mut server, &mut wire, 2, "drain ship:2").await;
+    assert!(ok, "{why}");
+    assert!(held(&server).0 < 1e-3, "{why}");
+}
+
+/// Charting the system the ship is in, and one it is not, leaves bodies it can place; between
+/// the stars it has to be told which.
+#[tokio::test]
+async fn chart_hands_a_craft_a_system_it_can_place() {
+    let far = stars()[2].id;
+    let (mut server, mut wire) = shard(Level::DEBUG);
+    let (ok, why) = ask(&mut server, &mut wire, 1, &format!("chart star:{}", far.get())).await;
+    assert!(ok, "{why}");
+    let now_s = server.now_t() as f64 * 1.0e-6;
+    let bodies = server.aboard(CraftId(1)).knowledge.bodies_of(far, now_s);
+    assert!(!bodies.is_empty(), "{why}");
+    assert!(
+        bodies.iter().all(|b| matches!(b.position_now, lc_world::knowledge::body::Placed::Known { .. })),
+        "a charted body was not placed",
+    );
+
+    let home = stars()[0].id;
+    let (ok, why) = ask(&mut server, &mut wire, 2, "chart").await;
+    assert!(ok && why.contains(&format!("{:#x}", home.get())), "{why}");
+
+    // A player has no such command.
+    let (mut server, mut wire) = shard(Level::PLAYER);
+    let (ok, why) = ask(&mut server, &mut wire, 1, "chart").await;
+    assert!(!ok && why.starts_with("no command"), "{why}");
+}
+
+fn gap_m(server: &Server<Memory>) -> f64 {
+    let t = server.now_t() as f64;
+    let at = |id| server.fleet.get(CraftId(id)).unwrap().position_at(t);
+    at(1).distance(at(2)) * lc_spacetime::LIGHT_MICROSECOND_M
+}
+
+/// Beside a ship holding an orbit is on that orbit, a standoff ahead, and stays there.
+#[tokio::test]
+async fn beside_a_ship_on_station_is_on_its_orbit() {
+    let far = stars()[2].id.get();
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    assert!(ask(&mut server, &mut wire, 1, &format!("teleport {far} altitude:5 ship:2")).await.0);
+    let (ok, why) = ask(&mut server, &mut wire, 2, "teleport beside:2").await;
+    assert!(ok, "{why}");
+
+    let (me, them) = (server.fleet.get(CraftId(1)).unwrap(), server.fleet.get(CraftId(2)).unwrap());
+    let standoff = lc_world::pursuit::standoff_m(me.length_m, them.length_m);
+    let (lc_world::motion::Motive::Holding(Waypoint::Orbit(mine)), lc_world::motion::Motive::Holding(Waypoint::Orbit(theirs))) =
+        (&me.motion.motive, &them.motion.motive)
+    else {
+        panic!("not both holding orbits: {why}");
+    };
+    assert_eq!((mine.radius_m, mine.pole), (theirs.radius_m, theirs.pole));
+    for _ in 0..5 {
+        let gap = gap_m(&server);
+        assert!((gap - standoff).abs() < 0.01 * standoff, "{gap} m apart, wanted {standoff}");
+        server.tick(&mut wire).await.unwrap();
+    }
+}
+
+/// Beside a ship that is not on station is a standoff to one side, moving as it moves.
+#[tokio::test]
+async fn beside_a_drifting_ship_moves_with_it() {
+    let (mut server, mut wire) = shard(Level::DEBUG);
+    let (ok, why) = ask(&mut server, &mut wire, 1, "teleport beside:2").await;
+    assert!(ok, "{why}");
+    let (me, them) = (server.fleet.get(CraftId(1)).unwrap(), server.fleet.get(CraftId(2)).unwrap());
+    let standoff = lc_world::pursuit::standoff_m(me.length_m, them.length_m);
+    let gap = gap_m(&server);
+    assert!((gap - standoff).abs() < 0.01 * standoff, "{gap} m apart, wanted {standoff}");
+
+    for (line, why) in [
+        ("teleport beside:1", "itself"),
+        ("teleport 1 beside:2", "not both"),
+        ("teleport", "is required"),
+        ("teleport beside:2 star:1", "goes with a target"),
+    ] {
+        let (ok, said) = ask(&mut server, &mut wire, 9, line).await;
+        assert!(!ok && said.contains(why), "{line}: {said}");
+    }
 }
 
 #[tokio::test]

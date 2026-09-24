@@ -5,8 +5,8 @@ and the shard parses it, checks it against the asker's level, runs it at a fixed
 tick and answers the connection that sent it. The client knows nothing about any command. Code
 is `lc_server::command` and `lc_client::console`.
 
-Status: **built** — `help`, `teleport`, `where`, `energize`, `refit-finish`, `refit-magic`,
-`stage`.
+Status: **built** — `help`, `teleport`, `where`, `energize`, `drain`, `chart`, `refit-finish`,
+`refit-magic`, `stage`.
 
 ## Why text on the wire
 
@@ -62,7 +62,8 @@ reason `ability::allows` opens development there: the population is whoever ran 
 `energize` and `stage` sit at the levels the old `Inbound::Grant` and `Inbound::Stage` are allowed
 at, and a test holds the two tables to each other.
 
-`teleport`, `energize`, `refit-finish` and `refit-magic` act on the asker's own ship from debug (3).
+`teleport`, `energize`, `drain`, `refit-finish` and `refit-magic` act on the asker's own ship from
+debug (3).
 Their `ship:` argument, which names any ship, starts at admin (2), so admins and superadmins act
 on anyone's.
 
@@ -78,7 +79,22 @@ flown, and nothing it does is re-solved by a pursuit before the tick is out.
 ship, and an amount past what fits tops it off at capacity rather than being refused. The ship's
 account is settled first, so "what fits" counts everything collected and spent up to now.
 
-## Finish-refit
+## Drain
+
+`drain [amount:<ME>] [ship:<id>]` is `energize` the other way: with no amount it empties the ship,
+and an amount past what it holds empties it rather than being refused. It can take energy a
+flight in progress had committed; the flight goes on, and its account reads empty.
+
+## Chart
+
+`chart [star:<id>]` hands the asker's own craft a whole system as the charting office would have
+it: the star's place, and every bound body's orbit exact and fully oriented as it stands now,
+moons about their planets. Without `star:` it is the system the craft is in. They are claims on
+`CHARTS`' word, so the craft's own fits outrank them as soon as it has any. Sizes, spins, colors
+and what kind of body each is are not charted: no orbit says them. `lc_world`'s
+`observatory::chart_system` is the mechanism.
+
+## Refit-finish
 
 `refit-finish [ship:<id>]` completes a refit under way now: the target loadout, and the energy the
 remaining steps would have taken. Only the time is skipped, so the crew's upkeep over it is not
@@ -98,11 +114,18 @@ shard's own parser, so the two cannot drift.
 
 ## Teleport
 
-`teleport <target> [altitude:2] [star:<id>] [ship:<id>]` puts a ship on an equatorial orbit of
-a star or body at once. The target is a star's catalog id, or a body's `BodyId`. A body is
+`teleport [target:<id>] [altitude:2] [star:<id>] [beside:<id>] [ship:<id>]` puts a ship on an
+equatorial orbit of a star or body at once, or beside another ship. The target is a star's catalog id, or a body's `BodyId`. A body is
 looked for only in systems already loaded, unless `star:` says which. Loading every star's
 system to search would generate the whole catalog in one tick. `where` prints the ids. It
 never prints names: the generator's keys must not reach a player.
+
+`beside:` names a ship instead of a target, and puts the mover where an intercept at company would
+leave it. Beside a ship holding an orbit, that is the same orbit a standoff ahead, so the two stay
+together. Otherwise it is a standoff across the other's direction of travel, drifting at its
+velocity, which holds only until the other ship does something. The shard places it by where the
+other ship *is*, not where it appears to be: a teleport is by fiat and answers to nothing an
+observer could see.
 
 Moving somebody else's ship takes `ship:`. The burn-attribution
 concern in `ability.rs` does not arise here. A teleport's events are kinds no order produces, so

@@ -490,6 +490,11 @@ impl Fitting {
         self.stored_j = (self.stored_j + joules.max(0.0)).min(capacity.max(self.stored_j));
     }
 
+    /// Take energy away, as far as there is any. Settle first.
+    pub fn drain(&mut self, joules: f64) {
+        self.stored_j = (self.stored_j - joules.max(0.0)).max(0.0);
+    }
+
     /// Begin a refit. Settle first; the caller has already checked it plans.
     pub fn begin_refit(&mut self, refit: Refit) {
         self.refit = Some(refit);

@@ -33,6 +33,8 @@ pub enum Verb {
     Teleport,
     Where,
     Energize,
+    Drain,
+    Chart,
     RefitMagic,
     RefitFinish,
     Stage,
