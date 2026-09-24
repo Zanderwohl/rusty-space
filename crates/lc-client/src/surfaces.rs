@@ -881,6 +881,46 @@ mod tests {
         assert_eq!(manifest.look_for("Mercury", Surface::Rock, false, false), None);
     }
 
+    /// giant.tgraph's masks bake as the CPU evaluates them. texture-graph's two evaluators part
+    /// outside `[0, 1]` -- the GPU clamps a Map's value and the CPU does not, and the CPU caps a
+    /// Multiply at one and the GPU does not -- and a graph that strays there looks right in every
+    /// CPU test here and wrong on screen. Skipped without a GPU.
+    #[test]
+    fn the_giant_bakes_as_it_evaluates() {
+        use lc_world::giant::{self, Inputs};
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let Ok(device) = runtime.block_on(DeviceCtx::request_headless()) else {
+            eprintln!("no GPU; the giant was not baked");
+            return;
+        };
+        let mut baker = Baker::new(device.clone());
+        let g = graph(&manifest().giants.unwrap().graph);
+        let paint = giant::of("Jupiter", &Inputs::from_tags(Surface::GasGiant, 1.898e27, 6.99e7, 122.0, 0.0, 5772.0, Some(35_730.0), &[]));
+        let mut ctx = EvalCtx { seed: seed_of("Jupiter"), ..EvalCtx::default() };
+        for (k, v) in giant_params(&paint) {
+            ctx.params.insert(k.into(), v);
+        }
+        let resolved = g.resolve_params(&ctx);
+        // Fine enough that the palette a Map bakes beside the faces resolves its narrowest ramp.
+        const FACE: u32 = 256;
+        const STEP: u32 = 16;
+        for name in GIANT_MASKS {
+            let layer = g.layers.iter().find(|l| l.name == name).unwrap().id;
+            let cube = baker.bake_scalar_cube(&g, layer, FACE, ScalarFormat::R32Float, &ctx).unwrap();
+            let img = texture_graph_gpu::read_scalar_volume(&device, &cube.texture, (FACE, FACE, 6), ScalarFormat::R32Float);
+            for face in 0..6 {
+                for y in (STEP / 2..FACE).step_by(STEP as usize) {
+                    for x in (STEP / 2..FACE).step_by(STEP as usize) {
+                        let (u, v) = ((x as f32 + 0.5) / FACE as f32, (y as f32 + 0.5) / FACE as f32);
+                        let want = eval::evaluate(&g, layer, cube_sample(face, u, v), &resolved).l;
+                        let got = img.value(x, y, face).unwrap();
+                        assert!((got - want).abs() < 0.03, "{name} on face {face} at ({x}, {y}): {got} against {want}");
+                    }
+                }
+            }
+        }
+    }
+
     /// What giant.tgraph covers with each layer, as body_surface.wgsl's `layers` weighs its masks,
     /// is what `Giant::shares` says it covers: the survey reads a giant's disc through those
     /// shares, so a graph that drew more belt than it says would be measured as another color.

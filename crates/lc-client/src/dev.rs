@@ -46,9 +46,10 @@ pub struct DevEntry {
     /// The angle `--at` stands at between the star and itself, seen from the body, degrees.
     /// Past ninety it is looking at the night side.
     pub phase_deg: Option<f64>,
-    /// Dress the `--at` body in the climate of a generated planet, by its name: `--wear "Wolf 359
-    /// c"`. Its surface, clouds and air are derived exactly as that planet's would be; only the
-    /// sphere they are drawn on is borrowed. A generated system is otherwise a crossing away.
+    /// Dress the `--at` body in the climate of a generated planet, or a generated giant's paint,
+    /// by its name: `--wear "Wolf 359 c"`. Its surface, clouds and air are derived exactly as that
+    /// planet's would be; only the sphere they are drawn on is borrowed. A generated system is
+    /// otherwise a crossing away.
     pub wear: Option<String>,
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
@@ -242,9 +243,10 @@ pub(crate) fn run_dev_actions(
     }
 }
 
-/// The climate a generated planet named `name` has, under its own star, from the stars whose
-/// name it begins with.
-fn generated_climate(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<lc_world::climate::Climate> {
+/// What a generated planet named `name` is painted with, under its own star, from the stars
+/// whose name it begins with: a climate if it is a rocky world with air, a giant's paint if it is
+/// a giant, and the world a survey would read of it.
+fn generated_paint(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<Worn> {
     use lc_world::climate::{Inputs, derived, variety};
     stars
         .iter()
@@ -259,8 +261,15 @@ fn generated_climate(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option
                 life: Some(p.life),
                 star_teff_k: s.star.teff_k,
             };
-            derived(&inputs, variety(&p.name))
+            Some(Worn { climate: derived(&inputs, variety(&p.name)), giant: p.giant(s), world: p.world(s) })
         })
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Worn {
+    climate: Option<lc_world::climate::Climate>,
+    giant: Option<lc_world::giant::Giant>,
+    world: lc_world::worlds::World,
 }
 
 /// See [`DevEntry::wear`]. Every frame, because the bodies are rebuilt every frame; after them
@@ -269,20 +278,22 @@ pub(crate) fn dress_worn(
     dev: Res<DevEntry>,
     game: Res<Game>,
     mut bodies: ResMut<crate::starfield::Bodies>,
-    mut worn: Local<Option<Option<lc_world::climate::Climate>>>,
+    mut worn: Local<Option<Option<Worn>>>,
 ) {
     let (Some(name), Some(at)) = (&dev.wear, &dev.at_body) else { return };
-    let climate = *worn.get_or_insert_with(|| {
-        let found = generated_climate(&game.stars, name);
+    let paint = *worn.get_or_insert_with(|| {
+        let found = generated_paint(&game.stars, name).filter(|w| w.climate.is_some() || w.giant.is_some());
         match &found {
-            Some(c) => info!("wearing {name}: {c:?}"),
-            None => warn!("no generated planet with air is named {name}"),
+            Some(w) => info!("wearing {name}: {w:?}"),
+            None => warn!("no generated planet with air or a giant is named {name}"),
         }
         found
     });
-    let Some(climate) = climate else { return };
+    let Some(paint) = paint else { return };
     if let Some(body) = bodies.drawn.iter_mut().find(|d| &d.name == at) {
-        body.climate = Some(climate);
+        body.climate = paint.climate;
+        body.giant = paint.giant;
+        body.world = paint.world;
     }
 }
 

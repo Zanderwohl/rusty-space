@@ -63,7 +63,7 @@ pub struct Giant {
 
 /// What the graph is painted with, Oklch `(L, C, hue in degrees)`: each layer's reflectance in the
 /// natural mapping, plus [`Colors::tint`], a belt stained twice as deep, which the graph puts in
-/// some belts and the great spots.
+/// some belts and the great spots. Raised to how a giant is seen: see [`look`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Colors {
     pub zone: [f32; 3],
@@ -293,7 +293,9 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Giant {
     // Scaled by Jupiter's own metals, so Jupiter's belts are what the constants say.
     // Below about 80 K the top deck is hydrogen sulfide over the ammonia, and nothing stains it.
     let stained_deck = smooth(60.0, 110.0, t);
-    let stain = 0.6 * (0.6 + 0.8 * a) * photochemistry * (x / 4.0).sqrt().min(2.5) * (ammonia * stained_deck + 0.35 * water);
+    // Capped: past about three Jupiters' worth a belt is as dark and red as a stain makes it.
+    let stain = (0.6 * (0.6 + 0.8 * a) * photochemistry * (x / 4.0).sqrt().min(2.5) * (ammonia * stained_deck + 0.35 * water))
+        .min(1.5);
     // Clear gas over a sunken deck scatters blue before the deck is reached.
     let gas = (0.15 * (sink - 1.0)).clamp(0.0, 0.5);
     // What the deep gas absorbs of the light that goes down to a sunken deck and back.
@@ -337,7 +339,7 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Giant {
     let belt = layer(Part { deck: Deck::Belt, depth: 1.0, stain: 1.0, haze: 0.0 });
     let tint = layer(Part { deck: Deck::Belt, depth: 1.0, stain: 2.2, haze: 0.0 });
     let spot = f32::from(h < 0.35) * (0.4 + 0.6 * e);
-    let storm = layer(Part { deck: Deck::Full, depth: 0.08, stain: 0.08 + 2.0 * spot, haze: 0.0 });
+    let storm = layer(Part { deck: Deck::Full, depth: 0.08, stain: 0.08 + 1.2 * spot, haze: 0.0 });
     // Polar haze is made by the ultraviolet and the aurora; far out there is little of either.
     let polar = layer(Part { deck: Deck::Zone, depth: 0.6, stain: 0.6, haze: 0.6 * photochemistry.min(1.0) });
 
@@ -361,12 +363,16 @@ pub fn derived(inputs: &Inputs, variety: Variety) -> Giant {
 
     Giant {
         layers: [zone, belt, storm, polar],
-        colors: Colors {
-            zone: display(&zone),
-            belt: display(&belt),
-            tint: display(&tint),
-            storm: display(&storm),
-            polar: display(&polar),
+        colors: {
+            let zone_c = display(&zone);
+            Colors {
+                zone: painted(look(zone_c, zone_c)),
+                belt: painted(look(display(&belt), zone_c)),
+                tint: painted(look(display(&tint), zone_c)),
+                // Chroma only: a stained oval darkened further went black.
+                storm: painted(look(display(&storm), [0.0; 3])),
+                polar: painted(look(display(&polar), zone_c)),
+            }
         },
         bands,
         contrast,
@@ -383,11 +389,47 @@ fn smooth(a: f64, b: f64, x: f64) -> f32 {
     (t * t * (3.0 - 2.0 * t)) as f32
 }
 
-/// A reflectance run as the natural mapping shows it, `(R, V, B)` on red, green and blue, in
-/// Oklch. A cubemap is sRGB, so it cannot carry more than one; nothing here reflects more.
+/// A reflectance run as the natural mapping puts it, `(R, V, B)` on red, green and blue, in
+/// Oklch: as a photograph balanced to white light would show it.
 pub fn display(r: &[f32; BANDS]) -> [f32; 3] {
-    let rgb = [r[Band::R.index()], r[Band::V.index()], r[Band::B.index()]].map(|c| c.clamp(0.0, 1.0));
-    oklch(rgb)
+    oklch([r[Band::R.index()], r[Band::V.index()], r[Band::B.index()]].map(|c| c.clamp(0.0, 1.0)))
+}
+
+/// A color to paint so that under the Sun it is seen as `seen`.
+///
+/// The natural mapping's Sun is not white: R is the widest of its three bands, so sunlight comes
+/// out `(1.37, 1, 1.04)`, and a pale cyan Uranus painted as it measures was drawn lavender. So the
+/// paint is divided by it at the same brightness, and a giant under the Sun looks as a balanced
+/// photograph of it does. Under another star it takes that star's color from the light.
+fn painted(seen: [f32; 3]) -> [f32; 3] {
+    let sun = [Band::R, Band::V, Band::B].map(|b| em_spectra::blackbody::band_radiance(b, 5772.0) as f32);
+    let luma = 0.2126 * sun[0] + 0.7152 * sun[1] + 0.0722 * sun[2];
+    let rgb = linear(seen);
+    oklch(std::array::from_fn(|c| (rgb[c] * luma / sun[c]).clamp(0.0, 1.0)))
+}
+
+/// A color as a giant is seen rather than as it measures. Jupiter's belts are within a few
+/// hundredths of gray and a tenth of a stop from its zones, and every photograph of it raises
+/// both, so the eye expects them raised: chroma more than doubled, short of neon, and a darker
+/// layer taken two and a half times as far below the `zone`, which is what shows in a surface's tone window. Only the cubemap is raised. The layers'
+/// spectra stay as measured, so every other band mapping and the survey see the true ratios.
+fn look([l, c, h]: [f32; 3], [zone_l, ..]: [f32; 3]) -> [f32; 3] {
+    let l = if l < zone_l { zone_l + 2.5 * (l - zone_l) } else { l };
+    // A dark color raised as far reads as neon: the cap falls with lightness.
+    [l.max(0.0), (2.4 * c).min(c.max(0.2 * l.min(0.85))), h]
+}
+
+/// Oklch to linear sRGB, after Ottosson.
+fn linear([l, c, h]: [f32; 3]) -> [f32; 3] {
+    let (a, b) = (c * h.to_radians().cos(), c * h.to_radians().sin());
+    let l_ = (l + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+    let m_ = (l - 0.105_561_346 * a - 0.063_854_17 * b).powi(3);
+    let s_ = (l - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+    [
+        4.076_741_7 * l_ - 3.307_711_6 * m_ + 0.230_969_94 * s_,
+        -1.268_438 * l_ + 2.609_757_4 * m_ - 0.341_319_38 * s_,
+        -0.004_196_086_3 * l_ - 0.703_418_6 * m_ + 1.707_614_7 * s_,
+    ]
 }
 
 /// Linear sRGB to Oklch, after Ottosson.
@@ -407,7 +449,7 @@ fn oklch([r, g, b]: [f32; 3]) -> [f32; 3] {
 fn measured(id: &str, derived: Giant) -> Option<Giant> {
     Some(match id {
         // Many bands, strongly stained belts, and the spot.
-        "Jupiter" => Giant { bands: 5.7, contrast: 0.9, turbulence: 0.9, storms: 0.7, spot: 1.0, shift: 0.0, ..derived },
+        "Jupiter" => Giant { bands: 5.7, contrast: 0.9, turbulence: 0.9, storms: 0.45, spot: 1.0, shift: 0.0, ..derived },
         // The same chemistry under more haze: butterscotch, broad and faint.
         "Saturn" => Giant { bands: 4.5, contrast: 0.35, turbulence: 0.3, storms: 0.1, spot: 0.0, ..derived },
         // Nearly featureless.
@@ -443,6 +485,12 @@ mod tests {
 
     fn ratio(r: [f64; BANDS], over: Band, under: Band) -> f64 {
         r[over.index()] / r[under.index()]
+    }
+
+    /// A belt's R over B: how deep its stain is.
+    fn redness(g: &Giant) -> f32 {
+        let belt = g.layers[Layer::Belt as usize];
+        belt[Band::R.index()] / belt[Band::B.index()]
     }
 
     /// The rule, given the four giants' masses, temperatures and the Sun, comes out the colors
@@ -523,7 +571,7 @@ mod tests {
         let (poor, rich) = (at(-1.0), at(0.4));
         let k = |g: &Giant| g.reflectance()[Band::K.index()];
         assert!(k(&rich) < 0.8 * k(&poor), "{} {}", k(&rich), k(&poor));
-        assert!(rich.colors.belt[1] > poor.colors.belt[1], "richer belts are more colored");
+        assert!(redness(&rich) > redness(&poor), "richer belts are redder");
         assert!(metals(JUPITER_MASS, true, 0.0) > 0.5 && metals(16.0 * EARTH_MASS, false, 0.0) > 1.6);
         assert!(metals(16.0 * EARTH_MASS, true, 0.0) < 1.1, "a runaway is diluted however small");
     }
@@ -534,7 +582,7 @@ mod tests {
         let at = |teff: f64| {
             let mut i = inputs("Jupiter");
             i.star_teff_k = teff;
-            derived(&i, variety("x")).colors.belt[1]
+            redness(&derived(&i, variety("x")))
         };
         assert!(at(7000.0) > at(5772.0) && at(5772.0) > at(3500.0));
     }
@@ -565,5 +613,7 @@ mod tests {
     fn a_gray_is_its_own_lightness() {
         let [l, c, _] = oklch([0.5, 0.5, 0.5]);
         assert!((l - 0.5f32.cbrt()).abs() < 1e-3 && c < 1e-3);
+        let back = linear(oklch([0.6, 0.3, 0.1]));
+        assert!(back.iter().zip([0.6, 0.3, 0.1]).all(|(a, b)| (a - b).abs() < 1e-3), "{back:?}");
     }
 }

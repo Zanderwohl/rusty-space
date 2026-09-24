@@ -95,9 +95,15 @@ impl Planet {
     /// `system::LocalSystem` makes from the body `to_universe` names this, which keys its
     /// variation on the name.
     pub fn world(&self, star: &crate::sky::CatalogStar) -> crate::worlds::World {
-        use crate::surface::Surface;
-        let surface = Surface::classify(self.radius_m, self.mass_kg, self.equilibrium_k);
-        let giant = surface.is_banded().then(|| {
+        let surface = crate::surface::Surface::classify(self.radius_m, self.mass_kg, self.equilibrium_k);
+        let tags = crate::worlds::Stated::tags(self.atmosphere, self.top, self.class == Class::GasGiant);
+        crate::worlds::of(&self.name, surface, &tags, self.giant(star).as_ref())
+    }
+
+    /// Its paint under `star`, if it is a giant.
+    pub fn giant(&self, star: &crate::sky::CatalogStar) -> Option<crate::giant::Giant> {
+        let surface = crate::surface::Surface::classify(self.radius_m, self.mass_kg, self.equilibrium_k);
+        surface.is_banded().then(|| {
             let inputs = crate::giant::Inputs {
                 mass_kg: self.mass_kg,
                 radius_m: self.radius_m,
@@ -110,9 +116,7 @@ impl Planet {
                 spin_s: Some(self.spin_s),
             };
             crate::giant::of(&self.name, &inputs)
-        });
-        let tags = crate::worlds::Stated::tags(self.atmosphere, self.top, self.class == Class::GasGiant);
-        crate::worlds::of(&self.name, surface, &tags, giant.as_ref())
+        })
     }
 }
 

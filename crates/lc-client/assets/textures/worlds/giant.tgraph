@@ -599,7 +599,7 @@ TextureGraphFile(
                     a: Some(7),
                     b: Some(6),
                     mode: Blend,
-                    factor: Const(-0.1),
+                    factor: Const(-0.4),
                     space: Oklch,
                 )),
             ),
@@ -620,7 +620,7 @@ TextureGraphFile(
                 kind: ColorRamp(ColorRamp(
                     stops: [
                         ColorStop(
-                            t: 0.98,
+                            t: 0.83,
                             color: Const(Oklch(
                                 l: 0.0,
                                 chroma: 0.0,
@@ -629,7 +629,7 @@ TextureGraphFile(
                             )),
                         ),
                         ColorStop(
-                            t: 1.02,
+                            t: 0.87,
                             color: Const(Oklch(
                                 l: 1.0,
                                 chroma: 0.0,
@@ -701,7 +701,7 @@ TextureGraphFile(
                 kind: ColorRamp(ColorRamp(
                     stops: [
                         ColorStop(
-                            t: 0.87,
+                            t: 0.72,
                             color: Const(Oklch(
                                 l: 0.0,
                                 chroma: 0.0,
@@ -710,7 +710,7 @@ TextureGraphFile(
                             )),
                         ),
                         ColorStop(
-                            t: 1.0,
+                            t: 0.85,
                             color: Const(Oklch(
                                 l: 1.0,
                                 chroma: 0.0,
@@ -890,7 +890,7 @@ TextureGraphFile(
                 kind: Noise(Noise(
                     dims: D3,
                     seed_offset: 7,
-                    frequency: 7.0,
+                    frequency: 14.0,
                     range: Unsigned,
                     output: Grayscale,
                     kernel: Simplex,
@@ -1059,205 +1059,11 @@ TextureGraphFile(
             ),
             Layer(
                 id: 86,
-                name: "spot x reach",
-                kind: Mix(Mix(
-                    a: Some(7),
-                    b: Some(85),
-                    mode: Blend,
-                    factor: Const(11.111111),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 87,
-                name: "spot x squared",
-                kind: Mix(Mix(
-                    a: Some(86),
-                    b: Some(86),
-                    mode: Multiply,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 88,
-                name: "spot y center",
-                kind: Color(Oklch(
-                    l: 0.3126967,
-                    chroma: 0.0,
-                    hue: OklabHue(0.0),
-                    alpha: 1.0,
-                )),
-            ),
-            Layer(
-                id: 89,
-                name: "spot y ahead",
-                kind: Mix(Mix(
-                    a: Some(3),
-                    b: Some(88),
-                    mode: Subtract,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 90,
-                name: "spot y behind",
-                kind: Mix(Mix(
-                    a: Some(88),
-                    b: Some(3),
-                    mode: Subtract,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 91,
-                name: "spot y off",
-                kind: MinMax(MinMax(
-                    a: Some(89),
-                    b: Some(90),
-                    mode: Max,
-                    criterion: Luma,
-                )),
-            ),
-            Layer(
-                id: 92,
-                name: "spot y reach",
-                kind: Mix(Mix(
-                    a: Some(7),
-                    b: Some(91),
-                    mode: Blend,
-                    factor: Const(22.222221),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 93,
-                name: "spot y squared",
-                kind: Mix(Mix(
-                    a: Some(92),
-                    b: Some(92),
-                    mode: Multiply,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 94,
-                name: "spot z center",
-                kind: Color(Oklch(
-                    l: 0.5,
-                    chroma: 0.0,
-                    hue: OklabHue(0.0),
-                    alpha: 1.0,
-                )),
-            ),
-            Layer(
-                id: 95,
-                name: "spot z ahead",
-                kind: Mix(Mix(
-                    a: Some(4),
-                    b: Some(94),
-                    mode: Subtract,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 96,
-                name: "spot z behind",
-                kind: Mix(Mix(
-                    a: Some(94),
-                    b: Some(4),
-                    mode: Subtract,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 97,
-                name: "spot z off",
-                kind: MinMax(MinMax(
-                    a: Some(95),
-                    b: Some(96),
-                    mode: Max,
-                    criterion: Luma,
-                )),
-            ),
-            Layer(
-                id: 98,
-                name: "spot z reach",
-                kind: Mix(Mix(
-                    a: Some(7),
-                    b: Some(97),
-                    mode: Blend,
-                    factor: Const(7.692308),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 99,
-                name: "spot z squared",
-                kind: Mix(Mix(
-                    a: Some(98),
-                    b: Some(98),
-                    mode: Multiply,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 100,
-                name: "spot reach partial 1",
-                kind: Mix(Mix(
-                    a: Some(87),
-                    b: Some(93),
-                    mode: Add,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 101,
-                name: "spot reach partial 2",
-                kind: Mix(Mix(
-                    a: Some(100),
-                    b: Some(99),
-                    mode: Add,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 102,
-                name: "spot reach term 3",
-                kind: Mix(Mix(
-                    a: Some(7),
-                    b: Some(16),
-                    mode: Blend,
-                    factor: Const(0.5),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 103,
-                name: "spot reach",
-                kind: Mix(Mix(
-                    a: Some(101),
-                    b: Some(102),
-                    mode: Add,
-                    factor: Const(0.0),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 104,
-                name: "spot outside ramp",
+                name: "spot x reach ramp",
                 kind: ColorRamp(ColorRamp(
                     stops: [
                         ColorStop(
-                            t: 0.95,
+                            t: 0.0,
                             color: Const(Oklch(
                                 l: 0.0,
                                 chroma: 0.0,
@@ -1266,7 +1072,7 @@ TextureGraphFile(
                             )),
                         ),
                         ColorStop(
-                            t: 1.2,
+                            t: 0.09,
                             color: Const(Oklch(
                                 l: 1.0,
                                 chroma: 0.0,
@@ -1279,47 +1085,346 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 105,
-                name: "spot outside",
+                id: 87,
+                name: "spot x reach",
                 kind: Map(Map(
-                    value: Some(103),
-                    palette: Some(104),
+                    value: Some(85),
+                    palette: Some(86),
+                )),
+            ),
+            Layer(
+                id: 88,
+                name: "spot x squared",
+                kind: Mix(Mix(
+                    a: Some(87),
+                    b: Some(87),
+                    mode: Multiply,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 89,
+                name: "spot y center",
+                kind: Color(Oklch(
+                    l: 0.3126967,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 90,
+                name: "spot y ahead",
+                kind: Mix(Mix(
+                    a: Some(3),
+                    b: Some(89),
+                    mode: Subtract,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 91,
+                name: "spot y behind",
+                kind: Mix(Mix(
+                    a: Some(89),
+                    b: Some(3),
+                    mode: Subtract,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 92,
+                name: "spot y off",
+                kind: MinMax(MinMax(
+                    a: Some(90),
+                    b: Some(91),
+                    mode: Max,
+                    criterion: Luma,
+                )),
+            ),
+            Layer(
+                id: 93,
+                name: "spot y reach ramp",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.0,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.045,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 94,
+                name: "spot y reach",
+                kind: Map(Map(
+                    value: Some(92),
+                    palette: Some(93),
+                )),
+            ),
+            Layer(
+                id: 95,
+                name: "spot y squared",
+                kind: Mix(Mix(
+                    a: Some(94),
+                    b: Some(94),
+                    mode: Multiply,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 96,
+                name: "spot z center",
+                kind: Color(Oklch(
+                    l: 0.5,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 97,
+                name: "spot z ahead",
+                kind: Mix(Mix(
+                    a: Some(4),
+                    b: Some(96),
+                    mode: Subtract,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 98,
+                name: "spot z behind",
+                kind: Mix(Mix(
+                    a: Some(96),
+                    b: Some(4),
+                    mode: Subtract,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 99,
+                name: "spot z off",
+                kind: MinMax(MinMax(
+                    a: Some(97),
+                    b: Some(98),
+                    mode: Max,
+                    criterion: Luma,
+                )),
+            ),
+            Layer(
+                id: 100,
+                name: "spot z reach ramp",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.0,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.13,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 101,
+                name: "spot z reach",
+                kind: Map(Map(
+                    value: Some(99),
+                    palette: Some(100),
+                )),
+            ),
+            Layer(
+                id: 102,
+                name: "spot z squared",
+                kind: Mix(Mix(
+                    a: Some(101),
+                    b: Some(101),
+                    mode: Multiply,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 103,
+                name: "spot reach term 0",
+                kind: Mix(Mix(
+                    a: Some(7),
+                    b: Some(88),
+                    mode: Blend,
+                    factor: Const(0.25),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 104,
+                name: "spot reach term 1",
+                kind: Mix(Mix(
+                    a: Some(7),
+                    b: Some(95),
+                    mode: Blend,
+                    factor: Const(0.25),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 105,
+                name: "spot reach partial 1",
+                kind: Mix(Mix(
+                    a: Some(103),
+                    b: Some(104),
+                    mode: Add,
+                    factor: Const(0.0),
+                    space: Oklch,
                 )),
             ),
             Layer(
                 id: 106,
-                name: "spot inside",
+                name: "spot reach term 2",
                 kind: Mix(Mix(
-                    a: Some(8),
-                    b: Some(7),
+                    a: Some(7),
+                    b: Some(102),
                     mode: Blend,
-                    factor: Layer(105),
+                    factor: Const(0.25),
                     space: Oklch,
                 )),
             ),
             Layer(
                 id: 107,
+                name: "spot reach partial 2",
+                kind: Mix(Mix(
+                    a: Some(105),
+                    b: Some(106),
+                    mode: Add,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 108,
+                name: "spot reach term 3",
+                kind: Mix(Mix(
+                    a: Some(7),
+                    b: Some(16),
+                    mode: Blend,
+                    factor: Const(0.12),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 109,
+                name: "spot reach",
+                kind: Mix(Mix(
+                    a: Some(107),
+                    b: Some(108),
+                    mode: Add,
+                    factor: Const(0.0),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 110,
+                name: "spot outside ramp",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.28,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.33,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 111,
+                name: "spot outside",
+                kind: Map(Map(
+                    value: Some(109),
+                    palette: Some(110),
+                )),
+            ),
+            Layer(
+                id: 112,
+                name: "spot inside",
+                kind: Mix(Mix(
+                    a: Some(8),
+                    b: Some(7),
+                    mode: Blend,
+                    factor: Layer(111),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 113,
                 name: "great spot",
                 kind: Mix(Mix(
                     a: Some(7),
-                    b: Some(106),
+                    b: Some(112),
                     mode: Blend,
                     factor: Param("spot"),
                     space: Oklch,
                 )),
             ),
             Layer(
-                id: 108,
+                id: 114,
                 name: "storm",
                 kind: MinMax(MinMax(
                     a: Some(81),
-                    b: Some(107),
+                    b: Some(113),
                     mode: Max,
                     criterion: Luma,
                 )),
             ),
             Layer(
-                id: 109,
+                id: 115,
                 name: "zone color palette",
                 kind: ColorRamp(ColorRamp(
                     stops: [
@@ -1336,7 +1441,7 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 110,
+                id: 116,
                 name: "zone color lookup",
                 kind: Color(Oklch(
                     l: 0.5,
@@ -1346,15 +1451,15 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 111,
+                id: 117,
                 name: "zone color",
                 kind: Map(Map(
-                    value: Some(110),
-                    palette: Some(109),
+                    value: Some(116),
+                    palette: Some(115),
                 )),
             ),
             Layer(
-                id: 112,
+                id: 118,
                 name: "belt color palette",
                 kind: ColorRamp(ColorRamp(
                     stops: [
@@ -1371,7 +1476,7 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 113,
+                id: 119,
                 name: "belt color lookup",
                 kind: Color(Oklch(
                     l: 0.5,
@@ -1381,15 +1486,15 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 114,
+                id: 120,
                 name: "belt color",
                 kind: Map(Map(
-                    value: Some(113),
-                    palette: Some(112),
+                    value: Some(119),
+                    palette: Some(118),
                 )),
             ),
             Layer(
-                id: 115,
+                id: 121,
                 name: "tint color palette",
                 kind: ColorRamp(ColorRamp(
                     stops: [
@@ -1406,7 +1511,7 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 116,
+                id: 122,
                 name: "tint color lookup",
                 kind: Color(Oklch(
                     l: 0.5,
@@ -1416,15 +1521,15 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 117,
+                id: 123,
                 name: "tint color",
                 kind: Map(Map(
-                    value: Some(116),
-                    palette: Some(115),
+                    value: Some(122),
+                    palette: Some(121),
                 )),
             ),
             Layer(
-                id: 118,
+                id: 124,
                 name: "storm color palette",
                 kind: ColorRamp(ColorRamp(
                     stops: [
@@ -1441,7 +1546,7 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 119,
+                id: 125,
                 name: "storm color lookup",
                 kind: Color(Oklch(
                     l: 0.5,
@@ -1451,15 +1556,15 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 120,
+                id: 126,
                 name: "storm color",
                 kind: Map(Map(
-                    value: Some(119),
-                    palette: Some(118),
+                    value: Some(125),
+                    palette: Some(124),
                 )),
             ),
             Layer(
-                id: 121,
+                id: 127,
                 name: "polar haze color palette",
                 kind: ColorRamp(ColorRamp(
                     stops: [
@@ -1476,7 +1581,7 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 122,
+                id: 128,
                 name: "polar haze color lookup",
                 kind: Color(Oklch(
                     l: 0.5,
@@ -1486,15 +1591,15 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 123,
+                id: 129,
                 name: "polar haze color",
                 kind: Map(Map(
-                    value: Some(122),
-                    palette: Some(121),
+                    value: Some(128),
+                    palette: Some(127),
                 )),
             ),
             Layer(
-                id: 124,
+                id: 130,
                 name: "staining",
                 kind: Noise(Noise(
                     dims: D3,
@@ -1514,7 +1619,7 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 125,
+                id: 131,
                 name: "stained ramp",
                 kind: ColorRamp(ColorRamp(
                     stops: [
@@ -1541,81 +1646,81 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 126,
+                id: 132,
                 name: "stained",
                 kind: Map(Map(
-                    value: Some(124),
-                    palette: Some(125),
+                    value: Some(130),
+                    palette: Some(131),
                 )),
             ),
             Layer(
-                id: 127,
+                id: 133,
                 name: "tint amount",
                 kind: Mix(Mix(
                     a: Some(7),
-                    b: Some(126),
+                    b: Some(132),
                     mode: Blend,
                     factor: Layer(71),
                     space: Oklch,
                 )),
             ),
             Layer(
-                id: 128,
+                id: 134,
                 name: "banded",
                 kind: Mix(Mix(
-                    a: Some(111),
-                    b: Some(114),
+                    a: Some(117),
+                    b: Some(120),
                     mode: Blend,
                     factor: Layer(71),
                     space: LinearSrgb,
                 )),
             ),
             Layer(
-                id: 129,
+                id: 135,
                 name: "tinted",
                 kind: Mix(Mix(
-                    a: Some(128),
-                    b: Some(117),
+                    a: Some(134),
+                    b: Some(123),
                     mode: Blend,
-                    factor: Layer(127),
+                    factor: Layer(133),
                     space: LinearSrgb,
                 )),
             ),
             Layer(
-                id: 130,
+                id: 136,
                 name: "oval color",
                 kind: Mix(Mix(
-                    a: Some(120),
-                    b: Some(117),
+                    a: Some(126),
+                    b: Some(123),
                     mode: Blend,
-                    factor: Layer(107),
+                    factor: Layer(113),
                     space: LinearSrgb,
                 )),
             ),
             Layer(
-                id: 131,
+                id: 137,
                 name: "stormed",
                 kind: Mix(Mix(
-                    a: Some(129),
-                    b: Some(130),
+                    a: Some(135),
+                    b: Some(136),
                     mode: Blend,
-                    factor: Layer(108),
+                    factor: Layer(114),
                     space: LinearSrgb,
                 )),
             ),
             Layer(
-                id: 132,
+                id: 138,
                 name: "color",
                 kind: Mix(Mix(
-                    a: Some(131),
-                    b: Some(123),
+                    a: Some(137),
+                    b: Some(129),
                     mode: Blend,
                     factor: Layer(57),
                     space: LinearSrgb,
                 )),
             ),
             Layer(
-                id: 133,
+                id: 139,
                 name: "roughness",
                 kind: Color(Oklch(
                     l: 0.8,
@@ -1758,6 +1863,12 @@ TextureGraphFile(
             131,
             132,
             133,
+            134,
+            135,
+            136,
+            137,
+            138,
+            139,
         ],
         canvases: {
             "main": Canvas(
@@ -1846,61 +1957,67 @@ TextureGraphFile(
                     83: (260.0, 1800.0),
                     84: (260.0, 1950.0),
                     85: (520.0, 1200.0),
-                    86: (780.0, 450.0),
-                    87: (1040.0, 450.0),
-                    88: (0.0, 3600.0),
-                    89: (260.0, 2100.0),
-                    90: (260.0, 2250.0),
-                    91: (520.0, 1350.0),
-                    92: (780.0, 600.0),
-                    93: (1040.0, 600.0),
-                    94: (0.0, 3750.0),
-                    95: (260.0, 2400.0),
-                    96: (260.0, 2550.0),
-                    97: (520.0, 1500.0),
-                    98: (780.0, 750.0),
-                    99: (1040.0, 750.0),
-                    100: (1300.0, 600.0),
-                    101: (1560.0, 450.0),
-                    102: (260.0, 2700.0),
-                    103: (1820.0, 300.0),
-                    104: (0.0, 3900.0),
-                    105: (2080.0, 600.0),
-                    106: (2340.0, 750.0),
-                    107: (2600.0, 300.0),
-                    108: (2860.0, 300.0),
-                    109: (0.0, 4050.0),
-                    110: (0.0, 4200.0),
-                    111: (260.0, 2850.0),
-                    112: (0.0, 4350.0),
-                    113: (0.0, 4500.0),
-                    114: (260.0, 3000.0),
-                    115: (0.0, 4650.0),
-                    116: (0.0, 4800.0),
-                    117: (260.0, 3150.0),
-                    118: (0.0, 4950.0),
-                    119: (0.0, 5100.0),
-                    120: (260.0, 3300.0),
-                    121: (0.0, 5250.0),
-                    122: (0.0, 5400.0),
-                    123: (260.0, 3450.0),
-                    124: (0.0, 5550.0),
-                    125: (0.0, 5700.0),
-                    126: (260.0, 3600.0),
-                    127: (4680.0, 0.0),
-                    128: (4680.0, 150.0),
-                    129: (4940.0, 0.0),
-                    130: (2860.0, 450.0),
-                    131: (5200.0, 0.0),
-                    132: (5460.0, 0.0),
-                    133: (0.0, 5850.0),
+                    86: (0.0, 3600.0),
+                    87: (780.0, 450.0),
+                    88: (1040.0, 450.0),
+                    89: (0.0, 3750.0),
+                    90: (260.0, 2100.0),
+                    91: (260.0, 2250.0),
+                    92: (520.0, 1350.0),
+                    93: (0.0, 3900.0),
+                    94: (780.0, 600.0),
+                    95: (1040.0, 600.0),
+                    96: (0.0, 4050.0),
+                    97: (260.0, 2400.0),
+                    98: (260.0, 2550.0),
+                    99: (520.0, 1500.0),
+                    100: (0.0, 4200.0),
+                    101: (780.0, 750.0),
+                    102: (1040.0, 750.0),
+                    103: (1300.0, 600.0),
+                    104: (1300.0, 750.0),
+                    105: (1560.0, 450.0),
+                    106: (1300.0, 900.0),
+                    107: (1820.0, 300.0),
+                    108: (260.0, 2700.0),
+                    109: (2080.0, 600.0),
+                    110: (0.0, 4350.0),
+                    111: (2340.0, 750.0),
+                    112: (2600.0, 300.0),
+                    113: (2860.0, 300.0),
+                    114: (3120.0, 300.0),
+                    115: (0.0, 4500.0),
+                    116: (0.0, 4650.0),
+                    117: (260.0, 2850.0),
+                    118: (0.0, 4800.0),
+                    119: (0.0, 4950.0),
+                    120: (260.0, 3000.0),
+                    121: (0.0, 5100.0),
+                    122: (0.0, 5250.0),
+                    123: (260.0, 3150.0),
+                    124: (0.0, 5400.0),
+                    125: (0.0, 5550.0),
+                    126: (260.0, 3300.0),
+                    127: (0.0, 5700.0),
+                    128: (0.0, 5850.0),
+                    129: (260.0, 3450.0),
+                    130: (0.0, 6000.0),
+                    131: (0.0, 6150.0),
+                    132: (260.0, 3600.0),
+                    133: (4680.0, 0.0),
+                    134: (4680.0, 150.0),
+                    135: (4940.0, 0.0),
+                    136: (3120.0, 450.0),
+                    137: (5200.0, 0.0),
+                    138: (5460.0, 0.0),
+                    139: (0.0, 6300.0),
                 },
                 output_pos: Some((5720.0, 0.0)),
             ),
         },
         output: Output(
-            color: Some(132),
-            roughness: Layer(133),
+            color: Some(138),
+            roughness: Layer(139),
             metallic: Const(0.0),
             normal: None,
         ),
@@ -2024,6 +2141,6 @@ TextureGraphFile(
                 description: Some("The bright high deck."),
             ),
         },
-        next_id: 134,
+        next_id: 140,
     ),
 )
