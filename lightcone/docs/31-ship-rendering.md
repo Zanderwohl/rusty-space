@@ -5,8 +5,7 @@ around all of it.
 
 **Status: designed, not built.** [28-ship-form.md](28-ship-form.md) is what is drawn,
 [29-the-field.md](29-the-field.md) is the field's physics, and [30-directed-energy.md](30-directed-energy.md)
-is what beams do. Today a hull is one ovoid with a gray planet material (`crates/lc-client/src/hull.rs`),
-and nothing about a refit shows.
+is what beams do.
 
 ## Two looks
 
@@ -122,8 +121,8 @@ with drone traffic streaming to it: a shipyard that is also the ship.
 Drones are **stateless particles**: each one's position is a closed-form function of its index, a
 seed and `t`, evaluated in the vertex shader over an instanced quad. That is the same rule as the
 hull: the picture is a function of the recipe and the clock. It also means no particle simulation
-to keep in step, and no dependency to check against Bevy 0.19 and the browser (WebGPU) build.
-`bevy_hanabi` was considered and is not needed for this.
+to keep in step, and no dependency such as `bevy_hanabi` to check against Bevy 0.19 and the browser
+(WebGPU) build.
 
 - **Count** follows drone volume, `particles_per_m3`, capped.
 - **Working:** arcs from the drone part's docks to points on the sliver, a dwell at the frontier,

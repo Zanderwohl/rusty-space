@@ -2,22 +2,19 @@
 
 What a ship is made of, what shape it is, and what it costs to change either.
 
-**Status: designed, not built.** This replaces the loadout of [19-ship-fitting.md](19-ship-fitting.md).
-Module counts and hull slots are gone: **a ship is its shapes**, and each shape's volume is how much
-of its kind the ship has. The energy, mass and drive rules of 19 are unchanged.
+**Status: designed, not built.** It replaces the loadout of [19-ship-fitting.md](19-ship-fitting.md):
+**a ship is its parts**, and each part's volume is how much of its kind the ship has. 19's energy,
+mass and drive rules stand.
 [29-the-field.md](29-the-field.md) and [30-directed-energy.md](30-directed-energy.md) are what the
 shape does in play, and [31-ship-rendering.md](31-ship-rendering.md) is how it is drawn.
 
-## Why shapes and not counts
+## Why parts
 
-The first version of this doc kept the loadout and had the form arrange it. That meant every edit
-was done twice: move a slider to have more of something, then place or resize a shape to hold it.
-Two sources of truth that the player had to keep in step. With the counts gone, the player builds
-what they want where they want it, and **energy is the only limit on what can be placed.**
+Module counts beside a form would be two sources of truth, and every edit would be made twice: once
+to the count, once to the shape holding it. Without counts, **energy is the only limit on what can be
+placed.**
 
-Placing individual blocks was never an option. A hull's volume goes as the cube of its length, so
-a 50 km GSV is a million times the volume of a 500 m ship. An editor has to work in parts a
-player can see.
+Blocks do not scale. A 50 km hull is a million times the volume of a 500 m one.
 
 ## Parts
 
@@ -39,8 +36,8 @@ machines might round differently. Each part alone is exact.
 
 ### Kinds
 
-Every kind but the Mind turns volume into a capacity at a density. The densities are converted
-from 19's per-module values over its 392 699 m³ slot, so the numbers a ship flies by are unchanged.
+Every kind but the Mind turns volume into a capacity at a density. Each density is 19's per-module
+value over its 392 699 m³ slot.
 
 | kind | per cubic meter | mass | notes |
 |---|---|---|---|
@@ -53,8 +50,7 @@ from 19's per-module values over its 392 699 m³ slot, so the numbers a ship fli
 | **bay** | a mouth, whose smaller dimension is the largest hull it can launch | a tenth | a shell with a procedural interior. After construction exists |
 | **spar** | nothing | a twentieth | structure for holding parts apart: cluster spokes, booms, straps. Conforms to what it touches; see below |
 
-Module density stays 395.8 kg/m³. **ME stays the unit of energy**, 1.397 × 10²⁵ J, which is what
-one 19-era module weighed. It no longer means anything but the number.
+Module density is 395.8 kg/m³. **ME is the unit of energy**, 1.397 × 10²⁵ J.
 
 **Every kind but drones may go to zero.** A ship with no engines cannot move and a ship with no
 storage holds nothing, and both are allowed. A ship with no drones could never refit again, so the
@@ -153,19 +149,19 @@ complete.
 | **moments of inertia** | the filled cells, weighted by each part's density | slew rate |
 | **extent** | the envelope's longest dimension | `length_m`: the camera, the zoom limits, `Presence` |
 
-**The shadow handles concave shapes**, which the ovoid formula could not. A stack of plates shades
+**The shadow handles concave shapes.** A stack of plates shades
 itself and collects about what one plate would. A ship spread out collects more and turns more
 slowly, because spreading out also raises its moment of inertia.
 
-The analytic ellipsoid `A(ŝ)` in `lc_world::solar` retires. Its tests turn around: a form that is one
-ellipsoid must reproduce it to within the grid's resolution.
+The shadow table replaces the analytic ellipsoid `A(ŝ)` in `lc_world::solar`. A form that is one ellipsoid must
+reproduce that formula to within the grid's resolution.
 
 ### Hull structure follows area
 
 Each part carries structure at `hull_areal_density` per square meter of **its own surface**, from its
 primitive's closed-form (or standard approximate) area, again ignoring overlaps. Flattening buys
 shadow, radiating area and room on the surface, and pays for them in mass, so in acceleration.
-`hull_areal_density` is anchored so the starting form weighs what today's starting ship does.
+`hull_areal_density` is anchored so the starting form weighs what 19's starting ship does.
 
 ### Placement rules
 
@@ -232,13 +228,12 @@ Flying and refitting still exclude each other, as in 19.
 ## The starting form
 
 - the Mind
-- **storage**, an ellipsoid at the old 5 : 3 : 1, enclosing the Mind: 2.36 × 10⁶ m³, 30 ME
+- **storage**, an ellipsoid at 5 : 3 : 1, enclosing the Mind: 2.36 × 10⁶ m³, 30 ME
 - **engines**, one frustum aft: 1.96 × 10⁶ m³, 5 g full
 - **drones**, a capsule under the keel: 7.85 × 10⁵ m³
 - **living**, a slab across the dorsal face, and **data**, a small capsule forward: one old slot each
 
-That is 19's starting loadout without the five empty slots, so the ship is about 9% shorter than
-today's. The anchors of 20 and 29 are re-derived from this form rather than kept at their old values.
+The anchors of 20 and 29 are derived from this form.
 
 The editor also offers **presets**, each rearranging the ship's current volumes:
 
@@ -262,8 +257,8 @@ for the reasons the map is not one ([07-rendering.md](07-rendering.md), [13-clie
 
 The sky takes the corner square, as in the map's mode. The clock does not stop.
 
-**The editor is where refits are made.** The refit window (`R`) loses its sliders and becomes the
-ledger: the budget, the three phases, progress, and Cancel.
+**The editor is where refits are made.** The refit window (`R`) is the ledger: the budget, the
+three phases, progress, and Cancel.
 
 ### The budget
 
@@ -355,7 +350,6 @@ photographs it, and `--form <preset>` stages a draft.
 | `envelope_margin` | 0.05 | the envelope's offset over the cube root of hull volume |
 | `engine_clear_half_angle` | 15° | |
 
-`recovery`, `drive_efficiency`, `module_density_kg_m3` and `data_work_factor` are unchanged.
 
 ## Where it goes
 

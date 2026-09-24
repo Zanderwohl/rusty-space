@@ -31,7 +31,7 @@ differ only in the source and the numbers.
 thrust it gives times c. The starting drive section, 1.96 × 10⁶ m³, is rated **1.1 × 10²⁰ W**,
 which is its 5 g. The rating bounds three things at once:
 
-- the drive's exhaust power, as today
+- the drive's exhaust power
 - anything the ship emits on purpose
 - conversion into storage, by reciprocity ([29-the-field.md](29-the-field.md))
 
@@ -59,7 +59,7 @@ exhaust comes from field heat first, and from storage only for what heat cannot 
   1.1 × 10²⁰ W, which empties a full field (10 ME) in about fifteen game days.
 - **Heat is mass**, as stored energy is. `mass_kg_at` counts `Q / c²`, and the rocket law is
   unchanged. Only the source of the exhaust changes.
-- **The commitment stays as it is.** A plan commits against storage when accepted, as today.
+- **The commitment is unchanged.** A plan commits against storage when accepted.
   Whatever heat supplies instead is refunded at settlement, through the same refund path that
   `CutDrive` uses. A plan's cost can only come out lower than it said.
 - The field's account gains a constant sink while lit: `dQ/dt = P_in − Q/τ − P_exhaust`, floored
@@ -203,9 +203,8 @@ announced it. Defense is posture beforehand, never reaction.
 
 A radio transmission is an emit through the **comms dish**, `Transmitter::SHIP`: 30 m at 3 cm. That
 is a separate aperture, not an engine, because a dish that talks should not also be a drive. Its
-power is `SIGNAL_POWER_W`, a megawatt. Its recoil is nothing. **It is now charged**, from storage,
-which closes an item left open in [19-ship-fitting.md](19-ship-fitting.md). At a megawatt, a year
-of transmitting is about 2 × 10⁻¹² ME.
+power is `SIGNAL_POWER_W`, a megawatt. Its recoil is nothing. It is charged from storage: a year of
+transmitting is about 2 × 10⁻¹² ME.
 
 `lc_world::signal`'s `Beam` and `Transmitter` are the geometry for all of it. What `Order::Emit`
 adds to radio is power large enough to matter and no message.

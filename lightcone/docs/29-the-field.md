@@ -77,9 +77,8 @@ What arrives is converted to storage at up to the **conversion rating**, at
 - **The rating is the engines'.** Engine volume is aperture ([30-directed-energy.md](30-directed-energy.md)),
   and what can send that much can take that much in. The starting drive section is rated
   1.1 × 10²⁰ W.
-- **`conversion_efficiency` is the old `solar_efficiency`**, 0.7, now applied to everything that
-  arrives. The 30% that solar collection always lost is now heat, which is where the sun-diving
-  limit comes from.
+- **`conversion_efficiency`**, 0.7, applies to everything that arrives, starlight included. The 30%
+  lost is heat, which is where the sun-diving limit comes from.
 - **Heat never converts back.** Once energy is in `Q`, it leaves by radiation, exhaust or collapse.
 - **Full storage converts nothing**, so everything that arrives becomes heat. A full ship is a
   hotter ship at the same distance.
@@ -96,7 +95,7 @@ is.
 
 | anchor | sets |
 |---|---|
-| **The starting ship, idle and far from any star, sits at 400 K.** Its living drain alone holds it there. That is today's `HULL_K`, now as a consequence | `q_idle` |
+| **The starting ship, idle and far from any star, sits at 400 K.** Its living drain alone holds it there, so `HULL_K`'s value is derived rather than set | `q_idle` |
 | **The starting ship's field holds 10 ME** from empty to collapse. The starting ship is [28-ship-form.md](28-ship-form.md)'s starting form | `field_capacity`, the capacity per unit envelope area |
 | **A full starting ship broadside at 0.05 AU from a Sun-like star is exactly at its rated load**: it would reach collapse only in the limit | `τ` |
 
@@ -139,7 +138,7 @@ rest. With the scaled ships of [20-solar-power.md](20-solar-power.md) (10% of vo
 | 5 km | 846 K | 3 240 K |
 | 50 km | 1 504 K | 3 273 K |
 
-At today's living drain, **square–cube shows up in the signature, not the survival limit.**
+At the default living drain, **square–cube shows up in the signature, not the survival limit.**
 Starlight and beams scale with shadow, the same as the field, so the sun-diving limit hardly moves
 with size. What moves is how brightly a ship glows at rest: a GSV at 1 500 K is visible in the
 near infrared to anyone looking, and it cannot go dark. The survival pressure will arrive with
@@ -247,7 +246,7 @@ infer from it:
 | `field_capacity` | *anchored*: 10 ME on the starting envelope | heat per m² of envelope at collapse |
 | `field_tau_s` | *anchored*: 1.84 × 10⁶ | the time constant |
 | `conversion_efficiency` | 0.7 | what arrives and is converted, over what is stored |
-| `field_albedo` | 0.35 | the old hull albedo, now the field's |
+| `field_albedo` | 0.35 | the field's reflectance |
 | `collapse_spike_fraction` | 0.9 | of `E`, released at once |
 | `collapse_spike_k` | 10⁷ | the spike's color temperature: X-rays |
 | `collapse_afterglow_s` | 30 game days | how long the rest takes |
@@ -268,8 +267,8 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 
 - **HUD:** field temperature, headroom as a bar, net heat flow, and **a countdown whenever a
   collapse is scheduled**. That is the one number a player must never have to compute.
-- **Refit panel:** the warning about vented storage becomes what the plan does to the field: the
-  peak temperature it reaches, and at which step. A plan that crosses `Q_max` shows it in red and
+- **Refit panel:** what the plan does to the field: the peak temperature it reaches, and at which
+  step. A plan that crosses `Q_max` shows it in red and
   asks once more before Apply. **It is not refused.** A player may choose to die.
 - **Flight:** a dive shows the equilibrium temperature at the destination, full and filling,
   before it is flown.
