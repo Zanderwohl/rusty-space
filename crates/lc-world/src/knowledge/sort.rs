@@ -17,8 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::sky::CatalogStar;
 use crate::sky::generate::architecture::Class;
 use crate::sky::generate::{disc, planets_of};
-use crate::surface::Surface;
-use crate::worlds::{Atmosphere, Stated, Top, World};
+use crate::worlds::{Atmosphere, Top, World};
 
 /// Stars sampled to build the prior. Beyond this the answer stops moving and the cost does not.
 const SORT_STARS: usize = 600;
@@ -238,7 +237,7 @@ impl Sorts {
         let mut drawn = Vec::new();
         for star in stars.iter().step_by(stride) {
             for planet in planets_of(star) {
-                drawn.push(Drawn::of(&planet));
+                drawn.push(Drawn::of(&planet, star));
             }
         }
         Self { drawn }
@@ -286,17 +285,10 @@ impl Sorts {
 }
 
 impl Drawn {
-    fn of(planet: &crate::sky::generate::Planet) -> Self {
+    fn of(planet: &crate::sky::generate::Planet, star: &CatalogStar) -> Self {
         let radius_earths = planet.radius_earths();
         let volume = 4.0 / 3.0 * std::f64::consts::PI * planet.radius_m.powi(3);
-        let surface = Surface::classify(planet.radius_m, planet.mass_kg, planet.equilibrium_k);
-        // The reflectance the body will actually have: `to_universe` names it this and
-        // `worlds::of` keys its variation on the name.
-        let world = crate::worlds::of(
-            &planet.name,
-            surface,
-            &Stated::tags(planet.atmosphere, planet.top, planet.class == Class::GasGiant),
-        );
+        let world = planet.world(star);
         Self {
             sort: Sort::of(planet.class, planet.atmosphere, planet.top, planet.equilibrium_k),
             radius_earths,
@@ -375,13 +367,9 @@ pub(crate) mod tests_support {
             .iter()
             .flat_map(|s| {
                 planets_of(s).into_iter().map(move |p| {
-                    let drawn = Drawn::of(&p);
+                    let drawn = Drawn::of(&p, s);
                     let volume = 4.0 / 3.0 * std::f64::consts::PI * p.radius_m.powi(3);
-                    let world = crate::worlds::of(
-                        &p.name,
-                        Surface::classify(p.radius_m, p.mass_kg, p.equilibrium_k),
-                        &Stated::tags(p.atmosphere, p.top, p.class == Class::GasGiant),
-                    );
+                    let world = p.world(s);
                     (
                         drawn.sort,
                         Measured::of(&world, p.radius_earths(), p.mass_kg / volume, p.equilibrium_k),
@@ -610,11 +598,7 @@ mod from_a_file {
 
         for planet in planets.iter().filter(|p| p.radius_earths() < 6.0) {
             let truth = Sort::of(planet.class, planet.atmosphere, planet.top, planet.equilibrium_k);
-            let world = crate::worlds::of(
-                &planet.name,
-                Surface::classify(planet.radius_m, planet.mass_kg, planet.equilibrium_k),
-                &Stated::tags(planet.atmosphere, planet.top, planet.class == Class::GasGiant),
-            );
+            let world = planet.world(&star);
 
             // What a file would hold: a radius, a mass, an orbit and per-band photometry.
             let mut colors = crate::knowledge::Colors::new(Witness(1));

@@ -8,7 +8,8 @@
 //!
 //! A rocky world with air -- anything [`lc_world::climate`] has a climate for -- takes the
 //! manifest's `[rocky]` graphs instead, with the graph's parameters bound from its climate: one
-//! graph for Earth, Mars and every world the generator makes between and beyond them.
+//! graph for Earth, Mars and every world the generator makes between and beyond them. A giant
+//! takes `[giants]`, bound from [`lc_world::giant`] the same way.
 //!
 //! A cloud deck's [`WEATHER`] is rebaked every [`CLOUD_PERIOD_S`] with a new seed and blended
 //! in body_surface.wgsl; its [`CLIMATE`] is baked once. Keyframes follow coordinate time, so
@@ -22,6 +23,7 @@ use bevy::asset::{AssetLoader, LoadContext, LoadState};
 use bevy::prelude::*;
 use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use lc_world::climate::Climate;
+use lc_world::giant::Giant;
 use lc_world::surface::Surface;
 use serde::Deserialize;
 use texture_graph_core::ParamValue;
@@ -64,6 +66,12 @@ pub struct SurfaceManifest {
     #[serde(default)]
     pub clouds: HashMap<String, String>,
     pub rocky: Option<Rocky>,
+    pub giants: Option<Giants>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Giants {
+    pub graph: String,
 }
 
 /// The graphs every rocky world with air is drawn from.
@@ -87,12 +95,19 @@ pub enum Ground<'a> {
 }
 
 impl SurfaceManifest {
-    /// A body named in the manifest takes its own graphs over anything a climate would give it.
-    pub fn look_for(&self, name: &str, class: Surface, climate: bool) -> Option<Look<'_>> {
-        if let (Some(rocky), true, false) = (&self.rocky, climate, self.bodies.contains_key(name)) {
+    /// A body named in the manifest takes its own graphs over a climate's or a giant's.
+    pub fn look_for(&self, name: &str, class: Surface, climate: bool, giant: bool) -> Option<Look<'_>> {
+        let named = self.bodies.contains_key(name);
+        if let (Some(rocky), true, false) = (&self.rocky, climate, named) {
             return Some(Look {
                 ground: Ground::Color(&rocky.ground),
                 clouds: Some(&rocky.clouds),
+            });
+        }
+        if let (Some(giants), true, false) = (&self.giants, giant, named) {
+            return Some(Look {
+                ground: Ground::Color(&giants.graph),
+                clouds: None,
             });
         }
         let ground = match self.bodies.get(name) {
@@ -161,7 +176,7 @@ pub struct BodyImages {
     pub color: Handle<Image>,
     pub weather: [Handle<Image>; 3],
     pub climate: Handle<Image>,
-    /// [`MASKS`], in order.
+    /// [`MASKS`] or [`GIANT_MASKS`], in order.
     pub masks: [Handle<Image>; 4],
 }
 
@@ -204,11 +219,16 @@ pub struct Drawn {
     pub clouds: bool,
     /// Whether the [`MASKS`] are baked, so each band can see its own ground.
     pub grounds: bool,
+    /// Whether the [`GIANT_MASKS`] are.
+    pub layers: bool,
 }
 
 /// rocky.tgraph's layers that say what its ground is made of, as body_surface.wgsl's `banded`
 /// mixes them: land over water, ice over everything, growth over dry land, sand over rock.
 pub const MASKS: [&str; 4] = ["land", "ice", "green", "sand amount"];
+
+/// giant.tgraph's layers, into the first three mask slots.
+pub const GIANT_MASKS: [&str; 3] = ["belt", "storm", "polar"];
 
 /// See [`BodySurfaceUniform`]'s `weather` and `drift`.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -228,6 +248,7 @@ struct Body {
     images: BodyImages,
     class: Surface,
     climate: Option<Climate>,
+    giant: Option<Giant>,
     /// `None` until the manifest has said.
     drawn: Option<Drawn>,
     deck: Option<Deck>,
@@ -262,6 +283,7 @@ impl Surfaces {
         name: &str,
         class: Surface,
         climate: Option<Climate>,
+        giant: Option<Giant>,
         images: &mut Assets<Image>,
     ) -> BodyImages {
         self.by_body
@@ -270,6 +292,7 @@ impl Surfaces {
                 images: BodyImages::placeholders(images),
                 class,
                 climate,
+                giant,
                 drawn: None,
                 deck: None,
             })
@@ -387,27 +410,32 @@ fn route(
         return;
     };
     for (name, body) in surfaces.by_body.iter_mut().filter(|(_, b)| b.drawn.is_none()) {
-        let Some(look) = manifest.look_for(name, body.class, body.climate.is_some()) else {
+        let Some(look) = manifest.look_for(name, body.class, body.climate.is_some(), body.giant.is_some()) else {
             warn!("no surface graph for {name} or its class, {:?}", body.class);
             body.drawn = Some(Drawn::default());
             continue;
         };
         let seed = seed_of(name);
         let graph = |path: &str| assets.load(format!("textures/{path}"));
-        let params = match (&manifest.rocky, body.climate) {
-            (Some(rocky), Some(climate)) if matches!(look.ground, Ground::Color(p) if p == rocky.ground) => {
-                ground_params(&climate)
+        let drawn_as = |graph: Option<&String>| {
+            graph.is_some_and(|g| matches!(look.ground, Ground::Color(p) if p == g))
+        };
+        let (params, masks): (Params, &[&str]) = match (body.climate, body.giant) {
+            (Some(climate), _) if drawn_as(manifest.rocky.as_ref().map(|r| &r.ground)) => {
+                (ground_params(&climate), &MASKS)
             }
-            _ => Params::new(),
+            (_, Some(giant)) if drawn_as(manifest.giants.as_ref().map(|g| &g.graph)) => {
+                (giant_params(&giant), &GIANT_MASKS)
+            }
+            _ => (Params::new(), &[]),
         };
         let mut bake = |path: &str, target, image: &Handle<Image>, params: Params| {
             bakes.request_with(graph(path), seed, params, target, image.clone());
         };
         let pattern = Target::new(Shape::Cube(FACE));
         let color = Target::new(Shape::Cube(COLOR_FACE)).color();
-        let grounds = !params.is_empty();
-        if let (Ground::Color(path), true) = (&look.ground, grounds) {
-            for (layer, image) in MASKS.into_iter().zip(&body.images.masks) {
+        if let Ground::Color(path) = &look.ground {
+            for (layer, image) in masks.iter().zip(&body.images.masks) {
                 bake(path, pattern.layer(layer), image, params.clone());
             }
         }
@@ -426,7 +454,8 @@ fn route(
         body.drawn = Some(Drawn {
             color: matches!(look.ground, Ground::Color(_)),
             clouds: look.clouds.is_some(),
-            grounds,
+            grounds: masks == MASKS,
+            layers: masks == GIANT_MASKS,
         });
     }
 }
@@ -503,6 +532,25 @@ fn ground_params(c: &Climate) -> Params {
         ("dark", scalar(c.dark)),
         ("foliage", color(c.foliage.low)),
         ("foliage high", color(c.foliage.high)),
+    ]
+}
+
+fn giant_params(g: &Giant) -> Params {
+    let scalar = ParamValue::Scalar;
+    let color = |[l, c, h]: [f32; 3]| ParamValue::Color(oklcha(l, c, h, 1.0));
+    vec![
+        ("bands", scalar(g.bands)),
+        ("contrast", scalar(g.contrast)),
+        ("turbulence", scalar(g.turbulence)),
+        ("storms", scalar(g.storms)),
+        ("polar", scalar(g.polar)),
+        ("shift", scalar(g.shift)),
+        ("spot", scalar(g.spot)),
+        ("zone", color(g.colors.zone)),
+        ("belt", color(g.colors.belt)),
+        ("tint", color(g.colors.tint)),
+        ("storm", color(g.colors.storm)),
+        ("polar color", color(g.colors.polar)),
     ]
 }
 
@@ -610,6 +658,17 @@ mod tests {
             let layer = ground.layers.iter().find(|l| l.name == name).unwrap_or_else(|| panic!("no mask {name}")).id;
             baker
                 .bake_scalar_cube(&ground, layer, 8, ScalarFormat::R8Unorm, &eval)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+        let giants = manifest.giants.as_ref().expect("giants are routed");
+        let giant = graph(&giants.graph);
+        baker
+            .bake_color_cube(&giant, 8, &eval)
+            .unwrap_or_else(|e| panic!("{}: {e}", giants.graph));
+        for name in GIANT_MASKS {
+            let layer = giant.layers.iter().find(|l| l.name == name).unwrap_or_else(|| panic!("no mask {name}")).id;
+            baker
+                .bake_scalar_cube(&giant, layer, 8, ScalarFormat::R8Unorm, &eval)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
         }
         for path in manifest.clouds.values().chain([&rocky.clouds]) {
@@ -795,27 +854,121 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            manifest.look_for("Kettle e", Surface::Weathered, true),
+            manifest.look_for("Kettle e", Surface::Weathered, true, false),
             Some(Look {
                 ground: Ground::Color("worlds/rocky.tgraph"),
                 clouds: Some("worlds/clouds.tgraph"),
             })
         );
         assert_eq!(
-            manifest.look_for("Earth", Surface::Weathered, true),
+            manifest.look_for("Earth", Surface::Weathered, true, false),
             Some(Look {
                 ground: Ground::Color("worlds/earthlike.tgraph"),
                 clouds: Some("worlds/earthlike-clouds.tgraph"),
             })
         );
         assert_eq!(
-            manifest.look_for("Mercury", Surface::Weathered, false),
+            manifest.look_for("Mercury", Surface::Weathered, false, false),
             Some(Look {
                 ground: Ground::Pattern("surfaces/weathered.tgraph"),
                 clouds: None,
             })
         );
-        assert_eq!(manifest.look_for("Mercury", Surface::Rock, false), None);
+        assert_eq!(manifest.look_for("Mercury", Surface::Rock, false, false), None);
+    }
+
+    /// giant.tgraph's masks bake as the CPU evaluates them. Outside `[0, 1]` texture-graph's GPU
+    /// clamps a Map's value and its CPU caps a Multiply, so a graph that strays there passes every
+    /// CPU test and draws wrong. Skipped without a GPU.
+    #[test]
+    fn the_giant_bakes_as_it_evaluates() {
+        use lc_world::giant::{self, Inputs};
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let Ok(device) = runtime.block_on(DeviceCtx::request_headless()) else {
+            eprintln!("no GPU; the giant was not baked");
+            return;
+        };
+        let mut baker = Baker::new(device.clone());
+        let g = graph(&manifest().giants.unwrap().graph);
+        let paint = giant::of("Jupiter", &Inputs::from_tags(Surface::GasGiant, 1.898e27, 6.99e7, 122.0, 0.0, 5772.0, Some(35_730.0), &[]));
+        let mut ctx = EvalCtx { seed: seed_of("Jupiter"), ..EvalCtx::default() };
+        for (k, v) in giant_params(&paint) {
+            ctx.params.insert(k.into(), v);
+        }
+        let resolved = g.resolve_params(&ctx);
+        // Coarser, a Map's baked palette smears the narrowest ramp.
+        const FACE: u32 = 256;
+        const STEP: u32 = 16;
+        for name in GIANT_MASKS {
+            let layer = g.layers.iter().find(|l| l.name == name).unwrap().id;
+            let cube = baker.bake_scalar_cube(&g, layer, FACE, ScalarFormat::R32Float, &ctx).unwrap();
+            let img = texture_graph_gpu::read_scalar_volume(&device, &cube.texture, (FACE, FACE, 6), ScalarFormat::R32Float);
+            for face in 0..6 {
+                for y in (STEP / 2..FACE).step_by(STEP as usize) {
+                    for x in (STEP / 2..FACE).step_by(STEP as usize) {
+                        let (u, v) = ((x as f32 + 0.5) / FACE as f32, (y as f32 + 0.5) / FACE as f32);
+                        let want = eval::evaluate(&g, layer, cube_sample(face, u, v), &resolved).l;
+                        let got = img.value(x, y, face).unwrap();
+                        assert!((got - want).abs() < 0.03, "{name} on face {face} at ({x}, {y}): {got} against {want}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// giant.tgraph covers what `Giant::shares` says, or the survey reads a giant as another color.
+    #[test]
+    fn a_giant_covers_what_its_paint_says() {
+        use lc_world::giant::{self, Inputs};
+        let g = graph(&manifest().giants.unwrap().graph);
+        let id = |name: &str| g.layers.iter().find(|l| l.name == name).unwrap().id;
+        let [belt, storm, polar] = GIANT_MASKS.map(id);
+        let jupiter = 1.898e27;
+        let cases = [
+            ("Jupiter", jupiter, 6.99e7, 122.0, 35_730.0),
+            ("Saturn", 5.68e26, 5.82e7, 90.0, 38_362.0),
+            ("Uranus", 8.68e25, 2.56e7, 64.0, 62_064.0),
+            ("Kettle b", jupiter, 8.0e7, 1100.0, 3.0 * 86_400.0),
+            ("Kettle c", 0.6 * jupiter, 6.5e7, 230.0, 14.0 * 3600.0),
+            ("Kettle d", 2.0 * jupiter, 7.0e7, 140.0, 8.0 * 3600.0),
+        ];
+        let mut misses = Vec::new();
+        for (name, mass, radius, eq, spin) in cases {
+            let class = if mass >= 2.0e26 { Surface::GasGiant } else { Surface::IceGiant };
+            let paint = giant::of(name, &Inputs::from_tags(class, mass, radius, eq, 0.0, 5772.0, Some(spin), &[]));
+            let mut ctx = EvalCtx { seed: seed_of(name), ..EvalCtx::default() };
+            for (k, v) in giant_params(&paint) {
+                ctx.params.insert(k.into(), v);
+            }
+            let ctx = g.resolve_params(&ctx);
+            let n = 24;
+            let (mut sums, mut area) = ([0.0f32; 4], 0.0);
+            for face in 0..6 {
+                for k in 0..n * n {
+                    let (u, v) = (((k % n) as f32 + 0.5) / n as f32, ((k / n) as f32 + 0.5) / n as f32);
+                    let s = cube_sample(face, u, v);
+                    // Solid angle: unweighted, the poles are undercounted.
+                    let [a, b] = [2.0 * u - 1.0, 2.0 * v - 1.0];
+                    let da = (1.0 + a * a + b * b).powf(-1.5);
+                    let mask = |layer| eval::evaluate(&g, layer, s, &ctx).l.clamp(0.0, 1.0);
+                    let (b, st, p) = (mask(belt), mask(storm), mask(polar));
+                    let open = (1.0 - st) * (1.0 - p);
+                    for (sum, w) in sums.iter_mut().zip([(1.0 - b) * open, b * open, st * (1.0 - p), p]) {
+                        *sum += w * da;
+                    }
+                    area += da;
+                }
+            }
+            let got = sums.map(|x| x / area);
+            let want = paint.shares();
+            eprintln!("{name}: {got:.3?} against {want:.3?}");
+            for (k, (g, w)) in got.iter().zip(want).enumerate() {
+                if (g - w).abs() > 0.03 {
+                    misses.push(format!("{name} layer {k}: {g:.3} against {w:.3}"));
+                }
+            }
+        }
+        assert!(misses.is_empty(), "{misses:#?}");
     }
 
     /// The share of rocky.tgraph's surface where `layer` is above a half, with `name` bound to
