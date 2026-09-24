@@ -55,9 +55,10 @@ impl Primitive {
         self.at(1.0).volume() * scale.powi(3)
     }
 
-    /// Exact to a few ulps, so the volume a client sends is the volume it gets back.
+    /// Exact to a few ulps, so the volume a client sends is the volume it gets back. `libm`, because
+    /// placement is built on it and the platform's `cbrt` differs in the last ulp.
     pub fn scale(&self, volume_m3: f64) -> f64 {
-        (volume_m3 / self.at(1.0).volume()).cbrt()
+        libm::cbrt(volume_m3 / self.at(1.0).volume())
     }
 
     pub fn area(&self, scale: f64) -> f64 {

@@ -115,18 +115,40 @@ Each part but the Mind hangs from a parent, and it is placed in one of two ways:
 |---|---|
 | `parent` | a part id |
 | `mount` | attached or enclosing. `Mount::Attached` carries `anchor` and `standoff`, so an enclosing part cannot have either |
-| `anchor` | attached only: a direction in the parent's frame. The attachment point is where a ray from the parent's center along it last leaves the parent's surface, so on a torus a child hangs off the rim |
+| `anchor` | attached only: a direction in the parent's frame. The attachment point is where a ray from the parent's center along it last leaves the parent's surface, so on a torus a child hangs off the rim. A ray that misses a torus's tube takes the point of the tube nearest it |
 | `twist` | rotation about the surface normal, or about the parent's axis when enclosing |
 | `tilt` | the child's axis relative to that normal or axis, as a small rotation: a two-component rotation vector across it, in radians |
-| `standoff` | attached only: distance along the normal, in multiples of the child's size. Negative embeds it |
+| `standoff` | attached only: distance along the normal, in multiples of the child's **reach**, the distance from its center to its foot. Zero rests the child on the surface, −1 centers it there, and negative embeds it |
 | `blend` | smooth-union radius with the parent, as a fraction of the smaller |
-| `mirror` | the subtree is repeated, reflected through the ship's port–starboard plane |
+| `mirror` | the subtree is repeated, reflected through the ship's port–starboard plane, y = 0 |
 
 An attached child's surface meets its parent's at the anchor, offset by `standoff`. When the parent
 grows, the anchor point moves out with its surface. When the child grows, it grows away from the
 parent.
 
-The Mind's frame is the ship's frame: its axis is the nose, `lc_world::motion::facing`.
+What meets the anchor is the child's **foot**: the end of its axis at −x, one **reach** from its
+center — the ellipsoid's first semi-axis, the capsule's half length plus its radius, half the slab's
+first edge, half the cylinder's or frustum's length, the torus's minor radius. On every primitive but
+the torus the foot is on its surface. A torus rests on its tube around the anchor, which sits in the
+middle of its hole. Tilt pivots the child about its foot, so a tilted boom leans from where it is
+bolted on rather than sliding its base across the parent. Reach is also the unit of `standoff`,
+because it is the length the placement is already made of: F1's scale means a different dimension on
+each primitive, and the extent along the normal would change under tilt.
+
+The Mind's frame is the ship's frame: its axis is the nose, `lc_world::motion::facing`. Space is
+Z-up, so the ship's z is up, its y is port, and the port–starboard plane a mirror reflects through is
+y = 0.
+
+**A mirrored copy keeps its part's id** and is named by `(PartId, Side)`, `Side::Original` or
+`Side::Mirror`. A part has a mirror when its own `mirror` or any ancestor's is set; a mirror inside a
+mirrored subtree adds nothing, since reflecting twice is the original. Refits, steps and animation
+name the part, and both copies change together. Every primitive is symmetric in its own y, so a
+mirrored copy is still a rigid transform: the reflection composed with that flip.
+
+**Placement is closed form**, so the server and every client compute it to the bit. A ray from a
+torus's center lies in a plane through its axis, which cuts the tube in two circles, so even its last
+exit is a quadratic; a rounded slab's is a quadratic on each of at most four pieces of the ray.
+Trigonometry is `libm`'s, as [06](06-crate-layout.md) §Shared determinism asks.
 
 **A part's axis is its local x**: a capsule's, cylinder's or frustum's length, a torus's axis of
 symmetry, an ellipsoid's first semi-axis and a slab's first edge. A frustum's first end is at −x.
@@ -355,7 +377,7 @@ the client, so tuning the feel is a data change:
 | proportions | ratios on the same series |
 | twist and tilt | 15°, and 5° with the modifier |
 | anchor | the parent's axes and their diagonals, and free with the modifier |
-| standoff | tenths of the child's size |
+| standoff | tenths of the child's reach |
 
 A ladder of ratios rather than fixed amounts means the same handle is fine on a 500 m ship and on a
 50 km one. The server never snaps anything. A console command or a hand-built target may ask for any

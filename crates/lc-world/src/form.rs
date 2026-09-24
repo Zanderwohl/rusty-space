@@ -70,7 +70,10 @@ pub enum Primitive {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Mount {
     /// On the parent's surface, where a ray from its center along `anchor` (parent frame) last
-    /// leaves it. `standoff` is along the normal in multiples of the child's size; negative embeds.
+    /// leaves it. `standoff` is along the normal in multiples of the child's [`Shape::reach`];
+    /// negative embeds.
+    ///
+    /// [`Shape::reach`]: primitive::Shape::reach
     Attached { anchor: DVec3, standoff: f64 },
     /// Centered on the parent and containing it.
     Enclosing,
@@ -89,7 +92,8 @@ pub struct Placement {
     pub tilt: DVec2,
     /// Smooth-union radius with the parent, as a fraction of the smaller part. Ignored at a spar.
     pub blend: f64,
-    /// Repeat the subtree reflected through the ship's port–starboard plane.
+    /// Repeat the subtree reflected through the ship's port–starboard plane, y = 0. The copies are
+    /// [`place::Side::Mirror`].
     pub mirror: bool,
 }
 
