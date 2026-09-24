@@ -48,6 +48,7 @@ pub struct DevEntry {
     pub phase_deg: Option<f64>,
     /// Dress the `--at` body as a generated planet, by its name: `--wear "Wolf 359 c"`. Only the
     /// sphere is borrowed; a generated system is otherwise a crossing away.
+    /// On an airless body a name no planet has is a seed for another airless look.
     pub wear: Option<String>,
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
@@ -257,7 +258,10 @@ fn generated_paint(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<W
                 life: Some(p.life),
                 star_teff_k: s.star.teff_k,
             };
-            Some(Worn { climate: derived(&inputs, variety(&p.name)), giant: p.giant(s), world: p.world(s) })
+            let bare = (p.atmosphere, p.top) == (lc_world::worlds::Atmosphere::None, lc_world::worlds::Top::Rock);
+            let surface = lc_world::surface::Surface::classify(p.radius_m, p.mass_kg, p.equilibrium_k);
+            let airless = bare.then(|| lc_world::airless::derived(surface, p.radius_m, variety(&p.name)));
+            Some(Worn { climate: derived(&inputs, variety(&p.name)), giant: p.giant(s), airless, world: p.world(s) })
         })
 }
 
@@ -265,6 +269,7 @@ fn generated_paint(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<W
 pub(crate) struct Worn {
     climate: Option<lc_world::climate::Climate>,
     giant: Option<lc_world::giant::Giant>,
+    airless: Option<lc_world::airless::Airless>,
     world: lc_world::worlds::World,
 }
 
@@ -277,18 +282,26 @@ pub(crate) fn dress_worn(
     mut worn: Local<Option<Option<Worn>>>,
 ) {
     let (Some(name), Some(at)) = (&dev.wear, &dev.at_body) else { return };
+    let Some(body) = bodies.drawn.iter_mut().find(|d| &d.name == at) else { return };
     let paint = *worn.get_or_insert_with(|| {
-        let found = generated_paint(&game.stars, name).filter(|w| w.climate.is_some() || w.giant.is_some());
+        let found = generated_paint(&game.stars, name)
+            .filter(|w| w.climate.is_some() || w.giant.is_some() || w.airless.is_some())
+            .or_else(|| {
+                body.airless?;
+                let airless = lc_world::airless::derived(body.surface, body.radius_m, lc_world::climate::variety(name));
+                Some(Worn { climate: None, giant: None, airless: Some(airless), world: body.world })
+            });
         match &found {
             Some(w) => info!("wearing {name}: {w:?}"),
-            None => warn!("no generated planet with air or a giant is named {name}"),
+            None => warn!("no generated planet named {name} has paint to wear, and {at} is not airless"),
         }
         found
     });
     let Some(paint) = paint else { return };
-    if let Some(body) = bodies.drawn.iter_mut().find(|d| &d.name == at) {
+    {
         body.climate = paint.climate;
         body.giant = paint.giant;
+        body.airless = paint.airless;
         body.world = paint.world;
     }
 }

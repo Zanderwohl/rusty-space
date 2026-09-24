@@ -19,7 +19,8 @@ pub struct BodySurfaceUniform {
     /// surface, and `masks` says what the masks and [`Self::ground`] are: 1 for a rocky world's
     /// grounds, 2 for a giant's layers, 0 for neither.
     pub params: Vec4,
-    /// Starlight the surface reflects, as linear display light before the tone map. `w` unused.
+    /// Starlight the surface reflects, as linear display light before the tone map. `w` is the
+    /// slope of [`BodySurfaceMaterial::height`] per unit of height per radian; zero is smooth.
     pub reflected: Vec4,
     /// Light the body makes itself, in the same units; `w` is how far the pattern inverts in it.
     ///
@@ -137,6 +138,9 @@ pub struct BodySurfaceMaterial {
     pub growth: Handle<Image>,
     #[texture(11, dimension = "cube", visibility(fragment))]
     pub sand: Handle<Image>,
+    /// Single-channel.
+    #[texture(12, dimension = "cube", visibility(fragment))]
+    pub height: Handle<Image>,
 }
 
 impl Material for BodySurfaceMaterial {

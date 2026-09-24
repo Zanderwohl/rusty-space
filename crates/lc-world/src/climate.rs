@@ -209,7 +209,7 @@ pub fn of(id: &str, world: &World, equilibrium_k: f64, star_teff_k: f64, tags: &
 /// Per-body departures from the type, keyed by id so a world looks the same on every approach.
 /// Each is uniform in `[0, 1]`.
 #[derive(Clone, Copy, Debug)]
-pub struct Variety([f32; 4]);
+pub struct Variety(pub [f32; 4]);
 
 pub fn variety(id: &str) -> Variety {
     // FNV-1a, as `worlds::varied` uses, salted apart from it.

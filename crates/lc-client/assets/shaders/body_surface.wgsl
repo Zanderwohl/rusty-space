@@ -31,6 +31,9 @@ struct VertexOutput {
     @location(4) radius: f32,
     /// The spin axis, world.
     @location(5) pole: vec3<f32>,
+    /// The body's x and z axes, world. With the pole they turn body-fixed into world.
+    @location(6) axis_x: vec3<f32>,
+    @location(7) axis_z: vec3<f32>,
 }
 
 struct BodySurfaceUniform {
@@ -42,7 +45,8 @@ struct BodySurfaceUniform {
     /// `(color, contrast, clouds, mode)`: whether the color and cloud cubemaps are drawn, and what
     /// the masks are: none, `MODE_GROUNDS` or `MODE_LAYERS`.
     params: vec4<f32>,
-    /// Starlight the surface reflects, as linear display light before the tone map.
+    /// Starlight the surface reflects, as linear display light before the tone map. `w` is the
+    /// relief's slope per unit of height per radian; zero is smooth.
     reflected: vec4<f32>,
     /// Light the body makes itself, in the same units. `w` is how far the pattern inverts in it.
     emitted: vec4<f32>,
@@ -94,6 +98,11 @@ const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 @group(#{MATERIAL_BIND_GROUP}) @binding(9) var mask_ice: texture_cube<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(10) var mask_growth: texture_cube<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(11) var mask_sand: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(12) var height: texture_cube<f32>;
+
+/// Radians: a texel and a half of a 1024 face, which the linear filter smooths without losing
+/// the smallest craters.
+const RELIEF_STEP: f32 = 0.0015;
 
 const CLOUD: i32 = 5;
 /// `params.w`: the masks are a rocky world's grounds, or a giant's layers.
@@ -281,7 +290,28 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.center = world_from_local[3].xyz;
     out.radius = length(world_from_local[0].xyz);
     out.pole = normalize((world_from_local * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz);
+    out.axis_x = normalize((world_from_local * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz);
+    out.axis_z = normalize((world_from_local * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);
     return out;
+}
+
+/// A finite difference east and north on the body-fixed sphere.
+fn relief_normal(in: VertexOutput) -> vec3<f32> {
+    let slope = material.reflected.w;
+    let sphere = normalize(in.world_normal);
+    if (slope <= 0.0) {
+        return sphere;
+    }
+    let n = in.local_direction;
+    let up = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.y) > 0.99);
+    let east = normalize(cross(up, n));
+    let north = cross(n, east);
+    let h = textureSample(height, pattern_sampler, n).r;
+    let he = textureSample(height, pattern_sampler, n + east * RELIEF_STEP).r;
+    let hn = textureSample(height, pattern_sampler, n + north * RELIEF_STEP).r;
+    let tilt = slope / RELIEF_STEP * vec2<f32>(he - h, hn - h);
+    let local = normalize(n - tilt.x * east - tilt.y * north);
+    return normalize(local.x * in.axis_x + local.y * normalize(in.pole) + local.z * in.axis_z);
 }
 
 @fragment
@@ -307,7 +337,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Lambert, with a soft terminator. A hard one is a straight line across the disc and reads
     // as a cut rather than as a horizon.
     let to_star = normalize(material.to_star.xyz);
-    let lambert = dot(normalize(in.world_normal), to_star);
+    let lambert = dot(relief_normal(in), to_star);
     let lit = smoothstep(-0.12, 0.25, lambert);
     var light = vec3<f32>(max(lit, material.to_star.w));
 

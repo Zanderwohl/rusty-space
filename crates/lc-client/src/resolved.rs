@@ -43,6 +43,10 @@ pub const NIGHT: f32 = 0.012;
 /// changing how much light the body sends.
 const INVERSION: f32 = 0.3;
 
+/// `reflected.w` times [`crate::surfaces::RELIEF_SCALE`]. Two because the unit sphere's
+/// diameter is one graph sample unit, so this draws the relief at its true slopes.
+const BUMP: f32 = 2.0;
+
 /// Which body a resolved sphere stands for.
 #[derive(Component)]
 pub struct ResolvedBody(pub String);
@@ -480,7 +484,7 @@ fn uniforms(
             // body_surface.wgsl's `MODE_GROUNDS` and `MODE_LAYERS`.
             if drawn.layers { 2.0 } else { as_weight(drawn.grounds) },
         ),
-        reflected: reflected.extend(0.0),
+        reflected: reflected.extend(if drawn.relief { BUMP / crate::surfaces::RELIEF_SCALE } else { 0.0 }),
         // `w` is how far the pattern inverts in the body's own light. See [`INVERSION`].
         emitted: emitted.extend(if body.surface.is_banded() { INVERSION } else { 0.0 }),
         exposure: Vec4::new(tone.surface_reference, tone.surface_stops, 0.0, 0.0),
@@ -657,7 +661,7 @@ pub fn update_resolved(
             .mesh
             .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
             .clone();
-        let own = surfaces.images(&body.name, body.surface, body.climate, body.giant, &mut images);
+        let own = surfaces.images(&body.name, body.surface, body.climate, body.giant, body.airless, &mut images);
         let uniforms = shade(body, &mut surfaces, *layer != RenderLayers::layer(0));
         let air = air_uniforms(&uniforms);
         let sphere = commands
@@ -708,6 +712,7 @@ mod tests {
             world: lc_world::worlds::of("test", Surface::Rock, &[], None),
             climate: None,
             giant: None,
+            airless: None,
             pole: DVec3::Z,
             spin_s: None,
             position_ly: at,

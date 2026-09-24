@@ -32,6 +32,11 @@ pub const SCORCHED_K: f64 = 500.0;
 /// are what this number is set between.
 pub const ICY_SURFACE_DENSITY: f64 = 3200.0;
 
+/// Below this escape speed a body is not assumed to hold air, so it is never
+/// [`Surface::Weathered`]: Pluto (1.2 km/s) and Triton (1.5) keep theirs, Ceres (0.51) and
+/// Phobos (0.011) have none. Air a generator states is kept regardless.
+pub const WEATHER_ESCAPE_M_S: f64 = 1000.0;
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Surface {
     /// Banded, warm, turbulent. Jupiter and Saturn.
@@ -66,6 +71,10 @@ impl Surface {
             // Below the ice line, density says whether it is a dirty snowball or a rock that
             // happens to be cold.
             return if density < ICY_SURFACE_DENSITY { Self::Ice } else { Self::Rock };
+        }
+        let escape = (2.0 * 6.674_30e-11 * mass_kg / radius_m.max(1.0)).sqrt();
+        if escape < WEATHER_ESCAPE_M_S {
+            return Self::Rock;
         }
         Self::Weathered
     }
@@ -303,5 +312,14 @@ mod tests {
         // Ice is the bright one and bare rock the dark one, which is the whole point of
         // having an albedo per class rather than one number for everything.
         assert!(Surface::Ice.albedo() > Surface::Rock.albedo() * 4.0);
+    }
+
+    /// Phobos is warm enough to be Weathered and too small to hold air.
+    #[test]
+    fn too_small_to_hold_air_is_bare_rock() {
+        assert_eq!(Surface::classify(1.11e4, 1.0659e16, 230.0), Surface::Rock, "Phobos");
+        assert_eq!(Surface::classify(4.7e5, 9.39e20, 230.0), Surface::Rock, "a warm Ceres");
+        assert_eq!(Surface::classify(1.737e6, 7.342e22, 270.0), Surface::Weathered, "Luna");
+        assert_eq!(Surface::classify(3.39e6, 6.417e23, 210.0), Surface::Weathered, "Mars");
     }
 }
