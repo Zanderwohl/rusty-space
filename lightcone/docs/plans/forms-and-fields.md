@@ -507,7 +507,7 @@ graph LR
 
 ### R6 · Field shader, in a void
 
-- status: active claude/keen-mendel-ab53a2
+- status: done #66
 - needs: —
 - touches: `crates/em-render/src/field_material.rs`, `crates/lc-client/assets/shaders/field.wgsl`, `crates/lc-client/examples/field_void.rs`
 - read: 32 §The field
