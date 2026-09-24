@@ -252,16 +252,16 @@ TextureGraphFile(
                 kind: ColorRamp(ColorRamp(
                     stops: [
                         ColorStop(
-                            t: 0.35,
+                            t: 0.45,
                             color: Const(Oklch(
-                                l: 0.08,
+                                l: 0.05,
                                 chroma: 0.0,
                                 hue: OklabHue(0.0),
                                 alpha: 1.0,
                             )),
                         ),
                         ColorStop(
-                            t: 0.6,
+                            t: 0.62,
                             color: Const(Oklch(
                                 l: 1.0,
                                 chroma: 0.0,

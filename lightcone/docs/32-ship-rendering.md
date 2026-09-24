@@ -57,8 +57,11 @@ see becomes its own average — a lit window's power spread over the pixel, not 
 One texture-graph graph per kind, delivered like the planet graphs, with the region set by which
 part a point is nearest. Fillets blend between the two regions.
 
-The mesher hands the material each vertex's two nearest parts' regions and the second's share,
-read off the per-part distances it already evaluates. The material knows regions only as indices
+The mesher hands the material each vertex's weight for every region, a byte apiece, read off the
+per-part distances it already evaluates, and the shader draws the two heaviest. Weights rather
+than two indices and a share, because a triangle whose corners name different pairs cannot
+interpolate a share, and every triangle crossing the edge of a fillet is one: that was tried, and
+drew the edges as stairs. The material knows regions only as indices
 into the caller's palette of graphs; which kind is which is Lightcone's. A graph's output color is
 albedo, and a layer named `lights` beside it is the lit share of each texel, which the caller
 scales by a power per region.

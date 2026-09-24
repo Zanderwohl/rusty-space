@@ -1,7 +1,7 @@
 //! Photograph the hull material on a sphere in a void, through the real render pipeline.
 //!
 //! Nothing in the game draws a hull this way yet. The sphere is eight regions, one a kind,
-//! seeded around the living one under the camera, with fillets between them, which is what a
+//! seeded around the one under the camera, with fillets between them, which is what a
 //! form's mesher will hand the material. See `lightcone/docs/32-ship-rendering.md`.
 //!
 //! ```text
@@ -11,11 +11,13 @@
 //! | flag | for |
 //! |---|---|
 //! | `--radius <m>` | the sphere; 500 by default |
+//! | `--kind <name>` | the kind under the camera; `living` by default |
 //! | `--standoff <m>` | the camera's height over the surface; the whole disc by default |
 //! | `--tilt <deg>` | turn the view from straight down toward the horizon |
 //! | `--sun <deg>` | the star's elevation over the point beneath the camera; negative is night |
 //! | `--exposure <stops>` | open the exposure from one placed for a lit hull |
 //! | `--frames <n>` / `--burst <n>` | as the client's: frames after the tiles land, and consecutive shots |
+//! | `--spin <deg>` | turn the hull this far each frame, about the axis under the camera. A still hull cannot shimmer, so a burst for shimmer wants this |
 
 use std::f32::consts::TAU;
 
@@ -27,8 +29,8 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::WindowResolution;
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::hull_material::{
-    ATTRIBUTE_HULL_REGION, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, region,
-    tile_array,
+    HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, insert_region_weights,
+    region_weights, tile_array,
 };
 use em_render::plume_material::PlumeMaterial;
 use em_render::population_material::PopulationMaterial;
@@ -37,7 +39,6 @@ use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape, Target, plac
 use lc_client::tonemap::ToneMap;
 
 const KINDS: [&str; 8] = ["storage", "drone", "living", "engine", "data", "mind", "spar", "bay"];
-const LIVING: usize = 2;
 
 /// What every graph's unit square spans. The graphs are written to it.
 const TILE_M: f32 = 64.0;
@@ -52,7 +53,7 @@ const LIT_WINDOW: f32 = 0.0075;
 /// The albedo the exposure is placed for, lit face-on.
 const LIT_HULL: f32 = 0.3;
 
-/// How far off the living region's center the ring of other regions sits.
+/// How far off the center region's middle the ring of other regions sits.
 const RING_DEG: f32 = 35.0;
 
 /// A fillet's width, as a share of the radius: a form's fillets scale with its parts.
@@ -60,6 +61,8 @@ const FILLET: f32 = 0.05;
 
 struct Args {
     path: String,
+    /// Index into [`KINDS`] of the region under the camera.
+    center: usize,
     radius: f32,
     standoff: f32,
     tilt_deg: f32,
@@ -67,6 +70,7 @@ struct Args {
     exposure: f32,
     frames: u32,
     burst: u32,
+    spin_deg: f32,
 }
 
 impl Args {
@@ -83,8 +87,17 @@ impl Args {
             std::process::exit(2);
         });
         let radius = value("--radius").unwrap_or(500.0);
+        let kind = args.iter().position(|a| a == "--kind").and_then(|i| args.get(i + 1));
+        let center = match kind {
+            None => 2,
+            Some(k) => KINDS.iter().position(|n| n == k).unwrap_or_else(|| {
+                eprintln!("hull_void: --kind is one of {KINDS:?}");
+                std::process::exit(2);
+            }),
+        };
         Self {
             path,
+            center,
             radius,
             standoff: value("--standoff").unwrap_or(2.5 * radius),
             tilt_deg: value("--tilt").unwrap_or(0.0),
@@ -92,9 +105,13 @@ impl Args {
             exposure: value("--exposure").unwrap_or(0.0),
             frames: value("--frames").unwrap_or(30.0) as u32,
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
+            spin_deg: value("--spin").unwrap_or(0.0),
         }
     }
 }
+
+#[derive(Component)]
+struct Spun;
 
 #[derive(Resource)]
 struct Scene {
@@ -142,7 +159,7 @@ fn main() {
             drawn: None,
         })
         .add_systems(Startup, request_tiles)
-        .add_systems(Update, (spawn_hull, photograph).chain())
+        .add_systems(Update, (spawn_hull, spin, photograph).chain())
         .add_systems(Last, take_texels)
         .run();
 }
@@ -154,6 +171,7 @@ fn request_tiles(
     mut bakes: ResMut<Bakes>,
 ) {
     let plane = Target::new(Shape::Plane(TILE_TEXELS));
+    let scene = &mut *scene;
     for kind in KINDS {
         let graph = assets.load(format!("textures/hull/{kind}.tgraph"));
         for (target, into) in [(plane.color(), &mut scene.albedo), (plane.layer("lights"), &mut scene.lights)] {
@@ -188,6 +206,7 @@ fn spawn_hull(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<HullMaterial>>,
     mut exit: MessageWriter<AppExit>,
+    mut waited: Local<u32>,
 ) {
     if scene.drawn.is_some() {
         return;
@@ -199,7 +218,12 @@ fn spawn_hull(
         scene.albedo_texels.iter().cloned().collect::<Option<Vec<_>>>(),
         scene.light_texels.iter().cloned().collect::<Option<Vec<_>>>(),
     ) else {
-        // A bake that failed has settled without landing.
+        // A bake lands in `Update` and its texels are taken in `Last`, so give it a frame. One
+        // still missing after that failed: it settled without landing.
+        *waited += 1;
+        if *waited < 3 {
+            return;
+        }
         let missing: Vec<_> = KINDS
             .iter()
             .zip(scene.albedo_texels.iter().zip(&scene.light_texels))
@@ -212,8 +236,8 @@ fn spawn_hull(
     };
 
     let args = &scene.args;
-    let (living, e1, e2) = frame();
-    let to_star = (args.sun_deg.to_radians().sin() * living
+    let (under, e1, e2) = frame();
+    let to_star = (args.sun_deg.to_radians().sin() * under
         - args.sun_deg.to_radians().cos() * e1)
         .normalize();
 
@@ -243,11 +267,11 @@ fn spawn_hull(
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
     });
-    commands.spawn((Mesh3d(meshes.add(sphere(args.radius))), MeshMaterial3d(material)));
+    commands.spawn((Mesh3d(meshes.add(sphere(args.radius, args.center))), MeshMaterial3d(material), Spun));
 
-    let eye = living * (args.radius + args.standoff);
+    let eye = under * (args.radius + args.standoff);
     let tilt = args.tilt_deg.to_radians();
-    let look = (-living * tilt.cos() + e1 * tilt.sin()).normalize();
+    let look = (-under * tilt.cos() + e1 * tilt.sin()).normalize();
     commands.spawn((
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection {
@@ -267,40 +291,42 @@ fn spawn_hull(
     scene.drawn = Some(0);
 }
 
-/// The living region's center, and two directions square to it.
+/// The center region's middle, under the camera, and two directions square to it.
 fn frame() -> (Vec3, Vec3, Vec3) {
-    let living = Vec3::new(0.3, 0.5, 0.8).normalize();
-    let e1 = living.cross(Vec3::Y).normalize();
-    let e2 = e1.cross(living);
-    (living, e1, e2)
+    let under = Vec3::new(0.3, 0.5, 0.8).normalize();
+    let e1 = under.cross(Vec3::Y).normalize();
+    let e2 = e1.cross(under);
+    (under, e1, e2)
 }
 
-/// Each kind's seed: living at the center, the rest in a ring about it.
-fn seeds() -> [Vec3; KINDS.len()] {
-    let (living, e1, e2) = frame();
+/// Each kind's seed: `center` under the camera, the rest in a ring about it.
+fn seeds(center: usize) -> [Vec3; KINDS.len()] {
+    let (under, e1, e2) = frame();
     let ring = RING_DEG.to_radians();
-    let mut out = [living; KINDS.len()];
-    let others: Vec<usize> = (0..KINDS.len()).filter(|&k| k != LIVING).collect();
+    let mut out = [under; KINDS.len()];
+    let others: Vec<usize> = (0..KINDS.len()).filter(|&k| k != center).collect();
     for (i, &k) in others.iter().enumerate() {
         let around = TAU * i as f32 / others.len() as f32;
         let side = e1 * around.cos() + e2 * around.sin();
-        out[k] = living * ring.cos() + side * ring.sin();
+        out[k] = under * ring.cos() + side * ring.sin();
     }
     out
 }
 
 /// A sphere of `radius` meters in regions: each vertex takes its nearest seed, blending into
 /// the second nearest over [`FILLET`], as a mesher would from per-part distances.
-fn sphere(radius: f32) -> Mesh {
-    let mut mesh = Sphere::new(radius).mesh().ico(7).expect("seven subdivisions is allowed");
-    let seeds = seeds();
+fn sphere(radius: f32, center: usize) -> Mesh {
+    // Eighty segments an edge of the icosahedron, some 6.5 m on the small sphere: `ico(n)`
+    // splits each edge into n + 1.
+    let mut mesh = Sphere::new(radius).mesh().ico(79).expect("79 is the most ico allows");
+    let seeds = seeds(center);
     let fillet = FILLET * radius;
     let positions = mesh
         .attribute(Mesh::ATTRIBUTE_POSITION)
         .and_then(|a| a.as_float3())
         .expect("a sphere has positions")
         .to_vec();
-    let regions: Vec<[f32; 3]> = positions
+    let regions: Vec<[[u8; 4]; 4]> = positions
         .iter()
         .map(|p| {
             let dir = Vec3::from(*p).normalize();
@@ -313,11 +339,19 @@ fn sphere(radius: f32) -> Mesh {
             let ((d1, nearest), (d2, second)) = (by_distance[0], by_distance[1]);
             let x = ((d2 - d1) / fillet).clamp(0.0, 1.0);
             let share = 0.5 * (1.0 - x * x * (3.0 - 2.0 * x));
-            region(nearest, second, share)
+            region_weights(nearest, second, share)
         })
         .collect();
-    mesh.insert_attribute(ATTRIBUTE_HULL_REGION, regions);
+    insert_region_weights(&mut mesh, &regions);
     mesh
+}
+
+/// By a fixed angle a frame rather than a rate, so a burst's frames are evenly spaced.
+fn spin(scene: Res<Scene>, mut hulls: Query<&mut Transform, With<Spun>>) {
+    let (under, ..) = frame();
+    for mut transform in &mut hulls {
+        transform.rotate(Quat::from_axis_angle(under, scene.args.spin_deg.to_radians()));
+    }
 }
 
 /// As the client's `--shot` and `--burst`.
@@ -326,10 +360,9 @@ fn photograph(
     mut scene: ResMut<Scene>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let Some(frames) = scene.drawn.as_mut() else { return };
-    *frames += 1;
+    let Some(frames) = scene.drawn.map(|n| n + 1) else { return };
+    scene.drawn = Some(frames);
     let (after, burst, path) = (scene.args.frames, scene.args.burst, scene.args.path.clone());
-    let frames = *frames;
     if (after..after + burst).contains(&frames) {
         let index = frames - after;
         let at = match (burst > 1, path.rsplit_once('.')) {

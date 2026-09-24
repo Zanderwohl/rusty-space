@@ -15,12 +15,20 @@ use bevy::render::render_resource::{
     TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension, VertexFormat,
 };
 use bevy::shader::ShaderRef;
-use bevy_mesh::{MeshVertexAttribute, MeshVertexBufferLayoutRef};
+use bevy_mesh::{MeshVertexAttribute, MeshVertexBufferLayoutRef, VertexAttributeValues};
 
-/// `(a, b, t)`: the regions of the two nearest parts with `a <= b`, and `b`'s share. A mesher
-/// has both from the per-part distances at each vertex; write it through [`region`].
-pub const ATTRIBUTE_HULL_REGION: MeshVertexAttribute =
-    MeshVertexAttribute::new("HullRegion", 0x4855_4C4C_0000_0001, VertexFormat::Float32x3);
+/// Each vertex's weight for every region of the palette, a byte apiece, four regions an
+/// attribute. A mesher writes its nearest parts' blend through [`region_weights`].
+///
+/// Weights rather than a pair of indices and a share: a triangle whose corners name different
+/// pairs cannot interpolate a share measured against each corner's own pair, and every
+/// triangle crossing the edge of a fillet is one.
+pub const ATTRIBUTE_HULL_REGIONS: [MeshVertexAttribute; 4] = [
+    MeshVertexAttribute::new("HullRegions0", 0x4855_4C4C_0000_0001, VertexFormat::Unorm8x4),
+    MeshVertexAttribute::new("HullRegions1", 0x4855_4C4C_0000_0002, VertexFormat::Unorm8x4),
+    MeshVertexAttribute::new("HullRegions2", 0x4855_4C4C_0000_0003, VertexFormat::Unorm8x4),
+    MeshVertexAttribute::new("HullRegions3", 0x4855_4C4C_0000_0004, VertexFormat::Unorm8x4),
+];
 
 /// Regions a palette may hold. Must match `REGIONS` in `hull.wgsl`.
 pub const REGIONS: usize = 16;
@@ -28,15 +36,22 @@ pub const REGIONS: usize = 16;
 /// Anything at or past this in [`HullUniform::reveal`]'s `w` is plated everywhere.
 pub const ALL_PLATED: f32 = 1.0e30;
 
-/// [`ATTRIBUTE_HULL_REGION`] for a point between `nearest` and `second`, taking `share` of
-/// `second`. Ordered, so neighboring vertices between the same two parts agree on the pair:
-/// the shader holds the pair flat across a triangle and interpolates only the share.
-pub fn region(nearest: u32, second: u32, share: f32) -> [f32; 3] {
+/// [`ATTRIBUTE_HULL_REGIONS`] for a point between `nearest` and `second`, taking `share` of
+/// `second`. The shader draws the two heaviest regions at a point, so a triple junction
+/// drops its lightest.
+pub fn region_weights(nearest: u32, second: u32, share: f32) -> [[u8; 4]; 4] {
     let share = share.clamp(0.0, 1.0);
-    if nearest <= second {
-        [nearest as f32, second as f32, share]
-    } else {
-        [second as f32, nearest as f32, 1.0 - share]
+    let mut weights = [0.0f32; REGIONS];
+    weights[nearest as usize] += 1.0 - share;
+    weights[second as usize] += share;
+    std::array::from_fn(|a| std::array::from_fn(|c| (weights[4 * a + c] * 255.0).round() as u8))
+}
+
+/// Set [`ATTRIBUTE_HULL_REGIONS`] from one [`region_weights`] a vertex.
+pub fn insert_region_weights(mesh: &mut Mesh, weights: &[[[u8; 4]; 4]]) {
+    for (a, attribute) in ATTRIBUTE_HULL_REGIONS.iter().enumerate() {
+        let values: Vec<[u8; 4]> = weights.iter().map(|w| w[a]).collect();
+        mesh.insert_attribute(*attribute, VertexAttributeValues::Unorm8x4(values));
     }
 }
 
@@ -102,15 +117,6 @@ impl Material for HullMaterial {
         AlphaMode::Opaque
     }
 
-    /// The default prepass would write depth where the reveal mask discards.
-    fn enable_prepass() -> bool {
-        false
-    }
-
-    fn enable_shadows() -> bool {
-        false
-    }
-
     fn specialize(
         _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
@@ -120,7 +126,10 @@ impl Material for HullMaterial {
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            ATTRIBUTE_HULL_REGION.at_shader_location(2),
+            ATTRIBUTE_HULL_REGIONS[0].at_shader_location(2),
+            ATTRIBUTE_HULL_REGIONS[1].at_shader_location(3),
+            ATTRIBUTE_HULL_REGIONS[2].at_shader_location(4),
+            ATTRIBUTE_HULL_REGIONS[3].at_shader_location(5),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
@@ -255,10 +264,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_region_is_the_same_pair_from_either_side() {
-        assert_eq!(region(3, 5, 0.25), [3.0, 5.0, 0.25]);
-        assert_eq!(region(5, 3, 0.25), [3.0, 5.0, 0.75]);
-        assert_eq!(region(2, 2, 0.4), [2.0, 2.0, 0.4]);
+    fn a_fillets_weights_land_on_its_two_regions() {
+        let w = region_weights(5, 2, 0.25);
+        assert_eq!(w[1][1], 191);
+        assert_eq!(w[0][2], 64);
+        assert_eq!(w.iter().flatten().map(|&b| b as u32).sum::<u32>(), 255);
+        assert_eq!(region_weights(9, 9, 0.4)[2][1], 255);
     }
 
     /// The last level is the whole tile's average, in linear light for albedo: averaging the

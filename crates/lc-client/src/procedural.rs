@@ -776,9 +776,11 @@ mod tests {
             let lights = g.layers.iter().find(|l| l.name == "lights").expect("a lights layer").id;
             let ctx = EvalCtx::default();
             for layer in [albedo, lights] {
-                for k in 0..64 {
-                    let u = (k % 8) as f32 / 8.0 + 0.013;
-                    let v = (k / 8) as f32 / 8.0 + 0.029;
+                // Low-discrepancy, not a grid: a grid shares the tile's own pitches and can land
+                // every point between the windows.
+                for k in 0..256 {
+                    let u = (k as f32 * 0.618_034).fract();
+                    let v = (k as f32 * 0.754_878).fract();
                     let at = |u, v| eval::evaluate(&g, layer, Sample::new(u, v, 0.5), &ctx);
                     let here = at(u, v);
                     for there in [at(u + 1.0, v), at(u, v + 1.0)] {

@@ -13,7 +13,11 @@ struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) region: vec3<f32>,
+    // em_render::hull_material::ATTRIBUTE_HULL_REGIONS: a weight a region.
+    @location(2) regions_0: vec4<f32>,
+    @location(3) regions_1: vec4<f32>,
+    @location(4) regions_2: vec4<f32>,
+    @location(5) regions_3: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -21,9 +25,10 @@ struct VertexOutput {
     @location(0) world_normal: vec3<f32>,
     @location(1) ship_position: vec3<f32>,
     @location(2) ship_normal: vec3<f32>,
-    // Flat, so a triangle between two parts blends one pair of materials.
-    @location(3) @interpolate(flat) regions: vec2<u32>,
-    @location(4) share: f32,
+    @location(3) regions_0: vec4<f32>,
+    @location(4) regions_1: vec4<f32>,
+    @location(5) regions_2: vec4<f32>,
+    @location(6) regions_3: vec4<f32>,
 }
 
 const REGIONS: u32 = 16u;
@@ -63,8 +68,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
     out.ship_position = vertex.position;
     out.ship_normal = vertex.normal;
-    out.regions = vec2<u32>(u32(vertex.region.x + 0.5), u32(vertex.region.y + 0.5));
-    out.share = vertex.region.z;
+    out.regions_0 = vertex.regions_0;
+    out.regions_1 = vertex.regions_1;
+    out.regions_2 = vertex.regions_2;
+    out.regions_3 = vertex.regions_3;
     return out;
 }
 
@@ -126,19 +133,48 @@ fn plated(p: vec3<f32>, n: vec3<f32>) -> bool {
     return distance(center, material.reveal.xyz) + lag <= front;
 }
 
+/// The two heaviest regions at a point, and the second's share of the pair.
+struct Pair {
+    first: u32,
+    second: u32,
+    share: f32,
+}
+
+fn heaviest(in: VertexOutput) -> Pair {
+    let weights = array<vec4<f32>, 4>(in.regions_0, in.regions_1, in.regions_2, in.regions_3);
+    var first = 0u;
+    var second = 0u;
+    var w1 = -1.0;
+    var w2 = -1.0;
+    for (var i = 0u; i < REGIONS; i++) {
+        let w = weights[i / 4u][i % 4u];
+        if (w > w1) {
+            second = first;
+            w2 = w1;
+            first = i;
+            w1 = w;
+        } else if (w > w2) {
+            second = i;
+            w2 = w;
+        }
+    }
+    return Pair(first, second, max(w2, 0.0) / max(w1 + max(w2, 0.0), 1.0e-6));
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    let pair = heaviest(in);
     let w = planes(in.ship_normal);
-    let near = triplanar(in.ship_position, w, in.regions.x);
-    let far = triplanar(in.ship_position, w, in.regions.y);
+    let near = triplanar(in.ship_position, w, pair.first);
+    let far = triplanar(in.ship_position, w, pair.second);
     if (!plated(in.ship_position, in.ship_normal)) {
         discard;
     }
-    let t = saturate(in.share);
+    let t = pair.share;
     let albedo = mix(near.albedo, far.albedo, t);
     let emitted = mix(
-        near.lit * material.emitted[min(in.regions.x, REGIONS - 1u)].rgb,
-        far.lit * material.emitted[min(in.regions.y, REGIONS - 1u)].rgb,
+        near.lit * material.emitted[pair.first].rgb,
+        far.lit * material.emitted[pair.second].rgb,
         t,
     );
 

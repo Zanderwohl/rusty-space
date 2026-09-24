@@ -482,7 +482,7 @@ graph LR
 
 - status: active claude/elegant-ishizaka-4a9803
 - needs: —
-- touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/assets/textures/`, `crates/lc-client/examples/hull_void.rs`
+- touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/assets/textures/`, `crates/lc-client/examples/hull_void.rs`, `crates/lc-client/src/procedural.rs` (a plane bake)
 - read: 32 §Details are sized in meters, §Materials by kind
 - deliver: a triplanar material with kind regions, detail fixed in meters and faded at distance, living lights through the exposure, a reveal-mask uniform for plating, and one texture-graph graph per kind.
 - done when: photographed on spheres of 500 m and 50 km, the detail is the same size in meters on both, and nothing shimmers at a distance.
