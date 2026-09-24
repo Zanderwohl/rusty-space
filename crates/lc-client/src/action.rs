@@ -363,11 +363,10 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             // the physics rather than here, but offering it would be offering nothing.
             match session.system.as_ref().map(|s| s.star) {
                 Some(star) => {
-                    let bodies = session.system.as_ref().map_or(0, |s| s.len());
                     set_duty(ui, session, Duty::Survey { star, started_s: now }, &mut effects);
-                    effects.push(Effect::Notify(format!(
-                        "surveying {bodies} bodies, brightest first"
-                    )));
+                    // No count: `session.system` is the truth, and how many bodies there are is
+                    // what the survey is for.
+                    effects.push(Effect::Notify("surveying local system for bodies".into()));
                 }
                 None => effects.push(Effect::Notify("no system here to survey".into())),
             }
