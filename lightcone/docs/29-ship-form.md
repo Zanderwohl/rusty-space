@@ -24,10 +24,10 @@ A `Form` is a tree of **parts**. Each part is one primitive of one kind, with a 
 |---|---|---|
 | ellipsoid | three semi-axis ratios | `4/3 π a b c` |
 | capsule | length over radius | cylinder plus a sphere |
-| slab | three edge ratios, corner radius | rounded box |
+| slab | three edge ratios, corner radius over the shortest edge | rounded box |
 | cylinder | length over radius | `π r² h` |
 | torus | major radius over minor | `2 π² R r²` |
-| frustum | length, and the two end radii over each other | `π h (r₁² + r₁ r₂ + r₂²) / 3` |
+| frustum | length over the first end's radius, and the second end's radius over the first's | `π h (r₁² + r₁ r₂ + r₂²) / 3` |
 
 **Volume and proportions are stored. Scale is solved** from them in closed form. Overlaps and
 fillets are ignored when sizing: the volume of a blended union depends on the neighbors, which
@@ -80,7 +80,7 @@ editor shows it through the hull.
 
 A spar is shaped by the parts it joins, as if it were bolted to them. Its distance field is its own
 primitive combined with its **tree neighbors** (its parent and its children) by boolean operations,
-in one of two ways:
+in one of two ways, carried on the kind as `Kind::Spar(SparMode)`:
 
 - **Saddle.** Each neighbor, grown by `spar_gap`, is subtracted from the spar. Where a boom meets a
   hull, its end is cut to the hull's curve and sits flush against it. The spar is embedded into its
@@ -111,10 +111,10 @@ Each part but the Mind hangs from a parent, and it is placed in one of two ways:
 | field | meaning |
 |---|---|
 | `parent` | a part id |
-| `mode` | attached or enclosing |
+| `mount` | attached or enclosing. `Mount::Attached` carries `anchor` and `standoff`, so an enclosing part cannot have either |
 | `anchor` | attached only: a direction in the parent's frame. The attachment point is where a ray from the parent's center along it last leaves the parent's surface, so on a torus a child hangs off the rim |
 | `twist` | rotation about the surface normal, or about the parent's axis when enclosing |
-| `tilt` | the child's axis relative to that normal or axis, as a small rotation |
+| `tilt` | the child's axis relative to that normal or axis, as a small rotation: a two-component rotation vector across it, in radians |
 | `standoff` | attached only: distance along the normal, in multiples of the child's size. Negative embeds it |
 | `blend` | smooth-union radius with the parent, as a fraction of the smaller |
 | `mirror` | the subtree is repeated, reflected through the ship's port–starboard plane |
@@ -425,14 +425,14 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `form.rs` (parts, tree, sizing, capacities, the starting form, presets), `form_grid.rs` (voxels, shadow, envelope, moments) | `fitting.rs` loses `Loadout` and reads capacities. `refit.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments |
+| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments |
 | `lc-proto` | | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |
 | `lc-client` | `form_view.rs`, `form_panel.rs`, `snap.rs`, `form_history.rs`, `presets_panel.rs` | `ui.rs` gains the view mode. The refit window becomes the ledger |
 
-`form_grid.rs` and the client's mesher ([32-ship-rendering.md](32-ship-rendering.md)) both evaluate the
-distance field that `form.rs` defines, so the grid the server reasons about and the surface the player
+`form/grid.rs` and the client's mesher ([32-ship-rendering.md](32-ship-rendering.md)) both evaluate the
+distance field that `form/sdf.rs` defines, so the grid the server reasons about and the surface the player
 sees are one definition.
 
 ## Open
