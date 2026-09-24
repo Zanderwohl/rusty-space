@@ -218,7 +218,7 @@ graph LR
 
 ### K2 · Balance fields
 
-- status: todo
+- status: active claude/hungry-bardeen-ec6f11
 - needs: —
 - touches: `crates/lc-world/src/fitting.rs`
 - read: the Balance tables of 29, 30 and 31
