@@ -23,6 +23,12 @@ Everything that applies now, in turn, one per shot:
 | horizon | the same, within thirty of its radii | along the limb on the star's side, looking just over it |
 | below | the same | straight down |
 
+The horizon and the ground below are framed by **length, not angle**: a stretch of limb and a
+patch of ground a fixed share of the body's radius across, about 360 and 290 km on Earth. A
+higher orbit is therefore a longer lens on the same scene. Straight down, the photograph from
+twenty radii matches the one from low orbit; the horizon keeps its size but not its perspective,
+because from far out the limb is seen edge-on rather than across the ground in front of it.
+
 Rotating rather than ranking was a choice: a survey that runs for days would otherwise hold the
 square on one kind of picture for all of them. `--beauty-kind <kind>` holds the rotation on one
 kind for a photograph of the client, with the kinds named as in `Subject::kind`.

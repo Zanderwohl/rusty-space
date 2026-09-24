@@ -54,11 +54,15 @@ const DEFAULT_SIDE_PX: u32 = 384;
 const MAX_FIELD_RAD: f64 = 1.75;
 /// How much sky around a framed disc, as a multiple of its diameter.
 const FRAME_MARGIN: f64 = 1.3;
-const HORIZON_FIELD_RAD: f64 = 0.1;
+/// How much of the limb the horizon shot spans, and how much ground the shot below does, in the
+/// body's radii. Lengths rather than angles, so a higher orbit is a longer lens on the same
+/// scene. Both were an angle once, set from low orbit, and from twenty radii out each one took
+/// in the whole disc.
+const HORIZON_SPAN_RADII: f64 = 0.057;
+const NADIR_SPAN_RADII: f64 = 0.045;
 /// How far above the limb the horizon shot looks, as a fraction of its field, so the limb sits
 /// in the lower part of the frame with sky over it.
 const HORIZON_LIFT: f64 = 0.25;
-const NADIR_FIELD_RAD: f64 = 0.3;
 /// Past this many of its radii from its center a body is not *below*: its horizon and the
 /// ground under the ship are both most of the disc again, and the whole-disc shot says it.
 const BELOW_RADII: f64 = 30.0;
@@ -474,15 +478,17 @@ pub fn aim(
         }
         Subject::Horizon(name) => {
             let b = body(name)?;
-            let (forward, up) = horizon(to_m(b.position_ly), b.radius_m, toward_star)?;
+            let (forward, up, field) = horizon(to_m(b.position_ly), b.radius_m, toward_star)?;
             let caption = format!("{} · horizon", session.body_label(name));
-            (forward, up, HORIZON_FIELD_RAD, Some(name.clone()), caption)
+            (forward, up, field, Some(name.clone()), caption)
         }
         Subject::Nadir(name) => {
             let b = body(name)?;
-            let forward = to_m(b.position_ly).try_normalize()?;
+            let to = to_m(b.position_ly);
+            let forward = to.try_normalize()?;
+            let field = nadir_field(to.length(), b.radius_m)?;
             let caption = format!("{} · below", session.body_label(name));
-            (forward, upright(forward, b.pole), NADIR_FIELD_RAD, Some(name.clone()), caption)
+            (forward, upright(forward, b.pole), field, Some(name.clone()), caption)
         }
         Subject::Destination(to_ly) => {
             let forward = (*to_ly - eye_ly).try_normalize()?;
@@ -557,13 +563,26 @@ pub fn framed(to_m: DVec3, radius_m: f64) -> (DVec3, f64) {
     (forward, (2.0 * half * FRAME_MARGIN).min(MAX_FIELD_RAD))
 }
 
+/// The field that spans [`NADIR_SPAN_RADII`] of ground straight down. `None` from inside.
+pub fn nadir_field(distance_m: f64, radius_m: f64) -> Option<f64> {
+    let altitude = distance_m - radius_m;
+    (altitude > 0.0)
+        .then(|| (2.0 * (NADIR_SPAN_RADII * radius_m / (2.0 * altitude)).atan()).min(MAX_FIELD_RAD))
+}
+
+/// The field that spans [`HORIZON_SPAN_RADII`] of limb, seen from `distance_m` off the center.
+/// The limb is the tangent point, so it is this far away. `None` from inside.
+pub fn horizon_field(distance_m: f64, radius_m: f64) -> Option<f64> {
+    let to_limb = (distance_m * distance_m - radius_m * radius_m).sqrt();
+    (to_limb > 0.0).then(|| (HORIZON_SPAN_RADII * radius_m / to_limb).min(MAX_FIELD_RAD))
+}
+
 /// Along the limb of a sphere whose center is `to_center_m` away, on the side toward the star,
-/// with the planet below and the sky above. `None` from inside it.
-pub fn horizon(to_center_m: DVec3, radius_m: f64, toward_star: DVec3) -> Option<(DVec3, DVec3)> {
+/// with the planet below and the sky above: the view, its up, and its field. `None` from inside.
+pub fn horizon(to_center_m: DVec3, radius_m: f64, toward_star: DVec3)
+    -> Option<(DVec3, DVec3, f64)> {
     let distance = to_center_m.length();
-    if distance <= radius_m {
-        return None;
-    }
+    let field = horizon_field(distance, radius_m)?;
     let down = to_center_m / distance;
     // The limb is this far off straight down.
     let dip = (radius_m / distance).asin();
@@ -573,9 +592,9 @@ pub fn horizon(to_center_m: DVec3, radius_m: f64, toward_star: DVec3) -> Option<
     let limb = down * dip.cos() + across * dip.sin();
     // Up is away from the center, square to the line of sight.
     let up_at = |f: DVec3| (-down - f * (-down).dot(f)).normalize_or(across);
-    let lift = HORIZON_FIELD_RAD * HORIZON_LIFT;
+    let lift = field * HORIZON_LIFT;
     let forward = (limb * lift.cos() + up_at(limb) * lift.sin()).normalize();
-    Some((forward, up_at(forward)))
+    Some((forward, up_at(forward), field))
 }
 
 /// An up for `forward`, as close to `pole` as it can be, falling back to anything square to it.
@@ -722,15 +741,32 @@ mod tests {
     fn the_horizon_is_just_below_the_middle_of_the_frame() {
         let center = DVec3::new(0.0, 0.0, -(EARTH_M + 4.0e5));
         let star = DVec3::X;
-        let (forward, up) = horizon(center, EARTH_M, star).expect("outside the planet");
+        let (forward, up, field) = horizon(center, EARTH_M, star).expect("outside the planet");
         assert!(forward.dot(up).abs() < 1e-12, "up is square to the view");
         assert!(up.z > 0.0, "up is away from the planet");
         assert!(forward.x > 0.0, "and it faces the lit side");
 
         let dip = (EARTH_M / center.length()).asin();
         let limb_off_down = angle(forward, center);
-        let lifted = HORIZON_FIELD_RAD * HORIZON_LIFT;
+        let lifted = field * HORIZON_LIFT;
         assert!((limb_off_down - dip - lifted).abs() < 1e-9, "{limb_off_down} vs {dip}");
+    }
+
+    /// Further out is a longer lens on the same scene: the ground below and the stretch of limb
+    /// in frame are the same size from every orbit.
+    #[test]
+    fn a_higher_orbit_is_a_longer_lens_on_the_same_scene() {
+        for radii in [1.05, 1.15, 5.0, 20.0] {
+            let distance = radii * EARTH_M;
+            let below = nadir_field(distance, EARTH_M).unwrap();
+            let ground = 2.0 * (distance - EARTH_M) * (below / 2.0).tan();
+            assert!((ground / EARTH_M - NADIR_SPAN_RADII).abs() < 1e-9, "{ground} m at {radii}");
+
+            let along = horizon_field(distance, EARTH_M).unwrap();
+            let limb = along * (distance * distance - EARTH_M * EARTH_M).sqrt();
+            assert!((limb / EARTH_M - HORIZON_SPAN_RADII).abs() < 1e-9, "{limb} m at {radii}");
+        }
+        assert!(nadir_field(EARTH_M * 20.0, EARTH_M) < nadir_field(EARTH_M * 5.0, EARTH_M));
     }
 
     #[test]
