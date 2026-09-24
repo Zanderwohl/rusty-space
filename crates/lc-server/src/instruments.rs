@@ -364,7 +364,7 @@ impl<J: Journal> Server<J> {
             if landing.strength < floor {
                 continue;
             }
-            let Ok(report) = serde_json::from_str::<Report>(&landing.body) else {
+            let Ok(report) = lc_proto::decode_report::<Report>(&landing.body) else {
                 eprintln!("WARNING: a report landing on craft {} would not parse", landing.observer.0);
                 continue;
             };
@@ -516,7 +516,7 @@ impl<J: Journal> Server<J> {
         loop {
             let (report, through) = aboard.knowledge.report_upto(since, at_s, limit);
             let through = through.ok_or(Refusal::NothingNew)?;
-            let body = serde_json::to_string(&report).map_err(|_| Refusal::Impossible)?;
+            let body = lc_proto::encode_report(&report);
             if body.len() <= lc_proto::REPORT_LIMIT {
                 return Ok((body, through));
             }
@@ -1050,6 +1050,47 @@ mod tests {
         assert!(belief.learned_s > now_s + 3_000.0, "when its light got there: {}", belief.learned_s);
     }
 
+    /// **A report carrying an unbounded error lands.** The radio's report went as JSON, which has
+    /// no infinity, so an orbit whose axis the arc could not bound made the whole report
+    /// unreadable on arrival -- and every report about a fitted system carried one.
+    #[tokio::test]
+    async fn a_reported_orbit_with_an_unbounded_error_is_filed_by_its_receiver() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.load_world(World::new(sky()));
+        let mut wire = Loopback::new();
+        let (near, far) = (ShipId(40), ShipId(41));
+        server.admit(ClientId(1), crate::world::still(near, DVec3::ZERO), 0.0);
+        server.admit(ClientId(2), crate::world::still(far, DVec3::X * 1.0e6), 0.0);
+        let star = sky()[0].id;
+        let subject = Subject::Body { star, body: lc_world::knowledge::BodyId::of(star, "loose") };
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        server.aboard(CraftId(far.0)).knowledge.orbits(
+            subject,
+            lc_world::knowledge::Orbit {
+                witness: witness(CraftId(far.0)),
+                about: None,
+                period_s: (3.0e7, f64::INFINITY),
+                semi_major_au: (1.0, f64::INFINITY),
+                eccentricity: Some((0.1, f64::NAN)),
+                orientation: lc_world::knowledge::Orientation::Unknown,
+                epoch_s: Some(0.0),
+                method: lc_world::knowledge::Method::Astrometric,
+                stated_s: now_s,
+                lineage: Vec::new(),
+            },
+        );
+        let report = Order::SendReport { to: Some(near), aim: lc_proto::Aim::Omni, secrecy: lc_proto::Secrecy::Open, idem: 4 };
+        wire.client_says(ClientId(2), act(far, report));
+        // A light-second apart, and a tick is minutes of coordinate time.
+        for _ in 0..3 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let held = server.knowledge_of(near).and_then(|k| k.file(subject)).expect("the report landed");
+        let orbit = held.orbits().first().expect("with its orbit");
+        assert_eq!(orbit.semi_major_au.1, f64::INFINITY);
+        assert_eq!(orbit.lineage.len(), 1, "heard, not measured");
+    }
+
     /// A tick with a hundred craft sweeping, each holding ten thousand files. A timing, not a
     /// check: `cargo test -p lc-server --lib a_busy_tick -- --ignored --nocapture`. The figure is
     /// in `lightcone/docs/24-standing-instruments.md`.
@@ -1184,7 +1225,7 @@ mod tests {
         let mut wire = Loopback::new();
         let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let mut heard = Vec::new();
-        let mut run = async |server: &mut Server<Memory>, wire: &mut Loopback, ticks: usize, heard: &mut Vec<u32>| {
+        let run = async |server: &mut Server<Memory>, wire: &mut Loopback, ticks: usize, heard: &mut Vec<u32>| {
             for _ in 0..ticks {
                 server.tick(wire).await.unwrap();
                 heard.extend(wire.take(ClientId(1)).into_iter().filter_map(|m| match m {

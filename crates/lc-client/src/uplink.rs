@@ -625,7 +625,7 @@ fn fold(
                 };
                 // Only counted here. The shard folds it into this craft's knowledge when its light
                 // lands, signed in or not, and what it taught arrives in the next `Learned`.
-                let stars = serde_json::from_str::<lc_world::knowledge::Report>(body).map(|r| r.stars());
+                let stars = lc_proto::decode_report::<lc_world::knowledge::Report>(body).map(|r| r.stars());
                 let notice = match stars {
                     Ok(n) => format!("{who}: told you about {n} stars"),
                     Err(_) => format!("{who} sent a report that made no sense"),
@@ -1422,7 +1422,7 @@ mod tests {
             beamed: false,
             idem: 3,
             sealed: false,
-            body: Some(serde_json::to_string(&report).unwrap()),
+            body: Some(lc_proto::encode_report(&report)),
             format: lc_proto::REPORT_FORMAT,
         };
         let sighting = Sighting {

@@ -978,6 +978,7 @@ pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, INTEGRATION_MAX_S, NAME_LIMIT,
 
 pub use radio::{
     ACK_DEPTH, Aim, Body, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
+    decode_report, encode_report,
 };
 
 #[cfg(test)]
