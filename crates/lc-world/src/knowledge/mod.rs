@@ -67,6 +67,29 @@ fn sigma_of(claim: &Claim) -> f64 {
     }
 }
 
+/// Where a static source is, from the looks that ranged it: a star seen from inside its own
+/// system is a disc, and a disc's size is a range. Parallax needs the craft to have moved; this
+/// needs only one look, which is what lets a ship parked at its own sun fit anything at all.
+///
+/// Inverse-variance mean of each ranged look's point, its error the range's and the bearing's
+/// across it in quadrature.
+fn ranged_place(sightings: &[Sighting]) -> Option<Distance> {
+    let (mut sum, mut weight) = (glam::DVec3::ZERO, 0.0);
+    for seen in sightings {
+        let Some((range_m, range_sigma_m)) = seen.range_m else { continue };
+        let range_ly = range_m / crate::system::M_PER_LY;
+        let across_ly = seen.bearing.sigma_rad * range_ly;
+        let variance = (range_sigma_m / crate::system::M_PER_LY).powi(2) + across_ly * across_ly;
+        if !(range_ly > 0.0 && variance > 0.0 && variance.is_finite()) {
+            continue;
+        }
+        let at = seen.bearing.observer_ly + seen.bearing.toward.normalize_or_zero() * range_ly;
+        sum += at / variance;
+        weight += 1.0 / variance;
+    }
+    (weight > 0.0).then(|| Distance::Measured { position_ly: sum / weight, sigma_ly: weight.recip().sqrt() })
+}
+
 fn better_name(held: Option<&Naming>, new: &Naming, owner: Witness) -> bool {
     let rank = |n: &Naming| (n.kind.chosen(), n.witness == owner, n.stated_s);
     match held {
@@ -230,7 +253,7 @@ impl File {
         // where it was. A body's distance comes from its orbit; see `knowledge::body`.
         let measured = match subject {
             Subject::Body { .. } => Distance::Unknown,
-            _ => astrometry::triangulate(&bearings),
+            _ => ranged_place(&self.sightings).unwrap_or_else(|| astrometry::triangulate(&bearings)),
         };
         let taken = matches!(measured, Distance::Measured { .. });
         let claimed = self.claims.iter().min_by(|a, b| sigma_of(a).total_cmp(&sigma_of(b)));

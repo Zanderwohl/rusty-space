@@ -106,6 +106,8 @@ pub struct Session {
     /// Each body's settled type, against the measurement it was read from. A type is a pass
     /// over the whole prior and every label in a frame asks for one.
     settled: std::sync::Mutex<HashMap<BodyId, (Measured, Option<Sort>)>>,
+    /// Logs the shard has still to analyze, as it last said.
+    pub analyzing: usize,
     pub observer: Coord,
     pub telescope: Instrument,
     pub mapping: BandMapping,
@@ -174,6 +176,7 @@ impl Session {
         let mut session = Self {
             sorts: std::sync::OnceLock::new(),
             settled: Default::default(),
+            analyzing: 0,
             stars,
             observer: Coord::ORIGIN,
             telescope: SHIP_SENSOR,

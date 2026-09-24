@@ -290,8 +290,10 @@ bodies of one system in turn, **brightest first**, for `SURVEY_DWELL_S` each. Wh
 - **The star is measured every tick, and does not take a turn.** It is not a target of the
   survey; it is the reference the survey is measured against, in every frame because it is the
   brightest thing in the sky and what every phase angle is reckoned from. So it costs no dwell
-  of its own, and its parallax accumulates with the ship's motion tick by tick — without which
-  nothing in the system has a distance and no mass prior runs. Putting it in the source list for
+  of its own. **Its distance is its range**: from inside its system it is a resolved disc, and
+  a disc is ranged like any body's, so one look places it. Without that distance nothing in
+  the system has a place and no orbit is fitted. It was parallax alone at first, which left a
+  ship parked where it spawned with no orbits and no plane after an hour of real time. Putting it in the source list for
   its glare and never pointing at it is what the first version did, and a test asking for its
   triangulated distance is what caught that.
 
@@ -307,8 +309,8 @@ at, with the error bar of a fit that converged: a ship on a 5 AU orbit surveying
 at 1.63 AU plus or minus 9e-7**, sixteen million sigma from where it was, which is far worse than
 no answer. `Knowledge::believe` now returns `Distance::Unknown` for a `Subject::Body` and a body's
 distance comes from its orbit, which is what this section always said it would. The ship's own sun
-is measured from the same bearings, because it is the one thing in the system that holds still —
-and that is the whole difference.
+is the one thing in the system that holds still, so its bearings would triangulate — but its
+range, from its disc, is what places it, and needs no motion.
 
 **The local star is in the way.** ✅ **Built** (2026-09-22), and the diagnosis it was built from
 was half wrong, so both halves are recorded here.

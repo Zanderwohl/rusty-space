@@ -87,6 +87,9 @@ pub struct Connected {
     pub logged_s: f64,
     /// Whether this connection has been told which subjects its craft keeps raw.
     pub retained_sent: bool,
+    /// The last [`Outbound::Analyzing`] count this connection was sent. A client starts at
+    /// zero, so a new connection has in effect been told that.
+    pub analyzing_sent: usize,
 }
 
 pub struct Server<J: Journal> {
@@ -404,6 +407,7 @@ impl<J: Journal> Server<J> {
             learned: Default::default(),
             logged_s: f64::NEG_INFINITY,
             retained_sent: false,
+            analyzing_sent: 0,
         });
         self.aboard(CraftId(ship_id.0));
     }
@@ -988,6 +992,7 @@ impl<J: Journal> Server<J> {
             learned: Default::default(),
             logged_s: f64::NEG_INFINITY,
             retained_sent: false,
+            analyzing_sent: 0,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused

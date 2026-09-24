@@ -790,6 +790,10 @@ pub enum Outbound {
     /// The answer to [`Inbound::Command`] `seq`, to its sender only. `text` is for a person;
     /// nothing parses it. Appended last.
     Answered { seq: u32, ok: bool, text: String },
+    /// Logs the shard has still to read for an [`Order::Analyze`], whenever that changes. The
+    /// shard's count and not a client's guess at it: only the shard knows which logs it holds.
+    /// Appended last.
+    Analyzing { left: u32 },
 }
 
 /// The longest command line a shard will read, in bytes.

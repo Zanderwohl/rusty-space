@@ -5,7 +5,7 @@
 //! later tick files the answer. The job is stamped with the time its looks were taken, so what
 //! is filed does not depend on which tick picks it up.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
@@ -23,8 +23,10 @@ pub(crate) struct Fits {
     /// a panic elsewhere cannot leave half-written, and a shard that stopped fitting orbits
     /// because an unrelated thread died would be the worse outcome.
     done: Mutex<Receiver<(CraftId, Option<Solved>)>>,
-    /// Craft with a fit in flight. One each: a second would be fitting the same arc.
-    busy: HashSet<CraftId>,
+    /// Fits in flight, by craft. Several to a craft is safe: `Knowledge::fit_job` records the
+    /// attempt, so the next job is always a different body. One each left a craft in a system of
+    /// two hundred bodies placing them one at a time.
+    busy: HashMap<CraftId, usize>,
     /// Half the machine, so the tick and the network keep the rest.
     most: usize,
 }
@@ -33,21 +35,26 @@ impl Default for Fits {
     fn default() -> Self {
         let (send, done) = channel();
         let cores = std::thread::available_parallelism().map_or(2, usize::from);
-        Self { send, done: Mutex::new(done), busy: HashSet::new(), most: (cores / 2).clamp(1, 4) }
+        Self { send, done: Mutex::new(done), busy: HashMap::new(), most: (cores / 2).clamp(1, 4) }
     }
 }
 
 impl Fits {
-    pub fn busy(&self, id: CraftId) -> bool {
-        self.busy.contains(&id)
+    pub fn full(&self) -> bool {
+        self.busy.values().sum::<usize>() >= self.most
     }
 
-    pub fn full(&self) -> bool {
-        self.busy.len() >= self.most
+    fn done_with(&mut self, id: CraftId) {
+        if let Some(count) = self.busy.get_mut(&id) {
+            *count -= 1;
+            if *count == 0 {
+                self.busy.remove(&id);
+            }
+        }
     }
 
     pub fn start(&mut self, id: CraftId, job: FitJob) {
-        self.busy.insert(id);
+        *self.busy.entry(id).or_default() += 1;
         let send = self.send.clone();
         std::thread::spawn(move || {
             // Always answered, or the craft is busy forever. A panic in the solve is a fit that
@@ -71,7 +78,7 @@ impl Fits {
         }
         let mut out = Vec::new();
         for (id, solved) in taken {
-            self.busy.remove(&id);
+            self.done_with(id);
             out.extend(solved.map(|s| (id, s)));
         }
         out
@@ -84,7 +91,7 @@ impl Fits {
         while !self.busy.is_empty() {
             let received = self.done.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recv();
             let Ok((id, solved)) = received else { break };
-            self.busy.remove(&id);
+            self.done_with(id);
             out.extend(solved.map(|s| (id, s)));
         }
         out

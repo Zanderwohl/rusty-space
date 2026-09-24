@@ -108,6 +108,9 @@ const SETTLINGS: usize = 60;
 /// timing line nearly so, leaving nothing over to judge a candidate by.
 pub const LOOKS_NEEDED: usize = 5;
 
+/// Ranged looks that make a fit a solution rather than a search: three positions are an orbit.
+pub const RANGED_NEEDED: usize = 3;
+
 /// Three positions within this of collinear give a plane that is all rounding.
 const DEGENERATE: f64 = 1.0e-6;
 
@@ -811,7 +814,7 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     // polish, nothing searched. What proximity buys is not a better search but no search.
     // Every ranged look, not three of them: the plane a short arc gives is only as good as the
     // number of positions defining it.
-    if ranged.len() >= 3 {
+    if ranged.len() >= RANGED_NEEDED {
         let places: Vec<(DVec3, f64)> =
             ranged.iter().filter_map(|l| Some((l.place()?, l.at_s))).collect();
         if let Some(found) = through(&places, &ordered, reach, f64::INFINITY) {

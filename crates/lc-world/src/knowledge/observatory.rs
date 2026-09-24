@@ -700,6 +700,27 @@ mod tests {
         assert_eq!(k.bodies_of(system.star, TICK_S * 20.0).len(), held - 1, "a body did not read back");
     }
 
+    /// **A parked ship ranges its own sun.** It is a resolved disc from anywhere in the
+    /// system, so one look gives its distance, and every orbit is fitted in its frame. Parallax
+    /// alone left a ship at rest with no distance, and so with no orbits, forever.
+    #[test]
+    fn a_parked_ship_ranges_its_own_sun_at_once() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S);
+
+        let sun = k.belief(Subject::Star(system.star)).expect("the sun is measured every tick");
+        let Distance::Measured { position_ly, sigma_ly } = sun.distance else {
+            panic!("a parked ship has no distance to its sun: {:?}", sun.distance)
+        };
+        let miss_au = position_ly.distance(system.star_position_ly()) * M_PER_LY / AU_M;
+        let sigma_au = sigma_ly * M_PER_LY / AU_M;
+        assert!(miss_au < 0.01 && miss_au < 5.0 * sigma_au.max(1.0e-6), "{miss_au} AU off, sigma {sigma_au}");
+    }
+
     /// **A moving ship's bearings on a moving planet are not a distance.** `triangulate` fits a
     /// static point to whatever it is given, and a body's bearings are all taken from inside its
     /// own system where it moves appreciably between them. Before this was guarded, a ship on a

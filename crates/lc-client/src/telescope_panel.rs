@@ -125,7 +125,7 @@ fn room(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
         if used >= capacity {
             ui.colored_label(egui::Color32::from_rgb(230, 150, 60), "Data full.");
         }
-        match game.knowledge.analyzing() {
+        match game.analyzing {
             0 => {
                 let button = ui.add_enabled(used > 0.0, egui::Button::new("Analyze"));
                 if button.on_hover_text("Read every log into a conclusion and free its room").clicked() {

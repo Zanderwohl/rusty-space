@@ -10,7 +10,7 @@
 
 use glam::DVec3;
 
-use super::arc::{self, Fitted, Look, LOOKS_NEEDED};
+use super::arc::{self, Fitted, Look, LOOKS_NEEDED, RANGED_NEEDED};
 use super::{BodyId, Subject};
 use crate::sky::StarId;
 
@@ -35,6 +35,8 @@ const REFIT_GROWTH: f64 = 1.5;
 pub(crate) struct Attempt {
     pub at_s: f64,
     pub span_s: f64,
+    /// Ranged looks it had. More of them re-arms it whatever the span: see [`newly_ranged`].
+    pub ranged: usize,
     pub last: Option<(Option<BodyId>, Fitted)>,
 }
 
@@ -45,6 +47,17 @@ fn span_s(sightings: &[super::Sighting]) -> f64 {
         .iter()
         .fold((f64::MAX, f64::MIN), |(lo, hi), s| (lo.min(s.observed_s), hi.max(s.observed_s)));
     (last - first).max(0.0)
+}
+
+fn ranged(sightings: &[super::Sighting]) -> usize {
+    sightings.iter().filter(|s| s.range_m.is_some()).count()
+}
+
+/// Whether a body has become solvable outright since it was last tried. A close pass can do
+/// that in minutes of an arc hundreds of hours long, and waiting for the span to grow would
+/// leave a planet the ship is looking at unplaced.
+fn newly_ranged(now: usize, tried: Option<&Attempt>) -> bool {
+    now >= RANGED_NEEDED && tried.is_none_or(|t| now > t.ranged)
 }
 
 impl crate::knowledge::Knowledge {
@@ -80,8 +93,11 @@ impl crate::knowledge::Knowledge {
     /// reach [`REFIT_GROWTH`] times what the last attempt saw, which is a handful of refits per
     /// decade of arc: a failed fit waits for its inputs to change, and a good one is revisited
     /// as the arc it stands on lengthens.
+    ///
+    /// **Except for new ranges**, which make a fit a solution rather than a search: a body with
+    /// more of them than when last tried goes back in, ahead of the rest.
     pub fn unfitted(&self, star: StarId) -> Option<Subject> {
-        let mine = |subject: Subject| -> Option<f64> {
+        let mine = |subject: Subject| -> Option<(bool, f64)> {
             let file = self.file(subject)?;
             if file.sightings().len() < LOOKS_NEEDED {
                 return None;
@@ -95,18 +111,19 @@ impl crate::knowledge::Knowledge {
                 .map(|o| o.stated_s)
                 .fold(f64::MIN, f64::max);
             let tried = self.tried.get(&subject);
-            if tried.is_some_and(|t| span < t.span_s * REFIT_GROWTH) {
+            let fresh = newly_ranged(ranged(file.sightings()), tried);
+            if !fresh && tried.is_some_and(|t| span < t.span_s * REFIT_GROWTH) {
                 return None;
             }
             let tried_s = tried.map_or(f64::MIN, |t| t.at_s);
-            (newest > stated).then_some(stated.max(tried_s))
+            (fresh || newest > stated).then_some((!fresh, stated.max(tried_s)))
         };
         self.members(star)
             .filter_map(|(subject, _)| match subject {
                 Subject::Body { .. } => Some((mine(subject)?, subject)),
                 _ => None,
             })
-            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+            .min_by(|a, b| a.0.0.cmp(&b.0.0).then(a.0.1.total_cmp(&b.0.1)).then(a.1.cmp(&b.1)))
             .map(|(_, subject)| subject)
     }
 
@@ -190,9 +207,10 @@ impl crate::knowledge::Knowledge {
                 (about, self.looks_at(subject, &at))
             })
             .collect();
-        let span_s = self.file(subject).map_or(0.0, |file| span_s(file.sightings()));
+        let (span_s, ranged) =
+            self.file(subject).map_or((0.0, 0), |file| (span_s(file.sightings()), ranged(file.sightings())));
         let last = self.tried.get(&subject).and_then(|t| t.last);
-        self.tried.insert(subject, Attempt { at_s: now_s, span_s, last });
+        self.tried.insert(subject, Attempt { at_s: now_s, span_s, ranged, last });
         Some(FitJob { subject, owner: self.owner, frames, warm: last, stated_s: now_s })
     }
 
@@ -253,3 +271,49 @@ impl FitJob {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::knowledge::{Bearing, Knowledge, Lineage, Sighting, Witness};
+    use em_spectra::Band;
+
+    fn look(at_s: f64, range_m: Option<(f64, f64)>) -> Sighting {
+        Sighting {
+            witness: Witness(1),
+            observed_s: at_s,
+            bearing: Bearing { observer_ly: DVec3::ZERO, toward: DVec3::new(1.0, at_s * 1.0e-9, 0.0), sigma_rad: 1.0e-7 },
+            size: None,
+            range_m,
+            spin_s: None,
+            band: Band::V,
+            flux: 1.0e-12,
+            flux_sigma: 1.0e-15,
+            lineage: Lineage::new(),
+        }
+    }
+
+    /// A body tried on bearings alone waits for its arc to grow half again, but a close pass
+    /// that ranges it puts it back at the front at once: three ranges are a solution.
+    #[test]
+    fn new_ranges_rearm_a_body_whose_arc_has_not_grown() {
+        let star = StarId::synthesize("primary", 1);
+        let (quiet, ranged) = (BodyId::of(star, "quiet"), BodyId::of(star, "ranged"));
+        let mut k = Knowledge::new(Witness(1));
+        for body in [quiet, ranged] {
+            for i in 0..LOOKS_NEEDED {
+                k.sighted(Subject::Body { star, body }, look(1000.0 * i as f64, None));
+            }
+        }
+        while let Some(subject) = k.unfitted(star) {
+            k.fit_job(subject, DVec3::ZERO, 10_000.0);
+        }
+
+        for i in 0..RANGED_NEEDED {
+            k.sighted(Subject::Body { star, body: ranged }, look(4100.0 + i as f64, Some((1.0e11, 1.0e6))));
+        }
+        assert_eq!(k.unfitted(star), Some(Subject::Body { star, body: ranged }));
+        k.fit_job(Subject::Body { star, body: ranged }, DVec3::ZERO, 10_001.0);
+        assert_eq!(k.unfitted(star), None, "tried with those ranges, so not again until more come");
+    }
+}

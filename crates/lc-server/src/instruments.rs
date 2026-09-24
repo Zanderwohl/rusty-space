@@ -251,9 +251,6 @@ impl<J: Journal> Server<J> {
             if started == FITS_PER_TICK || self.instruments.fits.full() {
                 break;
             }
-            if self.instruments.fits.busy(id) {
-                continue;
-            }
             let Some(aboard) = self.instruments.aboard.get_mut(&id) else { continue };
             let Some(star) = aboard.observatory.duty.surveying() else { continue };
             let Some(star_ly) = aboard
@@ -386,6 +383,7 @@ impl<J: Journal> Server<J> {
             .collect();
         for (client, ship, since, logged, retained_sent) in connected {
             let knowledge = &self.aboard(CraftId(ship.0)).knowledge;
+            let left = knowledge.analyzing();
             let learned = page(PAGE, |limit| {
                 let (report, through) = knowledge.report_upto(since, now_s, limit);
                 // Nothing new is the usual answer, and not worth encoding an empty report for.
@@ -410,6 +408,10 @@ impl<J: Journal> Server<J> {
             };
             if let Some(state) = self.clients.get_mut(&client) {
                 state.retained_sent = true;
+                if state.analyzing_sent != left {
+                    state.analyzing_sent = left;
+                    wire.send(client, Outbound::Analyzing { left: u32::try_from(left).unwrap_or(u32::MAX) });
+                }
             }
             if let Some((body, through)) = learned {
                 if let Some(report) = body {
@@ -772,8 +774,8 @@ mod tests {
         }
     }
 
-    /// **The fitting chain is alive on the shard, and refuses where it should.** A drifting
-    /// craft surveying its own system triangulates its sun, which is what puts the bearings in
+    /// **The fitting chain is alive on the shard, and refuses where it should.** A parked
+    /// craft surveying its own system ranges its sun, which is what puts the bearings in
     /// a frame at all, and the fit is then offered bodies whose arcs are hours long. Hours is
     /// nothing of any orbit, so it declines them -- and declining is the behavior worth
     /// pinning here, since `knowledge::arc` covers the arcs that do settle.
@@ -821,13 +823,8 @@ mod tests {
         let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let star = sky()[0].id;
 
-        // Adrift rather than at rest: a ship that holds still measures no parallax, so its own
-        // sun has no distance and nothing downstream of that runs at all. Across the line of
-        // sight and not along it -- a craft starts on the +X axis from its star, and drifting
-        // straight out along it sweeps no baseline at all.
-        if let Some(craft) = server.fleet_mut().get_mut(CraftId(ship.0)) {
-            craft.motion.beta = DVec3::new(0.0, 1.0e-6, 0.0);
-        }
+        // At rest, as a new craft is. Its sun is a resolved disc and so a range, which is what a
+        // parked ship's fits stand on: parallax alone gave it no distance, and so no orbits, ever.
         let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
         wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
         for _ in 0..80 {
@@ -840,7 +837,7 @@ mod tests {
         let host = knowledge
             .belief(lc_world::knowledge::Subject::Star(star))
             .expect("its own sun is surveyed every tick");
-        assert!(host.triangulated, "a drifting ship should measure it: {:?}", host.distance);
+        assert!(host.triangulated, "a parked ship should measure it: {:?}", host.distance);
 
         // Bodies enough to fit, and no orbit from any of them yet.
         let now_s = server.now_t() as f64 * 1.0e-6;
@@ -1172,5 +1169,42 @@ mod tests {
         if let Some((took, files, bytes)) = checkpointed {
             eprintln!("worst checkpoint snapshot {took:?}: {files} files, {bytes} bytes");
         }
+    }
+
+    /// **The client's Analyze count is the shard's.** A client that marked its own copy of the
+    /// logs counted subjects the shard held none of, which no conclusion ever came back for, and
+    /// the panel said "3 logs left" for good.
+    #[tokio::test]
+    async fn an_analysis_counts_down_to_nothing_on_the_client() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let mut heard = Vec::new();
+        let mut run = async |server: &mut Server<Memory>, wire: &mut Loopback, ticks: usize, heard: &mut Vec<u32>| {
+            for _ in 0..ticks {
+                server.tick(wire).await.unwrap();
+                heard.extend(wire.take(ClientId(1)).into_iter().filter_map(|m| match m {
+                    Outbound::Analyzing { left } => Some(left),
+                    _ => None,
+                }));
+            }
+        };
+        let sweep = lc_proto::Duty::Sweep { center: [0.0, 0.0, 1.0], radius_rad: 3.2, dwell_s: 60.0, started_s: 0.0 };
+        wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty: sweep, integration_s: 1.0e4 }));
+        run(&mut server, &mut wire, 200, &mut heard).await;
+        // Three logs, since a tick reads one and a count that is gone by the end of its tick is
+        // never said.
+        for star in &sky()[1..] {
+            let stare = lc_proto::Duty::Stare { star: star.id.get() };
+            wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty: stare, integration_s: 1.0e4 }));
+            run(&mut server, &mut wire, 100, &mut heard).await;
+        }
+        assert!(heard.is_empty(), "nothing to say until the count changes: {heard:?}");
+
+        wire.client_says(ClientId(1), act(ship, Order::Analyze));
+        run(&mut server, &mut wire, 100, &mut heard).await;
+        assert!(heard.iter().any(|&left| left > 0), "the analysis was never counted: {heard:?}");
+        assert_eq!(heard.last(), Some(&0), "the count never reached zero: {heard:?}");
     }
 }

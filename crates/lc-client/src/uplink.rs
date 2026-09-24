@@ -687,11 +687,8 @@ fn fold(
                     game.0.knowledge.retain_raw(lc_world::knowledge::Subject::from(*subject), *keep);
                     None
                 }
-                // Mirrored, so the panel can count down as the shard's conclusions consume them.
-                Order::Analyze => {
-                    game.0.knowledge.analyze();
-                    None
-                }
+                // The count arrives as `Outbound::Analyzing`: only the shard knows which logs it holds.
+                Order::Analyze => None,
                 Order::SetCourse { course, accel_g, max_beta } => {
                     let course: lc_world::navigation::Course = course.clone().into();
                     match game.0.set_course_at(at_s, &course, *accel_g, *max_beta) {
@@ -867,6 +864,7 @@ fn fold(
             }
         }
         Outbound::Answered { seq, ok, text } => uplink.console.answered(seq, ok, text),
+        Outbound::Analyzing { left } => game.0.analyzing = left as usize,
         Outbound::Backlog { messages, keys } => {
             // Nothing is announced. A transcript is what was *already* said, and a box of
             // notifications about years-old messages on every sign-in would bury whatever is

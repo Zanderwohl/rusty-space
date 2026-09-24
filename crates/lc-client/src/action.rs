@@ -1354,7 +1354,7 @@ mod tests {
         assert!(!s.knowledge.retained(id), "kept when the shard says so, not before");
         let sent = orders(&apply(Action::Analyze, &mut ui, &mut s));
         assert!(matches!(sent.as_slice(), [lc_proto::Order::Analyze]), "{sent:?}");
-        assert_eq!(s.knowledge.analyzing(), 0, "analyzing when the shard says so, not before");
+        assert_eq!(s.analyzing, 0, "analyzing when the shard says so, not before");
     }
 
 
