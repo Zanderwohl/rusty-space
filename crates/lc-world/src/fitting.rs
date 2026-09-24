@@ -251,7 +251,7 @@ impl Balance {
             spar_gap: 0.5,
             spar_thickness: 0.02,
             move_work_factor: 0.25,
-            // Placeholder: F5 anchors it on `Form::starting()` with `form::capacity::areal_density_for`.
+            // Placeholder: F5 anchors it as a literal, pinned by a test of `form::capacity::areal_density_for` on `Form::starting()`.
             hull_areal_density: 0.0,
             envelope_margin: 0.05,
             engine_clear_half_angle_rad: 15.0 * degree,

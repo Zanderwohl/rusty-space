@@ -7,7 +7,6 @@
 
 use super::{Form, Kind, Part};
 use crate::fitting::{Balance, C2, ONBOARD_DATA_BYTES};
-use crate::flight::C_M_S;
 
 /// Sums of volume × density per kind. The Mind, bays and spars add nothing.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -16,7 +15,8 @@ pub struct Capacities {
     pub storage_j: f64,
     /// Watts of drone building power.
     pub building_w: f64,
-    /// Watts of engine aperture, fore and aft together.
+    /// Watts of engine aperture, fore and aft together. The rating, not thrust: a fore engine
+    /// pushes against an aft one.
     pub aperture_w: f64,
     /// Watts living space drains, continuously.
     pub drain_w: f64,
@@ -50,11 +50,6 @@ impl Capacities {
             drain_w: living_m3 * balance.living_density_w,
             data_b: ONBOARD_DATA_BYTES + data_m3 * balance.data_density_b,
         }
-    }
-
-    /// Newtons: a photon engine's aperture power over `c`.
-    pub fn thrust_n(&self) -> f64 {
-        self.aperture_w / C_M_S
     }
 }
 
@@ -112,6 +107,10 @@ impl Transfer {
     /// the two: a reshape or a change of kind is a dismantle of all of `from` then a build of
     /// all of `to`, so it is two calls.
     pub fn of(from: Option<&Part>, to: Option<&Part>, balance: &Balance) -> Self {
+        if let (Some(from), Some(to)) = (from, to) {
+            // Priced as a resize, a reshape would skip the loss on all of it.
+            debug_assert!(from.kind == to.kind && from.primitive == to.primitive, "a reshape is two transfers");
+        }
         let kg = |p: Option<&Part>| p.map_or(0.0, |p| part_kg(p, balance));
         // Structure goes as volume^(2/3), so this is not a volume difference at one density.
         let delta_j = (kg(to) - kg(from)) * C2;
@@ -182,7 +181,7 @@ mod tests {
         assert!(close(c.building_w, b.refit_power_w(&start)));
         assert!(close(c.drain_w, b.drain_w(&start)));
         assert!(close(c.data_b, b.data_capacity(&start)));
-        assert!(close(c.thrust_n(), start.engines as f64 * b.engine_thrust_n));
+        assert!(close(c.aperture_w / crate::flight::C_M_S, start.engines as f64 * b.engine_thrust_n));
     }
 
     /// The comparison above cannot see a density that DEFAULT derives wrongly from a per-module
@@ -265,7 +264,7 @@ mod tests {
         let density = areal_density_for(&form, &b, target).unwrap();
         let anchored = Balance { hull_areal_density: density, ..b };
         assert!(close(dry_mass_kg(&form, &anchored), target));
-        // A structure of the right order: 19's frame over the surface of about 14 slots of parts.
+        // A structure of the right order: 19's frame over the surface of 15 slots of parts.
         assert!((100.0..10_000.0).contains(&density), "{density}");
         assert_eq!(areal_density_for(&form, &b, 1.0), None);
     }
@@ -289,6 +288,26 @@ mod tests {
         let Transfer::Build { cost_j } = grow else { panic!("growing is a build") };
         assert!(close(cost_j, (part_kg(&bigger, &b) - part_kg(&tank, &b)) * C2));
         assert!(close(grow.net_j() + shrink.net_j(), -0.05 * cost_j));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "a reshape is two transfers")]
+    fn a_reshape_is_refused_as_one_transfer() {
+        let b = Balance::DEFAULT;
+        let rod = part(1, Kind::Spar(SparMode::Saddle), Primitive::Cylinder { length: 8.0 }, 1.0e5);
+        let strap = Part { kind: Kind::Spar(SparMode::Strap), ..rod };
+        Transfer::of(Some(&rod), Some(&strap), &b);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "a reshape is two transfers")]
+    fn a_new_primitive_is_refused_as_one_transfer() {
+        let b = Balance::DEFAULT;
+        let rod = part(1, Kind::Storage, Primitive::Cylinder { length: 8.0 }, 1.0e5);
+        let ball = Part { primitive: Primitive::Capsule { length: 0.0 }, ..rod };
+        Transfer::of(Some(&rod), Some(&ball), &b);
     }
 
     #[test]
