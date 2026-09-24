@@ -13,6 +13,7 @@ pub mod body_material;
 pub mod body_surface_material;
 pub mod body_point_material;
 pub mod encounter_marker_material;
+pub mod hull_material;
 pub mod local_starfield_material;
 pub mod plume_material;
 pub mod population_material;

@@ -47,10 +47,21 @@ At a distance where detail would be smaller than a pixel, it fades into a textur
 it, to stop the shimmer. A distance-field mesh has no UV coordinates, so materials are mapped
 **triplanar**, from world position in the ship's frame.
 
+As built (`em_render::hull_material`): each kind's graph is baked as one repeating tile of 64 m,
+and the fade is the tile's mip chain, built on the CPU in linear light, so a window too small to
+see becomes its own average — a lit window's power spread over the pixel, not lost from it.
+`cargo run -p lc-client --example hull_void` photographs it on a sphere of any size.
+
 ### Materials by kind
 
 One texture-graph graph per kind, delivered like the planet graphs, with the region set by which
 part a point is nearest. Fillets blend between the two regions.
+
+The mesher hands the material each vertex's two nearest parts' regions and the second's share,
+read off the per-part distances it already evaluates. The material knows regions only as indices
+into the caller's palette of graphs; which kind is which is Lightcone's. A graph's output color is
+albedo, and a layer named `lights` beside it is the lit share of each texel, which the caller
+scales by a power per region.
 
 | kind | look |
 |---|---|
@@ -60,7 +71,7 @@ part a point is nearest. Fillets blend between the two regions.
 | engine | an emitter grid on the open face, glowing with exhaust power |
 | data | fine dense panels |
 | mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
-| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own |
+| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. Not built yet: it needs the neighbor's distance, which arrives with the form (R8, R10) |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything

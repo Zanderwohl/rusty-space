@@ -1,0 +1,293 @@
+TextureGraphFile(
+    format_version: 2,
+    metadata: FileMetadata(
+        name: "spar hull",
+        description: Some("Spar: plates 8 m by 32 m over girders every 8 m. The bolt line where a spar meets a neighbor is the shader's, from the form. One tile is 64 m of hull and must repeat: integer frequencies, and noise with period == frequency. Output color is albedo; the layer named lights is the lit share of each texel. See em_render::hull_material."),
+        authors: [
+            "Alexander Lowry",
+        ],
+        modified: "2026-09-24T00:00:00Z",
+        written_by: "texture-graph-core 12498d1",
+    ),
+    graph: Graph(
+        layers: [
+            Layer(
+                id: 1,
+                name: "u",
+                kind: Coordinate(Coordinate(
+                    axis: U,
+                )),
+            ),
+            Layer(
+                id: 2,
+                name: "v",
+                kind: Coordinate(Coordinate(
+                    axis: V,
+                )),
+            ),
+            Layer(
+                id: 3,
+                name: "base",
+                kind: Color(Oklch(
+                    l: 0.6037,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 4,
+                name: "light plate",
+                kind: Color(Oklch(
+                    l: 0.6542,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 5,
+                name: "plate tone",
+                kind: Noise(Noise(
+                    dims: D2,
+                    seed_offset: 7,
+                    frequency: 8.0,
+                    range: Unsigned,
+                    output: Grayscale,
+                    kernel: Value,
+                    period: (8, 8, 0),
+                    fractal: Fractal(
+                        octaves: 1,
+                        lacunarity: 2.0,
+                        gain: 0.5,
+                        mode: Standard,
+                        normalize: true,
+                    ),
+                )),
+            ),
+            Layer(
+                id: 6,
+                name: "plates",
+                kind: Mix(Mix(
+                    a: Some(3),
+                    b: Some(4),
+                    mode: Blend,
+                    factor: Layer(5),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 7,
+                name: "girders wave",
+                kind: Wave(Wave(
+                    input: Layer(2),
+                    shape: Triangle,
+                    frequency: 8.0,
+                    phase: 0.75,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 8,
+                name: "girders edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.084375,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.115625,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 9,
+                name: "girders",
+                kind: Map(Map(
+                    value: Some(7),
+                    palette: Some(8),
+                )),
+            ),
+            Layer(
+                id: 10,
+                name: "girder",
+                kind: Color(Oklch(
+                    l: 0.698,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 11,
+                name: "ribbed",
+                kind: Mix(Mix(
+                    a: Some(6),
+                    b: Some(10),
+                    mode: Blend,
+                    factor: Layer(9),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 12,
+                name: "seam u wave",
+                kind: Wave(Wave(
+                    input: Layer(1),
+                    shape: Triangle,
+                    frequency: 8.0,
+                    phase: 0.75,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 13,
+                name: "seam u edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.015625,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.046875,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 14,
+                name: "seam u",
+                kind: Map(Map(
+                    value: Some(12),
+                    palette: Some(13),
+                )),
+            ),
+            Layer(
+                id: 15,
+                name: "seam v wave",
+                kind: Wave(Wave(
+                    input: Layer(2),
+                    shape: Triangle,
+                    frequency: 2.0,
+                    phase: 0.75,
+                    range: Unsigned,
+                )),
+            ),
+            Layer(
+                id: 16,
+                name: "seam v edge",
+                kind: ColorRamp(ColorRamp(
+                    stops: [
+                        ColorStop(
+                            t: 0.003906,
+                            color: Const(Oklch(
+                                l: 1.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        ),
+                        ColorStop(
+                            t: 0.011719,
+                            color: Const(Oklch(
+                                l: 0.0,
+                                chroma: 0.0,
+                                hue: OklabHue(0.0),
+                                alpha: 1.0,
+                            )),
+                        )
+                    ],
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 17,
+                name: "seam v",
+                kind: Map(Map(
+                    value: Some(15),
+                    palette: Some(16),
+                )),
+            ),
+            Layer(
+                id: 18,
+                name: "seams",
+                kind: MinMax(MinMax(
+                    a: Some(14),
+                    b: Some(17),
+                    mode: Max,
+                    criterion: Luma,
+                )),
+            ),
+            Layer(
+                id: 19,
+                name: "seam",
+                kind: Color(Oklch(
+                    l: 0.4932,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+            Layer(
+                id: 20,
+                name: "albedo",
+                kind: Mix(Mix(
+                    a: Some(11),
+                    b: Some(19),
+                    mode: Blend,
+                    factor: Layer(18),
+                    space: Oklch,
+                )),
+            ),
+            Layer(
+                id: 21,
+                name: "lights",
+                kind: Color(Oklch(
+                    l: 0.0,
+                    chroma: 0.0,
+                    hue: OklabHue(0.0),
+                    alpha: 1.0,
+                )),
+            ),
+        ],
+        list_order: [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+        ],
+        canvases: {},
+        output: Output(
+            color: Some(20),
+            roughness: Const(0.5),
+            metallic: Const(0.0),
+            normal: None,
+        ),
+        params: {},
+        next_id: 22,
+    ),
+)
