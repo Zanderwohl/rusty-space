@@ -129,7 +129,8 @@ parent.
 The Mind's frame is the ship's frame: its axis is the nose, `lc_world::motion::facing`.
 
 **A part's axis is its local x**: a capsule's, cylinder's or frustum's length, a torus's axis of
-symmetry, an ellipsoid's first semi-axis and a slab's first edge. A frustum's first end is at −x. At
+symmetry, an ellipsoid's first semi-axis and a slab's first edge. A frustum's first end is at −x.
+Every part is centered on its own origin, a frustum at half its length rather than its centroid. At
 zero twist and tilt, a child's axis lies along the normal (attached) or its parent's axis (enclosing),
 and its y along the parent's y projected across that, or the parent's z where the y is parallel. Twist
 turns it about its axis. Tilt then rotates it by a rotation vector whose two components are along the
@@ -139,7 +140,10 @@ Part ids are small integers assigned by whoever adds the part, checked for uniqu
 server, and stable across refits. Steps and animation refer to parts by id.
 
 `Form::validate` also refuses any number that is NaN, infinite, or of a sign its meaning forbids,
-naming the part and the field, because forms arrive from clients.
+naming the part and the field, because forms arrive from clients. Two ranges are narrower than a
+sign: a slab's corner is at most half its shortest edge, past which opposite roundings cross, and a
+torus's major radius is at least its minor, below which the tube crosses the axis and the closed
+forms count that part twice.
 
 ## What the server computes from a form
 
