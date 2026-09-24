@@ -97,7 +97,78 @@ What follows:
   cutoff. A receiver's heat input changes at the retarded times of those two events. Candidate
   receivers are only those within the distance where the flux falls to a millionth of the cooking
   flux, a thousand times the cooking distance.
-- **The drawn plume's flare is `drive_spread_rad`**, so what a player sees is the cone that hurts.
+- **The drawn cone is `drive_spread_rad`**, so what a player sees is the cone that hurts
+  ([31-ship-rendering.md](31-ship-rendering.md#the-exhaust-cone)).
+
+## Maneuvering near others
+
+Every approach [08-networking.md](08-networking.md#intercept-a-standing-order) plans ends in a brake,
+and a brake points the exhaust at where the ship is going. A pursuer taking station on an ally flames
+it on arrival, an escort that takes station astern sits in its quarry's cone, and every deadband
+correction lights the main drive beside a neighbor. Flotillas are a real use of `Order::Intercept`:
+a player sets their ship to follow an ally and logs off, and the authority keeps them together. So
+maneuvering near others has to be possible without cooking anyone.
+
+### Station-keeping thrusters
+
+Every hull has **station-keeping thrusters**, attitude-control style. They are not a part and take no
+volume: they give any ship up to `rcs_accel_g` of thrust, spread wide at `rcs_spread_rad`, drawn from
+heat and then storage like the drive. They are photon thrusters too, but at a hundredth of a g and
+spread over a 60° half-angle, they cook almost nothing:
+
+| ship | thrust power at 0.01 g | cooking distance |
+|---|---|---|
+| 500 m | 2.1 × 10¹⁷ W | 6 m |
+| 5 km | 2.1 × 10²⁰ W | 190 m |
+| 50 km | 2.1 × 10²³ W | 6 km |
+
+A hundredth of a g is slow in game time and nothing in real time: five kilometers takes about
+seven and a half game minutes, a twentieth of a real second.
+
+They fly everything near a neighbor: the last leg onto a station, deadband corrections, and holding
+station. A station-keeping leg is an ordinary `Cruise` with a drive of `rcs_accel_g`, so it needs no
+new motion.
+
+### Courtesy
+
+A maneuver is **courteous** when the flux it puts on any craft it can see stays under
+`courtesy_fraction`, 1%, of the cooking flux: the flux at which a Black, full receiver of any size
+sits at its rated load. The limit is per square meter, so it holds for any receiver without knowing
+its size. It sets a **courtesy radius** around each drive, inside which its cone must miss:
+
+| ship at 5 g | courtesy radius |
+|---|---|
+| 500 m | 27 km |
+| 5 km | 840 km |
+| 50 km | 27 000 km |
+
+Station-keeping thrusters are throttled to stay courteous too. A large ship holding station close to
+a small one maneuvers more slowly than its thrusters allow, rather than cooking it.
+
+### Two ways to approach
+
+`Order::Intercept` gains `approach`, beside `closeness`:
+
+- **Courteous** (the default). The solver is constrained so that nothing it flies cooks the quarry:
+  - **The station is abeam.** For a quarry under thrust it sits perpendicular to the quarry's thrust
+    axis, so the quarry's cone points past it and its own cone, parallel, points past the quarry.
+    For a coasting or falling quarry it sits perpendicular to the pursuer's line of arrival.
+  - **Followers spread around the axis.** Each pursuer's station is at an azimuth hashed from its
+    own id, so a flotilla forms a ring beside its leader rather than a queue in each other's cones.
+  - **The main-drive leg ends at an ingress point**, at the courtesy radius and offset to the side,
+    so the braking cone passes beside the quarry. The quarry falls inside that cone only while it is
+    more than eleven courtesy radii away (5° is a slope of one in eleven), where the flux is under a
+    hundredth of the limit.
+  - **Station-keeping thrusters fly from there to the station**, and keep it.
+- **Direct.** Today's solver: burn, flip and brake straight to a station wherever it falls, cone and
+  all. It is quicker by the ingress leg and the hop, a fraction of a real second, and it flames
+  whatever it arrives at. This is the Kzinti approach, for when the arrival is the point.
+
+Courteous is the default because a standing order runs on the authority while its owner is away,
+and a flotilla left overnight should still be there in the morning.
+
+What courtesy does not do: it only avoids craft the pursuer can **see**. A ship that has not yet
+come into sight is not avoided, which is what light delay means.
 
 ## Emitting on purpose
 
@@ -264,10 +335,15 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 | setting | first guess | meaning |
 |---|---|---|
 | `drive_spread_rad` | 5° | the drive's exhaust half-angle |
+| `rcs_accel_g` | 0.01 | the most station-keeping thrusters give any ship |
+| `rcs_spread_rad` | 60° | their half-angle |
+| `courtesy_fraction` | 0.01 | of the cooking flux, the most a courteous maneuver puts on anyone it can see |
 
 ## Protocol
 
-- `Order::Emit` as above. `Order::Transmit` keeps its message fields and is charged.
+- `Order::Emit` as above.
+- `Order::Intercept` gains `approach: Courteous | Direct`. `Pursuit`, as stated to the client, carries
+  it. `Order::Transmit` keeps its message fields and is charged.
 - `Refusal::NoAperture` (both apertures asked of a ship with engines at one end only),
   `Refusal::OverRating`, and the existing `UnderWay` and `Refitting`.
 - `Outbound::Illuminated`: a beam arriving, with its bearing, band and power, **when its light
@@ -277,6 +353,8 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 
 ## Client
 
+- **Intercept**: two buttons beside Company and Intimate, **Courteous** and **Direct**, so a
+  chase is chosen as a pair. The HUD line that says who is being followed says which.
 - **Emit window**, on `E`, with the same toolkit and rules as the other windows. Aim at a known
   craft, at the reticle, or along a bearing. Before sending, it shows:
   - the diffraction floor, the chosen spread, and the spot at the target
@@ -295,13 +373,18 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `emit.rs`: the aperture rating, received fraction, lead uncertainty, the emit as a boost segment | `signal.rs` generalizes to any wavelength and aperture. `cost.rs` draws exhaust from heat first. `fitting.rs` counts heat in mass. Rated acceleration counts aft engines only |
+| `lc-world` | `emit.rs`: the aperture rating, received fraction, lead uncertainty, the emit as a boost segment. `courtesy.rs`: the cooking flux, the courtesy radius, the abeam station and ingress point | `signal.rs` generalizes to any wavelength and aperture. `cost.rs` draws exhaust from heat first. `fitting.rs` counts heat in mass. Rated acceleration counts aft engines only |
 | `lc-proto` | `Order::Emit`, `Outbound::Illuminated`, the refusals | `Presence` |
 | `lc-server` | `emit.rs`, beside `radio.rs`: fan-out to every worldline in the cone, delivery at the retarded time, heat into the receiver's account | `radio.rs` charges transmissions |
 | `lc-client` | `emit_panel.rs` | map overlays, plume, HUD |
 
 ## Tests
 
+- **Courtesy.** A courteous approach to a quarry at rest, and an escort of a burning one, never put
+  more than `courtesy_fraction` of the cooking flux on the quarry at any instant of the plan. A direct
+  approach to the same quarry does, which is what shows the check is not passing trivially.
+- **Flotillas.** Three pursuers of one leader take stations at three azimuths, and none is in
+  another's cone.
 - **Exhaust from heat.** A burn from a hot ship refunds what heat supplied, and the ship ends
   colder, lighter and where the plan said.
 - **Recoil.** A balanced emit leaves the worldline untouched. An aft-only emit moves the ship

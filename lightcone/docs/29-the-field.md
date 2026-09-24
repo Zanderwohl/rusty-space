@@ -122,7 +122,29 @@ beam arrives with its own warning, so a switch started when it lands is too late
 chosen beforehand.
 
 A switch can be ordered at any time, under way or refitting, and is refused only while another is
-running. A new ship starts Black.
+running.
+
+### Auto
+
+The third setting is **Auto**: a thermostat that switches between the two. It is what a player sets
+before logging off, and a new ship starts in it.
+
+- **Clear** when heat rises to `auto_clear_above` of `Q_max`, or storage fills.
+- **Black** when heat falls to `auto_black_below` and storage is under `auto_refill_below` of capacity.
+
+The defaults are a half and three tenths of `Q_max`, about 3 850 K and 3 400 K, well short of
+collapse, with storage refilling below 95%. The gaps between the pairs are hysteresis, so the field
+does not chatter at a boundary. A player can move either threshold. They travel with the order.
+
+A ship left in Auto at 0.1 AU fills Black, turns Clear when full and sits there at about 2 400 K,
+goes Black again when its living drain has taken 5% of storage, and repeats.
+
+**Auto runs on the authority**, like every standing order: logging off does not stop the world. It
+needs no polling. The heat account and the fill time are closed form, so the authority works out when
+the next threshold is crossed and schedules the switch then, as it schedules a collapse, and re-solves
+at every change of input. A burst that jumps past a threshold starts the switch at once. The switch
+still takes `field_switch_s`, so Auto is posture too, not a reflex: it cannot answer a beam in time,
+only the heat the beam leaves behind.
 
 ## The anchors
 
@@ -289,6 +311,9 @@ infer from it:
 | `conversion_efficiency` | 0.7 | what arrives and is converted, over what is stored |
 | `clear_absorptivity` | 0.3 | what a Clear field absorbs. Black absorbs everything |
 | `field_switch_s` | 86 400 | one game day to change mode |
+| `auto_clear_above` | 0.5 | of `Q_max`: Auto goes Clear |
+| `auto_black_below` | 0.3 | of `Q_max`: Auto goes Black, if storage has room |
+| `auto_refill_below` | 0.95 | of capacity: what counts as room |
 | `collapse_spike_fraction` | 0.9 | of `E`, released at once |
 | `collapse_spike_k` | 10⁷ | the spike's color temperature: X-rays |
 | `collapse_afterglow_s` | 30 game days | how long the rest takes |
@@ -301,7 +326,7 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 | crate | new | changed |
 |---|---|---|
 | `lc-world` | `field.rs`: the account, its closed forms, time to collapse, temperature, the lethal radius | `solar.rs` becomes intake: starlight onto the shadow, gained at the star. `fitting.rs` folds heat beside stored energy. `refit.rs` reports each step's heat, and whether the plan crosses `Q_max` |
-| `lc-proto` | `Outbound::Collapsed`, `Order::FieldMode`, `Refusal::Switching` | `Fitted` gains `Q` and its time, and the mode with any switch under way. `Presence` gains field temperature and mode |
+| `lc-proto` | `Outbound::Collapsed`, `Order::FieldMode { Clear \| Black \| Auto { clear_above, black_below, refill_below } }`, `Refusal::Switching` | `Fitted` gains `Q` and its time, and the mode with any switch under way. `Presence` gains field temperature and mode |
 | `lc-server` | collapse scheduling and delivery, respawn | the tick settles heat. Refit and order acceptance warn |
 | `lc-client` | | `hud.rs` gains `Field`, `panels.rs` draws the bar. The refit panel, photometry. The field shader is [31-ship-rendering.md](31-ship-rendering.md) |
 
@@ -327,8 +352,10 @@ A second bar in the top header, beside the energy bar and built the same way: `H
 - **The text beside it**: temperature, net heat flow, and **a countdown whenever a collapse is
   scheduled** — `3 240 K ↑ 1.2 ME/yr — collapse in 4:10`. That is the one number a player must never
   have to compute.
-- **The mode, `CLEAR` or `BLACK`,** is a label at the bar's left, reading `→ BLACK` while a switch
-  runs. Clicking it orders the switch.
+- **Three buttons at the bar's left: Black, Clear and Auto.** The chosen one is lit. In Auto, the mode
+  the field is actually in shows as a small `CLEAR` or `BLACK` beside it, and a switch under way reads
+  `→ BLACK`.
+- **In Auto, two markers on the bar** show the thresholds. Dragging one sends a new order.
 - **Color is never the only signal.** The countdown and the numbers say everything the hue does, for
   a player who cannot tell red from orange.
 
@@ -362,6 +389,9 @@ puts a countdown in the text.
   conversion loss. The same energy as a burst adds all of it.
 - **Modes.** A Clear field takes `clear_absorptivity` of a beam and a Black one all of it. A switch
   changes nothing until `field_switch_s` has passed, and a second switch meanwhile is refused.
+- **Auto.** A ship in Auto at 0.1 AU switches at the predicted instants, stepped finely and in one
+  leap, and a ship with no client connected does the same. Set both thresholds equal on purpose and
+  check the hysteresis test fails.
 
 ## Open
 

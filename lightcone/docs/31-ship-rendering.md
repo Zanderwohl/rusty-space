@@ -171,10 +171,38 @@ says.
 - **A beam is invisible**, because vacuum scatters nothing. The one exception is an observer inside
   the cone, who sees the emitter as a blinding point in the beam's band. The map draws your own
   beams and the bearings of beams landing on you ([30-directed-energy.md](30-directed-energy.md)).
-- **The plume brightens under a dump** by the same rule it already has: more power through the same
-  nozzle is hotter and longer. A **fore** emission lights a plume at the bow.
-- **The plume flares at `drive_spread_rad`**, so the cone drawn is the cone that heats whatever is in
-  it ([30-directed-energy.md](30-directed-energy.md#exhaust-lands-on-whatever-is-behind)).
+- A **fore** emission lights the bow's apertures as a drive lights the stern's.
+
+### The exhaust cone
+
+A photon drive's exhaust has no gas in it. Seen from the side, it is invisible; seen from inside, it
+is a blinding point. `plume.wgsl` draws a reaction drive: a glowing column of fuel-rich gas 1.5 hull
+lengths long, with soot lanes, heated by the jet power `½ F v`. None of that exists here. And the
+cone that matters is thousands of times longer than any hull: 27 km of courtesy radius behind a
+starting ship, 27 000 km behind a GSV.
+
+The current shader is not the cost problem it might look like. It is one draw per burning ship: a
+proxy cone, with each covered pixel marching 24 samples back along its ray. Cost goes with the pixels
+covered and not with the length. What does not survive a longer cone is its content, so it is
+replaced by two things:
+
+- **The aperture.** The engine's open face glows as a blackbody at the flux leaving it, `F c` over the
+  aperture's area, not `½ F v`. It is white-hot at any real thrust, and it is what a burning ship looks
+  like from the side. A short near-field glow off the face, a few aperture widths, keeps the direction
+  of thrust readable at a glance.
+- **The cone**, drawn as an indicator rather than as light: a long, faint cone along the exhaust, out
+  to the courtesy radius, shaded by how much heat lands at each distance. Heat falls as `1/d²` along
+  the axis, so the shading is **closed form per pixel**: take the point where the view ray passes
+  closest to the axis, and read the flux there. There is no march and no loop, one draw per cone,
+  and the fragment works in the proxy's own coordinates from the surface back, as `plume.wgsl` does,
+  so `f32` holds at 27 000 km.
+
+The cone is drawn for your own ship whenever it burns, for any ship whose courtesy radius you are
+inside, and for a selected ship. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s
+palette, and is brightest where it would cook. The map draws the same cone as lines.
+
+An observer inside someone's cone gets the blinding point, from the photometry, as for a beam
+([30-directed-energy.md](30-directed-energy.md)).
 - God view may draw every beam's cone, as a debug overlay, like the causality lines of
   [07-rendering.md](07-rendering.md).
 
@@ -215,8 +243,8 @@ photographed:
 
 | crate | new | changed |
 |---|---|---|
-| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material` | `plume_material` reads the aperture's shape |
-| `lc-client` | `hull_mesh.rs` (surface nets, finishes, caching), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws the form instead of the ovoid. `plume.rs` for dumps and fore emission |
+| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` | `plume_material` becomes the aperture glow |
+| `lc-client` | `hull_mesh.rs` (surface nets, finishes, caching), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws the form instead of the ovoid. `plume.rs` draws the aperture glow at `F c` and the cone |
 | `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl` | |
 
 Materials go in `em-render` because nothing in them is specific to Lightcone. A hull with regions
