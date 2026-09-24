@@ -772,18 +772,24 @@ pub enum Outbound {
     /// which is what lets the shelf offer "recently read" without either end having to agree
     /// about whose clock a timestamp would be in.
     Reading(Vec<Bookmark>),
-    /// What this craft has learned since the last of these: a serialized
+    /// What this craft has learned since the last of these: an [`encode`]d
     /// `lc_world::knowledge::Report` from the craft itself, which the client folds into its
     /// copy without adding a hop. The whole of a craft's knowledge arrives this way, in pages,
     /// when it signs in. Appended last.
-    Learned { report: String },
+    ///
+    /// Postcard and not JSON, which has no infinity: an orbit with an element the arc cannot
+    /// bound states its error as infinite, serde_json wrote that as `null` and could not read
+    /// it back, and the client dropped every page carrying one -- which was every page about a
+    /// system anyone had fitted.
+    Learned { report: Vec<u8> },
     /// What the telescope is committed to, as the shard has it. Said on sign-in and whenever it
     /// changes. Appended last.
     Observing { duty: Duty, integration_s: f64 },
-    /// This craft's own photometry since the last of these: a serialized
-    /// `lc_world::knowledge::Logs`, with the subjects it keeps raw. A report never carries logs, so a client's copy of its
-    /// own curves arrives this way, in pages. Appended last.
-    Logged { logs: String },
+    /// This craft's own photometry since the last of these: an [`encode`]d
+    /// `lc_world::knowledge::Logs`, with the subjects it keeps raw. A report never carries logs,
+    /// so a client's copy of its own curves arrives this way, in pages. Postcard for the reason
+    /// [`Outbound::Learned`] is. Appended last.
+    Logged { logs: Vec<u8> },
     /// Every craft this ship answers automatically, whole. Sent on signing in and after each
     /// [`Order::AutoAck`]. Appended last.
     AutoAcking { ship_id: ShipId, with: Vec<ShipId> },
@@ -1289,7 +1295,7 @@ mod tests {
     }
 
     fn learned() -> Outbound {
-        Outbound::Learned { report: "{}".into() }
+        Outbound::Learned { report: b"{}".to_vec() }
     }
 
     fn send_report() -> Inbound {
@@ -1480,7 +1486,7 @@ mod tests {
             },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NothingNew },
-            Outbound::Learned { report: "{}".into() },
+            Outbound::Learned { report: b"{}".to_vec() },
             Outbound::Observing { duty: Duty::Stare { star: 3 }, integration_s: 1.0e4 },
             Outbound::Observing { duty: Duty::Idle, integration_s: 0.0 },
             Outbound::AutoAcking { ship_id: ShipId(42), with: vec![ShipId(7), ShipId(9)] },

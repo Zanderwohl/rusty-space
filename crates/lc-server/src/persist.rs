@@ -716,7 +716,7 @@ mod tests {
         );
 
         // serde_json's default parser does not round this trip; its `float_roundtrip` feature
-        // does, and reports and knowledge pages travel as JSON and are deduplicated by the bits,
+        // does, and reports between craft travel as JSON and are deduplicated by the bits,
         // so the workspace turns it on. Pinned here, where losing it would be noticed.
         let text = serde_json::to_string(&awkward).expect("it writes");
         let json: f64 = serde_json::from_str(&text).expect("it reads");

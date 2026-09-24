@@ -464,7 +464,7 @@ async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
     while !(relayed(&copy) && told_of_it) {
         for message in receiver.poll() {
             match message {
-                Outbound::Learned { report } => copy.absorb(&serde_json::from_str(&report).expect("a report")),
+                Outbound::Learned { report } => copy.absorb(&lc_proto::decode(&report).expect("a report")),
                 Outbound::Sightings(cleared) => {
                     told_of_it |= cleared.iter().any(|c| c.get().kind == lc_proto::kind::REPORT);
                 }

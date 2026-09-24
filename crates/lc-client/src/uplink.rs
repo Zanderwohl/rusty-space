@@ -836,12 +836,12 @@ fn fold(
         Outbound::Library { base, books } => uplink.shelf = Some((base, books)),
         Outbound::Reading(marks) => uplink.bookmarks = Some(marks),
         // A report from this craft itself: what it has learned since the last one, with no hop.
-        Outbound::Learned { report } => match serde_json::from_str::<lc_world::knowledge::Report>(&report) {
+        Outbound::Learned { report } => match lc_proto::decode::<lc_world::knowledge::Report>(&report) {
             Ok(report) => game.0.knowledge.absorb(&report),
             Err(why) => warn!(%why, "a knowledge page that would not parse"),
         },
         // Its own photometry, which no report carries.
-        Outbound::Logged { logs } => match serde_json::from_str::<lc_world::knowledge::Logs>(&logs) {
+        Outbound::Logged { logs } => match lc_proto::decode::<lc_world::knowledge::Logs>(&logs) {
             Ok(page) => {
                 game.0.knowledge.copy_logs(&page.logs);
                 for subject in page.retained {
@@ -1404,7 +1404,7 @@ mod tests {
                 lineage: Vec::new(),
             },
         );
-        let report = serde_json::to_string(&held.report(lc_world::knowledge::Mark::default(), 1.0)).unwrap();
+        let report = lc_proto::encode(&held.report(lc_world::knowledge::Mark::default(), 1.0));
         fold(&mut uplink, &mut game, &mut ui, Outbound::Learned { report });
         assert_eq!(game.0.knowledge.belief(star).unwrap().hops, 0, "its own, not relayed");
     }

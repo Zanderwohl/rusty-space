@@ -137,7 +137,7 @@ pub(crate) fn witness(id: CraftId) -> Witness {
 /// A single item larger than a page is sent alone if it fits a frame. One that does not is
 /// skipped (body `None`, mark moved past it), because sending it would close the connection on
 /// every reconnection.
-fn page<T>(mut limit: usize, build: impl Fn(usize) -> (Option<String>, Option<T>)) -> Option<(Option<String>, T)> {
+fn page<T>(mut limit: usize, build: impl Fn(usize) -> (Option<Vec<u8>>, Option<T>)) -> Option<(Option<Vec<u8>>, T)> {
     loop {
         let (body, through) = build(limit);
         let (body, through) = (body?, through?);
@@ -269,10 +269,13 @@ impl<J: Journal> Server<J> {
     }
 
     /// No recount after: a fit changes no samples, and a recount is a pass over every file.
-    fn file_fits(&mut self, finished: Vec<(CraftId, lc_world::knowledge::primary::Solved)>) {
+    fn file_fits(&mut self, mut finished: Vec<(CraftId, lc_world::knowledge::primary::Solved)>) {
+        let now_s = self.now_t as f64 * 1.0e-6;
+        // Oldest looks first, so of two fits of one body the later one is filed last and stands.
+        finished.sort_by(|a, b| a.1.taken_s().total_cmp(&b.1.taken_s()));
         for (id, solved) in finished {
             if let Some(aboard) = self.instruments.aboard.get_mut(&id) {
-                aboard.knowledge.file_fit(solved);
+                aboard.knowledge.file_fit(solved, now_s);
             }
         }
     }
@@ -387,7 +390,7 @@ impl<J: Journal> Server<J> {
             let learned = page(PAGE, |limit| {
                 let (report, through) = knowledge.report_upto(since, now_s, limit);
                 // Nothing new is the usual answer, and not worth encoding an empty report for.
-                (through.and_then(|_| serde_json::to_string(&report).ok()), through)
+                (through.map(|_| lc_proto::encode(&report)), through)
             });
             let retained = knowledge.retained_subjects();
             let logs = page(LOG_PAGE, |limit| {
@@ -396,14 +399,14 @@ impl<J: Journal> Server<J> {
                     return (None, None);
                 }
                 let page = lc_world::knowledge::Logs { logs, retained: retained.clone() };
-                (serde_json::to_string(&page).ok(), through)
+                (Some(lc_proto::encode(&page)), through)
             });
             // Send what the craft keeps raw once even with no logs; later log pages and accepted
             // orders carry it after that.
             let logs = match logs {
-                None if !retained_sent && !retained.is_empty() => serde_json::to_string(&lc_world::knowledge::Logs { logs: Vec::new(), retained })
-                    .ok()
-                    .map(|body| (Some(body), logged)),
+                None if !retained_sent && !retained.is_empty() => {
+                    Some((Some(lc_proto::encode(&lc_world::knowledge::Logs { logs: Vec::new(), retained })), logged))
+                }
                 other => other,
             };
             if let Some(state) = self.clients.get_mut(&client) {
@@ -599,7 +602,7 @@ mod tests {
         let mut copy = Knowledge::new(witness(CraftId(ship.0)));
         for message in messages {
             if let Outbound::Learned { report } = message {
-                copy.absorb(&serde_json::from_str(report).expect("a report"));
+                copy.absorb(&lc_proto::decode(report).expect("a report"));
             }
         }
         copy
@@ -900,10 +903,10 @@ mod tests {
         assert_eq!(replica(ship, &all).name_of(sky()[0].id).as_deref(), Some("Hearth"));
     }
 
-    /// A craft that knows more than one frame holds is paged all of it, every page inside
+    /// A craft that knows more than a page holds is paged all of it, every page inside
     /// [`PAGE_BYTES`], until its copy matches the original.
     #[tokio::test]
-    async fn a_craft_that_knows_more_than_a_frame_is_paged_all_of_it() {
+    async fn a_craft_that_knows_more_than_a_page_is_paged_all_of_it() {
         let broker = Broker::new([1u8; 32]);
         let mut server = server(&broker);
         let mut wire = Loopback::new();
@@ -935,8 +938,8 @@ mod tests {
             let sample = lc_world::knowledge::Sample { observed_s: now_s + n as f64 * 1e-3, deficit: 1e-4, sigma: 1e-5 };
             knowledge.measured(watched, witness(id), em_spectra::Band::V, sample);
         }
-        let whole = serde_json::to_string(&knowledge.report(Mark::default(), now_s + 2.0)).unwrap().len();
-        assert!(whole > lc_proto::FRAME_LIMIT, "the test needs more than a frame of files: {whole}");
+        let whole = lc_proto::encode(&knowledge.report(Mark::default(), now_s + 2.0)).len();
+        assert!(whole > 3 * PAGE_BYTES, "the test needs several pages of files: {whole}");
 
         for _ in 0..200 {
             server.tick(&mut wire).await.unwrap();
@@ -947,11 +950,11 @@ mod tests {
         for message in &said {
             let body = match message {
                 Outbound::Learned { report } => {
-                    copy.absorb(&serde_json::from_str(report).unwrap());
+                    copy.absorb(&lc_proto::decode(report).unwrap());
                     report
                 }
                 Outbound::Logged { logs } => {
-                    let page: lc_world::knowledge::Logs = serde_json::from_str(logs).unwrap();
+                    let page: lc_world::knowledge::Logs = lc_proto::decode(logs).unwrap();
                     copy.copy_logs(&page.logs);
                     for subject in page.retained {
                         copy.retain_raw(subject, true);
@@ -963,7 +966,7 @@ mod tests {
             pages += 1;
             assert!(body.len() <= PAGE_BYTES, "a page of {} bytes", body.len());
         }
-        assert!(pages > 16, "it took pages, not one message: {pages}");
+        assert!(pages > 8, "it took pages, not one message: {pages}");
         let original = server.knowledge_of(ship).unwrap();
         assert!(original.own_series(watched, em_spectra::Band::V).unwrap().len() > 40_000, "a log longer than a page");
         assert_eq!(copy.len(), original.len(), "every file arrived");
@@ -1206,5 +1209,42 @@ mod tests {
         run(&mut server, &mut wire, 100, &mut heard).await;
         assert!(heard.iter().any(|&left| left > 0), "the analysis was never counted: {heard:?}");
         assert_eq!(heard.last(), Some(&0), "the count never reached zero: {heard:?}");
+    }
+
+    /// **An orbit whose error is unbounded reaches the client.** `spread` states an element the
+    /// arc cannot bound as infinite, and JSON has no infinity: serde_json wrote `null`, the
+    /// client could not read the page back and dropped it, and the shard had already moved the
+    /// client's mark past it. Every page about a system with a fit in it was lost that way, on
+    /// every reconnection -- a client held none of the 174 orbits its shard had fitted.
+    #[test]
+    fn an_unbounded_error_crosses_the_wire() {
+        let star = sky()[0].id;
+        let subject = lc_world::knowledge::Subject::Body { star, body: lc_world::knowledge::BodyId::of(star, "loose") };
+        let mut knowledge = Knowledge::new(witness(CraftId(1)));
+        knowledge.orbits(
+            subject,
+            lc_world::knowledge::Orbit {
+                witness: witness(CraftId(1)),
+                about: None,
+                period_s: (3.0e7, f64::INFINITY),
+                semi_major_au: (1.0, f64::INFINITY),
+                eccentricity: Some((0.1, f64::NAN)),
+                orientation: lc_world::knowledge::Orientation::Unknown,
+                epoch_s: Some(0.0),
+                method: lc_world::knowledge::Method::Astrometric,
+                stated_s: 10.0,
+                lineage: Vec::new(),
+            },
+        );
+        let (report, _) = knowledge.report_upto(Mark::default(), 20.0, PAGE);
+        let Some(Outbound::Learned { report }) =
+            lc_proto::decode(&lc_proto::encode(&Outbound::Learned { report: lc_proto::encode(&report) })).ok()
+        else {
+            panic!("the message did not survive the wire")
+        };
+        let mut copy = Knowledge::new(witness(CraftId(1)));
+        copy.absorb(&lc_proto::decode(&report).expect("a page the client can read"));
+        let held = copy.file(subject).expect("the body arrived").orbits().first().expect("its orbit arrived").clone();
+        assert_eq!(held.semi_major_au.1, f64::INFINITY);
     }
 }
