@@ -520,9 +520,9 @@ graph LR
 
 ### R7 · Exhaust cone, in a void
 
-- status: todo
+- status: active claude/r7-exhaust-cone
 - needs: E1
-- touches: `crates/em-render/src/exhaust_cone_material.rs`, `crates/lc-client/assets/shaders/exhaust_cone.wgsl`, `crates/em-render/src/plume_material.rs`
+- touches: `crates/em-render/src/exhaust_cone_material.rs`, `crates/lc-client/assets/shaders/exhaust_cone.wgsl`, `crates/em-render/src/plume_material.rs`, `crates/lc-client/examples/cone_void.rs`
 - read: 32 §The exhaust cone
 - deliver: the cone shaded in closed form per pixel from the flux at the ray's closest approach to the axis, one draw, precise at 26 000 km; the aperture glow at `F c` over its area.
 - done when: photographed from beside, behind and inside the cone, at 26 km and at 26 000 km.
