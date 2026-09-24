@@ -435,6 +435,24 @@ impl<J: Journal> Server<J> {
         }
     }
 
+    /// Tell each client what its craft's instruments are at, where that changed: see
+    /// [`Outbound::Doing`]. Called once a real second.
+    pub(crate) fn tell_doing(&mut self, wire: &mut impl Transport) {
+        let clients: Vec<(lc_proto::ClientId, ShipId)> = self.clients.iter().map(|(c, s)| (*c, s.ship)).collect();
+        for (client, ship) in clients {
+            let id = CraftId(ship.0);
+            let observing = self.instruments.aboard.get(&id).and_then(|a| a.observatory.observed()).map(Into::into);
+            let fitting = self.instruments.fits.fitting(id).iter().map(|s| (*s).into()).collect();
+            let doing = Outbound::Doing { observing, fitting };
+            if let Some(state) = self.clients.get_mut(&client)
+                && state.doing_sent.as_ref() != Some(&doing)
+            {
+                state.doing_sent = Some(doing.clone());
+                wire.send(client, doing);
+            }
+        }
+    }
+
     pub(crate) fn tell_observing(&mut self, wire: &mut impl Transport, client: lc_proto::ClientId, id: CraftId) {
         let observatory = &self.aboard(id).observatory;
         let observing = Outbound::Observing {
@@ -1212,6 +1230,42 @@ mod tests {
         );
         if let Some((took, files, bytes)) = checkpointed {
             eprintln!("worst checkpoint snapshot {took:?}: {files} files, {bytes} bytes");
+        }
+    }
+
+    /// **What the instruments are at is said at most once a second, only when it changed, and
+    /// only about what the craft holds.** A survey detects a body and says so; naming one the
+    /// craft had not found would be the truth arriving by the side door.
+    #[tokio::test]
+    async fn what_the_instruments_are_at_is_said_once_a_second_and_only_about_what_is_held() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let star = sky()[0].id;
+        let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
+        wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
+        let ticks = 5 * crate::server::TICKS_PER_SECOND as usize;
+        let mut said = Vec::new();
+        for _ in 0..ticks {
+            server.tick(&mut wire).await.unwrap();
+            said.extend(wire.take(ClientId(1)).into_iter().filter(|m| matches!(m, Outbound::Doing { .. })));
+        }
+        assert!(!said.is_empty(), "a surveying craft said nothing of what it was doing");
+        assert!(said.len() <= 6, "{} in five seconds", said.len());
+        assert!(said.windows(2).all(|pair| pair[0] != pair[1]), "the same thing said twice");
+
+        let knowledge = server.knowledge_of(ship).unwrap();
+        let observed: Vec<Subject> = said
+            .iter()
+            .filter_map(|m| match m {
+                Outbound::Doing { observing, .. } => observing.map(Subject::from),
+                _ => None,
+            })
+            .collect();
+        assert!(observed.iter().any(|s| matches!(s, Subject::Body { .. })), "never a body: {observed:?}");
+        for subject in observed {
+            assert!(knowledge.file(subject).is_some(), "named {subject:?}, which the craft does not hold");
         }
     }
 

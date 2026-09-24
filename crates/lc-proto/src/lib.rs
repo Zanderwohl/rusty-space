@@ -800,6 +800,10 @@ pub enum Outbound {
     /// shard's count and not a client's guess at it: only the shard knows which logs it holds.
     /// Appended last.
     Analyzing { left: u32 },
+    /// What the craft's instruments are at: what they last measured, and what orbits are being
+    /// fitted, oldest first. Only subjects the craft already holds. At most once a real second,
+    /// and only when it changes. Appended last.
+    Doing { observing: Option<Subject>, fitting: Vec<Subject> },
 }
 
 /// The longest command line a shard will read, in bytes.

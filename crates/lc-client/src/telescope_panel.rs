@@ -226,7 +226,7 @@ fn duty(
         }
         Duty::Survey { star, .. } => {
             let here = game.system.as_ref().filter(|s| s.star == *star).is_some();
-            ui.label(format!("Surveying bodies local to {}", game.name_of(*star)));
+            ui.label(format!("Surveying bodies local to {}{}", game.name_of(*star), doing_text(game)));
             if !here {
                 ui.weak("not in that system");
             } else if held.bodies.is_empty() {
@@ -262,6 +262,20 @@ fn duty(
             ask(out, Action::StopSurvey);
         }
     });
+}
+
+/// ": Fitting A, B; Observing C", from what the shard last said, or nothing.
+fn doing_text(game: &Game) -> String {
+    let doing = &game.doing;
+    let mut parts = Vec::new();
+    if !doing.fitting.is_empty() {
+        let names: Vec<String> = doing.fitting.iter().map(|s| game.name_subject(*s)).collect();
+        parts.push(format!("Fitting {}", names.join(", ")));
+    }
+    if let Some(subject) = doing.observing {
+        parts.push(format!("Observing {}", game.name_subject(subject)));
+    }
+    if parts.is_empty() { String::new() } else { format!(": {}", parts.join("; ")) }
 }
 
 /// Nearest believed first. No labels: only the rows on screen get those.

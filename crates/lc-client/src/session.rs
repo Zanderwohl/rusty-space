@@ -94,6 +94,13 @@ pub struct Scene {
     pub discs: Vec<Disc>,
 }
 
+/// What a shard's instruments are at, by what the craft holds. See [`lc_proto::Outbound::Doing`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Doing {
+    pub observing: Option<lc_world::knowledge::Subject>,
+    pub fitting: Vec<lc_world::knowledge::Subject>,
+}
+
 pub struct Session {
     pub stars: Vec<CatalogStar>,
     /// The generator's own population of worlds, as a prior over what a measured body is.
@@ -108,6 +115,9 @@ pub struct Session {
     settled: std::sync::Mutex<HashMap<BodyId, (Measured, Option<Sort>)>>,
     /// Logs the shard has still to analyze, as it last said.
     pub analyzing: usize,
+    /// What the shard last said the instruments are at: what they last measured, and what
+    /// orbits are being fitted.
+    pub doing: Doing,
     pub observer: Coord,
     pub telescope: Instrument,
     pub mapping: BandMapping,
@@ -177,6 +187,7 @@ impl Session {
             sorts: std::sync::OnceLock::new(),
             settled: Default::default(),
             analyzing: 0,
+            doing: Doing::default(),
             stars,
             observer: Coord::ORIGIN,
             telescope: SHIP_SENSOR,
@@ -587,6 +598,18 @@ impl Session {
         let called: HashMap<BodyId, String> =
             crate::beliefs::of(self).bodies.iter().map(|b| (b.body, self.called(b))).collect();
         lc_world::labels::label(system, &star, |body| called.get(&body).cloned())
+    }
+
+    /// What this ship calls anything it holds, star or body.
+    pub fn name_subject(&self, subject: lc_world::knowledge::Subject) -> String {
+        match subject {
+            lc_world::knowledge::Subject::Star(star) => self.name_of(star),
+            lc_world::knowledge::Subject::Body { star, body } => self
+                .knowledge
+                .body_belief(star, body, self.coordinate_time_s())
+                .map_or_else(|| "unidentified body".into(), |belief| self.called(&belief)),
+            _ => "something".into(),
+        }
     }
 
     /// What this ship calls a body it holds: see [`lc_world::knowledge::called`].

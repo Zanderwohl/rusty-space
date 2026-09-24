@@ -865,6 +865,12 @@ fn fold(
         }
         Outbound::Answered { seq, ok, text } => uplink.console.answered(seq, ok, text),
         Outbound::Analyzing { left } => game.0.analyzing = left as usize,
+        Outbound::Doing { observing, fitting } => {
+            game.0.doing = crate::session::Doing {
+                observing: observing.map(Into::into),
+                fitting: fitting.into_iter().map(Into::into).collect(),
+            };
+        }
         Outbound::Backlog { messages, keys } => {
             // Nothing is announced. A transcript is what was *already* said, and a box of
             // notifications about years-old messages on every sign-in would bury whatever is

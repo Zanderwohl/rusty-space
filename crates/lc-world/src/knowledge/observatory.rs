@@ -158,6 +158,10 @@ pub struct Observatory {
     swept_s: f64,
     slot: i64,
     pointing: Option<StarId>,
+    /// What the instrument last measured: the star a stare or watch is on, or the body a survey
+    /// last detected, which the craft therefore holds. For a readout; not kept across a restart.
+    #[serde(skip)]
+    observed: Option<Subject>,
 }
 
 impl Default for Observatory {
@@ -169,6 +173,7 @@ impl Default for Observatory {
             swept_s: 0.0,
             slot: i64::MIN,
             pointing: None,
+            observed: None,
         }
     }
 }
@@ -176,6 +181,10 @@ impl Default for Observatory {
 impl Observatory {
     pub fn pointing(&self) -> Option<StarId> {
         self.pointing
+    }
+
+    pub fn observed(&self) -> Option<Subject> {
+        self.observed
     }
 
     /// A sweep or a watch starts at `now_s`, whatever start it was handed.
@@ -189,6 +198,7 @@ impl Observatory {
         self.swept_s = now_s;
         self.slot = i64::MIN;
         self.pointing = duty.target_at(now_s);
+        self.observed = None;
         self.duty = duty;
     }
 
@@ -207,8 +217,9 @@ impl Observatory {
         now_s: f64,
     ) {
         match self.duty.clone() {
-            Duty::Idle => {}
+            Duty::Idle => self.observed = None,
             Duty::Stare(id) => {
+                self.observed = Some(Subject::Star(id));
                 let elapsed = now_s - self.sampled_s;
                 if elapsed >= self.integration_s.max(1.0) {
                     self.pointing = Some(id);
@@ -234,16 +245,20 @@ impl Observatory {
                     }
                 }
                 self.pointing = duty.target_at(now_s);
+                self.observed = self.pointing.map(Subject::Star);
             }
             Duty::Sweep(sweep) => {
                 self.pointing = None;
+                self.observed = None;
                 sweep_between(sky, knowledge, at, &sweep, self.swept_s, now_s);
                 self.swept_s = now_s;
             }
             duty @ Duty::Survey { star, .. } => {
                 self.pointing = Some(star);
-                if let Some(system) = system.filter(|s| s.star == star) {
-                    survey_between(sky, system, knowledge, at, &duty, self.swept_s, now_s);
+                if let Some(system) = system.filter(|s| s.star == star)
+                    && let Some(seen) = survey_between(sky, system, knowledge, at, &duty, self.swept_s, now_s)
+                {
+                    self.observed = Some(seen);
                 }
                 self.swept_s = now_s;
             }
@@ -259,6 +274,8 @@ impl Observatory {
 /// asked about it if it is a source like any other. The rest of the catalog is left out: a
 /// star light-years off cannot outshine a planet at 5 AU, so it can neither glare on one nor
 /// hide behind one.
+///
+/// Returns the last body it detected, if any.
 pub fn survey_between(
     sky: &mut Sky,
     system: &LocalSystem,
@@ -267,9 +284,9 @@ pub fn survey_between(
     duty: &Duty,
     from_s: f64,
     to_s: f64,
-) {
+) -> Option<Subject> {
     let optics = at.optics();
-    let Some(band) = optics.band() else { return };
+    let band = optics.band()?;
     let mut sources = host_source(sky, system, band, at.position_ly)
         .into_iter()
         .collect::<Vec<Source>>();
@@ -302,6 +319,7 @@ pub fn survey_between(
         knowledge.sighted(Subject::Star(system.star), seen);
     }
 
+    let mut detected = None;
     for slot in duty.visits(bodies, from_s, to_s) {
         let index = star_last + slot;
         let Some(source) = sources.get(index) else { continue };
@@ -322,7 +340,9 @@ pub fn survey_between(
         );
         knowledge.sighted(source.subject, sighting);
         knowledge.measured_colors(source.subject, witness, to_s, &colors);
+        detected = Some(source.subject);
     }
+    detected
 }
 
 /// The system's own star as a source, worked the way the catalog path works it so the two
