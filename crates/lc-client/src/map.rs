@@ -269,7 +269,7 @@ impl Viewport {
     }
 
     /// One item's mark, in pixels: the surface's size scaled by what the thing weighs, never
-    /// under the floor. The pixel floor usually binds before [`em_map::weight::MIN_SCALE`].
+    /// under the floor. On a small map the floor binds before [`em_map::weight::MIN_SCALE`].
     fn mark_px(self, placement: &Placement) -> f32 {
         (self.point_px * placement.symbol_scale).max(POINT_FLOOR_PX)
     }

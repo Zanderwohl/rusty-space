@@ -23,6 +23,7 @@ pub mod called;
 pub mod conclusion;
 pub mod formats;
 pub mod moments;
+pub mod mass;
 pub mod names;
 pub mod observatory;
 pub mod primary;
