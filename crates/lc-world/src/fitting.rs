@@ -116,8 +116,8 @@ pub struct Balance {
     pub hull_density_kg_m3: f64,
     pub slot_volume_m3: f64,
     pub module_density_kg_m3: f64,
-    /// η: what fraction of the starlight falling on the hull's collectors is stored.
-    pub solar_efficiency: f64,
+    /// η: what arrives and is converted, over what is stored.
+    pub conversion_efficiency: f64,
     /// An unphysical multiplier on collection, because a module-energy is `mc²` and real
     /// starlight on a real hull would take billions of years to pay for one. See
     /// `lightcone/docs/20-solar-power.md`.
@@ -128,6 +128,56 @@ pub struct Balance {
     pub data_mass_fraction: f64,
     /// How many times longer a data module takes to build or take apart than any other module.
     pub data_work_factor: f64,
+    /// Module-energies of capacity per m³ of storage.
+    pub storage_density: f64,
+    /// W/m³ of building power.
+    pub drone_density_w: f64,
+    /// W/m³ of aperture power; thrust is this over `c`.
+    pub engine_density_w: f64,
+    /// W/m³ drained, continuously.
+    pub living_density_w: f64,
+    /// Bytes per m³.
+    pub data_density_b: f64,
+    /// Of module density. Every kind without its own fraction is one.
+    pub bay_mass_fraction: f64,
+    pub spar_mass_fraction: f64,
+    /// m³.
+    pub min_part_m3: f64,
+    pub min_drone_m3: f64,
+    /// m.
+    pub spar_gap: f64,
+    /// Of the parent's smallest dimension.
+    pub spar_thickness: f64,
+    pub move_work_factor: f64,
+    /// kg/m² of part surface.
+    pub hull_areal_density: f64,
+    /// Of the cube root of hull volume.
+    pub envelope_margin: f64,
+    /// Radians.
+    pub engine_clear_half_angle: f64,
+    /// K.
+    pub field_idle_k: f64,
+    /// J/m² of envelope at collapse.
+    pub field_capacity: f64,
+    pub field_tau_s: f64,
+    pub clear_absorptivity: f64,
+    pub field_switch_s: f64,
+    /// Of `Q_max`.
+    pub auto_clear_above: f64,
+    /// Of `Q_max`.
+    pub auto_black_below: f64,
+    /// Of storage capacity.
+    pub auto_refill_below: f64,
+    /// Of the field's energy.
+    pub collapse_spike_fraction: f64,
+    pub collapse_spike_k: f64,
+    pub collapse_afterglow_s: f64,
+    pub drive_spread_rad: f64,
+    /// In g.
+    pub rcs_accel_g: f64,
+    pub rcs_spread_rad: f64,
+    /// Of the cooking flux.
+    pub courtesy_fraction: f64,
 }
 
 /// What [`Balance::data_per_module`] is anchored to: one module holds a year of a
@@ -161,7 +211,14 @@ impl Balance {
         let week_s = 7.0 * 86_400.0;
         let century_s = 100.0 * crate::flight::JULIAN_YEAR_S;
         let living_drain_w = module_kg * C2 / century_s;
-        let solar_efficiency = 0.7;
+        let conversion_efficiency = 0.7;
+        let data_per_module = DATA_ANCHOR_S / DATA_ANCHOR_CADENCE_S
+            * em_spectra::Band::ALL.len() as f64
+            * crate::knowledge::SAMPLE_BYTES;
+        let engine_thrust_n = G0 * full_kg;
+        let drone_power_w = module_kg * C2 / week_s;
+        let day_s = 86_400.0;
+        let degree = std::f64::consts::PI / 180.0;
         // Collection that fills the starting storage in the anchor time and pays the drain too,
         // over what real starlight on the broadside of a 500 m hull would give.
         let wanted_w = storage_per_module * start.storage as f64 * module_kg * C2 / SOLAR_ANCHOR_S
@@ -175,19 +232,50 @@ impl Balance {
             recovery: 0.95,
             storage_per_module,
             // One g of the starting ship with its storage full, so its five engines give 5 g.
-            engine_thrust_n: G0 * full_kg,
-            drone_power_w: module_kg * C2 / week_s,
+            engine_thrust_n,
+            drone_power_w,
             living_drain_w,
             hull_density_kg_m3,
             slot_volume_m3,
             module_density_kg_m3,
-            solar_efficiency,
-            solar_gain: wanted_w / (solar_efficiency * flux * broadside_m2),
-            data_per_module: DATA_ANCHOR_S / DATA_ANCHOR_CADENCE_S
-                * em_spectra::Band::ALL.len() as f64
-                * crate::knowledge::SAMPLE_BYTES,
+            conversion_efficiency,
+            solar_gain: wanted_w / (conversion_efficiency * flux * broadside_m2),
+            data_per_module,
             data_mass_fraction,
             data_work_factor: 3.0,
+            storage_density: storage_per_module / slot_volume_m3,
+            drone_density_w: drone_power_w / slot_volume_m3,
+            engine_density_w: engine_thrust_n * C_M_S / slot_volume_m3,
+            living_density_w: living_drain_w / slot_volume_m3,
+            data_density_b: data_per_module / slot_volume_m3,
+            bay_mass_fraction: 0.1,
+            spar_mass_fraction: 0.05,
+            min_part_m3: 1_000.0,
+            min_drone_m3: 10_000.0,
+            spar_gap: 0.5,
+            spar_thickness: 0.02,
+            move_work_factor: 0.25,
+            // Placeholder: anchored by F4.
+            hull_areal_density: 0.0,
+            envelope_margin: 0.05,
+            engine_clear_half_angle: 15.0 * degree,
+            field_idle_k: 400.0,
+            // Placeholder: anchored by H2 to 10 ME on the starting envelope.
+            field_capacity: 0.0,
+            // Placeholder: anchored by H2.
+            field_tau_s: 1.84e6,
+            clear_absorptivity: 0.3,
+            field_switch_s: day_s,
+            auto_clear_above: 0.5,
+            auto_black_below: 0.3,
+            auto_refill_below: 0.95,
+            collapse_spike_fraction: 0.9,
+            collapse_spike_k: 1.0e7,
+            collapse_afterglow_s: 30.0 * day_s,
+            drive_spread_rad: 5.0 * degree,
+            rcs_accel_g: 0.01,
+            rcs_spread_rad: 60.0 * degree,
+            courtesy_fraction: 0.01,
         }
     };
 
@@ -552,11 +640,13 @@ impl From<lc_proto::Balance> for Balance {
             hull_density_kg_m3: b.hull_density_kg_m3,
             slot_volume_m3: b.slot_volume_m3,
             module_density_kg_m3: b.module_density_kg_m3,
-            solar_efficiency: b.solar_efficiency,
+            conversion_efficiency: b.solar_efficiency,
             solar_gain: b.solar_gain,
             data_per_module: b.data_per_module,
             data_mass_fraction: b.data_mass_fraction,
             data_work_factor: b.data_work_factor,
+            // Not on the wire until K3.
+            ..Self::DEFAULT
         }
     }
 }
@@ -573,7 +663,7 @@ impl From<Balance> for lc_proto::Balance {
             hull_density_kg_m3: b.hull_density_kg_m3,
             slot_volume_m3: b.slot_volume_m3,
             module_density_kg_m3: b.module_density_kg_m3,
-            solar_efficiency: b.solar_efficiency,
+            solar_efficiency: b.conversion_efficiency,
             solar_gain: b.solar_gain,
             data_per_module: b.data_per_module,
             data_mass_fraction: b.data_mass_fraction,
@@ -678,6 +768,24 @@ mod tests {
     use super::*;
     use crate::craft::{Craft, CraftId, Kind};
     use glam::DVec3;
+
+    /// The first guesses 29-ship-form.md prints, to the digits it prints them.
+    #[test]
+    fn densities_match_the_design() {
+        let b = Balance::DEFAULT;
+        assert_eq!(format!("{:.2e}", b.storage_density), "1.27e-5");
+        assert_eq!(format!("{:.2e}", b.drone_density_w), "5.88e13");
+        assert_eq!(format!("{:.2e}", b.engine_density_w), "5.47e13");
+        assert_eq!(format!("{:.2e}", b.living_density_w), "1.13e10");
+        assert_eq!(format!("{:.1}", b.data_density_b), "7.5");
+    }
+
+    #[test]
+    fn the_wire_keeps_the_renamed_efficiency() {
+        let b = Balance { conversion_efficiency: 0.5, ..Balance::DEFAULT };
+        let wire: lc_proto::Balance = b.into();
+        assert_eq!(Balance::from(wire), b);
+    }
 
     #[test]
     fn the_reference_hull_is_exactly_twenty_slots_and_five_hundred_meters() {
