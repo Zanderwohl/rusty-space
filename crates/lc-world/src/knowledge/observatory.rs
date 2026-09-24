@@ -158,6 +158,10 @@ pub struct Observatory {
     swept_s: f64,
     slot: i64,
     pointing: Option<StarId>,
+    /// What the instrument last measured: the star a stare or watch is on, or the body a survey
+    /// last detected, which the craft therefore holds. For a readout; not kept across a restart.
+    #[serde(skip)]
+    observed: Option<Subject>,
 }
 
 impl Default for Observatory {
@@ -169,6 +173,7 @@ impl Default for Observatory {
             swept_s: 0.0,
             slot: i64::MIN,
             pointing: None,
+            observed: None,
         }
     }
 }
@@ -176,6 +181,10 @@ impl Default for Observatory {
 impl Observatory {
     pub fn pointing(&self) -> Option<StarId> {
         self.pointing
+    }
+
+    pub fn observed(&self) -> Option<Subject> {
+        self.observed
     }
 
     /// A sweep or a watch starts at `now_s`, whatever start it was handed.
@@ -189,6 +198,7 @@ impl Observatory {
         self.swept_s = now_s;
         self.slot = i64::MIN;
         self.pointing = duty.target_at(now_s);
+        self.observed = None;
         self.duty = duty;
     }
 
@@ -207,8 +217,9 @@ impl Observatory {
         now_s: f64,
     ) {
         match self.duty.clone() {
-            Duty::Idle => {}
+            Duty::Idle => self.observed = None,
             Duty::Stare(id) => {
+                self.observed = Some(Subject::Star(id));
                 let elapsed = now_s - self.sampled_s;
                 if elapsed >= self.integration_s.max(1.0) {
                     self.pointing = Some(id);
@@ -234,16 +245,20 @@ impl Observatory {
                     }
                 }
                 self.pointing = duty.target_at(now_s);
+                self.observed = self.pointing.map(Subject::Star);
             }
             Duty::Sweep(sweep) => {
                 self.pointing = None;
+                self.observed = None;
                 sweep_between(sky, knowledge, at, &sweep, self.swept_s, now_s);
                 self.swept_s = now_s;
             }
             duty @ Duty::Survey { star, .. } => {
                 self.pointing = Some(star);
-                if let Some(system) = system.filter(|s| s.star == star) {
-                    survey_between(sky, system, knowledge, at, &duty, self.swept_s, now_s);
+                if let Some(system) = system.filter(|s| s.star == star)
+                    && let Some(seen) = survey_between(sky, system, knowledge, at, &duty, self.swept_s, now_s)
+                {
+                    self.observed = Some(seen);
                 }
                 self.swept_s = now_s;
             }
@@ -259,6 +274,8 @@ impl Observatory {
 /// asked about it if it is a source like any other. The rest of the catalog is left out: a
 /// star light-years off cannot outshine a planet at 5 AU, so it can neither glare on one nor
 /// hide behind one.
+///
+/// Returns the last body it detected, if any.
 pub fn survey_between(
     sky: &mut Sky,
     system: &LocalSystem,
@@ -267,9 +284,9 @@ pub fn survey_between(
     duty: &Duty,
     from_s: f64,
     to_s: f64,
-) {
+) -> Option<Subject> {
     let optics = at.optics();
-    let Some(band) = optics.band() else { return };
+    let band = optics.band()?;
     let mut sources = host_source(sky, system, band, at.position_ly)
         .into_iter()
         .collect::<Vec<Source>>();
@@ -302,6 +319,7 @@ pub fn survey_between(
         knowledge.sighted(Subject::Star(system.star), seen);
     }
 
+    let mut detected = None;
     for slot in duty.visits(bodies, from_s, to_s) {
         let index = star_last + slot;
         let Some(source) = sources.get(index) else { continue };
@@ -322,7 +340,9 @@ pub fn survey_between(
         );
         knowledge.sighted(source.subject, sighting);
         knowledge.measured_colors(source.subject, witness, to_s, &colors);
+        detected = Some(source.subject);
     }
+    detected
 }
 
 /// The system's own star as a source, worked the way the catalog path works it so the two
@@ -698,6 +718,60 @@ mod tests {
         assert!(held > 100, "only {held} subjects after a real second");
         // Everything but the star itself is a body, and every one of them reads back.
         assert_eq!(k.bodies_of(system.star, TICK_S * 20.0).len(), held - 1, "a body did not read back");
+    }
+
+    /// A ship in low orbit places the planet under it and reads its whole orbit.
+    #[test]
+    fn a_ship_in_low_orbit_places_the_planet_under_it() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        let mut t = 0.0;
+        for _ in 0..400 {
+            t += TICK_S;
+            let phase = std::f64::consts::TAU * t / 5820.0;
+            let here = system.body_position_at("Earth", t).unwrap()
+                + DVec3::new(phase.cos(), phase.sin(), 0.0) * 7.0e6 / M_PER_LY;
+            o.tick(&mut sky, Some(&system), &mut k, at(here), t);
+        }
+        let earth = crate::knowledge::BodyId::of(system.star, "Earth");
+        let star_ly = k.belief(Subject::Star(system.star)).unwrap().distance.position_ly().expect("the sun is ranged");
+        assert!(k.fit_orbit(Subject::Body { star: system.star, body: earth }, star_ly, t), "no orbit from low orbit");
+
+        let belief = k.body_belief(system.star, earth, t).unwrap();
+        let crate::knowledge::Placed::Known { offset_au, .. } = belief.position_now else {
+            panic!("{:?}", belief.position_now)
+        };
+        let truth_au = (system.body_position_at("Earth", t).unwrap() - system.star_position_ly()) * M_PER_LY / AU_M;
+        let miss_au = offset_au.distance(truth_au);
+        assert!(miss_au < 0.01, "Earth placed {miss_au} AU from where it is");
+
+        // Not a circle at the radius Earth is at, which near perihelion is 0.983 AU.
+        let (semi_major_au, _) = belief.semi_major_au.expect("an axis");
+        assert!((semi_major_au - 1.0).abs() < 1.0e-3, "{semi_major_au} AU");
+        let orbit = k.file(Subject::Body { star: system.star, body: earth }).unwrap().orbits().last().unwrap().clone();
+        let (eccentricity, _) = orbit.eccentricity.expect("a shape, not a circle assumed");
+        assert!((eccentricity - 0.0167).abs() < 2.0e-3, "e {eccentricity}");
+    }
+
+    /// A parked ship ranges its own sun from one look, which every orbit fit needs.
+    #[test]
+    fn a_parked_ship_ranges_its_own_sun_at_once() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        o.tick(&mut sky, Some(&system), &mut k, at(from), TICK_S);
+
+        let sun = k.belief(Subject::Star(system.star)).expect("the sun is measured every tick");
+        let Distance::Measured { position_ly, sigma_ly } = sun.distance else {
+            panic!("a parked ship has no distance to its sun: {:?}", sun.distance)
+        };
+        let miss_au = position_ly.distance(system.star_position_ly()) * M_PER_LY / AU_M;
+        let sigma_au = sigma_ly * M_PER_LY / AU_M;
+        assert!(miss_au < 0.01 && miss_au < 5.0 * sigma_au.max(1.0e-6), "{miss_au} AU off, sigma {sigma_au}");
     }
 
     /// **A moving ship's bearings on a moving planet are not a distance.** `triangulate` fits a

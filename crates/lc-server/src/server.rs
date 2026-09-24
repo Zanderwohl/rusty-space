@@ -87,6 +87,11 @@ pub struct Connected {
     pub logged_s: f64,
     /// Whether this connection has been told which subjects its craft keeps raw.
     pub retained_sent: bool,
+    /// The last [`Outbound::Analyzing`] count this connection was sent. A client starts at
+    /// zero, so a new connection has in effect been told that.
+    pub analyzing_sent: usize,
+    /// The last [`Outbound::Doing`] this connection was sent.
+    pub doing_sent: Option<Outbound>,
 }
 
 pub struct Server<J: Journal> {
@@ -404,6 +409,8 @@ impl<J: Journal> Server<J> {
             learned: Default::default(),
             logged_s: f64::NEG_INFINITY,
             retained_sent: false,
+            analyzing_sent: 0,
+            doing_sent: None,
         });
         self.aboard(CraftId(ship_id.0));
     }
@@ -474,6 +481,9 @@ impl<J: Journal> Server<J> {
         self.pending = events;
         self.state_the_clock(wire);
         self.tell_learned(wire);
+        if self.ticks % u64::from(TICKS_PER_SECOND) == 0 {
+            self.tell_doing(wire);
+        }
         self.stages.mark("tell");
         // 3 and 4. Everything that has arrived since the last tick, through the gate.
         let flushed = self.flush(wire).await;
@@ -988,6 +998,8 @@ impl<J: Journal> Server<J> {
             learned: Default::default(),
             logged_s: f64::NEG_INFINITY,
             retained_sent: false,
+            analyzing_sent: 0,
+            doing_sent: None,
         });
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused

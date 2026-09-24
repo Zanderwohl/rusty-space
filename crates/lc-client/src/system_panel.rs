@@ -99,7 +99,7 @@ pub(crate) fn system(
             let target = held.target(belief.body).cloned();
             let on = *picked == Some(belief.body);
             ui.horizontal(|ui| {
-                let row = ui.selectable_label(on, name_of(belief));
+                let row = ui.selectable_label(on, game.called(belief));
                 if row.clicked() {
                     // Off the focus either way: a phantom has no target to put there, and
                     // leaving the old one would light two rows at once.
@@ -232,7 +232,10 @@ fn details(
     draft: &mut String,
     out: &mut MessageWriter<Requested>,
 ) {
-    ui.heading(name_of(belief));
+    ui.heading(game.called(belief));
+    if belief.given.is_some() {
+        ui.weak(game.called(&BodyBelief { given: None, ..belief.clone() }));
+    }
     name_field(ui, game, belief.subject, draft, out);
     // The range its own orbit implies, never the one the arena holds. A body the list calls
     // "distance unknown" has no range to give, and printing the true one here said what the
@@ -324,10 +327,6 @@ fn believed_range(
     let star = system.star_position_at(game.coordinate_time_s())?;
     let at = star + offset_au * (lc_world::navigation::AU / lc_world::system::M_PER_LY);
     Some(at.distance(game.ship.motion.position_ly))
-}
-
-fn name_of(belief: &BodyBelief) -> String {
-    belief.name.clone().unwrap_or_else(|| "unnamed body".to_string())
 }
 
 /// A believed distance, or that there is not one.
@@ -477,7 +476,8 @@ mod tests {
         BodyBelief {
             subject: lc_world::knowledge::Subject::Star(StarId::synthesize("t", 1)),
             body: BodyId::from_raw(1),
-            name: Some("b".into()),
+            given: None,
+            designation: Some("b".into()),
             kind: Vec::new(),
             period_s: None,
             semi_major_au: None,

@@ -1,33 +1,45 @@
 //! What mass decides: which names a map has room for, and how big a mark is drawn.
-//!
-//! Both are the same comparison — this thing against the heaviest thing beside it — so they
-//! share one constant rather than two that would drift apart.
 
-/// How light a thing may be, against the heaviest thing beside it, and still be named and
-/// still be drawn whole.
+/// How light a thing may be, against the heaviest thing beside it, and still be named.
 ///
 /// Set from Earth beside the Sun, three parts in a million, and well under it: the gap it aims
 /// at is between the smallest planet and the largest asteroid. Mercury is 1.7e-7 of the Sun
 /// and Ceres 4.7e-10, so a floor in the middle keeps the planets and drops the rocks.
 pub const FLOOR: f64 = 1.0e-8;
 
-/// The smallest a mark is drawn, as a fraction of full size: two decades under the floor and
-/// no further. A host applies its own pixel floor under this.
-pub const MIN_SCALE: f32 = 0.25;
+/// How many times larger the largest mark is than the smallest, however far apart the weights.
+pub const SPAN: f32 = 10.0;
 
-/// How big a thing's mark is, as a fraction of full size.
+/// The smallest a mark is drawn, as a fraction of full size. A host applies its own pixel floor
+/// under this.
+pub const MIN_SCALE: f32 = 1.0 / SPAN;
+
+/// For an unstated weight: neither the heaviest nor the lightest.
+pub const UNKNOWN_SCALE: f32 = 0.5;
+
+/// A mark's size as a fraction of full size, the heaviest being full.
 ///
-/// Two per decade: ten times the mass is twice the radius. Eight orders of magnitude of mass
-/// cannot be eight orders of pixels.
-///
-/// One at the floor and above, so anything worth naming is drawn whole, and shrinking below
-/// it. Unstated and infinite weights are drawn whole: neither is in the comparison.
-pub fn scale(weight: f64, floor: f64) -> f32 {
-    if !weight.is_finite() || weight <= 0.0 || !(floor > 0.0) {
+/// The cube root of mass (equal density), the slope reduced only as far as keeps the lightest
+/// within [`SPAN`]: stretching every range to the full span would draw two near-equal stars ten
+/// times apart. An infinite weight (a ship) is drawn whole, an unstated one at [`UNKNOWN_SCALE`].
+pub fn scale(weight: f64, lightest: f64, heaviest: f64) -> f32 {
+    if weight == f64::INFINITY {
         return 1.0;
     }
-    let decades = (weight / floor).log10();
-    (2.0f64.powf(decades) as f32).clamp(MIN_SCALE, 1.0)
+    if !(weight.is_finite() && weight > 0.0) {
+        return UNKNOWN_SCALE;
+    }
+    if !(heaviest > 0.0 && lightest > 0.0) {
+        return 1.0;
+    }
+    let decades = (heaviest / lightest).log10().max(0.0);
+    let slope = (f64::from(SPAN).log10() / decades).min(1.0 / 3.0);
+    ((weight / heaviest).powf(slope) as f32).clamp(MIN_SCALE, 1.0)
+}
+
+/// The lightest stated weight, which the smallest mark is drawn for.
+pub fn lightest(weights: impl Iterator<Item = f64>) -> f64 {
+    weights.filter(|w| w.is_finite() && *w > 0.0).fold(f64::INFINITY, f64::min)
 }
 
 /// The heaviest stated weight, which [`FLOOR`] is a fraction of. Infinite weights set no bar:
@@ -41,62 +53,53 @@ mod tests {
     use super::*;
 
     const SUN: f64 = 1.988_41e30;
+    const JUPITER: f64 = 1.898e27;
     const EARTH: f64 = 5.972e24;
-    const CERES: f64 = 9.39e20;
+    const MOON: f64 = 7.342e22;
 
-    /// Ten times the mass is twice the radius.
+    /// The heaviest is drawn whole and the lightest a [`SPAN`] under it, however many decades
+    /// apart they are.
     #[test]
-    fn ten_times_the_mass_is_twice_the_radius() {
-        let floor = 1.0e22;
-        for decades in 1..=2 {
-            let heavier = scale(floor / 10.0f64.powi(decades - 1), floor);
-            let lighter = scale(floor / 10.0f64.powi(decades), floor);
-            assert!(
-                (heavier / lighter - 2.0).abs() < 1.0e-5,
-                "{decades} decades down: {heavier} against {lighter}",
-            );
+    fn a_star_and_a_moon_are_the_span_apart() {
+        assert_eq!(scale(SUN, MOON, SUN), 1.0);
+        assert!((scale(MOON, MOON, SUN) - MIN_SCALE).abs() < 1.0e-6);
+        let (earth, jupiter) = (scale(EARTH, MOON, SUN), scale(JUPITER, MOON, SUN));
+        assert!(MIN_SCALE < earth && earth < jupiter && jupiter < 1.0, "{earth} {jupiter}");
+    }
+
+    /// Log in mass: each decade takes the same share of the span.
+    #[test]
+    fn each_decade_takes_the_same_share() {
+        let (lightest, heaviest) = (1.0e20, 1.0e30);
+        let ratio = |a: f64, b: f64| scale(a, lightest, heaviest) / scale(b, lightest, heaviest);
+        assert!((ratio(1.0e25, 1.0e24) - ratio(1.0e22, 1.0e21)).abs() < 1.0e-5);
+    }
+
+    /// Close weights are not stretched across the span.
+    #[test]
+    fn close_weights_are_drawn_close() {
+        let (lighter, heavier) = (0.75 * SUN, SUN);
+        let drawn = scale(lighter, lighter, heavier);
+        assert!((drawn - 0.75f32.cbrt()).abs() < 1.0e-5, "{drawn}");
+        assert_eq!(scale(EARTH, EARTH, EARTH), 1.0, "one weight is drawn whole");
+    }
+
+    /// An unstated weight is drawn at half size, a ship's infinite one whole.
+    #[test]
+    fn an_unstated_weight_is_drawn_at_half_size() {
+        for weight in [0.0, -1.0, f64::NAN, f64::NEG_INFINITY] {
+            assert_eq!(scale(weight, MOON, SUN), UNKNOWN_SCALE, "{weight} should be drawn at half size");
         }
-        assert!((scale(floor / 10.0, floor) - 0.5).abs() < 1.0e-6);
-        assert!((scale(floor / 100.0, floor) - 0.25).abs() < 1.0e-6);
+        assert_eq!(scale(f64::INFINITY, MOON, SUN), 1.0, "a ship is drawn whole");
+        assert_eq!(scale(0.0, f64::INFINITY, 0.0), UNKNOWN_SCALE, "with nothing weighed at all too");
     }
 
-    /// Anything worth naming is drawn whole, and above the floor a mark stops growing — or a
-    /// star beside a planet would be a hundred times its size.
+    /// Neither bound is set by a ship's infinite weight or an unstated one.
     #[test]
-    fn anything_worth_naming_is_drawn_whole() {
-        let floor = SUN * FLOOR;
-        assert_eq!(scale(SUN, floor), 1.0, "the heaviest thing there is");
-        assert_eq!(scale(EARTH, floor), 1.0, "and the case the floor is set from");
-        assert_eq!(scale(floor, floor), 1.0, "and the floor itself");
-        assert!(scale(CERES, floor) < 1.0, "but a rock is drawn as one");
-        assert!(scale(CERES, floor) > MIN_SCALE, "and is still more than the least there is");
-    }
-
-    /// Bounded below: the marks are a few pixels across to begin with.
-    #[test]
-    fn it_is_bounded_below() {
-        let floor = SUN * FLOOR;
-        // A pebble, nine orders under the floor.
-        assert_eq!(scale(floor * 1.0e-9, floor), MIN_SCALE);
-        assert_eq!(scale(f64::MIN_POSITIVE, floor), MIN_SCALE);
-    }
-
-    /// Unstated and infinite weights are not shrunk.
-    #[test]
-    fn an_unstated_weight_is_drawn_whole() {
-        let floor = SUN * FLOOR;
-        for weight in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            assert_eq!(scale(weight, floor), 1.0, "{weight} should be drawn whole");
-        }
-        // And a map where nothing stated a mass draws everything whole.
-        assert_eq!(scale(EARTH, 0.0), 1.0);
-    }
-
-    /// The bar is the heaviest stated weight; a ship states none.
-    #[test]
-    fn a_ship_sets_no_bar() {
-        assert_eq!(heaviest([f64::INFINITY, EARTH, CERES].into_iter()), EARTH);
+    fn a_ship_sets_no_bound() {
+        let weights = [f64::INFINITY, 0.0, EARTH, MOON];
+        assert_eq!(heaviest(weights.into_iter()), EARTH);
+        assert_eq!(lightest(weights.into_iter()), MOON);
         assert_eq!(heaviest([f64::INFINITY].into_iter()), 0.0);
-        assert_eq!(heaviest([].into_iter()), 0.0);
     }
 }

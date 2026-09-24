@@ -285,11 +285,11 @@ fn key_of(system: &lc_world::system::LocalSystem, index: em_sim::id::BodyIndex) 
 /// keyed differently is a button that does nothing at all. A body no generator made — a
 /// transit's false positive — falls back to its own id, which nothing else will ask for.
 ///
-/// Nothing here carries a radius or a mass: a transit says a body exists and roughly where, not
-/// how big it is. Both arrive with imaging, in phase 6.
+/// No radius: a believed body is drawn as a mark, never a sphere of a size nobody measured.
 fn push_believed(build: &mut Build, session: &Session, held: &Held) {
     let Some(system) = session.system.as_ref() else { return };
     let star_ly = system.star_position_ly();
+    let star = session.stars.iter().find(|c| c.id == system.star).map(|c| c.star);
     // The galactic normal where no plane is solved, for the reason `MapView::resolved_plane`
     // gives: `+Z` is Sol's plane and drawing another star's error bars about it is a
     // measurement of one system shown around another.
@@ -306,11 +306,12 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
             .as_deref()
             .map(ItemKey::from_name)
             .unwrap_or_else(|| ItemKey::from_id("phantom", belief.body.get()));
-        let label = belief.name.clone().unwrap_or_else(|| "unnamed body".to_string());
+        let label = session.called(belief);
         // Keyed by what the body is targeted by, never by what it is called. Two bodies
         // nobody has named are both "unnamed body", so a label as a key made every one of
         // them the same subject: picking one focused nothing and hovering one lit them all.
         let subject = named.map(|target| Subject::Body(target, label.clone()));
+        let weight = star.and_then(|star| session.knowledge.guessed_mass_kg(belief, &star)).unwrap_or(0.0);
         match belief.position_now {
             // Where on the ring it is, with the error drawn along the ring rather than across
             // it: what is uncertain is how far round it has got.
@@ -319,6 +320,7 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
                 let along = offset_au.normalize_or(DVec3::X).cross(pole).normalize_or(DVec3::X);
                 build.push(
                     MapItem::body(key, label, ItemKind::Planet, at, 0.0, pole)
+                        .weighing(weight)
                         .spread(at - along * (sigma_au * AU_LY), at + along * (sigma_au * AU_LY)),
                     subject,
                 );
@@ -340,7 +342,8 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
                             outer: r + s,
                             half_angle_rad: std::f64::consts::FRAC_PI_2,
                         },
-                    ),
+                    )
+                    .weighing(weight),
                     subject,
                 );
             }

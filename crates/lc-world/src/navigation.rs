@@ -1413,7 +1413,7 @@ mod tests {
 
         // What the crew calls it: one body detected, under its discovery designation.
         let labels = crate::labels::label(&system, "the star", |body| {
-            (body == crate::knowledge::BodyId::of(star.id, &key)).then(|| "180.5-00.1".to_string())
+            (body == crate::knowledge::BodyId::of(star.id, &key)).then(|| "Object 0-1".to_string())
         });
 
         let stations = [
@@ -1428,7 +1428,7 @@ mod tests {
         for station in stations {
             let said = station.label(&labels);
             assert!(!said.contains(&key), "the key leaked: {said}");
-            assert!(said.contains("180.5-00.1"), "not the crew's name: {said}");
+            assert!(said.contains("Object 0-1"), "not the crew's name: {said}");
         }
     }
 

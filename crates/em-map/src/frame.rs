@@ -130,8 +130,8 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Datum, meters_per_u
         .filter(|ring| ring.radius.is_finite() && ring.radius <= MAX_RENDER_UNITS)
         .collect();
 
-    let mass_floor =
-        crate::weight::heaviest(snapshot.items.iter().map(|i| i.weight)) * crate::weight::FLOOR;
+    let heaviest = crate::weight::heaviest(snapshot.items.iter().map(|i| i.weight));
+    let lightest = crate::weight::lightest(snapshot.items.iter().map(|i| i.weight));
     let mut placements = Vec::with_capacity(snapshot.items.len());
     for item in &snapshot.items {
         let at = relative(item.position_ly);
@@ -150,7 +150,7 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Datum, meters_per_u
             kind: item.kind,
             label: item.label.clone(),
             weight: item.weight,
-            symbol_scale: crate::weight::scale(item.weight, mass_floor),
+            symbol_scale: crate::weight::scale(item.weight, lightest, heaviest),
             at,
             foot,
             radius: (item.radius_m / meters_per_unit) as f32,
