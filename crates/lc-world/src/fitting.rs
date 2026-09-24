@@ -507,6 +507,14 @@ impl Fitting {
         true
     }
 
+    /// Become `loadout` at once and for nothing, dropping any refit under way. Storage keeps what
+    /// it holds, as far as the new capacity allows. Settle first.
+    pub fn refit_at_once(&mut self, loadout: Loadout) {
+        self.refit = None;
+        self.loadout = loadout;
+        self.stored_j = self.stored_j.min(self.balance.capacity_j(&loadout).max(0.0));
+    }
+
     /// Stop a refit where it is. Settle first. The step in progress is reversed.
     pub fn cancel_refit(&mut self, now_s: f64) {
         let Some(refit) = self.refit.take() else { return };

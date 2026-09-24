@@ -104,7 +104,12 @@ async fn an_answer_names_the_line_it_answers_and_a_mistake_says_what_it_was() {
 #[tokio::test]
 async fn debug_acts_on_its_own_ship_and_admins_on_anyone_s() {
     let far = stars()[2].id.get();
-    for line in [format!("teleport {far} ship:2"), "energize ship:2".into(), "refit-finish ship:2".into()] {
+    for line in [
+        format!("teleport {far} ship:2"),
+        "energize ship:2".into(),
+        "refit-finish ship:2".into(),
+        "refit-magic ship:2".into(),
+    ] {
         let (mut server, mut wire) = shard(Level::DEBUG);
         let (ok, why) = ask(&mut server, &mut wire, 1, &line).await;
         assert!(!ok && why.contains("no argument 'ship'"), "{line}: {why}");
@@ -185,6 +190,54 @@ async fn refit_finish_completes_a_refit_under_way_and_only_one() {
     assert!(!craft.is_refitting(now_s));
     assert_eq!(craft.fitting().unwrap().loadout, target);
     assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+}
+
+/// An empty ship becomes one it could never have paid for, at once; what is not named stays as
+/// it was; and the modules still have to fit.
+#[tokio::test]
+async fn refit_magic_builds_what_fits_whatever_it_costs() {
+    use lc_world::fitting::Loadout;
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    emptied(&mut server);
+    let (ok, why) = ask(&mut server, &mut wire, 1, "refit-magic engines:30 slots:60 ship:2").await;
+    assert!(ok, "{why}");
+    let now_s = server.now_t() as f64 * 1.0e-6;
+    let craft = server.fleet.get(CraftId(2)).unwrap();
+    let got = craft.fitting().unwrap().loadout_at(now_s);
+    assert_eq!(got, Loadout { engines: 30, slots: 60, ..Loadout::STARTING });
+    assert!(!craft.is_refitting(now_s));
+    assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+
+    let (ok, why) = ask(&mut server, &mut wire, 2, "refit-magic slots:10 ship:2").await;
+    assert!(!ok && why.contains("do not fit"), "{why}");
+    let (ok, why) = ask(&mut server, &mut wire, 3, "refit-magic engines:2.5 ship:2").await;
+    assert!(!ok && why.contains("whole number"), "{why}");
+    let now_s = server.now_t() as f64 * 1.0e-6;
+    assert_eq!(server.fleet.get(CraftId(2)).unwrap().fitting().unwrap().loadout_at(now_s).slots, 60);
+}
+
+/// A refit under way is replaced, not finished first.
+#[tokio::test]
+async fn refit_magic_replaces_a_refit_under_way() {
+    use lc_world::fitting::Loadout;
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    emptied(&mut server);
+    let (ok, why) = ask(&mut server, &mut wire, 1, "energize ship:2").await;
+    assert!(ok, "{why}");
+    let now_s = server.now_t() as f64 * 1.0e-6;
+    let craft = server.fleet.get_mut(CraftId(2)).unwrap();
+    craft.begin_refit(Loadout { engines: 7, ..Loadout::STARTING }, now_s).expect("the refit plans");
+    server.refitting.insert(CraftId(2));
+
+    let (ok, why) = ask(&mut server, &mut wire, 2, "refit-magic storage:1 ship:2").await;
+    assert!(ok, "{why}");
+    let now_s = server.now_t() as f64 * 1.0e-6;
+    let craft = server.fleet.get(CraftId(2)).unwrap();
+    assert!(!craft.is_refitting(now_s));
+    assert_eq!(craft.fitting().unwrap().loadout_at(now_s), Loadout { storage: 1, ..Loadout::STARTING });
+    // Storage shrank, and what it holds with it.
+    let (stored, capacity) = held(&server);
+    assert!(stored <= capacity + 1e-9, "{stored} of {capacity}");
 }
 
 #[tokio::test]
@@ -303,7 +356,7 @@ fn every_default_binds_for_whoever_can_see_it() {
             |line, arg| match arg.kind {
                 Kind::Word(words) => format!("{line} {}", words[0]),
                 Kind::Number(limits) => format!("{line} {}", limits[0].min),
-                Kind::Id | Kind::Text => format!("{line} 1"),
+                Kind::Id | Kind::Count(_) | Kind::Text => format!("{line} 1"),
             },
         );
         let parsed = parse(&line).unwrap();

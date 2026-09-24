@@ -130,6 +130,63 @@ pub const COMMANDS: &[Spec] = &[
         }],
     },
     Spec {
+        name: "refit-magic",
+        verb: Verb::RefitMagic,
+        level: Level::DEBUG,
+        summary: "rebuild a ship to a loadout at once and for nothing, as long as its modules fit",
+        args: &[
+            ArgSpec {
+                name: "storage",
+                kind: Kind::Count(MOST_OF_ANY),
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "storage modules; default as now",
+            },
+            ArgSpec {
+                name: "drones",
+                kind: Kind::Count(MOST_OF_ANY),
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "drone modules; default as now",
+            },
+            ArgSpec {
+                name: "living",
+                kind: Kind::Count(MOST_OF_ANY),
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "living modules; default as now",
+            },
+            ArgSpec {
+                name: "engines",
+                kind: Kind::Count(MOST_OF_ANY),
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "engine modules; default as now",
+            },
+            ArgSpec {
+                name: "data",
+                kind: Kind::Count(MOST_OF_ANY),
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "data modules; default as now",
+            },
+            ArgSpec {
+                name: "slots",
+                kind: Kind::Count(MOST_OF_ANY),
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "hull slots; default as now",
+            },
+            ArgSpec {
+                name: "ship",
+                kind: Kind::Id,
+                need: Need::Optional,
+                level: Level::ADMIN,
+                help: "the ship to rebuild; default your own",
+            },
+        ],
+    },
+    Spec {
         name: "stage",
         verb: Verb::Stage,
         level: Level::DEBUG,
@@ -143,6 +200,9 @@ pub const COMMANDS: &[Spec] = &[
         }],
     },
 ];
+
+/// The most of any one module, or of slots, `refit-magic` will put on a hull.
+const MOST_OF_ANY: u32 = 10_000;
 
 /// `lc_world::scenario::Scenario::ALL` by name, which a `const` cannot collect for itself.
 const SCENES: &[&str] = &["traffic", "meeting", "approach", "closing", "chase", "corona"];
@@ -209,6 +269,10 @@ impl<J: Journal> Server<J> {
             Verb::Energize => {
                 let ship = self.ship_named(command.from, &args)?;
                 self.energize(ship, args.number("amount"), wire)
+            }
+            Verb::RefitMagic => {
+                let ship = self.ship_named(command.from, &args)?;
+                self.refit_magic(ship, &args, wire)
             }
             Verb::RefitFinish => {
                 let ship = self.ship_named(command.from, &args)?;

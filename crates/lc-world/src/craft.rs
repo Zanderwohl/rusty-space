@@ -595,6 +595,15 @@ impl Craft {
         finished
     }
 
+    /// Become `loadout` now, free, replacing any refit under way. `false` with no fitting.
+    pub fn refit_at_once(&mut self, loadout: crate::fitting::Loadout, now_s: f64) -> bool {
+        self.settle(now_s);
+        let Some(fitting) = &mut self.fitting else { return false };
+        fitting.refit_at_once(loadout);
+        self.sync_length();
+        true
+    }
+
     /// Stop a refit where it is, reversing the step in progress.
     pub fn cancel_refit(&mut self, now_s: f64) {
         self.settle(now_s);

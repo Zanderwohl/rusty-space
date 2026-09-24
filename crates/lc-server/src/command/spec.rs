@@ -33,6 +33,7 @@ pub enum Verb {
     Teleport,
     Where,
     Energize,
+    RefitMagic,
     RefitFinish,
     Stage,
 }
@@ -63,6 +64,8 @@ pub enum Kind {
     /// A catalog or body identifier, as `where` prints them: decimal, or hexadecimal with
     /// `0x`.
     Id,
+    /// A whole number from zero to this.
+    Count(u32),
     /// Anything at all.
     Text,
 }
@@ -79,6 +82,7 @@ pub enum Value {
     Word(&'static str),
     Number(f64),
     Id(u64),
+    Count(u32),
     Text(String),
 }
 
@@ -115,6 +119,13 @@ impl Bound {
         }
     }
 
+    pub fn count(&self, name: &str) -> Option<u32> {
+        match self.get(name)? {
+            Value::Count(n) => Some(*n),
+            _ => None,
+        }
+    }
+
     pub fn text(&self, name: &str) -> Option<&str> {
         match self.get(name)? {
             Value::Text(text) => Some(text),
@@ -139,6 +150,8 @@ pub enum BindError {
     NotANumber { arg: &'static str, value: String },
     #[error("{arg} is from {min} to {max}")]
     OutOfRange { arg: &'static str, min: f64, max: f64 },
+    #[error("{arg} is a whole number, not '{value}'")]
+    NotACount { arg: &'static str, value: String },
     #[error("{arg} is an identifier, decimal or 0x hexadecimal, not '{value}'")]
     NotAnId { arg: &'static str, value: String },
 }
@@ -184,6 +197,7 @@ impl Kind {
             Kind::Word(_) => "<word>",
             Kind::Number(_) => "<number>",
             Kind::Id => "<id>",
+            Kind::Count(_) => "<count>",
             Kind::Text => "<text>",
         }
     }
@@ -191,6 +205,9 @@ impl Kind {
     /// The widest range `level` reaches, or `None` for a kind that has none or a level that
     /// reaches none of them.
     fn range_for(&self, level: Level) -> Option<(f64, f64)> {
+        if let Kind::Count(max) = self {
+            return Some((0.0, *max as f64));
+        }
         let Kind::Number(limits) = self else { return None };
         limits.iter().filter(|limit| level.at_least(limit.level)).fold(None, |range, limit| {
             Some(match range {
@@ -232,6 +249,11 @@ impl Kind {
                 };
                 parsed.map(Value::Id).map_err(|_| BindError::NotAnId { arg: arg.name, value: typed.into() })
             }
+            Kind::Count(max) => match typed.parse::<u32>() {
+                Ok(n) if n <= *max => Ok(Value::Count(n)),
+                Ok(_) => Err(BindError::OutOfRange { arg: arg.name, min: 0.0, max: *max as f64 }),
+                Err(_) => Err(BindError::NotACount { arg: arg.name, value: typed.into() }),
+            },
             Kind::Text => Ok(Value::Text(typed.into())),
         }
     }
