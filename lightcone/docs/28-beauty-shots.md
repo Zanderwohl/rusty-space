@@ -21,7 +21,18 @@ Everything that applies now, in turn, one per shot:
 | destination | flying to somewhere with no body there, which across the gap is a star | the patch of sky ahead |
 | whole | held by a body other than the star | the body, framed |
 | horizon | the same, within thirty of its radii | along the limb on the star's side, looking just over it |
-| below | the same | straight down |
+| below | the same, over the day side | straight down |
+| neighbor | any other body wider than 150 microradians on the sky | one of them at random, framed |
+
+A body or star is left out when more than 70% of its disc is behind nearer bodies (or the star),
+and a body when less than 30% of its face is lit. A moonrise and a crescent are kept; a moon
+behind its planet and a new moon are not. The covering is worked on angles as if the sky were
+flat, which is close for a moon and rough for a planet filling half the view, and overlapping
+occluders are both counted, so it errs toward calling a target hidden.
+
+The neighbor threshold takes in the Moon from Earth at nine milliradians, and Jupiter or Venus
+near their closest; Mars at opposition falls just short. A body first resolved for the shot is
+drawn flat until its surface has baked, so the shutter waits for that, up to three seconds.
 
 The horizon and the ground below are framed by **length, not angle**: a stretch of limb and a
 patch of ground a fixed share of the body's radius across, about 1450 and 1150 km on Earth. A

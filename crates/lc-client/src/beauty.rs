@@ -40,6 +40,9 @@ const SETTLE_FRAMES: u32 = 2;
 /// Frames between the shutter and showing the picture. Rendering is pipelined: the frame the
 /// camera was active on is drawn while the next is being built.
 const DEVELOP_FRAMES: u32 = 2;
+/// The longest the shutter waits for a sphere's surface to finish baking. A body first resolved
+/// for the shot is flat until it has; a bake that never lands must not hold the rotation.
+const BAKE_WAIT_S: f32 = 3.0;
 const FADE_S: f32 = 0.6;
 
 /// The fewest pixels across a shot is drawn at. A field too small to hold this many of the
@@ -68,6 +71,16 @@ const HORIZON_LIFT: f64 = 0.25;
 const BELOW_RADII: f64 = 30.0;
 /// A body within this many of its radii of where the ship is going is what it is going to.
 const ARRIVING_RADII: f64 = 50.0;
+/// How wide a body's disc has to be on the sky for it to be a neighbor worth a shot of its own.
+/// The Moon from Earth is nine milliradians; Venus and Jupiter at their closest are a little
+/// over this, and Mars at opposition a little under.
+const NEIGHBOR_MIN_RAD: f64 = 1.5e-4;
+/// The most of a target's disc that may be hidden behind something nearer. A moonrise is a
+/// picture; a moon wholly behind its planet is a black frame.
+const MAX_COVERED: f64 = 0.7;
+/// The least of a target's face that must be lit. A thin crescent is a picture; a new moon is
+/// not.
+const MIN_LIT: f64 = 0.3;
 /// A star's disc is almost never resolved, so this is the patch of sky around it.
 const STAR_FIELD_RAD: f64 = 0.01;
 
@@ -92,6 +105,8 @@ pub enum Subject {
     Destination(DVec3),
     /// The body a survey last measured.
     Surveyed(String),
+    /// A body big on the sky that none of the above is about, picked at random each time.
+    Neighbor(String),
     /// The star a stare or a watch is on.
     Star(StarId),
     /// The sweep's field being exposed now.
@@ -108,6 +123,7 @@ impl Subject {
             Self::Approach(_) => "approach",
             Self::Destination(_) => "destination",
             Self::Surveyed(_) => "survey",
+            Self::Neighbor(_) => "neighbor",
             Self::Star(_) => "star",
             Self::Field { .. } => "field",
         }
@@ -148,7 +164,7 @@ pub struct BeautyCamera;
 #[derive(Clone, Debug)]
 enum Phase {
     Waiting { at_s: f32 },
-    Aiming { subject: Subject, frames: u32 },
+    Aiming { subject: Subject, frames: u32, since_s: f32 },
     Developing { frames: u32, caption: String, spikes: Option<Vec3> },
 }
 
@@ -265,6 +281,8 @@ fn shoot(
     dev: Res<crate::dev::DevEntry>,
     mut beauty: ResMut<Beauty>,
     mut shot_body: ResMut<ShotBody>,
+    surfaces: Res<crate::surfaces::Surfaces>,
+    bakes: Res<crate::procedural::Bakes>,
     mut images: ResMut<Assets<Image>>,
     camera: Single<
         (&mut Camera, &mut Transform, &mut Projection, &mut RenderTarget, &mut Exposure),
@@ -288,7 +306,9 @@ fn shoot(
         if now < at_s {
             return;
         }
-        let mut list = subjects(&game.0, &bodies.drawn, eye.at_ly);
+        // Seeded from the clock as well, so two sessions do not visit the neighbors in step.
+        let seed = beauty.taken ^ time.elapsed().as_nanos() as u64;
+        let mut list = subjects(&game.0, &bodies.drawn, eye.at_ly, seed);
         if let Some(kind) = dev.beauty_kind.as_deref() {
             list.retain(|s| s.kind() == kind);
         }
@@ -297,12 +317,13 @@ fn shoot(
             beauty.phase = Phase::Waiting { at_s: now + RETRY_S };
             return;
         };
-        beauty.phase = Phase::Aiming { subject: subject.clone(), frames: SETTLE_FRAMES };
+        beauty.phase =
+            Phase::Aiming { subject: subject.clone(), frames: SETTLE_FRAMES, since_s: now };
     }
 
     match beauty.phase.clone() {
         Phase::Waiting { .. } => {}
-        Phase::Aiming { subject, frames } => {
+        Phase::Aiming { subject, frames, since_s } => {
             let resolution = game.optics().band().map_or(0.0, |b| game.optics().resolution_rad(b));
             let Some(shot) =
                 aim(&subject, &game.0, &bodies.drawn, eye.at_ly, resolution, beauty.side_px)
@@ -321,7 +342,11 @@ fn shoot(
                 }
             }
             if frames > 0 {
-                beauty.phase = Phase::Aiming { subject, frames: frames - 1 };
+                beauty.phase = Phase::Aiming { subject, frames: frames - 1, since_s };
+                return;
+            }
+            let baked = shot.body.as_deref().is_none_or(|name| surfaces.ready(name, &bakes));
+            if !baked && now - since_s < BAKE_WAIT_S {
                 return;
             }
             *transform = Transform::default().looking_to(
@@ -360,10 +385,21 @@ fn shoot(
 }
 
 /// Everything worth photographing now, in the order the rotation takes them.
-pub fn subjects(session: &Session, drawn: &[Drawable], eye_ly: DVec3) -> Vec<Subject> {
+///
+/// Anything that would come out mostly hidden or mostly dark is left out; see [`MAX_COVERED`]
+/// and [`MIN_LIT`].
+pub fn subjects(session: &Session, drawn: &[Drawable], eye_ly: DVec3, seed: u64) -> Vec<Subject> {
     let now = session.coordinate_time_s();
     let system = session.system.as_deref();
     let mut out = Vec::new();
+    let star = system.and_then(|s| Some((s.star_position_at(now)?, s.star_radius_m())));
+    let occluders: Vec<(DVec3, f64)> =
+        drawn.iter().map(|d| (d.position_ly, d.radius_m)).chain(star).collect();
+    let body_ok = |b: &Drawable| {
+        covered(b.position_ly, b.radius_m, eye_ly, &occluders) <= MAX_COVERED
+            && star.is_none_or(|(at, _)| lit(b.position_ly, at, eye_ly) >= MIN_LIT)
+    };
+    let named_ok = |name: &str| drawn.iter().find(|d| d.name == name).is_some_and(body_ok);
 
     match &session.observatory.duty {
         Duty::Idle => {}
@@ -420,16 +456,99 @@ pub fn subjects(session: &Session, drawn: &[Drawable], eye_ly: DVec3) -> Vec<Sub
         }
     }
 
-    if let Some(name) = held
+    if let Some(name) = held.clone()
         && let Some(body) = drawn.iter().find(|d| d.name == name)
     {
         out.push(Subject::Whole(name.clone()));
         if body.position_ly.distance(eye_ly) * M_PER_LY < BELOW_RADII * body.radius_m {
             out.push(Subject::Horizon(name.clone()));
-            out.push(Subject::Nadir(name));
+            // Not over the night side, where the ground below is black.
+            let day = star.is_none_or(|(at, _)| {
+                (eye_ly - body.position_ly).dot(at - body.position_ly) > 0.0
+            });
+            if day {
+                out.push(Subject::Nadir(name.clone()));
+            }
         }
     }
+
+    let neighbors: Vec<&Drawable> = drawn
+        .iter()
+        .filter(|d| d.radius_m > 0.0 && held.as_deref() != Some(d.name.as_str()))
+        .filter(|d| {
+            let distance = d.position_ly.distance(eye_ly) * M_PER_LY;
+            2.0 * (d.radius_m / distance.max(d.radius_m)).asin() > NEIGHBOR_MIN_RAD
+        })
+        .filter(|d| !out.iter().any(|s| matches!(s,
+            Subject::Approach(n) | Subject::Surveyed(n) if *n == d.name)))
+        .filter(|d| body_ok(d))
+        .collect();
+    if !neighbors.is_empty() {
+        let pick = lc_world::rng::hash(&[seed, 0xbea0]) % neighbors.len() as u64;
+        out.push(Subject::Neighbor(neighbors[pick as usize].name.clone()));
+    }
+
+    out.retain(|subject| match subject {
+        Subject::Whole(n) | Subject::Approach(n) | Subject::Surveyed(n) => named_ok(n),
+        Subject::Star(id) => session.star(*id).is_some_and(|s| {
+            covered(s.position_ly, s.star.radius_m, eye_ly, &occluders) <= MAX_COVERED
+        }),
+        _ => true,
+    });
     out
+}
+
+/// How much of a disc of `radius_m` at `at_ly` is behind nearer discs, seen from `eye_ly`, as
+/// a fraction.
+///
+/// Flat geometry on angles, which is exact for small discs and good enough at the threshold for
+/// a planet filling half the sky. Where two occluders overlap each other their shares are both
+/// counted, which errs toward calling the target hidden.
+pub fn covered(at_ly: DVec3, radius_m: f64, eye_ly: DVec3, occluders: &[(DVec3, f64)]) -> f64 {
+    let to = (at_ly - eye_ly) * M_PER_LY;
+    let distance = to.length();
+    if distance <= radius_m || radius_m <= 0.0 {
+        return 0.0;
+    }
+    let a = (radius_m / distance).asin();
+    let mut hidden = 0.0;
+    for &(other_ly, other_m) in occluders {
+        let toward = (other_ly - eye_ly) * M_PER_LY;
+        let other_distance = toward.length();
+        // Itself, and anything not in front of it.
+        if other_distance >= distance * (1.0 - 1e-9) || other_m <= 0.0 {
+            continue;
+        }
+        let b = (other_m / other_distance.max(other_m)).asin();
+        let apart = to.angle_between(toward);
+        hidden += disc_overlap(a, b, apart);
+    }
+    (hidden / (std::f64::consts::PI * a * a)).min(1.0)
+}
+
+/// The area two discs of radii `a` and `b` share, their centers `apart`.
+fn disc_overlap(a: f64, b: f64, apart: f64) -> f64 {
+    use std::f64::consts::PI;
+    if apart >= a + b {
+        return 0.0;
+    }
+    if apart <= (a - b).abs() {
+        return PI * a.min(b).powi(2);
+    }
+    let lens = |r: f64, other: f64| {
+        r * r * ((apart * apart + r * r - other * other) / (2.0 * apart * r)).clamp(-1.0, 1.0).acos()
+    };
+    let kite = (-apart + a + b) * (apart + a - b) * (apart - a + b) * (apart + a + b);
+    lens(a, b) + lens(b, a) - 0.5 * kite.max(0.0).sqrt()
+}
+
+/// How much of a sphere's face toward `eye_ly` is lit by a star at `star_ly`: one full, zero new.
+pub fn lit(at_ly: DVec3, star_ly: DVec3, eye_ly: DVec3) -> f64 {
+    let phase = (star_ly - at_ly).angle_between(eye_ly - at_ly);
+    if phase.is_nan() {
+        return 1.0;
+    }
+    0.5 * (1.0 + phase.cos())
 }
 
 /// Where the ship is flying to, light-years from the world origin.
@@ -465,7 +584,10 @@ pub fn aim(
         .unwrap_or(DVec3::X);
 
     let (forward, up, field_rad, sphere, caption) = match subject {
-        Subject::Whole(name) | Subject::Approach(name) | Subject::Surveyed(name) => {
+        Subject::Whole(name)
+        | Subject::Approach(name)
+        | Subject::Surveyed(name)
+        | Subject::Neighbor(name) => {
             let b = body(name)?;
             let (forward, field) = framed(to_m(b.position_ly), b.radius_m);
             let label = session.body_label(name);
@@ -774,6 +896,49 @@ mod tests {
     #[test]
     fn skimming_the_surface_holds_the_widest_lens() {
         assert_eq!(nadir_field(EARTH_M * 1.02, EARTH_M), Some(MAX_FIELD_RAD));
+    }
+
+    const MOON_M: f64 = 1.737e6;
+    const LY: f64 = 1.0 / M_PER_LY;
+
+    /// How much of the Moon Earth hides, with Earth between them on the sky.
+    fn moon_behind_earth(apart_moon_radii: f64) -> f64 {
+        let eye = DVec3::ZERO;
+        let earth = DVec3::new(0.0, 4.0e7 * LY, 0.0);
+        let moon_distance = 4.0e8;
+        let moon_rad = MOON_M / moon_distance;
+        let earth_rad = (EARTH_M / 4.0e7_f64).asin();
+        // The Moon's center this many of its radii outside Earth's limb.
+        let angle = earth_rad + apart_moon_radii * moon_rad;
+        let moon = DVec3::new(angle.sin(), angle.cos(), 0.0) * moon_distance * LY;
+        covered(moon, MOON_M, eye, &[(earth, EARTH_M), (moon, MOON_M)])
+    }
+
+    /// A moonrise is kept and a moon behind the planet is not: the cut is at how much is hidden.
+    #[test]
+    fn a_moon_rising_is_kept_and_one_behind_the_planet_is_not() {
+        assert_eq!(moon_behind_earth(3.0), 0.0, "clear of the limb");
+        assert!(moon_behind_earth(-3.0) > 0.999, "wholly behind");
+        let half = moon_behind_earth(0.0);
+        assert!(half > 0.4 && half < 0.6, "straddling the limb, {half} hidden");
+        assert!(moon_behind_earth(0.0) <= MAX_COVERED, "a moonrise passes");
+        assert!(moon_behind_earth(-0.9) > MAX_COVERED, "a sliver does not");
+    }
+
+    #[test]
+    fn nothing_behind_the_target_covers_it() {
+        let near = DVec3::new(0.0, 1.0e8 * LY, 0.0);
+        let far = DVec3::new(0.0, 1.0e9 * LY, 0.0);
+        assert_eq!(covered(near, MOON_M, DVec3::ZERO, &[(far, EARTH_M * 100.0)]), 0.0);
+    }
+
+    #[test]
+    fn full_is_lit_and_new_is_dark() {
+        let at = DVec3::new(0.0, 1.0, 0.0);
+        assert!((lit(at, DVec3::new(0.0, 2.0, 0.0), DVec3::ZERO) - 0.0).abs() < 1e-12, "new");
+        assert!((lit(at, DVec3::ZERO, DVec3::ZERO * 0.5 + DVec3::new(0.0, -1.0, 0.0)) - 1.0).abs()
+            < 1e-12, "full");
+        assert!((lit(at, DVec3::new(1.0, 1.0, 0.0), DVec3::ZERO) - 0.5).abs() < 1e-12, "quarter");
     }
 
     #[test]
