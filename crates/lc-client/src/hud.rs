@@ -5,8 +5,9 @@
 
 use em_spectra::presets;
 
+use crate::action::Action;
 use crate::session::Session;
-use crate::ui::UiState;
+use crate::ui::{Panel, UiState, ViewMode};
 
 const YEAR_S: f64 = 31_557_600.0;
 
@@ -40,6 +41,40 @@ pub struct Energy {
     pub fraction: f32,
     /// `23.4 / 30.0 ME`, and what is spoken for: a plan's commitment or a refit under way.
     pub amount: String,
+}
+
+/// A button on the right of the top bar: the way to find a window without knowing its key.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Toggle {
+    pub label: &'static str,
+    /// Byte offset of the letter to underline: the key that does the same thing.
+    pub underline: Option<usize>,
+    pub action: Action,
+    pub on: bool,
+}
+
+pub fn toggles(ui: &UiState) -> Vec<Toggle> {
+    let panel = |label, p: Panel| (label, Action::TogglePanel(p), ui.is_open(p));
+    [
+        panel("Flight", Panel::Flight),
+        panel("Telescope", Panel::Telescope),
+        panel("System", Panel::System),
+        ("Map", Action::ToggleView, ui.view == ViewMode::Map),
+        panel("Refit", Panel::Refit),
+        panel("Comms", Panel::Chat),
+        panel("Bookshelf", Panel::Reader),
+        ("Slideshow", Action::ToggleBeautyShots, ui.beauty_shots),
+    ]
+    .into_iter()
+    .map(|(label, action, on)| Toggle {
+        label,
+        underline: crate::input::letter_for(&action).and_then(|c| {
+            label.char_indices().find(|(_, l)| l.eq_ignore_ascii_case(&c)).map(|(i, _)| i)
+        }),
+        action,
+        on,
+    })
+    .collect()
 }
 
 /// What an arc reads as: the two apsides, or the periapsis alone on an escape.
@@ -172,6 +207,26 @@ mod tests {
         // something else. `session::tests` is where an unsurveyed sky is the subject.
         session.issue_charts(30.0);
         (UiState::default(), session)
+    }
+
+    #[test]
+    fn each_toggle_underlines_its_key_and_the_slideshow_underlines_nothing() {
+        let (mut ui, _) = fixture();
+        let underlined = |ui: &UiState| {
+            toggles(ui)
+                .into_iter()
+                .map(|t| (t.label, t.underline.map(|i| &t.label[i..i + 1]), t.on))
+                .collect::<Vec<_>>()
+        };
+        let before = underlined(&ui);
+        assert!(before.contains(&("Telescope", Some("T"), false)));
+        assert!(before.contains(&("System", Some("y"), false)), "the key's letter, not the first");
+        assert!(before.contains(&("Bookshelf", Some("B"), false)));
+        assert!(before.contains(&("Comms", Some("C"), false)));
+        assert!(before.contains(&("Slideshow", None, false)));
+
+        apply(Action::TogglePanel(Panel::Telescope), &mut ui, &mut fixture().1);
+        assert!(underlined(&ui).contains(&("Telescope", Some("T"), true)));
     }
 
     /// The pursuit reads where a crossing's progress would, and in hull clearance.
