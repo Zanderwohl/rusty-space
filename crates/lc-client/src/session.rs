@@ -636,14 +636,27 @@ impl Session {
         self.home_labels().of(key)
     }
 
-    /// Give a star a name of this ship's own.
-    pub fn name_star(&mut self, id: StarId, name: &str) -> bool {
+    /// What this ship calls a belt or cloud of its system, by its index in `populations`.
+    pub fn band_label(&self, index: usize) -> String {
+        let Some(system) = self.system.as_ref() else { return String::new() };
+        let Some(population) = system.populations.get(index) else { return String::new() };
+        let subject = lc_world::knowledge::Subject::Population { star: system.star, index: index as u32 };
+        self.knowledge
+            .name_of(subject)
+            .unwrap_or_else(|| lc_world::navigation::band_designation(population))
+    }
+
+    pub fn nameable(&self, subject: lc_world::knowledge::Subject) -> bool {
+        self.knowledge.nameable(subject, self.system.as_deref())
+    }
+
+    pub fn name_it(&mut self, subject: lc_world::knowledge::Subject, name: &str) -> bool {
         let name = name.trim();
-        if name.is_empty() || !self.knowledge.knows(id) {
+        if name.is_empty() || !self.nameable(subject) {
             return false;
         }
         let now = self.coordinate_time_s();
-        self.knowledge.name_it(id, name, now);
+        self.knowledge.name_it(subject, name, now);
         true
     }
 

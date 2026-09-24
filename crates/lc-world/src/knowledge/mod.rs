@@ -651,6 +651,17 @@ impl Knowledge {
         self.refresh(subject);
     }
 
+    /// A population qualifies only in `here`, the system the craft is in: populations are
+    /// generated, not observed, so no craft holds a file on one.
+    pub fn nameable(&self, subject: impl Into<Subject>, here: Option<&crate::system::LocalSystem>) -> bool {
+        match subject.into() {
+            Subject::Population { star, index } => {
+                here.is_some_and(|s| s.star == star && (index as usize) < s.populations.len())
+            }
+            subject => self.knows(subject),
+        }
+    }
+
     /// Give something this craft's own name for it.
     pub fn name_it(&mut self, subject: impl Into<Subject>, name: impl Into<String>, now_s: f64) {
         let naming = Naming {
