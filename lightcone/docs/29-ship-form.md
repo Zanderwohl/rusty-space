@@ -23,7 +23,7 @@ A `Form` is a tree of **parts**. Each part is one primitive of one kind, with a 
 | primitive | proportions | closed-form volume |
 |---|---|---|
 | ellipsoid | three semi-axis ratios | `4/3 π a b c` |
-| capsule | length over radius | cylinder plus a sphere |
+| capsule | straight length over radius | cylinder plus a sphere |
 | slab | three edge ratios, corner radius over the shortest edge | rounded box |
 | cylinder | length over radius | `π r² h` |
 | torus | major radius over minor | `2 π² R r²` |
@@ -143,7 +143,8 @@ server, and stable across refits. Steps and animation refer to parts by id.
 naming the part and the field, because forms arrive from clients. Two ranges are narrower than a
 sign: a slab's corner is at most half its shortest edge, past which opposite roundings cross, and a
 torus's major radius is at least its minor, below which the tube crosses the axis and the closed
-forms count that part twice.
+forms count that part twice. And proportions extreme enough that the part's solved dimensions
+underflow to zero or overflow to infinity are refused, since a grid sized from them would be too.
 
 ## What the server computes from a form
 
@@ -176,7 +177,7 @@ reproduce that formula to within the grid's resolution.
 ### Hull structure follows area
 
 Each part carries structure at `hull_areal_density` per square meter of **its own surface**, from its
-primitive's closed-form (or standard approximate) area, again ignoring overlaps. Flattening buys
+primitive's closed-form area (Thomsen's approximation for an ellipsoid), again ignoring overlaps. Flattening buys
 shadow, radiating area and room on the surface, and pays for them in mass, so in acceleration.
 `hull_areal_density` is anchored so the starting form weighs what 19's starting ship does.
 

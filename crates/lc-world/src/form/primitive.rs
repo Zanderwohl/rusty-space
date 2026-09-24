@@ -1,11 +1,8 @@
 //! Sizing a primitive: its volume, the scale solved from a volume, and its surface area.
 //!
 //! A [`Primitive`] is shape without size, and a [`Shape`] is one at a scale, in meters. Volume
-//! goes as scale³ and area as scale², so each primitive needs only its value at scale one.
-//!
-//! Every shape is centered on its part's origin, and a part's axis is its local x: a capsule's,
-//! cylinder's or frustum's length and a torus's axis of symmetry run along it, a frustum's first
-//! end at −x. A frustum is centered at half its length, not at its centroid.
+//! goes as scale³ and area as scale², so each primitive needs only its value at scale one. Axes
+//! and centers are as 29 §Placement is relative gives them.
 
 use std::f64::consts::PI;
 
@@ -69,6 +66,21 @@ impl Primitive {
 }
 
 impl Shape {
+    /// Every dimension finite, and positive where zero is not a shape the primitive allows. Fails
+    /// where extreme proportions underflow the unit volume or a large volume overflows a length.
+    pub(super) fn exists(&self) -> bool {
+        let positive = |x: f64| x.is_finite() && x > 0.0;
+        let non_negative = |x: f64| x.is_finite() && x >= 0.0;
+        match *self {
+            Shape::Ellipsoid { semi_axes } => semi_axes.to_array().into_iter().all(positive),
+            Shape::Capsule { radius, length } => positive(radius) && non_negative(length),
+            Shape::Slab { edges, corner } => edges.to_array().into_iter().all(positive) && non_negative(corner),
+            Shape::Cylinder { radius, length } => positive(radius) && positive(length),
+            Shape::Torus { major, minor } => positive(major) && positive(minor),
+            Shape::Frustum { length, start, end } => positive(length) && positive(start) && non_negative(end),
+        }
+    }
+
     pub fn volume(&self) -> f64 {
         match *self {
             Shape::Ellipsoid { semi_axes: s } => 4.0 / 3.0 * PI * s.x * s.y * s.z,
@@ -107,7 +119,6 @@ impl Shape {
 }
 
 impl Part {
-    /// `min_part_m3` is a parameter until K2's `Balance` lands; F4 and F5 read it from there.
     pub fn mind(id: PartId, min_part_m3: f64) -> Part {
         Part { id, kind: Kind::Mind, primitive: Primitive::MIND, volume_m3: min_part_m3, placement: None }
     }
@@ -351,10 +362,10 @@ mod tests {
         for primitive in spread() {
             let shape = primitive.at(1.7);
             let (area, volume) = measured(&shape);
-            // Thomsen is good to about 1%. A rounded slab's curvature jumps where a face meets its
-            // rounding, which spoils the extrapolation.
+            // Thomsen is good to about 1.061%. A rounded slab's curvature jumps where a face meets
+            // its rounding, which spoils the extrapolation.
             let (area_tolerance, volume_tolerance) = match primitive {
-                Primitive::Ellipsoid { .. } => (1.5e-2, 1e-8),
+                Primitive::Ellipsoid { .. } => (1.1e-2, 1e-8),
                 Primitive::Slab { corner, .. } if corner > 0.0 => (1e-4, 1e-4),
                 _ => (1e-8, 1e-8),
             };
