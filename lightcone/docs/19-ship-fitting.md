@@ -349,8 +349,10 @@ As planned, and done in this order.
   the dev grant unnecessary. The first source, hull solar, is designed in
   [20-solar-power.md](20-solar-power.md).
 - **Transmission** should draw on the same budget; `Order::Transmit` states a power and is free.
+  [30-directed-energy.md](30-directed-energy.md) charges it, as one use of `Order::Emit`.
 - **Other modules**: weapons, cargo, sensors. The planner's order of priority will need a rule
-  for each.
+  for each. Weapons turn out to be engines ([30-directed-energy.md](30-directed-energy.md)); bays
+  and where modules sit are [28-ship-form.md](28-ship-form.md).
 - **A full ship throws energy away** when it takes a module apart, rather than being refused.
   The refit panel warns how much, and a player who cares makes room in storage first.
 - **Holding a station is free**, as it was before energy: `motion::thrust_g` treats the

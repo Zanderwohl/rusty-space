@@ -1,0 +1,236 @@
+# Ship rendering
+
+How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
+around all of it.
+
+**Status: designed, not built.** [28-ship-form.md](28-ship-form.md) is what is drawn,
+[29-the-field.md](29-the-field.md) is the field's physics, and [30-directed-energy.md](30-directed-energy.md)
+is what beams do. Today a hull is one ovoid with a gray planet material (`crates/lc-client/src/hull.rs`),
+and nothing about a refit shows.
+
+## Two looks
+
+- **From TNG: parts you can read.** Each shape is one kind, and each kind looks like what it is.
+  A drive section, a habitat and a bay are recognizable from outside.
+- **From the Culture: a smooth field with the ship inside it.** Not the surface clutter of a Star
+  Destroyer. Light does most of the work: lit living areas on the night side, the field's glow,
+  the plume.
+
+The construction look is Cities: Skylines and SimCity 4: a skeleton goes up, is closed in, is
+fitted out, and the scaffolding comes down. It is mechanical on purpose. The one time the ship
+looks like machinery is while it is being built.
+
+## The hull
+
+### From distance field to mesh
+
+The client evaluates the same signed distance field that `lc_world::form` defines, so the surface
+drawn is the surface the server reasons about.
+
+- **Surface nets**, on a grid sized to the ship's pixels on screen: coarse when it is a smudge, fine
+  when it fills the view. Surface nets are smooth, cheap, and have no ambiguous cases to get wrong.
+- Meshed **off the main thread** on Bevy's async compute pool, cached by a hash of the form and
+  each shape's solved scale, and swapped in when ready. A new mesh is needed only when a step
+  completes. Within a step, the growing shape is drawn by the construction pass below, not
+  remeshed.
+- **Finish** is a per-form choice: *smooth* (surface nets as they come), *faceted* (flat normals),
+  or *blocky* (occupied cells drawn as cubes, for anyone who wants a brutalist ship). It changes
+  extraction, not the shape, so it touches nothing the server computes.
+
+### Details are sized in meters
+
+The eye judges size by how small repeated detail is. So **every repeated detail has a fixed size
+in meters, whatever the hull's size**: windows every few meters, panels tens of meters across,
+girders at a fixed pitch. A 50 km ship reads as enormous because its girders are fine against its
+length.
+
+At a distance where detail would be smaller than a pixel, it fades into a texture that averages
+it, to stop the shimmer. A distance-field mesh has no UV coordinates, so materials are mapped
+**triplanar**, from world position in the ship's frame.
+
+### Materials by kind
+
+One texture-graph graph per kind, delivered like the planet graphs, with the region set by which
+shape a point is nearest. Fillets blend between the two regions.
+
+| kind | look |
+|---|---|
+| storage | dark and smooth, faint seams. The mass of the ship |
+| drone | hangar doors in rows, docks lit when drones are home |
+| living | window bands. Lit on the night side, where they are the brightest thing on the hull |
+| engine | an emitter grid on the open face, glowing with exhaust power |
+| data | fine dense panels |
+| frame | truss only, never plated |
+| bay | a shell with a mouth, and a lit interior grid of decks and gantries |
+
+Living lights are emitters with a real (small) power, through the same exposure as everything
+else, so they show on a night side and vanish in sunlight as they should.
+
+## Building, as a function of time
+
+**What is drawn is a pure function of the refit's recipe and the time `t`.** No animation state is
+stored, and nothing is sent. The planner's steps already say which shape, which direction, and the
+interval each occupies ([28-ship-form.md](28-ship-form.md) adds the shape id to each step).
+
+Each shape's volume at `t` is its volume at the refit's start plus completed steps plus the
+completed fraction of the current one. The step in progress acts on a **sliver**: the shell between
+the shape at its volume before the step and after it.
+
+### A build step
+
+| fraction of the step | phase | drawn |
+|---|---|---|
+| 0 – 0.3 | **truss** | a lattice of girders spreads through the sliver outward from where the shape meets its parent |
+| 0.3 – 0.7 | **plating** | panels close over the lattice, in order of distance from the attachment point |
+| 0.7 – 0.9 | **fitting-out** | the kind's material fades in, windows light, emitters appear |
+| 0.9 – 1.0 | **scaffold down** | the outer truss comes apart, and drone traffic carries it off |
+
+The fractions are client constants. The step's duration is the planner's.
+
+- **The truss is a distance field too**: a repeating lattice of capsules at a fixed pitch in meters,
+  intersected with the sliver's shell. It is meshed once at the step's start, since the sliver is
+  known then.
+- **Plating is a reveal mask** on the hull material: each panel has a hashed threshold ordered by
+  distance from the attachment point, and a uniform sweeps across them.
+- **Frame shrinks as the module shape grows.** The slot a module takes comes out of frame, so as
+  the new sliver goes up, a frame shape's truss is taken down at the same rate.
+
+**On a small ship, a step is a big event.** A slot is a twentieth of the starting hull, and the
+whole sliver goes up as one structure. **On a GSV, the sliver is a thin skin** on a shape tens of
+kilometers long, so building becomes a **frontier**: a band of scaffolding working its way across
+the growing face, with drone traffic streaming to it. It is a shipyard that is also the ship.
+
+### The other steps
+
+- **Dismantle** runs a build's phases in reverse order but is not a rewind: scaffold goes up, the
+  plating comes off, which shows the truss, and then the truss is taken down.
+- **Move** slides the subtree from its old anchor to its new one along a smooth path over the
+  step. No construction, and drones swarm the joint.
+- **Rebuild** is a dismantle of the whole shape to nothing and a build of the new one.
+- **Cancel** runs the step in progress backward from the fraction it had reached, which is what the
+  server does to its energy.
+
+## Drones
+
+Drones are **stateless particles**: each one's position is a closed-form function of its index, a
+seed and `t`, evaluated in the vertex shader over an instanced quad. That is the same rule as the
+hull: the picture is a function of the recipe and the clock. It also means no particle simulation
+to keep in step, and no dependency to check against Bevy 0.19 and the browser (WebGPU) build.
+`bevy_hanabi` was considered and is not needed for this.
+
+- **Count** follows the drone modules, `particles_per_drone` each, capped.
+- **Working:** arcs from the drone shape's docks to points on the sliver, a dwell at the frontier,
+  and the arc back. On a dismantle they carry glowing pieces home, which reads as energy going back
+  into storage.
+- **Moving a shape:** they swarm the joint.
+- **Idle:** most docked, a thin patrol drifting over the hull.
+- **At a distance:** the swarm fades into a soft haze over the frontier before individual motes
+  would fall below a pixel.
+
+## The field
+
+The envelope from [28-ship-form.md](28-ship-form.md), meshed coarsely, drawn as **two layers**
+whatever is decided about air:
+
+- **Inner: clear.** A fresnel rim, faint, with the ship plainly visible through it. If air is ever
+  held, this is where the haze goes. `haze.rs` already scatters sunlight through a planet's
+  atmosphere, and a park's sky is the same problem in a smaller volume.
+- **Outer: the radiator.** Its color is a blackbody at the field's temperature through
+  `em_spectra::blackbody`, and its brightness is **physical**: σT⁴ over its area, through the same
+  exposure as the stars. The hull's plume already works this way ([`plume.rs`](../../crates/lc-client/src/plume.rs)):
+  the color is a consequence, not a setting. At 400 K the outer layer is invisible in the visible
+  bands. At 2 400 K on a dive it glows red-orange. At 4 600 K it is the brightest thing on screen.
+
+| field state | drawn |
+|---|---|
+| idle | a faint rim, a slow shimmer |
+| warm | a colored glow, even over the surface |
+| beamed | a **hot spot** on the envelope toward each incoming beam's bearing, from `Outbound::Illuminated`, spreading as the field fills |
+| past 80% of `Q_max` | the glow goes uneven and begins to flicker, faster as it nears the limit |
+| collapse | below |
+
+**Collapse** is a white flash and a sphere of hot debris expanding and cooling through the colors
+of the afterglow over `collapse_afterglow_s`. Nearby fields brighten when the spike lands on them,
+each at its own retarded time, so a cascade is seen spreading at c. From a distance, a collapse is
+drawn by the photometry: a new point in the sky, as bright as [29-the-field.md](29-the-field.md)
+says.
+
+## Beams and plumes
+
+- **A beam is invisible**, because vacuum scatters nothing. The one exception is an observer inside
+  the cone, who sees the emitter as a blinding point in the beam's band. The map draws your own
+  beams and the bearings of beams landing on you ([30-directed-energy.md](30-directed-energy.md)).
+- **The plume brightens under a dump** by the same rule it already has: more power through the same
+  nozzle is hotter and longer. A **fore** emission lights a plume at the bow.
+- God view may draw every beam's cone, as a debug overlay, like the causality lines of
+  [07-rendering.md](07-rendering.md).
+
+## Temporary assets
+
+Before the mesher, the construction pass or the field shader exist, everything above has a
+placeholder, so the rest can be built and the sliders visibly change the ship straight away:
+
+- **Each shape as a Bevy primitive mesh**, scaled to its solved size: `Sphere` scaled for an
+  ellipsoid, `Capsule3d`, `Cuboid` for a slab, `Cylinder`, `Torus`, `ConicalFrustum`. No blends.
+- **A flat color per kind.**
+- **Construction as scale plus wireframe:** the growing shape drawn in `BodyWireframeMaterial`
+  during the truss phase, crossfading to solid.
+- **Drones as instanced motes** on straight lines.
+- **The field as a fresnel sphere** around the bounds, tinted by temperature once there is one.
+
+Every placeholder is replaced independently. None of them is on the server's side of anything.
+
+## Photographing it
+
+WGSL cannot be asserted from a test ([AGENTS.md](../../AGENTS.md)), so each piece gets a way to be
+photographed:
+
+| flag | shows |
+|---|---|
+| `--form <plate\|spindle\|cluster\|default>` | the ship in a preset form |
+| `--view form` | the editor ([28-ship-form.md](28-ship-form.md)) |
+| `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point |
+| `--demo collapse` | a ship collapsing beside two others, one close enough to follow it |
+| `--field-k <kelvin>` | the player's field held at a temperature, for the shader |
+
+`--burst` is the only way to see the saturation flicker, as it is for any flicker.
+
+## Where it goes
+
+| crate | new | changed |
+|---|---|---|
+| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material` | `plume_material` reads the aperture's shape |
+| `lc-client` | `hull_mesh.rs` (surface nets, finishes, caching), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws the form instead of the ovoid. `plume.rs` for dumps and fore emission |
+| `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl` | |
+
+Materials go in `em-render` because nothing in them is specific to Lightcone. A hull with regions
+and a reveal mask is as much Exotic Matters' as anyone's.
+
+## Order of work, across 28 to 31
+
+Each step leaves the game playable and adds one thing a player can see or feel.
+
+1. **Visible refits, client only.** `Form::default_for(loadout)`, the placeholder meshes, construction
+   as scale and wireframe, instanced drones. The refit sliders change the ship. No protocol change.
+2. **The form is real.** `lc_world::form` and its grid. The form on the wire and in saves. Solar
+   reads the shadow table. The editor, as a third view. Hull mass by area.
+3. **The field.** The heat account, collapse and proximity. `HULL_K` retires. Photometry of fields.
+   The field shader, and the HUD's countdown.
+4. **Directed energy.** Exhaust from heat, `Order::Emit`, beams fanned out and delivered, reciprocity,
+   the gain moved onto stars, radio charged. The emit window.
+5. **The real hull.** Surface nets, the truss and plating passes, materials by kind, scale-true
+   detail. The placeholders go.
+6. **Later:** bays and what is built in them, air under the field, parks, Dyson swarms.
+
+Step 3 comes before 4 because heat has to exist before anything can dump it, and proximity heating
+from a collapse needs no beams.
+
+## Open
+
+- **Refraction** of the stars behind the field. It needs the sky behind the ship, which is drawn by a
+  different camera. It is a nice-to-have, and the rim carries the look without it.
+- **Meshing a GSV.** A 50 km hull at fine detail is far too many triangles at once. It will want
+  levels of detail per shape, and the frontier meshed finer than the rest.
+- **Looking into a bay.** The interior grid is procedural, but a ship being built inside a bay is the
+  construction pass applied to a second form inside the first. That is the screenshot, and it waits
+  for bays.
