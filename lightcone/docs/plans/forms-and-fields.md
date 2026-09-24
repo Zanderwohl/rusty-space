@@ -437,7 +437,7 @@ graph LR
 - needs: E1, E2, S1
 - touches: `crates/lc-world/src/emit.rs`, `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`
 - read: 31 §Emitting on purpose, §Three uses, §Radio
-- deliver: `Order::Emit`, balanced and as a burn; fan-out to every worldline in the cone; delivery at the retarded time as intake; `Outbound::Illuminated`; radio charged.
+- deliver: `Order::Emit`, balanced and as a burn; fan-out to every worldline in the cone; delivery at the retarded time as intake; `Outbound::Illuminated`; `Presence` carries `Glare` to observers inside the cone; radio charged.
 - done when: a second craft in the cone is fed and a third just outside is not, a balanced emit leaves the worldline alone, and an aimed beam misses a target that maneuvered after it left.
 
 ### E4 · Exhaust heats neighbors
@@ -658,7 +658,7 @@ graph LR
 
 - status: todo
 - needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, R8, R9, R10, R11
-- touches: `lightcone/docs/`, `lightcone/README.md`
+- touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
-- deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status.
+- deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
 - done when: nothing in `lightcone/docs/` describes a loadout as current.

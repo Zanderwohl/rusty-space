@@ -887,8 +887,8 @@ pub enum Refusal {
     /// A report was asked for and this craft has learned nothing since it last reported to that
     /// recipient. Appended last.
     NothingNew,
-    /// The shard does not do this yet. Deleted once `lightcone/docs/plans/forms-and-fields.md`
-    /// has built every order that answers with it.
+    /// The shard does not do this yet. X1 of `lightcone/docs/plans/forms-and-fields.md` deletes
+    /// it, once every order that answers with it is built.
     NotBuilt,
     /// A field switch is already running.
     Switching,
