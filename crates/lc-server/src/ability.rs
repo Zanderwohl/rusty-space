@@ -90,8 +90,11 @@ impl Act {
             | Order::CutDrive
             | Order::Intercept { .. }
             | Order::BreakOff
+            | Order::RefitLoadout { .. }
             | Order::Refit { .. }
             | Order::CancelRefit
+            | Order::FieldMode { .. }
+            | Order::Emit { .. }
             // What the telescope does and what the crew call things are the ship's business.
             | Order::SetDuty { .. }
             | Order::NameIt { .. }
@@ -242,16 +245,26 @@ mod tests {
     /// exhaustive match in `Act::of` is exercised rather than merely written.
     #[test]
     fn every_order_is_gated_as_one_kind_or_the_other() {
-        use lc_proto::{Aim, Closeness, Loadout, MessageKey, Secrecy, ShipId};
+        use lc_proto::{Aim, Apertures, Approach, Closeness, FieldMode, Form, Loadout, MessageKey, Secrecy, ShipId};
 
         let commands = [
             Order::Transmit { power_w: 1.0 },
             Order::Burn { beta: [0.1, 0.0, 0.0] },
             Order::CutDrive,
-            Order::Intercept { ship_id: ShipId(1), closeness: Closeness::Company },
+            Order::Intercept { ship_id: ShipId(1), closeness: Closeness::Company, approach: Approach::Courteous },
             Order::BreakOff,
-            Order::Refit { target: Loadout::default() },
+            Order::RefitLoadout { target: Loadout::default() },
+            Order::Refit { target: Form::default() },
             Order::CancelRefit,
+            Order::FieldMode { mode: FieldMode::Black },
+            Order::Emit {
+                aim: Aim::Omni,
+                apertures: Apertures::Both,
+                power_w: 1.0,
+                wavelength_m: 1.0e-9,
+                spread_rad: 1.0e-3,
+                duration_s: 1.0,
+            },
         ];
         for order in &commands {
             assert_eq!(Act::of(order), Act::Command, "{order:?}");

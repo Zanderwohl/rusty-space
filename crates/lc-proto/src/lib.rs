@@ -250,11 +250,22 @@ pub enum Closeness {
     Intimate,
 }
 
-/// A standing intercept: who, and how close.
+/// How an intercept arrives. See `lightcone/docs/31-directed-energy.md`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Approach {
+    /// Nothing it flies cooks the quarry: abeam, and the last leg on station-keeping thrusters.
+    #[default]
+    Courteous,
+    /// Burn, flip and brake straight onto the station, cone and all.
+    Direct,
+}
+
+/// A standing intercept: who, how close, and how it arrives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pursuit {
     pub quarry: ShipId,
     pub closeness: Closeness,
+    pub approach: Approach,
 }
 
 /// A ship's whole state of motion.
@@ -326,13 +337,14 @@ pub enum Order {
     /// light has not arrived.
     ///
     /// Sent again for the same quarry with another closeness, it closes in or stands off.
-    Intercept { ship_id: ShipId, closeness: Closeness },
+    Intercept { ship_id: ShipId, closeness: Closeness, approach: Approach },
     /// Give up a standing [`Order::Intercept`], with no further corrections: the drive is cut
     /// and the ship keeps whatever velocity the approach or the station left it with, on whatever
     /// conic that is.
     BreakOff,
-    /// Rebuild toward this loadout. Refused while under way.
-    Refit { target: Loadout },
+    /// Rebuild toward this loadout. Refused while under way. Deleted by S1, when [`Order::Refit`]
+    /// takes its place.
+    RefitLoadout { target: Loadout },
     /// Stop a refit where it is; the step in progress is reversed.
     CancelRefit,
     /// Put a message on the air, for `to`, pointed `aim`, readable by `secrecy`.
@@ -386,6 +398,15 @@ pub enum Order {
     /// Read every log this craft holds into a conclusion and consume it, to make room. Kept
     /// raw logs are left alone. Appended last.
     Analyze,
+    /// Rebuild toward this form, in one round. Refused while under way.
+    Refit { target: Form },
+    /// Set the field. The change takes `field_switch_s`, and is refused while one is running.
+    FieldMode { mode: FieldMode },
+    /// Put light out on purpose: to dump heat, feed an ally, or attack.
+    ///
+    /// `power_w` is at the start and at most the apertures' rating; `spread_rad` is the
+    /// half-angle, at least the diffraction floor. See `lightcone/docs/31-directed-energy.md`.
+    Emit { aim: Aim, apertures: Apertures, power_w: f64, wavelength_m: f64, spread_rad: f64, duration_s: f64 },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -490,6 +511,12 @@ pub struct Presence {
     pub emitted_t: i64,
     /// Coordinate microseconds it arrives. Never later than the server's `t` when it is sent.
     pub arrive_t: i64,
+    /// Its silhouette, as its light left it. Empty until S1.
+    pub form: Form,
+    /// `None` until H7.
+    pub glow: Option<Glow>,
+    /// Only for an observer inside the craft's beam. `None` until E3.
+    pub glare: Option<Glare>,
 }
 
 /// A sighting that has passed the gate, and the only thing the event channel can carry.
@@ -737,7 +764,9 @@ pub enum Outbound {
     Pursuing { ship_id: ShipId, pursuit: Pursuit },
     /// The ship's modules and energy, as settled by the authority. Sent on sign-in and whenever
     /// the account changes other than by the passage of time. Appended last.
-    Fitted { ship_id: ShipId, fitting: Fitting },
+    ///
+    /// `hull` is `None` until S1, and `field` until H3.
+    Fitted { ship_id: ShipId, fitting: Fitting, hull: Option<Hull>, field: Option<Field> },
     /// Everything this ship has ever said or been told, and whose keys it holds.
     ///
     /// Sent once, shortly after a welcome. A conversation outlives the connection it happened
@@ -801,6 +830,14 @@ pub enum Outbound {
     /// fitted, oldest first. Only subjects the craft already holds. At most once a real second,
     /// and only when it changes. Appended last.
     Doing { observing: Option<Subject>, fitting: Vec<Subject> },
+    /// This client's ship reached `Q_max` at `at_t` and released `released_j` as light. The
+    /// account now flies `successor`, a new starting ship. Observers learn of it from the light.
+    Collapsed { ship_id: ShipId, at_t: i64, released_j: f64, successor: ShipId },
+    /// A beam landing on this ship, told when its light arrives and not before. `power_w` is what
+    /// reaches the field, before its absorptivity. `bearing` is a unit vector toward the source.
+    Illuminated { ship_id: ShipId, bearing: [f64; 3], wavelength_m: f64, power_w: f64, arrive_t: i64, until_t: i64 },
+    /// The account's presets, whole. Sent after `Welcome` and after each change.
+    Presets(Vec<Preset>),
 }
 
 /// The longest command line a shard will read, in bytes.
@@ -845,81 +882,16 @@ pub enum Refusal {
     /// A report was asked for and this craft has learned nothing since it last reported to that
     /// recipient. Appended last.
     NothingNew,
-}
-
-/// Why a refit cannot be done. Mirrors `lc_world::refit::Shortage`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Shortfall {
-    Unbuildable,
-    Energy,
-    NoDrones,
-    CannotBuild(Module),
-    CannotDismantle(Module),
-}
-
-/// Mirrors `lc_world::fitting::Module`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Module {
-    Storage,
-    Drone,
-    Living,
-    Engine,
-    Data,
-}
-
-/// Module counts and hull slots. Mirrors `lc_world::fitting::Loadout`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Loadout {
-    pub storage: u32,
-    pub drones: u32,
-    pub living: u32,
-    pub engines: u32,
-    pub slots: u32,
-    pub data: u32,
-}
-
-/// The shard's tunables. Mirrors `lc_world::fitting::Balance`; stated so a client's refit
-/// preview uses the numbers the authority does.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Balance {
-    pub drive_efficiency: f64,
-    pub recovery: f64,
-    pub storage_per_module: f64,
-    pub engine_thrust_n: f64,
-    pub drone_power_w: f64,
-    pub living_drain_w: f64,
-    pub hull_density_kg_m3: f64,
-    pub slot_volume_m3: f64,
-    pub module_density_kg_m3: f64,
-    pub solar_efficiency: f64,
-    pub solar_gain: f64,
-    pub data_per_module: f64,
-    pub data_mass_fraction: f64,
-    pub data_work_factor: f64,
-}
-
-/// A refit as the arguments it is planned from. Mirrors `lc_world::refit::Order`.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct RefitOrder {
-    pub from: Loadout,
-    pub target: Loadout,
-    pub stored_j: f64,
-    pub start_s: f64,
-}
-
-/// A ship's energy account, settled at `since_s`. Mirrors `lc_world::fitting::Account`, with
-/// the balance it is read under.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Fitting {
-    pub balance: Balance,
-    pub loadout: Loadout,
-    pub stored_j: f64,
-    pub since_s: f64,
-    pub rapidity_since: f64,
-    pub committed_j: f64,
-    /// Starlight being collected in the segment that began at `since_s`, watts.
-    pub solar_w: f64,
-    pub refit: Option<RefitOrder>,
+    /// The shard does not do this yet. Deleted once `lightcone/docs/plans/forms-and-fields.md`
+    /// has built every order that answers with it.
+    NotBuilt,
+    /// A field switch is already running.
+    Switching,
+    /// Both apertures asked of a ship with engines at one end only.
+    NoAperture,
+    /// More power than the chosen apertures are rated for.
+    OverRating,
+    Form(FormFault),
 }
 
 /// Everything a client says.
@@ -951,6 +923,9 @@ pub enum Inbound {
     /// A console line as typed. Text, so the shard is the only parser: a client that sent a
     /// structure could send one no parser would produce. Appended last.
     Command { seq: u32, line: String },
+    /// Keep `form` under `name`, replacing any preset already called that.
+    SavePreset { name: String, form: Form },
+    DeletePreset { name: String },
 }
 
 /// Encode anything the protocol carries.
@@ -972,8 +947,15 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// a format that is not self-describing cannot notice a field that moved, so this is what
 /// notices.
 pub mod golden;
+mod field;
+mod fitting;
+pub mod form;
 mod knowing;
 mod radio;
+
+pub use field::{Apertures, Field, FieldMode, Glare, Glow, Shade, Switch};
+pub use fitting::{Balance, Fitting, Loadout, Module, RefitOrder, Shortfall};
+pub use form::{Form, FormFault, Hull, Preset};
 
 pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
 
@@ -1101,6 +1083,9 @@ mod tests {
                     jet_power_w: 7.2e17,
                     emitted_t: 500_000,
                     arrive_t: 1_000_000,
+                    form: two_parts(),
+                    glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear }),
+                    glare: Some(Glare { wavelength_m: 1.0e-6, received_w: 3.5e12 }),
                 },
                 1_000_000,
             )
@@ -1220,6 +1205,115 @@ mod tests {
         }
     }
 
+    /// A Mind inside an ellipsoid of storage, with an engine aft: every shape a part can take
+    /// on the wire except the other primitives, which [`golden::REFIT`] pins.
+    fn two_parts() -> Form {
+        use form::{Kind, Mount, Part, PartId, Placement, Primitive};
+        let mind = Part {
+            id: PartId(0),
+            kind: Kind::Mind,
+            primitive: Primitive::Slab { edges: [1.0, 1.0, 1.0], corner: 0.0 },
+            volume_m3: 1_000.0,
+            placement: None,
+        };
+        let storage = Part {
+            id: PartId(1),
+            kind: Kind::Storage,
+            primitive: Primitive::Ellipsoid { axes: [5.0, 3.0, 1.0] },
+            volume_m3: 2.36e6,
+            placement: Some(Placement {
+                parent: PartId(0),
+                mount: Mount::Enclosing,
+                twist: 0.0,
+                tilt: [0.0, 0.0],
+                blend: 0.0,
+                mirror: false,
+            }),
+        };
+        let engine = Part {
+            id: PartId(2),
+            kind: Kind::Engine,
+            primitive: Primitive::Frustum { length: 2.0, taper: 0.5 },
+            volume_m3: 1.96e6,
+            placement: Some(Placement {
+                parent: PartId(1),
+                mount: Mount::Attached { anchor: [-1.0, 0.0, 0.0], standoff: -0.25 },
+                twist: 0.5,
+                tilt: [0.125, -0.25],
+                blend: 0.1,
+                mirror: true,
+            }),
+        };
+        Form { parts: vec![mind, storage, engine] }
+    }
+
+    fn refit() -> Inbound {
+        use form::{Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
+        let mut form = two_parts();
+        let hung = |id, kind, primitive| Part {
+            id: PartId(id),
+            kind,
+            primitive,
+            volume_m3: 3.93e5,
+            placement: Some(Placement {
+                parent: PartId(1),
+                mount: Mount::Attached { anchor: [0.0, 0.0, 1.0], standoff: 0.0 },
+                twist: 0.0,
+                tilt: [0.0, 0.0],
+                blend: 0.2,
+                mirror: false,
+            }),
+        };
+        form.parts.extend([
+            hung(3, Kind::Drone, Primitive::Capsule { length: 3.0 }),
+            hung(4, Kind::Living, Primitive::Cylinder { length: 0.5 }),
+            hung(5, Kind::Bay, Primitive::Torus { major: 4.0 }),
+            hung(6, Kind::Spar(SparMode::Saddle), Primitive::Capsule { length: 0.0 }),
+            hung(7, Kind::Spar(SparMode::Strap), Primitive::Cylinder { length: 6.0 }),
+            hung(8, Kind::Data, Primitive::Capsule { length: 1.0 }),
+        ]);
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::Refit { target: form },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
+    fn field_mode() -> Inbound {
+        let mode = FieldMode::Auto { clear_above: 0.5, black_below: 0.3, refill_below: 0.95 };
+        Inbound::Act(Intent { ship_id: ShipId(42), order: Order::FieldMode { mode }, issued_at_client_t: 1_000_000 })
+    }
+
+    fn emit() -> Inbound {
+        Inbound::Act(Intent {
+            ship_id: ShipId(42),
+            order: Order::Emit {
+                aim: Aim::Ship(ShipId(7)),
+                apertures: Apertures::Both,
+                power_w: 1.1e20,
+                wavelength_m: 1.0e-9,
+                spread_rad: 1.0e-5,
+                duration_s: 3_600.0,
+            },
+            issued_at_client_t: 1_000_000,
+        })
+    }
+
+    fn collapsed() -> Outbound {
+        Outbound::Collapsed { ship_id: ShipId(42), at_t: 1_000_000, released_j: 3.6e24, successor: ShipId(43) }
+    }
+
+    fn illuminated() -> Outbound {
+        Outbound::Illuminated {
+            ship_id: ShipId(42),
+            bearing: [0.0, 0.6, 0.8],
+            wavelength_m: 1.0e-6,
+            power_w: 2.5e17,
+            arrive_t: 1_000_000,
+            until_t: 4_600_000_000,
+        }
+    }
+
     fn fitted() -> Outbound {
         let loadout = Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 };
         Outbound::Fitted {
@@ -1254,6 +1348,35 @@ mod tests {
                     start_s: 1.0e6,
                 }),
             },
+            hull: Some(Hull {
+                form: two_parts(),
+                scales_m: vec![5.0, 150.0, 60.0],
+                capacities: form::Capacities {
+                    storage_j: 2.7e24,
+                    drone_w: 4.6e19,
+                    aft_w: 1.1e20,
+                    fore_w: 0.0,
+                    living_w: 4.4e15,
+                    data_b: 2.9e6,
+                    dry_mass_kg: 1.5e9,
+                },
+                geometry: form::Geometry {
+                    shadow_m2: vec![7.1e4, 4.3e4, 1.4e4],
+                    broadside: [0.0, 0.0, 1.0],
+                    broadside_roll_rad: 0.25,
+                    envelope_area_m2: 2.2e5,
+                    envelope_volume_m3: 5.8e6,
+                    moments_kg_m2: [2.0e13, 7.5e13, 8.5e13],
+                    extent_m: 530.0,
+                },
+            }),
+            field: Some(Field {
+                heat_j: 5.0e23,
+                since_s: 1.0e6,
+                mode: FieldMode::Auto { clear_above: 0.5, black_below: 0.3, refill_below: 0.95 },
+                shade: Shade::Black,
+                switch: Some(Switch { to: Shade::Clear, done_s: 1.0864e6 }),
+            }),
         }
     }
 
@@ -1263,6 +1386,7 @@ mod tests {
             order: Order::Intercept {
                 ship_id: ShipId(7),
                 closeness: Closeness::Intimate,
+                approach: Approach::Direct,
             },
             issued_at_client_t: 1_000_000,
         })
@@ -1405,6 +1529,24 @@ mod tests {
             ("Outbound::Observing", encode(&observing()), golden::OBSERVING),
             ("Outbound::Observing (survey)", encode(&surveying()), golden::SURVEYING),
             ("Outbound::Learned", encode(&learned()), golden::LEARNED),
+            ("Order::Refit", encode(&refit()), golden::REFIT),
+            ("Order::FieldMode", encode(&field_mode()), golden::FIELD_MODE),
+            ("Order::Emit", encode(&emit()), golden::EMIT),
+            ("Outbound::Illuminated", encode(&illuminated()), golden::ILLUMINATED),
+            ("Outbound::Collapsed", encode(&collapsed()), golden::COLLAPSED),
+            (
+                "Inbound::SavePreset",
+                encode(&Inbound::SavePreset { name: "Plate".into(), form: two_parts() }),
+                golden::SAVE_PRESET,
+            ),
+            (
+                "Outbound::Refused (form)",
+                encode(&Outbound::Refused {
+                    ship_id: ShipId(42),
+                    reason: Refusal::Form(FormFault::Malformed { part: form::PartId(3), number: form::Number::Tilt }),
+                }),
+                golden::REFUSED_FORM,
+            ),
         ] {
             assert_eq!(bytes, pinned, "{what} changed shape at protocol version {PROTOCOL_VERSION}");
         }
@@ -1464,7 +1606,7 @@ mod tests {
             Outbound::WrongProtocol { server: 9 },
             Outbound::Pursuing {
                 ship_id: ShipId(42),
-                pursuit: Pursuit { quarry: ShipId(7), closeness: Closeness::Intimate },
+                pursuit: Pursuit { quarry: ShipId(7), closeness: Closeness::Intimate, approach: Approach::Courteous },
             },
             consort(),
             fitted(),
@@ -1493,6 +1635,39 @@ mod tests {
             Outbound::Observing { duty: Duty::Idle, integration_s: 0.0 },
             Outbound::AutoAcking { ship_id: ShipId(42), with: vec![ShipId(7), ShipId(9)] },
             Outbound::AutoAcking { ship_id: ShipId(42), with: Vec::new() },
+            illuminated(),
+            collapsed(),
+            Outbound::Presets(vec![
+                Preset { name: "Plate".into(), form: two_parts() },
+                Preset { name: String::new(), form: Form::default() },
+            ]),
+            Outbound::Presets(Vec::new()),
+            Outbound::Fitted {
+                ship_id: ShipId(42),
+                fitting: match fitted() {
+                    Outbound::Fitted { fitting, .. } => fitting,
+                    _ => unreachable!(),
+                },
+                hull: None,
+                field: Some(Field {
+                    heat_j: 0.0,
+                    since_s: 0.0,
+                    mode: FieldMode::Clear,
+                    shade: Shade::Clear,
+                    switch: None,
+                }),
+            },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NotBuilt },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Switching },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoAperture },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::OverRating },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Form(FormFault::TooManyParts { found: 257 }) },
+            Outbound::Refused {
+                ship_id: ShipId(42),
+                reason: Refusal::Form(FormFault::MissingParent { part: form::PartId(3), parent: form::PartId(9) }),
+            },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Form(FormFault::EngineBlocked(form::PartId(2))) },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Form(FormFault::TooFewDrones) },
         ];
         for message in out {
             let bytes = encode(&message);
@@ -1518,7 +1693,9 @@ mod tests {
             Inbound::Grant { joules: 1.5e25 },
             Inbound::Act(Intent {
                 ship_id: ShipId(1),
-                order: Order::Refit { target: Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 } },
+                order: Order::RefitLoadout {
+                    target: Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 },
+                },
                 issued_at_client_t: 0,
             }),
             Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CancelRefit, issued_at_client_t: 0 }),
@@ -1585,6 +1762,42 @@ mod tests {
                 issued_at_client_t: 0,
             }),
             Inbound::Act(Intent { ship_id: ShipId(42), order: Order::Analyze, issued_at_client_t: 0 }),
+            refit(),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::Refit { target: Form::default() },
+                issued_at_client_t: 0,
+            }),
+            field_mode(),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::FieldMode { mode: FieldMode::Black },
+                issued_at_client_t: 0,
+            }),
+            emit(),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::Emit {
+                    aim: Aim::Bearing([1.0, 0.0, 0.0]),
+                    apertures: Apertures::Fore,
+                    power_w: 0.0,
+                    wavelength_m: 0.03,
+                    spread_rad: 0.5,
+                    duration_s: 0.0,
+                },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::Intercept {
+                    ship_id: ShipId(7),
+                    closeness: Closeness::Company,
+                    approach: Approach::Courteous,
+                },
+                issued_at_client_t: 0,
+            }),
+            Inbound::SavePreset { name: "Plate".into(), form: two_parts() },
+            Inbound::DeletePreset { name: "Plate".into() },
         ];
         for message in inbound {
             let bytes = encode(&message);
@@ -1609,6 +1822,9 @@ mod tests {
             jet_power_w: 0.0,
             emitted_t: arrive_t - 1_000,
             arrive_t,
+            form: Form::default(),
+            glow: None,
+            glare: None,
         };
         assert_eq!(
             Cleared::<Presence>::clear(at(now + 1), now),

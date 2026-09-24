@@ -737,8 +737,9 @@ fn fold(
                 // motive, once per re-solve, through the same placement path a reconnect uses
                 // — so the client is told the approach its ship is flying rather than working
                 // one out from a quarry it can only see the past of.
-                Order::Intercept { ship_id, closeness } => {
-                    uplink.chasing = Some(lc_proto::Pursuit { quarry: *ship_id, closeness: *closeness });
+                Order::Intercept { ship_id, closeness, approach } => {
+                    uplink.chasing =
+                        Some(lc_proto::Pursuit { quarry: *ship_id, closeness: *closeness, approach: *approach });
                     Some(format!("closing on {}", ship_id.0))
                 }
                 // The server cut the drive of a ship that was flying the pursuit, and this folds
@@ -754,7 +755,9 @@ fn fold(
                 // client learns of it the same way anyone else does: when its light arrives.
                 Order::Transmit { .. } | Order::Burn { .. } => None,
                 // What a refit does to the account arrives straight after, as `Fitted`.
-                Order::Refit { .. } => Some("refit begun".into()),
+                Order::RefitLoadout { .. } => Some("refit begun".into()),
+                // Refused as not built until S1, H6 and E3.
+                Order::Refit { .. } | Order::FieldMode { .. } | Order::Emit { .. } => None,
                 Order::CancelRefit => Some("refit stopped where it was".into()),
                 // Recorded against the identifier the server minted, which is the only thing
                 // an acknowledgment will ever name it by. Not shown in the events box: that
@@ -821,6 +824,12 @@ fn fold(
                 // message like any other — which is to say, it takes as long as the light does.
                 Refusal::NoKey => "no key for them yet; send yours and ask for theirs".into(),
                 Refusal::NothingNew => "nothing new to report since the last one".into(),
+                Refusal::NotBuilt => "this shard cannot do that yet".into(),
+                Refusal::Switching => "the field is already switching".into(),
+                Refusal::NoAperture => "engines at one end only: emit fore or aft".into(),
+                Refusal::OverRating => "more power than those apertures are rated for".into(),
+                // Naming the part is the ledger's, with C5; no shard validates a form before S1.
+                Refusal::Form(_) => "that form cannot be built".into(),
             });
         }
         Outbound::Throttled { retry_after_ticks } => {
@@ -852,7 +861,8 @@ fn fold(
         },
         Outbound::Observing { duty, integration_s } => game.0.adopt_duty(&duty, integration_s),
         // Taken whole, like `Flying`: the authority's account, settled.
-        Outbound::Fitted { ship_id, fitting } => {
+        // The hull and the field are read once S1 and H3 send them.
+        Outbound::Fitted { ship_id, fitting, .. } => {
             if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
                 uplink.fitting = Some(fitting);
                 game.0.ship.fit(Some((&fitting).into()));
@@ -882,6 +892,8 @@ fn fold(
                 ui.0.notify(format!("{count} messages in the log"), at);
             }
         }
+        // Sent once H4, E3 and S2 are built.
+        Outbound::Collapsed { .. } | Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
     }
 }
 
@@ -1285,6 +1297,9 @@ mod tests {
             jet_power_w: 4.2e17,
             emitted_t: 500_000,
             arrive_t: 1_000_000,
+            form: lc_proto::Form::default(),
+            glow: None,
+            glare: None,
         };
         let cleared = lc_proto::Cleared::<lc_proto::Presence>::clear(presence, 1_000_000).unwrap();
         fold(&mut uplink, &mut game, &mut ui, Outbound::Present(vec![cleared]));
@@ -1345,6 +1360,9 @@ mod tests {
                 jet_power_w: 0.0,
                 emitted_t: (emitted_s * 1e6) as i64,
                 arrive_t: (emitted_s * 1e6) as i64,
+                form: lc_proto::Form::default(),
+                glow: None,
+                glare: None,
             };
             let mut contact = Contact::seen(presence, Some(&system));
             // Every frame drawn before the next statement lands, and frames from a client whose
@@ -1674,7 +1692,11 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         let accepted = |order| Outbound::Accepted { ship_id: ShipId(7), event_id: 1, at_t: 0, order };
-        let pursuit = lc_proto::Pursuit { quarry: ShipId(2), closeness: lc_proto::Closeness::Company };
+        let pursuit = lc_proto::Pursuit {
+            quarry: ShipId(2),
+            closeness: lc_proto::Closeness::Company,
+            approach: lc_proto::Approach::Direct,
+        };
 
         uplink.chasing = Some(pursuit);
         fold(&mut uplink, &mut game, &mut ui, accepted(Order::Transmit { power_w: 1.0 }));
@@ -1705,6 +1727,9 @@ mod tests {
             jet_power_w: burning,
             emitted_t: 0,
             arrive_t: 0,
+            form: lc_proto::Form::default(),
+            glow: None,
+            glare: None,
         };
         let present = |p: lc_proto::Presence| {
             let arrive_t = p.arrive_t;

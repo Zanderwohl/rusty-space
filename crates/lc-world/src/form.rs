@@ -108,6 +108,42 @@ pub struct Form {
     pub parts: Vec<Part>,
 }
 
+/// A number in a part that can be malformed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Number {
+    Volume,
+    Axes,
+    Length,
+    Edges,
+    Corner,
+    Major,
+    Taper,
+    Twist,
+    Tilt,
+    Blend,
+    Anchor,
+    Standoff,
+}
+
+impl std::fmt::Display for Number {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Volume => "volume",
+            Self::Axes => "axes",
+            Self::Length => "length",
+            Self::Edges => "edges",
+            Self::Corner => "corner",
+            Self::Major => "major radius",
+            Self::Taper => "taper",
+            Self::Twist => "twist",
+            Self::Tilt => "tilt",
+            Self::Blend => "blend",
+            Self::Anchor => "anchor",
+            Self::Standoff => "standoff",
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FormError {
     TooManyParts { found: usize },
@@ -115,7 +151,7 @@ pub enum FormError {
     NoMind,
     SecondMind { first: PartId, second: PartId },
     /// Not finite, or out of the sign its meaning allows. Checked because a client sends forms.
-    Malformed { part: PartId, field: &'static str },
+    Malformed { part: PartId, number: Number },
     MindPlaced(PartId),
     /// A part other than the Mind hangs from nothing.
     Unplaced(PartId),
@@ -131,7 +167,7 @@ impl std::fmt::Display for FormError {
             Self::DuplicateId(id) => write!(f, "{id} appears twice"),
             Self::NoMind => write!(f, "no Mind"),
             Self::SecondMind { first, second } => write!(f, "{second} is a second Mind beside {first}"),
-            Self::Malformed { part, field } => write!(f, "{part} has a malformed {field}"),
+            Self::Malformed { part, number } => write!(f, "{part} has a malformed {number}"),
             Self::MindPlaced(id) => write!(f, "the Mind, {id}, has a parent"),
             Self::Unplaced(id) => write!(f, "{id} has no parent"),
             Self::MissingParent { part, parent } => write!(f, "{part} hangs from {parent}, which does not exist"),
@@ -170,8 +206,8 @@ impl Form {
             return Err(FormError::NoMind);
         }
         for part in &self.parts {
-            if let Some(field) = part.malformed() {
-                return Err(FormError::Malformed { part: part.id, field });
+            if let Some(number) = part.malformed() {
+                return Err(FormError::Malformed { part: part.id, number });
             }
         }
 
@@ -214,30 +250,30 @@ impl Form {
 impl Part {
     /// The first field that is not finite or has a sign its meaning forbids. `NaN > 0.0` is
     /// false, so every test is written to refuse NaN.
-    fn malformed(&self) -> Option<&'static str> {
+    fn malformed(&self) -> Option<Number> {
         let positive = |x: f64| x.is_finite() && x > 0.0;
         let non_negative = |x: f64| x.is_finite() && x >= 0.0;
         let all_positive = |v: DVec3| v.to_array().into_iter().all(positive);
         if !positive(self.volume_m3) {
-            return Some("volume");
+            return Some(Number::Volume);
         }
         let shape = match self.primitive {
-            Primitive::Ellipsoid { axes } => (!all_positive(axes)).then_some("axes"),
-            Primitive::Capsule { length } => (!non_negative(length)).then_some("length"),
+            Primitive::Ellipsoid { axes } => (!all_positive(axes)).then_some(Number::Axes),
+            Primitive::Capsule { length } => (!non_negative(length)).then_some(Number::Length),
             Primitive::Slab { edges, corner } => {
                 if !all_positive(edges) {
-                    Some("edges")
+                    Some(Number::Edges)
                 } else {
-                    (!non_negative(corner)).then_some("corner")
+                    (!non_negative(corner)).then_some(Number::Corner)
                 }
             }
-            Primitive::Cylinder { length } => (!positive(length)).then_some("length"),
-            Primitive::Torus { major } => (!positive(major)).then_some("major radius"),
+            Primitive::Cylinder { length } => (!positive(length)).then_some(Number::Length),
+            Primitive::Torus { major } => (!positive(major)).then_some(Number::Major),
             Primitive::Frustum { length, taper } => {
                 if !positive(length) {
-                    Some("length")
+                    Some(Number::Length)
                 } else {
-                    (!non_negative(taper)).then_some("taper")
+                    (!non_negative(taper)).then_some(Number::Taper)
                 }
             }
         };
@@ -246,20 +282,233 @@ impl Part {
         }
         let place = self.placement?;
         if !place.twist.is_finite() {
-            return Some("twist");
+            return Some(Number::Twist);
         }
         if !place.tilt.is_finite() {
-            return Some("tilt");
+            return Some(Number::Tilt);
         }
         if !non_negative(place.blend) {
-            return Some("blend");
+            return Some(Number::Blend);
         }
         match place.mount {
             Mount::Attached { anchor, .. } if !(anchor.is_finite() && anchor.length_squared() > 0.0) => {
-                Some("anchor")
+                Some(Number::Anchor)
             }
-            Mount::Attached { standoff, .. } if !standoff.is_finite() => Some("standoff"),
+            Mount::Attached { standoff, .. } if !standoff.is_finite() => Some(Number::Standoff),
             _ => None,
+        }
+    }
+}
+
+impl From<lc_proto::form::PartId> for PartId {
+    fn from(id: lc_proto::form::PartId) -> Self {
+        Self(id.0)
+    }
+}
+
+impl From<PartId> for lc_proto::form::PartId {
+    fn from(id: PartId) -> Self {
+        Self(id.0)
+    }
+}
+
+impl From<lc_proto::form::Kind> for Kind {
+    fn from(k: lc_proto::form::Kind) -> Self {
+        use lc_proto::form::{Kind as K, SparMode as S};
+        match k {
+            K::Mind => Self::Mind,
+            K::Storage => Self::Storage,
+            K::Drone => Self::Drone,
+            K::Engine => Self::Engine,
+            K::Living => Self::Living,
+            K::Data => Self::Data,
+            K::Bay => Self::Bay,
+            K::Spar(S::Saddle) => Self::Spar(SparMode::Saddle),
+            K::Spar(S::Strap) => Self::Spar(SparMode::Strap),
+        }
+    }
+}
+
+impl From<Kind> for lc_proto::form::Kind {
+    fn from(k: Kind) -> Self {
+        use lc_proto::form::SparMode as S;
+        match k {
+            Kind::Mind => Self::Mind,
+            Kind::Storage => Self::Storage,
+            Kind::Drone => Self::Drone,
+            Kind::Engine => Self::Engine,
+            Kind::Living => Self::Living,
+            Kind::Data => Self::Data,
+            Kind::Bay => Self::Bay,
+            Kind::Spar(SparMode::Saddle) => Self::Spar(S::Saddle),
+            Kind::Spar(SparMode::Strap) => Self::Spar(S::Strap),
+        }
+    }
+}
+
+impl From<lc_proto::form::Primitive> for Primitive {
+    fn from(p: lc_proto::form::Primitive) -> Self {
+        use lc_proto::form::Primitive as P;
+        match p {
+            P::Ellipsoid { axes } => Self::Ellipsoid { axes: DVec3::from_array(axes) },
+            P::Capsule { length } => Self::Capsule { length },
+            P::Slab { edges, corner } => Self::Slab { edges: DVec3::from_array(edges), corner },
+            P::Cylinder { length } => Self::Cylinder { length },
+            P::Torus { major } => Self::Torus { major },
+            P::Frustum { length, taper } => Self::Frustum { length, taper },
+        }
+    }
+}
+
+impl From<Primitive> for lc_proto::form::Primitive {
+    fn from(p: Primitive) -> Self {
+        match p {
+            Primitive::Ellipsoid { axes } => Self::Ellipsoid { axes: axes.to_array() },
+            Primitive::Capsule { length } => Self::Capsule { length },
+            Primitive::Slab { edges, corner } => Self::Slab { edges: edges.to_array(), corner },
+            Primitive::Cylinder { length } => Self::Cylinder { length },
+            Primitive::Torus { major } => Self::Torus { major },
+            Primitive::Frustum { length, taper } => Self::Frustum { length, taper },
+        }
+    }
+}
+
+impl From<lc_proto::form::Mount> for Mount {
+    fn from(m: lc_proto::form::Mount) -> Self {
+        match m {
+            lc_proto::form::Mount::Attached { anchor, standoff } => {
+                Self::Attached { anchor: DVec3::from_array(anchor), standoff }
+            }
+            lc_proto::form::Mount::Enclosing => Self::Enclosing,
+        }
+    }
+}
+
+impl From<Mount> for lc_proto::form::Mount {
+    fn from(m: Mount) -> Self {
+        match m {
+            Mount::Attached { anchor, standoff } => Self::Attached { anchor: anchor.to_array(), standoff },
+            Mount::Enclosing => Self::Enclosing,
+        }
+    }
+}
+
+impl From<lc_proto::form::Placement> for Placement {
+    fn from(p: lc_proto::form::Placement) -> Self {
+        Self {
+            parent: p.parent.into(),
+            mount: p.mount.into(),
+            twist: p.twist,
+            tilt: DVec2::from_array(p.tilt),
+            blend: p.blend,
+            mirror: p.mirror,
+        }
+    }
+}
+
+impl From<Placement> for lc_proto::form::Placement {
+    fn from(p: Placement) -> Self {
+        Self {
+            parent: p.parent.into(),
+            mount: p.mount.into(),
+            twist: p.twist,
+            tilt: p.tilt.to_array(),
+            blend: p.blend,
+            mirror: p.mirror,
+        }
+    }
+}
+
+impl From<lc_proto::form::Part> for Part {
+    fn from(p: lc_proto::form::Part) -> Self {
+        Self {
+            id: p.id.into(),
+            kind: p.kind.into(),
+            primitive: p.primitive.into(),
+            volume_m3: p.volume_m3,
+            placement: p.placement.map(Into::into),
+        }
+    }
+}
+
+impl From<Part> for lc_proto::form::Part {
+    fn from(p: Part) -> Self {
+        Self {
+            id: p.id.into(),
+            kind: p.kind.into(),
+            primitive: p.primitive.into(),
+            volume_m3: p.volume_m3,
+            placement: p.placement.map(Into::into),
+        }
+    }
+}
+
+impl From<&lc_proto::Form> for Form {
+    fn from(f: &lc_proto::Form) -> Self {
+        Self { parts: f.parts.iter().map(|&p| p.into()).collect() }
+    }
+}
+
+impl From<&Form> for lc_proto::Form {
+    fn from(f: &Form) -> Self {
+        Self { parts: f.parts.iter().map(|&p| p.into()).collect() }
+    }
+}
+
+impl From<lc_proto::form::Number> for Number {
+    fn from(n: lc_proto::form::Number) -> Self {
+        use lc_proto::form::Number as N;
+        match n {
+            N::Volume => Self::Volume,
+            N::Axes => Self::Axes,
+            N::Length => Self::Length,
+            N::Edges => Self::Edges,
+            N::Corner => Self::Corner,
+            N::Major => Self::Major,
+            N::Taper => Self::Taper,
+            N::Twist => Self::Twist,
+            N::Tilt => Self::Tilt,
+            N::Blend => Self::Blend,
+            N::Anchor => Self::Anchor,
+            N::Standoff => Self::Standoff,
+        }
+    }
+}
+
+impl From<Number> for lc_proto::form::Number {
+    fn from(n: Number) -> Self {
+        match n {
+            Number::Volume => Self::Volume,
+            Number::Axes => Self::Axes,
+            Number::Length => Self::Length,
+            Number::Edges => Self::Edges,
+            Number::Corner => Self::Corner,
+            Number::Major => Self::Major,
+            Number::Taper => Self::Taper,
+            Number::Twist => Self::Twist,
+            Number::Tilt => Self::Tilt,
+            Number::Blend => Self::Blend,
+            Number::Anchor => Self::Anchor,
+            Number::Standoff => Self::Standoff,
+        }
+    }
+}
+
+/// One way only: a refusal is said by the server and read by a person.
+impl From<FormError> for lc_proto::FormFault {
+    fn from(e: FormError) -> Self {
+        match e {
+            FormError::TooManyParts { found } => Self::TooManyParts { found: u32::try_from(found).unwrap_or(u32::MAX) },
+            FormError::DuplicateId(id) => Self::DuplicateId(id.into()),
+            FormError::NoMind => Self::NoMind,
+            FormError::SecondMind { first, second } => Self::SecondMind { first: first.into(), second: second.into() },
+            FormError::Malformed { part, number } => Self::Malformed { part: part.into(), number: number.into() },
+            FormError::MindPlaced(id) => Self::MindPlaced(id.into()),
+            FormError::Unplaced(id) => Self::Unplaced(id.into()),
+            FormError::MissingParent { part, parent } => {
+                Self::MissingParent { part: part.into(), parent: parent.into() }
+            }
+            FormError::Cycle(id) => Self::Cycle(id.into()),
         }
     }
 }
@@ -367,23 +616,23 @@ mod tests {
 
     #[test]
     fn a_malformed_number_is_refused_by_part_and_field() {
-        let cases: [(usize, fn(&mut Part), &str); 10] = [
-            (2, |p| p.volume_m3 = f64::NAN, "volume"),
-            (2, |p| p.volume_m3 = 0.0, "volume"),
-            (2, |p| p.primitive = Primitive::Ellipsoid { axes: DVec3::new(1.0, -1.0, 1.0) }, "axes"),
-            (2, |p| p.primitive = Primitive::Slab { edges: DVec3::ONE, corner: f64::NAN }, "corner"),
-            (2, |p| p.primitive = Primitive::Frustum { length: f64::INFINITY, taper: 0.5 }, "length"),
-            (2, |p| p.placement.as_mut().unwrap().tilt = DVec2::new(0.0, f64::NAN), "tilt"),
-            (2, |p| p.placement.as_mut().unwrap().blend = -0.1, "blend"),
-            (2, |p| p.placement.as_mut().unwrap().blend = f64::INFINITY, "blend"),
-            (2, |p| p.placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::ZERO, standoff: 0.0 }, "anchor"),
-            (0, |p| p.volume_m3 = f64::NAN, "volume"),
+        let cases: [(usize, fn(&mut Part), Number); 10] = [
+            (2, |p| p.volume_m3 = f64::NAN, Number::Volume),
+            (2, |p| p.volume_m3 = 0.0, Number::Volume),
+            (2, |p| p.primitive = Primitive::Ellipsoid { axes: DVec3::new(1.0, -1.0, 1.0) }, Number::Axes),
+            (2, |p| p.primitive = Primitive::Slab { edges: DVec3::ONE, corner: f64::NAN }, Number::Corner),
+            (2, |p| p.primitive = Primitive::Frustum { length: f64::INFINITY, taper: 0.5 }, Number::Length),
+            (2, |p| p.placement.as_mut().unwrap().tilt = DVec2::new(0.0, f64::NAN), Number::Tilt),
+            (2, |p| p.placement.as_mut().unwrap().blend = -0.1, Number::Blend),
+            (2, |p| p.placement.as_mut().unwrap().blend = f64::INFINITY, Number::Blend),
+            (2, |p| p.placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::ZERO, standoff: 0.0 }, Number::Anchor),
+            (0, |p| p.volume_m3 = f64::NAN, Number::Volume),
         ];
-        for (index, spoil, field) in cases {
+        for (index, spoil, number) in cases {
             let mut form = ship();
             spoil(&mut form.parts[index]);
             let part = form.parts[index].id;
-            assert_eq!(form.validate(), Err(FormError::Malformed { part, field }), "{field}");
+            assert_eq!(form.validate(), Err(FormError::Malformed { part, number }), "{number}");
         }
     }
 
@@ -410,6 +659,34 @@ mod tests {
         assert_eq!(form.validate(), Ok(()));
         form.parts.push(hung(MAX_PARTS as u16, Kind::Storage, 0));
         assert_eq!(form.validate(), Err(FormError::TooManyParts { found: MAX_PARTS + 1 }));
+    }
+
+    #[test]
+    fn a_form_round_trips_through_the_wire() {
+        let mut form = ship();
+        form.parts[2].primitive = Primitive::Frustum { length: 2.0, taper: 0.5 };
+        form.parts[3].primitive = Primitive::Slab { edges: DVec3::new(4.0, 2.0, 0.5), corner: 0.1 };
+        form.parts[4].primitive = Primitive::Torus { major: 3.0 };
+        form.parts.push(Part { primitive: Primitive::Capsule { length: 1.5 }, ..hung(5, Kind::Bay, 1) });
+        let spar = hung(6, Kind::Spar(SparMode::Saddle), 1);
+        form.parts.push(Part { primitive: Primitive::Cylinder { length: 2.5 }, ..spar });
+        let place = form.parts[4].placement.as_mut().unwrap();
+        place.twist = 0.3;
+        place.tilt = DVec2::new(-0.1, 0.2);
+        place.mirror = true;
+        let wire = lc_proto::Form::from(&form);
+        let back = Form::from(&lc_proto::decode::<lc_proto::Form>(&lc_proto::encode(&wire)).unwrap());
+        assert_eq!(back, form);
+    }
+
+    #[test]
+    fn a_refused_form_names_its_part_on_the_wire() {
+        let mut form = ship();
+        form.parts[2].placement.as_mut().unwrap().blend = f64::NAN;
+        let fault = lc_proto::FormFault::from(form.validate().unwrap_err());
+        let number = lc_proto::form::Number::Blend;
+        assert_eq!(fault, lc_proto::FormFault::Malformed { part: lc_proto::form::PartId(2), number });
+        assert_eq!(Number::from(number), Number::Blend);
     }
 
     #[test]

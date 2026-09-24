@@ -347,9 +347,11 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 - `Refusal::NoAperture` (both apertures asked of a ship with engines at one end only),
   `Refusal::OverRating`, and the existing `UnderWay` and `Refitting`.
 - `Outbound::Illuminated`: a beam arriving, with its bearing, band and power, **when its light
-  lands**. That is the only way a receiver learns of it. A receiver knows the bearing because the
-  light came from there.
-- `Presence` of an emitter seen from inside its cone carries its brightness in that band.
+  lands**, and when it stops. That is the only way a receiver learns of it. A receiver knows the
+  bearing because the light came from there. The power is what reaches the field, before its
+  absorptivity.
+- `Presence` of an emitter seen from inside its cone carries its brightness in that band, as a
+  `Glare`.
 
 ## Client
 
