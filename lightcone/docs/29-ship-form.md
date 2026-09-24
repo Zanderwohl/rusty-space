@@ -168,7 +168,7 @@ shadow, radiating area and room on the surface, and pays for them in mass, so in
 A target that breaks one is refused, naming the part.
 
 - **Engine parts point along the nose axis, fore or aft,** and need a clear cone of
-  `engine_clear_half_angle` along it, checked by marching rays through the grid.
+  `engine_clear_half_angle_rad` along it, checked by marching rays through the grid.
 - **A bay's mouth must be clear** out to its own width.
 - **Every attached part touches its parent**, and every enclosing part contains its parent.
 - **The envelope's extent stays inside `LENGTH_RANGE_M`.**
@@ -407,7 +407,7 @@ photographs it, and `--form <preset>` stages a draft.
 | `engine_density_w` | 5.47 × 10¹³ W/m³ | aperture power per m³, so thrust is this over c |
 | `living_density_w` | 1.13 × 10¹⁰ W/m³ | drain per m³ |
 | `data_density_b` | 7.5 B/m³ | |
-| `mass_fraction` | data 0.5, bay 0.1, spar 0.05, others 1 | of module density |
+| `data_mass_fraction`, `bay_mass_fraction`, `spar_mass_fraction` | 0.5, 0.1, 0.05 | of module density. Every other kind is 1 |
 | `min_part_m3` | 1 000 | the smallest part, and the Mind's size: a 10 m cube |
 | `min_drone_m3` | 10 000 | the least drone a ship may keep |
 | `spar_gap` | 0.5 m | how far a saddle stands off the neighbor it is cut to |
@@ -415,7 +415,7 @@ photographs it, and `--form <preset>` stages a draft.
 | `move_work_factor` | 0.25 | a move's time over building what it carries |
 | `hull_areal_density` | *anchored* | structure per m² of part surface |
 | `envelope_margin` | 0.05 | the envelope's offset over the cube root of hull volume |
-| `engine_clear_half_angle` | 15° | |
+| `engine_clear_half_angle_rad` | 15° | |
 
 Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 64, and on the client
 `MAX_HISTORY` 256.

@@ -222,7 +222,7 @@ graph LR
 - needs: —
 - touches: `crates/lc-world/src/fitting.rs`
 - read: the Balance tables of 29, 30 and 31
-- deliver: every new field in `Balance` with its first guess: densities and mass fractions, `min_part_m3`, `min_drone_m3`, `move_work_factor`, `hull_areal_density`, `envelope_margin`, `engine_clear_half_angle`, `spar_gap`, `spar_thickness`, the field's settings, `conversion_efficiency` (renamed from `solar_efficiency`), the modes and Auto, `drive_spread_rad`, `rcs_accel_g`, `rcs_spread_rad`, `courtesy_fraction`, the collapse settings. Anchored values are marked as such and filled in by their tasks. Nothing reads them yet. The old per-module fields stay until F9.
+- deliver: every new field in `Balance` with its first guess: densities and mass fractions, `min_part_m3`, `min_drone_m3`, `move_work_factor`, `hull_areal_density`, `envelope_margin`, `engine_clear_half_angle_rad`, `spar_gap`, `spar_thickness`, the field's settings, `conversion_efficiency` (renamed from `solar_efficiency`), the modes and Auto, `drive_spread_rad`, `rcs_accel_g`, `rcs_spread_rad`, `courtesy_fraction`, the collapse settings. Anchored values are marked as such and filled in by their tasks. Nothing reads them yet. The old per-module fields stay until F9.
 - done when: the crate builds, and `Balance::DEFAULT` has every field with the value the docs give.
 
 ### K3 · Wire types
@@ -231,7 +231,7 @@ graph LR
 - needs: K1
 - touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`
 - read: the Protocol sections of 29, 30 and 31
-- deliver: every new wire type at once: the form's mirror types, `Order::Refit` taking a `Form` beside the old loadout, `Order::FieldMode`, `Order::Emit`, `approach` on `Order::Intercept`, `Outbound::Collapsed`, `Outbound::Illuminated`, `Outbound::Presets`, `Inbound::SavePreset` and `DeletePreset`, the new `Fitted` and `Presence` fields, the new refusals. The server answers each new order with a refusal saying it is not built yet. Goldens regenerated once.
+- deliver: every new wire type at once: the form's mirror types, `Order::Refit` taking a `Form` beside the old loadout, `Order::FieldMode`, `Order::Emit`, `approach` on `Order::Intercept`, `Outbound::Collapsed`, `Outbound::Illuminated`, `Outbound::Presets`, `Inbound::SavePreset` and `DeletePreset`, the new `Fitted` and `Presence` fields, `Balance`'s new fields and `solar_efficiency` renamed to `conversion_efficiency`, the new refusals. The server answers each new order with a refusal saying it is not built yet. Goldens regenerated once.
 - done when: every type round-trips, the goldens pass, and the game plays exactly as before.
 
 ## F: form
@@ -278,7 +278,7 @@ graph LR
 - needs: F2, F4
 - touches: `crates/lc-world/src/form/presets.rs`
 - read: 29 §The starting form, §Your own presets
-- deliver: `Form::starting()`, the Plate, Spindle and Cluster layouts, and applying any preset as a **layout** (this ship's volumes in the preset's arrangement, by share of each kind) or as a **design** (exactly).
+- deliver: `Form::starting()`, the Plate, Spindle and Cluster layouts, and applying any preset as a **layout** (this ship's volumes in the preset's arrangement, by share of each kind) or as a **design** (exactly). `hull_areal_density` anchored in `Balance::DEFAULT` so the starting form weighs what 19's starting ship does.
 - done when: a layout keeps every kind's total volume, and a design reproduces the preset.
 
 ### F6 · Form grid

@@ -116,7 +116,7 @@ pub struct Balance {
     pub hull_density_kg_m3: f64,
     pub slot_volume_m3: f64,
     pub module_density_kg_m3: f64,
-    /// η: what arrives and is converted, over what is stored.
+    /// η: of what is converted, the fraction stored.
     pub conversion_efficiency: f64,
     /// An unphysical multiplier on collection, because a module-energy is `mc²` and real
     /// starlight on a real hull would take billions of years to pay for one. See
@@ -141,7 +141,6 @@ pub struct Balance {
     /// Of module density. Every kind without its own fraction is one.
     pub bay_mass_fraction: f64,
     pub spar_mass_fraction: f64,
-    /// m³.
     pub min_part_m3: f64,
     pub min_drone_m3: f64,
     /// m.
@@ -153,9 +152,7 @@ pub struct Balance {
     pub hull_areal_density: f64,
     /// Of the cube root of hull volume.
     pub envelope_margin: f64,
-    /// Radians.
-    pub engine_clear_half_angle: f64,
-    /// K.
+    pub engine_clear_half_angle_rad: f64,
     pub field_idle_k: f64,
     /// J/m² of envelope at collapse.
     pub field_capacity: f64,
@@ -173,7 +170,6 @@ pub struct Balance {
     pub collapse_spike_k: f64,
     pub collapse_afterglow_s: f64,
     pub drive_spread_rad: f64,
-    /// In g.
     pub rcs_accel_g: f64,
     pub rcs_spread_rad: f64,
     /// Of the cooking flux.
@@ -255,14 +251,15 @@ impl Balance {
             spar_gap: 0.5,
             spar_thickness: 0.02,
             move_work_factor: 0.25,
-            // Placeholder: anchored by F4.
+            // Placeholder: anchored by F5.
             hull_areal_density: 0.0,
             envelope_margin: 0.05,
-            engine_clear_half_angle: 15.0 * degree,
+            engine_clear_half_angle_rad: 15.0 * degree,
             field_idle_k: 400.0,
-            // Placeholder: anchored by H2 to 10 ME on the starting envelope.
+            // Placeholder: anchored by H2 to 10 ME on the starting envelope. Zero makes `Q_max`
+            // zero, so nothing may rely on it before then.
             field_capacity: 0.0,
-            // Placeholder: anchored by H2.
+            // Anchored by H2; 30's figure until then.
             field_tau_s: 1.84e6,
             clear_absorptivity: 0.3,
             field_switch_s: day_s,

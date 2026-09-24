@@ -308,7 +308,7 @@ infer from it:
 | `field_idle_k` | 400 | the anchor temperature |
 | `field_capacity` | *anchored*: 10 ME on the starting envelope | heat per m² of envelope at collapse |
 | `field_tau_s` | *anchored*: 1.84 × 10⁶ | the time constant |
-| `conversion_efficiency` | 0.7 | what arrives and is converted, over what is stored |
+| `conversion_efficiency` | 0.7 | of what is converted, the fraction stored |
 | `clear_absorptivity` | 0.3 | what a Clear field absorbs. Black absorbs everything |
 | `field_switch_s` | 86 400 | one game day to change mode |
 | `auto_clear_above` | 0.5 | of `Q_max`: Auto goes Clear |
