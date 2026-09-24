@@ -62,6 +62,16 @@ pub fn shifted_bindings() -> Vec<(KeyCode, Action)> {
     ]
 }
 
+/// The letter that does `action` unshifted, for a button to underline.
+pub fn letter_for(action: &Action) -> Option<char> {
+    let (key, _) = bindings().into_iter().find(|(_, a)| a == action)?;
+    let name = format!("{key:?}");
+    let letter = name.strip_prefix("Key")?;
+    let mut chars = letter.chars();
+    let c = chars.next()?;
+    chars.next().is_none().then_some(c)
+}
+
 /// `table` with the shifted bindings laid over it while Shift is held.
 pub fn with_shift(mut table: Vec<(KeyCode, Action)>, shift: bool) -> Vec<(KeyCode, Action)> {
     if !shift {
@@ -325,6 +335,14 @@ mod tests {
         let keys: Vec<KeyCode> = shifted.iter().map(|(k, _)| *k).collect();
         assert_eq!(keys.iter().filter(|k| **k == KeyCode::Backslash).count(), 1);
         assert_eq!(acts(&shifted, KeyCode::KeyT), acts(&plain, KeyCode::KeyT), "the rest are as they were");
+    }
+
+    #[test]
+    fn a_letter_is_found_only_for_a_plain_letter_key() {
+        assert_eq!(letter_for(&Action::TogglePanel(Panel::Telescope)), Some('T'));
+        assert_eq!(letter_for(&Action::ToggleView), Some('M'));
+        assert_eq!(letter_for(&Action::TogglePanel(Panel::Debug)), None, "F3 is not a letter");
+        assert_eq!(letter_for(&Action::ToggleBeautyShots), None, "shifted, and not a letter");
     }
 
     #[test]
