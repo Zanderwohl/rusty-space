@@ -101,8 +101,8 @@ impl Shape {
     pub fn area(&self) -> f64 {
         match *self {
             Shape::Ellipsoid { semi_axes: s } => {
-                let [a, b, c] = s.to_array().map(|x| x.powf(THOMSEN_P));
-                4.0 * PI * ((a * b + b * c + c * a) / 3.0).powf(1.0 / THOMSEN_P)
+                let [a, b, c] = s.to_array().map(|x| libm::pow(x, THOMSEN_P));
+                4.0 * PI * libm::pow((a * b + b * c + c * a) / 3.0, 1.0 / THOMSEN_P)
             }
             Shape::Capsule { radius: r, length } => 2.0 * PI * r * (length + 2.0 * r),
             Shape::Slab { edges, corner: r } => {

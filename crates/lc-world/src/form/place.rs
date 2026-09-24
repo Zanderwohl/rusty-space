@@ -202,7 +202,8 @@ impl Shape {
         let d = direction;
         let radial = DVec3::new(0.0, d.y, d.z);
         let w = radial.length();
-        // On the axis every radial direction is as good as another.
+        // On the axis every radial direction is as good as another; +y picks the one point of a
+        // torus's inner equator, all of which is nearest to that ray.
         let out = if w > 0.0 { radial / w } else { DVec3::Y };
         let cap = |h: f64| (h / d.x.abs(), DVec3::X * d.x.signum());
         let (s, normal) = match *self {
@@ -284,7 +285,6 @@ fn slab_exit(inner: DVec3, corner: f64, d: DVec3) -> (f64, DVec3) {
     }
     if normal == DVec3::ZERO {
         // A sharp box, whose root sits where its first face is reached.
-        normal = DVec3::ZERO;
         normal[order[0]] = d[order[0]].signum();
     }
     (s, normal)
@@ -525,6 +525,16 @@ mod tests {
                         }
                         if tilt == DVec2::ZERO {
                             let normal = outer.rotation * parent_shape.exit(anchor).normal;
+                            if let Shape::Torus { major, minor } = child_shape {
+                                // Its hole over the anchor, its tube's lowest circle in the plane
+                                // tangent there.
+                                for k in 0..12 {
+                                    let (s, c) = (k as f64 * PI / 6.0).sin_cos();
+                                    let rim = pose.to_outer(DVec3::new(-minor, major * c, major * s));
+                                    let height = (rim - anchor_point).dot(normal);
+                                    assert!(height.abs() <= 1e-9 * scale, "{what}: rim {height} off the plane");
+                                }
+                            }
                             assert!(close(pose.axis(), normal, 1.0), "{what}");
                             let from_parent = outer.to_local(pose.position);
                             assert!(!inside(&parent_shape, from_parent), "{what}: the child's center is buried");

@@ -115,7 +115,7 @@ Each part but the Mind hangs from a parent, and it is placed in one of two ways:
 |---|---|
 | `parent` | a part id |
 | `mount` | attached or enclosing. `Mount::Attached` carries `anchor` and `standoff`, so an enclosing part cannot have either |
-| `anchor` | attached only: a direction in the parent's frame. The attachment point is where a ray from the parent's center along it last leaves the parent's surface, so on a torus a child hangs off the rim. A ray that misses a torus's tube takes the point of the tube nearest it |
+| `anchor` | attached only: a direction in the parent's frame. The attachment point is where a ray from the parent's center along it last leaves the parent's surface, so on a torus a child hangs off the rim. A ray that misses a torus's tube takes the point of the tube nearest it; along the axis, where every point of the inner equator is nearest, the one toward the parent's +y |
 | `twist` | rotation about the surface normal, or about the parent's axis when enclosing |
 | `tilt` | the child's axis relative to that normal or axis, as a small rotation: a two-component rotation vector across it, in radians |
 | `standoff` | attached only: distance along the normal, in multiples of the child's **reach**, the distance from its center to its foot. Zero rests the child on the surface, −1 centers it there, and negative embeds it |
@@ -127,10 +127,13 @@ grows, the anchor point moves out with its surface. When the child grows, it gro
 parent.
 
 What meets the anchor is the child's **foot**: the end of its axis at −x, one **reach** from its
-center — the ellipsoid's first semi-axis, the capsule's half length plus its radius, half the slab's
+center — the ellipsoid's first semi-axis, half the capsule's straight section plus its radius, half the slab's
 first edge, half the cylinder's or frustum's length, the torus's minor radius. On every primitive but
-the torus the foot is on its surface. A torus rests on its tube around the anchor, which sits in the
-middle of its hole. Tilt pivots the child about its foot, so a tilted boom leans from where it is
+the torus the foot is on its surface. A torus's foot is the center of its hole: the hole sits over the
+anchor and the tube's lowest circle lies in the plane tangent to the parent there. On a curved parent
+the tube therefore clears the surface by the parent's sag across the major radius, and touches it
+nowhere on a convex one. A negative `standoff` or a `blend` closes the gap. Seating the tube on the
+surface itself has no closed form for a general parent. Tilt pivots the child about its foot, so a tilted boom leans from where it is
 bolted on rather than sliding its base across the parent. Reach is also the unit of `standoff`,
 because it is the length the placement is already made of: F1's scale means a different dimension on
 each primitive, and the extent along the normal would change under tilt.
