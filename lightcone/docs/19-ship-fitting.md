@@ -6,6 +6,10 @@ What a ship is made of, what it costs to change that, and what it costs to fly.
 (`R`) and Dev actions (`F5`) panels. Where the build departed from the plan, this says what was
 built.
 
+**Being replaced in part.** [28-ship-form.md](28-ship-form.md) removes the loadout, module counts
+and hull slots: a ship becomes parts whose volumes are its capacities, and refits become rounds
+of edits paid for in energy. The mass, the rocket law and the energy account here stand.
+
 Energy is the currency of everything. A ship stores it, spends it on every burn, spends it
 building modules, gets most of it back by taking modules apart, and bleeds a little of it
 keeping its crew alive. [03-world-model.md](03-world-model.md)'s *Resources* section says energy

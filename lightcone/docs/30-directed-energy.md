@@ -27,18 +27,19 @@ differ only in the source and the numbers.
 
 ## Apertures
 
-**An engine module is an aperture**, rated for `engine_power_w`. That is `engine_thrust_n × c` for
-a photon drive: 7.24 × 10¹⁰ N × c = **2.17 × 10¹⁹ W**. The rating bounds three things at once:
+**Engine volume is aperture**, rated at `engine_density_w` per cubic meter: for a photon drive, the
+thrust it gives times c. The starting drive section, 1.96 × 10⁶ m³, is rated **1.1 × 10²⁰ W**,
+which is its 5 g. The rating bounds three things at once:
 
 - the drive's exhaust power, as today
 - anything the ship emits on purpose
 - conversion into storage, by reciprocity ([29-the-field.md](29-the-field.md))
 
-An engine shape's **aperture diameter** is the width of its open face: a frustum's wide end, a
+An engine part's **aperture diameter** is the width of its open face: a frustum's wide end, a
 cylinder's end. That sets the diffraction floor, so a broad drive section beams tighter than a
 narrow one.
 
-**Engine shapes point fore or aft** ([28-ship-form.md](28-ship-form.md)):
+**Engine parts point fore or aft** ([28-ship-form.md](28-ship-form.md)):
 
 - **Aft engines drive.** Acceleration is aft thrust over mass. Only aft engines count toward the
   rated acceleration.

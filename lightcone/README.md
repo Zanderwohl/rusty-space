@@ -56,7 +56,7 @@ cross-reference except where a shared crate is the subject.
 | [25-system-knowledge.md](docs/25-system-knowledge.md) | planets, their orbits and a system's plane as knowledge: how each is learned, what the System panel, the map and courses read, and how a player reports one system to another craft |
 | [26-system-generation.md](docs/26-system-generation.md) | what a star's seed turns into: the disc, the ladder of feeding zones, air and water from one retention chain, moons of two origins, and the belts that are what never assembled |
 | [27-console.md](docs/27-console.md) | commands typed after `/`, parsed and level-checked on the shard, and teleport as a worldline that jumps |
-| [28-ship-form.md](docs/28-ship-form.md) | a ship as shapes the loadout sizes: the attachment tree, the voxel grid the server reasons with, what rearranging and reshaping cost, and the editor as a third view |
+| [28-ship-form.md](docs/28-ship-form.md) | a ship as parts whose volumes are its capacities, the Mind at the root, refits as rounds paid for in energy, the voxel grid the server reasons with, and the editor as a third view |
 | [29-the-field.md](docs/29-the-field.md) | the field as collector, radiator and shield: heat that goes as `T⁴`, the anchors, collapse, and what dies beside a ship that fails |
 | [30-directed-energy.md](docs/30-directed-energy.md) | engines, radios, weapons and power lines as one order: apertures, exhaust from heat, spread against lead, and the star's gain |
 | [31-ship-rendering.md](docs/31-ship-rendering.md) | the hull from a distance field, construction as a function of time, stateless drones, the field shader, and the order of work across 28–31 |

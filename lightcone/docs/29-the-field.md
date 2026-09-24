@@ -66,7 +66,7 @@ Constant over a segment unless marked as a burst. A burst jumps `Q` at the insta
 | the living drain | all of it |
 | the drive below ε = 1 | `1 − ε` of the exhaust power. Nothing at the default ε = 1 |
 | dismantling | the 5% a dismantling loses, spread over the step as the energy moves |
-| **vented storage** | **a burst**: what a dismantled storage module held and had nowhere to go, at the step's end |
+| **vented storage** | **a burst**: what a refit round's dismantling returns and storage has no room for, at the end of the step that frees it ([28-ship-form.md](28-ship-form.md#refits)) |
 | **a collapse's spike** | **a burst**, on arrival: see below |
 
 ### Conversion
@@ -74,9 +74,9 @@ Constant over a segment unless marked as a burst. A burst jumps `Q` at the insta
 What arrives is converted to storage at up to the **conversion rating**, at
 `conversion_efficiency`, while storage has room. The rest is heat.
 
-- **The rating is the engines'.** An engine is an aperture ([30-directed-energy.md](30-directed-energy.md)),
-  and an aperture rated to send about 2.2 × 10¹⁹ W can take that much in. The starting ship's
-  five engines give 1.1 × 10²⁰ W.
+- **The rating is the engines'.** Engine volume is aperture ([30-directed-energy.md](30-directed-energy.md)),
+  and what can send that much can take that much in. The starting drive section is rated
+  1.1 × 10²⁰ W.
 - **`conversion_efficiency` is the old `solar_efficiency`**, 0.7, now applied to everything that
   arrives. The 30% that solar collection always lost is now heat, which is where the sun-diving
   limit comes from.
@@ -97,7 +97,7 @@ is.
 | anchor | sets |
 |---|---|
 | **The starting ship, idle and far from any star, sits at 400 K.** Its living drain alone holds it there. That is today's `HULL_K`, now as a consequence | `q_idle` |
-| **The starting ship's field holds 10 ME** from empty to collapse | `field_capacity`, the capacity per unit envelope area |
+| **The starting ship's field holds 10 ME** from empty to collapse. The starting ship is [28-ship-form.md](28-ship-form.md)'s starting form | `field_capacity`, the capacity per unit envelope area |
 | **A full starting ship broadside at 0.05 AU from a Sun-like star is exactly at its rated load**: it would reach collapse only in the limit | `τ` |
 
 Capacity per unit area is the same for every ship, so **every field fails at the same
@@ -131,7 +131,7 @@ back to back at 0.1 AU are not.
 ### Square–cube
 
 Internal heat goes as volume and the field's area as its square, so bigger ships run hotter at
-rest. With the scaled loadouts of [20-solar-power.md](20-solar-power.md) (10% living):
+rest. With the scaled ships of [20-solar-power.md](20-solar-power.md) (10% of volume living):
 
 | hull | idle, far from a star | full, 0.1 AU |
 |---|---|---|
@@ -152,7 +152,7 @@ released as light:
 
 **E = Q_max + stored energy**
 
-The committed burn energy is part of what is stored, so it goes too. Module mass does not.
+The committed burn energy is part of what is stored, so it goes too. The parts' own mass does not.
 
 - **It is an event**, at the craft's position at the scheduled instant, and it goes out as light
   like any other. Every observer learns of it when the light arrives, not before.
@@ -291,8 +291,8 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 
 ## Open
 
-- **Death.** A new starting ship, knowing nothing, is the harshest reading. Whether a data module's
-  contents or a faction's relays survive the ship is a question for
+- **Death.** A new starting ship, knowing nothing, is the harshest reading. Whether the Mind, the
+  data part's contents or a faction's relays survive the ship is a question for
   [22-provenance.md](22-provenance.md).
 - **Air under the field.** Parks held by the field would cap its temperature well below 4 600 K.
   Whether that is a real rule or only a look is undecided. The two layers are drawn either way.
