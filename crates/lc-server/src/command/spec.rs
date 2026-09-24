@@ -14,7 +14,6 @@ use std::fmt::Write as _;
 use super::parse::Parsed;
 use crate::ability::Level;
 
-/// One command, as `help` shows it and as [`bind`] reads it.
 pub struct Spec {
     pub name: &'static str,
     pub verb: Verb,
@@ -53,7 +52,6 @@ pub struct ArgSpec {
 #[derive(Clone, Copy, Debug)]
 pub enum Need {
     Required,
-    /// Absent unless given.
     Optional,
     /// This, as if typed.
     Default(&'static str),
@@ -69,7 +67,6 @@ pub enum Kind {
     Id,
     /// A whole number from zero to this.
     Count(u32),
-    /// Anything at all.
     Text,
 }
 
@@ -89,8 +86,6 @@ pub enum Value {
     Text(String),
 }
 
-/// A command's arguments, by name, after binding. An optional argument that was not given is
-/// absent.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Bound {
     values: Vec<(&'static str, Value)>,
@@ -165,7 +160,6 @@ impl Spec {
         self.args.iter().filter(move |arg| level.at_least(arg.level))
     }
 
-    /// `teleport <target> [altitude:2] [star:<id>]`, as `level` may type it.
     pub fn usage(&self, level: Level) -> String {
         let mut out = self.name.to_string();
         for arg in self.args_for(level) {
@@ -178,7 +172,6 @@ impl Spec {
         out
     }
 
-    /// The whole of `help <name>`.
     pub fn help_for(&self, level: Level) -> String {
         let mut out = format!("{}\n{}", self.usage(level), self.summary);
         for arg in self.args_for(level) {
@@ -205,8 +198,6 @@ impl Kind {
         }
     }
 
-    /// The widest range `level` reaches, or `None` for a kind that has none or a level that
-    /// reaches none of them.
     fn range_for(&self, level: Level) -> Option<(f64, f64)> {
         if let Kind::Count(max) = self {
             return Some((0.0, *max as f64));
@@ -262,7 +253,6 @@ impl Kind {
     }
 }
 
-/// Fit a parsed line to `spec`, as `level` may use it.
 pub fn bind(spec: &Spec, parsed: &Parsed, level: Level) -> Result<Bound, BindError> {
     let args: Vec<&'static ArgSpec> = spec.args_for(level).collect();
     // In the order typed, so `go 7 target:8` is a target given twice rather than a 7 that
@@ -353,8 +343,7 @@ mod tests {
         assert_eq!(got.get("mode"), None);
     }
 
-    /// An argument above the asker is an argument the command does not have: named, it is
-    /// unknown, and positionally it is never reached.
+    /// Named, an argument above the asker is unknown; positionally, it is never reached.
     #[test]
     fn an_argument_above_the_asker_does_not_exist_for_them() {
         assert_eq!(

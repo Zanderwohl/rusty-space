@@ -195,7 +195,6 @@ pub enum Action {
     AutoAck { with: lc_proto::ShipId, on: bool },
 
     // --- console ----------------------------------------------------------------------
-    /// A line for the shard, as typed. See [`crate::console`].
     RunCommand(String),
     // A resend is [`Action::Say`] with the original's `idem`, not an action of its own: it is
     // the same message, said again, and the only thing that makes it one is the key.
@@ -222,7 +221,6 @@ pub enum Effect {
     Stage(String),
     /// Ask for energy, for the reason [`Effect::Stage`] is not an order.
     Grant(f64),
-    /// A console line for the shard, which is the only thing that reads one.
     Command(String),
 }
 

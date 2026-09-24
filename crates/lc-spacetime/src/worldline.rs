@@ -54,11 +54,10 @@ pub trait Worldline {
     }
 
     /// Coordinate times at which this worldline jumps, ascending. At a break it already holds
-    /// its new position; between two it is continuous.
+    /// its new position.
     ///
-    /// Only a teleport makes one. Across a jump the retarded equation steps rather than rising,
-    /// so a solve over it bisects onto the step and reports an image at a time no light left
-    /// from. The solvers split the range here instead, and each piece has at most one root.
+    /// Across a jump the retarded equation steps, and a solve over it converges onto the step:
+    /// an image no light left from. The solvers split here, so each piece has at most one root.
     fn breaks(&self) -> SmallVec<[f64; 2]> {
         SmallVec::new()
     }
@@ -197,10 +196,8 @@ pub fn arrival_time(event: Coord, w: &dyn Worldline) -> Option<f64> {
 ///
 /// Empty means the light has not arrived, has already passed, or was never emitted.
 ///
-/// Ascending, so the last is the newest light. A worldline with a break gives one root per
-/// piece: shortly after a jump, an observer near where it landed sees the craft there *and*
-/// the older light of where it left, and one near where it left sees nothing at all until the
-/// light of the landing arrives.
+/// Ascending, so the last is the newest light. A worldline with breaks gives up to one root
+/// per piece.
 pub fn retarded_times(observer: Coord, w: &dyn Worldline) -> SmallVec<[f64; 2]> {
     retarded_times_at(observer.time_f64(), observer.position(), w)
 }
@@ -395,8 +392,7 @@ mod tests {
         Jump { from: DVec3::ZERO, to: DVec3::new(1000.0, 0.0, 0.0), at: 0.0 }
     }
 
-    /// Behind where it left, the craft is seen there until that light has passed, then not at
-    /// all until the light of where it went arrives. Seeing it go early is the leak.
+    /// Near where it left, the craft is seen there until that light passes, then not at all.
     #[test]
     fn a_jump_is_seen_to_vanish_at_light_delay_and_appear_later_still() {
         let w = jump();
@@ -409,8 +405,7 @@ mod tests {
         assert!((after[0] - 100.0).abs() < 1e-6, "got {after:?}");
     }
 
-    /// Near where it landed there are two images for a while: the new one, and the old light
-    /// still on its way from where it left. Ascending, so the newest is last.
+    /// Near where it landed, it is seen in both places for a while.
     #[test]
     fn near_the_landing_a_jump_is_seen_in_both_places() {
         let w = jump();
@@ -420,8 +415,8 @@ mod tests {
         assert!((roots[1] - 50.0).abs() < 1e-6, "{roots:?}");
     }
 
-    /// Solved without its break, the same worldline reports an image at the step itself, which
-    /// no light left from. The test above is only worth something if this one fails.
+    /// Without its break the solve reports an image at the step, which the tests above rely on
+    /// not happening.
     #[test]
     fn without_its_break_a_jump_is_solved_onto_the_step() {
         struct Undeclared(Jump);

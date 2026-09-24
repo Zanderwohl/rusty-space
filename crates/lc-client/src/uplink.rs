@@ -253,7 +253,6 @@ pub struct Uplink {
     pub fitting: Option<lc_proto::Fitting>,
     /// Every conversation this ship is in. See [`crate::chat`].
     pub chat: crate::chat::Chat,
-    /// What was typed at the shard and what it said. See [`crate::console`].
     pub console: crate::console::Console,
 }
 
@@ -633,9 +632,7 @@ fn fold(
                 };
                 ui.0.heard(from, notice, arrived_s);
             }
-            // Each end of a jump is its own news, arriving at its own light delay: a ship far
-            // from both hears of the vanishing and the appearance at different times, and a
-            // ship near one end may never hear of the other.
+            // Each end of a jump arrives at its own light delay.
             // Not this ship's own: its console already said where it went.
             let me = uplink.joined().map(|joined| joined.ship_id);
             for sighting in seen.iter().filter(|s| matches!(s.kind, lc_proto::kind::VANISH | lc_proto::kind::APPEAR)) {

@@ -8,8 +8,7 @@ use crate::journal::Journal;
 use crate::server::Server;
 
 impl<J: Journal> Server<J> {
-    /// One block per ship. By name, every ship called that, ignoring case: nothing makes a
-    /// name unique.
+    /// By name, every match: nothing makes a name unique.
     pub(super) fn who_is(&self, id: Option<u64>, name: Option<&str>) -> Result<String, String> {
         let found: Vec<&Craft> = match (id, name) {
             (Some(raw), None) => {

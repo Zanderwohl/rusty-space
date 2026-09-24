@@ -97,7 +97,6 @@ async fn an_answer_names_the_line_it_answers_and_a_mistake_says_what_it_was() {
     assert_eq!((answers[0].0, answers[0].1), (7, true));
     assert_eq!((answers[1].0, answers[1].1), (8, false));
     assert!(answers[1].2.contains("never closed"), "{}", answers[1].2);
-    // And nobody else hears either.
     assert!(!wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Answered { .. })));
 }
 
@@ -128,13 +127,12 @@ async fn debug_acts_on_its_own_ship_and_admins_on_anyone_s() {
         assert!(ok, "{why}");
         let moved = server.fleet.get(CraftId(2)).unwrap();
         assert_eq!(moved.system.as_ref().map(|s| s.star.get()), Some(far));
-        // Its owner is told what it is doing now; the asker's own ship stayed where it was.
         assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Flying { .. })));
         assert!(server.fleet.get(CraftId(1)).unwrap().motion.position_ly.x < 5.0);
     }
 }
 
-/// Ship 2 fitted and empty, and what it holds and can hold, in ME.
+/// Ship 2 fitted, with nothing stored.
 fn emptied(server: &mut Server<Memory>) {
     use lc_world::fitting::{Fitting, Loadout};
     let balance = server.balance();
@@ -237,7 +235,6 @@ async fn refit_magic_replaces_a_refit_under_way() {
     let craft = server.fleet.get(CraftId(2)).unwrap();
     assert!(!craft.is_refitting(now_s));
     assert_eq!(craft.fitting().unwrap().loadout_at(now_s), Loadout { storage: 1, ..Loadout::STARTING });
-    // Storage shrank, and what it holds with it.
     let (stored, capacity) = held(&server);
     assert!(stored <= capacity + 1e-9, "{stored} of {capacity}");
 }
@@ -289,7 +286,6 @@ async fn chart_hands_a_craft_a_system_it_can_place() {
     let (ok, why) = ask(&mut server, &mut wire, 2, "chart").await;
     assert!(ok && why.contains(&format!("{:#x}", home.get())), "{why}");
 
-    // A player has no such command.
     let (mut server, mut wire) = shard(Level::PLAYER);
     let (ok, why) = ask(&mut server, &mut wire, 1, "chart").await;
     assert!(!ok && why.starts_with("no command"), "{why}");
@@ -357,8 +353,7 @@ async fn energize_with_no_amount_fills_the_ship() {
     assert!(capacity > 0.0 && (stored - capacity).abs() < 1e-6, "{stored} of {capacity}");
 }
 
-/// By id, one block; by name, every ship called that, whatever the case, quoted when it has
-/// spaces.
+/// By name, every match, in any case.
 #[tokio::test]
 async fn who_is_names_a_ship_by_id_or_finds_it_by_name() {
     let (mut server, mut wire) = shard(Level::DEBUG);
@@ -412,12 +407,8 @@ async fn where_names_bodies_a_teleport_can_reach() {
     assert!(!listed.contains("Authored"), "{listed}");
 }
 
-/// **The light-delay test.** A ship ten AU off the one that jumps goes on seeing it where it
-/// was until the light of the jump arrives, sees the vanishing at that moment and not before,
-/// and then sees nothing: the landing is light-years away and its light is years out.
-///
-/// Checked against the mechanism: with the old rule — a contact is whoever shares your system
-/// *now* — the second ship lost the contact on the very next tick.
+/// A ship ten AU away sees the jumper where it was until the jump's light arrives, then nothing.
+/// Counting contacts by the system a craft is in now loses it on the next tick instead.
 #[tokio::test]
 async fn a_ship_that_jumps_is_seen_to_go_only_when_the_light_of_it_arrives() {
     let far = stars()[2].id.get();

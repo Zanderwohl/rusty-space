@@ -1,8 +1,7 @@
 //! The console: a line typed after `/`, sent to the shard as typed, and what came back.
 //!
-//! **Nothing here parses a command.** A line is text on the wire and the shard's to read — see
-//! `lc_server::command` — so a client can neither know what commands exist nor send one the
-//! shard would not have parsed. `help` is how a player finds out, and it answers per level.
+//! Nothing here parses a command. The shard is the only parser (`lc_server::command`), and
+//! `help` is how a player learns what exists at their level.
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
@@ -16,7 +15,6 @@ use crate::ui::Panel;
 /// How many lines the console keeps, answers included.
 const KEPT: usize = 200;
 
-/// Everything typed this session, and what each became.
 #[derive(Default)]
 pub struct Console {
     entries: Vec<Entry>,
@@ -38,7 +36,6 @@ pub enum Answer {
 }
 
 impl Console {
-    /// Record a line going out, and the number its answer will carry.
     pub fn sent(&mut self, line: String) -> u32 {
         let seq = self.next_seq;
         self.next_seq = self.next_seq.wrapping_add(1);
@@ -46,15 +43,13 @@ impl Console {
         seq
     }
 
-    /// Record a line that could not go out, and why.
     pub fn unsent(&mut self, line: String, why: &str) {
         let seq = self.next_seq;
         self.next_seq = self.next_seq.wrapping_add(1);
         self.push(Entry { seq, line, answer: Answer::Failed(why.into()) });
     }
 
-    /// The shard's answer to line `seq`. An answer to a line this console no longer holds is
-    /// dropped: it scrolled away, or it is for a previous connection.
+    /// An answer to a line no longer held is dropped.
     pub fn answered(&mut self, seq: u32, ok: bool, text: String) {
         let Some(entry) = self.entries.iter_mut().rev().find(|e| e.seq == seq) else { return };
         entry.answer = if ok { Answer::Done(text) } else { Answer::Failed(text) };
@@ -78,7 +73,6 @@ impl Console {
     }
 }
 
-/// What is being typed, and where in the history the arrows have got to.
 #[derive(Default)]
 pub struct Draft {
     text: String,
@@ -88,7 +82,6 @@ pub struct Draft {
     was_open: bool,
 }
 
-/// The console window. Hangs from the top of the screen, over everything, while it is open.
 pub fn draw(
     mut contexts: EguiContexts,
     ui_state: Res<Ui>,
@@ -106,8 +99,7 @@ pub fn draw(
         return;
     }
     let Ok(ctx) = contexts.ctx_mut() else { return };
-    // Opaque: it is drawn over whatever panels are open, and two translucent surfaces in one
-    // place read as one muddled one. See `lightcone/docs/18-ui-style.md`.
+    // Opaque, because it draws over other panels. See `lightcone/docs/18-ui-style.md`.
     let frame = egui::Frame::window(&ctx.global_style()).fill(ctx.global_style().visuals.window_fill.to_opaque());
     let width = (ctx.content_rect().width() - 32.0).clamp(240.0, 640.0);
     egui::Window::new("Console")
@@ -204,7 +196,6 @@ mod tests {
         console.answered(first, false, "no".into());
         assert_eq!(console.entries()[0].answer, Answer::Failed("no".into()));
         assert_eq!(console.entries()[1].answer, Answer::Done("star 0x1".into()));
-        // One for a line it never sent changes nothing.
         console.answered(99, true, "?".into());
         assert_eq!(console.entries().len(), 2);
     }

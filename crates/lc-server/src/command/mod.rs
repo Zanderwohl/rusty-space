@@ -27,7 +27,6 @@ use crate::server::Server;
 use crate::transport::Transport;
 use crate::world::{Event, Scheduled};
 
-/// Every command there is, and who may run it.
 pub const COMMANDS: &[Spec] = &[
     Spec {
         name: "help",
@@ -273,12 +272,10 @@ const MOST_OF_ANY: u32 = 10_000;
 /// `lc_world::scenario::Scenario::ALL` by name, which a `const` cannot collect for itself.
 const SCENES: &[&str] = &["traffic", "meeting", "approach", "closing", "chase", "corona"];
 
-/// A command `level` may run, by name.
 pub fn find(name: &str, level: Level) -> Option<&'static Spec> {
     COMMANDS.iter().find(|spec| spec.name == name && level.at_least(spec.level))
 }
 
-/// A line waiting for the tick to reach it.
 #[derive(Clone, Debug)]
 pub struct Queued {
     from: ClientId,
@@ -287,10 +284,7 @@ pub struct Queued {
 }
 
 impl<J: Journal> Server<J> {
-    /// Hold a line for [`Server::run_commands`].
-    ///
-    /// Charged against the sender's rate budget before this, like any other message. One too
-    /// long to parse is answered here rather than held.
+    /// A line too long to parse is answered now rather than held.
     pub(crate) fn enqueue(&mut self, from: ClientId, seq: u32, line: String, wire: &mut impl Transport) {
         if line.len() > COMMAND_LIMIT {
             let text = ParseError::TooLong.to_string();
@@ -300,7 +294,6 @@ impl<J: Journal> Server<J> {
         self.commands.push_back(Queued { from, seq, line });
     }
 
-    /// Run every queued line, in the order it arrived, and answer each.
     pub(crate) fn run_commands(
         &mut self,
         wire: &mut impl Transport,
@@ -362,7 +355,6 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// The ship a command acts on: `ship:` when given, and otherwise the asker's own.
     fn ship_named(&self, from: ClientId, args: &Bound) -> Result<CraftId, String> {
         match args.id("ship") {
             Some(raw) => i64::try_from(raw)
@@ -374,7 +366,6 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// The level this connection's commands are checked at.
     fn commanding(&self, from: ClientId) -> Level {
         let level = self.clients.get(&from).map_or(Level::PLAYER, |c| c.permission);
         crate::ability::commanding(level, crate::ability::Directing(self.directs))

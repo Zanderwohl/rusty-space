@@ -141,9 +141,8 @@ fn burn_changed(pursuer: &Craft, burn: Option<glam::DVec3>) -> bool {
 /// A *visibility* rule and not a causality one. What it decides is which craft are worth
 /// solving for; whether the light has arrived is [`Cleared::clear`]'s alone.
 ///
-/// Against every system the other has been in that it still remembers, and not only its current
-/// one. A craft that jumped out of a system is still arriving there as old light, and dropping it
-/// the moment it left would tell everybody there it had gone before that light did.
+/// Against every system the other still remembers being in: a craft that jumped out of one is
+/// still arriving there as old light.
 pub fn in_sight(observer: &Craft, other: &Craft) -> bool {
     match (&observer.system, &other.system) {
         (Some(a), _) => other.has_been_in(a),
@@ -168,8 +167,8 @@ pub fn sighting(
     }
     let here = observer.position_at(now_t as f64);
     let worldline = quarry.worldline();
-    // No root means light that has not arrived or has already gone past. There is one per piece
-    // of a worldline that jumped, and the newest is where the craft appears to be now.
+    // No root means light that has not arrived or has already gone past. A worldline that
+    // jumped has one per piece, and the newest is where the craft appears now.
     let emitted = retarded_times_at(now_t as f64, here, &worldline).last().copied()?;
     Some(pursuit::Sighting {
         target: lc_world::motion::ShipId(quarry.id.0),

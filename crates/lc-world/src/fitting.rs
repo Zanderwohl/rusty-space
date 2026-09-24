@@ -490,7 +490,7 @@ impl Fitting {
         self.stored_j = (self.stored_j + joules.max(0.0)).min(capacity.max(self.stored_j));
     }
 
-    /// Take energy away, as far as there is any. Settle first.
+    /// Settle first.
     pub fn drain(&mut self, joules: f64) {
         self.stored_j = (self.stored_j - joules.max(0.0)).max(0.0);
     }
@@ -500,8 +500,7 @@ impl Fitting {
         self.refit = Some(refit);
     }
 
-    /// Jump a refit to its end: the target loadout, and the energy the steps not yet run would
-    /// have taken. Only the time is skipped. Settle first. `false` if there was none.
+    /// Only the time is skipped: the remaining steps' energy is still taken. Settle first.
     pub fn finish_refit(&mut self) -> bool {
         let Some(refit) = self.refit.take() else { return false };
         let end = refit.at(refit.order().start_s + refit.duration_s());
@@ -512,8 +511,8 @@ impl Fitting {
         true
     }
 
-    /// Become `loadout` at once and for nothing, dropping any refit under way. Storage keeps what
-    /// it holds, as far as the new capacity allows. Settle first.
+    /// For nothing, dropping any refit under way. Storage is cut to the new capacity. Settle
+    /// first.
     pub fn refit_at_once(&mut self, loadout: Loadout) {
         self.refit = None;
         self.loadout = loadout;
@@ -740,8 +739,7 @@ mod tests {
 
     #[test]
     fn finishing_a_refit_lands_where_running_it_out_would() {
-        // No drain, because a finish skips the time and nothing else: the crew's upkeep over
-        // the rest of the refit is simply not charged, where running it out charges it.
+        // No drain: a finish skips the upkeep with the time, where running it out pays it.
         let b = Balance { living_drain_w: 0.0, ..Balance::DEFAULT };
         let target = Loadout { engines: 7, ..Loadout::STARTING };
         let begun = |fitting: &mut Fitting| {
@@ -759,7 +757,6 @@ mod tests {
         let end_s = ran.refit().unwrap().duration_s();
         let mut finished = ran.clone();
 
-        // Part-way, then finished at once.
         finished.settle(&motion, end_s * 0.3);
         assert!(finished.finish_refit());
         assert!(!finished.finish_refit(), "a second finish found another refit");

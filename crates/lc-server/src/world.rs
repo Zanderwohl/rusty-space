@@ -181,7 +181,6 @@ impl World {
         }
     }
 
-    /// Every system loaded now.
     pub fn loaded(&self) -> impl Iterator<Item = &Arc<LocalSystem>> {
         self.loaded.values().map(|held| &held.system)
     }

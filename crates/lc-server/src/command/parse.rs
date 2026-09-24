@@ -13,15 +13,12 @@
 
 use lc_proto::COMMAND_LIMIT;
 
-/// A line, split and unquoted. Nothing here knows what any command takes: that is
-/// [`super::spec::bind`]'s.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Parsed {
     pub name: String,
     pub args: Vec<Arg>,
 }
 
-/// One argument as typed: a bare or quoted word, or a `key:value` pair.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Arg {
     pub key: Option<String>,
@@ -110,7 +107,7 @@ fn token(chars: &[char], at: &mut usize) -> Result<(Arg, bool), ParseError> {
     Ok((Arg { key: Some(word.to_lowercase()), value }, false))
 }
 
-/// A bare run up to a space, a `:` or the end. A `"` in one is an error, never a new token.
+/// A `"` in a bare word is an error, never the start of a new token.
 fn bare(chars: &[char], at: &mut usize) -> Result<String, ParseError> {
     let start = *at;
     while let Some(&c) = chars.get(*at) {
@@ -168,7 +165,6 @@ mod tests {
         (arg.key.expect("a key"), arg.value)
     }
 
-    /// The four spellings asked for by name.
     #[test]
     fn a_value_is_bare_or_quoted_and_a_quoted_one_holds_anything() {
         assert_eq!(keyed("x foo:bar"), ("foo".into(), "bar".into()));
@@ -188,7 +184,6 @@ mod tests {
         assert_eq!(args, [(None, "12"), (None, "two words"), (Some("altitude"), "3")]);
     }
 
-    /// Each of these is a line a person could mean two ways, or none.
     #[test]
     fn what_is_ambiguous_is_refused_and_says_where() {
         use ParseError::*;

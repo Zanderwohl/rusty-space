@@ -566,7 +566,6 @@ impl Craft {
         }
     }
 
-    /// Take energy out of storage, down to empty and no further.
     pub fn drain(&mut self, joules: f64, now_s: f64) {
         self.settle(now_s);
         if let Some(fitting) = &mut self.fitting {
@@ -595,7 +594,7 @@ impl Craft {
         Ok(())
     }
 
-    /// Complete a refit now, at the energy it would have cost. `false` if none was under way.
+    /// At the energy it would have cost. `false` if none was under way.
     pub fn finish_refit(&mut self, now_s: f64) -> bool {
         self.settle(now_s);
         let finished = self.fitting.as_mut().is_some_and(Fitting::finish_refit);
@@ -603,7 +602,7 @@ impl Craft {
         finished
     }
 
-    /// Become `loadout` now, free, replacing any refit under way. `false` with no fitting.
+    /// Free, replacing any refit under way. `false` with no fitting.
     pub fn refit_at_once(&mut self, loadout: crate::fitting::Loadout, now_s: f64) -> bool {
         self.settle(now_s);
         let Some(fitting) = &mut self.fitting else { return false };
@@ -642,13 +641,9 @@ impl Craft {
         });
     }
 
-    /// Put it somewhere by fiat, holding `waypoint` in `system`, without flying there.
-    ///
-    /// The worldline **jumps**, and the stretch before is marked as ending in one so the
-    /// light-delay solve splits there rather than bisecting onto the step. Nothing about the
-    /// old stretch is lost: an observer still receiving its light goes on seeing it, where it
-    /// was, until that light has passed. Returns where it landed, or `None` with nothing
-    /// changed when the waypoint cannot be placed in that system.
+    /// Holding `waypoint` in `system`, without flying there. The stretch before is marked as
+    /// ending in a jump; see [`lc_spacetime::Worldline::breaks`]. `None`, with nothing
+    /// changed, when the waypoint cannot be placed.
     pub fn teleport(&mut self, system: Arc<LocalSystem>, waypoint: Waypoint, now_s: f64) -> Option<DVec3> {
         let at = waypoint.place_at(&system, now_s)?;
         self.remember(now_s, true, |craft| {
@@ -660,8 +655,7 @@ impl Craft {
         Some(at)
     }
 
-    /// [`Craft::teleport`] onto a straight line: at `at_ly` moving at `beta`, in `system` or in
-    /// none. What a craft put beside one that is not holding a station is given.
+    /// [`Craft::teleport`] onto a straight line, in `system` or in none.
     pub fn teleport_drifting(&mut self, system: Option<Arc<LocalSystem>>, at_ly: DVec3, beta: DVec3, now_s: f64) {
         self.remember(now_s, true, |craft| {
             craft.system = system;
@@ -672,10 +666,8 @@ impl Craft {
         });
     }
 
-    /// Whether any stretch it still remembers was flown in `system`, the current one included.
-    ///
-    /// What an observer in that system may still be receiving light from, and so what decides
-    /// whether it is worth solving for at all.
+    /// Whether any stretch it still remembers was flown in `system`, the current one included:
+    /// what an observer there may still be receiving light from.
     pub fn has_been_in(&self, system: &Arc<LocalSystem>) -> bool {
         self.system.as_ref().is_some_and(|s| Arc::ptr_eq(s, system))
             || self.past.iter().any(|entry| entry.system.as_ref().is_some_and(|s| Arc::ptr_eq(s, system)))
@@ -1441,9 +1433,8 @@ mod tests {
         (system, waypoint)
     }
 
-    /// The stretch before a teleport is read in the system it was flown in, and ends in a jump.
-    /// Read in the new one, a station about a body the new system does not have froze where it
-    /// was — an observer watching the old light would have seen it stop at once.
+    /// The stretch before a teleport is read in its own system and ends in a jump. Read in the
+    /// new one, it freezes where it left.
     #[test]
     fn a_teleport_leaves_the_old_stretch_where_it_was_and_breaks_there() {
         use lc_spacetime::Worldline;

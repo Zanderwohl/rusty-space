@@ -138,7 +138,7 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Put energy into the asking client's ship, whoever may. `None` when it has no fitted one.
+    /// No permission check; the caller makes it. `None` without a fitted ship.
     pub(crate) fn grant(&mut self, from: ClientId, joules: f64) -> Option<CraftId> {
         let now_s = self.now_t as f64 * 1.0e-6;
         let ship = self.owned_by(from)?;

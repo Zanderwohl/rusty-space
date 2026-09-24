@@ -17,9 +17,8 @@ pub struct Past {
     /// Coordinate seconds at which this stopped being in force.
     pub until_s: f64,
     pub motion: ShipState,
-    /// The system it was flown in. A station is defined against bodies, and read against
-    /// whatever system the craft is in *now* it froze where it left the moment the craft went
-    /// anywhere else — which an observer still watching the old light could see at once.
+    /// The system it was flown in. Read against another system, a station has no bodies to be
+    /// placed by.
     pub system: Option<Arc<LocalSystem>>,
     /// Whether it ended in a jump rather than joining the next stretch. See
     /// [`Worldline::breaks`].

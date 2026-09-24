@@ -176,7 +176,7 @@ pub struct Server<J: Journal> {
     pub(crate) balance: lc_world::fitting::Balance,
     /// Craft whose owner is to be told when their refit finishes.
     pub(crate) refitting: std::collections::HashSet<CraftId>,
-    /// Console lines waiting for the tick to run them. See [`crate::command`].
+    /// Console lines waiting for the tick.
     pub(crate) commands: std::collections::VecDeque<crate::command::Queued>,
 }
 
@@ -1134,8 +1134,8 @@ impl<J: Journal> Server<J> {
         self.emit_from(id, from, kind, power_w, payload, at, events, deliveries);
     }
 
-    /// [`Server::emit`] from a stated position, light-microseconds, for the one case where the
-    /// worldline cannot say: the moment of a jump has two.
+    /// [`Server::emit`] from a stated position, light-microseconds: at a jump the worldline has
+    /// two.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_from(
         &mut self,

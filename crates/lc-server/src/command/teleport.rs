@@ -26,16 +26,13 @@ use crate::server::{BURN_POWER_W, Server};
 use crate::transport::Transport;
 use crate::world::{Event, Scheduled};
 
-/// Where a teleport goes: a body of a system, by the key the system targets it with.
 struct Place {
     system: Arc<LocalSystem>,
     key: String,
-    /// What the asker called it, for the answer.
     id: u64,
     what: &'static str,
 }
 
-/// Where a jump puts a craft.
 enum Landing {
     Holding { system: Arc<LocalSystem>, waypoint: Waypoint },
     Drifting { system: Option<Arc<LocalSystem>>, at_ly: DVec3, beta: DVec3 },
@@ -65,9 +62,8 @@ impl<J: Journal> Server<J> {
         Ok(format!("{name} is {said}"))
     }
 
-    /// A star by its catalog id, or a body by its id: in `star`'s system when that is given,
-    /// and otherwise in any system already loaded. Loading every star's system to look would be
-    /// the whole catalog generated in one tick.
+    /// Without `star`, a body is looked for only in loaded systems: loading every star's system
+    /// would generate the whole catalog in one tick.
     fn locate(&mut self, id: u64, star: Option<u64>) -> Result<Place, String> {
         let now_s = self.now_t() as f64 * 1.0e-6;
         if star.is_none()
@@ -94,7 +90,6 @@ impl<J: Journal> Server<J> {
             })
     }
 
-    /// An equatorial orbit of `place`, `altitude_radii` above it.
     fn onto(&self, ship: CraftId, place: Place, altitude_radii: f64) -> Result<(Landing, String), String> {
         let now_s = self.now_t() as f64 * 1.0e-6;
         let from = self.fleet.get(ship).ok_or("no such ship")?.motion.position_ly;
@@ -106,11 +101,8 @@ impl<J: Journal> Server<J> {
         Ok((Landing::Holding { system: place.system, waypoint }, said))
     }
 
-    /// Where an intercept at company would leave `ship` beside `other`, as it is now.
-    ///
-    /// On the same orbit a standoff ahead when `other` holds one, so the two stay together.
-    /// Otherwise the same velocity a standoff to the side, which holds only as long as `other`
-    /// does nothing.
+    /// Where an intercept at company would leave `ship`. Off an orbit, the two stay together
+    /// only until `other` maneuvers.
     fn beside(&self, ship: CraftId, other: u64) -> Result<(Landing, String), String> {
         let now_s = self.now_t() as f64 * 1.0e-6;
         let quarry = i64::try_from(other)
@@ -140,7 +132,6 @@ impl<J: Journal> Server<J> {
         Ok((Landing::Drifting { system: quarry.system.clone(), at_ly, beta }, said))
     }
 
-    /// Put `id` down at `landing`, and put both ends of it on the air. Returns its name.
     fn jump(
         &mut self,
         id: CraftId,
@@ -167,7 +158,7 @@ impl<J: Journal> Server<J> {
         // brightness alone.
         self.emit_from(id, left, kind::VANISH, BURN_POWER_W, "{}".into(), at, events, deliveries);
         self.emit_from(id, landed, kind::APPEAR, BURN_POWER_W, "{}".into(), at, events, deliveries);
-        // Somewhere it did not fly to, which no client can reach by folding anything.
+        // No client can reach this by folding anything it sent.
         self.tell_flying(wire, id);
         Ok(name)
     }
@@ -200,7 +191,7 @@ impl<J: Journal> Server<J> {
     }
 }
 
-/// The key a body is targeted by, from its id. Never shown: a key is the generator's name.
+/// Never shown: a key is the generator's name.
 fn body_key(system: &LocalSystem, id: u64) -> Option<String> {
     system.inventory().iter().find_map(|entry| match &entry.target {
         Target::Body(key) if BodyId::of(system.star, key).get() == id => Some(key.clone()),

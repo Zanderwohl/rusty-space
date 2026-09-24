@@ -494,12 +494,9 @@ pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach
     }
 }
 
-/// A whole system, as the charting office would have it if it had been everywhere: the star's
-/// place, and every bound body's orbit, exact and fully oriented, as it stands at `now_s`.
-///
-/// Claims on [`CHARTS`]' word, so a craft's own fits outrank them the moment it has any. What
-/// is not charted is what no orbit says: sizes, spins, colors and what kind of body each is.
-/// Returns how many bodies were charted.
+/// The star's place and every bound body's exact orbit at `now_s`, as claims on [`CHARTS`]'
+/// word, so a craft's own fits outrank them. Sizes, spins, colors and kinds are not charted: no
+/// orbit says them. Returns how many bodies were charted.
 pub fn chart_system(knowledge: &mut Knowledge, system: &LocalSystem, now_s: f64) -> usize {
     use em_foundations::kepler::{anomaly, state};
     use super::record::{Method, Orbit, Orientation};
@@ -581,8 +578,7 @@ mod tests {
     use super::*;
     use crate::sky::{AuthoredStars, StarProvider};
 
-    /// A charted body is believed exactly where it is, moon included, and goes on being so as
-    /// the clock runs: the placement is the orbit, not a snapshot of it.
+    /// Every charted body, moons included, is placed where it is, now and later.
     #[test]
     fn a_charted_system_places_every_body_where_it_is() {
         let star = AuthoredStars::sample().stars()[2].clone();

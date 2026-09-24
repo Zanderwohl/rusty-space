@@ -10,8 +10,7 @@ use crate::server::Server;
 use crate::transport::Transport;
 
 impl<J: Journal> Server<J> {
-    /// Add `modules` ME to `id`'s storage, or fill it when `None`. Anything past capacity is
-    /// dropped rather than refused.
+    /// `None` fills it. Past capacity is dropped, not refused.
     pub(super) fn energize(
         &mut self,
         id: CraftId,
@@ -39,8 +38,7 @@ impl<J: Journal> Server<J> {
         ))
     }
 
-    /// Take `modules` ME out of `id`'s storage, or empty it when `None`. Asking for more than it
-    /// holds empties it rather than being refused.
+    /// `None`, or more than it holds, empties it.
     pub(super) fn drain(&mut self, id: CraftId, modules: Option<f64>, wire: &mut impl Transport) -> Result<String, String> {
         let now_s = self.now_t() as f64 * 1.0e-6;
         let craft = self.fleet.get_mut(id).ok_or("no such ship")?;
@@ -61,8 +59,7 @@ impl<J: Journal> Server<J> {
         ))
     }
 
-    /// Rebuild `id` to the loadout `args` name, each count defaulting to what it has now. Energy
-    /// is neither asked for nor spent; only the modules have to fit the hull.
+    /// Energy is neither asked for nor spent; only the modules have to fit the hull.
     pub(super) fn refit_magic(&mut self, id: CraftId, args: &Bound, wire: &mut impl Transport) -> Result<String, String> {
         let now_s = self.now_t() as f64 * 1.0e-6;
         let craft = self.fleet.get_mut(id).ok_or("no such ship")?;

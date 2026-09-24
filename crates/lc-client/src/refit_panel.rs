@@ -280,8 +280,8 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
         if ui.button("Reset").clicked() {
             ask(out, Action::ResetRefitDraft);
         }
-        // Enabled whatever the planner says: skipping the energy is the point. Whether this
-        // player may is the shard's to say, and the answer lands in the console.
+        // Enabled whatever the planner says: skipping the energy is the point. The shard
+        // decides who may.
         if game.remote
             && draft != current
             && ui.button("Magic").on_hover_text("build this now, free; admins only").clicked()
@@ -298,7 +298,6 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     }
 }
 
-/// `draft` as a `refit-magic` console line.
 fn magic_line(draft: Loadout) -> String {
     let Loadout { storage, drones, living, engines, slots, data } = draft;
     format!("refit-magic storage:{storage} drones:{drones} living:{living} engines:{engines} data:{data} slots:{slots}")
@@ -331,8 +330,7 @@ mod tests {
     use lc_world::craft::{CraftId, Kind};
     use lc_world::fitting::{Balance, Fitting};
 
-    /// The button's line is one the shard reads back as the draft. Native only: the browser
-    /// build has no shard in it to ask.
+    /// The button's line binds back to the draft. Native only: the browser build has no shard.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_magic_button_says_what_the_shard_reads() {

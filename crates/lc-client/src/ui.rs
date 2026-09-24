@@ -55,8 +55,7 @@ pub enum Panel {
     /// with the others, because it is the one surface that is not a readout — it has its own
     /// frame, its own palette and its own keys.
     Reader,
-    /// Commands for the shard, typed after `/`. Drawn by [`crate::console`], which hangs it from
-    /// the top of the screen rather than giving it a window of its own.
+    /// Drawn by [`crate::console`], not as a window.
     Console,
 }
 
