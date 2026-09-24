@@ -274,6 +274,10 @@ abundance column — fast is old is metal-poor. The relation is saturating rathe
 exponential: an exponential starts falling immediately, which made every ordinary disc star
 metal-poor and left the whole galaxy short of the rock that builds planets.
 
+A giant's envelope inherits its star's metals, raised by how little hydrogen it took, give or
+take 0.15 dex, and the generator states the result as a `Metals:` tag. It is what colors the
+giant: see `07-rendering.md`.
+
 ## What is measured and what is chosen
 
 Worth keeping separate, because the second kind is where the game lives.
