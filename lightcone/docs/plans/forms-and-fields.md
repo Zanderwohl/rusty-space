@@ -415,7 +415,7 @@ graph LR
 
 ### E1 · Beam and courtesy math
 
-- status: active claude/e1-beam-courtesy
+- status: done #70
 - needs: K2
 - touches: `crates/lc-world/src/signal.rs`, `crates/lc-world/src/emit.rs`, `crates/lc-world/src/courtesy.rs`
 - read: 31 §Spread, §What arrives, §Courtesy
