@@ -3,7 +3,7 @@
 Every ship is wrapped in a field. It is the collector, the radiator and the shield, and when it
 fails, the ship is gone and the whole system sees it happen.
 
-**Status: designed, not built.** It replaces the fixed 400 K hull (`lc_world::craft::HULL_K`)
+**Status: designed.** The account is `lc_world::field`, which nothing reads yet. It replaces the fixed 400 K hull (`lc_world::craft::HULL_K`)
 with a heat account. It turns the hull collectors of [20-solar-power.md](20-solar-power.md) into
 the field receiving starlight. The field is part Culture and part the Langston Field of *The Mote
 in God's Eye*: a skin that absorbs what hits it, glows as it fills, and collapses when it is
@@ -165,7 +165,7 @@ power that would bring a field to `Q_max`, is `Q_max / τ`.
 |---|---|
 | `τ` | 1.84 × 10⁶ s: 21 game days, 3.5 real minutes |
 | rated load, starting ship | 7.6 × 10¹⁹ W |
-| field at collapse | 4 580 K, peaking at 630 nm |
+| field at collapse | 4 577 K, peaking at 630 nm |
 
 ### The starting ship, by distance from a Sun-like star
 
@@ -173,8 +173,8 @@ power that would bring a field to `Q_max`, is `Q_max / τ`.
 |---|---|---|
 | 5 AU | 444 K | 513 K |
 | 1 AU | 772 K | 1 029 K |
-| 0.1 AU | 2 395 K | 3 236 K |
-| 0.05 AU | 3 387 K | **4 576 K, at the limit** |
+| 0.1 AU | 2 396 K | 3 237 K |
+| 0.05 AU | 3 388 K | **4 577 K, at the limit** |
 
 The sun-diving limit comes out of this with no rule of its own. **A filling ship can go closer
 than a full one.** The dive that pays best is the one timed to leave as storage tops out. Filling
@@ -192,9 +192,9 @@ rest. With the scaled ships of [20-solar-power.md](20-solar-power.md) (10% of vo
 
 | hull | idle, far from a star | full, 0.1 AU |
 |---|---|---|
-| 500 m | 476 K | 3 236 K |
+| 500 m | 476 K | 3 237 K |
 | 5 km | 846 K | 3 240 K |
-| 50 km | 1 504 K | 3 273 K |
+| 50 km | 1 504 K | 3 274 K |
 
 At the default living drain, **square–cube shows up in the signature, not the survival limit.**
 Starlight and beams scale with shadow, the same as the field, so the sun-diving limit hardly moves
