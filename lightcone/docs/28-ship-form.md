@@ -282,6 +282,14 @@ for the reasons the map is not one ([07-rendering.md](07-rendering.md), [13-clie
 
 The sky takes the corner square, as in the map's mode. The clock does not stop.
 
+**The editor's camera carries a zero-sized marker, `FormCamera`,** as `SkyCamera`, `MapCamera` and
+`UiCamera` do, and every query that wants it filters on that marker. Bevy gives no order between
+cameras spawned by separate systems, and a fourth camera would otherwise turn every `.single()`
+camera query into an early return, the failure [AGENTS.md](../../AGENTS.md) describes for the map's.
+Existing queries already filter on `SkyCamera`, so adding the editor's should break none of them.
+Check any that do not before it lands. The editor's camera must also never be the first one created,
+or `bevy_egui` gives it the primary context.
+
 **The editor is where refits are made.** The refit window (`R`) is the ledger: the budget, the
 three phases, progress, and Cancel.
 
