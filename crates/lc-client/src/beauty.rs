@@ -9,7 +9,7 @@
 //! [`ShotBody`], and the ship's own hull by `app::SKY_ONLY_LAYER`.
 
 use bevy::camera::visibility::RenderLayers;
-use bevy::camera::{Hdr, RenderTarget};
+use bevy::camera::{Exposure, Hdr, RenderTarget};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
@@ -58,7 +58,7 @@ const HORIZON_FIELD_RAD: f64 = 0.1;
 /// How far above the limb the horizon shot looks, as a fraction of its field, so the limb sits
 /// in the lower part of the frame with sky over it.
 const HORIZON_LIFT: f64 = 0.25;
-const NADIR_FIELD_RAD: f64 = 0.08;
+const NADIR_FIELD_RAD: f64 = 0.3;
 /// Past this many of its radii from its center a body is not *below*: its horizon and the
 /// ground under the ship are both most of the disc again, and the whole-disc shot says it.
 const BELOW_RADII: f64 = 30.0;
@@ -66,6 +66,12 @@ const BELOW_RADII: f64 = 30.0;
 const ARRIVING_RADII: f64 = 50.0;
 /// A star's disc is almost never resolved, so this is the patch of sky around it.
 const STAR_FIELD_RAD: f64 = 0.01;
+
+/// Where a shot of the sky puts the star it is metered on, in stops over the top of the window:
+/// over, so it is a point with its glare round it rather than a dim dot.
+const POINT_ABOVE: f32 = 8.0;
+/// How far a shot's exposure may move from the view's, in stops.
+const MAX_STOPS: f32 = 24.0;
 
 /// What a photograph is of.
 #[derive(Clone, Debug, PartialEq)]
@@ -114,6 +120,12 @@ pub struct Shot {
     pub side_px: u32,
     /// A body to draw as a sphere if the shot resolves it.
     pub body: Option<String>,
+    /// How much brighter than the view the starfield is exposed. A body the shot resolves is
+    /// metered for itself instead; see `resolved::metered_for`.
+    pub stops: f32,
+    /// The color of a star at the middle of the frame, which is drawn with the diffraction
+    /// spikes the secondary mirror's supports throw.
+    pub spikes: Option<Vec3>,
     pub caption: String,
 }
 
@@ -133,7 +145,7 @@ pub struct BeautyCamera;
 enum Phase {
     Waiting { at_s: f32 },
     Aiming { subject: Subject, frames: u32 },
-    Developing { frames: u32, caption: String },
+    Developing { frames: u32, caption: String, spikes: Option<Vec3> },
 }
 
 #[derive(Resource)]
@@ -146,6 +158,7 @@ pub struct Beauty {
     /// Which image is on show, and since when (real seconds), for the fade.
     front: Option<(usize, f32)>,
     caption: String,
+    spikes: Option<Vec3>,
     /// Physical pixels across the square, as the interface last laid it out.
     side_px: u32,
     /// Whether the last look found anything to photograph.
@@ -163,7 +176,8 @@ impl Plugin for BeautyPlugin {
                 Update,
                 shoot
                     .in_set(Stage::Scene)
-                    .after(crate::hull::place_eye)
+                    // Which places the eye first; the eye itself is placed in the menu too, and
+                    // a system added twice cannot be ordered against.
                     .after(crate::starfield::update_bodies)
                     .before(crate::resolved::update_resolved)
                     .run_if(in_state(AppState::InGame)),
@@ -210,6 +224,8 @@ fn setup(
         Hdr,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
+        // Read only by the starfield, as a ratio to the sky's. See `drawn_exposure`.
+        Exposure::default(),
         Transform::default(),
     ));
     commands.insert_resource(Beauty {
@@ -219,6 +235,7 @@ fn setup(
         textures,
         front: None,
         caption: String::new(),
+        spikes: None,
         side_px: DEFAULT_SIDE_PX,
         idle: false,
     });
@@ -246,11 +263,12 @@ fn shoot(
     mut shot_body: ResMut<ShotBody>,
     mut images: ResMut<Assets<Image>>,
     camera: Single<
-        (&mut Camera, &mut Transform, &mut Projection, &mut RenderTarget),
+        (&mut Camera, &mut Transform, &mut Projection, &mut RenderTarget, &mut Exposure),
         With<BeautyCamera>,
     >,
 ) {
-    let (mut camera, mut transform, mut projection, mut target) = camera.into_inner();
+    let (mut camera, mut transform, mut projection, mut target, mut exposure) =
+        camera.into_inner();
     let now = time.elapsed_secs();
     // From the ship. Watching from another craft, the eye is somewhere the ship is not.
     if !ui.beauty_shots || eye.anchored.is_some() {
@@ -309,21 +327,27 @@ fn shoot(
             if let Projection::Perspective(lens) = &mut *projection {
                 lens.fov = shot.field_rad as f32;
             }
+            exposure.ev100 = Exposure::default().ev100 - shot.stops;
             *target = RenderTarget::Image(beauty.images[back].clone().into());
             camera.is_active = true;
-            beauty.phase = Phase::Developing { frames: DEVELOP_FRAMES, caption: shot.caption };
+            beauty.phase = Phase::Developing {
+                frames: DEVELOP_FRAMES,
+                caption: shot.caption,
+                spikes: shot.spikes,
+            };
         }
-        Phase::Developing { frames, caption } => {
+        Phase::Developing { frames, caption, spikes } => {
             if camera.is_active {
                 camera.is_active = false;
             }
             if frames > 0 {
-                beauty.phase = Phase::Developing { frames: frames - 1, caption };
+                beauty.phase = Phase::Developing { frames: frames - 1, caption, spikes };
                 return;
             }
             let back = beauty.front.map_or(0, |(i, _)| 1 - i);
             beauty.front = Some((back, now));
             beauty.caption = caption;
+            beauty.spikes = spikes;
             beauty.taken += 1;
             shot_body.name = None;
             beauty.phase = Phase::Waiting { at_s: now + PERIOD_S };
@@ -479,7 +503,35 @@ pub fn aim(
         }
     };
     let (field_rad, side_px) = fidelity(field_rad, resolution_rad, max_side_px);
-    Some(Shot { forward, up, field_rad, side_px, body: sphere, caption })
+    let metered = match subject {
+        Subject::Star(id) => session.star(*id).and_then(|star| shaded(session, star)),
+        Subject::Destination(_) | Subject::Field { .. } => brightest(session, forward, field_rad),
+        _ => None,
+    };
+    let stops = metered
+        .as_ref()
+        .map_or(0.0, |star| (POINT_ABOVE - star.stops).clamp(-MAX_STOPS, MAX_STOPS));
+    let spikes = matches!(subject, Subject::Star(_)).then(|| metered.map(|s| s.chroma)).flatten();
+    Some(Shot { forward, up, field_rad, side_px, body: sphere, stops, spikes, caption })
+}
+
+/// A star as the sky's window shades it. `None` for one that sends nothing in the bands on
+/// show, which a default `Shaded` cannot be told apart from.
+fn shaded(session: &Session, star: &lc_world::sky::CatalogStar) -> Option<crate::tonemap::Shaded> {
+    let shaded = session.tone.shade(&session.radiance_from(star), &session.mapping);
+    (shaded.stops != 0.0 || shaded.value > 0.0).then_some(shaded)
+}
+
+/// The brightest star in a square field, if there is one in it.
+fn brightest(session: &Session, forward: DVec3, field_rad: f64) -> Option<crate::tonemap::Shaded> {
+    // The square's corners are this far out: half its diagonal.
+    let reach = (field_rad * std::f64::consts::FRAC_1_SQRT_2).cos();
+    session
+        .stars
+        .iter()
+        .filter(|s| session.apparent_dir(s).dot(forward) > reach)
+        .filter_map(|s| shaded(session, s))
+        .max_by(|a, b| a.stops.total_cmp(&b.stops))
 }
 
 /// The field actually taken and the pixels across it, for the optics' resolution.
@@ -580,6 +632,9 @@ pub fn draw(
                 }
                 painter.image(beauty.textures[front], rect, whole,
                     egui::Color32::WHITE.gamma_multiply(t));
+                if let Some(chroma) = beauty.spikes {
+                    spikes(painter, rect, chroma, t);
+                }
             }
             let font = egui::TextStyle::Small.resolve(ui.style());
             let galley = painter.layout_no_wrap(caption, font, text);
@@ -596,6 +651,45 @@ pub fn draw(
     if beauty.front.is_some_and(|(_, since)| now - since < FADE_S) {
         ctx.request_repaint();
     }
+}
+
+/// How far a diffraction spike reaches, as a fraction of the square's side, and how wide it is
+/// at the star, in points. The glow round the star is in points too.
+const SPIKE_REACH: f32 = 0.45;
+const SPIKE_WIDTH: f32 = 1.2;
+const GLOW_RADIUS: f32 = 5.0;
+
+/// Four spikes and a glow at the middle of the frame, each fading to nothing. Drawn over the
+/// photograph rather than in it: the starfield's glare is round by design, and the spikes are a
+/// property of this instrument, not of how the sky is drawn.
+fn spikes(painter: &egui::Painter, rect: egui::Rect, chroma: Vec3, alpha: f32) {
+    let c = chroma.clamp(Vec3::ZERO, Vec3::ONE);
+    let color = |a: f32| {
+        egui::Color32::from_rgb((c.x * 255.0) as u8, (c.y * 255.0) as u8, (c.z * 255.0) as u8)
+            .gamma_multiply(a * alpha)
+    };
+    let middle = rect.center();
+    let reach = rect.width() * SPIKE_REACH;
+    let mut mesh = egui::Mesh::default();
+    for k in 0..4 {
+        let angle = k as f32 * std::f32::consts::FRAC_PI_2;
+        let along = egui::vec2(angle.cos(), angle.sin());
+        let across = egui::vec2(-along.y, along.x) * SPIKE_WIDTH * 0.5;
+        let base = mesh.vertices.len() as u32;
+        mesh.colored_vertex(middle + across, color(0.7));
+        mesh.colored_vertex(middle - across, color(0.7));
+        mesh.colored_vertex(middle + along * reach, color(0.0));
+        mesh.add_triangle(base, base + 1, base + 2);
+    }
+    let center = mesh.vertices.len() as u32;
+    mesh.colored_vertex(middle, color(0.9));
+    const SEGMENTS: u32 = 16;
+    for k in 0..SEGMENTS {
+        let angle = k as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+        mesh.colored_vertex(middle + egui::vec2(angle.cos(), angle.sin()) * GLOW_RADIUS, color(0.0));
+        mesh.add_triangle(center, center + 1 + k, center + 1 + (k + 1) % SEGMENTS);
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 #[cfg(test)]

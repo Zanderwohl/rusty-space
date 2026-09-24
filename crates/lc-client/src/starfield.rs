@@ -472,6 +472,11 @@ pub fn camera_scale(camera: &Query<(&Projection, &Camera), With<crate::app::SkyC
     radians_per_pixel(perspective.fov, height)
 }
 
+/// The sky's camera carries no `Exposure`, which Bevy reads as the default.
+fn sky_exposure() -> f32 {
+    bevy::camera::Exposure::default().exposure()
+}
+
 /// Radians per *physical* pixel for the sky's camera, which is what a shader can measure a view
 /// against. See `drawn_rad_per_px`.
 pub fn physical_scale(camera: &Query<(&Projection, &Camera), With<crate::app::SkyCamera>>) -> f32 {
@@ -508,6 +513,7 @@ pub fn spawn_sky(
         // anything has placed one, and the boom is corrected on the very next frame anyway.
         let uniform = RelativisticStarfieldUniform {
             drawn_rad_per_px,
+            drawn_exposure: sky_exposure(),
             ..uniforms(&session.0, origin_ly, origin_ly, lut_scale(), rad_per_px, style)
         };
         let mesh = meshes.add(build_mesh(stars, origin_ly));
@@ -616,6 +622,7 @@ pub fn update_sky(
         let style = style_for(&ui.0, pass.which);
         let next = RelativisticStarfieldUniform {
             drawn_rad_per_px,
+            drawn_exposure: sky_exposure(),
             ..uniforms(&session.0, eye.at_ly, origin, lut_scale(), rad_per_px, style)
         };
         if next == pass.sent {

@@ -66,6 +66,7 @@ struct StarfieldUniform {
     log_t_scale: f32,
     lut_samples: f32,
     drawn_rad_per_px: f32,
+    drawn_exposure: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: StarfieldUniform;
@@ -201,6 +202,14 @@ fn pixel_scale() -> f32 {
     return here / material.drawn_rad_per_px;
 }
 
+/// How much brighter this view is exposed than the one the window was placed for.
+fn exposure_gain() -> f32 {
+    if (material.drawn_exposure <= 0.0) {
+        return 1.0;
+    }
+    return view.exposure / material.drawn_exposure;
+}
+
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
@@ -249,7 +258,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let peak = max(linear.r, max(linear.g, linear.b));
     var above = -1e9;
     if (luminance > 0.0 && material.reference > 0.0) {
-        above = log2(luminance / material.reference);
+        above = log2(luminance * exposure_gain() / material.reference);
     }
     let chroma = select(vec3<f32>(1.0), linear / peak, peak > 0.0);
     let level = clamp(1.0 + above / max(material.point_stops, 1e-6), 0.0, 1.0);

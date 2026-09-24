@@ -97,6 +97,14 @@ pub fn parse(args: &[String]) -> Entry {
         actions.push(Action::SelectNearest);
         actions.push(Action::OpenPanel(crate::ui::Panel::Telescope));
     }
+    // Telescope duties, so a beauty shot of each can be photographed.
+    if flag("--stare") {
+        actions.push(Action::SelectNearest);
+        actions.push(Action::StareSelected);
+    }
+    if flag("--sweep") {
+        actions.push(Action::SurveyAhead);
+    }
     if let Some(b) = value::<usize>(args, "--curve")
         && let Some(band) = em_spectra::Band::ALL.get(b)
     {
