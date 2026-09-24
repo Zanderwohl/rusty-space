@@ -1,4 +1,4 @@
-//! `energize` and `finish-refit`: a ship's energy and modules, by fiat.
+//! `energize` and `refit-finish`: a ship's energy and modules, by fiat.
 
 use lc_world::craft::CraftId;
 

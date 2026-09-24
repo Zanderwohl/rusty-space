@@ -5,7 +5,7 @@ and the shard parses it, checks it against the asker's level, runs it at a fixed
 tick and answers the connection that sent it. The client knows nothing about any command. Code
 is `lc_server::command` and `lc_client::console`.
 
-Status: **built** — `help`, `teleport`, `where`, `energize`, `finish-refit`, `stage`.
+Status: **built** — `help`, `teleport`, `where`, `energize`, `refit-finish`, `stage`.
 
 ## Why text on the wire
 
@@ -61,7 +61,7 @@ reason `ability::allows` opens development there: the population is whoever ran 
 `energize` and `stage` sit at the levels the old `Inbound::Grant` and `Inbound::Stage` are allowed
 at, and a test holds the two tables to each other.
 
-`teleport`, `energize` and `finish-refit` act on the asker's own ship from debug (3). Their `ship:`
+`teleport`, `energize` and `refit-finish` act on the asker's own ship from debug (3). Their `ship:`
 argument, which names any ship, starts at admin (2), so admins and superadmins act on anyone's.
 
 ## The queue
@@ -78,7 +78,7 @@ account is settled first, so "what fits" counts everything collected and spent u
 
 ## Finish-refit
 
-`finish-refit [ship:<id>]` completes a refit under way now: the target loadout, and the energy the
+`refit-finish [ship:<id>]` completes a refit under way now: the target loadout, and the energy the
 remaining steps would have taken. Only the time is skipped, so the crew's upkeep over it is not
 charged, and a ship that is not refitting is an error.
 

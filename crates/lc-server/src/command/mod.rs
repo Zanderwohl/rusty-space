@@ -117,8 +117,8 @@ pub const COMMANDS: &[Spec] = &[
         ],
     },
     Spec {
-        name: "finish-refit",
-        verb: Verb::FinishRefit,
+        name: "refit-finish",
+        verb: Verb::RefitFinish,
         level: Level::DEBUG,
         summary: "complete a refit under way, at once",
         args: &[ArgSpec {
@@ -210,7 +210,7 @@ impl<J: Journal> Server<J> {
                 let ship = self.ship_named(command.from, &args)?;
                 self.energize(ship, args.number("amount"), wire)
             }
-            Verb::FinishRefit => {
+            Verb::RefitFinish => {
                 let ship = self.ship_named(command.from, &args)?;
                 self.finish_refit(ship, wire)
             }
