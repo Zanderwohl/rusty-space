@@ -238,9 +238,9 @@ graph LR
 
 ### F1 · Primitives
 
-- status: todo
+- status: done #65
 - needs: K1
-- touches: `crates/lc-world/src/form/primitive.rs`
+- touches: `crates/lc-world/src/form/primitive.rs`, `crates/lc-world/src/form.rs`
 - read: 29 §Parts
 - deliver: for each of the six primitives, volume from scale and proportions, scale solved from volume, and surface area (closed form, or the standard approximation for the ellipsoid). The Mind as a cube of `min_part_m3`.
 - done when: scale solved from a volume gives the volume back to a part in 10¹², and each area is checked against a fine tessellation.
@@ -498,21 +498,22 @@ graph LR
 
 ### R5 · Drones, in a void
 
-- status: todo
+- status: done https://github.com/Zanderwohl/rusty-space/pull/64
 - needs: —
-- touches: `crates/em-render/src/drone_material.rs`, `crates/lc-client/assets/shaders/drones.wgsl`
+- touches: `crates/em-render/src/drone_material.rs`, `crates/lc-client/assets/shaders/drones.wgsl`, `crates/lc-client/examples/drones_void.rs`, `lightcone/images/drones-*.png`
 - read: 32 §Drones
-- deliver: stateless particles: position a closed form of index, seed and `t`, in the vertex shader over instanced quads; arcs to fixture targets, dwell, return; idle patrol; haze at a distance.
+- deliver: stateless particles: position a closed form of index, seed and `t`, in the vertex shader over one quad per drone; arcs to fixture targets, dwell, return; idle patrol; haze at a distance.
 - done when: `--burst` shows smooth motion, and a paused clock photographs the same frame twice.
 
 ### R6 · Field shader, in a void
 
-- status: todo
+- status: done #66
 - needs: —
-- touches: `crates/em-render/src/field_material.rs`, `crates/lc-client/assets/shaders/field.wgsl`
+- touches: `crates/em-render/src/field_material.rs`, `crates/lc-client/assets/shaders/field.wgsl`, `crates/lc-client/examples/field_void.rs`
 - read: 32 §The field
 - deliver: two layers on any envelope mesh; Clear's thin-film shimmer and Black's matte surface; the blackbody glow from temperature at physical brightness through the exposure; hot spots from bearings; the flicker past 80%; the switch sweep; the collapse flash and afterglow; `--field-k`.
 - done when: photographed at 400, 2 400 and 4 600 K in both modes, and `--burst` shows the flicker.
+- note: photographed through `examples/field_void.rs`, which has its own `--field-k`, `--mode` and `--burst`. The binary's `--field-k` holds the player's field, and there is none until R11, whose deliver line has it.
 
 ### R7 · Exhaust cone, in a void
 
@@ -556,7 +557,7 @@ graph LR
 - needs: R6, F6, H7
 - touches: `crates/lc-client/src/field.rs`
 - read: 32 §The field, 30 §What an observer sees
-- deliver: the envelope meshed from F6's grid, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and hot spots from `Illuminated` once E3 exists.
+- deliver: the envelope meshed from F6's grid, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and hot spots from `Illuminated` once E3 exists; `--field-k` in the binary (32 §Photographing it), holding the player's field at a temperature.
 - done when: a diving ship glows the color the field bar shows.
 
 ### R12 · The cone in the game

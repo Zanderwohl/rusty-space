@@ -123,6 +123,8 @@ pub enum Number {
     Blend,
     Anchor,
     Standoff,
+    /// Finite each, but a shape whose solved size is not.
+    Proportions,
 }
 
 impl std::fmt::Display for Number {
@@ -140,6 +142,7 @@ impl std::fmt::Display for Number {
             Self::Blend => "blend",
             Self::Anchor => "anchor",
             Self::Standoff => "standoff",
+            Self::Proportions => "proportions",
         })
     }
 }
@@ -264,11 +267,13 @@ impl Part {
                 if !all_positive(edges) {
                     Some(Number::Edges)
                 } else {
-                    (!non_negative(corner)).then_some(Number::Corner)
+                    // Past half the shortest edge the rounding of opposite faces would cross.
+                    (!(non_negative(corner) && corner <= 0.5)).then_some(Number::Corner)
                 }
             }
             Primitive::Cylinder { length } => (!positive(length)).then_some(Number::Length),
-            Primitive::Torus { major } => (!positive(major)).then_some(Number::Major),
+            // Below one the tube crosses the axis, and the closed forms count that twice.
+            Primitive::Torus { major } => (!(major.is_finite() && major >= 1.0)).then_some(Number::Major),
             Primitive::Frustum { length, taper } => {
                 if !positive(length) {
                     Some(Number::Length)
@@ -279,6 +284,9 @@ impl Part {
         };
         if shape.is_some() {
             return shape;
+        }
+        if !self.primitive.at(self.primitive.scale(self.volume_m3)).exists() {
+            return Some(Number::Proportions);
         }
         let place = self.placement?;
         if !place.twist.is_finite() {
@@ -471,6 +479,7 @@ impl From<lc_proto::form::Number> for Number {
             N::Blend => Self::Blend,
             N::Anchor => Self::Anchor,
             N::Standoff => Self::Standoff,
+            N::Proportions => Self::Proportions,
         }
     }
 }
@@ -490,6 +499,7 @@ impl From<Number> for lc_proto::form::Number {
             Number::Blend => Self::Blend,
             Number::Anchor => Self::Anchor,
             Number::Standoff => Self::Standoff,
+            Number::Proportions => Self::Proportions,
         }
     }
 }
@@ -616,11 +626,19 @@ mod tests {
 
     #[test]
     fn a_malformed_number_is_refused_by_part_and_field() {
-        let cases: [(usize, fn(&mut Part), Number); 10] = [
+        let cases: [(usize, fn(&mut Part), Number); 15] = [
             (2, |p| p.volume_m3 = f64::NAN, Number::Volume),
             (2, |p| p.volume_m3 = 0.0, Number::Volume),
             (2, |p| p.primitive = Primitive::Ellipsoid { axes: DVec3::new(1.0, -1.0, 1.0) }, Number::Axes),
             (2, |p| p.primitive = Primitive::Slab { edges: DVec3::ONE, corner: f64::NAN }, Number::Corner),
+            (2, |p| p.primitive = Primitive::Slab { edges: DVec3::new(1.0, 2.0, 3.0), corner: 0.500_001 }, Number::Corner),
+            (2, |p| p.primitive = Primitive::Torus { major: 0.99 }, Number::Major),
+            (2, |p| p.primitive = Primitive::Torus { major: f64::NAN }, Number::Major),
+            (2, |p| p.primitive = Primitive::Ellipsoid { axes: DVec3::new(1.0, 1e-160, 1e-160) }, Number::Proportions),
+            (2, |p| {
+                p.primitive = Primitive::Cylinder { length: 1e-200 };
+                p.volume_m3 = 1e300;
+            }, Number::Proportions),
             (2, |p| p.primitive = Primitive::Frustum { length: f64::INFINITY, taper: 0.5 }, Number::Length),
             (2, |p| p.placement.as_mut().unwrap().tilt = DVec2::new(0.0, f64::NAN), Number::Tilt),
             (2, |p| p.placement.as_mut().unwrap().blend = -0.1, Number::Blend),
@@ -641,6 +659,8 @@ mod tests {
         let mut form = ship();
         form.parts[2].primitive = Primitive::Capsule { length: 0.0 };
         form.parts[3].primitive = Primitive::Frustum { length: 2.0, taper: 0.0 };
+        form.parts[1].primitive = Primitive::Slab { edges: DVec3::new(1.0, 2.0, 3.0), corner: 0.5 };
+        form.parts[4].primitive = Primitive::Torus { major: 1.0 };
         form.parts[4].placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::X, standoff: -0.5 };
         assert_eq!(form.validate(), Ok(()));
     }

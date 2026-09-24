@@ -134,6 +134,7 @@ pub enum Number {
     Blend,
     Anchor,
     Standoff,
+    Proportions,
 }
 
 /// Why a target form was refused, naming the part where there is one. The structural checks

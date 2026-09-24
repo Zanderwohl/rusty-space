@@ -119,7 +119,7 @@ with drone traffic streaming to it: a shipyard that is also the ship.
 ## Drones
 
 Drones are **stateless particles**: each one's position is a closed-form function of its index, a
-seed and `t`, evaluated in the vertex shader over an instanced quad. That is the same rule as the
+seed and `t`, evaluated in the vertex shader over one quad per drone. That is the same rule as the
 hull: the picture is a function of the recipe and the clock. It also means no particle simulation
 to keep in step, and no dependency such as `bevy_hanabi` to check against Bevy 0.19 and the browser
 (WebGPU) build.
@@ -132,6 +132,19 @@ to keep in step, and no dependency such as `bevy_hanabi` to check against Bevy 0
 - **Idle:** most docked, a thin patrol drifting over the hull.
 - **At a distance:** the swarm fades into a soft haze over the frontier before individual motes
   would fall below a pixel.
+
+As built (`em_render::drone_material`, `drones.wgsl`): the quads are one mesh, each carrying its
+drone's index in a vertex, since Bevy's shared vertex buffers offset `vertex_index`. Docks and
+targets are fixed arrays in the material's uniform, which the host fills. A hash of the index picks
+each drone's role against two fractions, working and patrolling, so raising either adds drones
+without reshuffling the rest. A working drone takes a new target every trip, switching while it is
+docked. Haze is a mote's light spread over a disc about the spacing between drones, and never
+narrower than a few pixels, because a quad under a pixel lands on no pixel center and sparkles. The
+light is conserved, so the haze has the swarm's true brightness per pixel, as the hull does, and a
+sparse swarm makes a faint haze. The clock is seconds since the refit round began (R4's `t`), or
+since the view was spawned when idle. The host takes that difference in `f64` and only then narrows
+it to the shader's `f32`, which resolves a clock since J2000 only to seconds.
+`crates/lc-client/examples/drones_void.rs` photographs it.
 
 ## The field
 
@@ -147,6 +160,14 @@ whatever is decided about air:
   the color is a consequence, not a setting. At 400 K the outer layer is invisible in the visible
   bands. At 2 400 K on a dive it glows red-orange. At 4 600 K it is the brightest thing on screen.
 
+**How it is drawn.** One mesh, three draws: the far wall, the inner rim, then the near wall, which
+alone has alpha and so is the only one that can hide anything. By Kirchhoff each mode's emissivity is
+its absorptivity, and a thin shell's grows toward one along a grazing path, so a Clear field is
+limb-brightened and a Black one glows evenly. The same number is how much of what is behind a wall it
+takes out: Clear shows the ship, Black hides it. The shader takes kelvin and fractions and a table of
+blackbody colors the host has already put through the observer's bands, so nothing in
+`em_render::field_material` knows a `Balance`.
+
 **The mode sets the surface.** Clear is a shimmering, mostly transparent skin: thin-film color bands
 that drift across it like a soap bubble's, over the fresnel rim, with the heat glow showing through
 as a tint. Black is matte and dark, and the heat glow is all there is to see. A switch sweeps the new
@@ -160,11 +181,23 @@ surface across the envelope over `field_switch_s`, from the Mind outward.
 | past 80% of `Q_max` | the glow goes uneven and begins to flicker, faster as it nears the limit |
 | collapse | below |
 
+![A field at 400, 2 400 and 4 600 K, Clear left and Black right](../images/field-temperatures.png)
+
+At 400 K the glow is nothing in the visible: Clear shows the ship and the world behind it through
+the sheen, and Black is a hole in the world. At 2 400 K it is red-orange, Clear's limb the brighter.
+At 4 600 K it is the brightest thing in the frame, and uneven.
+
+![Four consecutive frames of a field at its limit](../images/field-flicker.png)
+
+![A beam's hot spot, and a switch from Clear to Black half swept from the Mind](../images/field-beams-and-switch.png)
+
 **Collapse** is a white flash and a sphere of hot debris expanding and cooling through the colors
 of the afterglow over `collapse_afterglow_s`. Nearby fields brighten when the spike lands on them,
 each at its own retarded time, so a cascade is seen spreading at c. From a distance, a collapse is
 drawn by the photometry: a new point in the sky, as bright as [30-the-field.md](30-the-field.md)
 says.
+
+![A collapse: the flash, then the debris at 40, 180 and 270 s of a 300 s afterglow](../images/field-collapse.png)
 
 ## Beams and plumes
 
@@ -236,6 +269,10 @@ photographed:
 | `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point |
 | `--demo collapse` | a ship collapsing beside two others, one close enough to follow it |
 | `--field-k <kelvin>` | the player's field held at a temperature, for the shader |
+
+Until the player has a field, the shader is photographed in a void: `cargo run -p lc-client
+--example field_void -- --field-k <kelvin> --mode clear|black`, around a stand-in hull, with its
+own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the example's module doc.
 
 `--burst` is the only way to see the saturation flicker, as it is for any flicker.
 
