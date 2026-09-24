@@ -229,7 +229,7 @@ keeps the welcome's shape and puts the numbers next to what they govern.
 | `drive_efficiency` | 1.0 | ε. Unbounded above |
 | `recovery` | 0.95 | fraction of build energy a dismantling returns |
 | `storage_per_module` | 5 ME | capacity of one storage module |
-| `engine_thrust_n` | 7.24 × 10¹⁰ N | 1 g of the starting ship, full, per engine, so five engines give today's 5 g |
+| `engine_thrust_n` | 7.17 × 10¹⁰ N | 1 g of the starting ship, full, per engine, so five engines give today's 5 g |
 | `drone_power_w` | 2.31 × 10¹⁹ W | one drone builds one module in a week of proper time — about 69 s of real time at the design rate |
 | `living_drain_w` | 4.43 × 10¹⁵ W | one living module drains 1 ME a century |
 | `data_mass_fraction` | 0.5 | a data module's mass, and so its build energy, over any other module's |

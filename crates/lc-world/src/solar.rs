@@ -55,7 +55,7 @@ pub fn flux_w_m2(luminosity_w: f64, distance_m: f64) -> f64 {
 /// What a hull collects broadside, W: the balance's efficiency and gain times flux times shadow.
 pub fn power_w(balance: &crate::fitting::Balance, length_m: f64, luminosity_w: f64, distance_m: f64) -> f64 {
     balance.solar_gain
-        * balance.solar_efficiency
+        * balance.conversion_efficiency
         * flux_w_m2(luminosity_w, distance_m)
         * broadside_m2(length_m)
 }
