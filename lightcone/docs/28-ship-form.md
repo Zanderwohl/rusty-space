@@ -231,11 +231,11 @@ Flying and refitting still exclude each other, as in 19.
 - **storage**, an ellipsoid at 5 : 3 : 1, enclosing the Mind: 2.36 × 10⁶ m³, 30 ME
 - **engines**, one frustum aft: 1.96 × 10⁶ m³, 5 g full
 - **drones**, a capsule under the keel: 7.85 × 10⁵ m³
-- **living**, a slab across the dorsal face, and **data**, a small capsule forward: one old slot each
+- **living**, a slab across the dorsal face, and **data**, a small capsule forward: 3.93 × 10⁵ m³ each
 
 The anchors of 20 and 29 are derived from this form.
 
-The editor also offers **presets**, each rearranging the ship's current volumes:
+The editor also offers **built-in presets**, each rearranging the ship's current volumes:
 
 | preset | shape |
 |---|---|
@@ -244,6 +244,31 @@ The editor also offers **presets**, each rearranging the ship's current volumes:
 | **Cluster** | separate bodies on spars about a core, all inside one envelope |
 
 A preset is only a target. Applying it is a round like any other, usually made of moves.
+
+### Your own presets
+
+A player can save the draft as a preset, name it, and apply it to any ship they fly later. A saved
+preset is a `Form` with its part ids, and it applies in one of two ways:
+
+| applied as | what the target is | typical round |
+|---|---|---|
+| **layout** | the preset's arrangement, filled with this ship's volumes. Each part keeps its share of its kind's total, so the ship keeps what it has and changes shape | moves and reshapes, little energy |
+| **design** | the preset exactly, volumes included | builds and dismantles, paid for as usual |
+
+The built-in presets are layouts written in code. Applying either kind replaces the draft, not the
+ship, so the result is one undoable edit and nothing is spent until Apply. A preset whose kinds the
+ship lacks gives those parts nothing in a layout, and the editor names them.
+
+- **Presets belong to the account, not to a craft.** They are designs a player carries in their head,
+  not facts about the world, so they are not knowledge and do not travel at the speed of light. They
+  are kept in `lc-store`, so a player sees the same list on the desktop and in a browser, which has
+  nowhere good to keep files.
+- **They can be shared as text.** Export copies the preset as a RON string and Import reads one from
+  the clipboard. Sharing designs between players then needs no server feature and nothing to moderate.
+- An imported or stale preset is only a draft: the server validates the target when it is applied,
+  as it validates any other.
+- Limits, so a store row stays small: `MAX_PARTS` parts to a form, `MAX_PRESETS` presets to an
+  account, and a name of at most 64 characters.
 
 ## The editor
 
@@ -318,6 +343,37 @@ volume above the minimum.
   envelope area, slew rate, the field's rated load and headroom, brightness at the ship's current
   distance from its star, and the round's duration.
 
+### Undo and redo
+
+The editor keeps a **history of edits to the draft**: a list of entries and a cursor into it. Each
+entry records what changed, before and after, on the parts it touched:
+
+| edit | before | after |
+|---|---|---|
+| add | nothing | the new part |
+| remove | the part and its subtree | nothing |
+| resize | volume | volume |
+| reshape | primitive and proportions | primitive and proportions |
+| move | placement: parent, mode, anchor, twist, tilt, standoff, blend | placement |
+| mirror | on or off | on or off |
+| apply a preset | the whole draft | the whole draft |
+| reset the draft to the ship | the whole draft | the whole draft |
+
+- **Undo** writes an entry's *before* back and moves the cursor back one. **Redo** writes its *after*
+  and moves forward. A new edit made with the cursor behind the end drops everything after it. That
+  is the ordinary linear history, without branches.
+- **Part ids make it exact.** Entries name parts by id, and a removed part keeps its id in its entry,
+  so undoing a removal puts back the same part in the same place with the same children.
+- **One gesture is one entry.** A drag records on release, not on every frame, and a typed field
+  records when it is committed. The list reads as what the player did.
+- **The history is a panel**, listing entries by what they say ("resized storage core, 2.4 → 3.0 ×
+  10⁶ m³"). Clicking one moves the cursor there, undoing or redoing everything between.
+- **It is temporary.** It lives in `Ui` beside the draft, survives leaving the view and coming back,
+  and is cleared when a round is applied, because the ship is then the new starting point. It is not
+  saved and not sent. It holds `MAX_HISTORY` entries and drops the oldest.
+- `Cmd`/`Ctrl`+`Z` undoes, and `Shift` with it redoes. Both are `Action`s like any handle, so undo is
+  tested without a window, as the preview is.
+
 Every handle emits an `Action` ([13-client-shell.md](13-client-shell.md)). `--view form --shot`
 photographs it, and `--form <preset>` stages a draft.
 
@@ -326,6 +382,9 @@ photographs it, and `--form <preset>` stages a draft.
 - `Loadout` is removed from the wire and from saves. `Order::Refit { target: Form }`.
 - `Fitted` carries the form, each part's solved scale, the capacities, and the geometry's numbers.
 - A craft's form is saved. Old rows are not read: there are no players, so the format simply changes.
+- Presets: `Inbound::SavePreset { name, form }`, `Inbound::DeletePreset { name }`, and
+  `Outbound::Presets`, the account's whole list, sent after `Welcome` and after each change. A
+  `presets` table in `lc-store`, keyed by account and name.
 - **Other craft's forms reach a client only by being seen.** `Presence` gains the form, and it arrives with
   the light, so a ship seen mid-refit is seen in the shape its light left in.
 
@@ -350,6 +409,9 @@ photographs it, and `--form <preset>` stages a draft.
 | `envelope_margin` | 0.05 | the envelope's offset over the cube root of hull volume |
 | `engine_clear_half_angle` | 15° | |
 
+Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 64, and on the client
+`MAX_HISTORY` 256.
+
 
 ## Where it goes
 
@@ -357,8 +419,9 @@ photographs it, and `--form <preset>` stages a draft.
 |---|---|---|
 | `lc-world` | `form.rs` (parts, tree, sizing, capacities, the starting form, presets), `form_grid.rs` (voxels, shadow, envelope, moments) | `fitting.rs` loses `Loadout` and reads capacities. `refit.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments |
 | `lc-proto` | | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form |
-| `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands |
-| `lc-client` | `form_view.rs`, `form_panel.rs`, `snap.rs` | `ui.rs` gains the view mode. The refit window becomes the ledger |
+| `lc-store` | `presets.rs` | |
+| `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |
+| `lc-client` | `form_view.rs`, `form_panel.rs`, `snap.rs`, `form_history.rs`, `presets_panel.rs` | `ui.rs` gains the view mode. The refit window becomes the ledger |
 
 `form_grid.rs` and the client's mesher ([31-ship-rendering.md](31-ship-rendering.md)) both evaluate the
 distance field that `form.rs` defines, so the grid the server reasons about and the surface the player
