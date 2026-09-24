@@ -89,7 +89,7 @@ fn bezier(a: vec3<f32>, control: vec3<f32>, b: vec3<f32>, s: f32) -> vec3<f32> {
     return u * u * a + 2.0 * u * s * control + s * s * b;
 }
 
-// The arc's control point: bowed away from the patrol center so a drone flies round the hull
+// The arc's control point: bowed away from the patrol center so a drone flies around the hull
 // rather than through it, and pushed sideways by `h` so a hundred drones on one route fan out.
 fn arc_control(a: vec3<f32>, b: vec3<f32>, h: u32) -> vec3<f32> {
     let mid = 0.5 * (a + b);
@@ -131,8 +131,8 @@ fn working(key: u32) -> Placed {
         out.glow = 0.0;
     } else if (p < leg + dwell) {
         let u = (p - leg) / dwell;
-        // Zero at both ends, so arriving and leaving are continuous with the arcs.
-        let wander = sin(PI * u) * material.hover_m;
+        // Zero with zero velocity at both ends, to match the arcs, which ease in and out.
+        let wander = sin(PI * u) * sin(PI * u) * material.hover_m;
         let phases = vec3<f32>(unit(pcg(trip + 21u)), unit(pcg(trip + 22u)), unit(pcg(trip + 23u)));
         out.position = goal + wander * sin(TAU * (vec3<f32>(1.0, 1.7, 2.3) * u + phases));
         // The piece is picked up at the end of the dwell.
@@ -198,19 +198,13 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let mote = material.mote_m * scale;
     let mote_px = mote * px_per_m;
 
-    // Haze before a mote falls below a pixel: its light spread over a disc wide enough to
-    // overlap its neighbors, and never narrower than `haze_px`. The light is held at what the mote
-    // had when it became haze rather than falling with it, or a distant swarm is not a haze but
-    // nothing at all.
-    let fully_hazed_px = material.haze_px / 3.0;
-    let hazed = 1.0 - smoothstep(fully_hazed_px, material.haze_px, mote_px);
+    // Haze before a mote falls below a pixel, which would land on no pixel center and sparkle: the
+    // same light spread over a disc wide enough to overlap its neighbors, and never narrower than
+    // `haze_px`. The light is conserved, so the haze has the swarm's true brightness per pixel.
+    let hazed = 1.0 - smoothstep(material.haze_px / 3.0, material.haze_px, mote_px);
     let haze = max(max(material.haze_m * scale, material.haze_px / px_per_m), mote);
     let size = mix(mote, haze, hazed);
-    // Once the haze disc itself is narrower than `haze_px`, it dims as the hull does, or a far
-    // swarm outshines the ship it is working on.
-    let receding = min(material.haze_m * scale * px_per_m / material.haze_px, 1.0);
-    let lit = max(mote_px, fully_hazed_px * receding) / (size * px_per_m);
-    let conserve = lit * lit;
+    let conserve = (mote / size) * (mote / size);
 
     let right = view.world_from_view[0].xyz;
     let up = view.world_from_view[1].xyz;

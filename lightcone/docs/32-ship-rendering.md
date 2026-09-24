@@ -138,9 +138,12 @@ drone's index in a vertex, since Bevy's shared vertex buffers offset `vertex_ind
 targets are fixed arrays in the material's uniform, which the host fills. A hash of the index picks
 each drone's role against two fractions, working and patrolling, so raising either adds drones
 without reshuffling the rest. A working drone takes a new target every trip, switching while it is
-docked. Haze is a mote's light spread over a disc about the spacing between drones. Each drone keeps
-the light it had when it became haze, since true point sources that far off would add up to nothing,
-until the haze disc is narrower than a few pixels too. From there the haze dims as the hull does.
+docked. Haze is a mote's light spread over a disc about the spacing between drones, and never
+narrower than a few pixels, because a quad under a pixel lands on no pixel center and sparkles. The
+light is conserved, so the haze has the swarm's true brightness per pixel, as the hull does, and a
+sparse swarm makes a faint haze. The clock is seconds since the refit round began (R4's `t`), or
+since the view was spawned when idle. The host takes that difference in `f64` and only then narrows
+it to the shader's `f32`, which resolves a clock since J2000 only to seconds.
 `crates/lc-client/examples/drones_void.rs` photographs it.
 
 ## The field

@@ -44,18 +44,20 @@ impl Options {
         let value = |flag: &str| {
             args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
         };
-        let number = |flag: &str, default: f32| {
-            value(flag).map(|v| v.parse().unwrap_or_else(|_| panic!("{flag} {v}"))).unwrap_or(default)
-        };
+        fn parsed<T: std::str::FromStr>(flag: &str, v: Option<String>, default: T) -> T {
+            v.map(|v| v.parse().unwrap_or_else(|_| panic!("{flag} {v}"))).unwrap_or(default)
+        }
+        let number = |flag: &str, default: f32| parsed(flag, value(flag), default);
+        let integer = |flag: &str, default: u32| parsed(flag, value(flag), default);
         Self {
             shot: value("--shot"),
-            burst: number("--burst", 1.0) as u32,
-            frames: number("--frames", 30.0) as u32,
+            burst: integer("--burst", 1),
+            frames: integer("--frames", 30),
             at: number("--at", 0.0),
             rate: number("--rate", 1.0),
             mode: value("--mode").unwrap_or_else(|| "working".into()),
-            count: number("--count", 600.0) as u32,
-            seed: number("--seed", 1.0) as u32,
+            count: integer("--count", 600),
+            seed: integer("--seed", 1),
             distance: number("--distance", 150.0),
         }
     }

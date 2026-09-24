@@ -42,8 +42,9 @@ pub struct DroneUniform {
     pub color: Vec4,
     /// Color a carrying drone turns on its way home, in place of `color`.
     pub carry_color: Vec4,
-    /// Seconds. Kept small by the host — it is `f32` in the shader, so a clock of a day
-    /// resolves only to about eight milliseconds.
+    /// Seconds since the host's own origin: the start of the refit round, or of the view when
+    /// idle. `f32` in the shader resolves a day only to about eight milliseconds and a clock
+    /// since J2000 to several seconds, so the host subtracts in `f64` before narrowing.
     pub time: f32,
     pub seed: u32,
     /// Drones drawn, at most the quads in the mesh; the rest collapse to nothing.
@@ -74,8 +75,8 @@ pub struct DroneUniform {
     /// so the haze is smooth rather than a field of blobs.
     pub haze_m: f32,
     /// Pixels across at which a mote starts turning into haze. It is haze entirely by a third
-    /// of this, which is above a pixel for any value from three up, and from there on each drone
-    /// keeps the light it had then, so a distant swarm stays visible as haze.
+    /// of this, which is at least a pixel for any value from three up. Light is conserved
+    /// throughout, so the haze is as bright per pixel as the swarm is up close.
     pub haze_px: f32,
 }
 
