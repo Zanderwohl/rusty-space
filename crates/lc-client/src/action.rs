@@ -95,7 +95,6 @@ pub enum Action {
     WatchSelected,
     /// Call the selected star something. A name is this ship's, not the star's.
     NameSelected(String),
-    /// Call a star, a body or a population something.
     Name(Subject, String),
     /// Keep a star's raw log whatever is concluded from it, or let it go once it has been read.
     RetainRaw(StarId, bool),
@@ -750,8 +749,7 @@ fn set_duty(ui: &UiState, session: &mut Session, duty: Duty, effects: &mut Vec<E
     }
 }
 
-/// A name is the shard's to record, like a course: sent, and back in what the craft is told it
-/// knows.
+/// With a shard, the name is held only once the shard's report brings it back.
 fn name_it(session: &mut Session, subject: Subject, name: &str, effects: &mut Vec<Effect>) {
     let name = name.trim();
     if name.is_empty() {
@@ -1325,8 +1323,7 @@ mod tests {
         );
     }
 
-    /// A planet is named like a star, and so is a belt of the system the ship is in, which has
-    /// no file to hold the name until one is made for it.
+    /// A belt has no file until it is named, so only the ship's own system's belts can be.
     #[test]
     fn a_body_and_a_belt_take_a_name() {
         let (mut ui, mut s) = fixture();
@@ -1354,7 +1351,6 @@ mod tests {
         apply(Action::Name(belt, "The Shoals".into()), &mut ui, &mut s);
         assert_eq!(s.band_label(0), "The Shoals");
 
-        // Past the end of the list, or around another star, is naming nothing.
         let none = Subject::Population { star: system.star, index: system.populations.len() as u32 };
         let effects = apply(Action::Name(none, "Nowhere".into()), &mut ui, &mut s);
         assert!(matches!(effects.as_slice(), [Effect::Notify(t)] if t.contains("nothing detected")));

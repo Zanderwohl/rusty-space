@@ -273,7 +273,7 @@ pub struct Remembered {
     tab: SystemTab,
     draft: String,
     name_draft: String,
-    /// The System panel's, apart from the telescope's so two open fields do not type as one.
+    /// Separate from the telescope's, so two open fields do not share text.
     body_draft: String,
     aimed: crate::radio_panel::Aimed,
     seal: bool,

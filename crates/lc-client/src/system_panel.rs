@@ -272,7 +272,6 @@ fn details(
     });
 }
 
-/// Somewhere to type a name for `subject`, sent on Enter. Nothing for what this ship may not name.
 fn name_field(
     ui: &mut egui::Ui,
     game: &Game,

@@ -606,10 +606,8 @@ impl Knowledge {
         self.refresh(subject);
     }
 
-    /// Whether this craft may put a name on `subject` from inside `here`.
-    ///
-    /// Something it holds a file on, or a belt or cloud of the system it is in: populations are
-    /// the generator's until they become knowledge, so no craft has a file to name one by.
+    /// A population qualifies only in `here`, the system the craft is in: populations are
+    /// generated, not observed, so no craft holds a file on one.
     pub fn nameable(&self, subject: impl Into<Subject>, here: Option<&crate::system::LocalSystem>) -> bool {
         match subject.into() {
             Subject::Population { star, index } => {

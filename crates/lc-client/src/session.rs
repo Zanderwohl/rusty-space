@@ -585,7 +585,7 @@ impl Session {
         self.home_labels().of(key)
     }
 
-    /// What this ship calls a belt or cloud of its system, by its index in the system's list.
+    /// What this ship calls a belt or cloud of its system, by its index in `populations`.
     pub fn band_label(&self, index: usize) -> String {
         let Some(system) = self.system.as_ref() else { return String::new() };
         let Some(population) = system.populations.get(index) else { return String::new() };
@@ -599,7 +599,6 @@ impl Session {
         self.knowledge.nameable(subject, self.system.as_deref())
     }
 
-    /// Give something a name of this ship's own.
     pub fn name_it(&mut self, subject: lc_world::knowledge::Subject, name: &str) -> bool {
         let name = name.trim();
         if name.is_empty() || !self.nameable(subject) {

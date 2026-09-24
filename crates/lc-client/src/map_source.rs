@@ -377,7 +377,7 @@ fn push_local_system(build: &mut Build, session: &Session) {
         let name = session.band_label(index);
         build.push(
             MapItem::annulus(
-                // By index, so naming a belt does not move its key out from under a pin.
+                // By index, so renaming a belt keeps its key.
                 ItemKey::from_id("band", index as u64),
                 name.clone(),
                 origin,

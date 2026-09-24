@@ -904,8 +904,7 @@ mod tests {
         assert_eq!(replica(ship, &all).name_of(sky()[0].id).as_deref(), Some("Hearth"));
     }
 
-    /// A belt has no file until it is named, so what may be named is a belt of the system the
-    /// craft is in — and not one around another star, or one past the end of the list.
+    /// Only a belt of the craft's own system can be named, since no craft holds a file on one.
     #[tokio::test]
     async fn a_craft_names_the_belts_of_its_own_system() {
         let broker = Broker::new([1u8; 32]);
