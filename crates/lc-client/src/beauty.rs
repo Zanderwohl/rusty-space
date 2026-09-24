@@ -58,8 +58,8 @@ const FRAME_MARGIN: f64 = 1.3;
 /// body's radii. Lengths rather than angles, so a higher orbit is a longer lens on the same
 /// scene. Both were an angle once, set from low orbit, and from twenty radii out each one took
 /// in the whole disc.
-const HORIZON_SPAN_RADII: f64 = 0.057;
-const NADIR_SPAN_RADII: f64 = 0.045;
+const HORIZON_SPAN_RADII: f64 = 0.114;
+const NADIR_SPAN_RADII: f64 = 0.09;
 /// How far above the limb the horizon shot looks, as a fraction of its field, so the limb sits
 /// in the lower part of the frame with sky over it.
 const HORIZON_LIFT: f64 = 0.25;

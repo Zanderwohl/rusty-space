@@ -24,7 +24,7 @@ Everything that applies now, in turn, one per shot:
 | below | the same | straight down |
 
 The horizon and the ground below are framed by **length, not angle**: a stretch of limb and a
-patch of ground a fixed share of the body's radius across, about 360 and 290 km on Earth. A
+patch of ground a fixed share of the body's radius across, about 730 and 570 km on Earth. A
 higher orbit is therefore a longer lens on the same scene. Straight down, the photograph from
 twenty radii matches the one from low orbit; the horizon keeps its size but not its perspective,
 because from far out the limb is seen edge-on rather than across the ground in front of it.
