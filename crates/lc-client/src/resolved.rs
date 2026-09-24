@@ -43,8 +43,8 @@ pub const NIGHT: f32 = 0.012;
 /// changing how much light the body sends.
 const INVERSION: f32 = 0.3;
 
-/// `reflected.w` times [`crate::surfaces::RELIEF_SCALE`]: the unit sphere's diameter is one of
-/// the graph's sample units, so this is the relief drawn at its true slopes.
+/// `reflected.w` times [`crate::surfaces::RELIEF_SCALE`]. Two because the unit sphere's
+/// diameter is one graph sample unit, so this draws the relief at its true slopes.
 const BUMP: f32 = 2.0;
 
 /// Which body a resolved sphere stands for.

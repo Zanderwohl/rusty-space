@@ -32,10 +32,9 @@ pub const SCORCHED_K: f64 = 500.0;
 /// are what this number is set between.
 pub const ICY_SURFACE_DENSITY: f64 = 3200.0;
 
-/// Below this escape speed a body holds no air worth drawing, however warm it is, so it cannot
-/// be [`Surface::Weathered`]. Pluto and Triton, at 1.2 and 1.5 km/s, keep their thin air;
-/// Ceres at 0.51 and Phobos at 0.011 do not. A generator that states air on a smaller body
-/// still gets it: this only decides what is assumed.
+/// Below this escape speed a body is not assumed to hold air, so it is never
+/// [`Surface::Weathered`]: Pluto (1.2 km/s) and Triton (1.5) keep theirs, Ceres (0.51) and
+/// Phobos (0.011) have none. Air a generator states is kept regardless.
 pub const WEATHER_ESCAPE_M_S: f64 = 1000.0;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -315,8 +314,7 @@ mod tests {
         assert!(Surface::Ice.albedo() > Surface::Rock.albedo() * 4.0);
     }
 
-    /// Phobos is warm enough to be weathered and far too small to hold anything to weather it
-    /// with; a Luna is big enough that air on it is a choice rather than a mistake.
+    /// Phobos is warm enough to be Weathered and too small to hold air.
     #[test]
     fn too_small_to_hold_air_is_bare_rock() {
         assert_eq!(Surface::classify(1.11e4, 1.0659e16, 230.0), Surface::Rock, "Phobos");

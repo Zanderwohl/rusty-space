@@ -1,14 +1,10 @@
 //! What an airless rocky world looks like from orbit, from what it is.
 //!
-//! The counterpart of [`crate::climate`] for bodies with nothing to weather them. Such a
-//! surface is a record of impacts, so what varies is how many, how long ago, and how much of
-//! the oldest record lava has since buried. Three series of craters stand for that history:
-//! an ancient one that saturates any old surface, a later one that lands on the lava too, and a
-//! fresh one whose ejecta has not yet darkened. The bodies anybody has been to are measured
-//! instead, for the reason [`crate::worlds`] gives: no rule reaches Io.
+//! The counterpart of [`crate::climate`] for bodies without air: three series of craters, oldest
+//! first, with lava flooding the oldest. Measured where anybody has been; no rule reaches Io.
 //!
-//! Display quantities, as a climate's are: what they have to get right is the ordering -- a
-//! bigger body kept its heat longer and flooded more, a hotter one is darker -- and the look.
+//! Display quantities: what has to be right is the ordering -- a bigger body flooded more, a
+//! hotter one is darker -- and the look.
 
 use crate::surface::Surface;
 use crate::worlds::{Atmosphere, Top, World};
@@ -29,9 +25,7 @@ pub struct Airless {
     pub ejecta: [f32; 3],
 }
 
-/// An airless rocky body's paint: measured where anybody has been, derived otherwise. `None`
-/// for anything with air or with ice on top, which [`crate::climate`] or the body's class
-/// paints instead.
+/// `None` for anything with air or with ice on top.
 pub fn of(id: &str, world: &World, surface: Surface, radius_m: f64) -> Option<Airless> {
     if world.atmosphere != Atmosphere::None || world.top != Top::Rock {
         return None;
@@ -42,9 +36,8 @@ pub fn of(id: &str, world: &World, surface: Surface, radius_m: f64) -> Option<Ai
     measured(id).or_else(|| Some(derived(surface, radius_m, crate::climate::variety(id))))
 }
 
-/// Share of the surface flooded, from the radius: lava needs heat, and a small body lost its
-/// own before the ancient bombardment ended. Nothing under 800 km; the Moon's 1737 km gives it
-/// a few to twenty per cent, and a Mercury up to a third.
+/// Lava needs heat, which a small body lost early: nothing under 800 km, a few to twenty per cent
+/// at the Moon's 1737 km, up to a third at Mercury's.
 fn maria_share(radius_m: f64, draw: f32) -> f32 {
     let size = ((radius_m / 1.0e3 - 800.0) / 2000.0).clamp(0.0, 1.0) as f32;
     size * (0.08 + 0.3 * draw)
@@ -52,7 +45,7 @@ fn maria_share(radius_m: f64, draw: f32) -> f32 {
 
 pub fn derived(surface: Surface, radius_m: f64, variety: crate::climate::Variety) -> Airless {
     let [a, b, c, d] = variety.0;
-    // Close to a star, rock is baked dark and flat, and ejecta darkens quickly.
+    // Close to a star rock is darker, and ejecta darkens faster.
     let scorched = surface == Surface::Scorched;
     let highland_l = if scorched { 0.55 } else { 0.62 } + 0.08 * (b - 0.5);
     let hue = 72.0 + 24.0 * (d - 0.5);
@@ -88,8 +81,7 @@ fn measured(id: &str) -> Option<Airless> {
             mare: [0.52, 0.010, 65.0],
             ejecta: [0.80, 0.008, 75.0],
         },
-        // Resurfaced faster than anything can crater it: sulfur plains and dark volcanic
-        // centers, and not a crater on it.
+        // Resurfaced faster than anything craters it.
         "Io" => Airless {
             craters: [0.0, 0.0, 0.0],
             maria: 0.25,

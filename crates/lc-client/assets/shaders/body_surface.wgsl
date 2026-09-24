@@ -30,7 +30,7 @@ struct VertexOutput {
     @location(4) radius: f32,
     /// The spin axis, world.
     @location(5) pole: vec3<f32>,
-    /// The body's own x and z, world: with the pole, what turns a body-fixed direction.
+    /// The body's x and z axes, world. With the pole they turn body-fixed into world.
     @location(6) axis_x: vec3<f32>,
     @location(7) axis_z: vec3<f32>,
 }
@@ -44,7 +44,7 @@ struct BodySurfaceUniform {
     /// `(color, contrast, clouds, unused)`: whether the color and cloud cubemaps are drawn.
     params: vec4<f32>,
     /// Starlight the surface reflects, as linear display light before the tone map. `w` is the
-    /// slope of the relief per unit of height per unit of arc; zero for a smooth sphere.
+    /// relief's slope per unit of height per radian; zero is smooth.
     reflected: vec4<f32>,
     /// Light the body makes itself, in the same units. `w` is how far the pattern inverts in it.
     emitted: vec4<f32>,
@@ -98,8 +98,8 @@ const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 @group(#{MATERIAL_BIND_GROUP}) @binding(11) var mask_sand: texture_cube<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(12) var height: texture_cube<f32>;
 
-/// Radians between the relief's samples: about a texel and a half of a 1024 face, so the
-/// linear filter smooths the difference without blurring the smallest craters away.
+/// Radians: a texel and a half of a 1024 face, which the linear filter smooths without losing
+/// the smallest craters.
 const RELIEF_STEP: f32 = 0.0015;
 
 const CLOUD: i32 = 5;
@@ -268,8 +268,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     return out;
 }
 
-/// The world normal at `in`, tilted by the relief: a finite difference east and north on the
-/// body-fixed sphere, turned into the world.
+/// A finite difference east and north on the body-fixed sphere.
 fn relief_normal(in: VertexOutput) -> vec3<f32> {
     let slope = material.reflected.w;
     let sphere = normalize(in.world_normal);

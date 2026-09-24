@@ -51,8 +51,7 @@ const CLIMATE: Target = Target::new(Shape::Cube(64)).layer("drive term 1");
 /// airless.tgraph's relief about zero, where a byte would lose all but the largest craters.
 const RELIEF: Target = Target::new(Shape::Cube(COLOR_FACE)).layer("height").format(ScalarFormat::R16Float);
 
-/// airless.tgraph's heights per unit of its sample space, in which the sphere's radius is a half:
-/// the `relief` of its Craters nodes, which a test holds it to.
+/// The `relief` of airless.tgraph's Craters nodes: heights per unit of its sample space.
 pub const RELIEF_SCALE: f32 = 8.0;
 
 /// [`WEATHER`]'s mean over the sphere, measured; it varies about half a percent by seed.
@@ -85,13 +84,12 @@ pub struct Rocky {
     pub clouds: String,
 }
 
-/// The graph every rocky world without air is drawn from.
 #[derive(Debug, Deserialize)]
 pub struct Bare {
     pub ground: String,
 }
 
-/// Which of a body's descriptions it is painted from, before the manifest has its say.
+/// What a body is painted from, before the manifest overrides it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Paint {
     Climate,
@@ -197,7 +195,7 @@ pub struct BodyImages {
     pub climate: Handle<Image>,
     /// [`MASKS`], in order.
     pub masks: [Handle<Image>; 4],
-    /// [`RELIEF`]: flat until an airless world's lands.
+    /// [`RELIEF`]; flat for anything not airless.
     pub height: Handle<Image>,
 }
 
@@ -579,7 +577,6 @@ const MARIA_LEVELS: [(f32, f32); 14] = [
     (0.80, 1.0),
 ];
 
-/// airless.tgraph's parameters, from what the world is.
 fn airless_params(a: &Airless) -> Params {
     let scalar = ParamValue::Scalar;
     let color = |[l, c, h]: [f32; 3]| ParamValue::Color(oklcha(l, c, h, 1.0));
@@ -984,8 +981,7 @@ mod tests {
         holds(&MARIA_LEVELS, |maria| share(&g, "mare", "maria", maria), |share| level(&MARIA_LEVELS, share));
     }
 
-    /// The shader turns the height into slopes with [`RELIEF_SCALE`], so every series of
-    /// craters in the graph must be drawn at it.
+    /// The shader assumes [`RELIEF_SCALE`] for every series.
     #[test]
     fn the_relief_is_drawn_at_the_scale_the_shader_assumes() {
         let g = graph(&manifest().airless.unwrap().ground);

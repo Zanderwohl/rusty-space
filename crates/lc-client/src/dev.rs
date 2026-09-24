@@ -49,8 +49,7 @@ pub struct DevEntry {
     /// Dress the `--at` body in the paint of a generated planet, by its name: `--wear "Wolf 359
     /// c"`. Its surface, clouds and air are derived exactly as that planet's would be; only the
     /// sphere they are drawn on is borrowed. A generated system is otherwise a crossing away.
-    /// On an airless body a name no planet has is a seed instead: another member of the class,
-    /// on the same sphere.
+    /// On an airless body a name no planet has is a seed for another airless look.
     pub wear: Option<String>,
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
