@@ -494,10 +494,121 @@ pub fn issue_charts(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, reach
     }
 }
 
+/// The star's place and every bound body's exact orbit at `now_s`, as claims on [`CHARTS`]'
+/// word, so a craft's own fits outrank them. Sizes, spins, colors and kinds are not charted: no
+/// orbit says them. Returns how many bodies were charted.
+pub fn chart_system(knowledge: &mut Knowledge, system: &LocalSystem, now_s: f64) -> usize {
+    use em_foundations::kepler::{anomaly, state};
+    use super::record::{Method, Orbit, Orientation};
+    use super::BodyId;
+
+    let hop = Hop { from: CHARTS, to: knowledge.owner, sent_s: now_s, received_s: now_s };
+    let star = system.star;
+    let sim = system.sim();
+    let primary = system.primary();
+    // The key a body is targeted and hashed by: the one `LocalSystem::inventory` lists.
+    let key = |i| sim.info(i).name.clone().unwrap_or_else(|| sim.name(i).to_string());
+
+    knowledge.named(
+        star,
+        Naming { witness: CHARTS, name: chart_number(star), kind: NameKind::Designation, stated_s: now_s, lineage: vec![hop] },
+    );
+    knowledge.told(
+        star,
+        Claim {
+            witness: CHARTS,
+            // Not zero: a belief with no error is one nothing could ever move.
+            distance: Distance::Measured { position_ly: system.star_position_ly(), sigma_ly: 1.0e-9 },
+            stated_s: now_s,
+            lineage: vec![hop],
+        },
+    );
+
+    let mut charted = 0;
+    for body in sim.indices().filter(|&i| i != primary) {
+        let Some(parent) = sim.parent(body) else { continue };
+        let (Some((at, moving)), Some((parent_at, parent_moving))) =
+            (system.body_state_at(body, now_s), system.body_state_at(parent, now_s))
+        else {
+            continue;
+        };
+        // `mu` is the orbit the body is on, `G(M_parent + M_body)`: the two-body answer.
+        let mu = sim.mu(body);
+        let Some(elements) = state::from_state(mu, at - parent_at, moving - parent_moving) else { continue };
+        let (a_m, e) = (elements.semi_major_axis, elements.eccentricity);
+        // Unbound or nearly so: `body::placed_at` holds eccentricity below this, and a comet on
+        // its way out has no period to chart.
+        if !(a_m > 0.0 && a_m.is_finite() && e < 0.999 && mu > 0.0) {
+            continue;
+        }
+        let period_s = std::f64::consts::TAU * (a_m.powi(3) / mu).sqrt();
+        let eccentric = anomaly::eccentric_from_true(elements.true_anomaly, e);
+        let mean = eccentric - e * eccentric.sin();
+        let pole = (at - parent_at).cross(moving - parent_moving).normalize_or(DVec3::Z);
+        knowledge.orbits(
+            Subject::Body { star, body: BodyId::of(star, &key(body)) },
+            Orbit {
+                witness: CHARTS,
+                about: (parent != primary).then(|| BodyId::of(star, &key(parent))),
+                period_s: (period_s, period_s * 1.0e-9),
+                semi_major_au: (a_m / generate::AU, a_m / generate::AU * 1.0e-9),
+                eccentricity: Some((e, 1.0e-9)),
+                // The same angles `body::placed_at` reads back into `state::to_state`, so an
+                // orbit charted here is placed exactly where the body is.
+                orientation: Orientation::Known {
+                    pole,
+                    sigma_rad: 1.0e-9,
+                    node: elements.longitude_of_ascending_node,
+                    periapsis: elements.argument_of_periapsis,
+                },
+                // The periapsis passage, as `placed_at` takes it.
+                epoch_s: Some(now_s - mean / std::f64::consts::TAU * period_s),
+                method: Method::Claim,
+                stated_s: now_s,
+                lineage: vec![hop],
+            },
+        );
+        charted += 1;
+    }
+    charted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sky::{AuthoredStars, StarProvider};
+
+    /// Every charted body, moons included, is placed where it is, now and later.
+    #[test]
+    fn a_charted_system_places_every_body_where_it_is() {
+        let star = AuthoredStars::sample().stars()[2].clone();
+        let system = LocalSystem::for_star(&star).expect("a generated system");
+        let mut knowledge = Knowledge::new(Witness(7));
+        let now_s = 1.0e8;
+        let charted = chart_system(&mut knowledge, &system, now_s);
+        assert!(charted > 1, "{charted}");
+
+        let sim = system.sim();
+        let key = |i| sim.info(i).name.clone().unwrap_or_else(|| sim.name(i).to_string());
+        let mut moons = 0;
+        for later in [now_s, now_s + 3.0e6] {
+            let star_at = system.body_state_at(system.primary(), later).unwrap().0;
+            for body in sim.indices().filter(|&i| i != system.primary()) {
+                let Some(belief) = knowledge.body_belief(star.id, super::super::BodyId::of(star.id, &key(body)), later)
+                else {
+                    continue;
+                };
+                let super::super::body::Placed::Known { offset_au, .. } = belief.position_now else {
+                    panic!("{} was charted and not placed", key(body));
+                };
+                let truth_au = (system.body_state_at(body, later).unwrap().0 - star_at) / generate::AU;
+                let off = (offset_au - truth_au).length() / truth_au.length();
+                assert!(off < 1.0e-6, "{} is {off} of its distance out", key(body));
+                moons += usize::from(belief.about.is_some());
+            }
+        }
+        assert!(moons > 0, "premise: the system has a moon to chart");
+    }
 
     const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
     const AU_M: f64 = 1.495_978_707e11;

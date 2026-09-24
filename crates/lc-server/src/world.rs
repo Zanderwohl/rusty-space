@@ -181,6 +181,10 @@ impl World {
         }
     }
 
+    pub fn loaded(&self) -> impl Iterator<Item = &Arc<LocalSystem>> {
+        self.loaded.values().map(|held| &held.system)
+    }
+
     /// How many systems are loaded. For a test and the status readout.
     pub fn loaded_count(&self) -> usize {
         self.loaded.len()

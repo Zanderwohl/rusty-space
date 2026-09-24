@@ -20,6 +20,7 @@ glam = "0.32"
 # identity broker: see lightcone/docs/16-identity.md.
 jsonwebtoken = "9"
 serde = { version = "1", features = ["derive"] }
+thiserror = "2"
 # Exact: a report or a knowledge page that moved a bearing by one place in the last digit
 # would be a different measurement, and deduplication is by the bits.
 serde_json = { version = "1", features = ["float_roundtrip"] }

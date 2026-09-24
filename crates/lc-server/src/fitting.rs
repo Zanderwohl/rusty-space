@@ -126,21 +126,26 @@ impl<J: Journal> Server<J> {
 
     /// **Development only.** Put energy into the asking client's ship, if it may develop.
     pub fn granted(&mut self, from: ClientId, joules: f64, wire: &mut impl Transport) {
-        let now_s = self.now_t as f64 * 1.0e-6;
         let ship = self.owned_by(from);
         let done = self.may(from, crate::ability::Act::GrantEnergy, ship)
             && joules.is_finite()
             && joules > 0.0
-            && ship.and_then(|id| self.fleet.get_mut(id)).is_some_and(|craft| {
-                let fitted = craft.fitting().is_some();
-                craft.grant(joules, now_s);
-                fitted
-            });
+            && self.grant(from, joules).is_some();
         match ship {
             Some(id) if done => self.tell_fitted(wire, id),
             // The answer `Stage` gives, for the reason it gives it.
             _ => wire.send(from, Outbound::Refused { ship_id: ShipId(0), reason: Refusal::Impossible }),
         }
+    }
+
+    /// No permission check; the caller makes it. `None` without a fitted ship.
+    pub(crate) fn grant(&mut self, from: ClientId, joules: f64) -> Option<CraftId> {
+        let now_s = self.now_t as f64 * 1.0e-6;
+        let ship = self.owned_by(from)?;
+        let craft = self.fleet.get_mut(ship)?;
+        let fitted = craft.fitting().is_some();
+        craft.grant(joules, now_s);
+        fitted.then_some(ship)
     }
 
     /// Once a tick, after the pursuits: refits that finished, and chases that can no longer be

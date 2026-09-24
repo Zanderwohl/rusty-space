@@ -176,6 +176,8 @@ pub struct Server<J: Journal> {
     pub(crate) balance: lc_world::fitting::Balance,
     /// Craft whose owner is to be told when their refit finishes.
     pub(crate) refitting: std::collections::HashSet<CraftId>,
+    /// Console lines waiting for the tick.
+    pub(crate) commands: std::collections::VecDeque<crate::command::Queued>,
 }
 
 impl<J: Journal> Server<J> {
@@ -217,6 +219,7 @@ impl<J: Journal> Server<J> {
             stages: Default::default(),
             balance: lc_world::fitting::Balance::DEFAULT,
             refitting: std::collections::HashSet::new(),
+            commands: std::collections::VecDeque::new(),
         }
     }
 
@@ -444,6 +447,9 @@ impl<J: Journal> Server<J> {
             budget.advance(TICKS_PER_SECOND);
         }
         self.stages.mark("intents");
+        // After the intents, so a command sees every order that arrived with it already flown.
+        self.run_commands(wire, &mut events, &mut deliveries);
+        self.stages.mark("commands");
         // After motion, so every instrument looks from where its craft now is, and after the
         // intents, so a report composed this tick carries nothing its craft learns in it.
         self.run_instruments();
@@ -577,6 +583,7 @@ impl<J: Journal> Server<J> {
                     Err(reason) => wire.send(from, Outbound::Refused { ship_id, reason }),
                 }
             }
+            Inbound::Command { seq, line } => self.enqueue(from, seq, line, wire),
             Inbound::Stage { scenario } => self.staged(from, &scenario, wire),
             Inbound::Grant { joules } => self.granted(from, joules, wire),
             Inbound::ResumeFrom { arrive_t } => {
@@ -1123,12 +1130,30 @@ impl<J: Journal> Server<J> {
         deliveries: &mut Vec<Scheduled>,
     ) {
         let Some(craft) = self.fleet.get(id) else { return };
+        let from = craft.position_at(at as f64);
+        self.emit_from(id, from, kind, power_w, payload, at, events, deliveries);
+    }
+
+    /// [`Server::emit`] from a stated position, light-microseconds: at a jump the worldline has
+    /// two.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn emit_from(
+        &mut self,
+        id: CraftId,
+        from: DVec3,
+        kind: i16,
+        power_w: f64,
+        payload: String,
+        at: i64,
+        events: &mut Vec<Event>,
+        deliveries: &mut Vec<Scheduled>,
+    ) {
         let Some(event_id) = self.minter.mint(at) else { return };
         let event = Event {
             id: event_id.get(),
             source: ShipId(id.0),
             t: at,
-            at: craft.position_at(at as f64),
+            at: from,
             kind,
             power_w,
             payload,

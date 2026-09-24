@@ -55,10 +55,12 @@ pub enum Panel {
     /// with the others, because it is the one surface that is not a readout — it has its own
     /// frame, its own palette and its own keys.
     Reader,
+    /// Drawn by [`crate::console`], not as a window.
+    Console,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 12] = [
+    pub const ALL: [Panel; 13] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -71,6 +73,7 @@ impl Panel {
         Panel::DevActions,
         Panel::Chat,
         Panel::Reader,
+        Panel::Console,
     ];
 
     /// A panel by the name a development flag would use.
@@ -92,6 +95,7 @@ impl Panel {
             Panel::DevActions => "Dev actions",
             Panel::Chat => "Communications",
             Panel::Reader => "Reader",
+            Panel::Console => "Console",
         }
     }
 }

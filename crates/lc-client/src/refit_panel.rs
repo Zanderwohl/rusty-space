@@ -280,6 +280,15 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
         if ui.button("Reset").clicked() {
             ask(out, Action::ResetRefitDraft);
         }
+        // Enabled whatever the planner says: skipping the energy is the point. The shard
+        // decides who may.
+        if game.remote
+            && draft != current
+            && ui.button("Magic").on_hover_text("build this now, free; admins only").clicked()
+        {
+            ask(out, Action::OpenPanel(crate::ui::Panel::Console));
+            ask(out, Action::RunCommand(magic_line(draft)));
+        }
     });
     if let Some(why) = &view.blocked {
         ui.weak(why);
@@ -287,6 +296,11 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     if let Some(warning) = &view.warning {
         ui.colored_label(ui.visuals().warn_fg_color, warning);
     }
+}
+
+fn magic_line(draft: Loadout) -> String {
+    let Loadout { storage, drones, living, engines, slots, data } = draft;
+    format!("refit-magic storage:{storage} drones:{drones} living:{living} engines:{engines} data:{data} slots:{slots}")
 }
 
 pub fn dev_actions(ui: &mut egui::Ui, game: &Session, out: &mut MessageWriter<Requested>) {
@@ -315,6 +329,30 @@ mod tests {
     use glam::DVec3;
     use lc_world::craft::{CraftId, Kind};
     use lc_world::fitting::{Balance, Fitting};
+
+    /// The button's line binds back to the draft. Native only: the browser build has no shard.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_magic_button_says_what_the_shard_reads() {
+        use lc_server::ability::Level;
+        use lc_server::command::{bind, find, parse};
+        let draft = Loadout { storage: 3, drones: 1, living: 0, engines: 12, slots: 33, data: 2 };
+        let parsed = parse(&magic_line(draft)).expect("it parses");
+        let spec = find(&parsed.name, Level::DEBUG).expect("a command");
+        let args = bind(spec, &parsed, Level::DEBUG).expect("it binds");
+        let got = |n: &str| args.count(n).unwrap();
+        assert_eq!(
+            Loadout {
+                storage: got("storage"),
+                drones: got("drones"),
+                living: got("living"),
+                engines: got("engines"),
+                slots: got("slots"),
+                data: got("data"),
+            },
+            draft,
+        );
+    }
 
     fn ship() -> Craft {
         let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);

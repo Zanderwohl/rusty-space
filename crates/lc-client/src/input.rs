@@ -29,6 +29,8 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::F5, Action::TogglePanel(Panel::DevActions)),
         // `R` is the refit window's. `C` for comms, which is what this is.
         (KeyCode::KeyC, Action::TogglePanel(Panel::Chat)),
+        // Opens and never closes: once the field has the keyboard, a slash is a slash.
+        (KeyCode::Slash, Action::OpenPanel(Panel::Console)),
         (KeyCode::KeyM, Action::ToggleView),
         (KeyCode::Digit1, Action::SetBandPreset(0)),
         (KeyCode::Digit2, Action::SetBandPreset(1)),

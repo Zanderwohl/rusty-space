@@ -196,6 +196,7 @@ pub fn parse(args: &[String]) -> Entry {
         // rather than by a page, so it needs its own way in to be photographed.
         open_password_form: flag("--password"),
         say: after("--say"),
+        console: after("--console"),
         actions,
     };
     // The first argument only. Scanning for any non-flag token would pick up a flag's own

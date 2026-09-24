@@ -171,6 +171,10 @@ invariant is checked where it holds rather than assumed everywhere. A second roo
 worldline exceeded `c`, which today is a bug and is the only thing that would have to change
 if it ever were not — see [10-superluminal.md](10-superluminal.md).
 
+The exception is a worldline that **jumps**, which only a teleport makes. It is one root per
+continuous piece rather than one in all: `Worldline::breaks` names the jumps and the solvers
+split there. See [27-console.md](27-console.md).
+
 `position_at(t)` being a total, single-valued function of server-frame `t` is also what makes
 closed causal loops unrepresentable: nothing can move backward in `t`, so no effect can be
 placed before its cause. That property is free, and it is worth not losing.

@@ -10,6 +10,8 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 em-foundations = { path = "../em-foundations" }
 em-spectra = { path = "../em-spectra" }
 lc-spacetime = { path = "../lc-spacetime" }
+# What `Worldline::breaks` returns.
+smallvec = "1"
 # The wire types, for the conversions in `navigation`. Serde and postcard and nothing else,
 # so this costs the browser build nothing it was not already paying.
 lc-proto = { path = "../lc-proto" }

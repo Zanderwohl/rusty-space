@@ -193,6 +193,9 @@ pub enum Action {
     OfferKey { to: Option<lc_proto::ShipId>, aim: lc_proto::Aim },
     /// Answer this craft automatically, or stop.
     AutoAck { with: lc_proto::ShipId, on: bool },
+
+    // --- console ----------------------------------------------------------------------
+    RunCommand(String),
     // A resend is [`Action::Say`] with the original's `idem`, not an action of its own: it is
     // the same message, said again, and the only thing that makes it one is the key.
 }
@@ -218,6 +221,7 @@ pub enum Effect {
     Stage(String),
     /// Ask for energy, for the reason [`Effect::Stage`] is not an order.
     Grant(f64),
+    Command(String),
 }
 
 /// Where a scene says to stand, as the interface's own state.
@@ -702,6 +706,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             effects.push(Effect::Notify("no server, so nothing to refit or fill".into()));
         }
         Action::GrantEnergy(joules) => effects.push(Effect::Grant(joules)),
+        Action::RunCommand(line) => effects.push(Effect::Command(line)),
         Action::FillStorage => {
             let now = session.coordinate_time_s();
             if let Some(fitting) = session.ship.fitting() {

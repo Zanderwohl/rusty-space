@@ -16,6 +16,7 @@ pub mod ability;
 pub mod archive;
 pub mod admin;
 pub mod chase;
+pub mod command;
 pub mod director;
 pub mod drive;
 pub(crate) mod fits;

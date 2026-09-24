@@ -36,9 +36,55 @@ pub trait Worldline {
     /// that needs nothing but `c`: over a span the worldline cannot leave a ball of that span's
     /// own radius. An implementation that knows its own shape should give a tighter one, and a
     /// loose bound costs only traversal that turns out to be unnecessary.
+    ///
+    /// A jump is not bounded by `c`, so across a break the default is one such ball per piece,
+    /// merged.
     fn bounding_ball(&self, t0: f64, t1: f64) -> (DVec3, f64) {
-        (self.position_at(t0), (t1 - t0).max(0.0))
+        let mut ball: Option<(DVec3, f64)> = None;
+        for (a, b) in pieces(self, t0, t1) {
+            let piece = (self.position_at(a), (b - a).max(0.0));
+            ball = Some(match ball {
+                None => piece,
+                Some((center, radius)) => {
+                    (center, radius.max(center.distance(piece.0) + piece.1))
+                }
+            });
+        }
+        ball.unwrap_or((self.position_at(t0), (t1 - t0).max(0.0)))
     }
+
+    /// Coordinate times at which this worldline jumps, ascending. At a break it already holds
+    /// its new position.
+    ///
+    /// Across a jump the retarded equation steps, and a solve over it converges onto the step:
+    /// an image no light left from. The solvers split here, so each piece has at most one root.
+    fn breaks(&self) -> SmallVec<[f64; 2]> {
+        SmallVec::new()
+    }
+}
+
+/// `[t0, t1]` split at `w`'s breaks. Each piece but the last ends just short of the break that
+/// closes it, so it reads the position the worldline jumped *from*.
+fn pieces<W: Worldline + ?Sized>(w: &W, t0: f64, t1: f64) -> SmallVec<[(f64, f64); 3]> {
+    let mut out = SmallVec::new();
+    let mut lo = t0;
+    for at in w.breaks() {
+        if at > t1 {
+            break;
+        }
+        if at > lo {
+            out.push((lo, just_before(at)));
+            lo = at;
+        }
+    }
+    out.push((lo, t1));
+    out
+}
+
+/// Far enough below `t` that a caller converting microseconds to seconds still lands on the
+/// earlier side of it, and a nanosecond at the least: no position moves measurably in that.
+fn just_before(t: f64) -> f64 {
+    t - (t.abs() * 8.0 * f64::EPSILON).max(1.0e-3)
 }
 
 /// Solve `t_a - |w(t_a) - x_e| = t_e` for when an event's light reaches a worldline.
@@ -47,6 +93,9 @@ pub trait Worldline {
 /// event is fixed and the observer moves. `g(t) = t - t_e - |w(t) - x_e|` rises at
 /// `1 - n . v >= 1 - |v| > 0` for anything sub-luminal, so there is at most one root, and
 /// `None` means the light never reaches this worldline while it is defined.
+///
+/// Across a break the earliest piece the light lands in wins. An observer that jumps ahead of
+/// a wavefront meets it a second time, and that second arrival is not another delivery.
 pub fn arrival_time_at(t_e: f64, x_e: DVec3, w: &dyn Worldline) -> Option<f64> {
     if !w.is_subluminal() {
         debug_assert!(false, "superluminal worldlines fold g(t); not supported yet");
@@ -61,7 +110,11 @@ pub fn arrival_time_at(t_e: f64, x_e: DVec3, w: &dyn Worldline) -> Option<f64> {
     if !lo.is_finite() {
         lo = t_e;
     }
+    pieces(w, lo, t1).into_iter().find_map(|(lo, hi)| arrival_within(t_e, x_e, w, lo, hi))
+}
 
+/// [`arrival_time_at`] over one continuous piece, `[lo, hi]`.
+fn arrival_within(t_e: f64, x_e: DVec3, w: &dyn Worldline, mut lo: f64, hi: f64) -> Option<f64> {
     let g = |t: f64| t - t_e - (w.position_at(t) - x_e).length();
 
     let g_lo = g(lo);
@@ -76,7 +129,7 @@ pub fn arrival_time_at(t_e: f64, x_e: DVec3, w: &dyn Worldline) -> Option<f64> {
 
     // Walk out a bracket. `g` rises at least at rate `1 - |v|`, so doubling terminates; an
     // unbounded worldline needs it because there is no finite upper limit to start from.
-    let mut hi = t1;
+    let mut hi = hi;
     if !hi.is_finite() {
         let mut step = (w.position_at(lo) - x_e).length().max(1.0);
         hi = lo + step;
@@ -136,11 +189,15 @@ pub fn arrival_time(event: Coord, w: &dyn Worldline) -> Option<f64> {
 
 /// Solve `t_r + |x_o - w(t_r)| = t_o` for the emission times whose light reaches `observer`.
 ///
-/// A collection rather than an `Option`: sub-luminal worldlines always give zero or one root,
-/// but superluminal motion folds `f` and gives zero, one or more, and changing the signature
-/// later would touch every call site. See `lightcone/docs/10-superluminal.md`.
+/// A collection rather than an `Option`: a sub-luminal worldline gives zero or one root per
+/// continuous piece, but superluminal motion folds `f` and gives zero, one or more, and
+/// changing the signature later would touch every call site. See
+/// `lightcone/docs/10-superluminal.md`.
 ///
 /// Empty means the light has not arrived, has already passed, or was never emitted.
+///
+/// Ascending, so the last is the newest light. A worldline with breaks gives up to one root
+/// per piece.
 pub fn retarded_times(observer: Coord, w: &dyn Worldline) -> SmallVec<[f64; 2]> {
     retarded_times_at(observer.time_f64(), observer.position(), w)
 }
@@ -158,21 +215,25 @@ pub fn retarded_times_at(t_o: f64, x_o: DVec3, w: &dyn Worldline) -> SmallVec<[f
     }
 
     let (t0, t1) = w.defined_over();
-    let mut hi = t1.min(t_o);
+    let hi = t1.min(t_o);
     if hi < t0 || !hi.is_finite() {
         return out;
     }
+    out.extend(pieces(w, t0, hi).into_iter().filter_map(|(lo, hi)| retarded_within(t_o, x_o, w, lo, hi)));
+    out
+}
 
+/// [`retarded_times_at`] over one continuous piece, `[t0, hi]`.
+fn retarded_within(t_o: f64, x_o: DVec3, w: &dyn Worldline, t0: f64, mut hi: f64) -> Option<f64> {
     // f(t) = t + |x_o - w(t)| - t_o, strictly increasing for |v| < 1, so exactly one root.
     let f = |t: f64| t + (x_o - w.position_at(t)).length() - t_o;
 
     let f_hi = f(hi);
     if f_hi < 0.0 {
-        return out; // all of this worldline's light has already gone past.
+        return None; // all of this piece's light has already gone past.
     }
     if f_hi == 0.0 {
-        out.push(hi);
-        return out;
+        return Some(hi);
     }
 
     // An unbounded worldline gives no finite lower bracket, so walk one back. f falls at
@@ -189,18 +250,17 @@ pub fn retarded_times_at(t_o: f64, x_o: DVec3, w: &dyn Worldline) -> SmallVec<[f
             guard += 1;
             debug_assert!(guard <= 256, "bracket expansion failed; is the worldline sub-luminal?");
             if guard > 256 {
-                return out;
+                return None;
             }
         }
     }
 
     let f_lo = f(lo);
     if f_lo > 0.0 {
-        return out; // the earliest light has not arrived yet.
+        return None; // the earliest light has not arrived yet.
     }
     if f_lo == 0.0 {
-        out.push(lo);
-        return out;
+        return Some(lo);
     }
 
     // Safeguarded Newton. Newton alone can leave the bracket where the derivative is
@@ -235,9 +295,7 @@ pub fn retarded_times_at(t_o: f64, x_o: DVec3, w: &dyn Worldline) -> SmallVec<[f
         }
         t = next;
     }
-
-    out.push(t);
-    out
+    Some(t)
 }
 
 /// A worldline that does not move.
@@ -307,6 +365,93 @@ impl Worldline for Inertial {
 mod tests {
     use super::*;
     use crate::units::Micros;
+
+    /// At `from` until `at`, and at `to` from then on.
+    struct Jump {
+        from: DVec3,
+        to: DVec3,
+        at: f64,
+    }
+
+    impl Worldline for Jump {
+        fn position_at(&self, t: f64) -> DVec3 {
+            if t < self.at { self.from } else { self.to }
+        }
+        fn velocity_at(&self, _t: f64) -> DVec3 {
+            DVec3::ZERO
+        }
+        fn defined_over(&self) -> (f64, f64) {
+            (f64::NEG_INFINITY, f64::INFINITY)
+        }
+        fn breaks(&self) -> SmallVec<[f64; 2]> {
+            smallvec::smallvec![self.at]
+        }
+    }
+
+    fn jump() -> Jump {
+        Jump { from: DVec3::ZERO, to: DVec3::new(1000.0, 0.0, 0.0), at: 0.0 }
+    }
+
+    /// Near where it left, the craft is seen there until that light passes, then not at all.
+    #[test]
+    fn a_jump_is_seen_to_vanish_at_light_delay_and_appear_later_still() {
+        let w = jump();
+        let x_o = DVec3::new(-100.0, 0.0, 0.0);
+        let before = retarded_times_at(50.0, x_o, &w);
+        assert_eq!(before.as_slice(), &[-50.0], "still seen where it was");
+        assert!(retarded_times_at(150.0, x_o, &w).is_empty(), "seen somewhere in the gap");
+        let after = retarded_times_at(1200.0, x_o, &w);
+        assert_eq!(after.len(), 1);
+        assert!((after[0] - 100.0).abs() < 1e-6, "got {after:?}");
+    }
+
+    /// Near where it landed, it is seen in both places for a while.
+    #[test]
+    fn near_the_landing_a_jump_is_seen_in_both_places() {
+        let w = jump();
+        let roots = retarded_times_at(150.0, DVec3::new(1100.0, 0.0, 0.0), &w);
+        assert_eq!(roots.len(), 2, "{roots:?}");
+        assert!((roots[0] + 950.0).abs() < 1e-6, "{roots:?}");
+        assert!((roots[1] - 50.0).abs() < 1e-6, "{roots:?}");
+    }
+
+    /// Without its break the solve reports an image at the step, which the tests above rely on
+    /// not happening.
+    #[test]
+    fn without_its_break_a_jump_is_solved_onto_the_step() {
+        struct Undeclared(Jump);
+        impl Worldline for Undeclared {
+            fn position_at(&self, t: f64) -> DVec3 {
+                self.0.position_at(t)
+            }
+            fn velocity_at(&self, t: f64) -> DVec3 {
+                self.0.velocity_at(t)
+            }
+            fn defined_over(&self) -> (f64, f64) {
+                self.0.defined_over()
+            }
+        }
+        let roots = retarded_times_at(150.0, DVec3::new(-100.0, 0.0, 0.0), &Undeclared(jump()));
+        assert!(roots.first().is_some_and(|t| t.abs() < 1.0), "{roots:?}");
+    }
+
+    /// An observer that jumps receives in whichever piece the light reaches it first.
+    #[test]
+    fn a_jumping_observer_receives_where_it_is_when_the_light_arrives() {
+        let w = jump();
+        let arrived = arrival_time_at(-10.0, DVec3::new(500.0, 0.0, 0.0), &w).expect("it arrives");
+        assert!((arrived - 490.0).abs() < 1e-6, "got {arrived}");
+        // Light that would have reached it where it was reaches it there.
+        let early = arrival_time_at(-100.0, DVec3::new(-20.0, 0.0, 0.0), &w).expect("it arrives");
+        assert!((early + 80.0).abs() < 1e-6, "got {early}");
+    }
+
+    #[test]
+    fn a_ball_across_a_jump_holds_both_ends() {
+        let w = jump();
+        let (center, radius) = w.bounding_ball(-10.0, 10.0);
+        assert!(center.distance(w.from) <= radius && center.distance(w.to) <= radius);
+    }
 
     fn observer(t: i64, x: i64, y: i64, z: i64) -> Coord {
         Coord::new(Micros::new(t), x, y, z).unwrap()

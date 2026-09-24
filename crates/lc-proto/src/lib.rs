@@ -420,6 +420,10 @@ pub mod kind {
     /// [`super::Body::Key`] — it lands in the same conversation, because that is where a player
     /// looks for it. Receiving one is what puts the source in the receiver's keyring.
     pub const KEY: i16 = 6;
+    /// A teleport's departure, stamped where the craft was.
+    pub const VANISH: i16 = 8;
+    /// Its arrival, at the same coordinate time. Each end is seen at its own light delay.
+    pub const APPEAR: i16 = 9;
 }
 
 /// What a craft's drive became at a [`kind::DRIVE`] event.
@@ -783,7 +787,13 @@ pub enum Outbound {
     /// Every craft this ship answers automatically, whole. Sent on signing in and after each
     /// [`Order::AutoAck`]. Appended last.
     AutoAcking { ship_id: ShipId, with: Vec<ShipId> },
+    /// The answer to [`Inbound::Command`] `seq`, to its sender only. `text` is for a person;
+    /// nothing parses it. Appended last.
+    Answered { seq: u32, ok: bool, text: String },
 }
+
+/// The longest command line a shard will read, in bytes.
+pub const COMMAND_LIMIT: usize = 1024;
 
 /// The largest frame and message either end of a connection accepts, bytes. Stated rather than
 /// left to the library's default, so that the shard's pages can be bounded against the same
@@ -927,6 +937,9 @@ pub enum Inbound {
     /// Where the player has got to. Debounced by the client: a page turn every few seconds must
     /// not be a message every few seconds.
     SetReading(Bookmark),
+    /// A console line as typed. Text, so the shard is the only parser: a client that sent a
+    /// structure could send one no parser would produce. Appended last.
+    Command { seq: u32, line: String },
 }
 
 /// Encode anything the protocol carries.
