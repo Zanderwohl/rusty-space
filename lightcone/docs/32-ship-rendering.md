@@ -119,7 +119,7 @@ with drone traffic streaming to it: a shipyard that is also the ship.
 ## Drones
 
 Drones are **stateless particles**: each one's position is a closed-form function of its index, a
-seed and `t`, evaluated in the vertex shader over an instanced quad. That is the same rule as the
+seed and `t`, evaluated in the vertex shader over one quad per drone. That is the same rule as the
 hull: the picture is a function of the recipe and the clock. It also means no particle simulation
 to keep in step, and no dependency such as `bevy_hanabi` to check against Bevy 0.19 and the browser
 (WebGPU) build.
@@ -132,6 +132,19 @@ to keep in step, and no dependency such as `bevy_hanabi` to check against Bevy 0
 - **Idle:** most docked, a thin patrol drifting over the hull.
 - **At a distance:** the swarm fades into a soft haze over the frontier before individual motes
   would fall below a pixel.
+
+As built (`em_render::drone_material`, `drones.wgsl`): the quads are one mesh, each carrying its
+drone's index in a vertex, since Bevy's shared vertex buffers offset `vertex_index`. Docks and
+targets are fixed arrays in the material's uniform, which the host fills. A hash of the index picks
+each drone's role against two fractions, working and patrolling, so raising either adds drones
+without reshuffling the rest. A working drone takes a new target every trip, switching while it is
+docked. Haze is a mote's light spread over a disc about the spacing between drones, and never
+narrower than a few pixels, because a quad under a pixel lands on no pixel center and sparkles. The
+light is conserved, so the haze has the swarm's true brightness per pixel, as the hull does, and a
+sparse swarm makes a faint haze. The clock is seconds since the refit round began (R4's `t`), or
+since the view was spawned when idle. The host takes that difference in `f64` and only then narrows
+it to the shader's `f32`, which resolves a clock since J2000 only to seconds.
+`crates/lc-client/examples/drones_void.rs` photographs it.
 
 ## The field
 
