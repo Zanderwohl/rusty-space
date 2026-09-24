@@ -268,9 +268,9 @@ graph LR
 
 ### F4 · Capacities and mass
 
-- status: todo
+- status: done #71
 - needs: F1, K2
-- touches: `crates/lc-world/src/form/capacity.rs`
+- touches: `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/fitting.rs`
 - read: 29 §Kinds, §Hull structure follows area
 - deliver: capacities per kind from volume at the densities, dry mass from volume and mass fraction plus structure over each part's own area, a spar charged as its uncut primitive, and the mass-energy of adding or removing any part.
 - done when: a form with 19's starting volumes has 19's starting capacities to a part in 10⁹.
