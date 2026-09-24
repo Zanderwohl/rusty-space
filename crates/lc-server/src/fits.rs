@@ -28,8 +28,7 @@ pub(crate) struct Fits {
     /// because an unrelated thread died would be the worse outcome.
     done: Mutex<Receiver<Finished>>,
     /// Fits in flight, by craft, and what of. Several to a craft is safe: `Knowledge::fit_job`
-    /// records the attempt, so the next job is always a different body. One each left a craft in
-    /// a system of two hundred bodies placing them one at a time.
+    /// records the attempt, so the next job is always a different body.
     busy: HashMap<CraftId, Vec<Subject>>,
     /// Half the machine, so the tick and the network keep the rest.
     most: usize,

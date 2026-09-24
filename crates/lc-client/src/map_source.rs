@@ -285,9 +285,7 @@ fn key_of(system: &lc_world::system::LocalSystem, index: em_sim::id::BodyIndex) 
 /// keyed differently is a button that does nothing at all. A body no generator made — a
 /// transit's false positive — falls back to its own id, which nothing else will ask for.
 ///
-/// Weighed by what it probably weighs, which sizes its mark: see
-/// [`lc_world::knowledge::Knowledge::guessed_mass_kg`]. No radius: the map draws a believed body
-/// as a mark, never a sphere of a size nobody has measured.
+/// No radius: a believed body is drawn as a mark, never a sphere of a size nobody measured.
 fn push_believed(build: &mut Build, session: &Session, held: &Held) {
     let Some(system) = session.system.as_ref() else { return };
     let star_ly = system.star_position_ly();

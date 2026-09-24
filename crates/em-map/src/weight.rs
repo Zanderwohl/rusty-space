@@ -7,28 +7,21 @@
 /// and Ceres 4.7e-10, so a floor in the middle keeps the planets and drops the rocks.
 pub const FLOOR: f64 = 1.0e-8;
 
-/// How many times the largest mark is the smallest, however far apart the weights beside each
-/// other are. A star and a moonlet are thirty million times apart in mass and cannot be drawn
-/// thirty million, or even three hundred, times apart in size.
+/// How many times larger the largest mark is than the smallest, however far apart the weights.
 pub const SPAN: f32 = 10.0;
 
 /// The smallest a mark is drawn, as a fraction of full size. A host applies its own pixel floor
 /// under this.
 pub const MIN_SCALE: f32 = 1.0 / SPAN;
 
-/// A mark for something nothing has weighed: neither claiming to be the heaviest thing on the map
-/// nor the lightest.
+/// For an unstated weight: neither the heaviest nor the lightest.
 pub const UNKNOWN_SCALE: f32 = 0.5;
 
-/// How big a thing's mark is, as a fraction of full size: the heaviest beside it is full size.
+/// A mark's size as a fraction of full size, the heaviest being full.
 ///
-/// The cube root of the mass -- the size a body of the same density would be -- until that would
-/// put the lightest more than [`SPAN`] under the heaviest, and then the same log scale squeezed
-/// so it lands exactly there. Squeezed only when it must be: two stars a third apart in mass are
-/// a tenth apart in size, not the whole span.
-///
-/// An infinite weight -- a ship -- is drawn whole and an unstated one at [`UNKNOWN_SCALE`]:
-/// neither is in the comparison.
+/// The cube root of mass (equal density), the slope reduced only as far as keeps the lightest
+/// within [`SPAN`]: stretching every range to the full span would draw two near-equal stars ten
+/// times apart. An infinite weight (a ship) is drawn whole, an unstated one at [`UNKNOWN_SCALE`].
 pub fn scale(weight: f64, lightest: f64, heaviest: f64) -> f32 {
     if weight == f64::INFINITY {
         return 1.0;
@@ -82,8 +75,7 @@ mod tests {
         assert!((ratio(1.0e25, 1.0e24) - ratio(1.0e22, 1.0e21)).abs() < 1.0e-5);
     }
 
-    /// Close weights are drawn close, not stretched across the span: size goes as the cube root
-    /// of mass until the span would be exceeded.
+    /// Close weights are not stretched across the span.
     #[test]
     fn close_weights_are_drawn_close() {
         let (lighter, heavier) = (0.75 * SUN, SUN);
@@ -92,8 +84,7 @@ mod tests {
         assert_eq!(scale(EARTH, EARTH, EARTH), 1.0, "one weight is drawn whole");
     }
 
-    /// An unstated weight is drawn at half size, claiming neither end of the scale; a ship's
-    /// infinite one is drawn whole.
+    /// An unstated weight is drawn at half size, a ship's infinite one whole.
     #[test]
     fn an_unstated_weight_is_drawn_at_half_size() {
         for weight in [0.0, -1.0, f64::NAN, f64::NEG_INFINITY] {

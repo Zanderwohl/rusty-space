@@ -59,9 +59,9 @@ const SCALE_PX: f32 = LINE_PX * 0.5;
 const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
 /// A population's outline, dashed. At full brightness a shell's six curves outshine the map.
 const POPULATION_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
-/// An error bar is about the thing drawn, not the thing itself, so it sits well under it.
+/// An error bar sits well under the line it qualifies.
 const SPREAD_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.25;
-/// How long the cap across each end of an error bar is on screen.
+/// Length of the cap across each end of an error bar.
 const SPREAD_CAP_PX: f32 = 8.0;
 
 /// How much of the palette color a line is drawn at.
@@ -154,8 +154,8 @@ pub struct MapRingOf(pub usize);
 #[derive(Component)]
 pub struct MapDropOf(pub usize);
 
-/// Where something might be: a bar between the ends of its error, capped across each end. By
-/// its placement's place in the frame's list, and which of the three pieces.
+/// An error bar, capped at each end. By its placement's place in the frame's list, and which of
+/// the three pieces.
 #[derive(Component)]
 pub struct MapSpreadOf(pub usize, pub SpreadPart);
 
@@ -791,7 +791,6 @@ fn segment_transform(near: Vec3, far: Vec3) -> Transform {
     }
 }
 
-/// One piece of an error bar from `near` to `far`.
 fn spread_transform(near: Vec3, far: Vec3, part: SpreadPart, rad_per_px: f32) -> Transform {
     match part {
         SpreadPart::Bar => segment_transform(near, far),
@@ -800,10 +799,8 @@ fn spread_transform(near: Vec3, far: Vec3, part: SpreadPart, rad_per_px: f32) ->
     }
 }
 
-/// A cap across the end `end` of a bar running toward `other`, [`SPREAD_CAP_PX`] long on screen.
-///
-/// Across both the bar and the line of sight, so it reads as square to the bar from any angle.
-/// The eye is the render origin, so a point is also its own line of sight.
+/// Square to both the bar and the line of sight, so it looks square from any angle. The eye is
+/// the render origin, so a point is its own line of sight.
 fn cap_transform(end: Vec3, other: Vec3, rad_per_px: f32) -> Transform {
     let (end, other) = (render(end.as_dvec3()), render(other.as_dvec3()));
     let along = (other - end).normalize_or(Vec3::Y);

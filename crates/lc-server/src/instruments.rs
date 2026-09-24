@@ -844,8 +844,7 @@ mod tests {
         let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let star = sky()[0].id;
 
-        // At rest, as a new craft is. Its sun is a resolved disc and so a range, which is what a
-        // parked ship's fits stand on: parallax alone gave it no distance, and so no orbits, ever.
+        // At rest, as a new craft is: its sun is ranged from its disc, not from parallax.
         let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
         wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
         for _ in 0..80 {
@@ -1068,9 +1067,7 @@ mod tests {
         assert!(belief.learned_s > now_s + 3_000.0, "when its light got there: {}", belief.learned_s);
     }
 
-    /// **A report carrying an unbounded error lands.** The radio's report went as JSON, which has
-    /// no infinity, so an orbit whose axis the arc could not bound made the whole report
-    /// unreadable on arrival -- and every report about a fitted system carried one.
+    /// A report carrying an infinite error lands; as JSON it could not be read back.
     #[tokio::test]
     async fn a_reported_orbit_with_an_unbounded_error_is_filed_by_its_receiver() {
         let mut server = Server::new(Memory::default(), 0, 1);
@@ -1233,9 +1230,8 @@ mod tests {
         }
     }
 
-    /// **What the instruments are at is said at most once a second, only when it changed, and
-    /// only about what the craft holds.** A survey detects a body and says so; naming one the
-    /// craft had not found would be the truth arriving by the side door.
+    /// What the instruments are at is said at most once a second, only when it changed, and only
+    /// about subjects the craft holds: naming any other would leak what it has not found.
     #[tokio::test]
     async fn what_the_instruments_are_at_is_said_once_a_second_and_only_about_what_is_held() {
         let broker = Broker::new([1u8; 32]);
@@ -1269,9 +1265,7 @@ mod tests {
         }
     }
 
-    /// **The client's Analyze count is the shard's.** A client that marked its own copy of the
-    /// logs counted subjects the shard held none of, which no conclusion ever came back for, and
-    /// the panel said "3 logs left" for good.
+    /// The client's Analyze count comes from the shard, and reaches zero.
     #[tokio::test]
     async fn an_analysis_counts_down_to_nothing_on_the_client() {
         let broker = Broker::new([1u8; 32]);
@@ -1306,11 +1300,8 @@ mod tests {
         assert_eq!(heard.last(), Some(&0), "the count never reached zero: {heard:?}");
     }
 
-    /// **An orbit whose error is unbounded reaches the client.** `spread` states an element the
-    /// arc cannot bound as infinite, and JSON has no infinity: serde_json wrote `null`, the
-    /// client could not read the page back and dropped it, and the shard had already moved the
-    /// client's mark past it. Every page about a system with a fit in it was lost that way, on
-    /// every reconnection -- a client held none of the 174 orbits its shard had fitted.
+    /// An orbit with an infinite error reaches the client; as JSON the page could not be read
+    /// back, and the mark had already moved past it.
     #[test]
     fn an_unbounded_error_crosses_the_wire() {
         let star = sky()[0].id;

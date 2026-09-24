@@ -120,10 +120,7 @@ pub const REPORT_FORMAT: u32 = 8;
 
 /// A report as [`Reported::body`] carries it: postcard, then base64 so it rides in the JSON a
 /// journaled payload must be.
-///
-/// Not the report as JSON, which has no infinity. An orbit states an element its arc cannot bound
-/// with an infinite error; serde_json wrote that as `null`, could not read it back, and the
-/// receiver dropped the whole report -- every report about a system anybody had fitted.
+/// Not JSON, which has no infinity: an orbit states an unbounded element's error as infinite.
 pub fn encode_report<T: Serialize>(report: &T) -> String {
     STANDARD.encode(crate::encode(report))
 }

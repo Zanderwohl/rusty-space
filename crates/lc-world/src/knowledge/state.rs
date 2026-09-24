@@ -1,12 +1,9 @@
-//! An orbit from ranged positions by way of the body's own motion: where it is, how fast it is
-//! going and how hard it is being pulled, all read off the positions at the middle of the arc.
+//! An orbit from ranged positions by way of the body's own motion: its position, velocity and
+//! pull toward its primary, read at the middle of the arc.
 //!
-//! [`super::arc`]'s conic through the positions needs the arc to bend before it can say what shape
-//! the orbit is, and over the few degrees a close pass covers it cannot: it assumes a circle at
-//! the radius the body is at. But a close pass places a body to meters, and positions that good
-//! give the velocity outright and the acceleration too. Position and velocity and the primary's
-//! pull are a whole orbit, eccentricity and all, from any arc long enough to see the pull bend
-//! the path.
+//! [`super::arc`]'s conic through the positions assumes a circle over the few degrees a close
+//! pass covers. Positions good to meters give the velocity and acceleration as well, and with
+//! them the eccentricity.
 
 use glam::{DMat4, DVec3, DVec4};
 
@@ -111,8 +108,7 @@ mod tests {
     const AU_M: f64 = 1.495_978_707e11;
     const MU_SUN: f64 = 1.327_124_4e20;
 
-    /// Earth-like, and near perihelion like Earth in January: a circle through the positions
-    /// reads 0.983 AU off this, and the motion reads the orbit.
+    /// Earth-like and near perihelion, where a circle through the positions reads 0.983 AU.
     fn truth() -> Fitted {
         let semi_major_m = AU_M;
         let n = (MU_SUN / semi_major_m.powi(3)).sqrt();

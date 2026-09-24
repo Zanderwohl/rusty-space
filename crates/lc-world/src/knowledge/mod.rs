@@ -69,12 +69,9 @@ fn sigma_of(claim: &Claim) -> f64 {
     }
 }
 
-/// Where a static source is, from the looks that ranged it: a star seen from inside its own
-/// system is a disc, and a disc's size is a range. Parallax needs the craft to have moved; this
-/// needs only one look, which is what lets a ship parked at its own sun fit anything at all.
-///
-/// Inverse-variance mean of each ranged look's point, its error the range's and the bearing's
-/// across it in quadrature.
+/// Where a static source is, from the looks that ranged it: a star is a disc from inside its own
+/// system, and parallax would need the craft to have moved. Inverse-variance mean of each look's
+/// point, its error the range's and the bearing's across it in quadrature.
 fn ranged_place(sightings: &[Sighting]) -> Option<Distance> {
     let (mut sum, mut weight) = (glam::DVec3::ZERO, 0.0);
     for seen in sightings {

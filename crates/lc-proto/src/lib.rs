@@ -777,10 +777,8 @@ pub enum Outbound {
     /// copy without adding a hop. The whole of a craft's knowledge arrives this way, in pages,
     /// when it signs in. Appended last.
     ///
-    /// Postcard and not JSON, which has no infinity: an orbit with an element the arc cannot
-    /// bound states its error as infinite, serde_json wrote that as `null` and could not read
-    /// it back, and the client dropped every page carrying one -- which was every page about a
-    /// system anyone had fitted.
+    /// Postcard, not JSON: JSON has no infinity, and an orbit states an unbounded element's
+    /// error as infinite.
     Learned { report: Vec<u8> },
     /// What the telescope is committed to, as the shard has it. Said on sign-in and whenever it
     /// changes. Appended last.
@@ -796,9 +794,8 @@ pub enum Outbound {
     /// The answer to [`Inbound::Command`] `seq`, to its sender only. `text` is for a person;
     /// nothing parses it. Appended last.
     Answered { seq: u32, ok: bool, text: String },
-    /// Logs the shard has still to read for an [`Order::Analyze`], whenever that changes. The
-    /// shard's count and not a client's guess at it: only the shard knows which logs it holds.
-    /// Appended last.
+    /// Logs the shard has still to read for an [`Order::Analyze`], whenever that changes. Only the
+    /// shard knows which logs it holds. Appended last.
     Analyzing { left: u32 },
     /// What the craft's instruments are at: what they last measured, and what orbits are being
     /// fitted, oldest first. Only subjects the craft already holds. At most once a real second,

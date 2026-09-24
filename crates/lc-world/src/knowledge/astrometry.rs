@@ -246,8 +246,8 @@ pub fn triangulate(bearings: &[Bearing]) -> Distance {
     // Twice the distance at which the transverse baseline would show a parallax at the
     // threshold: what "no parallax found" rules out.
     let floor_ly = spread.sqrt() / PARALLAX_SNR;
-    // Without a baseline the slope is rounding error and the source's own motion, and their
-    // ratio passes the test below: a ship parked 5 AU from its sun put the sun at the ship.
+    // Without a baseline the slope is rounding error and the source's own motion, whose ratio
+    // passes the test below.
     let baseline_ly = (spread / total).sqrt();
     if s_var <= 0.0 || !(baseline_ly >= MIN_BASELINE_LY) {
         return if floor_ly > 0.0 {
@@ -296,10 +296,8 @@ mod tests {
         }
     }
 
-    /// **One place is no baseline.** A source that moves a little -- a sun about its
-    /// barycenter -- spreads the bearings from a parked observer, and the regression read that
-    /// spread as parallax at a depth of rounding error: a ship 5 AU from its sun was told the
-    /// sun was at the ship, to sixteen decimal places.
+    /// Bearings from one place give no distance, even to a source that wobbles about its
+    /// barycenter.
     #[test]
     fn bearings_from_one_place_give_no_distance() {
         let at = DVec3::new(5.0, 0.0, 0.0) * AU_LY;

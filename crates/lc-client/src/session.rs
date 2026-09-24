@@ -94,7 +94,7 @@ pub struct Scene {
     pub discs: Vec<Disc>,
 }
 
-/// What a shard's instruments are at, by what the craft holds. See [`lc_proto::Outbound::Doing`].
+/// See [`lc_proto::Outbound::Doing`].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Doing {
     pub observing: Option<lc_world::knowledge::Subject>,
@@ -110,13 +110,12 @@ pub struct Session {
     /// pays for it. Derived from the same stars every other belief is read against, so no craft
     /// is classifying against a sky it cannot see.
     sorts: std::sync::OnceLock<lc_world::knowledge::sort::Sorts>,
-    /// Each body's settled type, against the measurement it was read from. A type is a pass
-    /// over the whole prior and every label in a frame asks for one.
+    /// Each body's settled type, against the measurement it was read from: a type is a pass over
+    /// the whole prior, and every label asks for one every frame.
     settled: std::sync::Mutex<HashMap<BodyId, (Measured, Option<Sort>)>>,
     /// Logs the shard has still to analyze, as it last said.
     pub analyzing: usize,
-    /// What the shard last said the instruments are at: what they last measured, and what
-    /// orbits are being fitted.
+    /// As the shard last said.
     pub doing: Doing,
     pub observer: Coord,
     pub telescope: Instrument,

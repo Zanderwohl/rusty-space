@@ -122,10 +122,8 @@ const DEGENERATE: f64 = 1.0e-6;
 /// bearings. Three of the eight starts on Saturn's three-degree arc landed there, at 5.0000 AU
 /// with no eccentricity, which is the 5 AU circle the ship was flying.
 ///
-/// Not for a look that ranged the body: its range is scored, so the attractor costs it the whole
-/// measured distance, and a body that close is exactly what a ranged look is. From a low orbit
-/// about Earth the guard sat at a million and a half kilometers and refused every orbit of the
-/// planet underneath.
+/// Not for a ranged look: its range is scored, which rules the attractor out, and a body that
+/// close is what ranging is for. From low Earth orbit this bound is 1.5 million km.
 const NOT_ABOARD: f64 = 1.0e-2;
 
 /// How closely two separated solutions must agree on the axis and the period to be the same
@@ -635,11 +633,9 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
     if !sound(total) {
         return Spread { period_s: f64::INFINITY, semi_major_m: f64::INFINITY, eccentricity: f64::INFINITY, pole_rad: std::f64::consts::PI };
     }
-    // Chi-square one worse, expressed in the weighted RMS this file works in -- or, where the
-    // best fit misses by more than the measurements' own errors allow, one *reduced* chi-square
-    // worse. A two-body orbit is not the whole of any body's motion: Earth's center swings 4700
-    // km about the barycenter it shares with the Moon, and against ranges good to meters the
-    // unscaled bar claimed a part in a billion on an axis four thousand kilometers out.
+    // Chi-square one worse, in the weighted RMS this file works in -- or one reduced chi-square
+    // worse where the fit misses by more than the errors allow. A two-body orbit is not the
+    // whole of a body's motion: Earth's center swings 4700 km about the Earth-Moon barycenter.
     let measured = looks.len() + looks.iter().filter(|l| l.range_m.is_some()).count();
     let freedom = measured.saturating_sub(ELEMENTS).max(1) as f64;
     let squared = fitted.residual_rad * fitted.residual_rad;
@@ -832,10 +828,8 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     // Every ranged look, not three of them: the plane a short arc gives is only as good as the
     // number of positions defining it.
     //
-    // Two ways from positions to an orbit, and the better kept. The conic through them needs
-    // the arc to bend and, over the few degrees a close pass covers, assumes a circle at the
-    // radius the body is at; the body's motion at the middle of the arc reads the whole orbit
-    // but only while a cubic in time still describes the path. See `super::state`.
+    // Two ways from positions to an orbit, the better kept: the conic assumes a circle over a
+    // short arc, and the body's motion (`super::state`) holds only while a cubic describes it.
     if ranged.len() >= RANGED_NEEDED {
         let places: Vec<(DVec3, f64)> =
             ranged.iter().filter_map(|l| Some((l.place()?, l.at_s))).collect();

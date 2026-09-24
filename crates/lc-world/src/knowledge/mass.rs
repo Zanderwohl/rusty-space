@@ -17,8 +17,7 @@ use crate::star::Star;
 const ALBEDO: f64 = 0.3;
 
 /// Bulk density by size, Earth radii against kg/m^3, interpolated in log-log: rubble piles, the
-/// Moon, the Earth, Neptune, Jupiter. Size alone does not decide density, but it is what a guess
-/// from a radius has.
+/// Moon, the Earth, Neptune, Jupiter.
 const DENSITY: [(f64, f64); 5] = [(0.05, 2000.0), (0.27, 3340.0), (1.0, 5510.0), (3.9, 1640.0), (11.2, 1330.0)];
 
 impl Knowledge {
@@ -113,9 +112,7 @@ mod tests {
         }
     }
 
-    /// Jupiter's brightness, as the doc gives it from five AU, reads as roughly Jupiter. Its
-    /// real albedo is 0.54, so a guess at 0.3 reads it large, and that is the scale of error the
-    /// method has.
+    /// Jupiter's brightness reads as roughly Jupiter. Its real albedo is 0.54, so it reads large.
     #[test]
     fn a_brightness_gives_about_the_size() {
         let jupiter_m = 6.991e7;

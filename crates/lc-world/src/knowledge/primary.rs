@@ -225,11 +225,9 @@ impl crate::knowledge::Knowledge {
     /// forgotten, since filing would bring back a file the store let go of, or if a fit on later
     /// looks has already been filed.
     ///
-    /// **Stated when filed, not when its looks were taken.** A report carries what was learned
-    /// after the reader's mark, and a shard solves a fit off the tick and files it a tick or more
-    /// later -- by when every client's mark is past the moment the job began. Stamped with that
-    /// moment, no fitted orbit ever reached a client: the map stayed empty and the system's plane
-    /// was never found, while the shard held both.
+    /// Stated when filed, not when its looks were taken: a report carries what was learned after
+    /// the reader's mark, and a fit solved off the tick lands after every client's mark has passed
+    /// the moment its job began.
     pub fn file_fit(&mut self, solved: Solved, now_s: f64) -> bool {
         if self.file(solved.subject).is_none() {
             return false;
@@ -348,9 +346,8 @@ mod tests {
         Solved { subject, about: None, fitted, orbit, taken_s }
     }
 
-    /// **A fit filed after the reader's mark reaches the reader**, however long before it the
-    /// looks were taken. Stamped with when its job began, every orbit a shard fitted landed
-    /// behind every client's mark and none was ever sent.
+    /// A fit filed after the reader's mark reaches the reader, however long before it the looks
+    /// were taken.
     #[test]
     fn a_fit_filed_late_is_still_news() {
         let star = StarId::synthesize("primary", 2);
