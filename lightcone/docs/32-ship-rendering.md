@@ -160,6 +160,14 @@ whatever is decided about air:
   the color is a consequence, not a setting. At 400 K the outer layer is invisible in the visible
   bands. At 2 400 K on a dive it glows red-orange. At 4 600 K it is the brightest thing on screen.
 
+**How it is drawn.** One mesh, three draws: the far wall, the inner rim, then the near wall, which
+alone has alpha and so is the only one that can hide anything. By Kirchhoff each mode's emissivity is
+its absorptivity, and a thin shell's grows toward one along a grazing path, so a Clear field is
+limb-brightened and a Black one glows evenly. The same number is how much of what is behind a wall it
+takes out: Clear shows the ship, Black hides it. The shader takes kelvin and fractions and a table of
+blackbody colors the host has already put through the observer's bands, so nothing in
+`em_render::field_material` knows a `Balance`.
+
 **The mode sets the surface.** Clear is a shimmering, mostly transparent skin: thin-film color bands
 that drift across it like a soap bubble's, over the fresnel rim, with the heat glow showing through
 as a tint. Black is matte and dark, and the heat glow is all there is to see. A switch sweeps the new
@@ -173,11 +181,23 @@ surface across the envelope over `field_switch_s`, from the Mind outward.
 | past 80% of `Q_max` | the glow goes uneven and begins to flicker, faster as it nears the limit |
 | collapse | below |
 
+![A field at 400, 2 400 and 4 600 K, Clear left and Black right](../images/field-temperatures.png)
+
+At 400 K the glow is nothing in the visible: Clear shows the ship and the world behind it through
+the sheen, and Black is a hole in the world. At 2 400 K it is red-orange, Clear's limb the brighter.
+At 4 600 K it is the brightest thing in the frame, and uneven.
+
+![Four consecutive frames of a field at its limit](../images/field-flicker.png)
+
+![A beam's hot spot, and a switch from Clear to Black half swept from the Mind](../images/field-beams-and-switch.png)
+
 **Collapse** is a white flash and a sphere of hot debris expanding and cooling through the colors
 of the afterglow over `collapse_afterglow_s`. Nearby fields brighten when the spike lands on them,
 each at its own retarded time, so a cascade is seen spreading at c. From a distance, a collapse is
 drawn by the photometry: a new point in the sky, as bright as [30-the-field.md](30-the-field.md)
 says.
+
+![A collapse: the flash, then the debris at 40, 180 and 270 s of a 300 s afterglow](../images/field-collapse.png)
 
 ## Beams and plumes
 
@@ -249,6 +269,10 @@ photographed:
 | `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point |
 | `--demo collapse` | a ship collapsing beside two others, one close enough to follow it |
 | `--field-k <kelvin>` | the player's field held at a temperature, for the shader |
+
+Until the player has a field, the shader is photographed in a void: `cargo run -p lc-client
+--example field_void -- --field-k <kelvin> --mode clear|black`, around a stand-in hull, with its
+own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the example's module doc.
 
 `--burst` is the only way to see the saturation flicker, as it is for any flicker.
 

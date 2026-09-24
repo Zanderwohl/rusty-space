@@ -507,12 +507,13 @@ graph LR
 
 ### R6 · Field shader, in a void
 
-- status: todo
+- status: done #66
 - needs: —
-- touches: `crates/em-render/src/field_material.rs`, `crates/lc-client/assets/shaders/field.wgsl`
+- touches: `crates/em-render/src/field_material.rs`, `crates/lc-client/assets/shaders/field.wgsl`, `crates/lc-client/examples/field_void.rs`
 - read: 32 §The field
 - deliver: two layers on any envelope mesh; Clear's thin-film shimmer and Black's matte surface; the blackbody glow from temperature at physical brightness through the exposure; hot spots from bearings; the flicker past 80%; the switch sweep; the collapse flash and afterglow; `--field-k`.
 - done when: photographed at 400, 2 400 and 4 600 K in both modes, and `--burst` shows the flicker.
+- note: photographed through `examples/field_void.rs`, which has its own `--field-k`, `--mode` and `--burst`. The binary's `--field-k` holds the player's field, and there is none until R11, whose deliver line has it.
 
 ### R7 · Exhaust cone, in a void
 
@@ -556,7 +557,7 @@ graph LR
 - needs: R6, F6, H7
 - touches: `crates/lc-client/src/field.rs`
 - read: 32 §The field, 30 §What an observer sees
-- deliver: the envelope meshed from F6's grid, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and hot spots from `Illuminated` once E3 exists.
+- deliver: the envelope meshed from F6's grid, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and hot spots from `Illuminated` once E3 exists; `--field-k` in the binary (32 §Photographing it), holding the player's field at a temperature.
 - done when: a diving ship glows the color the field bar shows.
 
 ### R12 · The cone in the game
