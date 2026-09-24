@@ -99,6 +99,10 @@ pub fn baseline_rad(bearings: &[Bearing], star_ly: DVec3) -> f64 {
 /// to share a direction and has nothing to say about a source seen from all round it.
 pub const WIDE_RAD: f64 = 0.05;
 
+/// Transverse spread of the observing positions below which no depth is read from them: a
+/// kilometer, far under any baseline that measures anything and far over rounding error.
+const MIN_BASELINE_LY: f64 = 1.0e3 / crate::system::M_PER_LY;
+
 /// Smallest determinant, against the cube of the matrix's own largest entry, that
 /// [`intersect`] will invert.
 const CONDITION: f64 = 1.0e-12;
@@ -242,7 +246,10 @@ pub fn triangulate(bearings: &[Bearing]) -> Distance {
     // Twice the distance at which the transverse baseline would show a parallax at the
     // threshold: what "no parallax found" rules out.
     let floor_ly = spread.sqrt() / PARALLAX_SNR;
-    if s_var <= 0.0 {
+    // Without a baseline the slope is rounding error and the source's own motion, and their
+    // ratio passes the test below: a ship parked 5 AU from its sun put the sun at the ship.
+    let baseline_ly = (spread / total).sqrt();
+    if s_var <= 0.0 || !(baseline_ly >= MIN_BASELINE_LY) {
         return if floor_ly > 0.0 {
             Distance::AtLeast(floor_ly)
         } else {
@@ -287,6 +294,22 @@ mod tests {
             toward: (toward + nudge).normalize(),
             sigma_rad: sigma,
         }
+    }
+
+    /// **One place is no baseline.** A source that moves a little -- a sun about its
+    /// barycenter -- spreads the bearings from a parked observer, and the regression read that
+    /// spread as parallax at a depth of rounding error: a ship 5 AU from its sun was told the
+    /// sun was at the ship, to sixteen decimal places.
+    #[test]
+    fn bearings_from_one_place_give_no_distance() {
+        let at = DVec3::new(5.0, 0.0, 0.0) * AU_LY;
+        let bearings: Vec<Bearing> = (0..16)
+            .map(|i| {
+                let wobble = DVec3::new(0.0, i as f64 * 1.0e-4, 0.0) * AU_LY;
+                sighted(wobble, at, 3.0e-10, i)
+            })
+            .collect();
+        assert!(!matches!(triangulate(&bearings), Distance::Measured { .. }), "{:?}", triangulate(&bearings));
     }
 
     /// An orbit of one AU about a point, sampled over half a year.

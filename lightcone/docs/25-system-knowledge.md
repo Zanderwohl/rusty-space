@@ -292,8 +292,9 @@ bodies of one system in turn, **brightest first**, for `SURVEY_DWELL_S` each. Wh
   brightest thing in the sky and what every phase angle is reckoned from. So it costs no dwell
   of its own. **Its distance is its range**: from inside its system it is a resolved disc, and
   a disc is ranged like any body's, so one look places it. Without that distance nothing in
-  the system has a place and no orbit is fitted. It was parallax alone at first, which left a
-  ship parked where it spawned with no orbits and no plane after an hour of real time. Putting it in the source list for
+  the system has a place and no orbit is fitted. It was parallax alone at first, and a parked
+  ship's bearings -- one place, and a sun wobbling about its barycenter -- triangulated the sun
+  to the ship itself, to sixteen decimal places, so an hour of real time fitted nothing. Putting it in the source list for
   its glare and never pointing at it is what the first version did, and a test asking for its
   triangulated distance is what caught that.
 
