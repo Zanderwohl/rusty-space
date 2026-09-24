@@ -65,6 +65,9 @@ pub struct Drawable {
     pub world: crate::worlds::World,
     /// What a rocky world with air is painted with. See [`crate::climate`].
     pub climate: Option<crate::climate::Climate>,
+    /// What a giant is painted with, and the reflectance [`Drawable::world`] carries for it.
+    /// See [`crate::giant`].
+    pub giant: Option<crate::giant::Giant>,
     /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub pole: DVec3,
     /// How long it takes to turn once, seconds. `None` where the arena states no rotation.
@@ -121,6 +124,8 @@ pub struct LocalSystem {
     star_radius_m: f64,
     star_teff_k: f64,
     star_luminosity_w: f64,
+    /// `[Fe/H]`, which a giant's envelope inherits.
+    star_feh: f64,
 }
 
 impl LocalSystem {
@@ -156,6 +161,7 @@ impl LocalSystem {
             star_radius_m: star.star.radius_m,
             star_teff_k: star.star.teff_k,
             star_luminosity_w: star.star.luminosity(),
+            star_feh: star.metallicity,
         };
         // Propagate before taking the inventory. Straight out of the file every body sits at
         // the origin and has no parent -- the derived columns are rebuilt by the first
@@ -241,7 +247,22 @@ impl LocalSystem {
                 // Its own albedo, not one number for everything, and the same one a survey
                 // reads per band: a second opinion about how bright a body is would be a
                 // second chance to have it wrong.
-                let world = crate::worlds::of(self.sim.name(i), surface, &self.sim.info(i).tags);
+                let tags = &self.sim.info(i).tags;
+                let giant = surface.is_banded().then(|| {
+                    let inputs = crate::giant::Inputs::from_tags(
+                        surface,
+                        self.sim.info(i).mass,
+                        radius_m,
+                        equilibrium_k,
+                        self.star_feh,
+                        self.star_teff_k,
+                        spin_s,
+                        tags,
+                    );
+                    crate::giant::of(self.sim.name(i), &inputs)
+                });
+                let world = crate::worlds::of(self.sim.name(i), surface, tags, giant.as_ref());
+                let giant = giant.filter(|_| world.atmosphere == crate::worlds::Atmosphere::Envelope);
                 let mut albedo = world.gray_albedo();
                 if let Some(rings) = rings {
                     let lit = rings.pole.dot(to_star.normalize_or_zero()).abs();
@@ -264,8 +285,9 @@ impl LocalSystem {
                     // Keyed by the arena's id, which is what `rings::for_body` is keyed by and
                     // is not always the display name -- see `worlds`.
                     climate: painted
-                        .then(|| crate::climate::of(self.sim.name(i), &world, equilibrium_k, self.star_teff_k, &self.sim.info(i).tags))
+                        .then(|| crate::climate::of(self.sim.name(i), &world, equilibrium_k, self.star_teff_k, tags))
                         .flatten(),
+                    giant,
                     world,
                     pole,
                     spin_s,
