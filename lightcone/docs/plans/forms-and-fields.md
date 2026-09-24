@@ -507,9 +507,9 @@ graph LR
 
 ### R6 · Field shader, in a void
 
-- status: todo
+- status: active claude/keen-mendel-ab53a2
 - needs: —
-- touches: `crates/em-render/src/field_material.rs`, `crates/lc-client/assets/shaders/field.wgsl`
+- touches: `crates/em-render/src/field_material.rs`, `crates/lc-client/assets/shaders/field.wgsl`, `crates/lc-client/examples/field_void.rs`
 - read: 32 §The field
 - deliver: two layers on any envelope mesh; Clear's thin-film shimmer and Black's matte surface; the blackbody glow from temperature at physical brightness through the exposure; hot spots from bearings; the flicker past 80%; the switch sweep; the collapse flash and afterglow; `--field-k`.
 - done when: photographed at 400, 2 400 and 4 600 K in both modes, and `--burst` shows the flicker.
