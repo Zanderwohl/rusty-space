@@ -227,9 +227,9 @@ graph LR
 
 ### K3 · Wire types
 
-- status: active claude/cool-franklin-b6d6ff
+- status: done #68
 - needs: K1
-- touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-proto/src/form.rs`, `crates/lc-proto/src/field.rs`, `crates/lc-proto/src/emit.rs`, `crates/lc-world/src/form.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/pursuit.rs`, `crates/lc-server/src/`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/hud.rs`, `lightcone/docs/29-ship-form.md`, `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`
+- touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-proto/src/form.rs`, `crates/lc-proto/src/field.rs`, `crates/lc-proto/src/fitting.rs`, `crates/lc-world/src/form.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-server/src/`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/hud.rs`, `lightcone/docs/29-ship-form.md`, `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`
 - read: the Protocol sections of 29, 30 and 31
 - deliver: every new wire type at once: the form's mirror types, `Order::Refit` taking a `Form` beside the old loadout, `Order::FieldMode`, `Order::Emit`, `approach` on `Order::Intercept`, `Outbound::Collapsed`, `Outbound::Illuminated`, `Outbound::Presets`, `Inbound::SavePreset` and `DeletePreset`, the new `Fitted` and `Presence` fields, `Balance`'s new fields and `solar_efficiency` renamed to `conversion_efficiency`, the new refusals. The server answers each new order with a refusal saying it is not built yet. Goldens regenerated once.
 - done when: every type round-trips, the goldens pass, and the game plays exactly as before.
