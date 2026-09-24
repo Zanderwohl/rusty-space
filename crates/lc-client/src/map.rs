@@ -59,6 +59,10 @@ const SCALE_PX: f32 = LINE_PX * 0.5;
 const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
 /// A population's outline, dashed. At full brightness a shell's six curves outshine the map.
 const POPULATION_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
+/// An error bar is about the thing drawn, not the thing itself, so it sits well under it.
+const SPREAD_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.25;
+/// How long the cap across each end of an error bar is on screen.
+const SPREAD_CAP_PX: f32 = 8.0;
 
 /// How much of the palette color a line is drawn at.
 ///
@@ -150,10 +154,17 @@ pub struct MapRingOf(pub usize);
 #[derive(Component)]
 pub struct MapDropOf(pub usize);
 
-/// Where a star measured by parallax might be: its error along the line of sight. By its
-/// placement's place in the frame's list.
+/// Where something might be: a bar between the ends of its error, capped across each end. By
+/// its placement's place in the frame's list, and which of the three pieces.
 #[derive(Component)]
-pub struct MapSpreadOf(pub usize);
+pub struct MapSpreadOf(pub usize, pub SpreadPart);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpreadPart {
+    Bar,
+    NearCap,
+    FarCap,
+}
 
 /// A belt, a ring system or a cloud, drawn as its own outline rather than as a point. By its
 /// placement's place in the frame's list.
@@ -554,7 +565,7 @@ fn place(
     }
     for (of, mut at) in spreads.iter_mut() {
         let Some((near, far)) = frame.placements.get(of.0).and_then(|p| p.spread) else { continue };
-        *at = segment_transform(near, far);
+        *at = spread_transform(near, far, of.1, rad_per_px);
     }
     for (of, mut at) in rings.iter_mut() {
         let Some(ring) = frame.rings.get(of.0) else { continue };
@@ -780,6 +791,31 @@ fn segment_transform(near: Vec3, far: Vec3) -> Transform {
     }
 }
 
+/// One piece of an error bar from `near` to `far`.
+fn spread_transform(near: Vec3, far: Vec3, part: SpreadPart, rad_per_px: f32) -> Transform {
+    match part {
+        SpreadPart::Bar => segment_transform(near, far),
+        SpreadPart::NearCap => cap_transform(near, far, rad_per_px),
+        SpreadPart::FarCap => cap_transform(far, near, rad_per_px),
+    }
+}
+
+/// A cap across the end `end` of a bar running toward `other`, [`SPREAD_CAP_PX`] long on screen.
+///
+/// Across both the bar and the line of sight, so it reads as square to the bar from any angle.
+/// The eye is the render origin, so a point is also its own line of sight.
+fn cap_transform(end: Vec3, other: Vec3, rad_per_px: f32) -> Transform {
+    let (end, other) = (render(end.as_dvec3()), render(other.as_dvec3()));
+    let along = (other - end).normalize_or(Vec3::Y);
+    let across = along.cross(end).try_normalize().unwrap_or_else(|| along.any_orthonormal_vector());
+    let length = end.length() * rad_per_px * SPREAD_CAP_PX;
+    Transform {
+        translation: end - across * (0.5 * length),
+        rotation: Quat::from_rotation_arc(Vec3::Y, across),
+        scale: Vec3::new(1.0, length, 1.0),
+    }
+}
+
 /// A unit ring in the XZ plane, turned onto the reference plane and grown to its radius.
 fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
     let normal = render(frame.plane_normal.as_dvec3()).normalize();
@@ -861,18 +897,20 @@ fn spawn_scene(
             ));
         }
         if let Some((near, far)) = placement.spread {
-            let at = segment_transform(near, far);
-            commands.spawn((
-                // One dash: a solid line.
-                Mesh3d(map.drops[0].clone()),
-                MeshMaterial3d(materials.add(line_material(color_of(placement.kind), LINE_TUBE_FRACTION,
-                    LINE_PX, LINE_COLOR_SCALE))),
-                at,
-                NoFrustumCulling,
-                layer.clone(),
-                MapDrawn,
-                MapSpreadOf(index),
-            ));
+            let material = materials.add(line_material(color_of(placement.kind), LINE_TUBE_FRACTION,
+                LINE_PX, SPREAD_COLOR_SCALE));
+            for part in [SpreadPart::Bar, SpreadPart::NearCap, SpreadPart::FarCap] {
+                commands.spawn((
+                    // One dash: a solid line.
+                    Mesh3d(map.drops[0].clone()),
+                    MeshMaterial3d(material.clone()),
+                    spread_transform(near, far, part, view.rad_per_px),
+                    NoFrustumCulling,
+                    layer.clone(),
+                    MapDrawn,
+                    MapSpreadOf(index, part),
+                ));
+            }
         }
         if placement.has_drop_line() {
             let at = drop_transform(placement);
@@ -929,6 +967,22 @@ fn color_of(kind: ItemKind) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cap reads as square to its bar from any angle, centered on the end it closes and the
+    /// same size on screen however far off it is.
+    #[test]
+    fn an_error_bar_cap_is_square_to_its_bar_and_to_the_eye() {
+        let (near, far) = (Vec3::new(10.0, 0.0, 3.0), Vec3::new(12.0, 1.0, 2.0));
+        let rad_per_px = 1.0e-3;
+        let cap = cap_transform(near, far, rad_per_px);
+        let across = cap.rotation * Vec3::Y;
+        let (end, other) = (render(near.as_dvec3()), render(far.as_dvec3()));
+        assert!(across.dot((other - end).normalize()).abs() < 1.0e-5, "not square to the bar");
+        assert!(across.dot(end.normalize()).abs() < 1.0e-5, "not square to the line of sight");
+        let middle = cap.translation + across * (0.5 * cap.scale.y);
+        assert!(middle.distance(end) < 1.0e-4, "not centered on its end");
+        assert!((cap.scale.y - end.length() * rad_per_px * SPREAD_CAP_PX).abs() < 1.0e-5);
+    }
     use crate::map_line::tube_radius;
 
     use crate::ui::{Frame, MapFocus};
