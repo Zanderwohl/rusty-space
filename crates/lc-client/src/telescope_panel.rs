@@ -226,7 +226,7 @@ fn duty(
         }
         Duty::Survey { star, .. } => {
             let here = game.system.as_ref().filter(|s| s.star == *star).is_some();
-            ui.label(format!("Surveying {}", game.name_of(*star)));
+            ui.label(format!("Surveying bodies local to {}", game.name_of(*star)));
             if !here {
                 ui.weak("not in that system");
             } else if held.bodies.is_empty() {
