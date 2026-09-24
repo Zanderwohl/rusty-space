@@ -134,7 +134,7 @@ from the origin, which is nothing against a distance of 0.05 AU.
 ### Balance
 
 ```rust
-pub solar_efficiency: f64,   // η, 0.7
+pub conversion_efficiency: f64,   // η, 0.7; was solar_efficiency, see 30-the-field.md
 pub solar_gain: f64,         // G, derived in DEFAULT from the anchor
 ```
 
