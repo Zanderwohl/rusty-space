@@ -6,6 +6,10 @@ What a ship is made of, what it costs to change that, and what it costs to fly.
 (`R`) and Dev actions (`F5`) panels. Where the build departed from the plan, this says what was
 built.
 
+**Being replaced in part.** [29-ship-form.md](29-ship-form.md) removes the loadout, module counts
+and hull slots: a ship becomes parts whose volumes are its capacities, and refits become rounds
+of edits paid for in energy. The mass, the rocket law and the energy account here stand.
+
 Energy is the currency of everything. A ship stores it, spends it on every burn, spends it
 building modules, gets most of it back by taking modules apart, and bleeds a little of it
 keeping its crew alive. [03-world-model.md](03-world-model.md)'s *Resources* section says energy
@@ -349,8 +353,10 @@ As planned, and done in this order.
   the dev grant unnecessary. The first source, hull solar, is designed in
   [20-solar-power.md](20-solar-power.md).
 - **Transmission** should draw on the same budget; `Order::Transmit` states a power and is free.
+  [31-directed-energy.md](31-directed-energy.md) charges it, as one use of `Order::Emit`.
 - **Other modules**: weapons, cargo, sensors. The planner's order of priority will need a rule
-  for each.
+  for each. Weapons turn out to be engines ([31-directed-energy.md](31-directed-energy.md)); bays
+  and where modules sit are [29-ship-form.md](29-ship-form.md).
 - **A full ship throws energy away** when it takes a module apart, rather than being refused.
   The refit panel warns how much, and a player who cares makes room in storage first.
 - **Holding a station is free**, as it was before energy: `motion::thrust_g` treats the

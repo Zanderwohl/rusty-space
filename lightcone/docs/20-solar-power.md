@@ -269,6 +269,8 @@ The geometry is checked independently of the formula it replaces:
 ## Open
 
 - **Heat.** The mechanic's missing counter-pressure. Closer is always better until it exists.
+  Designed in [30-the-field.md](30-the-field.md), where collection becomes the field's intake and
+  the analytic shadow gives way to [29-ship-form.md](29-ship-form.md)'s table.
 - **Multiple stars.** Only the primary is counted. A binary's companion contributes nothing.
 - **Eclipses.** A planet between ship and star does not shade it. A ship in low orbit is in shadow
   for up to half of each orbit, which is a real effect and a small one against a segment a day
