@@ -19,6 +19,7 @@ use crate::sky::StarId;
 pub mod arc;
 pub mod astrometry;
 pub mod body;
+pub mod called;
 pub mod conclusion;
 pub mod formats;
 pub mod moments;
@@ -190,8 +191,12 @@ impl File {
     }
 
     fn naming(&self, owner: Witness) -> Option<&Naming> {
+        self.best_naming(owner, |_| true)
+    }
+
+    fn best_naming(&self, owner: Witness, admit: impl Fn(&Naming) -> bool) -> Option<&Naming> {
         let mut name: Option<&Naming> = None;
-        for naming in &self.names {
+        for naming in self.names.iter().filter(|n| admit(n)) {
             if better_name(name, naming, owner) {
                 name = Some(naming);
             }
@@ -495,11 +500,29 @@ impl Knowledge {
         self.name_at_depth(subject.into(), 0)
     }
 
+    /// The name a rule assigned, read as [`Knowledge::name_of`] reads it, whatever anybody has
+    /// since chosen.
+    pub fn designation_of(&self, subject: impl Into<Subject>) -> Option<String> {
+        let subject = subject.into();
+        let naming = self.files.get(&subject)?.best_naming(self.owner, |n| !n.kind.chosen())?;
+        self.read_naming(subject, naming, 0)
+    }
+
+    /// The name somebody chose, if the name that wins is one.
+    pub fn given_name_of(&self, subject: impl Into<Subject>) -> Option<String> {
+        let naming = self.files.get(&subject.into())?.naming(self.owner)?;
+        naming.kind.chosen().then(|| naming.name.clone())
+    }
+
     /// A report can carry a relative naming on a star, which would read after itself forever;
     /// past [`NAME_DEPTH`] the subject goes by its designation instead.
     fn name_at_depth(&self, subject: Subject, depth: usize) -> Option<String> {
+        let naming = self.files.get(&subject)?.naming(self.owner)?;
+        self.read_naming(subject, naming, depth)
+    }
+
+    fn read_naming(&self, subject: Subject, naming: &Naming, depth: usize) -> Option<String> {
         let file = self.files.get(&subject)?;
-        let naming = file.naming(self.owner)?;
         match naming.kind {
             NameKind::Relative if depth >= NAME_DEPTH => {
                 let toward = file.sightings.first().map_or(glam::DVec3::Z, |s| s.bearing.toward);
@@ -705,6 +728,10 @@ impl Knowledge {
     fn file_sighting(&mut self, subject: Subject, sighting: Sighting) {
         let witness = sighting.witness;
         let owner = self.owner;
+        let assigned = match subject {
+            Subject::Body { star, .. } => self.next_discovery(star, sighting.observed_s),
+            _ => designation(sighting.bearing.toward),
+        };
         let file = self.files.entry(subject).or_default();
         if file.sightings.iter().any(|s| s.same_as(&sighting)) {
             return;
@@ -713,7 +740,7 @@ impl Knowledge {
         if witness == owner && file.names.is_empty() {
             file.names.push(Naming {
                 witness: owner,
-                name: designation(sighting.bearing.toward),
+                name: assigned,
                 kind: NameKind::Designation,
                 stated_s: sighting.observed_s,
                 lineage: Lineage::new(),
@@ -722,6 +749,20 @@ impl Knowledge {
         file.sightings.push(sighting);
         file.decimate(witness);
         self.refresh(subject);
+    }
+
+    /// The designation this craft's next find around `star` in the year of `found_s` gets: one
+    /// past the highest it has already given there that year.
+    fn next_discovery(&self, star: StarId, found_s: f64) -> String {
+        let prefix = format!("{}-", names::discovery_year(found_s));
+        let order = self
+            .members(star)
+            .flat_map(|(_, file)| file.names.iter())
+            .filter(|n| n.witness == self.owner && n.kind == NameKind::Designation)
+            .filter_map(|n| n.name.strip_prefix(&prefix)?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0);
+        names::discovery_designation(found_s, order + 1)
     }
 
     fn refresh(&mut self, subject: Subject) {
@@ -1149,6 +1190,30 @@ mod tests {
             along_x,
             "a direction, not a distance"
         );
+    }
+
+    /// A body is designated by when it was found, counted per star and per year, and keeps
+    /// that designation whatever it is later named.
+    #[test]
+    fn a_found_body_is_designated_by_year_and_order() {
+        let (star, other) = (star_id(30), star_id(31));
+        let year = crate::flight::JULIAN_YEAR_S;
+        let mut k = Knowledge::new(Witness(1));
+        let find = |k: &mut Knowledge, star, key: &str, at_s| {
+            let (_, subject) = planet(star, key);
+            k.sighted(subject, sighting(1, DVec3::ZERO, DVec3::X, at_s));
+            k.designation_of(subject).unwrap()
+        };
+        assert_eq!(find(&mut k, star, "a", 10.0), "0-1");
+        assert_eq!(find(&mut k, star, "b", 20.0), "0-2");
+        assert_eq!(find(&mut k, other, "c", 30.0), "0-1", "counted per star");
+        assert_eq!(find(&mut k, star, "d", 2.5 * year), "2-1", "counted per year");
+        assert_eq!(find(&mut k, star, "a", 3.0 * year), "0-1", "never re-designated");
+
+        let (_, a) = planet(star, "a");
+        k.name_it(a, "Pebble", 4.0 * year);
+        assert_eq!(k.given_name_of(a).as_deref(), Some("Pebble"));
+        assert_eq!(k.designation_of(a).as_deref(), Some("0-1"));
     }
 
     fn planet(star: StarId, key: &str) -> (BodyId, Subject) {

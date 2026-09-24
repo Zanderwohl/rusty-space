@@ -692,7 +692,8 @@ mod from_a_file {
         crate::knowledge::BodyBelief {
             subject: crate::knowledge::Subject::Body { star, body },
             body,
-            name: None,
+            given: None,
+            designation: None,
             kind: Vec::new(),
             period_s: None,
             semi_major_au: None,

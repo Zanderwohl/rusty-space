@@ -10,7 +10,9 @@ use lc_world::craft::{Craft, CraftId, Fleet, Kind};
 use lc_world::instrument::Instrument;
 use lc_world::knowledge::observatory::{Observatory, Sky};
 use lc_world::knowledge::survey::Duty;
-use lc_world::knowledge::{Belief, Knowledge, Sample, Witness};
+use lc_world::knowledge::conclusion::SETTLED;
+use lc_world::knowledge::sort::{Measured, Sort};
+use lc_world::knowledge::{Belief, BodyBelief, BodyId, Knowledge, Sample, Witness};
 use lc_world::motion::{self, Motive};
 use lc_world::observation::{Observation, Target, observe};
 use lc_world::sky::{CatalogStar, StarId, StarProvider, generate};
@@ -101,6 +103,9 @@ pub struct Session {
     /// pays for it. Derived from the same stars every other belief is read against, so no craft
     /// is classifying against a sky it cannot see.
     sorts: std::sync::OnceLock<lc_world::knowledge::sort::Sorts>,
+    /// Each body's settled type, against the measurement it was read from. A type is a pass
+    /// over the whole prior and every label in a frame asks for one.
+    settled: std::sync::Mutex<HashMap<BodyId, (Measured, Option<Sort>)>>,
     pub observer: Coord,
     pub telescope: Instrument,
     pub mapping: BandMapping,
@@ -168,6 +173,7 @@ impl Session {
         let sky_model = Sky::new(Arc::new(stars.clone()));
         let mut session = Self {
             sorts: std::sync::OnceLock::new(),
+            settled: Default::default(),
             stars,
             observer: Coord::ORIGIN,
             telescope: SHIP_SENSOR,
@@ -575,9 +581,29 @@ impl Session {
     pub fn home_labels(&self) -> lc_world::labels::Labels {
         let Some(system) = self.system.as_ref() else { return Default::default() };
         let star = self.name_of(system.star);
-        lc_world::labels::label(system, &star, |body| {
-            self.knowledge.name_of(lc_world::knowledge::Subject::Body { star: system.star, body })
-        })
+        let called: HashMap<BodyId, String> =
+            crate::beliefs::of(self).bodies.iter().map(|b| (b.body, self.called(b))).collect();
+        lc_world::labels::label(system, &star, |body| called.get(&body).cloned())
+    }
+
+    /// What this ship calls a body it holds: see [`lc_world::knowledge::called`].
+    pub fn called(&self, belief: &BodyBelief) -> String {
+        let Some(star) = belief.subject.star().and_then(|id| self.stars.iter().find(|c| c.id == id)) else {
+            return belief.given.clone().or_else(|| belief.designation.clone()).unwrap_or_else(|| "unidentified body".into());
+        };
+        let measured = Measured::from_belief(belief, &star.star);
+        let settled = {
+            let mut held = self.settled.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            match held.get(&belief.body) {
+                Some((read, sort)) if *read == measured => *sort,
+                _ => {
+                    let sort = self.sorts().leading(&measured, SETTLED);
+                    held.insert(belief.body, (measured, sort));
+                    sort
+                }
+            }
+        };
+        lc_world::knowledge::called::called(belief, &star.star, settled)
     }
 
     /// What this ship calls a body of its system, by the key it is targeted by.

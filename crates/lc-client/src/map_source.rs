@@ -306,7 +306,7 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
             .as_deref()
             .map(ItemKey::from_name)
             .unwrap_or_else(|| ItemKey::from_id("phantom", belief.body.get()));
-        let label = belief.name.clone().unwrap_or_else(|| "unnamed body".to_string());
+        let label = session.called(belief);
         // Keyed by what the body is targeted by, never by what it is called. Two bodies
         // nobody has named are both "unnamed body", so a label as a key made every one of
         // them the same subject: picking one focused nothing and hovering one lit them all.
