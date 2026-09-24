@@ -164,7 +164,7 @@ complete.
 | **shadow table** | area of the grid's projection along each of the 162 vertices of a twice-subdivided icosahedron, interpolated between them | starlight and beams arriving, brightness |
 | **broadside** | the direction of largest shadow, and the roll that presents it | the idle attitude of [20-solar-power.md](20-solar-power.md) |
 | **envelope** | the union's distance field offset by `envelope_margin` and blended with a large radius | the field's area and volume, [30-the-field.md](30-the-field.md) |
-| **moments of inertia** | the filled cells, weighted by each part's density | slew rate |
+| **inertia tensor** | the filled cells, weighted by each part's density, as the full symmetric tensor: a form is symmetric only port to starboard, so the xz product is generally not zero | slew rate |
 | **extent** | the envelope's longest dimension | `length_m`: the camera, the zoom limits, `Presence` |
 
 **The shadow handles concave shapes.** A stack of plates shades
@@ -287,7 +287,8 @@ ship lacks gives those parts nothing in a layout, and the editor names them.
 - An imported or stale preset is only a draft: the server validates the target when it is applied,
   as it validates any other.
 - Limits, so a store row stays small: `MAX_PARTS` parts to a form, `MAX_PRESETS` presets to an
-  account, and a name of at most 64 characters.
+  account, and a name of at most `PRESET_NAME_LIMIT`, 64 bytes. Both preset limits are in
+  `lc_proto::form`, because both ends check them.
 
 ## The editor
 
@@ -408,7 +409,12 @@ photographs it, and `--form <preset>` stages a draft.
 ## Protocol and persistence
 
 - `Loadout` is removed from the wire and from saves. `Order::Refit { target: Form }`.
-- `Fitted` carries the form, each part's solved scale, the capacities, and the geometry's numbers.
+- `Fitted` carries a `Hull`: the form, each part's solved scale, the capacities, and the geometry's
+  numbers.
+- An invalid target is `Refusal::Form(FormFault)`, naming the part: the structural checks, then each
+  placement rule.
+- The wire's form types are `lc_proto::form`, mirrors with arrays for glam's vectors, converted in
+  `lc_world::form`.
 - A craft's form is saved. Old rows are not read: there are no players, so the format simply changes.
 - Presets: `Inbound::SavePreset { name, form }`, `Inbound::DeletePreset { name }`, and
   `Outbound::Presets`, the account's whole list, sent after `Welcome` and after each change. A
@@ -446,7 +452,7 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 | crate | new | changed |
 |---|---|---|
 | `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments |
-| `lc-proto` | | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form |
+| `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |
 | `lc-client` | `form_view.rs`, `form_panel.rs`, `snap.rs`, `form_history.rs`, `presets_panel.rs` | `ui.rs` gains the view mode. The refit window becomes the ledger |

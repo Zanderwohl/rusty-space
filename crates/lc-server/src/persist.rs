@@ -512,6 +512,7 @@ impl<J: Journal> Server<J> {
                     let pursuit = self.pursuits.get(&craft.id).map(|p| lc_proto::Pursuit {
                         quarry: p.quarry,
                         closeness: p.closeness.into(),
+                        approach: lc_proto::Approach::Direct,
                     });
                     let instruments = self.instruments.aboard.get(&craft.id).map(|a| SavedInstruments {
                         observatory: a.observatory.clone(),
@@ -740,6 +741,7 @@ mod tests {
         let pursuit = lc_proto::Pursuit {
             quarry: lc_proto::ShipId(9),
             closeness: lc_proto::Closeness::Intimate,
+            approach: lc_proto::Approach::Direct,
         };
         let row = save(&a_craft(), None, Some(pursuit), None, Radio::default(), 0);
         assert_eq!(decode(&row).expect("it reads").pursuit, Some(pursuit));

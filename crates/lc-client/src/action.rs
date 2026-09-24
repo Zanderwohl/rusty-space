@@ -529,7 +529,9 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // the past of, which is the one thing the design will not have.
         Action::Intercept(ship_id, closeness) => {
             if session.remote {
-                effects.push(Effect::Send(lc_proto::Order::Intercept { ship_id, closeness }));
+                // Direct is all a shard flies until E5 and C9 add the choice.
+                let approach = lc_proto::Approach::Direct;
+                effects.push(Effect::Send(lc_proto::Order::Intercept { ship_id, closeness, approach }));
             } else {
                 effects.push(Effect::Notify("no server, so nobody to close on".into()));
             }
@@ -723,7 +725,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::ApplyRefit => {
             // Kept, so a refused refit leaves the sliders where they were.
             if let Some(target) = ui.refit_draft {
-                effects.push(Effect::Send(lc_proto::Order::Refit { target: target.into() }));
+                effects.push(Effect::Send(lc_proto::Order::RefitLoadout { target: target.into() }));
             }
         }
         Action::CancelRefit => effects.push(Effect::Send(lc_proto::Order::CancelRefit)),

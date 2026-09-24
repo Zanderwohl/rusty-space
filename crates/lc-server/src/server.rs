@@ -515,6 +515,8 @@ impl<J: Journal> Server<J> {
                         let pursuing = self.pursuits.get(&CraftId(ship_id.0)).map(|p| lc_proto::Pursuit {
                             quarry: p.quarry,
                             closeness: p.closeness.into(),
+                            // The only approach flown until E5.
+                            approach: lc_proto::Approach::Direct,
                         });
                         // What it is doing, not merely where it is: an account coming back
                         // finds its craft mid-orbit or mid-burn, and a welcome that said only
@@ -594,6 +596,12 @@ impl<J: Journal> Server<J> {
                 }
             }
             Inbound::Command { seq, line } => self.enqueue(from, seq, line, wire),
+            // S2 keeps presets. A connection with no ship has nobody to refuse to.
+            Inbound::SavePreset { .. } | Inbound::DeletePreset { .. } => {
+                if let Some(state) = self.clients.get(&from) {
+                    wire.send(from, Outbound::Refused { ship_id: state.ship, reason: Refusal::NotBuilt });
+                }
+            }
             Inbound::Stage { scenario } => self.staged(from, &scenario, wire),
             Inbound::Grant { joules } => self.granted(from, joules, wire),
             Inbound::ResumeFrom { arrive_t } => {
@@ -779,7 +787,8 @@ impl<J: Journal> Server<J> {
                 // who could see it lit — `crate::drive` states it — and after that the ship is.
                 (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
             }
-            Order::Intercept { ship_id, closeness } => {
+            Order::Intercept { approach: lc_proto::Approach::Courteous, .. } => return Err(Refusal::NotBuilt),
+            Order::Intercept { ship_id, closeness, .. } => {
                 let quarry = *ship_id;
                 // The first plan is made here rather than left to the next tick, so that a
                 // player who presses the button sees the ship move on the same round trip as
@@ -817,7 +826,7 @@ impl<J: Journal> Server<J> {
                     KIND_BURN,
                     BURN_POWER_W,
                     format!("{{\"intercept\":{}}}", quarry.0),
-                    Order::Intercept { ship_id: quarry, closeness: *closeness },
+                    Order::Intercept { ship_id: quarry, closeness: *closeness, approach: lc_proto::Approach::Direct },
                 )
             }
             Order::BreakOff => {
@@ -836,11 +845,13 @@ impl<J: Journal> Server<J> {
                 }
                 (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
             }
-            Order::Refit { target } => {
+            Order::RefitLoadout { target } => {
                 self.refit(id, (*target).into(), at_s)?;
                 // Drones are quiet. Nothing about a refit is visible from outside the hull.
-                (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::Refit { target: *target })
+                (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::RefitLoadout { target: *target })
             }
+            // S1, H6 and E3 build these.
+            Order::Refit { .. } | Order::FieldMode { .. } | Order::Emit { .. } => return Err(Refusal::NotBuilt),
             Order::CancelRefit => {
                 self.fleet.get_mut(id).ok_or(Refusal::NotYours)?.cancel_refit(at_s);
                 self.refitting.remove(&id);
@@ -1923,7 +1934,11 @@ use crate::transport::Loopback;
 
         wire.client_says(hunter, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+            order: Order::Intercept {
+                ship_id: ShipId(2),
+                closeness: lc_proto::Closeness::Company,
+                approach: lc_proto::Approach::Direct,
+            },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -1969,7 +1984,11 @@ use crate::transport::Loopback;
         server.admit(ClientId(2), crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)), 0.0);
         wire.client_says(hunter, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+            order: Order::Intercept {
+                ship_id: ShipId(2),
+                closeness: lc_proto::Closeness::Company,
+                approach: lc_proto::Approach::Direct,
+            },
             issued_at_client_t: 0,
         }));
         for _ in 0..3 {
@@ -2029,7 +2048,11 @@ use crate::transport::Loopback;
             server.admit(ClientId(2), crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)), 0.0);
             wire.client_says(hunter, Inbound::Act(Intent {
                 ship_id: ShipId(1),
-                order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+                order: Order::Intercept {
+                    ship_id: ShipId(2),
+                    closeness: lc_proto::Closeness::Company,
+                    approach: lc_proto::Approach::Direct,
+                },
                 issued_at_client_t: 0,
             }));
             for _ in 0..3 {
@@ -2073,7 +2096,11 @@ use crate::transport::Loopback;
 
         wire.client_says(hunter, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+            order: Order::Intercept {
+                ship_id: ShipId(2),
+                closeness: lc_proto::Closeness::Company,
+                approach: lc_proto::Approach::Direct,
+            },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -2223,7 +2250,11 @@ use crate::transport::Loopback;
 
         wire.client_says(hunter, Inbound::Act(Intent {
             ship_id: ShipId(1),
-            order: Order::Intercept { ship_id: ShipId(2), closeness: lc_proto::Closeness::Company },
+            order: Order::Intercept {
+                ship_id: ShipId(2),
+                closeness: lc_proto::Closeness::Company,
+                approach: lc_proto::Approach::Direct,
+            },
             issued_at_client_t: 0,
         }));
         server.tick(&mut wire).await.unwrap();
@@ -3449,7 +3480,11 @@ mod hello_tests {
 
         wire.client_says(ClientId(1), Inbound::Act(Intent {
             ship_id: ship,
-            order: Order::Intercept { ship_id: quarry, closeness: lc_proto::Closeness::Intimate },
+            order: Order::Intercept {
+                ship_id: quarry,
+                closeness: lc_proto::Closeness::Intimate,
+                approach: lc_proto::Approach::Direct,
+            },
             issued_at_client_t: server.now_t(),
         }));
         server.tick(&mut wire).await.unwrap();
@@ -3488,7 +3523,11 @@ mod hello_tests {
             said.get(1),
             Some(&Outbound::Pursuing {
                 ship_id: ship,
-                pursuit: lc_proto::Pursuit { quarry, closeness: lc_proto::Closeness::Intimate },
+                pursuit: lc_proto::Pursuit {
+                    quarry,
+                    closeness: lc_proto::Closeness::Intimate,
+                    approach: lc_proto::Approach::Direct,
+                },
             }),
         );
     }

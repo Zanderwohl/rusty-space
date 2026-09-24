@@ -348,8 +348,13 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
   `Refusal::OverRating`, and the existing `UnderWay` and `Refitting`.
 - `Outbound::Illuminated`: a beam arriving, with its bearing, band and power, **when its light
   lands**. That is the only way a receiver learns of it. A receiver knows the bearing because the
-  light came from there.
-- `Presence` of an emitter seen from inside its cone carries its brightness in that band.
+  light came from there. The power is what reaches the field, before its absorptivity. It is said
+  again whenever the arriving power changes, as it falls with the emitter's mass, and with zero
+  power when the light of the beam stopping arrives. It carries no end time: an emitter may stop
+  early, and until that light lands the receiver cannot know. Each carries the emit's event id,
+  so two beams from one bearing stay apart.
+- `Presence` of an emitter seen from inside its cone carries its brightness in that band, as a
+  `Glare`.
 
 ## Client
 

@@ -218,6 +218,9 @@ pub fn contacts(
                 // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by
                 // construction, so this is the light landing at this instant.
                 arrive_t: now_t,
+                form: lc_proto::Form::default(),
+                glow: None,
+                glare: None,
             };
             match Cleared::<Presence>::clear(presence, now_t) {
                 Ok(pass) => seen.push(pass),

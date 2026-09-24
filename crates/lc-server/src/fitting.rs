@@ -106,7 +106,7 @@ impl<J: Journal> Server<J> {
         let Some(craft) = self.fleet.get(id) else { return };
         let Some(fitting) = craft.fitting() else { return };
         let Some(owner) = self.owners.get(&id).copied() else { return };
-        wire.send(owner, Outbound::Fitted { ship_id: ShipId(id.0), fitting: fitting.into() });
+        wire.send(owner, Outbound::Fitted { ship_id: ShipId(id.0), fitting: fitting.into(), hull: None, field: None });
     }
 
     /// Begin a refit, or say why not.
@@ -262,7 +262,7 @@ mod tests {
         let (mut server, mut wire, from, _) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
         let target = lc_proto::Loadout { storage: 6, drones: 2, living: 1, engines: 6, slots: 20, data: 1 };
-        wire.client_says(from, act(Order::Refit { target }));
+        wire.client_says(from, act(Order::RefitLoadout { target }));
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
         assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { .. })), "{said:?}");
@@ -294,7 +294,7 @@ mod tests {
             change: Change::Cross { to_ly: DVec3::X * 0.01, drive: lc_world::flight::Drive::DEFAULT },
         })
         .unwrap();
-        wire.client_says(from, act(Order::Refit { target }));
+        wire.client_says(from, act(Order::RefitLoadout { target }));
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
         assert!(
@@ -309,7 +309,7 @@ mod tests {
         server.tick(&mut wire).await.unwrap();
         // Forty engines and the slots for them: more than thirty stored module-energies pay for.
         let target = lc_proto::Loadout { storage: 6, drones: 2, living: 1, engines: 40, slots: 60, data: 1 };
-        wire.client_says(from, act(Order::Refit { target }));
+        wire.client_says(from, act(Order::RefitLoadout { target }));
         server.tick(&mut wire).await.unwrap();
         let said = replies(&mut wire);
         assert!(
@@ -319,6 +319,51 @@ mod tests {
             )),
             "{said:?}"
         );
+    }
+
+    /// Each order the wire has before the shard can do it is refused as such, and does nothing.
+    #[tokio::test]
+    async fn an_order_not_built_yet_is_refused_as_not_built() {
+        use lc_proto::{Aim, Apertures, Approach, Closeness, FieldMode, Form};
+        let (mut server, mut wire, from, ship) = fitted_server(false);
+        server.tick(&mut wire).await.unwrap();
+        let before = server.ship(ship).unwrap().fitting().cloned();
+        let unbuilt = [
+            act(Order::Refit { target: Form::default() }),
+            act(Order::FieldMode { mode: FieldMode::Clear }),
+            act(Order::Emit {
+                aim: Aim::Omni,
+                apertures: Apertures::Aft,
+                power_w: 1.0e15,
+                wavelength_m: 1.0e-6,
+                spread_rad: 0.01,
+                duration_s: 60.0,
+            }),
+            act(Order::Intercept { ship_id: ShipId(2), closeness: Closeness::Company, approach: Approach::Courteous }),
+            Inbound::SavePreset { name: "plate".into(), form: Form::default() },
+            Inbound::DeletePreset { name: "plate".into() },
+        ];
+        for message in unbuilt {
+            wire.client_says(from, message.clone());
+            server.tick(&mut wire).await.unwrap();
+            let said = replies(&mut wire);
+            assert!(
+                said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::NotBuilt, .. })),
+                "{message:?}: {said:?}"
+            );
+            assert!(!said.iter().any(|m| matches!(m, Outbound::Accepted { .. })), "{message:?}: {said:?}");
+        }
+        assert_eq!(server.ship(ship).unwrap().fitting().cloned(), before);
+        assert!(server.pursuits.is_empty());
+
+        // A direct intercept is today's, and reaches the sighting check.
+        wire.client_says(
+            from,
+            act(Order::Intercept { ship_id: ShipId(2), closeness: Closeness::Company, approach: Approach::Direct }),
+        );
+        server.tick(&mut wire).await.unwrap();
+        let said = replies(&mut wire);
+        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::NotInSight, .. })), "{said:?}");
     }
 
     #[tokio::test]

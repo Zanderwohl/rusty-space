@@ -598,6 +598,7 @@ mod tests {
             order: lc_proto::Order::Intercept {
                 ship_id: ShipId(cast.0),
                 closeness: lc_proto::Closeness::Intimate,
+                approach: lc_proto::Approach::Direct,
             },
             issued_at_client_t: server.now_t(),
         }));

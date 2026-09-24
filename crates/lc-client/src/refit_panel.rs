@@ -130,6 +130,35 @@ pub fn shortfall(short: Shortage) -> String {
     }
 }
 
+/// What a refused form reads as, naming the part as 29 says a refusal does. The structural
+/// cases word themselves as `lc_world::form::FormError` does.
+pub fn form_fault(fault: lc_proto::FormFault) -> String {
+    use lc_proto::FormFault as F;
+    use lc_world::form::{Number, PartId};
+    let part = |id: lc_proto::form::PartId| PartId::from(id);
+    match fault {
+        F::TooManyParts { found } => format!("{found} parts, at most {}", lc_world::form::MAX_PARTS),
+        F::DuplicateId(id) => format!("{} appears twice", part(id)),
+        F::NoMind => "no Mind".into(),
+        F::SecondMind { first, second } => format!("{} is a second Mind beside {}", part(second), part(first)),
+        F::Malformed { part: id, number } => format!("{} has a malformed {}", part(id), Number::from(number)),
+        F::MindPlaced(id) => format!("the Mind, {}, has a parent", part(id)),
+        F::Unplaced(id) => format!("{} has no parent", part(id)),
+        F::MissingParent { part: id, parent } => {
+            format!("{} hangs from {}, which does not exist", part(id), part(parent))
+        }
+        F::Cycle(id) => format!("{} is its own ancestor", part(id)),
+        F::EngineOffAxis(id) => format!("{} must point fore or aft", part(id)),
+        F::EngineBlocked(id) => format!("something is in {}'s exhaust cone", part(id)),
+        F::BayBlocked(id) => format!("{}'s mouth is blocked", part(id)),
+        F::Detached(id) => format!("{} does not touch its parent", part(id)),
+        F::Uncontained(id) => format!("{} does not contain its parent", part(id)),
+        F::Extent => "the ship is too long or too short".into(),
+        F::TooSmall(id) => format!("{} is smaller than the smallest part", part(id)),
+        F::TooFewDrones => "fewer drones than a ship may keep".into(),
+    }
+}
+
 /// Joules as module-energies, the unit everything here is argued in.
 pub fn me(joules: f64, module_j: f64) -> String {
     format!("{:.2} ME", joules / module_j)
@@ -329,6 +358,14 @@ mod tests {
     use glam::DVec3;
     use lc_world::craft::{CraftId, Kind};
     use lc_world::fitting::{Balance, Fitting};
+
+    #[test]
+    fn a_refused_form_names_the_part() {
+        use lc_proto::form::{Number, PartId};
+        let malformed = lc_proto::FormFault::Malformed { part: PartId(3), number: Number::Tilt };
+        assert_eq!(form_fault(malformed), "part 3 has a malformed tilt");
+        assert_eq!(form_fault(lc_proto::FormFault::EngineBlocked(PartId(2))), "something is in part 2's exhaust cone");
+    }
 
     /// The button's line binds back to the draft. Native only: the browser build has no shard.
     #[cfg(not(target_arch = "wasm32"))]

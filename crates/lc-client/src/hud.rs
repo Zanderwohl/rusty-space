@@ -246,10 +246,17 @@ mod tests {
                 jet_power_w: 0.0,
                 emitted_t: 0,
                 arrive_t: 0,
+                form: lc_proto::Form::default(),
+                glow: None,
+                glare: None,
             },
             None,
         );
-        let close = lc_proto::Pursuit { quarry: quarry.ship_id, closeness: lc_proto::Closeness::Intimate };
+        let close = lc_proto::Pursuit {
+            quarry: quarry.ship_id,
+            closeness: lc_proto::Closeness::Intimate,
+            approach: lc_proto::Approach::Direct,
+        };
         assert_eq!(pursuit(&s, close, Some(&quarry)), "alongside Anvil — 1.0 km between hulls — close in");
         assert_eq!(pursuit(&s, close, None), "alongside ship 7 — close in");
     }

@@ -291,8 +291,9 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
 | 2 400 K, diving | 1.2 µm | the near infrared, and red |
 | 4 600 K, failing | 630 nm | the visible, as an orange-yellow point |
 
-A craft's field temperature and mode go on `Presence`, arriving with its light. What a player can
-infer from it:
+A craft's field temperature and mode go on `Presence`, arriving with its light, as a `Glow`. The mode
+there is the `Shade` the field is in, Clear or Black: Auto is a setting, and nothing about a field
+shows its thresholds. What a player can infer from it:
 
 - **How full someone is.** Temperature at a known distance from a known star reads back to
   whether they are converting. Whether attacking them feeds them is on the screen.
@@ -326,7 +327,7 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 | crate | new | changed |
 |---|---|---|
 | `lc-world` | `field.rs`: the account, its closed forms, time to collapse, temperature, the lethal radius | `solar.rs` becomes intake: starlight onto the shadow, gained at the star. `fitting.rs` folds heat beside stored energy. `refit.rs` reports each step's heat, and whether the plan crosses `Q_max` |
-| `lc-proto` | `Outbound::Collapsed`, `Order::FieldMode { Clear \| Black \| Auto { clear_above, black_below, refill_below } }`, `Refusal::Switching` | `Fitted` gains `Q` and its time, and the mode with any switch under way. `Presence` gains field temperature and mode |
+| `lc-proto` | `field.rs`. `Outbound::Collapsed { at_t, released_j, successor }`, to the owner only: observers learn of a collapse from its light. `Order::FieldMode { mode: Clear \| Black \| Auto { clear_above, black_below, refill_below } }`, `Refusal::Switching` | `Fitted` gains `field: Field`, with `Q` and its time, the mode, the `Shade` it is in, and any switch under way. `Presence` gains `glow: Glow`, the field's temperature and shade |
 | `lc-server` | collapse scheduling and delivery, respawn | the tick settles heat. Refit and order acceptance warn |
 | `lc-client` | | `hud.rs` gains `Field`, `panels.rs` draws the bar. The refit panel, photometry. The field shader is [32-ship-rendering.md](32-ship-rendering.md) |
 
