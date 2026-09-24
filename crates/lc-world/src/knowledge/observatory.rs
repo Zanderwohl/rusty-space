@@ -700,6 +700,37 @@ mod tests {
         assert_eq!(k.bodies_of(system.star, TICK_S * 20.0).len(), held - 1, "a body did not read back");
     }
 
+    /// **A ship in low orbit places the planet under it.** Every look ranges the planet, and a
+    /// guard written against fits from bearings alone refused any orbit that brought the body
+    /// within one percent of the ship's own distance from the sun -- a million and a half
+    /// kilometers here, against seven thousand. Earth stayed "distance unknown" from low orbit.
+    #[test]
+    fn a_ship_in_low_orbit_places_the_planet_under_it() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        let mut t = 0.0;
+        for _ in 0..400 {
+            t += TICK_S;
+            let phase = std::f64::consts::TAU * t / 5820.0;
+            let here = system.body_position_at("Earth", t).unwrap()
+                + DVec3::new(phase.cos(), phase.sin(), 0.0) * 7.0e6 / M_PER_LY;
+            o.tick(&mut sky, Some(&system), &mut k, at(here), t);
+        }
+        let earth = crate::knowledge::BodyId::of(system.star, "Earth");
+        let star_ly = k.belief(Subject::Star(system.star)).unwrap().distance.position_ly().expect("the sun is ranged");
+        assert!(k.fit_orbit(Subject::Body { star: system.star, body: earth }, star_ly, t), "no orbit from low orbit");
+
+        let belief = k.body_belief(system.star, earth, t).unwrap();
+        let crate::knowledge::Placed::Known { offset_au, .. } = belief.position_now else {
+            panic!("{:?}", belief.position_now)
+        };
+        let truth_au = (system.body_position_at("Earth", t).unwrap() - system.star_position_ly()) * M_PER_LY / AU_M;
+        let miss_au = offset_au.distance(truth_au);
+        assert!(miss_au < 0.01, "Earth placed {miss_au} AU from where it is");
+    }
+
     /// **A parked ship ranges its own sun.** It is a resolved disc from anywhere in the
     /// system, so one look gives its distance, and every orbit is fitted in its frame. Parallax
     /// alone left a ship at rest with no distance, and so with no orbits, forever.

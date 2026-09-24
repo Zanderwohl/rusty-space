@@ -121,6 +121,11 @@ const DEGENERATE: f64 = 1.0e-6;
 /// the observer and the range goes to zero, the parallax with it, and any orbit explains the
 /// bearings. Three of the eight starts on Saturn's three-degree arc landed there, at 5.0000 AU
 /// with no eccentricity, which is the 5 AU circle the ship was flying.
+///
+/// Not for a look that ranged the body: its range is scored, so the attractor costs it the whole
+/// measured distance, and a body that close is exactly what a ranged look is. From a low orbit
+/// about Earth the guard sat at a million and a half kilometers and refused every orbit of the
+/// planet underneath.
 const NOT_ABOARD: f64 = 1.0e-2;
 
 /// How closely two separated solutions must agree on the axis and the period to be the same
@@ -420,7 +425,7 @@ fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f64> {
     let mut sum = 0.0;
     for look in looks {
         let offset = fitted.at(look.at_s) - look.from_m;
-        if !sound(offset.length() - NOT_ABOARD * look.from_m.length()) {
+        if look.range_m.is_none() && !sound(offset.length() - NOT_ABOARD * look.from_m.length()) {
             return None;
         }
         let miss = between(offset.normalize(), look.toward);
