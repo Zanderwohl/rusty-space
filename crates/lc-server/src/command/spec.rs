@@ -32,6 +32,7 @@ pub enum Verb {
     Help,
     Teleport,
     Where,
+    WhoIs,
     Energize,
     Drain,
     Chart,

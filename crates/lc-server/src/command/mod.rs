@@ -10,6 +10,7 @@ mod fitting;
 mod parse;
 mod spec;
 mod teleport;
+mod who;
 
 use std::collections::VecDeque;
 use std::fmt::Write as _;
@@ -101,6 +102,28 @@ pub const COMMANDS: &[Spec] = &[
             level: Level::DEBUG,
             help: "which bodies to list",
         }],
+    },
+    Spec {
+        name: "who-is",
+        verb: Verb::WhoIs,
+        level: Level::DEBUG,
+        summary: "a ship's id and name",
+        args: &[
+            ArgSpec {
+                name: "id",
+                kind: Kind::Id,
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "the ship's id",
+            },
+            ArgSpec {
+                name: "name",
+                kind: Kind::Text,
+                need: Need::Optional,
+                level: Level::DEBUG,
+                help: "the ship's name, any case; quote one with spaces",
+            },
+        ],
     },
     Spec {
         name: "energize",
@@ -313,6 +336,7 @@ impl<J: Journal> Server<J> {
                 let ship = self.ship_named(command.from, &args)?;
                 self.energize(ship, args.number("amount"), wire)
             }
+            Verb::WhoIs => self.who_is(args.id("id"), args.text("name")),
             Verb::Drain => {
                 let ship = self.ship_named(command.from, &args)?;
                 self.drain(ship, args.number("amount"), wire)

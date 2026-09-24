@@ -5,7 +5,7 @@ and the shard parses it, checks it against the asker's level, runs it at a fixed
 tick and answers the connection that sent it. The client knows nothing about any command. Code
 is `lc_server::command` and `lc_client::console`.
 
-Status: **built** — `help`, `teleport`, `where`, `energize`, `drain`, `chart`, `refit-finish`,
+Status: **built** — `help`, `teleport`, `where`, `who-is`, `energize`, `drain`, `chart`, `refit-finish`,
 `refit-magic`, `stage`.
 
 ## Why text on the wire
@@ -72,6 +72,13 @@ on anyone's.
 A line is charged against the sender's rate budget like any other message, held, and run once a
 tick **after the intents**. A command therefore sees every order that arrived with it already
 flown, and nothing it does is re-solved by a pursuit before the tick is out.
+
+## Who-is
+
+`who-is [id:<id>] [name:<text>]` prints a block per ship: for now its id and its name. One of the
+two is required. A name matches whatever the ship is called on screen, ignoring case, and every
+ship called that is listed, since nothing makes a name unique. It is how an id is found for
+`ship:` and `beside:`.
 
 ## Energize
 

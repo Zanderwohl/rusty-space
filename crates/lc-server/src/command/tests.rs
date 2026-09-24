@@ -357,6 +357,37 @@ async fn energize_with_no_amount_fills_the_ship() {
     assert!(capacity > 0.0 && (stored - capacity).abs() < 1e-6, "{stored} of {capacity}");
 }
 
+/// By id, one block; by name, every ship called that, whatever the case, quoted when it has
+/// spaces.
+#[tokio::test]
+async fn who_is_names_a_ship_by_id_or_finds_it_by_name() {
+    let (mut server, mut wire) = shard(Level::DEBUG);
+    server.fleet.get_mut(CraftId(2)).unwrap().name = Some("Rosa Luxemburg".into());
+    let (ok, said) = ask(&mut server, &mut wire, 1, "who-is id:2").await;
+    assert!(ok, "{said}");
+    assert_eq!(said, "ship 2\n  name: Rosa Luxemburg");
+    let (ok, said) = ask(&mut server, &mut wire, 2, "who-is name:\"rosa LUXEMBURG\"").await;
+    assert_eq!((ok, said.as_str()), (true, "ship 2\n  name: Rosa Luxemburg"));
+    // Positionally, the first is the id.
+    assert!(ask(&mut server, &mut wire, 3, "who-is 2").await.0);
+
+    server.fleet.get_mut(CraftId(1)).unwrap().name = Some("Rosa Luxemburg".into());
+    let (_, said) = ask(&mut server, &mut wire, 4, "who-is name:\"Rosa Luxemburg\"").await;
+    assert_eq!(said, "ship 1\n  name: Rosa Luxemburg\nship 2\n  name: Rosa Luxemburg");
+
+    for (line, why) in [
+        ("who-is id:99", "no ship 99"),
+        ("who-is name:nobody", "no ship is called"),
+        ("who-is", "is required"),
+        ("who-is id:1 name:x", "not both"),
+    ] {
+        let (ok, said) = ask(&mut server, &mut wire, 9, line).await;
+        assert!(!ok && said.contains(why), "{line}: {said}");
+    }
+    let (mut server, mut wire) = shard(Level::PLAYER);
+    assert!(!ask(&mut server, &mut wire, 1, "who-is id:2").await.0);
+}
+
 /// `where` prints ids and a teleport takes them: a body of the system the ship is in, found by
 /// its id alone because the system is loaded.
 #[tokio::test]
