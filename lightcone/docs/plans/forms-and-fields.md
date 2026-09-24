@@ -103,6 +103,7 @@ graph LR
   R10["R10 The real hull in the game"]
   R11["R11 The field in the game"]
   R12["R12 The cone in the game"]
+  R13["R13 The engine grid on the open face"]
   C1["C1 Editor view"]
   C2["C2 Editing the draft"]
   C3["C3 Undo and redo"]
@@ -173,6 +174,8 @@ graph LR
   H7 --> R11
   R7 --> R12
   F9 --> R12
+  R10 --> R13
+  R12 --> R13
   R1 --> C1
   C1 --> C2
   F5 --> C2
@@ -567,6 +570,15 @@ graph LR
 - read: 32 §The exhaust cone
 - deliver: the aperture glow on each engine part's open face; the cone for your own burns, for any burn whose courtesy radius you are in, and for a selected ship; the map's lines.
 - done when: a burning ship photographs with its cone, and the old gas plume is gone.
+
+### R13 · The engine grid on the open face
+
+- status: todo
+- needs: R10, R12
+- touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/src/hull.rs`
+- read: 32 §Materials by kind, §The exhaust cone
+- deliver: the engine kind's emitter grid lit only on each engine part's open face, from a per-vertex share the mesher reads off the part, at the exhaust's power. R3 lights it over the whole region, which is right in a void and wrong on a ship; R12's aperture glow sits over it.
+- done when: a burning ship photographs with the grid glowing on its open face and dark on the engine's flanks.
 
 ## C: client
 

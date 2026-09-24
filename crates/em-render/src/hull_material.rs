@@ -30,6 +30,16 @@ pub const ATTRIBUTE_HULL_REGIONS: [MeshVertexAttribute; 4] = [
     MeshVertexAttribute::new("HullRegions3", 0x4855_4C4C_0000_0004, VertexFormat::Unorm8x4),
 ];
 
+/// `(across, along)`: signed meters from the vertex to the nearest seam between two regions,
+/// positive on the lower-numbered region's side, and meters along that seam from anywhere fixed
+/// on it. What a bolted region draws its row of heads by. A vertex far from every seam writes a
+/// large `across`.
+///
+/// The side comes from the sign rather than from which region weighs more, because in the
+/// middle of a fillet the two weights differ by less than a byte.
+pub const ATTRIBUTE_HULL_SEAM: MeshVertexAttribute =
+    MeshVertexAttribute::new("HullSeam", 0x4855_4C4C_0000_0005, VertexFormat::Float32x2);
+
 /// Regions a palette may hold. Must match `REGIONS` in `hull.wgsl`.
 pub const REGIONS: usize = 16;
 
@@ -40,6 +50,10 @@ pub const ALL_PLATED: f32 = 1.0e30;
 /// `second`. The shader draws the two heaviest regions at a point, so a triple junction
 /// drops its lightest.
 pub fn region_weights(nearest: u32, second: u32, share: f32) -> [[u8; 4]; 4] {
+    assert!(
+        (nearest as usize) < REGIONS && (second as usize) < REGIONS,
+        "regions {nearest} and {second}: a palette holds {REGIONS}"
+    );
     let share = share.clamp(0.0, 1.0);
     let mut weights = [0.0f32; REGIONS];
     weights[nearest as usize] += 1.0 - share;
@@ -72,6 +86,11 @@ pub struct HullUniform {
     pub reveal: Vec4,
     /// `(panel_m, spread_m, 0, 0)`.
     pub reveal_panel: Vec4,
+    /// A bolted region's row of heads along each seam: `(pitch_m, head_radius_m, offset_m,
+    /// albedo)`, the offset measured from the seam into the bolted region.
+    pub bolts: Vec4,
+    /// Which regions are bolted, one bit a region.
+    pub bolted: u32,
     /// Per region, what a fully lit texel of its lights sends, in [`Self::reflected`]'s units.
     /// A real, small power: it shows on a night side and is lost against a lit one.
     pub emitted: [Vec4; REGIONS],
@@ -86,6 +105,8 @@ impl Default for HullUniform {
             detail: Vec4::new(64.0, 0.0, 0.0, 0.0),
             reveal: Vec4::new(0.0, 0.0, 0.0, ALL_PLATED),
             reveal_panel: Vec4::new(8.0, 0.0, 0.0, 0.0),
+            bolts: Vec4::new(1.5, 0.25, 0.8, 0.45),
+            bolted: 0,
             emitted: [Vec4::ZERO; REGIONS],
         }
     }
@@ -130,6 +151,7 @@ impl Material for HullMaterial {
             ATTRIBUTE_HULL_REGIONS[1].at_shader_location(3),
             ATTRIBUTE_HULL_REGIONS[2].at_shader_location(4),
             ATTRIBUTE_HULL_REGIONS[3].at_shader_location(5),
+            ATTRIBUTE_HULL_SEAM.at_shader_location(6),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
@@ -270,6 +292,12 @@ mod tests {
         assert_eq!(w[0][2], 64);
         assert_eq!(w.iter().flatten().map(|&b| b as u32).sum::<u32>(), 255);
         assert_eq!(region_weights(9, 9, 0.4)[2][1], 255);
+    }
+
+    #[test]
+    #[should_panic(expected = "a palette holds 16")]
+    fn a_region_past_the_palette_is_refused() {
+        region_weights(3, REGIONS as u32, 0.5);
     }
 
     /// The last level is the whole tile's average, in linear light for albedo: averaging the

@@ -18,6 +18,8 @@ struct Vertex {
     @location(3) regions_1: vec4<f32>,
     @location(4) regions_2: vec4<f32>,
     @location(5) regions_3: vec4<f32>,
+    // em_render::hull_material::ATTRIBUTE_HULL_SEAM: signed meters across to the seam, and along it.
+    @location(6) seam: vec2<f32>,
 }
 
 struct VertexOutput {
@@ -29,6 +31,7 @@ struct VertexOutput {
     @location(4) regions_1: vec4<f32>,
     @location(5) regions_2: vec4<f32>,
     @location(6) regions_3: vec4<f32>,
+    @location(7) seam: vec2<f32>,
 }
 
 const REGIONS: u32 = 16u;
@@ -45,6 +48,10 @@ struct HullUniform {
     reveal: vec4<f32>,
     /// `(panel_m, spread_m, 0, 0)`.
     reveal_panel: vec4<f32>,
+    /// `(pitch_m, head_radius_m, offset_m, albedo)`.
+    bolts: vec4<f32>,
+    /// One bit a region.
+    bolted: u32,
     emitted: array<vec4<f32>, REGIONS>,
 }
 
@@ -72,6 +79,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.regions_1 = vertex.regions_1;
     out.regions_2 = vertex.regions_2;
     out.regions_3 = vertex.regions_3;
+    out.seam = vertex.seam;
     return out;
 }
 
@@ -129,7 +137,8 @@ fn plated(p: vec3<f32>, n: vec3<f32>) -> bool {
     }
     let cell = floor(p / panel_m) * (1.0 - keep) + keep * 0.5;
     let center = mix((cell + 0.5) * panel_m, p, keep);
-    let lag = hash(cell + keep * 17.0) * material.reveal_panel.y;
+    // Signed, so the two faces of a thin part lag independently.
+    let lag = hash(cell + keep * 17.0 * sign(n)) * material.reveal_panel.y;
     return distance(center, material.reveal.xyz) + lag <= front;
 }
 
@@ -161,17 +170,40 @@ fn heaviest(in: VertexOutput) -> Pair {
     return Pair(first, second, max(w2, 0.0) / max(w1 + max(w2, 0.0), 1.0e-6));
 }
 
+/// How much of the fragment is a bolt head, from its seam coordinates. A row too fine to see is
+/// drawn as its share of the pixels it crosses, so it fades rather than sparkling.
+fn bolt_cover(seam: vec2<f32>) -> f32 {
+    let pitch = material.bolts.x;
+    let r = material.bolts.y;
+    let across = abs(seam.x) - material.bolts.z;
+    let along = (fract(seam.y / pitch) - 0.5) * pitch;
+    // Meters a pixel spans.
+    let w = max(fwidth(seam.x) + fwidth(seam.y), 1.0e-4);
+    let d = length(vec2<f32>(across, along));
+    let sharp = 1.0 - smoothstep(r - 0.5 * w, r + 0.5 * w, d);
+    let wide = max(w, 2.0 * r);
+    let band = 1.0 - smoothstep(0.25 * wide, 0.75 * wide, abs(across));
+    let mean = min(3.14159265 * r * r / (pitch * wide), 1.0) * band;
+    return mix(sharp, mean, smoothstep(r, 3.0 * r, w));
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let pair = heaviest(in);
     let w = planes(in.ship_normal);
     let near = triplanar(in.ship_position, w, pair.first);
     let far = triplanar(in.ship_position, w, pair.second);
+    // Before the discard: it takes derivatives.
+    let bolt = bolt_cover(in.seam);
     if (!plated(in.ship_position, in.ship_normal)) {
         discard;
     }
     let t = pair.share;
-    let albedo = mix(near.albedo, far.albedo, t);
+    var albedo = mix(near.albedo, far.albedo, t);
+    let side = select(max(pair.first, pair.second), min(pair.first, pair.second), in.seam.x > 0.0);
+    if (((material.bolted >> side) & 1u) != 0u) {
+        albedo = mix(albedo, vec3<f32>(material.bolts.w), bolt);
+    }
     let emitted = mix(
         near.lit * material.emitted[pair.first].rgb,
         far.lit * material.emitted[pair.second].rgb,
