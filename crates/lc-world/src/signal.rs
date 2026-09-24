@@ -12,9 +12,10 @@
 
 use glam::DVec3;
 
-/// What a craft transmits with: a wavelength and a dish to launch it from.
+/// What a craft transmits with: a wavelength and an aperture to launch it from.
 ///
-/// Both are needed and neither is a tier. Beamwidth is `lambda / D`, so a shorter wavelength
+/// The aperture is a radio dish or an engine's open face; `lightcone/docs/31-directed-energy.md`
+/// makes them one thing. Both are needed and neither is a tier. Beamwidth is `lambda / D`, so a shorter wavelength
 /// and a wider dish buy the same thing — a tighter beam — and a design that offered "narrow"
 /// and "wide" would be hiding the trade rather than posing it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -26,6 +27,10 @@ pub struct Transmitter {
 }
 
 impl Transmitter {
+    pub const fn new(wavelength_m: f64, aperture_m: f64) -> Self {
+        Self { wavelength_m, aperture_m }
+    }
+
     /// What a crewed ship carries: a thirty-meter dish at 10 GHz, which is a milliradian.
     ///
     /// The numbers are the second row of the table in `lightcone/docs/05-observation.md`, and
@@ -47,6 +52,21 @@ impl Transmitter {
     pub fn spot_at(&self, distance: f64) -> f64 {
         2.0 * distance * self.half_angle_rad().tan()
     }
+
+    /// The half-angle an emission asking for `requested_rad` gets: never under the diffraction
+    /// floor, and never past a sphere.
+    pub fn spread_rad(&self, requested_rad: f64) -> f64 {
+        requested_rad.max(self.half_angle_rad()).min(std::f64::consts::PI)
+    }
+}
+
+/// The solid angle of a cone of half-angle `half_angle_rad`, steradians.
+///
+/// `2 pi (1 - cos theta)`, spelled `4 pi sin^2(theta/2)` for the reason [`Beam::gain`] gives.
+/// Exact at any width: `pi theta^2` is 10% high at the 60° a station-keeping thruster spreads to.
+pub fn cone_solid_angle_sr(half_angle_rad: f64) -> f64 {
+    let s = (half_angle_rad.clamp(0.0, std::f64::consts::PI) * 0.5).sin();
+    4.0 * std::f64::consts::PI * s * s
 }
 
 /// A transmission's shape: which way it was pointed, and how wide the cone is.
@@ -72,6 +92,10 @@ impl Beam {
             axis: axis.normalize_or(DVec3::X),
             half_angle_rad: half_angle_rad.clamp(0.0, std::f64::consts::PI),
         }
+    }
+
+    pub fn solid_angle_sr(&self) -> f64 {
+        cone_solid_angle_sr(self.half_angle_rad)
     }
 
     pub fn is_omni(&self) -> bool {
@@ -155,6 +179,28 @@ mod tests {
         assert!((optical.gain() - 4.0e12).abs() / 4.0e12 < 1.0e-9, "{}", optical.gain());
         let naive = 2.0 / (1.0 - 1.0e-6_f64.cos());
         assert!((naive - optical.gain()).abs() / optical.gain() > 1.0e-5, "the trap is real");
+    }
+
+    /// A hemisphere is `2 pi` and a 60° cone exactly `pi`; `pi theta^2` would say 3.44.
+    #[test]
+    fn solid_angles_are_exact_at_any_width() {
+        use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, PI};
+        assert!((cone_solid_angle_sr(FRAC_PI_3) - PI).abs() < 1.0e-12);
+        assert!((cone_solid_angle_sr(FRAC_PI_2) - 2.0 * PI).abs() < 1.0e-12);
+        assert!((Beam::OMNI.solid_angle_sr() - 4.0 * PI).abs() < 1.0e-12);
+        let narrow = Beam::along(DVec3::X, 1.0e-6);
+        assert!((narrow.solid_angle_sr() * narrow.gain() - 4.0 * PI).abs() < 1.0e-12);
+    }
+
+    /// An engine's open face is an aperture like a dish, and an emit's spread is never under
+    /// its floor.
+    #[test]
+    fn an_engine_face_is_a_transmitter_and_its_floor_bounds_the_spread() {
+        let face = Transmitter::new(1.0e-9, 100.0);
+        assert!((face.half_angle_rad() - 5.0e-12).abs() < 1.0e-24);
+        assert_eq!(face.spread_rad(0.0), face.half_angle_rad());
+        assert_eq!(face.spread_rad(0.1), 0.1);
+        assert_eq!(face.spread_rad(10.0), std::f64::consts::PI);
     }
 
     #[test]

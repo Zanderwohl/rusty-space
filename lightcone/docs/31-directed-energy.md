@@ -76,9 +76,9 @@ default 5°:
 
 | burning ship, at 5 g | exhaust | cooking distance |
 |---|---|---|
-| 500 m | 1.1 × 10²⁰ W | 2.7 km |
+| 500 m | 1.1 × 10²⁰ W | 2.6 km |
 | 5 km | 1.1 × 10²³ W | 84 km |
-| 50 km | 1.1 × 10²⁶ W | 2 700 km |
+| 50 km | 1.1 × 10²⁶ W | 2 600 km |
 
 A Clear receiver's distance is a little over half of these. A receiver's shadow and its rated load
 both scale with its size squared, so **the distance does not depend on the receiver's size**. The same is true of a collapse's lethal radius. Inside that
@@ -118,9 +118,9 @@ spread over a 60° half-angle, they cook almost nothing:
 
 | ship | thrust power at 0.01 g | cooking distance |
 |---|---|---|
-| 500 m | 2.1 × 10¹⁷ W | 6 m |
-| 5 km | 2.1 × 10²⁰ W | 190 m |
-| 50 km | 2.1 × 10²³ W | 6 km |
+| 500 m | 2.1 × 10¹⁷ W | 10 m |
+| 5 km | 2.1 × 10²⁰ W | 330 m |
+| 50 km | 2.1 × 10²³ W | 10 km |
 
 A hundredth of a g is slow in game time and nothing in real time: five kilometers takes about
 seven and a half game minutes, a twentieth of a real second.
@@ -138,9 +138,9 @@ its size. It sets a **courtesy radius** around each drive, inside which its cone
 
 | ship at 5 g | courtesy radius |
 |---|---|
-| 500 m | 27 km |
+| 500 m | 26 km |
 | 5 km | 840 km |
-| 50 km | 27 000 km |
+| 50 km | 26 000 km |
 
 Station-keeping thrusters are throttled to stay courteous too. A large ship holding station close to
 a small one maneuvers more slowly than its thrusters allow, rather than cooking it.
@@ -180,7 +180,7 @@ come into sight is not avoided, which is what light delay means.
 | `apertures` | fore, aft or both |
 | `power_w` | at the start. At most the chosen apertures' rating |
 | `wavelength_m` | anything from the radio dish's 3 cm down to 1 nm |
-| `spread_rad` | the half-angle. **At least the diffraction floor** `λ / D`, and wider on request |
+| `spread_rad` | the half-angle. **At least the diffraction floor** `λ / 2D`, half of the full width `λ / D`, and wider on request |
 | `duration_s` | how long |
 
 - **Source: heat first, then storage.** Emitting from heat is dumping. Emitting from storage is
@@ -219,15 +219,18 @@ tight beam hits at any range. Communication is what makes long-range power beami
 
 ### What arrives
 
-The spot at distance `d` has radius `spread × d`. The receiver takes the fraction of it that its
-shadow toward the emitter covers, at most all of it:
+The spot at distance `d` is the cap the cone cuts from a sphere of that radius, of area `Ω d²`, where
+`Ω = 2π (1 − cos spread)` is the cone's solid angle. For a narrow cone that is a disk of radius
+`spread × d`. The receiver takes the fraction of it that its shadow toward the emitter covers, at
+most all of it:
 
-**P_received = P · min(1, A_shadow / (π (spread · d)²))**
+**P_received = P · min(1, A_shadow / (Ω d²))**
 
 and the receiver's field absorbs `α` of that: all of it Black, 30% Clear
 ([30-the-field.md](30-the-field.md#clear-and-black)).
 
-Taking a 100 m aperture at the diffraction floor, the fraction a receiver collects:
+Taking a 100 m aperture at the diffraction floor, the spot's diameter and the fraction a receiver
+collects broadside:
 
 | distance | wavelength | spot | 500 m ship | 5 km | 50 km |
 |---|---|---|---|---|---|
