@@ -77,6 +77,13 @@ pub fn opacity_of(covering: f64) -> f32 {
     (covering.powf(0.25) as f32).clamp(0.0, 1.0)
 }
 
+/// How opaque a ring system is drawn. Rings are solid and reflective rather than a shadow, so
+/// this is what they cover of their own annulus, not of a sphere.
+pub fn ring_opacity(rings: &lc_world::rings::RingSystem) -> f32 {
+    let annulus = std::f64::consts::PI * rings.outer_m().powi(2);
+    opacity_of(rings.cross_section_m2() / annulus.max(f64::MIN_POSITIVE))
+}
+
 #[derive(Component)]
 pub struct EnvelopeMesh(pub usize);
 
@@ -619,10 +626,6 @@ fn spawn_rings(
     }));
     for (i, body) in drawn.iter().enumerate() {
         let Some(rings) = body.rings else { continue };
-        // Rings are solid and reflective rather than a shadow, so their opacity is what they
-        // cover of their own annulus, not of a sphere.
-        let annulus = std::f64::consts::PI * rings.system.outer_m().powi(2);
-        let covering = rings.system.cross_section_m2() / annulus.max(f64::MIN_POSITIVE);
         // No display gain, unlike a population. The gain exists because even a Kuiper belt is
         // a trace and would otherwise be nothing; Saturn's rings cover a third of their own
         // annulus and need no help. Applying it here made Jupiter's rings -- three parts per
@@ -630,7 +633,7 @@ fn spawn_rings(
         let _ = gain;
         let uniform = PopulationUniform {
             tint: Vec4::new(0.88, 0.84, 0.76, 1.0),
-            opacity: opacity_of(covering),
+            opacity: ring_opacity(rings.system),
             seed: i as f32 * 3.77 + 0.5,
             // A ring is not a cloud: its texture is banding, not speckle.
             grain_frequency: 12.0,
@@ -1158,10 +1161,7 @@ mod tests {
     /// The four ring systems, in the order a person would rank them by eye.
     #[test]
     fn the_ring_systems_come_out_in_the_right_order() {
-        let drawn = |id: &str| {
-            let r = lc_world::rings::for_body(id).unwrap();
-            opacity_of(r.cross_section_m2() / (std::f64::consts::PI * r.outer_m().powi(2)))
-        };
+        let drawn = |id: &str| ring_opacity(lc_world::rings::for_body(id).unwrap());
         let (saturn, uranus, neptune, jupiter) =
             (drawn("Saturn"), drawn("Uranus"), drawn("Neptune"), drawn("Jupiter"));
         assert!(saturn > 0.5, "Saturn's rings are the thing you see: {saturn}");
