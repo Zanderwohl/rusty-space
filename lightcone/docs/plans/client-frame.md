@@ -173,7 +173,7 @@ graph LR
 
 ### D2 · Containment chain once per frame
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; not a resource. The per-frame caller that mattered was the coasting repatch backstop in `lc-world::craft`, which runs on the server too, so the fix went where every caller gets it: `em_sim::influence::containment_chain` places each parent once per level. Sol, between planets: 61 → 25 µs a call; near Earth 5.7 → 2.2. Pinned against the per-child walk over every body across a year)
 - needs: —
 - touches: `crates/lc-client/src/map_source.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/hud.rs`
 - read: —
