@@ -299,7 +299,7 @@ impl Chat {
                     continue;
                 }
                 let from = said.with.filter(|_| !said.mine);
-                self.loose.push(Loose {
+                push_kept(&mut self.loose, Loose {
                     from,
                     from_name: from.map(|_| said.with_name.clone()).unwrap_or_default(),
                     to: said.to,
@@ -372,7 +372,7 @@ impl Chat {
         if spoken.body == Body::Ack {
             return;
         }
-        conversation.lines.push(Line {
+        push_kept(&mut conversation.lines, Line {
             event_ids: vec![event_id],
             idem: spoken.idem,
             mine: false,
@@ -418,7 +418,7 @@ impl Chat {
                 self.conversations.get(&from.0).map(|c| c.name.clone()).filter(|n| !n.is_empty())
             })
             .unwrap_or_else(|| format!("ship {}", from.0));
-        self.loose.push(Loose {
+        push_kept(&mut self.loose, Loose {
             from: Some(from),
             from_name,
             to: spoken.to.map(ShipId),
@@ -464,7 +464,7 @@ impl Chat {
                 if self.loose.iter().any(|l| l.line.event_ids.contains(&event_id)) {
                     return;
                 }
-                self.loose.push(Loose {
+                push_kept(&mut self.loose, Loose {
                     from: None,
                     from_name: String::new(),
                     to: None,
@@ -495,7 +495,7 @@ impl Chat {
             line.event_ids.push(event_id);
             return;
         }
-        lines.push(Line {
+        push_kept(lines, Line {
             event_ids: vec![event_id],
             idem,
             mine: true,
@@ -507,6 +507,17 @@ impl Chat {
             strength: None,
         });
     }
+}
+
+/// Lines kept in each conversation, and of broadcasts and overheard traffic together. The
+/// oldest go first; a session of hours in a busy system otherwise kept every word, and every
+/// arrival scanned all of it for a duplicate.
+const KEPT: usize = 500;
+
+fn push_kept<T>(list: &mut Vec<T>, item: T) {
+    list.push(item);
+    let excess = list.len().saturating_sub(KEPT);
+    list.drain(..excess);
 }
 
 /// Fold one entry of a transcript into a list of lines.
@@ -529,7 +540,7 @@ fn restore_into(lines: &mut Vec<Line>, said: Said) {
         }
         return;
     }
-    lines.push(line_of(said));
+    push_kept(lines, line_of(said));
 }
 
 /// One transcript entry as a line.
@@ -992,5 +1003,22 @@ mod tests {
         let conversation = chat.get(ShipId(7)).unwrap();
         assert_eq!(conversation.lines.len(), 1);
         assert_eq!(conversation.lines[0].event_ids, vec![1, 2]);
+    }
+
+    /// A long session keeps the newest [`KEPT`] of what it heard, not everything.
+    #[test]
+    fn the_logs_keep_the_newest_and_forget_the_rest() {
+        let mut chat = Chat::default();
+        let heard = KEPT as i64 + 20;
+        for n in 0..heard {
+            chat.received(ShipId(9), Some("Bry"), n, broadcast(&format!("{n}")), n as f64, n as f64, 1.0);
+            chat.received(ShipId(7), Some("Ada"), heard + n, spoken(1, text(&format!("{n}")), false, vec![]), n as f64, n as f64, 1.0);
+        }
+        let public = chat.public();
+        assert_eq!(public.len(), KEPT);
+        assert_eq!(public[0].line.body, text("20"), "the oldest were not the ones dropped");
+        let conversation = chat.get(ShipId(7)).unwrap();
+        assert_eq!(conversation.lines.len(), KEPT);
+        assert_eq!(conversation.lines[0].body, text("20"));
     }
 }
