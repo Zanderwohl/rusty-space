@@ -31,6 +31,9 @@ pub const STATUS: &str = "/admin/status/{account}";
 /// Paged and ordered on this side; see [`crate::systems`].
 pub const SYSTEMS: &str = "/admin/systems";
 
+/// `{id}` is a system's id as [`SYSTEMS`] lists it.
+pub const SYSTEM: &str = "/admin/systems/{id}";
+
 #[derive(Clone)]
 pub struct Api {
     pub db: Arc<tokio_postgres::Client>,
@@ -59,6 +62,7 @@ pub fn router(api: Api) -> Router {
     Router::new()
         .route(STATUS, get(status))
         .route(SYSTEMS, get(systems))
+        .route(SYSTEM, get(system))
         .route("/admin/health", get(|| async { "ok" }))
         .with_state(api)
 }
@@ -140,20 +144,61 @@ async fn systems(
     };
     let page = crate::systems::page(&api.stars, &tally, &query);
 
-    match ron::to_string(&page) {
-        Ok(body) => (
-            [(
-                header::CONTENT_TYPE,
-                "application/ron; charset=utf-8".to_owned(),
-            )],
-            body,
-        )
-            .into_response(),
-        Err(why) => {
-            eprintln!("admin systems: could not serialize: {why}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
+    ron_response(&page, "systems")
+}
+
+async fn system(State(api): State<Api>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if admitted(&api, &headers).await.is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
     }
+    let found = id.parse::<u64>().ok().and_then(|id| api.stars.iter().find(|s| s.id.get() == id));
+    let Some(star) = found else {
+        return (StatusCode::NOT_FOUND, "None").into_response();
+    };
+
+    let ships = match lc_store::ships::load_ships(&api.db).await {
+        Ok(ships) => ships,
+        Err(why) => {
+            eprintln!("admin system: the store did not answer: {why}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let craft: Vec<_> = ships
+        .iter()
+        .filter_map(|ship| {
+            let saved = crate::persist::decode(ship).ok()?;
+            Some(crate::systems::Aboard {
+                ship_id: ship.ship_id,
+                name: saved.name,
+                account: ship.account.clone(),
+                saved_t: ship.saved_t,
+                motion: saved.motion,
+            })
+        })
+        .collect();
+
+    let subject = lc_proto::encode(&lc_world::knowledge::Subject::Star(star.id));
+    let rows = match lc_store::knowledge::files_on(&api.db, &subject).await {
+        Ok(rows) => rows,
+        Err(why) => {
+            eprintln!("admin system: the store did not answer: {why}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let files: Vec<_> = rows
+        .iter()
+        .filter_map(|row| match crate::archive::read_file(row) {
+            Ok((_, file)) => Some((row.ship_id, file)),
+            // Left out, as an undecodable ship is from the tally: one bad row is not a 500.
+            Err(why) => {
+                eprintln!("admin system: craft {}'s file did not decode: {why}", row.ship_id);
+                None
+            }
+        })
+        .collect();
+    let files: Vec<_> = files.iter().map(|(ship, file)| (*ship, file)).collect();
+
+    ron_response(&crate::systems::detail(star, &api.stars, &craft, &files), "system")
 }
 
 async fn status(
@@ -188,7 +233,11 @@ async fn status(
     // "Who asked about whom" is a thing an administration wants to answer about itself.
     eprintln!("admin status: {} asked about {account}", claims.sub);
 
-    match ron::to_string(&status) {
+    ron_response(&status, "status")
+}
+
+fn ron_response(body: &impl serde::Serialize, route: &str) -> Response {
+    match ron::to_string(body) {
         Ok(body) => (
             [(
                 header::CONTENT_TYPE,
@@ -198,7 +247,7 @@ async fn status(
         )
             .into_response(),
         Err(why) => {
-            eprintln!("admin status: could not serialize: {why}");
+            eprintln!("admin {route}: could not serialize: {why}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
