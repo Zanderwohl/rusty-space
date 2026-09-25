@@ -339,8 +339,6 @@ mod tests {
                 spread_rad: 0.01,
                 duration_s: 60.0,
             }),
-            Inbound::SavePreset { name: "plate".into(), form: Form::default() },
-            Inbound::DeletePreset { name: "plate".into() },
         ];
         for message in unbuilt {
             wire.client_says(from, message.clone());

@@ -190,3 +190,62 @@ async fn what_a_craft_knows_survives_the_store_and_a_restart() {
     assert_eq!(new.knowledge_of(ship), old.knowledge_of(ship), "the map after is the map before");
     assert_eq!(new.duty_of(ship), old.duty_of(ship), "and the telescope is still on its star");
 }
+
+/// Presets through a checkpoint and into a new shard, deletions included, one account apart from
+/// another.
+#[tokio::test]
+async fn presets_survive_the_store_and_a_restart() {
+    use lc_proto::Form;
+    use lc_server::presets::{Presets, rows};
+
+    let Some(client) = store().await else { return };
+    let (alice, bob) = ("acct-checkpoint-presets-a", "acct-checkpoint-presets-b");
+    for account in [alice, bob] {
+        client.execute("DELETE FROM presets WHERE account = $1", &[&account]).await.unwrap();
+    }
+    let checkpoint = |shard: &mut Presets| {
+        let changes = shard.take_dirty();
+        let client = &client;
+        async move {
+            let (saved, deleted) = rows(&changes);
+            lc_store::presets::save(client, &saved).await.unwrap();
+            for (account, name) in &deleted {
+                lc_store::presets::delete(client, account, name).await.unwrap();
+            }
+        }
+    };
+
+    let mut old = Presets::default();
+    let plate = Form { parts: vec![awkward_part()] };
+    old.save(alice, "Plate".into(), plate.clone()).unwrap();
+    old.save(alice, "Ring".into(), Form::default()).unwrap();
+    old.save(bob, "Plate".into(), Form::default()).unwrap();
+    checkpoint(&mut old).await;
+    old.delete(alice, "Ring");
+    checkpoint(&mut old).await;
+
+    let saved: Vec<_> = lc_store::presets::load(&client)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|p| p.account == alice || p.account == bob)
+        .collect();
+    let mut new = Presets::default();
+    assert!(new.adopt(saved).is_empty());
+    assert_eq!(new.for_account(alice), old.for_account(alice));
+    assert_eq!(new.for_account(alice).len(), 1, "the deletion was written too");
+    assert_eq!(new.for_account(bob), old.for_account(bob));
+    assert_eq!(new.for_account(alice)[0].form, plate, "bit for bit");
+}
+
+/// A part with awkward floats, so a lossy encoding would show.
+fn awkward_part() -> lc_proto::form::Part {
+    use lc_proto::form::{Kind, Part, PartId, Primitive};
+    Part {
+        id: PartId(7),
+        kind: Kind::Mind,
+        primitive: Primitive::Ellipsoid { axes: [4.200000033670821, 1.8149592025296526e-22, 0.1] },
+        volume_m3: 876.6000009999999,
+        placement: None,
+    }
+}

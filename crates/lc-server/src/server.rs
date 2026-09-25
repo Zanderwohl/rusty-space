@@ -147,6 +147,8 @@ pub struct Server<J: Journal> {
     /// Public because the binary fills it from a file and drains its writes into the store; the
     /// server itself only ever reads it and records what a client says.
     pub library: crate::library::Library,
+    /// Every account's presets. Public for the same reason as `library`.
+    pub presets: crate::presets::Presets,
     /// Ticks since this server started.
     ///
     /// Counted rather than derived from `now_t / TICK_US`, which stopped meaning anything once
@@ -219,6 +221,7 @@ impl<J: Journal> Server<J> {
             rate: 1.0,
             directs: false,
             library: crate::library::Library::default(),
+            presets: crate::presets::Presets::default(),
             director: None,
             ticks: 0,
             stages: Default::default(),
@@ -551,6 +554,7 @@ impl<J: Journal> Server<J> {
                             });
                             wire.send(from, Outbound::Reading(self.library.marks_for(&account)));
                         }
+                        wire.send(from, Outbound::Presets(self.presets.for_account(&account)));
                     }
                     None => wire.send(from, Outbound::Unauthenticated),
                 }
@@ -595,12 +599,8 @@ impl<J: Journal> Server<J> {
                 }
             }
             Inbound::Command { seq, line } => self.enqueue(from, seq, line, wire),
-            // S2 keeps presets. A connection with no ship has nobody to refuse to.
-            Inbound::SavePreset { .. } | Inbound::DeletePreset { .. } => {
-                if let Some(state) = self.clients.get(&from) {
-                    wire.send(from, Outbound::Refused { ship_id: state.ship, reason: Refusal::NotBuilt });
-                }
-            }
+            Inbound::SavePreset { name, form } => self.keep_preset(from, name, Some(form), wire),
+            Inbound::DeletePreset { name } => self.keep_preset(from, name, None, wire),
             Inbound::Stage { scenario } => self.staged(from, &scenario, wire),
             Inbound::Grant { joules } => self.granted(from, joules, wire),
             Inbound::ResumeFrom { arrive_t } => {
@@ -1758,7 +1758,7 @@ use crate::transport::Loopback;
             ticket: broker.mint("acct-1", "shard-1", 60, "j2"),
         });
         server.tick(&mut wire).await.unwrap();
-        assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }]));
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_)]));
     }
 
     /// **A faster world is the same world.** Its tick buys coarser event timestamps and
@@ -2834,7 +2834,7 @@ mod hello_tests {
 
         says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
         let said = wire.take(client);
-        let [Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }] =
+        let [Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_)] =
             said.as_slice()
         else {
             panic!("no welcome: {said:?}")
@@ -2900,7 +2900,7 @@ mod hello_tests {
         let ticket = broker.mint("acct-1", SHARD, 60, "only-once");
 
         says(&mut server, &mut wire, ClientId(1), ticket.clone()).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_)]));
 
         says(&mut server, &mut wire, ClientId(2), ticket).await;
         assert!(matches!(wire.take(ClientId(2)).as_slice(), [Outbound::Unauthenticated]));
@@ -2920,7 +2920,7 @@ mod hello_tests {
 
         // The real one, with the same identifier, still works.
         says(&mut server, &mut wire, ClientId(1), ours.mint("acct-1", SHARD, 60, "j1")).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_)]));
     }
 
     /// A ticket minted for another shard is not a ticket here, however valid it is there.

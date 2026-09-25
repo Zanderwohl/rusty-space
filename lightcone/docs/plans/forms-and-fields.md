@@ -358,9 +358,9 @@ graph LR
 
 ### S2 · Presets
 
-- status: active card "Build S2: presets saved per account"
+- status: done #88
 - needs: K3
-- touches: `crates/lc-store/src/presets.rs`, `crates/lc-server/src/`
+- touches: `crates/lc-store/src/presets.rs`, `crates/lc-server/src/`, `crates/lc-store/sql/0013_presets.sql`, `crates/lc-store/src/migrate.rs`, `crates/lc-store/src/lib.rs`, `crates/lc-server/tests/checkpoint.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-client/src/uplink.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §Your own presets
 - deliver: a `presets` table keyed by account and name; save, delete and list; `Outbound::Presets` after `Welcome` and after each change; the limits.
 - done when: presets survive a restart, one account never sees another's, and the store's tests skip cleanly without PostgreSQL.

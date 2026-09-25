@@ -236,6 +236,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 None => eprintln!("shard {shard_id} has no saved state; starting a new world"),
             }
+            // Outside the match: presets belong to accounts rather than to this shard's world, and
+            // a new world over an old database would otherwise hide them and let the limit
+            // be counted against an empty list.
+            let presets = lc_store::presets::load(&client).await?;
+            if !presets.is_empty() {
+                eprintln!("resumed {} presets", presets.len());
+            }
+            for problem in server.presets.adopt(presets) {
+                eprintln!("WARNING: preset not restored: {problem}");
+            }
             // After the clock is adopted, because the acknowledgment window is stamped
             // against it: a shard that read these first would date every message it had ever
             // been told to the instant before it knew what time it was.
@@ -352,6 +362,7 @@ struct Taken {
     /// file that never changes again would otherwise never be written.
     remembered: lc_server::archive::Remembered,
     marks: Vec<(String, lc_proto::Bookmark)>,
+    presets: Vec<lc_server::presets::Change>,
 }
 
 fn take(server: &mut Server<Store>) -> Taken {
@@ -359,12 +370,14 @@ fn take(server: &mut Server<Store>) -> Taken {
         checkpoint: server.checkpoint(),
         remembered: server.take_knowledge(),
         marks: server.library.take_dirty(),
+        presets: server.presets.take_dirty(),
     }
 }
 
 fn give_back(server: &mut Server<Store>, taken: Taken) {
     server.untake_knowledge(taken.remembered);
     server.library.redirty(&taken.marks);
+    server.presets.redirty(&taken.presets);
 }
 
 /// A checkpoint write's outcome, with the connection and what was being written handed back.
@@ -385,6 +398,7 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
             locations: mark.locations as i32,
         })
         .collect();
+    let (presets, forgotten) = lc_server::presets::rows(&taken.presets);
     // One transaction: a checkpoint is the shard's state at one tick, and half of one — samples
     // written and their deletions not, say — would be reloaded as something that never was.
     let written = async {
@@ -401,6 +415,10 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
         })
         .await?;
         lc_store::reading::save(&transaction, &rows).await?;
+        lc_store::presets::save(&transaction, &presets).await?;
+        for (account, name) in &forgotten {
+            lc_store::presets::delete(&transaction, account, name).await?;
+        }
         transaction.commit().await
     }
     .await;
