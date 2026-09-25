@@ -224,7 +224,7 @@ graph LR
 
 ### M1 · 10 Hz in the corner
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: —
 - touches: `crates/lc-client/src/map.rs`, `crates/lc-client/src/map_panel.rs`
 - read: 13, 11
