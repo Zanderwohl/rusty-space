@@ -6,17 +6,23 @@
 //! which is the only thing placed each frame. Only the player's own ship has a form so far, and
 //! only from `--form`.
 
+use std::borrow::Cow;
+
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
+use em_render::body_material::BodyWireframeMaterial;
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::render_space::sim_to_render;
+use em_render::wire_mesh;
 use glam::DVec3;
 use lc_world::fitting::Balance;
 use lc_world::form::presets::Builtin;
+use lc_world::form::place::Side;
 use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::{Piece, Sdf};
-use lc_world::form::{Form, FormError, Kind};
+use lc_world::form::{Form, FormError, Kind, PartId};
 
+use crate::construction::{Frame, Refit};
 use crate::hull::{Eye, frame, lighting, lit};
 use crate::system::UNIT_M;
 
@@ -32,7 +38,10 @@ const SPHERE_STACKS: u32 = 16;
 pub struct OwnForm(Option<Formed>);
 
 struct Formed {
+    /// For the editor to draw and to cast the pointer into.
     sdf: Sdf,
+    /// The form standing still, which is what is drawn when no refit is under way.
+    still: Frame,
     /// From the Mind to the farthest corner of the form's bounds, meters.
     reach_m: f64,
 }
@@ -42,12 +51,26 @@ impl OwnForm {
         let sdf = Sdf::new(form, balance)?;
         let (min, max) = sdf.bounds();
         let reach_m = min.abs().max(max.abs()).length();
-        Ok(OwnForm(Some(Formed { sdf, reach_m })))
+        let still = Frame { pieces: sdf.pieces().to_vec(), finished: 0, working: None };
+        Ok(OwnForm(Some(Formed { sdf, still, reach_m })))
     }
 
     /// The solved form, for the editor to draw and to cast the pointer into.
     pub fn sdf(&self) -> Option<&Sdf> {
         self.0.as_ref().map(|f| &f.sdf)
+    }
+
+    /// Framed to hold every one of `forms`, drawn as the first: a refit's two ends, so the camera
+    /// does not breathe as the round runs.
+    pub fn spanning(forms: &[&Form], balance: &Balance) -> Result<OwnForm, FormError> {
+        let mut own = OwnForm::new(forms[0], balance)?;
+        for form in &forms[1..] {
+            let (min, max) = Sdf::new(form, balance)?.bounds();
+            if let Some(f) = own.0.as_mut() {
+                f.reach_m = f.reach_m.max(min.abs().max(max.abs()).length());
+            }
+        }
+        Ok(own)
     }
 
     pub fn is_formed(&self) -> bool {
@@ -141,12 +164,72 @@ pub(crate) fn local(piece: &Piece, scale: Vec3) -> Transform {
     }
 }
 
-/// The ship's frame, placed and turned. Scaled from meters to render units.
+/// The ship's frame, placed and turned. Scaled from meters to render units. Holds which moment
+/// of a refit its pieces were spawned for, so they are respawned only when a step changes.
 #[derive(Component)]
-pub struct FormRoot;
+pub struct FormRoot(Option<(usize, Option<usize>)>);
 
+/// A copy drawn solid. Its mesh is built at `reach_m` and scaled to the copy's size each frame.
 #[derive(Component)]
-pub struct Painted(Vec4);
+pub struct Painted {
+    color: Vec4,
+    part: PartId,
+    side: Side,
+    mesh_scale: Vec3,
+    reach_m: f64,
+}
+
+/// The cage around the sliver of the working step's `copy`th copy.
+#[derive(Component)]
+pub struct Cage {
+    copy: usize,
+    tube_m: f32,
+}
+
+/// Parallels and meridians of a copy's cage.
+const CAGE_RINGS: usize = 7;
+const CAGE_MERIDIANS: usize = 12;
+const CAGE_SAMPLES: usize = 48;
+/// Of the whole form's reach, so a small part's cage is as legible as a large one's.
+const CAGE_TUBE: f64 = 0.005;
+/// Linear, before the exposure; the cage is lit by its own work lights, not the star.
+const CAGE_COLOR: LinearRgba = LinearRgba::new(0.9, 0.55, 0.18, 1.0);
+const CAGE_EMISSION: f32 = 2.0;
+/// Of a cage's full thickness, while any of it stands.
+const CAGE_THINNEST: f32 = 0.3;
+
+/// Lines over a copy's surface, part frame, meters: each point where a ray from the center leaves
+/// it, so one grid of directions fits every primitive.
+fn cage(shape: &Shape) -> Vec<Vec<Vec3>> {
+    let on = |theta: f64, phi: f64| {
+        let d = DVec3::new(theta.cos(), theta.sin() * phi.cos(), theta.sin() * phi.sin());
+        shape.exit(d).point.as_vec3()
+    };
+    let tau = std::f64::consts::TAU;
+    let pi = std::f64::consts::PI;
+    let mut curves = Vec::new();
+    for r in 1..=CAGE_RINGS {
+        let theta = pi * r as f64 / (CAGE_RINGS + 1) as f64;
+        curves.push((0..=CAGE_SAMPLES).map(|i| on(theta, tau * i as f64 / CAGE_SAMPLES as f64)).collect());
+    }
+    for m in 0..CAGE_MERIDIANS {
+        let phi = tau * m as f64 / CAGE_MERIDIANS as f64;
+        curves.push((0..=CAGE_SAMPLES).map(|i| on(pi * i as f64 / CAGE_SAMPLES as f64, phi)).collect());
+    }
+    curves
+}
+
+/// What is drawn this frame: a refit's moment, or the form standing still.
+fn this_frame<'a>(own: &'a Formed, refit: Option<&Refit>, now_s: f64) -> (Cow<'a, Frame>, Option<(usize, Option<usize>)>) {
+    match refit {
+        Some(refit) => {
+            let frame = refit.frame(now_s);
+            let key = (frame.finished, frame.working.as_ref().map(|w| w.step));
+            (Cow::Owned(frame), Some(key))
+        }
+        None => (Cow::Borrowed(&own.still), None),
+    }
+}
 
 /// Draw the player's form, if it has one, where [`crate::hull::update_hulls`] would have put
 /// its ovoid.
@@ -156,11 +239,14 @@ pub fn update_parts(
     ui: Res<crate::app::Ui>,
     eye: Res<Eye>,
     own: Res<OwnForm>,
+    refit: Option<Res<Refit>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
+    mut wires: ResMut<Assets<BodyWireframeMaterial>>,
     surfaces: Res<crate::surfaces::Surfaces>,
-    mut roots: Query<(Entity, &mut Transform), With<FormRoot>>,
-    pieces: Query<(&MeshMaterial3d<BodySurfaceMaterial>, &Painted)>,
+    mut roots: Query<(Entity, &mut Transform, &FormRoot), (Without<Painted>, Without<Cage>)>,
+    mut pieces: Query<(&MeshMaterial3d<BodySurfaceMaterial>, &Painted, &mut Transform, &mut Visibility), Without<Cage>>,
+    mut cages: Query<(&MeshMaterial3d<BodyWireframeMaterial>, &Cage, &mut Transform, &mut Visibility), Without<Painted>>,
 ) {
     if own.0.is_none() && !own.is_changed() {
         return;
@@ -174,39 +260,107 @@ pub fn update_parts(
         rotation: frame(facing, star.map(|(star_ly, _, _)| star_ly - at_ly)),
         scale: Vec3::splat((1.0 / UNIT_M) as f32),
     };
-
-    if own.is_changed() {
-        for (root, _) in &roots {
+    let Some(formed) = &own.0 else {
+        for (root, _, _) in &roots {
             commands.entity(root).despawn();
         }
-        let Some(formed) = &own.0 else { return };
-        let root = commands.spawn((placed, Visibility::default(), FormRoot)).id();
-        for piece in formed.sdf.pieces() {
-            let (mesh, scale) = solid(&piece.shape);
+        return;
+    };
+    let (drawn, key) = this_frame(formed, refit.as_deref(), session.coordinate_time_s());
+
+    let stale = own.is_changed() || roots.iter().all(|(_, _, root)| root.0 != key);
+    if stale {
+        for (root, _, _) in &roots {
+            commands.entity(root).despawn();
+        }
+        let root = commands.spawn((placed, Visibility::default(), FormRoot(key))).id();
+        let outer = drawn.working.as_ref().map_or(&[][..], |w| &w.outer[..]);
+        for piece in &drawn.pieces {
+            // Built at the sliver's outer size, so a part starting from nothing has a mesh to grow.
+            let full = outer.iter().find(|o| o.part == piece.part && o.side == piece.side).unwrap_or(piece);
+            let (mesh, mesh_scale) = solid(&full.shape);
             let color = paint(piece.kind);
+            let painted = Painted { color, part: piece.part, side: piece.side, mesh_scale, reach_m: full.shape.reach() };
             commands.spawn((
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(materials.add(surfaces.flat.material(lit(session, star, at_ly, color)))),
-                local(piece, scale),
+                sized(piece, &painted),
                 // As for a hull: placed by hand at a scale where a mesh's bounds say nothing.
                 NoFrustumCulling,
                 RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
-                Painted(color),
+                painted,
+                ChildOf(root),
+            ));
+        }
+        for (copy, piece) in outer.iter().enumerate() {
+            let tube_m = (CAGE_TUBE * formed.reach_m) as f32;
+            let material = BodyWireframeMaterial {
+                base_color: CAGE_COLOR,
+                emission_strength: CAGE_EMISSION,
+                base_tube_radius: tube_m,
+                target_tube_radius: 0.0,
+                ..default()
+            };
+            commands.spawn((
+                Mesh3d(meshes.add(wire_mesh::tube_curves(&cage(&piece.shape), tube_m, 4, 1.0))),
+                MeshMaterial3d(wires.add(material)),
+                caged(piece),
+                NoFrustumCulling,
+                RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+                Cage { copy, tube_m },
                 ChildOf(root),
             ));
         }
         return;
     }
 
-    for (_, mut transform) in &mut roots {
+    for (_, mut transform, _) in &mut roots {
         *transform = placed;
     }
-    for (material, painted) in &pieces {
+    for (material, painted, mut transform, mut visibility) in &mut pieces {
+        match drawn.piece(painted.part, painted.side) {
+            Some(piece) => {
+                *transform = sized(piece, painted);
+                *visibility = Visibility::Inherited;
+            }
+            None => *visibility = Visibility::Hidden,
+        }
         let Some(mut asset) = materials.get_mut(&material.0) else { continue };
-        let next = lit(session, star, at_ly, painted.0);
+        let next = lit(session, star, at_ly, painted.color);
         if asset.uniforms != next {
             asset.uniforms = next;
         }
+    }
+    let Some(working) = &drawn.working else { return };
+    let scaffold = working.mean().scaffold as f32;
+    for (material, cage, mut transform, mut visibility) in &mut cages {
+        let Some(piece) = working.outer.get(cage.copy) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        *transform = caged(piece);
+        *visibility = if scaffold > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
+        let Some(mut asset) = wires.get_mut(&material.0) else { continue };
+        // Thinner than this the tubes alias into dots, which read as nothing being built.
+        let radius = cage.tube_m * (CAGE_THINNEST + (1.0 - CAGE_THINNEST) * scaffold);
+        if asset.target_tube_radius != radius {
+            asset.target_tube_radius = radius;
+        }
+    }
+}
+
+/// A painted copy at its size this frame: its mesh's scale times how much bigger it has grown.
+fn sized(piece: &Piece, painted: &Painted) -> Transform {
+    let grown = (piece.shape.reach() / painted.reach_m) as f32;
+    local(piece, painted.mesh_scale * grown)
+}
+
+/// The cage is built in the part's own frame, so it takes the pose without the quarter turn.
+fn caged(piece: &Piece) -> Transform {
+    Transform {
+        translation: piece.pose.position.as_vec3(),
+        rotation: Quat::from_mat3(&piece.pose.rotation.as_mat3()),
+        scale: Vec3::ONE,
     }
 }
 
@@ -312,7 +466,7 @@ mod tests {
         engine.placement.as_mut().unwrap().mirror = true;
         let own = OwnForm::new(&form, &Balance::DEFAULT).unwrap();
         let drawn = |side: Side| {
-            let piece = own.0.as_ref().unwrap().sdf.pieces().iter().find(|p| p.part == PartId(2) && p.side == side).unwrap();
+            let piece = own.0.as_ref().unwrap().still.pieces.iter().find(|p| p.part == PartId(2) && p.side == side).unwrap();
             let (_, scale) = solid(&piece.shape);
             let t = local(piece, scale);
             assert!(scale.min_element() > 0.0);
@@ -353,7 +507,7 @@ mod tests {
             let form = fixture(name).unwrap();
             let own = OwnForm::new(&form, &Balance::DEFAULT).unwrap();
             let reach = own.length_m().unwrap() as f32 / 2.0;
-            for piece in own.0.as_ref().unwrap().sdf.pieces() {
+            for piece in &own.0.as_ref().unwrap().still.pieces {
                 for v in vertices(&piece.shape) {
                     let p = piece.pose.to_outer(v.as_dvec3()).as_vec3();
                     assert!(p.length() <= reach * 1.001, "{name}: {:?} reaches {}", piece.part, p.length());

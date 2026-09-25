@@ -114,13 +114,14 @@ impl Plugin for ClientPlugin {
             PopulationMaterialPlugin,
             em_render::plume_material::PlumeMaterialPlugin,
             BodySurfaceMaterialPlugin,
+            em_render::body_material::BodyWireframeMaterialPlugin,
             em_render::atmosphere_material::AtmosphereMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
             crate::procedural::ProceduralTexturesPlugin,
             crate::library::LibraryPlugin,
             crate::faces::FacesPlugin,
-            crate::map::MapPlugin,
-            crate::form_view::FormViewPlugin,
+            // The two modes beside the world, paired: a tuple of plugins stops at fifteen.
+            (crate::map::MapPlugin, crate::form_view::FormViewPlugin),
             crate::bench::BenchPlugin,
             crate::haze::HazePlugin,
             crate::beauty::BeautyPlugin,
@@ -158,7 +159,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<crate::map_panel::WorldInset>()
             // Chained, so the editor's camera is never the first created.
             .add_systems(Startup, ((spawn_camera, crate::form_view::spawn_camera).chain(), no_lights,
-                crate::parts::adopt_fixture))
+                (crate::parts::adopt_fixture, crate::construction::adopt_demo).chain()))
             .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnExit(AppState::InGame), (crate::map_panel::release_world_frame, leave_scene))
             .add_systems(OnEnter(AppState::InGame), spawn_sky)

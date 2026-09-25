@@ -109,6 +109,7 @@ graph LR
   R11["R11 The field in the game"]
   R12["R12 The cone in the game"]
   R13["R13 The engine grid on the open face"]
+  R14["R14 Refits in the game"]
   C1["C1 Editor view"]
   C2["C2 Editing the draft"]
   C3["C3 Undo and redo"]
@@ -183,6 +184,8 @@ graph LR
   F9 --> R12
   R10 --> R13
   R12 --> R13
+  R4 --> R14
+  S1 --> R14
   R1 --> C1
   C1 --> C2
   F5 --> C2
@@ -212,6 +215,8 @@ graph LR
   R9 --> X1
   R10 --> X1
   R11 --> X1
+  R13 --> X1
+  R14 --> X1
 ```
 <!-- /graph -->
 
@@ -378,9 +383,9 @@ graph LR
 
 ### H2 · The field's anchors
 
-- status: active card "Build H2: the field's anchors"
+- status: done #93
 - needs: H1, F5, F6
-- touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/field.rs`
+- touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/field.rs`, `crates/lc-world/src/form/presets.rs`, `lightcone/docs/30-the-field.md`
 - read: 30 §The anchors
 - deliver: `q_idle`, `field_capacity` and `τ` derived in `Balance::DEFAULT` from the starting form's envelope; 30's tables recomputed for it.
 - done when: the three anchors hold to a part in a million.
@@ -508,9 +513,9 @@ graph LR
 
 ### R4 · Construction timeline
 
-- status: active card "Build R4: construction timeline"
+- status: done #95
 - needs: F8, R1
-- touches: `crates/lc-client/src/construction.rs`
+- touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §Building, as a function of time
 - deliver: the pure function from a round's recipe and `t` to each part's volume, the sliver, and each point's phase; drawn on the placeholders as scale plus wireframe; `--demo refit` and `--refit-at`.
 - done when: the function is tested without a window, and `--refit-at 0.5` photographs a half-built part.
@@ -597,6 +602,15 @@ graph LR
 - read: 32 §Materials by kind, §The exhaust cone
 - deliver: the engine kind's emitter grid lit only on each engine part's open face, from a per-vertex share the mesher reads off the part, at the exhaust's power. R3 lights it over the whole region, which is right in a void and wrong on a ship; R12's aperture glow sits over it.
 - done when: a burning ship photographs with the grid glowing on its open face and dark on the engine's flanks.
+
+### R14 · Refits in the game
+
+- status: todo
+- needs: R4, S1
+- touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/src/parts.rs`
+- read: 32 §Building, as a function of time; 29 §Cancel
+- deliver: a `Refit` built from the player's round in `Fitted` and from other ships' rounds in `Presence`, and `Frame::canceled` drawn on a cancel. `--demo refit` stays as the fixture.
+- done when: a refit applied in the game draws on the ship as `--demo refit` does, and a cancel runs the step backward.
 
 ## C: client
 
@@ -686,7 +700,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, R8, R9, R10, R11
+- needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, R8, R9, R10, R11, R13, R14
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.

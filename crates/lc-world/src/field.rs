@@ -7,6 +7,8 @@
 //!
 //! Powers are W, energies J, times s, areas m².
 
+use crate::fitting::Balance;
+
 /// What the field does with what arrives at it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Mode {
@@ -39,6 +41,17 @@ pub struct Field {
 }
 
 impl Field {
+    /// The field on an envelope of `area_m2`, with the balance's constants.
+    pub fn of(area_m2: f64, balance: &Balance) -> Field {
+        Field {
+            area_m2,
+            capacity_j_m2: balance.field_capacity,
+            tau_s: balance.field_tau_s,
+            idle_k: balance.field_idle_k,
+            idle_j_m2: balance.field_idle_j_m2(),
+        }
+    }
+
     /// `Q_max`: the heat at which the field collapses.
     pub fn heat_max_j(&self) -> f64 {
         self.capacity_j_m2 * self.area_m2
@@ -246,52 +259,118 @@ pub struct Settled {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{Balance, C2};
-    use crate::flight::C_M_S;
-    use crate::solar::{SOLAR_CONSTANT_W_M2, broadside_m2};
+    use crate::fitting::{FIELD_ANCHOR_ME, RATED_LOAD_AU, SOLAR_ANCHOR_AU, SOLAR_ANCHOR_S, STARTING_ENVELOPE_M2};
+    use crate::form::capacity::Capacities;
+    use crate::form::grid::FormGrid;
+    use crate::form::Form;
+    use crate::solar::{self, SOLAR_CONSTANT_W_M2};
+    use crate::system::UNIT_M as AU_M;
 
-    /// Any area: every worked number is a ratio in which it cancels.
     const AREA_M2: f64 = 4.0e5;
 
-    fn module_energy_j(b: &Balance) -> f64 {
-        b.slot_volume_m3 * b.module_density_kg_m3 * C2
+    /// The starting form's field, capacities and broadside, and the starlight it takes in.
+    struct Start {
+        field: Field,
+        caps: Capacities,
+        broadside_m2: f64,
+        /// 20's anchor solved on the shadow's broadside, as F10 re-anchors `solar_gain`: the gain
+        /// is on the star, so this is what the field takes in once H3 lands.
+        gain: f64,
     }
 
-    /// Starlight arriving broadside on the 500 m starting hull, `d_au` from a Sun-like star.
-    fn starlight_w(b: &Balance, d_au: f64) -> f64 {
-        b.solar_gain * SOLAR_CONSTANT_W_M2 / (d_au * d_au) * broadside_m2(500.0)
-    }
+    impl Start {
+        fn new(b: &Balance) -> Start {
+            let form = Form::starting();
+            let grid = FormGrid::new(&form, b).unwrap();
+            let caps = Capacities::of(&form, b);
+            let broadside_m2 = grid.broadside_m2();
+            let wanted_w = caps.storage_j / SOLAR_ANCHOR_S + caps.drain_w;
+            let collected_w = b.conversion_efficiency * flux_w_m2(SOLAR_ANCHOR_AU) * broadside_m2;
+            Start { field: Field::of(grid.envelope_area_m2(), b), caps, broadside_m2, gain: wanted_w / collected_w }
+        }
 
-    fn rating_w(b: &Balance) -> f64 {
-        5.0 * b.engine_thrust_n * C_M_S
-    }
+        /// Broadside, `d_au` from a Sun-like star, before absorptivity.
+        fn starlight_w(&self, d_au: f64) -> f64 {
+            self.gain * flux_w_m2(d_au) * self.broadside_m2
+        }
 
-    /// The starting ship at `d_au`, Black, with storage `room_j` short of full.
-    fn starting_segment(b: &Balance, d_au: f64, room_j: f64) -> Segment {
-        Segment {
-            arriving_w: starlight_w(b, d_au),
-            absorptivity: Mode::Black.absorptivity(b.clear_absorptivity),
-            internal_w: b.living_drain_w,
-            rating_w: rating_w(b),
-            efficiency: b.conversion_efficiency,
-            room_j,
-            draw_w: b.living_drain_w,
+        /// Black, with storage `room_j` short of full.
+        fn segment(&self, b: &Balance, d_au: f64, room_j: f64) -> Segment {
+            Segment {
+                arriving_w: self.starlight_w(d_au),
+                absorptivity: Mode::Black.absorptivity(b.clear_absorptivity),
+                internal_w: self.caps.drain_w,
+                rating_w: self.caps.aperture_w,
+                efficiency: b.conversion_efficiency,
+                room_j,
+                draw_w: self.caps.drain_w,
+            }
         }
     }
 
-    /// 30's three anchors, put in by hand: idle at `field_idle_k` on the living drain alone, 10 ME
-    /// from empty to collapse, and full at 0.05 AU exactly at rated load. Storage held full turns
-    /// everything absorbed into heat, drain or no drain.
-    fn anchored(b: &Balance) -> Field {
-        let heat_max_j = 10.0 * module_energy_j(b);
-        let tau_s = heat_max_j / starlight_w(b, 0.05);
-        Field {
-            area_m2: AREA_M2,
-            capacity_j_m2: heat_max_j / AREA_M2,
-            tau_s,
-            idle_k: b.field_idle_k,
-            idle_j_m2: b.living_drain_w * tau_s / AREA_M2,
-        }
+    fn flux_w_m2(d_au: f64) -> f64 {
+        SOLAR_CONSTANT_W_M2 / (d_au * d_au)
+    }
+
+    fn me(b: &Balance) -> f64 {
+        b.module_energy_j()
+    }
+
+    #[test]
+    fn the_idle_starting_ship_sits_at_field_idle_k() {
+        let b = Balance::DEFAULT;
+        let start = Start::new(&b);
+        let idle = equilibrium_k(&start.field, start.caps.drain_w);
+        assert!(close(idle, b.field_idle_k, 1e-6), "{idle}");
+    }
+
+    /// Capacity is a lever a shard may turn; the idle anchor must not move with it.
+    #[test]
+    fn the_idle_anchor_does_not_ride_on_capacity() {
+        let b = Balance { field_capacity: 2.0 * Balance::DEFAULT.field_capacity, ..Balance::DEFAULT };
+        let start = Start::new(&b);
+        let idle = equilibrium_k(&start.field, start.caps.drain_w);
+        assert!(close(idle, b.field_idle_k, 1e-6), "{idle}");
+    }
+
+    #[test]
+    fn the_starting_envelope_is_pinned() {
+        let area_m2 = Start::new(&Balance::DEFAULT).field.area_m2;
+        assert!(close(STARTING_ENVELOPE_M2, area_m2, 1e-6), "pinned {STARTING_ENVELOPE_M2}, the starting form solves to {area_m2:?}");
+    }
+
+    #[test]
+    fn field_capacity_is_anchored_on_the_starting_envelope() {
+        let b = Balance::DEFAULT;
+        let heat_max_j = Start::new(&b).field.heat_max_j();
+        assert!(close(heat_max_j, FIELD_ANCHOR_ME * me(&b), 1e-6), "{heat_max_j}");
+    }
+
+    #[test]
+    fn field_tau_is_anchored_on_a_full_starting_ship_at_rated_load() {
+        let b = Balance::DEFAULT;
+        let start = Start::new(&b);
+        let field = start.field;
+        let full = start.segment(&b, RATED_LOAD_AU, 0.0);
+        let heat_w = field.heat_full_w(&full);
+        let solved = field.heat_max_j() / heat_w;
+        assert!(close(b.field_tau_s, solved, 1e-6), "DEFAULT has {}, the starting form solves to {solved:?}", b.field_tau_s);
+        assert!(close(field.equilibrium_j(heat_w), field.heat_max_j(), 1e-6));
+        let closer = start.segment(&b, RATED_LOAD_AU * (1.0 - 1e-5), 0.0);
+        assert!(field.time_to_rise_s(0.0, field.heat_max_j(), field.heat_full_w(&closer)).is_some());
+        let farther = start.segment(&b, RATED_LOAD_AU * (1.0 + 1e-5), 0.0);
+        assert_eq!(field.time_to_rise_s(0.0, field.heat_max_j(), field.heat_full_w(&farther)), None);
+    }
+
+    /// The gain cancels the broadside, so the shadow's starlight is what `solar` collects on the old
+    /// ovoid today, and re-anchoring the gain in F10 moves no anchor.
+    #[test]
+    fn the_starlight_anchored_on_is_todays() {
+        let b = Balance::DEFAULT;
+        let start = Start::new(&b);
+        let luminosity_w = SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * AU_M * AU_M;
+        let today_w = solar::power_w(&b, 500.0, luminosity_w, RATED_LOAD_AU * AU_M) / b.conversion_efficiency;
+        assert!(close(start.starlight_w(RATED_LOAD_AU), today_w, 1e-9), "{} {today_w}", start.starlight_w(RATED_LOAD_AU));
     }
 
     fn equilibrium_k(field: &Field, power_w: f64) -> f64 {
@@ -305,11 +384,12 @@ mod tests {
     #[test]
     fn the_worked_numbers_are_thirtys() {
         let b = Balance::DEFAULT;
-        let field = anchored(&b);
-        let me = module_energy_j(&b);
+        let start = Start::new(&b);
+        let field = start.field;
+        let me = me(&b);
         assert!(close(field.tau_s, 1.84e6, 1e-3), "τ {}", field.tau_s);
         assert!(close(field.rated_load_w(), 7.6e19, 1e-2), "rated {}", field.rated_load_w());
-        assert!(close(rating_w(&b), 1.1e20, 3e-2));
+        assert!(close(start.caps.aperture_w, 1.1e20, 3e-2));
         let at_collapse = field.temperature_k(field.heat_max_j());
         assert!((at_collapse - 4_577.0).abs() < 0.5, "{at_collapse}");
         let peak_nm = 2.897_771_955e-3 / at_collapse * 1e9;
@@ -319,7 +399,7 @@ mod tests {
         for (d_au, filling_k, full_k) in
             [(5.0, 444.0, 458.0), (1.0, 772.0, 1_024.0), (0.1, 2_396.0, 3_237.0), (0.05, 3_388.0, 4_577.0)]
         {
-            let segment = starting_segment(&b, d_au, 30.0 * me);
+            let segment = start.segment(&b, d_au, 30.0 * me);
             assert!(segment.stored_w() > segment.draw_w, "{d_au} AU cannot hold storage full");
             let filling = equilibrium_k(&field, field.heat_filling_w(&segment));
             let full = equilibrium_k(&field, field.heat_full_w(&segment));
@@ -335,12 +415,12 @@ mod tests {
         assert!((clear_above - 3_850.0).abs() < 5.0, "{clear_above}");
         assert!((black_below - 3_400.0).abs() < 15.0, "{black_below}");
 
-        let filling_j = field.equilibrium_j(field.heat_filling_w(&starting_segment(&b, 0.1, 30.0 * me)));
+        let filling_j = field.equilibrium_j(field.heat_filling_w(&start.segment(&b, 0.1, 30.0 * me)));
         assert!(filling_j + 5.0 * me < field.heat_max_j());
         assert!(filling_j + 10.0 * me > field.heat_max_j());
 
         // A full Clear ship at rated load: absorbed starlight goes as 1/d².
-        let clear = b.clear_absorptivity * starlight_w(&b, 0.05);
+        let clear = b.clear_absorptivity * start.starlight_w(0.05);
         let d_au = 0.05 * (clear / field.rated_load_w()).sqrt();
         assert!((d_au - 0.027).abs() < 5e-4, "{d_au}");
     }
@@ -349,16 +429,16 @@ mod tests {
     #[test]
     fn bigger_ships_idle_hotter_and_dive_the_same() {
         let b = Balance::DEFAULT;
-        let start = anchored(&b);
+        let start = Start::new(&b);
         for (length_m, idle_k, full_k) in [(500.0, 476.0, 3_237.0), (5_000.0, 846.0, 3_237.0), (50_000.0, 1_504.0, 3_237.0)] {
             let scale = length_m / 500.0;
-            let field = Field { area_m2: start.area_m2 * scale * scale, ..start };
+            let field = Field { area_m2: start.field.area_m2 * scale * scale, ..start.field };
             let living_w = 2.0 * scale.powi(3) * b.living_drain_w;
             let segment = Segment {
-                arriving_w: starlight_w(&b, 0.1) * scale * scale,
+                arriving_w: start.starlight_w(0.1) * scale * scale,
                 internal_w: living_w,
                 draw_w: living_w,
-                ..starting_segment(&b, 0.1, 0.0)
+                ..start.segment(&b, 0.1, 0.0)
             };
             let idle = equilibrium_k(&field, living_w);
             let full = equilibrium_k(&field, field.heat_full_w(&segment));
@@ -433,9 +513,9 @@ mod tests {
     #[test]
     fn full_storage_holds_full_and_the_draw_delays_filling() {
         let b = Balance::DEFAULT;
-        let me = module_energy_j(&b);
+        let me = me(&b);
         let field = test_field();
-        let open = starting_segment(&b, 0.1, me);
+        let open = Start::new(&b).segment(&b, 0.1, me);
         assert_eq!(open.converted_w(), open.absorbed_w());
         let full = Segment { room_j: 0.0, ..open };
         assert_eq!(full.fill_s(), Some(0.0));
@@ -517,8 +597,9 @@ mod tests {
     #[test]
     fn the_closed_form_agrees_with_stepping_through_starlight_bursts_and_a_fill() {
         let b = Balance::DEFAULT;
-        let field = anchored(&b);
-        let me = module_energy_j(&b);
+        let start = Start::new(&b);
+        let field = start.field;
+        let me = me(&b);
         let capacity_j = 30.0 * me;
         let idle_j = b.living_drain_w * field.tau_s;
         let mut stepper =
@@ -526,7 +607,7 @@ mod tests {
         let steps_per_s = 1.0 / 5.0;
 
         // Starlight at 0.05 AU, not yet full.
-        let first = starting_segment(&b, 0.05, capacity_j);
+        let first = start.segment(&b, 0.05, capacity_j);
         let first_s = 2.0e6;
         let settled = field.settle(&first, idle_j, first_s);
         stepper.run(&field, &first, first_s, (first_s * steps_per_s) as usize, |_| false);
@@ -541,7 +622,7 @@ mod tests {
         stepper.heat_j += 5.0 * me + b.clear_absorptivity * 3.0 * me;
 
         // Closer in, where storage fills partway and the full field goes past its rated load.
-        let second = Segment { arriving_w: starlight_w(&b, 0.045), room_j: capacity_j - stored_j, ..first };
+        let second = Segment { arriving_w: start.starlight_w(0.045), room_j: capacity_j - stored_j, ..first };
         let second_s = 8.0e6;
         let settled = field.settle(&second, heat_j, second_s);
         let collapse_s = field.segment_time_to_rise_s(&second, heat_j, field.heat_max_j()).unwrap();
@@ -571,13 +652,14 @@ mod tests {
     #[test]
     fn where_segments_are_cut_does_not_matter() {
         let b = Balance::DEFAULT;
-        let field = anchored(&b);
-        let me = module_energy_j(&b);
+        let start = Start::new(&b);
+        let field = start.field;
+        let me = me(&b);
         let t_s = 3.0e6;
         let heat_j = 2.0 * me;
         for room_j in [0.0, 0.5 * me, 100.0 * me] {
-            for draw_w in [b.living_drain_w, 3.0 * starlight_w(&b, 0.1)] {
-                let segment = Segment { room_j, draw_w, ..starting_segment(&b, 0.1, 0.0) };
+            for draw_w in [b.living_drain_w, 3.0 * start.starlight_w(0.1)] {
+                let segment = Segment { room_j, draw_w, ..start.segment(&b, 0.1, 0.0) };
                 let leap = field.settle(&segment, heat_j, 2.0 * t_s);
                 let half = field.settle(&segment, heat_j, t_s);
                 let rest = Segment { room_j: room_j - half.storage_j, ..segment };

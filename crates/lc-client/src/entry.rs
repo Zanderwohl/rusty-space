@@ -198,11 +198,12 @@ pub fn parse(args: &[String]) -> Entry {
                 || flag("--at")
                 || flag("--station")
                 || flag("--form")
+                || flag("--refit-at")
                 || flag("--demo")),
         target_swarm: flag("--swarm"),
         // Not when the camera is pinned: a pin is a request for one exact frame, and turning
         // to face something first would be the aim it exists to stop racing.
-        frame_cast: flag("--demo") && !flag("--demo-cam"),
+        frame_cast: after("--demo").as_deref().and_then(scenario::Scenario::named).is_some() && !flag("--demo-cam"),
         camera: after("--demo-cam").and_then(|spec| {
             let mut fields = spec.split(':').map(|f| f.parse::<f64>());
             match (fields.next(), fields.next(), fields.next()) {
@@ -230,6 +231,13 @@ pub fn parse(args: &[String]) -> Entry {
         }),
         lift_deg: value(args, "--lift"),
         form: after("--form"),
+        // Only the player's own ship, and no round on the wire yet, so no shard: see
+        // `construction`. `--refit-at` on its own asks for the same scene.
+        refit: match value::<f64>(args, "--refit-at") {
+            Some(f) => Some(crate::construction::Clock::Frozen(f)),
+            None => (after("--demo").as_deref() == Some("refit")).then_some(crate::construction::Clock::Looping),
+        },
+        rate_given: flag("--rate"),
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),

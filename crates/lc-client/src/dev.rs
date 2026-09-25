@@ -96,6 +96,10 @@ pub struct DevEntry {
     pub lift_deg: Option<f64>,
     /// Draw the player's ship as this preset, by [`crate::parts::fixture`]'s spelling.
     pub form: Option<String>,
+    /// Stage `--demo refit` on the player's ship, its clock frozen by `--refit-at` or looping.
+    pub refit: Option<crate::construction::Clock>,
+    /// `--rate` was given, so a scene leaves the clock alone.
+    pub rate_given: bool,
     pub screenshot: Option<String>,
     /// Frames to let the sky settle before the shutter. Pipelines compile lazily.
     pub after_frames: u32,
