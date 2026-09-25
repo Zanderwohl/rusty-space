@@ -90,20 +90,38 @@ pub fn hud(
     uplink: Res<crate::uplink::Uplink>,
     mut foot: ResMut<HudFoot>,
     mut out: MessageWriter<Requested>,
+    mut fixed_width: Local<Option<f32>>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let lines = hud::lines(&game.0, &ui_state.0);
 
     let mut root = viewport_ui(ctx);
+    let toggles = hud::toggles(&ui_state.0);
     let strip = egui::Panel::top("hud").show(&mut root, |ui| {
         ui.horizontal(|ui| {
+            let across = ui.available_width();
+            let start = ui.cursor().min.x;
+            let fit = fixed_width.map_or(hud::Fit::Words, |fixed| {
+                hud::Fit::WIDEST_FIRST
+                    .into_iter()
+                    .find(|&fit| {
+                        fixed + wording_width(ui, &lines, &toggles, fit) + BAR_GAP <= across
+                    })
+                    .unwrap_or(hud::Fit::Keys)
+            });
             ui.strong(&lines.clock);
             ui.separator();
             ui.strong(&lines.ship_clock);
             ui.separator();
-            ui.label(format!("BAND {}", lines.mapping));
+            let band = ui.label(lines.band(fit));
+            if fit != hud::Fit::Words {
+                band.on_hover_text(format!("band {}", lines.mapping.to_lowercase()));
+            }
             ui.separator();
-            ui.label(format!("EXPOSURE {}", lines.exposure));
+            let exposure = ui.label(lines.exposure(fit));
+            if fit != hud::Fit::Words {
+                exposure.on_hover_text(format!("exposure {}", lines.exposure));
+            }
             if let Some(energy) = &lines.energy {
                 ui.separator();
                 ui.label("ENERGY");
@@ -120,13 +138,23 @@ pub fn hud(
                 ui.separator();
                 ui.colored_label(connection_color(note), words);
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                for toggle in hud::toggles(&ui_state.0).into_iter().rev() {
-                    if ui.selectable_label(toggle.on, toggle_text(ui, &toggle)).clicked() {
-                        ask(&mut out, toggle.action);
+            let readout = ui.cursor().min.x - start;
+            let buttons = ui
+                .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for toggle in toggles.iter().rev() {
+                        let text = toggle_text(ui, toggle, fit);
+                        let mut button = ui.selectable_label(toggle.on, text);
+                        if fit == hud::Fit::Keys {
+                            button = button.on_hover_text(toggle.label);
+                        }
+                        if button.clicked() {
+                            ask(&mut out, toggle.action.clone());
+                        }
                     }
-                }
-            });
+                    ui.min_rect().width()
+                })
+                .inner;
+            *fixed_width = Some(readout + buttons - wording_width(ui, &lines, &toggles, fit));
         });
         if let Some(target) = &lines.target {
             ui.colored_label(egui::Color32::from_rgb(240, 190, 110), target);
@@ -202,11 +230,31 @@ pub fn hud(
 }
 
 
+/// Room kept between the readout and the window buttons, in points.
+const BAR_GAP: f32 = 16.0;
+
+/// Width of the words that change between fits: the band, the exposure and the button labels.
+///
+/// The rest of the bar reads the same at every fit, so `hud` takes its width from the frame
+/// before rather than laying out each fit in full.
+fn wording_width(ui: &egui::Ui, lines: &hud::Hud, toggles: &[hud::Toggle], fit: hud::Fit) -> f32 {
+    let width = |text: String, style: egui::TextStyle| {
+        let font = style.resolve(ui.style());
+        ui.fonts_mut(|f| f.layout_no_wrap(text, font, egui::Color32::PLACEHOLDER).size().x)
+    };
+    width(lines.band(fit), egui::TextStyle::Body)
+        + width(lines.exposure(fit), egui::TextStyle::Body)
+        + toggles
+            .iter()
+            .map(|t| width(t.text(fit).to_string(), egui::TextStyle::Button))
+            .sum::<f32>()
+}
+
 /// The label with its key's letter underlined, as a menu bar marks its accelerators.
 ///
 /// In the placeholder color, which the button replaces with its own: a fixed color would not
 /// follow it through hovered and selected.
-fn toggle_text(ui: &egui::Ui, toggle: &hud::Toggle) -> egui::text::LayoutJob {
+fn toggle_text(ui: &egui::Ui, toggle: &hud::Toggle, fit: hud::Fit) -> egui::text::LayoutJob {
     let plain = egui::TextFormat {
         font_id: egui::TextStyle::Button.resolve(ui.style()),
         color: egui::Color32::PLACEHOLDER,
@@ -214,6 +262,10 @@ fn toggle_text(ui: &egui::Ui, toggle: &hud::Toggle) -> egui::text::LayoutJob {
     };
     let marked = egui::TextFormat { underline: egui::Stroke::new(1.0, plain.color), ..plain.clone() };
     let mut job = egui::text::LayoutJob::default();
+    if fit == hud::Fit::Keys {
+        job.append(&toggle.key, 0.0, plain);
+        return job;
+    }
     match toggle.underline {
         Some(i) => {
             let end = i + toggle.label[i..].chars().next().map_or(0, char::len_utf8);
