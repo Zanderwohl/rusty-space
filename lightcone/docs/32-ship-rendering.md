@@ -221,11 +221,11 @@ it to the shader's `f32`, which resolves a clock since J2000 only to seconds.
 `crates/lc-client/examples/drones_void.rs` photographs it.
 
 On the player's ship (`lc_client::drones`), what the material is told is a pure function of R4's
-`Frame`. The count is `PARTICLES_PER_M3` = 10⁻³ of drone part, 785 on the starting ship, capped at
-`MAX_DRONES` = 8192 quads, since the vertex shader runs over all of them every frame. Past the cap
-a mote stands for several drones: as wide as the cube of drone part it stands for, with the rest
-of their light in its brightness. Widening it enough to carry all the light in area drew a GSV's
-swarm as a few hundred blobs. Docks are points just off the drone parts' surfaces, where no other
+`Frame`. The count is `PARTICLES_PER_M3` = 10⁻³ per m³ of drone part, 785 on the starting ship,
+capped at `MAX_DRONES` = 8192 quads, since the vertex shader runs over all of them every frame.
+Past the cap a mote stands for several drones: a fixed share of the width of the cube of drone part
+it stands for, with the rest of their light in its brightness. Widening it enough to carry all the
+light in area drew a GSV's swarm as a few hundred blobs. Docks are points just off the drone parts' surfaces, where no other
 part covers them. A build or a dismantle sends drones to its sliver, and a dismantle's come home
 glowing. A move sends them to ring the moved part's rim, from its foot to its middle. With no step
 working, a few patrol and the rest stay docked.
@@ -241,7 +241,12 @@ first tenth of each step, or one trip if that is shorter, and out over the last.
 no drone flies before a step starts or after it ends.
 
 The drones' clock is the round's while it loops. `--refit-at` freezes the construction but not the
-traffic, so a burst of one step moves; `--rate 0` freezes both. The shader guards its distance to
+traffic, so a burst of one step moves; `--rate 0` freezes both. Four consecutive frames of the
+dismantle at `--refit-at 0.1 --rate 3`, each mote a little further along:
+
+![burst frame 0](../images/drones-burst-0.jpg) ![burst frame 1](../images/drones-burst-1.jpg)
+![burst frame 2](../images/drones-burst-2.jpg) ![burst frame 3](../images/drones-burst-3.jpg)
+ The shader guards its distance to
 the eye against zero and nothing else. It once clamped at 10⁻⁶, which was a micrometer in the
 example and 150 km in the client, whose unit is an AU, and turned every mote into haze.
 

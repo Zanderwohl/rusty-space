@@ -74,9 +74,10 @@ pub fn population(drone_m3: f64) -> (u32, f64) {
 
 /// Meters across a mote standing for `each` drones, and how much brighter than one drone it is.
 ///
-/// As wide as the cube of drone part it stands for, and the rest of `each` drones' light in its
-/// brightness, so a capped swarm is as bright as the whole one would be. Widening it by `√each`
-/// instead, to carry all of the light in area, drew a GSV's swarm as a few hundred blobs.
+/// A fixed share of the width of the cube of drone part it stands for, with the rest of `each`
+/// drones' light in its brightness, so a capped swarm is as bright as the whole one would be.
+/// Widening it by `√each` instead, to carry all of the light in area, drew a GSV's swarm as a few
+/// hundred blobs.
 pub fn mote(each: f64) -> (f64, f64) {
     let width = each.cbrt();
     (MOTE_FILL * PARTICLES_PER_M3.powf(-1.0 / 3.0) * width, each / (width * width))
@@ -420,7 +421,7 @@ pub fn update_drones(
     own: Res<OwnForm>,
     refit: Option<Res<Refit>>,
     roots: Query<&Transform, (With<FormRoot>, Without<Swarm>)>,
-    mut swarms: Query<(Entity, &Swarm, &mut Transform, &mut Visibility)>,
+    mut swarms: Query<(Entity, &Swarm, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<DroneMaterial>>,
 ) {
@@ -440,8 +441,8 @@ pub fn update_drones(
         }
         None => traffic(sdf.pieces(), None),
     };
-    let Some((_, swarm, mut transform, mut visibility)) = swarms.iter_mut().next() else {
-        let uniforms = traffic.uniform(0.0, SEED);
+    let Some((_, swarm, mut transform)) = swarms.iter_mut().next() else {
+        let uniforms = traffic.uniform(clock_s(refit, now_s, now_s), SEED);
         let material = materials.add(DroneMaterial { uniforms });
         commands.spawn((
             Mesh3d(meshes.add(drone_quads(MAX_DRONES))),
@@ -455,7 +456,6 @@ pub fn update_drones(
         return;
     };
     *transform = *root;
-    *visibility = Visibility::Inherited;
     let next = traffic.uniform(clock_s(refit, now_s, swarm.origin_s), SEED);
     if let Some(mut material) = materials.get_mut(&swarm.material)
         && material.uniforms != next
@@ -514,13 +514,24 @@ mod tests {
         let (count, each) = population(drone_m3 * 1.0e6);
         assert_eq!(count, MAX_DRONES);
         assert!((each * count as f64 - drone_m3 * 1.0e6 * PARTICLES_PER_M3).abs() < 1.0);
-        // The capped swarm's light: each mote's area carries `each` drones' worth.
-        let light = |each: f64| {
-            let (width, gain) = mote(each);
-            width * width * gain / each
-        };
         assert!(mote(each).0 < 100.0 * mote(1.0).0, "{} m motes", mote(each).0);
-        assert!((light(each) - light(1.0)).abs() < 1e-9 * light(1.0));
+    }
+
+    /// What the material is told for a capped swarm: each mote's area carries `each` drones' light.
+    #[test]
+    fn a_capped_swarm_is_as_bright_as_the_whole() {
+        let gsv = crate::parts::fixture("default*100").unwrap();
+        let pieces = crate::parts::OwnForm::new(&gsv, &B).unwrap().sdf().unwrap().pieces().to_vec();
+        let drone_m3: f64 = pieces.iter().filter(|p| p.kind == Kind::Drone).map(|p| p.shape.volume()).sum();
+        let (count, each) = population(drone_m3);
+        assert!(count == MAX_DRONES && each > 1.0e4, "{count} drawn, {each} each");
+        let uniform = traffic(&pieces, None).uniform(0.0, SEED);
+        let (width, gain) = mote(each);
+        assert!(((width * width * gain / each) / mote(1.0).0.powi(2) - 1.0).abs() < 1e-9);
+        let one = DroneUniform::default();
+        assert_eq!(uniform.mote_m, width as f32);
+        assert_eq!(uniform.color, one.color * gain as f32);
+        assert_eq!(uniform.carry_color, one.carry_color * gain as f32);
     }
 
     #[test]
@@ -630,7 +641,8 @@ mod tests {
         let piece = &working.outer[0];
         for t in targets(&working) {
             let local = piece.pose.to_local(t);
-            assert!(local.x <= 0.0 && piece.shape.distance(local) > 0.0, "{local} in the part's frame");
+            let (x, reach) = (local.x, piece.shape.reach());
+            assert!((-reach..=0.0).contains(&x) && piece.shape.distance(local) > 0.0, "{local} in the part's frame");
         }
         let traffic = traffic(&at(&plan, &s, 0.5).pieces, Some((&working, s.duration_s)));
         assert!(traffic.working > 0.0 && traffic.carrying == 0.0);

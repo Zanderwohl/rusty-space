@@ -138,11 +138,6 @@ impl Working {
         (p.distance(joint) / span).clamp(0.0, 1.0)
     }
 
-    /// Where copy `copy` meets its parent, ship frame: what [`Working::across`] measures from.
-    pub fn joint(&self, copy: usize) -> DVec3 {
-        self.joints[copy].0
-    }
-
     /// Each layer averaged across the sliver: what a placeholder with one mesh per part draws.
     pub fn mean(&self) -> Look {
         let mut sum = Look::default();
