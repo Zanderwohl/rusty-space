@@ -164,7 +164,7 @@ graph LR
 
 ### D1 · Static drawables per system
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; smaller than planned. Timed on Sol's 221 bodies, `drawables_at` is 127 µs natively, 77 of it propagation. The class, world, giant and climate follow the distance from the star, so they stay per frame to stay exact. What is truly fixed is held once: 127 → 121 µs. The mesh is still rebuilt, since Bevy re-uploads a changed mesh whole either way)
 - needs: —
 - touches: `crates/lc-world/src/system.rs`, `crates/lc-client/src/starfield.rs`, `crates/lc-client/src/session.rs`
 - read: 26, 07
