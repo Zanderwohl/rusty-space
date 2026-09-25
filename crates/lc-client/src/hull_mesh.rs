@@ -17,7 +17,7 @@
 //! lands in it. It may vanish or be holed; diagonal neighbors are joined rather than split, and
 //! what is left is closed.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::f64::consts::TAU;
 use std::sync::Arc;
 
@@ -29,6 +29,7 @@ use bevy_mesh::{Indices, PrimitiveTopology};
 use em_render::hull_material::{ATTRIBUTE_HULL_SEAM, insert_region_weights, region_weights};
 use glam::DVec3;
 use lc_world::fitting::Balance;
+use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::Sdf;
 use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 
@@ -120,14 +121,15 @@ pub fn mesh_form(form: &Form, balance: &Balance, cells: u32, finish: Finish) -> 
     let surface = nets(&grid, finish == Finish::Blocky);
     let paint = Paint::new(&sdf, form, balance, grid.step);
     let mut scratch = Vec::new();
-    let painted: Vec<Painted> = surface.vertices.iter().map(|&p| paint.at(p, &mut scratch)).collect();
+    let mut painted: Vec<Painted> = surface.vertices.iter().map(|&p| paint.at(p, &mut scratch)).collect();
+    along_seams(&mut painted);
     let normals = (finish == Finish::Smooth).then(|| gradients(&sdf, &surface, grid.step));
     Ok(buffers(&surface, &painted, normals.as_deref(), grid.step))
 }
 
 /// FNV-1a over a canonical encoding of the form, each part's solved shape, and what of
 /// `balance` shapes it. Parts in id order, and `-0.0` as `0.0`, so two forms that mesh alike
-/// hash alike. Stable across runs and builds, unlike `DefaultHasher`.
+/// hash alike.
 pub fn form_hash(form: &Form, balance: &Balance) -> u64 {
     let mut h = Fnv::default();
     for x in [balance.min_part_m3, balance.spar_gap, balance.spar_thickness] {
@@ -151,7 +153,16 @@ pub fn form_hash(form: &Form, balance: &Balance) -> u64 {
         h.f64(part.volume_m3);
         // The solved shape covers the primitive's proportions and its scale.
         let shape = part.shape(balance.min_part_m3);
-        h.bytes(format!("{shape:?}").as_bytes());
+        let dimensions: Vec<f64> = match shape {
+            Shape::Ellipsoid { semi_axes } => semi_axes.to_array().to_vec(),
+            Shape::Capsule { radius, length } | Shape::Cylinder { radius, length } => vec![radius, length],
+            Shape::Slab { edges, corner } => vec![edges.x, edges.y, edges.z, corner],
+            Shape::Torus { major, minor } => vec![major, minor],
+            Shape::Frustum { length, start, end } => vec![length, start, end],
+        };
+        for x in dimensions {
+            h.f64(x);
+        }
         match part.placement {
             None => h.u64(0),
             Some(Placement { parent, mount, twist, tilt, blend, mirror }) => {
@@ -575,6 +586,59 @@ struct Painted {
     /// The spar whose seam `along` is measured about, the vertex's angle about its axis, and
     /// what `along` gains a radian, to unwrap the angle where a triangle straddles its cut.
     about: Option<(usize, f64, f64)>,
+    seam: Option<SeamAt>,
+}
+
+/// Where a vertex is about the spar whose seam is nearest, in the spar's frame.
+#[derive(Clone, Copy, Debug)]
+struct SeamAt {
+    spar: usize,
+    neighbor: usize,
+    theta: f64,
+    rho: f64,
+    x: f64,
+    /// How far the seam runs around the axis and along it here, as the parts of a unit tangent.
+    /// Only where the vertex is within reach of the seam.
+    runs: Option<(f64, f64)>,
+}
+
+/// Classes each seam, a spar and the neighbor it meets, as a ring about the spar's axis or a
+/// line along it, by which way it runs on the whole, and writes `along` as meters around or
+/// along for all of it. Chosen per vertex it would shear the heads where the choice changes, and
+/// weights that vary would add their own slope, times tens of meters, to `along`. A seam off its
+/// class spreads its heads by the cosine of how far it strays.
+///
+/// A ring's radius is one for the seam, its vertices' mean: the angle reaches π, so a tenth of a
+/// meter between two neighbors' own radii would put a third of a meter between their `along`s.
+fn along_seams(painted: &mut [Painted]) {
+    #[derive(Default)]
+    struct Total {
+        around: f64,
+        axial: f64,
+        rho: f64,
+        n: f64,
+    }
+    let mut totals: HashMap<(usize, usize), Total> = HashMap::new();
+    for seam in painted.iter().filter_map(|p| p.seam) {
+        if let Some((around, axial)) = seam.runs {
+            let total = totals.entry((seam.spar, seam.neighbor)).or_default();
+            total.around += around;
+            total.axial += axial;
+            total.rho += seam.rho;
+            total.n += 1.0;
+        }
+    }
+    for paint in painted.iter_mut() {
+        let Some(seam) = paint.seam else { continue };
+        (paint.along, paint.about) = match totals.get(&(seam.spar, seam.neighbor)) {
+            Some(t) if t.axial > t.around => (seam.x, None),
+            Some(t) => {
+                let rho = t.rho / t.n;
+                (seam.theta * rho, Some((seam.spar, seam.theta, rho)))
+            }
+            None => (seam.theta * seam.rho, Some((seam.spar, seam.theta, seam.rho))),
+        };
+    }
 }
 
 /// Past this from every seam, `across` is written as [`SEAM_FAR`] with its sign kept.
@@ -629,17 +693,15 @@ impl<'a> Paint<'a> {
         let Some((spar, (neighbor, off))) =
             self.spars.iter().filter_map(|&s| Some((s, self.sdf.seam(s, p)?))).min_by(|a, b| a.1.1.total_cmp(&b.1.1))
         else {
-            return Painted { regions, across: SEAM_FAR as f32, along: 0.0, about: None };
+            return Painted { regions, across: SEAM_FAR as f32, along: 0.0, about: None, seam: None };
         };
         let on_spar = distances[spar] <= distances[neighbor];
         let (mine, theirs) = if on_spar { (spar, neighbor) } else { (neighbor, spar) };
         // Positive on the lower-numbered region's side; between two spars, the nearer spar's.
         let positive = self.region[mine] < self.region[theirs] || (self.region[mine] == self.region[theirs] && on_spar);
         let sign = if positive { 1.0 } else { -1.0 };
-        let across = sign * if off <= SEAM_REACH_M.max(2.0 * self.step) { off } else { SEAM_FAR };
-        // Meters around the spar's axis and along it, each weighted by how far the seam runs
-        // that way: a boom's end is a ring, a rib's edge runs along the axis. Either alone on the
-        // other kind of seam would advance across the bolt row and shear every head.
+        let near = off <= SEAM_REACH_M.max(2.0 * self.step);
+        let across = sign * if near { off } else { SEAM_FAR };
         let pose = self.sdf.pieces()[spar].pose;
         let local = pose.to_local(p);
         let (theta, rho) = (local.z.atan2(local.y), local.y.hypot(local.z));
@@ -647,19 +709,13 @@ impl<'a> Paint<'a> {
         let grad = |i: usize| {
             DVec3::from_array([0, 1, 2].map(|a| self.sdf.primitive(i, p + AXES[a] * h) - self.sdf.primitive(i, p - AXES[a] * h)))
         };
-        let tangent = pose.rotation.transpose() * grad(spar).cross(grad(neighbor));
-        let around = DVec3::new(0.0, -local.z, local.y) / rho;
-        let (w_around, w_axis) = match tangent.try_normalize() {
-            Some(t) if rho > 0.0 => (t.dot(around).abs(), t.x.abs()),
-            _ => (1.0, 0.0),
-        };
-        let per_radian = w_around * rho;
-        Painted {
-            regions,
-            across: across as f32,
-            along: theta * per_radian + local.x * w_axis,
-            about: Some((spar, theta, per_radian)),
-        }
+        let runs = near
+            .then(|| (pose.rotation.transpose() * grad(spar).cross(grad(neighbor))).try_normalize())
+            .flatten()
+            .filter(|_| rho > 0.0)
+            .map(|t| (t.dot(DVec3::new(0.0, -local.z, local.y) / rho).abs(), t.x.abs()));
+        let seam = SeamAt { spar, neighbor, theta, rho, x: local.x, runs };
+        Painted { regions, across: across as f32, along: 0.0, about: None, seam: Some(seam) }
     }
 
     /// The nearest region and the next, blended across the fillet between them, or across a
@@ -760,7 +816,7 @@ pub fn spar_fixture(mode: SparMode) -> Form {
 }
 
 /// What an entity draws as its hull. A mesh arrives as its `Mesh3d` once meshed; give it a
-/// `MeshMaterial3d<HullMaterial>` yourself. Set [`HullPixels`] each frame to size its grid.
+/// `MeshMaterial3d<HullMaterial>` yourself. Its grid is sized by [`measure`].
 #[derive(Component, Clone)]
 #[require(HullPixels, HullMeshState)]
 pub struct HullForm {
@@ -771,7 +827,7 @@ pub struct HullForm {
     pub cells: Option<u32>,
 }
 
-/// Pixels the hull spans on screen along its longest side; [`pixels_across`] estimates it.
+/// Pixels the hull spans on screen along its longest side, written by [`measure`].
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct HullPixels(pub f32);
 
@@ -817,7 +873,27 @@ pub struct HullMeshPlugin;
 
 impl Plugin for HullMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HullMeshes>().add_systems(Update, (want, land).chain().in_set(HullMeshSystems));
+        app.init_resource::<HullMeshes>().add_systems(Update, (measure, want, land).chain().in_set(HullMeshSystems));
+    }
+}
+
+/// Each hull's pixels on screen, the most it spans through any active perspective camera, so it
+/// is meshed for its nearest view. A frame behind, as the transforms are.
+pub fn measure(
+    cameras: Query<(&Camera, &Projection, &GlobalTransform)>,
+    mut hulls: Query<(&GlobalTransform, &HullMeshState, &mut HullPixels)>,
+) {
+    for (at, state, mut pixels) in &mut hulls {
+        pixels.0 = cameras
+            .iter()
+            .filter(|(camera, ..)| camera.is_active)
+            .filter_map(|(camera, projection, eye)| {
+                let Projection::Perspective(perspective) = projection else { return None };
+                let height = camera.physical_viewport_size()?.y as f32;
+                let distance = eye.translation().distance(at.translation());
+                Some(pixels_across(state.extent_m as f32, distance, perspective.fov, height))
+            })
+            .fold(0.0, f32::max);
     }
 }
 
@@ -881,11 +957,6 @@ fn land(
         meshes.ready.insert(key, mesh.map(|m| assets.add(m)));
         meshes.order.push_back(key);
     }
-    while meshes.order.len() > CACHED {
-        if let Some(old) = meshes.order.pop_front() {
-            meshes.ready.remove(&old);
-        }
-    }
     for (entity, mut state, mesh) in &mut hulls {
         let Some(wanted) = state.wanted else { continue };
         if state.shown == Some(wanted) {
@@ -901,12 +972,22 @@ fn land(
             }
         }
     }
+    // After the handing out, and never one still wanted: `want` asks for a key only once.
+    let wanted: HashSet<u64> = hulls.iter().filter_map(|(_, state, _)| state.wanted).collect();
+    let mut excess = meshes.order.len().saturating_sub(CACHED);
+    let ready = &mut meshes.ready;
+    meshes.order.retain(|key| {
+        if excess == 0 || wanted.contains(key) {
+            return true;
+        }
+        ready.remove(key);
+        excess -= 1;
+        false
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use lc_world::form::presets::Builtin;
 
     use super::*;
@@ -1016,8 +1097,9 @@ mod tests {
 
     const RESOLUTIONS: [u32; 3] = [16, 40, 96];
 
+    /// Faceted is Smooth's triangles with other normals, so two topologies cover the three finishes.
     #[test]
-    fn every_primitive_is_closed_at_three_resolutions_in_every_finish() {
+    fn every_primitive_is_closed_at_three_resolutions_in_both_topologies() {
         for (primitive, handles) in primitives() {
             let form = alone(primitive, 5.0e5);
             let truth = form.parts[1].shape(B.min_part_m3).volume();
@@ -1167,6 +1249,136 @@ mod tests {
                 let spread = along.iter().copied().fold(f32::MIN, f32::max) - along.iter().copied().fold(f32::MAX, f32::min);
                 assert!((spread as f64) < rho, "a triangle spans {spread} m of seam");
             }
+        }
+    }
+
+    #[test]
+    fn a_sphere_and_a_strap_are_closed_at_the_finest_grid() {
+        for form in [alone(Primitive::Capsule { length: 0.0 }, 5.0e5), spar_fixture(SparMode::Strap)] {
+            let (s, ..) = surface(&form, MAX_CELLS, Finish::Smooth);
+            let (chi, pieces) = check_closed(&s, "at MAX_CELLS");
+            assert_eq!(chi, 2 * pieces);
+        }
+    }
+
+    /// The saddle's boom tilted, so its end meets the hull obliquely and each seam climbs on one
+    /// side of the boom and dips on the other.
+    fn tilted_boom() -> Form {
+        let mut form = spar_fixture(SparMode::Saddle);
+        form.parts[2].placement.as_mut().unwrap().tilt = glam::DVec2::new(0.45, 0.3);
+        form
+    }
+
+    /// Along a seam, `along` advances a meter a meter whichever way the seam runs.
+    #[test]
+    fn along_is_meters_along_a_seam_that_climbs() {
+        let form = tilted_boom();
+        let sdf = Sdf::new(&form, &B).unwrap();
+        let b = mesh_form(&form, &B, 128, Finish::Smooth).unwrap();
+        let spar = 2;
+        let h = 1e-4;
+        let grad = |i: usize, p: DVec3| DVec3::from_array([0, 1, 2].map(|a| sdf.primitive(i, p + AXES[a] * h) - sdf.primitive(i, p - AXES[a] * h)));
+        let mut checked = 0;
+        for t in b.indices.chunks(3) {
+            for k in 0..3 {
+                let (i, j) = (t[k] as usize, t[(k + 1) % 3] as usize);
+                if b.seams[i][0].abs() > 1.5 || b.seams[j][0].abs() > 1.5 {
+                    continue;
+                }
+                let (p, q) = (Vec3::from(b.positions[i]).as_dvec3(), Vec3::from(b.positions[j]).as_dvec3());
+                let mid = (p + q) / 2.0;
+                let Some((neighbor, _)) = sdf.seam(spar, mid) else { continue };
+                let Some(tangent) = grad(spar, mid).cross(grad(neighbor, mid)).try_normalize() else { continue };
+                let edge = q - p;
+                if edge.normalize().dot(tangent).abs() < 0.95 {
+                    continue;
+                }
+                let ratio = ((b.seams[j][1] - b.seams[i][1]) as f64).abs() / edge.length();
+                assert!((0.7..=1.3).contains(&ratio), "{ratio} m of along a meter at {mid}");
+                checked += 1;
+            }
+        }
+        assert!(checked > 50, "{checked}");
+    }
+
+    fn headless() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default())).init_asset::<Mesh>().add_plugins(HullMeshPlugin);
+        app
+    }
+
+    fn step_until(app: &mut App, what: &str, done: impl Fn(&mut World) -> bool) {
+        for _ in 0..20_000 {
+            app.update();
+            if done(app.world_mut()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("never {what}");
+    }
+
+    fn hull(form: Form, cells: u32) -> HullForm {
+        HullForm { form: Arc::new(form), balance: B, finish: Finish::Smooth, cells: Some(cells) }
+    }
+
+    fn shown(world: &World, e: Entity) -> Option<Handle<Mesh>> {
+        world.get::<Mesh3d>(e).map(|m| m.0.clone())
+    }
+
+    /// The old mesh stays up through the frame that asks for a new one and every frame until it
+    /// lands, and the new one is swapped in once it has.
+    #[test]
+    fn a_remesh_never_holds_up_a_frame() {
+        let mut app = headless();
+        let e = app.world_mut().spawn(hull(Builtin::Cluster.form(), 16)).id();
+        step_until(&mut app, "meshed", |w| w.get::<HullMeshState>(e).unwrap().current());
+        let old = shown(app.world(), e).expect("a mesh once current");
+
+        app.world_mut().get_mut::<HullForm>(e).unwrap().cells = Some(128);
+        app.update();
+        assert_eq!(shown(app.world(), e), Some(old.clone()), "the frame that asked still draws the old mesh");
+        assert!(!app.world().get::<HullMeshState>(e).unwrap().current());
+        assert_eq!(app.world().resource::<HullMeshes>().pending.len(), 1, "meshing elsewhere");
+
+        let mut frames = 0;
+        loop {
+            let pending = !app.world().resource::<HullMeshes>().pending.is_empty();
+            app.update();
+            frames += 1;
+            let now = shown(app.world(), e);
+            if now != Some(old.clone()) {
+                assert!(pending || frames == 1, "swapped before the task finished");
+                assert!(app.world().resource::<HullMeshes>().pending.is_empty());
+                assert!(app.world().get::<HullMeshState>(e).unwrap().current());
+                break;
+            }
+            assert!(frames < 20_000, "the new mesh never landed");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(frames > 1, "landed on the first frame after asking: not meshed off the frame");
+    }
+
+    /// More meshes landing in one frame than the cache keeps: every hull still gets its own.
+    #[test]
+    fn a_crowd_landing_at_once_is_all_drawn() {
+        let mut app = headless();
+        let crowd: Vec<Entity> = (0..CACHED + 1)
+            .map(|k| {
+                let form = alone(Primitive::Capsule { length: 0.0 }, 5.0e5 * (1.0 + k as f64 / 100.0));
+                app.world_mut().spawn(hull(form, 16)).id()
+            })
+            .collect();
+        app.update();
+        let tasks = |w: &mut World| w.resource::<HullMeshes>().pending.values().all(|t| t.is_finished());
+        while !tasks(app.world_mut()) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        app.update();
+        app.update();
+        for e in crowd {
+            assert!(shown(app.world(), e).is_some(), "a hull left without its mesh");
+            assert!(app.world().get::<HullMeshState>(e).unwrap().current());
         }
     }
 
