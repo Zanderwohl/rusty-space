@@ -358,6 +358,28 @@ fn settle(unsettled: &mut HashMap<AssetId<Image>, u32>, image: &Handle<Image>) {
     }
 }
 
+/// What the bakes being read back may hold at once: a little over one 1024 color cube. Each is
+/// copied into wasm memory whole, twice, and that memory never shrinks, so a burst of bakes
+/// would leave its peak behind for the session. At least one always starts.
+const IN_FLIGHT_BYTES: usize = 32 << 20;
+
+/// Which waiting bakes start now, and which wait. In order of face size, because the baker's
+/// scratch textures are rebuilt whenever it changes; the sort is stable, and once one waits
+/// everything after it does, so bakes of one image still land in the order asked.
+fn admit(mut waiting: Vec<Request>, in_flight: usize) -> (Vec<Request>, Vec<Request>) {
+    waiting.sort_by_key(|r| match r.target.shape {
+        Shape::Volume(n) | Shape::Cube(n) | Shape::Plane(n) => n,
+    });
+    let mut held = in_flight;
+    let first_waiting = waiting.iter().position(|r| {
+        let fits = held == 0 || held + r.target.bytes() <= IN_FLIGHT_BYTES;
+        held += r.target.bytes();
+        !fits
+    });
+    let deferred = first_waiting.map_or_else(Vec::new, |at| waiting.split_off(at));
+    (waiting, deferred)
+}
+
 /// Start what can start, and finish what the GPU has finished.
 ///
 /// Neither the graphs nor the device exist at startup: a graph is a fetch in a browser, and
@@ -389,7 +411,9 @@ fn run_bakes(
     }
     let (baker, device) = bakes.baker.as_mut().expect("built above");
 
-    let waiting = std::mem::take(&mut bakes.waiting);
+    let in_flight = bakes.reading.iter().map(|r| r.target.bytes()).sum();
+    let (waiting, deferred) = admit(std::mem::take(&mut bakes.waiting), in_flight);
+    bakes.waiting = deferred;
     for request in waiting {
         if let LoadState::Failed(e) = assets.load_state(&request.graph) {
             warn!("a procedural texture's graph did not load, drawing without it: {e}");
@@ -634,6 +658,32 @@ mod tests {
     };
 
     use super::*;
+
+    fn asked(target: Target) -> Request {
+        Request {
+            graph: Handle::default(),
+            seed: 0,
+            params: Params::new(),
+            target,
+            image: Handle::default(),
+        }
+    }
+
+    #[test]
+    fn bakes_start_within_the_budget_smallest_face_first() {
+        let color = Target::new(Shape::Cube(1024)).color();
+        let mask = Target::new(Shape::Cube(512));
+        let climate = Target::new(Shape::Cube(64));
+        let (start, wait) = admit(vec![asked(color), asked(mask), asked(color), asked(climate)], 0);
+        let faces = |list: &[Request]| list.iter().map(|r| r.target.shape).collect::<Vec<_>>();
+        assert_eq!(faces(&start), [Shape::Cube(64), Shape::Cube(512), Shape::Cube(1024)]);
+        assert_eq!(faces(&wait), [Shape::Cube(1024)]);
+
+        let (start, wait) = admit(wait, color.bytes());
+        assert!(start.is_empty() && wait.len() == 1, "over the budget with one in flight");
+        let (start, _) = admit(vec![asked(Target::new(Shape::Cube(4096)).color())], 0);
+        assert_eq!(start.len(), 1, "one too big for the budget still starts alone");
+    }
 
     #[test]
     fn a_forgotten_image_is_not_baked_and_counts_as_settled() {
