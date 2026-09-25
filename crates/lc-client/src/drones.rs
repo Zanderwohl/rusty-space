@@ -72,10 +72,14 @@ pub fn population(drone_m3: f64) -> (u32, f64) {
     (drawn as u32, each)
 }
 
-/// Meters across a mote standing for `each` drones: the light of `each` spread over a disc, so a
-/// capped swarm is as bright as the whole one would be.
-pub fn mote_m(each: f64) -> f64 {
-    MOTE_FILL * PARTICLES_PER_M3.powf(-1.0 / 3.0) * each.sqrt()
+/// Meters across a mote standing for `each` drones, and how much brighter than one drone it is.
+///
+/// As wide as the cube of drone part it stands for, and the rest of `each` drones' light in its
+/// brightness, so a capped swarm is as bright as the whole one would be. Widening it by `√each`
+/// instead, to carry all of the light in area, drew a GSV's swarm as a few hundred blobs.
+pub fn mote(each: f64) -> (f64, f64) {
+    let width = each.cbrt();
+    (MOTE_FILL * PARTICLES_PER_M3.powf(-1.0 / 3.0) * width, each / (width * width))
 }
 
 /// Points just off each drone part's open surface, where it is not inside another part, spread
@@ -265,6 +269,8 @@ pub fn patrol(pieces: &[Piece]) -> (DVec3, DVec3) {
 pub struct Traffic {
     pub count: u32,
     pub mote_m: f64,
+    /// Times one drone's light, per unit of a mote's area.
+    pub gain: f64,
     pub haze_m: f64,
     pub docks: Vec<DVec3>,
     pub targets: Vec<DVec3>,
@@ -282,13 +288,14 @@ pub struct Traffic {
 pub fn traffic(pieces: &[Piece], working: Option<(&Working, f64)>) -> Traffic {
     let drone_m3 = pieces.iter().filter(|p| p.kind == Kind::Drone).map(|p| p.shape.volume()).sum();
     let (count, each) = population(drone_m3);
-    let mote = mote_m(each);
+    let (mote, gain) = mote(each);
     let (patrol_center, patrol_radii) = patrol(pieces);
     let spacing = |area: f64, share: f64| (area / (share * count as f64).max(1.0)).sqrt().max(mote);
     let mean_radius = (patrol_radii.x * patrol_radii.y * patrol_radii.z).cbrt();
     let idle = Traffic {
         count,
         mote_m: mote,
+        gain,
         haze_m: spacing(4.0 * std::f64::consts::PI * mean_radius * mean_radius, PATROL),
         docks: docks(pieces),
         targets: Vec::new(),
@@ -354,6 +361,8 @@ impl Traffic {
             haze_m: self.haze_m as f32,
             ..default()
         };
+        uniform.color *= self.gain as f32;
+        uniform.carry_color *= self.gain as f32;
         uniform.set_docks(&self.docks.iter().map(|&p| v(p)).collect::<Vec<_>>());
         uniform.set_targets(&self.targets.iter().map(|&p| v(p)).collect::<Vec<_>>());
         uniform
@@ -506,7 +515,11 @@ mod tests {
         assert_eq!(count, MAX_DRONES);
         assert!((each * count as f64 - drone_m3 * 1.0e6 * PARTICLES_PER_M3).abs() < 1.0);
         // The capped swarm's light: each mote's area carries `each` drones' worth.
-        let light = |each: f64| mote_m(each).powi(2) / each;
+        let light = |each: f64| {
+            let (width, gain) = mote(each);
+            width * width * gain / each
+        };
+        assert!(mote(each).0 < 100.0 * mote(1.0).0, "{} m motes", mote(each).0);
         assert!((light(each) - light(1.0)).abs() < 1e-9 * light(1.0));
     }
 
