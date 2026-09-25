@@ -48,6 +48,14 @@ canonical encoding of the form and each part's solved shape, since `Form` holds 
 256-cell mesh takes a few seconds in a dev build and never holds up a frame; the old mesh stays up
 until the new one lands. `cargo run -p lc-client --example mesh_void` photographs the fixtures.
 
+![The fixture forms, meshed and drawn in the hull material](../images/mesh-forms.jpg)
+
+![Smooth, faceted and blocky, at the grid the screen asks for and at 32 cells](../images/mesh-finishes.jpg)
+
+![A saddle's bolt row, and a strap at 16, 64 and 256 cells: holed on the coarse grid, never torn](../images/mesh-seams.jpg)
+
+![Consecutive frames across a remesh from 32 to 128 cells: the old mesh stays up until the new one lands](../images/mesh-remesh.jpg)
+
 ### Details are sized in meters
 
 The eye judges size by how small repeated detail is. So **every repeated detail has a fixed size

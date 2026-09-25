@@ -490,9 +490,9 @@ graph LR
 
 ### R2 · Mesher, in a void
 
-- status: active card "Build R2: surface-nets mesher with no game data"
+- status: done PRNUM
 - needs: F3
-- touches: `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/examples/`
+- touches: `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/examples/`, `crates/lc-client/src/lib.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §From distance field to mesh
 - deliver: surface nets over F3's field at a resolution set by pixels on screen; smooth, faceted and blocky finishes; meshing on the async pool, cached by the form's hash; an example that meshes fixture forms, spars conforming included, and photographs them.
 - done when: every primitive and a spar saddle and strap mesh without holes at three resolutions, and a remesh never blocks a frame.
