@@ -6,7 +6,7 @@
 //! ([`Form::copies`]). See `lightcone/docs/29-ship-form.md` §Kinds and §Hull structure follows
 //! area.
 
-use super::{Form, Kind, Part};
+use super::{rules, Form, Kind, Part};
 use crate::fitting::{Balance, C2, ONBOARD_DATA_BYTES};
 
 /// Sums of volume × density per kind. The Mind, bays and spars add nothing.
@@ -16,8 +16,8 @@ pub struct Capacities {
     pub storage_j: f64,
     /// Watts of drone building power.
     pub building_w: f64,
-    /// Watts of engine aperture, fore and aft together. The rating, not thrust: a fore engine
-    /// pushes against an aft one.
+    /// Watts of engine aperture, fore and aft together. Not the drive's rating, which counts only
+    /// the engines firing aft: see [`aft_aperture_w`].
     pub aperture_w: f64,
     /// Watts living space drains, continuously.
     pub drain_w: f64,
@@ -53,6 +53,20 @@ impl Capacities {
             data_b: ONBOARD_DATA_BYTES + data_m3 * balance.data_density_b,
         }
     }
+}
+
+/// Watts of aperture in the engines whose exhaust leaves aft, every copy counted: what pushes the
+/// ship along its nose. `None` for a form that does not place, as one partway through a round may
+/// not.
+pub fn aft_aperture_w(form: &Form, balance: &Balance) -> Option<f64> {
+    let poses = form.place(balance.min_part_m3).ok()?;
+    let aft = poses.iter().filter_map(|(id, _, pose)| {
+        let part = form.parts.iter().find(|p| p.id == id && p.kind == Kind::Engine)?;
+        let (face_x, _) = rules::face(&part.shape(balance.min_part_m3));
+        let exhaust = pose.axis() * face_x.signum();
+        (exhaust.x < 0.0).then_some(part.volume_m3 * balance.engine_density_w)
+    });
+    Some(aft.sum())
 }
 
 /// Of module density.
@@ -144,7 +158,8 @@ mod tests {
     use glam::{DVec2, DVec3};
 
     use super::*;
-    use crate::fitting::Loadout;
+    use crate::fitting::STARTING_DRY_KG;
+    use crate::form::presets::SLOT_M3;
     use crate::form::{Mount, PartId, Placement, Primitive, SparMode};
 
     fn part(id: u16, kind: Kind, primitive: Primitive, volume_m3: f64) -> Part {
@@ -163,20 +178,26 @@ mod tests {
         ((a - b) / b).abs() < 1e-9
     }
 
+    /// 19's table, which the starting ship's modules had: 30 ME stored, two drones each building
+    /// an ME a week, one living module draining an ME a century, and a data module's year of a
+    /// thirty-minute stare in every band. Its 5 g is `form::presets`'.
     #[test]
     fn nineteens_volumes_have_nineteens_capacities() {
         let b = Balance::DEFAULT;
-        let start = Loadout::STARTING;
+        let me = b.module_energy_j();
         let c = Capacities::of(&Form::starting(), &b);
-        assert!(close(c.storage_j, b.capacity_j(&start)), "{} vs {}", c.storage_j, b.capacity_j(&start));
-        assert!(close(c.building_w, b.refit_power_w(&start)));
-        assert!(close(c.drain_w, b.drain_w(&start)));
-        assert!(close(c.data_b, b.data_capacity(&start)));
-        assert!(close(c.aperture_w / crate::flight::C_M_S, start.engines as f64 * b.engine_thrust_n));
+        let (week_s, century_s) = (7.0 * 86_400.0, 100.0 * crate::flight::JULIAN_YEAR_S);
+        assert!(close(c.storage_j, 30.0 * me), "{} ME", c.storage_j / me);
+        assert!(close(c.building_w, 2.0 * me / week_s));
+        assert!(close(c.drain_w, me / century_s));
+        let year_of_stares = crate::fitting::DATA_ANCHOR_S / 1800.0
+            * em_spectra::Band::ALL.len() as f64
+            * crate::knowledge::SAMPLE_BYTES;
+        assert!(close(c.data_b, ONBOARD_DATA_BYTES + year_of_stares));
     }
 
-    /// The comparison above cannot see a density that DEFAULT derives wrongly from a per-module
-    /// value that is wrong the same way, so pin 29's table too.
+    /// The comparison above cannot see a density that DEFAULT derives wrongly from a figure that
+    /// is wrong the same way, so pin 29's table too.
     #[test]
     fn densities_and_fractions_are_29s() {
         let b = Balance::DEFAULT;
@@ -216,8 +237,8 @@ mod tests {
     #[test]
     fn contents_weigh_what_nineteens_modules_do() {
         let b = Balance { hull_areal_density: 0.0, ..Balance::DEFAULT };
-        let start = Loadout::STARTING;
-        let modules_kg = b.dry_mass_kg(&start) - start.slots as f64 * b.slot_structure_kg();
+        let frame_kg = 20.0 * SLOT_M3 * 50.0;
+        let modules_kg = STARTING_DRY_KG - frame_kg;
         let mind_kg = b.min_part_m3 * b.module_density_kg_m3;
         assert!(close(dry_mass_kg(&Form::starting(), &b), modules_kg + mind_kg));
     }
@@ -384,10 +405,29 @@ mod tests {
     #[test]
     fn a_modules_worth_of_volume_costs_what_building_a_module_does() {
         let b = Balance { hull_areal_density: 0.0, ..Balance::DEFAULT };
-        for (kind, module) in [(Kind::Storage, crate::fitting::Module::Storage), (Kind::Data, crate::fitting::Module::Data)] {
-            let one = part(1, kind, Primitive::Capsule { length: 1.0 }, b.slot_volume_m3);
+        for (kind, me) in [(Kind::Storage, 1.0), (Kind::Data, 0.5)] {
+            let one = part(1, kind, Primitive::Capsule { length: 1.0 }, SLOT_M3);
             let Transfer::Build { cost_j } = Transfer::of(None, Some(&one), 1, &b) else { panic!() };
-            assert!(close(cost_j, b.build_energy_j(module)), "{kind:?}");
+            assert!(close(cost_j, me * b.module_energy_j()), "{kind:?}");
         }
+    }
+
+    /// Only an engine whose exhaust leaves aft pushes the ship along its nose. Turning one of the
+    /// plate's pair to fire fore halves the rating and leaves the aperture as it was.
+    #[test]
+    fn the_rating_counts_the_engines_that_fire_aft() {
+        let b = Balance::DEFAULT;
+        let plate = crate::form::presets::Builtin::Plate.form();
+        let both = aft_aperture_w(&plate, &b).unwrap();
+        assert!(close(both, Capacities::of(&plate, &b).aperture_w), "both of its engines fire aft");
+        let mut turned = plate.clone();
+        let engine = turned.parts.iter_mut().find(|p| p.id == PartId(3)).unwrap();
+        let Some(Placement { mount: Mount::Attached { anchor, .. }, .. }) = engine.placement.as_mut() else { panic!() };
+        anchor.x = -anchor.x;
+        assert!(close(aft_aperture_w(&turned, &b).unwrap(), both / 2.0));
+        assert!(close(Capacities::of(&turned, &b).aperture_w, both));
+        // The starting form's one bell flares aft.
+        let start = Form::starting();
+        assert!(close(aft_aperture_w(&start, &b).unwrap(), Capacities::of(&start, &b).aperture_w));
     }
 }

@@ -16,23 +16,21 @@ use crate::fitting::Balance;
 
 const MIND: PartId = PartId(0);
 
-/// 19's slot, the reference 500 m ovoid's `π L³ / 50` over twenty. Written out rather than read
-/// from `Balance`, which loses the slot when the loadout goes.
-const SLOT_M3: f64 = 125_000.0 * std::f64::consts::PI;
+/// 19's slot, the reference 500 m ovoid's `π L³ / 50` over twenty: what one of its modules held,
+/// and what the densities and a module-energy are still quoted per.
+pub const SLOT_M3: f64 = 125_000.0 * std::f64::consts::PI;
 
 /// 19's starting modules as volumes: each kind's count of slots.
-struct Volumes {
-    storage: f64,
-    drone: f64,
-    engine: f64,
-    living: f64,
-    data: f64,
+pub(crate) struct Volumes {
+    pub(crate) storage: f64,
+    pub(crate) drone: f64,
+    pub(crate) engine: f64,
+    pub(crate) living: f64,
+    pub(crate) data: f64,
 }
 
-const STARTING: Volumes =
+pub(crate) const STARTING: Volumes =
     Volumes { storage: 6.0 * SLOT_M3, drone: 2.0 * SLOT_M3, engine: 5.0 * SLOT_M3, living: SLOT_M3, data: SLOT_M3 };
-
-pub(crate) const STARTING_LIVING_M3: f64 = STARTING.living;
 
 fn hang(id: u16, kind: Kind, primitive: Primitive, volume_m3: f64, parent: PartId, mount: Mount) -> Part {
     let placement = Placement { parent, mount, twist: 0.0, tilt: DVec2::ZERO, blend: 0.0, mirror: false };
@@ -315,7 +313,7 @@ impl Form {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{Loadout, ONBOARD_DATA_BYTES};
+    use crate::fitting::{ONBOARD_DATA_BYTES, STARTING_DRY_KG};
     use crate::flight::{C_M_S, G0};
     use crate::form::capacity::{areal_density_for, dry_mass_kg, Capacities};
     use crate::form::place::{Poses, Side};
@@ -351,23 +349,6 @@ mod tests {
         form.place(MIN).unwrap()
     }
 
-    /// While 19's loadout lasts. F9 removes it, and this test with it; the volumes stand.
-    #[test]
-    fn the_starting_volumes_are_nineteens_module_counts() {
-        let b = Balance::DEFAULT;
-        let start = Loadout::STARTING;
-        let slots = |count: u32| count as f64 * b.slot_volume_m3;
-        for (volume, want) in [
-            (STARTING.storage, slots(start.storage)),
-            (STARTING.engine, slots(start.engines)),
-            (STARTING.drone, slots(start.drones)),
-            (STARTING.living, slots(start.living)),
-            (STARTING.data, slots(start.data)),
-        ] {
-            assert!(close(volume, want, 1e-15), "{volume} against {want}");
-        }
-    }
-
     #[test]
     fn the_starting_volumes_are_29s_figures() {
         let b = Balance::DEFAULT;
@@ -390,12 +371,12 @@ mod tests {
     #[test]
     fn the_starting_form_has_nineteens_capacities_and_pulls_five_g_full() {
         let b = Balance::DEFAULT;
-        let start = Loadout::STARTING;
         let c = Capacities::of(&Form::starting(), &b);
-        assert!(close(c.storage_j, b.capacity_j(&start), 1e-12));
-        assert!(close(c.building_w, b.refit_power_w(&start), 1e-12));
-        assert!(close(c.drain_w, b.drain_w(&start), 1e-12));
-        assert!(close(c.data_b, b.data_capacity(&start), 1e-12));
+        // A slot of each is what one of 19's modules gave.
+        assert!(close(c.storage_j, 6.0 * SLOT_M3 * b.storage_density * b.module_energy_j(), 1e-12));
+        assert!(close(c.building_w, 2.0 * SLOT_M3 * b.drone_density_w, 1e-12));
+        assert!(close(c.drain_w, SLOT_M3 * b.living_density_w, 1e-12));
+        assert!(close(c.data_b, ONBOARD_DATA_BYTES + SLOT_M3 * b.data_density_b, 1e-12));
         assert!(c.data_b > ONBOARD_DATA_BYTES);
         let full_kg = dry_mass_kg(&Form::starting(), &b) + c.storage_j / (C_M_S * C_M_S);
         let g = c.aperture_w / C_M_S / full_kg / G0;
@@ -407,7 +388,7 @@ mod tests {
     #[test]
     fn hull_areal_density_is_anchored_on_nineteens_dry_starting_ship() {
         let b = Balance::DEFAULT;
-        let target = b.dry_mass_kg(&Loadout::STARTING);
+        let target = STARTING_DRY_KG;
         let solved = areal_density_for(&Form::starting(), &b, target).unwrap();
         assert!(close(b.hull_areal_density, solved, 1e-9), "DEFAULT has {}, the starting form solves to {solved}", b.hull_areal_density);
         assert!(close(dry_mass_kg(&Form::starting(), &b), target, 1e-9));

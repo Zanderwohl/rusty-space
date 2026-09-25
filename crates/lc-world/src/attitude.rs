@@ -41,6 +41,28 @@ pub fn rate_rad_s(length_m: f64) -> f64 {
     RATE_RAD_S * REFERENCE_LENGTH_M / length_m
 }
 
+/// How fast a form turns, from its radius of gyration about the slowest axis across its nose, m.
+///
+/// The law above with the moment in place of the length. Attitude thrust is sized to the ship as
+/// its drive is, so torque over mass is the same for every ship, angular acceleration goes as
+/// `1/k²`, and the rate as `1/k`. For a hull of one shape `k` is a fixed fraction of its length,
+/// so this is [`rate_rad_s`]; a form spread out has the larger `k` for its length and turns more
+/// slowly. Anchored on the reference hull, a uniform ovoid 5 : 3 : 1.
+pub fn rate_for_gyration(gyration_m: f64) -> f64 {
+    if gyration_m <= 0.0 || !gyration_m.is_finite() {
+        return RATE_RAD_S;
+    }
+    RATE_RAD_S * ovoid_gyration_m(REFERENCE_LENGTH_M) / gyration_m
+}
+
+/// A uniform ovoid's radius of gyration about its height, the slower of the two axes across its
+/// nose: `√((a² + b²) / 5)` for semi-axes `a` along it and `b` across the beam.
+fn ovoid_gyration_m(length_m: f64) -> f64 {
+    let a = 0.5 * length_m;
+    let b = a * crate::craft::BEAM_PER_LENGTH;
+    ((a * a + b * b) / 5.0).sqrt()
+}
+
 /// How long a hull turning at `rate_rad_s` takes to swing end for end, seconds.
 ///
 /// The half-turn is the expensive one and the one a crossing has to make room for, so it has a
@@ -167,6 +189,16 @@ mod tests {
         // And the big one's flip is the better part of two hours.
         let flip = turn_time_s(DVec3::X, -DVec3::X, large);
         assert!(flip > 5_000.0 && flip < 7_200.0, "{flip} s");
+    }
+
+    /// The ovoid every unfitted craft is turns at the same rate by its length or its moment.
+    #[test]
+    fn an_ovoid_turns_alike_by_its_length_or_its_gyration() {
+        for length_m in [500.0, 5_000.0, 50_000.0] {
+            let by_moment = rate_for_gyration(ovoid_gyration_m(length_m));
+            assert!((by_moment / rate_rad_s(length_m) - 1.0).abs() < 1.0e-12, "{length_m} m");
+        }
+        assert!((ovoid_gyration_m(500.0) - 17_000f64.sqrt()).abs() < 1.0e-9);
     }
 
     /// The named half-turn and the general one are the same turn.

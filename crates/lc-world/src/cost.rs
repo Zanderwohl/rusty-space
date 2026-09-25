@@ -72,12 +72,13 @@ pub fn planned_rapidity(state: &ShipState) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{Balance, Fitting, Loadout};
+    use crate::fitting::{Balance, Fitting};
+    use crate::form::Form;
     use crate::flight::{C_M_S, Cruise, Drive, G0, JULIAN_YEAR_S};
 
     fn mass() -> f64 {
-        let b = Balance::DEFAULT;
-        b.dry_mass_kg(&Loadout::STARTING) + b.capacity_j(&Loadout::STARTING) / C2
+        let hull = *Fitting::full(Form::starting(), Balance::DEFAULT, 0.0).hull();
+        hull.dry_kg + hull.capacities.storage_j / C2
     }
 
     #[test]
@@ -124,13 +125,10 @@ mod tests {
 
     #[test]
     fn a_full_starting_ship_crosses_at_about_half_c() {
-        let b = Balance::DEFAULT;
-        let fitting = Fitting::full(Loadout::STARTING, b, 0.0);
-        let dry = b.dry_mass_kg(&Loadout::STARTING);
-        let eta = affordable_rapidity(mass(), b.capacity_j(&Loadout::STARTING), 1.0);
-        assert!((eta - (mass() / dry).ln()).abs() < 1.0e-12);
+        let hull = *Fitting::full(Form::starting(), Balance::DEFAULT, 0.0).hull();
+        let eta = affordable_rapidity(mass(), hull.capacities.storage_j, 1.0);
+        assert!((eta - (mass() / hull.dry_kg).ln()).abs() < 1.0e-12);
         assert!(((eta / 2.0).tanh() - 0.468).abs() < 1.0e-3);
-        let _ = fitting;
     }
 
     /// Checked against the rest profile's own closed forms rather than against itself.

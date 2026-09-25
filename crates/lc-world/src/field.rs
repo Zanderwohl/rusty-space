@@ -394,7 +394,7 @@ mod tests {
         assert!((at_collapse - 4_577.0).abs() < 0.5, "{at_collapse}");
         let peak_nm = 2.897_771_955e-3 / at_collapse * 1e9;
         assert!((peak_nm - 630.0).abs() < 5.0, "{peak_nm}");
-        assert!((field.temperature_k(b.living_drain_w * field.tau_s) - 400.0).abs() < 1e-9);
+        assert!((field.temperature_k(start.caps.drain_w * field.tau_s) - 400.0).abs() < 1e-9);
 
         for (d_au, filling_k, full_k) in
             [(5.0, 444.0, 458.0), (1.0, 772.0, 1_024.0), (0.1, 2_396.0, 3_237.0), (0.05, 3_388.0, 4_577.0)]
@@ -407,7 +407,7 @@ mod tests {
             assert!((full - full_k).abs() < 0.5, "{d_au} AU full {full}");
         }
 
-        let idle_j = b.living_drain_w * field.tau_s;
+        let idle_j = start.caps.drain_w * field.tau_s;
         let vented = field.temperature_k(idle_j + Burst::Vent(5.0 * me).heat_j(1.0));
         assert!((vented - 3_850.0).abs() < 5.0, "{vented}");
         let clear_above = field.temperature_k(b.auto_clear_above * field.heat_max_j());
@@ -433,7 +433,7 @@ mod tests {
         for (length_m, idle_k, full_k) in [(500.0, 476.0, 3_237.0), (5_000.0, 846.0, 3_237.0), (50_000.0, 1_504.0, 3_237.0)] {
             let scale = length_m / 500.0;
             let field = Field { area_m2: start.field.area_m2 * scale * scale, ..start.field };
-            let living_w = 2.0 * scale.powi(3) * b.living_drain_w;
+            let living_w = 2.0 * scale.powi(3) * start.caps.drain_w;
             let segment = Segment {
                 arriving_w: start.starlight_w(0.1) * scale * scale,
                 internal_w: living_w,
@@ -601,7 +601,7 @@ mod tests {
         let field = start.field;
         let me = me(&b);
         let capacity_j = 30.0 * me;
-        let idle_j = b.living_drain_w * field.tau_s;
+        let idle_j = start.caps.drain_w * field.tau_s;
         let mut stepper =
             Stepper { heat_j: idle_j, stored_j: 0.0, capacity_j, t_s: 0.0, filled_at_s: None };
         let steps_per_s = 1.0 / 5.0;
@@ -658,7 +658,7 @@ mod tests {
         let t_s = 3.0e6;
         let heat_j = 2.0 * me;
         for room_j in [0.0, 0.5 * me, 100.0 * me] {
-            for draw_w in [b.living_drain_w, 3.0 * start.starlight_w(0.1)] {
+            for draw_w in [start.caps.drain_w, 3.0 * start.starlight_w(0.1)] {
                 let segment = Segment { room_j, draw_w, ..start.segment(&b, 0.1, 0.0) };
                 let leap = field.settle(&segment, heat_j, 2.0 * t_s);
                 let half = field.settle(&segment, heat_j, t_s);
