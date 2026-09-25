@@ -22,8 +22,12 @@ pub struct Hud {
     pub target: Option<String>,
     /// Band mapping in force.
     pub mapping: String,
+    /// [`Hud::mapping`] as one or two letters, for a bar with no room for the name.
+    pub mapping_code: &'static str,
     /// Exposure relative to automatic.
     pub exposure: String,
+    /// [`Hud::exposure`] without its unit.
+    pub exposure_code: String,
     /// Set while a crossing is under way.
     pub flight: Option<String>,
     /// Set while the ship is falling rather than flying.
@@ -32,6 +36,52 @@ pub struct Hud {
     pub warning: Option<String>,
     /// Stored energy, for a ship with modules.
     pub energy: Option<Energy>,
+}
+
+impl Hud {
+    pub fn band(&self, fit: Fit) -> String {
+        match fit {
+            Fit::Words => format!("BAND {}", self.mapping),
+            Fit::Codes | Fit::Keys => format!("B {}", self.mapping_code),
+        }
+    }
+
+    pub fn exposure(&self, fit: Fit) -> String {
+        match fit {
+            Fit::Words => format!("EXPOSURE {}", self.exposure),
+            Fit::Codes | Fit::Keys => format!("E {}", self.exposure_code),
+        }
+    }
+}
+
+/// How much of the top bar's wording fits across the window.
+///
+/// The window buttons are laid out right to left with no check against the readout, so a bar
+/// that asks for more than the window has draws one over the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fit {
+    Words,
+    /// The band and exposure as codes.
+    Codes,
+    /// Codes, and each window button as the key that toggles it.
+    Keys,
+}
+
+impl Fit {
+    pub const WIDEST_FIRST: [Fit; 3] = [Fit::Words, Fit::Codes, Fit::Keys];
+}
+
+/// Codes for [`presets::all`], by name so that reordering the list cannot shift them.
+fn mapping_code(name: &str) -> &'static str {
+    match name {
+        "natural" => "N",
+        "deep natural" => "DN",
+        "thermal" => "TH",
+        "dust penetration" => "DP",
+        "composition" => "CO",
+        "survey" => "SV",
+        _ => "?",
+    }
 }
 
 /// The energy readout: a bar, and the numbers beside it.
@@ -51,28 +101,46 @@ pub struct Toggle {
     pub underline: Option<usize>,
     pub action: Action,
     pub on: bool,
+    /// What the button reads at [`Fit::Keys`]: its key, or a code for a button without one.
+    pub key: String,
+}
+
+impl Toggle {
+    pub fn text(&self, fit: Fit) -> &str {
+        match fit {
+            Fit::Keys => &self.key,
+            Fit::Words | Fit::Codes => self.label,
+        }
+    }
 }
 
 pub fn toggles(ui: &UiState) -> Vec<Toggle> {
-    let panel = |label, p: Panel| (label, Action::TogglePanel(p), ui.is_open(p));
+    let panel = |label, p: Panel| (label, Action::TogglePanel(p), ui.is_open(p), None);
     [
         panel("Flight", Panel::Flight),
         panel("Telescope", Panel::Telescope),
         panel("System", Panel::System),
-        ("Map", Action::ToggleView, ui.view == ViewMode::Map),
+        ("Map", Action::ToggleView, ui.view == ViewMode::Map, None),
         panel("Refit", Panel::Refit),
         panel("Comms", Panel::Chat),
         panel("Bookshelf", Panel::Reader),
-        ("Slideshow", Action::ToggleBeautyShots, ui.beauty_shots),
+        ("Slideshow", Action::ToggleBeautyShots, ui.beauty_shots, Some("SH")),
     ]
     .into_iter()
-    .map(|(label, action, on)| Toggle {
-        label,
-        underline: crate::input::letter_for(&action).and_then(|c| {
-            label.char_indices().find(|(_, l)| l.eq_ignore_ascii_case(&c)).map(|(i, _)| i)
-        }),
-        action,
-        on,
+    .map(|(label, action, on, keyless): (_, _, _, Option<&str>)| {
+        let letter = crate::input::letter_for(&action);
+        Toggle {
+            label,
+            underline: letter.and_then(|c| {
+                label.char_indices().find(|(_, l)| l.eq_ignore_ascii_case(&c)).map(|(i, _)| i)
+            }),
+            key: match letter {
+                Some(c) => c.to_ascii_uppercase().to_string(),
+                None => keyless.unwrap_or(label).to_string(),
+            },
+            action,
+            on,
+        }
     })
     .collect()
 }
@@ -149,9 +217,14 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
             format!("{} — {range}", session.name_of(id))
         }),
         mapping: name.to_uppercase(),
+        mapping_code: mapping_code(name),
         exposure: match ui.exposure_offset {
             o if o.abs() < 1e-6 => "auto".to_string(),
             o => format!("{o:+.1} stops"),
+        },
+        exposure_code: match ui.exposure_offset {
+            o if o.abs() < 1e-6 => "auto".to_string(),
+            o => format!("{o:+.1}"),
         },
         flight: session.cruise().as_ref().map(|c| {
             let left = (c.duration_s() - (session.coordinate_time_s() - c.start_s)).max(0.0);
@@ -227,6 +300,47 @@ mod tests {
 
         apply(Action::TogglePanel(Panel::Telescope), &mut ui, &mut fixture().1);
         assert!(underlined(&ui).contains(&("Telescope", Some("T"), true)));
+    }
+
+    #[test]
+    fn at_keys_each_button_reads_as_its_underlined_letter_and_no_two_read_alike() {
+        let (ui, _) = fixture();
+        let toggles = toggles(&ui);
+        for t in &toggles {
+            match t.underline {
+                Some(i) => assert!(t.key.eq_ignore_ascii_case(&t.label[i..i + 1]), "{}", t.label),
+                None => assert!(t.key.len() <= 2, "{} reads {}", t.label, t.key),
+            }
+        }
+        let slideshow = toggles.iter().find(|t| t.label == "Slideshow").unwrap();
+        assert_eq!(slideshow.text(Fit::Keys), "SH");
+        assert_eq!(slideshow.text(Fit::Codes), "Slideshow");
+        let mut keys: Vec<_> = toggles.iter().map(|t| t.key.as_str()).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), toggles.len());
+    }
+
+    #[test]
+    fn every_band_preset_has_its_own_code() {
+        let mut codes: Vec<_> = presets::all().iter().map(|(name, _)| mapping_code(name)).collect();
+        assert!(!codes.contains(&"?"), "a preset without a code: {codes:?}");
+        codes.sort();
+        codes.dedup();
+        assert_eq!(codes.len(), presets::all().len());
+    }
+
+    #[test]
+    fn codes_shorten_the_band_and_exposure_but_keep_their_values() {
+        let (mut ui, session) = fixture();
+        let hud = lines(&session, &ui);
+        assert_eq!(hud.band(Fit::Words), "BAND NATURAL");
+        assert_eq!(hud.band(Fit::Codes), "B N");
+        assert_eq!(hud.exposure(Fit::Codes), "E auto");
+        ui.exposure_offset = 1.5;
+        let hud = lines(&session, &ui);
+        assert_eq!(hud.exposure(Fit::Words), "EXPOSURE +1.5 stops");
+        assert_eq!(hud.exposure(Fit::Keys), "E +1.5");
     }
 
     /// The pursuit reads where a crossing's progress would, and in hull clearance.
