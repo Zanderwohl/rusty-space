@@ -929,8 +929,10 @@ fn spectrum_at(teff_k: f64) -> PerBand<f32> {
             std::cell::RefCell::new(HashMap::new());
     }
     // The key is the temperature in units of its own resolution, so neighboring temperatures
-    // share an entry and a sweeping Doppler factor does not mint one per frame.
-    let key = (teff_k / (teff_k * TEFF_RESOLUTION).max(1.0)).round() as u64;
+    // share an entry and a sweeping Doppler factor does not mint one per frame. A logarithm,
+    // because a step proportional to the temperature is a constant step in its log: dividing by
+    // the step instead gave every temperature above a thousand kelvin the same key.
+    let key = (teff_k.max(1.0).ln() / TEFF_RESOLUTION.ln_1p()).round() as u64;
     SPECTRA.with(|spectra| {
         let mut spectra = spectra.borrow_mut();
         if let Some(found) = spectra.get(&key) {
@@ -1542,6 +1544,21 @@ mod tests {
     /// Rayleigh-Jeans tail and the radiance is therefore linear in temperature. So the band
     /// must brighten by exactly D — not by D^4, which is the *bolometric* factor and would
     /// only show up in an integral over all frequencies, not in one narrow window.
+    /// Distinct temperatures are distinct spectra; only ones within [`TEFF_RESOLUTION`] share.
+    #[test]
+    fn each_temperature_has_its_own_spectrum() {
+        for (a, b) in [(3000.0, 10_000.0), (5772.0, 5800.0), (400.0, 450.0)] {
+            assert_ne!(spectrum_at(a), spectrum_at(b), "{a} K and {b} K");
+        }
+        let fresh = |t: f64| PerBand::<f32>::new(std::array::from_fn(|i| blackbody::band_radiance(Band::ALL[i], t) as f32));
+        for t in [300.0, 3000.0, 5772.0, 30_000.0] {
+            let (held, exact) = (spectrum_at(t * (1.0 + 0.2 * TEFF_RESOLUTION)), fresh(t));
+            for band in [Band::V, Band::ThermalIr] {
+                assert!((held[band] / exact[band] - 1.0).abs() < 0.02, "{t} K in {band:?}");
+            }
+        }
+    }
+
     #[test]
     fn a_shifted_blackbody_is_a_blackbody_at_the_shifted_temperature() {
         let mut s = spread();
