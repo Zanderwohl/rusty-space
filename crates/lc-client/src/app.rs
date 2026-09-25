@@ -120,6 +120,7 @@ impl Plugin for ClientPlugin {
             crate::library::LibraryPlugin,
             crate::faces::FacesPlugin,
             crate::map::MapPlugin,
+            crate::form_view::FormViewPlugin,
             crate::bench::BenchPlugin,
             crate::haze::HazePlugin,
             crate::beauty::BeautyPlugin,
@@ -155,7 +156,9 @@ impl Plugin for ClientPlugin {
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .init_resource::<panels::HudFoot>()
             .init_resource::<crate::map_panel::WorldInset>()
-            .add_systems(Startup, (spawn_camera, no_lights, crate::parts::adopt_fixture))
+            // Chained, so the editor's camera is never the first created.
+            .add_systems(Startup, ((spawn_camera, crate::form_view::spawn_camera).chain(), no_lights,
+                crate::parts::adopt_fixture))
             .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnExit(AppState::InGame), (crate::map_panel::release_world_frame, leave_scene))
             .add_systems(OnEnter(AppState::InGame), spawn_sky)
@@ -173,10 +176,13 @@ impl Plugin for ClientPlugin {
                     crate::dev::place_on_station.run_if(in_state(AppState::InGame)),
                     (
                         read_keys,
-                        // Only while the world is the view being flown. In the map's mode the
-                        // world is a thumbnail in the corner, and a drag over the map turning
-                        // the ship behind it would be the two modes fighting over one pointer.
-                        (grab_cursor, look_around, crate::input::read_wheel).chain().run_if(flying),
+                        // Only while the view is a camera this reads the mouse for: the sky, or
+                        // the editor's orbit. In the map's mode the world is a thumbnail in the
+                        // corner, and a drag over the map turning the ship behind it would be the
+                        // two modes fighting over one pointer.
+                        (grab_cursor, look_around, crate::input::read_wheel).chain().run_if(steering),
+                        (crate::form_view::press, crate::form_view::read_drag, crate::form_view::read_slide_keys)
+                            .run_if(crate::form_view::editing),
                     )
                         .chain()
                         .run_if(in_state(AppState::InGame)),
@@ -282,9 +288,9 @@ impl Plugin for ClientPlugin {
     }
 }
 
-/// Whether the world is the view being flown, rather than the map's thumbnail.
-fn flying(ui: Res<Ui>) -> bool {
-    ui.view == crate::ui::ViewMode::World
+/// Whether the view is one the mouse steers directly, rather than the map, which egui reads.
+fn steering(ui: Res<Ui>) -> bool {
+    ui.view != crate::ui::ViewMode::Map
 }
 
 /// The camera the sky is drawn for.
@@ -330,6 +336,8 @@ fn spawn_camera(mut commands: Commands) {
         UiCamera,
         // See `EguiGlobalSettings` above for why this is said rather than left to spawn order.
         PrimaryEguiContext,
+        // Bevy UI would otherwise take whichever window camera has the highest order.
+        bevy::ui::IsDefaultUiCamera,
         Hdr,
         Camera {
             order: 1,
@@ -825,6 +833,38 @@ mod tests {
 
         let after = *app.world().entity(sky).get::<Transform>().unwrap();
         assert_ne!(after.rotation, before.rotation, "the turn never reached the sky camera");
+    }
+
+    /// **The editor's camera costs no other query its camera.** The real startup systems, with
+    /// the map's stood in for, and every marker found exactly once. The editor's is spawned last,
+    /// so `bevy_egui` could never have taken it for the primary context, and it starts switched
+    /// off, so it draws nothing until the editor is the view.
+    #[test]
+    fn every_camera_query_finds_its_own_camera_beside_the_editors() {
+        use crate::form_view::FormCamera;
+        use crate::map::MapCamera;
+        let mut app = harness();
+        app.init_resource::<Assets<Image>>()
+            .add_systems(Startup, (spawn_camera, crate::form_view::spawn_camera).chain())
+            .add_systems(Update, aim_camera);
+        app.world_mut().spawn((Camera3d::default(), MapCamera, Transform::default()));
+        app.world_mut().write_message(Requested(Action::Look { yaw: 1.0, pitch: 0.4 }));
+        app.update();
+
+        let world = app.world_mut();
+        assert_eq!(world.query_filtered::<(), With<SkyCamera>>().iter(world).count(), 1, "sky");
+        assert_eq!(world.query_filtered::<(), With<UiCamera>>().iter(world).count(), 1, "interface");
+        assert_eq!(world.query_filtered::<(), With<MapCamera>>().iter(world).count(), 1, "map");
+        assert_eq!(world.query_filtered::<(), With<FormCamera>>().iter(world).count(), 1, "editor");
+        assert_eq!(world.query_filtered::<(), With<bevy::ui::IsDefaultUiCamera>>().iter(world).count(), 1);
+
+        let (sky, turned) = world.query_filtered::<(Entity, &Transform), With<SkyCamera>>().single(world).unwrap();
+        assert_ne!(turned.rotation, Quat::IDENTITY, "the look never reached the sky's camera");
+        let (form, camera) = world.query_filtered::<(Entity, &Camera), With<FormCamera>>().single(world).unwrap();
+        assert!(!camera.is_active);
+        let ui = world.query_filtered::<Entity, With<UiCamera>>().single(world).unwrap();
+        assert!(form.index() > sky.index() && form.index() > ui.index(), "the editor's camera came first");
+        assert!(world.query_filtered::<(), (With<UiCamera>, With<bevy::ui::IsDefaultUiCamera>)>().single(world).is_ok());
     }
 
     /// Where a mark placed in [`Stage::Mark`] found the camera.

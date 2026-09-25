@@ -178,20 +178,32 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     /// A button carrying `action`, which the screen's handler reads back out of its
     /// `Interaction` query.
     pub fn button<A: Component>(&mut self, panel: Entity, text: &str, action: A) -> Entity {
+        let node = Node {
+            width: Val::Px(250.0),
+            height: Val::Px(45.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(2.0)),
+            ..default()
+        };
+        self.button_in(panel, text, action, node, 18.0)
+    }
+
+    fn button_in<A: Component>(
+        &mut self,
+        panel: Entity,
+        text: &str,
+        action: A,
+        node: Node,
+        font_size: f32,
+    ) -> Entity {
         let theme = self.theme;
         let font = self.font.clone();
         let btn = self
             .commands
             .spawn((
                 Button,
-                Node {
-                    width: Val::Px(250.0),
-                    height: Val::Px(45.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
+                node,
                 BackgroundColor(theme.button_bg),
                 BorderColor::all(theme.border),
                 MenuButton { rest: theme.button_bg, hover: theme.button_hover },
@@ -202,7 +214,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
                     Text::new(text),
                     TextFont {
                         font: font.map(FontSource::Handle).unwrap_or_default(),
-                        font_size: FontSize::Px(18.0),
+                        font_size: FontSize::Px(font_size),
                         ..default()
                     },
                     TextColor(theme.text),
@@ -213,6 +225,87 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         btn
     }
 }
+
+/// Which edge of the window a [`MenuUi::docked`] strip sits against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edge {
+    Top,
+    Bottom,
+}
+
+impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
+    /// A full-width node against one edge of the window that centers what is put in it, for
+    /// chrome over a view rather than a screen of its own. It takes no pointer: only what is
+    /// put in it does.
+    pub fn docked(&mut self, marker: impl Bundle, edge: Edge, inset: f32) -> Entity {
+        let mut node = Node {
+            width: Val::Percent(100.0),
+            position_type: PositionType::Absolute,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            ..default()
+        };
+        match edge {
+            Edge::Top => node.top = Val::Px(inset),
+            Edge::Bottom => node.bottom = Val::Px(inset),
+        }
+        self.commands.spawn((node, marker)).id()
+    }
+
+    /// A bordered row, the compact sibling of [`MenuUi::panel`]: a line of labels and buttons
+    /// read at a glance rather than worked down.
+    pub fn strip(&mut self, parent: Entity) -> Entity {
+        let strip = self
+            .commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(12.0),
+                    padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(self.theme.panel_bg),
+                BorderColor::all(self.theme.border),
+            ))
+            .id();
+        self.commands.entity(parent).add_child(strip);
+        strip
+    }
+
+    /// A label for a [`MenuUi::strip`] or a line under one: no margin, since a row spaces its
+    /// own children.
+    pub fn inline(&mut self, parent: Entity, text: &str, font_size: f32, color: Color) -> Entity {
+        let font = self.font.clone();
+        let label = self.faced(parent, text, font_size, color, font);
+        self.commands.entity(label).insert(Node::default());
+        label
+    }
+
+    /// A dim line of small print, for the keys that do what the strip above it cannot show.
+    pub fn hint(&mut self, parent: Entity, text: &str) -> Entity {
+        let dim = self.theme.text_dim;
+        let hint = self.inline(parent, text, HINT_SIZE, dim);
+        self.commands.entity(hint).insert(Node { margin: UiRect::top(Val::Px(4.0)), ..default() });
+        hint
+    }
+
+    /// A [`MenuUi::button`] sized to its words, for a strip.
+    pub fn small_button<A: Component>(&mut self, parent: Entity, text: &str, action: A) -> Entity {
+        let node = Node {
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        };
+        self.button_in(parent, text, action, node, 15.0)
+    }
+}
+
+/// The size small print is set at.
+pub const HINT_SIZE: f32 = 13.0;
 
 /// How far above the ordinary screens an overlay sits. Room underneath for anything that wants
 /// to be between.

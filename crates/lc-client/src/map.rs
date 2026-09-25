@@ -233,7 +233,7 @@ fn hide(mut map: ResMut<Map>) {
     map.shown = false;
 }
 
-fn target_image(size: UVec2) -> Image {
+pub(crate) fn target_image(size: UVec2) -> Image {
     let mut image = Image::new_target_texture(
         size.x.max(MIN_SIDE),
         size.y.max(MIN_SIDE),

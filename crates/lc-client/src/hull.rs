@@ -332,7 +332,7 @@ pub(crate) fn lit(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVe
     }
 }
 
-fn uniforms(
+pub(crate) fn uniforms(
     to_star: DVec3,
     reflected: Vec3,
     emitted: Vec3,

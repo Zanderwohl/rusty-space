@@ -28,6 +28,7 @@ pub mod dev;
 pub mod entry;
 pub mod envelope;
 pub mod faces;
+pub mod form_view;
 pub mod haze;
 pub mod hud;
 pub mod hull;

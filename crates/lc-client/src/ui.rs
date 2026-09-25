@@ -111,13 +111,24 @@ pub enum ViewMode {
     World,
     /// Where everything is: a reference plane, decade rings, and what stands off it.
     Map,
+    /// The ship on a turntable, to be reshaped. See `lightcone/docs/29-ship-form.md`.
+    Form,
 }
 
 impl ViewMode {
+    /// What the corner square shows, and where a click on it goes.
     pub fn other(self) -> Self {
         match self {
             ViewMode::World => ViewMode::Map,
+            ViewMode::Map | ViewMode::Form => ViewMode::World,
+        }
+    }
+
+    /// Where `M` goes: into the map, or out of it to the world.
+    pub fn map_key(self) -> Self {
+        match self {
             ViewMode::Map => ViewMode::World,
+            ViewMode::World | ViewMode::Form => ViewMode::Map,
         }
     }
 }
@@ -437,6 +448,8 @@ pub struct UiState {
     pub view: ViewMode,
     /// The map's camera, plane and source. See [`MapView`].
     pub map: MapView,
+    /// The editor's camera, and the mode it was entered from.
+    pub form: crate::form_view::FormView,
     /// Whether this client may ask for the god view.
     ///
     /// Read once from the ticket, at boot, because that is the only place the ticket is. Held
@@ -533,6 +546,7 @@ impl Default for UiState {
             look: Look::default(),
             view: ViewMode::default(),
             map: MapView::default(),
+            form: crate::form_view::FormView::default(),
             may_see_everything: false,
             perspective: None,
             boom_lengths: crate::hull::DEFAULT_BOOM_LENGTHS,

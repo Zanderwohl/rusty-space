@@ -173,6 +173,7 @@ pub fn toggles(ui: &UiState) -> Vec<Toggle> {
         panel("Telescope", Panel::Telescope),
         panel("System", Panel::System),
         ("Map", Action::ToggleView, ui.view == ViewMode::Map, None),
+        ("Ship", Action::ToggleForm, ui.view == ViewMode::Form, None),
         panel("Refit", Panel::Refit),
         panel("Comms", Panel::Chat),
         panel("Bookshelf", Panel::Reader),

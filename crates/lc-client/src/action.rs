@@ -28,7 +28,16 @@ pub enum Action {
     Quit,
     /// Which mode of play the main view shows. The map is one of two, not a window.
     SetView(ViewMode),
+    /// `M`: into the map, or out of it. See [`ViewMode::map_key`].
     ToggleView,
+    /// `H`: into the editor, or back to the mode it was entered from.
+    ToggleForm,
+    // --- the editor -------------------------------------------------------------------
+    /// Turn the editor's camera about its focus, radians.
+    OrbitForm { azimuth: f64, elevation: f64 },
+    /// Slide the editor's focus along the ship's nose axis, in stand-offs: the same drag moves
+    /// it as far across the screen at any zoom. Positive is toward the nose.
+    SlideForm(f64),
     // --- the map ----------------------------------------------------------------------
     /// Turn the map's camera by a relative amount, radians.
     TurnMap { azimuth: f64, elevation: f64 },
@@ -256,6 +265,14 @@ pub const SURVEY_CONE_RAD: f64 = 0.35;
 pub const MIN_ACCEL_G: f64 = 0.1;
 pub const MAX_ACCEL_G: f64 = 1000.0;
 
+/// Change the mode of the main view, remembering where the editor was entered from.
+fn set_view(ui: &mut UiState, view: ViewMode) {
+    if view == ViewMode::Form && ui.view != ViewMode::Form {
+        ui.form.from = ui.view;
+    }
+    ui.view = view;
+}
+
 /// Apply an action. The only path that mutates UI state.
 pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Effect> {
     let mut effects = Vec::new();
@@ -266,8 +283,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::CloseTopPanel => {
             // Nothing is modal, so "back" closes the most recently opened panel and opens
             // the escape menu only when there is nothing left to close.
+            // The editor is the one mode with somewhere to go back to, and it goes there first.
             if ui.close_top().is_none() {
-                ui.open(Panel::Escape);
+                match ui.view {
+                    ViewMode::Form => set_view(ui, ui.form.from),
+                    _ => ui.open(Panel::Escape),
+                }
             }
         }
         Action::GoToMenuPage(page) => ui.menu_page = page,
@@ -437,8 +458,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
 
-    Action::SetView(view) => ui.view = view,
-    Action::ToggleView => ui.view = ui.view.other(),
+    Action::SetView(view) => set_view(ui, view),
+    Action::ToggleView => set_view(ui, ui.view.map_key()),
+    Action::ToggleForm => match ui.view {
+        ViewMode::Form => set_view(ui, ui.form.from),
+        _ => set_view(ui, ViewMode::Form),
+    },
+    Action::OrbitForm { azimuth, elevation } => ui.form.orbit.turn(azimuth, elevation),
+    Action::SlideForm(standoffs) => ui.form.orbit.slide(standoffs),
     Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
     Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
         Some(anchor) => {
@@ -473,6 +500,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // imperceptible at the far end or the whole range in one notch at the near one. Left
         // unclamped here and clamped against the viewport by `hull::place_eye`, which is the
         // only thing that knows how wide a pixel is.
+        Action::Zoom(notches) if ui.view == ViewMode::Form => ui.form.orbit.zoom(notches),
         Action::Zoom(notches) => {
             ui.boom_lengths = (ui.boom_lengths * crate::hull::ZOOM_STEP.powf(-notches))
                 .clamp(f64::MIN_POSITIVE, 1.0e9);
