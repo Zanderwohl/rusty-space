@@ -228,13 +228,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             })
                             .collect(),
                     );
-                    let presets = lc_store::presets::load(&client).await?;
-                    if !presets.is_empty() {
-                        eprintln!("resumed {} presets", presets.len());
-                    }
-                    for problem in server.presets.adopt(presets) {
-                        eprintln!("WARNING: preset not restored: {problem}");
-                    }
                     eprintln!(
                         "resumed shard {shard_id} at t={} with {} of {count} craft",
                         shard.now_t,
@@ -242,6 +235,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 None => eprintln!("shard {shard_id} has no saved state; starting a new world"),
+            }
+            // Outside the match: presets belong to accounts rather than to this shard's world, and
+            // a new world over an old database would otherwise hide them and let the limit
+            // be counted against an empty list.
+            let presets = lc_store::presets::load(&client).await?;
+            if !presets.is_empty() {
+                eprintln!("resumed {} presets", presets.len());
+            }
+            for problem in server.presets.adopt(presets) {
+                eprintln!("WARNING: preset not restored: {problem}");
             }
             // After the clock is adopted, because the acknowledgment window is stamped
             // against it: a shard that read these first would date every message it had ever

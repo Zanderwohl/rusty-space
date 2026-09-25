@@ -425,7 +425,9 @@ A layout's other rules:
   long, and `Form(TooManyParts)`. Saving under a name already kept replaces it, so it is never one
   too many. Nothing else about the form is checked on save.
 - The shard sends an account its whole list, by name, after `Welcome` and after every save or
-  delete, and keeps it in memory, checkpointed beside the bookmarks. A row holds the form in
+  delete. There is one connection to send it to: signing in displaces the account's earlier one,
+  so a player moving from the desktop to a browser gets the current list with the welcome. It keeps the lists in memory, checkpointed
+  beside the bookmarks, and reads them at every boot, including a shard starting a new world. A row holds the form in
   postcard, the wire's encoding, so its shape is pinned by `lc-proto`'s goldens.
 
 ## The editor

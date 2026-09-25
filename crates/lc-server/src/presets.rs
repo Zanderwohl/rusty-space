@@ -1,4 +1,4 @@
-//! Presets, as the shard holds them: every account's, in memory, checkpointed beside the ships.
+//! Presets, as the shard holds them: every account's, in memory, checkpointed beside the bookmarks.
 //!
 //! Not part of the world, so nothing here is cleared. A form is checked only for size; its
 //! geometry is validated when a preset is applied, like any other target. See
@@ -99,6 +99,9 @@ impl Presets {
 
 impl<J: Journal> Server<J> {
     /// Save a preset, or delete it when `form` is `None`, and answer with the account's whole list.
+    ///
+    /// Only to `from`: signing in displaces the account's earlier connection, so there is no
+    /// other one to keep current, and the next machine is sent the list with its welcome.
     ///
     /// Ignored from a connection with no account, as a bookmark is: there is nowhere to keep it.
     pub(crate) fn keep_preset(&mut self, from: ClientId, name: String, form: Option<Form>, wire: &mut impl Transport) {
