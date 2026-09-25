@@ -26,6 +26,7 @@ pub mod journal;
 pub mod library;
 pub mod persist;
 pub mod planets;
+pub mod presets;
 pub mod radio;
 pub mod rate;
 pub mod server;

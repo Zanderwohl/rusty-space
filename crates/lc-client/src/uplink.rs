@@ -837,6 +837,10 @@ fn fold(
                 Refusal::NoAperture => "engines at one end only: emit fore or aft".into(),
                 Refusal::OverRating => "more power than those apertures are rated for".into(),
                 Refusal::Form(fault) => crate::refit_panel::form_fault(fault),
+                Refusal::TooManyPresets => "no room for another preset; delete one first".into(),
+                Refusal::PresetName => {
+                    format!("a preset needs a name of 1 to {} bytes", lc_proto::form::PRESET_NAME_LIMIT)
+                }
             });
         }
         Outbound::Throttled { retry_after_ticks } => {

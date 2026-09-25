@@ -14,6 +14,7 @@ pub mod cursor;
 pub mod id;
 pub mod knowledge;
 pub mod migrate;
+pub mod presets;
 pub mod reading;
 pub mod retention;
 pub mod ships;

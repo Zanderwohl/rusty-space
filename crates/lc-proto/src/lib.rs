@@ -897,6 +897,10 @@ pub enum Refusal {
     /// More power than the chosen apertures are rated for.
     OverRating,
     Form(FormFault),
+    /// The account already keeps `form::MAX_PRESETS`. Replacing one by name is not refused.
+    TooManyPresets,
+    /// A preset's name is empty or longer than `form::PRESET_NAME_LIMIT` bytes.
+    PresetName,
 }
 
 /// Everything a client says.
@@ -1709,6 +1713,8 @@ mod tests {
             },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Form(FormFault::EngineBlocked(form::PartId(2))) },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Form(FormFault::TooFewDrones) },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::TooManyPresets },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::PresetName },
         ];
         for message in out {
             let bytes = encode(&message);
