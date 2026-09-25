@@ -5,6 +5,10 @@
 //! own position, which is the ship's frame in meters. The tile is [`HullUniform::detail`]'s
 //! meters across whatever the hull's size, which is what makes a big hull look big. Tiles are
 //! mipmapped, so detail smaller than a pixel is drawn as its own average instead of shimmering.
+//!
+//! A hull under construction sweeps four bands out from a joint: truss, plating, fitting-out and
+//! scaffold down, each a front and a width in meters that the caller moves. A mesh carrying
+//! [`ATTRIBUTE_HULL_GIRDER`] instead of regions is that truss, drawn by the same shader.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -39,6 +43,12 @@ pub const ATTRIBUTE_HULL_REGIONS: [MeshVertexAttribute; 4] = [
 /// middle of a fillet the two weights differ by less than a byte.
 pub const ATTRIBUTE_HULL_SEAM: MeshVertexAttribute =
     MeshVertexAttribute::new("HullSeam", 0x4855_4C4C_0000_0005, VertexFormat::Float32x2);
+
+/// A girder's `(x_m, threshold, scaffold, 0)`: meters from the joint to it, the share of its band
+/// that must have passed for it to stand, and 1 for scaffold, which stands outside the finished
+/// surface and comes down with the last band.
+pub const ATTRIBUTE_HULL_GIRDER: MeshVertexAttribute =
+    MeshVertexAttribute::new("HullGirder", 0x4855_4C4C_0000_0006, VertexFormat::Float32x4);
 
 /// Regions a palette may hold. Must match `REGIONS` in `hull.wgsl`.
 pub const REGIONS: usize = 16;
@@ -82,10 +92,24 @@ pub struct HullUniform {
     /// `(tile_m, 0, 0, 0)`: meters one tile spans.
     pub detail: Vec4,
     /// Plating's sweep: `(origin, front)`, ship frame, meters. A panel is plated once `front`
-    /// passes its distance from `origin` plus its hashed share of the spread.
+    /// passes its distance from `origin` plus its hashed share of the spread. Anything at or past
+    /// [`ALL_PLATED`] is a finished hull, and the other bands are not read.
     pub reveal: Vec4,
     /// `(panel_m, spread_m, 0, 0)`.
     pub reveal_panel: Vec4,
+    /// The other bands' fronts from `reveal`'s origin, meters: `(truss, fitting-out, scaffold
+    /// down, span)`. At `x` meters out, no farther than the span, a band's share is
+    /// `(front - x) / width`, clamped to 0..1.
+    pub build_fronts: Vec4,
+    /// `(truss, fitting-out, scaffold down, layers)`, the last how many layers of truss a line of
+    /// sight crosses where the lattice is drawn on the surface.
+    pub build_widths: Vec4,
+    /// `(pitch_m, girder_radius_m, on_surface, bare_albedo)`. `on_surface` 1 draws the truss on
+    /// the surface where no girder mesh stands in for it; the bare albedo is plating before it is
+    /// fitted out.
+    pub lattice: Vec4,
+    /// A girder's albedo, and its work lights in [`Self::reflected`]'s units.
+    pub girder: Vec4,
     /// A bolted region's row of heads along each seam: `(pitch_m, head_radius_m, offset_m,
     /// albedo)`, the offset measured from the seam into the bolted region.
     pub bolts: Vec4,
@@ -105,6 +129,10 @@ impl Default for HullUniform {
             detail: Vec4::new(64.0, 0.0, 0.0, 0.0),
             reveal: Vec4::new(0.0, 0.0, 0.0, ALL_PLATED),
             reveal_panel: Vec4::new(8.0, 0.0, 0.0, 0.0),
+            build_fronts: Vec4::splat(ALL_PLATED),
+            build_widths: Vec4::ONE,
+            lattice: Vec4::new(8.0, 0.35, 0.0, 0.4),
+            girder: Vec4::new(0.55, 0.42, 0.22, 0.0),
             bolts: Vec4::new(1.5, 0.25, 0.8, 0.45),
             bolted: 0,
             emitted: [Vec4::ZERO; REGIONS],
@@ -144,6 +172,19 @@ impl Material for HullMaterial {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        if layout.0.contains(ATTRIBUTE_HULL_GIRDER) {
+            let vertex_layout = layout.0.get_layout(&[
+                Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+                Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+                ATTRIBUTE_HULL_GIRDER.at_shader_location(2),
+            ])?;
+            descriptor.vertex.buffers = vec![vertex_layout];
+            descriptor.vertex.shader_defs.push("HULL_GIRDER".into());
+            if let Some(fragment) = descriptor.fragment.as_mut() {
+                fragment.shader_defs.push("HULL_GIRDER".into());
+            }
+            return Ok(());
+        }
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),

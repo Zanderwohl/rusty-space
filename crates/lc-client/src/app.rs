@@ -124,7 +124,8 @@ impl Plugin for ClientPlugin {
             (crate::map::MapPlugin, crate::form_view::FormViewPlugin),
             crate::bench::BenchPlugin,
             crate::haze::HazePlugin,
-            crate::beauty::BeautyPlugin,
+            // The beauty shots and the staged refit both photograph the ship.
+            (crate::beauty::BeautyPlugin, crate::refit_hull::RefitHullPlugin),
         ))
             // **Which camera egui draws on is not left to spawn order.**
             //
@@ -233,6 +234,7 @@ impl Plugin for ClientPlugin {
                     // just placed for.
                     crate::hull::update_hulls,
                     crate::parts::update_parts,
+                    crate::refit_hull::draw_refit,
                     // And the exhaust after the ship, so it is placed against the same frame.
                     crate::plume::update_plumes,
                 )

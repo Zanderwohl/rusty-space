@@ -70,8 +70,11 @@ const NIGHT: f32 = 0.10;
 pub struct Eye {
     /// Light-years from the world origin.
     pub at_ly: DVec3,
-    /// Meters from the hull's center, back along the view.
+    /// Meters from what the camera orbits, back along the view.
     pub boom_m: f64,
+    /// From the hull's center to what the camera orbits, simulation axes, meters. Zero but
+    /// under `--demo-cam-at`.
+    pub aim_m: DVec3,
     /// The craft the boom is on, or `None` for the player's own.
     ///
     /// Read by [`drawn`], which gives that one craft the boom exactly rather than the
@@ -85,7 +88,7 @@ impl Eye {
     /// craft it is on; see [`Eye::anchored`].
     pub fn offset_m(&self, at_ly: DVec3, ship_id: Option<ShipId>, look: DVec3) -> DVec3 {
         if ship_id.map(|s| s.0) == self.anchored.map(|s| s.0) {
-            look * self.boom_m
+            look * self.boom_m - self.aim_m
         } else {
             (at_ly - self.at_ly) * M_PER_LY
         }
@@ -224,7 +227,21 @@ pub fn place_eye(
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut eye: ResMut<Eye>,
     own_form: Res<crate::parts::OwnForm>,
+    dev: Res<crate::dev::DevEntry>,
 ) {
+    if let Some((at, distance_m)) = dev.camera_at {
+        let (anchored, at_ly, _) = anchor(&ui, &game, &uplink, &own_form);
+        let session = &game.0;
+        let fore = session.ship.facing_at(session.coordinate_time_s()).unwrap_or(DVec3::X);
+        let to_star = lighting(session).map(|(star_ly, _, _)| star_ly - session.ship.motion.position_ly);
+        let [x, y, z] = ship_axes(fore, to_star).unwrap_or([DVec3::X, DVec3::Y, DVec3::Z]);
+        eye.aim_m = x * at.x + y * at.y + z * at.z;
+        eye.boom_m = distance_m;
+        eye.anchored = anchored;
+        eye.at_ly = at_ly + (eye.aim_m - ui.look.forward() * distance_m) / M_PER_LY;
+        return;
+    }
+    eye.aim_m = DVec3::ZERO;
     let measured = match camera.single() {
         Ok((Projection::Perspective(perspective), camera)) => {
             held_to(ui.view, camera.logical_viewport_size(), perspective.fov)

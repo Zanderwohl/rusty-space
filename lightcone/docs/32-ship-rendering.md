@@ -3,7 +3,7 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void, and construction is drawn on the placeholders; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
+**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void. Construction is drawn on the placeholders in the game, and truss and plating on the meshed hull under `--demo refit`; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
 [30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
@@ -175,9 +175,48 @@ On the placeholders the working part is solid at its volume at `t`, inside a cag
 outer size: rings and meridians through `Shape::exit` from the part's center, so one grid fits
 every primitive, drawn as tubes in `BodyWireframeMaterial`. The cage's thickness follows the scaffold
 averaged across the sliver, so it goes up with the truss and thins away as the scaffold comes down;
-the crossfade to solid is the solid filling the cage, since both materials are opaque. R8 replaces the
-cage with the truss meshed between `Working::inner` and `Working::outer`, and reads `Working::look`
-per vertex through `Working::across`.
+the crossfade to solid is the solid filling the cage, since both materials are opaque. The game keeps
+this until R15 draws construction there the way the demo does.
+
+As built for truss and plating (`lc_client::refit_hull`, `lc_client::truss`): **`--demo refit` draws
+the whole ship on the mesher and the hull material**, and the placeholders stand aside. Plating is a
+mask on R3's material and means nothing on a Bevy primitive, so the demo could not wait for R10. A
+step is meshed once, as it starts: the ship it leaves alone (`Frame::standing`, placed as a form, or as
+its bare copies where it hangs from a part not built yet), each copy it works on at its larger size,
+and each copy's truss. Within the step only uniforms and poses move: what hangs from a part being
+resized rides out on it, each copy posed every frame from `Frame::pieces`, as a move's carried copies
+are, and the truss keeps out of where those copies will stand. Once the clock passes a step, its copies
+are drawn as the step left them until the next step's meshes land, so a part taken apart stays gone. `Working::sweep` turns `Working::look` into
+meters from the joint, a front and a width a band, which is all the shader needs to give every point
+its own phase; a test holds the two to agreement across every step. A step's meshes are shown only
+once all of them have landed, and the last step's stay up until then. A carried or riding copy is meshed in its own frame, bare,
+so a fillet it has with the resized part is missing until the step is done.
+
+- **The truss is whole girders, not a distance field meshed.** The lattice is the one described, at
+  8 m square to the ship's frame, girders 0.35 m in radius, and it is kept where both of a girder's
+  nodes lie between two pitches inside the copy's surface and one outside it, and outside the
+  standing ship. The girders outside the finished surface are the scaffold. Meshing the lattice's
+  field by surface nets would cost the shell's volume over the girder's radius cubed, about twenty
+  million samples on a starting ship's hull; whole girders cost what is kept, 15 600 of them, and a
+  truss stops at a node anyway. Each girder carries its distance from the joint and a hashed
+  threshold, and stands while its band's share is past it, so the truss goes up and comes down a
+  girder at a time. The mesher's core is shared all the same: `surface_nets` takes any Lipschitz
+  field, and the working copies are meshed through it as bare shapes.
+- **Past 60 000 girders there is no truss mesh**, and the shader draws the same lattice on the
+  sliver's surface, in the face's two axes at the same pitch. That is every GSV. Close up it is
+  girders over the gaps, which are discarded. Once a girder is under a pixel nothing is discarded,
+  and plating, girders and what is behind them are drawn as their shares of the pixel, counting the
+  three layers a line of sight crosses; a band of scaffolding kilometers wide is then a band of
+  that color. The girders are safety yellow with their own work lights, so it reads as construction.
+- **Plating** is R3's reveal mask with the joint as its origin, a panel a lattice cell. **Fitting-out**
+  fades the kind's material in over bare plating and lights its emitters. **Scaffold down** takes the
+  outside girders away. A dismantle is the same uniforms with the fraction run backward, so it goes in
+  reverse. Where nothing is up yet the working surface is discarded, and the ship it grows from shows.
+
+![A starting ship's hull growing: truss, plating, fitting-out, scaffold down; then the data core taken apart, scaffold up and truss down](../images/truss-starting.jpg)
+![The same round on a 50 km GSV](../images/truss-gsv.jpg)
+![From 150 m, the lattice on both: meshed girders on the starting ship, the shader's on the GSV, both 8 m](../images/truss-pitch.jpg)
+![A burst at the demo's pace, frames 0 to 3 above and 20, 21, 38 and 39 below: panels close one at a time, nothing jumps, and the hull runs on through scaffold down to finished](../images/truss-burst.jpg)
 
 `--demo refit` stages one of each step on the starting form (the data core taken apart, the deck
 moved aft, the hull grown by half, a mirrored pair of pods on spars) as a client fixture beside
@@ -404,7 +443,8 @@ photographed:
 |---|---|
 | `--form <plate\|spindle\|cluster\|default>` | the ship in a preset form |
 | `--view form` | the editor ([29-ship-form.md](29-ship-form.md)) |
-| `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point |
+| `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point, or `--refit-from <fraction>` to run it from there. With `--form default*k` every part is `k` times larger |
+| `--demo-cam-at <x:y:z:m>` | orbit a point of the ship's frame from `m` meters, past the boom's stops. Aimed with `--demo-cam`; how the truss's pitch is photographed on a GSV |
 | `--demo collapse` | a ship collapsing beside two others, one close enough to follow it |
 | `--field-k <kelvin>` | the player's field held at a temperature, for the shader |
 
@@ -419,7 +459,7 @@ own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the examp
 | crate | new | changed |
 |---|---|---|
 | `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` (the cone, and the aperture glow beside it) | `plume_material` retires once `plume.rs` stops drawing the reaction drive |
-| `lc-client` | `hull_mesh.rs` (surface nets, finishes, caching), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws the form instead of the ovoid. `plume.rs` draws the aperture glow at `F c` and the cone |
+| `lc-client` | `hull_mesh.rs` (finishes, painting, caching) over `surface_nets.rs` (any field), `truss.rs`, `refit_hull.rs`, `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws the form instead of the ovoid. `plume.rs` draws the aperture glow at `F c` and the cone |
 | `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl`, `exhaust_cone.wgsl`, `aperture_glow.wgsl` | |
 
 Materials go in `em-render` because nothing in them is specific to Lightcone. A hull with regions

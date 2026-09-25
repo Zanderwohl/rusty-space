@@ -25,7 +25,6 @@
 //! | `--remesh <cells>` | on the first shot, ask every hull for this resolution. Each frame's wall time is logged until every new mesh has landed and been drawn, and a burst photographs the old meshes staying up until the new ones swap in |
 
 use std::f32::consts::FRAC_PI_2;
-use std::sync::Arc;
 
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -329,7 +328,7 @@ fn spawn(
         let center = ((lo + hi) / 2.0).as_vec3();
         commands.spawn((
             Hull(name),
-            HullForm { form: Arc::new(form), balance, finish: args.finish, cells: args.cells },
+            HullForm { cells: args.cells, ..HullForm::form(form, balance, args.finish) },
             MeshMaterial3d(material.clone()),
             Transform::from_translation(at - ship_to_world() * center).with_rotation(ship_to_world()),
         ));
