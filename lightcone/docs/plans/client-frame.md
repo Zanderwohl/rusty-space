@@ -289,7 +289,7 @@ graph LR
 
 ### W4 · Per-camera render work
 
-- status: todo
+- status: active claude/game-loop-optimization-71831f
 - needs: T1
 - touches: `crates/lc-client/src/app.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/haze.rs`, `crates/lc-client/src/beauty.rs`
 - read: 07
