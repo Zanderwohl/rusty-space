@@ -153,7 +153,7 @@ graph LR
 
 ### B3 · Map source from the caches
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: B1, K2, S1
 - touches: `crates/lc-client/src/map_source.rs`
 - read: 11
@@ -184,7 +184,7 @@ graph LR
 
 ### S1 · Planck through the cache
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; also fixed the cache's key, which gave every temperature above 1000 K one spectrum; see *Measured*)
 - needs: —
 - touches: `crates/lc-client/src/session.rs`, `crates/lc-client/src/resolved.rs`, `crates/lc-client/src/envelope.rs`, `crates/lc-client/src/plume.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/map_source.rs`
 - read: 04
@@ -466,6 +466,13 @@ native, 160 MB in the browser) releases the least recently drawn. A body counts 
 as `route` asks for them, so one whose bakes were never asked for counts zero: the first version
 kept those across a change of system, and the test caught it. Not measured in memory yet; T2's
 browser readout is where the heap after a tour of Sol belongs.
+
+### Found on the way, 2026-09-25
+
+`session::spectrum_at` keyed its cache on `T / max(T × 10⁻³, 1)`, which is 1000 for every
+temperature above 1000 K, so every such star read the spectrum of whichever was cached first.
+It fed `bare()`: exposure metering, a body's reflected light, star beauty shots and the
+telescope's received flux. Fixed in its own commit, with a test that fails on the old key.
 
 ## Not yet agreed
 
