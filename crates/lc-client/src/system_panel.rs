@@ -353,7 +353,7 @@ fn with_error(value: f64, sigma: f64, unit: &str) -> String {
 /// a color say what kind of world it is, and a transit only says rocky or giant. The transit
 /// reading is what is left when nothing has been measured. See `lc_world::knowledge::sort`.
 fn type_text(belief: &BodyBelief, game: &Game) -> String {
-    let star = game.system.as_ref().and_then(|s| game.stars.iter().find(|c| c.id == s.star));
+    let star = game.system.as_ref().and_then(|s| game.star(s.star));
     if let Some(star) = star {
         let measured = Measured::from_belief(belief, &star.star);
         let named: Vec<String> = game

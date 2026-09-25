@@ -289,7 +289,7 @@ fn key_of(system: &lc_world::system::LocalSystem, index: em_sim::id::BodyIndex) 
 fn push_believed(build: &mut Build, session: &Session, held: &Held) {
     let Some(system) = session.system.as_ref() else { return };
     let star_ly = system.star_position_ly();
-    let star = session.stars.iter().find(|c| c.id == system.star).map(|c| c.star);
+    let star = session.star(system.star).map(|c| c.star);
     // The galactic normal where no plane is solved, for the reason `MapView::resolved_plane`
     // gives: `+Z` is Sol's plane and drawing another star's error bars about it is a
     // measurement of one system shown around another.

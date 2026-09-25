@@ -102,7 +102,10 @@ pub struct Doing {
 }
 
 pub struct Session {
+    /// Nearest the origin first, and never changed after [`Session::new`]: `by_id` indexes it
+    /// and [`Session::local_star`] searches it by distance.
     pub stars: Vec<CatalogStar>,
+    by_id: HashMap<u64, usize>,
     /// The generator's own population of worlds, as a prior over what a measured body is.
     ///
     /// Built from this craft's sky the first time a type is asked for and not before: it costs
@@ -182,7 +185,9 @@ impl Session {
         }
 
         let sky_model = Sky::new(Arc::new(stars.clone()));
+        let by_id = stars.iter().enumerate().map(|(i, s)| (s.id.get(), i)).collect();
         let mut session = Self {
+            by_id,
             sorts: std::sync::OnceLock::new(),
             settled: Default::default(),
             analyzing: 0,
@@ -211,8 +216,17 @@ impl Session {
     }
 
     /// The star whose system the ship is inside, if it is inside one.
+    ///
+    /// Only a star whose distance from the origin is within a shell of the ship's can hold it,
+    /// and the catalog is sorted by that distance, so this looks at a handful rather than all.
     pub fn local_star(&self) -> Option<&CatalogStar> {
-        self.stars.iter().find(|s| self.distance_to(s) < crate::starfield::LOCAL_SHELL_LY)
+        let shell = crate::starfield::LOCAL_SHELL_LY;
+        let from_origin = self.ship.motion.position_ly.length();
+        let first = self.stars.partition_point(|s| s.position_ly.length() < from_origin - shell);
+        self.stars[first..]
+            .iter()
+            .take_while(|s| s.position_ly.length() <= from_origin + shell)
+            .find(|s| self.distance_to(s) < shell)
     }
 
     /// Load or drop the local system, and propagate it to now.
@@ -389,7 +403,11 @@ impl Session {
 
     /// A star by the raw id the wire carries.
     pub fn star_by_raw(&self, id: u64) -> Option<&CatalogStar> {
-        self.stars.iter().find(|s| s.id.get() == id)
+        match self.by_id.get(&id).and_then(|&i| self.stars.get(i)) {
+            Some(star) if star.id.get() == id => Some(star),
+            // Only if `stars` was changed behind the index.
+            _ => self.stars.iter().find(|s| s.id.get() == id),
+        }
     }
 
     /// Set a course inside the local system, and hold there on arrival.
@@ -504,7 +522,7 @@ impl Session {
     }
 
     pub fn star(&self, id: StarId) -> Option<&CatalogStar> {
-        self.stars.iter().find(|s| s.id == id)
+        self.star_by_raw(id.get())
     }
 
     /// Point the telescope, clearing whatever it was watching.
@@ -528,7 +546,7 @@ impl Session {
         self.pointing = id;
         if let Some(id) = id
             && !self.targets.contains_key(&id)
-            && let Some(star) = self.stars.iter().find(|s| s.id == id)
+            && let Some(star) = self.star(id)
         {
             let target = build_target(star);
             self.targets.insert(id, target);
@@ -613,7 +631,7 @@ impl Session {
 
     /// What this ship calls a body it holds: see [`lc_world::knowledge::called`].
     pub fn called(&self, belief: &BodyBelief) -> String {
-        let Some(star) = belief.subject.star().and_then(|id| self.stars.iter().find(|c| c.id == id)) else {
+        let Some(star) = belief.subject.star().and_then(|id| self.star(id)) else {
             return belief.given.clone().or_else(|| belief.designation.clone()).unwrap_or_else(|| "unidentified body".into());
         };
         let measured = Measured::from_belief(belief, &star.star);
@@ -979,6 +997,31 @@ mod tests {
         let mut session = Session::new(&AuthoredStars::sample(), 3);
         session.issue_charts(30.0);
         session
+    }
+
+    /// The search by distance from the origin finds what a scan of every star finds: at each
+    /// star, at the edge of its shell either side, and between stars.
+    #[test]
+    fn the_local_star_is_the_one_a_full_scan_finds() {
+        let mut s = Session::new(&AuthoredStars::sample(), 12);
+        let shell = crate::starfield::LOCAL_SHELL_LY;
+        let scan = |s: &Session| s.stars.iter().find(|c| s.distance_to(c) < shell).map(|c| c.id);
+        let mut places = vec![DVec3::ZERO, DVec3::new(1.3, -2.1, 0.4)];
+        for star in &s.stars {
+            for along in [0.0, 0.99, 1.01] {
+                places.push(star.position_ly + DVec3::new(0.6, -0.48, 0.64) * shell * along);
+            }
+        }
+        let mut found = 0;
+        for at in places {
+            s.place_at(at);
+            assert_eq!(s.local_star().map(|c| c.id), scan(&s), "at {at}");
+            found += usize::from(scan(&s).is_some());
+        }
+        assert_eq!(found, 2 * s.stars.len(), "each star is found from inside its shell");
+        for star in &s.stars {
+            assert_eq!(s.star(star.id).map(|c| c.id), Some(star.id));
+        }
     }
 
     #[test]
