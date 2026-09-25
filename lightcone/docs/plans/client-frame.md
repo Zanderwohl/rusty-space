@@ -309,7 +309,7 @@ graph LR
 
 ### L2 · Sign-in lifecycle
 
-- status: todo
+- status: active claude/game-loop-optimization-71831f
 - needs: —
 - touches: `crates/lc-client/src/auth.rs`, `crates/lc-client/src/signin_ui.rs`
 - read: 16
