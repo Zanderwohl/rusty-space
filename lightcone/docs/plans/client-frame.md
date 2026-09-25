@@ -135,7 +135,7 @@ graph LR
 
 ### B1 · Beliefs cached by revision
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; `Knowledge::move_to` moves held beliefs, and `body_belief` places a body through the same lean `placed_within`)
 - needs: K1
 - touches: `crates/lc-client/src/beliefs.rs`, `crates/lc-world/src/knowledge/body.rs`
 - read: 25, 22
@@ -144,7 +144,7 @@ graph LR
 
 ### B2 · Labels cached
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: B1, K2
 - touches: `crates/lc-client/src/session.rs`, `crates/lc-client/src/pick.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-client/src/panels.rs`
 - read: 23
