@@ -300,7 +300,7 @@ graph LR
 
 ### L1 · Surfaces released
 
-- status: active claude/game-loop-optimization-71831f
+- status: done 0d745a62
 - needs: —
 - touches: `crates/lc-client/src/surfaces.rs`, `crates/lc-client/src/procedural.rs`
 - read: 07, 28
@@ -457,6 +457,15 @@ About 70% less every time, and all of it render-world CPU, which in the browser 
 thread. Build both binaries from one checkout by swapping the changed files: two checkouts sharing
 one `CARGO_TARGET_DIR` reuse each other's artifacts, and the "before" binary silently was the
 "after" one.
+
+### L1, 2026-09-25
+
+`Surfaces::keep`, called by `update_resolved` every frame with the bodies it draws, releases every
+other body when the star changes (or the ship is between stars), and past `IDLE_BYTES` (640 MB
+native, 160 MB in the browser) releases the least recently drawn. A body counts its bakes' bytes
+as `route` asks for them, so one whose bakes were never asked for counts zero: the first version
+kept those across a change of system, and the test caught it. Not measured in memory yet; T2's
+browser readout is where the heap after a tour of Sol belongs.
 
 ## Not yet agreed
 
