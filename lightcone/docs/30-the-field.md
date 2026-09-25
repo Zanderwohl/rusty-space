@@ -3,9 +3,9 @@
 Every ship is wrapped in a field. It is the collector, the radiator and the shield, and when it
 fails, the ship is gone and the whole system sees it happen.
 
-**Status: designed.** The account is `lc_world::field`, with its anchors pinned in
-`Balance::DEFAULT`; nothing reads it yet. It replaces the
-fixed 400 K hull (`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
+**Status: designed.** The account is `lc_world::field`, with its anchors derived in
+`Balance::DEFAULT`; nothing reads it yet. It replaces the fixed 400 K hull
+(`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
 [20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
 Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
 glows as it fills, and collapses when it is full. Where the energy it sheds goes is
@@ -167,7 +167,8 @@ One number needs the starting form's grid ([29-ship-form.md](29-ship-form.md)): 
 3.39 × 10⁵ m², pinned as `STARTING_ENVELOPE_M2` by a test that re-solves it to a part in a
 million. The rest are derived in `Balance::DEFAULT`. `q_idle` is not a setting: it is the
 starting drain times `τ` over that envelope, 2.40 × 10¹⁶ J/m², so turning `field_capacity` does
-not move the idle anchor.
+not move the idle anchor. The anchors hold for the default geometry: a shard that changes the
+starting envelope, through `envelope_margin` say, moves them with it.
 
 The starlight in the third anchor falls on the shadow table's broadside, with the gain that
 [20-solar-power.md](20-solar-power.md)'s anchor gives on that broadside. That is what the account

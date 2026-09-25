@@ -32,6 +32,8 @@ struct Volumes {
 const STARTING: Volumes =
     Volumes { storage: 6.0 * SLOT_M3, drone: 2.0 * SLOT_M3, engine: 5.0 * SLOT_M3, living: SLOT_M3, data: SLOT_M3 };
 
+pub(crate) const STARTING_LIVING_M3: f64 = STARTING.living;
+
 fn hang(id: u16, kind: Kind, primitive: Primitive, volume_m3: f64, parent: PartId, mount: Mount) -> Part {
     let placement = Placement { parent, mount, twist: 0.0, tilt: DVec2::ZERO, blend: 0.0, mirror: false };
     Part { id: PartId(id), kind, primitive, volume_m3, placement: Some(placement) }

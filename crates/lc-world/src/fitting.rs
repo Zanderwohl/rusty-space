@@ -325,7 +325,7 @@ impl Balance {
     /// `q_idle`, J/m² of envelope: the starting ship's living drain alone holds its field at
     /// `field_idle_k`, so its idle heat is `P τ` over [`STARTING_ENVELOPE_M2`].
     pub fn field_idle_j_m2(&self) -> f64 {
-        let drain_w = crate::form::capacity::Capacities::of(&crate::form::Form::starting(), self).drain_w;
+        let drain_w = crate::form::presets::STARTING_LIVING_M3 * self.living_density_w;
         drain_w * self.field_tau_s / STARTING_ENVELOPE_M2
     }
 
