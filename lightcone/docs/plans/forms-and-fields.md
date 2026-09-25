@@ -602,7 +602,7 @@ graph LR
 
 ### C1 · Editor view
 
-- status: todo
+- status: active card "Build C1: the editor view"
 - needs: R1
 - touches: `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/app.rs`
 - read: 29 §The editor
