@@ -210,7 +210,7 @@ impl<J: Journal> Server<J> {
             Act::Cut => Some(Change::CutDrive),
             Act::Chase(on) => {
                 let Some(quarry) = director.craft_in(*on) else { return };
-                self.pursuits.insert(id, crate::chase::Pursuit {
+                let pursuit = crate::chase::Pursuit {
                     quarry: ShipId(quarry.0),
                     closeness: lc_world::pursuit::Closeness::Company,
                     approach: lc_proto::Approach::default(),
@@ -219,7 +219,20 @@ impl<J: Journal> Server<J> {
                     // implementation of the only standing order there is.
                     last_plan_t: i64::MIN,
                     last_seen: None,
-                });
+                };
+                // A player's own order folds into what its client shows; one given by a
+                // scene reaches it by nothing else.
+                if let Some(owner) = self.owners.get(&id).copied() {
+                    wire.send(owner, Outbound::Pursuing {
+                        ship_id: ShipId(id.0),
+                        pursuit: lc_proto::Pursuit {
+                            quarry: pursuit.quarry,
+                            closeness: pursuit.closeness.into(),
+                            approach: pursuit.approach,
+                        },
+                    });
+                }
+                self.pursuits.insert(id, pursuit);
                 None
             }
             Act::BreakOff => {
@@ -386,6 +399,32 @@ mod tests {
         assert!(
             said.iter().any(|m| matches!(m, Outbound::Flying { .. })),
             "the player was moved and not told: {said:?}",
+        );
+    }
+
+    /// A scene that sets the player chasing says so, or the client shows no pursuit and no way
+    /// to change or break it off.
+    #[tokio::test]
+    async fn the_player_is_told_it_was_set_chasing() {
+        let Some((mut server, mut wire, client, pov)) = staged(&lc_world::scenario::CLOSING)
+        else {
+            return;
+        };
+        server.tick(&mut wire).await.unwrap();
+
+        let said = wire.take(client);
+        let stated = said.iter().find_map(|m| match m {
+            Outbound::Pursuing { ship_id, pursuit } if ship_id.0 == pov.0 => Some(*pursuit),
+            _ => None,
+        });
+        assert_eq!(
+            stated,
+            Some(lc_proto::Pursuit {
+                quarry: ShipId(lc_world::scenario::BASE_ID),
+                closeness: lc_proto::Closeness::Company,
+                approach: lc_proto::Approach::Courteous,
+            }),
+            "{said:?}",
         );
     }
 
