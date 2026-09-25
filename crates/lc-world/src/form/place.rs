@@ -160,7 +160,7 @@ const PARALLEL: f64 = 1e-9;
 
 /// Axis along `normal`, y along the parent's y projected across it, or its z where the y is
 /// parallel.
-fn normal_frame(normal: DVec3) -> DMat3 {
+pub(super) fn normal_frame(normal: DVec3) -> DMat3 {
     let across = |v: DVec3| v - normal * normal.dot(v);
     let y = across(DVec3::Y);
     let y = if y.length() > PARALLEL { y } else { across(DVec3::Z) }.normalize();

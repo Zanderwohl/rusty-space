@@ -284,9 +284,9 @@ graph LR
 
 ### F5 · Starting form and presets
 
-- status: active card "Build F5: starting form and presets"
+- status: done #77
 - needs: F2, F4
-- touches: `crates/lc-world/src/form/presets.rs`
+- touches: `crates/lc-world/src/form/presets.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/form/place.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §The starting form, §Your own presets
 - deliver: `Form::starting()`, the Plate, Spindle and Cluster layouts, and applying any preset as a **layout** (this ship's volumes in the preset's arrangement, by share of each kind) or as a **design** (exactly). `hull_areal_density` anchored in `Balance::DEFAULT` so the starting form weighs what 19's starting ship does.
 - done when: a layout keeps every kind's total volume, and a design reproduces the preset.

@@ -255,8 +255,9 @@ impl Balance {
             spar_gap: 0.5,
             spar_thickness: 0.02,
             move_work_factor: 0.25,
-            // Placeholder: F5 anchors it as a literal, pinned by a test of `form::capacity::areal_density_for` on `Form::starting()`.
-            hull_areal_density: 0.0,
+            // `Form::starting()` weighs 19's dry starting ship. Solved there, since the areas are
+            // not `const`, and pinned by `form::presets`' anchor test.
+            hull_areal_density: 1214.530767193309,
             envelope_margin: 0.05,
             engine_clear_half_angle_rad: 15.0 * degree,
             field_idle_k: 400.0,

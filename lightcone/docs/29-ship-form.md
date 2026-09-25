@@ -313,6 +313,20 @@ Flying and refitting still exclude each other, as in 19.
 - **drones**, a capsule under the keel: 7.85 × 10⁵ m³
 - **living**, a slab across the dorsal face, and **data**, a small capsule forward: 3.93 × 10⁵ m³ each
 
+Each volume is 19's module count of its kind times the 392 699 m³ slot, so the form holds exactly
+what 19's starting ship does. Placed, it is about 545 m long, 200 m across and 190 m deep:
+
+- the storage is 335 × 201 × 67 m;
+- the engine flares aft, 116 m wide where it meets the hull and 175 m at its open face, which is the
+  aperture ([31](31-directed-energy.md));
+- the drone capsule, 169 m long, lies fore and aft under the keel with its top sunk into the hull, so
+  it is tilted off the normal it is attached along;
+- the living slab is 145 m across the beam, 96 m fore and aft and 29 m deep;
+- the data capsule, 124 m long, is sunk into the nose.
+
+`hull_areal_density` is 1 215 kg/m², so this form weighs 19's dry starting ship, 2.65 × 10⁹ kg: every
+module, the data module at half, and 19's frame over all twenty slots, the five empty ones included.
+
 The anchors of 20 and 30 are derived from this form.
 
 The editor also offers **built-in presets**, each rearranging the ship's current volumes:
@@ -335,9 +349,21 @@ preset is a `Form` with its part ids, and it applies in one of two ways:
 | **layout** | the preset's arrangement, filled with this ship's volumes. Each part keeps its share of its kind's total, so the ship keeps what it has and changes shape | moves and reshapes, little energy |
 | **design** | the preset exactly, volumes included | builds and dismantles, paid for as usual |
 
-The built-in presets are layouts written in code. Applying either kind replaces the draft, not the
-ship, so the result is one undoable edit and nothing is spent until Apply. A preset whose kinds the
-ship lacks gives those parts nothing in a layout, and the editor names them.
+The built-in presets are layouts written in code, filled with the starting form's volumes so each is
+also a design. Applying either kind replaces the draft, not the ship, so the result is one undoable
+edit and nothing is spent until Apply. A preset whose kinds the ship lacks gives those parts nothing in
+a layout, and the editor names them.
+
+A layout's other rules:
+
+- **Spars are not shared out.** They hold nothing, so a ship's spar volume says nothing about where
+  its parts go. They are the arrangement's own structure and grow by the ratio its other parts grew
+  by, so a cluster applied to the starting ship, which has no spars, keeps its spokes.
+- **A share below `min_part_m3` is dropped**, smallest first, and the rest of its kind take its volume.
+  It is named with the parts given nothing.
+- A part given nothing is left out, and its children hang from its nearest ancestor that is kept.
+- A kind the ship has and the preset has no part for is left out of the layout, and the editor names
+  that too.
 
 - **Presets belong to the account, not to a craft.** They are designs a player carries in their head,
   not facts about the world, so they are not knowledge and do not travel at the speed of light. They
@@ -500,7 +526,7 @@ photographs it, and `--form <preset>` stages a draft.
 | `spar_gap` | 0.5 m | how far a saddle stands off the neighbor it is cut to |
 | `spar_thickness` | 2% of the parent's smallest dimension | a strap's depth |
 | `move_work_factor` | 0.25 | a move's time over building what it carries |
-| `hull_areal_density` | *anchored* | structure per m² of part surface |
+| `hull_areal_density` | *anchored*: 1 215 kg/m² | structure per m² of part surface |
 | `envelope_margin` | 0.05 | the envelope's offset over the cube root of hull volume |
 | `engine_clear_half_angle_rad` | 15° | |
 
