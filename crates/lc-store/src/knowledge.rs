@@ -81,6 +81,30 @@ pub async fn load_files(client: &Client) -> Result<Vec<Filed>, Error> {
         .collect())
 }
 
+/// Every craft's file on one subject.
+///
+/// A scan: the key leads with the craft. Fine for a console page; an index on `subject` is the
+/// fix if it is ever on a hot path.
+pub async fn files_on(client: &Client, subject: &[u8]) -> Result<Vec<Filed>, Error> {
+    let rows = client
+        .query(
+            "SELECT ship_id, subject, format, file, saved_t FROM lc_knowledge
+             WHERE subject = $1 ORDER BY ship_id",
+            &[&subject],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| Filed {
+            ship_id: row.get(0),
+            subject: row.get(1),
+            format: row.get(2),
+            file: row.get(3),
+            saved_t: row.get(4),
+        })
+        .collect())
+}
+
 /// Append samples. A duplicate is skipped rather than refused, so a retried checkpoint does not
 /// fail on what it wrote the first time.
 ///
@@ -187,6 +211,27 @@ mod tests {
         let read: Vec<Filed> =
             load_files(&client).await.unwrap().into_iter().filter(|f| f.ship_id == band).collect();
         assert_eq!(read, vec![filed(band, b"planet", b"p"), filed(band, b"star", b"second")]);
+    }
+
+    #[tokio::test]
+    async fn files_on_one_subject_are_every_craft_s_and_nothing_else() {
+        let Some(client) = store().await else { return };
+        let band = 8_002_000;
+        clear(&client, band).await;
+        save_files(&client, &[
+            filed(band + 1, b"star", b"theirs"),
+            filed(band, b"star", b"ours"),
+            filed(band, b"planet", b"p"),
+        ])
+        .await
+        .unwrap();
+        let read: Vec<Filed> = files_on(&client, b"star")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|f| f.ship_id == band || f.ship_id == band + 1)
+            .collect();
+        assert_eq!(read, vec![filed(band, b"star", b"ours"), filed(band + 1, b"star", b"theirs")]);
     }
 
     /// Samples come back bit-exact, in series order, and a sample written twice is one sample.

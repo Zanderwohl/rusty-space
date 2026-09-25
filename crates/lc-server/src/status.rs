@@ -64,7 +64,7 @@ pub struct Status {
 }
 
 /// Light-years in an astronomical unit.
-const AU_LY: f64 = 1.495_978_707e11 / 9.460_730_472_580_8e15;
+pub(crate) const AU_LY: f64 = 1.495_978_707e11 / 9.460_730_472_580_8e15;
 
 impl Status {
     /// A linear scan over `stars`, as `world::system_at` does: once per page view, and

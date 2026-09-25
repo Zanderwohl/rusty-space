@@ -1,4 +1,4 @@
-//! Asking the game where somebody's ship is.
+//! Asking the game where somebody's ship is, and what is in a system.
 //!
 //! **These types are a copy on purpose.** The originals are `lc_server::status`, which this
 //! service may not depend on — CI refuses a path dependency across the workspace line. RON
@@ -61,12 +61,58 @@ pub struct Systems {
     pub systems: Vec<System>,
 }
 
+/// Mirrors `lc_server::systems::Facts`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Facts {
+    /// The catalog's, never a player's.
+    pub catalog_name: Option<String>,
+    pub source: String,
+    pub key: u64,
+    pub from_sol_ly: f64,
+    pub teff_k: f64,
+    pub radius_m: f64,
+    pub luminosity_solar: f64,
+    pub mass_solar: f64,
+    pub metallicity: f64,
+    pub component: u8,
+    pub group: Option<u64>,
+}
+
+/// Mirrors `lc_server::systems::Craft`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Craft {
+    pub ship_id: i64,
+    pub name: Option<String>,
+    pub account: Option<String>,
+    pub au: f64,
+}
+
+/// Mirrors `lc_server::systems::Name`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Name {
+    pub name: String,
+    pub by: i64,
+    /// Coordinate seconds.
+    pub stated_s: f64,
+    pub held_by: Vec<i64>,
+}
+
+/// Mirrors `lc_server::systems::Detail`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Detail {
+    pub id: u64,
+    pub star: Facts,
+    pub ships: Vec<Craft>,
+    pub names: Vec<Name>,
+}
+
 /// Why there is nothing to show. Distinct, because a card that says "unavailable" for every
 /// cause is one people learn to ignore.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Missing {
     NotConfigured,
     NoShip,
+    NoSystem,
     Unreachable(String),
 }
 
@@ -75,6 +121,7 @@ impl Missing {
         match self {
             Missing::NotConfigured => "This console is not pointed at a shard.".to_owned(),
             Missing::NoShip => "This account has never entered the world.".to_owned(),
+            Missing::NoSystem => "This shard holds no system with that identifier.".to_owned(),
             Missing::Unreachable(why) => format!("The shard did not answer: {why}"),
         }
     }
@@ -98,10 +145,33 @@ impl Shard<'_> {
     /// Minted per request rather than held: a ticket is sixty seconds and single use, and
     /// this way the shard's log says who was looking.
     pub async fn status(&self, acting: &str, about: &str) -> Result<Status, Missing> {
+        self.fetch(acting, &format!("/admin/status/{about}"), Missing::NoShip)
+            .await
+    }
+
+    /// The query goes verbatim: the shard can order them without sending them all here.
+    pub async fn systems(&self, acting: &str, query: &str) -> Result<Systems, Missing> {
+        let absent = Missing::Unreachable("it has no systems route".to_owned());
+        self.fetch(acting, &format!("/admin/systems?{query}"), absent)
+            .await
+    }
+
+    pub async fn system(&self, acting: &str, id: u64) -> Result<Detail, Missing> {
+        self.fetch(acting, &format!("/admin/systems/{id}"), Missing::NoSystem)
+            .await
+    }
+
+    /// `absent` is what a 404 means at `path`.
+    async fn fetch<T: serde::de::DeserializeOwned>(
+        &self,
+        acting: &str,
+        path: &str,
+        absent: Missing,
+    ) -> Result<T, Missing> {
         let ticket = self.ticket_for(acting).await?;
         let response = self
             .http
-            .get(format!("{}/admin/status/{about}", self.api))
+            .get(format!("{}{path}", self.api))
             .bearer_auth(&ticket)
             .send()
             .await
@@ -109,7 +179,7 @@ impl Shard<'_> {
 
         match response.status() {
             s if s.is_success() => {}
-            reqwest::StatusCode::NOT_FOUND => return Err(Missing::NoShip),
+            reqwest::StatusCode::NOT_FOUND => return Err(absent),
             other => return Err(Missing::Unreachable(format!("it answered {other}"))),
         }
         let body = response
@@ -118,33 +188,7 @@ impl Shard<'_> {
             .map_err(|why| Missing::Unreachable(why.to_string()))?;
         ron::from_str(&body).map_err(|why| {
             // Logged with the body, or the next person has to reproduce it to see what came.
-            tracing::error!(%why, %body, "the shard's status did not parse");
-            Missing::Unreachable("it answered in a shape this build does not read".to_owned())
-        })
-    }
-
-    /// The query goes verbatim: the shard can order them without sending them all here.
-    pub async fn systems(&self, acting: &str, query: &str) -> Result<Systems, Missing> {
-        let ticket = self.ticket_for(acting).await?;
-        let response = self
-            .http
-            .get(format!("{}/admin/systems?{query}", self.api))
-            .bearer_auth(&ticket)
-            .send()
-            .await
-            .map_err(|why| Missing::Unreachable(why.to_string()))?;
-        if !response.status().is_success() {
-            return Err(Missing::Unreachable(format!(
-                "it answered {}",
-                response.status()
-            )));
-        }
-        let body = response
-            .text()
-            .await
-            .map_err(|why| Missing::Unreachable(why.to_string()))?;
-        ron::from_str(&body).map_err(|why| {
-            tracing::error!(%why, %body, "the shard's systems did not parse");
+            tracing::error!(%why, %body, path, "the shard's answer did not parse");
             Missing::Unreachable("it answered in a shape this build does not read".to_owned())
         })
     }
@@ -255,6 +299,21 @@ mod tests {
         assert_eq!(nowhere.whereabouts, Whereabouts::Nowhere);
     }
 
+    /// **Captured from the shard's own serializer**, like the ones above.
+    const SYSTEM_FROM_THE_SHARD: &str = r#"(id:4889409560617541148,star:(catalog_name:Some("Sol"),source:"test",key:0,from_sol_ly:0.0,teff_k:5772.0,radius_m:695700000.0,luminosity_solar:1.0,mass_solar:1.0,metallicity:0.0,component:1,group:None),ships:[(ship_id:7,name:Some("Rocinante"),account:Some("acct-7"),au:0.0)],names:[(name:"Hearth",by:7,stated_s:30000000.0,held_by:[7])])"#;
+
+    #[test]
+    fn parses_the_system_the_shard_sends() {
+        let detail: Detail = ron::from_str(SYSTEM_FROM_THE_SHARD).expect("the shard's shape");
+        assert_eq!(detail.id, 4889409560617541148);
+        assert_eq!(detail.star.catalog_name.as_deref(), Some("Sol"));
+        assert_eq!(detail.star.teff_k, 5772.0);
+        assert_eq!(detail.ships.len(), 1);
+        assert_eq!(detail.ships[0].account.as_deref(), Some("acct-7"));
+        assert_eq!(detail.names[0].name, "Hearth");
+        assert_eq!(detail.names[0].held_by, [7]);
+    }
+
     /// Each absence says which absence it is. One message for all of them is a card people
     /// learn to stop reading.
     #[test]
@@ -262,6 +321,7 @@ mod tests {
         let said: Vec<String> = [
             Missing::NotConfigured,
             Missing::NoShip,
+            Missing::NoSystem,
             Missing::Unreachable("connection refused".into()),
         ]
         .iter()
@@ -276,6 +336,6 @@ mod tests {
             said.len(),
             "two absences read alike: {said:?}"
         );
-        assert!(said[2].contains("connection refused"), "{}", said[2]);
+        assert!(said[3].contains("connection refused"), "{}", said[3]);
     }
 }

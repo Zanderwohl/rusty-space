@@ -32,6 +32,129 @@ pub struct Page {
     pub systems: Vec<Row>,
 }
 
+/// One system, for its own page. As of the last checkpoint, like everything the console reads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Detail {
+    pub id: u64,
+    pub star: Facts,
+    /// Nearest the star first.
+    pub ships: Vec<Craft>,
+    /// Oldest first.
+    pub names: Vec<Name>,
+}
+
+/// The star as the catalog describes it. Truth, which no player is shown.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Facts {
+    /// **The catalog's, not a player's**; see `lc_world::sky::Provenance::name`.
+    pub catalog_name: Option<String>,
+    pub source: String,
+    /// The source's own row number.
+    pub key: u64,
+    pub from_sol_ly: f64,
+    pub teff_k: f64,
+    pub radius_m: f64,
+    pub luminosity_solar: f64,
+    pub mass_solar: f64,
+    /// `[Fe/H]`, synthesized from kinematics rather than measured.
+    pub metallicity: f64,
+    /// 1 for a single star or a multiple's primary.
+    pub component: u8,
+    /// Shared by the members of one multiple.
+    pub group: Option<u64>,
+}
+
+/// A craft inside the system's shell.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Craft {
+    pub ship_id: i64,
+    pub name: Option<String>,
+    /// Opaque account id; `None` for a craft with no pilot.
+    pub account: Option<String>,
+    /// From the star.
+    pub au: f64,
+}
+
+/// A name some craft chose for the star, and which craft hold it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Name {
+    pub name: String,
+    /// The craft that chose it.
+    pub by: i64,
+    /// Coordinate seconds.
+    pub stated_s: f64,
+    /// Every craft whose file carries it, the chooser included while it still does. Holding a
+    /// name is not calling the star by it: a craft may hold several and prefer its own.
+    pub held_by: Vec<i64>,
+}
+
+/// Craft are `(ship_id, account, where)` and files are each craft's file on this star.
+pub fn detail(
+    star: &CatalogStar,
+    stars: &[CatalogStar],
+    craft: &[(i64, Option<String>, Option<String>, glam::DVec3)],
+    files: &[(i64, &lc_world::knowledge::File)],
+) -> Detail {
+    let mut ships: Vec<Craft> = craft
+        .iter()
+        .filter(|(_, _, _, at)| {
+            crate::status::nearest_within_shell(*at, stars).is_some_and(|s| s.id == star.id)
+        })
+        .map(|(ship_id, name, account, at)| Craft {
+            ship_id: *ship_id,
+            name: name.clone(),
+            account: account.clone(),
+            au: at.distance(star.position_ly) / crate::status::AU_LY,
+        })
+        .collect();
+    ships.sort_by(|a, b| a.au.total_cmp(&b.au).then(a.ship_id.cmp(&b.ship_id)));
+
+    let mut names: Vec<Name> = Vec::new();
+    for (holder, file) in files {
+        let chosen = file.names().iter().filter(|n| n.kind.chosen());
+        for naming in chosen {
+            let by = naming.witness.0 as i64;
+            // Every copy of one naming carries the chooser's own stamp, so this is identity.
+            let same = |n: &&mut Name| {
+                n.by == by && n.name == naming.name && n.stated_s == naming.stated_s
+            };
+            match names.iter_mut().find(same) {
+                Some(name) => name.held_by.push(*holder),
+                None => names.push(Name {
+                    name: naming.name.clone(),
+                    by,
+                    stated_s: naming.stated_s,
+                    held_by: vec![*holder],
+                }),
+            }
+        }
+    }
+    for name in &mut names {
+        name.held_by.sort_unstable();
+        name.held_by.dedup();
+    }
+    names.sort_by(|a, b| a.stated_s.total_cmp(&b.stated_s).then(a.by.cmp(&b.by)));
+
+    Detail {
+        id: star.id.get(),
+        star: Facts {
+            catalog_name: star.provenance.name.clone(),
+            source: star.provenance.source.clone(),
+            key: star.provenance.key,
+            from_sol_ly: star.position_ly.length(),
+            teff_k: star.star.teff_k,
+            radius_m: star.star.radius_m,
+            luminosity_solar: star.luminosity_solar,
+            mass_solar: star.mass_solar,
+            metallicity: star.metallicity,
+            component: star.component.index,
+            group: star.component.group,
+        },
+        ships,
+        names,
+    }
+}
+
 /// Which column the list is ordered by.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Sort {
@@ -144,6 +267,7 @@ pub fn page(stars: &[CatalogStar], ships: &HashMap<u64, u64>, query: &Query) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lc_world::knowledge::{Hop, Knowledge, NameKind, Naming, Subject, Witness};
     use lc_world::sky::{Component as StarComponent, Provenance, StarId};
     use lc_world::star::Star;
 
@@ -340,6 +464,80 @@ mod tests {
         let page = page(&stars, &HashMap::new(), &Query { offset: 500, ..query() });
         assert!(page.systems.is_empty());
         assert_eq!(page.total, 10);
+    }
+
+    fn named(owner: u64, star: &CatalogStar, name: &str, at_s: f64) -> Knowledge {
+        let mut k = Knowledge::new(Witness(owner));
+        k.name_it(Subject::Star(star.id), name, at_s);
+        k
+    }
+
+    /// A craft inside the shell is listed with its distance from the star, nearest first; one
+    /// in another system or between the stars is not.
+    #[test]
+    fn a_system_lists_the_craft_inside_its_shell() {
+        let stars = catalog();
+        let au = |au: f64| glam::DVec3::new(au * crate::status::AU_LY, 0.0, 0.0);
+        let craft = vec![
+            (1, Some("Far".into()), Some("acct-1".into()), au(40.0)),
+            (2, None, None, au(1.0)),
+            (3, None, None, glam::DVec3::new(10.0, 0.0, 0.0)),
+            (4, None, None, glam::DVec3::new(5.0, 0.0, 0.0)),
+        ];
+        let detail = detail(&stars[0], &stars, &craft, &[]);
+        let ids: Vec<i64> = detail.ships.iter().map(|c| c.ship_id).collect();
+        assert_eq!(ids, [2, 1], "nearest first, and only Sol's");
+        assert!((detail.ships[1].au - 40.0).abs() < 1e-9, "{}", detail.ships[1].au);
+        assert_eq!(detail.ships[1].account.as_deref(), Some("acct-1"));
+        assert_eq!(detail.star.catalog_name.as_deref(), Some("Sol"));
+        assert!(detail.names.is_empty());
+    }
+
+    /// A name relayed to other craft is one name held by several, not one name per holder;
+    /// two craft choosing the same word are still two names. Designations are not names.
+    #[test]
+    fn a_relayed_name_is_one_name_held_by_several_craft() {
+        let stars = catalog();
+        let sol = &stars[0];
+        let chooser = named(7, sol, "Hearth", 10.0);
+        let chosen = chooser.file(Subject::Star(sol.id)).unwrap().names()[0].clone();
+
+        let mut heard = Knowledge::new(Witness(9));
+        let hop = Hop { from: Witness(7), to: Witness(9), sent_s: 11.0, received_s: 12.0 };
+        heard.named(Subject::Star(sol.id), Naming { lineage: vec![hop], ..chosen });
+        heard.named(Subject::Star(sol.id), Naming {
+            witness: Witness(9),
+            name: "SOL-1".into(),
+            kind: NameKind::Designation,
+            stated_s: 1.0,
+            lineage: Vec::new(),
+        });
+        let rival = named(8, sol, "Hearth", 20.0);
+
+        let files: Vec<_> = [(7, &chooser), (9, &heard), (8, &rival)]
+            .into_iter()
+            .map(|(ship, k)| (ship, k.file(Subject::Star(sol.id)).unwrap()))
+            .collect();
+        let detail = detail(sol, &stars, &[], &files);
+
+        assert_eq!(detail.names.len(), 2, "{:?}", detail.names);
+        assert_eq!(detail.names[0].by, 7, "oldest first");
+        assert_eq!(detail.names[0].held_by, [7, 9]);
+        assert_eq!(detail.names[1].by, 8);
+        assert_eq!(detail.names[1].held_by, [8]);
+        assert!(detail.names.iter().all(|n| n.name == "Hearth"));
+    }
+
+    /// The console parses this with its own copy of the types; its test holds these bytes.
+    #[test]
+    fn the_detail_round_trips_through_ron() {
+        let stars = catalog();
+        let chooser = named(7, &stars[0], "Hearth", 3.0e7);
+        let file = chooser.file(Subject::Star(stars[0].id)).unwrap();
+        let craft = vec![(7, Some("Rocinante".into()), Some("acct-7".into()), glam::DVec3::ZERO)];
+        let detail = detail(&stars[0], &stars, &craft, &[(7, file)]);
+        let text = ron::to_string(&detail).expect("it serializes");
+        assert_eq!(ron::from_str::<Detail>(&text).expect("it parses"), detail);
     }
 
     #[test]

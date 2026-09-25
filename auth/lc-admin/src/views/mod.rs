@@ -5,6 +5,7 @@
 //! prevents it where a convention about remembering would not.
 
 pub mod index;
+pub mod system;
 pub mod systems;
 pub mod user;
 
