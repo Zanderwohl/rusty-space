@@ -51,6 +51,7 @@ graph LR
   K1["K1 Knowledge revision"]
   K2["K2 Star index"]
   T1["T1 Frame timing"]
+  T2["T2 Browser timing"]
   B1["B1 Beliefs cached by revision"]
   B2["B2 Labels cached"]
   B3["B3 Map source from the caches"]
@@ -67,6 +68,7 @@ graph LR
   W1["W1 Build for speed"]
   W2["W2 Bevy features"]
   W3["W3 Render passes"]
+  W4["W4 Per-camera render work"]
   L1["L1 Surfaces released"]
   L2["L2 Sign-in lifecycle"]
   L3["L3 Chat bounded"]
@@ -74,6 +76,7 @@ graph LR
   L5["L5 Browser socket closed"]
   L6["L6 Scene left behind"]
   L7["L7 Readback peaks"]
+  T1 --> T2
   K1 --> B1
   B1 --> B2
   K2 --> B2
@@ -82,9 +85,10 @@ graph LR
   S1 --> B3
   S1 --> S2
   M2 --> M3
-  T1 --> W1
+  T2 --> W1
   W1 --> W2
   W1 --> W3
+  T1 --> W4
   L1 --> L7
 ```
 <!-- /graph -->
@@ -111,12 +115,21 @@ graph LR
 
 ### T1 · Frame timing
 
-- status: todo
+- status: done (baseline in *Measured*)
 - needs: —
-- touches: `crates/lc-client/src/dev.rs`, `crates/lc-client/src/app.rs`
+- touches: `tools/trace_systems.py`
 - read: 13
-- deliver: spans around each Update/PostUpdate system set and the egui passes, readable on native (tracing, Chrome trace) and in the browser (`performance.mark`/`measure`, so the browser's own profiler shows them). A dev readout of the worst stage over the last second.
+- deliver: native only. Bevy's own `trace` and `trace_chrome` features already put a span on every system, schedule and camera, so no code was needed: `tools/trace_systems.py` reduces a chrome trace to milliseconds per frame per system. The browser half is T2.
 - done when: a numbers table for three scenes — flying in Sol with the thumbnail, the map full-screen, a crossing — is added to this file's *Measured* section, and every later task adds its after-numbers there.
+
+### T2 · Browser timing
+
+- status: todo
+- needs: T1
+- touches: `crates/lc-client/src/bench.rs`, `crates/lc-client/src/bin/lightcone_web.rs`
+- read: 14
+- deliver: the same breakdown in the browser, where main world, extract and render share one thread and WebGPU calls cross into JS. `performance.mark`/`measure` around each schedule and camera so the browser's profiler shows them, and a `--bench`-like readout from a URL parameter. Needs a shard the page can reach; the dev stack or a local one.
+- done when: *Measured* has the three scenes in Chrome, with the machine and browser named.
 
 ## B: beliefs
 
@@ -250,7 +263,7 @@ graph LR
 ### W1 · Build for speed
 
 - status: todo
-- needs: T1
+- needs: T2
 - touches: `Cargo.toml`, `tools/build-wasm.sh`, `.cargo/config.toml`
 - read: 14
 - deliver: `wasm-release` at `opt-level = 3`, `wasm-opt -O3` instead of `-Oz`, and `+simd128` in the wasm target's rustflags with `--enable-simd` on `wasm-opt`. SIMD is safe for us: every browser with WebGPU already has wasm SIMD (Chrome 91, Firefox 89, Safari 16.4), so it narrows nothing. Record the size change and T1's before/after in *Measured*; if the size grows past what the CDN budget in 14 allows, try `opt-level = 2`.
@@ -273,6 +286,15 @@ graph LR
 - read: 07
 - deliver: the haze camera and its composite active only when there are shells to draw. `CameraOutputMode::Skip` on the sky camera, which the UI camera overwrites anyway. MSAA 4× on the full-screen `Rgba16Float` targets tried off; this changes the image, so it is the user's call on screenshots.
 - done when: screenshots with and without are shown to the user, and the haze pass is absent between stars.
+
+### W4 · Per-camera render work
+
+- status: todo
+- needs: T1
+- touches: `crates/lc-client/src/app.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/haze.rs`, `crates/lc-client/src/beauty.rs`
+- read: 07
+- deliver: found by T1, not by the read. The client has no Bevy lights, yet GPU clustered lighting runs for three cameras: about 0.9 ms of render CPU a frame counting its prepare, bind-group and upload systems. `ClusterConfig::None` on every 3D camera, checked in a trace to stop the `cluster::gpu` systems too. Then the rest of each camera's fixed cost — 30 queue submits a frame, bloom, MSAA writeback, tonemapping and upscaling per camera — cut where a camera does not need it: the map and haze cameras draw lines and a composite, not HDR scenes.
+- done when: T1's traces show the clustering systems gone and each camera's `camera_schedule` smaller, and the screenshots match.
 
 ## L: leaks
 
@@ -341,7 +363,83 @@ graph LR
 
 ## Measured
 
-T1 fills this in; every task adds its after-numbers.
+Every task adds its after-numbers here, measured the same way.
+
+### Baseline, 2026-09-24, at `908142f8`
+
+Native only; the browser is T2. Apple M3 Pro, window 1280×720 physical on a 75 Hz display.
+Workspace code built at `opt-level = 3` (dependencies already are), so the weights are nearer the
+browser build's than a debug build's. Offline, with no shard: **no contacts, hulls or plumes**, so
+everything that scales with craft is absent from A–C. D has four craft, which is not many.
+
+| scene | flags |
+|---|---|
+| A, flying, map in the corner | `--at Earth --charted` |
+| B, the map full-screen | `--at Earth --charted --panel map` |
+| C, a crossing | `--charted --fly` (boosting for HC 6703-31, 4.23 ly) |
+| D, traffic | `--demo traffic`: a local shard and four craft in view, nothing charted |
+
+```bash
+CARGO_PROFILE_DEV_OPT_LEVEL=3 cargo build -p lc-client --bin lightcone
+target/debug/lightcone assets/catalogs/hygdata_v42.csv <flags> --frames 300 --bench 600
+```
+
+**`--bench`**, two runs each, main-world CPU in ms. Frame time was 13.3 ms in every run: one
+refresh, so it says nothing below that.
+
+| scene | mean | p95 | p99 |
+|---|---|---|---|
+| A | 1.85 / 1.84 | 2.04 / 1.97 | 2.16 / 2.09 |
+| B | 1.84 / 1.83 | 1.96 / 1.95 | 2.08 / 2.09 |
+| C | 1.87 / 1.89 | 2.05 / 2.07 | 2.18 / 2.23 |
+| D | 1.89 / 1.91 | 2.02 / 2.06 | 2.09 / 2.13 |
+
+**Traced**, ms per frame over 300 frames after 120 of warm-up. Tracing inflates main-world CPU by
+about half (2.8 against 1.85), so read these for proportion.
+
+```bash
+CARGO_TARGET_DIR=target/trace CARGO_PROFILE_DEV_OPT_LEVEL=3 \
+  cargo build -p lc-client --bin lightcone --features bevy/trace,bevy/trace_chrome
+TRACE_CHROME=a.json target/trace/debug/lightcone assets/catalogs/hygdata_v42.csv <flags> --frames 120 --bench 300
+python3 tools/trace_systems.py a.json --skip 120 --spans
+```
+
+| | A | B | C | D |
+|---|---|---|---|---|
+| Main schedule | 2.85 | 2.74 | 2.89 | 2.92 |
+| — PreUpdate | 0.39 | 0.48 | 0.39 | 0.46 |
+| — Update | 0.86 | 0.67 | 0.87 | 0.83 |
+| — PostUpdate | 1.20 | 1.19 | 1.24 | 1.22 |
+| Extract | 0.50 | 0.49 | 0.48 | 0.50 |
+| Render graph (render-world CPU) | 3.10 | 2.96 | 2.90 | 2.96 |
+| all `lc_client::` systems | 0.63 | 0.54 | 0.67 | 0.61 |
+| `starfield::update_bodies` | 0.22 | 0.20 | 0.22 | 0.21 |
+| `pick::survey` | 0.09 | — | 0.13 | 0.09 |
+| `map::survey` | 0.09 | 0.08 | 0.09 | 0.05 |
+| `panels::hud` | 0.06 | 0.04 | 0.08 | 0.06 |
+| `map_panel::draw` | 0.03 | 0.10 | 0.03 | 0.02 |
+| `starfield::update_sky` | 0.05 | 0.04 | 0.04 | 0.05 |
+| `uplink::pump` | — | — | — | 0.05 |
+
+Render-world CPU in A, by camera: sky (order 0) 0.97, haze (−2) 0.62, map (−1) 0.55, UI (1)
+0.19. Across them: GPU clustering 0.47 (three cameras; the client has no lights), bloom 0.30,
+`queue_submit` 0.66 for 30 submits a frame.
+
+**What it says.**
+
+- Our own systems are about a fifth of main-world CPU. PostUpdate — transforms, visibility, egui
+  — is more than all of Update, and render-world CPU is more than the whole main schedule. On
+  native those two run in parallel; in the browser they run one after the other on one thread.
+  So W4, and whatever cuts entities and cameras, may matter more than the read expected.
+- The map is cheap here: `map::survey` under 0.1 ms, and its camera 0.55 ms of render CPU. The
+  belief rebuild the read called largest is inside that `survey`, so on native, with Sol charted,
+  it is small. It grows with knowledge; B1 is still worth doing, but it is not a frame's worth.
+- `pick::survey` does not run in B, which is why B's Update is lower.
+- Four craft (D) cost nothing visible. Not exercised: tens of craft, plumes, bakes landing
+  (warmed up past them), the radio and telescope panels, a beauty shot.
+
+The browser build (`tools/build-wasm.sh`, `wasm-release` at `opt-level = "s"`, `wasm-opt -Oz`):
+`lightcone_web_bg.wasm` 35.50 MB raw, 7.87 MB brotli; the build took 13 minutes.
 
 ## Not yet agreed
 
