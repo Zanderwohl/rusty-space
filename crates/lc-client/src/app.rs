@@ -1,6 +1,7 @@
 //! The Bevy layer: states, resources, and the systems that carry actions.
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::light::cluster::{ClusterConfig, GlobalClusterSettings};
 use bevy::math::DVec3;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
@@ -153,7 +154,7 @@ impl Plugin for ClientPlugin {
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .init_resource::<panels::HudFoot>()
             .init_resource::<crate::map_panel::WorldInset>()
-            .add_systems(Startup, spawn_camera)
+            .add_systems(Startup, (spawn_camera, no_lights))
             .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnExit(AppState::InGame), crate::map_panel::release_world_frame)
             .add_systems(OnEnter(AppState::InGame), spawn_sky)
@@ -355,8 +356,18 @@ fn spawn_camera(mut commands: Commands) {
         Hdr,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
+        ClusterConfig::None,
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
+}
+
+/// Nothing here is lit by a Bevy light: every material shades itself from the star. Bevy
+/// clusters lights for every 3D camera regardless, on the GPU, where a camera's
+/// `ClusterConfig::None` is not consulted — so that path is turned off, and the CPU one each
+/// camera opts out of does nothing. It was about 0.9 ms of render CPU a frame across three
+/// cameras, which in the browser is on the one thread.
+fn no_lights(mut settings: ResMut<GlobalClusterSettings>) {
+    settings.gpu_clustering = None;
 }
 
 /// Point the camera where the interface says it is looking.

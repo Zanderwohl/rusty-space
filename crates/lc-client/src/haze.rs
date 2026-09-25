@@ -12,6 +12,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::camera::{Hdr, RenderTarget};
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
+use bevy::light::cluster::ClusterConfig;
 use bevy::image::ImageSampler;
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
@@ -141,6 +142,8 @@ fn setup(
         Tonemapping::None,
         DebandDither::Disabled,
         Msaa::Off,
+        // See `app::no_lights`.
+        ClusterConfig::None,
         Projection::Perspective(PerspectiveProjection::default()),
         Transform::default(),
     ));

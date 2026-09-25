@@ -13,6 +13,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::camera::RenderTarget;
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::light::cluster::ClusterConfig;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureFormat, TextureUsages};
 use bevy_egui::EguiUserTextures;
@@ -369,6 +370,8 @@ fn setup(
         Projection::Perspective(PerspectiveProjection { fov: MAP_FOV, ..default() }),
         // See the module doc.
         Tonemapping::None,
+        // See `app::no_lights`.
+        ClusterConfig::None,
         Transform::default(),
     ));
 }

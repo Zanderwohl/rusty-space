@@ -8,6 +8,7 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{Exposure, Hdr, RenderTarget};
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::light::cluster::ClusterConfig;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::render_resource::{TextureFormat, TextureUsages};
@@ -245,6 +246,8 @@ fn setup(
         Tonemapping::TonyMcMapface,
         // Read only by the starfield, as a ratio to the sky's. See `drawn_exposure`.
         Exposure::default(),
+        // See `app::no_lights`.
+        ClusterConfig::None,
         Transform::default(),
     ));
     commands.insert_resource(Beauty {
