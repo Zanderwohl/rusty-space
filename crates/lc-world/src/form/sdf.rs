@@ -299,7 +299,7 @@ impl Shape {
     /// Half the box, along the axes of the frame `rotation` turns the part into, around where
     /// [`Shape::distance`] is at most `margin`. Exact for all but the frustum, which takes its
     /// wider end at both.
-    pub(super) fn extent(&self, rotation: DMat3, margin: f64) -> DVec3 {
+    pub fn extent(&self, rotation: DMat3, margin: f64) -> DVec3 {
         let axis = rotation.x_axis.abs();
         // How far a unit circle across the axis reaches along each outer axis.
         let across = (DVec3::ONE - axis * axis).max(DVec3::ZERO).map(f64::sqrt);

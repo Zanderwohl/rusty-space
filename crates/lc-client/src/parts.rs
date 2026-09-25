@@ -51,7 +51,7 @@ impl OwnForm {
         let sdf = Sdf::new(form, balance)?;
         let (min, max) = sdf.bounds();
         let reach_m = min.abs().max(max.abs()).length();
-        let still = Frame { pieces: sdf.pieces().to_vec(), finished: 0, working: None };
+        let still = Frame { pieces: sdf.pieces().to_vec(), standing: form.clone(), finished: 0, working: None };
         Ok(OwnForm(Some(Formed { sdf, still, reach_m })))
     }
 
@@ -89,10 +89,8 @@ impl OwnForm {
 /// suffix `*k` makes every part but the Mind `k` times larger at the same proportions, which is
 /// how a hull tens of kilometers long is photographed before anything can build one.
 pub fn fixture(spec: &str) -> Option<Form> {
-    let (name, scale) = match spec.split_once('*') {
-        Some((name, k)) => (name, k.parse::<f64>().ok().filter(|k| k.is_finite() && *k > 0.0)?),
-        None => (spec, 1.0),
-    };
+    let name = spec.split_once('*').map_or(spec, |(name, _)| name);
+    let scale = fixture_scale(spec)?;
     let mut form = match name.eq_ignore_ascii_case("default") {
         true => Form::starting(),
         false => Builtin::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(name)).map(Builtin::form)?,
@@ -101,6 +99,14 @@ pub fn fixture(spec: &str) -> Option<Form> {
         part.volume_m3 *= scale.powi(3);
     }
     Some(form)
+}
+
+/// The `k` of a `--form` spelling's `*k`, one without it, and `None` for a `k` that is no scale.
+pub fn fixture_scale(spec: &str) -> Option<f64> {
+    match spec.split_once('*') {
+        Some((_, k)) => k.parse::<f64>().ok().filter(|k| k.is_finite() && *k > 0.0),
+        None => Some(1.0),
+    }
 }
 
 /// Give the player's ship the form `--form` named, with no server involved.
@@ -231,6 +237,18 @@ fn this_frame<'a>(own: &'a Formed, refit: Option<&Refit>, now_s: f64) -> (Cow<'a
     }
 }
 
+/// The ship's frame in meters, placed and turned, and scaled into render units.
+pub(crate) fn ship_frame(session: &crate::session::Session, eye: &Eye, ui: &crate::app::Ui) -> Transform {
+    let at_ly = session.ship.motion.position_ly;
+    let star = lighting(session);
+    let facing = session.ship.facing_at(session.coordinate_time_s()).unwrap_or(DVec3::X);
+    Transform {
+        translation: sim_to_render(eye.offset_m(at_ly, None, ui.look.forward()) / UNIT_M).as_vec3(),
+        rotation: frame(facing, star.map(|(star_ly, _, _)| star_ly - at_ly)),
+        scale: Vec3::splat((1.0 / UNIT_M) as f32),
+    }
+}
+
 /// Draw the player's form, if it has one, where [`crate::hull::update_hulls`] would have put
 /// its ovoid.
 pub fn update_parts(
@@ -254,13 +272,10 @@ pub fn update_parts(
     let session = &game.0;
     let at_ly = session.ship.motion.position_ly;
     let star = lighting(session);
-    let facing = session.ship.facing_at(session.coordinate_time_s()).unwrap_or(DVec3::X);
-    let placed = Transform {
-        translation: sim_to_render(eye.offset_m(at_ly, None, ui.look.forward()) / UNIT_M).as_vec3(),
-        rotation: frame(facing, star.map(|(star_ly, _, _)| star_ly - at_ly)),
-        scale: Vec3::splat((1.0 / UNIT_M) as f32),
-    };
-    let Some(formed) = &own.0 else {
+    let placed = ship_frame(session, &eye, &ui);
+    // `crate::refit_hull` draws a staged refit on the hull meshes instead.
+    let formed = own.0.as_ref().filter(|_| refit.is_none());
+    let Some(formed) = formed else {
         for (root, _, _) in &roots {
             commands.entity(root).despawn();
         }

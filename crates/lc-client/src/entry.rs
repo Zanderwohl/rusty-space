@@ -199,6 +199,7 @@ pub fn parse(args: &[String]) -> Entry {
                 || flag("--station")
                 || flag("--form")
                 || flag("--refit-at")
+                || flag("--refit-from")
                 || flag("--demo")),
         target_swarm: flag("--swarm"),
         // Not when the camera is pinned: a pin is a request for one exact frame, and turning
@@ -208,6 +209,13 @@ pub fn parse(args: &[String]) -> Entry {
             let mut fields = spec.split(':').map(|f| f.parse::<f64>());
             match (fields.next(), fields.next(), fields.next()) {
                 (Some(Ok(yaw)), Some(Ok(pitch)), Some(Ok(booms))) => Some((yaw, pitch, booms)),
+                _ => None,
+            }
+        }),
+        camera_at: after("--demo-cam-at").and_then(|spec| {
+            let fields: Vec<f64> = spec.split(':').map(|f| f.parse::<f64>()).collect::<Result<_, _>>().ok()?;
+            match fields[..] {
+                [x, y, z, m] if m > 0.0 => Some((glam::DVec3::new(x, y, z), m)),
                 _ => None,
             }
         }),
@@ -233,9 +241,10 @@ pub fn parse(args: &[String]) -> Entry {
         form: after("--form"),
         // Only the player's own ship, and no round on the wire yet, so no shard: see
         // `construction`. `--refit-at` on its own asks for the same scene.
-        refit: match value::<f64>(args, "--refit-at") {
-            Some(f) => Some(crate::construction::Clock::Frozen(f)),
-            None => (after("--demo").as_deref() == Some("refit")).then_some(crate::construction::Clock::Looping),
+        refit: match (value::<f64>(args, "--refit-at"), value::<f64>(args, "--refit-from")) {
+            (Some(f), _) => Some(crate::construction::Clock::Frozen(f)),
+            (None, Some(f)) => Some(crate::construction::Clock::Looping(f)),
+            (None, None) => (after("--demo").as_deref() == Some("refit")).then_some(crate::construction::Clock::Looping(0.0)),
         },
         rate_given: flag("--rate"),
         screenshot: after("--shot"),

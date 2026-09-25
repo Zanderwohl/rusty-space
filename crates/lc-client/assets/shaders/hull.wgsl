@@ -3,6 +3,9 @@
 // The mesh's own position is the ship's frame in meters, so a tile is the same size in meters
 // on any hull. Tiles are mipmapped and sampled with derivatives: detail below a pixel is drawn
 // as its average rather than shimmering.
+//
+// Under construction (reveal.w below ALL_PLATED) each point reads its own bands from its distance
+// to the joint. With HULL_GIRDER the mesh is the truss: tubes carrying a girder each, not regions.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -13,6 +16,10 @@ struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+#ifdef HULL_GIRDER
+    // em_render::hull_material::ATTRIBUTE_HULL_GIRDER: (x_m, threshold, scaffold, 0).
+    @location(2) girder: vec4<f32>,
+#else
     // em_render::hull_material::ATTRIBUTE_HULL_REGIONS: a weight a region.
     @location(2) regions_0: vec4<f32>,
     @location(3) regions_1: vec4<f32>,
@@ -20,6 +27,7 @@ struct Vertex {
     @location(5) regions_3: vec4<f32>,
     // em_render::hull_material::ATTRIBUTE_HULL_SEAM: signed meters across to the seam, and along it.
     @location(6) seam: vec2<f32>,
+#endif
 }
 
 struct VertexOutput {
@@ -27,11 +35,15 @@ struct VertexOutput {
     @location(0) world_normal: vec3<f32>,
     @location(1) ship_position: vec3<f32>,
     @location(2) ship_normal: vec3<f32>,
+#ifdef HULL_GIRDER
+    @location(3) @interpolate(flat) girder: vec4<f32>,
+#else
     @location(3) regions_0: vec4<f32>,
     @location(4) regions_1: vec4<f32>,
     @location(5) regions_2: vec4<f32>,
     @location(6) regions_3: vec4<f32>,
     @location(7) seam: vec2<f32>,
+#endif
 }
 
 const REGIONS: u32 = 16u;
@@ -48,6 +60,13 @@ struct HullUniform {
     reveal: vec4<f32>,
     /// `(panel_m, spread_m, 0, 0)`.
     reveal_panel: vec4<f32>,
+    /// `(truss, fitting-out, scaffold down, span)`, meters from reveal's origin.
+    build_fronts: vec4<f32>,
+    build_widths: vec4<f32>,
+    /// `(pitch_m, girder_radius_m, on_surface, bare_albedo)`.
+    lattice: vec4<f32>,
+    /// Albedo, and work lights.
+    girder: vec4<f32>,
     /// `(pitch_m, head_radius_m, offset_m, albedo)`.
     bolts: vec4<f32>,
     /// One bit a region.
@@ -75,13 +94,66 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
     out.ship_position = vertex.position;
     out.ship_normal = vertex.normal;
+#ifdef HULL_GIRDER
+    out.girder = vertex.girder;
+#else
     out.regions_0 = vertex.regions_0;
     out.regions_1 = vertex.regions_1;
     out.regions_2 = vertex.regions_2;
     out.regions_3 = vertex.regions_3;
     out.seam = vertex.seam;
+#endif
     return out;
 }
+
+/// Meters from the joint to `p`, no farther than the span.
+fn swept(p: vec3<f32>) -> f32 {
+    return min(distance(p, material.reveal.xyz), material.build_fronts.w);
+}
+
+/// A band's share at `x` meters out.
+fn band(front: f32, width: f32, x: f32) -> f32 {
+    return clamp((front - x) / max(width, 1.0e-6), 0.0, 1.0);
+}
+
+/// Lit albedo plus what glows, through the exposure.
+fn shade(albedo: vec3<f32>, emitted: vec3<f32>, world_normal: vec3<f32>) -> vec4<f32> {
+    let to_star = normalize(material.to_star.xyz);
+    let lambert = max(dot(normalize(world_normal), to_star), 0.0);
+    let light = max(lambert, material.to_star.w);
+    let linear = material.reflected.rgb * albedo * light + emitted;
+
+    let reference = material.exposure.x;
+    let stops = material.exposure.y;
+    let luminance = dot(linear, LUMA);
+    let peak = max(linear.r, max(linear.g, linear.b));
+    var value = 0.0;
+    if (luminance > 0.0 && reference > 0.0 && stops > 0.0) {
+        value = clamp(log2(luminance / reference) / stops + 1.0, 0.0, 1.0);
+    }
+    let chroma = select(vec3<f32>(1.0), linear / peak, peak > 0.0);
+    return vec4<f32>(chroma * value, 1.0);
+}
+
+fn girder_light() -> vec3<f32> {
+    return material.girder.rgb * material.girder.w;
+}
+
+#ifdef HULL_GIRDER
+/// A girder stands while its band's share is past its threshold: the truss as it goes up, and
+/// the scaffold until it comes down.
+@fragment
+fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    let x = min(in.girder.x, material.build_fronts.w);
+    let truss = band(material.build_fronts.x, material.build_widths.x, x);
+    let down = band(material.build_fronts.z, material.build_widths.z, x);
+    let standing = select(truss, truss * (1.0 - down), in.girder.z > 0.5);
+    if (material.reveal.w >= ALL_PLATED || standing <= in.girder.y) {
+        discard;
+    }
+    return shade(material.girder.rgb, girder_light(), in.world_normal);
+}
+#else
 
 struct Texel {
     albedo: vec3<f32>,
@@ -116,17 +188,9 @@ fn hash(cell: vec3<f32>) -> f32 {
     return fract((r.x + r.y) * r.z);
 }
 
-/// Whether the plating has reached the panel at `p`. Panels are cells of the dominant
-/// projection, each with its own hashed lag, so the front arrives as panels, not as a line.
-fn plated(p: vec3<f32>, n: vec3<f32>) -> bool {
-    let front = material.reveal.w;
-    if (front >= ALL_PLATED) {
-        return true;
-    }
-    let panel_m = material.reveal_panel.x;
+/// The axis the normal is nearest, as a one; the other two are the face's.
+fn dominant(n: vec3<f32>) -> vec3<f32> {
     let a = abs(n);
-    // The dominant axis is left alone, so the cell is a column through the hull and its
-    // center stays on the surface.
     var keep = vec3<f32>(0.0);
     if (a.x >= a.y && a.x >= a.z) {
         keep.x = 1.0;
@@ -135,11 +199,64 @@ fn plated(p: vec3<f32>, n: vec3<f32>) -> bool {
     } else {
         keep.z = 1.0;
     }
+    return keep;
+}
+
+/// Whether the plating has reached the panel at `p`. Panels are cells of the dominant
+/// projection, each with its own hashed lag, so the front arrives as panels, not as a line.
+fn plated(p: vec3<f32>, n: vec3<f32>) -> bool {
+    let front = material.reveal.w;
+    if (front >= ALL_PLATED) {
+        return true;
+    }
+    let panel_m = material.reveal_panel.x;
+    // The dominant axis is left alone, so the cell is a column through the hull and its
+    // center stays on the surface.
+    let keep = dominant(n);
     let cell = floor(p / panel_m) * (1.0 - keep) + keep * 0.5;
     let center = mix((cell + 0.5) * panel_m, p, keep);
     // Signed, so the two faces of a thin part lag independently.
     let lag = hash(cell + keep * 17.0 * sign(n)) * material.reveal_panel.y;
-    return distance(center, material.reveal.xyz) + lag <= front;
+    return swept(center) + lag <= front;
+}
+
+/// The lattice where it crosses a face: girders along the face's two axes at every pitch.
+struct Lines {
+    /// How much of the fragment is girder, and the same as a mean over the lattice.
+    sharp: f32,
+    mean: f32,
+    /// The nearest girder's.
+    threshold: f32,
+    /// 1 once a girder is under a pixel, where `mean` is what to draw.
+    under: f32,
+}
+
+fn lattice_lines(p: vec3<f32>, n: vec3<f32>, pixel: f32) -> Lines {
+    let pitch = material.lattice.x;
+    let r = material.lattice.y;
+    let keep = dominant(n);
+    let q = p / pitch;
+    let off = abs(fract(q + 0.5) - 0.5) * pitch + keep * 1.0e9;
+    let d = min(off.x, min(off.y, off.z));
+    // The plane the nearest girder lies in names it, with the segment along the girder and the
+    // layer through the face.
+    var across = vec3<f32>(0.0);
+    if (off.x == d) {
+        across.x = 1.0;
+    } else if (off.y == d) {
+        across.y = 1.0;
+    } else {
+        across.z = 1.0;
+    }
+    let id = mix(floor(q), round(q), across + keep) + across * 0.37;
+    let sharp = 1.0 - smoothstep(r - 0.5 * pixel, r + 0.5 * pixel, d);
+    let c = min(2.0 * r / pitch, 1.0);
+    return Lines(sharp, 2.0 * c - c * c, hash(id), smoothstep(r, 3.0 * r, pixel));
+}
+
+/// Meters a pixel spans on the surface.
+fn pixel_m(p: vec3<f32>) -> f32 {
+    return max(length(fwidth(p)), 1.0e-4);
 }
 
 /// The two heaviest regions at a point, and the second's share of the pair.
@@ -193,36 +310,63 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let w = planes(in.ship_normal);
     let near = triplanar(in.ship_position, w, pair.first);
     let far = triplanar(in.ship_position, w, pair.second);
-    // Before the discard: it takes derivatives.
+    // Before any discard: these take derivatives.
     let bolt = bolt_cover(in.seam);
-    if (!plated(in.ship_position, in.ship_normal)) {
-        discard;
-    }
+    let pixel = pixel_m(in.ship_position);
+    let lines = lattice_lines(in.ship_position, in.ship_normal, pixel);
+    let plated_here = plated(in.ship_position, in.ship_normal);
     let t = pair.share;
     var albedo = mix(near.albedo, far.albedo, t);
     let side = select(max(pair.first, pair.second), min(pair.first, pair.second), in.seam.x > 0.0);
     if (((material.bolted >> side) & 1u) != 0u) {
         albedo = mix(albedo, vec3<f32>(material.bolts.w), bolt);
     }
-    let emitted = mix(
+    var emitted = mix(
         near.lit * material.emitted[pair.first].rgb,
         far.lit * material.emitted[pair.second].rgb,
         t,
     );
-
-    let to_star = normalize(material.to_star.xyz);
-    let lambert = max(dot(normalize(in.world_normal), to_star), 0.0);
-    let light = max(lambert, material.to_star.w);
-    let linear = material.reflected.rgb * albedo * light + emitted;
-
-    let reference = material.exposure.x;
-    let stops = material.exposure.y;
-    let luminance = dot(linear, LUMA);
-    let peak = max(linear.r, max(linear.g, linear.b));
-    var value = 0.0;
-    if (luminance > 0.0 && reference > 0.0 && stops > 0.0) {
-        value = clamp(log2(luminance / reference) / stops + 1.0, 0.0, 1.0);
+    if (material.reveal.w >= ALL_PLATED) {
+        return shade(albedo, emitted, in.world_normal);
     }
-    let chroma = select(vec3<f32>(1.0), linear / peak, peak > 0.0);
-    return vec4<f32>(chroma * value, 1.0);
+
+    let x = swept(in.ship_position);
+    let fitted = band(material.build_fronts.y, material.build_widths.y, x);
+    let fitted_albedo = albedo;
+    albedo = mix(vec3<f32>(material.lattice.w), albedo, fitted);
+    emitted *= fitted;
+    if (material.lattice.z < 0.5) {
+        // A girder mesh stands behind the gaps.
+        if (!plated_here) {
+            discard;
+        }
+        return shade(albedo, emitted, in.world_normal);
+    }
+
+    // No girder mesh: the lattice is drawn here, in place of plating not yet up and over plating
+    // as scaffold. Once a girder is under a pixel nothing is discarded, and plating, gaps and
+    // girders are drawn as their shares of the pixel.
+    let truss = band(material.build_fronts.x, material.build_widths.x, x);
+    let scaffold = truss * (1.0 - band(material.build_fronts.z, material.build_widths.z, x));
+    // Seen from afar, a line of sight crosses every layer of truss the sliver holds.
+    let through = 1.0 - pow(1.0 - lines.mean * truss, max(material.build_widths.w, 1.0));
+    let open = mix(select(0.0, lines.sharp, truss > lines.threshold), through, lines.under);
+    let over = mix(select(0.0, lines.sharp, scaffold > lines.threshold), lines.mean * scaffold, lines.under);
+    let panel_far = smoothstep(0.3, 1.0, pixel / material.reveal_panel.x);
+    let smooth_plating = band(material.reveal.w, material.reveal_panel.y, x);
+    let plating = mix(select(0.0, 1.0, plated_here), smooth_plating, max(panel_far, lines.under));
+    // Where nothing is up yet there is nothing to draw. Between girders too far off to resolve,
+    // what shows is taken to be the part's own material, which for a part growing is the old
+    // hull just behind.
+    let bare = lines.under < 0.5 && open < 0.5;
+    if (plating < 0.5 && (bare || truss <= 0.0)) {
+        discard;
+    }
+    let girder = material.girder.rgb;
+    let open_albedo = mix(fitted_albedo, girder, open);
+    let closed_albedo = mix(albedo, girder, over);
+    let open_emitted = girder_light() * open;
+    let closed_emitted = mix(emitted, girder_light(), over);
+    return shade(mix(open_albedo, closed_albedo, plating), mix(open_emitted, closed_emitted, plating), in.world_normal);
 }
+#endif

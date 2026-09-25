@@ -6,16 +6,7 @@
 //! it on the async compute pool, caches the meshes by [`form_hash`], and swaps each into its
 //! entity when it lands, so a remesh never holds up a frame.
 //!
-//! **Manifold by construction.** Before extraction the grid is cleaned of every lattice square
-//! whose corners alternate in sign, by turning one of its outside corners inside. Every cell
-//! face then carries at most one segment of surface, so the crossings in a cell form simple
-//! loops, and a vertex a loop (not a cell) leaves every edge shared by exactly two triangles
-//! and every vertex with one fan of them. The blocky finish is the same topology with its
-//! vertices moved, so it is closed the same way.
-//!
-//! A feature thinner than a cell, like a strap on a coarse grid, is kept only where a sample
-//! lands in it. It may vanish or be holed; diagonal neighbors are joined rather than split, and
-//! what is left is closed.
+//! The grid and its extraction are [`crate::surface_nets`]'s, which says why the mesh is closed.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::f64::consts::TAU;
@@ -30,8 +21,10 @@ use em_render::hull_material::{ATTRIBUTE_HULL_SEAM, insert_region_weights, regio
 use glam::DVec3;
 use lc_world::fitting::Balance;
 use lc_world::form::primitive::Shape;
-use lc_world::form::sdf::Sdf;
+use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
+
+use crate::surface_nets::{AXES, Field, Grid, Surface, gradients, nets};
 
 /// The palette's order: region `i` is drawn with `textures/hull/{REGION_GRAPHS[i]}.tgraph`.
 pub const REGION_GRAPHS: [&str; 8] = ["storage", "drone", "living", "engine", "data", "mind", "spar", "bay"];
@@ -139,30 +132,10 @@ pub fn form_hash(form: &Form, balance: &Balance) -> u64 {
     parts.sort_by_key(|p| p.id);
     for part in parts {
         h.u64(part.id.0 as u64);
-        h.u64(match part.kind {
-            Kind::Mind => 0,
-            Kind::Storage => 1,
-            Kind::Drone => 2,
-            Kind::Engine => 3,
-            Kind::Living => 4,
-            Kind::Data => 5,
-            Kind::Bay => 6,
-            Kind::Spar(SparMode::Saddle) => 7,
-            Kind::Spar(SparMode::Strap) => 8,
-        });
+        h.kind(part.kind);
         h.f64(part.volume_m3);
         // The solved shape covers the primitive's proportions and its scale.
-        let shape = part.shape(balance.min_part_m3);
-        let dimensions: Vec<f64> = match shape {
-            Shape::Ellipsoid { semi_axes } => semi_axes.to_array().to_vec(),
-            Shape::Capsule { radius, length } | Shape::Cylinder { radius, length } => vec![radius, length],
-            Shape::Slab { edges, corner } => vec![edges.x, edges.y, edges.z, corner],
-            Shape::Torus { major, minor } => vec![major, minor],
-            Shape::Frustum { length, start, end } => vec![length, start, end],
-        };
-        for x in dimensions {
-            h.f64(x);
-        }
+        h.shape(&part.shape(balance.min_part_m3));
         match part.placement {
             None => h.u64(0),
             Some(Placement { parent, mount, twist, tilt, blend, mirror }) => {
@@ -182,6 +155,23 @@ pub fn form_hash(form: &Form, balance: &Balance) -> u64 {
                 }
                 h.u64(mirror as u64);
             }
+        }
+    }
+    h.0
+}
+
+/// [`form_hash`] for bare copies, which are their poses and shapes and nothing else. Salted, so
+/// no set of pieces hashes as a form does.
+pub fn pieces_hash(pieces: &[Piece]) -> u64 {
+    let mut h = Fnv::default();
+    h.u64(0x5049_4543_4553);
+    for piece in pieces {
+        h.u64(piece.part.0 as u64);
+        h.u64(piece.side as u64);
+        h.kind(piece.kind);
+        h.shape(&piece.shape);
+        for x in piece.pose.position.to_array().into_iter().chain(piece.pose.rotation.to_cols_array()) {
+            h.f64(x);
         }
     }
     h.0
@@ -217,364 +207,33 @@ impl Fnv {
     fn f64(&mut self, x: f64) {
         self.u64((x + 0.0).to_bits());
     }
-}
 
-/// Samples of the field on a lattice whose outermost layer lies outside the bounds, so every
-/// sample on it is outside and the surface is closed.
-struct Grid {
-    origin: DVec3,
-    step: f64,
-    n: [usize; 3],
-    values: Vec<f32>,
-    /// Blocks that may hold a sign change, as block coordinates.
-    near: Vec<[usize; 3]>,
-}
-
-/// Samples a side of the blocks the grid is evaluated in.
-const BLOCK: usize = 8;
-
-/// `f32` rounds a positive distance below about 1e-45 to zero, which would read as inside.
-fn narrow(d: f64) -> f32 {
-    let v = d as f32;
-    if d > 0.0 && v <= 0.0 { f32::MIN_POSITIVE } else { v }
-}
-
-/// Where cleaning puts a sample it turns inside, in cells: far enough in that its crossings
-/// are not all at the sample, which would put several vertices on one point.
-const DILATED: f64 = 0.1;
-
-const AXES: [DVec3; 3] = [DVec3::X, DVec3::Y, DVec3::Z];
-
-/// The two axes across each axis, in the order the cell's edge table indexes them.
-const ACROSS: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
-
-impl Grid {
-    fn sample(sdf: &Sdf, cells: u32) -> Grid {
-        let (min, max) = sdf.bounds();
-        let size = max - min;
-        let step = size.max_element() / cells.max(1) as f64;
-        let n = size.to_array().map(|s| (s / step).ceil() as usize + 3);
-        let origin = min - DVec3::splat(step);
-        let mut grid = Grid { origin, step, n, values: vec![0.0; n[0] * n[1] * n[2]], near: Vec::new() };
-
-        // Lipschitz 1: a block whose center is farther from the surface than any of its samples
-        // or their neighbors two cells out has one sign across all of them, so no crossing
-        // touches it and its samples need only the sign.
-        let reach = ((BLOCK as f64) * 3f64.sqrt() / 2.0 + 2.0) * step;
-        let blocks = n.map(|n| n.div_ceil(BLOCK));
-        let mut scratch = Vec::new();
-        for bz in 0..blocks[2] {
-            for by in 0..blocks[1] {
-                for bx in 0..blocks[0] {
-                    let lo = [bx, by, bz].map(|b| b * BLOCK);
-                    let hi = [0, 1, 2].map(|a| (lo[a] + BLOCK).min(n[a]));
-                    let middle = DVec3::from_array([0, 1, 2].map(|a| (lo[a] + hi[a] - 1) as f64 / 2.0));
-                    let d = sdf.distance_with(origin + middle * step, &mut scratch);
-                    let far = d.abs() > reach;
-                    if !far {
-                        grid.near.push([bx, by, bz]);
-                    }
-                    for z in lo[2]..hi[2] {
-                        for y in lo[1]..hi[1] {
-                            for x in lo[0]..hi[0] {
-                                let i = grid.index([x, y, z]);
-                                let d = if far { d } else { sdf.distance_with(grid.position([x, y, z]), &mut scratch) };
-                                grid.values[i] = narrow(d);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        grid.clean();
-        grid
+    fn kind(&mut self, kind: Kind) {
+        self.u64(match kind {
+            Kind::Mind => 0,
+            Kind::Storage => 1,
+            Kind::Drone => 2,
+            Kind::Engine => 3,
+            Kind::Living => 4,
+            Kind::Data => 5,
+            Kind::Bay => 6,
+            Kind::Spar(SparMode::Saddle) => 7,
+            Kind::Spar(SparMode::Strap) => 8,
+        });
     }
 
-    fn index(&self, i: [usize; 3]) -> usize {
-        i[0] + self.n[0] * (i[1] + self.n[1] * i[2])
-    }
-
-    fn position(&self, i: [usize; 3]) -> DVec3 {
-        self.origin + DVec3::new(i[0] as f64, i[1] as f64, i[2] as f64) * self.step
-    }
-
-    fn value(&self, i: [usize; 3]) -> f32 {
-        self.values[self.index(i)]
-    }
-
-    fn inside(&self, i: [usize; 3]) -> bool {
-        self.value(i) <= 0.0
-    }
-
-    fn on_boundary(&self, i: [usize; 3]) -> bool {
-        (0..3).any(|a| i[a] == 0 || i[a] == self.n[a] - 1)
-    }
-
-    /// Turns inside one outside corner of each lattice square whose corners alternate, until
-    /// none does. Each turn makes an outside sample inside, so it ends. The corner turned is
-    /// the one nearer the surface. A boundary sample is never one: a square that alternates
-    /// has an inside corner diagonal to each outside one, and no boundary sample is inside.
-    fn clean(&mut self) {
-        let mut queue = VecDeque::new();
-        for block in self.near.clone() {
-            let samples: Vec<[usize; 3]> = self.block_samples(block).collect();
-            for i in samples {
-                for axis in 0..3 {
-                    self.clean_square(axis, i, &mut queue);
-                }
-            }
-        }
-        while let Some((axis, base)) = queue.pop_front() {
-            self.clean_square(axis, base, &mut queue);
-        }
-        self.near.sort_unstable();
-        self.near.dedup();
-    }
-
-    /// Queues every square the turned sample is a corner of.
-    fn clean_square(&mut self, axis: usize, base: [usize; 3], queue: &mut VecDeque<(usize, [usize; 3])>) {
-        let Some(corners) = self.square(axis, base) else { return };
-        let [a, b, c, d] = corners.map(|i| self.inside(i));
-        if !(a == d && b == c && a != b) {
-            return;
-        }
-        let (p, q) = if a { (corners[1], corners[2]) } else { (corners[0], corners[3]) };
-        let pick = match (self.on_boundary(p), self.on_boundary(q)) {
-            (false, true) => p,
-            (true, false) => q,
-            (true, true) => return,
-            (false, false) if self.value(p) <= self.value(q) => p,
-            (false, false) => q,
+    fn shape(&mut self, shape: &Shape) {
+        let dimensions: Vec<f64> = match *shape {
+            Shape::Ellipsoid { semi_axes } => semi_axes.to_array().to_vec(),
+            Shape::Capsule { radius, length } | Shape::Cylinder { radius, length } => vec![radius, length],
+            Shape::Slab { edges, corner } => vec![edges.x, edges.y, edges.z, corner],
+            Shape::Torus { major, minor } => vec![major, minor],
+            Shape::Frustum { length, start, end } => vec![length, start, end],
         };
-        let i = self.index(pick);
-        self.values[i] = -(DILATED * self.step) as f32;
-        self.near.push(pick.map(|x| x / BLOCK));
-        for axis in 0..3 {
-            let (u, v) = ACROSS[axis];
-            for (du, dv) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                if pick[u] >= du && pick[v] >= dv {
-                    let mut base = pick;
-                    base[u] -= du;
-                    base[v] -= dv;
-                    queue.push_back((axis, base));
-                }
-            }
+        for x in dimensions {
+            self.f64(x);
         }
     }
-
-    /// The square across `axis` at `base`, corners in the order `base`, `+u`, `+v`, `+u+v`.
-    fn square(&self, axis: usize, base: [usize; 3]) -> Option<[[usize; 3]; 4]> {
-        let (u, v) = ACROSS[axis];
-        if base[u] + 1 >= self.n[u] || base[v] + 1 >= self.n[v] {
-            return None;
-        }
-        let step = |i: [usize; 3], a: usize| {
-            let mut j = i;
-            j[a] += 1;
-            j
-        };
-        Some([base, step(base, u), step(base, v), step(step(base, u), v)])
-    }
-
-    fn block_samples(&self, block: [usize; 3]) -> impl Iterator<Item = [usize; 3]> + '_ {
-        let lo = block.map(|b| b * BLOCK);
-        let hi = [0, 1, 2].map(|a| (lo[a] + BLOCK).min(self.n[a]));
-        (lo[2]..hi[2]).flat_map(move |z| (lo[1]..hi[1]).flat_map(move |y| (lo[0]..hi[0]).map(move |x| [x, y, z])))
-    }
-
-    /// Every sample that is the base of a cell, lattice edge or voxel that may cross the surface.
-    /// An edge that crosses has an end in a near block, either because the field crosses there
-    /// or because cleaning turned it, and the cells around it are based within two samples of
-    /// that end, so in the same block or the next.
-    fn candidates(&self) -> impl Iterator<Item = [usize; 3]> + '_ {
-        let blocks = self.n.map(|n| n.div_ceil(BLOCK));
-        let mut marked = vec![false; blocks[0] * blocks[1] * blocks[2]];
-        for &[x, y, z] in &self.near {
-            for dz in 0..3 {
-                for dy in 0..3 {
-                    for dx in 0..3 {
-                        let (bx, by, bz) = ((x + dx).wrapping_sub(1), (y + dy).wrapping_sub(1), (z + dz).wrapping_sub(1));
-                        if bx < blocks[0] && by < blocks[1] && bz < blocks[2] {
-                            marked[bx + blocks[0] * (by + blocks[1] * bz)] = true;
-                        }
-                    }
-                }
-            }
-        }
-        let marked: Vec<[usize; 3]> = (0..marked.len())
-            .filter(|&k| marked[k])
-            .map(|k| [k % blocks[0], k / blocks[0] % blocks[1], k / blocks[0] / blocks[1]])
-            .collect();
-        marked.into_iter().flat_map(|block| self.block_samples(block))
-    }
-}
-
-/// Vertices and outward, counterclockwise triangles over them.
-struct Surface {
-    vertices: Vec<DVec3>,
-    triangles: Vec<[u32; 3]>,
-}
-
-impl Surface {
-    /// Split along the shorter diagonal, which keeps slivers out of a curved sheet.
-    fn quad(&mut self, q: [u32; 4]) {
-        let p = q.map(|i| self.vertices[i as usize]);
-        if p[0].distance_squared(p[2]) <= p[1].distance_squared(p[3]) {
-            self.triangles.extend([[q[0], q[1], q[2]], [q[0], q[2], q[3]]]);
-        } else {
-            self.triangles.extend([[q[0], q[1], q[3]], [q[1], q[2], q[3]]]);
-        }
-    }
-}
-
-/// A cell's twelve edges as pairs of corners, corner `c` at offset `(c & 1, c >> 1 & 1, c >> 2)`.
-/// Edge `4a + bu + 2bv` runs along axis `a` at offsets `bu`, `bv` across it, per [`ACROSS`].
-const EDGES: [(usize, usize); 12] =
-    [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)];
-
-/// Each face's four edges.
-const FACES: [[usize; 4]; 6] = [[4, 10, 6, 8], [5, 11, 7, 9], [0, 9, 2, 8], [1, 11, 3, 10], [0, 5, 1, 4], [2, 7, 3, 6]];
-
-const NO_LOOP: u8 = u8::MAX;
-
-/// Which loop of crossings each edge is on, from the cell's corner signs. Each face holds at
-/// most two crossings once the grid is clean, so each pairs its two and the pairs chain into
-/// loops.
-fn loops(inside: [bool; 8]) -> ([u8; 12], u8) {
-    let crosses = EDGES.map(|(a, b)| inside[a] != inside[b]);
-    // For each edge, its two faces and its partner on each.
-    let mut partner = [[usize::MAX; 2]; 12];
-    let mut faces_of = [[usize::MAX; 2]; 12];
-    for (f, face) in FACES.iter().enumerate() {
-        let on: Vec<usize> = face.iter().copied().filter(|&e| crosses[e]).collect();
-        debug_assert!(on.len() != 4, "a face with four crossings survived cleaning");
-        for pair in on.chunks(2).filter(|p| p.len() == 2) {
-            for (e, other) in [(pair[0], pair[1]), (pair[1], pair[0])] {
-                let slot = usize::from(faces_of[e][0] != usize::MAX);
-                faces_of[e][slot] = f;
-                partner[e][slot] = other;
-            }
-        }
-    }
-    let mut id = [NO_LOOP; 12];
-    let mut count = 0u8;
-    for start in 0..12 {
-        if !crosses[start] || id[start] != NO_LOOP {
-            continue;
-        }
-        let (mut edge, mut via) = (start, faces_of[start][0]);
-        loop {
-            id[edge] = count;
-            let slot = usize::from(faces_of[edge][0] == via);
-            let next = partner[edge][slot];
-            via = faces_of[edge][slot];
-            edge = next;
-            if edge == start || edge == usize::MAX {
-                break;
-            }
-        }
-        count += 1;
-    }
-    (id, count)
-}
-
-/// Surface nets: a vertex at the mean of each loop's crossings, and a quad around each lattice
-/// edge that crosses, joining the vertices of the four cells around it.
-///
-/// `blocky` puts each vertex at its cell's center instead. The quad around a lattice edge is then
-/// the face between the cubes about the edge's two samples, so this is the occupied samples as
-/// cubes, with the loops keeping two cubes that meet only at a corner from sharing a vertex.
-fn nets(grid: &Grid, blocky: bool) -> Surface {
-    let mut surface = Surface { vertices: Vec::new(), triangles: Vec::new() };
-    let mut cells: HashMap<usize, [u32; 12]> = HashMap::new();
-    let mut active = Vec::new();
-    let is_base = |i: &[usize; 3]| (0..3).all(|a| i[a] + 1 < grid.n[a]);
-    let offsets: [usize; 8] = std::array::from_fn(|c| (c & 1) + (c >> 1 & 1) * grid.n[0] + (c >> 2) * grid.n[0] * grid.n[1]);
-    for base in grid.candidates().filter(is_base) {
-        let at = grid.index(base);
-        let mut mask = 0u8;
-        for (c, offset) in offsets.iter().enumerate() {
-            mask |= u8::from(grid.values[at + offset] <= 0.0) << c;
-        }
-        if mask == 0 || mask == u8::MAX {
-            continue;
-        }
-        let inside: [bool; 8] = std::array::from_fn(|c| mask >> c & 1 == 1);
-        let corner = |c: usize| [base[0] + (c & 1), base[1] + (c >> 1 & 1), base[2] + (c >> 2)];
-        let (id, count) = loops(inside);
-        let mut sums = vec![(DVec3::ZERO, 0.0); count as usize];
-        for (e, &(a, b)) in EDGES.iter().enumerate() {
-            if id[e] == NO_LOOP {
-                continue;
-            }
-            let (va, vb) = (grid.value(corner(a)) as f64, grid.value(corner(b)) as f64);
-            let t = va / (va - vb);
-            let p = grid.position(corner(a)).lerp(grid.position(corner(b)), t);
-            let sum = &mut sums[id[e] as usize];
-            *sum = (sum.0 + p, sum.1 + 1.0);
-        }
-        let first = surface.vertices.len() as u32;
-        let center = grid.position(base) + DVec3::splat(0.5 * grid.step);
-        surface.vertices.extend(sums.iter().map(|(p, n)| if blocky { center } else { *p / *n }));
-        cells.insert(at, id.map(|l| if l == NO_LOOP { u32::MAX } else { first + l as u32 }));
-        active.push(base);
-    }
-    for base in active {
-        let from = grid.inside(base);
-        for axis in 0..3 {
-            let mut end = base;
-            end[axis] += 1;
-            if grid.inside(end) == from {
-                continue;
-            }
-            let (u, v) = ACROSS[axis];
-            // Counterclockwise about `u × v`, which is `+axis` but for y.
-            let mut quad = [(1, 1), (0, 1), (0, 0), (1, 0)].map(|(du, dv)| {
-                let mut cell = base;
-                cell[u] -= du;
-                cell[v] -= dv;
-                cells[&grid.index(cell)][4 * axis + du + 2 * dv]
-            });
-            // Outward is `+axis` when the inside end is the base.
-            if (axis == 1) == from {
-                quad.reverse();
-            }
-            surface.quad(quad);
-        }
-    }
-    surface
-}
-
-/// Normals from the field's gradient, by central differences a tenth of a cell wide. Where the
-/// gradient vanishes, at a crease the field is flat across, the triangles' own.
-fn gradients(sdf: &Sdf, surface: &Surface, step: f64) -> Vec<DVec3> {
-    let h = 0.1 * step;
-    let mut scratch = Vec::new();
-    let mut normals: Vec<DVec3> = surface
-        .vertices
-        .iter()
-        .map(|&p| {
-            let mut d = |q: DVec3| sdf.distance_with(q, &mut scratch);
-            let g = DVec3::from_array([0, 1, 2].map(|a| d(p + AXES[a] * h) - d(p - AXES[a] * h)));
-            g.try_normalize().unwrap_or(DVec3::ZERO)
-        })
-        .collect();
-    let mut faces = vec![DVec3::ZERO; normals.len()];
-    for t in &surface.triangles {
-        let [a, b, c] = t.map(|i| surface.vertices[i as usize]);
-        let n = (b - a).cross(c - a);
-        for &i in t {
-            faces[i as usize] += n;
-        }
-    }
-    // Or where it points against them: across a gap narrower than a cell, which the grid
-    // bridged and the field did not.
-    for (n, f) in normals.iter_mut().zip(faces) {
-        if n.dot(f) <= 0.0 {
-            *n = f.try_normalize().unwrap_or(DVec3::Z);
-        }
-    }
-    normals
 }
 
 /// What a vertex carries to the material.
@@ -721,24 +380,89 @@ impl<'a> Paint<'a> {
     /// The nearest region and the next, blended across the fillet between them, or across a
     /// cell where they meet hard so the edge is not a stair of whole triangles.
     fn regions(&self, distances: &[f64]) -> [[u8; 4]; 4] {
-        let mut best = [(f64::INFINITY, usize::MAX); REGION_GRAPHS.len()];
-        for (i, &d) in distances.iter().enumerate() {
-            let slot = &mut best[self.region[i] as usize];
-            if d < slot.0 {
-                *slot = (d, i);
-            }
-        }
-        let mut order: Vec<usize> = (0..best.len()).filter(|&r| best[r].1 != usize::MAX).collect();
-        order.sort_by(|&a, &b| best[a].0.total_cmp(&best[b].0));
-        let first = order[0];
-        let Some(&second) = order.get(1) else { return region_weights(first as u32, first as u32, 0.0) };
-        let (d1, i1) = best[first];
-        let (d2, i2) = best[second];
-        let width = self.step.max(self.fillet[i1].min(self.fillet[i2]));
-        let x = ((d2 - d1) / width).clamp(0.0, 1.0);
-        let share = 0.5 * (1.0 - x * x * (3.0 - 2.0 * x));
-        region_weights(first as u32, second as u32, share as f32)
+        blended(distances, &self.region, &self.fillet, self.step)
     }
+}
+
+/// The nearest region to a point and the next, from each piece's distance, `fillet` meters wide
+/// where two pieces are blended and a cell `step` wide where they meet hard.
+fn blended(distances: &[f64], region: &[u32], fillet: &[f64], step: f64) -> [[u8; 4]; 4] {
+    let mut best = [(f64::INFINITY, usize::MAX); REGION_GRAPHS.len()];
+    for (i, &d) in distances.iter().enumerate() {
+        let slot = &mut best[region[i] as usize];
+        if d < slot.0 {
+            *slot = (d, i);
+        }
+    }
+    let mut order: Vec<usize> = (0..best.len()).filter(|&r| best[r].1 != usize::MAX).collect();
+    order.sort_by(|&a, &b| best[a].0.total_cmp(&best[b].0));
+    let first = order[0];
+    let Some(&second) = order.get(1) else { return region_weights(first as u32, first as u32, 0.0) };
+    let (d1, i1) = best[first];
+    let (d2, i2) = best[second];
+    let width = step.max(fillet[i1].min(fillet[i2]));
+    let x = ((d2 - d1) / width).clamp(0.0, 1.0);
+    let share = 0.5 * (1.0 - x * x * (3.0 - 2.0 * x));
+    region_weights(first as u32, second as u32, share as f32)
+}
+
+/// Copies drawn as the union of their bare shapes: no blend, and a spar uncut. For what a refit
+/// step is working on, which stands apart from the form until the step is done.
+pub struct Union<'a> {
+    pieces: &'a [Piece],
+    inverse: Vec<glam::DMat3>,
+    bounds: (DVec3, DVec3),
+}
+
+impl<'a> Union<'a> {
+    pub fn new(pieces: &'a [Piece]) -> Self {
+        let mut bounds = (DVec3::INFINITY, DVec3::NEG_INFINITY);
+        for piece in pieces {
+            let half = piece.shape.extent(piece.pose.rotation, 0.0);
+            bounds = (bounds.0.min(piece.pose.position - half), bounds.1.max(piece.pose.position + half));
+        }
+        Union { pieces, inverse: pieces.iter().map(|p| p.pose.rotation.transpose()).collect(), bounds }
+    }
+
+    fn each(&self, p: DVec3, into: &mut Vec<f64>) {
+        into.clear();
+        into.extend(self.pieces.iter().zip(&self.inverse).map(|(piece, inv)| piece.shape.distance(*inv * (p - piece.pose.position))));
+    }
+}
+
+impl Field for Union<'_> {
+    fn distance(&self, p: DVec3, scratch: &mut Vec<f64>) -> f64 {
+        self.each(p, scratch);
+        scratch.iter().copied().fold(f64::INFINITY, f64::min)
+    }
+
+    fn bounds(&self) -> (DVec3, DVec3) {
+        self.bounds
+    }
+}
+
+/// [`mesh_form`] for bare copies, in the frame their poses are in. Empty for no pieces.
+pub fn mesh_pieces(pieces: &[Piece], cells: u32, finish: Finish) -> HullBuffers {
+    if pieces.is_empty() {
+        return HullBuffers::default();
+    }
+    let union = Union::new(pieces);
+    let grid = Grid::sample(&union, cells);
+    let surface = nets(&grid, finish == Finish::Blocky);
+    let region: Vec<u32> = pieces.iter().map(|p| region(p.kind)).collect();
+    let fillet = vec![0.0; pieces.len()];
+    let mut scratch = Vec::new();
+    let painted: Vec<Painted> = surface
+        .vertices
+        .iter()
+        .map(|&p| {
+            union.each(p, &mut scratch);
+            let regions = blended(&scratch, &region, &fillet, grid.step);
+            Painted { regions, across: SEAM_FAR as f32, along: 0.0, about: None, seam: None }
+        })
+        .collect();
+    let normals = (finish == Finish::Smooth).then(|| gradients(&union, &surface, grid.step));
+    buffers(&surface, &painted, normals.as_deref(), grid.step)
 }
 
 /// Lays the surface out as buffers. Shared vertices stay shared where `normals` is given;
@@ -820,11 +544,51 @@ pub fn spar_fixture(mode: SparMode) -> Form {
 #[derive(Component, Clone)]
 #[require(HullPixels, HullMeshState)]
 pub struct HullForm {
-    pub form: Arc<Form>,
-    pub balance: Balance,
+    pub source: HullSource,
     pub finish: Finish,
     /// A fixed resolution instead of one from [`HullPixels`].
     pub cells: Option<u32>,
+}
+
+impl HullForm {
+    pub fn form(form: Form, balance: Balance, finish: Finish) -> Self {
+        HullForm { source: HullSource::Form(Arc::new(form), balance), finish, cells: None }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum HullSource {
+    Form(Arc<Form>, Balance),
+    /// Through [`mesh_pieces`].
+    Pieces(Arc<[Piece]>),
+}
+
+impl HullSource {
+    fn hash(&self) -> u64 {
+        match self {
+            HullSource::Form(form, balance) => form_hash(form, balance),
+            HullSource::Pieces(pieces) => pieces_hash(pieces),
+        }
+    }
+
+    fn extent_m(&self) -> f64 {
+        let (min, max) = match self {
+            HullSource::Form(form, balance) => match Sdf::new(form, balance) {
+                Ok(sdf) => sdf.bounds(),
+                Err(_) => return 0.0,
+            },
+            HullSource::Pieces(pieces) if pieces.is_empty() => return 0.0,
+            HullSource::Pieces(pieces) => Union::new(pieces).bounds,
+        };
+        (max - min).max_element()
+    }
+
+    fn mesh(&self, cells: u32, finish: Finish) -> Result<HullBuffers, FormError> {
+        match self {
+            HullSource::Form(form, balance) => mesh_form(form, balance, cells, finish),
+            HullSource::Pieces(pieces) => Ok(mesh_pieces(pieces, cells, finish)),
+        }
+    }
 }
 
 /// Pixels the hull spans on screen along its longest side, written by [`measure`].
@@ -894,7 +658,9 @@ pub fn measure(
                 let Projection::Perspective(perspective) = projection else { return None };
                 let height = camera.physical_viewport_size()?.y as f32;
                 let distance = eye.translation().distance(at.translation());
-                Some(pixels_across(state.extent_m as f32, distance, perspective.fov, height))
+                // The ship's frame is meters under a root that scales it into render units.
+                let extent = state.extent_m as f32 * at.scale().max_element();
+                Some(pixels_across(extent, distance, perspective.fov, height))
             })
             .fold(0.0, f32::max);
     }
@@ -903,14 +669,8 @@ pub fn measure(
 fn want(mut meshes: ResMut<HullMeshes>, mut hulls: Query<(Ref<HullForm>, &HullPixels, &mut HullMeshState)>) {
     for (hull, pixels, mut state) in &mut hulls {
         if hull.is_changed() {
-            state.form = form_hash(&hull.form, &hull.balance);
-            state.extent_m = match Sdf::new(&hull.form, &hull.balance) {
-                Ok(sdf) => {
-                    let (min, max) = sdf.bounds();
-                    (max - min).max_element()
-                }
-                Err(_) => 0.0,
-            };
+            state.form = hull.source.hash();
+            state.extent_m = hull.source.extent_m();
         }
         let cells = hull.cells.unwrap_or_else(|| cells_for(pixels.0, state.cells));
         let key = mesh_key(state.form, cells, hull.finish);
@@ -922,10 +682,10 @@ fn want(mut meshes: ResMut<HullMeshes>, mut hulls: Query<(Ref<HullForm>, &HullPi
         if meshes.ready.contains_key(&key) || meshes.pending.contains_key(&key) {
             continue;
         }
-        let (form, balance, finish) = (hull.form.clone(), hull.balance, hull.finish);
+        let (source, finish) = (hull.source.clone(), hull.finish);
         let task = AsyncComputeTaskPool::get().spawn(async move {
             let started = bevy::platform::time::Instant::now();
-            match mesh_form(&form, &balance, cells, finish) {
+            match source.mesh(cells, finish) {
                 Ok(buffers) => {
                     let (vertices, ms) = (buffers.positions.len(), started.elapsed().as_secs_f64() * 1e3);
                     debug!("hull_mesh: {cells} cells {finish:?}, {vertices} vertices in {ms:.0} ms");
@@ -1322,7 +1082,7 @@ mod tests {
     }
 
     fn hull(form: Form, cells: u32) -> HullForm {
-        HullForm { form: Arc::new(form), balance: B, finish: Finish::Smooth, cells: Some(cells) }
+        HullForm { cells: Some(cells), ..HullForm::form(form, B, Finish::Smooth) }
     }
 
     fn shown(world: &World, e: Entity) -> Option<Handle<Mesh>> {
