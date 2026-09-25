@@ -639,7 +639,7 @@ graph LR
 
 ### C2 · Editing the draft
 
-- status: todo
+- status: active card "Build C2: editing the draft"
 - needs: C1, F5
 - touches: `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/form_panel.rs`, `crates/lc-client/src/snap.rs`, `crates/lc-client/src/action.rs`
 - read: 29 §Handles, §Snapping, §What else it shows
