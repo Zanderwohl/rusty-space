@@ -38,6 +38,8 @@ const SPHERE_STACKS: u32 = 16;
 pub struct OwnForm(Option<Formed>);
 
 struct Formed {
+    /// For the editor to draw and to cast the pointer into.
+    sdf: Sdf,
     /// The form standing still, which is what is drawn when no refit is under way.
     still: Frame,
     /// From the Mind to the farthest corner of the form's bounds, meters.
@@ -50,7 +52,12 @@ impl OwnForm {
         let (min, max) = sdf.bounds();
         let reach_m = min.abs().max(max.abs()).length();
         let still = Frame { pieces: sdf.pieces().to_vec(), finished: 0, working: None };
-        Ok(OwnForm(Some(Formed { still, reach_m })))
+        Ok(OwnForm(Some(Formed { sdf, still, reach_m })))
+    }
+
+    /// The solved form, for the editor to draw and to cast the pointer into.
+    pub fn sdf(&self) -> Option<&Sdf> {
+        self.0.as_ref().map(|f| &f.sdf)
     }
 
     /// Framed to hold every one of `forms`, drawn as the first: a refit's two ends, so the camera
@@ -78,12 +85,22 @@ impl OwnForm {
     }
 }
 
-/// A preset by `--form`'s spelling: a builtin's name, or `default` for the starting form.
-pub fn fixture(name: &str) -> Option<Form> {
-    if name.eq_ignore_ascii_case("default") {
-        return Some(Form::starting());
+/// A preset by `--form`'s spelling: a builtin's name, or `default` for the starting form. A
+/// suffix `*k` makes every part but the Mind `k` times larger at the same proportions, which is
+/// how a hull tens of kilometers long is photographed before anything can build one.
+pub fn fixture(spec: &str) -> Option<Form> {
+    let (name, scale) = match spec.split_once('*') {
+        Some((name, k)) => (name, k.parse::<f64>().ok().filter(|k| k.is_finite() && *k > 0.0)?),
+        None => (spec, 1.0),
+    };
+    let mut form = match name.eq_ignore_ascii_case("default") {
+        true => Form::starting(),
+        false => Builtin::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(name)).map(Builtin::form)?,
+    };
+    for part in form.parts.iter_mut().filter(|p| p.placement.is_some()) {
+        part.volume_m3 *= scale.powi(3);
     }
-    Builtin::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(name)).map(Builtin::form)
+    Some(form)
 }
 
 /// Give the player's ship the form `--form` named, with no server involved.
@@ -100,7 +117,7 @@ pub fn adopt_fixture(dev: Res<crate::dev::DevEntry>, mut ui: ResMut<crate::app::
 }
 
 /// Flat albedo by kind, linear.
-fn paint(kind: Kind) -> Vec4 {
+pub(crate) fn paint(kind: Kind) -> Vec4 {
     let [r, g, b] = match kind {
         Kind::Mind => [0.60, 0.45, 0.10],
         Kind::Storage => [0.30, 0.31, 0.33],
@@ -120,7 +137,7 @@ fn in_mesh_axes(size: DVec3) -> Vec3 {
 }
 
 /// The mesh for `shape` and the scale it is drawn at, both in the mesh's own axes, meters.
-fn solid(shape: &Shape) -> (Mesh, Vec3) {
+pub(crate) fn solid(shape: &Shape) -> (Mesh, Vec3) {
     let f = |x: f64| x as f32;
     match *shape {
         Shape::Ellipsoid { semi_axes } => {
@@ -139,7 +156,7 @@ fn solid(shape: &Shape) -> (Mesh, Vec3) {
 }
 
 /// A piece's transform in the ship's frame, meters.
-fn local(piece: &Piece, scale: Vec3) -> Transform {
+pub(crate) fn local(piece: &Piece, scale: Vec3) -> Transform {
     Transform {
         translation: piece.pose.position.as_vec3(),
         rotation: Quat::from_mat3(&piece.pose.rotation.as_mat3()) * AXIS,
@@ -427,6 +444,14 @@ mod tests {
             assert!(own.length_m().is_some_and(|l| l > 0.0 && l.is_finite()));
         }
         assert!(fixture("ovoid").is_none());
+        assert!(fixture("spindle*0").is_none() && fixture("spindle*x").is_none());
+    }
+
+    #[test]
+    fn a_scaled_fixture_is_that_many_times_larger() {
+        let length = |spec: &str| OwnForm::new(&fixture(spec).unwrap(), &Balance::DEFAULT).unwrap().length_m().unwrap();
+        let ratio = length("spindle*100") / length("spindle");
+        assert!((90.0..=101.0).contains(&ratio), "{ratio}: the Mind alone keeps its size");
     }
 
     /// A mirrored copy is drawn as the reflection of its original through y = 0, with no

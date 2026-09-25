@@ -97,20 +97,26 @@ pub fn draw(
     let mode = ui_state.view;
     let per_point = ctx.pixels_per_point();
     let square = corner(ctx.viewport_rect());
-    map.shown = true;
+    // The editor keeps the square for the sky and has no map anywhere.
+    map.shown = mode != ViewMode::Form;
 
     // What the world's camera is to draw into, which is the square it is the thumbnail in.
-    world.0 = (mode == ViewMode::Map).then(|| pixels(square, per_point));
+    world.0 = (mode != ViewMode::World).then(|| pixels(square, per_point));
 
     // The square holds whichever mode is not in force, and a click swaps them.
     let swap = square_area(ctx, square, (mode == ViewMode::World).then_some(&*map));
     if swap.clicked() {
         ask(&mut out, Action::SetView(mode.other()));
     }
+    if mode == ViewMode::Form {
+        // The rest of the screen is the editor's, which reads its own pointer.
+        read_input(ctx, &swap, square, ViewMode::World, ui_state.map, &map, &mut out);
+        return;
+    }
 
     let (rect, response) = match mode {
         ViewMode::Map => whole(ctx, foot.0, &ui_state, &game, &map, square, &mut out),
-        ViewMode::World => (square, swap.clone()),
+        ViewMode::World | ViewMode::Form => (square, swap.clone()),
     };
     map.wanted = pixels(rect, per_point).size().max(UVec2::ONE);
 
@@ -119,13 +125,13 @@ pub fn draw(
     let over = crate::pick::occupied_rects(ctx, &[corner_id()]);
     let hole = match mode {
         ViewMode::Map => square,
-        ViewMode::World => egui::Rect::NOTHING,
+        ViewMode::World | ViewMode::Form => egui::Rect::NOTHING,
     };
     // Before the names, because a mark carries its own and the layout has to leave that one
     // out. Nothing is picked off the corner square: 190 points is a thumbnail, not a surface.
     let picked = match mode {
         ViewMode::Map => crate::map_pick::survey(&response, rect, &ui_state, &map, &mut out),
-        ViewMode::World => crate::map_pick::Picked::default(),
+        ViewMode::World | ViewMode::Form => crate::map_pick::Picked::default(),
     };
     scale_rule(&painter, rect, ui_state.map, &over);
     labels(&painter, rect, hole, ui_state.map, &map, &picked.named);
@@ -369,7 +375,7 @@ pub(crate) fn corner(viewport: egui::Rect) -> egui::Rect {
 ///
 /// egui clips to rectangles, and a rectangle with a hole in it is not one. Empty pieces are
 /// dropped, so a hole that touches nothing gives back the whole of `rect`.
-fn around(rect: egui::Rect, hole: egui::Rect) -> Vec<egui::Rect> {
+pub(crate) fn around(rect: egui::Rect, hole: egui::Rect) -> Vec<egui::Rect> {
     let hole = hole.intersect(rect);
     if !hole.is_positive() {
         return vec![rect];
@@ -396,7 +402,7 @@ fn around(rect: egui::Rect, hole: egui::Rect) -> Vec<egui::Rect> {
 
 /// Which part of the texture a piece of the surface shows. The image is drawn for the whole
 /// surface, so a piece of it takes the matching piece of the texture.
-fn uv(rect: egui::Rect, piece: egui::Rect) -> egui::Rect {
+pub(crate) fn uv(rect: egui::Rect, piece: egui::Rect) -> egui::Rect {
     let at = |p: egui::Pos2| {
         egui::pos2(
             (p.x - rect.min.x) / rect.width().max(f32::MIN_POSITIVE),
@@ -645,6 +651,8 @@ fn drag_of(shown: ViewMode, right: bool) -> Option<Drag> {
         (ViewMode::Map, false) => Some(Drag::Pan),
         (ViewMode::World, true) => Some(Drag::Look),
         (ViewMode::World, false) => None,
+        // The editor is never on an egui surface: `form_view::drag_of` is its answer.
+        (ViewMode::Form, _) => None,
     }
 }
 

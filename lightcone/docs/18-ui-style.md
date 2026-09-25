@@ -14,7 +14,13 @@ rule below was learned by photographing something that looked wrong.
 | | |
 |---|---|
 | **egui** | anything dense with text, and anything needing input |
-| **Bevy UI** | the menu, which composites over a rendered sky |
+| **Bevy UI** | the menu, which composites over a rendered sky, and the ship editor's controls |
+
+The editor's are Bevy UI because its handles have to sit on the rendered ship and take the pointer
+anywhere over it, and its tree and fields go with them so the editor is one surface; see
+[29-ship-form.md](29-ship-form.md#how-it-is-drawn). Its fields are therefore the custom text input
+this rule warns about, and belong in `em_ui` as a generic widget. Windows stay egui, which draws
+over Bevy UI.
 
 The second is the exception and stays small. The first is the default because the game is mostly
 readouts, and because **Bevy UI has no text input at all** — a form is an egui surface or it is

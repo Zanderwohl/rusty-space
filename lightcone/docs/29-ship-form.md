@@ -481,6 +481,75 @@ or `bevy_egui` gives it the primary context.
 **The editor is where refits are made.** The refit window (`R`) is the ledger: the budget, the
 three phases, progress, and Cancel.
 
+### Getting in and out
+
+| key | from World | from Map | from the editor |
+|---|---|---|---|
+| `H` | the editor | the editor | back to where it was entered from |
+| `M` | the map | the world | the map |
+| `Escape` | closes the top window, or opens the menu | the same | closes the top window, or leaves to where it was entered from |
+| click on the corner square | the map | the world | the world |
+
+The editor is the one mode with somewhere to go back to, so `Escape` goes there before it opens the
+menu. `M` always means the map; from the map it means out of it.
+
+### Its camera
+
+An orbit about a focus on the ship's nose axis (x in the ship's frame). It keeps every control the
+other two modes have, with the same sensitivities, so a drag means the same turn in all three:
+
+| control | World | Map | editor |
+|---|---|---|---|
+| right-drag (the cursor is locked) | turns the view | turns the camera | orbits the ship |
+| held arrow keys | turn the view | nothing | orbit the ship |
+| wheel, `=` / `-` | the boom, in hull lengths | zooms toward the pointer | in and out, in the form's own size |
+| left-drag | picks | pans the plane | on empty space, slides the focus fore and aft; on a part, nothing yet: reserved for selection and handles |
+| Shift+wheel | the boom | zooms | slides the focus fore and aft |
+| held `PgUp` / `PgDn` | nothing | nothing | slide the focus toward the nose / the stern |
+| right-drag on the corner square | — | turns the ship's view | turns the ship's view |
+
+- **Fore and aft is the spaceplane hangar's move.** The focus slides along the nose axis and stops
+  at the stem and the stern. Long ships are the point: a 50 km hull is navigable end to end, and
+  zoomed in on one end the rest is simply further along the slide.
+- **Everything is in the form's own size**, the diagonal of its bounds: the distance, and how far
+  the focus is along. A 500 m ship and a 50 km one open framed alike and a notch means the same on
+  both. The slide is in stand-offs, so the same drag moves the ship as far across the screen at any
+  zoom, and the point under the cursor follows it.
+- **The near stop is outside every part** however the camera is turned: outside the form's bounds,
+  grown by 15%, along the line of sight. Looking nose-on at a long hull it is off the bow, not on the
+  axis inside it. The far stop leaves the whole form a small thing in the middle.
+- **Up tilts the view up** on the arrows and the drag alike, as it does over the sky, which on an
+  orbit is the camera sinking under the ship. The map's turn has the same signs.
+- **The press decides.** A drag that starts on a window, on the corner square or on one of the
+  editor's own controls belongs to it wherever it goes, and one that starts on a part belongs to
+  the part. `form_view::drag_of` is that rule, and it is tested without a window.
+- The page keys are the reader's while a book is open, as the arrows are, and the slide stands down
+  then.
+
+### How it is drawn
+
+- **Its own camera, `FormCamera`, on its own layer**, drawing copies of the parts in the ship's
+  frame, in meters about the render origin, into an image. Copies, because the sky's pieces are
+  placed relative to the eye in astronomical units and lit by the star, and an entity has one
+  transform and one material; the draft will differ from the ship anyway. An image, because two
+  cameras on the window's own texture clear and tone-map over each other, which is why the map
+  renders into one too.
+- **The image is laid out in Bevy UI**, under the readout and around the corner square, where the
+  sky's camera draws exactly as it does in the map's mode.
+- **The editor's own controls are Bevy UI**, in `em_ui`'s widgets, so C2's handles, tree and fields
+  composite over the rendered view. egui draws over Bevy UI, so every window still floats over the
+  editor. Bevy UI has its own pointer: the look button, the wheel and the slide all stand down over
+  an `em_ui` control as they do over an egui one (`em_ui::Controls`).
+- **A hangar's light, not the star's.** A key light over the camera's shoulder and a fill under it,
+  so the side being looked at is always lit. The star is honest and leaves half the ship black, and
+  what is being judged here is shape: which part is where, and how big. How the ship looks under
+  its own star is one key away, and in the corner square the whole time.
+- **Until the draft exists it shows the ship's own form**, or the starting form for a ship that has
+  none yet.
+
+`--view form` starts in the editor; `--turn`, `--pitch`, `--zoom` and `--slide` move its camera, and
+`--form spindle*100` stages the preset a hundred times larger, a hull 92 km long.
+
 ### The budget
 
 Always on screen, and updated with every handle:
@@ -533,9 +602,9 @@ volume above the minimum.
 
 - **The draft**, drawn as structure over the ship as it is, drawn as a faint ghost. Parts to be built,
   dismantled, moved and rebuilt each get a mark from [18-ui-style.md](18-ui-style.md)'s palette.
-- **Egui side panels**: the tree of parts, and the selected part's primitive, kind, volume and
-  placement as editable numbers. Every handle has a field, so anything done with the mouse can be typed
-  exactly.
+- **Side panels**, in `em_ui`'s widgets like the rest of the editor's controls: the tree of parts,
+  and the selected part's primitive, kind, volume and placement as editable numbers. Every handle
+  has a field, so anything done with the mouse can be typed exactly.
 - **The preview**, a pure function of `Session` and `Ui`: capacities, acceleration, broadside shadow,
   envelope area, slew rate, the field's rated load and headroom, brightness at the ship's current
   distance from its star, and the round's duration.

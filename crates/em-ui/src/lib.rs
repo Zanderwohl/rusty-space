@@ -6,12 +6,14 @@
 #![forbid(unsafe_code)]
 
 pub mod picking;
+pub mod pointer;
 pub mod reticle;
 pub mod theme;
 pub mod widgets;
 
 pub use theme::{MenuTheme, vfd};
-pub use widgets::{MenuButton, MenuUi};
+pub use pointer::Controls;
+pub use widgets::{Edge, MenuButton, MenuUi};
 
 use bevy::prelude::*;
 

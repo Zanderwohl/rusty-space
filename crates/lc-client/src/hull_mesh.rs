@@ -879,8 +879,11 @@ impl Plugin for HullMeshPlugin {
 
 /// Each hull's pixels on screen, the most it spans through any active perspective camera, so it
 /// is meshed for its nearest view. A frame behind, as the transforms are.
+///
+/// Not the editor's camera, which stands in the ship's frame in meters rather than the sky's
+/// render space: its distance to a hull out there means nothing.
 pub fn measure(
-    cameras: Query<(&Camera, &Projection, &GlobalTransform)>,
+    cameras: Query<(&Camera, &Projection, &GlobalTransform), Without<crate::form_view::FormCamera>>,
     mut hulls: Query<(&GlobalTransform, &HullMeshState, &mut HullPixels)>,
 ) {
     for (at, state, mut pixels) in &mut hulls {

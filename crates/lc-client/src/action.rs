@@ -28,7 +28,16 @@ pub enum Action {
     Quit,
     /// Which mode of play the main view shows. The map is one of two, not a window.
     SetView(ViewMode),
+    /// `M`: into the map, or out of it. See [`ViewMode::map_key`].
     ToggleView,
+    /// `H`: into the editor, or back to the mode it was entered from.
+    ToggleForm,
+    // --- the editor -------------------------------------------------------------------
+    /// Turn the editor's camera about its focus, radians.
+    OrbitForm { azimuth: f64, elevation: f64 },
+    /// Slide the editor's focus along the ship's nose axis, in stand-offs: the same drag moves
+    /// it as far across the screen at any zoom. Positive is toward the nose.
+    SlideForm(f64),
     // --- the map ----------------------------------------------------------------------
     /// Turn the map's camera by a relative amount, radians.
     TurnMap { azimuth: f64, elevation: f64 },
@@ -256,6 +265,14 @@ pub const SURVEY_CONE_RAD: f64 = 0.35;
 pub const MIN_ACCEL_G: f64 = 0.1;
 pub const MAX_ACCEL_G: f64 = 1000.0;
 
+/// Change the mode of the main view, remembering where the editor was entered from.
+fn set_view(ui: &mut UiState, view: ViewMode) {
+    if view == ViewMode::Form && ui.view != ViewMode::Form {
+        ui.form.from = ui.view;
+    }
+    ui.view = view;
+}
+
 /// Apply an action. The only path that mutates UI state.
 pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Effect> {
     let mut effects = Vec::new();
@@ -266,8 +283,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::CloseTopPanel => {
             // Nothing is modal, so "back" closes the most recently opened panel and opens
             // the escape menu only when there is nothing left to close.
+            // The editor is the one mode with somewhere to go back to, and it goes there first.
             if ui.close_top().is_none() {
-                ui.open(Panel::Escape);
+                match ui.view {
+                    ViewMode::Form => set_view(ui, ui.form.from),
+                    _ => ui.open(Panel::Escape),
+                }
             }
         }
         Action::GoToMenuPage(page) => ui.menu_page = page,
@@ -437,8 +458,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
 
-    Action::SetView(view) => ui.view = view,
-    Action::ToggleView => ui.view = ui.view.other(),
+    Action::SetView(view) => set_view(ui, view),
+    Action::ToggleView => set_view(ui, ui.view.map_key()),
+    Action::ToggleForm => match ui.view {
+        ViewMode::Form => set_view(ui, ui.form.from),
+        _ => set_view(ui, ViewMode::Form),
+    },
+    Action::OrbitForm { azimuth, elevation } => ui.form.orbit.turn(azimuth, elevation),
+    Action::SlideForm(standoffs) => ui.form.orbit.slide(standoffs),
     Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
     Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
         Some(anchor) => {
@@ -473,6 +500,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // imperceptible at the far end or the whole range in one notch at the near one. Left
         // unclamped here and clamped against the viewport by `hull::place_eye`, which is the
         // only thing that knows how wide a pixel is.
+        Action::Zoom(notches) if ui.view == ViewMode::Form => ui.form.orbit.zoom(notches),
         Action::Zoom(notches) => {
             ui.boom_lengths = (ui.boom_lengths * crate::hull::ZOOM_STEP.powf(-notches))
                 .clamp(f64::MIN_POSITIVE, 1.0e9);
@@ -904,6 +932,70 @@ mod tests {
         apply(Action::SetView(ViewMode::Map), &mut ui, &mut s);
         apply(Action::SetView(ViewMode::Map), &mut ui, &mut s);
         assert_eq!(ui.view, ViewMode::Map);
+    }
+
+    /// `H` goes into the editor and back out to wherever it was entered from; `M` always means
+    /// the map. The rule is 29 §Getting in and out.
+    #[test]
+    fn the_editor_goes_back_to_where_it_was_entered_from() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Form);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::World);
+
+        apply(Action::ToggleView, &mut ui, &mut s);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Form);
+        // Asking again for the mode in force forgets nothing.
+        apply(Action::SetView(ViewMode::Form), &mut ui, &mut s);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map, "entered from the map, so back to it");
+
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map, "M from the editor is the map");
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::World, "and from the map, out of it");
+        // The corner square shows the world in the editor, so a click on it goes there.
+        assert_eq!(ViewMode::Form.other(), ViewMode::World);
+    }
+
+    /// `Escape` closes windows first, and with none left the editor goes back before any menu opens.
+    #[test]
+    fn escape_leaves_the_editor_once_its_windows_are_closed() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::ToggleView, &mut ui, &mut s);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(Action::OpenPanel(Panel::Telescope), &mut ui, &mut s);
+        apply(Action::CloseTopPanel, &mut ui, &mut s);
+        assert_eq!((ui.view, ui.open_panels().len()), (ViewMode::Form, 0), "a window first");
+        apply(Action::CloseTopPanel, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map);
+        assert!(!ui.is_open(Panel::Escape), "leaving the editor is not opening the menu");
+        apply(Action::CloseTopPanel, &mut ui, &mut s);
+        assert!(ui.is_open(Panel::Escape), "and anywhere else it is as it was");
+    }
+
+    /// `=` and `-` and the wheel send one `Zoom`, and in the editor it is the editor's: the boom
+    /// the player left is waiting when they come out.
+    #[test]
+    fn in_the_editor_zoom_moves_the_editors_camera_and_not_the_boom() {
+        let (mut ui, mut s) = fixture();
+        let boom = ui.boom_lengths;
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        let before = ui.form.orbit;
+        apply(Action::Zoom(2.0), &mut ui, &mut s);
+        assert_eq!(ui.boom_lengths, boom);
+        assert!(ui.form.orbit.distance < before.distance, "closer");
+        apply(Action::SlideForm(0.5), &mut ui, &mut s);
+        apply(Action::OrbitForm { azimuth: 0.2, elevation: 0.1 }, &mut ui, &mut s);
+        let held = ui.form.orbit;
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(Action::Zoom(2.0), &mut ui, &mut s);
+        assert!(ui.boom_lengths < boom, "out of the editor it is the boom's again");
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.form.orbit, held, "the editor's camera survives the round trip");
     }
 
     /// **Switching the view leaves the map where it was.** The corner square and the whole

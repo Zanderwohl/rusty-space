@@ -44,6 +44,17 @@ pub struct Entry {
     pub demo: Option<String>,
 }
 
+/// A mode of the main view by `--view`'s spelling.
+fn view_named(name: &str) -> Option<crate::ui::ViewMode> {
+    use crate::ui::ViewMode;
+    match name.to_ascii_lowercase().as_str() {
+        "world" => Some(ViewMode::World),
+        "map" => Some(ViewMode::Map),
+        "form" | "editor" => Some(ViewMode::Form),
+        _ => None,
+    }
+}
+
 /// Parses the flag vocabulary both binaries accept.
 pub fn parse(args: &[String]) -> Entry {
     let flag = |name: &str| args.iter().any(|a| a == name);
@@ -56,6 +67,16 @@ pub fn parse(args: &[String]) -> Entry {
     }
 
     let mut actions = Vec::new();
+    // `--panel map` is the map's older spelling, from when it was a window. First among the
+    // actions as well as pinned (see `DevEntry::view`), so the arrival's `--zoom` and `--turn`
+    // reach the camera of the mode they are meant for.
+    let view = after("--view")
+        .or_else(|| after("--panel").filter(|name| name.eq_ignore_ascii_case("map")))
+        .and_then(|name| view_named(&name));
+    let editing = view == Some(crate::ui::ViewMode::Form);
+    if let Some(view) = view {
+        actions.push(Action::SetView(view));
+    }
     // A scene says where to stand, so there is nothing to pass in. The identifiers are the
     // scene's own, which is why this needs no shard to have answered first.
     if let Some(scene) = after("--demo").as_deref().and_then(scenario::Scenario::named) {
@@ -128,11 +149,21 @@ pub fn parse(args: &[String]) -> Entry {
     // Last, and after anything that aims: `--turn` exists to put something off screen, and
     // `--fly` ends by pointing the view at what it is flying to. Pushed first, the aim undid
     // the turn and the two flags together were the same picture as the one on its own.
+    //
+    // In the editor they turn its orbit, as the look button does there.
+    let look = |yaw: f64, pitch: f64| match editing {
+        true => crate::form_view::orbit_from(yaw, pitch),
+        false => Action::Look { yaw, pitch },
+    };
     if let Some(degrees) = value::<f64>(args, "--turn") {
-        actions.push(Action::Look { yaw: degrees.to_radians(), pitch: 0.0 });
+        actions.push(look(degrees.to_radians(), 0.0));
     }
     if let Some(degrees) = value::<f64>(args, "--pitch") {
-        actions.push(Action::Look { yaw: 0.0, pitch: degrees.to_radians() });
+        actions.push(look(0.0, degrees.to_radians()));
+    }
+    // Stand-offs toward the nose; both ends are clamps, as the zoom's are.
+    if let Some(standoffs) = value::<f64>(args, "--slide") {
+        actions.push(Action::SlideForm(standoffs));
     }
     // Both ends of the orbit camera's range are clamps, so the only way to photograph one is
     // to ask for far more than it will give and let it stop where it stops.
@@ -181,11 +212,7 @@ pub fn parse(args: &[String]) -> Entry {
             }
         }),
         map_focus: after("--map-focus").as_deref().and_then(crate::dev::WantedFocus::named),
-        // The map is a mode now rather than a window, and `--panel map` is the spelling every
-        // shot list already has. A pin, not an action: see `DevEntry::view`.
-        view: after("--panel")
-            .filter(|name| name.eq_ignore_ascii_case("map"))
-            .map(|_| crate::ui::ViewMode::Map),
+        view,
         at_body: after("--at"),
         wear: after("--wear"),
         standoff_radii: value(args, "--standoff"),

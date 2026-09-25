@@ -32,6 +32,8 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         // Opens and never closes: once the field has the keyboard, a slash is a slash.
         (KeyCode::Slash, Action::OpenPanel(Panel::Console)),
         (KeyCode::KeyM, Action::ToggleView),
+        // For hangar, where KSP builds its planes.
+        (KeyCode::KeyH, Action::ToggleForm),
         (KeyCode::Digit1, Action::SetBandPreset(0)),
         (KeyCode::Digit2, Action::SetBandPreset(1)),
         (KeyCode::Digit3, Action::SetBandPreset(2)),
@@ -95,15 +97,28 @@ pub fn notches(unit: MouseScrollUnit, amount: f32) -> f64 {
 }
 
 /// The wheel, as zoom. Ignored while the interface wants it, so scrolling a panel does not
-/// also fly the camera.
+/// also fly the camera. In the editor, Shift turns it into the slide fore and aft.
 pub fn read_wheel(
     mut wheel: MessageReader<MouseWheel>,
+    keys: Res<ButtonInput<KeyCode>>,
     egui: Res<EguiWantsInput>,
+    controls: em_ui::Controls,
+    state: Res<crate::app::Ui>,
     mut out: MessageWriter<Requested>,
 ) {
     let total: f64 = wheel.read().map(|w| notches(w.unit, w.y)).sum();
-    if total != 0.0 && !egui.wants_any_pointer_input() {
-        out.write(Requested(Action::Zoom(total)));
+    if total == 0.0 || egui.wants_any_pointer_input() || controls.under_pointer() {
+        return;
+    }
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    out.write(Requested(wheel_action(state.view, shift, total)));
+}
+
+/// What `notches` of wheel do, in a view, with Shift held or not.
+pub fn wheel_action(view: crate::ui::ViewMode, shift: bool, notches: f64) -> Action {
+    match (view, shift) {
+        (crate::ui::ViewMode::Form, true) => Action::SlideForm(notches * crate::form_view::SLIDE_PER_NOTCH),
+        _ => Action::Zoom(notches),
     }
 }
 
@@ -115,6 +130,12 @@ pub fn held_bindings() -> Vec<(KeyCode, (f64, f64))> {
         (KeyCode::ArrowUp, (0.0, 1.0)),
         (KeyCode::ArrowDown, (0.0, -1.0)),
     ]
+}
+
+/// Keys held to slide the editor's focus, toward the nose or the stern. KSP's, and unbound
+/// elsewhere: the reader takes them only with a book open, when the slide stands down.
+pub fn slide_bindings() -> Vec<(KeyCode, f64)> {
+    vec![(KeyCode::PageUp, 1.0), (KeyCode::PageDown, -1.0)]
 }
 
 /// Radians of look per pixel of mouse movement.
@@ -153,6 +174,7 @@ pub struct Looking(pub bool);
 pub fn grab_cursor(
     buttons: Res<ButtonInput<MouseButton>>,
     egui: Res<EguiWantsInput>,
+    controls: em_ui::Controls,
     mut looking: ResMut<Looking>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
@@ -160,7 +182,7 @@ pub fn grab_cursor(
         looking.0,
         buttons.just_pressed(LOOK_BUTTON),
         buttons.pressed(LOOK_BUTTON),
-        egui.wants_any_pointer_input(),
+        egui.wants_any_pointer_input() || controls.under_pointer(),
     );
     let Some(grab) = want else { return };
     looking.0 = grab;
@@ -239,7 +261,11 @@ pub fn look_around(
     }
 
     if yaw != 0.0 || pitch != 0.0 {
-        out.write(Requested(Action::Look { yaw, pitch }));
+        // The same turn of the same controls, of whichever camera is the view.
+        out.write(Requested(match state.view {
+            crate::ui::ViewMode::Form => crate::form_view::orbit_from(yaw, pitch),
+            _ => Action::Look { yaw, pitch },
+        }));
     }
 }
 
@@ -416,6 +442,39 @@ mod tests {
         }
     }
 
+    /// The slide's keys mean nothing else in force, and the one place they do — a book's pages —
+    /// is where the slide stands down.
+    #[test]
+    fn the_slide_keys_are_free() {
+        let held: Vec<KeyCode> = held_bindings().iter().map(|(k, _)| *k).collect();
+        for (key, _) in slide_bindings() {
+            assert!(!held.contains(&key), "{key:?} also turns the view");
+            for shift in [false, true] {
+                for (reading, book) in [(false, false), (true, false)] {
+                    let table = with_shift(bindings_in_force(reading, book), shift);
+                    assert!(!table.iter().any(|(k, _)| *k == key), "{key:?} is bound at ({reading}, {book}, {shift})");
+                }
+            }
+        }
+        let ways: Vec<f64> = slide_bindings().iter().map(|(_, w)| *w).collect();
+        assert!(ways.contains(&1.0) && ways.contains(&-1.0), "both ways need a key");
+    }
+
+    #[test]
+    fn h_is_the_editor() {
+        assert_eq!(letter_for(&Action::ToggleForm), Some('H'));
+    }
+
+    /// Shift turns the wheel into the slide in the editor and nowhere else; `=` and `-` zoom the
+    /// editor through the same `Zoom` the wheel sends, which the dispatcher routes by view.
+    #[test]
+    fn the_wheel_zooms_everywhere_and_slides_with_shift_in_the_editor() {
+        use crate::ui::ViewMode;
+        assert_eq!(wheel_action(ViewMode::Form, true, 2.0), Action::SlideForm(2.0 * crate::form_view::SLIDE_PER_NOTCH));
+        assert_eq!(wheel_action(ViewMode::Form, false, 2.0), Action::Zoom(2.0));
+        assert_eq!(wheel_action(ViewMode::World, true, 2.0), Action::Zoom(2.0));
+    }
+
     #[test]
     fn look_can_be_driven_in_all_four_directions() {
         let mut seen = (false, false, false, false);
@@ -503,6 +562,38 @@ mod tests {
         app.update();
         assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::None);
         assert!(cursor(&app, window).visible);
+    }
+
+    /// **Bevy UI is a surface too.** A right-press on one of the editor's controls must not take
+    /// the cursor, the way one on an egui panel does not.
+    #[test]
+    fn a_press_on_a_bevy_control_does_not_take_the_view() {
+        let (mut app, window) = harness();
+        let button = app.world_mut().spawn(Interaction::Hovered).id();
+        press(&mut app);
+        app.update();
+        assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::None, "the control's press turned the view");
+
+        release(&mut app);
+        app.update();
+        app.world_mut().entity_mut(button).insert(Interaction::None);
+        press(&mut app);
+        app.update();
+        assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::Locked, "off the control it is the view's");
+    }
+
+    /// In the editor the look button orbits the ship, locked exactly as it is over the sky.
+    #[test]
+    fn in_the_editor_the_look_orbits() {
+        let (mut app, window) = harness();
+        app.world_mut().resource_mut::<crate::app::Ui>().view = crate::ui::ViewMode::Form;
+        press(&mut app);
+        app.world_mut().resource_mut::<AccumulatedMouseMotion>().delta = Vec2::new(10.0, 0.0);
+        app.update();
+        assert_eq!(cursor(&app, window).grab_mode, CursorGrabMode::Locked);
+        let sent: Vec<Action> =
+            app.world_mut().resource_mut::<Messages<Requested>>().drain().map(|r| r.0).collect();
+        assert!(matches!(sent.as_slice(), [Action::OrbitForm { .. }]), "{sent:?}");
     }
 
     #[test]
