@@ -257,7 +257,8 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
 - **A store that shrinks while fuller than its new capacity spills the excess** as part of its own
   step's vent. The ledger is the round's own: drain and income are the ship's, and are not in the
   energy check.
-- **Reshaping every drone at once is refused**, since the build phase would begin with none.
+- **A round is refused if the dismantle phase would leave no drone standing**, whether the drones
+  are removed, replaced by new parts or reshaped, since the build phase would begin with none.
 - The Mind's stored shape and volume may change freely, since nothing reads them.
 
 ### Why strict phases
@@ -278,7 +279,11 @@ storage part before reshaping it follows from the same rule, with nothing specia
 
 Completed steps stay. The step in progress is reversed. A build's energy comes back at the 95%
 rate, or goes to the field if storage has no room. A dismantling is put back: what it had returned to
-storage goes back into the part, which is left as it was. A move snaps back. The ship is left partway between its form and the
+storage and what it had radiated are paid back out of storage, and the part is left as it was. The
+radiated loss is not recovered: putting a part back costs its whole mass-energy. If storage cannot
+pay, the dismantling finishes at once instead, and its return goes to storage as far as there is
+room. A move snaps back. Whatever the reversal or the finish loses, and whatever has no room, is a
+burst at the moment of cancel. The ship is left partway between its form and the
 target, which may be worse than either, and that is intended.
 
 Flying and refitting still exclude each other, as in 19.
@@ -490,7 +495,7 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments |
+| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments |
 | `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |

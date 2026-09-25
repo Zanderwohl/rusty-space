@@ -126,7 +126,8 @@ pub struct Progress {
 pub struct Canceled {
     pub form: Form,
     pub stored_j: f64,
-    /// A burst, at once: what the reversed step returned and storage had no room for.
+    /// A burst, at once: the loss of the step undone or finished, what storage had no room for, and
+    /// what a store that finished shrinking held past its capacity.
     pub vented_j: f64,
 }
 
@@ -183,6 +184,8 @@ impl Pending {
 
 impl Plan {
     fn new(round: Round, balance: &Balance) -> Result<Self, Refusal> {
+        // Walked as a tree below, and it is the ship as it stands, so never a client's.
+        debug_assert_eq!(round.from.validate(), Ok(()));
         round.target.validate().map_err(Refusal::Form)?;
         let drone_m3: f64 = round.target.parts.iter().filter(|p| p.kind == Kind::Drone).map(|p| p.volume_m3).sum();
         // Validated finite, so no NaN gets past this.
@@ -309,7 +312,7 @@ impl Plan {
             steps.push(Step {
                 part: id,
                 change: Change::Move,
-                kind: target[&id].kind,
+                kind: from[&id].kind,
                 begins_s: elapsed,
                 duration_s,
                 gross_j: 0.0,
@@ -430,8 +433,12 @@ impl Plan {
     }
 
     /// Stop at `now_s` with `stored_j` actually in storage. Finished steps stay, and the step under
-    /// way is undone. A build returns what it had taken at the recovery rate, as far as there is
-    /// room; a dismantling puts back into the part what it had returned to storage.
+    /// way is undone, conserving mass-energy:
+    ///
+    /// - A build returns what it had taken at the recovery rate, as far as there is room.
+    /// - A dismantling is put back if storage can pay for all it had taken apart: what went to the
+    ///   store and what was radiated. Otherwise it is finished at once instead.
+    /// - A move snaps back.
     pub fn cancel(&self, now_s: f64, stored_j: f64) -> Canceled {
         let progress = self.at(now_s);
         let form = progress.form;
@@ -439,15 +446,30 @@ impl Plan {
             return Canceled { form, stored_j, vented_j: 0.0 };
         };
         let step = &self.steps[i];
+        let recovery = self.balance.recovery;
+        let capacity = |form: &Form| Capacities::of(form, &self.balance).storage_j;
         match step.change.phase() {
             Phase::Build => {
-                let returned_j = self.balance.recovery * step.gross_j * fraction;
-                let room_j = (Capacities::of(&form, &self.balance).storage_j - stored_j).max(0.0);
-                let kept = returned_j.min(room_j);
-                Canceled { form, stored_j: stored_j + kept, vented_j: returned_j - kept }
+                let moved_j = step.gross_j * fraction;
+                let returned_j = recovery * moved_j;
+                let kept = returned_j.min((capacity(&form) - stored_j).max(0.0));
+                Canceled { form, stored_j: stored_j + kept, vented_j: (returned_j - kept) + (moved_j - returned_j) }
             }
             Phase::Dismantle => {
-                Canceled { form, stored_j: (stored_j - step.stored_j * fraction).max(0.0), vented_j: 0.0 }
+                // The return awaiting its vent is still aboard and goes back into the part as well.
+                let owed_j = fraction * (step.stored_j + (1.0 - recovery) * step.gross_j);
+                if stored_j >= owed_j {
+                    return Canceled { form, stored_j: stored_j - owed_j, vented_j: 0.0 };
+                }
+                let mut parts: Parts = form.parts.iter().map(|p| (p.id, *p)).collect();
+                apply(&mut parts, step.part, step.after);
+                let form = Form { parts: parts.into_values().collect() };
+                let rest_j = (1.0 - fraction) * step.gross_j;
+                let pending_j = fraction * (recovery * step.gross_j - step.stored_j);
+                let arriving_j = pending_j + recovery * rest_j;
+                let after_j = (stored_j + arriving_j).min(capacity(&form));
+                let vented_j = (stored_j + arriving_j - after_j) + (1.0 - recovery) * rest_j;
+                Canceled { form, stored_j: after_j, vented_j }
             }
             Phase::Move => Canceled { form, stored_j, vented_j: 0.0 },
         }
@@ -624,10 +646,11 @@ mod tests {
     fn a_reshape_loses_five_percent_of_all_of_it() {
         let from = ship();
         let target = with(&from, 3, |p| p.primitive = Primitive::Cylinder { length: 3.0 });
-        let plan = solve(&from, &target, 0.5 * capacity(&from)).unwrap();
-        assert_eq!(changes(&plan), [(3, Change::Remove), (3, Change::Add)]);
         // Without structure the two shapes weigh the same.
-        assert!(close(plan.net_j(), 0.05 * energy(&get(&from, 3))));
+        let bare = Balance { hull_areal_density: 0.0, ..B };
+        let plan = solve_with(&bare, &from, &target, 0.5 * capacity(&from)).unwrap();
+        assert_eq!(changes(&plan), [(3, Change::Remove), (3, Change::Add)]);
+        assert!(close(plan.net_j(), 0.05 * part_kg(&get(&from, 3), &bare) * C2));
 
         // With it, each is priced whole.
         let b = Balance { hull_areal_density: 500.0, ..B };
@@ -762,20 +785,37 @@ mod tests {
         assert_eq!(get(&canceled.form, 2).volume_m3, 2.0 * B.slot_volume_m3);
         assert!(!canceled.form.parts.iter().any(|p| p.id == PartId(5) || p.id == PartId(6)));
         assert!(close(canceled.stored_j, ledger + 0.95 * 0.5 * energy(&engine)));
-        assert_eq!(canceled.vented_j, 0.0);
+        // The recovery's loss is a burst, so the field is told of it.
+        assert!(close(canceled.vented_j, 0.05 * 0.5 * energy(&engine)));
 
         // With the store refilled meanwhile, the return has nowhere to go.
         let full = capacity(&from);
         let canceled = plan.cancel(now, full);
         assert_eq!(canceled.stored_j, full);
-        assert!(close(canceled.vented_j, 0.95 * 0.5 * energy(&engine)));
+        assert!(close(canceled.vented_j, 0.5 * energy(&engine)));
 
-        // A dismantling under way is put back, and gives back what it had returned.
-        let apart = solve(&from, &without(&from, &[4]), 0.0).unwrap();
+        // A dismantling under way is put back, paying from storage for all it had taken apart,
+        // the radiated loss included.
+        let living = energy(&get(&from, 4));
+        let start = 0.5 * full;
+        let apart = solve(&from, &without(&from, &[4]), start).unwrap();
         let now = 100.0 + 0.5 * apart.duration_s();
-        let canceled = apart.cancel(now, apart.at(now).stored_j);
+        let ledger = apart.at(now).stored_j;
+        assert!(close(ledger, start + 0.5 * 0.95 * living));
+        let canceled = apart.cancel(now, ledger);
         assert_eq!(sorted(&canceled.form), sorted(&from));
-        assert!(canceled.stored_j.abs() < 1.0e-12 * full);
+        assert!(close(canceled.stored_j, start - 0.5 * 0.05 * living));
+        assert_eq!(canceled.vented_j, 0.0);
+
+        // Without that much in storage it cannot be put back, so it finishes, and nothing appears
+        // from nowhere: what is left of the part and what was in hand is stored or vented.
+        let short = 0.4 * living;
+        let finished = apart.cancel(now, short);
+        assert_eq!(sorted(&finished.form), sorted(&without(&from, &[4])));
+        let taking = apart.steps()[0];
+        let aboard = short + 0.5 * living + 0.5 * (0.95 * living - taking.stored_j);
+        assert!(close(finished.stored_j + finished.vented_j, aboard));
+        assert!(close(finished.vented_j, 0.5 * 0.05 * living));
 
         // Between steps there is nothing to reverse.
         let between = plan.cancel(100.0 + step.begins_s, 1.0);
@@ -808,7 +848,10 @@ mod tests {
         };
         assert_eq!(solve(&from, &usurped, 0.0).unwrap_err(), Refusal::Mind(PartId(9)));
 
-        // Reshaping the only drone leaves nothing to build it again with.
+        // Replacing the only drone with a new one leaves nothing to build it with.
+        let replaced = adding(&without(&from, &[2]), &[part(8, Kind::Drone, ROD, 1.0, 1)]);
+        assert_eq!(solve(&from, &replaced, capacity(&from)).unwrap_err(), Refusal::NoDrones { part: PartId(8) });
+        // Nor does reshaping it.
         let reshaped = with(&from, 2, |p| p.primitive = Primitive::Cylinder { length: 2.0 });
         assert_eq!(solve(&from, &reshaped, capacity(&from)).unwrap_err(), Refusal::NoDrones { part: PartId(2) });
     }
