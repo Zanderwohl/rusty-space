@@ -28,6 +28,8 @@ impl Session {
         self.observatory.integration_s = integration_s;
         let system = self.system.clone();
         self.observatory.tick(&mut self.sky_model, system.as_deref(), &mut self.knowledge, at, now);
+        // Kept for a shard to save, and there is none: every sample would otherwise be held twice.
+        let _ = self.knowledge.take_changes();
         if let Some(id) = self.observatory.pointing() {
             self.aim(Some(id));
         }

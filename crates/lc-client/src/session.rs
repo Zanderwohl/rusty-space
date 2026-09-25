@@ -1356,6 +1356,19 @@ mod tests {
         );
     }
 
+    /// With no shard to save them, a sample is not also kept as a change to save.
+    #[test]
+    fn instruments_without_a_shard_keep_each_sample_once() {
+        let mut s = spread();
+        s.point_at(Some(s.stars[0].id));
+        for _ in 0..4 {
+            s.advance(1.0);
+            s.tick_instruments(1.0);
+        }
+        assert!(!s.knowledge.is_empty(), "nothing was measured");
+        assert!(s.knowledge.take_changes().1.is_empty());
+    }
+
     /// One place gives a direction. A second place, far enough from the first, gives a
     /// distance — and that is the whole of how a ship learns where anything is.
     #[test]
