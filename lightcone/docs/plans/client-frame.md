@@ -15,6 +15,7 @@ by a number.
   commit, before starting work. **Finish it** with `- status: done <PR or commit>` in the same PR.
 - **Edit only your task's block.** New tasks go at the end of their stream with the next free
   number. A task that turns out unnecessary becomes `- status: dropped <why>`; it is never deleted.
+- Screenshots want `--frames 900` or more: the stars take two to ten seconds to load, and a shot taken before then is of a sky without them.
 - Every task ends as [AGENTS.md](../../../AGENTS.md) says: tests that fail when the mechanism is
   broken on purpose, `tools/api_surface.py` on each crate touched, screenshots through `--shot` for
   anything drawn, and `cargo clean`.
@@ -233,7 +234,7 @@ graph LR
 
 ### M2 · Shared map materials, culling back
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; a circle's cap was its natural width, so a fixed cap at the smallest mark shares one material per kind and form. A pinned map at 600,000 AU, full of star marks and spreads, is byte-identical before and after. Culled within a padded `Aabb` held by `NoAutoAabb`, since Bevy refits a changed mesh's box without the padding)
 - needs: —
 - touches: `crates/lc-client/src/map.rs`, `crates/lc-client/assets/shaders/map_line.wgsl`
 - read: 11, 18
@@ -242,7 +243,7 @@ graph LR
 
 ### M3 · Diff the map layer
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: M2
 - touches: `crates/lc-client/src/map.rs`
 - read: 11
