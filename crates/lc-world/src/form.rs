@@ -168,6 +168,21 @@ pub enum FormError {
     Cycle(PartId),
     /// The envelope reaches past every padding the grid tries, so it has no extent to state.
     EnvelopeOpen,
+    /// An engine whose axis is not the nose axis.
+    EngineOffAxis(PartId),
+    /// Another part in an engine's clear cone.
+    EngineBlocked(PartId),
+    BayBlocked(PartId),
+    /// An attached part not touching its parent.
+    Detached(PartId),
+    /// An enclosing part not containing its parent.
+    Uncontained(PartId),
+    /// The envelope's extent is outside `craft::LENGTH_RANGE_M`.
+    Extent,
+    /// Below `min_part_m3`.
+    TooSmall(PartId),
+    /// Less than `min_drone_m3` of drone, every copy counted.
+    TooFewDrones,
 }
 
 impl std::fmt::Display for FormError {
@@ -183,6 +198,14 @@ impl std::fmt::Display for FormError {
             Self::MissingParent { part, parent } => write!(f, "{part} hangs from {parent}, which does not exist"),
             Self::Cycle(id) => write!(f, "{id} is its own ancestor"),
             Self::EnvelopeOpen => write!(f, "the envelope does not close"),
+            Self::EngineOffAxis(id) => write!(f, "{id} is an engine not pointing fore or aft"),
+            Self::EngineBlocked(id) => write!(f, "something is in the cone of {id}, an engine"),
+            Self::BayBlocked(id) => write!(f, "something is in the mouth of {id}, a bay"),
+            Self::Detached(id) => write!(f, "{id} does not touch its parent"),
+            Self::Uncontained(id) => write!(f, "{id} does not contain its parent"),
+            Self::Extent => write!(f, "the ship is longer or shorter than a ship may be"),
+            Self::TooSmall(id) => write!(f, "{id} is smaller than the smallest part"),
+            Self::TooFewDrones => write!(f, "fewer drones than a ship may keep"),
         }
     }
 }
@@ -192,7 +215,7 @@ impl std::error::Error for FormError {}
 impl Form {
     /// Structure and well-formed numbers only: one Mind at the root, one tree, unique ids, at
     /// most [`MAX_PARTS`], and nothing NaN, infinite or of the wrong sign. Sizes and the
-    /// placement rules are [`rules`].
+    /// placement rules are [`rules::check`].
     pub fn validate(&self) -> Result<(), FormError> {
         if self.parts.len() > MAX_PARTS {
             return Err(FormError::TooManyParts { found: self.parts.len() });
@@ -527,7 +550,14 @@ impl From<FormError> for lc_proto::FormFault {
                 Self::MissingParent { part: part.into(), parent: parent.into() }
             }
             FormError::Cycle(id) => Self::Cycle(id.into()),
-            FormError::EnvelopeOpen => Self::Extent,
+            FormError::EnvelopeOpen | FormError::Extent => Self::Extent,
+            FormError::EngineOffAxis(id) => Self::EngineOffAxis(id.into()),
+            FormError::EngineBlocked(id) => Self::EngineBlocked(id.into()),
+            FormError::BayBlocked(id) => Self::BayBlocked(id.into()),
+            FormError::Detached(id) => Self::Detached(id.into()),
+            FormError::Uncontained(id) => Self::Uncontained(id.into()),
+            FormError::TooSmall(id) => Self::TooSmall(id.into()),
+            FormError::TooFewDrones => Self::TooFewDrones,
         }
     }
 }
