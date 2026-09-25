@@ -288,21 +288,12 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         row
     }
 
-    /// A label for a [`MenuUi::strip`] or a line under one: no margin, since a row spaces its
-    /// own children.
+    /// A label for a [`MenuUi::row`]: no margin, since a row spaces its own children.
     pub fn inline(&mut self, parent: Entity, text: &str, font_size: f32, color: Color) -> Entity {
         let font = self.font.clone();
         let label = self.faced(parent, text, font_size, color, font);
         self.commands.entity(label).insert(Node::default());
         label
-    }
-
-    /// A dim line of small print, for the keys that do what the strip above it cannot show.
-    pub fn hint(&mut self, parent: Entity, text: &str) -> Entity {
-        let dim = self.theme.text_dim;
-        let hint = self.inline(parent, text, HINT_SIZE, dim);
-        self.commands.entity(hint).insert(Node { margin: UiRect::top(Val::Px(4.0)), ..default() });
-        hint
     }
 
     /// A [`MenuUi::button`] sized to its words, for a strip.
@@ -317,9 +308,6 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         self.button_in(parent, text, action, node, 15.0)
     }
 }
-
-/// The size small print is set at.
-pub const HINT_SIZE: f32 = 13.0;
 
 /// How far above the ordinary screens an overlay sits. Room underneath for anything that wants
 /// to be between.

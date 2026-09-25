@@ -472,7 +472,7 @@ fn place(
 
 /// Everything on screen that is the editor's and not the camera's.
 #[derive(Component)]
-struct Chrome(ViewMode);
+struct Chrome;
 
 #[derive(Component)]
 struct Picture;
@@ -496,7 +496,7 @@ fn lay_out(
     assets: Res<AssetServer>,
     mut surface: ResMut<FormSurface>,
     mut images: ResMut<Assets<Image>>,
-    mut chrome: Query<(Entity, &Chrome, &mut Node), Without<Piece>>,
+    mut chrome: Query<(Entity, &mut Node), (With<Chrome>, Without<Piece>)>,
     pictures: Query<Entity, With<Picture>>,
     mut pieces: Query<(&Piece, &mut Node, &mut ImageNode), Without<Chrome>>,
 ) {
@@ -527,18 +527,14 @@ fn lay_out(
 
     let top = foot.0 + CHROME_GAP;
     let mut drawn = false;
-    for (entity, shows, mut node) in &mut chrome {
-        if shows.0 != ui.form.from {
-            commands.entity(entity).despawn();
-            continue;
-        }
+    for (_, mut node) in &mut chrome {
         drawn = true;
         if node.top != Val::Px(top) {
             node.top = Val::Px(top);
         }
     }
     if !drawn {
-        build_chrome(&mut commands, ui.form.from, top, assets.load(crate::faces::UI_FILE));
+        build_chrome(&mut commands, top, assets.load(crate::faces::UI_FILE));
     }
 
     let laid = crate::map_panel::around(rect, hole);
@@ -580,25 +576,15 @@ fn placed(at: egui::Rect) -> Node {
     }
 }
 
-fn build_chrome(commands: &mut Commands, from: ViewMode, top: f32, font: Handle<Font>) {
+fn build_chrome(commands: &mut Commands, top: f32, font: Handle<Font>) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
-    let root = ui.docked(Chrome(from), Edge::Top, top);
+    let root = ui.docked(Chrome, Edge::Top, top);
     let strip = ui.strip(root);
     let row = ui.row(strip);
     ui.inline(row, "SHIP EDITOR", 16.0, em_ui::vfd::TEXT);
-    ui.inline(row, "the ship as it is · nothing to change yet", 14.0, em_ui::vfd::TEXT_DIM);
-    let back = match from {
-        ViewMode::Map => "Back to the map   H",
-        _ => "Back to the world   H",
-    };
-    ui.small_button(row, back, Emit(Action::ToggleForm));
-    // Inside the strip, on its backdrop: under it, over a lit hull, it could not be read.
-    ui.hint(strip, HINT);
+    ui.inline(row, "current ship", 14.0, em_ui::vfd::TEXT_DIM);
+    ui.small_button(row, "Back", Emit(Action::ToggleForm));
 }
-
-/// Every control, on one line under the strip.
-pub const HINT: &str = "right-drag or arrows: orbit · wheel or = -: zoom · \
-    left-drag, Shift+wheel or PgUp PgDn: slide fore and aft · Esc: back";
 
 pub(crate) fn press(buttons: Query<(&Interaction, &Emit), Changed<Interaction>>, mut out: MessageWriter<Requested>) {
     for (interaction, emit) in &buttons {
