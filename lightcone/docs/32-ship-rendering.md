@@ -176,18 +176,21 @@ outer size: rings and meridians through `Shape::exit` from the part's center, so
 every primitive, drawn as tubes in `BodyWireframeMaterial`. The cage's thickness follows the scaffold
 averaged across the sliver, so it goes up with the truss and thins away as the scaffold comes down;
 the crossfade to solid is the solid filling the cage, since both materials are opaque. The game keeps
-this until R10.
+this until R15 draws construction there the way the demo does.
 
 As built for truss and plating (`lc_client::refit_hull`, `lc_client::truss`): **`--demo refit` draws
 the whole ship on the mesher and the hull material**, and the placeholders stand aside. Plating is a
 mask on R3's material and means nothing on a Bevy primitive, so the demo could not wait for R10. A
 step is meshed once, as it starts: the ship it leaves alone (`Frame::standing`, placed as a form, or as
 its bare copies where it hangs from a part not built yet), each copy it works on at its larger size,
-and each copy's truss. Within the step only uniforms move. `Working::sweep` turns `Working::look` into
+and each copy's truss. Within the step only uniforms and poses move: what hangs from a part being
+resized rides out on it, each copy posed every frame from `Frame::pieces`, as a move's carried copies
+are, and the truss keeps out of where those copies will stand. Once the clock passes a step, its copies
+are drawn as the step left them until the next step's meshes land, so a part taken apart stays gone. `Working::sweep` turns `Working::look` into
 meters from the joint, a front and a width a band, which is all the shader needs to give every point
 its own phase; a test holds the two to agreement across every step. A step's meshes are shown only
-once all of them have landed, and the last step's stay up until then. A move meshes each carried copy
-in its own frame and poses it every frame.
+once all of them have landed, and the last step's stay up until then. A carried or riding copy is meshed in its own frame, bare,
+so a fillet it has with the resized part is missing until the step is done.
 
 - **The truss is whole girders, not a distance field meshed.** The lattice is the one described, at
   8 m square to the ship's frame, girders 0.35 m in radius, and it is kept where both of a girder's

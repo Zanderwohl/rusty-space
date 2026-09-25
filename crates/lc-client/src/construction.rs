@@ -107,6 +107,10 @@ pub struct Sweep {
 impl Sweep {
     pub fn look(&self, x_m: f64) -> Look {
         let x = x_m.clamp(0.0, self.span_m);
+        // As `Look::built`: the far edge finishes exactly with the step.
+        if self.fronts_m[3] - x >= self.widths_m[3] * (1.0 - 1e-12 / SCAFFOLD) {
+            return Look::FINISHED;
+        }
         let ramp = |b: usize| ((self.fronts_m[b] - x) / self.widths_m[b]).clamp(0.0, 1.0);
         let truss = ramp(0);
         Look { truss, plating: ramp(1), fitted: ramp(2), scaffold: truss * (1.0 - ramp(3)) }
@@ -131,6 +135,9 @@ pub struct Working {
     joints: Vec<(DVec3, f64)>,
     /// For a move, every copy carried along with the moved part, itself included.
     pub carried: Vec<(PartId, Side)>,
+    /// For a resize, the copies hanging from the part, where they stand at its larger size. They
+    /// ride out on it, so each frame's are in [`Frame::pieces`].
+    pub riders: Vec<Piece>,
 }
 
 impl Working {
@@ -161,9 +168,14 @@ impl Working {
 
     /// Copy `copy`'s bands in meters. `None` for a move, which builds nothing.
     pub fn sweep(&self, copy: usize) -> Option<Sweep> {
+        self.sweep_at(copy, self.fraction)
+    }
+
+    /// The same at `fraction` through the step: at 1, how the step leaves the copy.
+    pub fn sweep_at(&self, copy: usize, fraction: f64) -> Option<Sweep> {
         let f = match self.change.phase() {
-            Phase::Build => self.fraction,
-            Phase::Dismantle => 1.0 - self.fraction,
+            Phase::Build => fraction,
+            Phase::Dismantle => 1.0 - fraction,
             Phase::Move => return None,
         };
         let (joint, span_m) = self.joints[copy];
@@ -177,6 +189,12 @@ impl Working {
             fronts_m: starts.map(|s| (f - s) * k),
             widths_m: widths.map(|w| w * k),
         })
+    }
+
+    /// Every copy that moves through the step as a whole: what a move carries, and what rides
+    /// out on a resized part.
+    pub fn moving(&self) -> impl Iterator<Item = (PartId, Side)> + '_ {
+        self.carried.iter().copied().chain(self.riders.iter().map(|p| (p.part, p.side)))
     }
 
     /// Each layer averaged across the sliver: what a placeholder with one mesh per part draws.
@@ -252,6 +270,7 @@ impl Frame {
         let keys = |pieces: &[Piece]| pieces.iter().map(|p| (p.part, p.side)).collect::<BTreeSet<_>>();
 
         let mut carried = Vec::new();
+        let mut riders = Vec::new();
         let (pieces, outer, inner) = match s.change {
             Change::Grow | Change::Shrink => {
                 let from = part(before, s.part).expect("a resize has a part to resize");
@@ -260,6 +279,8 @@ impl Frame {
                 let pieces = stand.place(&applied(before, s.part, Some(Part { volume_m3, ..to })));
                 let of = |placed: &[Piece]| placed.iter().filter(|p| p.part == s.part).copied().collect::<Vec<_>>();
                 let (big, small) = if s.change == Change::Grow { (&placed_after, &placed_before) } else { (&placed_before, &placed_after) };
+                let below = subtree(before, s.part);
+                riders = big.iter().filter(|p| p.part != s.part && below.contains(&p.part)).copied().collect();
                 (pieces, of(big), of(small))
             }
             Change::Add => {
@@ -289,26 +310,24 @@ impl Frame {
             }
         };
         let joints = outer.iter().map(|p| joint(p, &after, before)).collect();
-        let standing = match s.change {
-            Change::Grow | Change::Add => before.clone(),
-            Change::Shrink | Change::Remove => after,
-            Change::Move => {
-                let gone: BTreeSet<PartId> = carried.iter().map(|&(id, _)| id).collect();
-                Form { parts: before.parts.iter().filter(|p| !gone.contains(&p.id)).copied().collect() }
-            }
+        let gone: BTreeSet<PartId> = carried.iter().map(|&(id, _)| id).chain(riders.iter().map(|p| p.part)).collect();
+        let end = match s.change {
+            Change::Grow | Change::Add | Change::Move => before,
+            Change::Shrink | Change::Remove => &after,
         };
+        let standing = Form { parts: end.parts.iter().filter(|p| !gone.contains(&p.id)).copied().collect() };
         Frame {
             pieces,
             standing,
             finished,
-            working: Some(Working { step, part: s.part, change: s.change, fraction, outer, inner, joints, carried }),
+            working: Some(Working { step, part: s.part, change: s.change, fraction, outer, inner, joints, carried, riders }),
         }
     }
 
     /// [`Frame::standing`]'s copies, as placed this frame.
     pub fn standing_pieces(&self) -> Vec<Piece> {
         let Some(w) = &self.working else { return self.pieces.clone() };
-        let busy = |p: &Piece| p.part == w.part || w.carried.contains(&(p.part, p.side));
+        let busy = |p: &Piece| p.part == w.part || w.moving().any(|k| k == (p.part, p.side));
         self.pieces.iter().filter(|p| !busy(p)).chain(&w.inner).copied().collect()
     }
 

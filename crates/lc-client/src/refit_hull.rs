@@ -1,6 +1,7 @@
 //! `--demo refit` drawn on the hull meshes (R2) in the hull material (R3), with the truss (R8).
 //!
-//! The game keeps its placeholders until R10. The demo cannot: plating is a mask on R3's material,
+//! The game keeps its placeholders until R10, and draws construction this way from R15. The demo
+//! cannot wait: plating is a mask on R3's material,
 //! and means nothing on a Bevy primitive. So under `--demo refit` the whole ship is meshed, and
 //! [`crate::parts`] stands aside.
 //!
@@ -25,6 +26,7 @@ use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, Kind, PartId, SparMode};
 
 use crate::construction::{Frame, Refit, Sweep};
+use lc_world::refit::rounds::Phase;
 use crate::hull::{ALBEDO, Eye, lighting, lit};
 use crate::hull_mesh::{Finish, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, Union, region};
 use crate::procedural::{Bakes, Shape, Target, placeholder};
@@ -35,8 +37,8 @@ use crate::truss::{self, GIRDER_RADIUS_M, PITCH_M, TrussBuffers};
 const TILE_M: f32 = 64.0;
 const TILE_TEXELS: u32 = 512;
 
-/// Lights by kind, as shares of the exposure's reference. A stand-in for R10's powers: bright
-/// enough to read on a night side, lost on a lit one.
+/// Lights by kind, as shares of the exposure's reference. A stand-in until R15 gives them real
+/// powers: bright enough to read on a night side, lost on a lit one.
 fn lights(kind: &str) -> Vec3 {
     match kind {
         "drone" => 0.02 * Vec3::new(0.85, 0.92, 1.0),
@@ -142,6 +144,9 @@ struct Sliver {
     truss: Option<Task<Option<TrussBuffers>>>,
     /// Whether a girder mesh stands in for the lattice; `None` until its task lands.
     meshed: Option<bool>,
+    /// How the step leaves the copy, drawn once the clock is past it and until the next step's
+    /// meshes land: a part taken apart stays gone.
+    end: Option<Sweep>,
 }
 
 /// What a mesh under a [`Generation`] is.
@@ -207,7 +212,8 @@ pub fn draw_refit(
 
     for (root, mut generation, mut transform, mut visibility) in &mut generations {
         *transform = placed;
-        let working = frame.working.as_ref().filter(|_| generation.key == key);
+        let current = generation.key == key;
+        let working = frame.working.as_ref().filter(|_| current);
         for (copy, state) in generation.copies.iter_mut().enumerate() {
             if let Some(task) = state.truss.as_mut()
                 && let Some(done) = check_ready(task)
@@ -228,7 +234,7 @@ pub fn draw_refit(
                 }
             }
             let Some(mut asset) = materials.get_mut(&state.material) else { continue };
-            let sweep = working.and_then(|w| w.sweep(copy));
+            let sweep = if current { working.and_then(|w| w.sweep(copy)) } else { state.end };
             let next = building(&finished, sweep, state.meshed != Some(true));
             if asset.uniforms != next {
                 asset.uniforms = next;
@@ -282,23 +288,31 @@ fn spawn(
     let standing = standing(frame, balance);
     let finish = material(finished.clone());
     let working = frame.working.as_ref();
-    let copies: Vec<Sliver> = working
-        .filter(|w| w.carried.is_empty())
+    let builds = working.filter(|w| w.change.phase() != Phase::Move);
+    let riders: Arc<[Piece]> = working.map_or(Arc::from([]), |w| w.riders.clone().into());
+    let copies: Vec<Sliver> = builds
         .map_or(&[][..], |w| &w.outer[..])
         .iter()
         .enumerate()
         .map(|(n, piece)| {
-            let sweep = working.and_then(|w| w.sweep(n));
-            let (piece, standing) = (*piece, standing.clone());
+            let (sweep, end) = builds.map_or((None, None), |w| (w.sweep(n), w.sweep_at(n, 1.0)));
+            let (piece, standing, riders) = (*piece, standing.clone(), riders.clone());
             let truss = sweep.map(|s| {
                 AsyncComputeTaskPool::get().spawn(async move {
-                    let field = |p: DVec3| standing.distance(p);
+                    // Nor where what rides on the part will stand when it is done.
+                    let riding = Union::new(&riders);
+                    let scratch = std::cell::RefCell::new(Vec::new());
+                    let field = |p: DVec3| {
+                        let scratch = &mut *scratch.borrow_mut();
+                        let on = if riders.is_empty() { f64::INFINITY } else { riding.distance(p, scratch) };
+                        standing.distance(p, scratch).min(on)
+                    };
                     let girders = truss::girders(&piece, &field)?;
                     Some(truss::mesh(&girders, s.joint, s.span_m))
                 })
             });
             let meshed = sweep.is_none().then_some(false);
-            Sliver { material: material(building(finished, sweep, true)), truss, meshed }
+            Sliver { material: material(building(finished, sweep, true)), truss, meshed, end }
         })
         .collect();
 
@@ -316,12 +330,12 @@ fn spawn(
     };
     hull(standing.source(), Drawn::Standing, finish.clone(), Transform::IDENTITY);
     if let Some(w) = working {
-        if w.carried.is_empty() {
+        if w.change.phase() != Phase::Move {
             for (n, piece) in w.outer.iter().enumerate() {
                 hull(HullSource::Pieces(Arc::from([*piece])), Drawn::Working, copies[n].material.clone(), Transform::IDENTITY);
             }
         }
-        for &(part, side) in &w.carried {
+        for (part, side) in w.moving() {
             let Some(piece) = frame.piece(part, side) else { continue };
             let alone = Piece { pose: Pose { position: DVec3::ZERO, rotation: glam::DMat3::IDENTITY }, ..*piece };
             hull(HullSource::Pieces(Arc::from([alone])), Drawn::Carried(part, side), finish.clone(), posed(&piece.pose));
@@ -354,11 +368,11 @@ impl Standing {
         }
     }
 
-    fn distance(&self, p: DVec3) -> f64 {
+    fn distance(&self, p: DVec3, scratch: &mut Vec<f64>) -> f64 {
         match self {
-            Standing::Form(sdf, ..) => sdf.distance(p),
+            Standing::Form(sdf, ..) => sdf.distance_with(p, scratch),
             Standing::Pieces(pieces) if pieces.is_empty() => f64::INFINITY,
-            Standing::Pieces(pieces) => Union::new(pieces).distance(p, &mut Vec::new()),
+            Standing::Pieces(pieces) => Union::new(pieces).distance(p, scratch),
         }
     }
 }
@@ -426,6 +440,51 @@ mod tests {
         assert!(checked > 1000, "{checked}");
     }
 
+    /// Past its end, a step's copies are drawn as it left them: a dismantled part discards every
+    /// point, girders included, and a built one is finished.
+    #[test]
+    fn a_step_passed_is_drawn_as_it_ended() {
+        let plan = demo_round(&B, 1.0).solve(&B).unwrap();
+        let share = |front: f32, width: f32, x: f32| ((front - x) / width).clamp(0.0, 1.0);
+        let mut dismantles = 0;
+        for step in plan.steps() {
+            let frame = Frame::at(&plan, &B, step.begins_s + 0.5 * step.duration_s);
+            let working = frame.working.as_ref().unwrap();
+            let Some(end) = working.sweep_at(0, 1.0) else { continue };
+            let u = building(&HullUniform::default(), Some(end), false);
+            for j in 0..=20 {
+                let x = end.span_m as f32 * j as f32 / 20.0;
+                let truss = share(u.build_fronts.x, u.build_widths.x, x);
+                let plating = share(u.reveal.w, u.reveal_panel.y, x);
+                match step.change.phase() {
+                    Phase::Dismantle => assert!(truss == 0.0 && plating == 0.0, "{x}: {truss} {plating}"),
+                    _ => assert_eq!(end.look(x as f64), crate::construction::Look::FINISHED),
+                }
+            }
+            dismantles += usize::from(step.change.phase() == Phase::Dismantle);
+        }
+        assert!(dismantles > 0);
+    }
+
+    /// What hangs from the growing hull rides out on it: it is out of what stands, posed from the
+    /// frame, and arrives where the grown hull's form places it.
+    #[test]
+    fn what_hangs_from_a_growing_part_rides_out_on_it() {
+        let plan = demo_round(&B, 1.0).solve(&B).unwrap();
+        let step = plan.steps().iter().find(|s| s.change == lc_world::refit::rounds::Change::Grow).unwrap();
+        let at = |f: f64| Frame::at(&plan, &B, step.begins_s + f * step.duration_s);
+        let (early, late) = (at(0.1), at(1.0 - 1e-9));
+        let riders = &early.working.as_ref().unwrap().riders;
+        assert!(riders.len() >= 3, "{riders:?}");
+        for rider in riders {
+            assert!(early.standing.parts.iter().all(|p| p.id != rider.part), "{:?} stands still", rider.part);
+            assert!(early.standing_pieces().iter().all(|p| p.part != rider.part));
+            let (a, b) = (early.piece(rider.part, rider.side).unwrap().pose, late.piece(rider.part, rider.side).unwrap().pose);
+            assert!(a.position.distance(b.position) > 1.0, "{:?} did not ride", rider.part);
+            assert!(b.position.distance(rider.pose.position) < 1e-3, "{:?} ends apart from the grown form", rider.part);
+        }
+    }
+
     /// The truss the demo's grown hull puts up is meshed, and within the budget by a margin.
     #[test]
     fn the_starting_hulls_truss_is_meshed() {
@@ -435,7 +494,7 @@ mod tests {
         let working = frame.working.as_ref().unwrap();
         let standing = standing(&frame, &B);
         assert!(matches!(standing, Standing::Form(..)));
-        let field = |p: DVec3| standing.distance(p);
+        let field = |p: DVec3| standing.distance(p, &mut Vec::new());
         let girders = truss::girders(&working.outer[0], &field).expect("a starting hull's truss meshes");
         assert!((1_000..truss::MAX_GIRDERS / 2).contains(&girders.len()), "{}", girders.len());
     }

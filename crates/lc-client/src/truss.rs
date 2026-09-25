@@ -1,12 +1,8 @@
 //! The truss a refit step stands up: a lattice of girders at a fixed pitch in meters, square to
 //! the ship's frame, kept where it falls in the sliver's shell. 32 §A build step is a frontier.
 //!
-//! Whole girders rather than the lattice's distance field cut by the shell and meshed. A truss
-//! stops at a node, and a whole girder is one tube, so the cost goes with the girders kept: about
-//! twelve thousand on a starting ship's hull. Surface nets would cost the shell's volume over the
-//! girder's radius cubed, some twenty million samples on the same hull. Past [`MAX_GIRDERS`] there
-//! is no mesh, and the hull shader draws the same lattice on the sliver's surface instead, which
-//! it averages below a pixel as it does any detail. That is every GSV.
+//! Whole girders, so the cost goes with what is kept; past [`MAX_GIRDERS`] the hull shader draws
+//! the lattice on the sliver's surface instead.
 
 use std::collections::HashMap;
 
@@ -148,9 +144,9 @@ pub fn mesh(girders: &[(Girder, bool)], joint: DVec3, span_m: f64) -> TrussBuffe
     let mut out = TrussBuffers { count: girders.len(), ..default() };
     let r = GIRDER_RADIUS_M;
     let x_of = |p: DVec3| (p.distance(joint).min(span_m)) as f32;
-    // Per node: the earliest girder's threshold, and whether all of them are scaffold, so the
-    // knuckle stands while any of its girders does.
-    let mut nodes: HashMap<[i64; 3], (f64, bool)> = HashMap::new();
+    // Per node: the earliest girder's threshold and where it reads its band, and whether all of
+    // them are scaffold, so the knuckle stands exactly while one of its girders does.
+    let mut nodes: HashMap<[i64; 3], (f64, f32, bool)> = HashMap::new();
     for &(g, scaffold) in girders {
         let (a, b) = g.ends();
         let attribute = [x_of((a + b) / 2.0), g.threshold() as f32, if scaffold { 1.0 } else { 0.0 }, 0.0];
@@ -175,15 +171,18 @@ pub fn mesh(girders: &[(Girder, bool)], joint: DVec3, span_m: f64) -> TrussBuffe
         let mut next = g.node;
         next[g.axis] += 1;
         for node in [g.node, next] {
-            let slot = nodes.entry(node).or_insert((1.0, true));
-            *slot = (slot.0.min(g.threshold()), slot.1 && scaffold);
+            let slot = nodes.entry(node).or_insert((1.0, attribute[0], true));
+            if g.threshold() < slot.0 {
+                (slot.0, slot.1) = (g.threshold(), attribute[0]);
+            }
+            slot.2 &= scaffold;
         }
     }
     let mut nodes: Vec<_> = nodes.into_iter().collect();
     nodes.sort_by_key(|(node, _)| *node);
-    for (node, (threshold, scaffold)) in nodes {
+    for (node, (threshold, x, scaffold)) in nodes {
         let at = node_at(node);
-        let attribute = [x_of(at), threshold as f32, if scaffold { 1.0 } else { 0.0 }, 0.0];
+        let attribute = [x, threshold as f32, if scaffold { 1.0 } else { 0.0 }, 0.0];
         let base = out.positions.len() as u32;
         let tips = [DVec3::X, DVec3::NEG_X, DVec3::Y, DVec3::NEG_Y, DVec3::Z, DVec3::NEG_Z];
         for t in tips {
