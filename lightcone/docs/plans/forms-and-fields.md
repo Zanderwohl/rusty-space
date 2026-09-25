@@ -293,7 +293,7 @@ graph LR
 
 ### F6 · Form grid
 
-- status: todo
+- status: active card "Build F6: the form grid"
 - needs: F3
 - touches: `crates/lc-world/src/form/grid.rs`
 - read: 29 §What the server computes from a form
@@ -481,7 +481,7 @@ graph LR
 
 ### R1 · Placeholder parts
 
-- status: todo
+- status: active card "Build R1: placeholder parts in the client"
 - needs: F2, F5
 - touches: `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`
 - read: 32 §Temporary assets
@@ -490,7 +490,7 @@ graph LR
 
 ### R2 · Mesher, in a void
 
-- status: todo
+- status: active card "Build R2: surface-nets mesher with no game data"
 - needs: F3
 - touches: `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/examples/`
 - read: 32 §From distance field to mesh
