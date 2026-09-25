@@ -148,6 +148,13 @@ mirrored subtree adds nothing, since reflecting twice is the original. Refits, s
 name the part, and both copies change together. Every primitive is symmetric in its own y, so a
 mirrored copy is still a rigid transform: the reflection composed with that flip.
 
+**A part's volume is per copy.** Each copy is solved from the same volume and proportions, so a
+mirror repeats the part at its size. If the volume were split between the copies instead, switching a
+mirror on would halve each copy and pull its children in, and a part would change size because of a
+flag. So everything that totals volume counts every copy: capacities, dry mass and its structure, the
+drone minimum, and each kind's total that a layout keeps. `min_part_m3` applies to each copy.
+`Form::copies` gives the count.
+
 **Placement is closed form**, so the server and every client compute it to the bit. A ray from a
 torus's center lies in a plane through its axis, which cuts the tube in two circles, so even its last
 exit is a quadratic; a rounded slab's is a quadratic on each of at most four pieces of the ray.
@@ -177,7 +184,8 @@ A shape matters to play only once it becomes numbers. Everything below is in `lc
 engine-free, and is **stated by the server in `Fitted`**, as `Balance` already is. The client
 computes the same numbers for its preview and takes the server's when they arrive.
 
-**Capacities** are sums of volume × density per kind. They replace everything 19 read from the loadout.
+**Capacities** are sums of volume × density per kind, with every copy of a mirrored part counted. They
+replace everything 19 read from the loadout.
 
 **Geometry** comes from a **voxel grid of fixed resolution**: `FORM_GRID = 64` cells along the longest
 side of the bounding box, whatever the ship's size. Each cell is filled by evaluating the union's
@@ -201,10 +209,12 @@ reproduce that formula to within the grid's resolution.
 
 ### Hull structure follows area
 
-Each part carries structure at `hull_areal_density` per square meter of **its own surface**, from its
+Each copy of a part carries structure at `hull_areal_density` per square meter of **its own surface**, from its
 primitive's closed-form area (Thomsen's approximation for an ellipsoid), again ignoring overlaps. Flattening buys
 shadow, radiating area and room on the surface, and pays for them in mass, so in acceleration.
-`hull_areal_density` is anchored so the starting form weighs what 19's starting ship does.
+`hull_areal_density` is anchored so the starting form weighs what 19's starting ship does. The
+starting form and the built-in presets use no mirrors, so how a mirror is counted cannot move the
+anchor.
 
 ### Placement rules
 
@@ -237,8 +247,15 @@ in three phases, strictly in order:
 | new | build | its mass-energy | energy ÷ drone power |
 | removed | dismantle | 95% back | energy ÷ drone power |
 | **proportions, primitive, or a spar's mode** | dismantle all, then build all | the 5% loss on all of it | both |
-| **anchor, mount, twist, tilt, standoff, blend, mirror or parent** | move, carrying its subtree | none | `move_work_factor` of what building the subtree would take |
+| **anchor, mount, twist, tilt, standoff, blend or parent** | move, carrying its subtree | none | `move_work_factor` of what building the subtree would take |
+| **mirror**, or a new parent, that adds a copy or takes one away | build or dismantle that copy, for each part in the subtree whose count changes | as new or removed | as new or removed |
 | **kind**, other than a spar's mode | removed, then new | as those two | as those two |
+
+**Every row counts every copy.** A mirrored part that grows builds the difference on both copies, and
+a move carries both copies of whatever it moves. Mirroring is priced as matter because it is matter:
+if it were a move, a player could double a part for a fraction of its cost. A part whose count of
+copies changes in the same round as its size resizes the copies both forms have, then builds or
+dismantles the other whole, so the 5% loss cannot be dodged by trading a copy for size.
 
 Data takes `data_work_factor` times as long as its energy says, as in 19. Drone power is measured at
 each step's start, so drones built first speed up everything after them.

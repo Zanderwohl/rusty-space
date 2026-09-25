@@ -2,8 +2,9 @@
 //! surface, and the mass-energy a refit moves when a part changes.
 //!
 //! Every part is sized alone from its closed form, overlaps ignored, and a spar as the uncut
-//! primitive it is cut from. See `lightcone/docs/29-ship-form.md` §Kinds and §Hull structure
-//! follows area.
+//! primitive it is cut from. A part's volume is per copy, so a mirrored part counts twice
+//! ([`Form::copies`]). See `lightcone/docs/29-ship-form.md` §Kinds and §Hull structure follows
+//! area.
 
 use super::{Form, Kind, Part};
 use crate::fitting::{Balance, C2, ONBOARD_DATA_BYTES};
@@ -31,8 +32,9 @@ impl Capacities {
         let mut engine_m3 = 0.0;
         let mut living_m3 = 0.0;
         let mut data_m3 = 0.0;
+        let copies = form.copies();
         for part in &form.parts {
-            let v = part.volume_m3;
+            let v = part.volume_m3 * f64::from(copies[&part.id]);
             match part.kind {
                 Kind::Storage => storage_m3 += v,
                 Kind::Drone => drone_m3 += v,
@@ -81,14 +83,19 @@ pub fn part_kg(part: &Part, balance: &Balance) -> f64 {
 }
 
 pub fn dry_mass_kg(form: &Form, balance: &Balance) -> f64 {
-    form.parts.iter().map(|p| part_kg(p, balance)).sum()
+    sum_copies(form, |p| part_kg(p, balance))
+}
+
+fn sum_copies(form: &Form, per_copy: impl Fn(&Part) -> f64) -> f64 {
+    let copies = form.copies();
+    form.parts.iter().map(|p| f64::from(copies[&p.id]) * per_copy(p)).sum()
 }
 
 /// The `hull_areal_density`, kg/m², at which `form` weighs `target_kg` dry. `None` when its
 /// contents alone already weigh more, or it has no surface.
 pub fn areal_density_for(form: &Form, balance: &Balance, target_kg: f64) -> Option<f64> {
-    let body: f64 = form.parts.iter().map(|p| body_kg(p, balance)).sum();
-    let area: f64 = form.parts.iter().map(|p| area_m2(p, balance)).sum();
+    let body = sum_copies(form, |p| body_kg(p, balance));
+    let area = sum_copies(form, |p| area_m2(p, balance));
     let density = (target_kg - body) / area;
     (density.is_finite() && density >= 0.0).then_some(density)
 }
@@ -103,15 +110,17 @@ pub enum Transfer {
 }
 
 impl Transfer {
-    /// A part going from `from` to `to`, `None` where it is absent. Only size may differ between
-    /// the two: a reshape or a change of kind is a dismantle of all of `from` then a build of
-    /// all of `to`, so it is two calls.
-    pub fn of(from: Option<&Part>, to: Option<&Part>, balance: &Balance) -> Self {
+    /// `copies` of a part going from `from` to `to`, `None` where it is absent. Only size may
+    /// differ between the two: a reshape or a change of kind is a dismantle of all of `from` then
+    /// a build of all of `to`, so it is two calls. So is a change in how many copies there are:
+    /// the copies both forms have resize, and the one gained or lost is built or dismantled
+    /// whole, so a mirror cannot be traded for size without the loss.
+    pub fn of(from: Option<&Part>, to: Option<&Part>, copies: u32, balance: &Balance) -> Self {
         if let (Some(from), Some(to)) = (from, to) {
             // Priced as a resize, a reshape would skip the loss on all of it.
             debug_assert!(from.kind == to.kind && from.primitive == to.primitive, "a reshape is two transfers");
         }
-        let kg = |p: Option<&Part>| p.map_or(0.0, |p| part_kg(p, balance));
+        let kg = |p: Option<&Part>| p.map_or(0.0, |p| f64::from(copies) * part_kg(p, balance));
         // Structure goes as volume^(2/3), so this is not a volume difference at one density.
         let delta_j = (kg(to) - kg(from)) * C2;
         if delta_j >= 0.0 {
@@ -274,8 +283,8 @@ mod tests {
         let b = Balance { hull_areal_density: 80.0, ..Balance::DEFAULT };
         let tank = part(1, Kind::Storage, Primitive::Ellipsoid { axes: DVec3::new(5.0, 3.0, 1.0) }, 1.0e6);
         let whole_j = part_kg(&tank, &b) * C2;
-        assert_eq!(Transfer::of(None, Some(&tank), &b), Transfer::Build { cost_j: whole_j });
-        let Transfer::Dismantle { gross_j, returned_j } = Transfer::of(Some(&tank), None, &b) else {
+        assert_eq!(Transfer::of(None, Some(&tank), 1, &b), Transfer::Build { cost_j: whole_j });
+        let Transfer::Dismantle { gross_j, returned_j } = Transfer::of(Some(&tank), None, 1, &b) else {
             panic!("removing is a dismantle");
         };
         assert_eq!(gross_j, whole_j);
@@ -283,8 +292,8 @@ mod tests {
 
         // Growing and shrinking by the same step are the same mass, and a round trip loses 5% of it.
         let bigger = Part { volume_m3: 3.0e6, ..tank };
-        let grow = Transfer::of(Some(&tank), Some(&bigger), &b);
-        let shrink = Transfer::of(Some(&bigger), Some(&tank), &b);
+        let grow = Transfer::of(Some(&tank), Some(&bigger), 1, &b);
+        let shrink = Transfer::of(Some(&bigger), Some(&tank), 1, &b);
         let Transfer::Build { cost_j } = grow else { panic!("growing is a build") };
         assert!(close(cost_j, (part_kg(&bigger, &b) - part_kg(&tank, &b)) * C2));
         assert!(close(grow.net_j() + shrink.net_j(), -0.05 * cost_j));
@@ -297,7 +306,7 @@ mod tests {
         let b = Balance::DEFAULT;
         let rod = part(1, Kind::Spar(SparMode::Saddle), Primitive::Cylinder { length: 8.0 }, 1.0e5);
         let strap = Part { kind: Kind::Spar(SparMode::Strap), ..rod };
-        Transfer::of(Some(&rod), Some(&strap), &b);
+        Transfer::of(Some(&rod), Some(&strap), 1, &b);
     }
 
     #[test]
@@ -307,7 +316,79 @@ mod tests {
         let b = Balance::DEFAULT;
         let rod = part(1, Kind::Storage, Primitive::Cylinder { length: 8.0 }, 1.0e5);
         let ball = Part { primitive: Primitive::Capsule { length: 0.0 }, ..rod };
-        Transfer::of(Some(&rod), Some(&ball), &b);
+        Transfer::of(Some(&rod), Some(&ball), 1, &b);
+    }
+
+    fn under(mut part: Part, parent: u16, mirror: bool) -> Part {
+        let placement = part.placement.as_mut().unwrap();
+        placement.parent = PartId(parent);
+        placement.mirror = mirror;
+        part
+    }
+
+    /// A hull with a mirrored boom, which carries a pod and, below that, a tank whose own mirror
+    /// adds nothing; and the same ship with the mirror's copies built out by hand as parts of
+    /// their own.
+    fn mirrored_and_by_hand(b: &Balance) -> (Form, Form) {
+        let mind = Part::mind(PartId(0), b.min_part_m3);
+        let hull = part(1, Kind::Storage, Primitive::Ellipsoid { axes: DVec3::new(5.0, 3.0, 1.0) }, 2.0e6);
+        let rod = Primitive::Cylinder { length: 9.0 };
+        let cone = Primitive::Frustum { length: 1.5, taper: 0.6 };
+        let boom = |id, mirror| under(part(id, Kind::Spar(SparMode::Saddle), rod, 4.0e4), 1, mirror);
+        let pod = |id, parent| under(part(id, Kind::Engine, cone, 3.0e5), parent, false);
+        let tank = |id, parent, mirror| under(part(id, Kind::Drone, Primitive::Capsule { length: 3.0 }, 2.0e5), parent, mirror);
+        let data = part(5, Kind::Data, Primitive::Capsule { length: 2.0 }, 1.0e5);
+        let mirrored = Form { parts: vec![mind, hull, boom(2, true), pod(3, 2), tank(4, 3, true), data] };
+        let by_hand = Form {
+            parts: vec![mind, hull, boom(2, false), pod(3, 2), tank(4, 3, false), data]
+                .into_iter()
+                .chain([boom(12, false), pod(13, 12), tank(14, 13, false)])
+                .collect(),
+        };
+        (mirrored, by_hand)
+    }
+
+    #[test]
+    fn a_mirrored_part_holds_and_weighs_every_copy() {
+        let b = Balance { hull_areal_density: 90.0, ..Balance::DEFAULT };
+        let (mirrored, by_hand) = mirrored_and_by_hand(&b);
+        let (m, h) = (Capacities::of(&mirrored, &b), Capacities::of(&by_hand, &b));
+        let fields = |c: Capacities| [c.storage_j, c.building_w, c.aperture_w, c.data_b];
+        assert!(fields(m).into_iter().zip(fields(h)).all(|(m, h)| close(m, h)), "{m:?} vs {h:?}");
+        assert!(close(dry_mass_kg(&mirrored, &b), dry_mass_kg(&by_hand, &b)));
+        let target = 2.0 * dry_mass_kg(&by_hand, &b);
+        let density = |form| areal_density_for(form, &b, target).unwrap();
+        assert!(close(density(&mirrored), density(&by_hand)));
+    }
+
+    /// 29 §Refits: a mirror switched on builds the copies it adds, and is not free.
+    #[test]
+    fn a_mirror_costs_what_its_copies_weigh() {
+        let b = Balance { hull_areal_density: 90.0, ..Balance::DEFAULT };
+        let (mirrored, _) = mirrored_and_by_hand(&b);
+        let mut plain = mirrored.clone();
+        for part in &mut plain.parts {
+            if let Some(placement) = &mut part.placement {
+                placement.mirror = false;
+            }
+        }
+        let (before, after) = (plain.copies(), mirrored.copies());
+        let cost_j: f64 = mirrored
+            .parts
+            .iter()
+            .filter(|p| after[&p.id] > before[&p.id])
+            .map(|p| -Transfer::of(None, Some(p), after[&p.id] - before[&p.id], &b).net_j())
+            .sum();
+        let added_j = (dry_mass_kg(&mirrored, &b) - dry_mass_kg(&plain, &b)) * C2;
+        assert!(added_j > 0.0);
+        assert!(close(cost_j, added_j), "{cost_j} vs {added_j}");
+
+        // Resizing a mirrored part resizes both copies.
+        let pod = mirrored.parts[3];
+        let bigger = Part { volume_m3: 2.0 * pod.volume_m3, ..pod };
+        let Transfer::Build { cost_j: one } = Transfer::of(Some(&pod), Some(&bigger), 1, &b) else { panic!() };
+        let Transfer::Build { cost_j: both } = Transfer::of(Some(&pod), Some(&bigger), 2, &b) else { panic!() };
+        assert!(close(both, 2.0 * one));
     }
 
     #[test]
@@ -315,7 +396,7 @@ mod tests {
         let b = Balance { hull_areal_density: 0.0, ..Balance::DEFAULT };
         for (kind, module) in [(Kind::Storage, crate::fitting::Module::Storage), (Kind::Data, crate::fitting::Module::Data)] {
             let one = part(1, kind, Primitive::Capsule { length: 1.0 }, b.slot_volume_m3);
-            let Transfer::Build { cost_j } = Transfer::of(None, Some(&one), &b) else { panic!() };
+            let Transfer::Build { cost_j } = Transfer::of(None, Some(&one), 1, &b) else { panic!() };
             assert!(close(cost_j, b.build_energy_j(module)), "{kind:?}");
         }
     }

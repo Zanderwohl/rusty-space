@@ -86,6 +86,26 @@ impl Poses {
 }
 
 impl Form {
+    /// How many copies of each part there are: two where it has a [`Side::Mirror`], else one.
+    ///
+    /// Does not validate, so a form partway through a refit can be counted: the walk up stops at a
+    /// missing parent, and after as many steps as there are parts, which a cycle would exceed.
+    pub fn copies(&self) -> BTreeMap<PartId, u32> {
+        let by_id: BTreeMap<PartId, &Part> = self.parts.iter().map(|p| (p.id, p)).collect();
+        let mirrored = |part: &Part| {
+            let mut at = part.placement;
+            for _ in 0..=self.parts.len() {
+                let Some(placement) = at else { return false };
+                if placement.mirror {
+                    return true;
+                }
+                at = by_id.get(&placement.parent).and_then(|p| p.placement);
+            }
+            false
+        };
+        self.parts.iter().map(|p| (p.id, 1 + u32::from(mirrored(p)))).collect()
+    }
+
     pub fn place(&self, min_part_m3: f64) -> Result<Poses, FormError> {
         self.validate()?;
         let mut children: BTreeMap<PartId, Vec<&Part>> = BTreeMap::new();
@@ -690,6 +710,9 @@ mod tests {
         // A mirror inside a mirrored subtree adds nothing.
         assert_eq!(mirrored, [2, 3, 4, 5]);
         assert_eq!(poses.len(), 7 + 4);
+        let twice: Vec<u16> = form.copies().into_iter().filter(|&(_, n)| n == 2).map(|(id, _)| id.0).collect();
+        assert_eq!(twice, mirrored);
+        assert!(form.copies().values().all(|&n| n == 1 || n == 2));
 
         let flip = DVec3::new(1.0, -1.0, 1.0);
         for id in [2, 3, 4, 5] {
@@ -709,6 +732,18 @@ mod tests {
                 assert_eq!(inside(&shape, original.to_local(p)), reflected, "part {id} at {p}");
             }
         }
+    }
+
+    /// Partway through a refit a part may wait for a parent not yet built.
+    #[test]
+    fn copies_are_counted_without_validating() {
+        let mut form = mirrored_form();
+        form.parts[3].placement.as_mut().unwrap().parent = PartId(40);
+        let copies = form.copies();
+        assert_eq!((copies[&PartId(3)], copies[&PartId(4)], copies[&PartId(5)]), (1, 1, 2));
+        // A cycle with no mirror in it ends.
+        form.parts[1].placement = Some(Placement { parent: PartId(6), ..form.parts[6].placement.unwrap() });
+        assert_eq!(form.copies()[&PartId(6)], 1);
     }
 
     #[test]

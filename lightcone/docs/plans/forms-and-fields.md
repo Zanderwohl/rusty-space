@@ -81,6 +81,7 @@ graph LR
   F8["F8 Refit rounds"]
   F9["F9 The switch from loadout to form"]
   F10["F10 Solar from the shadow"]
+  F11["F11 Mirrored parts count every copy"]
   S1["S1 Refits with forms, end to end"]
   S2["S2 Presets"]
   H1["H1 The field's account"]
@@ -135,6 +136,8 @@ graph LR
   F7 --> F9
   F8 --> F9
   F9 --> F10
+  F2 --> F11
+  F4 --> F11
   K3 --> S1
   F7 --> S1
   F9 --> S1
@@ -332,6 +335,15 @@ graph LR
 - read: 29 §What the server computes, 20 §Attitude
 - deliver: collection reads the shadow table; the idle attitude turns the largest shadow to the star; `solar_gain` re-anchored on the starting form; 20's tables recomputed.
 - done when: 20's anchor holds for the starting form to 1%, and a plate collects more than a spindle of the same volume broadside.
+
+### F11 · Mirrored parts count every copy
+
+- status: done #78
+- needs: F2, F4
+- touches: `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/form/place.rs`, `lightcone/docs/29-ship-form.md`
+- read: 29 §Placement is relative, §Kinds, §Refits, §Hull structure follows area
+- deliver: `volume_m3` is per copy. `Form::copies`, valid or not; capacities, dry mass and the areal density's solve count every copy; `Transfer::of` takes a count of copies. 29 prices a mirror as a build or dismantle of the copy, not a move. F8's planner adopts it.
+- done when: a mirrored subtree holds, weighs and costs what the same parts built out by hand do.
 
 ## S: server
 
