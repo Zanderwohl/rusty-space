@@ -147,14 +147,18 @@ with drone traffic streaming to it: a shipyard that is also the ship.
 
 ### The other steps
 
-- **Dismantle** runs a build's phases in reverse order but is not a rewind: scaffold goes up, the
-  plating comes off, which shows the truss, and then the truss is taken down.
+- **Dismantle** runs a build's phases in reverse, from the far edge in: scaffold goes up, the
+  fitting-out comes out, the plating comes off, which shows the truss, and then the truss is taken
+  down. Point by point that is the build played backward; what is not a rewind is the drone traffic,
+  which carries loads home (R9).
 - **Move** slides the subtree from its old anchor to its new one along a smooth path over the
   step. No construction, and drones swarm the joint.
 - **Rebuild** is a dismantle of the whole part to nothing in the round's first phase, and a build of
   the new one in its last.
-- **Cancel** runs the step in progress backward from the fraction it had reached, which is what the
-  server does to its energy.
+- **Cancel** runs the step in progress backward from the fraction it had reached, at its own pace.
+  The ledger is back at the moment of cancel for every kind of step
+  ([29-ship-form.md](29-ship-form.md#cancel)), so the backward run is only the picture. A dismantling
+  that storage could not pay back finishes at once, in the picture as in the ledger.
 
 As built (`lc_client::construction`): `Frame::at` takes the plan and the round's clock and reads
 `Plan::at` for what is finished and what is under way, so no timing is derived twice. A form partway
@@ -167,13 +171,6 @@ so both copies of a mirrored part build together. Each point's phase is `Working
 way across the sliver from the joint; each point spends 30%, 15%, 15% and 10% of the step in the four
 phases, and the rest is the front's travel, so the far edge finishes as the step does.
 
-- **Dismantle** looks like the build played backward, point by point: from the far edge in, scaffold
-  up, fitting-out out, plating off, truss down. What makes it not a rewind is the drone traffic,
-  which carries loads home (R9), not the layers.
-- **Cancel** runs the step backward at its own pace, a move included, although the ledger snaps a
-  move back at once ([29-ship-form.md](29-ship-form.md#cancel)). A dismantling that could not be paid
-  back finishes at once in the picture as in the ledger.
-
 On the placeholders the working part is solid at its volume at `t`, inside a cage at the sliver's
 outer size: rings and meridians through `Shape::exit` from the part's center, so one grid fits
 every primitive, drawn as tubes in `BodyWireframeMaterial`. The cage's thickness follows the scaffold
@@ -184,7 +181,7 @@ per vertex through `Working::across`.
 
 `--demo refit` stages one of each step on the starting form (the data core taken apart, the deck
 moved aft, the hull grown by half, a mirrored pair of pods on spars) as a client fixture beside
-`--form`, not a scenario: it is only the player's ship, and a round is not on the wire yet. The
+`--form`, not a scenario: it is only the player's ship, and drawing a round from the game is R14's. The
 Cluster preset would be the obvious target, and the planner refuses it from the starting form.
 
 ![0.1: the data core being taken apart](../images/refit-10.jpg)

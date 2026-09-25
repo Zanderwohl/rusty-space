@@ -6,6 +6,8 @@
 //! which is the only thing placed each frame. Only the player's own ship has a form so far, and
 //! only from `--form`.
 
+use std::borrow::Cow;
+
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
 use em_render::body_material::BodyWireframeMaterial;
@@ -36,7 +38,8 @@ const SPHERE_STACKS: u32 = 16;
 pub struct OwnForm(Option<Formed>);
 
 struct Formed {
-    pieces: Vec<Piece>,
+    /// The form standing still, which is what is drawn when no refit is under way.
+    still: Frame,
     /// From the Mind to the farthest corner of the form's bounds, meters.
     reach_m: f64,
 }
@@ -46,7 +49,8 @@ impl OwnForm {
         let sdf = Sdf::new(form, balance)?;
         let (min, max) = sdf.bounds();
         let reach_m = min.abs().max(max.abs()).length();
-        Ok(OwnForm(Some(Formed { pieces: sdf.pieces().to_vec(), reach_m })))
+        let still = Frame { pieces: sdf.pieces().to_vec(), finished: 0, working: None };
+        Ok(OwnForm(Some(Formed { still, reach_m })))
     }
 
     /// Framed to hold every one of `forms`, drawn as the first: a refit's two ends, so the camera
@@ -199,14 +203,14 @@ fn cage(shape: &Shape) -> Vec<Vec<Vec3>> {
 }
 
 /// What is drawn this frame: a refit's moment, or the form standing still.
-fn this_frame(own: &Formed, refit: Option<&Refit>, now_s: f64) -> (Frame, Option<(usize, Option<usize>)>) {
+fn this_frame<'a>(own: &'a Formed, refit: Option<&Refit>, now_s: f64) -> (Cow<'a, Frame>, Option<(usize, Option<usize>)>) {
     match refit {
         Some(refit) => {
             let frame = refit.frame(now_s);
             let key = (frame.finished, frame.working.as_ref().map(|w| w.step));
-            (frame, Some(key))
+            (Cow::Owned(frame), Some(key))
         }
-        None => (Frame { pieces: own.pieces.clone(), finished: 0, working: None }, None),
+        None => (Cow::Borrowed(&own.still), None),
     }
 }
 
@@ -437,7 +441,7 @@ mod tests {
         engine.placement.as_mut().unwrap().mirror = true;
         let own = OwnForm::new(&form, &Balance::DEFAULT).unwrap();
         let drawn = |side: Side| {
-            let piece = own.0.as_ref().unwrap().pieces.iter().find(|p| p.part == PartId(2) && p.side == side).unwrap();
+            let piece = own.0.as_ref().unwrap().still.pieces.iter().find(|p| p.part == PartId(2) && p.side == side).unwrap();
             let (_, scale) = solid(&piece.shape);
             let t = local(piece, scale);
             assert!(scale.min_element() > 0.0);
@@ -478,7 +482,7 @@ mod tests {
             let form = fixture(name).unwrap();
             let own = OwnForm::new(&form, &Balance::DEFAULT).unwrap();
             let reach = own.length_m().unwrap() as f32 / 2.0;
-            for piece in &own.0.as_ref().unwrap().pieces {
+            for piece in &own.0.as_ref().unwrap().still.pieces {
                 for v in vertices(&piece.shape) {
                     let p = piece.pose.to_outer(v.as_dvec3()).as_vec3();
                     assert!(p.length() <= reach * 1.001, "{name}: {:?} reaches {}", piece.part, p.length());

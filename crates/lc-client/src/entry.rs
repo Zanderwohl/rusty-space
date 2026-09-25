@@ -172,7 +172,7 @@ pub fn parse(args: &[String]) -> Entry {
         target_swarm: flag("--swarm"),
         // Not when the camera is pinned: a pin is a request for one exact frame, and turning
         // to face something first would be the aim it exists to stop racing.
-        frame_cast: flag("--demo") && !flag("--demo-cam"),
+        frame_cast: after("--demo").as_deref().and_then(scenario::Scenario::named).is_some() && !flag("--demo-cam"),
         camera: after("--demo-cam").and_then(|spec| {
             let mut fields = spec.split(':').map(|f| f.parse::<f64>());
             match (fields.next(), fields.next(), fields.next()) {

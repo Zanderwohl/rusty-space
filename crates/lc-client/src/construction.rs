@@ -14,7 +14,8 @@
 //! [`Working::outer`] and reads [`Working::look`] with [`Working::across`] for each point.
 //!
 //! `--demo refit` is a client fixture beside `--form`, not a `Scenario`: it needs only the
-//! player's own ship, and a round is not on the wire yet, so a shard would have nothing to run.
+//! player's own ship. Building a [`Refit`] from a round in the game, and [`Frame::canceled`] on a
+//! cancel, is R14's.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -410,7 +411,8 @@ fn slid(before: &Form, placed_before: &[Piece], placed_after: &[Piece], moved: P
 /// Not the Cluster preset, which the planner refuses from the starting form: its ids put an engine
 /// where the only drone was, and reshaping the storage core would vent everything the build phase
 /// needs. This stages one of each step instead: the data core taken apart, the deck moved aft,
-/// the hull grown by half, which is under way at the round's midpoint, and a mirrored pair of pods on spars built together.
+/// the hull grown by half, which is under way at the round's midpoint, and a mirrored pair of pods
+/// on spars built together.
 pub fn demo_round(balance: &Balance) -> Round {
     let from = Form::starting();
     let mut target = from.clone();
@@ -623,6 +625,16 @@ mod tests {
         let (a, b) = (frame.volume_m3(PartId(6), Side::Original).unwrap(), frame.volume_m3(PartId(6), Side::Mirror).unwrap());
         assert!(a > 0.0 && (a - b).abs() < 1e-9 * a, "{a} and {b}");
         assert_eq!(frame.working.as_ref().unwrap().outer.len(), 2);
+    }
+
+    /// What `--refit-at 0.5` photographs, so a change of balance cannot move it onto another step
+    /// without saying so.
+    #[test]
+    fn the_demos_midpoint_is_the_hull_half_grown() {
+        let refit = Refit { plan: plan(), balance: B, clock: Clock::Frozen(0.5) };
+        let working = refit.frame(0.0).working.expect("a step is under way");
+        assert_eq!((working.change, working.part), (Change::Grow, PartId(1)));
+        assert!((0.2..0.8).contains(&working.fraction), "{}", working.fraction);
     }
 
     #[test]
