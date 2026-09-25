@@ -338,7 +338,7 @@ graph LR
 
 ### F11 · Mirrored parts count every copy
 
-- status: done (this PR)
+- status: done #78
 - needs: F2, F4
 - touches: `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/form/place.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §Placement is relative, §Kinds, §Refits, §Hull structure follows area
