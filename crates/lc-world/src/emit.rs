@@ -24,6 +24,15 @@ pub fn thrust_power_w(mass_kg: f64, accel_m_s2: f64) -> f64 {
     mass_kg * accel_m_s2 * C_M_S
 }
 
+/// The temperature of an aperture's open face, kelvin: a blackbody radiating all of `power_w`
+/// through `face_m2`. For a photon drive `power_w` is `F c`.
+pub fn aperture_temperature_k(power_w: f64, face_m2: f64) -> f64 {
+    if power_w <= 0.0 || face_m2 <= 0.0 {
+        return 0.0;
+    }
+    (power_w / (em_spectra::blackbody::SIGMA * face_m2)).powf(0.25)
+}
+
 /// W/m² anywhere inside a cone of `half_angle_rad` carrying `power_w`, at `distance_m`.
 pub fn flux_w_m2(power_w: f64, half_angle_rad: f64, distance_m: f64) -> f64 {
     if power_w <= 0.0 {
@@ -93,6 +102,16 @@ mod tests {
         let full_kg = b.engine_thrust_n / G0;
         let five_g = thrust_power_w(full_kg, 5.0 * G0);
         assert!((rated - five_g).abs() / rated < 1.0e-12, "{rated} against {five_g}");
+    }
+
+    /// 32 §The exhaust cone: the starting drive, all of it through a 100 m face, is white-hot.
+    #[test]
+    fn the_starting_drive_s_face_is_white_hot() {
+        let b = Balance::DEFAULT;
+        let rated = rating_w(&b, Loadout::STARTING.engines as f64 * b.slot_volume_m3);
+        let face_m2 = std::f64::consts::PI * 50.0 * 50.0;
+        assert_eq!(format!("{:.1e}", aperture_temperature_k(rated, face_m2)), "7.0e5");
+        assert_eq!(aperture_temperature_k(0.0, face_m2), 0.0, "an unlit drive has no face");
     }
 
     /// 31 §What arrives, every cell: a 100 m aperture at its diffraction floor, the spot across,

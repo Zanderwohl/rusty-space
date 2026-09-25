@@ -250,9 +250,26 @@ replaced by two things:
   and the fragment works in the proxy's own coordinates from the surface back, as `plume.wgsl` does,
   so `f32` holds at 26 000 km.
 
+  "Closest" is measured as an **angle from the apex**, not as a distance from the axis line. From
+  beside the two are the same point. From behind the ship, the nearest point to the line can fall
+  behind the apex, outside the cone, while the ray still crosses the cone further out, which leaves
+  a hole. The angle along a ray has one minimum, and it solves as a linear equation. When the ray
+  runs along the axis, the view from inside or from past the end, that solution cancels to noise.
+  So the ends of the ray's segment are always tried as well, and the smallest of the three
+  candidates wins.
+
 The cone is drawn for your own ship whenever it burns, for any ship whose courtesy radius you are
 inside, and for a selected ship. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s
 palette, and is brightest where it would cook. The map draws the same cone as lines.
+
+The hazard color is 18's red-orange. The material takes both of its colors as uniforms, so it
+stays free of either product's palette. The aperture glow is a second material in
+`exhaust_cone_material` rather than a reshaped `plume_material`, so the game's reaction-drive plume
+is untouched until the switch to photon drives replaces it. The starting drive's face, all of
+1.1 × 10²⁰ W through 100 m, is `lc_world::emit::aperture_temperature_k`: 7.0 × 10⁵ K.
+
+Photograph it in a void with `cargo run -p lc-client --example cone_void -- --view
+beside|behind|inside --length <m>`. Its flags are listed in the example's module doc.
 
 An observer inside someone's cone gets the blinding point, from the photometry, as for a beam
 ([31-directed-energy.md](31-directed-energy.md)).
@@ -300,9 +317,9 @@ own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the examp
 
 | crate | new | changed |
 |---|---|---|
-| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` | `plume_material` becomes the aperture glow |
+| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` (the cone, and the aperture glow beside it) | `plume_material` retires once `plume.rs` stops drawing the reaction drive |
 | `lc-client` | `hull_mesh.rs` (surface nets, finishes, caching), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws the form instead of the ovoid. `plume.rs` draws the aperture glow at `F c` and the cone |
-| `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl` | |
+| `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl`, `exhaust_cone.wgsl`, `aperture_glow.wgsl` | |
 
 Materials go in `em-render` because nothing in them is specific to Lightcone. A hull with regions
 and a reveal mask is as much Exotic Matters' as anyone's.

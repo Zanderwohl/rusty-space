@@ -141,6 +141,14 @@ What an egui surface has to set, because its defaults are its own:
 Game panels drawn over the sky keep egui's own dark theme and that is fine: they sit on a
 rendered background, not inside the menu, and matching the menu there would be matching nothing.
 
+### Hazard
+
+**Red-orange, sRGB `(1.0, 0.30, 0.10)`**, for anything that will hurt: an exhaust cone and where
+it cooks ([32-ship-rendering.md](32-ship-rendering.md#the-exhaust-cone)). It is a hue no craft or
+body is drawn in. Green is a body and amber is a craft, so the hazard has to be neither of them.
+It is Lightcone's and not the shared palette's, so it lives beside the game's code, not in
+`em_ui::vfd`. Until the cone is wired into the client, `examples/cone_void.rs` holds it.
+
 ## Three faces, and where each one stops
 
 The interface is set in **Quantico**: every readout, label, button and window title, on both
