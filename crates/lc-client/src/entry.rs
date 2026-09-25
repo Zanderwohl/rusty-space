@@ -167,6 +167,7 @@ pub fn parse(args: &[String]) -> Entry {
                 || flag("--at")
                 || flag("--station")
                 || flag("--form")
+                || flag("--refit-at")
                 || flag("--demo")),
         target_swarm: flag("--swarm"),
         // Not when the camera is pinned: a pin is a request for one exact frame, and turning
@@ -203,6 +204,13 @@ pub fn parse(args: &[String]) -> Entry {
         }),
         lift_deg: value(args, "--lift"),
         form: after("--form"),
+        // Only the player's own ship, and no round on the wire yet, so no shard: see
+        // `construction`. `--refit-at` on its own asks for the same scene.
+        refit: match value::<f64>(args, "--refit-at") {
+            Some(f) => Some(crate::construction::Clock::Frozen(f)),
+            None => (after("--demo").as_deref() == Some("refit")).then_some(crate::construction::Clock::Looping),
+        },
+        rate_given: flag("--rate"),
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),

@@ -114,6 +114,7 @@ impl Plugin for ClientPlugin {
             PopulationMaterialPlugin,
             em_render::plume_material::PlumeMaterialPlugin,
             BodySurfaceMaterialPlugin,
+            em_render::body_material::BodyWireframeMaterialPlugin,
             em_render::atmosphere_material::AtmosphereMaterialPlugin,
             crate::sky_asset::SkyAssetPlugin,
             crate::procedural::ProceduralTexturesPlugin,
@@ -155,7 +156,7 @@ impl Plugin for ClientPlugin {
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .init_resource::<panels::HudFoot>()
             .init_resource::<crate::map_panel::WorldInset>()
-            .add_systems(Startup, (spawn_camera, no_lights, crate::parts::adopt_fixture))
+            .add_systems(Startup, (spawn_camera, no_lights, (crate::parts::adopt_fixture, crate::construction::adopt_demo).chain()))
             .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnExit(AppState::InGame), (crate::map_panel::release_world_frame, leave_scene))
             .add_systems(OnEnter(AppState::InGame), spawn_sky)
