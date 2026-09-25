@@ -11,6 +11,8 @@ use glam::DVec3;
 use lc_server::persist::{SAVE_FORMAT, load, save};
 use lc_store::ships::{Shard, load_shard, load_ships, save_shard, save_ships};
 use lc_world::craft::{Craft, CraftId, Kind};
+use lc_world::fitting::{Balance, Fitting};
+use lc_world::form::Form;
 use lc_world::flight::{Cruise, Drive};
 use lc_world::motion::Motive;
 use tokio_postgres::Client;
@@ -86,6 +88,28 @@ async fn a_craft_written_to_the_store_comes_back_bit_for_bit() {
         }
         _ => unreachable!("a crossing"),
     }
+}
+
+/// A fitted ship's row holds `lc_proto::Fitting`, whose shape F9 left alone: the loadout it
+/// carries is the one rows written before F9 hold, and it comes back as the starting form with
+/// its account whole.
+#[tokio::test]
+async fn a_fitted_ships_account_comes_back_through_the_store() {
+    let Some(client) = store().await else { return };
+    let band = 7_103_000;
+    clear(&client, band).await;
+
+    let mut craft = Craft::at(CraftId(band), Kind::Ship, DVec3::ZERO);
+    craft.fit(Some(Fitting::full(Form::starting(), Balance::DEFAULT, 0.0)));
+    craft.drain(4.0e25, 30.0);
+    let row = save(&craft, Some("acct-fitted"), None, None, Default::default(), 60_000_000);
+    save_ships(&client, &[row]).await.unwrap();
+
+    let read = load_ships(&client).await.unwrap().into_iter().find(|s| s.ship_id == band).unwrap();
+    let back = load(&read, None).expect("it reads");
+    assert_eq!(back.fitting(), craft.fitting());
+    assert_eq!(back.fitting().unwrap().form(), &Form::starting());
+    assert_eq!(back.length_m, craft.length_m);
 }
 
 /// Saving the same craft again replaces it, because a checkpoint is written over and over.

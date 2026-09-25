@@ -26,7 +26,7 @@ use glam::DVec3;
 use lc_proto::ShipId;
 use lc_store::ships::Ship;
 use lc_world::craft::{Craft, CraftId, Kind};
-use lc_world::fitting::{Balance, Fitting, Loadout};
+use lc_world::fitting::{Balance, Fitting};
 use serde::{Deserialize, Serialize};
 
 use crate::chase::Pursuit;
@@ -348,13 +348,12 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     // a leak either way, because nothing after the save is involved. From here on the craft
     // records its stretches like any other, and `catch_up` fills the gap to now with real ones.
     craft.motion = snapshot.restore(system, row.saved_t as f64 * 1.0e-6);
-    // A player's ship from before modules existed is given the starting ones, full. Its hull
-    // was the starting hull, so it keeps its size and, by how the engines were rated, its
-    // acceleration.
+    // A player's ship from before modules existed is given the starting form, full. Its hull
+    // was the starting hull, so by how the engines were rated it keeps its acceleration.
     let fitting = match &saved.fitting {
         Some(fitting) => Some(Fitting::from(fitting)),
         None if row.format < 4 && row.account.is_some() => Some(Fitting::full(
-            Loadout::STARTING,
+            lc_world::form::Form::starting(),
             Balance::DEFAULT,
             row.saved_t as f64 * 1.0e-6,
         )),
@@ -558,7 +557,7 @@ impl<J: Journal> Server<J> {
             match load(row, system.as_deref()) {
                 Ok(mut craft) => {
                     if let Some(mut fitting) = craft.fitting().cloned() {
-                        fitting.balance = self.balance;
+                        fitting.set_balance(self.balance);
                         craft.fit(Some(fitting));
                     }
                     craft.enter(system, row.saved_t as f64 * 1.0e-6);
@@ -864,7 +863,10 @@ mod tests {
         };
         let back = load(&row, None).expect("a format 4 row reads");
         let fitting = back.fitting().expect("fitted");
-        assert_eq!(fitting.loadout, Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 }, "and no data module");
+        // The starting form with its living space doubled and no data part, read back as the counts.
+        let counts = lc_proto::Fitting::from(fitting).loadout;
+        assert_eq!(counts, lc_proto::Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 });
+        assert_eq!(fitting.hull().capacities.data_b, lc_world::fitting::ONBOARD_DATA_BYTES, "and no data");
         assert_eq!(fitting.account().stored_j, 1.25e26);
         assert_eq!(fitting.solar_w(), 0.0);
     }
@@ -1032,7 +1034,7 @@ mod tests {
     #[test]
     fn format_7_reads_with_its_reporting_marks() {
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
+        craft.fit(Some(Fitting::full(lc_world::form::Form::starting(), Balance::DEFAULT, 0.0)));
         let old = written::V7 {
             kind: 0,
             name: None,
@@ -1044,7 +1046,7 @@ mod tests {
             instruments: Some(old_instruments()),
         };
         let saved = decode(&row(lc_proto::encode(&old), 7)).expect("format 7 reads");
-        assert_eq!(saved.fitting.map(|f| f.loadout), craft.fitting().map(|f| f.loadout.into()));
+        assert_eq!(saved.fitting.map(|f| f.loadout), craft.fitting().map(|f| lc_proto::Fitting::from(f).loadout));
         assert_eq!(saved.instruments.unwrap().reporting.since(7), lc_world::knowledge::Mark::through(40.0));
     }
 
@@ -1078,19 +1080,30 @@ mod tests {
         assert_eq!(decode(&row).expect("it reads").radio, radio);
     }
 
+    /// A round cannot be saved as the loadouts a row holds until S1, so one under way is dropped
+    /// and the ship comes back in the form it began from. None can be begun on a shard meanwhile.
     #[test]
-    fn a_ships_modules_and_energy_survive_the_round_trip() {
+    fn a_ships_form_and_energy_survive_the_round_trip() {
+        use lc_world::form::{Form, PartId};
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
-        craft.begin_refit(Loadout { engines: 7, ..Loadout::STARTING }, 10.0).unwrap();
+        craft.fit(Some(Fitting::full(Form::starting(), Balance::DEFAULT, 0.0)));
+        craft.drain(3.0e25, 5.0);
         let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), 20_000_000), None).expect("it reads");
         assert_eq!(back.fitting(), craft.fitting());
-        assert!(back.is_refitting(20.0));
+        assert_eq!(back.length_m, craft.length_m);
+
+        let mut target = Form::starting();
+        target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 1.4;
+        craft.begin_refit(target, 10.0).unwrap();
+        let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), 20_000_000), None).expect("it reads");
+        assert!(!back.is_refitting(20.0));
+        let unrefitted = lc_world::fitting::Account { refit: None, ..craft.fitting().unwrap().account() };
+        assert_eq!(back.fitting().unwrap().account(), unrefitted);
     }
 
-    /// **Format 3 still reads**, and a player's ship in it is given the starting modules.
+    /// **Format 3 still reads**, and a player's ship in it is given the starting form.
     #[test]
-    fn a_player_ship_from_before_modules_comes_back_with_the_starting_ones() {
+    fn a_player_ship_from_before_modules_comes_back_with_the_starting_form() {
         #[derive(Serialize)]
         struct Old {
             kind: u8,
@@ -1118,8 +1131,10 @@ mod tests {
         };
         let player = load(&row(Some("acct")), None).expect("a format 3 row reads");
         let fitting = player.fitting().expect("a player's ship is fitted");
-        assert_eq!(fitting.loadout, Loadout::STARTING);
-        assert!((player.length_m - 500.0).abs() < 1.0e-9);
+        assert_eq!(fitting.form(), &lc_world::form::Form::starting());
+        // As long as the starting form's extent, where the twenty slots it had made it 500 m.
+        assert_eq!(player.length_m, fitting.hull().extent_m);
+        assert!((player.length_m - 570.6).abs() < 0.1, "{}", player.length_m);
         assert!((player.rated_drive(3.0).accel_g - 5.0).abs() < 1.0e-9);
         assert!(load(&row(None), None).unwrap().fitting().is_none(), "a craft with no pilot is not");
     }

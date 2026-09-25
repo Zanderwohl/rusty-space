@@ -198,7 +198,7 @@ pub const COMMANDS: &[Spec] = &[
         name: "refit-magic",
         verb: Verb::RefitMagic,
         level: Level::DEBUG,
-        summary: "rebuild a ship to a loadout at once and for nothing, as long as its modules fit",
+        summary: "rebuild a ship at once and for nothing; refused until refits by form are built",
         args: &[
             ArgSpec {
                 name: "storage",
@@ -339,8 +339,8 @@ impl<J: Journal> Server<J> {
                 self.chart(ship, args.id("star"))
             }
             Verb::RefitMagic => {
-                let ship = self.ship_named(command.from, &args)?;
-                self.refit_magic(ship, &args, wire)
+                self.ship_named(command.from, &args)?;
+                self.refit_magic()
             }
             Verb::RefitFinish => {
                 let ship = self.ship_named(command.from, &args)?;
