@@ -11,9 +11,13 @@ use glam::{DVec2, DVec3};
 use super::place::normal_frame;
 use super::primitive::Shape;
 use super::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
-use crate::fitting::{Balance, Loadout};
+use crate::fitting::Balance;
 
 const MIND: PartId = PartId(0);
+
+/// 19's slot, the reference 500 m ovoid's `π L³ / 50` over twenty. Written out rather than read
+/// from `Balance`, which loses the slot when the loadout goes.
+const SLOT_M3: f64 = 125_000.0 * std::f64::consts::PI;
 
 /// 19's starting modules as volumes: each kind's count of slots.
 struct Volumes {
@@ -24,19 +28,8 @@ struct Volumes {
     data: f64,
 }
 
-impl Volumes {
-    fn starting() -> Self {
-        let start = Loadout::STARTING;
-        let slots = |count: u32| count as f64 * Balance::DEFAULT.slot_volume_m3;
-        Self {
-            storage: slots(start.storage),
-            drone: slots(start.drones),
-            engine: slots(start.engines),
-            living: slots(start.living),
-            data: slots(start.data),
-        }
-    }
-}
+const STARTING: Volumes =
+    Volumes { storage: 6.0 * SLOT_M3, drone: 2.0 * SLOT_M3, engine: 5.0 * SLOT_M3, living: SLOT_M3, data: SLOT_M3 };
 
 fn hang(id: u16, kind: Kind, primitive: Primitive, volume_m3: f64, parent: PartId, mount: Mount) -> Part {
     let placement = Placement { parent, mount, twist: 0.0, tilt: DVec2::ZERO, blend: 0.0, mirror: false };
@@ -54,7 +47,9 @@ fn blended(mut part: Part, blend: f64) -> Part {
 
 /// The tilt that turns a child attached where its parent's normal is `normal` to lie along `along`,
 /// both in the parent's frame. `libm`, so every machine building the form builds the same one.
+/// `along` must not be parallel to `normal`, which leaves the turn's axis undefined.
 fn lying(normal: DVec3, along: DVec3) -> DVec2 {
+    debug_assert!(normal.cross(along).length_squared() > 1e-12, "no axis to turn about");
     let frame = normal_frame(normal);
     let cross = normal.cross(along);
     let turn = cross.normalize() * libm::atan2(cross.length(), normal.dot(along));
@@ -68,7 +63,7 @@ impl Form {
     /// 29's starting form, holding 19's starting modules. The frame is x the nose, z up.
     pub fn starting() -> Form {
         let b = Balance::DEFAULT;
-        let v = Volumes::starting();
+        let v = STARTING;
         let hull = Primitive::Ellipsoid { axes: DVec3::new(5.0, 3.0, 1.0) };
         let pod = Primitive::Capsule { length: 2.0 };
 
@@ -125,7 +120,7 @@ impl Builtin {
 
     pub fn form(self) -> Form {
         let b = Balance::DEFAULT;
-        let v = Volumes::starting();
+        let v = STARTING;
         let mind = Part::mind(MIND, b.min_part_m3);
         let parts = match self {
             Builtin::Plate => {
@@ -208,7 +203,8 @@ pub struct Layout {
     /// The preset's parts given nothing, by id: of a kind the ship lacks, or whose share would be
     /// below `min_part_m3`. Their children hang from the nearest ancestor that is kept.
     pub emptied: Vec<PartId>,
-    /// Kinds the ship has that the layout found no part for, whose volume it therefore leaves out.
+    /// Kinds the ship has that the preset has no part for, whose volume the layout leaves out. The
+    /// editor names these as it names `emptied`.
     pub unplaced: Vec<Kind>,
 }
 
@@ -318,7 +314,7 @@ impl Form {
 mod tests {
     use super::*;
     use crate::craft::LENGTH_RANGE_M;
-    use crate::fitting::ONBOARD_DATA_BYTES;
+    use crate::fitting::{Loadout, ONBOARD_DATA_BYTES};
     use crate::flight::{C_M_S, G0};
     use crate::form::capacity::{areal_density_for, dry_mass_kg, Capacities};
     use crate::form::place::{Poses, Side};
@@ -380,21 +376,36 @@ mod tests {
         (lo, hi)
     }
 
+    /// While 19's loadout lasts. F9 removes it, and this test with it; the volumes stand.
     #[test]
-    fn the_starting_volumes_are_nineteens_modules_and_29s_figures() {
+    fn the_starting_volumes_are_nineteens_module_counts() {
         let b = Balance::DEFAULT;
         let start = Loadout::STARTING;
+        let slots = |count: u32| count as f64 * b.slot_volume_m3;
+        for (volume, want) in [
+            (STARTING.storage, slots(start.storage)),
+            (STARTING.engine, slots(start.engines)),
+            (STARTING.drone, slots(start.drones)),
+            (STARTING.living, slots(start.living)),
+            (STARTING.data, slots(start.data)),
+        ] {
+            assert!(close(volume, want, 1e-15), "{volume} against {want}");
+        }
+    }
+
+    #[test]
+    fn the_starting_volumes_are_29s_figures() {
+        let b = Balance::DEFAULT;
         let form = Form::starting();
         let volume = |kind| of_kind(&form, kind).iter().map(|p| p.volume_m3).sum::<f64>();
-        for (kind, count, printed) in [
-            (Kind::Storage, start.storage, "2.36e6"),
-            (Kind::Engine, start.engines, "1.96e6"),
-            (Kind::Drone, start.drones, "7.85e5"),
-            (Kind::Living, start.living, "3.93e5"),
-            (Kind::Data, start.data, "3.93e5"),
+        for (kind, printed) in [
+            (Kind::Storage, "2.36e6"),
+            (Kind::Engine, "1.96e6"),
+            (Kind::Drone, "7.85e5"),
+            (Kind::Living, "3.93e5"),
+            (Kind::Data, "3.93e5"),
         ] {
             assert_eq!(of_kind(&form, kind).len(), 1, "{kind:?} is one part");
-            assert_eq!(volume(kind), count as f64 * b.slot_volume_m3, "{kind:?}");
             assert_eq!(format!("{:.2e}", volume(kind)), printed, "{kind:?}");
         }
         let c = Capacities::of(&form, &b);
@@ -520,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn every_built_in_is_at_least_the_shortest_hull() {
+    fn every_built_in_is_inside_the_length_range() {
         for (name, form) in everything() {
             let (lo, hi) = bounds(&form);
             let longest = (hi - lo).max_element();

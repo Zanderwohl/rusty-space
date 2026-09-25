@@ -238,17 +238,25 @@ mod tests {
         }
     }
 
+    /// The solver alone, on a form of its own. The anchor in `Balance::DEFAULT` is pinned in
+    /// `form::presets`.
     #[test]
-    fn the_areal_density_is_solved_to_weigh_nineteens_starting_ship() {
+    fn the_areal_density_solves_for_a_target_mass() {
         let b = Balance::DEFAULT;
-        let form = Form::starting();
-        let target = b.dry_mass_kg(&Loadout::STARTING);
+        let form = Form {
+            parts: vec![
+                Part::mind(PartId(0), b.min_part_m3),
+                part(1, Kind::Storage, Primitive::Ellipsoid { axes: DVec3::new(4.0, 2.0, 1.0) }, 3.0e6),
+                part(2, Kind::Data, Primitive::Slab { edges: DVec3::new(1.0, 3.0, 2.0), corner: 0.2 }, 4.0e5),
+            ],
+        };
+        let bare = dry_mass_kg(&form, &Balance { hull_areal_density: 0.0, ..b });
+        let target = 1.3 * bare;
         let density = areal_density_for(&form, &b, target).unwrap();
         let anchored = Balance { hull_areal_density: density, ..b };
         assert!(close(dry_mass_kg(&form, &anchored), target));
-        // A structure of the right order: 19's frame over the surface of 15 slots of parts.
-        assert!((100.0..10_000.0).contains(&density), "{density}");
-        assert_eq!(areal_density_for(&form, &b, 1.0), None);
+        assert_eq!(areal_density_for(&form, &b, bare), Some(0.0));
+        assert_eq!(areal_density_for(&form, &b, 0.99 * bare), None);
     }
 
     #[test]
