@@ -293,9 +293,9 @@ graph LR
 
 ### F6 · Form grid
 
-- status: active card "Build F6: the form grid"
+- status: done #84
 - needs: F3
-- touches: `crates/lc-world/src/form/grid.rs`
+- touches: `crates/lc-world/src/form/grid.rs`, `crates/lc-world/src/form/sdf.rs`, `crates/lc-world/src/form.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §What the server computes from a form
 - deliver: the voxel grid at `FORM_GRID`, the shadow table over 162 directions with interpolation, broadside and its roll, the envelope (offset, area, volume), moments of inertia, extent.
 - done when: a one-ellipsoid form reproduces 20's analytic `A(ŝ)` to within the grid's resolution, and a stack of plates shades itself.
