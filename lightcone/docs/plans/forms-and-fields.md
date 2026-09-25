@@ -378,9 +378,9 @@ graph LR
 
 ### H2 · The field's anchors
 
-- status: active card "Build H2: the field's anchors"
+- status: done #93
 - needs: H1, F5, F6
-- touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/field.rs`
+- touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/field.rs`, `lightcone/docs/30-the-field.md`
 - read: 30 §The anchors
 - deliver: `q_idle`, `field_capacity` and `τ` derived in `Balance::DEFAULT` from the starting form's envelope; 30's tables recomputed for it.
 - done when: the three anchors hold to a part in a million.
