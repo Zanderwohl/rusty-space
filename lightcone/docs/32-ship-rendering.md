@@ -283,7 +283,7 @@ placeholder, so the rest can be built and a refit visibly changes the ship strai
 
 - **Each part as a Bevy primitive mesh**, scaled to its solved size: `Sphere` scaled for an
   ellipsoid, `Capsule3d`, `Cuboid` for a slab and for the Mind, `Cylinder`, `Torus`,
-  `ConicalFrustum`. No blends.
+  `ConicalFrustum`. No blends, and a slab's corners square.
 - **A flat color per kind.**
 - **Construction as scale plus wireframe:** the growing part drawn in `BodyWireframeMaterial`
   during the truss phase, crossfading to solid.
@@ -291,6 +291,16 @@ placeholder, so the rest can be built and a refit visibly changes the ship strai
 - **The field as a fresnel sphere** around the bounds, tinted by temperature once there is one.
 - **Spars uncut**: the plain primitive. The saddles and straps arrive with the distance-field
   mesher.
+
+Until the grid gives a form its extent, the orbit camera frames the smallest sphere about the Mind
+holding the corners of the form's bounds, so its stops and standoff follow the form's size as the
+ovoid's follow its length.
+
+![the starting form as placeholder parts](../images/parts-default.jpg)
+![the cluster preset, from ahead](../images/parts-cluster.jpg)
+![the cluster preset, from the side](../images/parts-cluster-side.jpg)
+![the plate preset](../images/parts-plate.jpg)
+![the spindle preset](../images/parts-spindle.jpg)
 
 Every placeholder is replaced independently. None of them is on the server's side of anything.
 
