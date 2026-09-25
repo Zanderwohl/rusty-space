@@ -125,15 +125,7 @@ impl Knowledge {
     ) -> Option<BodyBelief> {
         let subject = Subject::Body { star, body };
         let file = self.file(subject)?;
-        // This craft's own before anybody else's, then the method that stands highest, then
-        // the later statement. A craft holds one orbit per witness per method now, so without
-        // the middle term a transit's shell would shadow a fit made before it.
-        let orbit = file.orbits().iter().max_by(|a, b| {
-            (a.witness == self.owner)
-                .cmp(&(b.witness == self.owner))
-                .then(a.method.standing().cmp(&b.method.standing()))
-                .then(a.stated_s.total_cmp(&b.stated_s))
-        });
+        let orbit = self.orbit_of(file);
         let kind = file
             .conclusions()
             .iter()
@@ -150,18 +142,7 @@ impl Knowledge {
             semi_major_au: orbit.map(|o| o.semi_major_au),
             orientation: orbit.map_or(Orientation::Unknown, |o| o.orientation),
             method: orbit.map(|o| o.method),
-            position_now: orbit.map_or(Placed::Unknown, |o| {
-                let here = placed_at(o, now_s);
-                match o.about {
-                    // Its own offset is from its primary, so the primary's own place is added.
-                    // A step with nowhere to stand on is a body whose place is not known.
-                    Some(primary) if depth > 0 => self
-                        .body_belief_within(star, primary, now_s, depth - 1)
-                        .map_or(Placed::Unknown, |up| added(up.position_now, here)),
-                    Some(_) => Placed::Unknown,
-                    None => here,
-                }
-            }),
+            position_now: self.placed_within(star, body, now_s, depth),
             radius_m: measured_radius(file),
             spin_s: file
                 .sightings()
@@ -182,6 +163,49 @@ impl Knowledge {
             stated_by: orbit.map(|o| o.witness),
             hops: orbit.map_or(0, |o| o.lineage.len()),
         })
+    }
+
+    /// The orbit a body's belief rests on. This craft's own before anybody else's, then the
+    /// method that stands highest, then the later statement. A craft holds one orbit per witness
+    /// per method now, so without the middle term a transit's shell would shadow a fit made
+    /// before it.
+    fn orbit_of<'a>(&self, file: &'a super::File) -> Option<&'a super::Orbit> {
+        file.orbits().iter().max_by(|a, b| {
+            (a.witness == self.owner)
+                .cmp(&(b.witness == self.owner))
+                .then(a.method.standing().cmp(&b.method.standing()))
+                .then(a.stated_s.total_cmp(&b.stated_s))
+        })
+    }
+
+    /// Where a body is believed to be at `now_s`: its orbit and its primaries', and nothing
+    /// else of its belief.
+    fn placed_within(&self, star: StarId, body: BodyId, now_s: f64, depth: usize) -> Placed {
+        let Some(orbit) = self.file(Subject::Body { star, body }).and_then(|f| self.orbit_of(f)) else {
+            return Placed::Unknown;
+        };
+        let here = placed_at(orbit, now_s);
+        match orbit.about {
+            // Its own offset is from its primary, so the primary's own place is added. A step
+            // with nowhere to stand on is a body whose place is not known.
+            Some(primary) if depth > 0 => added(self.placed_within(star, primary, now_s, depth - 1), here),
+            Some(_) => Placed::Unknown,
+            None => here,
+        }
+    }
+
+    /// Bring beliefs built at another time to `now_s`. Only a place and a velocity move with
+    /// time, so this is a Kepler solve a body up its primary chain, where building them again
+    /// is every file read and every name looked up.
+    pub fn move_to(&self, beliefs: &mut [BodyBelief], now_s: f64) {
+        for belief in beliefs {
+            let Some(star) = belief.subject.star() else { continue };
+            belief.position_now = self.placed_within(star, belief.body, now_s, Self::CHAIN);
+            belief.velocity_m_s = self
+                .file(belief.subject)
+                .and_then(|f| self.orbit_of(f))
+                .and_then(|o| moving_at(o, now_s));
+        }
     }
 
     /// Every body believed to be in one system, outward by believed distance.
@@ -791,6 +815,26 @@ mod tests {
     /// **A moon's plane is its planet's equator, not the system's.** Uranus's retinue is 98
     /// degrees off the ecliptic and Triton goes backwards; averaging them into the system's
     /// plane pushed the scatter past the limit and left Sol reading as unsolved.
+    /// Moving beliefs to another time gives what building them there would, a moon included,
+    /// whose place is its planet's plus its own.
+    #[test]
+    fn moved_beliefs_are_the_ones_built_at_that_time() {
+        let pole = DVec3::new(0.1, 0.2, 0.97);
+        let mut k = knowledge_with(&[
+            ("planet", orbit(1.0, known(pole, 0.01), Some(0.0))),
+            ("shell", orbit(3.0, Orientation::Unknown, None)),
+        ]);
+        let moon = Orbit { about: Some(body("planet")), ..orbit(0.01, known(DVec3::X, 0.01), Some(0.0)) };
+        k.orbits(Subject::Body { star: star(), body: body("moon") }, moon);
+
+        let mut moved = k.bodies_of(star(), 0.0);
+        let later = 0.3 * YEAR_S;
+        k.move_to(&mut moved, later);
+        assert_eq!(moved, k.bodies_of(star(), later));
+        let placed = |beliefs: &[BodyBelief]| beliefs.iter().filter(|b| matches!(b.position_now, Placed::Known { .. })).count();
+        assert_eq!(placed(&moved), 2, "the planet and its moon are both placed");
+    }
+
     #[test]
     fn a_moons_orbit_says_nothing_about_the_system_plane() {
         let star = StarId::synthesize("plane", 61);

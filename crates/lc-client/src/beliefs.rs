@@ -4,8 +4,9 @@
 //! of its evidence, and [`Knowledge::system_plane`] folds the result again. The map, the system
 //! panel and the telescope all want the same answer in the same frame.
 //!
-//! Keyed by the star and the coordinate second. Both readers run after the clock has advanced,
-//! so the second ask in a frame is a read, and a frame that asks for neither builds nothing.
+//! Built again only when the star or what the craft knows has changed ([`Knowledge::revision`]);
+//! between those, a new time only moves each body along its orbit. A frame that asks for neither
+//! builds nothing.
 
 use bevy::prelude::Resource;
 use lc_world::knowledge::{BodyBelief, BodyId, Knowledge, SystemPlane};
@@ -51,8 +52,13 @@ impl Held {
 /// The cache. Ask through [`Beliefs::held`]; nothing else reaches the list.
 #[derive(Resource, Default)]
 pub struct Beliefs {
-    key: Option<(StarId, f64)>,
+    /// The star and the knowledge revision it was built from.
+    key: Option<(StarId, u64)>,
+    /// Coordinate seconds the bodies are placed at.
+    at_s: f64,
     held: Held,
+    #[cfg(test)]
+    builds: usize,
     /// Always empty. Handed back when nothing is going to read the list, so a frame with the
     /// map hidden and no panel open pays nothing at all.
     blank: Held,
@@ -65,18 +71,26 @@ impl Beliefs {
         if wanted { self.held(session) } else { &self.blank }
     }
 
-    /// What this craft believes now, rebuilt only when the system or the second has changed.
+    /// What this craft believes now.
     pub fn held(&mut self, session: &Session) -> &Held {
         let Some(system) = session.system.as_ref() else {
             self.key = None;
             self.held = Held::default();
             return &self.held;
         };
-        let key = (system.star, session.coordinate_time_s());
+        let key = (system.star, session.knowledge.revision());
+        let now_s = session.coordinate_time_s();
         if self.key != Some(key) {
             self.key = Some(key);
-            self.held = build(&session.knowledge, system, key.0, key.1);
+            self.held = build(&session.knowledge, system, key.0, now_s);
+            #[cfg(test)]
+            {
+                self.builds += 1;
+            }
+        } else if self.at_s != now_s {
+            session.knowledge.move_to(&mut self.held.bodies, now_s);
         }
+        self.at_s = now_s;
         &self.held
     }
 }
@@ -179,6 +193,22 @@ mod tests {
         assert_eq!(later, placed(&of(&session)), "a held list outlived its second");
         assert_ne!(later, first, "the body did not move, so nothing was proved");
         assert!(!beliefs.held(&session).targets.is_empty(), "a system has bodies to go to");
+    }
+
+    /// Only learning something builds the list again; time alone moves what is held.
+    #[test]
+    fn the_list_is_built_again_only_when_something_is_learned() {
+        let mut session = at_a_star();
+        let mut beliefs = Beliefs::default();
+        beliefs.held(&session);
+        session.advance(3600.0);
+        beliefs.held(&session);
+        assert_eq!(beliefs.builds, 1, "time alone built it again");
+
+        let first = beliefs.held(&session).bodies[0].subject;
+        session.knowledge.name_it(first, "Newfound", 1.0);
+        assert_eq!(beliefs.held(&session).bodies[0].given.as_deref(), Some("Newfound"));
+        assert_eq!(beliefs.builds, 2);
     }
 
     /// A body no generator made has nowhere to be flown to, which is what a false positive
