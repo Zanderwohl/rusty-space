@@ -309,7 +309,7 @@ graph LR
 
 ### L2 · Sign-in lifecycle
 
-- status: active claude/game-loop-optimization-71831f
+- status: done (this branch; unit-tested only: the real flow needs a broker and a person)
 - needs: —
 - touches: `crates/lc-client/src/auth.rs`, `crates/lc-client/src/signin_ui.rs`
 - read: 16
@@ -318,7 +318,7 @@ graph LR
 
 ### L3 · Chat bounded
 
-- status: todo
+- status: active claude/game-loop-optimization-71831f
 - needs: —
 - touches: `crates/lc-client/src/chat.rs`, `crates/lc-client/src/radio_panel.rs`
 - read: 27
