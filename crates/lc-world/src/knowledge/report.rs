@@ -380,7 +380,7 @@ impl Knowledge {
                 // A replica drops the samples its original consumed.
                 if hop.is_none()
                     && let Some(through_s) = conclusion.discarded_s
-                    && let Some(file) = self.files.get_mut(&subject)
+                    && let Some(file) = self.files.edit().get_mut(&subject)
                 {
                     file.series
                         .iter_mut()
@@ -438,7 +438,7 @@ impl Knowledge {
     pub fn copy_logs(&mut self, logs: &[Log]) {
         let owner = self.owner;
         for log in logs {
-            let file = self.files.entry(log.subject).or_default();
+            let file = self.files.edit().entry(log.subject).or_default();
             if !file.series.iter().any(|s| s.witness == owner && s.band == log.band) {
                 file.series.push(super::Series::new(owner, log.band));
             }

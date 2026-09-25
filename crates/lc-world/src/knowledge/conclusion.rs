@@ -233,7 +233,7 @@ fn median_of(mut values: Vec<f64>) -> f64 {
 impl Knowledge {
     pub fn retain_raw(&mut self, subject: impl Into<Subject>, keep: bool) {
         let subject = subject.into();
-        let file = self.files.entry(subject).or_default();
+        let file = self.files.edit().entry(subject).or_default();
         if keep {
             self.analyzing.remove(&subject);
         }
@@ -247,7 +247,7 @@ impl Knowledge {
     /// Queued at the usual read rate, since each read is a period search.
     pub fn analyze(&mut self) {
         let owner = self.owner;
-        for (subject, file) in &self.files {
+        for (subject, file) in self.files.iter() {
             if !file.retained && file.series.iter().any(|s| s.witness == owner && s.len() > 0) {
                 self.analyzing.insert(*subject);
                 self.unread.insert(*subject);
@@ -308,7 +308,7 @@ impl Knowledge {
     /// One per reader per observer, the later winning.
     pub fn concluded(&mut self, subject: impl Into<Subject>, conclusion: Conclusion) {
         let subject = subject.into();
-        let file = self.files.entry(subject).or_default();
+        let file = self.files.edit().entry(subject).or_default();
         match file
             .conclusions
             .iter_mut()
@@ -502,7 +502,7 @@ impl Knowledge {
     }
 
     fn consume(&mut self, subject: Subject, observer: Witness, through_s: f64, digest: Digest) {
-        let Some(file) = self.files.get_mut(&subject) else { return };
+        let Some(file) = self.files.edit().get_mut(&subject) else { return };
         for series in file.series.iter_mut().filter(|s| s.witness == observer) {
             series.consume_through(through_s);
             self.consumed.push(Consumed { subject, witness: observer, band: series.band, through_s });

@@ -17,6 +17,9 @@ use crate::sky::StarId;
 pub struct BodyId(u64);
 
 impl BodyId {
+    pub const MIN: Self = Self(u64::MIN);
+    pub const MAX: Self = Self(u64::MAX);
+
     pub fn of(star: StarId, key: &str) -> Self {
         let tag = key.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
             (h ^ b as u64).wrapping_mul(0x100_0000_01b3)

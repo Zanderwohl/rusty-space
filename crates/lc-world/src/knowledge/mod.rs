@@ -36,6 +36,7 @@ pub mod room;
 pub mod subject;
 pub mod survey;
 pub mod transit;
+mod tracked;
 pub mod turns;
 
 pub use astrometry::{Bearing, Distance};
@@ -360,8 +361,8 @@ pub struct Logged {
 #[derive(Clone, Debug)]
 pub struct Knowledge {
     pub owner: Witness,
-    files: BTreeMap<Subject, File>,
-    beliefs: BTreeMap<Subject, Belief>,
+    files: tracked::Tracked<BTreeMap<Subject, File>>,
+    beliefs: tracked::Tracked<BTreeMap<Subject, Belief>>,
     /// Files and samples not yet written down. Not part of what a craft knows, so equality
     /// ignores them, as it does every field below `beliefs`.
     changed: std::collections::BTreeSet<Subject>,
@@ -398,8 +399,8 @@ impl Knowledge {
         Self {
             tried: BTreeMap::new(),
             owner,
-            files: BTreeMap::new(),
-            beliefs: BTreeMap::new(),
+            files: tracked::Tracked::new(BTreeMap::new()),
+            beliefs: tracked::Tracked::new(BTreeMap::new()),
             changed: Default::default(),
             unsaved: Vec::new(),
             consumed: Vec::new(),
@@ -449,9 +450,9 @@ impl Knowledge {
         logs: impl IntoIterator<Item = Logged>,
     ) -> Self {
         let mut knowledge = Self::new(owner);
-        knowledge.files = files.into_iter().collect();
+        *knowledge.files.edit() = files.into_iter().collect();
         for log in logs {
-            let file = knowledge.files.entry(log.subject).or_default();
+            let file = knowledge.files.edit().entry(log.subject).or_default();
             match file.series.iter_mut().find(|s| s.witness == log.witness && s.band == log.band) {
                 Some(series) => {
                     series.push(log.sample);
@@ -508,12 +509,20 @@ impl Knowledge {
         self.beliefs.values().filter_map(|b| Some((b.star()?, b)))
     }
 
-    /// Everything held about a star's system: its planets, belts and the rest.
+    /// Everything held about a star's system: its planets, belts and the rest. Two ranges of
+    /// the map, since `Subject` orders by variant and then by star, rather than a pass over
+    /// every file held.
     pub fn members(&self, star: StarId) -> impl Iterator<Item = (Subject, &File)> {
-        self.files
-            .iter()
-            .filter(move |(s, _)| s.star() == Some(star) && s.as_star().is_none())
-            .map(|(s, f)| (*s, f))
+        let bodies = Subject::Body { star, body: BodyId::MIN }..=Subject::Body { star, body: BodyId::MAX };
+        let populations =
+            Subject::Population { star, index: 0 }..=Subject::Population { star, index: u32::MAX };
+        self.files.range(bodies).chain(self.files.range(populations)).map(|(s, f)| (*s, f))
+    }
+
+    /// Moves on every write that can change a belief, and never on a read. Unique across every
+    /// `Knowledge` in the process, so a cache keyed on it survives this one being replaced.
+    pub fn revision(&self) -> u64 {
+        self.files.revision().max(self.beliefs.revision())
     }
 
     /// What this craft calls something, as a player should see it. A relative naming is read
@@ -569,7 +578,7 @@ impl Knowledge {
     /// File a distance somebody states.
     pub fn told(&mut self, subject: impl Into<Subject>, claim: Claim) {
         let subject = subject.into();
-        let file = self.files.entry(subject).or_default();
+        let file = self.files.edit().entry(subject).or_default();
         match file.claims.iter_mut().find(|c| c.witness == claim.witness) {
             Some(held) if held.stated_s >= claim.stated_s => {}
             Some(held) => *held = claim,
@@ -582,7 +591,7 @@ impl Knowledge {
     /// winning: a digest is not a statement to be corrected but a running total, and the
     /// longer run is the one with more in it.
     pub(super) fn absorb_colors(&mut self, subject: Subject, digest: Colors) {
-        let file = self.files.entry(subject).or_default();
+        let file = self.files.edit().entry(subject).or_default();
         match file.colors.iter_mut().find(|c| c.witness == digest.witness) {
             Some(held) if held.spanned_s.1 >= digest.spanned_s.1 => {}
             Some(held) => *held = digest,
@@ -601,7 +610,7 @@ impl Knowledge {
         flux: &em_spectra::PerBand<Option<(f64, f64)>>,
     ) {
         let subject = subject.into();
-        let file = self.files.entry(subject).or_default();
+        let file = self.files.edit().entry(subject).or_default();
         match file.colors.iter_mut().find(|c| c.witness == witness) {
             Some(held) => held.fold(at_s, flux),
             None => {
@@ -625,7 +634,7 @@ impl Knowledge {
     /// once.
     pub fn orbits(&mut self, subject: impl Into<Subject>, orbit: Orbit) {
         let subject = subject.into();
-        let file = self.files.entry(subject).or_default();
+        let file = self.files.edit().entry(subject).or_default();
         match file.orbits.iter_mut().find(|o| o.witness == orbit.witness && o.method == orbit.method) {
             Some(held) if held.stated_s >= orbit.stated_s => {}
             Some(held) => *held = orbit,
@@ -640,7 +649,7 @@ impl Knowledge {
     /// renaming a planet does not free its letter; a later chosen name replaces the earlier.
     pub fn named(&mut self, subject: impl Into<Subject>, naming: Naming) {
         let subject = subject.into();
-        let file = self.files.entry(subject).or_default();
+        let file = self.files.edit().entry(subject).or_default();
         match file.names.iter_mut().find(|n| n.witness == naming.witness && n.kind.chosen() == naming.kind.chosen()) {
             Some(held) if held.stated_s > naming.stated_s => {}
             // A rule's assignment is frozen.
@@ -730,7 +739,7 @@ impl Knowledge {
             self.unkept += 1;
             return;
         }
-        let file = self.files.entry(subject).or_default();
+        let file = self.files.edit().entry(subject).or_default();
         let added = match file.series.iter_mut().find(|s| s.witness == witness && s.band == band) {
             Some(series) => series.push(sample),
             None => {
@@ -765,7 +774,7 @@ impl Knowledge {
             Subject::Body { star, .. } => self.next_discovery(star, sighting.observed_s),
             _ => designation(sighting.bearing.toward),
         };
-        let file = self.files.entry(subject).or_default();
+        let file = self.files.edit().entry(subject).or_default();
         if file.sightings.iter().any(|s| s.same_as(&sighting)) {
             return;
         }
@@ -804,7 +813,7 @@ impl Knowledge {
             self.backlog.file(subject, file);
         }
         if let Some(belief) = self.files.get(&subject).and_then(|f| f.believe(subject, self.owner)) {
-            self.beliefs.insert(subject, belief);
+            self.beliefs.edit().insert(subject, belief);
         }
     }
 }
@@ -981,6 +990,49 @@ mod tests {
             .map(|s| s.observed_s)
             .fold(0.0, f64::max);
         assert_eq!(newest, 199.0 * 1e6, "the latest look is never dropped");
+    }
+
+    #[test]
+    fn a_write_moves_the_revision_and_a_read_does_not() {
+        let star = star_id(7);
+        let body = Subject::Body { star, body: BodyId::of(star, "b") };
+        let mut k = Knowledge::new(Witness(2));
+        let mut last = k.revision();
+        let mut moved = |k: &Knowledge, what: &str| {
+            assert_ne!(k.revision(), last, "{what} did not move it");
+            last = k.revision();
+        };
+        for s in looks(2, DVec3::new(0.0, 0.0, 6.0), 4, 0.0) {
+            k.sighted(star, s);
+        }
+        moved(&k, "a sighting");
+        k.orbits(body, at_au(1.0, 0.0));
+        moved(&k, "an orbit");
+        k.name_it(body, "Home", 1.0);
+        moved(&k, "a name");
+        k.measured(star, Witness(2), Band::V, Sample { observed_s: 10.0, deficit: 1e-4, sigma: 1e-5 });
+        moved(&k, "a sample");
+
+        let held = k.revision();
+        let _ = (k.name_of(body), k.members(star).count(), k.files().count(), k.belief(star));
+        let _ = k.body_belief(star, BodyId::of(star, "b"), 5.0);
+        let _ = k.take_changes();
+        assert_eq!(k.revision(), held, "a read moved it");
+        assert_ne!(Knowledge::new(Witness(2)).revision(), held, "a new one repeated it");
+    }
+
+    #[test]
+    fn a_system_s_members_are_its_bodies_and_populations_only() {
+        let (star, other) = (star_id(7), star_id(8));
+        let mut k = Knowledge::new(Witness(2));
+        let body = Subject::Body { star, body: BodyId::of(star, "b") };
+        let belt = Subject::Population { star, index: 3 };
+        for subject in [body, belt, Subject::Body { star: other, body: BodyId::of(other, "c") }] {
+            k.name_it(subject, "x", 0.0);
+        }
+        k.name_it(star, "Sol", 0.0);
+        let members: Vec<Subject> = k.members(star).map(|(s, _)| s).collect();
+        assert_eq!(members, [body, belt]);
     }
 
     #[test]
