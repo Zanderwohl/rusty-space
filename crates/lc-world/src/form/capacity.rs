@@ -150,24 +150,6 @@ mod tests {
         Part { id: PartId(id), kind, primitive, volume_m3, placement: Some(placement) }
     }
 
-    /// 19's starting ship as one part per module kind, each holding that kind's slots, in the
-    /// primitives 29's starting form gives them.
-    fn nineteen(balance: &Balance) -> Form {
-        let start = Loadout::STARTING;
-        let slot = balance.slot_volume_m3;
-        let n = |count: u32| count as f64 * slot;
-        Form {
-            parts: vec![
-                Part::mind(PartId(0), balance.min_part_m3),
-                part(1, Kind::Storage, Primitive::Ellipsoid { axes: DVec3::new(5.0, 3.0, 1.0) }, n(start.storage)),
-                part(2, Kind::Engine, Primitive::Frustum { length: 1.5, taper: 0.6 }, n(start.engines)),
-                part(3, Kind::Drone, Primitive::Capsule { length: 4.0 }, n(start.drones)),
-                part(4, Kind::Living, Primitive::Slab { edges: DVec3::new(4.0, 3.0, 0.5), corner: 0.2 }, n(start.living)),
-                part(5, Kind::Data, Primitive::Capsule { length: 2.0 }, n(start.data)),
-            ],
-        }
-    }
-
     fn close(a: f64, b: f64) -> bool {
         ((a - b) / b).abs() < 1e-9
     }
@@ -176,7 +158,7 @@ mod tests {
     fn nineteens_volumes_have_nineteens_capacities() {
         let b = Balance::DEFAULT;
         let start = Loadout::STARTING;
-        let c = Capacities::of(&nineteen(&b), &b);
+        let c = Capacities::of(&Form::starting(), &b);
         assert!(close(c.storage_j, b.capacity_j(&start)), "{} vs {}", c.storage_j, b.capacity_j(&start));
         assert!(close(c.building_w, b.refit_power_w(&start)));
         assert!(close(c.drain_w, b.drain_w(&start)));
@@ -228,13 +210,13 @@ mod tests {
         let start = Loadout::STARTING;
         let modules_kg = b.dry_mass_kg(&start) - start.slots as f64 * b.slot_structure_kg();
         let mind_kg = b.min_part_m3 * b.module_density_kg_m3;
-        assert!(close(dry_mass_kg(&nineteen(&b), &b), modules_kg + mind_kg));
+        assert!(close(dry_mass_kg(&Form::starting(), &b), modules_kg + mind_kg));
     }
 
     #[test]
     fn structure_is_each_parts_own_area() {
         let b = Balance { hull_areal_density: 120.0, ..Balance::DEFAULT };
-        let form = nineteen(&b);
+        let form = Form::starting();
         let area: f64 = form.parts.iter().map(|p| p.shape(b.min_part_m3).area()).sum();
         let bare = Balance { hull_areal_density: 0.0, ..b };
         assert!(close(dry_mass_kg(&form, &b) - dry_mass_kg(&form, &bare), 120.0 * area));
@@ -259,7 +241,7 @@ mod tests {
     #[test]
     fn the_areal_density_is_solved_to_weigh_nineteens_starting_ship() {
         let b = Balance::DEFAULT;
-        let form = nineteen(&b);
+        let form = Form::starting();
         let target = b.dry_mass_kg(&Loadout::STARTING);
         let density = areal_density_for(&form, &b, target).unwrap();
         let anchored = Balance { hull_areal_density: density, ..b };
