@@ -476,13 +476,20 @@ fn loops(inside: [bool; 8]) -> ([u8; 12], u8) {
 fn nets(grid: &Grid, blocky: bool) -> Surface {
     let mut surface = Surface { vertices: Vec::new(), triangles: Vec::new() };
     let mut cells: HashMap<usize, [u32; 12]> = HashMap::new();
+    let mut active = Vec::new();
     let is_base = |i: &[usize; 3]| (0..3).all(|a| i[a] + 1 < grid.n[a]);
+    let offsets: [usize; 8] = std::array::from_fn(|c| (c & 1) + (c >> 1 & 1) * grid.n[0] + (c >> 2) * grid.n[0] * grid.n[1]);
     for base in grid.candidates().filter(is_base) {
-        let corner = |c: usize| [base[0] + (c & 1), base[1] + (c >> 1 & 1), base[2] + (c >> 2)];
-        let inside: [bool; 8] = std::array::from_fn(|c| grid.inside(corner(c)));
-        if inside.iter().all(|&s| s) || inside.iter().all(|&s| !s) {
+        let at = grid.index(base);
+        let mut mask = 0u8;
+        for (c, offset) in offsets.iter().enumerate() {
+            mask |= u8::from(grid.values[at + offset] <= 0.0) << c;
+        }
+        if mask == 0 || mask == u8::MAX {
             continue;
         }
+        let inside: [bool; 8] = std::array::from_fn(|c| mask >> c & 1 == 1);
+        let corner = |c: usize| [base[0] + (c & 1), base[1] + (c >> 1 & 1), base[2] + (c >> 2)];
         let (id, count) = loops(inside);
         let mut sums = vec![(DVec3::ZERO, 0.0); count as usize];
         for (e, &(a, b)) in EDGES.iter().enumerate() {
@@ -498,12 +505,10 @@ fn nets(grid: &Grid, blocky: bool) -> Surface {
         let first = surface.vertices.len() as u32;
         let center = grid.position(base) + DVec3::splat(0.5 * grid.step);
         surface.vertices.extend(sums.iter().map(|(p, n)| if blocky { center } else { *p / *n }));
-        cells.insert(grid.index(base), id.map(|l| if l == NO_LOOP { u32::MAX } else { first + l as u32 }));
+        cells.insert(at, id.map(|l| if l == NO_LOOP { u32::MAX } else { first + l as u32 }));
+        active.push(base);
     }
-    for base in grid.candidates().filter(is_base) {
-        if !cells.contains_key(&grid.index(base)) {
-            continue;
-        }
+    for base in active {
         let from = grid.inside(base);
         for axis in 0..3 {
             let mut end = base;
@@ -513,18 +518,17 @@ fn nets(grid: &Grid, blocky: bool) -> Surface {
             }
             let (u, v) = ACROSS[axis];
             // Counterclockwise about `u × v`, which is `+axis` but for y.
-            let quad = [(1, 1), (0, 1), (0, 0), (1, 0)].map(|(du, dv)| {
+            let mut quad = [(1, 1), (0, 1), (0, 0), (1, 0)].map(|(du, dv)| {
                 let mut cell = base;
                 cell[u] -= du;
                 cell[v] -= dv;
                 cells[&grid.index(cell)][4 * axis + du + 2 * dv]
             });
-            let outward_positive = from;
-            let mut q = quad;
-            if (axis == 1) == outward_positive {
-                q.reverse();
+            // Outward is `+axis` when the inside end is the base.
+            if (axis == 1) == from {
+                quad.reverse();
             }
-            surface.quad(q);
+            surface.quad(quad);
         }
     }
     surface
@@ -568,8 +572,8 @@ struct Painted {
     regions: [[u8; 4]; 4],
     across: f32,
     along: f64,
-    /// The spar whose seam `along` is measured about, and the vertex's angle about its axis and
-    /// distance from it, to unwrap the angle where a triangle straddles its cut.
+    /// The spar whose seam `along` is measured about, the vertex's angle about its axis, and
+    /// what `along` gains a radian, to unwrap the angle where a triangle straddles its cut.
     about: Option<(usize, f64, f64)>,
 }
 
@@ -633,12 +637,29 @@ impl<'a> Paint<'a> {
         let positive = self.region[mine] < self.region[theirs] || (self.region[mine] == self.region[theirs] && on_spar);
         let sign = if positive { 1.0 } else { -1.0 };
         let across = sign * if off <= SEAM_REACH_M.max(2.0 * self.step) { off } else { SEAM_FAR };
-        // About the spar's own axis: around a boom's end, or along a band. The axial term keeps
-        // a seam running along the axis, a rib's, from standing still; where a seam climbs
-        // obliquely it overstates the meters by at most √2.
-        let local = self.sdf.pieces()[spar].pose.to_local(p);
+        // Meters around the spar's axis and along it, each weighted by how far the seam runs
+        // that way: a boom's end is a ring, a rib's edge runs along the axis. Either alone on the
+        // other kind of seam would advance across the bolt row and shear every head.
+        let pose = self.sdf.pieces()[spar].pose;
+        let local = pose.to_local(p);
         let (theta, rho) = (local.z.atan2(local.y), local.y.hypot(local.z));
-        Painted { regions, across: across as f32, along: theta * rho + local.x, about: Some((spar, theta, rho)) }
+        let h = 1e-3 * self.step;
+        let grad = |i: usize| {
+            DVec3::from_array([0, 1, 2].map(|a| self.sdf.primitive(i, p + AXES[a] * h) - self.sdf.primitive(i, p - AXES[a] * h)))
+        };
+        let tangent = pose.rotation.transpose() * grad(spar).cross(grad(neighbor));
+        let around = DVec3::new(0.0, -local.z, local.y) / rho;
+        let (w_around, w_axis) = match tangent.try_normalize() {
+            Some(t) if rho > 0.0 => (t.dot(around).abs(), t.x.abs()),
+            _ => (1.0, 0.0),
+        };
+        let per_radian = w_around * rho;
+        Painted {
+            regions,
+            across: across as f32,
+            along: theta * per_radian + local.x * w_axis,
+            about: Some((spar, theta, per_radian)),
+        }
     }
 
     /// The nearest region and the next, blended across the fillet between them, or across a
@@ -824,8 +845,13 @@ fn want(mut meshes: ResMut<HullMeshes>, mut hulls: Query<(Ref<HullForm>, &HullPi
         }
         let (form, balance, finish) = (hull.form.clone(), hull.balance, hull.finish);
         let task = AsyncComputeTaskPool::get().spawn(async move {
+            let started = bevy::platform::time::Instant::now();
             match mesh_form(&form, &balance, cells, finish) {
-                Ok(buffers) => Some(buffers.into_mesh()),
+                Ok(buffers) => {
+                    let (vertices, ms) = (buffers.positions.len(), started.elapsed().as_secs_f64() * 1e3);
+                    debug!("hull_mesh: {cells} cells {finish:?}, {vertices} vertices in {ms:.0} ms");
+                    Some(buffers.into_mesh())
+                }
                 Err(error) => {
                     warn!("hull_mesh: {error}");
                     None

@@ -18,6 +18,8 @@
 //! | `--scale <x>` | every length times this, so `--scale 100` makes a 50 km starting ship |
 //! | `--yaw <deg>` / `--pitch <deg>` | where the camera stands, about the forms |
 //! | `--zoom <x>` | the camera's distance, as a multiple of what frames everything |
+//! | `--aim <part>` | look at this part's center instead; with one form only. With `--zoom 0.3` it frames a spar's seams closely enough to see the bolts |
+//! | `--exposure <stops>` | open the exposure, in stops from `hull_void`'s, which is placed for a lit albedo of 0.3 and so clips anything lighter; `-1.5` by default |
 //! | `--sun <deg>` | the star's elevation; negative is night, where the living lights show |
 //! | `--frames <n>` / `--burst <n>` | frames after every mesh lands, and consecutive shots from there |
 //! | `--remesh <cells>` | on the first shot, ask every hull for this resolution. Each frame's wall time is logged until every new mesh has landed and been drawn, and a burst photographs the old meshes staying up until the new ones swap in |
@@ -67,9 +69,11 @@ struct Args {
     pitch_deg: f32,
     zoom: f32,
     sun_deg: f32,
+    exposure: f32,
     frames: u32,
     burst: u32,
     remesh: Option<u32>,
+    aim: Option<u16>,
 }
 
 impl Args {
@@ -102,9 +106,11 @@ impl Args {
             pitch_deg: value("--pitch").unwrap_or(25.0),
             zoom: value("--zoom").unwrap_or(1.0),
             sun_deg: value("--sun").unwrap_or(35.0),
+            exposure: value("--exposure").unwrap_or(-1.5),
             frames: value("--frames").unwrap_or(10.0) as u32,
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
             remesh: value("--remesh").map(|c| c as u32),
+            aim: value("--aim").map(|id| id as u16),
         }
     }
 }
@@ -161,6 +167,10 @@ fn main() {
     App::new()
         .add_plugins(
             DefaultPlugins
+                .set(bevy::log::LogPlugin {
+                    filter: format!("{},lc_client::hull_mesh=debug", bevy::log::DEFAULT_FILTER),
+                    ..default()
+                })
                 .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets").into(), ..default() })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
@@ -260,7 +270,7 @@ fn spawn(
 
     let toward = camera_direction(args);
     let sun = args.sun_deg.to_radians();
-    let side = Quat::from_rotation_y(1.1) * Vec3::new(toward.x, 0.0, toward.z).normalize();
+    let side = Quat::from_rotation_y(0.6) * Vec3::new(toward.x, 0.0, toward.z).normalize();
     let to_star = (side * sun.cos() + Vec3::Y * sun.sin()).normalize();
     let mut emitted = [Vec4::ZERO; REGIONS];
     for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS) {
@@ -276,8 +286,9 @@ fn spawn(
     }
     let material = materials.add(HullMaterial {
         uniforms: HullUniform {
-            to_star: to_star.extend(0.02),
-            exposure: Vec4::new(LIT_HULL, ToneMap::default().surface_stops, 0.0, 0.0),
+            // Enough fill to see an unlit side against the black.
+            to_star: to_star.extend(0.08),
+            exposure: Vec4::new(LIT_HULL * 2f32.powf(-args.exposure), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
             bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
@@ -298,16 +309,24 @@ fn spawn(
             (name, form, balance, bounds)
         })
         .collect();
+    let aim = match (args.aim, placed.as_slice()) {
+        (None, _) => None,
+        (Some(id), [(_, form, balance, (lo, hi))]) => {
+            let sdf = Sdf::new(form, balance).expect("fixtures are valid");
+            let piece = sdf.pieces().iter().find(|p| p.part.0 == id).unwrap_or_else(|| panic!("--aim: no part {id}"));
+            Some(ship_to_world() * (piece.pose.position - (*lo + *hi) / 2.0).as_vec3())
+        }
+        _ => panic!("--aim wants one --form"),
+    };
     let slot = placed.iter().map(|(.., (lo, hi))| (*hi - *lo).length() as f32).fold(0.0, f32::max);
     let columns = placed.len().min(3);
     let rows = placed.len().div_ceil(3);
+    // On the plane square to the view, so every slot is seen alike.
+    let right = Vec3::Y.cross(toward).normalize();
+    let up = toward.cross(right);
     for (k, (name, form, balance, (lo, hi))) in placed.into_iter().enumerate() {
         let (column, row) = ((k % 3) as f32, (k / 3) as f32);
-        let at = Vec3::new(
-            (column - (columns as f32 - 1.0) / 2.0) * slot,
-            ((rows as f32 - 1.0) / 2.0 - row) * slot * 0.8,
-            0.0,
-        );
+        let at = right * (column - (columns as f32 - 1.0) / 2.0) * slot + up * ((rows as f32 - 1.0) / 2.0 - row) * slot;
         let center = ((lo + hi) / 2.0).as_vec3();
         commands.spawn((
             Hull(name),
@@ -317,8 +336,10 @@ fn spawn(
         ));
     }
 
-    let reach = slot * (columns as f32).max(rows as f32 * 1.6) * 0.5;
-    let distance = args.zoom * reach / (0.5 * FOV_Y).tan() * 1.1;
+    // A slot is its form's bounding diagonal, so a form fits in one from any side.
+    let aspect = 16.0 / 9.0;
+    let half = (0.5 * rows as f32 * slot).max(0.5 * columns as f32 * slot / aspect);
+    let distance = args.zoom * half / (0.5 * FOV_Y).tan();
     commands.spawn((
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection {
@@ -330,7 +351,7 @@ fn spawn(
         Hdr,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
-        Transform::from_translation(toward * distance).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_translation(aim.unwrap_or_default() + toward * distance).looking_at(aim.unwrap_or_default(), Vec3::Y),
     ));
 }
 
