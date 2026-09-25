@@ -308,7 +308,7 @@ graph LR
 
 ### F8 · Refit rounds
 
-- status: active card "Build F8: refit rounds over forms"
+- status: done #75
 - needs: F4
 - touches: `crates/lc-world/src/refit.rs`, `crates/lc-world/src/refit/rounds.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §Refits
