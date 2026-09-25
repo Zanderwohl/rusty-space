@@ -777,6 +777,12 @@ pub fn refit(held: &Fitted, looks: &[Look]) -> Option<Fitted> {
 
 /// The orbit that best explains an arc of bearings, or `None` if they do not support one.
 ///
+// Per thread, so tests running side by side do not count each other's searches.
+#[cfg(test)]
+thread_local! {
+    static SCORED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Two ranges are searched, log-spaced because a body could be anywhere from just off the star
 /// to the far edge of the system and a linear grid would spend every point in the outer system.
 /// Everything after those two is closed form.
@@ -844,6 +850,8 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     }
 
     let score = |rho_a: f64, rho_b: f64, bound: f64| -> Option<Fitted> {
+        #[cfg(test)]
+        SCORED.with(|n| n.set(n.get() + 1));
         if !(sound(rho_a) && sound(rho_b)) {
             return None;
         }
@@ -1869,24 +1877,21 @@ mod tests {
         assert!(agreeing > blind * 0.5, "and it is still the same fit: {agreeing} against {blind}");
     }
 
-    /// And it is quick, because there is nothing to search: the three positions are the answer
-    /// and the rest is settling it.
+    /// There is nothing to search: the three positions are the answer and the rest is settling
+    /// it. Counted rather than timed, since a timing loses to a loaded machine.
     #[test]
     fn a_ranged_fit_does_no_searching() {
         let truth = like(1.0, 0.0167);
         let bearings = looks(&truth, 5.0, 24, 3.0 * DAY_S, SIGMA);
         let close = ranged(&truth, &bearings, 1.0e-4);
-
-        let searched = std::time::Instant::now();
-        fit(&bearings).expect("fits");
-        let searched = searched.elapsed();
-        let placed = std::time::Instant::now();
-        fit(&close).expect("fits");
-        let placed = placed.elapsed();
-        assert!(
-            placed * 4 < searched,
-            "ranged took {placed:?} against {searched:?} searched"
-        );
+        let scored = |looks: &[Look]| {
+            SCORED.with(|n| n.set(0));
+            fit(looks).expect("fits");
+            SCORED.with(|n| n.get())
+        };
+        // Otherwise a counter that never counts would pass.
+        assert!(scored(&bearings) > 0, "bearings alone are searched");
+        assert_eq!(scored(&close), 0, "ranged looks are not");
     }
 
     /// The angle between two nearly-parallel unit vectors, which `DVec3::angle_between` cannot
