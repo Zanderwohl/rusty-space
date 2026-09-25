@@ -12,10 +12,18 @@
 //!
 //! Everything here is pure or is a socket. No Bevy, so the parts worth testing are testable.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// How long a cancelled sign-in's listener may stay open.
+const ACCEPT_POLL: Duration = Duration::from_millis(50);
+
+/// How long a connection has to say what it wants. A browser says it at once.
+const ANSWER_WAIT: Duration = Duration::from_secs(10);
 
 /// Who the broker says we are. What the client keeps and shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,12 +160,14 @@ impl Bound {
     /// share — so every answer came back as somebody else's.
     pub fn listen(self, pending: Pending) -> Loopback {
         let (sender, answer) = channel();
-        // One connection, then done. A listener that stayed open would be a second way into the
-        // client for as long as the game ran.
+        let dropped = Arc::new(AtomicBool::new(false));
+        let cancelled = dropped.clone();
+        // One connection, then done, and nothing once the [`Loopback`] is dropped. A listener
+        // that stayed open would be a second way into the client for as long as the game ran.
         std::thread::spawn(move || {
-            let _ = sender.send(accept_one(&self.listener, &pending));
+            let _ = sender.send(accept_one(&self.listener, &pending, &cancelled));
         });
-        Loopback { port: self.port, answer: Mutex::new(answer) }
+        Loopback { port: self.port, answer: Mutex::new(answer), dropped }
     }
 }
 
@@ -168,6 +178,15 @@ pub struct Loopback {
     /// Behind a lock because this is held in a Bevy resource, which must be `Sync`, and an
     /// `mpsc::Receiver` is `Send` and not. Never contended: one reader, one message.
     answer: Mutex<Receiver<Result<String, CallbackError>>>,
+    /// Tells the listening thread to stop. Dropping the receiver alone did not: the thread sat
+    /// in `accept` with the port open until something connected.
+    dropped: Arc<AtomicBool>,
+}
+
+impl Drop for Loopback {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::Relaxed);
+    }
 }
 
 impl Loopback {
@@ -177,8 +196,25 @@ impl Loopback {
     }
 }
 
-fn accept_one(listener: &TcpListener, pending: &Pending) -> Result<String, CallbackError> {
-    let Ok((mut stream, _)) = listener.accept() else { return Err(CallbackError::NotOurs) };
+/// Polled rather than blocking, because a blocking `accept` cannot be cancelled.
+fn accept_one(listener: &TcpListener, pending: &Pending, cancelled: &AtomicBool) -> Result<String, CallbackError> {
+    listener.set_nonblocking(true).map_err(|_| CallbackError::NotOurs)?;
+    let mut stream = loop {
+        if cancelled.load(Ordering::Relaxed) {
+            // Nobody is left to read this.
+            return Err(CallbackError::NotOurs);
+        }
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(e) if e.kind() == ErrorKind::WouldBlock => std::thread::sleep(ACCEPT_POLL),
+            Err(_) => return Err(CallbackError::NotOurs),
+        }
+    };
+    // BSD sockets inherit the listener's non-blocking flag.
+    let blocking = stream.set_nonblocking(false).and(stream.set_read_timeout(Some(ANSWER_WAIT)));
+    if blocking.and(stream.set_write_timeout(Some(ANSWER_WAIT))).is_err() {
+        return Err(CallbackError::NotOurs);
+    }
     let mut line = String::new();
     if BufReader::new(&stream).read_line(&mut line).is_err() {
         return Err(CallbackError::NotOurs);
@@ -439,5 +475,21 @@ mod tests {
             })
             .expect("no answer came back");
         assert_eq!(answer, Err(CallbackError::WrongState));
+    }
+
+    /// Cancelling a sign-in closes its port, rather than leaving a thread in `accept` holding it
+    /// open for whatever connects next.
+    #[test]
+    fn a_dropped_listener_closes_its_port() {
+        use std::net::TcpStream;
+
+        let bound = Bound::open().expect("it binds");
+        let port = bound.port;
+        let loopback = bound.listen(begin("https://accounts.lightcone.example", port, "OURS"));
+        drop(loopback);
+
+        // One try: a listener left in `accept` takes the first connection and only then closes.
+        std::thread::sleep(ACCEPT_POLL * 4);
+        assert!(TcpStream::connect(("127.0.0.1", port)).is_err(), "port {port} still accepts connections");
     }
 }
