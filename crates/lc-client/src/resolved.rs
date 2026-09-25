@@ -587,6 +587,7 @@ pub fn update_resolved(
         for (entity, ..) in &placed {
             commands.entity(entity).despawn();
         }
+        surfaces.keep(None, [], &mut bakes);
         return;
     };
     let star_ly = system.star_position_ly();
@@ -689,6 +690,7 @@ pub fn update_resolved(
             commands.entity(sphere).insert(ResolvedAir(shell, child));
         }
     }
+    surfaces.keep(Some(system.star), want.iter().map(|(d, _)| d.name.as_str()), &mut bakes);
 }
 
 #[cfg(test)]

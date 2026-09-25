@@ -168,6 +168,21 @@ impl Target {
             ..self
         }
     }
+
+    /// What the baked texture holds on the GPU.
+    pub const fn bytes(self) -> usize {
+        let texels = match self.shape {
+            Shape::Volume(n) => n as usize * n as usize * n as usize,
+            Shape::Cube(n) => n as usize * n as usize * CUBE_FACES as usize,
+            Shape::Plane(n) => n as usize * n as usize,
+        };
+        let per_texel = match self.format {
+            Format::Scalar(ScalarFormat::R8Unorm) => 1,
+            Format::Scalar(ScalarFormat::R16Float) => 2,
+            Format::Scalar(ScalarFormat::R32Float) | Format::Color => 4,
+        };
+        texels * per_texel
+    }
 }
 
 /// A flat image of `target`'s kind, half-way everywhere, which every pattern here reads as no
@@ -315,6 +330,15 @@ impl Bakes {
             target,
             image,
         });
+    }
+
+    /// Drop what is still waiting to bake into `images`, whose owner no longer wants them. A bake
+    /// already on the GPU lands anyway, into an image nothing else holds.
+    pub fn forget(&mut self, images: &[AssetId<Image>]) {
+        self.waiting.retain(|request| !images.contains(&request.image.id()));
+        for image in images {
+            self.unsettled.remove(image);
+        }
     }
 
     /// Whether every bake asked of `image` has landed or failed. Bakes of one image land in the
@@ -610,6 +634,28 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn a_forgotten_image_is_not_baked_and_counts_as_settled() {
+        let mut images = Assets::<Image>::default();
+        let mut bakes = Bakes::default();
+        let target = Target::new(Shape::Cube(4));
+        let (kept, forgotten) = (images.add(placeholder(target)), images.add(placeholder(target)));
+        bakes.request(Handle::default(), 1, target, kept.clone());
+        bakes.request(Handle::default(), 1, target, forgotten.clone());
+        bakes.forget(&[forgotten.id()]);
+        assert_eq!(bakes.waiting.len(), 1);
+        assert_eq!(bakes.waiting[0].image, kept);
+        assert!(bakes.settled(&forgotten) && !bakes.settled(&kept));
+    }
+
+    #[test]
+    fn a_target_knows_its_size() {
+        assert_eq!(Target::new(Shape::Cube(1024)).color().bytes(), 6 * 1024 * 1024 * 4);
+        assert_eq!(Target::new(Shape::Cube(512)).bytes(), 6 * 512 * 512);
+        let relief = Target::new(Shape::Cube(1024)).format(ScalarFormat::R16Float);
+        assert_eq!(relief.bytes(), 6 * 1024 * 1024 * 2);
+    }
 
     fn shipped(path: &str) -> Graph {
         let full = format!("{}/assets/{path}", env!("CARGO_MANIFEST_DIR"));

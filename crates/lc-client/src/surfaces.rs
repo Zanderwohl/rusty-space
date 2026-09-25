@@ -27,6 +27,7 @@ use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use lc_world::airless::Airless;
 use lc_world::climate::Climate;
 use lc_world::giant::Giant;
+use lc_world::sky::StarId;
 use lc_world::surface::Surface;
 use serde::Deserialize;
 use texture_graph_gpu::ScalarFormat;
@@ -209,6 +210,14 @@ pub struct BodyImages {
 }
 
 impl BodyImages {
+    fn ids(&self) -> impl Iterator<Item = AssetId<Image>> + '_ {
+        [&self.pattern, &self.color, &self.climate, &self.height]
+            .into_iter()
+            .chain(&self.weather)
+            .chain(&self.masks)
+            .map(Handle::id)
+    }
+
     fn placeholders(images: &mut Assets<Image>) -> Self {
         let cube = Target::new(Shape::Cube(1));
         Self {
@@ -285,16 +294,27 @@ struct Body {
     /// `None` until the manifest has said.
     drawn: Option<Drawn>,
     deck: Option<Deck>,
+    /// What its bakes hold on the GPU once landed.
+    bytes: usize,
+    /// The [`Surfaces::keep`] that last found it drawn.
+    wanted_at: u64,
 }
+
+/// What bodies no longer drawn may keep on the GPU, so one flown back to is not baked again. A
+/// rocky world with clouds is about 48 MB. Never evicts a body being drawn.
+const IDLE_BYTES: usize = if cfg!(target_arch = "wasm32") { 160 << 20 } else { 640 << 20 };
 
 #[derive(Resource)]
 pub struct Surfaces {
     manifest: Handle<SurfaceManifest>,
     /// For what is drawn with the surface material but has no surface of its own: hulls.
     pub flat: BodyImages,
-    /// Kept for the session. A body's surface never changes, and bodies stop and start being
-    /// resolved as the ship moves; re-baking each time would be most of the cost.
+    /// Kept while drawn, and afterwards within [`IDLE_BYTES`] and the same system: bodies stop
+    /// and start being resolved as the ship moves, and re-baking each time would be most of the
+    /// cost. Each holds its textures by strong handle, so this is what frees them.
     by_body: HashMap<String, Body>,
+    star: Option<StarId>,
+    keeps: u64,
 }
 
 impl FromWorld for Surfaces {
@@ -305,6 +325,8 @@ impl FromWorld for Surfaces {
             manifest,
             flat,
             by_body: HashMap::new(),
+            star: None,
+            keeps: 0,
         }
     }
 }
@@ -330,9 +352,48 @@ impl Surfaces {
                 airless,
                 drawn: None,
                 deck: None,
+                bytes: 0,
+                wanted_at: self.keeps,
             })
             .images
             .clone()
+    }
+
+    /// Say which bodies are drawn in `star`'s system this frame, and release the rest: all of
+    /// them when the system has changed, otherwise the least recently drawn past [`IDLE_BYTES`].
+    pub fn keep<'a>(&mut self, star: Option<StarId>, drawn: impl IntoIterator<Item = &'a str>, bakes: &mut Bakes) {
+        self.keeps += 1;
+        let now = self.keeps;
+        for name in drawn {
+            if let Some(body) = self.by_body.get_mut(name) {
+                body.wanted_at = now;
+            }
+        }
+        let mut idle: Vec<(u64, usize, String)> = self
+            .by_body
+            .iter()
+            .filter(|(_, b)| b.wanted_at != now)
+            .map(|(name, b)| (b.wanted_at, b.bytes, name.clone()))
+            .collect();
+        let moved = self.star != star;
+        self.star = star;
+        if !moved {
+            if idle.iter().map(|(_, bytes, _)| bytes).sum::<usize>() <= IDLE_BYTES {
+                return;
+            }
+            // Most recent first: those are kept, and what is left past the budget goes.
+            idle.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            let mut room = IDLE_BYTES;
+            let kept = idle.iter().take_while(|(_, bytes, _)| room.checked_sub(*bytes).map(|r| room = r).is_some()).count();
+            idle.drain(..kept);
+        }
+        let mut gone = Vec::new();
+        for (.., name) in idle {
+            if let Some(body) = self.by_body.remove(&name) {
+                gone.extend(body.images.ids());
+            }
+        }
+        bakes.forget(&gone);
     }
 
     /// Whether `name` would be drawn as itself rather than flat: its graphs are chosen and their
@@ -475,7 +536,9 @@ fn route(
             }
             _ => (Params::new(), &[], false),
         };
-        let mut bake = |path: &str, target, image: &Handle<Image>, params: Params| {
+        let mut bytes = 0;
+        let mut bake = |path: &str, target: Target, image: &Handle<Image>, params: Params| {
+            bytes += target.bytes();
             bakes.request_with(graph(path), seed, params, target, image.clone());
         };
         let pattern = Target::new(Shape::Cube(FACE));
@@ -494,6 +557,7 @@ fn route(
         }
         if let Some(path) = look.clouds {
             bake(path, CLIMATE, &body.images.climate, Params::new());
+            bytes += body.images.weather.len() * WEATHER.bytes();
             body.deck = Some(Deck {
                 graph: graph(path),
                 seed,
@@ -507,6 +571,7 @@ fn route(
             layers: masks == GIANT_MASKS,
             relief,
         });
+        body.bytes = bytes;
     }
 }
 
@@ -1155,5 +1220,72 @@ mod tests {
             }
         }
         assert_eq!(series, 3);
+    }
+
+    fn held(names: &[&str], images: &mut Assets<Image>) -> Surfaces {
+        let mut surfaces = Surfaces {
+            manifest: Handle::default(),
+            flat: BodyImages::placeholders(images),
+            by_body: HashMap::new(),
+            star: None,
+            keeps: 0,
+        };
+        for name in names {
+            surfaces.images(name, Surface::Rock, None, None, None, images);
+            surfaces.by_body.get_mut(*name).unwrap().bytes = IDLE_BYTES / 2;
+        }
+        surfaces
+    }
+
+    fn kept(surfaces: &Surfaces) -> Vec<&str> {
+        let mut names: Vec<&str> = surfaces.by_body.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        names
+    }
+
+    #[test]
+    fn a_new_system_releases_what_the_last_one_drew() {
+        let mut images = Assets::<Image>::default();
+        let mut bakes = Bakes::default();
+        let mut surfaces = held(&["Earth", "Mars"], &mut images);
+        let (sol, other) = (StarId::synthesize("test", 1), StarId::synthesize("test", 2));
+        surfaces.keep(Some(sol), ["Earth", "Mars"], &mut bakes);
+        surfaces.keep(Some(sol), [], &mut bakes);
+        assert_eq!(kept(&surfaces), ["Earth", "Mars"], "within the budget and the same system");
+
+        surfaces.images("Proxima b", Surface::Rock, None, None, None, &mut images);
+        surfaces.keep(Some(other), ["Proxima b"], &mut bakes);
+        assert_eq!(kept(&surfaces), ["Proxima b"]);
+
+        surfaces.keep(None, [], &mut bakes);
+        assert!(kept(&surfaces).is_empty(), "between stars nothing is drawn");
+    }
+
+    #[test]
+    fn idle_bodies_past_the_budget_go_least_recently_drawn_first() {
+        let mut images = Assets::<Image>::default();
+        let mut bakes = Bakes::default();
+        let mut surfaces = held(&["Io", "Europa", "Ganymede", "Callisto"], &mut images);
+        let jupiter = Some(StarId::synthesize("test", 1));
+        let moons = ["Io", "Europa", "Ganymede", "Callisto"];
+        for first in 0..moons.len() {
+            surfaces.keep(jupiter, moons[first..].iter().copied(), &mut bakes);
+        }
+        // Each is half the budget. Callisto is drawn; Ganymede and Europa, drawn last, fill it.
+        assert_eq!(kept(&surfaces), ["Callisto", "Europa", "Ganymede"]);
+
+        surfaces.keep(jupiter, [], &mut bakes);
+        assert_eq!(kept(&surfaces), ["Callisto", "Ganymede"]);
+    }
+
+    #[test]
+    fn a_drawn_body_is_never_released() {
+        let mut images = Assets::<Image>::default();
+        let mut bakes = Bakes::default();
+        let names = ["Io", "Europa", "Ganymede", "Callisto"];
+        let mut surfaces = held(&names, &mut images);
+        let other = Some(StarId::synthesize("test", 2));
+        surfaces.keep(other, names, &mut bakes);
+        assert_eq!(kept(&surfaces).len(), 4, "twice the budget, all of it drawn");
     }
 }
