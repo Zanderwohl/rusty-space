@@ -602,9 +602,9 @@ graph LR
 
 ### C1 · Editor view
 
-- status: active card "Build C1: the editor view"
+- status: done #96
 - needs: R1
-- touches: `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/app.rs`
+- touches: `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/input.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/map_panel.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-client/src/lib.rs`, `crates/em-ui/src/lib.rs`, `crates/em-ui/src/widgets.rs`, `crates/em-ui/src/pointer.rs`, `lightcone/docs/29-ship-form.md`, `lightcone/docs/18-ui-style.md`, `lightcone/images/editor-*.png`
 - read: 29 §The editor
 - deliver: `ViewMode::Form` on `H`; its camera with the `FormCamera` marker, never the first camera created; the orbit; the sky in the corner square; the draft drawn on the placeholders; `--view form`.
 - done when: `--view form --shot` photographs it, and every existing camera query still finds its camera.
