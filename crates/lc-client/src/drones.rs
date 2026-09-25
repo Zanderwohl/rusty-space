@@ -61,8 +61,6 @@ const STANDOFF: f64 = 0.02;
 const HOVER: f64 = 0.01;
 /// Samples along a meridian when finding where it crosses the band.
 const MERIDIAN_SAMPLES: usize = 32;
-/// Of the moved part's least dimension: the radius of the swarm about its joint.
-const SWARM: f64 = 0.6;
 /// Directions the patrol's bounds are sought along, per piece.
 const BOUND_SAMPLES: usize = 48;
 
@@ -136,8 +134,8 @@ fn first(past: impl Fn(f64) -> bool) -> f64 {
 ///
 /// On a build or a dismantle, target `k` is on copy `k mod copies`, on a meridian of it at the
 /// golden angle times `k`, where [`Working::across`] is a fixed share of the way through the
-/// [`frontier`]: so it slides with the band and never jumps. On a move they are a hemisphere about
-/// each copy's joint, turned with it.
+/// [`frontier`]: so it slides with the band and never jumps. On a move they ring each copy's rim
+/// between its foot and its middle, and ride along with it.
 pub fn targets(working: &Working) -> Vec<DVec3> {
     let copies = working.outer.len();
     if copies == 0 {
@@ -147,12 +145,11 @@ pub fn targets(working: &Working) -> Vec<DVec3> {
         return (0..MAX_TARGETS)
             .map(|k| {
                 let piece = &working.outer[k % copies];
-                let n = MAX_TARGETS.div_ceil(copies);
-                let mut dir = fibonacci(k / copies, n);
-                // Along the part and away from its parent, where the joint shows.
-                dir.x = dir.x.abs();
-                let r = SWARM * piece.shape.least_dimension() * (0.6 + 0.4 * unit(k as u32));
-                working.joint(k % copies) + piece.pose.rotation * dir * r
+                let (s, c) = (GOLDEN * k as f64).sin_cos();
+                let out = DVec3::new(0.0, c, s);
+                let reach = piece.shape.reach();
+                let rim = piece.shape.exit(out).point + out * STANDOFF * reach;
+                piece.pose.to_outer(rim - DVec3::X * reach * unit(k as u32))
             })
             .collect();
     }
@@ -314,17 +311,14 @@ pub fn traffic(pieces: &[Piece], working: Option<(&Working, f64)>) -> Traffic {
     let ramp = smoothstep((edge_s / ramp_s).clamp(0.0, 1.0));
     let copies = working.outer.len() as f64;
     match working.change.phase() {
-        Phase::Move => {
-            let r = SWARM * working.outer.iter().map(|p| p.shape.least_dimension()).fold(0.0, f64::max);
-            Traffic {
-                working: SWARMING * ramp,
-                dwell: SWARM_DWELL,
-                hover_m: 0.3 * r,
-                haze_m: spacing(2.0 * std::f64::consts::PI * r * r * copies, SWARMING),
-                targets,
-                ..idle
-            }
-        }
+        Phase::Move => Traffic {
+            working: SWARMING * ramp,
+            dwell: SWARM_DWELL,
+            hover_m: 2.0 * HOVER * reach,
+            haze_m: spacing(2.0 * std::f64::consts::PI * reach * reach * copies, SWARMING),
+            targets,
+            ..idle
+        },
         phase => {
             let band = frontier(working).map_or(0.0, |(lo, hi)| hi - lo);
             Traffic {
@@ -583,8 +577,9 @@ mod tests {
 
     /// The pitfall: a target that jumped would make every drone flying to it jump. Across a whole
     /// step, wherever a target moves more than a little in a 400th of it, an eighth of that
-    /// interval moves it a good deal less: it is fast there, not discontinuous. Where the band
-    /// crosses a flat stretch, such as the hull's belt seen from its center, it is fast.
+    /// interval moves it a good deal less, or hardly at all: it is fast there, not discontinuous.
+    /// Where the band crosses a flat stretch, such as the hull's belt seen from its center, it is
+    /// fast, since the band really does reach all of the belt at once.
     #[test]
     fn every_target_moves_continuously_through_a_step() {
         let plan = plan();
@@ -611,21 +606,22 @@ mod tests {
                             targets_at(g(j))[k].distance(targets_at(g(j + 1))[k])
                         })
                         .fold(0.0, f64::max);
-                    assert!(finest < 0.5 * jump, "{change:?} target {k} jumped {jump} m at {f0}, {finest} m of it at once");
+                    assert!(finest < (0.5 * jump).max(0.025 * reach), "{change:?} target {k} jumped {jump} m at {f0}, {finest} m of it at once");
                 }
             }
         }
     }
 
+    /// Around the moved part's rim, on the joint's half of it, and outside it.
     #[test]
     fn a_move_swarms_the_joint() {
         let plan = plan();
         let s = step(&plan, Change::Move);
         let working = at(&plan, &s, 0.5).working.unwrap();
         let piece = &working.outer[0];
-        let r = SWARM * piece.shape.least_dimension();
         for t in targets(&working) {
-            assert!(t.distance(working.joint(0)) <= r * 1.0001, "{} m from the joint", t.distance(working.joint(0)));
+            let local = piece.pose.to_local(t);
+            assert!(local.x <= 0.0 && piece.shape.distance(local) > 0.0, "{local} in the part's frame");
         }
         let traffic = traffic(&at(&plan, &s, 0.5).pieces, Some((&working, s.duration_s)));
         assert!(traffic.working > 0.0 && traffic.carrying == 0.0);

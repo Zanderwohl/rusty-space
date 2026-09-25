@@ -193,7 +193,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let scale = length(world_from_local[0].xyz);
 
     // clip_from_view[1][1] is 1 / tan(fov_y / 2) for a perspective lens.
-    let distance = max(length(center - view.world_position.xyz), 1e-6);
+    // Only against a division by zero: a host may count in any unit, and the client's is an AU.
+    let distance = max(length(center - view.world_position.xyz), 1e-30);
     let px_per_m = view.viewport.w * view.clip_from_view[1][1] / (2.0 * distance);
     let mote = material.mote_m * scale;
     let mote_px = mote * px_per_m;
