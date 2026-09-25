@@ -88,14 +88,20 @@ in one of two ways, carried on the kind as `Kind::Spar(SparMode)`:
 - **Saddle.** Each neighbor, grown by `spar_gap`, is subtracted from the spar. Where a boom meets a
   hull, its end is cut to the hull's curve and sits flush against it. The spar is embedded into its
   neighbors a little so there is something to cut.
-- **Strap.** The spar is intersected with a shell of `spar_thickness` around its parent, so it follows
-  the parent's surface wherever its primitive passes: a band around a tank, a rib along a hull.
+- **Strap.** The spar is intersected with a shell around its parent, from its surface out to
+  `spar_thickness` of the parent's smallest dimension, so it follows the parent's surface wherever its
+  primitive passes: a band around a tank, a rib along a hull.
 
 A spar joins its neighbors **hard, never blended**. `blend` is ignored on a spar and on its children's
 joint with it, so the join reads as bolted rather than welded.
 
 Only tree neighbors cut a spar. That keeps each spar's evaluation local, and it means a spar never
 changes shape because an unrelated part moved past it.
+
+A neighbor is cut by its primitive, never its own cut shape, so a spar hung from a spar does not
+depend on how its parent was cut. An ellipsoid's distance is a bound rather than exact (see below), so
+off an ellipsoid the gap and the strap's depth are exact only across its shortest axis and grow with
+the semi-axis along the others.
 
 **A spar's volume is its uncut primitive's.** The cut shape has no closed form. It is charged as the
 stock it was cut from, which slightly overstates a strap's mass at a twentieth of module density, and
@@ -119,7 +125,7 @@ Each part but the Mind hangs from a parent, and it is placed in one of two ways:
 | `twist` | rotation about the surface normal, or about the parent's axis when enclosing |
 | `tilt` | the child's axis relative to that normal or axis, as a small rotation: a two-component rotation vector across it, in radians |
 | `standoff` | attached only: distance along the normal, in multiples of the child's **reach**, the distance from its center to its foot. Zero rests the child on the surface, −1 centers it there, and negative embeds it |
-| `blend` | smooth-union radius with the parent, as a fraction of the smaller |
+| `blend` | smooth-union radius with the parent, as a fraction of the smaller part's smallest dimension |
 | `mirror` | the subtree is repeated, reflected through the ship's port–starboard plane, y = 0 |
 
 An attached child's surface meets its parent's at the anchor, offset by `standoff`. When the parent
@@ -186,6 +192,16 @@ computes the same numbers for its preview and takes the server's when they arriv
 
 **Capacities** are sums of volume × density per kind, with every copy of a mirrored part counted. They
 replace everything 19 read from the loadout.
+
+**The distance field** is `form::sdf::Sdf`, built once from a form and then evaluated at any point in
+the ship's frame, negative inside. Every primitive's distance is exact except the ellipsoid's, which
+has no closed form off its surface and uses the bound `(|p/r| − 1) · r_min` instead: zero on the
+surface, the right sign everywhere, and Lipschitz 1. Blends are the quadratic polynomial smooth
+minimum, whose gradient is a convex combination of its arguments', so the whole field is Lipschitz 1:
+a lower bound on the distance, and zero on the surface. That is all a grid or surface nets need.
+The same `Sdf` names the part nearest a point, which is how the grid weights cells by density and the
+hull material finds its kind regions. It also gives a spar's distance to its seams, for the bolt rows
+of [32](32-ship-rendering.md) §Materials by kind.
 
 **Geometry** comes from a **voxel grid of fixed resolution**: `FORM_GRID = 64` cells along the longest
 side of the bounding box, whatever the ship's size. Each cell is filled by evaluating the union's
