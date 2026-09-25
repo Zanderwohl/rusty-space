@@ -674,9 +674,9 @@ graph LR
 
 ### C9 · Approach buttons
 
-- status: active card "Build C9: approach buttons"
+- status: done #89
 - needs: E5
-- touches: `crates/lc-client/src/panels.rs`, `crates/lc-client/src/hud.rs`
+- touches: `crates/lc-client/src/panels.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-client/src/action.rs`, `crates/lc-server/src/director.rs`
 - read: 31 §Two ways to approach
 - deliver: Courteous and Direct beside Company and Intimate; the HUD line names the approach.
 - done when: both styles can be ordered from the panel, and the HUD says which is flown.
