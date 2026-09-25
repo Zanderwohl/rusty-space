@@ -358,7 +358,7 @@ graph LR
 
 ### S2 · Presets
 
-- status: todo
+- status: active card "Build S2: presets saved per account"
 - needs: K3
 - touches: `crates/lc-store/src/presets.rs`, `crates/lc-server/src/`
 - read: 29 §Your own presets
@@ -674,7 +674,7 @@ graph LR
 
 ### C9 · Approach buttons
 
-- status: todo
+- status: active card "Build C9: approach buttons"
 - needs: E5
 - touches: `crates/lc-client/src/panels.rs`, `crates/lc-client/src/hud.rs`
 - read: 31 §Two ways to approach
