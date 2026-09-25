@@ -4,6 +4,7 @@
 //! that drifts from its page is the failure mode of this approach, and sharing the function
 //! prevents it where a convention about remembering would not.
 
+pub mod cdn;
 pub mod index;
 pub mod system;
 pub mod systems;
@@ -46,6 +47,7 @@ pub fn shell(assets: &Assets, head: Head<'_>, admin: Option<&Admin>, body: Marku
                     nav {
                         a href=(crate::routes::USERS) { "Users" }
                         a href=(crate::routes::SYSTEMS) { "Systems" }
+                        a href=(crate::routes::CDN) { "CDN" }
                     }
                     @if let Some(admin) = admin {
                         div class="whoami" {

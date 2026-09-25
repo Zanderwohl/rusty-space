@@ -4,4 +4,4 @@
 # accumulates them the way a bucket does, and rebuilding the image never loses a build.
 FROM caddy:2-alpine
 COPY Caddyfile /etc/caddy/Caddyfile
-EXPOSE 3101
+EXPOSE 3101 3103

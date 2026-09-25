@@ -56,6 +56,7 @@ pub struct AppState {
     /// to tell those apart or it reports the second as fine.
     pub db_expected: bool,
     pub release_token: Option<Arc<str>>,
+    pub release_read_token: Option<Arc<str>>,
     /// The identity broker, if this deployment has one. All three of these or none: a broker
     /// with no session key would sign people in and hand them a cookie anybody could forge.
     pub identity_base: Option<Arc<str>>,
@@ -169,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
         pool: pool.clone(),
         db_expected: config.database_url.is_some(),
         release_token: config.release_token.clone().map(Into::into),
+        release_read_token: config.release_read_token.clone().map(Into::into),
     };
 
     // Spawned before the router takes ownership of the state. Both hold the same Arc, so a

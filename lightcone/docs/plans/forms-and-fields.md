@@ -302,9 +302,9 @@ graph LR
 
 ### F7 · Placement rules
 
-- status: active card "Build F7: placement rules"
+- status: done #92
 - needs: F4, F6
-- touches: `crates/lc-world/src/form/rules.rs`
+- touches: `crates/lc-world/src/form/rules.rs`, `crates/lc-world/src/form.rs`, `crates/lc-world/src/form/sdf.rs`, `crates/lc-world/src/form/grid.rs`, `crates/lc-world/src/form/presets.rs`, `crates/lc-world/src/refit/rounds.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §Placement rules
 - deliver: validation of a target: engine parts fore or aft with a clear cone, a bay's mouth clear, attached parts touching and enclosing parts containing, extent inside `LENGTH_RANGE_M`, the size minimums, the drone minimum. Each failure names the part.
 - done when: one form per rule is refused with that rule's reason, and the starting form passes.
@@ -602,7 +602,7 @@ graph LR
 
 ### C1 · Editor view
 
-- status: todo
+- status: active card "Build C1: the editor view"
 - needs: R1
 - touches: `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/app.rs`
 - read: 29 §The editor

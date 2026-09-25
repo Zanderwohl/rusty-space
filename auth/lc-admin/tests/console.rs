@@ -79,6 +79,12 @@ fn state_against(pool: PgPool, identity_api: &str) -> AppState {
         // state a console runs in when the game is down, so it is the one the tests run in.
         shard_api: None,
         shard_audience: "shard-1".into(),
+        // Nothing configured, for the reason there is no shard.
+        cdn: std::sync::Arc::new(lc_admin::cdn::Sources {
+            storage: None,
+            site: None,
+            catalog: None,
+        }),
         http: lc_admin::http_client(),
     }
 }

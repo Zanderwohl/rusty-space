@@ -36,6 +36,8 @@ pub const USER_ROWS: &str = "/users/rows";
 pub const SYSTEMS: &str = "/systems";
 pub const SYSTEM_ROWS: &str = "/systems/rows";
 const SYSTEM: &str = "/systems/{id}";
+pub const CDN: &str = "/cdn";
+const CDN_BUILD: &str = "/cdn/game/{id}";
 const USER: &str = "/users/{id}";
 const USER_LEVEL: &str = "/users/{id}/level";
 const USER_BAN: &str = "/users/{id}/ban";
@@ -47,6 +49,20 @@ pub fn user_url(id: Uuid) -> String {
 
 pub fn system_url(id: u64) -> String {
     format!("/systems/{id}")
+}
+
+/// A build id is a path segment: encoded, but its `+` kept, which a path reads literally.
+pub fn cdn_build_url(id: &str) -> String {
+    const SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~')
+        .remove(b'+');
+    format!(
+        "/cdn/game/{}",
+        percent_encoding::utf8_percent_encode(id, SEGMENT)
+    )
 }
 
 pub fn user_level_url(id: Uuid) -> String {
@@ -81,6 +97,8 @@ pub fn router(state: AppState) -> Router {
         .route(SYSTEMS, get(system_index))
         .route(SYSTEM_ROWS, get(system_rows))
         .route(SYSTEM, get(system_page))
+        .route(CDN, get(cdn_index))
+        .route(CDN_BUILD, get(cdn_build))
         .route(USER_LEVEL, post(set_level))
         .route(USER_BAN, post(issue_ban))
         .route(USER_LIFT, post(lift_ban))
@@ -247,6 +265,40 @@ async fn system_page(
         views::system::page(&found),
     );
     (status, page).into_response()
+}
+
+async fn cdn_index(State(state): State<AppState>, admin: Admin) -> Response {
+    let index = state.cdn.index(&state.http).await;
+    views::shell(
+        &state.assets,
+        Head { title: "CDN" },
+        Some(&admin),
+        views::cdn::page(&index),
+    )
+    .into_response()
+}
+
+async fn cdn_build(
+    State(state): State<AppState>,
+    admin: Admin,
+    Path(id): Path<String>,
+) -> Response {
+    match state.cdn.build(&state.http, &id).await {
+        Some(page) => views::shell(
+            &state.assets,
+            Head { title: &id },
+            Some(&admin),
+            views::cdn::build_page(&page),
+        )
+        .into_response(),
+        None => views::refusal(
+            &state.assets,
+            StatusCode::NOT_FOUND,
+            "No such build",
+            "Nothing is stored or registered under that build id.",
+            (CDN, "← CDN"),
+        ),
+    }
 }
 
 async fn person(
@@ -659,6 +711,11 @@ mod tests {
         assert_eq!(USER.replace("{id}", "rows"), USER_ROWS);
         assert_eq!(system_url(42), SYSTEM.replace("{id}", "42"));
         assert_eq!(SYSTEM.replace("{id}", "rows"), SYSTEM_ROWS);
+        assert_eq!(
+            cdn_build_url("2026.09.1+a10eac4"),
+            CDN_BUILD.replace("{id}", "2026.09.1+a10eac4")
+        );
+        assert_eq!(cdn_build_url("a b/c"), "/cdn/game/a%20b%2Fc");
     }
 
     /// Every refusal the rules can produce has to be something this layer can show. A
