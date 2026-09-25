@@ -194,6 +194,14 @@ pub const SOLAR_ANCHOR_S: f64 = crate::flight::JULIAN_YEAR_S;
 /// at its rated load. H2 anchors the field's time constant on it, and it fixes the cooking flux.
 pub const RATED_LOAD_AU: f64 = 0.05;
 
+/// Module-energies the starting ship's field holds from empty to collapse. What
+/// [`Balance::field_capacity`] is anchored to.
+pub const FIELD_ANCHOR_ME: f64 = 10.0;
+
+/// The starting form's envelope, m². Solved in `field`'s anchor tests, since the grid is not
+/// `const`, and pinned there.
+pub const STARTING_ENVELOPE_M2: f64 = 339248.9593564414;
+
 impl Balance {
     pub const DEFAULT: Self = {
         let slot_volume_m3 = REFERENCE_HULL_M3 / Loadout::STARTING.slots as f64;
@@ -227,6 +235,7 @@ impl Balance {
             * 250.0
             * (250.0 * crate::craft::BEAM_PER_LENGTH);
         let flux = crate::solar::SOLAR_CONSTANT_W_M2 / (SOLAR_ANCHOR_AU * SOLAR_ANCHOR_AU);
+        let rated_load_gain = (SOLAR_ANCHOR_AU / RATED_LOAD_AU) * (SOLAR_ANCHOR_AU / RATED_LOAD_AU);
         Self {
             drive_efficiency: 1.0,
             recovery: 0.95,
@@ -261,11 +270,12 @@ impl Balance {
             envelope_margin: 0.05,
             engine_clear_half_angle_rad: 15.0 * degree,
             field_idle_k: 400.0,
-            // Placeholder: anchored by H2 to 10 ME on the starting envelope. Zero makes `Q_max`
-            // zero, so nothing may rely on it before then.
-            field_capacity: 0.0,
-            // Anchored by H2; 30's figure until then.
-            field_tau_s: 1.84e6,
+            field_capacity: FIELD_ANCHOR_ME * module_kg * C2 / STARTING_ENVELOPE_M2,
+            // The starting ship full and broadside at `RATED_LOAD_AU` exactly at rated load. Full
+            // storage turns all it absorbs into heat, and the gain is anchored on the same
+            // broadside the starlight falls on, so the broadside cancels.
+            field_tau_s: FIELD_ANCHOR_ME * module_kg * C2 * conversion_efficiency
+                / (wanted_w * rated_load_gain),
             clear_absorptivity: 0.3,
             field_switch_s: day_s,
             auto_clear_above: 0.5,
@@ -310,6 +320,13 @@ impl Balance {
             _ => 1.0,
         };
         factor * self.module_energy_j() / power_w
+    }
+
+    /// `q_idle`, J/m² of envelope: the starting ship's living drain alone holds its field at
+    /// `field_idle_k`, so its idle heat is `P τ` over [`STARTING_ENVELOPE_M2`].
+    pub fn field_idle_j_m2(&self) -> f64 {
+        let drain_w = crate::form::presets::STARTING_LIVING_M3 * self.living_density_w;
+        drain_w * self.field_tau_s / STARTING_ENVELOPE_M2
     }
 
     pub fn slot_structure_kg(&self) -> f64 {
