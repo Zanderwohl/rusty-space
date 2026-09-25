@@ -330,7 +330,7 @@ graph LR
 
 ### F9 · The switch from loadout to form
 
-- status: todo
+- status: active card "Build F9: the switch from loadout to form"
 - needs: F5, F6, F7, F8
 - touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-world/src/cost.rs`, `crates/lc-world/src/refit.rs`
 - read: 29 whole, 19 for what stays
