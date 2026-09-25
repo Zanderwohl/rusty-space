@@ -553,10 +553,15 @@ impl FormGrid {
                     let base = self.cell_center(i, j, k);
                     let points: [DVec3; 8] =
                         std::array::from_fn(|c| DVec3::new((c & 1) as f64, ((c >> 1) & 1) as f64, ((c >> 2) & 1) as f64) * h);
+                    // Every tetrahedron's edge is one of the seven leaving some cube's corner 0, so
+                    // each crossing is counted once.
+                    for c in [1, 2, 3, 4, 5, 6, 7] {
+                        if (values[0] < 0.0) != (values[c] < 0.0) {
+                            crossings.push(base - center + points[c] * (values[0] / (values[0] - values[c])));
+                        }
+                    }
                     for tet in TETS {
-                        let (a, v) = tetrahedron(tet.map(|c| (points[c], values[c])), tet_volume, &mut |p| {
-                            crossings.push(base - center + p);
-                        });
+                        let (a, v) = tetrahedron(tet.map(|c| (points[c], values[c])), tet_volume);
                         area += a;
                         volume += v;
                     }
@@ -586,8 +591,7 @@ fn widest(points: &[DVec3]) -> f64 {
 }
 
 /// The zero set's area in one tetrahedron and the volume where the linear interpolant is negative.
-/// `crossing` sees every point where the zero set meets an edge.
-fn tetrahedron(corners: [(DVec3, f64); 4], whole: f64, crossing: &mut impl FnMut(DVec3)) -> (f64, f64) {
+fn tetrahedron(corners: [(DVec3, f64); 4], whole: f64) -> (f64, f64) {
     let mut inside = [0usize; 4];
     let mut outside = [0usize; 4];
     let (mut ni, mut no) = (0, 0);
@@ -601,11 +605,9 @@ fn tetrahedron(corners: [(DVec3, f64); 4], whole: f64, crossing: &mut impl FnMut
         }
     }
     // Inside is strictly negative and outside not, so the denominator is never zero.
-    let mut cut = |a: usize, b: usize| {
+    let cut = |a: usize, b: usize| {
         let ((pa, va), (pb, vb)) = (corners[a], corners[b]);
-        let p = pa + (pb - pa) * (va / (va - vb));
-        crossing(p);
-        p
+        pa + (pb - pa) * (va / (va - vb))
     };
     let tet = |a: DVec3, b: DVec3, c: DVec3, d: DVec3| (b - a).dot((c - a).cross(d - a)).abs() / 6.0;
     let triangle = |a: DVec3, b: DVec3, c: DVec3| (b - a).cross(c - a).length() / 2.0;
@@ -613,8 +615,9 @@ fn tetrahedron(corners: [(DVec3, f64); 4], whole: f64, crossing: &mut impl FnMut
         0 => (0.0, 0.0),
         4 => (0.0, whole),
         1 | 3 => {
-            let (apex, others) = if ni == 1 { (inside[0], &outside[..3]) } else { (outside[0], &inside[..3]) };
-            let p = [cut_pair(&mut cut, apex, others[0], ni), cut_pair(&mut cut, apex, others[1], ni), cut_pair(&mut cut, apex, others[2], ni)];
+            let (apex, others) = if ni == 1 { (inside[0], outside) } else { (outside[0], inside) };
+            // `cut` wants the inside corner first.
+            let p = [0, 1, 2].map(|k| if ni == 1 { cut(apex, others[k]) } else { cut(others[k], apex) });
             let corner = tet(corners[apex].0, p[0], p[1], p[2]);
             (triangle(p[0], p[1], p[2]), if ni == 1 { corner } else { whole - corner })
         }
@@ -629,11 +632,6 @@ fn tetrahedron(corners: [(DVec3, f64); 4], whole: f64, crossing: &mut impl FnMut
             ((bd - ac).cross(bc - ad).length() / 2.0, volume)
         }
     }
-}
-
-/// `cut` wants the inside corner first.
-fn cut_pair(cut: &mut impl FnMut(usize, usize) -> DVec3, apex: usize, other: usize, inside: usize) -> DVec3 {
-    if inside == 1 { cut(apex, other) } else { cut(other, apex) }
 }
 
 /// Normal equations, by elimination with partial pivoting. `None` when they are singular.

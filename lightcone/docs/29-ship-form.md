@@ -238,8 +238,8 @@ refused as `Extent`; no preset needs a second pass. Four choices the table leave
   contents do, so the tensor is kept per kilogram and scaled by whatever the ship weighs. A cell's
   density is its nearest part's by the envelope's truer distance, which the same pass has computed.
 
-Building one takes about 20 ms for the starting form and 60 ms for the Cluster with `lc-world`
-optimized, and half a second to two seconds unoptimized in the dev profile.
+Building one takes about 20 ms for the starting form and 50 ms for the Cluster with `lc-world`
+optimized, and a quarter to three quarters of a second unoptimized in the dev profile.
 
 **The shadow handles concave shapes.** A stack of plates shades
 itself and collects about what one plate would. A ship spread out collects more and turns more
