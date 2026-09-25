@@ -23,7 +23,7 @@ use em_ui::picking::{self, Candidate, rank};
 use em_ui::reticle::{self, Frame, Marker};
 use glam::DVec3;
 use lc_world::navigation::Target;
-use lc_world::sky::StarId;
+use lc_world::sky::{CatalogStar, StarId};
 
 use crate::action::Action;
 use crate::app::{Game, SkyCamera, Ui};
@@ -399,7 +399,13 @@ fn sight(
     }
 
     let near_cos = stars.near.map(|(toward, cone_rad)| (toward, cone_rad.cos()));
-    for star in &game.stars {
+    // With no cursor on the sky only the selected star can be wanted, and it is found by id
+    // rather than by placing all six thousand.
+    let considered: Box<dyn Iterator<Item = &CatalogStar>> = match near_cos {
+        Some(_) => Box::new(game.stars.iter()),
+        None => Box::new(stars.selected.and_then(|id| game.star(id)).into_iter()),
+    };
+    for star in considered {
         // Where the sky pass draws it, aberration and all. Picking what you see rather than
         // what is there is the whole point of reading this and not the offset.
         let direction = game.apparent_dir(star);
@@ -896,5 +902,33 @@ mod tests {
         assert!(
             !Subject::Star(id, "Sol".into()).is(&Subject::Star(StarId::synthesize("test", 8), "Sol".into()))
         );
+    }
+
+    /// With no cursor on the sky, the one star wanted is the selected one, and none without.
+    #[test]
+    fn without_a_cursor_only_the_selected_star_is_sighted() {
+        let game = crate::app::Game(crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 5));
+        let chosen = game.stars[2].id;
+        let clip = Mat4::perspective_infinite_reverse_rh(1.0, 16.0 / 9.0, 0.1);
+        let stars_in = |selected| {
+            sight(
+                &game,
+                &crate::starfield::Bodies::default(),
+                &crate::uplink::Uplink::default(),
+                DVec3::ZERO,
+                &Transform::default(),
+                clip,
+                1.0e-3,
+                StarsWanted { near: None, selected },
+            )
+            .into_iter()
+            .filter_map(|seen| match seen.subject {
+                Subject::Star(id, _) => Some(id),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(stars_in(Some(chosen)), [chosen]);
+        assert!(stars_in(None).is_empty());
     }
 }
