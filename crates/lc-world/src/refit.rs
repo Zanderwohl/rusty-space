@@ -7,6 +7,8 @@
 
 use crate::fitting::{Balance, C2, Loadout, Module};
 
+pub mod rounds;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
     Build(Module),
