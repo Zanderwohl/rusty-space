@@ -36,8 +36,7 @@ use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH};
 use lc_world::emit::rating_w;
 use lc_world::fitting::{Balance, Loadout};
 
-/// The hazard color. `18-ui-style.md` names none yet; this is the second phosphor's opposite, a
-/// red-orange no craft or body is drawn in.
+/// `18-ui-style.md`'s hazard color.
 const HAZARD: Color = Color::srgb(1.0, 0.30, 0.10);
 /// How bright the cone is where it would cook, and at the courtesy radius, in the hazard color.
 const HOT_GAIN: f32 = 0.35;

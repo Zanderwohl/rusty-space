@@ -262,8 +262,8 @@ The cone is drawn for your own ship whenever it burns, for any ship whose courte
 inside, and for a selected ship. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s
 palette, and is brightest where it would cook. The map draws the same cone as lines.
 
-18 does not name a hazard color yet. Until it does, `examples/cone_void.rs` holds a red-orange that
-no craft or body is drawn in, and the material takes both of its colors as uniforms. The aperture
+The hazard color is 18's red-orange. The material takes both of its colors as uniforms, so it
+stays free of either product's palette. The aperture
 glow is a second material in `exhaust_cone_material` rather than a reshaped `plume_material`, so
 the game's reaction-drive plume is untouched until the switch to photon drives replaces it.
 
