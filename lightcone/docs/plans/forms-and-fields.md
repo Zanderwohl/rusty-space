@@ -263,7 +263,7 @@ graph LR
 
 ### F3 · Distance field
 
-- status: active card "Build F3: the form's distance field"
+- status: done #76
 - needs: F2
 - touches: `crates/lc-world/src/form/sdf.rs`
 - read: 29 §Spars conform, §What the server computes
