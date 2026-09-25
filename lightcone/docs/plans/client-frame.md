@@ -173,7 +173,7 @@ graph LR
 
 ### D2 · Containment chain once per frame
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: —
 - touches: `crates/lc-client/src/map_source.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/hud.rs`
 - read: —
