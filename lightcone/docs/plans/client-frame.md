@@ -144,7 +144,7 @@ graph LR
 
 ### B2 · Labels cached
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; one `Arc<Labels>` on `Session` under a lock, like `settled`. `pick::sight` still looks a label up per body, which is now a map read, so it was left)
 - needs: B1, K2
 - touches: `crates/lc-client/src/session.rs`, `crates/lc-client/src/pick.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-client/src/panels.rs`
 - read: 23
@@ -184,7 +184,7 @@ graph LR
 
 ### S1 · Planck through the cache
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: —
 - touches: `crates/lc-client/src/session.rs`, `crates/lc-client/src/resolved.rs`, `crates/lc-client/src/envelope.rs`, `crates/lc-client/src/plume.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/map_source.rs`
 - read: 04
