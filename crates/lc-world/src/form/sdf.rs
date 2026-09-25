@@ -3,15 +3,9 @@
 //! [`Sdf`] resolves poses, shapes, spar neighbors and blend radii once, so [`Sdf::distance`] is
 //! arithmetic only. The grid (F6) and the client's mesher both read it. See 29 §Spars conform.
 //!
-//! Every primitive's distance is exact except the ellipsoid's. For the ellipsoid it is the bound
-//! `(|p/r| − 1) · r_min`: zero on the surface, the right sign everywhere, and Lipschitz 1, but short
-//! of the true distance by up to the ratio of its longest semi-axis to its shortest. So off an
-//! ellipsoid, a saddle's gap and a strap's depth are what `Balance` says only across its shortest
-//! axis, and grow with the semi-axis along the others.
-//!
-//! Blends use the quadratic polynomial smooth minimum, with radius `blend` × the smaller part's
-//! [`Shape::least_dimension`]. Its gradient is a convex combination of its arguments' gradients,
-//! so the whole field stays Lipschitz 1 and is a lower bound on the distance everywhere.
+//! The ellipsoid is the Lipschitz-1 bound `(|p/r| − 1) · r_min`, not exact, so a saddle's gap and a
+//! strap's depth off it grow away from its shortest axis. The quadratic smooth minimum keeps the
+//! whole field Lipschitz 1. 29 §What the server computes has the rest.
 //!
 //! Only IEEE arithmetic and `sqrt`, like placement, so every machine agrees to the bit.
 
@@ -21,11 +15,8 @@ use glam::{DMat3, DVec2, DVec3};
 
 use super::place::{Pose, Side};
 use super::primitive::Shape;
-use super::{Form, FormError, Kind, MAX_PARTS, Part, PartId, SparMode};
+use super::{Form, FormError, Kind, Part, PartId, SparMode};
 use crate::fitting::Balance;
-
-/// Every part and its mirror.
-const MAX_PIECES: usize = 2 * MAX_PARTS;
 
 /// One copy of one part.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -138,9 +129,14 @@ impl Sdf {
         self.bounds
     }
 
+    /// Allocates its scratch; a loop wants [`Sdf::distance_with`].
     pub fn distance(&self, p: DVec3) -> f64 {
-        let mut raw = [0.0; MAX_PIECES];
-        let raw = self.raw(p, &mut raw);
+        self.distance_with(p, &mut Vec::new())
+    }
+
+    /// [`Sdf::distance`] reusing `scratch` across calls, for a loop over a grid.
+    pub fn distance_with(&self, p: DVec3, scratch: &mut Vec<f64>) -> f64 {
+        let raw = self.raw(p, scratch);
         let hard = (0..raw.len()).map(|i| self.conformed(i, raw)).fold(f64::INFINITY, f64::min);
         // A spar is never blended, so both ends of a joint are their primitives.
         self.blends.iter().fold(hard, |d, &(a, b, radius)| d.min(smooth_min(raw[a], raw[b], radius)))
@@ -149,8 +145,11 @@ impl Sdf {
     /// The piece whose own distance at `p` is least, and that distance. Where two are blended the
     /// fillet goes to whichever is nearer.
     pub fn nearest(&self, p: DVec3) -> (&Piece, f64) {
-        let mut raw = [0.0; MAX_PIECES];
-        let raw = self.raw(p, &mut raw);
+        self.nearest_with(p, &mut Vec::new())
+    }
+
+    pub fn nearest_with(&self, p: DVec3, scratch: &mut Vec<f64>) -> (&Piece, f64) {
+        let raw = self.raw(p, scratch);
         let (i, d) = (0..raw.len())
             .map(|i| (i, self.conformed(i, raw)))
             .fold((0, f64::INFINITY), |best, next| if next.1 < best.1 { next } else { best });
@@ -170,16 +169,33 @@ impl Sdf {
         }
     }
 
-    fn primitive(&self, i: usize, p: DVec3) -> f64 {
-        self.pieces[i].shape.distance(self.inverse[i] * (p - self.pieces[i].pose.position))
+    /// For a spar, the neighbor whose seam with it is nearest `p`, and how near: zero on the line
+    /// where the spar's primitive meets a saddle's cut or a strap's parent, and at most the
+    /// distance to that line off it. `None` for any other part. 32 §Materials by kind puts a row of
+    /// bolts along it.
+    pub fn seam(&self, piece: usize, p: DVec3) -> Option<(usize, f64)> {
+        let own = self.primitive(piece, p).abs();
+        let on = |n: usize, other: f64| (n, own.max(other.abs()));
+        let nearer = |a: (usize, f64), b: (usize, f64)| if b.1 < a.1 { b } else { a };
+        match &self.conform[piece] {
+            Conform::Whole => None,
+            Conform::Saddle(neighbors) => neighbors
+                .iter()
+                .map(|&n| on(n, self.spar_gap - self.primitive(n, p)))
+                .reduce(nearer),
+            &Conform::Strap { parent, .. } => Some(on(parent, self.primitive(parent, p))),
+        }
     }
 
-    fn raw<'a>(&self, p: DVec3, buffer: &'a mut [f64; MAX_PIECES]) -> &'a [f64] {
-        let raw = &mut buffer[..self.pieces.len()];
-        for (i, d) in raw.iter_mut().enumerate() {
-            *d = self.primitive(i, p);
-        }
-        raw
+    /// Distance to one piece's primitive, uncut and unblended.
+    pub fn primitive(&self, piece: usize, p: DVec3) -> f64 {
+        self.pieces[piece].shape.distance(self.inverse[piece] * (p - self.pieces[piece].pose.position))
+    }
+
+    fn raw<'a>(&self, p: DVec3, scratch: &'a mut Vec<f64>) -> &'a [f64] {
+        scratch.clear();
+        scratch.extend((0..self.pieces.len()).map(|i| self.primitive(i, p)));
+        scratch
     }
 
     fn conformed(&self, i: usize, raw: &[f64]) -> f64 {
@@ -512,6 +528,45 @@ mod tests {
         let spar = index(&sdf, 2, Side::Original);
         let depth = B.spar_thickness * edges.z;
         assert_eq!(sdf.conform[spar], Conform::Strap { parent: index(&sdf, 1, Side::Original), depth });
+    }
+
+    #[test]
+    fn a_seam_is_where_a_spar_meets_what_cuts_it() {
+        let sdf = Sdf::new(&boom(SparMode::Saddle), &B).unwrap();
+        let [hull, spar, ball] = [1, 2, 3].map(|id| index(&sdf, id, Side::Original));
+        let piece = sdf.pieces()[spar];
+        let Shape::Cylinder { radius, .. } = piece.shape else { panic!() };
+        let reach = piece.shape.reach();
+        // Down the boom's side toward the hull, to where the side meets the cut.
+        let side = |x: f64| piece.pose.to_outer(DVec3::new(x, 0.0, radius));
+        let x = root(|p| B.spar_gap - sdf.primitive(hull, p), side(0.0), side(-reach)).dot(piece.pose.axis())
+            - piece.pose.position.dot(piece.pose.axis());
+        let (neighbor, d) = sdf.seam(spar, side(x)).unwrap();
+        assert_eq!(neighbor, hull);
+        assert!(d < 1e-9, "{d}");
+        let (neighbor, d) = sdf.seam(spar, side(x + 1.0)).unwrap();
+        assert_eq!(neighbor, hull);
+        assert!(d > 0.5 && d <= 1.0 + 1e-9, "a meter along the side: {d}");
+        let proud = side(x) + piece.pose.rotation.z_axis;
+        assert!(sdf.seam(spar, proud).unwrap().1 > 0.5, "a meter off the boom's side");
+        let (neighbor, _) = sdf.seam(spar, side(reach * 0.9)).unwrap();
+        assert_eq!(neighbor, ball);
+        assert_eq!(sdf.seam(hull, side(x)), None);
+
+        // A strap's is its edge on the parent's surface.
+        let tank = part(1, Kind::Storage, SPHERE, 5e5, 0, Mount::Enclosing);
+        let r = tank.shape(B.min_part_m3).reach();
+        let band = Primitive::Torus { major: 7.0 };
+        let strap = part(2, Kind::Spar(SparMode::Strap), band, band.volume(r / 7.0), 1, Mount::Enclosing);
+        let sdf = Sdf::new(&Form { parts: vec![mind(), tank, strap] }, &B).unwrap();
+        let (tank, strap) = (index(&sdf, 1, Side::Original), index(&sdf, 2, Side::Original));
+        let tube = |t: f64| DVec3::new((r / 7.0) * t.sin(), r + (r / 7.0) * t.cos(), 0.0);
+        // Around the tube's surface, from its outermost point to its innermost.
+        let edge = tube(root(|t| sdf.primitive(tank, tube(t.x)), DVec3::ZERO, DVec3::X * PI).x);
+        let (neighbor, d) = sdf.seam(strap, edge).unwrap();
+        assert_eq!(neighbor, tank);
+        assert!(d < 1e-9, "{d}");
+        assert!(sdf.seam(strap, tube(0.0)).unwrap().1 > 0.1 * r / 7.0);
     }
 
     #[test]

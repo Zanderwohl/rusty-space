@@ -32,7 +32,8 @@ impl std::fmt::Display for PartId {
 pub enum SparMode {
     /// Each tree neighbor, grown by `spar_gap`, is cut out of the spar.
     Saddle,
-    /// The spar is kept only within `spar_thickness` of its parent's surface.
+    /// Kept between its parent's surface and `spar_thickness` of the parent's smallest dimension
+    /// outside it.
     Strap,
 }
 

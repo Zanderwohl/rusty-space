@@ -188,11 +188,12 @@ computes the same numbers for its preview and takes the server's when they arriv
 **The distance field** is `form::sdf::Sdf`, built once from a form and then evaluated at any point in
 the ship's frame, negative inside. Every primitive's distance is exact except the ellipsoid's, which
 has no closed form off its surface and uses the bound `(|p/r| − 1) · r_min` instead: zero on the
-surface, the right sign everywhere, and never steeper than the true distance. Blends are the
-quadratic polynomial smooth minimum, at most a quarter of the radius deep, so the whole field is a
-lower bound on the distance and exact on each unblended surface. That is all a grid or surface nets
-need. The same `Sdf` names the part nearest a point, which is how the grid weights cells by density
-and the hull material finds its kind regions.
+surface, the right sign everywhere, and Lipschitz 1. Blends are the quadratic polynomial smooth
+minimum, whose gradient is a convex combination of its arguments', so the whole field is Lipschitz 1:
+a lower bound on the distance, and zero on the surface. That is all a grid or surface nets need.
+The same `Sdf` names the part nearest a point, which is how the grid weights cells by density and the
+hull material finds its kind regions. It also gives a spar's distance to its seams, for the bolt rows
+of [32](32-ship-rendering.md) §Materials by kind.
 
 **Geometry** comes from a **voxel grid of fixed resolution**: `FORM_GRID = 64` cells along the longest
 side of the bounding box, whatever the ship's size. Each cell is filled by evaluating the union's
