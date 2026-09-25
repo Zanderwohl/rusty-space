@@ -153,7 +153,7 @@ graph LR
 
 ### B3 · Map source from the caches
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; labels and guessed masses are built with the belief list. Star items were not cached and labels are not `Arc<str>`: T1 put all of `map::survey` under 0.1 ms)
 - needs: B1, K2, S1
 - touches: `crates/lc-client/src/map_source.rs`
 - read: 11
