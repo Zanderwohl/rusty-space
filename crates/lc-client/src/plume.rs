@@ -20,7 +20,6 @@
 use bevy::prelude::*;
 use em_render::plume_material::{CHURN_PERIOD, PlumeMaterial, PlumeUniform};
 use em_render::render_space::sim_to_render;
-use em_spectra::{Band, PerBand, blackbody};
 use glam::DVec3;
 use lc_proto::ShipId;
 
@@ -297,10 +296,7 @@ fn along_exhaust(facing: DVec3) -> Quat {
 
 /// What a blackbody at `kelvin` looks like through this observer's bands, linear display RGB.
 fn shine(session: &Session, kelvin: f64) -> Vec3 {
-    let radiance = PerBand::new(std::array::from_fn(|i| {
-        blackbody::band_radiance(Band::ALL[i], kelvin) as f32
-    }));
-    Vec3::from_array(session.mapping.apply(&radiance))
+    Vec3::from_array(session.mapping.apply(&crate::session::spectrum_at(kelvin)))
 }
 
 fn uniforms(lit: &Burning, session: &Session, eye_local: Vec3, phase: f64) -> PlumeUniform {
@@ -429,6 +425,8 @@ pub fn update_plumes(
 
 #[cfg(test)]
 mod tests {
+    use em_spectra::{Band, PerBand, blackbody};
+
     use super::*;
 
     const SHIP_M: f64 = 500.0;

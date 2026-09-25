@@ -923,7 +923,7 @@ const SPECTRA_KEPT: usize = 4096;
 ///
 /// Doppler shifts the temperature, so this is not constant while under way — but it moves
 /// slowly, and quantizing it means a ship at rest computes each spectrum once ever.
-fn spectrum_at(teff_k: f64) -> PerBand<f32> {
+pub(crate) fn spectrum_at(teff_k: f64) -> PerBand<f32> {
     thread_local! {
         static SPECTRA: std::cell::RefCell<HashMap<u64, PerBand<f32>>> =
             std::cell::RefCell::new(HashMap::new());
@@ -955,9 +955,10 @@ fn spectrum_at(teff_k: f64) -> PerBand<f32> {
 /// crate does not expose yet.
 fn received(observation: &Observation, teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
     let g = geometry(radius_m, distance_m);
+    let spectrum = spectrum_at(teff_k);
     PerBand::new(std::array::from_fn(|i| {
         let band = Band::ALL[i];
-        let full = blackbody::band_radiance(band, teff_k) * g;
+        let full = spectrum[band] as f64 * g;
         // Relative flux, not one minus the deficit: a warm population adds where a cold one
         // only subtracts, and in the thermal infrared the sum can exceed the bare star.
         let relative = observation.band(band).map(|m| m.relative_flux()).unwrap_or(1.0);

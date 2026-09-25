@@ -445,9 +445,15 @@ fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
 }
 
 /// The Sun's luminosity in one band, watts: what a believed luminosity is ranked against.
+/// Integrated once per band, where it had been once per star per frame.
 fn sun_band_w(band: em_spectra::Band) -> f64 {
-    let m = lc_world::system::M_PER_LY;
-    4.0 * std::f64::consts::PI * m * m * lc_world::knowledge::survey::flux_from(&lc_world::star::Star::SOL, band, m)
+    static SUN: std::sync::LazyLock<[f64; em_spectra::Band::ALL.len()]> = std::sync::LazyLock::new(|| {
+        let m = lc_world::system::M_PER_LY;
+        em_spectra::Band::ALL.map(|band| {
+            4.0 * std::f64::consts::PI * m * m * lc_world::knowledge::survey::flux_from(&lc_world::star::Star::SOL, band, m)
+        })
+    });
+    SUN[band.index()]
 }
 
 #[cfg(test)]
