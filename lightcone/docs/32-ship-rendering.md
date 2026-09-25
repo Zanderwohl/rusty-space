@@ -3,7 +3,7 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: partly built.** The hull material, the drones and the field shader are in, each in a void; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
+**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
 [30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
@@ -35,6 +35,18 @@ drawn is the surface the server reasons about.
 - **Finish** is a per-form choice: *smooth* (surface nets as they come), *faceted* (flat normals),
   or *blocky* (occupied cells drawn as cubes, for anyone who wants a brutalist ship). It changes
   extraction, not the shape, so it touches nothing the server computes.
+
+As built (`lc_client::hull_mesh`): one cell per four pixels along the ship's longest side, as a
+power of two from 16 to 256, held until the ideal is more than three quarters of a doubling away.
+Before extraction the grid is cleaned of every lattice square whose corners alternate in sign by
+turning one outside corner inside, so each cell face carries at most one segment of surface; a
+vertex per loop of crossings in a cell, not per cell, then makes the mesh closed and manifold
+whatever the form. Blocky is the same topology with each vertex moved to its cell's center, which
+is exactly the cubes' faces. A feature thinner than a cell is kept only where a sample lands in
+it: a strap on a coarse grid comes out holed or gone, never torn. The cache key is FNV-1a over a
+canonical encoding of the form and each part's solved shape, since `Form` holds `f64`s. A
+256-cell mesh takes a few seconds in a dev build and never holds up a frame; the old mesh stays up
+until the new one lands. `cargo run -p lc-client --example mesh_void` photographs the fixtures.
 
 ### Details are sized in meters
 
@@ -76,7 +88,7 @@ scales by a power per region.
 | engine | an emitter grid on the open face, glowing with exhaust power. As built the grid is lit over the whole region, which is right in a void; which face is open is the form's, and R13 limits it there |
 | data | fine dense panels |
 | mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
-| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over; the angle about the joining part's axis times its radius should serve for the primitives 29 allows. R10's mesher has to supply both, since the material will not build a pipeline for a mesh without them |
+| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over. The mesher takes the seam's direction from the two primitives' gradients and weights meters around the spar's axis and along it by how far the seam runs each way, so a boom's end ring and a rib's edge are both measured in meters. Taking only one of the two shears every head on the other kind of seam |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
