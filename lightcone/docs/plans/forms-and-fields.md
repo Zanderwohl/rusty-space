@@ -456,7 +456,7 @@ graph LR
 
 - status: done #73
 - needs: E1, K3
-- touches: `crates/lc-world/src/pursuit.rs`, `crates/lc-world/src/escort.rs`, `crates/lc-world/src/consort.rs`, `crates/lc-world/src/courtesy.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/fitting.rs`
+- touches: `crates/lc-world/src/pursuit.rs`, `crates/lc-world/src/escort.rs`, `crates/lc-world/src/consort.rs`, `crates/lc-world/src/courtesy.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/fitting.rs`, `crates/lc-server/src/persist.rs` (the approach is saved), `crates/lc-server/src/director.rs` (a staged chase states its approach)
 - read: 31 §Maneuvering near others, 08 §Intercept
 - deliver: station-keeping legs as a `Cruise` at `rcs_accel_g`; abeam stations; ingress points at the courtesy radius; flotilla azimuths; `approach` on `Intercept`, Courteous by default. Needs no heat: it keeps to the courtesy limit whether or not anything yet burns from it.
 - done when: a courteous approach and escort never exceed the courtesy flux on the quarry at any instant, a direct one does, and three followers of one leader take three azimuths with none in another's cone.

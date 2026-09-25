@@ -101,8 +101,9 @@ pub const INGRESS_MARGIN: f64 = 1.1;
 /// reached a little inside its standoff.
 pub const THROTTLE_HEADROOM: f64 = 0.9;
 
-/// Legs that are not the station end at least this many standoffs out, so a plan's end says
-/// which kind it is: nothing ending here can be a station in either closeness's band.
+/// Legs that are not the station end at least this many standoffs out, past
+/// [`DRIFT_ALLOWANCE`](crate::pursuit::DRIFT_ALLOWANCE) of their own standoff, so
+/// [`is_waypoint`] can tell them from the station by where they end.
 pub const WAYPOINT_STANDOFFS: f64 = 3.0;
 
 /// The widest turn about the quarry one leg makes. A chord between two points this far apart
@@ -349,7 +350,7 @@ pub(crate) mod tests {
     const SAMPLES: usize = 4_000;
     /// Samples closing geometrically on each end of a leg, a tenth of a percent nearer each time.
     /// Evenly spaced ones miss a brake's last seconds, where it is nearest the quarry: from four
-    /// hundred thousand kilometers they are forty-five seconds apart and the last is fifty
+    /// hundred million kilometers they are forty-five seconds apart and the last is fifty
     /// kilometers short.
     const END_SAMPLES: i32 = 40_000;
     const QUARRY: ShipId = ShipId(1);
@@ -464,7 +465,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// Well outside the largest hull's ingress sphere, sixty thousand kilometers.
+    /// Four hundred million kilometers: well outside the largest hull's ingress sphere, about
+    /// thirty thousand.
     const FAR_M: f64 = 4.0e11;
 
     /// **31 §Tests, Courtesy**, for a quarry at rest. The ingress leg ends on the courtesy sphere,

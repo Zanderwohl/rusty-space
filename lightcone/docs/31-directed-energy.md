@@ -99,6 +99,11 @@ What follows:
   flux, a thousand times the cooking distance.
 - **The drawn cone is `drive_spread_rad`**, so what a player sees is the cone that hurts
   ([32-ship-rendering.md](32-ship-rendering.md#the-exhaust-cone)).
+- **A leg on station-keeping thrusters** (below) is a cruise at no more than `rcs_accel_g`, and
+  `courtesy::on_thrusters` is what says so. It emits at `rcs_spread_rad`, not `drive_spread_rad`.
+  An escort's thruster leg is two emissions: the main drive carrying the quarry's acceleration at
+  `drive_spread_rad`, and the thrusters carrying the closing at `rcs_spread_rad`. Folding them into
+  one 5° cone would put the thrusters' power into a solid angle a hundred and thirty times smaller.
 
 ## Maneuvering near others
 
