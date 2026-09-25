@@ -515,8 +515,9 @@ other two modes have, with the same sensitivities, so a drag means the same turn
   the focus is along. A 500 m ship and a 50 km one open framed alike and a notch means the same on
   both. The slide is in stand-offs, so the same drag moves the ship as far across the screen at any
   zoom, and the point under the cursor follows it.
-- **The near stop is outside every part** however the camera is turned: further from the nose axis
-  than anything on the form. The far stop leaves the whole form a small thing in the middle.
+- **The near stop is outside every part** however the camera is turned: outside the form's bounds,
+  grown by 15%, along the line of sight. Looking nose-on at a long hull it is off the bow, not on the
+  axis inside it. The far stop leaves the whole form a small thing in the middle.
 - **Up tilts the view up** on the arrows and the drag alike, as it does over the sky, which on an
   orbit is the camera sinking under the ship. The map's turn has the same signs.
 - **The press decides.** A drag that starts on a window, on the corner square or on one of the
@@ -547,7 +548,7 @@ other two modes have, with the same sensitivities, so a drag means the same turn
   none yet.
 
 `--view form` starts in the editor; `--turn`, `--pitch`, `--zoom` and `--slide` move its camera, and
-`--form spindle*100` stages a hull a hundred times longer than the preset.
+`--form spindle*100` stages the preset a hundred times larger, a hull 92 km long.
 
 ### The budget
 
@@ -601,9 +602,9 @@ volume above the minimum.
 
 - **The draft**, drawn as structure over the ship as it is, drawn as a faint ghost. Parts to be built,
   dismantled, moved and rebuilt each get a mark from [18-ui-style.md](18-ui-style.md)'s palette.
-- **Side panels**, in `em_ui`'s widgets like the rest of the editor's controls: the tree of parts, and the selected part's primitive, kind, volume and
-  placement as editable numbers. Every handle has a field, so anything done with the mouse can be typed
-  exactly.
+- **Side panels**, in `em_ui`'s widgets like the rest of the editor's controls: the tree of parts,
+  and the selected part's primitive, kind, volume and placement as editable numbers. Every handle
+  has a field, so anything done with the mouse can be typed exactly.
 - **The preview**, a pure function of `Session` and `Ui`: capacities, acceleration, broadside shadow,
   envelope area, slew rate, the field's rated load and headroom, brightness at the ship's current
   distance from its star, and the round's duration.

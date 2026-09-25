@@ -63,8 +63,8 @@ impl OwnForm {
 }
 
 /// A preset by `--form`'s spelling: a builtin's name, or `default` for the starting form. A
-/// suffix `*k` makes every part but the Mind `k` times longer, which is how a 50 km hull is
-/// photographed before anything can build one.
+/// suffix `*k` makes every part but the Mind `k` times larger at the same proportions, which is
+/// how a hull tens of kilometers long is photographed before anything can build one.
 pub fn fixture(spec: &str) -> Option<Form> {
     let (name, scale) = match spec.split_once('*') {
         Some((name, k)) => (name, k.parse::<f64>().ok().filter(|k| k.is_finite() && *k > 0.0)?),
@@ -294,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn a_scaled_fixture_is_that_many_times_longer() {
+    fn a_scaled_fixture_is_that_many_times_larger() {
         let length = |spec: &str| OwnForm::new(&fixture(spec).unwrap(), &Balance::DEFAULT).unwrap().length_m().unwrap();
         let ratio = length("spindle*100") / length("spindle");
         assert!((90.0..=101.0).contains(&ratio), "{ratio}: the Mind alone keeps its size");

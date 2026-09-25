@@ -48,9 +48,9 @@ const START_ELEVATION: f64 = 25.0 * std::f64::consts::PI / 180.0;
 /// Far enough back that the whole form is in view. See [`Extent::size_m`] for the unit.
 const START_DISTANCE: f64 = 1.5;
 
-/// The nearest the eye comes, as a multiple of the form's girth about the orbit's axis: outside
-/// every part wherever the camera is turned, since it is further from the axis than any of them.
-const NEAR_GIRTHS: f64 = 1.15;
+/// How far the bounds are grown, about their middle, before the eye is kept outside them. Every
+/// part is inside the bounds, so an eye outside them is outside every part.
+const NEAR_MARGIN: f64 = 1.15;
 /// The farthest, in form sizes: the whole form a small thing in the middle of the view.
 const FAR_SIZES: f64 = 4.0;
 
@@ -62,8 +62,8 @@ pub const SLIDE_PER_SECOND: f64 = 1.0;
 /// nose-on the axis is a point on screen and a drag has nothing to slide along.
 const MIN_FORESHORTENING: f32 = 0.25;
 
-/// A key light over the camera's shoulder and a floor under it. See §The editor for why the star
-/// is not the light here.
+/// A key light over the camera's shoulder and a floor under it. See
+/// `lightcone/docs/29-ship-form.md` §How it is drawn for why the star is not the light here.
 const KEY_UP: f64 = 0.8;
 const KEY_ACROSS: f64 = -0.5;
 const HANGAR_LIGHT: f32 = 1.0;
@@ -130,11 +130,15 @@ impl FormOrbit {
     }
 
     /// This orbit, held inside what `extent` allows.
+    ///
+    /// The near stop is along the line of sight: where the ray from the focus toward the eye
+    /// leaves the grown bounds. A stop by distance alone put the eye on the nose axis, inside a
+    /// long hull, whenever the camera looked nose-on.
     pub fn held_to(mut self, extent: &Extent) -> Self {
-        let (near, far) = extent.distances();
         let (aft, fore) = extent.along();
-        self.distance = self.distance.clamp(near, far);
         self.along = self.along.clamp(aft, fore);
+        let near = extent.exit_m(self.focus_m(extent), self.toward_eye()) / extent.size_m();
+        self.distance = self.distance.clamp(near.min(FAR_SIZES), FAR_SIZES);
         self
     }
 
@@ -194,16 +198,19 @@ impl Extent {
         (self.min + self.max) * 0.5
     }
 
-    /// From the nose axis through the middle to the bounds' farthest edge.
-    fn girth_m(&self) -> f64 {
-        let half = (self.max - self.min) * 0.5;
-        (half.y * half.y + half.z * half.z).sqrt()
-    }
-
-    /// The nearest and farthest the eye may stand from the focus, in form sizes.
-    pub fn distances(&self) -> (f64, f64) {
-        let near = NEAR_GIRTHS * self.girth_m() / self.size_m();
-        (near.min(FAR_SIZES), FAR_SIZES)
+    /// How far a ray from `from`, inside the bounds, runs along unit `direction` before it
+    /// leaves them grown by [`NEAR_MARGIN`], meters.
+    pub fn exit_m(&self, from: DVec3, direction: DVec3) -> f64 {
+        let half = (self.max - self.min) * 0.5 * NEAR_MARGIN;
+        let (low, high) = (self.middle() - half, self.middle() + half);
+        (0..3)
+            .filter(|&i| direction[i].abs() > f64::EPSILON)
+            .map(|i| {
+                let wall = if direction[i] > 0.0 { high[i] } else { low[i] };
+                (wall - from[i]) / direction[i]
+            })
+            .fold(f64::INFINITY, f64::min)
+            .max(0.0)
     }
 
     /// How far aft and fore the focus may slide, in form sizes: stem to stern and no further.
@@ -282,11 +289,15 @@ pub fn on_part(sdf: &Sdf, origin: DVec3, direction: DVec3, limit_m: f64) -> bool
 /// The form the editor shows: the ship's own, or the starting form while it has none. C2 puts
 /// the draft here.
 #[derive(Resource, Default)]
-pub struct Shown(Option<(Sdf, Extent)>);
+pub struct Shown {
+    drawn: Option<(Sdf, Extent)>,
+    /// Set once a form has been solved or has failed to, so a failure is not retried every frame.
+    tried: bool,
+}
 
 impl Shown {
     pub fn extent(&self) -> Option<Extent> {
-        self.0.as_ref().map(|(_, extent)| *extent)
+        self.drawn.as_ref().map(|(_, extent)| *extent)
     }
 }
 
@@ -372,21 +383,23 @@ fn show(
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
     surfaces: Res<crate::surfaces::Surfaces>,
 ) {
-    let fresh = shown.0.is_none() || own.is_changed();
-    if !fresh && !roots.is_empty() {
+    let fresh = !shown.tried || own.is_changed();
+    // Respawned when missing too, since leaving the game takes the copies down.
+    if !fresh && (!roots.is_empty() || shown.drawn.is_none()) {
         return;
     }
     if fresh {
         let sdf = own.sdf().cloned().or_else(|| Sdf::new(&Form::starting(), &Balance::DEFAULT).ok());
-        shown.0 = sdf.map(|sdf| {
+        shown.drawn = sdf.map(|sdf| {
             let (min, max) = sdf.bounds();
             (sdf, Extent { min, max })
         });
+        shown.tried = true;
     }
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let Some((sdf, _)) = &shown.0 else { return };
+    let Some((sdf, _)) = &shown.drawn else { return };
     // Ship axes to render axes, the same turn a ship flying along +x with its back to +z takes.
     let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z));
     let root = commands.spawn((Transform::from_rotation(turn), Visibility::default(), FormViewRoot)).id();
@@ -626,7 +639,7 @@ pub fn read_drag(
     mut out: MessageWriter<Requested>,
 ) {
     let cursor = window.cursor_position();
-    let (Some((sdf, extent)), Some((rect, hole))) = (&shown.0, surface.laid) else {
+    let (Some((sdf, extent)), Some((rect, hole))) = (&shown.drawn, surface.laid) else {
         *last = None;
         return;
     };
@@ -731,19 +744,36 @@ mod tests {
         assert!((0.0..std::f64::consts::TAU).contains(&orbit.azimuth));
     }
 
-    /// Zoom in notches, as the boom's, and both ends are clamps against the form.
+    fn outside(extent: &Extent, at: DVec3) -> bool {
+        (0..3).any(|i| at[i] < extent.min[i] || at[i] > extent.max[i])
+    }
+
+    /// **The near stop is outside the form along the line of sight**, however the camera is
+    /// turned and wherever the focus has slid: nose-on, stern-on, broadside and overhead, from
+    /// the middle and from both ends. A stop by distance alone put the eye 24 km inside this hull
+    /// looking nose-on.
     #[test]
-    fn zoom_is_clamped_outside_the_hull_and_short_of_losing_it() {
+    fn zoomed_all_the_way_in_the_eye_is_still_outside_the_hull() {
         let extent = long();
-        let (near, far) = extent.distances();
+        let limit = crate::ui::Look::PITCH_LIMIT;
+        for along in [0.0, 1.0e6, -1.0e6] {
+            for (azimuth, elevation) in [(0.0, 0.0), (std::f64::consts::PI, 0.0), (1.0, 0.0), (-2.0, 0.4), (0.3, limit)] {
+                let mut orbit = FormOrbit { azimuth, elevation, along, ..FormOrbit::default() };
+                orbit.zoom(1000.0);
+                let orbit = orbit.held_to(&extent);
+                let eye = orbit.eye_m(&extent);
+                assert!(outside(&extent, eye), "({along}, {azimuth}, {elevation}): the eye is at {eye}, inside");
+            }
+        }
+    }
+
+    /// Zoom in notches, as the boom's, and the far end is a clamp too.
+    #[test]
+    fn zoom_is_clamped_short_of_losing_the_form() {
+        let extent = long();
         let mut orbit = FormOrbit::default();
-        orbit.zoom(1000.0);
-        orbit = orbit.held_to(&extent);
-        assert_eq!(orbit.distance, near);
-        // Further from the axis than any part, however it is turned.
-        assert!(orbit.distance * extent.size_m() > extent.girth_m());
         orbit.zoom(-1000.0);
-        assert_eq!(orbit.held_to(&extent).distance, far);
+        assert_eq!(orbit.held_to(&extent).distance, FAR_SIZES);
         let mut one = FormOrbit::default();
         one.zoom(1.0);
         assert!((FormOrbit::default().distance / one.distance - crate::hull::ZOOM_STEP).abs() < 1e-12);
