@@ -61,6 +61,7 @@ cross-reference except where a shared crate is the subject.
 | [30-the-field.md](docs/30-the-field.md) | the field as collector, radiator and shield: heat that goes as `T⁴`, the anchors, collapse, and what dies beside a ship that fails |
 | [31-directed-energy.md](docs/31-directed-energy.md) | engines, radios, weapons and power lines as one order: apertures, exhaust from heat, spread against lead, and the star's gain |
 | [32-ship-rendering.md](docs/32-ship-rendering.md) | the hull from a distance field, construction as a function of time, stateless drones, the field shader, and the order of work across 29–32 |
+| [33-ring-habitats.md](docs/33-ring-habitats.md) | Orbitals and the Ringworld: one shape on two hosts, the solar-system demo, levels of detail at astronomical scale, and light delay across a spinning ring |
 
 ## Status
 
