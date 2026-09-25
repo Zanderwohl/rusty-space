@@ -595,17 +595,13 @@ mod tests {
                 if a.len() != b.len() {
                     continue;
                 }
-                for k in 0..a.len() {
-                    let jump = a[k].distance(b[k]);
-                    if jump < 0.01 * reach {
-                        continue;
-                    }
-                    let finest = (0..FINE)
-                        .map(|j| {
-                            let g = |j: usize| f0 + (f1 - f0) * j as f64 / FINE as f64;
-                            targets_at(g(j))[k].distance(targets_at(g(j + 1))[k])
-                        })
-                        .fold(0.0, f64::max);
+                let jumps: Vec<f64> = a.iter().zip(&b).map(|(p, q)| p.distance(*q)).collect();
+                if jumps.iter().all(|j| *j < 0.01 * reach) {
+                    continue;
+                }
+                let fine: Vec<Vec<DVec3>> = (0..=FINE).map(|j| targets_at(f0 + (f1 - f0) * j as f64 / FINE as f64)).collect();
+                for (k, jump) in jumps.into_iter().enumerate().filter(|(_, j)| *j >= 0.01 * reach) {
+                    let finest = fine.windows(2).map(|w| w[0][k].distance(w[1][k])).fold(0.0, f64::max);
                     assert!(finest < (0.5 * jump).max(0.025 * reach), "{change:?} target {k} jumped {jump} m at {f0}, {finest} m of it at once");
                 }
             }
