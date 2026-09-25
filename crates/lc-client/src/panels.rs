@@ -171,9 +171,10 @@ pub fn hud(
                 if ui.small_button("×").on_hover_text("break off: no further corrections").clicked() {
                     ask(&mut out, Action::BreakOff);
                 }
-                let (label, hint, next) = closer(pursuit.closeness);
-                if ui.small_button(label).on_hover_text(hint).clicked() {
-                    ask(&mut out, Action::Intercept(pursuit.quarry, next));
+                for (label, hint, next) in [closer(pursuit), manner(pursuit)] {
+                    if ui.small_button(label).on_hover_text(hint).clicked() {
+                        ask(&mut out, Action::Intercept(next));
+                    }
                 }
             } else if let Some(flight) = &lines.flight {
                 ui.colored_label(egui::Color32::from_rgb(130, 200, 250), flight);
@@ -315,17 +316,42 @@ fn notice_link(ui: &mut egui::Ui, text: &str) -> egui::Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// The button that changes a pursuit's closeness: what it says, what it does, and what it asks
-/// for.
-fn closer(now: lc_proto::Closeness) -> (&'static str, &'static str, lc_proto::Closeness) {
-    match now {
+/// The button that starts a pursuit. Courteous and in company, as the wire defaults; the
+/// other two are one click away once it is standing.
+fn intercept(quarry: lc_proto::ShipId) -> (&'static str, &'static str, lc_proto::Pursuit) {
+    let order = lc_proto::Pursuit { quarry, closeness: Default::default(), approach: Default::default() };
+    ("intercept", "in company, courteously: in from abeam, cooking no one", order)
+}
+
+/// The button that changes a pursuit's closeness: what it says, what it does, and the pursuit
+/// it asks for.
+fn closer(now: lc_proto::Pursuit) -> (&'static str, &'static str, lc_proto::Pursuit) {
+    let (label, hint, closeness) = match now.closeness {
         lc_proto::Closeness::Company => {
             ("close in", "within sight: a kilometer between hulls", lc_proto::Closeness::Intimate)
         }
         lc_proto::Closeness::Intimate => {
             ("stand off", "back to formation distance", lc_proto::Closeness::Company)
         }
-    }
+    };
+    (label, hint, lc_proto::Pursuit { closeness, ..now })
+}
+
+/// The button that changes a pursuit's approach, in the same shape as [`closer`].
+fn manner(now: lc_proto::Pursuit) -> (&'static str, &'static str, lc_proto::Pursuit) {
+    let (label, hint, approach) = match now.approach {
+        lc_proto::Approach::Courteous => (
+            "direct",
+            "straight in: faster, with the drive's cone on the quarry",
+            lc_proto::Approach::Direct,
+        ),
+        lc_proto::Approach::Direct => (
+            "courteous",
+            "in from abeam: slower, and cooks no one",
+            lc_proto::Approach::Courteous,
+        ),
+    };
+    (label, hint, lc_proto::Pursuit { approach, ..now })
 }
 
 /// Which half of the System window is showing.
@@ -663,14 +689,16 @@ pub(crate) fn ships(
                         if ui.button("break off").clicked() {
                             ask(out, Action::BreakOff);
                         }
-                        let (label, hint, next) = closer(pursuit.closeness);
-                        if ui.button(label).on_hover_text(hint).clicked() {
-                            ask(out, Action::Intercept(contact.ship_id, next));
+                        for (label, hint, next) in [closer(pursuit), manner(pursuit)] {
+                            if ui.button(label).on_hover_text(hint).clicked() {
+                                ask(out, Action::Intercept(next));
+                            }
                         }
                     }
                     None => {
-                        if ui.button("intercept").clicked() {
-                            ask(out, Action::Intercept(contact.ship_id, lc_proto::Closeness::Company));
+                        let (label, hint, order) = intercept(contact.ship_id);
+                        if ui.button(label).on_hover_text(hint).clicked() {
+                            ask(out, Action::Intercept(order));
                         }
                     }
                 }
@@ -778,5 +806,47 @@ pub(crate) fn span_m(meters: f64) -> String {
         m if m < 1.0e11 => format!("{:.2} million km", m / 1.0e9),
         m if m < 1.0e14 => format!("{:.2} AU", m / crate::navigation::AU),
         m => format!("{:.2} ly", m / crate::system::M_PER_LY),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lc_proto::{Approach, Closeness, Order, Pursuit, ShipId};
+
+    use super::*;
+    use crate::action::{Effect, apply};
+
+    /// What the pursuit buttons send, run through `apply` as a click would be.
+    fn click(pursuit: Pursuit) -> Vec<Effect> {
+        let mut ui = crate::ui::UiState::default();
+        let mut session = crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
+        session.remote = true;
+        apply(Action::Intercept(pursuit), &mut ui, &mut session)
+    }
+
+    fn sent(ship_id: ShipId, closeness: Closeness, approach: Approach) -> Vec<Effect> {
+        vec![Effect::Send(Order::Intercept { ship_id, closeness, approach })]
+    }
+
+    /// Both approaches can be ordered from the panel, courteous first, and switching one leaves
+    /// the closeness alone and the other way round.
+    #[test]
+    fn a_pursuit_is_ordered_courteous_and_switched_to_direct_and_back() {
+        let quarry = ShipId(7);
+        let (_, _, first) = intercept(quarry);
+        assert_eq!(click(first), sent(quarry, Closeness::Company, Approach::Courteous));
+
+        let (label, hint, direct) = manner(first);
+        assert_eq!(label, "direct");
+        assert!(hint.contains("faster") && hint.contains("cone"), "{hint}");
+        assert_eq!(click(direct), sent(quarry, Closeness::Company, Approach::Direct));
+
+        let (_, _, intimate) = closer(direct);
+        assert_eq!(click(intimate), sent(quarry, Closeness::Intimate, Approach::Direct));
+
+        let (label, hint, courteous) = manner(intimate);
+        assert_eq!(label, "courteous");
+        assert!(hint.contains("slower") && hint.contains("cooks no one"), "{hint}");
+        assert_eq!(click(courteous), sent(quarry, Closeness::Intimate, Approach::Courteous));
     }
 }
