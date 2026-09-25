@@ -354,7 +354,7 @@ graph LR
 
 ### L7 · Readback peaks
 
-- status: active claude/game-loop-optimization-71831f
+- status: done (this branch; `IN_FLIGHT_BYTES` = 32 MB, smallest face first. Earth still lands within 240 frames. The wasm heap after a tour is still to be measured, with T2)
 - needs: L1
 - touches: `crates/lc-client/src/procedural.rs`
 - read: 07
