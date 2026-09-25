@@ -221,7 +221,8 @@ fn span(meters: f64) -> String {
 }
 
 /// What a standing intercept reads as, in the place a crossing's progress would be: who, whether
-/// the approach is still being flown, and how much space there is between the two hulls.
+/// the approach is still being flown, how much space there is between the two hulls, and the
+/// closeness and approach the server says it is flying.
 ///
 /// No percentage, because there is nothing to be a percentage of — a pursuit re-plans whenever
 /// its quarry does something new. And between the hulls rather than between centers, because
@@ -235,10 +236,15 @@ pub fn pursuit(
         true => "closing on",
         false => "alongside",
     };
-    let how = match pursuit.closeness {
+    let near_or_far = match pursuit.closeness {
         lc_proto::Closeness::Company => "in company",
         lc_proto::Closeness::Intimate => "close in",
     };
+    let manner = match pursuit.approach {
+        lc_proto::Approach::Courteous => "courteous",
+        lc_proto::Approach::Direct => "direct",
+    };
+    let how = format!("{near_or_far}, {manner}");
     let Some(quarry) = quarry else {
         return format!("{doing} ship {} — {how}", pursuit.quarry.0);
     };
@@ -423,8 +429,18 @@ mod tests {
             closeness: lc_proto::Closeness::Intimate,
             approach: lc_proto::Approach::Direct,
         };
-        assert_eq!(pursuit(&s, close, Some(&quarry)), "alongside Anvil — 1.0 km between hulls — close in");
-        assert_eq!(pursuit(&s, close, None), "alongside ship 7 — close in");
+        assert_eq!(
+            pursuit(&s, close, Some(&quarry)),
+            "alongside Anvil — 1.0 km between hulls — close in, direct",
+        );
+        assert_eq!(pursuit(&s, close, None), "alongside ship 7 — close in, direct");
+
+        let polite = lc_proto::Pursuit {
+            closeness: lc_proto::Closeness::Company,
+            approach: lc_proto::Approach::Courteous,
+            ..close
+        };
+        assert_eq!(pursuit(&s, polite, None), "alongside ship 7 — in company, courteous");
     }
 
     #[test]
