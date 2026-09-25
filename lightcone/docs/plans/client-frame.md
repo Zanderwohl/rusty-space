@@ -193,7 +193,7 @@ graph LR
 
 ### S2 · Exposure metering
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: S1
 - touches: `crates/lc-client/src/session.rs`
 - read: 04
