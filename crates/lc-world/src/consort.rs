@@ -27,6 +27,7 @@
 use glam::DVec3;
 
 use crate::coast::{self, Coast};
+use crate::courtesy::Arrival;
 use crate::flight::{Aim, C_M_S, Cruise, Drive, FlightState};
 use crate::motion::{ShipId, ShipState};
 use crate::pursuit::Sighting;
@@ -177,6 +178,7 @@ pub fn approach(
     system: &LocalSystem,
     pursuer: &ShipState,
     standoff_m: f64,
+    arrival: Arrival,
     seen: &Sighting,
     now_s: f64,
     drive: Drive,
@@ -185,12 +187,13 @@ pub fn approach(
     let offset = pursuer.position_ly - quarry_at;
     // The side the pursuer is already on, as for a rendezvous.
     let side = offset.try_normalize().unwrap_or(DVec3::X);
+    let leg = arrival.leg(offset * M_PER_LY, side, None, standoff_m, drive);
     Formation {
         from_ly: offset,
         beta0: pursuer.beta - quarry_beta,
-        to_ly: side * standoff_m / M_PER_LY,
+        to_ly: leg.to_m / M_PER_LY,
         start_s: now_s,
-        drive,
+        drive: leg.drive,
         seen_ly: seen.position_ly,
         seen_beta: seen.beta,
         seen_s: seen.emitted_s,
@@ -254,7 +257,7 @@ mod tests {
         let mut pursuer = ShipState::at(seen.position_ly + DVec3::new(6.0e3, -8.0e3, 0.0) / M_PER_LY);
         pursuer.beta = seen.beta;
         let standoff = Closeness::Intimate.standoff_m(500.0, 500.0);
-        let plan = approach(&system, &pursuer, standoff, &seen, 0.0, drive()).expect("a plan");
+        let plan = approach(&system, &pursuer, standoff, Arrival::Direct, &seen, 0.0, drive()).expect("a plan");
 
         let end = plan.cruise.start_s + plan.cruise.duration_s();
         assert!(end < 3_600.0, "premise: a short hop, took {end} s");
@@ -272,6 +275,39 @@ mod tests {
         assert_eq!(plan.thrust_at(end + 1.0), DVec3::ZERO, "nothing is lit once alongside");
     }
 
+    /// **31 §Tests, Courtesy**, for a quarry in orbit: the legs are planned in the frame that
+    /// falls with it, and the same limit holds there.
+    #[test]
+    fn a_courteous_consort_never_exceeds_the_courtesy_flux() {
+        use crate::courtesy::tests::{peak, pursuer};
+        let system = sol();
+        let b = crate::fitting::Balance::DEFAULT;
+        let who = pursuer(&b, 500.0, ShipId(3), true);
+        let (station, mut seen) = holding(&system, 0.0);
+        let mut ship = ShipState::at(seen.position_ly + DVec3::new(6.0e4, -8.0e4, 0.0) / M_PER_LY);
+        ship.beta = seen.beta;
+        let standoff = Closeness::Company.standoff_m(500.0, 500.0);
+        let (mut legs, mut worst, mut now) = (0, 0.0f64, 0.0);
+        let last = loop {
+            let plan = approach(&system, &ship, standoff, who.arrival, &seen, now, who.drive).expect("a plan");
+            worst = worst.max(peak(&b, &who, &plan.cruise, DVec3::ZERO));
+            legs += 1;
+            now = plan.cruise.start_s + plan.cruise.duration_s();
+            if !crate::pursuit::on_the_way(plan.cruise.to_ly, standoff, &who.arrival) {
+                break plan;
+            }
+            assert!(legs < 8, "never took station");
+            (ship.position_ly, ship.beta) = plan.state_at(&system, now).unwrap();
+            seen = sighting_of(&system, &station, now);
+        };
+        assert!(worst <= 1.0, "{worst} of the courtesy flux");
+        assert!(legs >= 2, "no ingress");
+        assert!(crate::courtesy::on_thrusters(&b, &last.cruise.drive));
+        let (at, _) = last.state_at(&system, now).unwrap();
+        let gap = at.distance(station.place_at(&system, now).unwrap()) * M_PER_LY;
+        assert!((gap - standoff).abs() < 50.0, "{gap} m off a {standoff} m standoff");
+    }
+
     /// A quarry holding its orbit stays on the conic reckoned for it, so a standing consort is
     /// not thrown away for no reason — not for ten orbits, at the tightest closeness there is.
     #[test]
@@ -279,7 +315,7 @@ mod tests {
         let system = sol();
         let (station, seen) = holding(&system, 0.0);
         let pursuer = ShipState::at(seen.position_ly + DVec3::X * 3.0e3 / M_PER_LY);
-        let plan = approach(&system, &pursuer, 1_500.0, &seen, 0.0, drive()).expect("a plan");
+        let plan = approach(&system, &pursuer, 1_500.0, Arrival::Direct, &seen, 0.0, drive()).expect("a plan");
         let period = station.period_s(&system, 0.0).unwrap();
         let later = sighting_of(&system, &station, 10.0 * period);
         let off = plan.divergence_m(&system, &later).unwrap();
@@ -292,7 +328,7 @@ mod tests {
         let system = sol();
         let (_, seen) = holding(&system, 120.0);
         let pursuer = ShipState::at(seen.position_ly + DVec3::Y * 9.0e3 / M_PER_LY);
-        let plan = approach(&system, &pursuer, 1_500.0, &seen, 300.0, drive()).expect("a plan");
+        let plan = approach(&system, &pursuer, 1_500.0, Arrival::Direct, &seen, 300.0, drive()).expect("a plan");
         assert_eq!(plan.recipe().solve(&system, pursuer.attitude), Some(plan));
     }
 

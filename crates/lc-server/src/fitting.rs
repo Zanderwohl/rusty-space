@@ -339,7 +339,6 @@ mod tests {
                 spread_rad: 0.01,
                 duration_s: 60.0,
             }),
-            act(Order::Intercept { ship_id: ShipId(2), closeness: Closeness::Company, approach: Approach::Courteous }),
             Inbound::SavePreset { name: "plate".into(), form: Form::default() },
             Inbound::DeletePreset { name: "plate".into() },
         ];
@@ -356,14 +355,19 @@ mod tests {
         assert_eq!(server.ship(ship).unwrap().fitting().cloned(), before);
         assert!(server.pursuits.is_empty());
 
-        // A direct intercept is today's, and reaches the sighting check.
-        wire.client_says(
-            from,
-            act(Order::Intercept { ship_id: ShipId(2), closeness: Closeness::Company, approach: Approach::Direct }),
-        );
-        server.tick(&mut wire).await.unwrap();
-        let said = replies(&mut wire);
-        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::NotInSight, .. })), "{said:?}");
+        // Both approaches are built, and reach the sighting check.
+        for approach in [Approach::Courteous, Approach::Direct] {
+            wire.client_says(
+                from,
+                act(Order::Intercept { ship_id: ShipId(2), closeness: Closeness::Company, approach }),
+            );
+            server.tick(&mut wire).await.unwrap();
+            let said = replies(&mut wire);
+            assert!(
+                said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::NotInSight, .. })),
+                "{approach:?}: {said:?}"
+            );
+        }
     }
 
     #[tokio::test]

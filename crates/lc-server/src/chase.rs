@@ -16,7 +16,9 @@ use lc_spacetime::Worldline;
 use lc_spacetime::worldline::retarded_times_at;
 use lc_world::craft::{Craft, CraftId, Fleet};
 use lc_world::consort;
+use lc_world::courtesy::{Arrival, Manners};
 use lc_world::escort;
+use lc_world::fitting::Balance;
 use lc_world::motion::{LIGHT_US_PER_LY, Motive};
 use lc_world::pursuit::{self, Closeness, Refused};
 use lc_world::system::LOCAL_SHELL_LY;
@@ -28,6 +30,7 @@ use crate::server::Connected;
 pub struct Pursuit {
     pub quarry: ShipId,
     pub closeness: Closeness,
+    pub approach: lc_proto::Approach,
     pub last_plan_t: i64,
     /// The sighting before the newest, which is the only way a pursuer learns how hard its
     /// quarry is burning: two things that arrived, and the difference between them.
@@ -242,22 +245,31 @@ pub fn contacts(
 /// response, and which it cannot notice until the light of the maneuvere arrives — or whether
 /// the plan is for another closeness. A ship that has arrived, or is doing anything else, is
 /// asked whether it has drifted off station.
-pub fn should_close(pursuer: &Craft, seen: &pursuit::Sighting, closeness: Closeness, now_s: f64) -> bool {
+pub fn should_close(
+    pursuer: &Craft,
+    seen: &pursuit::Sighting,
+    closeness: Closeness,
+    arrival: &Arrival,
+    now_s: f64,
+) -> bool {
     let standoff = closeness.standoff_m(pursuer.length_m, seen.length_m);
     let replan = closeness.replan_m(standoff);
     let motive = &pursuer.motion.motive;
     match motive {
         Motive::Rendezvous(plan) if plan.target == seen.target && !plan.has_arrived(now_s) => {
-            pursuit::wants_replan(motive, seen, standoff, replan, now_s)
+            pursuit::wants_replan(motive, seen, standoff, replan, arrival, now_s)
         }
         Motive::Escort(plan) if plan.target == seen.target => {
-            pursuit::wants_replan(motive, seen, standoff, replan, now_s)
+            pursuit::wants_replan(motive, seen, standoff, replan, arrival, now_s)
         }
-        // Never runs out and never drifts, so only the quarry leaving its conic, or a new
-        // closeness, is a reason.
+        // Never runs out and never drifts, so only the quarry leaving its conic, a new closeness
+        // or the end of a courteous leg short of the station is a reason.
         Motive::Consort(plan) if plan.target == seen.target => {
+            let to = plan.cruise.to_ly;
             let off = pursuer.system.as_deref().and_then(|system| plan.divergence_m(system, seen));
-            !pursuit::aims_for(plan.cruise.to_ly, standoff) || off.is_none_or(|off| off > replan)
+            !pursuit::aims_for(to, standoff, arrival)
+                || (pursuit::on_the_way(to, standoff, arrival) && plan.has_closed(now_s))
+                || off.is_none_or(|off| off > replan)
         }
         _ => pursuit::wants_closing(&pursuer.motion, closeness.band_m(standoff), seen, now_s),
     }
@@ -283,25 +295,37 @@ pub fn plan(
     seen: &pursuit::Sighting,
     previous: Option<&pursuit::Sighting>,
     closeness: Closeness,
+    arrival: Arrival,
     now_s: f64,
 ) -> Result<Plan, Refused> {
     let standoff = closeness.standoff_m(pursuer.length_m, seen.length_m);
     let drive = pursuer.turning(pursuer.motion.drive);
     if let Some(accel) = burn_of(fleet, seen, previous) {
-        return escort::escort(&pursuer.motion, standoff, seen, accel, now_s, drive).map(Plan::Escort);
+        return escort::escort(&pursuer.motion, standoff, arrival, seen, accel, now_s, drive).map(Plan::Escort);
     }
-    let falling = pursuer
-        .system
-        .as_deref()
-        .and_then(|system| consort::approach(system, &pursuer.motion, standoff, seen, now_s, drive));
+    let falling = pursuer.system.as_deref().and_then(|system| {
+        consort::approach(system, &pursuer.motion, standoff, arrival, seen, now_s, drive)
+    });
     if let Some(plan) = falling {
         return Ok(Plan::Consort(plan));
     }
     if matches!(pursuer.motion.motive, Motive::Escort(_)) {
-        return escort::escort(&pursuer.motion, standoff, seen, glam::DVec3::ZERO, now_s, drive)
+        return escort::escort(&pursuer.motion, standoff, arrival, seen, glam::DVec3::ZERO, now_s, drive)
             .map(Plan::Escort);
     }
-    pursuit::approach(&pursuer.motion, standoff, seen, now_s, drive).map(Plan::Rendezvous)
+    pursuit::approach(&pursuer.motion, standoff, arrival, seen, now_s, drive).map(Plan::Rendezvous)
+}
+
+/// How a pursuer arrives under `approach`, for its mass and drive now.
+pub fn arrival(approach: lc_proto::Approach, balance: &Balance, pursuer: &Craft, now_s: f64) -> Arrival {
+    match approach {
+        lc_proto::Approach::Direct => Arrival::Direct,
+        lc_proto::Approach::Courteous => {
+            let drive = pursuer.turning(pursuer.motion.drive);
+            let id = lc_world::motion::ShipId(pursuer.id.0);
+            Arrival::Courteous(Manners::new(balance, pursuer.mass_kg_at(now_s), drive, id))
+        }
+    }
 }
 
 /// What each standing intercept wants done this tick.
@@ -312,6 +336,7 @@ pub fn plan(
 pub fn decide(
     fleet: &Fleet,
     pursuits: &mut HashMap<CraftId, Pursuit>,
+    balance: &Balance,
     now_t: i64,
 ) -> Vec<(CraftId, Option<Plan>)> {
     let now_s = now_t as f64 * 1.0e-6;
@@ -332,10 +357,11 @@ pub fn decide(
         let since = now_t.saturating_sub(pursuit.last_plan_t);
         let waiting = since < steer_floor_us(pursuer)
             && !burn_changed(pursuer, burn_of(fleet, &seen, previous.as_ref()));
-        if waiting || !should_close(pursuer, &seen, pursuit.closeness, now_s) {
+        let arrival = arrival(pursuit.approach, balance, pursuer, now_s);
+        if waiting || !should_close(pursuer, &seen, pursuit.closeness, &arrival, now_s) {
             continue;
         }
-        match plan(fleet, pursuer, &seen, previous.as_ref(), pursuit.closeness, now_s) {
+        match plan(fleet, pursuer, &seen, previous.as_ref(), pursuit.closeness, arrival, now_s) {
             Ok(plan) => decided.push((*id, Some(plan))),
             // On station. Nothing to fly, and the policy stays: it is what will notice the
             // next time this craft has drifted.
