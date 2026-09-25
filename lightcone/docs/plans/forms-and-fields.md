@@ -311,9 +311,9 @@ graph LR
 
 ### F8 · Refit rounds
 
-- status: active card "Build F8: refit rounds over forms"
+- status: done #75
 - needs: F4
-- touches: `crates/lc-world/src/refit.rs`
+- touches: `crates/lc-world/src/refit.rs`, `crates/lc-world/src/refit/rounds.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §Refits
 - deliver: the planner over forms: diff two forms into dismantle, move and build steps per part (a reshape is a dismantle and a build), drones last and first, the energy check, venting of what storage cannot hold, timing from drone power at each step's start, data's work factor, cancel. Lives beside the old planner until F9 removes it.
 - done when: a round that cannot pay for its builds is refused; a round that overflows storage reports the vent and the step that frees it; cancel keeps finished steps and reverses the rest.
