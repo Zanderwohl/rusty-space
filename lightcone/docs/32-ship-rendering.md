@@ -3,7 +3,7 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
+**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void, and construction is drawn on the placeholders; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
 [30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
@@ -155,6 +155,43 @@ with drone traffic streaming to it: a shipyard that is also the ship.
   the new one in its last.
 - **Cancel** runs the step in progress backward from the fraction it had reached, which is what the
   server does to its energy.
+
+As built (`lc_client::construction`): `Frame::at` takes the plan and the round's clock and reads
+`Plan::at` for what is finished and what is under way, so no timing is derived twice. A form partway
+through a round need not place, since a part may hang from one taken apart or not built yet; such a
+parent stands in from the start's form while dismantling and from the target's once moving and
+building, and is not drawn. Growth and shrinkage re-place the form at the interpolated volume, so
+children ride out on a growing parent. A part appearing or going whole is scaled about its foot, which
+is where the planner's placement would put it at that volume. A copy gained or lost is its own piece,
+so both copies of a mirrored part build together. Each point's phase is `Working::look`, `d` of the
+way across the sliver from the joint; each point spends 30%, 15%, 15% and 10% of the step in the four
+phases, and the rest is the front's travel, so the far edge finishes as the step does.
+
+- **Dismantle** looks like the build played backward, point by point: from the far edge in, scaffold
+  up, fitting-out out, plating off, truss down. What makes it not a rewind is the drone traffic,
+  which carries loads home (R9), not the layers.
+- **Cancel** runs the step backward at its own pace, a move included, although the ledger snaps a
+  move back at once ([29-ship-form.md](29-ship-form.md#cancel)). A dismantling that could not be paid
+  back finishes at once in the picture as in the ledger.
+
+On the placeholders the working part is solid at its volume at `t`, inside a cage at the sliver's
+outer size: rings and meridians through `Shape::exit` from the part's center, so one grid fits
+every primitive, drawn as tubes in `BodyWireframeMaterial`. The cage's thickness follows the scaffold
+averaged across the sliver, so it goes up with the truss and thins away as the scaffold comes down;
+the crossfade to solid is the solid filling the cage, since both materials are opaque. R8 replaces the
+cage with the truss meshed between `Working::inner` and `Working::outer`, and reads `Working::look`
+per vertex through `Working::across`.
+
+`--demo refit` stages one of each step on the starting form (the data core taken apart, the deck
+moved aft, the hull grown by half, a mirrored pair of pods on spars) as a client fixture beside
+`--form`, not a scenario: it is only the player's ship, and a round is not on the wire yet. The
+Cluster preset would be the obvious target, and the planner refuses it from the starting form.
+
+![0.1: the data core being taken apart](../images/refit-10.jpg)
+![0.2: further through the dismantle](../images/refit-20.jpg)
+![0.3: the deck sliding aft](../images/refit-30.jpg)
+![0.5: the hull partway grown inside its cage](../images/refit-50.jpg)
+![0.9: the mirrored pods being built](../images/refit-90.jpg)
 
 ## Drones
 

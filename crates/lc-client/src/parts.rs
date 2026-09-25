@@ -169,11 +169,13 @@ pub struct Cage {
 const CAGE_RINGS: usize = 7;
 const CAGE_MERIDIANS: usize = 12;
 const CAGE_SAMPLES: usize = 48;
-/// Of a copy's least dimension.
-const CAGE_TUBE: f64 = 0.012;
+/// Of the whole form's reach, so a small part's cage is as legible as a large one's.
+const CAGE_TUBE: f64 = 0.005;
 /// Linear, before the exposure; the cage is lit by its own work lights, not the star.
 const CAGE_COLOR: LinearRgba = LinearRgba::new(0.9, 0.55, 0.18, 1.0);
 const CAGE_EMISSION: f32 = 2.0;
+/// Of a cage's full thickness, while any of it stands.
+const CAGE_THINNEST: f32 = 0.3;
 
 /// Lines over a copy's surface, part frame, meters: each point where a ray from the center leaves
 /// it, so one grid of directions fits every primitive.
@@ -270,7 +272,7 @@ pub fn update_parts(
             ));
         }
         for (copy, piece) in outer.iter().enumerate() {
-            let tube_m = (CAGE_TUBE * piece.shape.least_dimension()) as f32;
+            let tube_m = (CAGE_TUBE * formed.reach_m) as f32;
             let material = BodyWireframeMaterial {
                 base_color: CAGE_COLOR,
                 emission_strength: CAGE_EMISSION,
@@ -318,7 +320,8 @@ pub fn update_parts(
         *transform = caged(piece);
         *visibility = if scaffold > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
         let Some(mut asset) = wires.get_mut(&material.0) else { continue };
-        let radius = cage.tube_m * scaffold;
+        // Thinner than this the tubes alias into dots, which read as nothing being built.
+        let radius = cage.tube_m * (CAGE_THINNEST + (1.0 - CAGE_THINNEST) * scaffold);
         if asset.target_tube_radius != radius {
             asset.target_tube_radius = radius;
         }

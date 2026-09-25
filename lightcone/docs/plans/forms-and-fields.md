@@ -510,7 +510,7 @@ graph LR
 
 - status: active card "Build R4: construction timeline"
 - needs: F8, R1
-- touches: `crates/lc-client/src/construction.rs`
+- touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §Building, as a function of time
 - deliver: the pure function from a round's recipe and `t` to each part's volume, the sliver, and each point's phase; drawn on the placeholders as scale plus wireframe; `--demo refit` and `--refit-at`.
 - done when: the function is tested without a window, and `--refit-at 0.5` photographs a half-built part.

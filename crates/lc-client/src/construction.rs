@@ -410,14 +410,14 @@ fn slid(before: &Form, placed_before: &[Piece], placed_after: &[Piece], moved: P
 /// Not the Cluster preset, which the planner refuses from the starting form: its ids put an engine
 /// where the only drone was, and reshaping the storage core would vent everything the build phase
 /// needs. This stages one of each step instead: the data core taken apart, the deck moved aft,
-/// the hull grown, and a mirrored pair of pods on spars built together.
+/// the hull grown by half, which is under way at the round's midpoint, and a mirrored pair of pods on spars built together.
 pub fn demo_round(balance: &Balance) -> Round {
     let from = Form::starting();
     let mut target = from.clone();
     target.parts.retain(|p| p.id != PartId(5));
     for p in &mut target.parts {
         match p.id.0 {
-            1 => p.volume_m3 *= 1.25,
+            1 => p.volume_m3 *= 1.5,
             4 => {
                 if let Some(Placement { mount: Mount::Attached { anchor, .. }, .. }) = &mut p.placement {
                     *anchor = DVec3::new(-0.7, 0.0, 1.0);
@@ -445,14 +445,15 @@ pub fn demo_round(balance: &Balance) -> Round {
         id: PartId(7),
         kind: Kind::Storage,
         primitive: Primitive::Ellipsoid { axes: DVec3::new(1.4, 1.0, 1.0) },
-        volume_m3: 1.5e5,
+        volume_m3: 3.0e5,
         placement: Some(placement(6, DVec3::X, -0.1, false)),
     });
     let stored_j = Capacities::of(&from, balance).storage_j;
     Round { from, target, stored_j, start_s: 0.0 }
 }
 
-/// Wall seconds `--demo refit` takes over its round when no `--rate` is given.
+/// Wall seconds `--demo refit` takes over its round when no `--rate` is given. At the design rate
+/// it would take three minutes, most of them spent watching one part.
 pub const DEMO_WALL_S: f64 = 40.0;
 
 /// Where the round's clock is.
@@ -513,7 +514,7 @@ pub fn adopt_demo(
         }
     }
     if clock == Clock::Looping && !dev.rate_given {
-        dev.actions.push(crate::action::Action::SetTimeRate(plan.duration_s() / DEMO_WALL_S));
+        dev.actions.push(crate::action::Action::SetTimeRate(plan.duration_s() / (DEMO_WALL_S * crate::session::TIME_RATE)));
     }
     commands.insert_resource(Refit { plan, balance, clock });
 }
