@@ -12,6 +12,8 @@
 //! the render origin. Every other pass reads the eye where it used to read the ship, so the
 //! parallax a ten-thousand-kilometer boom opens up against a nearby moon is simply correct
 //! instead of being an error nobody measured.
+//!
+//! A craft with a form is drawn by [`crate::parts`] instead, and its length here is its form's.
 
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
@@ -76,6 +78,18 @@ pub struct Eye {
     /// difference of two light-year positions. A meters-wide offset taken that way loses most
     /// of its bits, and the hull the camera is closest to is the one that can least afford it.
     pub anchored: Option<ShipId>,
+}
+
+impl Eye {
+    /// From the eye to a craft at `at_ly`, simulation axes, meters. Exactly the boom for the
+    /// craft it is on; see [`Eye::anchored`].
+    pub fn offset_m(&self, at_ly: DVec3, ship_id: Option<ShipId>, look: DVec3) -> DVec3 {
+        if ship_id.map(|s| s.0) == self.anchored.map(|s| s.0) {
+            look * self.boom_m
+        } else {
+            (at_ly - self.at_ly) * M_PER_LY
+        }
+    }
 }
 
 /// Which craft a hull stands for; `None` is the player's own.
@@ -151,32 +165,41 @@ pub fn fov_x(fov_y: f32, aspect: f32) -> f32 {
 /// ecliptic north; a ship flying straight up the pole then has no preferred roll and any answer is
 /// as good as another.
 pub fn attitude(fore_sim: DVec3, to_star: Option<DVec3>) -> Quat {
+    let Some([fore, port, up]) = ship_axes(fore_sim, to_star) else { return Quat::IDENTITY };
+    Quat::from_mat3(&Mat3::from_cols(
+        sim_to_render(port).as_vec3(),
+        sim_to_render(up).as_vec3(),
+        sim_to_render(fore).as_vec3(),
+    ))
+}
+
+/// The same attitude for a craft drawn in its own frame — x the nose, y port, z up, as 29
+/// §Placement is relative gives it — so its dorsal face is the one turned to the star.
+pub fn frame(fore_sim: DVec3, to_star: Option<DVec3>) -> Quat {
+    let Some([fore, port, up]) = ship_axes(fore_sim, to_star) else { return Quat::IDENTITY };
+    Quat::from_mat3(&Mat3::from_cols(
+        sim_to_render(fore).as_vec3(),
+        sim_to_render(port).as_vec3(),
+        sim_to_render(up).as_vec3(),
+    ))
+}
+
+/// Nose, port and dorsal directions in simulation axes, or `None` with no nose.
+fn ship_axes(fore_sim: DVec3, to_star: Option<DVec3>) -> Option<[DVec3; 3]> {
     let fore = fore_sim.normalize_or_zero();
     if fore == DVec3::ZERO {
-        return Quat::IDENTITY;
+        return None;
     }
     let toward = to_star
         .map(|s| s.normalize_or_zero() - fore * s.normalize_or_zero().dot(fore))
         .filter(|across| across.length_squared() > 1.0e-6);
-    if let Some(up) = toward.map(|across| across.normalize()) {
-        let right = up.cross(fore);
-        return Quat::from_mat3(&Mat3::from_cols(
-            sim_to_render(right).as_vec3(),
-            sim_to_render(up).as_vec3(),
-            sim_to_render(fore).as_vec3(),
-        ));
-    }
-    let reference = if fore.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
-    let up = (reference - fore * reference.dot(fore)).normalize_or_zero();
-    // `right x up = fore`, so the basis is right-handed and survives the change of axes, which
-    // is a proper rotation rather than a mirror.
-    let right = up.cross(fore);
-    let columns = Mat3::from_cols(
-        sim_to_render(right).as_vec3(),
-        sim_to_render(up).as_vec3(),
-        sim_to_render(fore).as_vec3(),
-    );
-    Quat::from_mat3(&columns)
+    let up = toward.map(|across| across.normalize()).unwrap_or_else(|| {
+        let reference = if fore.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
+        (reference - fore * reference.dot(fore)).normalize_or_zero()
+    });
+    // `fore x port = up`, so both bases built from these are right-handed and survive the
+    // change of axes as proper rotations rather than mirrors.
+    Some([fore, up.cross(fore), up])
 }
 
 /// The mesh scale for a hull of `length_m`, in render units.
@@ -200,6 +223,7 @@ pub fn place_eye(
     uplink: Res<Uplink>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut eye: ResMut<Eye>,
+    own_form: Res<crate::parts::OwnForm>,
 ) {
     let measured = match camera.single() {
         Ok((Projection::Perspective(perspective), camera)) => {
@@ -210,7 +234,7 @@ pub fn place_eye(
     // Whatever the interface has, left alone rather than clamped against a view nobody is
     // being shown.
     let (near, far) = measured.unwrap_or((ui.boom_lengths, ui.boom_lengths));
-    let (anchored, at_ly, length_m) = anchor(&ui, &game, &uplink);
+    let (anchored, at_ly, length_m) = anchor(&ui, &game, &uplink, &own_form);
     ui.boom_lengths = ui.boom_lengths.clamp(near, far);
     let boom_m = ui.boom_lengths * length_m;
     eye.boom_m = boom_m;
@@ -227,8 +251,10 @@ fn anchor(
     ui: &crate::ui::UiState,
     game: &Session,
     uplink: &Uplink,
+    own_form: &crate::parts::OwnForm,
 ) -> (Option<ShipId>, DVec3, f64) {
-    let own = (None, game.ship.motion.position_ly, game.ship.length_m);
+    let length_m = own_form.length_m().unwrap_or(game.ship.length_m);
+    let own = (None, game.ship.motion.position_ly, length_m);
     let Some(crate::ui::CameraPerspective::Pov(ship_id)) = ui.perspective else { return own };
     if game.ship.id.0 == ship_id.0 {
         return own;
@@ -292,15 +318,30 @@ fn hull_radiance() -> PerBand<f32> {
     *RADIANCE
 }
 
+/// A hull at `at_ly` painted `paint`, lit by [`lighting`]'s `star`.
+pub(crate) fn lit(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, paint: Vec4) -> BodySurfaceUniform {
+    let own = emitted(session);
+    match star {
+        Some((star_ly, radius, teff)) => {
+            let distance = star_ly.distance(at_ly) * M_PER_LY;
+            uniforms(star_ly - at_ly, shading(session, radius, teff, distance), own, &session.tone, paint)
+        }
+        // No star to reflect. The hull still glows with its own heat, which is the whole
+        // reason a ship between the stars is a thing you can see at all.
+        None => uniforms(DVec3::Z, Vec3::ZERO, own, &session.tone, paint),
+    }
+}
+
 fn uniforms(
     to_star: DVec3,
     reflected: Vec3,
     emitted: Vec3,
     tone: &crate::tonemap::ToneMap,
+    paint: Vec4,
 ) -> BodySurfaceUniform {
     BodySurfaceUniform {
-        dark: GRAY,
-        light: GRAY,
+        dark: paint,
+        light: paint,
         to_star: sim_to_render(to_star.normalize_or_zero()).as_vec3().extend(NIGHT),
         // A contrast of zero is what turns the generated surface off: the shader mixes the
         // palette at a half whatever the noise says, and the two ends are the same gray.
@@ -321,15 +362,7 @@ fn uniforms(
 fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option<ShipId>, Placed)> {
     let now = game.coordinate_time_s();
     let mut out = Vec::with_capacity(uplink.contacts.len() + 1);
-    // Exactly the boom the eye was pulled back by, for whichever craft the boom is on; a
-    // light-year difference for everything else. See [`Eye::anchored`].
-    let offset_of = |at_ly: DVec3, ship_id: Option<ShipId>| {
-        if ship_id.map(|s| s.0) == eye.anchored.map(|s| s.0) {
-            look * eye.boom_m
-        } else {
-            (at_ly - eye.at_ly) * M_PER_LY
-        }
-    };
+    let offset_of = |at_ly: DVec3, ship_id: Option<ShipId>| eye.offset_m(at_ly, ship_id, look);
     out.push((
         None,
         Placed {
@@ -353,6 +386,15 @@ fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option
         ));
     }
     out
+}
+
+/// The craft drawn as an ovoid: all but one with a form, which [`crate::parts`] draws. Only the
+/// player's own ship can have one so far.
+fn hulled(mut want: Vec<(Option<ShipId>, Placed)>, own_formed: bool) -> Vec<(Option<ShipId>, Placed)> {
+    if own_formed {
+        want.retain(|(id, _)| id.is_some());
+    }
+    want
 }
 
 /// One hull, reduced to what the transform and the material need.
@@ -381,22 +423,13 @@ pub fn update_hulls(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
     surfaces: Res<crate::surfaces::Surfaces>,
+    own_form: Res<crate::parts::OwnForm>,
     mut placed: Query<(Entity, &mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &Hull)>,
 ) {
     let look = ui.look.forward();
-    let want = drawn(&game.0, &uplink, &eye, look);
+    let want = hulled(drawn(&game.0, &uplink, &eye, look), own_form.is_formed());
     let star = lighting(&game.0);
-    // One mapping, so one answer: nothing about a particular hull enters its own heat.
-    let own = emitted(&game.0);
-    let shade = |at: &Placed| match star {
-        Some((star_ly, radius, teff)) => {
-            let distance = star_ly.distance(at.at_ly) * M_PER_LY;
-            uniforms(star_ly - at.at_ly, shading(&game.0, radius, teff, distance), own, &game.0.tone)
-        }
-        // No star to reflect. The hull still glows with its own heat, which is the whole
-        // reason a ship between the stars is a thing you can see at all.
-        None => uniforms(DVec3::Z, Vec3::ZERO, own, &game.0.tone),
-    };
+    let shade = |at: &Placed| lit(&game.0, star, at.at_ly, GRAY);
     let place = |at: &Placed| Transform {
         translation: sim_to_render(at.offset_m / UNIT_M).as_vec3(),
         rotation: attitude(at.facing, star.map(|(star_ly, _, _)| star_ly - at.at_ly)),
@@ -526,6 +559,15 @@ mod tests {
     fn a_camera_with_no_viewport_still_gives_a_usable_range() {
         let (near, far) = boom_limits(0.0, 0.0);
         assert!(near <= far && near > 0.0 && far.is_finite());
+    }
+
+    #[test]
+    fn only_a_craft_without_a_form_gets_the_ovoid() {
+        let placed = || Placed { offset_m: DVec3::ZERO, length_m: 500.0, facing: DVec3::X, at_ly: DVec3::ZERO };
+        let want = || vec![(None, placed()), (Some(ShipId(7)), placed())];
+        let ids = |v: Vec<(Option<ShipId>, Placed)>| v.into_iter().map(|(id, _)| id.map(|s| s.0)).collect::<Vec<_>>();
+        assert_eq!(ids(hulled(want(), false)), vec![None, Some(7)]);
+        assert_eq!(ids(hulled(want(), true)), vec![Some(7)], "the formed ship kept its ovoid");
     }
 
     fn render(v: DVec3) -> Vec3 {

@@ -156,6 +156,7 @@ pub fn sample_scene(
     bodies: Res<crate::starfield::Bodies>,
     eye: Res<crate::hull::Eye>,
     uplink: Res<crate::uplink::Uplink>,
+    own_form: Res<crate::parts::OwnForm>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut last: Local<Option<(usize, f32)>>,
 ) {
@@ -197,7 +198,9 @@ pub fn sample_scene(
     // Asked once: between the stars there is no system to light a hull and the answer is a
     // search over the whole catalog.
     let hull_star = crate::hull::lighting(&game.0);
-    let hulls = std::iter::once((game.ship.length_m, eye.boom_m, observer))
+    // The length the boom was counted in, so the disc and the standoff agree.
+    let own_length_m = own_form.length_m().unwrap_or(game.ship.length_m);
+    let hulls = std::iter::once((own_length_m, eye.boom_m, observer))
         .chain(uplink.contacts.iter().map(|c| {
             (c.length_m, c.position_ly.distance(observer) * M_PER_LY, c.position_ly)
         }));

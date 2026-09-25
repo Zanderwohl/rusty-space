@@ -149,12 +149,13 @@ impl Plugin for ClientPlugin {
             .init_resource::<crate::envelope::Envelopes>()
             .init_resource::<crate::hull::Eye>()
             .init_resource::<crate::hull::Hulls>()
+            .init_resource::<crate::parts::OwnForm>()
             .init_resource::<crate::plume::Plumes>()
             .init_resource::<crate::resolved::Resolved>()
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .init_resource::<panels::HudFoot>()
             .init_resource::<crate::map_panel::WorldInset>()
-            .add_systems(Startup, (spawn_camera, no_lights))
+            .add_systems(Startup, (spawn_camera, no_lights, crate::parts::adopt_fixture))
             .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnExit(AppState::InGame), (crate::map_panel::release_world_frame, leave_scene))
             .add_systems(OnEnter(AppState::InGame), spawn_sky)
@@ -224,6 +225,7 @@ impl Plugin for ClientPlugin {
                     // Last, because a hull is metered as part of the scene the exposure was
                     // just placed for.
                     crate::hull::update_hulls,
+                    crate::parts::update_parts,
                     // And the exhaust after the ship, so it is placed against the same frame.
                     crate::plume::update_plumes,
                 )

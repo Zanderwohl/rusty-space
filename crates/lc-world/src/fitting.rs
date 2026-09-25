@@ -190,6 +190,10 @@ pub const ONBOARD_DATA_BYTES: f64 = 1_048_576.0;
 pub const SOLAR_ANCHOR_AU: f64 = 0.1;
 pub const SOLAR_ANCHOR_S: f64 = crate::flight::JULIAN_YEAR_S;
 
+/// The distance, AU from a Sun-like star, at which the starting ship full and broadside is exactly
+/// at its rated load. H2 anchors the field's time constant on it, and it fixes the cooking flux.
+pub const RATED_LOAD_AU: f64 = 0.05;
+
 impl Balance {
     pub const DEFAULT: Self = {
         let slot_volume_m3 = REFERENCE_HULL_M3 / Loadout::STARTING.slots as f64;
@@ -251,8 +255,9 @@ impl Balance {
             spar_gap: 0.5,
             spar_thickness: 0.02,
             move_work_factor: 0.25,
-            // Placeholder: anchored by F5.
-            hull_areal_density: 0.0,
+            // `Form::starting()` weighs 19's dry starting ship. Solved there, since the areas are
+            // not `const`, and pinned by `form::presets`' anchor test.
+            hull_areal_density: 1214.530767193309,
             envelope_margin: 0.05,
             engine_clear_half_angle_rad: 15.0 * degree,
             field_idle_k: 400.0,

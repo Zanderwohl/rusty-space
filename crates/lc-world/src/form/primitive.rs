@@ -55,9 +55,10 @@ impl Primitive {
         self.at(1.0).volume() * scale.powi(3)
     }
 
-    /// Exact to a few ulps, so the volume a client sends is the volume it gets back.
+    /// Exact to a few ulps, so the volume a client sends is the volume it gets back. `libm`, because
+    /// placement is built on it and the platform's `cbrt` differs in the last ulp.
     pub fn scale(&self, volume_m3: f64) -> f64 {
-        (volume_m3 / self.at(1.0).volume()).cbrt()
+        libm::cbrt(volume_m3 / self.at(1.0).volume())
     }
 
     pub fn area(&self, scale: f64) -> f64 {
@@ -100,8 +101,8 @@ impl Shape {
     pub fn area(&self) -> f64 {
         match *self {
             Shape::Ellipsoid { semi_axes: s } => {
-                let [a, b, c] = s.to_array().map(|x| x.powf(THOMSEN_P));
-                4.0 * PI * ((a * b + b * c + c * a) / 3.0).powf(1.0 / THOMSEN_P)
+                let [a, b, c] = s.to_array().map(|x| libm::pow(x, THOMSEN_P));
+                4.0 * PI * libm::pow((a * b + b * c + c * a) / 3.0, 1.0 / THOMSEN_P)
             }
             Shape::Capsule { radius: r, length } => 2.0 * PI * r * (length + 2.0 * r),
             Shape::Slab { edges, corner: r } => {

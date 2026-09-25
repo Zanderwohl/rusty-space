@@ -5,7 +5,7 @@ Usage: tools/dag.py <plan.md> check | ready | waves | graph [--write]
 
 A task is a heading `### <ID> · <title>` followed by list lines, of which three are read:
 
-    - status: todo | active <branch> | done <PR or commit> | dropped <why>
+    - status: todo | active <who> | done <PR or commit> | dropped <why>
     - needs: <ID>, <ID> ...          (or `—` for none)
     - touches: `path`, `path` ...    (files or directories the task expects to change)
 

@@ -3,7 +3,7 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: partly built.** The hull material, the drones and the field shader are in, each in a void; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
+**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
 [30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
@@ -35,6 +35,26 @@ drawn is the surface the server reasons about.
 - **Finish** is a per-form choice: *smooth* (surface nets as they come), *faceted* (flat normals),
   or *blocky* (occupied cells drawn as cubes, for anyone who wants a brutalist ship). It changes
   extraction, not the shape, so it touches nothing the server computes.
+
+As built (`lc_client::hull_mesh`): one cell per four pixels along the ship's longest side, as a
+power of two from 16 to 256, held until the ideal is more than three quarters of a doubling away.
+Before extraction the grid is cleaned of every lattice square whose corners alternate in sign by
+turning one outside corner inside, so each cell face carries at most one segment of surface; a
+vertex per loop of crossings in a cell, not per cell, then makes the mesh closed and manifold
+whatever the form. Blocky is the same topology with each vertex moved to its cell's center, which
+is exactly the cubes' faces. A feature thinner than a cell is kept only where a sample lands in
+it: a strap on a coarse grid comes out holed or gone, never torn. The cache key is FNV-1a over a
+canonical encoding of the form and each part's solved shape, since `Form` holds `f64`s. A
+256-cell mesh takes a few seconds in a dev build and never holds up a frame; the old mesh stays up
+until the new one lands. `cargo run -p lc-client --example mesh_void` photographs the fixtures.
+
+![The fixture forms, meshed and drawn in the hull material](../images/mesh-forms.jpg)
+
+![Smooth, faceted and blocky, at the grid the screen asks for and at 32 cells](../images/mesh-finishes.jpg)
+
+![A saddle's bolt row, and a strap at 16, 64 and 256 cells: holed on the coarse grid, never torn](../images/mesh-seams.jpg)
+
+![Consecutive frames across a remesh from 32 to 128 cells: the old mesh stays up until the new one lands](../images/mesh-remesh.jpg)
 
 ### Details are sized in meters
 
@@ -76,7 +96,7 @@ scales by a power per region.
 | engine | an emitter grid on the open face, glowing with exhaust power. As built the grid is lit over the whole region, which is right in a void; which face is open is the form's, and R13 limits it there |
 | data | fine dense panels |
 | mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
-| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over; the angle about the joining part's axis times its radius should serve for the primitives 29 allows. R10's mesher has to supply both, since the material will not build a pipeline for a mesh without them |
+| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over. The mesher classes each seam whole, from the two primitives' gradients along it, as a ring about the spar's axis or a line along it, and measures it as meters around at the seam's mean radius or meters along. A boom's end and a rib's edge are both in meters, and a seam that climbs spreads its heads only by the cosine of its climb. Chosen per vertex, the heads shear where the choice changes |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
@@ -231,8 +251,8 @@ says.
 A photon drive's exhaust has no gas in it. Seen from the side, it is invisible; seen from inside, it
 is a blinding point. `plume.wgsl` draws a reaction drive: a glowing column of fuel-rich gas 1.5 hull
 lengths long, with soot lanes, heated by the jet power `½ F v`. None of that exists here. And the
-cone that matters is thousands of times longer than any hull: 27 km of courtesy radius behind a
-starting ship, 27 000 km behind a GSV.
+cone that matters is thousands of times longer than any hull: 26 km of courtesy radius behind a
+starting ship, 26 000 km behind a GSV.
 
 The current shader is not the cost problem it might look like. It is one draw per burning ship: a
 proxy cone, with each covered pixel marching 24 samples back along its ray. Cost goes with the pixels
@@ -248,11 +268,28 @@ replaced by two things:
   the axis, so the shading is **closed form per pixel**: take the point where the view ray passes
   closest to the axis, and read the flux there. There is no march and no loop, one draw per cone,
   and the fragment works in the proxy's own coordinates from the surface back, as `plume.wgsl` does,
-  so `f32` holds at 27 000 km.
+  so `f32` holds at 26 000 km.
+
+  "Closest" is measured as an **angle from the apex**, not as a distance from the axis line. From
+  beside the two are the same point. From behind the ship, the nearest point to the line can fall
+  behind the apex, outside the cone, while the ray still crosses the cone further out, which leaves
+  a hole. The angle along a ray has one minimum, and it solves as a linear equation. When the ray
+  runs along the axis, the view from inside or from past the end, that solution cancels to noise.
+  So the ends of the ray's segment are always tried as well, and the smallest of the three
+  candidates wins.
 
 The cone is drawn for your own ship whenever it burns, for any ship whose courtesy radius you are
 inside, and for a selected ship. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s
 palette, and is brightest where it would cook. The map draws the same cone as lines.
+
+The hazard color is 18's red-orange. The material takes both of its colors as uniforms, so it
+stays free of either product's palette. The aperture glow is a second material in
+`exhaust_cone_material` rather than a reshaped `plume_material`, so the game's reaction-drive plume
+is untouched until the switch to photon drives replaces it. The starting drive's face, all of
+1.1 × 10²⁰ W through 100 m, is `lc_world::emit::aperture_temperature_k`: 7.0 × 10⁵ K.
+
+Photograph it in a void with `cargo run -p lc-client --example cone_void -- --view
+beside|behind|inside --length <m>`. Its flags are listed in the example's module doc.
 
 An observer inside someone's cone gets the blinding point, from the photometry, as for a beam
 ([31-directed-energy.md](31-directed-energy.md)).
@@ -266,7 +303,7 @@ placeholder, so the rest can be built and a refit visibly changes the ship strai
 
 - **Each part as a Bevy primitive mesh**, scaled to its solved size: `Sphere` scaled for an
   ellipsoid, `Capsule3d`, `Cuboid` for a slab and for the Mind, `Cylinder`, `Torus`,
-  `ConicalFrustum`. No blends.
+  `ConicalFrustum`. No blends, and a slab's corners square.
 - **A flat color per kind.**
 - **Construction as scale plus wireframe:** the growing part drawn in `BodyWireframeMaterial`
   during the truss phase, crossfading to solid.
@@ -274,6 +311,16 @@ placeholder, so the rest can be built and a refit visibly changes the ship strai
 - **The field as a fresnel sphere** around the bounds, tinted by temperature once there is one.
 - **Spars uncut**: the plain primitive. The saddles and straps arrive with the distance-field
   mesher.
+
+Until the grid gives a form its extent, the orbit camera frames the smallest sphere about the Mind
+holding the corners of the form's bounds, so its stops and standoff follow the form's size as the
+ovoid's follow its length.
+
+![the starting form as placeholder parts](../images/parts-default.jpg)
+![the cluster preset, from ahead](../images/parts-cluster.jpg)
+![the cluster preset, from the side](../images/parts-cluster-side.jpg)
+![the plate preset](../images/parts-plate.jpg)
+![the spindle preset](../images/parts-spindle.jpg)
 
 Every placeholder is replaced independently. None of them is on the server's side of anything.
 
@@ -300,9 +347,9 @@ own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the examp
 
 | crate | new | changed |
 |---|---|---|
-| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` | `plume_material` becomes the aperture glow |
+| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` (the cone, and the aperture glow beside it) | `plume_material` retires once `plume.rs` stops drawing the reaction drive |
 | `lc-client` | `hull_mesh.rs` (surface nets, finishes, caching), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws the form instead of the ovoid. `plume.rs` draws the aperture glow at `F c` and the cone |
-| `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl` | |
+| `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl`, `exhaust_cone.wgsl`, `aperture_glow.wgsl` | |
 
 Materials go in `em-render` because nothing in them is specific to Lightcone. A hull with regions
 and a reveal mask is as much Exotic Matters' as anyone's.

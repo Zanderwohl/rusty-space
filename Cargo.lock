@@ -5092,6 +5092,7 @@ dependencies = [
  "glam",
  "lc-proto",
  "lc-spacetime",
+ "libm",
  "postcard",
  "serde",
  "serde_json",

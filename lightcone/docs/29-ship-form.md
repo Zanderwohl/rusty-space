@@ -88,14 +88,20 @@ in one of two ways, carried on the kind as `Kind::Spar(SparMode)`:
 - **Saddle.** Each neighbor, grown by `spar_gap`, is subtracted from the spar. Where a boom meets a
   hull, its end is cut to the hull's curve and sits flush against it. The spar is embedded into its
   neighbors a little so there is something to cut.
-- **Strap.** The spar is intersected with a shell of `spar_thickness` around its parent, so it follows
-  the parent's surface wherever its primitive passes: a band around a tank, a rib along a hull.
+- **Strap.** The spar is intersected with a shell around its parent, from its surface out to
+  `spar_thickness` of the parent's smallest dimension, so it follows the parent's surface wherever its
+  primitive passes: a band around a tank, a rib along a hull.
 
 A spar joins its neighbors **hard, never blended**. `blend` is ignored on a spar and on its children's
 joint with it, so the join reads as bolted rather than welded.
 
 Only tree neighbors cut a spar. That keeps each spar's evaluation local, and it means a spar never
 changes shape because an unrelated part moved past it.
+
+A neighbor is cut by its primitive, never its own cut shape, so a spar hung from a spar does not
+depend on how its parent was cut. An ellipsoid's distance is a bound rather than exact (see below), so
+off an ellipsoid the gap and the strap's depth are exact only across its shortest axis and grow with
+the semi-axis along the others.
 
 **A spar's volume is its uncut primitive's.** The cut shape has no closed form. It is charged as the
 stock it was cut from, which slightly overstates a strap's mass at a twentieth of module density, and
@@ -115,18 +121,50 @@ Each part but the Mind hangs from a parent, and it is placed in one of two ways:
 |---|---|
 | `parent` | a part id |
 | `mount` | attached or enclosing. `Mount::Attached` carries `anchor` and `standoff`, so an enclosing part cannot have either |
-| `anchor` | attached only: a direction in the parent's frame. The attachment point is where a ray from the parent's center along it last leaves the parent's surface, so on a torus a child hangs off the rim |
+| `anchor` | attached only: a direction in the parent's frame. The attachment point is where a ray from the parent's center along it last leaves the parent's surface, so on a torus a child hangs off the rim. A ray that misses a torus's tube takes the point of the tube nearest it; along the axis, where every point of the inner equator is nearest, the one toward the parent's +y |
 | `twist` | rotation about the surface normal, or about the parent's axis when enclosing |
 | `tilt` | the child's axis relative to that normal or axis, as a small rotation: a two-component rotation vector across it, in radians |
-| `standoff` | attached only: distance along the normal, in multiples of the child's size. Negative embeds it |
-| `blend` | smooth-union radius with the parent, as a fraction of the smaller |
-| `mirror` | the subtree is repeated, reflected through the ship's port–starboard plane |
+| `standoff` | attached only: distance along the normal, in multiples of the child's **reach**, the distance from its center to its foot. Zero rests the child on the surface, −1 centers it there, and negative embeds it |
+| `blend` | smooth-union radius with the parent, as a fraction of the smaller part's smallest dimension |
+| `mirror` | the subtree is repeated, reflected through the ship's port–starboard plane, y = 0 |
 
 An attached child's surface meets its parent's at the anchor, offset by `standoff`. When the parent
 grows, the anchor point moves out with its surface. When the child grows, it grows away from the
 parent.
 
-The Mind's frame is the ship's frame: its axis is the nose, `lc_world::motion::facing`.
+What meets the anchor is the child's **foot**: the end of its axis at −x, one **reach** from its
+center — the ellipsoid's first semi-axis, half the capsule's straight section plus its radius, half the slab's
+first edge, half the cylinder's or frustum's length, the torus's minor radius. On every primitive but
+the torus the foot is on its surface. A torus's foot is the center of its hole: the hole sits over the
+anchor and the tube's lowest circle lies in the plane tangent to the parent there. On a curved parent
+the tube therefore clears the surface by the parent's sag across the major radius, and touches it
+nowhere on a convex one. A negative `standoff` or a `blend` closes the gap. Seating the tube on the
+surface itself has no closed form for a general parent. Tilt pivots the child about its foot, so a tilted boom leans from where it is
+bolted on rather than sliding its base across the parent. Reach is also the unit of `standoff`,
+because it is the length the placement is already made of: F1's scale means a different dimension on
+each primitive, and the extent along the normal would change under tilt.
+
+The Mind's frame is the ship's frame: its axis is the nose, `lc_world::motion::facing`. Space is
+Z-up, so the ship's z is up, its y is port, and the port–starboard plane a mirror reflects through is
+y = 0.
+
+**A mirrored copy keeps its part's id** and is named by `(PartId, Side)`, `Side::Original` or
+`Side::Mirror`. A part has a mirror when its own `mirror` or any ancestor's is set; a mirror inside a
+mirrored subtree adds nothing, since reflecting twice is the original. Refits, steps and animation
+name the part, and both copies change together. Every primitive is symmetric in its own y, so a
+mirrored copy is still a rigid transform: the reflection composed with that flip.
+
+**A part's volume is per copy.** Each copy is solved from the same volume and proportions, so a
+mirror repeats the part at its size. If the volume were split between the copies instead, switching a
+mirror on would halve each copy and pull its children in, and a part would change size because of a
+flag. So everything that totals volume counts every copy: capacities, dry mass and its structure, the
+drone minimum, and each kind's total that a layout keeps. `min_part_m3` applies to each copy.
+`Form::copies` gives the count.
+
+**Placement is closed form**, so the server and every client compute it to the bit. A ray from a
+torus's center lies in a plane through its axis, which cuts the tube in two circles, so even its last
+exit is a quadratic; a rounded slab's is a quadratic on each of at most four pieces of the ray.
+Trigonometry is `libm`'s, as [06](06-crate-layout.md) §Shared determinism asks.
 
 **A part's axis is its local x**: a capsule's, cylinder's or frustum's length, a torus's axis of
 symmetry, an ellipsoid's first semi-axis and a slab's first edge. A frustum's first end is at −x.
@@ -152,7 +190,18 @@ A shape matters to play only once it becomes numbers. Everything below is in `lc
 engine-free, and is **stated by the server in `Fitted`**, as `Balance` already is. The client
 computes the same numbers for its preview and takes the server's when they arrive.
 
-**Capacities** are sums of volume × density per kind. They replace everything 19 read from the loadout.
+**Capacities** are sums of volume × density per kind, with every copy of a mirrored part counted. They
+replace everything 19 read from the loadout.
+
+**The distance field** is `form::sdf::Sdf`, built once from a form and then evaluated at any point in
+the ship's frame, negative inside. Every primitive's distance is exact except the ellipsoid's, which
+has no closed form off its surface and uses the bound `(|p/r| − 1) · r_min` instead: zero on the
+surface, the right sign everywhere, and Lipschitz 1. Blends are the quadratic polynomial smooth
+minimum, whose gradient is a convex combination of its arguments', so the whole field is Lipschitz 1:
+a lower bound on the distance, and zero on the surface. That is all a grid or surface nets need.
+The same `Sdf` names the part nearest a point, which is how the grid weights cells by density and the
+hull material finds its kind regions. It also gives a spar's distance to its seams, for the bolt rows
+of [32](32-ship-rendering.md) §Materials by kind.
 
 **Geometry** comes from a **voxel grid of fixed resolution**: `FORM_GRID = 64` cells along the longest
 side of the bounding box, whatever the ship's size. Each cell is filled by evaluating the union's
@@ -161,11 +210,36 @@ complete.
 
 | quantity | how | read by |
 |---|---|---|
-| **shadow table** | area of the grid's projection along each of the 162 vertices of a twice-subdivided icosahedron, interpolated between them | starlight and beams arriving, brightness |
-| **broadside** | the direction of largest shadow, and the roll that presents it | the idle attitude of [20-solar-power.md](20-solar-power.md) |
-| **envelope** | the union's distance field offset by `envelope_margin` and blended with a large radius | the field's area and volume, [30-the-field.md](30-the-field.md) |
-| **inertia tensor** | the filled cells, weighted by each part's density, as the full symmetric tensor: a form is symmetric only port to starboard, so the xz product is generally not zero | slew rate |
-| **extent** | the envelope's longest dimension | `length_m`: the camera, the zoom limits, `Presence` |
+| **shadow table** | area of the grid's projection along each of the 162 vertices of a twice-subdivided icosahedron, interpolated linearly across the face a direction passes through | starlight and beams arriving, brightness |
+| **broadside** | the direction of largest shadow, and the roll about the nose that carries +z onto the direction across the nose with the largest shadow | the idle attitude of [20-solar-power.md](20-solar-power.md) |
+| **envelope** | the union's distance field offset by `envelope_margin` and its two nearest parts blended over `ENVELOPE_BLEND = 0.5` of the cube root of hull volume; area and volume by marching tetrahedra | the field's area and volume, [30-the-field.md](30-the-field.md) |
+| **inertia tensor** | the filled cells, weighted by each part's density, as the full symmetric tensor per kilogram, scaled to the ship's whole mass: a form is symmetric only port to starboard, so the xz product is generally not zero | slew rate |
+| **extent** | the envelope's longest dimension: its widest width along the axes and the table's 81 directions, within about 1.2% of its diameter | `length_m`: the camera, the zoom limits, `Presence` |
+
+The grid is `form::grid::FormGrid`. Its box is the field's bounds padded by half as much again as
+the envelope can reach, so the hull spans about 51 of the 64 cells for the starting form and every
+preset, and about 57 for a form of one part, which blends with nothing and reaches only its offset.
+The pad doubles until the envelope closes inside the grid, and a form whose envelope never does is
+refused as `Extent`; no preset needs a second pass. Four choices the table leaves open:
+
+- **The envelope offsets a truer distance than the field.** Off an ellipsoid the field is a bound
+  that falls short by up to the ratio of its axes, so an offset of it would put the starting hull's
+  tips five margins out. The envelope reads `Sdf::estimate_each_with`, which replaces the bound with
+  `k₀(k₀ − 1)/k₁`: exact along the axes and to first order at the surface. Hull volume, for the
+  margin, is the parts' closed forms summed, so the offset does not move with the resolution.
+- **The blend is between the two nearest parts**, and never with a part something encloses, which
+  would raise a blister over its encloser. It adds at most a quarter of its radius anywhere.
+- **A shadow is cast by the cells either side of the surface**, each cut by the plane its field's
+  gradient gives. Whole cubes stand out past the rim by up to half a diagonal, which on a hull a few
+  cells thick is a tenth of its shadow. A one-ellipsoid form is within 0.9 of a cell of rim of `A(ŝ)`
+  in every direction. Broadside and roll are fitted, not climbed to: a projection is noisy to a few
+  parts in a thousand, and the shadow is flatter than that near its peak.
+- **The cells carry contents only.** Structure, stored energy and heat are taken to lie where the
+  contents do, so the tensor is kept per kilogram and scaled by whatever the ship weighs. A cell's
+  density is its nearest part's by the envelope's truer distance, which the same pass has computed.
+
+Building one takes about 20 ms for the starting form and 50 ms for the Cluster with `lc-world`
+optimized, and a quarter to three quarters of a second unoptimized in the dev profile.
 
 **The shadow handles concave shapes.** A stack of plates shades
 itself and collects about what one plate would. A ship spread out collects more and turns more
@@ -176,10 +250,12 @@ reproduce that formula to within the grid's resolution.
 
 ### Hull structure follows area
 
-Each part carries structure at `hull_areal_density` per square meter of **its own surface**, from its
+Each copy of a part carries structure at `hull_areal_density` per square meter of **its own surface**, from its
 primitive's closed-form area (Thomsen's approximation for an ellipsoid), again ignoring overlaps. Flattening buys
 shadow, radiating area and room on the surface, and pays for them in mass, so in acceleration.
-`hull_areal_density` is anchored so the starting form weighs what 19's starting ship does.
+`hull_areal_density` is anchored so the starting form weighs what 19's starting ship does. The
+starting form and the built-in presets use no mirrors, so how a mirror is counted cannot move the
+anchor.
 
 ### Placement rules
 
@@ -212,8 +288,15 @@ in three phases, strictly in order:
 | new | build | its mass-energy | energy ÷ drone power |
 | removed | dismantle | 95% back | energy ÷ drone power |
 | **proportions, primitive, or a spar's mode** | dismantle all, then build all | the 5% loss on all of it | both |
-| **anchor, mount, twist, tilt, standoff, blend, mirror or parent** | move, carrying its subtree | none | `move_work_factor` of what building the subtree would take |
+| **anchor, mount, twist, tilt, standoff, blend or parent** | move, carrying its subtree | none | `move_work_factor` of what building the subtree would take |
+| **mirror**, or a new parent, that adds a copy or takes one away | build or dismantle that copy, for each part in the subtree whose count changes | as new or removed | as new or removed |
 | **kind**, other than a spar's mode | removed, then new | as those two | as those two |
+
+**Every row counts every copy.** A mirrored part that grows builds the difference on both copies, and
+a move carries both copies of whatever it moves. Mirroring is priced as matter because it is matter:
+if it were a move, a player could double a part for a fraction of its cost. A part whose count of
+copies changes in the same round as its size resizes the copies both forms have, then builds or
+dismantles the other whole, so the 5% loss cannot be dodged by trading a copy for size.
 
 Data takes `data_work_factor` times as long as its energy says, as in 19. Drone power is measured at
 each step's start, so drones built first speed up everything after them.
@@ -221,6 +304,24 @@ each step's start, so drones built first speed up everything after them.
 **The target is refused if the build phase cannot be paid for** from what the dismantle phase leaves in
 storage. The target is **not** refused for venting. A player may vent heat on purpose, and
 [30-the-field.md](30-the-field.md) says what happens when the vent is too big.
+
+The planner is `lc_world::refit::rounds`. What it settles that the table does not:
+
+- **Within a phase, parts go in id order**, drones apart as above, and moves by depth in the tree
+  the round began with.
+- **A move carries what hung from the part when the round began**, as much of it as the dismantle
+  phase left, weighted by each part's work factor. A part both reshaped and moved still moves,
+  carrying its children, and is rebuilt in its new place.
+- **A store that shrinks while fuller than its new capacity spills the excess** as part of its own
+  step's vent. The ledger is the round's own: drain and income are the ship's, and are not in the
+  energy check.
+- **A round is refused if the dismantle phase would leave no drone standing**, whether the drones
+  are removed, replaced by new parts or reshaped, since the build phase would begin with none.
+- The Mind's stored shape and volume may change freely, since nothing reads them.
+- **A copy gained or lost is its own step**, an `Add` or `Remove` of the part, which carries the
+  part's `mirror`. The copy lost goes at the size it had, and the one gained comes at the size it
+  will have. A mirror inside a mirrored subtree, which changes no count, is a move that takes no
+  time. Counts in the form partway through follow the flags, so a subtree follows its root's step.
 
 ### Why strict phases
 
@@ -238,8 +339,13 @@ storage part before reshaping it follows from the same rule, with nothing specia
 
 ### Cancel
 
-Completed steps stay. The step in progress is reversed, and what it had moved comes back at the 95%
-rate, or goes to the field if storage has no room. The ship is left partway between its form and the
+Completed steps stay. The step in progress is reversed. A build's energy comes back at the 95%
+rate, or goes to the field if storage has no room. A dismantling is put back: what it had returned to
+storage and what it had radiated are paid back out of storage, and the part is left as it was. The
+radiated loss is not recovered: putting a part back costs its whole mass-energy. If storage cannot
+pay, the dismantling finishes at once instead, and its return goes to storage as far as there is
+room. A move snaps back. Whatever the reversal or the finish loses, and whatever has no room, is a
+burst at the moment of cancel. The ship is left partway between its form and the
 target, which may be worse than either, and that is intended.
 
 Flying and refitting still exclude each other, as in 19.
@@ -251,6 +357,20 @@ Flying and refitting still exclude each other, as in 19.
 - **engines**, one frustum aft: 1.96 × 10⁶ m³, 5 g full
 - **drones**, a capsule under the keel: 7.85 × 10⁵ m³
 - **living**, a slab across the dorsal face, and **data**, a small capsule forward: 3.93 × 10⁵ m³ each
+
+Each volume is 19's module count of its kind times the 392 699 m³ slot, so the form holds exactly
+what 19's starting ship does. Placed, it is about 545 m long, 200 m across and 190 m deep:
+
+- the storage is 335 × 201 × 67 m;
+- the engine flares aft, 116 m wide where it meets the hull and 175 m at its open face, which is the
+  aperture ([31](31-directed-energy.md));
+- the drone capsule, 169 m long, lies fore and aft under the keel with its top sunk into the hull, so
+  it is tilted off the normal it is attached along;
+- the living slab is 145 m across the beam, 96 m fore and aft and 29 m deep;
+- the data capsule, 124 m long, is sunk into the nose.
+
+`hull_areal_density` is 1 215 kg/m², so this form weighs 19's dry starting ship, 2.65 × 10⁹ kg: every
+module, the data module at half, and 19's frame over all twenty slots, the five empty ones included.
 
 The anchors of 20 and 30 are derived from this form.
 
@@ -274,9 +394,21 @@ preset is a `Form` with its part ids, and it applies in one of two ways:
 | **layout** | the preset's arrangement, filled with this ship's volumes. Each part keeps its share of its kind's total, so the ship keeps what it has and changes shape | moves and reshapes, little energy |
 | **design** | the preset exactly, volumes included | builds and dismantles, paid for as usual |
 
-The built-in presets are layouts written in code. Applying either kind replaces the draft, not the
-ship, so the result is one undoable edit and nothing is spent until Apply. A preset whose kinds the
-ship lacks gives those parts nothing in a layout, and the editor names them.
+The built-in presets are layouts written in code, filled with the starting form's volumes so each is
+also a design. Applying either kind replaces the draft, not the ship, so the result is one undoable
+edit and nothing is spent until Apply. A preset whose kinds the ship lacks gives those parts nothing in
+a layout, and the editor names them.
+
+A layout's other rules:
+
+- **Spars are not shared out.** They hold nothing, so a ship's spar volume says nothing about where
+  its parts go. They are the arrangement's own structure and grow by the ratio its other parts grew
+  by, so a cluster applied to the starting ship, which has no spars, keeps its spokes.
+- **A share below `min_part_m3` is dropped**, smallest first, and the rest of its kind take its volume.
+  It is named with the parts given nothing.
+- A part given nothing is left out, and its children hang from its nearest ancestor that is kept.
+- A kind the ship has and the preset has no part for is left out of the layout, and the editor names
+  that too.
 
 - **Presets belong to the account, not to a craft.** They are designs a player carries in their head,
   not facts about the world, so they are not knowledge and do not travel at the speed of light. They
@@ -355,7 +487,7 @@ the client, so tuning the feel is a data change:
 | proportions | ratios on the same series |
 | twist and tilt | 15°, and 5° with the modifier |
 | anchor | the parent's axes and their diagonals, and free with the modifier |
-| standoff | tenths of the child's size |
+| standoff | tenths of the child's reach |
 
 A ladder of ratios rather than fixed amounts means the same handle is fine on a 500 m ship and on a
 50 km one. The server never snaps anything. A console command or a hand-built target may ask for any
@@ -439,7 +571,7 @@ photographs it, and `--form <preset>` stages a draft.
 | `spar_gap` | 0.5 m | how far a saddle stands off the neighbor it is cut to |
 | `spar_thickness` | 2% of the parent's smallest dimension | a strap's depth |
 | `move_work_factor` | 0.25 | a move's time over building what it carries |
-| `hull_areal_density` | *anchored* | structure per m² of part surface |
+| `hull_areal_density` | *anchored*: 1 215 kg/m² | structure per m² of part surface |
 | `envelope_margin` | 0.05 | the envelope's offset over the cube root of hull volume |
 | `engine_clear_half_angle_rad` | 15° | |
 
@@ -451,7 +583,7 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments |
+| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments |
 | `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |

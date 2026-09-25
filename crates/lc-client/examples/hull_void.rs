@@ -37,10 +37,12 @@ use em_render::hull_material::{
 use em_render::plume_material::PlumeMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
+use lc_client::hull_mesh::REGION_GRAPHS;
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape, Target, placeholder};
 use lc_client::tonemap::ToneMap;
 
-const KINDS: [&str; 8] = ["storage", "drone", "living", "engine", "data", "mind", "spar", "bay"];
+/// The palette in the order the mesher numbers regions.
+const KINDS: [&str; 8] = REGION_GRAPHS;
 
 /// What every graph's unit square spans. The graphs are written to it.
 const TILE_M: f32 = 64.0;

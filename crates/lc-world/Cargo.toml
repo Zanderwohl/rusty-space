@@ -19,6 +19,9 @@ lc-proto = { path = "../lc-proto" }
 # must not link an engine.
 em-sim = { path = "../em-sim", default-features = false }
 glam = { version = "0.32", features = ["serde"] }
+# Transcendentals the server and every client must agree on to the bit. See
+# lightcone/docs/06-crate-layout.md §Shared determinism.
+libm = "0.2"
 serde = { version = "1.0.215", features = ["derive"] }
 csv = { version = "1", optional = true }
 # Offline only: the documentation's plots. Never in a build the game links.

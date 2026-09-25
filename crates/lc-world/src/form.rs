@@ -32,7 +32,8 @@ impl std::fmt::Display for PartId {
 pub enum SparMode {
     /// Each tree neighbor, grown by `spar_gap`, is cut out of the spar.
     Saddle,
-    /// The spar is kept only within `spar_thickness` of its parent's surface.
+    /// Kept between its parent's surface and `spar_thickness` of the parent's smallest dimension
+    /// outside it.
     Strap,
 }
 
@@ -70,7 +71,10 @@ pub enum Primitive {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Mount {
     /// On the parent's surface, where a ray from its center along `anchor` (parent frame) last
-    /// leaves it. `standoff` is along the normal in multiples of the child's size; negative embeds.
+    /// leaves it. `standoff` is along the normal in multiples of the child's [`Shape::reach`];
+    /// negative embeds.
+    ///
+    /// [`Shape::reach`]: primitive::Shape::reach
     Attached { anchor: DVec3, standoff: f64 },
     /// Centered on the parent and containing it.
     Enclosing,
@@ -89,7 +93,8 @@ pub struct Placement {
     pub tilt: DVec2,
     /// Smooth-union radius with the parent, as a fraction of the smaller part. Ignored at a spar.
     pub blend: f64,
-    /// Repeat the subtree reflected through the ship's port–starboard plane.
+    /// Repeat the subtree reflected through the ship's port–starboard plane, y = 0. The copies are
+    /// [`place::Side::Mirror`].
     pub mirror: bool,
 }
 
@@ -161,6 +166,8 @@ pub enum FormError {
     MissingParent { part: PartId, parent: PartId },
     /// Names the lowest id on the cycle, whichever part the walk started from.
     Cycle(PartId),
+    /// The envelope reaches past every padding the grid tries, so it has no extent to state.
+    EnvelopeOpen,
 }
 
 impl std::fmt::Display for FormError {
@@ -175,6 +182,7 @@ impl std::fmt::Display for FormError {
             Self::Unplaced(id) => write!(f, "{id} has no parent"),
             Self::MissingParent { part, parent } => write!(f, "{part} hangs from {parent}, which does not exist"),
             Self::Cycle(id) => write!(f, "{id} is its own ancestor"),
+            Self::EnvelopeOpen => write!(f, "the envelope does not close"),
         }
     }
 }
@@ -519,6 +527,7 @@ impl From<FormError> for lc_proto::FormFault {
                 Self::MissingParent { part: part.into(), parent: parent.into() }
             }
             FormError::Cycle(id) => Self::Cycle(id.into()),
+            FormError::EnvelopeOpen => Self::Extent,
         }
     }
 }

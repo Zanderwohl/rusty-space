@@ -94,6 +94,8 @@ pub struct DevEntry {
     /// holding the station it was placed from — the waypoint would put it straight back in the
     /// plane — so use it with `--rate 0`.
     pub lift_deg: Option<f64>,
+    /// Draw the player's ship as this preset, by [`crate::parts::fixture`]'s spelling.
+    pub form: Option<String>,
     pub screenshot: Option<String>,
     /// Frames to let the sky settle before the shutter. Pipelines compile lazily.
     pub after_frames: u32,

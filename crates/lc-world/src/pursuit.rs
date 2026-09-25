@@ -27,6 +27,7 @@
 use glam::DVec3;
 
 use crate::boost::{self, Event};
+use crate::courtesy::{self, Arrival};
 use crate::flight::{C_M_S, Cruise, Drive, JULIAN_YEAR_S, MAX_BETA};
 use crate::motion::{Motive, ShipId, ShipState};
 use crate::system::M_PER_LY;
@@ -138,10 +139,18 @@ impl From<Closeness> for lc_proto::Closeness {
     }
 }
 
-/// Whether a plan ending at `to_ly` from its quarry is a plan for this standoff. A plan for the
-/// other closeness is not, which is how changing it gets a fresh one.
-pub fn aims_for(to_ly: DVec3, standoff_m: f64) -> bool {
+/// Whether a plan ending at `to_ly` from its quarry is a plan for this standoff: ending on it or,
+/// courteously, [`on_the_way`] to it. A plan for the other closeness is not, which is how changing
+/// it gets a fresh one.
+pub fn aims_for(to_ly: DVec3, standoff_m: f64, arrival: &Arrival) -> bool {
     (to_ly.length() * M_PER_LY - standoff_m).abs() <= standoff_m * ON_STATION_FRACTION
+        || on_the_way(to_ly, standoff_m, arrival)
+}
+
+/// Whether a plan ending at `to_ly` is a courteous leg short of the station, so that another
+/// follows once it has been flown.
+pub fn on_the_way(to_ly: DVec3, standoff_m: f64, arrival: &Arrival) -> bool {
+    arrival.is_courteous() && courtesy::is_waypoint(to_ly.length() * M_PER_LY, standoff_m)
 }
 
 /// A craft as its pursuer currently sees it: a sighting, and therefore the past.
@@ -443,6 +452,7 @@ pub enum Refused {
 pub fn approach(
     pursuer: &ShipState,
     standoff_m: f64,
+    arrival: Arrival,
     seen: &Sighting,
     now_s: f64,
     drive: Drive,
@@ -465,15 +475,16 @@ pub fn approach(
     if (range - standoff_ls).abs() <= standoff_ls * ON_STATION_FRACTION {
         return Err(Refused::AlreadyThere);
     }
-    // Stopping short on the side the pursuer is already on. Aiming at the quarry itself is
-    // aiming to collide, and aiming at any other side is a plan that crosses through it.
-    let to = here.x.normalize_or(DVec3::X) * standoff_ls;
+    // Directly, stopping short on the side the pursuer is already on. Aiming at the quarry itself
+    // is aiming to collide, and aiming at any other side is a plan that crosses through it.
+    let side = here.x.normalize_or(DVec3::X);
+    let leg = arrival.leg(here.x * C_M_S, side, None, standoff_m, drive);
     Ok(Approach {
         from_ly: here.x / JULIAN_YEAR_S,
         beta0: boost::velocity_to_frame(pursuer.beta, seen.beta),
-        to_ly: to / JULIAN_YEAR_S,
+        to_ly: leg.to_m / C_M_S / JULIAN_YEAR_S,
         start_s: here.t,
-        drive,
+        drive: leg.drive,
         frame_from_ly: seen.position_ly,
         frame_beta: seen.beta,
         since_t: seen.emitted_s,
@@ -492,20 +503,24 @@ pub fn wants_replan(
     seen: &Sighting,
     standoff_m: f64,
     replan_m: f64,
+    arrival: &Arrival,
     now_s: f64,
 ) -> bool {
     let replan_ly = replan_m / M_PER_LY;
     // An escort does not run out: being alongside a burning quarry is somewhere to stay. Only
-    // the quarry leaving the burn it was assumed to hold is a reason to plan again.
+    // the quarry leaving the burn it was assumed to hold is a reason to plan again, or a
+    // courteous leg that has ended short of the station.
     if let Motive::Escort(plan) = motive {
+        let to = plan.cruise.to_ly;
         return plan.target != seen.target
-            || !aims_for(plan.cruise.to_ly, standoff_m)
+            || !aims_for(to, standoff_m, arrival)
+            || (on_the_way(to, standoff_m, arrival) && plan.has_closed(now_s))
             || plan.divergence(seen) > replan_ly;
     }
     let Motive::Rendezvous(plan) = motive else { return true };
     if plan.target != seen.target
         || plan.has_arrived(now_s)
-        || !aims_for(plan.cruise.to_ly, standoff_m)
+        || !aims_for(plan.cruise.to_ly, standoff_m, arrival)
     {
         return true;
     }
@@ -561,7 +576,7 @@ mod tests {
     fn an_approach_ends_alongside_and_moving_at_the_quarrys_speed() {
         let drifting = DVec3::Y * 1.0e-4;
         let seen = quarry(1_000.0, drifting);
-        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT).expect("a plan");
 
         let done = plan.since_t + plan.cruise.duration_s();
         let (at, beta) = plan.state_at(done);
@@ -586,7 +601,7 @@ mod tests {
         let seen = quarry(1_000.0, DVec3::Y * 1.0e-5);
         let mut me = pursuer();
         me.position_ly = DVec3::new(0.0, 3.0 * KM, -2.0 * KM);
-        let plan = approach(&me, STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&me, STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         let (at, beta) = plan.state_at(0.0);
         assert!(at.distance(me.position_ly) < 1.0e-12 * KM, "started at {at}, not {}", me.position_ly);
         // Not exactly at rest, and the residual is not this module's. `Cruise::plan_from`
@@ -609,7 +624,7 @@ mod tests {
         let beta = DVec3::Y * 1.0e-4;
         let seen = quarry(1_000.0, beta);
         let hour = 3_600.0;
-        let plan = approach(&pursuer(), STANDOFF, &seen, hour, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, hour, Drive::DEFAULT).expect("a plan");
         let moved = beta.length() * hour / JULIAN_YEAR_S;
         assert!(moved > 0.0, "premise: the quarry went somewhere in an hour");
         let reckoned = seen.reckoned_at(hour);
@@ -624,13 +639,13 @@ mod tests {
     #[test]
     fn only_a_maneuvere_throws_a_plan_away() {
         let held = quarry(1_000.0, DVec3::Y * 1.0e-5);
-        let plan = approach(&pursuer(), STANDOFF, &held, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, Arrival::Direct, &held, 0.0, Drive::DEFAULT).expect("a plan");
         let motive = Motive::Rendezvous(plan.clone());
 
         // The same quarry, seen again later, still on its course.
         let later = Sighting { position_ly: held.reckoned_at(600.0), emitted_s: 600.0, ..held };
         assert_eq!(plan.divergence(&later), 0.0, "dead reckoning is exact for a held course");
-        assert!(!wants_replan(&motive, &later, STANDOFF, STANDOFF * REPLAN_FRACTION, 300.0));
+        assert!(!wants_replan(&motive, &later, STANDOFF, STANDOFF * REPLAN_FRACTION, &Arrival::Direct, 300.0));
 
         // And one that has been under thrust since.
         let standoff_ly = standoff_m(500.0, 500.0) / M_PER_LY;
@@ -638,7 +653,7 @@ mod tests {
             position_ly: later.position_ly + DVec3::Z * standoff_ly,
             ..later
         };
-        assert!(wants_replan(&motive, &swerved, STANDOFF, STANDOFF * REPLAN_FRACTION, 300.0));
+        assert!(wants_replan(&motive, &swerved, STANDOFF, STANDOFF * REPLAN_FRACTION, &Arrival::Direct, 300.0));
     }
 
     /// A plan put back from its arguments is the same plan, not one that agrees to a
@@ -652,7 +667,7 @@ mod tests {
     fn a_plan_survives_being_reduced_to_its_arguments() {
         let seen = quarry(1_000.0, DVec3::Y * 1.0e-4);
         let chaser = pursuer();
-        let plan = approach(&chaser, STANDOFF, &seen, 120.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&chaser, STANDOFF, Arrival::Direct, &seen, 120.0, Drive::DEFAULT).expect("a plan");
         assert_eq!(plan.recipe().solve(chaser.attitude), plan);
     }
 
@@ -660,13 +675,13 @@ mod tests {
     #[test]
     fn a_finished_or_misaddressed_plan_is_replanned() {
         let seen = quarry(1_000.0, DVec3::ZERO);
-        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         let done = plan.since_t + plan.cruise.duration_s() + 1.0;
-        assert!(wants_replan(&Motive::Rendezvous(plan.clone()), &seen, STANDOFF, STANDOFF * REPLAN_FRACTION, done));
+        assert!(wants_replan(&Motive::Rendezvous(plan.clone()), &seen, STANDOFF, STANDOFF * REPLAN_FRACTION, &Arrival::Direct, done));
 
         let elsewhere = Sighting { target: ShipId(9), ..seen };
-        assert!(wants_replan(&Motive::Rendezvous(plan), &elsewhere, STANDOFF, STANDOFF * REPLAN_FRACTION, 0.0));
-        assert!(wants_replan(&Motive::Drifting { from_ly: DVec3::ZERO, since_t: 0.0 }, &seen, STANDOFF, STANDOFF * REPLAN_FRACTION, 0.0));
+        assert!(wants_replan(&Motive::Rendezvous(plan), &elsewhere, STANDOFF, STANDOFF * REPLAN_FRACTION, &Arrival::Direct, 0.0));
+        assert!(wants_replan(&Motive::Drifting { from_ly: DVec3::ZERO, since_t: 0.0 }, &seen, STANDOFF, STANDOFF * REPLAN_FRACTION, &Arrival::Direct, 0.0));
     }
 
     /// The standoff is set by both hulls, so a big ship is given room by a small one and not
@@ -683,7 +698,7 @@ mod tests {
     fn a_pursuer_already_alongside_is_refused_a_plan() {
         let seen = quarry(STANDOFF * 1.0e-3, DVec3::ZERO);
         assert_eq!(
-            approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT),
+            approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT),
             Err(Refused::AlreadyThere),
         );
     }
@@ -693,7 +708,7 @@ mod tests {
     #[test]
     fn a_pursuer_inside_its_standoff_backs_off_to_it() {
         let seen = quarry(1.0, DVec3::ZERO);
-        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         let (at, _) = plan.state_at(plan.since_t + world_duration(&plan));
         let gap_m = at.distance(seen.position_ly) * M_PER_LY;
         assert!((gap_m - STANDOFF).abs() < 1.0, "ended {gap_m} m off, wanted {STANDOFF}");
@@ -724,11 +739,11 @@ mod tests {
     #[test]
     fn a_plan_for_another_standoff_is_replanned() {
         let seen = quarry(1_000.0, DVec3::ZERO);
-        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         let motive = Motive::Rendezvous(plan);
-        assert!(!wants_replan(&motive, &seen, STANDOFF, STANDOFF * REPLAN_FRACTION, 0.0));
+        assert!(!wants_replan(&motive, &seen, STANDOFF, STANDOFF * REPLAN_FRACTION, &Arrival::Direct, 0.0));
         let close = Closeness::Intimate.standoff_m(500.0, 500.0);
-        assert!(wants_replan(&motive, &seen, close, Closeness::Intimate.replan_m(close), 0.0));
+        assert!(wants_replan(&motive, &seen, close, Closeness::Intimate.replan_m(close), &Arrival::Direct, 0.0));
     }
 
     /// The deadband. A craft on station holds until it has genuinely wandered, or a pair would
@@ -763,7 +778,7 @@ mod tests {
         for beta in [0.5, 0.9, 0.99, 0.999, 0.9999] {
             let running = DVec3::Y * beta;
             let seen = quarry(1_000.0, running);
-            let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT)
+            let plan = approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT)
                 .unwrap_or_else(|why| panic!("{beta}c was refused: {why:?}"));
 
             // Flown to the end, in world time.
@@ -792,9 +807,9 @@ mod tests {
     #[test]
     fn only_a_quarry_at_c_has_no_frame_to_match() {
         let seen = quarry(1_000.0, DVec3::Y * 0.9999);
-        assert!(approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).is_ok());
+        assert!(approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT).is_ok());
         let past = quarry(1_000.0, DVec3::Y * 1.5);
-        assert_eq!(approach(&pursuer(), STANDOFF, &past, 0.0, Drive::DEFAULT), Err(Refused::TooFast));
+        assert_eq!(approach(&pursuer(), STANDOFF, Arrival::Direct, &past, 0.0, Drive::DEFAULT), Err(Refused::TooFast));
     }
 
     /// The world clock and the frame's are inverses of each other, which is what everything
@@ -803,7 +818,7 @@ mod tests {
     fn the_two_clocks_invert_each_other() {
         let running = DVec3::new(0.0, 0.8, -0.2);
         let seen = quarry(1_000.0, running);
-        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         let gamma = boost::gamma_of(running);
         for step in 0..12 {
             let elapsed = world_duration(&plan) * step as f64 / 11.0;
@@ -823,7 +838,7 @@ mod tests {
     fn a_slow_chase_is_the_answer_the_old_arithmetic_gave() {
         let creeping = DVec3::Y * 1.0e-5;
         let seen = quarry(1_000.0, creeping);
-        let plan = approach(&pursuer(), STANDOFF, &seen, 0.0, Drive::DEFAULT).expect("a plan");
+        let plan = approach(&pursuer(), STANDOFF, Arrival::Direct, &seen, 0.0, Drive::DEFAULT).expect("a plan");
         // The frame's clock and the world's run together to within a part in 1e10.
         let elapsed = world_duration(&plan);
         assert!((plan.frame_time_at(elapsed) - elapsed).abs() < elapsed * 1.0e-9);

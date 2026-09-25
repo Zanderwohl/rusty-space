@@ -10,9 +10,13 @@ only the order.
 - **What can I start?** `python3 tools/dag.py lightcone/docs/plans/forms-and-fields.md ready` lists
   every task whose needs are done. It also warns when a task would touch a path an active task is
   touching.
-- **Claim a task** by changing its status line to `- status: active <your branch>`, in its own
-  commit, before starting work.
-- **Finish it** by changing the line to `- status: done <PR or commit>` in the same PR as the work.
+- **Claims live on `master`.** Whoever hands a task out changes its status line to
+  `- status: active <who>` and pushes that one commit straight to `master` before the work starts,
+  so `ready` on `master` never offers it twice. A claim on a branch is invisible until it merges.
+  The agent doing the task does not claim it again.
+- **Finish it** by merging `master` into your branch, then changing the line to
+  `- status: done <PR or commit>` in the same PR as the work. Merging first puts the claim in your
+  branch's history, so your one-line change merges cleanly.
 - **Edit only your task's block.** Every block is separated from the next by blank lines and its
   status sits on a line of its own, so two agents finishing two tasks change lines git sees as far
   apart and the merge is clean. Do not reflow, reorder or renumber anything.
@@ -77,6 +81,7 @@ graph LR
   F8["F8 Refit rounds"]
   F9["F9 The switch from loadout to form"]
   F10["F10 Solar from the shadow"]
+  F11["F11 Mirrored parts count every copy"]
   S1["S1 Refits with forms, end to end"]
   S2["S2 Presets"]
   H1["H1 The field's account"]
@@ -131,6 +136,8 @@ graph LR
   F7 --> F9
   F8 --> F9
   F9 --> F10
+  F2 --> F11
+  F4 --> F11
   K3 --> S1
   F7 --> S1
   F9 --> S1
@@ -250,16 +257,16 @@ graph LR
 
 ### F2 · Placement
 
-- status: todo
+- status: done #72
 - needs: F1
 - touches: `crates/lc-world/src/form/place.rs`
 - read: 29 §Placement is relative
 - deliver: every part's transform in the ship's frame, from the tree: attached (the anchor ray's last exit from the parent's surface, twist, tilt, standoff) and enclosing (centered on the parent), with mirrored subtrees.
-- done when: an attached child touches its parent at the anchor for every primitive pair, a child moves out with its parent when the parent grows, and a torus's child hangs off the rim.
+- done when: an attached child touches its parent at the anchor for every primitive pair (a torus child, whose foot is the center of its hole, lies tangent to the anchor's plane), a child moves out with its parent when the parent grows, and a torus's child hangs off the rim.
 
 ### F3 · Distance field
 
-- status: todo
+- status: done #76
 - needs: F2
 - touches: `crates/lc-world/src/form/sdf.rs`
 - read: 29 §Spars conform, §What the server computes
@@ -268,27 +275,27 @@ graph LR
 
 ### F4 · Capacities and mass
 
-- status: todo
+- status: done #71
 - needs: F1, K2
-- touches: `crates/lc-world/src/form/capacity.rs`
+- touches: `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/fitting.rs`
 - read: 29 §Kinds, §Hull structure follows area
 - deliver: capacities per kind from volume at the densities, dry mass from volume and mass fraction plus structure over each part's own area, a spar charged as its uncut primitive, and the mass-energy of adding or removing any part.
 - done when: a form with 19's starting volumes has 19's starting capacities to a part in 10⁹.
 
 ### F5 · Starting form and presets
 
-- status: todo
+- status: done #77
 - needs: F2, F4
-- touches: `crates/lc-world/src/form/presets.rs`
+- touches: `crates/lc-world/src/form/presets.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/form/place.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §The starting form, §Your own presets
 - deliver: `Form::starting()`, the Plate, Spindle and Cluster layouts, and applying any preset as a **layout** (this ship's volumes in the preset's arrangement, by share of each kind) or as a **design** (exactly). `hull_areal_density` anchored in `Balance::DEFAULT` so the starting form weighs what 19's starting ship does.
 - done when: a layout keeps every kind's total volume, and a design reproduces the preset.
 
 ### F6 · Form grid
 
-- status: todo
+- status: done #84
 - needs: F3
-- touches: `crates/lc-world/src/form/grid.rs`
+- touches: `crates/lc-world/src/form/grid.rs`, `crates/lc-world/src/form/sdf.rs`, `crates/lc-world/src/form.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §What the server computes from a form
 - deliver: the voxel grid at `FORM_GRID`, the shadow table over 162 directions with interpolation, broadside and its roll, the envelope (offset, area, volume), moments of inertia, extent.
 - done when: a one-ellipsoid form reproduces 20's analytic `A(ŝ)` to within the grid's resolution, and a stack of plates shades itself.
@@ -304,9 +311,9 @@ graph LR
 
 ### F8 · Refit rounds
 
-- status: todo
+- status: done #75
 - needs: F4
-- touches: `crates/lc-world/src/refit.rs`
+- touches: `crates/lc-world/src/refit.rs`, `crates/lc-world/src/refit/rounds.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §Refits
 - deliver: the planner over forms: diff two forms into dismantle, move and build steps per part (a reshape is a dismantle and a build), drones last and first, the energy check, venting of what storage cannot hold, timing from drone power at each step's start, data's work factor, cancel. Lives beside the old planner until F9 removes it.
 - done when: a round that cannot pay for its builds is refused; a round that overflows storage reports the vent and the step that frees it; cancel keeps finished steps and reverses the rest.
@@ -328,6 +335,15 @@ graph LR
 - read: 29 §What the server computes, 20 §Attitude
 - deliver: collection reads the shadow table; the idle attitude turns the largest shadow to the star; `solar_gain` re-anchored on the starting form; 20's tables recomputed.
 - done when: 20's anchor holds for the starting form to 1%, and a plate collects more than a spindle of the same volume broadside.
+
+### F11 · Mirrored parts count every copy
+
+- status: done #78
+- needs: F2, F4
+- touches: `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/form/place.rs`, `lightcone/docs/29-ship-form.md`
+- read: 29 §Placement is relative, §Kinds, §Refits, §Hull structure follows area
+- deliver: `volume_m3` is per copy. `Form::copies`, valid or not; capacities, dry mass and the areal density's solve count every copy; `Transfer::of` takes a count of copies. 29 prices a mirror as a build or dismantle of the copy, not a move. F8's planner adopts it.
+- done when: a mirrored subtree holds, weighs and costs what the same parts built out by hand do.
 
 ## S: server
 
@@ -353,7 +369,7 @@ graph LR
 
 ### H1 · The field's account
 
-- status: todo
+- status: done #69
 - needs: K2
 - touches: `crates/lc-world/src/field.rs`
 - read: 30 §The heat account, §Conversion, §Clear and Black
@@ -418,7 +434,7 @@ graph LR
 
 ### E1 · Beam and courtesy math
 
-- status: todo
+- status: done #70
 - needs: K2
 - touches: `crates/lc-world/src/signal.rs`, `crates/lc-world/src/emit.rs`, `crates/lc-world/src/courtesy.rs`
 - read: 31 §Spread, §What arrives, §Courtesy
@@ -454,9 +470,9 @@ graph LR
 
 ### E5 · Courteous maneuvering
 
-- status: todo
+- status: done #73
 - needs: E1, K3
-- touches: `crates/lc-world/src/pursuit.rs`, `crates/lc-world/src/escort.rs`, `crates/lc-world/src/consort.rs`, `crates/lc-world/src/courtesy.rs`, `crates/lc-server/src/chase.rs`
+- touches: `crates/lc-world/src/pursuit.rs`, `crates/lc-world/src/escort.rs`, `crates/lc-world/src/consort.rs`, `crates/lc-world/src/courtesy.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/fitting.rs`, `crates/lc-server/src/persist.rs` (the approach is saved), `crates/lc-server/src/director.rs` (a staged chase states its approach)
 - read: 31 §Maneuvering near others, 08 §Intercept
 - deliver: station-keeping legs as a `Cruise` at `rcs_accel_g`; abeam stations; ingress points at the courtesy radius; flotilla azimuths; `approach` on `Intercept`, Courteous by default. Needs no heat: it keeps to the courtesy limit whether or not anything yet burns from it.
 - done when: a courteous approach and escort never exceed the courtesy flux on the quarry at any instant, a direct one does, and three followers of one leader take three azimuths with none in another's cone.
@@ -465,18 +481,18 @@ graph LR
 
 ### R1 · Placeholder parts
 
-- status: todo
+- status: done #82
 - needs: F2, F5
-- touches: `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`
+- touches: `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/resolved.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §Temporary assets
 - deliver: each part as a Bevy primitive at its solved transform, a flat color per kind, the Mind as a small cube; `--form <preset>` draws the player's ship as that preset from a fixture, with no server involved.
 - done when: `--form cluster --shot` photographs a cluster, and the ovoid is only drawn for craft with no form.
 
 ### R2 · Mesher, in a void
 
-- status: todo
+- status: done #85
 - needs: F3
-- touches: `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/examples/`
+- touches: `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/examples/`, `crates/lc-client/src/lib.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §From distance field to mesh
 - deliver: surface nets over F3's field at a resolution set by pixels on screen; smooth, faceted and blocky finishes; meshing on the async pool, cached by the form's hash; an example that meshes fixture forms, spars conforming included, and photographs them.
 - done when: every primitive and a spar saddle and strap mesh without holes at three resolutions, and a remesh never blocks a frame.
@@ -520,12 +536,13 @@ graph LR
 
 ### R7 · Exhaust cone, in a void
 
-- status: todo
+- status: done #74
 - needs: E1
-- touches: `crates/em-render/src/exhaust_cone_material.rs`, `crates/lc-client/assets/shaders/exhaust_cone.wgsl`, `crates/em-render/src/plume_material.rs`
+- touches: `crates/em-render/src/exhaust_cone_material.rs`, `crates/lc-client/assets/shaders/exhaust_cone.wgsl`, `crates/lc-client/assets/shaders/aperture_glow.wgsl`, `crates/lc-client/examples/cone_void.rs`, `crates/lc-world/src/emit.rs`, `lightcone/images/cone-*.jpg`
 - read: 32 §The exhaust cone
-- deliver: the cone shaded in closed form per pixel from the flux at the ray's closest approach to the axis, one draw, precise at 27 000 km; the aperture glow at `F c` over its area.
-- done when: photographed from beside, behind and inside the cone, at 27 km and at 27 000 km.
+- deliver: the cone shaded in closed form per pixel from the flux at the ray's closest approach to the axis, one draw, precise at 26 000 km; the aperture glow at `F c` over its area.
+- done when: photographed from beside, behind and inside the cone, at 26 km and at 26 000 km.
+- note: left for R12, which wires the cone in: move `HAZARD` out of `examples/cone_void.rs` into `lc-client`, and retire `crates/em-render/src/plume_material.rs` and `crates/lc-client/assets/shaders/plume.wgsl` once `plume.rs` stops drawing the reaction drive. The face's temperature is `lc_world::emit::aperture_temperature_k`.
 
 ### R8 · Truss and plating
 
