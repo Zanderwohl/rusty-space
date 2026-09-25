@@ -184,14 +184,15 @@ pub fn pursuit(
         true => "closing on",
         false => "alongside",
     };
-    let how = match pursuit.closeness {
+    let near_or_far = match pursuit.closeness {
         lc_proto::Closeness::Company => "in company",
         lc_proto::Closeness::Intimate => "close in",
     };
-    let how = match pursuit.approach {
-        lc_proto::Approach::Courteous => format!("{how}, courteous"),
-        lc_proto::Approach::Direct => format!("{how}, direct"),
+    let manner = match pursuit.approach {
+        lc_proto::Approach::Courteous => "courteous",
+        lc_proto::Approach::Direct => "direct",
     };
+    let how = format!("{near_or_far}, {manner}");
     let Some(quarry) = quarry else {
         return format!("{doing} ship {} — {how}", pursuit.quarry.0);
     };
