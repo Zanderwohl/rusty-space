@@ -490,7 +490,7 @@ graph LR
 
 ### R2 · Mesher, in a void
 
-- status: done PRNUM
+- status: done #85
 - needs: F3
 - touches: `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/examples/`, `crates/lc-client/src/lib.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §From distance field to mesh
