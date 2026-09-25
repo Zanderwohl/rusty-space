@@ -336,7 +336,7 @@ graph LR
 
 ### L5 · Browser socket closed
 
-- status: active claude/game-loop-optimization-71831f
+- status: done (this branch; compiles for wasm, not yet watched in a browser: needs T2's setup)
 - needs: —
 - touches: `crates/lc-client/src/link.rs`
 - read: 08
@@ -345,7 +345,7 @@ graph LR
 
 ### L6 · Scene left behind
 
-- status: todo
+- status: active claude/game-loop-optimization-71831f
 - needs: —
 - touches: `crates/lc-client/src/app.rs`, `crates/lc-client/src/resolved.rs`, `crates/lc-client/src/envelope.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/plume.rs`
 - read: 13
