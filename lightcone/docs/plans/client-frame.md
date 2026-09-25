@@ -213,7 +213,7 @@ graph LR
 
 ### U2 · A landed bake touches only its own
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: —
 - touches: `crates/lc-client/src/procedural.rs`
 - read: —
