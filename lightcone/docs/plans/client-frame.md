@@ -97,7 +97,7 @@ graph LR
 
 ### K1 · Knowledge revision
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: —
 - touches: `crates/lc-world/src/knowledge/mod.rs`
 - read: 25
@@ -106,7 +106,7 @@ graph LR
 
 ### K2 · Star index
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: —
 - touches: `crates/lc-client/src/session.rs`, `crates/lc-client/src/system_panel.rs`, `crates/lc-client/src/map_source.rs`
 - read: —
