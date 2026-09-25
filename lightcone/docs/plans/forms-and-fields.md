@@ -565,9 +565,9 @@ graph LR
 
 ### R9 · Drones at work
 
-- status: active card "Build R9: drones at work"
+- status: done #97
 - needs: R4, R5
-- touches: `crates/lc-client/src/drones.rs`
+- touches: `crates/lc-client/src/drones.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/assets/shaders/drones.wgsl`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/drones-*.jpg`
 - read: 32 §Drones
 - deliver: the drone count from drone volume; paths from the drone part's docks to the sliver's frontier, loaded home on a dismantle, swarming a moved part's joint.
 - done when: `--demo refit` shows drones only where a step is working.

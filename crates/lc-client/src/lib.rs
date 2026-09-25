@@ -26,6 +26,7 @@ pub mod construction;
 pub mod curve;
 pub mod demos;
 pub mod dev;
+pub mod drones;
 pub mod entry;
 pub mod envelope;
 pub mod faces;
