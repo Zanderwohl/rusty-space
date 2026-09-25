@@ -17,7 +17,7 @@ pub fn page(found: &Result<Detail, Missing>) -> Markup {
             @match found {
                 Err(missing) => p class="nothing" { (missing.said()) },
                 Ok(detail) => {
-                    header class="system" {
+                    header class="page-head" {
                         h1 {
                             @match &detail.star.catalog_name {
                                 Some(name) => (name),
@@ -51,7 +51,7 @@ pub fn title(found: &Result<Detail, Missing>) -> String {
 fn facts(id: u64, star: &Facts) -> Markup {
     const SUN_RADIUS_M: f64 = 6.957e8;
     html! {
-        dl class="star-facts" {
+        dl class="facts" {
             dt { "System" }
             dd { code { (id) } }
             dt { "Catalog" }

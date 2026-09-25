@@ -1,4 +1,5 @@
-//! The Lightcone administration site: accounts, levels and bans.
+//! The Lightcone administration site: accounts, levels and bans, and read-only views of the
+//! shard's systems and the CDN's contents.
 //!
 //! A second service over the broker's database, separate so an administration console shares
 //! no origin, process or dependency tree with the sign-in every player reaches. See
@@ -11,6 +12,7 @@
 pub mod assets;
 pub mod auth;
 pub mod catalog;
+pub mod cdn;
 pub mod config;
 pub mod detail;
 pub mod listing;
@@ -42,6 +44,7 @@ pub struct AppState {
     /// `None` runs the console without a Status section rather than refusing to start.
     pub shard_api: Option<Arc<str>>,
     pub shard_audience: Arc<str>,
+    pub cdn: Arc<cdn::Sources>,
     pub http: reqwest::Client,
 }
 
