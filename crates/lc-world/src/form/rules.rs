@@ -282,6 +282,38 @@ mod tests {
         assert_eq!(refused(&form), [FormError::EngineBlocked(PartId(2))]);
     }
 
+    /// A slab with an engine on its aft face and a long data pod beside it, reaching past the
+    /// engine's face. `beside` is the pod's anchor across the beam; the face is at y = 0.5 of it.
+    fn pod_beside_engine(beside: f64) -> Form {
+        let slab = Primitive::Slab { edges: DVec3::new(1.0, 6.0, 3.0), corner: 0.0 };
+        let bell = Primitive::Cylinder { length: 2.0 };
+        let pod = Primitive::Capsule { length: 4.0 };
+        Form {
+            parts: vec![
+                Part::mind(PartId(0), B.min_part_m3),
+                hang(1, Kind::Storage, slab, 1.9e7, 0, Mount::Enclosing),
+                hang(2, Kind::Engine, bell, 8.0e6, 1, on(DVec3::NEG_X, 0.0)),
+                hang(3, Kind::Drone, Primitive::Capsule { length: 1.0 }, 1.0e5, 1, on(DVec3::Z, -0.2)),
+                hang(4, Kind::Data, pod, 1.6e6, 1, on(DVec3::new(-1.0, beside, 0.0), 0.0)),
+            ],
+        }
+    }
+
+    /// The cone's edge: the pod reaches about a quarter of the engine's length past its face, its
+    /// near side 180 m off the axis where the cone's radius is 124 m, so only a cone narrower than
+    /// the half-space in front of the face lets it pass.
+    #[test]
+    fn a_part_beside_the_cone_does_not_block_it() {
+        let form = pod_beside_engine(4.5);
+        let Shape::Capsule { radius, length } = form.parts[4].shape(B.min_part_m3) else { unreachable!() };
+        let Shape::Cylinder { length: bell, .. } = form.parts[2].shape(B.min_part_m3) else { unreachable!() };
+        assert!(length + 2.0 * radius > bell, "the pod reaches past the face");
+        if let Err(faults) = check(&form, &B) {
+            panic!("{faults:?}");
+        }
+        assert_eq!(refused(&pod_beside_engine(1.2)), [FormError::EngineBlocked(PartId(2))]);
+    }
+
     fn with_bay(anchor: DVec3) -> Form {
         let mut form = Form::starting();
         form.parts.push(hang(6, Kind::Bay, Primitive::Cylinder { length: 1.0 }, 2.0e5, 1, on(anchor, -0.3)));
@@ -295,6 +327,22 @@ mod tests {
         let mut form = with_bay(port);
         form.parts.push(hang(7, Kind::Data, Primitive::Capsule { length: 0.5 }, 5.0e4, 6, on(DVec3::X, 0.0)));
         assert_eq!(refused(&form), [FormError::BayBlocked(PartId(6))]);
+    }
+
+    /// The mouth is cleared out to its width and no further. A ball on the bay's axis, floating
+    /// and so detached, blocks it inside twice the face's radius and not beyond.
+    #[test]
+    fn a_bays_mouth_is_cleared_to_its_width() {
+        let ball = |gap_m: f64| {
+            let mut form = with_bay(DVec3::Y);
+            let r: f64 = 10.0;
+            let volume = 4.0 / 3.0 * std::f64::consts::PI * r.powi(3);
+            form.parts.push(hang(7, Kind::Data, Primitive::Ellipsoid { axes: DVec3::ONE }, volume, 6, on(DVec3::X, gap_m / r)));
+            form
+        };
+        let Shape::Cylinder { radius, .. } = with_bay(DVec3::Y).parts[6].shape(B.min_part_m3) else { unreachable!() };
+        assert_eq!(refused(&ball(radius)), [FormError::BayBlocked(PartId(6)), FormError::Detached(PartId(7))]);
+        assert_eq!(refused(&ball(3.0 * radius)), [FormError::Detached(PartId(7))]);
     }
 
     #[test]
@@ -356,8 +404,10 @@ mod tests {
         let mut form = Form::starting();
         part_mut(&mut form, 3).volume_m3 = 0.6 * B.min_drone_m3;
         assert_eq!(sizes(&form, &B), [FormError::TooFewDrones]);
+        assert_eq!(refused(&form), [FormError::TooFewDrones]);
         part_mut(&mut form, 3).placement.as_mut().unwrap().mirror = true;
         assert_eq!(sizes(&form, &B), []);
+        assert!(check(&form, &B).is_ok());
     }
 
     #[test]

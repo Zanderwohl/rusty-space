@@ -266,8 +266,8 @@ A target that breaks one is refused, naming the part.
 - **A bay's mouth must be clear** out to its own width.
 - **Every attached part touches its parent**, and every enclosing part contains its parent.
 - **The envelope's extent stays inside `LENGTH_RANGE_M`.**
-- **Drones stay at or above `min_drone_m3`**, every copy counted, and every part at or above
-  `min_part_m3`.
+- **Every part stays at or above `min_part_m3`**, and drones at or above `min_drone_m3`, every copy
+  counted.
 
 The rules are `form::rules::check`, which the server and the editor both call. It returns **every**
 fault, in the order above and by part id within a rule, so the editor can mark each part; the server
@@ -279,7 +279,8 @@ client agree to the bit, and to its resolution, **half a cell's diagonal**:
 
 - **An engine's or a bay's open face** is where its axis leaves it: a frustum's wide end, as 31 makes
   its aperture, and every other primitive's +x end, away from the foot it hangs by. A torus opens
-  through its hole.
+  through its hole. Its radius is the disk inscribed in that end: the lesser cross semi-axis of an
+  ellipsoid, half the lesser end edge of a slab, so a slab's corners reach outside it.
 - **The cone** widens at the half-angle from the face's rim, not from its center, since the exhaust
   leaves the whole aperture. A filled cell in it that lies inside any other part blocks the engine,
   the engine's own mirrored copy included. Every filled cell is tested rather than rays marched
