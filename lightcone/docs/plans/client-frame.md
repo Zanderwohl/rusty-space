@@ -446,12 +446,12 @@ The browser build (`tools/build-wasm.sh`, `wasm-release` at `opt-level = "s"`, `
 Measured differently from the baseline: the window opened on the laptop's Retina display
 (2560×1440 physical) and the machine was busy, so main-world CPU swung by more than a millisecond
 between runs of the same binary. Only the clustering systems' own time is steady enough to read.
-Four traced runs of each binary, alternating, scene A:
+Three traced runs of each binary, alternating, scene A; every span with "cluster" in its name:
 
-| | clustering systems, ms per frame |
+| | clustering, ms per frame |
 |---|---|
-| before (`0355b46b`) | 1.15, 2.12, 2.20, (and 0.93 in the quietest run) |
-| after | 0.36, 0.65, 0.57, 0.32 |
+| before (`0355b46b`) | 1.15, 2.12, 2.20 |
+| after | 0.36, 0.65, 0.57 |
 
 About 70% less every time, and all of it render-world CPU, which in the browser is on the one
 thread. Build both binaries from one checkout by swapping the changed files: two checkouts sharing
