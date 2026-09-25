@@ -10,7 +10,7 @@ natively `linux/amd64`. Ports 3000–3999 are this project's; 3000 belongs to an
 |---|---|---|
 | `lightcone-proxy` | 80, 443 | TLS, and the only thing that should be reached from a browser |
 | `lightcone-web` | 3100 | the site |
-| `lightcone-cdn` | 3101 | game builds |
+| `lightcone-cdn` | 3101, 3103 | game builds; 3103 lists them for the console and is **never published** |
 | `lightcone-db` | 3102 | the site's PostgreSQL |
 | `lightcone-identity` | 3200 | the identity broker |
 | `lightcone-admin` | 3300 | the administration console |
@@ -573,6 +573,31 @@ nowhere else. `LC_ADMIN_SHARD_AUDIENCE` must match the shard's `--audience` and 
 broker's `LC_IDENTITY_AUDIENCES`, or no ticket can be minted for it and every card reads "the
 shard did not answer". The shard refuses `--admin-bind` without both `--db` and `--jwks`
 rather than listening and turning every request away.
+
+For the CDN page, the console reads three things, each optional — one missing leaves its rows
+unchecked and says so:
+
+| console variable | value | the other end |
+|---|---|---|
+| `LC_ADMIN_CDN_LIST` | `http://lightcone-cdn:3103` | the CDN's listing port |
+| `LC_ADMIN_CDN_LIST_PASSWORD` | a password | `-e CDN_LIST_HASH=$(caddy hash-password)` of it on `lightcone-cdn` |
+| `LC_ADMIN_SITE_API` | `http://lightcone-web:3100` | the site |
+| `LC_ADMIN_RELEASE_READ_TOKEN` | a token | `RELEASE_READ_TOKEN` on `lightcone-web`, **not** `RELEASE_TOKEN`: this one lists and cannot promote |
+| `LC_ADMIN_BOOK_CATALOG` | `/srv/books.toml` | `-v <repo>/crates/lc-client/assets/books/books.toml:/srv/books.toml:ro` |
+
+**Port 3103 is never published and never proxied.** It is the one port that lists what the CDN
+holds, including builds nobody released; the public side answers a directory with a 404. Docker's
+published ports skip the host firewall, so a `-p 3103:3103` added for debugging is the listing on
+the LAN. If it must be reached from the host, `-p 127.0.0.1:3103:3103`. Without `CDN_LIST_HASH`
+the port refuses everyone and the public side is unaffected.
+
+The CDN's Caddyfile is baked into its image, so changing it is a rebuild and a restart: seconds
+in which `/play` and the shard's sky fetch fail. Pick a quiet moment. Builds are in the volume
+and survive it. Afterwards, check the public side still does not list:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://cdn.lc.zanderlowry.com/game/   # must be 404
+```
 
 Then check the whole path rather than the container: `/users` signed out must be a 303 to the
 console's own `/signin`, and that must be a 303 to the broker carrying `return_to` — and the

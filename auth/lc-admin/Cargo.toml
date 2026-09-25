@@ -31,6 +31,9 @@ sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio", "tls-rustls", "postgres", "macros", "chrono", "uuid",
 ] }
 chrono = { version = "0.4", features = ["serde"] }
+percent-encoding = "2"
+# The shelf's catalog, `books.toml`.
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 # The stylesheet, compiled at boot rather than in `build.rs`. Unlike the broker's, this sheet
 # sits beside a compiled TypeScript bundle in the same `static/` tree, and a service that reads

@@ -24,6 +24,12 @@ pub struct Config {
     pub shard_api: Option<String>,
     /// Must also be on the broker's `LC_IDENTITY_AUDIENCES`, or no ticket can be minted.
     pub shard_audience: String,
+    /// The CDN's internal listing port, and its password. Both, or no CDN page.
+    pub cdn_list: Option<(String, String)>,
+    /// The site's internal address and its **read** token, which cannot promote or yank.
+    pub site: Option<(String, String)>,
+    /// The shelf's `books.toml`, mounted read-only.
+    pub book_catalog: Option<PathBuf>,
     pub static_dir: PathBuf,
     /// Off only where the console is reached over plain HTTP.
     pub secure_cookies: bool,
@@ -58,6 +64,9 @@ impl Config {
             session_key,
             shard_api: var("LC_ADMIN_SHARD_API").map(|u| u.trim_end_matches('/').to_owned()),
             shard_audience: var("LC_ADMIN_SHARD_AUDIENCE").unwrap_or_else(|| "shard-1".into()),
+            cdn_list: both("LC_ADMIN_CDN_LIST", "LC_ADMIN_CDN_LIST_PASSWORD"),
+            site: both("LC_ADMIN_SITE_API", "LC_ADMIN_RELEASE_READ_TOKEN"),
+            book_catalog: var("LC_ADMIN_BOOK_CATALOG").map(Into::into),
             static_dir: var("LC_ADMIN_STATIC_DIR")
                 .unwrap_or_else(|| "static".into())
                 .into(),
@@ -73,6 +82,12 @@ impl Config {
 
 fn var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// An address and its secret. Either alone is treated as neither, since neither works alone.
+fn both(address: &str, secret: &str) -> Option<(String, String)> {
+    let address = var(address)?.trim_end_matches('/').to_owned();
+    Some((address, var(secret)?))
 }
 
 fn required(name: &str) -> anyhow::Result<String> {
