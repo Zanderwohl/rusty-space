@@ -463,12 +463,65 @@ fn run_bakes(
         settle(&mut bakes.unsettled, image);
     }
     if !landed.is_empty() {
-        // Visiting every material marks it changed, which is what makes Bevy rebuild the bind
-        // groups that still hold a placeholder's view.
-        for _ in populations.iter_mut() {}
-        for _ in surfaces.iter_mut() {}
-        for _ in skies.iter_mut() {}
-        for _ in plumes.iter_mut() {}
+        // Marking a material changed is what makes Bevy rebuild a bind group that still holds a
+        // placeholder's view. Only those that bind what landed: every one re-prepared was a new
+        // uniform buffer and bind group, for every body, whenever any bake landed.
+        let landed: Vec<AssetId<Image>> = landed.iter().map(Handle::id).collect();
+        touch(&mut populations, &landed);
+        touch(&mut surfaces, &landed);
+        touch(&mut skies, &landed);
+        touch(&mut plumes, &landed);
+    }
+}
+
+fn touch<M: Asset + Binds>(materials: &mut Assets<M>, landed: &[AssetId<Image>]) {
+    for id in bound(materials, landed) {
+        if let Some(mut material) = materials.get_mut(id) {
+            std::ops::DerefMut::deref_mut(&mut material);
+        }
+    }
+}
+
+fn bound<M: Asset + Binds>(materials: &Assets<M>, landed: &[AssetId<Image>]) -> Vec<AssetId<M>> {
+    materials
+        .iter()
+        .filter(|(_, material)| material.images().iter().any(|image| landed.contains(image)))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// The images a material binds. Each destructures its material whole, so a field added to one
+/// does not compile until it is said here whether it is an image.
+trait Binds {
+    fn images(&self) -> Vec<AssetId<Image>>;
+}
+
+impl Binds for BodySurfaceMaterial {
+    fn images(&self) -> Vec<AssetId<Image>> {
+        let Self { uniforms: _, pattern, color, weather_0, weather_1, weather_2, climate, land, ice, growth, sand, height } =
+            self;
+        [pattern, color, weather_0, weather_1, weather_2, climate, land, ice, growth, sand, height].map(Handle::id).to_vec()
+    }
+}
+
+impl Binds for PopulationMaterial {
+    fn images(&self) -> Vec<AssetId<Image>> {
+        let Self { uniforms: _, profile, grain } = self;
+        vec![profile.id(), grain.id()]
+    }
+}
+
+impl Binds for RelativisticStarfieldMaterial {
+    fn images(&self) -> Vec<AssetId<Image>> {
+        let Self { uniforms: _, band_lut, corona_filaments, corona_reach } = self;
+        vec![band_lut.id(), corona_filaments.id(), corona_reach.id()]
+    }
+}
+
+impl Binds for PlumeMaterial {
+    fn images(&self) -> Vec<AssetId<Image>> {
+        let Self { uniforms: _, churn } = self;
+        vec![churn.id()]
     }
 }
 
@@ -658,6 +711,21 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn a_landed_bake_touches_only_the_materials_that_bind_it() {
+        let mut images = Assets::<Image>::default();
+        let target = Target::new(Shape::Volume(2));
+        let (landed, other) = (images.add(placeholder(target)), images.add(placeholder(target)));
+        let mut plumes = Assets::<PlumeMaterial>::default();
+        let plume = |churn: &Handle<Image>| PlumeMaterial {
+            uniforms: em_render::plume_material::PlumeUniform::default(),
+            churn: churn.clone(),
+        };
+        let binding = plumes.add(plume(&landed));
+        plumes.add(plume(&other));
+        assert_eq!(bound(&plumes, &[landed.id()]), [binding.id()]);
+    }
 
     fn asked(target: Target) -> Request {
         Request {
