@@ -753,7 +753,9 @@ mod tests {
         let build = plan.steps()[1];
         let mid = plan.at(100.0 + build.begins_s + 0.25 * build.duration_s);
         assert_eq!(mid.finished, 1);
-        assert_eq!(mid.current, Some((1, 0.25)));
+        let (index, fraction) = mid.current.unwrap();
+        assert_eq!(index, 1);
+        assert!(close(fraction, 0.25));
         let after_first = stored + plan.steps()[0].stored_j;
         assert!(close(mid.stored_j, after_first - 0.25 * build.gross_j));
         assert!(close(mid.in_hand_kg * C2, 0.25 * build.gross_j));
