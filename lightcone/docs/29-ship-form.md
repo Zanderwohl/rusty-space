@@ -214,10 +214,13 @@ complete.
 | **broadside** | the direction of largest shadow, and the roll about the nose that carries +z onto the direction across the nose with the largest shadow | the idle attitude of [20-solar-power.md](20-solar-power.md) |
 | **envelope** | the union's distance field offset by `envelope_margin` and its two nearest parts blended over `ENVELOPE_BLEND = 0.5` of the cube root of hull volume; area and volume by marching tetrahedra | the field's area and volume, [30-the-field.md](30-the-field.md) |
 | **inertia tensor** | the filled cells, weighted by each part's density, as the full symmetric tensor per kilogram, scaled to the ship's whole mass: a form is symmetric only port to starboard, so the xz product is generally not zero | slew rate |
-| **extent** | the longest side of the envelope's box along the ship's axes | `length_m`: the camera, the zoom limits, `Presence` |
+| **extent** | the envelope's longest dimension: its widest width along the axes and the table's 81 directions, within about 1.2% of its diameter | `length_m`: the camera, the zoom limits, `Presence` |
 
-The grid is `form::grid::FormGrid`. Its box is the field's bounds padded by the envelope's reach,
-so the hull itself spans a little under 64 cells. Four choices the table leaves open:
+The grid is `form::grid::FormGrid`. Its box is the field's bounds padded by half as much again as
+the envelope can reach, so the hull spans about 51 of the 64 cells for the starting form and every
+preset, and about 57 for a form of one part, which blends with nothing and reaches only its offset.
+The pad doubles until the envelope closes inside the grid, and a form whose envelope never does is
+refused as `Extent`; no preset needs a second pass. Four choices the table leaves open:
 
 - **The envelope offsets a truer distance than the field.** Off an ellipsoid the field is a bound
   that falls short by up to the ratio of its axes, so an offset of it would put the starting hull's
@@ -228,11 +231,12 @@ so the hull itself spans a little under 64 cells. Four choices the table leaves 
   would raise a blister over its encloser. It adds at most a quarter of its radius anywhere.
 - **A shadow is cast by the cells either side of the surface**, each cut by the plane its field's
   gradient gives. Whole cubes stand out past the rim by up to half a diagonal, which on a hull a few
-  cells thick is a tenth of its shadow. A one-ellipsoid form is within 0.8 of a cell of rim of `A(ŝ)`
+  cells thick is a tenth of its shadow. A one-ellipsoid form is within 0.9 of a cell of rim of `A(ŝ)`
   in every direction. Broadside and roll are fitted, not climbed to: a projection is noisy to a few
   parts in a thousand, and the shadow is flatter than that near its peak.
 - **The cells carry contents only.** Structure, stored energy and heat are taken to lie where the
-  contents do, so the tensor is kept per kilogram and scaled by whatever the ship weighs.
+  contents do, so the tensor is kept per kilogram and scaled by whatever the ship weighs. A cell's
+  density is its nearest part's by the envelope's truer distance, which the same pass has computed.
 
 Building one takes about 20 ms for the starting form and 60 ms for the Cluster with `lc-world`
 optimized, and half a second to two seconds unoptimized in the dev profile.
