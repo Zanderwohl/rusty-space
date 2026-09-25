@@ -73,6 +73,8 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`, `corona`. Brings its own shard |
 | `--console <line>` | type a line at the console once the shard has welcomed the client, with the console open. With `--local` the shard is directing, so every command is available |
 | `--demo-cam <yaw:pitch:booms>` | pin the camera for the run, so two shots of a scene are the same shot |
+| `--demo-cam-at <x:y:z:m>` | orbit a point of the ship's frame, meters, from `m` meters, past the boom's stops, which are the whole ship's. Aim with `--demo-cam` |
+| `--demo refit` / `--refit-at <f>` / `--refit-from <f>` | a staged refit on the player's ship, frozen at a fraction of its round or running from one. With `--form default*k`, `k` times larger. The shot waits for its meshes |
 | `--beauty` / `--beauty-kind <kind>` | turn on the beauty shots, and hold them on one kind of subject (`whole`, `horizon`, `nadir`, `approach`, `destination`, `survey`, `rings`, `ringside`, `neighbor`, `star`, `field`). The first is taken a second in, so `--frames 240` photographs it |
 | `--beauty-dir <dir>` / `--beauty-period <s>` | save every beauty shot into `dir` as it is taken, numbered and named by kind, and take one every `s` seconds instead of ten. One run is then the whole series; `--shot` still ends it |
 | `--stare` / `--sweep` | set the telescope to stare at the nearest star, or to sweep the sky ahead |

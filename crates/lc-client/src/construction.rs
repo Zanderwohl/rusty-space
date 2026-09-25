@@ -10,8 +10,7 @@
 //!
 //! On the placeholders a working part is drawn solid at its volume at `t`, inside a cage at the
 //! sliver's outer size that thickens as the truss goes up and thins as the scaffold comes down.
-//! Point-level bands wait for R8, which meshes the truss between [`Working::inner`] and
-//! [`Working::outer`] and reads [`Working::look`] with [`Working::across`] for each point.
+//! On the hull meshes (`crate::refit_hull`) each point reads its own bands, through [`Sweep`].
 //!
 //! `--demo refit` is a client fixture beside `--form`, not a `Scenario`: it needs only the
 //! player's own ship. Building a [`Refit`] from a round in the game, and [`Frame::canceled`] on a
@@ -94,6 +93,26 @@ impl Look {
     pub const FINISHED: Look = Look { truss: 1.0, plating: 1.0, fitted: 1.0, scaffold: 0.0 };
 }
 
+/// [`Working::look`] for one copy in meters, for a shader: at `x` meters from the joint a band's
+/// share is `(front - x) / width`, clamped to 0..1, with `x` no farther than the span.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sweep {
+    pub joint: DVec3,
+    pub span_m: f64,
+    /// Truss, plating, fitting-out and scaffold down, in that order.
+    pub fronts_m: [f64; 4],
+    pub widths_m: [f64; 4],
+}
+
+impl Sweep {
+    pub fn look(&self, x_m: f64) -> Look {
+        let x = x_m.clamp(0.0, self.span_m);
+        let ramp = |b: usize| ((self.fronts_m[b] - x) / self.widths_m[b]).clamp(0.0, 1.0);
+        let truss = ramp(0);
+        Look { truss, plating: ramp(1), fitted: ramp(2), scaffold: truss * (1.0 - ramp(3)) }
+    }
+}
+
 /// The step under way.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Working {
@@ -110,6 +129,8 @@ pub struct Working {
     pub inner: Vec<Piece>,
     /// Where each copy meets its parent and how far its far edge is from there, meters.
     joints: Vec<(DVec3, f64)>,
+    /// For a move, every copy carried along with the moved part, itself included.
+    pub carried: Vec<(PartId, Side)>,
 }
 
 impl Working {
@@ -138,6 +159,26 @@ impl Working {
         (p.distance(joint) / span).clamp(0.0, 1.0)
     }
 
+    /// Copy `copy`'s bands in meters. `None` for a move, which builds nothing.
+    pub fn sweep(&self, copy: usize) -> Option<Sweep> {
+        let f = match self.change.phase() {
+            Phase::Build => self.fraction,
+            Phase::Dismantle => 1.0 - self.fraction,
+            Phase::Move => return None,
+        };
+        let (joint, span_m) = self.joints[copy];
+        // `d` of the way across is `span_m * d` meters, and the front covers the span in `TRAVEL`.
+        let k = span_m / TRAVEL;
+        let starts = [0.0, TRUSS, TRUSS + PLATING, TRUSS + PLATING + FITTING];
+        let widths = [TRUSS, PLATING, FITTING, SCAFFOLD];
+        Some(Sweep {
+            joint,
+            span_m,
+            fronts_m: starts.map(|s| (f - s) * k),
+            widths_m: widths.map(|w| w * k),
+        })
+    }
+
     /// Each layer averaged across the sliver: what a placeholder with one mesh per part draws.
     pub fn mean(&self) -> Look {
         let mut sum = Look::default();
@@ -158,6 +199,10 @@ impl Working {
 pub struct Frame {
     /// Every copy standing, at its volume then, a moved subtree partway along its path.
     pub pieces: Vec<Piece>,
+    /// What stands finished for the whole of the step: the form, less the working part or with it
+    /// at its smaller size, and less whatever a move carries. It may not place on its own, since
+    /// a part can hang from one the round has not built yet.
+    pub standing: Form,
     /// Steps finished.
     pub finished: usize,
     pub working: Option<Working>,
@@ -198,7 +243,7 @@ impl Frame {
             min_part_m3: balance.min_part_m3,
         };
         let Some((step, fraction)) = current else {
-            return Frame { pieces: stand.place(before), finished, working: None };
+            return Frame { pieces: stand.place(before), standing: before.clone(), finished, working: None };
         };
         let s = &plan.steps()[step];
         let after = applied(before, s.part, s.after);
@@ -206,6 +251,7 @@ impl Frame {
         let placed_after = stand.place(&after);
         let keys = |pieces: &[Piece]| pieces.iter().map(|p| (p.part, p.side)).collect::<BTreeSet<_>>();
 
+        let mut carried = Vec::new();
         let (pieces, outer, inner) = match s.change {
             Change::Grow | Change::Shrink => {
                 let from = part(before, s.part).expect("a resize has a part to resize");
@@ -237,15 +283,33 @@ impl Frame {
             Change::Move => {
                 let pieces = slid(before, &placed_before, &placed_after, s.part, fraction);
                 let moved = pieces.iter().filter(|p| p.part == s.part).copied().collect();
+                let subtree = subtree(before, s.part);
+                carried = pieces.iter().filter(|p| subtree.contains(&p.part)).map(|p| (p.part, p.side)).collect();
                 (pieces, moved, Vec::new())
             }
         };
         let joints = outer.iter().map(|p| joint(p, &after, before)).collect();
+        let standing = match s.change {
+            Change::Grow | Change::Add => before.clone(),
+            Change::Shrink | Change::Remove => after,
+            Change::Move => {
+                let gone: BTreeSet<PartId> = carried.iter().map(|&(id, _)| id).collect();
+                Form { parts: before.parts.iter().filter(|p| !gone.contains(&p.id)).copied().collect() }
+            }
+        };
         Frame {
             pieces,
+            standing,
             finished,
-            working: Some(Working { step, part: s.part, change: s.change, fraction, outer, inner, joints }),
+            working: Some(Working { step, part: s.part, change: s.change, fraction, outer, inner, joints, carried }),
         }
+    }
+
+    /// [`Frame::standing`]'s copies, as placed this frame.
+    pub fn standing_pieces(&self) -> Vec<Piece> {
+        let Some(w) = &self.working else { return self.pieces.clone() };
+        let busy = |p: &Piece| p.part == w.part || w.carried.contains(&(p.part, p.side));
+        self.pieces.iter().filter(|p| !busy(p)).chain(&w.inner).copied().collect()
     }
 
     pub fn piece(&self, part: PartId, side: Side) -> Option<&Piece> {
@@ -360,14 +424,12 @@ fn inverse(p: &Pose) -> Pose {
     Pose { position: -(r * p.position), rotation: r }
 }
 
-/// The moved part and everything hanging from it, carried rigidly along an arc from its old pose
-/// to its new one. Eased, so it leaves and arrives at rest.
-fn slid(before: &Form, placed_before: &[Piece], placed_after: &[Piece], moved: PartId, fraction: f64) -> Vec<Piece> {
-    let parent: BTreeMap<PartId, PartId> =
-        before.parts.iter().filter_map(|p| Some((p.id, p.placement?.parent))).collect();
-    let carried = |mut id: PartId| {
+/// `root` and every part hanging from it, however deep.
+fn subtree(form: &Form, root: PartId) -> BTreeSet<PartId> {
+    let parent: BTreeMap<PartId, PartId> = form.parts.iter().filter_map(|p| Some((p.id, p.placement?.parent))).collect();
+    let under = |mut id: PartId| {
         for _ in 0..=parent.len() {
-            if id == moved {
+            if id == root {
                 return true;
             }
             let Some(&up) = parent.get(&id) else { return false };
@@ -375,6 +437,14 @@ fn slid(before: &Form, placed_before: &[Piece], placed_after: &[Piece], moved: P
         }
         false
     };
+    form.parts.iter().map(|p| p.id).filter(|&id| under(id)).collect()
+}
+
+/// The moved part and everything hanging from it, carried rigidly along an arc from its old pose
+/// to its new one. Eased, so it leaves and arrives at rest.
+fn slid(before: &Form, placed_before: &[Piece], placed_after: &[Piece], moved: PartId, fraction: f64) -> Vec<Piece> {
+    let subtree = subtree(before, moved);
+    let carried = |id: PartId| subtree.contains(&id);
     let find = |pieces: &[Piece], side: Side| pieces.iter().find(|p| p.part == moved && p.side == side).map(|p| p.pose);
     let s = fraction * fraction * (3.0 - 2.0 * fraction);
     let path = |side: Side| -> Option<(Pose, Pose)> {
@@ -413,8 +483,15 @@ fn slid(before: &Form, placed_before: &[Piece], placed_after: &[Piece], moved: P
 /// needs. This stages one of each step instead: the data core taken apart, the deck moved aft,
 /// the hull grown by half, which is under way at the round's midpoint, and a mirrored pair of pods
 /// on spars built together.
-pub fn demo_round(balance: &Balance) -> Round {
-    let from = Form::starting();
+///
+/// `scale` makes every part but the Mind that many times larger, as `--form default*k` does, so a
+/// GSV can be photographed mid-refit.
+pub fn demo_round(balance: &Balance, scale: f64) -> Round {
+    let mut from = Form::starting();
+    let k3 = scale.powi(3);
+    for p in from.parts.iter_mut().filter(|p| p.placement.is_some()) {
+        p.volume_m3 *= k3;
+    }
     let mut target = from.clone();
     target.parts.retain(|p| p.id != PartId(5));
     for p in &mut target.parts {
@@ -440,14 +517,14 @@ pub fn demo_round(balance: &Balance) -> Round {
         id: PartId(6),
         kind: Kind::Spar(SparMode::Saddle),
         primitive: Primitive::Cylinder { length: 10.0 },
-        volume_m3: 3.0e4,
+        volume_m3: 3.0e4 * k3,
         placement: Some(placement(1, DVec3::new(0.3, 1.0, 0.0), -0.3, true)),
     });
     target.parts.push(Part {
         id: PartId(7),
         kind: Kind::Storage,
         primitive: Primitive::Ellipsoid { axes: DVec3::new(1.4, 1.0, 1.0) },
-        volume_m3: 3.0e5,
+        volume_m3: 3.0e5 * k3,
         placement: Some(placement(6, DVec3::X, -0.1, false)),
     });
     let stored_j = Capacities::of(&from, balance).storage_j;
@@ -463,8 +540,9 @@ pub const DEMO_WALL_S: f64 = 40.0;
 pub enum Clock {
     /// A fraction of the round, whatever the game's clock does.
     Frozen(f64),
-    /// The game's coordinate time, round and round.
-    Looping,
+    /// The game's coordinate time, round and round, starting this fraction in: a burst across a
+    /// boundary starts just before it.
+    Looping(f64),
 }
 
 /// The player's own ship mid-refit.
@@ -481,8 +559,8 @@ impl Refit {
         let (start, duration) = (self.plan.round().start_s, self.plan.duration_s());
         match self.clock {
             Clock::Frozen(f) => start + f.clamp(0.0, 1.0) * duration,
-            Clock::Looping if duration > 0.0 => start + (coordinate_s - start).rem_euclid(duration),
-            Clock::Looping => start,
+            Clock::Looping(from) if duration > 0.0 => start + (coordinate_s - start + from * duration).rem_euclid(duration),
+            Clock::Looping(_) => start,
         }
     }
 
@@ -500,7 +578,8 @@ pub fn adopt_demo(
 ) {
     let Some(clock) = dev.refit else { return };
     let balance = Balance::DEFAULT;
-    let round = demo_round(&balance);
+    let scale = dev.form.as_deref().and_then(crate::parts::fixture_scale).unwrap_or(1.0);
+    let round = demo_round(&balance, scale);
     let plan = match round.solve(&balance) {
         Ok(plan) => plan,
         Err(e) => {
@@ -515,10 +594,17 @@ pub fn adopt_demo(
             return;
         }
     }
-    if clock == Clock::Looping && !dev.rate_given {
+    // Where each step falls, for `--refit-at`.
+    for (i, s) in plan.steps().iter().enumerate() {
+        let of = |t: f64| t / plan.duration_s();
+        info!("refit step {i}: {:?} of {:?}, {:.3} to {:.3} of the round", s.change, s.part, of(s.begins_s), of(s.ends_s()));
+    }
+    if matches!(clock, Clock::Looping(_)) && !dev.rate_given {
         dev.actions.push(crate::action::Action::SetTimeRate(plan.duration_s() / (DEMO_WALL_S * crate::session::TIME_RATE)));
     }
     commands.insert_resource(Refit { plan, balance, clock });
+    // A photograph waits for the meshes from the start, not from when they are first asked for.
+    commands.insert_resource(crate::refit_hull::Unready(true));
 }
 
 #[cfg(test)]
@@ -528,7 +614,7 @@ mod tests {
     const B: Balance = Balance::DEFAULT;
 
     fn plan() -> Plan {
-        demo_round(&B).solve(&B).expect("the demo round solves")
+        demo_round(&B, 1.0).solve(&B).expect("the demo round solves")
     }
 
     fn start(plan: &Plan) -> f64 {
@@ -641,7 +727,7 @@ mod tests {
     fn a_frozen_clock_draws_the_same_frame_twice() {
         let refit = Refit { plan: plan(), balance: B, clock: Clock::Frozen(0.5) };
         assert_eq!(refit.frame(10.0), refit.frame(1.0e6));
-        let looping = Refit { clock: Clock::Looping, ..refit };
+        let looping = Refit { clock: Clock::Looping(0.3), ..refit };
         assert_eq!(looping.frame(123.0), looping.frame(123.0));
     }
 
@@ -714,7 +800,7 @@ mod tests {
     /// A part hanging from one not yet built still draws, from where the target will have it.
     #[test]
     fn a_part_whose_parent_is_not_built_yet_still_places() {
-        let mut round = demo_round(&B);
+        let mut round = demo_round(&B, 1.0);
         // The deck moves onto the new spar, which is built after it moves.
         let deck = round.target.parts.iter_mut().find(|p| p.id == PartId(4)).unwrap();
         deck.placement.as_mut().unwrap().parent = PartId(6);

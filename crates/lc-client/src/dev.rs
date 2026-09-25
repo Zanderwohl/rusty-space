@@ -86,6 +86,11 @@ pub struct DevEntry {
     /// have to be the same shot.
     pub map_camera: Option<(f64, f64, f64)>,
 
+    /// `--demo-cam-at x:y:z:m`: orbit this point of the ship's frame, meters, from this far,
+    /// unclamped. The boom's stops are the whole ship's, so without it nothing closer than half
+    /// a GSV can be photographed. Aim with `--demo-cam`.
+    pub camera_at: Option<(glam::DVec3, f64)>,
+
     /// Degrees to lift the ship out of the ecliptic, about the star, keeping its distance.
     ///
     /// Every station the interface offers is in the plane, and every population's pole is the
@@ -522,10 +527,15 @@ fn numbered(path: &str, index: u32) -> String {
 pub(crate) fn photograph(
     mut commands: Commands,
     dev: Res<DevEntry>,
+    unready: Option<Res<crate::refit_hull::Unready>>,
     mut frames: Local<u32>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(path) = &dev.screenshot else { return };
+    // Warm-up counts from when the meshes have landed, and a burst, once begun, is not held.
+    if *frames < dev.after_frames && unready.is_some_and(|u| u.0) {
+        return;
+    }
     *frames += 1;
     let burst = dev.burst.max(1);
     if (dev.after_frames..dev.after_frames + burst).contains(&*frames) {

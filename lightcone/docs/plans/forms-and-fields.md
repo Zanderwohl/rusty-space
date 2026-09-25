@@ -551,9 +551,9 @@ graph LR
 
 ### R8 · Truss and plating
 
-- status: active card "Build R8: truss and plating"
+- status: done #98
 - needs: R2, R3, R4
-- touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/assets/shaders/hull.wgsl`
+- touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/src/surface_nets.rs`, `crates/lc-client/src/truss.rs`, `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/examples/mesh_void.rs`, `crates/em-render/src/hull_material.rs`, `crates/lc-world/src/form/sdf.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`, `AGENTS.md`
 - read: 32 §A build step is a frontier
 - deliver: the truss lattice meshed in the sliver at each step's start, plating by the reveal mask, fitting-out and scaffold-down as bands sweeping from the attachment point, and dismantling in reverse.
 - done when: `--refit-at` photographs each phase on a starting ship and a GSV-sized fixture.
