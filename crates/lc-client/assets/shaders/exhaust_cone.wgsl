@@ -88,8 +88,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     //
     // **`v·m` cancels when the ray runs along the axis**, which is the view from inside and from
     // behind. There the minimum is far off the segment and its sign is noise. So it is only a
-    // candidate: the segment's two ends are always tried too, and since the angle is unimodal
-    // on the segment the smallest of the three is the minimum however wrong the third is.
+    // candidate, and the segment's two ends are always tried too. A `v·m` small enough to be
+    // noise puts `-q·m / v·m` far beyond a segment of order one, so the minimum there is an end;
+    // otherwise the candidate is sound. And a wrong candidate can only lose: the angle is
+    // unimodal on the segment, so nothing on it is below the true minimum.
     let q = f.xz;
     let v = -d.xz;
     let h = f.y;

@@ -108,8 +108,8 @@ pub struct ApertureGlowUniform {
     pub shape: Vec4,
     /// The camera in the proxy's own space, in aperture radii. `w` unused.
     pub eye_local: Vec4,
-    /// `(surface_reference, stops, overflow, _)`, as [`crate::plume_material::PlumeUniform::exposure`]
-    /// without the brightness, which is already in the colors.
+    /// `(surface_reference, stops, overflow, _)`: the lit surfaces' tone map, with the overflow
+    /// past the top of the window left as HDR value. The brightness is already in the colors.
     pub exposure: Vec4,
 }
 

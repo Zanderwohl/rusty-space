@@ -33,7 +33,7 @@ use em_spectra::{Band, BandMapping, PerBand, blackbody, presets};
 use glam::{DQuat, DVec3};
 use lc_world::courtesy::{cooking_flux_w_m2, drive_courtesy_radius_m};
 use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH};
-use lc_world::emit::rating_w;
+use lc_world::emit::{aperture_temperature_k, rating_w};
 use lc_world::fitting::{Balance, Loadout};
 
 /// `18-ui-style.md`'s hazard color.
@@ -52,7 +52,6 @@ const GLOW_STOPS: f64 = 4.0;
 const OVERFLOW_GAIN: f32 = 0.5;
 const STOPS: f32 = 5.0;
 
-const SIGMA: f64 = 5.670_374_419e-8;
 const SUN_RADIUS_M: f64 = 6.957e8;
 const SUN_K: f64 = 5772.0;
 const AU_M: f64 = 1.495_978_707e11;
@@ -123,8 +122,7 @@ impl Burn {
             courtesy_m: drive_courtesy_radius_m(&b, power_w),
             hot_w_m2: cooking_flux_w_m2(&b),
             aperture_m,
-            // `F c` over the face: all of the drive's power leaves through it.
-            face_k: (power_w / (SIGMA * face_m2)).powf(0.25),
+            face_k: aperture_temperature_k(power_w, face_m2),
         }
     }
 }

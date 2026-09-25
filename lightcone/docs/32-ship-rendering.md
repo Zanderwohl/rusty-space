@@ -263,9 +263,10 @@ inside, and for a selected ship. It uses the hazard color from [18-ui-style.md](
 palette, and is brightest where it would cook. The map draws the same cone as lines.
 
 The hazard color is 18's red-orange. The material takes both of its colors as uniforms, so it
-stays free of either product's palette. The aperture
-glow is a second material in `exhaust_cone_material` rather than a reshaped `plume_material`, so
-the game's reaction-drive plume is untouched until the switch to photon drives replaces it.
+stays free of either product's palette. The aperture glow is a second material in
+`exhaust_cone_material` rather than a reshaped `plume_material`, so the game's reaction-drive plume
+is untouched until the switch to photon drives replaces it. The starting drive's face, all of
+1.1 × 10²⁰ W through 100 m, is `lc_world::emit::aperture_temperature_k`: 7.0 × 10⁵ K.
 
 Photograph it in a void with `cargo run -p lc-client --example cone_void -- --view
 beside|behind|inside --length <m>`. Its flags are listed in the example's module doc.

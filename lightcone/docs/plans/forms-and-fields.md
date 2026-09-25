@@ -522,10 +522,11 @@ graph LR
 
 - status: done #74
 - needs: E1
-- touches: `crates/em-render/src/exhaust_cone_material.rs`, `crates/lc-client/assets/shaders/exhaust_cone.wgsl`, `crates/em-render/src/plume_material.rs`, `crates/lc-client/examples/cone_void.rs`, `crates/lc-client/assets/shaders/aperture_glow.wgsl`
+- touches: `crates/em-render/src/exhaust_cone_material.rs`, `crates/lc-client/assets/shaders/exhaust_cone.wgsl`, `crates/lc-client/assets/shaders/aperture_glow.wgsl`, `crates/lc-client/examples/cone_void.rs`, `crates/lc-world/src/emit.rs`, `lightcone/images/cone-*.jpg`
 - read: 32 §The exhaust cone
 - deliver: the cone shaded in closed form per pixel from the flux at the ray's closest approach to the axis, one draw, precise at 26 000 km; the aperture glow at `F c` over its area.
 - done when: photographed from beside, behind and inside the cone, at 26 km and at 26 000 km.
+- note: left for R12, which wires the cone in: move `HAZARD` out of `examples/cone_void.rs` into `lc-client`, and retire `crates/em-render/src/plume_material.rs` and `crates/lc-client/assets/shaders/plume.wgsl` once `plume.rs` stops drawing the reaction drive. The face's temperature is `lc_world::emit::aperture_temperature_k`.
 
 ### R8 · Truss and plating
 
