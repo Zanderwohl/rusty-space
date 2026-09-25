@@ -327,7 +327,7 @@ graph LR
 
 ### L4 · Small unbounded maps
 
-- status: active claude/game-loop-optimization-71831f
+- status: done (this branch; drives are bounded at 1024 ships rather than pruned to contacts, because a ship out of sight needs its last drive state when it reappears. Offline capacity stays unlimited: that is a dev and test mode)
 - needs: —
 - touches: `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/watch.rs`
 - read: —
@@ -336,7 +336,7 @@ graph LR
 
 ### L5 · Browser socket closed
 
-- status: todo
+- status: active claude/game-loop-optimization-71831f
 - needs: —
 - touches: `crates/lc-client/src/link.rs`
 - read: 08
