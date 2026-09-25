@@ -508,7 +508,7 @@ graph LR
 
 ### R4 · Construction timeline
 
-- status: active card "Build R4: construction timeline"
+- status: done #95
 - needs: F8, R1
 - touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §Building, as a function of time
