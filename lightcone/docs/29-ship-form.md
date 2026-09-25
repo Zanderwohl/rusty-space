@@ -262,11 +262,38 @@ anchor.
 A target that breaks one is refused, naming the part.
 
 - **Engine parts point along the nose axis, fore or aft,** and need a clear cone of
-  `engine_clear_half_angle_rad` along it, checked by marching rays through the grid.
+  `engine_clear_half_angle_rad` along it, checked on the grid's filled cells.
 - **A bay's mouth must be clear** out to its own width.
 - **Every attached part touches its parent**, and every enclosing part contains its parent.
 - **The envelope's extent stays inside `LENGTH_RANGE_M`.**
-- **Drones stay at or above `min_drone_m3`**, and every part at or above `min_part_m3`.
+- **Drones stay at or above `min_drone_m3`**, every copy counted, and every part at or above
+  `min_part_m3`.
+
+The rules are `form::rules::check`, which the server and the editor both call. It returns **every**
+fault, in the order above and by part id within a rule, so the editor can mark each part; the server
+refuses with the first. A form that fails the structural checks gets only that fault, since nothing
+else can be judged on it. On success it hands back the grid, which the caller was going to build
+anyway. The size rules alone are `rules::sizes`, which needs no grid, and the refit planner refuses on
+them itself. Geometry is judged on the grid's cell centers, in its fixed order, so the server and a
+client agree to the bit, and to its resolution, **half a cell's diagonal**:
+
+- **An engine's or a bay's open face** is where its axis leaves it: a frustum's wide end, as 31 makes
+  its aperture, and every other primitive's +x end, away from the foot it hangs by. A torus opens
+  through its hole.
+- **The cone** widens at the half-angle from the face's rim, not from its center, since the exhaust
+  leaves the whole aperture. A filled cell in it that lies inside any other part blocks the engine,
+  the engine's own mirrored copy included. Every filled cell is tested rather than rays marched
+  between them, which would leave gaps between rays that widen with distance and need a step.
+- **A bay's mouth** is a disk of its face's radius, cleared out to its width, twice that radius: a
+  hull that fits through the mouth has room to leave.
+- **Touching** is a cell center within the tolerance of both parts' primitives, uncut and unblended,
+  plus a quarter of the joint's blend radius, the most its fillet reaches. Both fields are Lipschitz 1,
+  the ellipsoid's bound too, so a part that touches its parent always passes. The bound is short
+  beside an ellipsoid's long axes, so there a gap up to its axis ratio times the tolerance passes too.
+- **Containing** samples the parent's surface along the shadow table's 162 directions and a cube's 26,
+  which find a slab's corners, and reads the encloser by the envelope's truer estimate, whose sign is
+  right everywhere. A part the grid cannot resolve, such as the Mind inside anything a cell across,
+  is contained as far as the server can tell.
 
 ## Refits
 

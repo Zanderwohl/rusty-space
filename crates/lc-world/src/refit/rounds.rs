@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::fitting::{Balance, C2};
 use crate::form::capacity::{Capacities, Transfer, part_kg};
-use crate::form::{Form, FormError, Kind, Part, PartId, Placement};
+use crate::form::{rules, Form, FormError, Kind, Part, PartId, Placement};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Phase {
@@ -88,9 +88,8 @@ impl Round {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Refusal {
+    /// Structure, or a size rule. The geometric rules are the caller's, since they need a grid.
     Form(FormError),
-    /// Less than `min_drone_m3` of drone in the target.
-    TooFewDrones { drone_m3: f64 },
     /// The target's Mind is not the ship's Mind.
     Mind(PartId),
     /// A step would begin with no drone to do it, as when every drone is being reshaped.
@@ -200,10 +199,8 @@ impl Plan {
         // Walked as a tree below, and it is the ship as it stands, so never a client's.
         debug_assert_eq!(round.from.validate(), Ok(()));
         round.target.validate().map_err(Refusal::Form)?;
-        let drone_m3: f64 = round.target.parts.iter().filter(|p| p.kind == Kind::Drone).map(|p| p.volume_m3).sum();
-        // Validated finite, so no NaN gets past this.
-        if drone_m3 < balance.min_drone_m3 {
-            return Err(Refusal::TooFewDrones { drone_m3 });
+        if let Some(&fault) = rules::sizes(&round.target, balance).first() {
+            return Err(Refusal::Form(fault));
         }
         let from: Parts = round.from.parts.iter().map(|p| (p.id, *p)).collect();
         let target: Parts = round.target.parts.iter().map(|p| (p.id, *p)).collect();
@@ -926,7 +923,7 @@ mod tests {
         assert_eq!(solve(&from, &twice, 0.0).unwrap_err(), Refusal::Form(FormError::DuplicateId(PartId(3))));
 
         let starved = with(&from, 2, |p| p.volume_m3 = 5_000.0);
-        assert_eq!(solve(&from, &starved, 0.0).unwrap_err(), Refusal::TooFewDrones { drone_m3: 5_000.0 });
+        assert_eq!(solve(&from, &starved, 0.0).unwrap_err(), Refusal::Form(FormError::TooFewDrones));
 
         let usurped = adding(&without(&from, &[0]), &[Part::mind(PartId(9), B.min_part_m3)]);
         let usurped = Form {

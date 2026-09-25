@@ -225,6 +225,10 @@ impl FormGrid {
         Ok(grid)
     }
 
+    pub fn sdf(&self) -> &Sdf {
+        &self.sdf
+    }
+
     pub fn dims(&self) -> [usize; 3] {
         self.dims
     }

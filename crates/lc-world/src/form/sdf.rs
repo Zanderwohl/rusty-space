@@ -44,6 +44,7 @@ pub struct Sdf {
     pieces: Vec<Piece>,
     /// Each pose's transpose, taken once.
     inverse: Vec<DMat3>,
+    parent: Vec<Option<usize>>,
     conform: Vec<Conform>,
     /// `(parent, child, radius in meters)` for every joint that is smoothed. Never a spar's.
     blends: Vec<(usize, usize, f64)>,
@@ -117,11 +118,23 @@ impl Sdf {
         }
 
         let inverse = pieces.iter().map(|p| p.pose.rotation.transpose()).collect();
-        Ok(Sdf { pieces, inverse, conform, blends, spar_gap: balance.spar_gap, bounds })
+        Ok(Sdf { pieces, inverse, parent, conform, blends, spar_gap: balance.spar_gap, bounds })
     }
 
     pub fn pieces(&self) -> &[Piece] {
         &self.pieces
+    }
+
+    /// The piece this one hangs from: the parent's copy on the same side, or its original where a
+    /// mirror starts at this part. `None` for the Mind.
+    pub fn parent(&self, piece: usize) -> Option<usize> {
+        self.parent[piece]
+    }
+
+    /// The smooth-union radius of this piece's joint with its parent, meters. Zero where a spar
+    /// is at either end, or nothing is blended.
+    pub fn blend_m(&self, piece: usize) -> f64 {
+        self.blends.iter().find(|&&(_, child, _)| child == piece).map_or(0.0, |&(.., radius)| radius)
     }
 
     /// Contains every point where [`Sdf::distance`] is not positive. Ship frame, `(min, max)`.
@@ -286,7 +299,7 @@ impl Shape {
     /// Half the box, along the axes of the frame `rotation` turns the part into, around where
     /// [`Shape::distance`] is at most `margin`. Exact for all but the frustum, which takes its
     /// wider end at both.
-    fn extent(&self, rotation: DMat3, margin: f64) -> DVec3 {
+    pub(super) fn extent(&self, rotation: DMat3, margin: f64) -> DVec3 {
         let axis = rotation.x_axis.abs();
         // How far a unit circle across the axis reaches along each outer axis.
         let across = (DVec3::ONE - axis * axis).max(DVec3::ZERO).map(f64::sqrt);
