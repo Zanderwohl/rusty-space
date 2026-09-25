@@ -1,4 +1,4 @@
-//! The HTTP surface: two indexes, their partials, and three acts.
+//! The HTTP surface: two indexes, their partials, a page for each row, and three acts.
 //!
 //! An act answers two callers from one handler: htmx gets the region back, a plain form gets
 //! a redirect — the post/redirect/get that stops a refresh banning somebody twice.
@@ -35,6 +35,7 @@ pub const USERS: &str = "/users";
 pub const USER_ROWS: &str = "/users/rows";
 pub const SYSTEMS: &str = "/systems";
 pub const SYSTEM_ROWS: &str = "/systems/rows";
+const SYSTEM: &str = "/systems/{id}";
 const USER: &str = "/users/{id}";
 const USER_LEVEL: &str = "/users/{id}/level";
 const USER_BAN: &str = "/users/{id}/ban";
@@ -42,6 +43,10 @@ const USER_LIFT: &str = "/users/{id}/lift";
 
 pub fn user_url(id: Uuid) -> String {
     format!("/users/{id}")
+}
+
+pub fn system_url(id: u64) -> String {
+    format!("/systems/{id}")
 }
 
 pub fn user_level_url(id: Uuid) -> String {
@@ -75,6 +80,7 @@ pub fn router(state: AppState) -> Router {
         // No detail route: there is not enough about one system to be worth a page.
         .route(SYSTEMS, get(system_index))
         .route(SYSTEM_ROWS, get(system_rows))
+        .route(SYSTEM, get(system_page))
         .route(USER_LEVEL, post(set_level))
         .route(USER_BAN, post(issue_ban))
         .route(USER_LIFT, post(lift_ban))
@@ -216,6 +222,31 @@ async fn load_systems(
                 .await
         }
     }
+}
+
+/// A shard that is down, or an id it does not hold, renders as the page saying so.
+async fn system_page(
+    State(state): State<AppState>,
+    admin: Admin,
+    Path(id): Path<String>,
+) -> Response {
+    let found = match (state.shard(), id.parse::<u64>()) {
+        (None, _) => Err(crate::shard::Missing::NotConfigured),
+        (_, Err(_)) => Err(crate::shard::Missing::NoSystem),
+        (Some(shard), Ok(id)) => shard.system(&admin.id.to_string(), id).await,
+    };
+    let status = match &found {
+        Err(crate::shard::Missing::NoSystem) => StatusCode::NOT_FOUND,
+        _ => StatusCode::OK,
+    };
+    let title = views::system::title(&found);
+    let page = views::shell(
+        &state.assets,
+        Head { title: &title },
+        Some(&admin),
+        views::system::page(&found),
+    );
+    (status, page).into_response()
 }
 
 async fn person(
@@ -626,6 +657,8 @@ mod tests {
         // router. If these ever diverge, `/users/rows` starts being read as an account id.
         assert!(USER_ROWS.starts_with(USERS));
         assert_eq!(USER.replace("{id}", "rows"), USER_ROWS);
+        assert_eq!(system_url(42), SYSTEM.replace("{id}", "42"));
+        assert_eq!(SYSTEM.replace("{id}", "rows"), SYSTEM_ROWS);
     }
 
     /// Every refusal the rules can produce has to be something this layer can show. A

@@ -9,7 +9,13 @@
 
 use std::collections::HashMap;
 
+use lc_world::knowledge::BodyId;
+use lc_world::labels::Labels;
+use lc_world::motion::{Motive, ShipState};
+use lc_world::navigation::Target;
+use lc_world::resume::Snapshot;
 use lc_world::sky::CatalogStar;
+use lc_world::system::LocalSystem;
 use serde::{Deserialize, Serialize};
 
 /// One system.
@@ -30,6 +36,185 @@ pub struct Row {
 pub struct Page {
     pub total: u64,
     pub systems: Vec<Row>,
+}
+
+/// One system, for its own page. As of the last checkpoint, like everything the console reads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Detail {
+    pub id: u64,
+    pub star: Facts,
+    /// Nearest the star first.
+    pub ships: Vec<Craft>,
+    /// Oldest first.
+    pub names: Vec<Name>,
+}
+
+/// The star as the catalog describes it. Truth, which no player is shown.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Facts {
+    /// **The catalog's, not a player's**; see `lc_world::sky::Provenance::name`.
+    pub catalog_name: Option<String>,
+    pub source: String,
+    /// The source's own row number.
+    pub key: u64,
+    pub from_sol_ly: f64,
+    pub teff_k: f64,
+    pub radius_m: f64,
+    pub luminosity_solar: f64,
+    pub mass_solar: f64,
+    /// `[Fe/H]`, synthesized from kinematics rather than measured.
+    pub metallicity: f64,
+    /// 1 for a single star or a multiple's primary.
+    pub component: u8,
+    /// Shared by the members of one multiple.
+    pub group: Option<u64>,
+}
+
+/// A craft inside the system's shell.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Craft {
+    pub ship_id: i64,
+    pub name: Option<String>,
+    /// Opaque account id; `None` for a craft with no pilot.
+    pub account: Option<String>,
+    /// What it is doing and about which body: `orbit of Earth`, `falling about Jupiter`.
+    pub place: String,
+    /// From the star.
+    pub au: f64,
+}
+
+/// One craft as the checkpoint holds it.
+#[derive(Clone, Debug)]
+pub struct Aboard {
+    pub ship_id: i64,
+    pub name: Option<String>,
+    pub account: Option<String>,
+    /// Coordinate microseconds.
+    pub saved_t: i64,
+    pub motion: lc_proto::Motion,
+}
+
+/// A name some craft chose for the star, and which craft hold it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Name {
+    pub name: String,
+    /// The craft that chose it.
+    pub by: i64,
+    /// Coordinate seconds.
+    pub stated_s: f64,
+    /// Every craft whose file carries it, the chooser included while it still does. Holding a
+    /// name is not calling the star by it: a craft may hold several and prefer its own.
+    pub held_by: Vec<i64>,
+}
+
+/// `files` are each craft's file on this star.
+pub fn detail(
+    star: &CatalogStar,
+    stars: &[CatalogStar],
+    craft: &[Aboard],
+    files: &[(i64, &lc_world::knowledge::File)],
+) -> Detail {
+    let inside: Vec<&Aboard> = craft
+        .iter()
+        .filter(|c| {
+            let at = glam::DVec3::from_array(c.motion.at_ly);
+            crate::status::nearest_within_shell(at, stars).is_some_and(|s| s.id == star.id)
+        })
+        .collect();
+    // Generated only for a system somebody is in; it is the expensive part of the page.
+    let system = (!inside.is_empty()).then(|| LocalSystem::for_star(star)).flatten();
+    let labels = system.as_ref().map(|system| truth_labels(system, star)).unwrap_or_default();
+    let mut ships: Vec<Craft> = inside
+        .into_iter()
+        .map(|c| {
+            let at = glam::DVec3::from_array(c.motion.at_ly);
+            let ship = Snapshot::from(&c.motion).restore(system.as_ref(), c.saved_t as f64 * 1e-6);
+            Craft {
+                ship_id: c.ship_id,
+                name: c.name.clone(),
+                account: c.account.clone(),
+                place: place(&ship, &labels),
+                au: at.distance(star.position_ly) / crate::status::AU_LY,
+            }
+        })
+        .collect();
+    ships.sort_by(|a, b| a.au.total_cmp(&b.au).then(a.ship_id.cmp(&b.ship_id)));
+
+    let mut names: Vec<Name> = Vec::new();
+    for (holder, file) in files {
+        let chosen = file.names().iter().filter(|n| n.kind.chosen());
+        for naming in chosen {
+            let by = naming.witness.0 as i64;
+            // Every copy of one naming carries the chooser's own stamp, so this is identity.
+            let same = |n: &&mut Name| {
+                n.by == by && n.name == naming.name && n.stated_s == naming.stated_s
+            };
+            match names.iter_mut().find(same) {
+                Some(name) => name.held_by.push(*holder),
+                None => names.push(Name {
+                    name: naming.name.clone(),
+                    by,
+                    stated_s: naming.stated_s,
+                    held_by: vec![*holder],
+                }),
+            }
+        }
+    }
+    for name in &mut names {
+        name.held_by.sort_unstable();
+        name.held_by.dedup();
+    }
+    names.sort_by(|a, b| a.stated_s.total_cmp(&b.stated_s).then(a.by.cmp(&b.by)));
+
+    Detail {
+        id: star.id.get(),
+        star: Facts {
+            catalog_name: star.provenance.name.clone(),
+            source: star.provenance.source.clone(),
+            key: star.provenance.key,
+            from_sol_ly: star.position_ly.length(),
+            teff_k: star.star.teff_k,
+            radius_m: star.star.radius_m,
+            luminosity_solar: star.luminosity_solar,
+            mass_solar: star.mass_solar,
+            metallicity: star.metallicity,
+            component: star.component.index,
+            group: star.component.group,
+        },
+        ships,
+        names,
+    }
+}
+
+/// Every body by the generator's own key. **The operator's page, not a player's**: a craft's
+/// labels come from what it has found, and these are the truth it is finding out.
+fn truth_labels(system: &LocalSystem, star: &CatalogStar) -> Labels {
+    let keys: HashMap<BodyId, String> = system
+        .inventory()
+        .iter()
+        .filter_map(|entry| match &entry.target {
+            Target::Body(key) => Some((BodyId::of(system.star, key), key.clone())),
+            _ => None,
+        })
+        .collect();
+    let star_name = star.provenance.name.clone().unwrap_or_else(|| "the star".to_owned());
+    lc_world::labels::label(system, &star_name, |body| keys.get(&body).cloned())
+}
+
+/// The words a crew's own screens use for where they are, with the operator's names in them.
+fn place(ship: &ShipState, labels: &Labels) -> String {
+    match &ship.motive {
+        Motive::Holding(station) => station.label(labels),
+        Motive::Falling(coast) => format!("falling about {}", labels.of(&coast.primary)),
+        Motive::Crossing(_) | Motive::Transfer(_) => match ship.bound_for() {
+            Some(station) => format!("bound for {}", station.label(labels)),
+            None => "under way".to_owned(),
+        },
+        Motive::Rendezvous(_) | Motive::Escort(_) | Motive::Consort(_) => {
+            "closing on another craft".to_owned()
+        }
+        Motive::Drifting { .. } => "drifting".to_owned(),
+    }
 }
 
 /// Which column the list is ordered by.
@@ -144,6 +329,8 @@ pub fn page(stars: &[CatalogStar], ships: &HashMap<u64, u64>, query: &Query) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lc_world::knowledge::{Hop, Knowledge, NameKind, Naming, Subject, Witness};
+    use lc_world::navigation::{Anchor, Orbit, Waypoint};
     use lc_world::sky::{Component as StarComponent, Provenance, StarId};
     use lc_world::star::Star;
 
@@ -340,6 +527,107 @@ mod tests {
         let page = page(&stars, &HashMap::new(), &Query { offset: 500, ..query() });
         assert!(page.systems.is_empty());
         assert_eq!(page.total, 10);
+    }
+
+    fn aboard(ship_id: i64, name: Option<&str>, account: Option<&str>, ship: ShipState) -> Aboard {
+        Aboard {
+            ship_id,
+            name: name.map(str::to_owned),
+            account: account.map(str::to_owned),
+            saved_t: 0,
+            motion: lc_proto::Motion::from(&ship.snapshot()),
+        }
+    }
+
+    fn named(owner: u64, star: &CatalogStar, name: &str, at_s: f64) -> Knowledge {
+        let mut k = Knowledge::new(Witness(owner));
+        k.name_it(Subject::Star(star.id), name, at_s);
+        k
+    }
+
+    /// A craft inside the shell is listed with its distance from the star, nearest first; one
+    /// in another system or between the stars is not.
+    #[test]
+    fn a_system_lists_the_craft_inside_its_shell() {
+        let stars = catalog();
+        let au = |au: f64| glam::DVec3::new(au * crate::status::AU_LY, 0.0, 0.0);
+        let craft = vec![
+            aboard(1, Some("Far"), Some("acct-1"), ShipState::at(au(40.0))),
+            aboard(2, None, None, ShipState::at(au(1.0))),
+            aboard(3, None, None, ShipState::at(glam::DVec3::new(10.0, 0.0, 0.0))),
+            aboard(4, None, None, ShipState::at(glam::DVec3::new(5.0, 0.0, 0.0))),
+        ];
+        let detail = detail(&stars[0], &stars, &craft, &[]);
+        let ids: Vec<i64> = detail.ships.iter().map(|c| c.ship_id).collect();
+        assert_eq!(ids, [2, 1], "nearest first, and only Sol's");
+        assert!((detail.ships[1].au - 40.0).abs() < 1e-9, "{}", detail.ships[1].au);
+        assert_eq!(detail.ships[1].account.as_deref(), Some("acct-1"));
+        assert_eq!(detail.ships[1].place, "drifting");
+        assert_eq!(detail.star.catalog_name.as_deref(), Some("Sol"));
+        assert!(detail.names.is_empty());
+    }
+
+    /// A ship on station reads as its own screens would read it, with the body's name.
+    #[test]
+    fn a_ship_on_station_is_placed_by_the_body_it_holds() {
+        let stars = catalog();
+        let mut ship = ShipState::at(glam::DVec3::new(crate::status::AU_LY, 0.0, 0.0));
+        ship.motive = Motive::Holding(Waypoint::Orbit(Orbit {
+            about: Anchor::Body("Earth".into()),
+            radius_m: 7.0e6,
+            pole: glam::DVec3::Z,
+            phase_rad: 0.0,
+        }));
+        let detail = detail(&stars[0], &stars, &[aboard(1, None, None, ship)], &[]);
+        assert_eq!(detail.ships[0].place, "orbit of Earth");
+    }
+
+    /// A name relayed to other craft is one name held by several, not one name per holder;
+    /// two craft choosing the same word are still two names. Designations are not names.
+    #[test]
+    fn a_relayed_name_is_one_name_held_by_several_craft() {
+        let stars = catalog();
+        let sol = &stars[0];
+        let chooser = named(7, sol, "Hearth", 10.0);
+        let chosen = chooser.file(Subject::Star(sol.id)).unwrap().names()[0].clone();
+
+        let mut heard = Knowledge::new(Witness(9));
+        let hop = Hop { from: Witness(7), to: Witness(9), sent_s: 11.0, received_s: 12.0 };
+        heard.named(Subject::Star(sol.id), Naming { lineage: vec![hop], ..chosen });
+        heard.named(Subject::Star(sol.id), Naming {
+            witness: Witness(9),
+            name: "SOL-1".into(),
+            kind: NameKind::Designation,
+            stated_s: 1.0,
+            lineage: Vec::new(),
+        });
+        let rival = named(8, sol, "Hearth", 20.0);
+
+        let files: Vec<_> = [(7, &chooser), (9, &heard), (8, &rival)]
+            .into_iter()
+            .map(|(ship, k)| (ship, k.file(Subject::Star(sol.id)).unwrap()))
+            .collect();
+        let detail = detail(sol, &stars, &[], &files);
+
+        assert_eq!(detail.names.len(), 2, "{:?}", detail.names);
+        assert_eq!(detail.names[0].by, 7, "oldest first");
+        assert_eq!(detail.names[0].held_by, [7, 9]);
+        assert_eq!(detail.names[1].by, 8);
+        assert_eq!(detail.names[1].held_by, [8]);
+        assert!(detail.names.iter().all(|n| n.name == "Hearth"));
+    }
+
+    /// The console parses this with its own copy of the types; its test holds these bytes.
+    #[test]
+    fn the_detail_round_trips_through_ron() {
+        let stars = catalog();
+        let chooser = named(7, &stars[0], "Hearth", 3.0e7);
+        let file = chooser.file(Subject::Star(stars[0].id)).unwrap();
+        let ship = ShipState::at(glam::DVec3::ZERO);
+        let craft = vec![aboard(7, Some("Rocinante"), Some("acct-7"), ship)];
+        let detail = detail(&stars[0], &stars, &craft, &[(7, file)]);
+        let text = ron::to_string(&detail).expect("it serializes");
+        assert_eq!(ron::from_str::<Detail>(&text).expect("it parses"), detail);
     }
 
     #[test]

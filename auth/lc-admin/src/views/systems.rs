@@ -2,9 +2,6 @@
 //!
 //! [`super::index`]'s shape, and its reasons. What differs is that the rows arrive from the
 //! shard already paged, so this renders what it was handed and counts nothing.
-//!
-//! **There is no view for one system**: a row that links somewhere empty is worse than one
-//! that does not link.
 
 use maud::{Markup, html};
 
@@ -132,15 +129,16 @@ fn heading(listing: &Listing, sort: Sort) -> Markup {
     }
 }
 
-/// **Not a link**: there is nowhere to go yet.
 fn line(system: &System) -> Markup {
     html! {
-        tr {
+        tr class="row-link" {
             th scope="row" class="cell-name" {
-                @match &system.name {
-                    // Its identifier is its name. A blank cell would not be scannable.
-                    Some(name) => (name),
-                    None => span class="nothing" { "Unnamed" },
+                a href=(crate::routes::system_url(system.id)) {
+                    @match &system.name {
+                        // Its identifier is its name. A blank cell would not be scannable.
+                        Some(name) => (name),
+                        None => span class="nothing" { "Unnamed" },
+                    }
                 }
                 span class="cell-email" { (system.id) }
             }
@@ -261,20 +259,17 @@ mod tests {
         );
     }
 
-    /// Three columns, each one sortable, and no link to a system: there is nowhere to go.
+    /// Three columns, each one sortable, and one link per row: to that system's page.
     #[test]
-    fn a_row_names_the_system_and_links_nowhere() {
+    fn a_row_names_the_system_and_links_to_it() {
         let markup = region(&Listing::default(), &found(2, 2)).into_string();
         let body = markup
             .split("<tbody>")
             .nth(1)
             .and_then(|t| t.split("</tbody>").next())
             .expect("a body");
-        assert_eq!(
-            body.matches("<a ").count(),
-            0,
-            "a row linked somewhere: {body}"
-        );
+        assert_eq!(body.matches("<a ").count(), 2, "one link a row: {body}");
+        assert!(body.contains(r#"href="/systems/1000""#), "{body}");
         assert!(body.contains("Sol"), "{body}");
         assert!(body.contains("1000"), "the identifier is missing: {body}");
         // An unnamed system still shows as something rather than as a blank cell.
@@ -291,9 +286,13 @@ mod tests {
         let markup = region(&listing, &found(7973, 25)).into_string();
         assert!(markup.contains("Showing 26–50 of 7973."), "{markup}");
         assert!(markup.contains("page=319"), "no last page: {markup}");
+        let pager = markup
+            .split(r#"<nav class="pager""#)
+            .nth(1)
+            .expect("a pager");
         assert!(
-            markup.matches("<a ").count() <= 12,
-            "an unbounded pager: {markup}"
+            pager.matches("<a ").count() <= 12,
+            "an unbounded pager: {pager}"
         );
     }
 
