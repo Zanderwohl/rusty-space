@@ -243,7 +243,7 @@ graph LR
 
 ### M3 · Diff the map layer
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; entities keyed by `ItemKey`, rings a pool of `MAX_RINGS`, spokes and scale materials made once. Moved into `map_scene.rs`, which also brought `map.rs` back under the cap after M1 and M2 had pushed it to 1035. The pinned wide map is byte-identical before and after)
 - needs: M2
 - touches: `crates/lc-client/src/map.rs`
 - read: 11
