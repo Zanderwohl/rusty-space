@@ -421,6 +421,12 @@ A layout's other rules:
 - Limits, so a store row stays small: `MAX_PARTS` parts to a form, `MAX_PRESETS` presets to an
   account, and a name of at most `PRESET_NAME_LIMIT`, 64 bytes. Both preset limits are in
   `lc_proto::form`, because both ends check them.
+- Each limit is refused by name: `TooManyPresets`, `PresetName` for a name that is empty or too
+  long, and `Form(TooManyParts)`. Saving under a name already kept replaces it, so it is never one
+  too many. Nothing else about the form is checked on save.
+- The shard sends an account its whole list, by name, after `Welcome` and after every save or
+  delete, and keeps it in memory, checkpointed beside the bookmarks. A row holds the form in
+  postcard, the wire's encoding, so its shape is pinned by `lc-proto`'s goldens.
 
 ## The editor
 
