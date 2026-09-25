@@ -251,7 +251,7 @@ graph LR
 
 ### M4 · Picking without rebuilding
 
-- status: todo
+- status: done (claude/client-frame-2; only the star loop: with no cursor, the selected star is found by id. The per-frame projector and cached torus outlines were left, because `map_pick` runs only as the main view and the outlines double as the hover skeleton, which needs a screen to check)
 - needs: —
 - touches: `crates/lc-client/src/map_pick.rs`, `crates/lc-client/src/pick.rs`, `crates/em-map/src/camera.rs`, `crates/em-map/src/outline.rs`
 - read: 11
