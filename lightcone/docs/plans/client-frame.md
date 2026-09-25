@@ -97,7 +97,7 @@ graph LR
 
 ### K1 · Knowledge revision
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; `Tracked` wraps files and beliefs, and its revisions come from one counter for the process)
 - needs: —
 - touches: `crates/lc-world/src/knowledge/mod.rs`
 - read: 25
@@ -106,7 +106,7 @@ graph LR
 
 ### K2 · Star index
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; `local_star` searches the catalog's distance order instead of being cached, so the second `sync_system` call now costs a binary search and was left in)
 - needs: —
 - touches: `crates/lc-client/src/session.rs`, `crates/lc-client/src/system_panel.rs`, `crates/lc-client/src/map_source.rs`
 - read: —
@@ -135,7 +135,7 @@ graph LR
 
 ### B1 · Beliefs cached by revision
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: K1
 - touches: `crates/lc-client/src/beliefs.rs`, `crates/lc-world/src/knowledge/body.rs`
 - read: 25, 22
