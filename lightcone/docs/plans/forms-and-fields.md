@@ -263,7 +263,7 @@ graph LR
 
 ### F3 · Distance field
 
-- status: todo
+- status: active card "Build F3: the form's distance field"
 - needs: F2
 - touches: `crates/lc-world/src/form/sdf.rs`
 - read: 29 §Spars conform, §What the server computes
@@ -281,7 +281,7 @@ graph LR
 
 ### F5 · Starting form and presets
 
-- status: todo
+- status: active card "Build F5: starting form and presets"
 - needs: F2, F4
 - touches: `crates/lc-world/src/form/presets.rs`
 - read: 29 §The starting form, §Your own presets
@@ -308,7 +308,7 @@ graph LR
 
 ### F8 · Refit rounds
 
-- status: todo
+- status: active card "Build F8: refit rounds over forms"
 - needs: F4
 - touches: `crates/lc-world/src/refit.rs`
 - read: 29 §Refits
