@@ -207,7 +207,23 @@ pub struct Map {
     /// What is spawned, in order. A rebuild happens only when this stops matching the frame.
     drawn: Vec<ItemKey>,
     rings_drawn: usize,
+    /// Whether this frame builds and renders the map. See [`pace`].
+    due: bool,
+    /// Real seconds at the last frame that did, and the controls it was drawn with.
+    drawn_at_s: f64,
+    drawn_for: Option<Controls>,
 }
+
+/// What a player moves the map's camera with. A change is drawn at once, however the map is shown.
+type Controls = (f64, f64, f64, em_map::Plane, crate::ui::MapFocus, Source);
+
+fn controls(view: &crate::ui::MapView) -> Controls {
+    (view.orbit.azimuth, view.orbit.elevation, view.orbit.log_distance_m, view.plane, view.focus, view.source)
+}
+
+/// How often the corner thumbnail is drawn while nobody is moving it. The texture holds the
+/// last picture between, and the labels are laid out from the same frame, so the two agree.
+const THUMBNAIL_PERIOD_S: f64 = 0.1;
 
 impl Map {
     /// Where the reference plane is anchored: the observer, or the camera's focus when a
@@ -303,7 +319,7 @@ impl Plugin for MapPlugin {
             // whenever the ship was under way.
             .add_systems(
                 Update,
-                (survey, resize, place, switch_camera)
+                (pace, survey, resize, place, switch_camera)
                     .chain()
                     .in_set(Stage::Scene)
                     .after(crate::app::Placed),
@@ -347,6 +363,9 @@ fn setup(
             .collect(),
         drawn: Vec::new(),
         rings_drawn: 0,
+        due: false,
+        drawn_at_s: f64::NEG_INFINITY,
+        drawn_for: None,
         image,
     });
 
@@ -373,10 +392,33 @@ fn setup(
     ));
 }
 
-/// Render the map only while something shows it: in the menu and the loading screen nothing does.
-fn switch_camera(map: Res<Map>, mut camera: Single<&mut Camera, With<MapCamera>>) {
-    if camera.is_active != map.shown {
-        camera.is_active = map.shown;
+/// Whether this frame draws the map: always as the main view, and in the corner only every
+/// [`THUMBNAIL_PERIOD_S`] unless the player is moving it.
+fn pace(time: Res<Time<Real>>, ui: Res<Ui>, mut map: ResMut<Map>) {
+    let now_s = time.elapsed_secs_f64();
+    let resized = map.size != map.wanted.clamp(UVec2::splat(MIN_SIDE), UVec2::splat(MAX_SIDE));
+    let stale = map.frame.is_none() || resized || map.drawn_for != Some(controls(&ui.map));
+    map.due = map.shown && due(ui.view == crate::ui::ViewMode::Map, stale, now_s - map.drawn_at_s);
+    if map.due {
+        map.drawn_at_s = now_s;
+    }
+}
+
+fn due(main_view: bool, stale: bool, since_s: f64) -> bool {
+    main_view || stale || since_s >= THUMBNAIL_PERIOD_S
+}
+
+/// Render the map only on a frame that draws it. In the menu and the loading screen nothing
+/// shows it, and between the thumbnail's frames its texture keeps the last picture.
+///
+/// The controls are taken here rather than in [`pace`], after [`place`] has turned the camera
+/// with a tracked frame: taken before, that turn read as a player's and drew every frame.
+fn switch_camera(ui: Res<Ui>, mut map: ResMut<Map>, mut camera: Single<&mut Camera, With<MapCamera>>) {
+    if map.due {
+        map.drawn_for = Some(controls(&ui.map));
+    }
+    if camera.is_active != map.due {
+        camera.is_active = map.due;
     }
 }
 
@@ -423,7 +465,7 @@ fn survey(
     mut map: ResMut<Map>,
     mut beliefs: ResMut<crate::beliefs::Beliefs>,
 ) {
-    if !map.shown {
+    if !map.due {
         return;
     }
     let held = beliefs.held(&game.0);
@@ -490,6 +532,9 @@ fn place(
         map.drawn.clear();
         map.rings_drawn = 0;
         map.frame = None;
+        return;
+    }
+    if !map.due {
         return;
     }
 
@@ -964,6 +1009,16 @@ fn color_of(kind: ItemKind) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The main view draws every frame; the corner every tenth of a second, or at once when
+    /// something about it has changed.
+    #[test]
+    fn the_thumbnail_is_drawn_ten_times_a_second_unless_moved() {
+        assert!(due(true, false, 0.0), "the main view waits for nothing");
+        assert!(!due(false, false, 0.05), "the corner redrew early");
+        assert!(due(false, false, THUMBNAIL_PERIOD_S), "the corner stopped");
+        assert!(due(false, true, 0.0), "a moved camera waited");
+    }
 
     /// A cap reads as square to its bar from any angle, centered on the end it closes and the
     /// same size on screen however far off it is.
