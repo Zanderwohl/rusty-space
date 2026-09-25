@@ -300,7 +300,7 @@ graph LR
 
 ### L1 · Surfaces released
 
-- status: todo
+- status: active claude/game-loop-optimization-71831f
 - needs: —
 - touches: `crates/lc-client/src/surfaces.rs`, `crates/lc-client/src/procedural.rs`
 - read: 07, 28
