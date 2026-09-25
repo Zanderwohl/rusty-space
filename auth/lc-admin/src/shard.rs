@@ -84,6 +84,8 @@ pub struct Craft {
     pub ship_id: i64,
     pub name: Option<String>,
     pub account: Option<String>,
+    /// `orbit of Earth`, `falling about Jupiter`: the ship's own words, with the true names.
+    pub place: String,
     pub au: f64,
 }
 
@@ -300,7 +302,7 @@ mod tests {
     }
 
     /// **Captured from the shard's own serializer**, like the ones above.
-    const SYSTEM_FROM_THE_SHARD: &str = r#"(id:4889409560617541148,star:(catalog_name:Some("Sol"),source:"test",key:0,from_sol_ly:0.0,teff_k:5772.0,radius_m:695700000.0,luminosity_solar:1.0,mass_solar:1.0,metallicity:0.0,component:1,group:None),ships:[(ship_id:7,name:Some("Rocinante"),account:Some("acct-7"),au:0.0)],names:[(name:"Hearth",by:7,stated_s:30000000.0,held_by:[7])])"#;
+    const SYSTEM_FROM_THE_SHARD: &str = r#"(id:4889409560617541148,star:(catalog_name:Some("Sol"),source:"test",key:0,from_sol_ly:0.0,teff_k:5772.0,radius_m:695700000.0,luminosity_solar:1.0,mass_solar:1.0,metallicity:0.0,component:1,group:None),ships:[(ship_id:7,name:Some("Rocinante"),account:Some("acct-7"),place:"drifting",au:0.0)],names:[(name:"Hearth",by:7,stated_s:30000000.0,held_by:[7])])"#;
 
     #[test]
     fn parses_the_system_the_shard_sends() {
@@ -310,6 +312,7 @@ mod tests {
         assert_eq!(detail.star.teff_k, 5772.0);
         assert_eq!(detail.ships.len(), 1);
         assert_eq!(detail.ships[0].account.as_deref(), Some("acct-7"));
+        assert_eq!(detail.ships[0].place, "drifting");
         assert_eq!(detail.names[0].name, "Hearth");
         assert_eq!(detail.names[0].held_by, [7]);
     }

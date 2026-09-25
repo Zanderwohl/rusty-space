@@ -167,7 +167,13 @@ async fn system(State(api): State<Api>, headers: HeaderMap, Path(id): Path<Strin
         .iter()
         .filter_map(|ship| {
             let saved = crate::persist::decode(ship).ok()?;
-            Some((ship.ship_id, saved.name, ship.account.clone(), saved.motion.at_ly.into()))
+            Some(crate::systems::Aboard {
+                ship_id: ship.ship_id,
+                name: saved.name,
+                account: ship.account.clone(),
+                saved_t: ship.saved_t,
+                motion: saved.motion,
+            })
         })
         .collect();
 

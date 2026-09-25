@@ -89,7 +89,7 @@ fn ships(ships: &[Craft]) -> Markup {
                             th scope="col" { "Ship" }
                             th scope="col" { "Hull" }
                             th scope="col" { "Pilot" }
-                            th scope="col" { "From the star" }
+                            th scope="col" { "Where" }
                         }
                     }
                     tbody {
@@ -103,7 +103,10 @@ fn ships(ships: &[Craft]) -> Markup {
                                 }
                                 td { (craft.ship_id) }
                                 td { (pilot(craft.account.as_deref())) }
-                                td { (format!("{:.2} AU", craft.au)) }
+                                td {
+                                    (craft.place)
+                                    span class="from-star" { (format!("{:.2} AU from the star", craft.au)) }
+                                }
                             }
                         }
                     }
