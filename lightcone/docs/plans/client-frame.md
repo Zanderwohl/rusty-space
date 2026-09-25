@@ -193,7 +193,7 @@ graph LR
 
 ### S2 · Exposure metering
 
-- status: active claude/client-frame-2
+- status: dropped (measured: of a 362 µs `expose_to_percentile`, the sort is 2 µs; the rest is luminance, and nearly all of that is the twelve modeled stars' full emission model, about 30 µs each. A partial selection would save nothing. Metering those twelve as bare blackbodies would, but it moves the chosen exposure, so it waits under *Not yet agreed*)
 - needs: S1
 - touches: `crates/lc-client/src/session.rs`
 - read: 04
@@ -492,6 +492,7 @@ Small on native, as T1 predicted. What they are worth in the browser is T2's to 
 
 Found in the same read, smaller, and not yet discussed:
 
+- Exposure metering reads the twelve modeled stars through the full emission model, about 30 µs each, several times a second during a crossing. Metered as bare blackbodies they would cost nothing, and the swarm deficit they would lose is a small correction to a percentile. It moves the chosen exposure a little.
 - Telescope panel: `known()` collects and sorts every known star per frame; `game.curve()` copies the whole light curve per frame.
 - Library: `keep_up` parses a whole chapter per frame until all are counted; `report_place` builds a `Bookmark` every frame to send one every 5 s.
 - `read_keys` builds its binding table each frame; `sample_scene` allocates new Vecs each frame.
