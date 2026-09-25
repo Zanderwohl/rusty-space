@@ -378,7 +378,7 @@ graph LR
 
 ### H2 · The field's anchors
 
-- status: todo
+- status: active card "Build H2: the field's anchors"
 - needs: H1, F5, F6
 - touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/field.rs`
 - read: 30 §The anchors
@@ -508,7 +508,7 @@ graph LR
 
 ### R4 · Construction timeline
 
-- status: todo
+- status: active card "Build R4: construction timeline"
 - needs: F8, R1
 - touches: `crates/lc-client/src/construction.rs`
 - read: 32 §Building, as a function of time
