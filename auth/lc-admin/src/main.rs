@@ -49,6 +49,18 @@ async fn main() -> anyhow::Result<()> {
         secure_cookies: config.secure_cookies,
         shard_api: config.shard_api.clone().map(Into::into),
         shard_audience: config.shard_audience.clone().into(),
+        cdn: std::sync::Arc::new(lc_admin::cdn::Sources {
+            storage: config.cdn_list.clone().map(|(base, password)| {
+                lc_admin::cdn::storage::Storage::Caddy {
+                    base,
+                    // The one user `tools/dev-cdn/Caddyfile` knows.
+                    user: "console".into(),
+                    password,
+                }
+            }),
+            site: config.site.clone(),
+            catalog: config.book_catalog.clone(),
+        }),
         http: lc_admin::http_client(),
     };
 

@@ -38,6 +38,9 @@ pub struct Config {
     pub database_url: Option<String>,
     /// Shared secret for the internal endpoints. Absent means they are all closed.
     pub release_token: Option<String>,
+    /// Opens `GET /internal/releases` and nothing else, for a reader such as the admin console
+    /// that must not be able to promote or yank.
+    pub release_read_token: Option<String>,
     /// Where the identity broker is. **Absent means there is no sign-in at all**, which is a
     /// supported state: the site is a content site that can also launch a game, and it serves
     /// every page of that without knowing who anyone is.
@@ -89,6 +92,7 @@ impl Config {
             fallback_build_id: var("FALLBACK_BUILD_ID"),
             database_url: var("DATABASE_URL"),
             release_token: var("RELEASE_TOKEN"),
+            release_read_token: var("RELEASE_READ_TOKEN"),
             identity_base: var("LC_IDENTITY_BASE").map(|b| b.trim_end_matches('/').to_owned()),
             identity_api: var("LC_IDENTITY_API").map(|b| b.trim_end_matches('/').to_owned()),
             identity_secret: var("LC_IDENTITY_SECRET"),

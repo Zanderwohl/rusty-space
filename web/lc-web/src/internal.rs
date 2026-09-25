@@ -16,12 +16,13 @@ use crate::releases::{self, NewRelease, PromoteError};
 
 const TOKEN_HEADER: &str = "x-release-token";
 
-/// Compares without leaking where two secrets first differ.
+/// Whether the request carries `expected`, compared without leaking where two secrets first
+/// differ.
 ///
 /// The difference is not measurable over a network in practice; it is one line, and the
 /// alternative is explaining to the next reader why it was fine to skip.
-fn authorized(state: &AppState, headers: &HeaderMap) -> bool {
-    let Some(expected) = state.release_token.as_deref() else {
+fn carries(expected: Option<&str>, headers: &HeaderMap) -> bool {
+    let Some(expected) = expected else {
         return false;
     };
     let Some(given) = headers.get(TOKEN_HEADER).and_then(|v| v.to_str().ok()) else {
@@ -30,6 +31,10 @@ fn authorized(state: &AppState, headers: &HeaderMap) -> bool {
     let (a, b) = (expected.as_bytes(), given.as_bytes());
     // Lengths are compared first and are not themselves secret.
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn authorized(state: &AppState, headers: &HeaderMap) -> bool {
+    carries(state.release_token.as_deref(), headers)
 }
 
 /// Why a privileged request was refused. A small type rather than a `Response`, so the happy
@@ -137,13 +142,52 @@ pub async fn yank(
 /// What is registered and what each channel points at.
 ///
 /// Readable with the token, because it is operational rather than public: a list of builds
-/// including yanked ones is a list of what went wrong and when.
+/// including yanked ones is a list of what went wrong and when. The read token opens this and
+/// nothing else.
+///
+/// A database that does not answer is a 503, not two empty lists: a reader comparing this
+/// against the CDN would otherwise report every build on it as never released.
 pub async fn list(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let pool = match guard(&state, &headers) {
-        Ok(p) => p,
-        Err(denied) => return denied.into_response(),
+    let reader = carries(state.release_read_token.as_deref(), &headers);
+    if !(reader || authorized(&state, &headers)) {
+        return Denied::Unauthorized.into_response();
+    }
+    let Some(pool) = state.pool.clone() else {
+        return Denied::NoDatabase.into_response();
     };
-    let releases = releases::list(&pool).await.unwrap_or_default();
-    let channels = releases::channels(&pool).await.unwrap_or_default();
-    Json(json!({ "releases": releases, "channels": channels })).into_response()
+    let listed = async {
+        let releases = releases::list(&pool).await?;
+        let channels = releases::channels(&pool).await?;
+        Ok::<_, sqlx::Error>((releases, channels))
+    };
+    match listed.await {
+        Ok((releases, channels)) => {
+            Json(json!({ "releases": releases, "channels": channels })).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "listing releases");
+            (StatusCode::SERVICE_UNAVAILABLE, "the release database did not answer").into_response()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(TOKEN_HEADER, token.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn a_token_is_carried_only_when_it_matches_exactly() {
+        assert!(carries(Some("secret"), &with("secret")));
+        assert!(!carries(Some("secret"), &with("secre")));
+        assert!(!carries(Some("secret"), &with("secret2")));
+        assert!(!carries(Some("secret"), &HeaderMap::new()));
+        // An unset secret opens nothing, whatever is sent.
+        assert!(!carries(None, &with("")));
+    }
 }

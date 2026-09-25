@@ -504,6 +504,14 @@ layout, so there is no request to route, and everything that actually breaks is 
 immutability. A hand-written server gets those wrong in the direction that hides the bug until
 production. A static server with an explicit header policy cannot.
 
+**What it holds is listed on a second port, 3103, and only there**: `file_server browse` behind
+basic auth, reached from the docker network by the administration console and from nowhere
+else. It is the stand-in for a bucket's list API — S3's `ListObjectsV2` takes a credential too —
+and the console asks it in S3's terms, so the bucket replaces it without the console noticing.
+Two things differ and the console absorbs both: the dev CDN keeps `.br` and `.gz` beside a file
+where a bucket carries the encoding on one object, and it reports a file's own modified time
+where a bucket reports the upload. See `auth/lc-admin/src/cdn/storage.rs`.
+
 Fault injection — latency, partial responses, a 500 on the wasm — is the one thing a small app
 would do better, and it is worth adding when the loader's failure paths need exercising rather
 than now.
@@ -633,6 +641,7 @@ Environment only; no config file, no secrets in the image.
 | `FALLBACK_BUILD_ID` | | what `/play` serves when the DB is unreachable |
 | `SITE_ENV` | `production` \| `staging` \| `dev` | gates drafts and the file watcher |
 | `RELEASE_TOKEN` | | shared secret for `/internal/release` |
+| `RELEASE_READ_TOKEN` | | opens `GET /internal/releases` and nothing else; the administration console's |
 | `SITE_BUILD` | build arg, not runtime | the `/v/<id>/` segment; falls back to the crate version |
 | `RUST_LOG` | | |
 
