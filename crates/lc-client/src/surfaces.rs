@@ -332,6 +332,17 @@ impl FromWorld for Surfaces {
 }
 
 impl Surfaces {
+    #[cfg(test)]
+    pub(crate) fn empty(images: &mut Assets<Image>) -> Self {
+        Self {
+            manifest: Handle::default(),
+            flat: BodyImages::placeholders(images),
+            by_body: HashMap::new(),
+            star: None,
+            keeps: 0,
+        }
+    }
+
     /// What `name` is drawn with: flat at first, its own once baked.
     pub fn images(
         &mut self,
@@ -1223,13 +1234,7 @@ mod tests {
     }
 
     fn held(names: &[&str], images: &mut Assets<Image>) -> Surfaces {
-        let mut surfaces = Surfaces {
-            manifest: Handle::default(),
-            flat: BodyImages::placeholders(images),
-            by_body: HashMap::new(),
-            star: None,
-            keeps: 0,
-        };
+        let mut surfaces = Surfaces::empty(images);
         for name in names {
             surfaces.images(name, Surface::Rock, None, None, None, images);
             surfaces.by_body.get_mut(*name).unwrap().bytes = IDLE_BYTES / 2;
