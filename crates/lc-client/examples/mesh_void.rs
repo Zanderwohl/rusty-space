@@ -39,8 +39,7 @@ use em_render::plume_material::PlumeMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use lc_client::hull_mesh::{
-    Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, HullPixels, REGION_GRAPHS, pixels_across,
-    region, spar_fixture,
+    Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
 };
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape, Target, placeholder};
 use lc_client::tonemap::ToneMap;
@@ -199,7 +198,7 @@ fn main() {
             after: 0,
         })
         .add_systems(Startup, request_tiles)
-        .add_systems(Update, (spawn, measure).chain().before(HullMeshSystems))
+        .add_systems(Update, spawn.before(HullMeshSystems))
         .add_systems(Update, photograph.after(HullMeshSystems))
         .add_systems(Last, take_texels)
         .run();
@@ -356,19 +355,6 @@ fn spawn(
 }
 
 type DVec3Pair = (glam::DVec3, glam::DVec3);
-
-/// Pixels on screen for each hull, from its extent and the camera.
-fn measure(
-    windows: Query<&Window>,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
-    mut hulls: Query<(&GlobalTransform, &HullMeshState, &mut HullPixels)>,
-) {
-    let (Ok(window), Ok(eye)) = (windows.single(), cameras.single()) else { return };
-    for (at, state, mut pixels) in &mut hulls {
-        let distance = eye.translation().distance(at.translation());
-        pixels.0 = pixels_across(state.extent_m() as f32, distance, FOV_Y, window.physical_height() as f32);
-    }
-}
 
 fn photograph(
     mut commands: Commands,
