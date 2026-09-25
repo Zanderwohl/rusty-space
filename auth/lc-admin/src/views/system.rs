@@ -88,7 +88,7 @@ fn ships(ships: &[Craft]) -> Markup {
                         tr {
                             th scope="col" { "Ship" }
                             th scope="col" { "Hull" }
-                            th scope="col" { "Pilot" }
+                            th scope="col" { "Mind" }
                             th scope="col" { "Where" }
                         }
                     }
@@ -102,7 +102,7 @@ fn ships(ships: &[Craft]) -> Markup {
                                     }
                                 }
                                 td { (craft.ship_id) }
-                                td { (pilot(craft.account.as_deref())) }
+                                td { (mind(craft.account.as_deref())) }
                                 td {
                                     (craft.place)
                                     span class="from-star" { (format!("{:.2} AU from the star", craft.au)) }
@@ -118,7 +118,7 @@ fn ships(ships: &[Craft]) -> Markup {
 
 /// The shard's account ids are the broker's, as text. One that does not parse is shown rather
 /// than linked, since a link built from it could only 404.
-fn pilot(account: Option<&str>) -> Markup {
+fn mind(account: Option<&str>) -> Markup {
     html! {
         @match account {
             None => span class="nothing" { "None" },
@@ -204,16 +204,16 @@ mod tests {
     }
 
     #[test]
-    fn a_pilot_links_to_its_account_only_when_the_id_is_one() {
+    fn a_mind_links_to_its_account_only_when_the_id_is_one() {
         let id = "11111111-1111-4111-8111-111111111111";
-        let linked = pilot(Some(id)).into_string();
+        let linked = mind(Some(id)).into_string();
         assert!(
             linked.contains(&format!("href=\"/users/{id}\"")),
             "{linked}"
         );
-        let unlinked = pilot(Some("acct-7")).into_string();
+        let unlinked = mind(Some("acct-7")).into_string();
         assert!(!unlinked.contains("href"), "{unlinked}");
-        assert!(pilot(None).into_string().contains("None"));
+        assert!(mind(None).into_string().contains("None"));
     }
 
     #[test]
