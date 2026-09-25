@@ -289,11 +289,11 @@ graph LR
 
 ### W4 · Per-camera render work
 
-- status: active claude/game-loop-optimization-71831f
+- status: done (this branch; see *Measured*)
 - needs: T1
-- touches: `crates/lc-client/src/app.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/haze.rs`, `crates/lc-client/src/beauty.rs`
+- touches: `crates/lc-client/src/app.rs`
 - read: 07
-- deliver: found by T1, not by the read. The client has no Bevy lights, yet GPU clustered lighting runs for three cameras: about 0.9 ms of render CPU a frame counting its prepare, bind-group and upload systems. `ClusterConfig::None` on every 3D camera, checked in a trace to stop the `cluster::gpu` systems too. Then the rest of each camera's fixed cost — 30 queue submits a frame, bloom, MSAA writeback, tonemapping and upscaling per camera — cut where a camera does not need it: the map and haze cameras draw lines and a composite, not HDR scenes.
+- deliver: the client has no Bevy lights, yet Bevy clustered them on the GPU for three cameras. `app::no_lights` turns GPU clustering off, so Bevy falls back to its CPU path, which with nothing to cluster costs about a third as much. `ClusterConfig::None` on each camera would remove the rest, but with it `--bench` lost the Metal device in three runs of eight ("Cannot allocate sample buffer", then `DeviceLost`), against none in seventeen without; not pursued. The other per-camera costs turned out not to be waste: the map and haze cameras already skip tonemapping and bloom, and the haze camera MSAA. What is left is MSAA, which changes the picture and is W3's.
 - done when: T1's traces show the clustering systems gone and each camera's `camera_schedule` smaller, and the screenshots match.
 
 ## L: leaks
@@ -440,6 +440,23 @@ Render-world CPU in A, by camera: sky (order 0) 0.97, haze (−2) 0.62, map (−
 
 The browser build (`tools/build-wasm.sh`, `wasm-release` at `opt-level = "s"`, `wasm-opt -Oz`):
 `lightcone_web_bg.wasm` 35.50 MB raw, 7.87 MB brotli; the build took 13 minutes.
+
+### W4, 2026-09-25
+
+Measured differently from the baseline: the window opened on the laptop's Retina display
+(2560×1440 physical) and the machine was busy, so main-world CPU swung by more than a millisecond
+between runs of the same binary. Only the clustering systems' own time is steady enough to read.
+Four traced runs of each binary, alternating, scene A:
+
+| | clustering systems, ms per frame |
+|---|---|
+| before (`0355b46b`) | 1.15, 2.12, 2.20, (and 0.93 in the quietest run) |
+| after | 0.36, 0.65, 0.57, 0.32 |
+
+About 70% less every time, and all of it render-world CPU, which in the browser is on the one
+thread. Build both binaries from one checkout by swapping the changed files: two checkouts sharing
+one `CARGO_TARGET_DIR` reuse each other's artifacts, and the "before" binary silently was the
+"after" one.
 
 ## Not yet agreed
 

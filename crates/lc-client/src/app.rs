@@ -1,7 +1,7 @@
 //! The Bevy layer: states, resources, and the systems that carry actions.
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::light::cluster::{ClusterConfig, GlobalClusterSettings};
+use bevy::light::cluster::GlobalClusterSettings;
 use bevy::math::DVec3;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
@@ -356,16 +356,16 @@ fn spawn_camera(mut commands: Commands) {
         Hdr,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
-        ClusterConfig::None,
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
 }
 
 /// Nothing here is lit by a Bevy light: every material shades itself from the star. Bevy
-/// clusters lights for every 3D camera regardless, on the GPU, where a camera's
-/// `ClusterConfig::None` is not consulted — so that path is turned off, and the CPU one each
-/// camera opts out of does nothing. It was about 0.9 ms of render CPU a frame across three
-/// cameras, which in the browser is on the one thread.
+/// clusters lights for every 3D camera anyway, which on the GPU cost about 1 ms of render CPU a
+/// frame across three cameras, and on the CPU, with nothing to cluster, about a third of that.
+///
+/// Not also `ClusterConfig::None` on the cameras, which would save the rest: with it, `--bench`
+/// lost the Metal device in three runs of eight ("Cannot allocate sample buffer").
 fn no_lights(mut settings: ResMut<GlobalClusterSettings>) {
     settings.gpu_clustering = None;
 }
