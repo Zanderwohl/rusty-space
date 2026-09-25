@@ -213,6 +213,7 @@ impl<J: Journal> Server<J> {
                 self.pursuits.insert(id, crate::chase::Pursuit {
                     quarry: ShipId(quarry.0),
                     closeness: lc_world::pursuit::Closeness::Company,
+                    approach: lc_proto::Approach::default(),
                     // Never planned, so the guidance loop takes it this tick and solves the
                     // first approach itself. A second solve here would be a second
                     // implementation of the only standing order there is.

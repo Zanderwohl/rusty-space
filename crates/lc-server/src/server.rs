@@ -515,8 +515,7 @@ impl<J: Journal> Server<J> {
                         let pursuing = self.pursuits.get(&CraftId(ship_id.0)).map(|p| lc_proto::Pursuit {
                             quarry: p.quarry,
                             closeness: p.closeness.into(),
-                            // The only approach flown until E5.
-                            approach: lc_proto::Approach::Direct,
+                            approach: p.approach,
                         });
                         // What it is doing, not merely where it is: an account coming back
                         // finds its craft mid-orbit or mid-burn, and a welcome that said only
@@ -787,8 +786,7 @@ impl<J: Journal> Server<J> {
                 // who could see it lit — `crate::drive` states it — and after that the ship is.
                 (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
             }
-            Order::Intercept { approach: lc_proto::Approach::Courteous, .. } => return Err(Refusal::NotBuilt),
-            Order::Intercept { ship_id, closeness, .. } => {
+            Order::Intercept { ship_id, closeness, approach } => {
                 let quarry = *ship_id;
                 // The first plan is made here rather than left to the next tick, so that a
                 // player who presses the button sees the ship move on the same round trip as
@@ -801,7 +799,8 @@ impl<J: Journal> Server<J> {
                 let last_seen =
                     self.pursuits.get(&id).filter(|p| p.quarry == quarry).and_then(|p| p.last_seen);
                 let craft = self.fleet.get(id).ok_or(Refusal::NotYours)?;
-                match chase::plan(&self.fleet, craft, &seen, last_seen.as_ref(), (*closeness).into(), now_s) {
+                let arrival = chase::arrival(*approach, &self.balance, craft, now_s);
+                match chase::plan(&self.fleet, craft, &seen, last_seen.as_ref(), (*closeness).into(), arrival, now_s) {
                     Ok(plan) => {
                         let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
                         let before = craft.clone();
@@ -819,6 +818,7 @@ impl<J: Journal> Server<J> {
                 self.pursuits.insert(id, Pursuit {
                     quarry,
                     closeness: (*closeness).into(),
+                    approach: *approach,
                     last_plan_t: at,
                     last_seen,
                 });
@@ -826,7 +826,7 @@ impl<J: Journal> Server<J> {
                     KIND_BURN,
                     BURN_POWER_W,
                     format!("{{\"intercept\":{}}}", quarry.0),
-                    Order::Intercept { ship_id: quarry, closeness: *closeness, approach: lc_proto::Approach::Direct },
+                    Order::Intercept { ship_id: quarry, closeness: *closeness, approach: *approach },
                 )
             }
             Order::BreakOff => {
@@ -1113,7 +1113,7 @@ impl<J: Journal> Server<J> {
     ) {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
-        for (id, plan) in chase::decide(&self.fleet, &mut self.pursuits, now) {
+        for (id, plan) in chase::decide(&self.fleet, &mut self.pursuits, &self.balance, now) {
             let Some(craft) = self.fleet.get_mut(id) else { continue };
             let Some(plan) = plan else {
                 self.pursuits.remove(&id);
@@ -1971,6 +1971,61 @@ use crate::transport::Loopback;
             later < standoff * lc_world::pursuit::DRIFT_ALLOWANCE,
             "it wandered off station: {closed} to {later}",
         );
+    }
+
+    /// **A courteous intercept, flown by the server**: a main-drive leg that ends short, on the
+    /// ingress sphere, then thrusters onto the station, and it stays. The legs are separate plans,
+    /// so this is the chase noticing a leg that ended short and planning the next — and only then:
+    /// a leg re-planned part-way starts from wherever the ship is moving, which courtesy does not
+    /// cover.
+    #[tokio::test]
+    async fn a_courteous_intercept_goes_in_on_thrusters_and_stays() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let hunter = ClientId(1);
+        server.admit(hunter, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(
+            ClientId(2),
+            crate::world::still(ShipId(2), DVec3::new(ONE_LIGHT_SECOND, 0.0, 0.0)),
+            0.0,
+        );
+        wire.client_says(hunter, Inbound::Act(Intent {
+            ship_id: ShipId(1),
+            order: Order::Intercept {
+                ship_id: ShipId(2),
+                closeness: lc_proto::Closeness::Company,
+                approach: lc_proto::Approach::Courteous,
+            },
+            issued_at_client_t: 0,
+        }));
+        let standoff = lc_world::pursuit::standoff_m(
+            server.ship(ShipId(1)).unwrap().length_m,
+            server.ship(ShipId(2)).unwrap().length_m,
+        );
+        let rcs_g = server.balance().rcs_accel_g;
+        let (mut ingress, mut thrusters) = (false, false);
+        let mut legs: Vec<lc_world::pursuit::Rendezvous> = Vec::new();
+        for _ in 0..200 {
+            server.tick(&mut wire).await.unwrap();
+            if let Some(leg) = plan(&server, ShipId(1)) {
+                if legs.last() != Some(&leg) {
+                    legs.push(leg.clone());
+                }
+                let to_m = leg.cruise.to_ly.length() * lc_world::system::M_PER_LY;
+                ingress |= leg.cruise.drive.accel_g > rcs_g && to_m > 2.0 * standoff;
+                thrusters |= ingress && leg.cruise.drive.accel_g <= rcs_g;
+            }
+        }
+        assert!(ingress, "never flew a main-drive leg to the ingress sphere");
+        assert!(thrusters, "never went in on thrusters");
+        assert_eq!(legs.len(), 2, "{:#?}", legs.iter().map(|l| l.cruise.to_ly).collect::<Vec<_>>());
+        let closed = gap(&server);
+        assert!((closed - standoff).abs() < standoff * 0.1, "ended {closed} off, wanted {standoff}");
+        for _ in 0..300 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let later = gap(&server);
+        assert!((later - closed).abs() < standoff * 0.1, "it wandered off station: {closed} to {later}");
     }
 
     /// **Breaking off is no further corrections.** The ship is left on whatever its velocity

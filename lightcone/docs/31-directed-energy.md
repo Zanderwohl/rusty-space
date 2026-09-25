@@ -153,13 +153,23 @@ a small one maneuvers more slowly than its thrusters allow, rather than cooking 
   - **The station is abeam.** For a quarry under thrust it sits perpendicular to the quarry's thrust
     axis, so the quarry's cone points past it and its own cone, parallel, points past the quarry.
     For a coasting or falling quarry it sits perpendicular to the pursuer's line of arrival.
-  - **Followers spread around the axis.** Each pursuer's station is at an azimuth hashed from its
-    own id, so a flotilla forms a ring beside its leader rather than a queue in each other's cones.
-  - **The main-drive leg ends at an ingress point**, at the courtesy radius and offset to the side,
-    so the braking cone passes beside the quarry. The quarry falls inside that cone only while it is
-    more than eleven courtesy radii away (5° is a slope of one in eleven), where the flux is under a
-    hundredth of the limit.
-  - **Station-keeping thrusters fly from there to the station**, and keep it.
+  - **Followers spread around the axis.** Each pursuer's station is at an azimuth taken from its
+    own id, the golden-ratio sequence, so consecutive ids land far apart and a flotilla forms a ring
+    beside its leader rather than a queue in each other's cones.
+  - **The main-drive leg ends at an ingress point** on a sphere a tenth wider than the courtesy
+    radius at full thrust, and at least three standoffs out. It is the point on that sphere nearest
+    the station that the pursuer can see, which from far off is where its line of sight grazes the
+    sphere, so the whole leg stays outside it and the braking cone passes beside the quarry. The
+    quarry falls inside that cone only while it is more than eleven courtesy radii away (5° is a
+    slope of one in eleven), where the flux is under a hundredth of the limit. A station more than
+    60° further round than that point is reached through waypoints, each a 60° hop.
+  - **Station-keeping thrusters fly from there to the station**, and keep it. They run at full
+    thrust as far in as full thrust is courteous, then throttled to nine tenths of the limit at the
+    nearest the leg comes. Beside a burning quarry the main drive goes on carrying the quarry's
+    acceleration, abeam and pointed past it, while the thrusters close.
+  - **Each leg is its own plan**, as every re-solve already is. A leg ending more than twice the
+    standoff out is on the way rather than the station, and the next is planned when it has been
+    flown.
 - **Direct.** Today's solver: burn, flip and brake straight to a station wherever it falls, cone and
   all. It is quicker by the ingress leg and the hop, a fraction of a real second, and it flames
   whatever it arrives at. This is the Kzinti approach, for when the arrival is the point.
@@ -168,7 +178,11 @@ Courteous is the default because a standing order runs on the authority while it
 and a flotilla left overnight should still be there in the morning.
 
 What courtesy does not do: it only avoids craft the pursuer can **see**. A ship that has not yet
-come into sight is not avoided, which is what light delay means.
+come into sight is not avoided, which is what light delay means. It avoids only the quarry, not
+the rest of a flotilla on the way in. Its guarantee is for a leg begun at rest with the quarry: a
+re-plan mid-leg, because the quarry maneuvered, starts from whatever the pursuer is doing, and the
+match burn that sheds it is flown where the pursuer happens to be. And a pursuer that finds itself
+close ahead of a burning quarry cannot keep pace without its exhaust on it while it moves round.
 
 ## Emitting on purpose
 

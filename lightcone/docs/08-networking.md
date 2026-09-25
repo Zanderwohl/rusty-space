@@ -130,7 +130,12 @@ last drive event, or the last statement.
 ### Intercept: a standing order
 
 Near the quarry, how an approach avoids cooking it is
-[31-directed-energy.md](31-directed-energy.md#maneuvering-near-others).
+[31-directed-energy.md](31-directed-energy.md#maneuvering-near-others). A courteous approach, the
+default, is a short sequence of the plans below rather than one: a main-drive leg to an ingress
+point, perhaps a hop or two round the quarry, and a leg on station-keeping thrusters. Each is an
+ordinary rendezvous, escort or consort, and nothing on the wire tells them apart; the authority
+plans the next when one ending short of the station has been flown. `approach` is kept with the
+pursuit, so it survives a checkpoint and is repeated in `Outbound::Pursuing`.
 
 `Order::Intercept` is the first order that is a **policy** rather than an event. Every other
 one happens at an instant and a trajectory follows from it; this one is re-solved by the

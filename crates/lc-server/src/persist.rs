@@ -512,7 +512,7 @@ impl<J: Journal> Server<J> {
                     let pursuit = self.pursuits.get(&craft.id).map(|p| lc_proto::Pursuit {
                         quarry: p.quarry,
                         closeness: p.closeness.into(),
-                        approach: lc_proto::Approach::Direct,
+                        approach: p.approach,
                     });
                     let instruments = self.instruments.aboard.get(&craft.id).map(|a| SavedInstruments {
                         observatory: a.observatory.clone(),
@@ -580,6 +580,7 @@ impl<J: Journal> Server<J> {
                         self.pursuits.insert(craft.id, Pursuit {
                             quarry: pursuit.quarry,
                             closeness: pursuit.closeness.into(),
+                            approach: pursuit.approach,
                             last_plan_t: i64::MIN,
                             last_seen: None,
                         });
