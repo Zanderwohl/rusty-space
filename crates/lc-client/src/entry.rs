@@ -166,6 +166,7 @@ pub fn parse(args: &[String]) -> Entry {
                 || flag("--bench")
                 || flag("--at")
                 || flag("--station")
+                || flag("--form")
                 || flag("--demo")),
         target_swarm: flag("--swarm"),
         // Not when the camera is pinned: a pin is a request for one exact frame, and turning
@@ -201,6 +202,7 @@ pub fn parse(args: &[String]) -> Entry {
             }
         }),
         lift_deg: value(args, "--lift"),
+        form: after("--form"),
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),
@@ -345,6 +347,14 @@ mod tests {
         // `2` is the band's value, and looks exactly like a path.
         let none = parse(&args("--band 2")).catalog;
         assert_eq!(none, None);
+    }
+
+    #[test]
+    fn a_form_is_taken_by_name_and_goes_straight_to_the_sky() {
+        let dev = parse(&args("--form cluster")).dev;
+        assert_eq!(dev.form.as_deref(), Some("cluster"));
+        assert!(dev.observe_immediately, "a form asked for is a form to look at");
+        assert_eq!(parse(&[]).dev.form, None);
     }
 
     #[test]

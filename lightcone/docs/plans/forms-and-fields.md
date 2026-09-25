@@ -293,9 +293,9 @@ graph LR
 
 ### F6 · Form grid
 
-- status: active card "Build F6: the form grid"
+- status: done #84
 - needs: F3
-- touches: `crates/lc-world/src/form/grid.rs`
+- touches: `crates/lc-world/src/form/grid.rs`, `crates/lc-world/src/form/sdf.rs`, `crates/lc-world/src/form.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §What the server computes from a form
 - deliver: the voxel grid at `FORM_GRID`, the shadow table over 162 directions with interpolation, broadside and its roll, the envelope (offset, area, volume), moments of inertia, extent.
 - done when: a one-ellipsoid form reproduces 20's analytic `A(ŝ)` to within the grid's resolution, and a stack of plates shades itself.
@@ -481,9 +481,9 @@ graph LR
 
 ### R1 · Placeholder parts
 
-- status: active card "Build R1: placeholder parts in the client"
+- status: done #82
 - needs: F2, F5
-- touches: `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`
+- touches: `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/resolved.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §Temporary assets
 - deliver: each part as a Bevy primitive at its solved transform, a flat color per kind, the Mind as a small cube; `--form <preset>` draws the player's ship as that preset from a fixture, with no server involved.
 - done when: `--form cluster --shot` photographs a cluster, and the ovoid is only drawn for craft with no form.

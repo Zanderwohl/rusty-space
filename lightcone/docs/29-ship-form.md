@@ -210,11 +210,36 @@ complete.
 
 | quantity | how | read by |
 |---|---|---|
-| **shadow table** | area of the grid's projection along each of the 162 vertices of a twice-subdivided icosahedron, interpolated between them | starlight and beams arriving, brightness |
-| **broadside** | the direction of largest shadow, and the roll that presents it | the idle attitude of [20-solar-power.md](20-solar-power.md) |
-| **envelope** | the union's distance field offset by `envelope_margin` and blended with a large radius | the field's area and volume, [30-the-field.md](30-the-field.md) |
-| **inertia tensor** | the filled cells, weighted by each part's density, as the full symmetric tensor: a form is symmetric only port to starboard, so the xz product is generally not zero | slew rate |
-| **extent** | the envelope's longest dimension | `length_m`: the camera, the zoom limits, `Presence` |
+| **shadow table** | area of the grid's projection along each of the 162 vertices of a twice-subdivided icosahedron, interpolated linearly across the face a direction passes through | starlight and beams arriving, brightness |
+| **broadside** | the direction of largest shadow, and the roll about the nose that carries +z onto the direction across the nose with the largest shadow | the idle attitude of [20-solar-power.md](20-solar-power.md) |
+| **envelope** | the union's distance field offset by `envelope_margin` and its two nearest parts blended over `ENVELOPE_BLEND = 0.5` of the cube root of hull volume; area and volume by marching tetrahedra | the field's area and volume, [30-the-field.md](30-the-field.md) |
+| **inertia tensor** | the filled cells, weighted by each part's density, as the full symmetric tensor per kilogram, scaled to the ship's whole mass: a form is symmetric only port to starboard, so the xz product is generally not zero | slew rate |
+| **extent** | the envelope's longest dimension: its widest width along the axes and the table's 81 directions, within about 1.2% of its diameter | `length_m`: the camera, the zoom limits, `Presence` |
+
+The grid is `form::grid::FormGrid`. Its box is the field's bounds padded by half as much again as
+the envelope can reach, so the hull spans about 51 of the 64 cells for the starting form and every
+preset, and about 57 for a form of one part, which blends with nothing and reaches only its offset.
+The pad doubles until the envelope closes inside the grid, and a form whose envelope never does is
+refused as `Extent`; no preset needs a second pass. Four choices the table leaves open:
+
+- **The envelope offsets a truer distance than the field.** Off an ellipsoid the field is a bound
+  that falls short by up to the ratio of its axes, so an offset of it would put the starting hull's
+  tips five margins out. The envelope reads `Sdf::estimate_each_with`, which replaces the bound with
+  `k₀(k₀ − 1)/k₁`: exact along the axes and to first order at the surface. Hull volume, for the
+  margin, is the parts' closed forms summed, so the offset does not move with the resolution.
+- **The blend is between the two nearest parts**, and never with a part something encloses, which
+  would raise a blister over its encloser. It adds at most a quarter of its radius anywhere.
+- **A shadow is cast by the cells either side of the surface**, each cut by the plane its field's
+  gradient gives. Whole cubes stand out past the rim by up to half a diagonal, which on a hull a few
+  cells thick is a tenth of its shadow. A one-ellipsoid form is within 0.9 of a cell of rim of `A(ŝ)`
+  in every direction. Broadside and roll are fitted, not climbed to: a projection is noisy to a few
+  parts in a thousand, and the shadow is flatter than that near its peak.
+- **The cells carry contents only.** Structure, stored energy and heat are taken to lie where the
+  contents do, so the tensor is kept per kilogram and scaled by whatever the ship weighs. A cell's
+  density is its nearest part's by the envelope's truer distance, which the same pass has computed.
+
+Building one takes about 20 ms for the starting form and 50 ms for the Cluster with `lc-world`
+optimized, and a quarter to three quarters of a second unoptimized in the dev profile.
 
 **The shadow handles concave shapes.** A stack of plates shades
 itself and collects about what one plate would. A ship spread out collects more and turns more

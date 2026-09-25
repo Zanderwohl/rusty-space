@@ -166,6 +166,8 @@ pub enum FormError {
     MissingParent { part: PartId, parent: PartId },
     /// Names the lowest id on the cycle, whichever part the walk started from.
     Cycle(PartId),
+    /// The envelope reaches past every padding the grid tries, so it has no extent to state.
+    EnvelopeOpen,
 }
 
 impl std::fmt::Display for FormError {
@@ -180,6 +182,7 @@ impl std::fmt::Display for FormError {
             Self::Unplaced(id) => write!(f, "{id} has no parent"),
             Self::MissingParent { part, parent } => write!(f, "{part} hangs from {parent}, which does not exist"),
             Self::Cycle(id) => write!(f, "{id} is its own ancestor"),
+            Self::EnvelopeOpen => write!(f, "the envelope does not close"),
         }
     }
 }
@@ -524,6 +527,7 @@ impl From<FormError> for lc_proto::FormFault {
                 Self::MissingParent { part: part.into(), parent: parent.into() }
             }
             FormError::Cycle(id) => Self::Cycle(id.into()),
+            FormError::EnvelopeOpen => Self::Extent,
         }
     }
 }

@@ -142,6 +142,20 @@ impl Sdf {
         self.blends.iter().fold(hard, |d, &(a, b, radius)| d.min(smooth_min(raw[a], raw[b], radius)))
     }
 
+    /// Every piece's own distance into `each`, spars cut, and the union with its blends returned,
+    /// all from [`Shape::estimate`]. Nearer the Euclidean distance than [`Sdf::distance`] off an
+    /// ellipsoid, where the bound is short by up to the ratio of its axes, but no longer a bound.
+    pub fn estimate_each_with(&self, p: DVec3, scratch: &mut Vec<f64>, each: &mut Vec<f64>) -> f64 {
+        scratch.clear();
+        scratch.extend(
+            self.pieces.iter().zip(&self.inverse).map(|(piece, inv)| piece.shape.estimate(*inv * (p - piece.pose.position))),
+        );
+        each.clear();
+        each.extend((0..scratch.len()).map(|i| self.conformed(i, scratch)));
+        let hard = each.iter().copied().fold(f64::INFINITY, f64::min);
+        self.blends.iter().fold(hard, |d, &(a, b, radius)| d.min(smooth_min(scratch[a], scratch[b], radius)))
+    }
+
     /// The piece whose own distance at `p` is least, and that distance. Where two are blended the
     /// fillet goes to whichever is nearer.
     pub fn nearest(&self, p: DVec3) -> (&Piece, f64) {
@@ -213,7 +227,7 @@ fn strap(own: f64, parent: f64, depth: f64) -> f64 {
 }
 
 /// At most `radius / 4` below `min(a, b)`, and equal to it once they differ by `radius`.
-fn smooth_min(a: f64, b: f64, radius: f64) -> f64 {
+pub(super) fn smooth_min(a: f64, b: f64, radius: f64) -> f64 {
     let h = (radius - (a - b).abs()).max(0.0) / radius;
     a.min(b) - h * h * radius / 4.0
 }
@@ -239,6 +253,20 @@ impl Shape {
             }
             Shape::Torus { major, minor } => DVec2::new(rho - major, p.x).length() - minor,
             Shape::Frustum { length, start, end } => frustum(DVec2::new(rho, p.x), length / 2.0, start, end),
+        }
+    }
+
+    /// [`Shape::distance`] with the ellipsoid's `k₀(k₀ − 1)/k₁` instead of the bound: exact along
+    /// its axes and to first order near its surface, which an offset by a margin needs.
+    pub fn estimate(&self, p: DVec3) -> f64 {
+        match *self {
+            Shape::Ellipsoid { semi_axes } => {
+                let k0 = (p / semi_axes).length();
+                let k1 = (p / (semi_axes * semi_axes)).length();
+                // Only the center has no gradient to divide by.
+                if k1 > 0.0 { k0 * (k0 - 1.0) / k1 } else { -semi_axes.min_element() }
+            }
+            _ => self.distance(p),
         }
     }
 
