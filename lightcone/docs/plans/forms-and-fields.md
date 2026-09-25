@@ -302,7 +302,7 @@ graph LR
 
 ### F7 · Placement rules
 
-- status: todo
+- status: active card "Build F7: placement rules"
 - needs: F4, F6
 - touches: `crates/lc-world/src/form/rules.rs`
 - read: 29 §Placement rules
