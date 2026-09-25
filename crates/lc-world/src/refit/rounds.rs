@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::fitting::{Balance, C2};
 use crate::form::capacity::{Capacities, Transfer, part_kg};
-use crate::form::{Form, FormError, Kind, Part, PartId};
+use crate::form::{Form, FormError, Kind, Part, PartId, Placement};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Phase {
@@ -23,9 +23,10 @@ pub enum Phase {
 pub enum Change {
     Grow,
     Shrink,
+    /// Also a copy gained, when the part stays.
     Add,
     /// Also the first half of a reshape or a change of kind, whose second is an `Add` of the same
-    /// part.
+    /// part, and a copy lost, when the part stays.
     Remove,
     /// Carries everything that hung from the part when the round began.
     Move,
@@ -154,6 +155,18 @@ fn work_factor(kind: Kind, balance: &Balance) -> f64 {
     if kind == Kind::Data { balance.data_work_factor } else { 1.0 }
 }
 
+fn unmirrored(part: &Part) -> Option<Placement> {
+    part.placement.map(|p| Placement { mirror: false, ..p })
+}
+
+fn mirror(part: &Part) -> bool {
+    part.placement.is_some_and(|p| p.mirror)
+}
+
+fn with_mirror(part: Part, mirror: bool) -> Part {
+    Part { placement: part.placement.map(|p| Placement { mirror, ..p }), ..part }
+}
+
 fn apply(parts: &mut Parts, id: PartId, after: Option<Part>) {
     match after {
         Some(part) => parts.insert(id, part),
@@ -171,13 +184,13 @@ struct Pending {
 }
 
 impl Pending {
-    fn remove(part: &Part, balance: &Balance) -> Self {
-        let transfer = Transfer::of(Some(part), None, balance);
+    fn remove(part: &Part, copies: u32, balance: &Balance) -> Self {
+        let transfer = Transfer::of(Some(part), None, copies, balance);
         Self { part: part.id, change: Change::Remove, kind: part.kind, transfer, after: None }
     }
 
-    fn add(part: &Part, balance: &Balance) -> Self {
-        let transfer = Transfer::of(None, Some(part), balance);
+    fn add(part: &Part, copies: u32, balance: &Balance) -> Self {
+        let transfer = Transfer::of(None, Some(part), copies, balance);
         Self { part: part.id, change: Change::Add, kind: part.kind, transfer, after: Some(*part) }
     }
 }
@@ -199,31 +212,54 @@ impl Plan {
             return Err(Refusal::Mind(mind.id));
         }
 
+        let from_copies = round.from.copies();
+        let target_copies = round.target.copies();
         let mut dismantles = Vec::new();
         let mut moves = Vec::new();
         let mut builds = Vec::new();
+        // Whose added copy is built after the move phase, which must leave its mirror to that step.
+        let mut gaining = BTreeSet::new();
         for id in from.keys().chain(target.keys()).copied().collect::<BTreeSet<_>>() {
             match (from.get(&id), target.get(&id)) {
-                (Some(f), None) => dismantles.push(Pending::remove(f, balance)),
-                (None, Some(t)) => builds.push(Pending::add(t, balance)),
+                (Some(f), None) => dismantles.push(Pending::remove(f, from_copies[&id], balance)),
+                (None, Some(t)) => builds.push(Pending::add(t, target_copies[&id], balance)),
                 (Some(f), Some(t)) => {
                     // The Mind's stored shape and size are ignored, and it cannot move.
                     if f.kind == Kind::Mind {
                         continue;
                     }
+                    let (cf, ct) = (from_copies[&id], target_copies[&id]);
                     if f.kind != t.kind || f.primitive != t.primitive {
-                        dismantles.push(Pending::remove(f, balance));
-                        builds.push(Pending::add(t, balance));
-                    } else if f.volume_m3 != t.volume_m3 {
-                        let resized = Part { volume_m3: t.volume_m3, ..*f };
-                        let transfer = Transfer::of(Some(f), Some(t), balance);
-                        let (change, after, list) = match transfer {
-                            Transfer::Build { .. } => (Change::Grow, *t, &mut builds),
-                            Transfer::Dismantle { .. } => (Change::Shrink, resized, &mut dismantles),
-                        };
-                        list.push(Pending { part: id, change, kind: f.kind, transfer, after: Some(after) });
+                        dismantles.push(Pending::remove(f, cf, balance));
+                        builds.push(Pending::add(t, ct, balance));
+                    } else {
+                        let mut kept = *f;
+                        if f.volume_m3 != t.volume_m3 {
+                            let resized = Part { volume_m3: t.volume_m3, ..*f };
+                            let transfer = Transfer::of(Some(f), Some(t), cf.min(ct), balance);
+                            let (change, after, list) = match transfer {
+                                Transfer::Build { .. } => (Change::Grow, *t, &mut builds),
+                                Transfer::Dismantle { .. } => {
+                                    kept = resized;
+                                    (Change::Shrink, resized, &mut dismantles)
+                                }
+                            };
+                            list.push(Pending { part: id, change, kind: f.kind, transfer, after: Some(after) });
+                        }
+                        // A copy lost goes at the size it had, and one gained comes at the size it will have.
+                        if cf > ct {
+                            let transfer = Transfer::of(Some(f), None, cf - ct, balance);
+                            let after = Some(with_mirror(kept, mirror(t)));
+                            dismantles.push(Pending { part: id, change: Change::Remove, kind: f.kind, transfer, after });
+                        } else if ct > cf {
+                            let transfer = Transfer::of(None, Some(t), ct - cf, balance);
+                            builds.push(Pending { part: id, change: Change::Add, kind: f.kind, transfer, after: Some(*t) });
+                            gaining.insert(id);
+                        }
                     }
-                    if f.placement != t.placement {
+                    // A mirror that changes the count is the copy's step; one that does not is a
+                    // move of nothing, so the flag still lands.
+                    if unmirrored(f) != unmirrored(t) || (f.placement != t.placement && cf == ct) {
                         moves.push(id);
                     }
                 }
@@ -297,17 +333,23 @@ impl Plan {
         moves.sort_by_key(|&id| (depth(id), id));
         for id in moves {
             let power = building_w(&parts, balance, id)?;
+            let copies = Form { parts: parts.values().copied().collect() }.copies();
             // Through a part already taken apart too: what hung from it is still carried.
             let mut carried_j = 0.0;
             let mut stack = vec![id];
             while let Some(at) = stack.pop() {
                 if let Some(part) = parts.get(&at) {
-                    carried_j += part_kg(part, balance) * C2 * work_factor(part.kind, balance);
+                    carried_j +=
+                        f64::from(copies[&at]) * part_kg(part, balance) * C2 * work_factor(part.kind, balance);
                 }
                 stack.extend(children.get(&at).into_iter().flatten());
             }
-            let duration_s = balance.move_work_factor * carried_j / power;
-            let after = parts.get(&id).map(|p| Part { placement: target[&id].placement, ..*p });
+            let relocated = unmirrored(&from[&id]) != unmirrored(&target[&id]);
+            let duration_s = if relocated { balance.move_work_factor * carried_j / power } else { 0.0 };
+            let after = parts.get(&id).map(|p| {
+                let flag = if gaining.contains(&id) { mirror(p) } else { mirror(&target[&id]) };
+                with_mirror(Part { placement: target[&id].placement, ..*p }, flag)
+            });
             apply(&mut parts, id, after);
             steps.push(Step {
                 part: id,
@@ -823,6 +865,58 @@ mod tests {
         let between = plan.cancel(100.0 + step.begins_s, 1.0);
         assert_eq!(between.stored_j, 1.0);
         assert_eq!(get(&between.form, 2).volume_m3, 2.0 * B.slot_volume_m3);
+    }
+
+    fn mirrored(form: &Form, id: u16, on: bool) -> Form {
+        with(form, id, |p| p.placement.as_mut().unwrap().mirror = on)
+    }
+
+    #[test]
+    fn every_copy_of_a_mirrored_part_is_priced() {
+        // The engine's living space is mirrored with it.
+        let from = mirrored(&ship(), 3, true);
+        let grown = with(&from, 3, |p| p.volume_m3 = 2.0 * B.slot_volume_m3);
+        let plan = solve(&from, &grown, capacity(&from)).unwrap();
+        assert_eq!(changes(&plan), [(3, Change::Grow)]);
+        let difference = energy(&get(&grown, 3)) - energy(&get(&from, 3));
+        assert!(close(plan.net_j(), 2.0 * difference));
+
+        let moved = solve(&from, &with(&from, 3, |p| p.placement.as_mut().unwrap().twist = 0.5), 0.0).unwrap();
+        let carried = 2.0 * (energy(&get(&from, 3)) + energy(&get(&from, 4)));
+        assert!(close(moved.duration_s(), 0.25 * carried / power(&from)));
+    }
+
+    #[test]
+    fn a_copy_gained_or_lost_is_built_or_taken_apart_whole() {
+        let from = ship();
+        let small = 0.5 * B.slot_volume_m3;
+        let target = with(&mirrored(&from, 3, true), 3, |p| p.volume_m3 = small);
+        let plan = solve(&from, &target, 0.5 * capacity(&from)).unwrap();
+        // Mirroring is matter, not a move.
+        assert_eq!(changes(&plan), [(3, Change::Shrink), (3, Change::Add), (4, Change::Add)]);
+        // Halving the original does not pay for its copy: the half taken apart loses 5%.
+        let want = energy(&get(&target, 3)) + energy(&get(&from, 4))
+            - 0.95 * (energy(&get(&from, 3)) - energy(&get(&target, 3)));
+        assert!(close(plan.net_j(), want), "{} vs {want}", plan.net_j());
+        assert_eq!(sorted(&plan.at(1.0e30).form), sorted(&target));
+
+        let back = solve(&target, &from, 0.0).unwrap();
+        assert_eq!(changes(&back), [(3, Change::Remove), (4, Change::Remove), (3, Change::Grow)]);
+        // The copy lost goes at the size it had.
+        assert!(close(back.steps()[0].gross_j, energy(&get(&target, 3))));
+        assert_eq!(sorted(&back.at(1.0e30).form), sorted(&from));
+        // Taken apart before the move, it counts once for anything after it.
+        assert_eq!(back.at(100.0 + back.steps()[1].begins_s).form.copies()[&PartId(3)], 1);
+    }
+
+    #[test]
+    fn a_mirror_that_changes_no_count_is_a_move_of_nothing() {
+        let from = mirrored(&ship(), 3, true);
+        let target = mirrored(&from, 4, true);
+        let plan = solve(&from, &target, 0.0).unwrap();
+        assert_eq!(changes(&plan), [(4, Change::Move)]);
+        assert_eq!(plan.duration_s(), 0.0);
+        assert_eq!(sorted(&plan.at(100.0).form), sorted(&target));
     }
 
     #[test]
