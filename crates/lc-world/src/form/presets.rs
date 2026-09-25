@@ -10,6 +10,7 @@ use glam::{DVec2, DVec3};
 
 use super::place::normal_frame;
 use super::primitive::Shape;
+use super::rules;
 use super::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 use crate::fitting::Balance;
 
@@ -236,8 +237,7 @@ impl Form {
     /// The preset exactly, once it is known to be a form the ship could be.
     pub fn as_design(&self, min_part_m3: f64) -> Result<Form, PresetError> {
         self.validate()?;
-        // The Mind's stored volume is ignored, so it cannot be too small.
-        if let Some(part) = self.parts.iter().find(|p| p.kind != Kind::Mind && p.volume_m3 < min_part_m3) {
+        if let Some(part) = self.parts.iter().find(|p| rules::too_small(p, min_part_m3)) {
             return Err(PresetError::TooSmall(part.id));
         }
         Ok(self.clone())
@@ -313,7 +313,6 @@ impl Form {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::craft::LENGTH_RANGE_M;
     use crate::fitting::{Loadout, ONBOARD_DATA_BYTES};
     use crate::flight::{C_M_S, G0};
     use crate::form::capacity::{areal_density_for, dry_mass_kg, Capacities};
@@ -339,17 +338,6 @@ mod tests {
         all
     }
 
-    /// Directions spread evenly over the sphere.
-    fn fibonacci(n: usize) -> impl Iterator<Item = DVec3> {
-        let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
-        (0..n).map(move |i| {
-            let z = 1.0 - 2.0 * (i as f64 + 0.5) / n as f64;
-            let r = (1.0 - z * z).sqrt();
-            let (s, c) = (golden * i as f64).sin_cos();
-            DVec3::new(r * c, r * s, z)
-        })
-    }
-
     /// Every primitive used here is star-shaped about its center, so a point is inside when it is
     /// no farther out than the surface along its own ray.
     fn inside(shape: &Shape, local: DVec3) -> bool {
@@ -359,21 +347,6 @@ mod tests {
 
     fn placed(form: &Form) -> Poses {
         form.place(MIN).unwrap()
-    }
-
-    /// The ship-frame bounding box of every part, from its surface along many rays.
-    fn bounds(form: &Form) -> (DVec3, DVec3) {
-        let poses = placed(form);
-        let (mut lo, mut hi) = (DVec3::INFINITY, DVec3::NEG_INFINITY);
-        for (id, _, pose) in poses.iter() {
-            let shape = part(form, id.0).shape(MIN);
-            for d in fibonacci(2_000) {
-                let p = pose.to_outer(shape.exit(d).point);
-                lo = lo.min(p);
-                hi = hi.max(p);
-            }
-        }
-        (lo, hi)
     }
 
     /// While 19's loadout lasts. F9 removes it, and this test with it; the volumes stand.
@@ -494,48 +467,12 @@ mod tests {
         assert!(Builtin::Cluster.form().parts.iter().any(|p| matches!(p.kind, Kind::Spar(_))));
     }
 
-    /// 29 §Placement rules, ahead of F7: nothing in a cone of `engine_clear_half_angle_rad` out
-    /// of each engine's open face.
     #[test]
-    fn every_engine_points_fore_or_aft_with_a_clear_cone() {
-        let half = Balance::DEFAULT.engine_clear_half_angle_rad;
+    fn every_built_in_passes_the_placement_rules() {
         for (name, form) in everything() {
-            let poses = placed(&form);
-            let (lo, hi) = bounds(&form);
-            let far = (hi - lo).length() * 2.0;
-            for engine in of_kind(&form, Kind::Engine) {
-                let pose = poses.get(engine.id, Side::Original).unwrap();
-                let axis = pose.axis();
-                assert!(axis.x.abs() > 1.0 - 1e-12, "{name}: {} points {axis}", engine.id);
-                let shape = engine.shape(MIN);
-                let Shape::Frustum { start, end, .. } = shape else { panic!("{name}: an engine with an aperture") };
-                assert!(end > start, "{name}: {} opens outward", engine.id);
-                let mouth = pose.to_outer(DVec3::X * shape.reach());
-                for k in 0..=8 {
-                    let off = half * k as f64 / 8.0;
-                    for turn in 0..16 {
-                        let (s, c) = (turn as f64 * std::f64::consts::PI / 8.0).sin_cos();
-                        let (u, v) = axis.any_orthonormal_pair();
-                        let ray = (axis * off.cos() + (u * c + v * s) * off.sin()).normalize();
-                        for step in 1..=400 {
-                            let p = mouth + ray * (far * step as f64 / 400.0);
-                            for (id, _, other) in poses.iter().filter(|(id, ..)| *id != engine.id) {
-                                let blocked = inside(&part(&form, id.0).shape(MIN), other.to_local(p));
-                                assert!(!blocked, "{name}: {id} is in {}'s cone at {p}", engine.id);
-                            }
-                        }
-                    }
-                }
+            if let Err(faults) = rules::check(&form, &Balance::DEFAULT) {
+                panic!("{name}: {faults:?}");
             }
-        }
-    }
-
-    #[test]
-    fn every_built_in_is_inside_the_length_range() {
-        for (name, form) in everything() {
-            let (lo, hi) = bounds(&form);
-            let longest = (hi - lo).max_element();
-            assert!(longest >= LENGTH_RANGE_M.0 && longest <= LENGTH_RANGE_M.1, "{name}: {longest} m");
         }
     }
 
