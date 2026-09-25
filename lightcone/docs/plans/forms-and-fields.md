@@ -10,9 +10,13 @@ only the order.
 - **What can I start?** `python3 tools/dag.py lightcone/docs/plans/forms-and-fields.md ready` lists
   every task whose needs are done. It also warns when a task would touch a path an active task is
   touching.
-- **Claim a task** by changing its status line to `- status: active <your branch>`, in its own
-  commit, before starting work.
-- **Finish it** by changing the line to `- status: done <PR or commit>` in the same PR as the work.
+- **Claims live on `master`.** Whoever hands a task out changes its status line to
+  `- status: active <who>` and pushes that one commit straight to `master` before the work starts,
+  so `ready` on `master` never offers it twice. A claim on a branch is invisible until it merges.
+  The agent doing the task does not claim it again.
+- **Finish it** by merging `master` into your branch, then changing the line to
+  `- status: done <PR or commit>` in the same PR as the work. Merging first puts the claim in your
+  branch's history, so your one-line change merges cleanly.
 - **Edit only your task's block.** Every block is separated from the next by blank lines and its
   status sits on a line of its own, so two agents finishing two tasks change lines git sees as far
   apart and the merge is clean. Do not reflow, reorder or renumber anything.
