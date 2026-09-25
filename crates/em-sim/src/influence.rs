@@ -204,6 +204,21 @@ pub fn soi_at_with(system: &System, i: BodyIndex, time: Instant, model: SoiModel
     build(system, i, model, center, primary_position, primary, time)
 }
 
+/// [`soi_at`] for a child of `parent`, whose position at `time` is already known. Falls back to
+/// the full evaluation when the child's primary at that time is some other body.
+fn soi_about(system: &System, i: BodyIndex, time: Instant, parent: BodyIndex, parent_at: DVec3) -> Option<Soi> {
+    let model = default_model(system, i);
+    if matches!(model, SoiModel::None) {
+        return None;
+    }
+    let primary = primary_at(system, i, time)?;
+    if primary != parent {
+        return soi_at_with(system, i, time, model);
+    }
+    let center = propagate::position_at(system, i, time)?;
+    build(system, i, model, center, parent_at, primary, time)
+}
+
 /// The primary in force at `time`, resolved from the motive rather than the derived parent
 /// column, which is only valid for the arena's last rebuild time.
 fn primary_at(system: &System, i: BodyIndex, time: Instant) -> Option<BodyIndex> {
@@ -285,8 +300,11 @@ pub fn containment_chain(system: &System, point: DVec3, time: Instant) -> Vec<Bo
 
     // `topological_order` tolerates a cyclic parent column, so this walk must too.
     for _ in 0..MAX_DEPTH {
+        // Once per level rather than once per child: a star with sixty children was propagated
+        // sixty times to answer one question.
+        let Some(here) = propagate::position_at(system, current, time) else { break };
         let next = system.children_of(current).find(|&child| {
-            soi_at(system, child, time).is_some_and(|soi| soi.contains(point))
+            soi_about(system, child, time, current, here).is_some_and(|soi| soi.contains(point))
         });
         match next {
             Some(child) if !chain.contains(&child) => {
@@ -355,6 +373,49 @@ mod tests {
         let mut system = System::from_contents(&solar_system()).expect("the bundled system builds");
         propagate::evaluate_at(&mut system, Instant::J2000);
         system
+    }
+
+    /// Placing the parent once per level answers what placing it for every child did, near
+    /// every body and between them, across a year.
+    #[test]
+    fn the_chain_is_the_one_each_childs_own_sphere_gives() {
+        let system = built();
+        let by_child = |point: DVec3, time: Instant| {
+            let mut current = system
+                .roots()
+                .min_by(|&a, &b| {
+                    let d = |i| propagate::position_at(&system, i, time).map_or(f64::INFINITY, |p| (p - point).length());
+                    d(a).total_cmp(&d(b))
+                })
+                .unwrap();
+            let mut chain = vec![current];
+            for _ in 0..MAX_DEPTH {
+                let next = system
+                    .children_of(current)
+                    .find(|&c| soi_at(&system, c, time).is_some_and(|soi| soi.contains(point)));
+                match next {
+                    Some(c) if !chain.contains(&c) => {
+                        chain.push(c);
+                        current = c;
+                    }
+                    _ => break,
+                }
+            }
+            chain
+        };
+        let mut compared = 0;
+        for day in [0.0, 100.0, 250.0, 365.0] {
+            let time = Instant::from_seconds_since_j2000(day * 86_400.0);
+            for i in system.indices() {
+                let Some(at) = propagate::position_at(&system, i, time) else { continue };
+                for nudge in [DVec3::ZERO, DVec3::new(1.0e6, 0.0, 0.0), DVec3::new(0.0, 3.0e8, 1.0e8)] {
+                    let point = at + nudge;
+                    assert_eq!(containment_chain(&system, point, time), by_child(point, time));
+                    compared += 1;
+                }
+            }
+        }
+        assert!(compared > 500);
     }
 
     fn soi_of(system: &System, name: &str, model: SoiModel) -> Soi {
