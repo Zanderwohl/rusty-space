@@ -31,6 +31,7 @@ pub mod faces;
 pub mod haze;
 pub mod hud;
 pub mod hull;
+pub mod hull_mesh;
 pub mod input;
 pub mod library;
 pub mod link;
