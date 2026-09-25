@@ -57,3 +57,24 @@
 		format console
 	}
 }
+
+# What the CDN holds, for the administration console. **Internal only**: never published with
+# `-p` and never proxied, because this is the one port that lists — the public side above
+# answers a directory with a 404. Docker's published ports bypass the host firewall, so "just
+# for debugging" puts the listing on the LAN; `-p 127.0.0.1:3103:3103` if it must be reached
+# from the host at all.
+#
+# The stand-in for a bucket's list API (S3 `ListObjectsV2`), which takes a credential too;
+# see lightcone/docs/14-hosting.md. JSON when asked with `Accept: application/json`.
+#
+# Unset, the default is the hash of random bytes nobody kept, so the port refuses everyone. It
+# has to be a valid hash: Caddy refuses to start on a malformed one, public port included.
+:3103 {
+	root * /srv/cdn
+	basic_auth {
+		console {$CDN_LIST_HASH:$2a$14$dP5PV73tuT8mC9kfteb1F.qAIegwpRVLKF0q/zNCzQ8OQvqYEC.xe}
+	}
+	file_server browse {
+		hide .git
+	}
+}

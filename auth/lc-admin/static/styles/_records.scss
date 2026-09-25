@@ -1,0 +1,56 @@
+// One system's page, and one build's: a header of facts over panels of records.
+
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--step--1);
+
+  dt {
+    color: var(--ink-dim);
+  }
+
+  dd {
+    margin: 0;
+  }
+}
+
+.from-star {
+  display: block;
+  color: var(--ink-dim);
+}
+
+// The CDN's statuses. Missing is the one to act on; the rest are information.
+.badge-released {
+  border-color: var(--ok-dim);
+  color: var(--ok);
+}
+
+.badge-missing {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.badge-channel {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.badge-yanked,
+.badge-unreleased,
+.badge-unchecked {
+  color: var(--ink-dim);
+}
+
+// A book's catalog id, under its title.
+.id {
+  display: block;
+  color: var(--ink-dim);
+}
