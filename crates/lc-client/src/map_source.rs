@@ -160,7 +160,7 @@ pub fn coordinate(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> Picture 
     push_local_system(&mut build, session);
     if let Some(system) = session.system.as_ref() {
         let labels = session.home_labels();
-        for body in system.drawables_at(eye_ly, now) {
+        for body in system.drawables_unpainted_at(eye_ly, now) {
             push_drawable(&mut build, &body, &labels);
         }
     }

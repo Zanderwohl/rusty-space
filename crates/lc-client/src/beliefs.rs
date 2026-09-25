@@ -211,6 +211,29 @@ mod tests {
         assert_eq!(beliefs.builds, 2);
     }
 
+    /// Labels are built once per thing learned, and name what was learned.
+    #[test]
+    fn labels_are_built_again_only_when_something_is_learned() {
+        let mut session = at_a_star();
+        let first = session.home_labels();
+        session.advance(3600.0);
+        assert!(std::sync::Arc::ptr_eq(&first, &session.home_labels()), "time alone built them");
+
+        let system = session.system.clone().unwrap();
+        let key = system
+            .inventory()
+            .iter()
+            .find_map(|e| match &e.target {
+                Target::Body(key) if e.depth > 0 => Some(key.clone()),
+                _ => None,
+            })
+            .expect("a body under the star");
+        assert_eq!(session.home_labels().of(&key), "unidentified body");
+        let subject = lc_world::knowledge::Subject::Body { star: system.star, body: BodyId::of(system.star, &key) };
+        session.knowledge.name_it(subject, "Newfound", 1.0);
+        assert_eq!(session.home_labels().of(&key), "Newfound");
+    }
+
     /// A body no generator made has nowhere to be flown to, which is what a false positive
     /// should mean rather than a crash or a course into empty space.
     #[test]

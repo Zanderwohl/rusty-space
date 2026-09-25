@@ -116,6 +116,9 @@ pub struct Session {
     /// Each body's settled type, against the measurement it was read from: a type is a pass over
     /// the whole prior, and every label asks for one every frame.
     settled: std::sync::Mutex<HashMap<BodyId, (Measured, Option<Sort>)>>,
+    /// [`Session::home_labels`], by the star and the knowledge revision it was built from.
+    /// The pick pass, the readout and the Flight panel each ask every frame.
+    labels: std::sync::Mutex<Option<((StarId, u64), Arc<lc_world::labels::Labels>)>>,
     /// Logs the shard has still to analyze, as it last said.
     pub analyzing: usize,
     /// As the shard last said.
@@ -190,6 +193,7 @@ impl Session {
             by_id,
             sorts: std::sync::OnceLock::new(),
             settled: Default::default(),
+            labels: Default::default(),
             analyzing: 0,
             doing: Doing::default(),
             stars,
@@ -609,12 +613,26 @@ impl Session {
 
     /// What this ship calls the star it is in and every body around it. Never the generator's
     /// names, which are only keys: see [`lc_world::labels`].
-    pub fn home_labels(&self) -> lc_world::labels::Labels {
+    pub fn home_labels(&self) -> Arc<lc_world::labels::Labels> {
         let Some(system) = self.system.as_ref() else { return Default::default() };
+        let key = (system.star, self.knowledge.revision());
+        let mut held = self.labels.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((at, labels)) = held.as_ref()
+            && *at == key
+        {
+            return labels.clone();
+        }
+        // Positions are not read, so the time the beliefs are built at does not matter.
         let star = self.name_of(system.star);
-        let called: HashMap<BodyId, String> =
-            crate::beliefs::of(self).bodies.iter().map(|b| (b.body, self.called(b))).collect();
-        lc_world::labels::label(system, &star, |body| called.get(&body).cloned())
+        let called: HashMap<BodyId, String> = self
+            .knowledge
+            .bodies_of(system.star, 0.0)
+            .iter()
+            .map(|b| (b.body, self.called(b)))
+            .collect();
+        let labels = Arc::new(lc_world::labels::label(system, &star, |body| called.get(&body).cloned()));
+        *held = Some((key, labels.clone()));
+        labels
     }
 
     /// What this ship calls anything it holds, star or body.
