@@ -10,7 +10,8 @@
 //! needs a different range — see [`LINE_COLOR_SCALE`].
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::camera::primitives::Aabb;
+use bevy::camera::visibility::{NoAutoAabb, NoFrustumCulling, RenderLayers};
 use bevy::camera::RenderTarget;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -52,6 +53,16 @@ const SPHERE_TUBE_FRACTION: f32 = 0.06;
 /// A disc has one normal, so displacement translates it instead of thickening it. Asking for
 /// the material's base radius makes the displacement zero.
 const DOT_TUBE_FRACTION: f32 = BASE_TUBE_RADIUS;
+
+/// A circle's line is [`LINE_PX`] over the mark's radius in pixels, which the shader works out
+/// itself: both are fixed on screen, so the distance cancels. This is that at the smallest mark
+/// there is, so it never binds and every circle can share one material.
+const CIRCLE_TUBE_FRACTION: f32 = LINE_PX / (POINT_FLOOR_PX * 0.5);
+
+/// What a unit mesh here can reach once the shader has thickened it, with room: a circle's line
+/// at [`CIRCLE_TUBE_FRACTION`] puts its outside at twice its radius. Held rather than computed,
+/// because a mark changes mesh with its form and the box has to fit all of them.
+const UNIT_REACH: f32 = 2.5;
 
 /// The reference scale — rings, spokes, drop-lines — is drawn at half a line's width and half
 /// its brightness. It is the ruler, not what is being measured.
@@ -206,6 +217,9 @@ pub struct Map {
     drops: Vec<Handle<Mesh>>,
     /// What is spawned, in order. A rebuild happens only when this stops matching the frame.
     drawn: Vec<ItemKey>,
+    /// One material per kind and form, and per kind for spreads (`None`), shared by every item
+    /// drawn with it: a material each was a bind group each, and a draw each.
+    palette: std::collections::HashMap<(ItemKind, Option<Form>), Handle<MapLineMaterial>>,
     rings_drawn: usize,
     /// Whether this frame builds and renders the map. See [`pace`].
     due: bool,
@@ -290,16 +304,10 @@ impl Viewport {
         (self.point_px * placement.symbol_scale).max(POINT_FLOOR_PX)
     }
 
-    /// A circle's line, as a fraction of its radius. Both are fixed pixel sizes, so the
-    /// distance and scale in [`crate::map_line::tube_radius`] cancel and this is the answer,
-    /// not a cap.
-    fn point_tube_fraction(self, mark_px: f32) -> f32 {
-        LINE_PX / (mark_px * 0.5)
-    }
 }
 
 /// How a body is drawn at this zoom. One decision, read in three places.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Form {
     Sphere,
     Circle,
@@ -363,6 +371,7 @@ fn setup(
             .collect(),
         drawn: Vec::new(),
         rings_drawn: 0,
+        palette: Default::default(),
         due: false,
         drawn_at_s: f64::NEG_INFINITY,
         drawn_for: None,
@@ -494,7 +503,7 @@ fn place(
     camera: Single<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
     existing: Query<Entity, With<MapDrawn>>,
     mut items: Query<
-        (&MapItemOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<MapLineMaterial>),
+        (&MapItemOf, &mut Transform, &mut Mesh3d, &mut MeshMaterial3d<MapLineMaterial>),
         (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpokes>,
             Without<MapSpreadOf>),
     >,
@@ -575,27 +584,26 @@ fn place(
         for entity in &existing {
             commands.entity(entity).despawn();
         }
-        spawn_scene(&mut commands, &map, &frame, standoff, view, &mut meshes, &mut materials);
+        spawn_scene(&mut commands, &mut map, &frame, standoff, view, &mut meshes, &mut materials);
         map.drawn = wanted;
         map.rings_drawn = frame.rings.len();
         map.frame = Some(frame);
         return;
     }
 
-    for (of, mut at, mut mesh, material) in items.iter_mut() {
+    for (of, mut at, mut mesh, mut material) in items.iter_mut() {
         let Some(placement) = frame.placements.get(of.0) else { continue };
         *at = item_transform(placement, view);
         // Crossing the threshold does not change the set that is drawn, so the level of
-        // detail is a handle swap rather than a respawn.
-        let (wanted, fraction) = mesh_for(form_of(placement, view), placement, &map, view);
+        // detail is a handle swap rather than a respawn, and so is the material that goes with it.
+        let form = form_of(placement, view);
+        let wanted = mesh_of(form, &map);
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
         }
-        // A mark's cap follows its form. Compared first: a write re-prepares the material.
-        if materials.get(&material.0).is_some_and(|m| m.max_fraction != fraction)
-            && let Some(mut asset) = materials.get_mut(&material.0)
-        {
-            asset.max_fraction = fraction;
+        let wanted = material_of(&mut map.palette, &mut materials, placement.kind, Some(form));
+        if material.0 != wanted {
+            material.0 = wanted;
         }
     }
     for (of, mut at, mut mesh) in drops.iter_mut() {
@@ -786,14 +794,40 @@ fn item_transform(placement: &Placement, view: Viewport) -> Transform {
     }
 }
 
-/// The mesh a form is drawn with, and the cap its tube is sized under.
-fn mesh_for<'a>(form: Form, placement: &Placement, map: &'a Map, view: Viewport)
-    -> (&'a Handle<Mesh>, f32) {
+/// The mesh a form is drawn with.
+fn mesh_of(form: Form, map: &Map) -> &Handle<Mesh> {
     match form {
-        Form::Sphere => (&map.sphere, SPHERE_TUBE_FRACTION),
-        Form::Circle => (&map.point, view.point_tube_fraction(view.mark_px(placement))),
-        Form::Dot => (&map.dot, DOT_TUBE_FRACTION),
+        Form::Sphere => &map.sphere,
+        Form::Circle => &map.point,
+        Form::Dot => &map.dot,
     }
+}
+
+/// The shared material for an item of `kind` drawn as `form`, or for its spread when `None`.
+fn material_of(
+    palette: &mut std::collections::HashMap<(ItemKind, Option<Form>), Handle<MapLineMaterial>>,
+    materials: &mut Assets<MapLineMaterial>,
+    kind: ItemKind,
+    form: Option<Form>,
+) -> Handle<MapLineMaterial> {
+    palette
+        .entry((kind, form))
+        .or_insert_with(|| {
+            let (cap, scale) = match form {
+                Some(Form::Sphere) => (SPHERE_TUBE_FRACTION, LINE_COLOR_SCALE),
+                Some(Form::Circle) => (CIRCLE_TUBE_FRACTION, LINE_COLOR_SCALE),
+                Some(Form::Dot) => (DOT_TUBE_FRACTION, LINE_COLOR_SCALE),
+                None => (LINE_TUBE_FRACTION, SPREAD_COLOR_SCALE),
+            };
+            materials.add(line_material(color_of(kind), cap, LINE_PX, scale))
+        })
+        .clone()
+}
+
+/// Culled like anything else, with room for what the shader adds. See [`UNIT_REACH`]. Held
+/// fixed: Bevy would otherwise refit it to the mesh at every change of form, without the room.
+fn unit_bounds() -> (Aabb, NoAutoAabb) {
+    (Aabb::from_min_max(Vec3::splat(-UNIT_REACH), Vec3::splat(UNIT_REACH)), NoAutoAabb)
 }
 
 /// How many dashes a drop wants, so each is [`DASH_PX`] long on screen. The mesh lays `n`
@@ -871,7 +905,7 @@ fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
 
 fn spawn_scene(
     commands: &mut Commands,
-    map: &Map,
+    map: &mut Map,
     frame: &MapFrame,
     standoff: f32,
     view: Viewport,
@@ -911,18 +945,12 @@ fn spawn_scene(
 
     for (index, placement) in frame.placements.iter().enumerate() {
         let at = item_transform(placement, view);
-        let (mesh, fraction) = mesh_for(form_of(placement, view), placement, map, view);
+        let form = form_of(placement, view);
         commands.spawn((
-            Mesh3d(mesh.clone()),
-            // Its own, because its cap changes with its form.
-            MeshMaterial3d(materials.add(line_material(
-                color_of(placement.kind),
-                fraction,
-                LINE_PX,
-                LINE_COLOR_SCALE,
-            ))),
+            Mesh3d(mesh_of(form, map).clone()),
+            MeshMaterial3d(material_of(&mut map.palette, materials, placement.kind, Some(form))),
             at,
-            NoFrustumCulling,
+            unit_bounds(),
             layer.clone(),
             MapDrawn,
             MapItemOf(index),
@@ -939,15 +967,14 @@ fn spawn_scene(
             ));
         }
         if let Some((near, far)) = placement.spread {
-            let material = materials.add(line_material(color_of(placement.kind), LINE_TUBE_FRACTION,
-                LINE_PX, SPREAD_COLOR_SCALE));
+            let material = material_of(&mut map.palette, materials, placement.kind, None);
             for part in [SpreadPart::Bar, SpreadPart::NearCap, SpreadPart::FarCap] {
                 commands.spawn((
                     // One dash: a solid line.
                     Mesh3d(map.drops[0].clone()),
                     MeshMaterial3d(material.clone()),
                     spread_transform(near, far, part, view.rad_per_px),
-                    NoFrustumCulling,
+                    unit_bounds(),
                     layer.clone(),
                     MapDrawn,
                     MapSpreadOf(index, part),
@@ -1358,11 +1385,11 @@ mod tests {
         for scale in [em_map::weight::MIN_SCALE, 0.0, 1.0e-9] {
             assert!(marked(scale) >= POINT_FLOOR_PX, "{scale} drew {}", marked(scale));
         }
-        // And the line thickens to match, or a small mark is a hairline ring nobody can see.
-        assert!(
-            view.point_tube_fraction(marked(0.5)) > view.point_tube_fraction(marked(1.0)),
-            "a smaller mark wants a thicker line, as a fraction of itself",
-        );
+        // The shader thickens a small mark's line to match, as a fraction of it; the shared cap
+        // must leave room for the smallest there is, or it would be a hairline ring.
+        for scale in [em_map::weight::MIN_SCALE, 0.0, 0.5, 1.0] {
+            assert!(LINE_PX / (marked(scale) * 0.5) <= CIRCLE_TUBE_FRACTION, "{scale} was capped");
+        }
     }
 
     /// The crossover is the surface's size for everyone, so a light body steps down to its
