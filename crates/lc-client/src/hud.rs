@@ -42,33 +42,85 @@ impl Hud {
     pub fn band(&self, fit: Fit) -> String {
         match fit {
             Fit::Words => format!("BAND {}", self.mapping),
-            Fit::Codes | Fit::Keys => format!("B {}", self.mapping_code),
+            Fit::Codes | Fit::Keys | Fit::Bare => format!("B {}", self.mapping_code),
         }
     }
 
     pub fn exposure(&self, fit: Fit) -> String {
         match fit {
             Fit::Words => format!("EXPOSURE {}", self.exposure),
-            Fit::Codes | Fit::Keys => format!("E {}", self.exposure_code),
+            Fit::Codes | Fit::Keys | Fit::Bare => format!("E {}", self.exposure_code),
         }
     }
+
+    /// The numbers beside the energy bar, or `None` where the bar is shown alone.
+    pub fn energy_amount(&self, fit: Fit) -> Option<&str> {
+        self.energy.as_ref().filter(|_| fit < Fit::Bare).map(|e| e.amount.as_str())
+    }
+
+    pub fn warning(&self, fit: Fit) -> Option<String> {
+        let words = self.warning.as_deref()?;
+        Some(if fit == Fit::Bare { rate_code(words) } else { words.to_string() })
+    }
+}
+
+/// A rate in unit symbols: "15 minutes / second" is "15 min/s". A rate off the design one is
+/// never dropped from the bar, only shortened.
+fn rate_code(label: &str) -> String {
+    let symbol = |word| match word {
+        "year" | "years" => "yr",
+        "day" | "days" => "d",
+        "hour" | "hours" => "h",
+        "minute" | "minutes" => "min",
+        "second" | "seconds" => "s",
+        word => word,
+    };
+    label
+        .split(" / ")
+        .map(|side| side.split(' ').map(symbol).collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// The connection note at this fit. [`Fit::Bare`] keeps the state and drops who, how fast and
+/// why, which the bar shows on hover.
+pub fn link(
+    state: &crate::uplink::State,
+    round_trip_s: Option<f64>,
+    fit: Fit,
+) -> Option<(crate::uplink::Note, String)> {
+    use crate::uplink::State;
+    let (note, words) = crate::uplink::note(state, round_trip_s)?;
+    if fit < Fit::Bare {
+        return Some((note, words));
+    }
+    let state = match state {
+        State::Offline => return None,
+        State::Connecting => "CONNECTING",
+        State::Joined(_) => "LINKED",
+        State::Refused(_) => "REFUSED",
+        State::Lost(_) => "LINK LOST",
+    };
+    Some((note, state.to_string()))
 }
 
 /// How much of the top bar's wording fits across the window.
 ///
 /// The window buttons are laid out right to left with no check against the readout, so a bar
 /// that asks for more than the window has draws one over the other.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Fit {
     Words,
     /// The band and exposure as codes.
     Codes,
     /// Codes, and each window button as the key that toggles it.
     Keys,
+    /// Keys, the energy bar without its numbers, and the rate and link notes shortened.
+    Bare,
 }
 
 impl Fit {
-    pub const WIDEST_FIRST: [Fit; 3] = [Fit::Words, Fit::Codes, Fit::Keys];
+    pub const WIDEST_FIRST: [Fit; 4] = [Fit::Words, Fit::Codes, Fit::Keys, Fit::Bare];
 }
 
 /// Codes for [`presets::all`], by name so that reordering the list cannot shift them.
@@ -108,7 +160,7 @@ pub struct Toggle {
 impl Toggle {
     pub fn text(&self, fit: Fit) -> &str {
         match fit {
-            Fit::Keys => &self.key,
+            Fit::Keys | Fit::Bare => &self.key,
             Fit::Words | Fit::Codes => self.label,
         }
     }
@@ -448,6 +500,69 @@ mod tests {
         assert_eq!(lines(&s, &ui).warning.unwrap(), "7 minutes / second");
         apply(Action::SetTimeRate(1.0), &mut ui, &mut s);
         assert!(lines(&s, &ui).warning.is_none(), "the canonical rate needs no warning");
+    }
+
+    /// The narrowest fit keeps the rate on the bar in unit symbols, so a scene's slow clock is
+    /// still said rather than hidden in a hover.
+    #[test]
+    fn a_bare_bar_shortens_the_rate_and_does_not_drop_it() {
+        assert_eq!(rate_code("15 minutes / second"), "15 min/s");
+        assert_eq!(rate_code("1 year / minute"), "1 yr/min");
+        assert_eq!(rate_code("1 year / 10 min"), "1 yr/10 min");
+        assert_eq!(rate_code("1 year / 56 seconds"), "1 yr/56 s");
+        assert_eq!(rate_code("2 days / second"), "2 d/s");
+        assert_eq!(rate_code("stopped"), "stopped");
+        for (_, rung) in crate::ui::RATE_LADDER {
+            assert!(rate_code(rung).len() <= rung.len(), "{rung} grew");
+        }
+
+        let (mut ui, mut s) = fixture();
+        apply(Action::SetTimeRate(0.05), &mut ui, &mut s);
+        let hud = lines(&s, &ui);
+        assert_eq!(hud.warning(Fit::Keys).unwrap(), "7 minutes / second");
+        assert_eq!(hud.warning(Fit::Bare).unwrap(), "7 min/s");
+        apply(Action::SetTimeRate(1.0), &mut ui, &mut s);
+        assert_eq!(lines(&s, &ui).warning(Fit::Bare), None);
+    }
+
+    /// Only the bare fit leaves the energy bar without its numbers.
+    #[test]
+    fn a_bare_bar_shows_energy_as_the_bar_alone() {
+        use lc_world::fitting::{Balance, Fitting, Loadout};
+        let (ui, mut s) = fixture();
+        s.ship.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, s.coordinate_time_s())));
+        let hud = lines(&s, &ui);
+        for fit in [Fit::Words, Fit::Codes, Fit::Keys] {
+            assert_eq!(hud.energy_amount(fit), Some("30.0 / 30.0 ME"), "{fit:?}");
+        }
+        assert_eq!(hud.energy_amount(Fit::Bare), None);
+        assert!(hud.energy.is_some(), "the bar itself is still drawn");
+    }
+
+    /// The link note keeps its state at the bare fit, and loses who, how fast and why.
+    #[test]
+    fn a_bare_bar_says_the_state_of_the_link_and_no_more() {
+        use crate::uplink::{Joined, Note, State};
+        let joined = State::Joined(Joined {
+            client_id: lc_proto::ClientId(1),
+            ship_id: lc_proto::ShipId(1),
+            name: "Traveler 1".into(),
+        });
+        assert_eq!(
+            link(&joined, Some(0.012), Fit::Keys),
+            Some((Note::Quiet, "LINKED Traveler 1 · 12 ms".into())),
+        );
+        assert_eq!(link(&joined, Some(0.012), Fit::Bare), Some((Note::Quiet, "LINKED".into())));
+        assert_eq!(
+            link(&State::Lost("socket closed".into()), None, Fit::Bare),
+            Some((Note::Wrong, "LINK LOST".into())),
+        );
+        assert_eq!(
+            link(&State::Refused("no".into()), None, Fit::Bare),
+            Some((Note::Wrong, "REFUSED".into())),
+        );
+        assert_eq!(link(&State::Connecting, None, Fit::Bare), Some((Note::Working, "CONNECTING".into())));
+        assert_eq!(link(&State::Offline, None, Fit::Bare), None);
     }
 
     /// The readout's job during a crossing: the two clocks disagree and it has to show both.
