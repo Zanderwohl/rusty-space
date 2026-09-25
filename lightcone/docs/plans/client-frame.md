@@ -318,7 +318,7 @@ graph LR
 
 ### L3 · Chat bounded
 
-- status: active claude/game-loop-optimization-71831f
+- status: done (this branch; capped at 500 lines. Once bounded, the linear duplicate check and the sort per draw are bounded too, so neither was indexed; `show_rows` not done, since the lines wrap to different heights)
 - needs: —
 - touches: `crates/lc-client/src/chat.rs`, `crates/lc-client/src/radio_panel.rs`
 - read: 27
@@ -327,7 +327,7 @@ graph LR
 
 ### L4 · Small unbounded maps
 
-- status: todo
+- status: active claude/game-loop-optimization-71831f
 - needs: —
 - touches: `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/watch.rs`
 - read: —
