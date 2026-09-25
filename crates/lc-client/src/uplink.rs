@@ -110,6 +110,10 @@ pub type DriveAt = (f64, f64);
 /// the instant drawn is never more than a tick or two behind the newest.
 const REMEMBERED_DRIVES: usize = 16;
 
+/// Ships whose drives are remembered. One out of sight keeps its history for when it comes
+/// back, until a busy shard pushes the count past this.
+const REMEMBERED_DRIVERS: usize = 1024;
+
 impl Contact {
     /// A contact from a statement. `system` is the one this ship is in, which a contact inside
     /// it is reckoned along a conic about.
@@ -654,6 +658,10 @@ fn fold(
                 drives.insert(place, at);
                 let excess = drives.len().saturating_sub(REMEMBERED_DRIVES);
                 drives.drain(..excess);
+            }
+            if uplink.drives.len() > REMEMBERED_DRIVERS {
+                let contacts = &uplink.contacts;
+                uplink.drives.retain(|ship, _| contacts.iter().any(|c| c.ship_id == *ship));
             }
             uplink.seen.extend(seen);
             let excess = uplink.seen.len().saturating_sub(REMEMBERED);
@@ -1765,6 +1773,54 @@ mod tests {
         let later = lc_proto::Presence { jet_power_w: 0.0, emitted_t: 400_000_000, arrive_t: 400_000_000, ..presence };
         fold(&mut uplink, &mut game, &mut ui, present(later));
         assert_eq!(power_at(&mut uplink, 410.0), 0.0, "an older event outranked a newer statement");
+    }
+
+    /// Past [`REMEMBERED_DRIVERS`], only the contacts in sight keep their drive histories.
+    #[test]
+    fn drive_histories_are_bounded_by_the_ships_in_sight() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(2),
+            name: "Vela".into(),
+            length_m: 500.0,
+            at_ly: [0.0; 3],
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            jet_power_w: 0.0,
+            emitted_t: 0,
+            arrive_t: 0,
+            form: lc_proto::Form::default(),
+            glow: None,
+            glare: None,
+        };
+        fold(
+            &mut uplink,
+            &mut game,
+            &mut ui,
+            Outbound::Present(vec![Cleared::<lc_proto::Presence>::clear(presence, 0).unwrap()]),
+        );
+        let drive = |source_id: i64| {
+            let change = lc_proto::DriveChange { power_w: 1.0, facing: [1.0, 0.0, 0.0] };
+            let sighting = Sighting {
+                event_id: source_id,
+                source_id,
+                arrive_t: 1_000_000,
+                emitted_t: 1_000_000,
+                direction: [1.0, 0.0, 0.0],
+                strength: 1.0,
+                kind: lc_proto::kind::DRIVE,
+                payload: serde_json::to_string(&change).unwrap(),
+            };
+            Cleared::<Sighting>::clear(sighting, 1_000_000, 0.0).unwrap()
+        };
+        let under: Vec<_> = (2..REMEMBERED_DRIVERS as i64 + 2).map(drive).collect();
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Sightings(under));
+        assert_eq!(uplink.drives.len(), REMEMBERED_DRIVERS, "out of sight is kept while there is room");
+
+        let over = vec![drive(REMEMBERED_DRIVERS as i64 + 2)];
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Sightings(over));
+        assert_eq!(uplink.drives.keys().copied().collect::<Vec<_>>(), vec![ShipId(2)]);
     }
 
     #[test]

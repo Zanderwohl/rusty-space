@@ -168,6 +168,21 @@ impl Target {
             ..self
         }
     }
+
+    /// What the baked texture holds on the GPU.
+    pub const fn bytes(self) -> usize {
+        let texels = match self.shape {
+            Shape::Volume(n) => n as usize * n as usize * n as usize,
+            Shape::Cube(n) => n as usize * n as usize * CUBE_FACES as usize,
+            Shape::Plane(n) => n as usize * n as usize,
+        };
+        let per_texel = match self.format {
+            Format::Scalar(ScalarFormat::R8Unorm) => 1,
+            Format::Scalar(ScalarFormat::R16Float) => 2,
+            Format::Scalar(ScalarFormat::R32Float) | Format::Color => 4,
+        };
+        texels * per_texel
+    }
 }
 
 /// A flat image of `target`'s kind, half-way everywhere, which every pattern here reads as no
@@ -317,6 +332,15 @@ impl Bakes {
         });
     }
 
+    /// Drop what is still waiting to bake into `images`, whose owner no longer wants them. A bake
+    /// already on the GPU lands anyway, into an image nothing else holds.
+    pub fn forget(&mut self, images: &[AssetId<Image>]) {
+        self.waiting.retain(|request| !images.contains(&request.image.id()));
+        for image in images {
+            self.unsettled.remove(image);
+        }
+    }
+
     /// Whether every bake asked of `image` has landed or failed. Bakes of one image land in the
     /// order they were asked for, so the image then holds the last.
     pub fn settled(&self, image: &Handle<Image>) -> bool {
@@ -332,6 +356,28 @@ fn settle(unsettled: &mut HashMap<AssetId<Image>, u32>, image: &Handle<Image>) {
             unsettled.remove(&image.id());
         }
     }
+}
+
+/// What the bakes being read back may hold at once: a little over one 1024 color cube. Each is
+/// copied into wasm memory whole, twice, and that memory never shrinks, so a burst of bakes
+/// would leave its peak behind for the session. At least one always starts.
+const IN_FLIGHT_BYTES: usize = 32 << 20;
+
+/// Which waiting bakes start now, and which wait. In order of face size, because the baker's
+/// scratch textures are rebuilt whenever it changes; the sort is stable, and once one waits
+/// everything after it does, so bakes of one image still land in the order asked.
+fn admit(mut waiting: Vec<Request>, in_flight: usize) -> (Vec<Request>, Vec<Request>) {
+    waiting.sort_by_key(|r| match r.target.shape {
+        Shape::Volume(n) | Shape::Cube(n) | Shape::Plane(n) => n,
+    });
+    let mut held = in_flight;
+    let first_waiting = waiting.iter().position(|r| {
+        let fits = held == 0 || held + r.target.bytes() <= IN_FLIGHT_BYTES;
+        held += r.target.bytes();
+        !fits
+    });
+    let deferred = first_waiting.map_or_else(Vec::new, |at| waiting.split_off(at));
+    (waiting, deferred)
 }
 
 /// Start what can start, and finish what the GPU has finished.
@@ -365,7 +411,9 @@ fn run_bakes(
     }
     let (baker, device) = bakes.baker.as_mut().expect("built above");
 
-    let waiting = std::mem::take(&mut bakes.waiting);
+    let in_flight = bakes.reading.iter().map(|r| r.target.bytes()).sum();
+    let (waiting, deferred) = admit(std::mem::take(&mut bakes.waiting), in_flight);
+    bakes.waiting = deferred;
     for request in waiting {
         if let LoadState::Failed(e) = assets.load_state(&request.graph) {
             warn!("a procedural texture's graph did not load, drawing without it: {e}");
@@ -415,12 +463,65 @@ fn run_bakes(
         settle(&mut bakes.unsettled, image);
     }
     if !landed.is_empty() {
-        // Visiting every material marks it changed, which is what makes Bevy rebuild the bind
-        // groups that still hold a placeholder's view.
-        for _ in populations.iter_mut() {}
-        for _ in surfaces.iter_mut() {}
-        for _ in skies.iter_mut() {}
-        for _ in plumes.iter_mut() {}
+        // Marking a material changed is what makes Bevy rebuild a bind group that still holds a
+        // placeholder's view. Only those that bind what landed: every one re-prepared was a new
+        // uniform buffer and bind group, for every body, whenever any bake landed.
+        let landed: Vec<AssetId<Image>> = landed.iter().map(Handle::id).collect();
+        touch(&mut populations, &landed);
+        touch(&mut surfaces, &landed);
+        touch(&mut skies, &landed);
+        touch(&mut plumes, &landed);
+    }
+}
+
+fn touch<M: Asset + Binds>(materials: &mut Assets<M>, landed: &[AssetId<Image>]) {
+    for id in bound(materials, landed) {
+        if let Some(mut material) = materials.get_mut(id) {
+            std::ops::DerefMut::deref_mut(&mut material);
+        }
+    }
+}
+
+fn bound<M: Asset + Binds>(materials: &Assets<M>, landed: &[AssetId<Image>]) -> Vec<AssetId<M>> {
+    materials
+        .iter()
+        .filter(|(_, material)| material.images().iter().any(|image| landed.contains(image)))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// The images a material binds. Each destructures its material whole, so a field added to one
+/// does not compile until it is said here whether it is an image.
+trait Binds {
+    fn images(&self) -> Vec<AssetId<Image>>;
+}
+
+impl Binds for BodySurfaceMaterial {
+    fn images(&self) -> Vec<AssetId<Image>> {
+        let Self { uniforms: _, pattern, color, weather_0, weather_1, weather_2, climate, land, ice, growth, sand, height } =
+            self;
+        [pattern, color, weather_0, weather_1, weather_2, climate, land, ice, growth, sand, height].map(Handle::id).to_vec()
+    }
+}
+
+impl Binds for PopulationMaterial {
+    fn images(&self) -> Vec<AssetId<Image>> {
+        let Self { uniforms: _, profile, grain } = self;
+        vec![profile.id(), grain.id()]
+    }
+}
+
+impl Binds for RelativisticStarfieldMaterial {
+    fn images(&self) -> Vec<AssetId<Image>> {
+        let Self { uniforms: _, band_lut, corona_filaments, corona_reach } = self;
+        vec![band_lut.id(), corona_filaments.id(), corona_reach.id()]
+    }
+}
+
+impl Binds for PlumeMaterial {
+    fn images(&self) -> Vec<AssetId<Image>> {
+        let Self { uniforms: _, churn } = self;
+        vec![churn.id()]
     }
 }
 
@@ -610,6 +711,69 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn a_landed_bake_touches_only_the_materials_that_bind_it() {
+        let mut images = Assets::<Image>::default();
+        let target = Target::new(Shape::Volume(2));
+        let (landed, other) = (images.add(placeholder(target)), images.add(placeholder(target)));
+        let mut plumes = Assets::<PlumeMaterial>::default();
+        let plume = |churn: &Handle<Image>| PlumeMaterial {
+            uniforms: em_render::plume_material::PlumeUniform::default(),
+            churn: churn.clone(),
+        };
+        let binding = plumes.add(plume(&landed));
+        plumes.add(plume(&other));
+        assert_eq!(bound(&plumes, &[landed.id()]), [binding.id()]);
+    }
+
+    fn asked(target: Target) -> Request {
+        Request {
+            graph: Handle::default(),
+            seed: 0,
+            params: Params::new(),
+            target,
+            image: Handle::default(),
+        }
+    }
+
+    #[test]
+    fn bakes_start_within_the_budget_smallest_face_first() {
+        let color = Target::new(Shape::Cube(1024)).color();
+        let mask = Target::new(Shape::Cube(512));
+        let climate = Target::new(Shape::Cube(64));
+        let (start, wait) = admit(vec![asked(color), asked(mask), asked(color), asked(climate)], 0);
+        let faces = |list: &[Request]| list.iter().map(|r| r.target.shape).collect::<Vec<_>>();
+        assert_eq!(faces(&start), [Shape::Cube(64), Shape::Cube(512), Shape::Cube(1024)]);
+        assert_eq!(faces(&wait), [Shape::Cube(1024)]);
+
+        let (start, wait) = admit(wait, color.bytes());
+        assert!(start.is_empty() && wait.len() == 1, "over the budget with one in flight");
+        let (start, _) = admit(vec![asked(Target::new(Shape::Cube(4096)).color())], 0);
+        assert_eq!(start.len(), 1, "one too big for the budget still starts alone");
+    }
+
+    #[test]
+    fn a_forgotten_image_is_not_baked_and_counts_as_settled() {
+        let mut images = Assets::<Image>::default();
+        let mut bakes = Bakes::default();
+        let target = Target::new(Shape::Cube(4));
+        let (kept, forgotten) = (images.add(placeholder(target)), images.add(placeholder(target)));
+        bakes.request(Handle::default(), 1, target, kept.clone());
+        bakes.request(Handle::default(), 1, target, forgotten.clone());
+        bakes.forget(&[forgotten.id()]);
+        assert_eq!(bakes.waiting.len(), 1);
+        assert_eq!(bakes.waiting[0].image, kept);
+        assert!(bakes.settled(&forgotten) && !bakes.settled(&kept));
+    }
+
+    #[test]
+    fn a_target_knows_its_size() {
+        assert_eq!(Target::new(Shape::Cube(1024)).color().bytes(), 6 * 1024 * 1024 * 4);
+        assert_eq!(Target::new(Shape::Cube(512)).bytes(), 6 * 512 * 512);
+        let relief = Target::new(Shape::Cube(1024)).format(ScalarFormat::R16Float);
+        assert_eq!(relief.bytes(), 6 * 1024 * 1024 * 2);
+    }
 
     fn shipped(path: &str) -> Graph {
         let full = format!("{}/assets/{path}", env!("CARGO_MANIFEST_DIR"));

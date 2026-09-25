@@ -242,14 +242,28 @@ mod browser {
 
     /// The socket, and the closures that have to outlive the call that registered them.
     ///
-    /// Dropping a `Closure` unregisters it, so they are kept rather than `forget()`-ed — a
-    /// forgotten closure is a leak of one per connection, which a reconnecting client repeats.
+    /// Kept rather than `forget()`-ed, which would leak one per connection. Dropping a `Closure`
+    /// does not unregister it, though: a socket that fired afterwards would call freed memory.
+    /// So dropping this takes the handlers off first, then closes the socket, which otherwise
+    /// stayed open with the server streaming into it.
     struct Inner {
         socket: WebSocket,
         _on_message: Closure<dyn FnMut(MessageEvent)>,
         _on_close: Closure<dyn FnMut(CloseEvent)>,
         _on_error: Closure<dyn FnMut(web_sys::Event)>,
     }
+
+    impl Drop for Inner {
+        fn drop(&mut self) {
+            self.socket.set_onmessage(None);
+            self.socket.set_onclose(None);
+            self.socket.set_onerror(None);
+            let _ = self.socket.close();
+        }
+    }
+
+    /// Orders held while the socket opens. More than this and the connection is not opening.
+    const QUEUED: usize = 256;
 
     /// A WebSocket the browser owns.
     ///
@@ -344,6 +358,11 @@ mod browser {
 
     impl Link for BrowserLink {
         fn poll(&mut self) -> Vec<Outbound> {
+            // A bad frame marks the link closed from inside a callback, which has no socket to
+            // close; the server would go on streaming to a client showing LINK LOST.
+            if self.is_open() && self.shared.lock().unwrap().closed.is_some() {
+                let _ = self.inner.socket.close();
+            }
             // Anything handed over while the socket was still opening goes out now. Before the
             // first open there is nowhere to put it but here.
             if self.is_open() && !self.queued.is_empty() {
@@ -357,7 +376,7 @@ mod browser {
         fn send(&mut self, message: Inbound) {
             if self.is_open() {
                 let _ = self.inner.socket.send_with_u8_array(&lc_proto::encode(&message));
-            } else {
+            } else if self.queued.len() < QUEUED {
                 self.queued.push(message);
             }
         }

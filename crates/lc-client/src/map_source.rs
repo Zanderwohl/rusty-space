@@ -160,7 +160,7 @@ pub fn coordinate(session: &Session, uplink: &Uplink, eye_ly: DVec3) -> Picture 
     push_local_system(&mut build, session);
     if let Some(system) = session.system.as_ref() {
         let labels = session.home_labels();
-        for body in system.drawables_at(eye_ly, now) {
+        for body in system.drawables_unpainted_at(eye_ly, now) {
             push_drawable(&mut build, &body, &labels);
         }
     }
@@ -289,7 +289,7 @@ fn key_of(system: &lc_world::system::LocalSystem, index: em_sim::id::BodyIndex) 
 fn push_believed(build: &mut Build, session: &Session, held: &Held) {
     let Some(system) = session.system.as_ref() else { return };
     let star_ly = system.star_position_ly();
-    let star = session.stars.iter().find(|c| c.id == system.star).map(|c| c.star);
+    let star = session.star(system.star).map(|c| c.star);
     // The galactic normal where no plane is solved, for the reason `MapView::resolved_plane`
     // gives: `+Z` is Sol's plane and drawing another star's error bars about it is a
     // measurement of one system shown around another.
@@ -297,7 +297,7 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
         lc_world::knowledge::SystemPlane::Known { pole, .. } => pole,
         _ => em_map::Plane::Galactic.about(DVec3::Z).normal(),
     };
-    for belief in &held.bodies {
+    for (index, belief) in held.bodies.iter().enumerate() {
         let named = match held.target(belief.body) {
             Some(lc_world::navigation::Target::Body(name)) => Some(name.clone()),
             _ => None,
@@ -306,12 +306,17 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
             .as_deref()
             .map(ItemKey::from_name)
             .unwrap_or_else(|| ItemKey::from_id("phantom", belief.body.get()));
-        let label = session.called(belief);
+        let (label, weight) = match held.called(index) {
+            Some((label, weight)) => (label.clone(), *weight),
+            None => (
+                session.called(belief),
+                star.and_then(|star| session.knowledge.guessed_mass_kg(belief, &star)).unwrap_or(0.0),
+            ),
+        };
         // Keyed by what the body is targeted by, never by what it is called. Two bodies
         // nobody has named are both "unnamed body", so a label as a key made every one of
         // them the same subject: picking one focused nothing and hovering one lit them all.
         let subject = named.map(|target| Subject::Body(target, label.clone()));
-        let weight = star.and_then(|star| session.knowledge.guessed_mass_kg(belief, &star)).unwrap_or(0.0);
         match belief.position_now {
             // Where on the ring it is, with the error drawn along the ring rather than across
             // it: what is uncertain is how far round it has got.
@@ -445,9 +450,15 @@ fn push_stars(build: &mut Build, session: &Session, eye_ly: DVec3) {
 }
 
 /// The Sun's luminosity in one band, watts: what a believed luminosity is ranked against.
+/// Integrated once per band, where it had been once per star per frame.
 fn sun_band_w(band: em_spectra::Band) -> f64 {
-    let m = lc_world::system::M_PER_LY;
-    4.0 * std::f64::consts::PI * m * m * lc_world::knowledge::survey::flux_from(&lc_world::star::Star::SOL, band, m)
+    static SUN: std::sync::LazyLock<[f64; em_spectra::Band::ALL.len()]> = std::sync::LazyLock::new(|| {
+        let m = lc_world::system::M_PER_LY;
+        em_spectra::Band::ALL.map(|band| {
+            4.0 * std::f64::consts::PI * m * m * lc_world::knowledge::survey::flux_from(&lc_world::star::Star::SOL, band, m)
+        })
+    });
+    SUN[band.index()]
 }
 
 #[cfg(test)]

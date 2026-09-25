@@ -102,7 +102,10 @@ pub struct Doing {
 }
 
 pub struct Session {
+    /// Nearest the origin first, and never changed after [`Session::new`]: `by_id` indexes it
+    /// and [`Session::local_star`] searches it by distance.
     pub stars: Vec<CatalogStar>,
+    by_id: HashMap<u64, usize>,
     /// The generator's own population of worlds, as a prior over what a measured body is.
     ///
     /// Built from this craft's sky the first time a type is asked for and not before: it costs
@@ -113,6 +116,9 @@ pub struct Session {
     /// Each body's settled type, against the measurement it was read from: a type is a pass over
     /// the whole prior, and every label asks for one every frame.
     settled: std::sync::Mutex<HashMap<BodyId, (Measured, Option<Sort>)>>,
+    /// [`Session::home_labels`], by the star and the knowledge revision it was built from.
+    /// The pick pass, the readout and the Flight panel each ask every frame.
+    labels: std::sync::Mutex<Option<((StarId, u64), Arc<lc_world::labels::Labels>)>>,
     /// Logs the shard has still to analyze, as it last said.
     pub analyzing: usize,
     /// As the shard last said.
@@ -182,9 +188,12 @@ impl Session {
         }
 
         let sky_model = Sky::new(Arc::new(stars.clone()));
+        let by_id = stars.iter().enumerate().map(|(i, s)| (s.id.get(), i)).collect();
         let mut session = Self {
+            by_id,
             sorts: std::sync::OnceLock::new(),
             settled: Default::default(),
+            labels: Default::default(),
             analyzing: 0,
             doing: Doing::default(),
             stars,
@@ -211,8 +220,17 @@ impl Session {
     }
 
     /// The star whose system the ship is inside, if it is inside one.
+    ///
+    /// Only a star whose distance from the origin is within a shell of the ship's can hold it,
+    /// and the catalog is sorted by that distance, so this looks at a handful rather than all.
     pub fn local_star(&self) -> Option<&CatalogStar> {
-        self.stars.iter().find(|s| self.distance_to(s) < crate::starfield::LOCAL_SHELL_LY)
+        let shell = crate::starfield::LOCAL_SHELL_LY;
+        let from_origin = self.ship.motion.position_ly.length();
+        let first = self.stars.partition_point(|s| s.position_ly.length() < from_origin - shell);
+        self.stars[first..]
+            .iter()
+            .take_while(|s| s.position_ly.length() <= from_origin + shell)
+            .find(|s| self.distance_to(s) < shell)
     }
 
     /// Load or drop the local system, and propagate it to now.
@@ -389,7 +407,11 @@ impl Session {
 
     /// A star by the raw id the wire carries.
     pub fn star_by_raw(&self, id: u64) -> Option<&CatalogStar> {
-        self.stars.iter().find(|s| s.id.get() == id)
+        match self.by_id.get(&id).and_then(|&i| self.stars.get(i)) {
+            Some(star) if star.id.get() == id => Some(star),
+            // Only if `stars` was changed behind the index.
+            _ => self.stars.iter().find(|s| s.id.get() == id),
+        }
     }
 
     /// Set a course inside the local system, and hold there on arrival.
@@ -504,7 +526,7 @@ impl Session {
     }
 
     pub fn star(&self, id: StarId) -> Option<&CatalogStar> {
-        self.stars.iter().find(|s| s.id == id)
+        self.star_by_raw(id.get())
     }
 
     /// Point the telescope, clearing whatever it was watching.
@@ -528,7 +550,7 @@ impl Session {
         self.pointing = id;
         if let Some(id) = id
             && !self.targets.contains_key(&id)
-            && let Some(star) = self.stars.iter().find(|s| s.id == id)
+            && let Some(star) = self.star(id)
         {
             let target = build_target(star);
             self.targets.insert(id, target);
@@ -591,12 +613,26 @@ impl Session {
 
     /// What this ship calls the star it is in and every body around it. Never the generator's
     /// names, which are only keys: see [`lc_world::labels`].
-    pub fn home_labels(&self) -> lc_world::labels::Labels {
+    pub fn home_labels(&self) -> Arc<lc_world::labels::Labels> {
         let Some(system) = self.system.as_ref() else { return Default::default() };
+        let key = (system.star, self.knowledge.revision());
+        let mut held = self.labels.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((at, labels)) = held.as_ref()
+            && *at == key
+        {
+            return labels.clone();
+        }
+        // Positions are not read, so the time the beliefs are built at does not matter.
         let star = self.name_of(system.star);
-        let called: HashMap<BodyId, String> =
-            crate::beliefs::of(self).bodies.iter().map(|b| (b.body, self.called(b))).collect();
-        lc_world::labels::label(system, &star, |body| called.get(&body).cloned())
+        let called: HashMap<BodyId, String> = self
+            .knowledge
+            .bodies_of(system.star, 0.0)
+            .iter()
+            .map(|b| (b.body, self.called(b)))
+            .collect();
+        let labels = Arc::new(lc_world::labels::label(system, &star, |body| called.get(&body).cloned()));
+        *held = Some((key, labels.clone()));
+        labels
     }
 
     /// What this ship calls anything it holds, star or body.
@@ -613,7 +649,7 @@ impl Session {
 
     /// What this ship calls a body it holds: see [`lc_world::knowledge::called`].
     pub fn called(&self, belief: &BodyBelief) -> String {
-        let Some(star) = belief.subject.star().and_then(|id| self.stars.iter().find(|c| c.id == id)) else {
+        let Some(star) = belief.subject.star().and_then(|id| self.star(id)) else {
             return belief.given.clone().or_else(|| belief.designation.clone()).unwrap_or_else(|| "unidentified body".into());
         };
         let measured = Measured::from_belief(belief, &star.star);
@@ -887,14 +923,16 @@ const SPECTRA_KEPT: usize = 4096;
 ///
 /// Doppler shifts the temperature, so this is not constant while under way — but it moves
 /// slowly, and quantizing it means a ship at rest computes each spectrum once ever.
-fn spectrum_at(teff_k: f64) -> PerBand<f32> {
+pub(crate) fn spectrum_at(teff_k: f64) -> PerBand<f32> {
     thread_local! {
         static SPECTRA: std::cell::RefCell<HashMap<u64, PerBand<f32>>> =
             std::cell::RefCell::new(HashMap::new());
     }
     // The key is the temperature in units of its own resolution, so neighboring temperatures
-    // share an entry and a sweeping Doppler factor does not mint one per frame.
-    let key = (teff_k / (teff_k * TEFF_RESOLUTION).max(1.0)).round() as u64;
+    // share an entry and a sweeping Doppler factor does not mint one per frame. A logarithm,
+    // because a step proportional to the temperature is a constant step in its log: dividing by
+    // the step instead gave every temperature above a thousand kelvin the same key.
+    let key = (teff_k.max(1.0).ln() / TEFF_RESOLUTION.ln_1p()).round() as u64;
     SPECTRA.with(|spectra| {
         let mut spectra = spectra.borrow_mut();
         if let Some(found) = spectra.get(&key) {
@@ -917,9 +955,10 @@ fn spectrum_at(teff_k: f64) -> PerBand<f32> {
 /// crate does not expose yet.
 fn received(observation: &Observation, teff_k: f64, radius_m: f64, distance_m: f64) -> PerBand<f32> {
     let g = geometry(radius_m, distance_m);
+    let spectrum = spectrum_at(teff_k);
     PerBand::new(std::array::from_fn(|i| {
         let band = Band::ALL[i];
-        let full = blackbody::band_radiance(band, teff_k) * g;
+        let full = spectrum[band] as f64 * g;
         // Relative flux, not one minus the deficit: a warm population adds where a cold one
         // only subtracts, and in the thermal infrared the sum can exceed the bare star.
         let relative = observation.band(band).map(|m| m.relative_flux()).unwrap_or(1.0);
@@ -979,6 +1018,31 @@ mod tests {
         let mut session = Session::new(&AuthoredStars::sample(), 3);
         session.issue_charts(30.0);
         session
+    }
+
+    /// The search by distance from the origin finds what a scan of every star finds: at each
+    /// star, at the edge of its shell either side, and between stars.
+    #[test]
+    fn the_local_star_is_the_one_a_full_scan_finds() {
+        let mut s = Session::new(&AuthoredStars::sample(), 12);
+        let shell = crate::starfield::LOCAL_SHELL_LY;
+        let scan = |s: &Session| s.stars.iter().find(|c| s.distance_to(c) < shell).map(|c| c.id);
+        let mut places = vec![DVec3::ZERO, DVec3::new(1.3, -2.1, 0.4)];
+        for star in &s.stars {
+            for along in [0.0, 0.99, 1.01] {
+                places.push(star.position_ly + DVec3::new(0.6, -0.48, 0.64) * shell * along);
+            }
+        }
+        let mut found = 0;
+        for at in places {
+            s.place_at(at);
+            assert_eq!(s.local_star().map(|c| c.id), scan(&s), "at {at}");
+            found += usize::from(scan(&s).is_some());
+        }
+        assert_eq!(found, 2 * s.stars.len(), "each star is found from inside its shell");
+        for star in &s.stars {
+            assert_eq!(s.star(star.id).map(|c| c.id), Some(star.id));
+        }
     }
 
     #[test]
@@ -1356,6 +1420,19 @@ mod tests {
         );
     }
 
+    /// With no shard to save them, a sample is not also kept as a change to save.
+    #[test]
+    fn instruments_without_a_shard_keep_each_sample_once() {
+        let mut s = spread();
+        s.point_at(Some(s.stars[0].id));
+        for _ in 0..4 {
+            s.advance(1.0);
+            s.tick_instruments(1.0);
+        }
+        assert!(!s.knowledge.is_empty(), "nothing was measured");
+        assert!(s.knowledge.take_changes().1.is_empty());
+    }
+
     /// One place gives a direction. A second place, far enough from the first, gives a
     /// distance — and that is the whole of how a ship learns where anything is.
     #[test]
@@ -1468,6 +1545,21 @@ mod tests {
     /// Rayleigh-Jeans tail and the radiance is therefore linear in temperature. So the band
     /// must brighten by exactly D — not by D^4, which is the *bolometric* factor and would
     /// only show up in an integral over all frequencies, not in one narrow window.
+    /// Distinct temperatures are distinct spectra; only ones within [`TEFF_RESOLUTION`] share.
+    #[test]
+    fn each_temperature_has_its_own_spectrum() {
+        for (a, b) in [(3000.0, 10_000.0), (5772.0, 5800.0), (400.0, 450.0)] {
+            assert_ne!(spectrum_at(a), spectrum_at(b), "{a} K and {b} K");
+        }
+        let fresh = |t: f64| PerBand::<f32>::new(std::array::from_fn(|i| blackbody::band_radiance(Band::ALL[i], t) as f32));
+        for t in [300.0, 3000.0, 5772.0, 30_000.0] {
+            let (held, exact) = (spectrum_at(t * (1.0 + 0.2 * TEFF_RESOLUTION)), fresh(t));
+            for band in [Band::V, Band::ThermalIr] {
+                assert!((held[band] / exact[band] - 1.0).abs() < 0.02, "{t} K in {band:?}");
+            }
+        }
+    }
+
     #[test]
     fn a_shifted_blackbody_is_a_blackbody_at_the_shifted_temperature() {
         let mut s = spread();

@@ -453,10 +453,11 @@ pub fn source_radiance(population: &Population, lighting: Lighting) -> em_spectr
     // its disc is from this far out.
     let dilution = (lighting.star_radius_m / radius).powi(2);
     let equilibrium = population.equilibrium_temperature_under(lighting.star_luminosity_w);
+    let (star, warm) = (crate::session::spectrum_at(lighting.star_teff_k), crate::session::spectrum_at(equilibrium));
     em_spectra::PerBand::new(std::array::from_fn(|i| {
         let band = em_spectra::Band::ALL[i];
-        let scattered = ALBEDO * dilution * em_spectra::blackbody::band_radiance(band, lighting.star_teff_k);
-        let glow = em_spectra::blackbody::band_radiance(band, equilibrium);
+        let scattered = ALBEDO * dilution * star[band] as f64;
+        let glow = warm[band] as f64;
         (population.band_response[band] as f64 * (scattered + glow)) as f32
     }))
 }

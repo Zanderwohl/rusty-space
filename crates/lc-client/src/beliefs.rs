@@ -4,8 +4,9 @@
 //! of its evidence, and [`Knowledge::system_plane`] folds the result again. The map, the system
 //! panel and the telescope all want the same answer in the same frame.
 //!
-//! Keyed by the star and the coordinate second. Both readers run after the clock has advanced,
-//! so the second ask in a frame is a read, and a frame that asks for neither builds nothing.
+//! Built again only when the star or what the craft knows has changed ([`Knowledge::revision`]);
+//! between those, a new time only moves each body along its orbit. A frame that asks for neither
+//! builds nothing.
 
 use bevy::prelude::Resource;
 use lc_world::knowledge::{BodyBelief, BodyId, Knowledge, SystemPlane};
@@ -23,6 +24,9 @@ pub struct Held {
     pub bodies: Vec<BodyBelief>,
     pub plane: SystemPlane,
     targets: HashMap<BodyId, Target>,
+    /// Each body's label and guessed mass in kilograms, beside it in [`Held::bodies`]. Built with
+    /// the list, because a guessed mass rebuilds the body's belief at every sighting.
+    called: Vec<(String, f64)>,
 }
 
 impl Held {
@@ -39,7 +43,12 @@ impl Held {
     /// A list made by hand, for a test that needs one without a session behind it.
     #[cfg(test)]
     pub(crate) fn from_parts(bodies: Vec<BodyBelief>, targets: HashMap<BodyId, Target>) -> Self {
-        Self { bodies, plane: SystemPlane::Unknown, targets }
+        Self { bodies, plane: SystemPlane::Unknown, targets, called: Vec::new() }
+    }
+
+    /// What the `index`th body is called and weighs, if the list was built with a session.
+    pub fn called(&self, index: usize) -> Option<&(String, f64)> {
+        self.called.get(index)
     }
 
     /// The belief held about whatever is at a target, if anything is.
@@ -51,8 +60,13 @@ impl Held {
 /// The cache. Ask through [`Beliefs::held`]; nothing else reaches the list.
 #[derive(Resource, Default)]
 pub struct Beliefs {
-    key: Option<(StarId, f64)>,
+    /// The star and the knowledge revision it was built from.
+    key: Option<(StarId, u64)>,
+    /// Coordinate seconds the bodies are placed at.
+    at_s: f64,
     held: Held,
+    #[cfg(test)]
+    builds: usize,
     /// Always empty. Handed back when nothing is going to read the list, so a frame with the
     /// map hidden and no panel open pays nothing at all.
     blank: Held,
@@ -65,18 +79,27 @@ impl Beliefs {
         if wanted { self.held(session) } else { &self.blank }
     }
 
-    /// What this craft believes now, rebuilt only when the system or the second has changed.
+    /// What this craft believes now.
     pub fn held(&mut self, session: &Session) -> &Held {
         let Some(system) = session.system.as_ref() else {
             self.key = None;
             self.held = Held::default();
             return &self.held;
         };
-        let key = (system.star, session.coordinate_time_s());
+        let key = (system.star, session.knowledge.revision());
+        let now_s = session.coordinate_time_s();
         if self.key != Some(key) {
             self.key = Some(key);
-            self.held = build(&session.knowledge, system, key.0, key.1);
+            self.held = build(&session.knowledge, system, key.0, now_s);
+            self.held.called = called(session, &self.held.bodies);
+            #[cfg(test)]
+            {
+                self.builds += 1;
+            }
+        } else if self.at_s != now_s {
+            session.knowledge.move_to(&mut self.held.bodies, now_s);
         }
+        self.at_s = now_s;
         &self.held
     }
 }
@@ -85,7 +108,20 @@ impl Beliefs {
 /// has no world to hold one in.
 pub fn of(session: &Session) -> Held {
     let Some(system) = session.system.as_ref() else { return Held::default() };
-    build(&session.knowledge, system, system.star, session.coordinate_time_s())
+    let mut held = build(&session.knowledge, system, system.star, session.coordinate_time_s());
+    held.called = called(session, &held.bodies);
+    held
+}
+
+fn called(session: &Session, bodies: &[BodyBelief]) -> Vec<(String, f64)> {
+    let star = session.system.as_ref().and_then(|s| session.star(s.star)).map(|c| c.star);
+    bodies
+        .iter()
+        .map(|belief| {
+            let weight = star.and_then(|star| session.knowledge.guessed_mass_kg(belief, &star));
+            (session.called(belief), weight.unwrap_or(0.0))
+        })
+        .collect()
 }
 
 fn build(knowledge: &Knowledge, system: &LocalSystem, star: StarId, now_s: f64) -> Held {
@@ -99,7 +135,7 @@ fn build(knowledge: &Knowledge, system: &LocalSystem, star: StarId, now_s: f64) 
             _ => None,
         })
         .collect();
-    Held { bodies, plane, targets }
+    Held { bodies, plane, targets, called: Vec::new() }
 }
 
 #[cfg(test)]
@@ -179,6 +215,46 @@ mod tests {
         assert_eq!(later, placed(&of(&session)), "a held list outlived its second");
         assert_ne!(later, first, "the body did not move, so nothing was proved");
         assert!(!beliefs.held(&session).targets.is_empty(), "a system has bodies to go to");
+    }
+
+    /// Only learning something builds the list again; time alone moves what is held.
+    #[test]
+    fn the_list_is_built_again_only_when_something_is_learned() {
+        let mut session = at_a_star();
+        let mut beliefs = Beliefs::default();
+        beliefs.held(&session);
+        session.advance(3600.0);
+        beliefs.held(&session);
+        assert_eq!(beliefs.builds, 1, "time alone built it again");
+
+        let first = beliefs.held(&session).bodies[0].subject;
+        session.knowledge.name_it(first, "Newfound", 1.0);
+        assert_eq!(beliefs.held(&session).bodies[0].given.as_deref(), Some("Newfound"));
+        assert_eq!(beliefs.held(&session).called(0).map(|c| c.0.as_str()), Some("Newfound"));
+        assert_eq!(beliefs.builds, 2);
+    }
+
+    /// Labels are built once per thing learned, and name what was learned.
+    #[test]
+    fn labels_are_built_again_only_when_something_is_learned() {
+        let mut session = at_a_star();
+        let first = session.home_labels();
+        session.advance(3600.0);
+        assert!(std::sync::Arc::ptr_eq(&first, &session.home_labels()), "time alone built them");
+
+        let system = session.system.clone().unwrap();
+        let key = system
+            .inventory()
+            .iter()
+            .find_map(|e| match &e.target {
+                Target::Body(key) if e.depth > 0 => Some(key.clone()),
+                _ => None,
+            })
+            .expect("a body under the star");
+        assert_eq!(session.home_labels().of(&key), "unidentified body");
+        let subject = lc_world::knowledge::Subject::Body { star: system.star, body: BodyId::of(system.star, &key) };
+        session.knowledge.name_it(subject, "Newfound", 1.0);
+        assert_eq!(session.home_labels().of(&key), "Newfound");
     }
 
     /// A body no generator made has nowhere to be flown to, which is what a false positive

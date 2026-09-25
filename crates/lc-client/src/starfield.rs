@@ -270,7 +270,7 @@ pub fn partition(session: &Session) -> (Vec<Point>, Vec<Point>) {
 
 /// Which star's system the ship is inside, if any.
 pub fn local_star(session: &Session) -> Option<&CatalogStar> {
-    session.stars.iter().find(|s| session.distance_to(s) < LOCAL_SHELL_LY)
+    session.local_star()
 }
 
 /// `log2` of band radiance against temperature: one column per sample, one row per band.

@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use em_render::atmosphere_material::{AtmosphereMaterial, AtmosphereUniform, TOP_HEIGHTS};
 use em_render::body_surface_material::{BANDS, BodySurfaceMaterial, BodySurfaceUniform, GROUNDS};
 use em_render::render_space::sim_to_render;
-use em_spectra::{Band, BandMapping, PerBand, blackbody, presets};
+use em_spectra::{Band, BandMapping, PerBand, presets};
 use glam::DVec3;
 
 use crate::session::{Disc, Scene, Session};
@@ -265,7 +265,7 @@ fn blackbody_at(k: f64) -> PerBand<f32> {
     if k <= 0.0 {
         return PerBand::splat(0.0);
     }
-    PerBand::new(std::array::from_fn(|i| blackbody::band_radiance(Band::ALL[i], k) as f32))
+    crate::session::spectrum_at(k)
 }
 
 /// The starlight half: `p (R_star / d)^2 B(T_star)`, which has the star's spectrum.
@@ -305,9 +305,8 @@ pub fn lit_radiance(
         return PerBand::splat(0.0);
     }
     let scale = albedo * (star_radius_m / star_distance_m).powi(2);
-    PerBand::new(std::array::from_fn(|i| {
-        (blackbody::band_radiance(Band::ALL[i], star_teff_k) * scale) as f32
-    }))
+    let star = crate::session::spectrum_at(star_teff_k);
+    PerBand::new(std::array::from_fn(|i| (star[Band::ALL[i]] as f64 * scale) as f32))
 }
 
 /// The half a body emits itself: a blackbody at whatever it radiates at.
@@ -351,7 +350,7 @@ fn air_of(body: &Drawable, mapping: &BandMapping, star: &PerBand<f32>) -> [Vec4;
     let per = |sum: Vec3, over: Vec3| Vec3::select(over.cmpgt(Vec3::ZERO), sum / over, Vec3::ZERO);
     let haze = per(haze, weight);
     let albedo = per(scattered, haze * weight);
-    let glow = alone(Band::ThermalIr.index(), blackbody::band_radiance(Band::ThermalIr, body.effective_k * AIR_K) as f32);
+    let glow = alone(Band::ThermalIr.index(), crate::session::spectrum_at(body.effective_k * AIR_K)[Band::ThermalIr]);
     [per(gas, weight).extend(a.height), haze.extend(a.infrared), albedo.extend(0.0), glow.extend(0.0)]
 }
 
@@ -416,11 +415,10 @@ impl Grounds {
         use lc_world::ground::{Ground, rock_emissivity, rock_inertia};
         let rust = climate.rust;
         // Each band alone through the mapping, so the shader can weight them one by one.
+        let warm = crate::session::spectrum_at(mean_k);
         let bands = std::array::from_fn(|b| {
             let band = Band::ALL[b];
-            let alone = PerBand::new(std::array::from_fn(|i| {
-                if i == b { blackbody::band_radiance(band, mean_k) as f32 } else { 0.0 }
-            }));
+            let alone = PerBand::new(std::array::from_fn(|i| if i == b { warm[band] } else { 0.0 }));
             Vec3::from_array(mapping.apply(&alone)).extend((band.center_m() * 1.0e6) as f32)
         });
         let emissivities = [
@@ -590,6 +588,7 @@ pub fn update_resolved(
         for (entity, ..) in &placed {
             commands.entity(entity).despawn();
         }
+        surfaces.keep(None, [], &mut bakes);
         return;
     };
     let star_ly = system.star_position_ly();
@@ -692,10 +691,12 @@ pub fn update_resolved(
             commands.entity(sphere).insert(ResolvedAir(shell, child));
         }
     }
+    surfaces.keep(Some(system.star), want.iter().map(|(d, _)| d.name.as_str()), &mut bakes);
 }
 
 #[cfg(test)]
 mod tests {
+    use em_spectra::blackbody;
     use lc_world::sky::AuthoredStars;
     use lc_world::surface::Surface;
 

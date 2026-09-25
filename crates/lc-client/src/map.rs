@@ -1,4 +1,5 @@
-//! The map's camera, its render target, and the entities it draws.
+//! The map's camera, its render target, and the frame it draws. The entities are
+//! [`crate::map_scene`]'s.
 //!
 //! A second `Camera3d` on its own [`MAP_LAYER`], rendering into an [`Image`] that egui shows.
 //!
@@ -10,21 +11,18 @@
 //! needs a different range — see [`LINE_COLOR_SCALE`].
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::camera::visibility::RenderLayers;
 use bevy::camera::RenderTarget;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureFormat, TextureUsages};
 use bevy_egui::EguiUserTextures;
-use em_map::{ItemKey, ItemKind, MapFrame, MapSnapshot, Placement, compose};
-use em_render::body_material::BASE_TUBE_RADIUS;
+use em_map::{ItemKey, MapFrame, MapSnapshot, Placement, compose};
 
-use crate::map_line::MapLineMaterial;
-use em_render::render_space::sim_to_render;
-use em_render::wire_mesh;
 use glam::DVec3;
 
 use crate::app::{Game, Stage, Ui};
+use crate::map_scene::{Form, Scene, Shapes, Viewport, form_of, render};
 use crate::map_source::Source;
 
 /// The map's own layer. The sky keeps layer 0, so neither camera sees the other's entities.
@@ -38,41 +36,6 @@ const INITIAL_SIDE: u32 = 512;
 const MIN_SIDE: u32 = 64;
 const MAX_SIDE: u32 = 4096;
 
-/// How wide a line is drawn, in pixels. Held there per vertex by `map_line.wgsl`.
-const LINE_PX: f32 = 1.6;
-
-/// The most of its own unit mesh a tube may take, per family.
-///
-/// The shader displaces along normals in mesh space, so this is a proportion of the thing
-/// drawn and not of the screen. Unclamped, a ring seen from forty times its radius would be a
-/// tube a tenth of itself thick.
-const LINE_TUBE_FRACTION: f32 = 0.02;
-const SPHERE_TUBE_FRACTION: f32 = 0.06;
-
-/// A disc has one normal, so displacement translates it instead of thickening it. Asking for
-/// the material's base radius makes the displacement zero.
-const DOT_TUBE_FRACTION: f32 = BASE_TUBE_RADIUS;
-
-/// The reference scale — rings, spokes, drop-lines — is drawn at half a line's width and half
-/// its brightness. It is the ruler, not what is being measured.
-const SCALE_PX: f32 = LINE_PX * 0.5;
-const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
-/// A population's outline, dashed. At full brightness a shell's six curves outshine the map.
-const POPULATION_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
-/// An error bar sits well under the line it qualifies.
-const SPREAD_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.25;
-/// Length of the cap across each end of an error bar.
-const SPREAD_CAP_PX: f32 = 8.0;
-
-/// How much of the palette color a line is drawn at.
-///
-/// The shader gives `base_color * (1 + alpha * emission_strength)`, where alpha is the mesh's
-/// line weight: 0.6 for grid, 1.0 for an equator. With no tone map in front of it the whole
-/// range has to land inside the display, so 0.45 and 1.2 put a grid line at 0.77 and an
-/// equator at 0.99.
-const LINE_COLOR_SCALE: f32 = 0.45;
-const LINE_EMISSION: f32 = 1.2;
-
 /// The near and far planes, as multiples of the stand-off: wide enough for a ship beside the
 /// camera and the outermost ring at once, and no wider.
 const NEAR_FRACTION: f32 = 1.0e-4;
@@ -82,98 +45,9 @@ const FAR_MULTIPLE: f32 = 1.0e6;
 /// with it, and a camera and a cursor that disagree put the anchor away from the pointer.
 pub const MAP_FOV: f32 = std::f32::consts::FRAC_PI_4;
 
-/// Divisions of a decade ring. Enough that the largest one does not read as a polygon.
-const RING_SEGMENTS: u32 = 128;
-
-/// How far the spokes reach, as a multiple of the stand-off.
-///
-/// Far past the edge of the view: a spoke that ends inside the frame reads as an object with
-/// a tip. At forty the far end's tube is a fortieth of a pixel, so it fades out instead.
-/// Passing the eye is safe because the elevation floor clears the plane by `sin(3°)` of the
-/// stand-off, sixteen times a line's half-width.
-const SPOKE_REACH: f32 = 40.0;
-
-/// Where a spoke starts, as a fraction of the stand-off, so the hole in the middle holds its
-/// size whatever [`SPOKE_REACH`] is.
-const SPOKE_INNER: f32 = 0.02;
-
-/// Radial spokes in the reference plane.
-///
-/// Their thickness is sized to the stand-off, not to the outermost ring. A ring is all at one
-/// distance so one radius serves it; a spoke runs from near the camera to its rim, and a width
-/// of a pixel at the far end is eighty at the near one.
-const PLANE_SPOKES: u32 = 12;
-
-/// How long a dash is, in pixels, wherever it is drawn. The mesh is scaled to the drop, so a
-/// fixed count would give a tall drop long dashes; the host picks the count per drop instead.
-const DASH_PX: f32 = 5.0;
-
-/// The most dashes a drop-line is built with. A drop needing more than this is longer than the
-/// viewport many times over and its dashes are sub-pixel anyway.
-const MAX_DASHES: usize = 48;
-
-/// A mark's apparent diameter, as a share of the viewport's height. A diameter, unlike the
-/// sky's `resolved::RESOLVE_PX`, and a share because one texture serves two surfaces.
-///
-/// Both the threshold and the size a mark is drawn at, so a body shrinks to this and holds and
-/// nothing jumps at the crossover. Below it a sphere is a dozen sub-pixel tubes over each
-/// other: dearer to draw and less legible.
-const POINT_FRACTION: f32 = 0.02;
-
-/// The floor under that, at twice a line's width. Below it a ring has no inside left, which
-/// makes it a dot.
-const POINT_FLOOR_PX: f32 = 2.0 * LINE_PX;
-
-/// Divisions of a mark. Sixteen is smooth at any size one reaches, and an eighth of the ring
-/// mesh — a level of detail that cost more than the sphere would not be one.
-const POINT_SEGMENTS: u32 = 16;
-
 /// The camera the map is drawn for.
 #[derive(Component)]
 pub struct MapCamera;
-
-/// Everything the map spawns, so a rebuild can clear the layer without touching anything else.
-#[derive(Component)]
-pub struct MapDrawn;
-
-/// Which item an entity stands for, by its place in the frame's list, so a transform can be
-/// written without respawning.
-///
-/// An index rather than the key it could be looked up by: [`place`] respawns the whole layer
-/// whenever the key list changes, so while these entities exist `frame.placements` holds the
-/// same placements in the same order it did when they were spawned. That makes the index the
-/// cheap half of a lookup the scan would otherwise repeat for every entity, every frame.
-#[derive(Component)]
-pub struct MapItemOf(pub usize);
-
-/// A decade ring, by its place in the frame's list.
-#[derive(Component)]
-pub struct MapRingOf(pub usize);
-
-/// The drop-line under an item, by its placement's place in the frame's list.
-#[derive(Component)]
-pub struct MapDropOf(pub usize);
-
-/// An error bar, capped at each end. By its placement's place in the frame's list, and which of
-/// the three pieces.
-#[derive(Component)]
-pub struct MapSpreadOf(pub usize, pub SpreadPart);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SpreadPart {
-    Bar,
-    NearCap,
-    FarCap,
-}
-
-/// A belt, a ring system or a cloud, drawn as its own outline rather than as a point. By its
-/// placement's place in the frame's list.
-#[derive(Component)]
-pub struct MapAnnulusOf(pub usize);
-
-/// The reference plane's spokes. One entity.
-#[derive(Component)]
-pub struct MapSpokes;
 
 #[derive(Resource)]
 pub struct Map {
@@ -194,20 +68,25 @@ pub struct Map {
     /// because that is where the session is.
     pub primary: Option<ItemKey>,
     pub frame: Option<MapFrame>,
-    sphere: Handle<Mesh>,
-    /// An unresolved body: a circle facing the eye. See [`POINT_FRACTION`].
-    point: Handle<Mesh>,
-    /// A ship, at any zoom: the same size, filled.
-    dot: Handle<Mesh>,
-    ring: Handle<Mesh>,
-    spokes: Handle<Mesh>,
-    /// One drop-line mesh per dash count, indexed from one dash. Built once, so a body
-    /// drifting off the plane swaps a handle instead of rebuilding geometry.
-    drops: Vec<Handle<Mesh>>,
-    /// What is spawned, in order. A rebuild happens only when this stops matching the frame.
-    drawn: Vec<ItemKey>,
-    rings_drawn: usize,
+    pub(crate) shapes: Shapes,
+    pub(crate) scene: Scene,
+    /// Whether this frame builds and renders the map. See [`pace`].
+    pub(crate) due: bool,
+    /// Real seconds at the last frame that did, and the controls it was drawn with.
+    drawn_at_s: f64,
+    drawn_for: Option<Controls>,
 }
+
+/// What a player moves the map's camera with. A change is drawn at once, however the map is shown.
+type Controls = (f64, f64, f64, em_map::Plane, crate::ui::MapFocus, Source);
+
+fn controls(view: &crate::ui::MapView) -> Controls {
+    (view.orbit.azimuth, view.orbit.elevation, view.orbit.log_distance_m, view.plane, view.focus, view.source)
+}
+
+/// How often the corner thumbnail is drawn while nobody is moving it. The texture holds the
+/// last picture between, and the labels are laid out from the same frame, so the two agree.
+const THUMBNAIL_PERIOD_S: f64 = 0.1;
 
 impl Map {
     /// Where the reference plane is anchored: the observer, or the camera's focus when a
@@ -247,49 +126,6 @@ impl Map {
     }
 }
 
-/// What a pixel of the map's viewport is worth. Everything on the layer is sized from one of
-/// these two, and both come from the viewport's height.
-#[derive(Clone, Copy, Debug)]
-struct Viewport {
-    /// Radians a pixel subtends: every line's thickness, and half of the sphere decision.
-    rad_per_px: f32,
-    /// A mark's diameter in pixels. See [`POINT_FRACTION`].
-    point_px: f32,
-}
-
-impl Viewport {
-    fn new(height_px: u32, fov_y: f32) -> Self {
-        Self {
-            rad_per_px: match height_px {
-                0 => 0.0,
-                height => 2.0 * (fov_y * 0.5).tan() / height as f32,
-            },
-            point_px: (height_px as f32 * POINT_FRACTION).max(POINT_FLOOR_PX),
-        }
-    }
-
-    /// One item's mark, in pixels: the surface's size scaled by what the thing weighs, never
-    /// under the floor. On a small map the floor binds before [`em_map::weight::MIN_SCALE`].
-    fn mark_px(self, placement: &Placement) -> f32 {
-        (self.point_px * placement.symbol_scale).max(POINT_FLOOR_PX)
-    }
-
-    /// A circle's line, as a fraction of its radius. Both are fixed pixel sizes, so the
-    /// distance and scale in [`crate::map_line::tube_radius`] cancel and this is the answer,
-    /// not a cap.
-    fn point_tube_fraction(self, mark_px: f32) -> f32 {
-        LINE_PX / (mark_px * 0.5)
-    }
-}
-
-/// How a body is drawn at this zoom. One decision, read in three places.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Form {
-    Sphere,
-    Circle,
-    Dot,
-}
-
 pub struct MapPlugin;
 
 impl Plugin for MapPlugin {
@@ -303,7 +139,7 @@ impl Plugin for MapPlugin {
             // whenever the ship was under way.
             .add_systems(
                 Update,
-                (survey, resize, place, switch_camera)
+                (pace, survey, resize, place, crate::map_scene::lay, switch_camera)
                     .chain()
                     .in_set(Stage::Scene)
                     .after(crate::app::Placed),
@@ -331,22 +167,11 @@ fn setup(
         subjects: std::collections::HashMap::new(),
         primary: None,
         frame: None,
-        sphere: meshes.add(wire_mesh::generate_latlon_sphere(&[], BASE_TUBE_RADIUS, 4)),
-        point: meshes.add(wire_mesh::ring_tube(POINT_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
-        dot: meshes.add(wire_mesh::disc(POINT_SEGMENTS, 1.0)),
-        ring: meshes.add(wire_mesh::ring_tube(RING_SEGMENTS, BASE_TUBE_RADIUS, 4, 1.0)),
-        spokes: meshes.add(wire_mesh::plane_spokes(
-            PLANE_SPOKES,
-            SPOKE_INNER / SPOKE_REACH,
-            BASE_TUBE_RADIUS,
-            4,
-            0.6,
-        )),
-        drops: (1..=MAX_DASHES)
-            .map(|n| meshes.add(wire_mesh::drop_line(n as u32, BASE_TUBE_RADIUS, 4, 0.8)))
-            .collect(),
-        drawn: Vec::new(),
-        rings_drawn: 0,
+        shapes: Shapes::new(&mut meshes),
+        scene: Scene::default(),
+        due: false,
+        drawn_at_s: f64::NEG_INFINITY,
+        drawn_for: None,
         image,
     });
 
@@ -373,10 +198,33 @@ fn setup(
     ));
 }
 
-/// Render the map only while something shows it: in the menu and the loading screen nothing does.
-fn switch_camera(map: Res<Map>, mut camera: Single<&mut Camera, With<MapCamera>>) {
-    if camera.is_active != map.shown {
-        camera.is_active = map.shown;
+/// Whether this frame draws the map: always as the main view, and in the corner only every
+/// [`THUMBNAIL_PERIOD_S`] unless the player is moving it.
+fn pace(time: Res<Time<Real>>, ui: Res<Ui>, mut map: ResMut<Map>) {
+    let now_s = time.elapsed_secs_f64();
+    let resized = map.size != map.wanted.clamp(UVec2::splat(MIN_SIDE), UVec2::splat(MAX_SIDE));
+    let stale = map.frame.is_none() || resized || map.drawn_for != Some(controls(&ui.map));
+    map.due = map.shown && due(ui.view == crate::ui::ViewMode::Map, stale, now_s - map.drawn_at_s);
+    if map.due {
+        map.drawn_at_s = now_s;
+    }
+}
+
+fn due(main_view: bool, stale: bool, since_s: f64) -> bool {
+    main_view || stale || since_s >= THUMBNAIL_PERIOD_S
+}
+
+/// Render the map only on a frame that draws it. In the menu and the loading screen nothing
+/// shows it, and between the thumbnail's frames its texture keeps the last picture.
+///
+/// The controls are taken here rather than in [`pace`], after [`place`] has turned the camera
+/// with a tracked frame: taken before, that turn read as a player's and drew every frame.
+fn switch_camera(ui: Res<Ui>, mut map: ResMut<Map>, mut camera: Single<&mut Camera, With<MapCamera>>) {
+    if map.due {
+        map.drawn_for = Some(controls(&ui.map));
+    }
+    if camera.is_active != map.due {
+        camera.is_active = map.due;
     }
 }
 
@@ -423,7 +271,7 @@ fn survey(
     mut map: ResMut<Map>,
     mut beliefs: ResMut<crate::beliefs::Beliefs>,
 ) {
-    if !map.shown {
+    if !map.due {
         return;
     }
     let held = beliefs.held(&game.0);
@@ -444,52 +292,16 @@ fn survey(
 
 #[allow(clippy::too_many_arguments)]
 fn place(
-    mut commands: Commands,
     mut map: ResMut<Map>,
     mut ui: ResMut<Ui>,
-    mut materials: ResMut<Assets<MapLineMaterial>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    camera: Single<(&mut Transform, &mut Projection), (With<MapCamera>, Without<MapDrawn>)>,
-    existing: Query<Entity, With<MapDrawn>>,
-    mut items: Query<
-        (&MapItemOf, &mut Transform, &mut Mesh3d, &MeshMaterial3d<MapLineMaterial>),
-        (Without<MapCamera>, Without<MapDropOf>, Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpokes>,
-            Without<MapSpreadOf>),
-    >,
-    mut drops: Query<
-        (&MapDropOf, &mut Transform, &mut Mesh3d),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
-            Without<MapSpreadOf>),
-    >,
-    mut spreads: Query<
-        (&MapSpreadOf, &mut Transform),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
-            Without<MapDropOf>),
-    >,
-    mut rings: Query<
-        (&MapRingOf, &mut Transform),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
-            Without<MapSpreadOf>),
-    >,
-    mut spokes: Query<
-        &mut Transform,
-        (With<MapSpokes>, Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>,
-            Without<MapRingOf>, Without<MapAnnulusOf>, Without<MapSpreadOf>),
-    >,
-    mut annuli: Query<
-        (&MapAnnulusOf, &mut Transform),
-        (Without<MapCamera>, Without<MapItemOf>, Without<MapDropOf>, Without<MapRingOf>,
-            Without<MapSpokes>, Without<MapSpreadOf>),
-    >,
+    camera: Single<(&mut Transform, &mut Projection), With<MapCamera>>,
 ) {
     let (mut transform, mut projection) = camera.into_inner();
     if !map.shown {
-        for entity in &existing {
-            commands.entity(entity).despawn();
-        }
-        map.drawn.clear();
-        map.rings_drawn = 0;
         map.frame = None;
+        return;
+    }
+    if !map.due {
         return;
     }
 
@@ -523,62 +335,7 @@ fn place(
         _ => MAP_FOV,
     };
     let view = map.viewport(fov_y);
-    let rad_per_px = view.rad_per_px;
-
-    let wanted: Vec<ItemKey> = frame.placements.iter().map(|p| p.key).collect();
-    if wanted != map.drawn || frame.rings.len() != map.rings_drawn {
-        for entity in &existing {
-            commands.entity(entity).despawn();
-        }
-        spawn_scene(&mut commands, &map, &frame, standoff, view, &mut meshes, &mut materials);
-        map.drawn = wanted;
-        map.rings_drawn = frame.rings.len();
-        map.frame = Some(frame);
-        return;
-    }
-
-    for (of, mut at, mut mesh, material) in items.iter_mut() {
-        let Some(placement) = frame.placements.get(of.0) else { continue };
-        *at = item_transform(placement, view);
-        // Crossing the threshold does not change the set that is drawn, so the level of
-        // detail is a handle swap rather than a respawn.
-        let (wanted, fraction) = mesh_for(form_of(placement, view), placement, &map, view);
-        if mesh.0 != *wanted {
-            mesh.0 = wanted.clone();
-        }
-        // A mark's cap follows its form. Compared first: a write re-prepares the material.
-        if materials.get(&material.0).is_some_and(|m| m.max_fraction != fraction)
-            && let Some(mut asset) = materials.get_mut(&material.0)
-        {
-            asset.max_fraction = fraction;
-        }
-    }
-    for (of, mut at, mut mesh) in drops.iter_mut() {
-        let Some(placement) = frame.placements.get(of.0) else { continue };
-        *at = drop_transform(placement);
-        // Drifting off the plane gains dashes, not longer ones, so the mesh changes.
-        let dashes = dash_count(at.scale.y, at.translation.length(), rad_per_px);
-        let wanted = &map.drops[dashes - 1];
-        if mesh.0 != *wanted {
-            mesh.0 = wanted.clone();
-        }
-    }
-    for (of, mut at) in spreads.iter_mut() {
-        let Some((near, far)) = frame.placements.get(of.0).and_then(|p| p.spread) else { continue };
-        *at = spread_transform(near, far, of.1, rad_per_px);
-    }
-    for (of, mut at) in rings.iter_mut() {
-        let Some(ring) = frame.rings.get(of.0) else { continue };
-        *at = ring_transform(&frame, ring.radius);
-    }
-    for (of, mut at) in annuli.iter_mut() {
-        let Some(placement) = frame.placements.get(of.0) else { continue };
-        let Some(annulus) = placement.annulus else { continue };
-        *at = annulus_transform(placement, annulus);
-    }
-    if let Ok(mut at) = spokes.single_mut() {
-        *at = ring_transform(&frame, standoff * SPOKE_REACH);
-    }
+    map.scene.view = Some((view, standoff));
     map.frame = Some(frame);
 }
 
@@ -656,314 +413,22 @@ fn reference_line(snapshot: &MapSnapshot, primary: Option<ItemKey>) -> Option<DV
     Some(ship - at)
 }
 
-/// The outline mesh for a population, normalized so its outer edge is one unit.
-///
-/// Built in simulation axes and converted here, so the pole arrives on `+Y` — what
-/// [`annulus_transform`] rotates from. The shape depends only on the radius ratio and the
-/// half-angle, so only its scale changes with zoom.
-fn annulus_mesh(annulus: em_map::Annulus) -> Mesh {
-    let curves: Vec<Vec<Vec3>> = em_map::outline::torus(DVec3::ZERO, DVec3::Z, annulus.unit())
-        .into_iter()
-        .map(|curve| curve.into_iter().map(render).collect())
-        .collect();
-    wire_mesh::tube_curves(&curves, BASE_TUBE_RADIUS, 4, 0.8)
-}
-
-/// A population sits at its own center, in its own plane, at its own size.
-fn annulus_transform(placement: &Placement, annulus: em_map::Annulus) -> Transform {
-    Transform {
-        translation: at_of(placement),
-        rotation: Quat::from_rotation_arc(Vec3::Y, render(placement.pole.as_dvec3()).normalize()),
-        scale: Vec3::splat(annulus.outer.max(f32::MIN_POSITIVE)),
-    }
-}
-
-fn render(v: DVec3) -> Vec3 {
-    sim_to_render(v).as_vec3()
-}
-
-fn at_of(placement: &Placement) -> Vec3 {
-    render(placement.at.as_dvec3())
-}
-
-/// A body is a sphere at its own size above [`Viewport::point_px`] across, and a mark below.
-///
-/// The threshold is the surface's size and not the mark's, so a light body steps *down* to
-/// its mark at the crossover. The alternative lets a rock stay a sphere down to three pixels,
-/// which is the illegible case the level of detail exists for.
-///
-/// A ship is always a dot: its hull size is not what anyone reads off a map.
-fn form_of(placement: &Placement, view: Viewport) -> Form {
-    match placement.kind {
-        // This ship is drawn as one of them: a circle around a dot at the same place is a
-        // white outline on somebody else's mark.
-        ItemKind::Ship | ItemKind::Observer => Form::Dot,
-        _ if view.rad_per_px > 0.0
-            && 2.0 * placement.angular_radius / view.rad_per_px > view.point_px =>
-        {
-            Form::Sphere
-        }
-        _ => Form::Circle,
-    }
-}
-
-/// The render-unit radius of a mark drawn `mark_px` across at `distance`.
-fn point_radius(distance: f32, rad_per_px: f32, mark_px: f32) -> f32 {
-    (distance * rad_per_px * mark_px * 0.5).max(f32::MIN_POSITIVE)
-}
-
-/// A mark faces the eye, which is the render origin because every transform here is
-/// camera-relative. The mesh lies in the XZ plane, so its +Y is what points back.
-fn face_camera(at: Vec3) -> Quat {
-    match at.try_normalize() {
-        Some(away) => Quat::from_rotation_arc(Vec3::Y, -away),
-        None => Quat::IDENTITY,
-    }
-}
-
-fn item_transform(placement: &Placement, view: Viewport) -> Transform {
-    let at = at_of(placement);
-    match form_of(placement, view) {
-        Form::Sphere => Transform {
-            translation: at,
-            rotation: Quat::from_rotation_arc(
-                Vec3::Y,
-                render(placement.pole.as_dvec3()).normalize(),
-            ),
-            scale: Vec3::splat(placement.radius),
-        },
-        // Flat, facing the eye, at the size this one's mass earns.
-        Form::Circle | Form::Dot => Transform {
-            translation: at,
-            rotation: face_camera(at),
-            scale: Vec3::splat(point_radius(at.length(), view.rad_per_px, view.mark_px(placement))),
-        },
-    }
-}
-
-/// The mesh a form is drawn with, and the cap its tube is sized under.
-fn mesh_for<'a>(form: Form, placement: &Placement, map: &'a Map, view: Viewport)
-    -> (&'a Handle<Mesh>, f32) {
-    match form {
-        Form::Sphere => (&map.sphere, SPHERE_TUBE_FRACTION),
-        Form::Circle => (&map.point, view.point_tube_fraction(view.mark_px(placement))),
-        Form::Dot => (&map.dot, DOT_TUBE_FRACTION),
-    }
-}
-
-/// How many dashes a drop wants, so each is [`DASH_PX`] long on screen. The mesh lays `n`
-/// dashes and `n - 1` equal gaps over a unit height, so `n = (h / d + 1) / 2`.
-fn dash_count(height: f32, distance: f32, rad_per_px: f32) -> usize {
-    let dash = distance * rad_per_px * DASH_PX;
-    if !(dash > 0.0) || !height.is_finite() {
-        return 1;
-    }
-    (((height / dash + 1.0) * 0.5).round() as i64).clamp(1, MAX_DASHES as i64) as usize
-}
-
-/// The dashed line is a unit height along `+Y`, so it is scaled to the drop and turned onto it.
-fn drop_transform(placement: &Placement) -> Transform {
-    let foot = render(placement.foot.as_dvec3());
-    let span = at_of(placement) - foot;
-    let length = span.length();
-    Transform {
-        translation: foot,
-        rotation: match length > f32::EPSILON {
-            true => Quat::from_rotation_arc(Vec3::Y, span / length),
-            false => Quat::IDENTITY,
-        },
-        scale: Vec3::new(1.0, length, 1.0),
-    }
-}
-
-/// The unit line along `+Y`, laid from `near` to `far`.
-fn segment_transform(near: Vec3, far: Vec3) -> Transform {
-    let (near, far) = (render(near.as_dvec3()), render(far.as_dvec3()));
-    let span = far - near;
-    let length = span.length();
-    Transform {
-        translation: near,
-        rotation: match length > f32::EPSILON {
-            true => Quat::from_rotation_arc(Vec3::Y, span / length),
-            false => Quat::IDENTITY,
-        },
-        scale: Vec3::new(1.0, length, 1.0),
-    }
-}
-
-fn spread_transform(near: Vec3, far: Vec3, part: SpreadPart, rad_per_px: f32) -> Transform {
-    match part {
-        SpreadPart::Bar => segment_transform(near, far),
-        SpreadPart::NearCap => cap_transform(near, far, rad_per_px),
-        SpreadPart::FarCap => cap_transform(far, near, rad_per_px),
-    }
-}
-
-/// Square to both the bar and the line of sight, so it looks square from any angle. The eye is
-/// the render origin, so a point is its own line of sight.
-fn cap_transform(end: Vec3, other: Vec3, rad_per_px: f32) -> Transform {
-    let (end, other) = (render(end.as_dvec3()), render(other.as_dvec3()));
-    let along = (other - end).normalize_or(Vec3::Y);
-    let across = along.cross(end).try_normalize().unwrap_or_else(|| along.any_orthonormal_vector());
-    let length = end.length() * rad_per_px * SPREAD_CAP_PX;
-    Transform {
-        translation: end - across * (0.5 * length),
-        rotation: Quat::from_rotation_arc(Vec3::Y, across),
-        scale: Vec3::new(1.0, length, 1.0),
-    }
-}
-
-/// A unit ring in the XZ plane, turned onto the reference plane and grown to its radius.
-fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
-    let normal = render(frame.plane_normal.as_dvec3()).normalize();
-    Transform {
-        // The ship, not the focus: the scale is the observer's. See `MapFrame::rings_at`.
-        translation: render(frame.rings_at.as_dvec3()),
-        rotation: Quat::from_rotation_arc(Vec3::Y, normal),
-        scale: Vec3::splat(radius.max(f32::MIN_POSITIVE)),
-    }
-}
-
-fn spawn_scene(
-    commands: &mut Commands,
-    map: &Map,
-    frame: &MapFrame,
-    standoff: f32,
-    view: Viewport,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<MapLineMaterial>,
-) {
-    let layer = RenderLayers::layer(MAP_LAYER);
-    let ring = materials.add(line_material(RING, LINE_TUBE_FRACTION, SCALE_PX, SCALE_COLOR_SCALE));
-    let drop = materials.add(line_material(DROP, LINE_TUBE_FRACTION, SCALE_PX, SCALE_COLOR_SCALE));
-    let population = materials.add(MapLineMaterial {
-        dash_px: DASH_PX,
-        ..line_material(POPULATION, LINE_TUBE_FRACTION, LINE_PX, POPULATION_COLOR_SCALE)
-    });
-
-    for (index, placed) in frame.rings.iter().enumerate() {
-        commands.spawn((
-            Mesh3d(map.ring.clone()),
-            MeshMaterial3d(ring.clone()),
-            ring_transform(frame, placed.radius),
-            NoFrustumCulling,
-            layer.clone(),
-            MapDrawn,
-            MapRingOf(index),
-        ));
-    }
-
-    commands.spawn((
-        Mesh3d(map.spokes.clone()),
-        MeshMaterial3d(materials.add(line_material(SPOKE, LINE_TUBE_FRACTION, SCALE_PX,
-            SCALE_COLOR_SCALE))),
-        ring_transform(frame, standoff * SPOKE_REACH),
-        NoFrustumCulling,
-        layer.clone(),
-        MapDrawn,
-        MapSpokes,
-    ));
-
-    for (index, placement) in frame.placements.iter().enumerate() {
-        let at = item_transform(placement, view);
-        let (mesh, fraction) = mesh_for(form_of(placement, view), placement, map, view);
-        commands.spawn((
-            Mesh3d(mesh.clone()),
-            // Its own, because its cap changes with its form.
-            MeshMaterial3d(materials.add(line_material(
-                color_of(placement.kind),
-                fraction,
-                LINE_PX,
-                LINE_COLOR_SCALE,
-            ))),
-            at,
-            NoFrustumCulling,
-            layer.clone(),
-            MapDrawn,
-            MapItemOf(index),
-        ));
-        if let Some(annulus) = placement.annulus {
-            commands.spawn((
-                Mesh3d(meshes.add(annulus_mesh(annulus))),
-                MeshMaterial3d(population.clone()),
-                annulus_transform(placement, annulus),
-                NoFrustumCulling,
-                layer.clone(),
-                MapDrawn,
-                MapAnnulusOf(index),
-            ));
-        }
-        if let Some((near, far)) = placement.spread {
-            let material = materials.add(line_material(color_of(placement.kind), LINE_TUBE_FRACTION,
-                LINE_PX, SPREAD_COLOR_SCALE));
-            for part in [SpreadPart::Bar, SpreadPart::NearCap, SpreadPart::FarCap] {
-                commands.spawn((
-                    // One dash: a solid line.
-                    Mesh3d(map.drops[0].clone()),
-                    MeshMaterial3d(material.clone()),
-                    spread_transform(near, far, part, view.rad_per_px),
-                    NoFrustumCulling,
-                    layer.clone(),
-                    MapDrawn,
-                    MapSpreadOf(index, part),
-                ));
-            }
-        }
-        if placement.has_drop_line() {
-            let at = drop_transform(placement);
-            let dashes = dash_count(at.scale.y, at.translation.length(), view.rad_per_px);
-            commands.spawn((
-                Mesh3d(map.drops[dashes - 1].clone()),
-                MeshMaterial3d(drop.clone()),
-                at,
-                NoFrustumCulling,
-                layer.clone(),
-                MapDrawn,
-                MapDropOf(index),
-            ));
-        }
-    }
-}
-
-fn line_material(color: Color, max_fraction: f32, width_px: f32, color_scale: f32)
-    -> MapLineMaterial {
-    let rgba = color.to_linear();
-    MapLineMaterial {
-        base_color: LinearRgba::new(
-            rgba.red * color_scale,
-            rgba.green * color_scale,
-            rgba.blue * color_scale,
-            1.0,
-        ),
-        emission_strength: LINE_EMISSION,
-        base_tube_radius: BASE_TUBE_RADIUS,
-        max_fraction,
-        width_px,
-        dash_px: 0.0,
-    }
-}
-
-// The interface's own palette. `18-ui-style.md`: one source, converted at the edge.
-const RING: Color = em_ui::vfd::TEXT_DIM;
-const SPOKE: Color = em_ui::vfd::TEXT_DIM;
-const DROP: Color = em_ui::vfd::BUTTON_BORDER;
-const POPULATION: Color = em_ui::vfd::TEXT_DIM;
-
-fn color_of(kind: ItemKind) -> Color {
-    match kind {
-        ItemKind::Star => em_ui::vfd::TEXT,
-        ItemKind::Planet | ItemKind::Moon | ItemKind::Minor => em_ui::vfd::BUTTON_BORDER,
-        ItemKind::Population => em_ui::vfd::TEXT_DIM,
-        // Amber against the green: color is the one channel a map has that a list does not.
-        // This ship included — it is a craft like the others, and the palette has no white in
-        // it. What says which one is the reader's is the rings, which are drawn from it.
-        ItemKind::Ship | ItemKind::Station | ItemKind::Observer => em_ui::vfd::AMBER,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use em_render::body_material::BASE_TUBE_RADIUS;
+
     use super::*;
+    use crate::map_scene::*;
+
+    /// The main view draws every frame; the corner every tenth of a second, or at once when
+    /// something about it has changed.
+    #[test]
+    fn the_thumbnail_is_drawn_ten_times_a_second_unless_moved() {
+        assert!(due(true, false, 0.0), "the main view waits for nothing");
+        assert!(!due(false, false, 0.05), "the corner redrew early");
+        assert!(due(false, false, THUMBNAIL_PERIOD_S), "the corner stopped");
+        assert!(due(false, true, 0.0), "a moved camera waited");
+    }
 
     /// A cap reads as square to its bar from any angle, centered on the end it closes and the
     /// same size on screen however far off it is.
@@ -1303,11 +768,11 @@ mod tests {
         for scale in [em_map::weight::MIN_SCALE, 0.0, 1.0e-9] {
             assert!(marked(scale) >= POINT_FLOOR_PX, "{scale} drew {}", marked(scale));
         }
-        // And the line thickens to match, or a small mark is a hairline ring nobody can see.
-        assert!(
-            view.point_tube_fraction(marked(0.5)) > view.point_tube_fraction(marked(1.0)),
-            "a smaller mark wants a thicker line, as a fraction of itself",
-        );
+        // The shader thickens a small mark's line to match, as a fraction of it; the shared cap
+        // must leave room for the smallest there is, or it would be a hairline ring.
+        for scale in [em_map::weight::MIN_SCALE, 0.0, 0.5, 1.0] {
+            assert!(LINE_PX / (marked(scale) * 0.5) <= CIRCLE_TUBE_FRACTION, "{scale} was capped");
+        }
     }
 
     /// The crossover is the surface's size for everyone, so a light body steps down to its

@@ -126,6 +126,21 @@ pub struct LocalSystem {
     star_teff_k: f64,
     star_luminosity_w: f64,
     star_feh: f64,
+    /// What [`LocalSystem::drawables_at`] would otherwise look up again for every body on every
+    /// frame. Everything that depends on where a body is stays out of it: its class and its
+    /// climate follow its distance from the star.
+    fixed: std::sync::OnceLock<Vec<Fixed>>,
+}
+
+/// What never changes about a body, for [`LocalSystem::drawables_at`].
+#[derive(Clone)]
+struct Fixed {
+    index: BodyIndex,
+    name: String,
+    kind: crate::navigation::Kind,
+    pole: DVec3,
+    spin_s: Option<f64>,
+    rings: Option<Rings>,
 }
 
 impl LocalSystem {
@@ -162,6 +177,7 @@ impl LocalSystem {
             star_teff_k: star.star.teff_k,
             star_luminosity_w: star.star.luminosity(),
             star_feh: star.metallicity,
+            fixed: std::sync::OnceLock::new(),
         };
         // Propagate before taking the inventory. Straight out of the file every body sits at
         // the origin and has no parent -- the derived columns are rebuilt by the first
@@ -207,10 +223,10 @@ impl LocalSystem {
             None => return Vec::new(),
         };
         let observer_m = (observer_ly - self.origin_ly) * M_PER_LY;
-        self.sim
-            .indices()
-            .filter(|i| *i != self.primary)
-            .filter_map(|i| {
+        self.fixed()
+            .iter()
+            .filter_map(|fixed| {
+                let i = fixed.index;
                 let at = em_sim::propagate::position_at(&self.sim, i, time)?;
                 if !at.is_finite() {
                     return None;
@@ -225,14 +241,7 @@ impl LocalSystem {
                 let to_observer = observer_m - at;
                 let phase = phase_factor(to_star, to_observer);
 
-                // The rings are found by the body's `em-sim` id, and their plane is that body's
-                // own pole out of the preset's IAU rotation. A second copy of a pole here would
-                // be a second chance to have it wrong.
-                let kind = crate::navigation::Kind::of(&self.sim.info(i).tags);
-                let pole = self.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
-                let spin_s = self.sim.rotation(i).and_then(|r| self.spin_of(i, r));
-                let rings = crate::rings::for_body(self.sim.name(i))
-                    .map(|system| Rings { system, pole });
+                let Fixed { kind, pole, spin_s, rings, .. } = *fixed;
 
                 let equilibrium_k = equilibrium_temperature(self.star_luminosity_w, distance_m);
                 let surface = crate::surface::Surface::classify(
@@ -278,7 +287,7 @@ impl LocalSystem {
                 }
 
                 Some(Drawable {
-                    name: self.sim.info(i).name.clone().unwrap_or_else(|| self.sim.name(i).into()),
+                    name: fixed.name.clone(),
                     kind,
                     rings,
                     surface,
@@ -308,6 +317,29 @@ impl LocalSystem {
                 })
             })
             .collect()
+    }
+
+    fn fixed(&self) -> &[Fixed] {
+        self.fixed.get_or_init(|| {
+            self.sim
+                .indices()
+                .filter(|i| *i != self.primary)
+                .map(|i| {
+                    // The rings are found by the body's `em-sim` id, and their plane is that
+                    // body's own pole out of the preset's IAU rotation. A second copy of a pole
+                    // here would be a second chance to have it wrong.
+                    let pole = self.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
+                    Fixed {
+                        index: i,
+                        name: self.sim.info(i).name.clone().unwrap_or_else(|| self.sim.name(i).into()),
+                        kind: crate::navigation::Kind::of(&self.sim.info(i).tags),
+                        pole,
+                        spin_s: self.sim.rotation(i).and_then(|r| self.spin_of(i, r)),
+                        rings: crate::rings::for_body(self.sim.name(i)).map(|system| Rings { system, pole }),
+                    }
+                })
+                .collect()
+        })
     }
 
     /// Everything in the system a ship can be sent to, ordered outward from the primary with
@@ -938,5 +970,27 @@ mod tests {
         let earth = sys.drawables_at(sun.position_ly, 0.0).into_iter().find(|d| d.name == "Earth").unwrap();
         assert!(earth.rings.is_none());
     }
-}
 
+    /// What is held once per system is what the arena says, whenever it is asked.
+    #[test]
+    fn a_drawables_fixed_facts_are_the_arenas() {
+        let Some(provider) = catalog() else { return };
+        let sun = provider.stars().iter().find(|s| s.provenance.name.as_deref() == Some(SOL)).expect("Sol");
+        let system = LocalSystem::for_star(sun).expect("Sol loads");
+        for day in [0.0, 91.0, 182.0, 365.0] {
+            let drawn = system.drawables_at(system.origin_ly, day * 86_400.0);
+            assert!(drawn.len() > 100);
+            for body in &drawn {
+                let i = system.sim.by_name(&body.name).or_else(|| {
+                    system.sim.indices().find(|i| system.sim.info(*i).name.as_deref() == Some(body.name.as_str()))
+                });
+                let i = i.expect("a drawable is in the arena");
+                let pole = system.sim.rotation(i).and_then(pole_of).unwrap_or(DVec3::Z);
+                assert_eq!(body.pole, pole, "{}", body.name);
+                assert_eq!(body.kind, crate::navigation::Kind::of(&system.sim.info(i).tags), "{}", body.name);
+                assert_eq!(body.spin_s, system.sim.rotation(i).and_then(|r| system.spin_of(i, r)), "{}", body.name);
+                assert_eq!(body.rings.is_some(), crate::rings::for_body(system.sim.name(i)).is_some(), "{}", body.name);
+            }
+        }
+    }
+}

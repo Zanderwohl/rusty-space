@@ -39,8 +39,11 @@ pub struct Signin {
     /// The password form, when it is open. See [`Form`].
     pub form: Option<Form>,
     /// Behind a lock for the reason `Loopback`'s is: a resource must be `Sync`.
-    from_tasks: Mutex<Receiver<Report>>,
-    to_main: Sender<Report>,
+    from_tasks: Mutex<Receiver<(u64, Report)>>,
+    to_main: Sender<(u64, Report)>,
+    /// Which sign-in a report must belong to. Starting, cancelling and signing out each begin
+    /// a new one, so a broker that answers late cannot sign back in a player who left.
+    attempt: u64,
 }
 
 /// What the player has typed.
@@ -81,7 +84,14 @@ impl Signin {
             form: None,
             from_tasks: Mutex::new(from_tasks),
             to_main,
+            attempt: 0,
         }
+    }
+
+    /// Leave whatever sign-in was under way: nothing it reports is taken now.
+    fn next_attempt(&mut self) -> u64 {
+        self.attempt += 1;
+        self.attempt
     }
 
     /// Whether the player may start observing.
@@ -148,22 +158,24 @@ fn resume(mut signin: ResMut<Signin>) {
     signin.grant = Some(grant.clone());
     signin.session = Session::Working;
     let to_main = signin.to_main.clone();
+    let attempt = signin.attempt;
     IoTaskPool::get()
         .spawn(async move {
             // The ticket is not used to connect — it is asked for to find out whether the
             // grant is still good, and the claims say who it belongs to. See
             // `broker::identity_in` for why reading them unverified is right here.
-            let _ = match broker.ticket(&grant) {
-                Ok(ticket) => to_main.send(Report::Granted {
+            let report = match broker.ticket(&grant) {
+                Ok(ticket) => Report::Granted {
                     grant: grant.clone(),
                     identity: crate::broker::identity_in(&ticket).unwrap_or(Identity {
                         account_id: String::new(),
                         display_name: "signed in".into(),
                     }),
-                }),
-                Err(BrokerError::Refused) => to_main.send(Report::Rejected),
-                Err(why) => to_main.send(Report::Failed(why.to_string())),
+                },
+                Err(BrokerError::Refused) => Report::Rejected,
+                Err(why) => Report::Failed(why.to_string()),
             };
+            let _ = to_main.send((attempt, report));
         })
         .detach();
 }
@@ -183,10 +195,12 @@ fn handle(
             Action::CancelSignIn => {
                 // Dropping the listener closes the socket, so the browser tab that never came
                 // back gets a refused connection rather than hanging.
+                signin.next_attempt();
                 signin.session = Session::SignedOut;
                 ui.menu_page = MenuPage::Root;
             }
             Action::SignOut => {
+                signin.next_attempt();
                 let _ = signin.vault.clear();
                 signin.grant = None;
                 signin.session = Session::SignedOut;
@@ -208,11 +222,18 @@ fn open_dev_form(dev: Res<crate::dev::DevEntry>, mut signin: ResMut<Signin>) {
 
 /// Take what the background tasks have said.
 fn collect(mut signin: ResMut<Signin>) {
-    let reports: Vec<Report> = {
+    take_reports(&mut signin);
+}
+
+fn take_reports(signin: &mut Signin) {
+    let reports: Vec<(u64, Report)> = {
         let Ok(from_tasks) = signin.from_tasks.lock() else { return };
         from_tasks.try_iter().collect()
     };
-    for report in reports {
+    for (attempt, report) in reports {
+        if attempt != signin.attempt {
+            continue;
+        }
         match report {
             Report::Granted { grant, identity } => {
                 if let Err(why) = signin.vault.write(&grant) {
@@ -253,13 +274,14 @@ fn listen(mut signin: ResMut<Signin>) {
     let return_to = format!("http://127.0.0.1:{}{}", loopback.port, crate::auth::RETURN_PATH);
     let label = machine_name();
     let to_main = signin.to_main.clone();
+    let attempt = signin.attempt;
     IoTaskPool::get()
         .spawn(async move {
-            let _ = match broker.redeem(&code, &return_to, &label) {
-                Ok(granted) => to_main
-                    .send(Report::Granted { grant: granted.grant, identity: granted.identity }),
-                Err(why) => to_main.send(Report::Failed(why.to_string())),
+            let report = match broker.redeem(&code, &return_to, &label) {
+                Ok(granted) => Report::Granted { grant: granted.grant, identity: granted.identity },
+                Err(why) => Report::Failed(why.to_string()),
             };
+            let _ = to_main.send((attempt, report));
         })
         .detach();
 }
@@ -282,6 +304,7 @@ fn machine_name() -> String {
 /// Begin: open the browser, listen on loopback.
 pub fn begin(signin: &mut Signin) {
     let Some(broker) = signin.broker.clone() else { return };
+    signin.next_attempt();
     let bound = match crate::auth::Bound::open() {
         Ok(bound) => bound,
         Err(why) => {
@@ -321,16 +344,17 @@ fn password_submit(signin: &mut Signin) {
     });
     let label = machine_name();
     let to_main = signin.to_main.clone();
+    let attempt = signin.next_attempt();
     signin.session = Session::Working;
     IoTaskPool::get()
         .spawn(async move {
             let asked =
                 broker.with_password(&form.email, &form.password, &label, register_as.as_deref());
-            let _ = match asked {
-                Ok(granted) => to_main
-                    .send(Report::Granted { grant: granted.grant, identity: granted.identity }),
-                Err(why) => to_main.send(Report::Failed(why.to_string())),
+            let report = match asked {
+                Ok(granted) => Report::Granted { grant: granted.grant, identity: granted.identity },
+                Err(why) => Report::Failed(why.to_string()),
             };
+            let _ = to_main.send((attempt, report));
         })
         .detach();
 }
@@ -559,6 +583,7 @@ mod tests {
             form: None,
             from_tasks: Mutex::new(channel().1),
             to_main: channel().0,
+            attempt: 0,
         };
         assert!(signin.may_observe());
     }
@@ -574,6 +599,7 @@ mod tests {
             form: None,
             from_tasks: Mutex::new(channel().1),
             to_main: channel().0,
+            attempt: 0,
         };
         assert!(!with(Session::SignedOut).may_observe());
         assert!(!with(Session::Working).may_observe());
@@ -646,5 +672,38 @@ mod tests {
             said.contains(".config") || said.contains("XDG"),
             "Linux does not keep this in {said}",
         );
+    }
+
+    /// Signing out while the broker is still answering must stay signed out: the late grant is
+    /// from a sign-in the player has left.
+    #[test]
+    fn a_grant_that_lands_after_signing_out_is_dropped() {
+        let (to_main, from_tasks) = channel();
+        let mut signin = Signin {
+            broker: None,
+            vault: Vault::memory(),
+            session: Session::Working,
+            grant: None,
+            form: None,
+            from_tasks: Mutex::new(from_tasks),
+            to_main,
+            attempt: 0,
+        };
+        let granted = || Report::Granted {
+            grant: "late".into(),
+            identity: Identity { account_id: "a".into(), display_name: "Ada".into() },
+        };
+        let asked = signin.attempt;
+        signin.next_attempt();
+        signin.session = Session::SignedOut;
+        signin.to_main.send((asked, granted())).unwrap();
+        take_reports(&mut signin);
+        assert!(matches!(signin.session, Session::SignedOut));
+        assert_eq!(signin.grant, None);
+        assert_eq!(signin.vault.read().ok().flatten(), None, "the late grant was kept");
+
+        signin.to_main.send((signin.attempt, granted())).unwrap();
+        take_reports(&mut signin);
+        assert!(matches!(signin.session, Session::SignedIn(_)), "the current one still lands");
     }
 }

@@ -1,6 +1,7 @@
 //! The Bevy layer: states, resources, and the systems that carry actions.
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::light::cluster::GlobalClusterSettings;
 use bevy::math::DVec3;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
@@ -154,9 +155,9 @@ impl Plugin for ClientPlugin {
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .init_resource::<panels::HudFoot>()
             .init_resource::<crate::map_panel::WorldInset>()
-            .add_systems(Startup, (spawn_camera, crate::parts::adopt_fixture))
+            .add_systems(Startup, (spawn_camera, no_lights, crate::parts::adopt_fixture))
             .add_systems(OnEnter(AppState::Loading), begin_load)
-            .add_systems(OnExit(AppState::InGame), crate::map_panel::release_world_frame)
+            .add_systems(OnExit(AppState::InGame), (crate::map_panel::release_world_frame, leave_scene))
             .add_systems(OnEnter(AppState::InGame), spawn_sky)
             .insert_resource(ClearColor(Color::BLACK))
             .add_systems(
@@ -359,6 +360,42 @@ fn spawn_camera(mut commands: Commands) {
         Tonemapping::TonyMcMapface,
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
+}
+
+/// Take down what the scene systems spawned, which run only in game and so would otherwise leave
+/// it all drawn behind the Unreachable screen. Each respawns what it wants on the way back in.
+fn leave_scene(
+    mut commands: Commands,
+    placed: Query<
+        Entity,
+        Or<(
+            With<crate::resolved::ResolvedBody>,
+            With<crate::envelope::EnvelopeMesh>,
+            With<crate::envelope::RingMesh>,
+            With<crate::hull::Hull>,
+            With<crate::plume::Plume>,
+        )>,
+    >,
+    mut envelopes: ResMut<crate::envelope::Envelopes>,
+    mut surfaces: ResMut<crate::surfaces::Surfaces>,
+    mut bakes: ResMut<crate::procedural::Bakes>,
+) {
+    for entity in &placed {
+        commands.entity(entity).despawn();
+    }
+    // It respawns only on a change of star.
+    envelopes.star = None;
+    surfaces.keep(None, [], &mut bakes);
+}
+
+/// Nothing here is lit by a Bevy light: every material shades itself from the star. Bevy
+/// clusters lights for every 3D camera anyway, which on the GPU cost about 1 ms of render CPU a
+/// frame across three cameras, and on the CPU, with nothing to cluster, about a third of that.
+///
+/// Not also `ClusterConfig::None` on the cameras, which would save the rest: with it, `--bench`
+/// lost the Metal device in three runs of eight ("Cannot allocate sample buffer").
+fn no_lights(mut settings: ResMut<GlobalClusterSettings>) {
+    settings.gpu_clustering = None;
 }
 
 /// Point the camera where the interface says it is looking.
@@ -653,6 +690,41 @@ mod tests {
             .add_systems(Update, (dispatch, advance_clock).chain());
         app.insert_state(AppState::InGame);
         app
+    }
+
+    /// Leaving the game takes the scene down, and nothing else.
+    #[test]
+    fn leaving_the_game_despawns_the_scene() {
+        let mut app = harness();
+        let mut images = Assets::<Image>::default();
+        let surfaces = crate::surfaces::Surfaces::empty(&mut images);
+        app.insert_resource(surfaces)
+            .init_resource::<crate::procedural::Bakes>()
+            .insert_resource(crate::envelope::Envelopes {
+                star: Some(lc_world::sky::StarId::synthesize("test", 1)),
+                ..default()
+            })
+            .add_systems(OnExit(AppState::InGame), leave_scene);
+        let world = app.world_mut();
+        world.spawn(crate::resolved::ResolvedBody("Earth".into()));
+        world.spawn(crate::envelope::EnvelopeMesh(0));
+        world.spawn(crate::envelope::RingMesh { body: 0, radius: 1.0 });
+        world.spawn(crate::hull::Hull(None));
+        world.spawn(crate::plume::Plume(None));
+        let bystander = world.spawn(Name::new("not the scene")).id();
+        app.update();
+
+        app.world_mut().resource_mut::<NextState<AppState>>().set(AppState::Unreachable);
+        app.update();
+        let world = app.world_mut();
+        let left: Vec<Entity> = world.query::<Entity>().iter(world).collect();
+        assert!(left.contains(&bystander));
+        assert_eq!(world.query::<&crate::hull::Hull>().iter(world).count(), 0);
+        assert_eq!(world.query::<&crate::resolved::ResolvedBody>().iter(world).count(), 0);
+        assert_eq!(world.query::<&crate::envelope::RingMesh>().iter(world).count(), 0);
+        assert_eq!(world.query::<&crate::envelope::EnvelopeMesh>().iter(world).count(), 0);
+        assert_eq!(world.query::<&crate::plume::Plume>().iter(world).count(), 0);
+        assert_eq!(world.resource::<crate::envelope::Envelopes>().star, None, "they would not respawn");
     }
 
     /// The invariant of 13-client-shell.md, asserted rather than assumed.
