@@ -388,8 +388,13 @@ impl Draft {
 
     /// Back to the ship as it is.
     pub fn reset(&self) -> Edit {
+        self.replace(self.ship.clone())
+    }
+
+    /// The whole draft, as applying a preset does.
+    pub fn replace(&self, form: Form) -> Edit {
         let mind = self.form.parts.iter().find(|p| p.kind == Kind::Mind).map_or(PartId(0), |p| p.id);
-        Edit { what: What::Whole, part: mind, before: self.form.parts.clone(), after: self.ship.parts.clone(), settled: true }
+        Edit { what: What::Whole, part: mind, before: self.form.parts.clone(), after: form.parts, settled: true }
     }
 
     /// A typed number, exactly: fields do not snap. Angles arrive in degrees.
@@ -490,6 +495,28 @@ impl Draft {
             Kind::Spar(SparMode::Strap) => "spar, strapped to its parent".into(),
         }
     }
+}
+
+/// A draft to photograph, by `--draft`'s spelling: `edits` for one of each mark on `ship`, or a
+/// preset by `--form`'s.
+pub fn staged(name: &str, ship: &Form, balance: &Balance) -> Option<Form> {
+    if name != "edits" {
+        return crate::parts::fixture(name);
+    }
+    let mut d = Draft::new(ship.clone());
+    let by_kind = |d: &Draft, kind: Kind| d.form.parts.iter().find(|p| p.kind == kind).copied();
+    let edits = [
+        by_kind(&d, Kind::Drone).map(|p| d.resize(p.id, snap::volume(p.volume_m3 * 2.0, balance.min_part_m3, false))),
+        by_kind(&d, Kind::Engine).map(|p| d.resize(p.id, snap::volume(p.volume_m3 * 0.6, balance.min_part_m3, false))),
+        by_kind(&d, Kind::Data).map(|p| d.reshape(p.id, PRIMITIVES[0])),
+    ];
+    for edit in edits.into_iter().flatten() {
+        d.apply(&edit.ok()?, balance).ok()?;
+    }
+    if let Some(living) = by_kind(&d, Kind::Living) {
+        d.apply(&d.anchor(living.id, DVec3::new(-1.0, 0.0, 1.0)).ok()?, balance).ok()?;
+    }
+    Some(d.form)
 }
 
 fn number_of(field: Field, primitive: &Primitive) -> lc_world::form::Number {
@@ -709,6 +736,16 @@ mod tests {
         assert_eq!(marks[&PartId(2)], Mark::Dismantle);
         assert_eq!(marks[&PartId(6)], Mark::Build);
         assert!(!marks.contains_key(&PartId(3)));
+    }
+
+    /// The staged draft the shots are taken of carries one of each mark.
+    #[test]
+    fn the_staged_draft_has_every_mark() {
+        let mut d = draft();
+        let staged = staged("edits", &d.ship, &B).unwrap();
+        d.apply(&d.replace(staged), &B).unwrap();
+        let marks: BTreeSet<&str> = d.marks(&B).values().map(|m| m.word()).collect();
+        assert_eq!(marks, ["build", "dismantle", "move", "rebuild"].into_iter().collect());
     }
 
     #[test]

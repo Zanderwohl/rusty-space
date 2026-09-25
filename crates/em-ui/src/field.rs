@@ -72,38 +72,35 @@ impl Plugin for FieldPlugin {
     }
 }
 
-fn commit(entity: Entity, fields: &Query<(&NumberField, &EditableText)>, out: &mut MessageWriter<Committed>) {
-    let Ok((field, editable)) = fields.get(entity) else { return };
+/// The field's number, if it was changed and is one.
+fn committed(field: &NumberField, editable: &EditableText) -> Option<f64> {
     let text = editable.value().to_string();
-    if text == field.shown {
-        return;
-    }
-    if let Some(value) = parse(&text) {
-        out.write(Committed { field: entity, value });
-    }
+    (text != field.shown).then(|| parse(&text)).flatten()
 }
 
 fn on_key(
     key: On<FocusedInput<KeyboardInput>>,
-    fields: Query<(&NumberField, &EditableText)>,
-    mut reverting: Query<(&mut NumberField, &mut EditableText)>,
+    mut fields: Query<(&mut NumberField, &mut EditableText)>,
     mut focus: ResMut<InputFocus>,
     mut out: MessageWriter<Committed>,
 ) {
-    let entity = key.focused_entity;
-    if !key.input.state.is_pressed() || !fields.contains(entity) {
+    let field = key.focused_entity;
+    let Ok((mut number, mut editable)) = fields.get_mut(field) else { return };
+    if !key.input.state.is_pressed() {
         return;
     }
     match key.input.logical_key {
         Key::Enter => {
-            commit(entity, &fields, &mut out);
+            if let Some(value) = committed(&number, &editable) {
+                out.write(Committed { field, value });
+                // So losing the focus next does not commit it a second time.
+                number.shown = editable.value().to_string();
+            }
             focus.clear();
         }
         Key::Escape => {
-            if let Ok((field, mut editable)) = reverting.get_mut(entity) {
-                let shown = field.shown.clone();
-                editable.editor_mut().set_text(&shown);
-            }
+            let shown = number.shown.clone();
+            editable.editor_mut().set_text(&shown);
             focus.clear();
         }
         _ => {}
@@ -111,7 +108,11 @@ fn on_key(
 }
 
 fn on_focus_lost(lost: On<FocusLost>, fields: Query<(&NumberField, &EditableText)>, mut out: MessageWriter<Committed>) {
-    commit(lost.entity, &fields, &mut out);
+    if let Ok((number, editable)) = fields.get(lost.entity)
+        && let Some(value) = committed(number, editable)
+    {
+        out.write(Committed { field: lost.entity, value });
+    }
 }
 
 /// A press anywhere but the field takes the keyboard from it, which commits it. Bevy moves the
@@ -147,6 +148,75 @@ mod tests {
         assert_eq!(parse("-0.3"), Some(-0.3));
         assert_eq!(parse("1e999"), None, "not a number a form can hold");
         assert_eq!(parse("--"), None);
+    }
+
+    /// A field showing `shown`, focused, with `typed` in it.
+    fn app_with_field(shown: &str, typed: &str) -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::input::InputPlugin,
+            bevy::input_focus::InputFocusPlugin,
+            bevy::input_focus::InputDispatchPlugin,
+            FieldPlugin,
+        ));
+        app.world_mut().spawn((bevy::window::Window::default(), bevy::window::PrimaryWindow));
+        let mut number = NumberField::default();
+        let mut editable = EditableText::default();
+        number.show(&mut editable, false, shown);
+        editable.editor_mut().set_text(typed);
+        let field = app.world_mut().spawn((number, editable, Interaction::None)).id();
+        app.world_mut().resource_mut::<InputFocus>().set(field, bevy::input_focus::FocusCause::Pressed);
+        app.update();
+        (app, field)
+    }
+
+    fn press(app: &mut App, logical_key: Key) {
+        let window = app.world_mut().query_filtered::<Entity, With<bevy::window::PrimaryWindow>>().single(app.world()).unwrap();
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Enter,
+            logical_key,
+            state: bevy::input::ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window,
+        });
+        app.update();
+    }
+
+    fn commits(app: &App) -> Vec<Committed> {
+        let messages = app.world().resource::<Messages<Committed>>();
+        messages.get_cursor().read(messages).cloned().collect()
+    }
+
+    /// Enter commits a changed number and gives the keyboard back; its systems and observers
+    /// are valid together, which nothing but running them checks.
+    #[test]
+    fn enter_commits_the_number_typed() {
+        let (mut app, field) = app_with_field("1", "2.5e6");
+        press(&mut app, Key::Enter);
+        assert_eq!(commits(&app), vec![Committed { field, value: 2.5e6 }]);
+        assert_eq!(app.world().resource::<InputFocus>().get(), None);
+        let (mut app, _) = app_with_field("1", "1");
+        press(&mut app, Key::Enter);
+        assert!(commits(&app).is_empty(), "nothing changed, so nothing is committed");
+    }
+
+    #[test]
+    fn escape_puts_back_what_it_showed_and_commits_nothing() {
+        let (mut app, field) = app_with_field("7", "9");
+        press(&mut app, Key::Escape);
+        assert!(commits(&app).is_empty());
+        assert_eq!(app.world().get::<EditableText>(field).unwrap().value().to_string(), "7");
+    }
+
+    #[test]
+    fn a_press_elsewhere_takes_the_keyboard_back_and_commits() {
+        let (mut app, field) = app_with_field("1", "3");
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
+        app.update();
+        assert_eq!(app.world().resource::<InputFocus>().get(), None);
+        assert_eq!(commits(&app), vec![Committed { field, value: 3.0 }]);
     }
 
     #[derive(Resource, Default)]

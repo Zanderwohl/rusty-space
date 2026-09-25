@@ -408,9 +408,21 @@ struct HangarPaint(Vec4);
 
 /// Start the draft from the ship's own form the first time the editor opens, or from the
 /// starting form for a ship that has none.
-fn start_draft(ui: Res<Ui>, own: Res<crate::parts::OwnForm>, mut out: MessageWriter<Requested>) {
-    if ui.view == ViewMode::Form && ui.form.draft.is_none() {
-        out.write(Requested(Action::StartDraft(own.form().cloned().unwrap_or_else(Form::starting))));
+fn start_draft(
+    ui: Res<Ui>,
+    own: Res<crate::parts::OwnForm>,
+    dev: Res<crate::dev::DevEntry>,
+    mut out: MessageWriter<Requested>,
+) {
+    if ui.view != ViewMode::Form || ui.form.draft.is_some() {
+        return;
+    }
+    let ship = own.form().cloned().unwrap_or_else(Form::starting);
+    out.write(Requested(Action::StartDraft(ship.clone())));
+    let staged = dev.draft.as_deref().and_then(|name| crate::draft::staged(name, &ship, &Balance::DEFAULT));
+    if let Some(form) = staged {
+        let edit = crate::draft::Draft::new(ship).replace(form);
+        out.write(Requested(Action::EditForm(Ok(edit))));
     }
 }
 
