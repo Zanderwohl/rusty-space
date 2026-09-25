@@ -162,7 +162,7 @@ Kinds, and the one property of each that matters to the physics rather than the 
 | solar collector | area, distance from the star, occlusion it casts |
 | refinery, fabricator | none; pure economy |
 | swarm population | a distribution over orbital elements, not a roster; see below |
-| ringworld, shell segment | large fixed occlusion over a solid angle |
+| ringworld, shell segment | large fixed occlusion over a solid angle; see [33-ring-habitats.md](33-ring-habitats.md) |
 
 Solar collectors, swarm elements and megastructures are the same thing to the light model:
 area that blocks a fraction of the star's output in some set of directions. That is what
