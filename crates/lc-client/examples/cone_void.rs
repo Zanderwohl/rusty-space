@@ -18,11 +18,12 @@
 //! Every position is worked out in `f64` relative to the eye, and the camera sits at the render
 //! origin, as the client places everything.
 
-use bevy::camera::Hdr;
+use bevy::camera::{Hdr, RenderTarget};
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
+use bevy::render::render_resource::{TextureFormat, TextureUsages};
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use em_render::exhaust_cone_material::{
     ApertureGlowMaterial, ApertureGlowUniform, ExhaustConeMaterial, ExhaustConeMaterialPlugin,
@@ -196,7 +197,8 @@ fn camera(args: &Args, burn: &Burn, frame: u32) -> (DVec3, DVec3) {
             (AFT * 0.5 * l + DVec3::Y * wall / 3.0, DVec3::ZERO)
         }
     };
-    let turn = DQuat::from_axis_angle(AFT, (args.drift_deg * frame as f64).to_radians());
+    // Across the axis: turning about it leaves a round cone exactly as it was.
+    let turn = DQuat::from_axis_angle(DVec3::Z, (args.drift_deg * frame as f64).to_radians());
     (target + turn * (eye - target), target)
 }
 
@@ -207,6 +209,7 @@ fn stage(
     mut standard: ResMut<Assets<StandardMaterial>>,
     mut cones: ResMut<Assets<ExhaustConeMaterial>>,
     mut glows: ResMut<Assets<ApertureGlowMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let mapping = presets::natural();
     let sunlit = planck(SUN_K).map(|_, v| v * lc_client::hull::ALBEDO * (SUN_RADIUS_M / AU_M).powi(2));
@@ -265,8 +268,15 @@ fn stage(
         DirectionalLight { illuminance: 4_000.0, ..default() },
         Transform::from_xyz(-0.4, 1.0, 0.7).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+    // Into an image rather than the window: a window behind others presents nothing, and its
+    // screenshot comes back black. `COPY_SRC` is what a screenshot of an image copies out by.
+    let mut film = Image::new_target_texture(WINDOW.0, WINDOW.1, TextureFormat::Rgba8UnormSrgb, None);
+    film.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+    let film = images.add(film);
+    commands.insert_resource(Film(film.clone()));
     commands.spawn((
         Camera3d::default(),
+        RenderTarget::Image(film.into()),
         Projection::Perspective(PerspectiveProjection { far: 1.0e12, ..default() }),
         Hdr,
         Bloom::NATURAL,
@@ -274,6 +284,9 @@ fn stage(
         Transform::default(),
     ));
 }
+
+#[derive(Resource)]
+struct Film(Handle<Image>);
 
 /// Everything placed about the eye at the origin, and each proxy told where the eye is in its
 /// own space: the transform undone, in `f64`.
@@ -336,8 +349,14 @@ fn place(
     }
 }
 
-/// `lc_client::dev::photograph`: consecutive frames of one run, numbered, then quit.
-fn photograph(mut commands: Commands, args: Res<Args>, frame: Res<Frame>, mut exit: MessageWriter<AppExit>) {
+/// `lc_client::dev::photograph`, from the film: consecutive frames of one run, numbered, then quit.
+fn photograph(
+    mut commands: Commands,
+    args: Res<Args>,
+    frame: Res<Frame>,
+    film: Res<Film>,
+    mut exit: MessageWriter<AppExit>,
+) {
     let Some(path) = &args.shot else { return };
     let burst = args.burst.max(1);
     let first = args.frames;
@@ -348,7 +367,7 @@ fn photograph(mut commands: Commands, args: Res<Args>, frame: Res<Frame>, mut ex
             (true, Some((stem, extension))) => format!("{stem}.{index}.{extension}"),
             (true, None) => format!("{path}.{index}"),
         };
-        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(at));
+        commands.spawn(Screenshot::image(film.0.clone())).observe(save_to_disk(at));
     }
     // The capture is asynchronous; quitting on the same frame loses the file.
     if frame.0 > first + burst + 30 {
