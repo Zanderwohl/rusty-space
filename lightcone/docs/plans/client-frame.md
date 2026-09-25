@@ -345,7 +345,7 @@ graph LR
 
 ### L6 · Scene left behind
 
-- status: active claude/game-loop-optimization-71831f
+- status: done (this branch; one `leave_scene` system on `OnExit(InGame)` querying the five components, not a marker added at five spawn sites)
 - needs: —
 - touches: `crates/lc-client/src/app.rs`, `crates/lc-client/src/resolved.rs`, `crates/lc-client/src/envelope.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/plume.rs`
 - read: 13
@@ -354,7 +354,7 @@ graph LR
 
 ### L7 · Readback peaks
 
-- status: todo
+- status: active claude/game-loop-optimization-71831f
 - needs: L1
 - touches: `crates/lc-client/src/procedural.rs`
 - read: 07
