@@ -31,7 +31,7 @@ use bevy_mesh::MeshVertexBufferLayoutRef;
 /// The proxies are polygons inscribed in their circles, so a flat side sits `1 − cos(π/N)` inside;
 /// at [`SIDES`] that is half a percent, and the rest is room for the edge.
 const MARGIN: f32 = 1.05;
-pub const SIDES: u32 = 48;
+const SIDES: u32 = 48;
 
 #[derive(Clone, Debug, PartialEq, ShaderType)]
 pub struct ExhaustConeUniform {
