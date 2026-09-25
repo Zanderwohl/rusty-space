@@ -163,17 +163,19 @@ is. All three assume a Black field, since Black is the mode that collects.
 | **The starting ship's field holds 10 ME** from empty to collapse. The starting ship is [29-ship-form.md](29-ship-form.md)'s starting form | `field_capacity`, the capacity per unit envelope area |
 | **A full starting ship broadside at 0.05 AU from a Sun-like star is exactly at its rated load**: it would reach collapse only in the limit | `τ` |
 
-They are solved on the starting form's grid ([29-ship-form.md](29-ship-form.md)), whose envelope
-is 3.39 × 10⁵ m², and pinned in `Balance::DEFAULT` by tests that re-solve them to a part in a
-million. `q_idle` is not a setting: it is the starting drain times `τ` over that envelope,
-2.40 × 10¹⁶ J/m², and `Balance::field_idle_j_m2` works it out from the other two.
+One number needs the starting form's grid ([29-ship-form.md](29-ship-form.md)): its envelope,
+3.39 × 10⁵ m², pinned as `STARTING_ENVELOPE_M2` by a test that re-solves it to a part in a
+million. The rest are derived in `Balance::DEFAULT`. `q_idle` is not a setting: it is the
+starting drain times `τ` over that envelope, 2.40 × 10¹⁶ J/m², so turning `field_capacity` does
+not move the idle anchor.
 
 The starlight in the third anchor falls on the shadow table's broadside, with the gain that
 [20-solar-power.md](20-solar-power.md)'s anchor gives on that broadside. That is what the account
 reads once collection moves to the shadow and the gain moves to the star. Since that anchor fixes
 what the starting ship collects, the broadside cancels: `τ` is the same whichever shadow it is
-worked on, and agrees with the old ovoid's collection. Today's gain on the new, smaller broadside
-would have given 2.79 × 10⁶ s and a field failing at 4 126 K, a mix no version of the code runs.
+worked on, and agrees with the old ovoid's collection. The gain has to be solved on the same
+broadside the starlight falls on: the old gain on the new, smaller broadside would give
+2.79 × 10⁶ s and a field failing at 4 126 K.
 
 Capacity per unit area is the same for every ship, so **every field fails at the same
 temperature**. Here that is about 4 600 K, a yellow-white glow. The rated load, the sustained

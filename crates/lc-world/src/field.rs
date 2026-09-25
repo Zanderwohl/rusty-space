@@ -259,12 +259,12 @@ pub struct Settled {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{FIELD_ANCHOR_ME, RATED_LOAD_AU, SOLAR_ANCHOR_AU, SOLAR_ANCHOR_S};
-    use crate::system::UNIT_M as AU_M;
+    use crate::fitting::{FIELD_ANCHOR_ME, RATED_LOAD_AU, SOLAR_ANCHOR_AU, SOLAR_ANCHOR_S, STARTING_ENVELOPE_M2};
     use crate::form::capacity::Capacities;
     use crate::form::grid::FormGrid;
     use crate::form::Form;
     use crate::solar::{self, SOLAR_CONSTANT_W_M2};
+    use crate::system::UNIT_M as AU_M;
 
     const AREA_M2: f64 = 4.0e5;
 
@@ -324,13 +324,26 @@ mod tests {
         assert!(close(idle, b.field_idle_k, 1e-6), "{idle}");
     }
 
+    /// Capacity is a lever a shard may turn; the idle anchor must not move with it.
+    #[test]
+    fn the_idle_anchor_does_not_ride_on_capacity() {
+        let b = Balance { field_capacity: 2.0 * Balance::DEFAULT.field_capacity, ..Balance::DEFAULT };
+        let start = Start::new(&b);
+        let idle = equilibrium_k(&start.field, start.caps.drain_w);
+        assert!(close(idle, b.field_idle_k, 1e-6), "{idle}");
+    }
+
+    #[test]
+    fn the_starting_envelope_is_pinned() {
+        let area_m2 = Start::new(&Balance::DEFAULT).field.area_m2;
+        assert!(close(STARTING_ENVELOPE_M2, area_m2, 1e-6), "pinned {STARTING_ENVELOPE_M2}, the starting form solves to {area_m2:?}");
+    }
+
     #[test]
     fn field_capacity_is_anchored_on_the_starting_envelope() {
         let b = Balance::DEFAULT;
-        let start = Start::new(&b);
-        let solved = FIELD_ANCHOR_ME * me(&b) / start.field.area_m2;
-        assert!(close(b.field_capacity, solved, 1e-6), "DEFAULT has {}, the starting envelope solves to {solved:?}", b.field_capacity);
-        assert!(close(start.field.heat_max_j(), 10.0 * me(&b), 1e-6));
+        let heat_max_j = Start::new(&b).field.heat_max_j();
+        assert!(close(heat_max_j, FIELD_ANCHOR_ME * me(&b), 1e-6), "{heat_max_j}");
     }
 
     #[test]
