@@ -109,6 +109,7 @@ graph LR
   R11["R11 The field in the game"]
   R12["R12 The cone in the game"]
   R13["R13 The engine grid on the open face"]
+  R14["R14 Refits in the game"]
   C1["C1 Editor view"]
   C2["C2 Editing the draft"]
   C3["C3 Undo and redo"]
@@ -183,6 +184,8 @@ graph LR
   F9 --> R12
   R10 --> R13
   R12 --> R13
+  R4 --> R14
+  S1 --> R14
   R1 --> C1
   C1 --> C2
   F5 --> C2
@@ -212,6 +215,8 @@ graph LR
   R9 --> X1
   R10 --> X1
   R11 --> X1
+  R13 --> X1
+  R14 --> X1
 ```
 <!-- /graph -->
 
@@ -598,6 +603,15 @@ graph LR
 - deliver: the engine kind's emitter grid lit only on each engine part's open face, from a per-vertex share the mesher reads off the part, at the exhaust's power. R3 lights it over the whole region, which is right in a void and wrong on a ship; R12's aperture glow sits over it.
 - done when: a burning ship photographs with the grid glowing on its open face and dark on the engine's flanks.
 
+### R14 · Refits in the game
+
+- status: todo
+- needs: R4, S1
+- touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/src/parts.rs`
+- read: 32 §Building, as a function of time; 29 §Cancel
+- deliver: a `Refit` built from the player's round in `Fitted` and from other ships' rounds in `Presence`, and `Frame::canceled` drawn on a cancel. `--demo refit` stays as the fixture.
+- done when: a refit applied in the game draws on the ship as `--demo refit` does, and a cancel runs the step backward.
+
 ## C: client
 
 ### C1 · Editor view
@@ -686,7 +700,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, R8, R9, R10, R11
+- needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, R8, R9, R10, R11, R13, R14
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
