@@ -233,7 +233,7 @@ graph LR
 
 ### M2 · Shared map materials, culling back
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: —
 - touches: `crates/lc-client/src/map.rs`, `crates/lc-client/assets/shaders/map_line.wgsl`
 - read: 11, 18
