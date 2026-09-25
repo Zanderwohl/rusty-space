@@ -38,6 +38,7 @@ pub mod map;
 pub mod map_panel;
 pub mod map_line;
 pub mod map_pick;
+pub mod map_scene;
 pub mod map_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod local;
