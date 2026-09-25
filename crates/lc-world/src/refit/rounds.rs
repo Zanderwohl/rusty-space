@@ -143,6 +143,12 @@ fn capacities(parts: &Parts, balance: &Balance) -> Capacities {
     Capacities::of(&Form { parts: parts.values().copied().collect() }, balance)
 }
 
+/// At the start of `part`'s step.
+fn building_w(parts: &Parts, balance: &Balance, part: PartId) -> Result<f64, Refusal> {
+    let power = capacities(parts, balance).building_w;
+    if power > 0.0 { Ok(power) } else { Err(Refusal::NoDrones { part }) }
+}
+
 fn work_factor(kind: Kind, balance: &Balance) -> f64 {
     if kind == Kind::Data { balance.data_work_factor } else { 1.0 }
 }
@@ -179,7 +185,8 @@ impl Plan {
     fn new(round: Round, balance: &Balance) -> Result<Self, Refusal> {
         round.target.validate().map_err(Refusal::Form)?;
         let drone_m3: f64 = round.target.parts.iter().filter(|p| p.kind == Kind::Drone).map(|p| p.volume_m3).sum();
-        if !(drone_m3 >= balance.min_drone_m3) {
+        // Validated finite, so no NaN gets past this.
+        if drone_m3 < balance.min_drone_m3 {
             return Err(Refusal::TooFewDrones { drone_m3 });
         }
         let from: Parts = round.from.parts.iter().map(|p| (p.id, *p)).collect();
@@ -240,10 +247,7 @@ impl Plan {
             capacities(&after, balance).storage_j
         };
         for p in dismantles {
-            let power = capacities(&parts, balance).building_w;
-            if !(power > 0.0) {
-                return Err(Refusal::NoDrones { part: p.part });
-            }
+            let power = building_w(&parts, balance, p.part)?;
             let Transfer::Dismantle { gross_j, returned_j } = p.transfer else { unreachable!() };
             let duration_s = gross_j * work_factor(p.kind, balance) / power;
             apply(&mut parts, p.part, p.after);
@@ -289,10 +293,7 @@ impl Plan {
         };
         moves.sort_by_key(|&id| (depth(id), id));
         for id in moves {
-            let power = capacities(&parts, balance).building_w;
-            if !(power > 0.0) {
-                return Err(Refusal::NoDrones { part: id });
-            }
+            let power = building_w(&parts, balance, id)?;
             // Through a part already taken apart too: what hung from it is still carried.
             let mut carried_j = 0.0;
             let mut stack = vec![id];
@@ -329,10 +330,7 @@ impl Plan {
             return Err(Refusal::Energy { short_j: total_j - stored });
         }
         for p in builds {
-            let power = capacities(&parts, balance).building_w;
-            if !(power > 0.0) {
-                return Err(Refusal::NoDrones { part: p.part });
-            }
+            let power = building_w(&parts, balance, p.part)?;
             let gross_j = cost_j(&p);
             let duration_s = gross_j * work_factor(p.kind, balance) / power;
             apply(&mut parts, p.part, p.after);

@@ -247,6 +247,19 @@ each step's start, so drones built first speed up everything after them.
 storage. The target is **not** refused for venting. A player may vent heat on purpose, and
 [30-the-field.md](30-the-field.md) says what happens when the vent is too big.
 
+The planner is `lc_world::refit::rounds`. What it settles that the table does not:
+
+- **Within a phase, parts go in id order**, drones apart as above, and moves by depth in the tree
+  the round began with.
+- **A move carries what hung from the part when the round began**, as much of it as the dismantle
+  phase left, weighted by each part's work factor. A part both reshaped and moved still moves,
+  carrying its children, and is rebuilt in its new place.
+- **A store that shrinks while fuller than its new capacity spills the excess** as part of its own
+  step's vent. The ledger is the round's own: drain and income are the ship's, and are not in the
+  energy check.
+- **Reshaping every drone at once is refused**, since the build phase would begin with none.
+- The Mind's stored shape and volume may change freely, since nothing reads them.
+
 ### Why strict phases
 
 The planner could interleave dismantles and builds so that energy in transit never piles up. It does
@@ -263,8 +276,9 @@ storage part before reshaping it follows from the same rule, with nothing specia
 
 ### Cancel
 
-Completed steps stay. The step in progress is reversed, and what it had moved comes back at the 95%
-rate, or goes to the field if storage has no room. The ship is left partway between its form and the
+Completed steps stay. The step in progress is reversed. A build's energy comes back at the 95%
+rate, or goes to the field if storage has no room. A dismantling is put back: what it had returned to
+storage goes back into the part, which is left as it was. A move snaps back. The ship is left partway between its form and the
 target, which may be worse than either, and that is intended.
 
 Flying and refitting still exclude each other, as in 19.
