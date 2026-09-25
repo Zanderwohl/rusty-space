@@ -213,7 +213,7 @@ graph LR
 
 ### U2 · A landed bake touches only its own
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; Earth still takes its bakes in the screenshot)
 - needs: —
 - touches: `crates/lc-client/src/procedural.rs`
 - read: —
@@ -224,7 +224,7 @@ graph LR
 
 ### M1 · 10 Hz in the corner
 
-- status: active claude/client-frame-2
+- status: done (claude/client-frame-2; see *Measured*)
 - needs: —
 - touches: `crates/lc-client/src/map.rs`, `crates/lc-client/src/map_panel.rs`
 - read: 13, 11
@@ -487,6 +487,26 @@ anything that scales with pixels (egui, `map_panel::draw`) is not comparable. Of
 | `starfield::update_bodies` (D1's) | 0.22 | 0.21 | 0.22 | 0.22 |
 
 Small on native, as T1 predicted. What they are worth in the browser is T2's to say.
+
+### After M1 as well, 2026-09-25, at the baseline's window size
+
+Scene A, 1280×720 again, traced:
+
+| ms per frame | baseline | now |
+|---|---|---|
+| all `lc_client::` systems | 0.63 | 0.45 |
+| `map::survey` | 0.09 | 0.009 |
+| map camera's `camera_schedule` | 0.55 (every frame) | 0.06 (one frame in ten) |
+| render graph | 3.10 | 2.42 to 2.65 over three runs |
+| clustering | about 1 | 0.32 (CPU path) |
+
+Untraced `--bench`, main-world CPU: mean 1.90 and 1.87 against the baseline's 1.85 and 1.84 —
+the same, because the savings are in the render world, which runs beside it on native. In the
+browser the two run one after the other.
+
+The frame time's p95 rose from 13.9 to about 19 ms, and it was **not** M1: with the thumbnail
+drawn every frame it was 19 ms too. Something about the machine changed between sessions, so
+compare frame time only within one session.
 
 ## Not yet agreed
 
