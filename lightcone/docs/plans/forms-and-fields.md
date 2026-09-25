@@ -454,7 +454,7 @@ graph LR
 
 ### E5 · Courteous maneuvering
 
-- status: active claude/e5-courteous-maneuvering
+- status: done #73
 - needs: E1, K3
 - touches: `crates/lc-world/src/pursuit.rs`, `crates/lc-world/src/escort.rs`, `crates/lc-world/src/consort.rs`, `crates/lc-world/src/courtesy.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/fitting.rs`
 - read: 31 §Maneuvering near others, 08 §Intercept
