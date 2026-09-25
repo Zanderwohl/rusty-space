@@ -66,8 +66,12 @@ const MIN_FORESHORTENING: f32 = 0.25;
 /// is not the light here.
 const KEY_UP: f64 = 0.8;
 const KEY_ACROSS: f64 = -0.5;
-const HANGAR_LIGHT: f32 = 2.0;
+const HANGAR_LIGHT: f32 = 1.0;
 const HANGAR_FILL: f32 = 0.35;
+/// The tone map's window, wider than a surface's in the sky: eight stops keep the darkest paint's
+/// unlit side off the floor, where five turned the engine's underside black.
+const HANGAR_REFERENCE: f32 = 5.0;
+const HANGAR_STOPS: f32 = 8.0;
 const BACKDROP: Color = Color::srgb(0.018, 0.026, 0.024);
 
 /// What the target starts at, before the first layout.
@@ -403,7 +407,11 @@ fn show(
 
 /// A part lit from `key`, ship frame, whatever the star is doing.
 fn hangar(paint: Vec4, key: DVec3) -> BodySurfaceUniform {
-    let tone = crate::tonemap::ToneMap::default();
+    let tone = crate::tonemap::ToneMap {
+        surface_reference: HANGAR_REFERENCE,
+        surface_stops: HANGAR_STOPS,
+        ..crate::tonemap::ToneMap::default()
+    };
     // Ship axes are drawn as simulation axes are (see `show`), so `uniforms` converts them right.
     let mut lit = crate::hull::uniforms(key, Vec3::splat(HANGAR_LIGHT), Vec3::ZERO, &tone, paint);
     lit.to_star.w = HANGAR_FILL;
@@ -576,14 +584,16 @@ fn build_chrome(commands: &mut Commands, from: ViewMode, top: f32, font: Handle<
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
     let root = ui.docked(Chrome(from), Edge::Top, top);
     let strip = ui.strip(root);
-    ui.inline(strip, "SHIP EDITOR", 16.0, em_ui::vfd::TEXT);
-    ui.inline(strip, "the ship as it is · nothing to change yet", 14.0, em_ui::vfd::TEXT_DIM);
+    let row = ui.row(strip);
+    ui.inline(row, "SHIP EDITOR", 16.0, em_ui::vfd::TEXT);
+    ui.inline(row, "the ship as it is · nothing to change yet", 14.0, em_ui::vfd::TEXT_DIM);
     let back = match from {
         ViewMode::Map => "Back to the map   H",
         _ => "Back to the world   H",
     };
-    ui.small_button(strip, back, Emit(Action::ToggleForm));
-    ui.hint(root, HINT);
+    ui.small_button(row, back, Emit(Action::ToggleForm));
+    // Inside the strip, on its backdrop: under it, over a lit hull, it could not be read.
+    ui.hint(strip, HINT);
 }
 
 /// Every control, on one line under the strip.

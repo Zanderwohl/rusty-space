@@ -252,16 +252,15 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         self.commands.spawn((node, marker)).id()
     }
 
-    /// A bordered row, the compact sibling of [`MenuUi::panel`]: a line of labels and buttons
-    /// read at a glance rather than worked down.
+    /// A bordered box, the compact sibling of [`MenuUi::panel`]: a [`MenuUi::row`] or two of
+    /// labels and buttons, read at a glance rather than worked down.
     pub fn strip(&mut self, parent: Entity) -> Entity {
         let strip = self
             .commands
             .spawn((
                 Node {
-                    flex_direction: FlexDirection::Row,
+                    flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    column_gap: Val::Px(12.0),
                     padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     ..default()
@@ -272,6 +271,21 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             .id();
         self.commands.entity(parent).add_child(strip);
         strip
+    }
+
+    /// A line of widgets side by side, with no frame of its own.
+    pub fn row(&mut self, parent: Entity) -> Entity {
+        let row = self
+            .commands
+            .spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                ..default()
+            })
+            .id();
+        self.commands.entity(parent).add_child(row);
+        row
     }
 
     /// A label for a [`MenuUi::strip`] or a line under one: no margin, since a row spaces its

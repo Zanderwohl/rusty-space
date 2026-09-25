@@ -934,6 +934,70 @@ mod tests {
         assert_eq!(ui.view, ViewMode::Map);
     }
 
+    /// `H` goes into the editor and back out to wherever it was entered from; `M` always means
+    /// the map. The rule is 29 §Getting in and out.
+    #[test]
+    fn the_editor_goes_back_to_where_it_was_entered_from() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Form);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::World);
+
+        apply(Action::ToggleView, &mut ui, &mut s);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Form);
+        // Asking again for the mode in force forgets nothing.
+        apply(Action::SetView(ViewMode::Form), &mut ui, &mut s);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map, "entered from the map, so back to it");
+
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map, "M from the editor is the map");
+        apply(Action::ToggleView, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::World, "and from the map, out of it");
+        // The corner square shows the world in the editor, so a click on it goes there.
+        assert_eq!(ViewMode::Form.other(), ViewMode::World);
+    }
+
+    /// `Escape` closes windows first, and with none left the editor goes back before any menu opens.
+    #[test]
+    fn escape_leaves_the_editor_once_its_windows_are_closed() {
+        let (mut ui, mut s) = fixture();
+        apply(Action::ToggleView, &mut ui, &mut s);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(Action::OpenPanel(Panel::Telescope), &mut ui, &mut s);
+        apply(Action::CloseTopPanel, &mut ui, &mut s);
+        assert_eq!((ui.view, ui.open_panels().len()), (ViewMode::Form, 0), "a window first");
+        apply(Action::CloseTopPanel, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::Map);
+        assert!(!ui.is_open(Panel::Escape), "leaving the editor is not opening the menu");
+        apply(Action::CloseTopPanel, &mut ui, &mut s);
+        assert!(ui.is_open(Panel::Escape), "and anywhere else it is as it was");
+    }
+
+    /// `=` and `-` and the wheel send one `Zoom`, and in the editor it is the editor's: the boom
+    /// the player left is waiting when they come out.
+    #[test]
+    fn in_the_editor_zoom_moves_the_editors_camera_and_not_the_boom() {
+        let (mut ui, mut s) = fixture();
+        let boom = ui.boom_lengths;
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        let before = ui.form.orbit;
+        apply(Action::Zoom(2.0), &mut ui, &mut s);
+        assert_eq!(ui.boom_lengths, boom);
+        assert!(ui.form.orbit.distance < before.distance, "closer");
+        apply(Action::SlideForm(0.5), &mut ui, &mut s);
+        apply(Action::OrbitForm { azimuth: 0.2, elevation: 0.1 }, &mut ui, &mut s);
+        let held = ui.form.orbit;
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(Action::Zoom(2.0), &mut ui, &mut s);
+        assert!(ui.boom_lengths < boom, "out of the editor it is the boom's again");
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.form.orbit, held, "the editor's camera survives the round trip");
+    }
+
     /// **Switching the view leaves the map where it was.** The corner square and the whole
     /// screen are one camera, so coming back has to find the picture that was left — including
     /// the free camera a pan drops into, which is the state with no button of its own.

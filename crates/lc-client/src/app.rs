@@ -754,6 +754,20 @@ mod tests {
         assert!(after > before, "time stopped while panels were open: {before} -> {after}");
     }
 
+    /// Nor for the editor, which is a mode of the view and not a pause for building.
+    #[test]
+    fn the_clock_runs_in_the_editor() {
+        let mut app = harness();
+        app.world_mut().write_message(Requested(Action::ToggleForm));
+        app.update();
+        assert_eq!(app.world().resource::<Ui>().view, crate::ui::ViewMode::Form);
+        let before = app.world().resource::<Game>().coordinate_time_s();
+        for _ in 0..8 {
+            app.update();
+        }
+        assert!(app.world().resource::<Game>().coordinate_time_s() > before);
+    }
+
     #[test]
     fn a_request_reaches_the_session_through_the_dispatcher() {
         let mut app = harness();
