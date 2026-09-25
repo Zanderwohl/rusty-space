@@ -121,7 +121,7 @@ fn room(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
     let capacity = game
         .ship
         .fitting()
-        .map_or(lc_world::fitting::ONBOARD_DATA_BYTES, |f| f.balance.data_capacity(&f.loadout_at(now)));
+        .map_or(lc_world::fitting::ONBOARD_DATA_BYTES, |f| f.capacities_at(now).data_b);
     let used = game.knowledge.bytes();
     let mb = |bytes: f64| bytes / 1_048_576.0;
     ui.horizontal(|ui| {

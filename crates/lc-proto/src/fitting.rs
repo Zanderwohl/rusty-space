@@ -1,10 +1,11 @@
-//! A ship's modules and energy account, mirrored from `lc_world::fitting` and `lc_world::refit`.
+//! A ship's modules and energy account. `lc_world` has kept the account on a form since F9; the
+//! loadout here is converted at its boundary in `lc_world::fitting`, and S1 removes it.
 //! `Loadout` and the per-module fields leave with S1 and F9 of
 //! `lightcone/docs/plans/forms-and-fields.md`.
 
 use serde::{Deserialize, Serialize};
 
-/// Why a refit cannot be done. Mirrors `lc_world::refit::Shortage`.
+/// Why a loadout refit could not be done. Nothing sends it since F9.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Shortfall {
     Unbuildable,
@@ -14,7 +15,7 @@ pub enum Shortfall {
     CannotDismantle(Module),
 }
 
-/// Mirrors `lc_world::fitting::Module`.
+/// 19's module kinds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Module {
     Storage,
@@ -24,7 +25,7 @@ pub enum Module {
     Data,
 }
 
-/// Module counts and hull slots. Mirrors `lc_world::fitting::Loadout`.
+/// Module counts and hull slots, 19's slot of each kind a module.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Loadout {
     pub storage: u32,
@@ -35,8 +36,8 @@ pub struct Loadout {
     pub data: u32,
 }
 
-/// The shard's tunables. Mirrors `lc_world::fitting::Balance`; stated so a client's refit
-/// preview uses the numbers the authority does.
+/// The shard's tunables, `lc_world::fitting::Balance` with 19's per-module fields besides; stated
+/// so a client's preview uses the numbers the authority does.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Balance {
     pub drive_efficiency: f64,
@@ -85,7 +86,7 @@ pub struct Balance {
     pub courtesy_fraction: f64,
 }
 
-/// A refit as the arguments it is planned from. Mirrors `lc_world::refit::Order`.
+/// A loadout refit as the arguments it was planned from. Read and dropped since F9.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RefitOrder {
     pub from: Loadout,
@@ -94,8 +95,7 @@ pub struct RefitOrder {
     pub start_s: f64,
 }
 
-/// A ship's energy account, settled at `since_s`. Mirrors `lc_world::fitting::Account`, with
-/// the balance it is read under.
+/// A ship's energy account, settled at `since_s`, with the balance it is read under.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Fitting {
     pub balance: Balance,

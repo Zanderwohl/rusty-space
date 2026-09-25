@@ -2,9 +2,11 @@
 
 What a ship is made of, what shape it is, and what it costs to change either.
 
-**Status: designed, not built.** It replaces the loadout of [19-ship-fitting.md](19-ship-fitting.md):
+**Status: partly built.** It replaces the loadout of [19-ship-fitting.md](19-ship-fitting.md):
 **a ship is its parts**, and each part's volume is how much of its kind the ship has. 19's energy,
-mass and drive rules stand.
+mass and drive rules stand. Since F9 `lc-world` has no loadout: a craft's account is kept on its
+form (§What a craft reads). The wire and saves still carry the loadout until S1, and **refits are
+refused between F9 and S1** (§Protocol and persistence).
 [30-the-field.md](30-the-field.md) and [31-directed-energy.md](31-directed-energy.md) are what the
 shape does in play, and [32-ship-rendering.md](32-ship-rendering.md) is how it is drawn.
 
@@ -241,6 +243,34 @@ refused as `Extent`; no preset needs a second pass. Four choices the table leave
 Building one takes about 20 ms for the starting form and 50 ms for the Cluster with `lc-world`
 optimized, and a quarter to three quarters of a second unoptimized in the dev profile.
 
+### What a craft reads
+
+`lc_world::fitting::Hull` is what the account and the craft read off a form, worked out when the form
+changes and never per tick: at creation and load, and when a refit step finishes.
+
+| number | from | read by |
+|---|---|---|
+| capacities | volumes, as above | storage, drain, building, data |
+| dry mass | contents and structure | mass, and so every rating |
+| thrust | the aperture of the engines **firing aft**, over `c`: those whose open face points to −x | the rated acceleration. An engine firing fore pushes the other way, and is a weapon ([31](31-directed-energy.md)) |
+| extent | the grid | `length_m` |
+| gyration | the grid's tensor: the square root of the larger eigenvalue of its block across the nose, per kilogram | the slew rate |
+
+**Slew goes as one over the gyration.** Attitude thrust is sized to the ship as its drive is, so
+torque over mass is the same for every ship, angular acceleration goes as `1/k²` and the rate as
+`1/k`. For one shape `k` is a fixed fraction of the length, so this is the old `1/L` law, and it is
+anchored on the same hull: the 500 m ovoid turns at π/60 rad/s. The starting form's `k` is
+139 m against the ovoid's 130, so it flips in 64 s rather than 60. A craft with no form is still
+that ovoid and turns by its length. The flip's axis is the slower of those across the nose, since
+a flip is about one of them and the nose never turns about itself.
+
+A process builds each form's grid once: every ship today is the starting form, so a shard fitting a
+hundred builds one. A step partway through a round, whose form may not place, keeps the last
+measured extent and gyration until it finishes. The starting form's extent is **571 m**, where its
+twenty slots made 19's ship 500 m long. Until F10 reads the shadow, collection still takes the
+ovoid of the craft's length, so the starting form collects (571/500)², about 1.3 times, what
+[20](20-solar-power.md)'s anchor says.
+
 **The shadow handles concave shapes.** A stack of plates shades
 itself and collects about what one plate would. A ship spread out collects more and turns more
 slowly, because spreading out also raises its moment of inertia.
@@ -399,6 +429,7 @@ what 19's starting ship does. Placed, it is about 545 m long, 200 m across and 1
 
 `hull_areal_density` is 1 215 kg/m², so this form weighs 19's dry starting ship, 2.65 × 10⁹ kg: every
 module, the data module at half, and 19's frame over all twenty slots, the five empty ones included.
+Its one bell fires aft, so it pulls 5 g full and 13.8 g empty, as 19's ship did.
 
 The anchors of 20 and 30 are derived from this form.
 
@@ -646,6 +677,14 @@ photographs it, and `--form <preset>` stages a draft.
 ## Protocol and persistence
 
 - `Loadout` is removed from the wire and from saves. `Order::Refit { target: Form }`.
+- **Between F9 and S1** `lc-world` has no loadout and the wire still does. A ship created or loaded
+  from a loadout is the starting form with each kind scaled by its count over the starting ship's,
+  a count of zero leaving the part out. A loadout the wire asks for is read back off the
+  capacities, a slot of each density a module, and the balance's per-module fields are each
+  density over 19's slot. A loadout refit on the wire or in a save is dropped, as one whose recipe
+  no longer planned always was. **The shard refuses `RefitLoadout` and `refit-magic` as
+  `NotBuilt`**, as it refuses `Order::Refit`, and the refit window is a ledger with no draft.
+  `lc_world::fitting`'s conversions are S1's to delete.
 - `Fitted` carries a `Hull`: the form, each part's solved scale, the capacities, and the geometry's
   numbers.
 - An invalid target is `Refusal::Form(FormFault)`, naming the part: the structural checks, then each
@@ -661,7 +700,9 @@ photographs it, and `--form <preset>` stages a draft.
 
 ## Balance
 
-`Balance` loses the per-module fields and `slot_volume_m3`, and gains:
+`Balance` loses the per-module fields and `slot_volume_m3` (F9), and gains the fields below. 19's
+slot survives as `form::presets::SLOT_M3`, the volume a module-energy and the first guesses below
+are quoted per.
 
 | setting | first guess | meaning |
 |---|---|---|

@@ -308,11 +308,11 @@ fn energy(session: &Session) -> Option<Energy> {
     let now = session.coordinate_time_s();
     let ship = &session.ship;
     let fitting = ship.fitting()?;
-    let module_j = fitting.balance.module_energy_j();
+    let module_j = fitting.balance().module_energy_j();
     let (stored, capacity) = (fitting.stored_j_at(&ship.motion, now), fitting.capacity_j_at(now));
     let mut line = format!("{:.1} / {:.1} ME", stored / module_j, capacity / module_j);
     if fitting.solar_w() > 0.0 {
-        let net = fitting.solar_w() - fitting.balance.drain_w(&fitting.loadout_at(now));
+        let net = fitting.solar_w() - fitting.capacities_at(now).drain_w;
         line += &format!(" {}", crate::refit_panel::me_per_year(net, module_j));
     }
     let committed = fitting.committed_j_at(&ship.motion, now);
@@ -467,10 +467,10 @@ mod tests {
 
     #[test]
     fn a_fitted_ship_shows_its_energy_as_a_bar_and_numbers() {
-        use lc_world::fitting::{Balance, Fitting, Loadout};
+        use lc_world::fitting::{Balance, Fitting};
         let (ui, mut s) = fixture();
         assert!(lines(&s, &ui).energy.is_none(), "an unfitted ship has no energy readout");
-        s.ship.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, s.coordinate_time_s())));
+        s.ship.fit(Some(Fitting::full(lc_world::form::Form::starting(), Balance::DEFAULT, s.coordinate_time_s())));
         let energy = lines(&s, &ui).energy.expect("an energy readout");
         assert!((energy.fraction - 1.0).abs() < 1.0e-6, "{}", energy.fraction);
         assert_eq!(energy.amount, "30.0 / 30.0 ME");
@@ -545,9 +545,9 @@ mod tests {
     /// Only the bare fit leaves the energy bar without its numbers.
     #[test]
     fn a_bare_bar_shows_energy_as_the_bar_alone() {
-        use lc_world::fitting::{Balance, Fitting, Loadout};
+        use lc_world::fitting::{Balance, Fitting};
         let (ui, mut s) = fixture();
-        s.ship.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, s.coordinate_time_s())));
+        s.ship.fit(Some(Fitting::full(lc_world::form::Form::starting(), Balance::DEFAULT, s.coordinate_time_s())));
         let hud = lines(&s, &ui);
         for fit in [Fit::Words, Fit::Codes, Fit::Keys] {
             assert_eq!(hud.energy_amount(fit), Some("30.0 / 30.0 ME"), "{fit:?}");
