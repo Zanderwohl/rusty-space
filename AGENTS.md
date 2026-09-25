@@ -39,6 +39,18 @@ cargo run -p lc-client --bin lightcone -- assets/catalogs/hygdata_v42.csv \
     --station rings:Saturn --panel system --rate 0 --shot /tmp/shot.png --frames 90
 ```
 
+In a cloud container, which has no GPU and no display, set this up first. Bevy needs rustc ≥ 1.95,
+and lavapipe renders on the CPU:
+
+```bash
+rustup toolchain install stable --profile minimal     # then cargo +stable ...
+apt-get install -y mesa-vulkan-drivers libasound2-dev libudev-dev libdbus-1-dev \
+    libwayland-dev libxkbcommon-dev
+xvfb-run -a cargo +stable run -p lc-client --bin lightcone -- --demo corona --shot /tmp/shot.png
+```
+
+The window is always 1280×720, and frame timings from lavapipe are meaningless.
+
 | flag | for |
 |---|---|
 | `--shot <path> --frames <n>` | photograph and quit |
