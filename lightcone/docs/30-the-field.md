@@ -3,7 +3,8 @@
 Every ship is wrapped in a field. It is the collector, the radiator and the shield, and when it
 fails, the ship is gone and the whole system sees it happen.
 
-**Status: designed.** The account is `lc_world::field`, which nothing reads yet. It replaces the
+**Status: designed.** The account is `lc_world::field`, with its anchors pinned in
+`Balance::DEFAULT`; nothing reads it yet. It replaces the
 fixed 400 K hull (`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
 [20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
 Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
@@ -162,6 +163,18 @@ is. All three assume a Black field, since Black is the mode that collects.
 | **The starting ship's field holds 10 ME** from empty to collapse. The starting ship is [29-ship-form.md](29-ship-form.md)'s starting form | `field_capacity`, the capacity per unit envelope area |
 | **A full starting ship broadside at 0.05 AU from a Sun-like star is exactly at its rated load**: it would reach collapse only in the limit | `τ` |
 
+They are solved on the starting form's grid ([29-ship-form.md](29-ship-form.md)), whose envelope
+is 3.39 × 10⁵ m², and pinned in `Balance::DEFAULT` by tests that re-solve them to a part in a
+million. `q_idle` is not a setting: it is the starting drain times `τ` over that envelope,
+2.40 × 10¹⁶ J/m², and `Balance::field_idle_j_m2` works it out from the other two.
+
+The starlight in the third anchor falls on the shadow table's broadside, with the gain that
+[20-solar-power.md](20-solar-power.md)'s anchor gives on that broadside. That is what the account
+reads once collection moves to the shadow and the gain moves to the star. Since that anchor fixes
+what the starting ship collects, the broadside cancels: `τ` is the same whichever shadow it is
+worked on, and agrees with the old ovoid's collection. Today's gain on the new, smaller broadside
+would have given 2.79 × 10⁶ s and a field failing at 4 126 K, a mix no version of the code runs.
+
 Capacity per unit area is the same for every ship, so **every field fails at the same
 temperature**. Here that is about 4 600 K, a yellow-white glow. The rated load, the sustained
 power that would bring a field to `Q_max`, is `Q_max / τ`.
@@ -169,6 +182,7 @@ power that would bring a field to `Q_max`, is `Q_max / τ`.
 | | value |
 |---|---|
 | `τ` | 1.84 × 10⁶ s: 21 game days, 3.5 real minutes |
+| `field_capacity` | 4.12 × 10²⁰ J/m² |
 | rated load, starting ship | 7.6 × 10¹⁹ W |
 | field at collapse | 4 577 K, peaking at 630 nm |
 
@@ -313,7 +327,7 @@ shows its thresholds. What a player can infer from it:
 | setting | first guess | meaning |
 |---|---|---|
 | `field_idle_k` | 400 | the anchor temperature |
-| `field_capacity` | *anchored*: 10 ME on the starting envelope | heat per m² of envelope at collapse |
+| `field_capacity` | *anchored*: 10 ME on the starting envelope, 4.12 × 10²⁰ | heat per m² of envelope at collapse |
 | `field_tau_s` | *anchored*: 1.84 × 10⁶ | the time constant |
 | `conversion_efficiency` | 0.7 | of what is converted, the fraction stored |
 | `clear_absorptivity` | 0.3 | what a Clear field absorbs. Black absorbs everything |
