@@ -775,14 +775,14 @@ pub fn refit(held: &Fitted, looks: &[Look]) -> Option<Fitted> {
     fit_from(looks, Some(held))
 }
 
-/// The orbit that best explains an arc of bearings, or `None` if they do not support one.
-///
 // Per thread, so tests running side by side do not count each other's searches.
 #[cfg(test)]
 thread_local! {
     static SCORED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// The orbit that best explains an arc of bearings, or `None` if they do not support one.
+///
 /// Two ranges are searched, log-spaced because a body could be anywhere from just off the star
 /// to the far edge of the system and a linear grid would spend every point in the outer system.
 /// Everything after those two is closed form.
