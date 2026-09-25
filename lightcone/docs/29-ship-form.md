@@ -293,6 +293,10 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
 - **A round is refused if the dismantle phase would leave no drone standing**, whether the drones
   are removed, replaced by new parts or reshaped, since the build phase would begin with none.
 - The Mind's stored shape and volume may change freely, since nothing reads them.
+- **A copy gained or lost is its own step**, an `Add` or `Remove` of the part, which carries the
+  part's `mirror`. The copy lost goes at the size it had, and the one gained comes at the size it
+  will have. A mirror inside a mirrored subtree, which changes no count, is a move that takes no
+  time. Counts in the form partway through follow the flags, so a subtree follows its root's step.
 
 ### Why strict phases
 
