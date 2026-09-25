@@ -254,6 +254,7 @@ impl Plugin for ClientPlugin {
             // before the app is built, and the desktop mints one from its device grant.
             .init_resource::<crate::Ticket>()
             .add_plugins(crate::pick::PickPlugin)
+            .add_plugins(crate::drones::DronesPlugin)
             .add_plugins(crate::uplink::UplinkPlugin)
             // Desktop only: a browser build arrives with a session.
             .add_plugins(SigninPlugins)
