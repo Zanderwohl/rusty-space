@@ -29,8 +29,8 @@ use crate::session::TIME_RATE;
 pub const PARTICLES_PER_M3: f64 = 1.0e-3;
 /// Quads in the mesh, which every frame's vertex shader runs over whether drawn or docked. A GSV's
 /// drone part would hold about 10⁹ at the density above; past the cap each mote stands for several
-/// drones and is drawn wider to carry their light, and from any distance that frames such a hull
-/// the swarm is haze either way.
+/// ([`mote`]), and from any distance that frames such a hull, single drones would be below a pixel
+/// anyway.
 pub const MAX_DRONES: u32 = 8192;
 /// A mote's width, of the cube of drone part each drone stands for.
 const MOTE_FILL: f64 = 0.4;
@@ -49,8 +49,8 @@ const PATROL: f64 = 0.04;
 const DWELL: f64 = 0.3;
 const SWARM_DWELL: f64 = 0.5;
 /// Traffic fades in over this much of a step's start and out over its end, at most a trip. The
-/// targets change from one step to the next, and a drone on its way when they do would jump; this
-/// way it is not out.
+/// targets change from one step to the next, and a drone on its way when they did would jump; this
+/// way hardly any are out.
 const RAMP: f64 = 0.1;
 
 /// Directions a drone part is searched over for docks.

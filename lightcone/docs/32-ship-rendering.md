@@ -220,6 +220,38 @@ since the view was spawned when idle. The host takes that difference in `f64` an
 it to the shader's `f32`, which resolves a clock since J2000 only to seconds.
 `crates/lc-client/examples/drones_void.rs` photographs it.
 
+On the player's ship (`lc_client::drones`), what the material is told is a pure function of R4's
+`Frame`. The count is `PARTICLES_PER_M3` = 10⁻³ of drone part, 785 on the starting ship, capped at
+`MAX_DRONES` = 8192 quads, since the vertex shader runs over all of them every frame. Past the cap
+a mote stands for several drones: as wide as the cube of drone part it stands for, with the rest
+of their light in its brightness. Widening it enough to carry all the light in area drew a GSV's
+swarm as a few hundred blobs. Docks are points just off the drone parts' surfaces, where no other
+part covers them. A build or a dismantle sends drones to its sliver, and a dismantle's come home
+glowing. A move sends them to ring the moved part's rim, from its foot to its middle. With no step
+working, a few patrol and the rest stay docked.
+
+The shader gives each drone a new target every trip, so a target that jumped would make every
+drone on its way there jump with it. Instead each target is a continuous function of the step's
+fraction: it sits on a fixed meridian of the part, where `Working::across` is a fixed share of the
+way through the band. It is stood off along the meridian's ray rather than the surface normal,
+because the normal turns at once over a cylinder's rim. Where the band crosses a flat stretch, such
+as the hull's belt seen from its center, the targets move fast, because the band does reach all of
+that stretch at once. Targets still change from one step to the next, so traffic fades in over the
+first tenth of each step, or one trip if that is shorter, and out over the last. That is also why
+no drone flies before a step starts or after it ends.
+
+The drones' clock is the round's while it loops. `--refit-at` freezes the construction but not the
+traffic, so a burst of one step moves; `--rate 0` freezes both. The shader guards its distance to
+the eye against zero and nothing else. It once clamped at 10⁻⁶, which was a micrometer in the
+example and 150 km in the client, whose unit is an AU, and turned every mote into haze.
+
+![0.1: the data core taken apart, loads going home](../images/drones-dismantle.jpg)
+![0.3: the deck moving aft, its rim swarmed](../images/drones-move.jpg)
+![0.5: the hull growing](../images/drones-grow.jpg)
+![0.9: the mirrored pods being built](../images/drones-build.jpg)
+![the starting form idle: a thin patrol and nothing else](../images/drones-idle.jpg)
+![a GSV-sized form idle, its motes capped](../images/drones-gsv-idle.jpg)
+
 ## The field
 
 The envelope from [29-ship-form.md](29-ship-form.md), meshed coarsely, drawn as **two layers**
