@@ -551,7 +551,7 @@ graph LR
 
 ### R8 · Truss and plating
 
-- status: todo
+- status: active card "Build R8: truss and plating"
 - needs: R2, R3, R4
 - touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/assets/shaders/hull.wgsl`
 - read: 32 §A build step is a frontier
@@ -560,7 +560,7 @@ graph LR
 
 ### R9 · Drones at work
 
-- status: todo
+- status: active card "Build R9: drones at work"
 - needs: R4, R5
 - touches: `crates/lc-client/src/drones.rs`
 - read: 32 §Drones
