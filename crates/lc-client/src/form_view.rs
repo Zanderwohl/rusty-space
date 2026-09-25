@@ -83,11 +83,18 @@ const MAX_SIDE: u32 = 8192;
 const CHROME_GAP: f32 = 6.0;
 
 /// The editor's state in the interface.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct FormView {
     pub orbit: FormOrbit,
     /// Where `H` and `Escape` go back to. Never [`ViewMode::Form`].
     pub from: ViewMode,
+    /// Started from the ship's own form the first time the editor opens, and kept across leaving
+    /// it. `None` until then.
+    pub draft: Option<crate::draft::Draft>,
+    /// The part the handles and the fields are on.
+    pub selected: Option<lc_world::form::PartId>,
+    /// What a press on a part adds there instead of selecting it.
+    pub adding: Option<(lc_world::form::Kind, lc_world::form::Primitive)>,
 }
 
 /// The editor's camera: an orbit about a focus on the ship's nose axis.
@@ -231,8 +238,8 @@ pub enum FormDrag {
 
 /// What a press over the editor's view starts, by button and by whether it landed on a part.
 ///
-/// **A left-press on a part is not the camera's.** It is where selection and every handle will
-/// begin (C2), so it starts nothing here; only one on empty space slides.
+/// **A left-press on a part is not the camera's.** It selects the part or adds to it
+/// ([`crate::form_handles`]), so it starts nothing here; only one on empty space slides.
 pub fn drag_of(button: MouseButton, on_part: bool) -> Option<FormDrag> {
     match button {
         crate::input::LOOK_BUTTON => Some(FormDrag::Orbit),
@@ -286,19 +293,45 @@ pub fn on_part(sdf: &Sdf, origin: DVec3, direction: DVec3, limit_m: f64) -> bool
     false
 }
 
-/// The form the editor shows: the ship's own, or the starting form while it has none. C2 puts
-/// the draft here.
+/// The draft as drawn, and the ship it is drawn over.
 #[derive(Resource, Default)]
 pub struct Shown {
+    /// The draft's field, and the bounds of it and the ship together, which the camera frames.
     drawn: Option<(Sdf, Extent)>,
-    /// Set once a form has been solved or has failed to, so a failure is not retried every frame.
-    tried: bool,
+    ghost: Option<Sdf>,
+    marks: std::collections::BTreeMap<lc_world::form::PartId, crate::draft::Mark>,
+    /// The draft and the ship last drawn, so a frame that changed neither draws nothing. A
+    /// failure to solve is kept too, so it is not retried every frame.
+    of: Option<(Form, Form)>,
 }
 
 impl Shown {
     pub fn extent(&self) -> Option<Extent> {
         self.drawn.as_ref().map(|(_, extent)| *extent)
     }
+
+    pub fn sdf(&self) -> Option<&Sdf> {
+        self.drawn.as_ref().map(|(sdf, _)| sdf)
+    }
+
+    /// The ship as it is, where the draft differs from it.
+    pub fn ghost(&self) -> Option<&Sdf> {
+        self.ghost.as_ref()
+    }
+
+    pub fn marks(&self) -> &std::collections::BTreeMap<lc_world::form::PartId, crate::draft::Mark> {
+        &self.marks
+    }
+}
+
+/// Where the picture is on the window, logical pixels, while the editor is the view.
+pub fn picture(surface: &FormSurface) -> Option<egui::Rect> {
+    surface.laid.map(|(rect, _)| rect)
+}
+
+/// Whether `at`, logical pixels, is on the picture rather than the corner square or the readout.
+pub fn on_picture(surface: &FormSurface, at: Vec2) -> bool {
+    surface.laid.is_some_and(|(rect, hole)| inside(rect, hole, at))
 }
 
 /// Where the picture goes on the window, logical pixels, and the target it is drawn into.
@@ -326,7 +359,7 @@ impl Plugin for FormViewPlugin {
         app.init_resource::<Shown>()
             .add_systems(
                 Update,
-                (show, lay_out, place, relight)
+                (start_draft, show, lay_out, place, relight)
                     .chain()
                     .in_set(crate::app::Stage::Scene)
                     .after(crate::app::Placed)
@@ -373,28 +406,47 @@ struct FormViewRoot;
 #[derive(Component)]
 struct HangarPaint(Vec4);
 
-/// Take up the ship's form when it changes, and draw it on the editor's layer.
+/// Start the draft from the ship's own form the first time the editor opens, or from the
+/// starting form for a ship that has none.
+fn start_draft(ui: Res<Ui>, own: Res<crate::parts::OwnForm>, mut out: MessageWriter<Requested>) {
+    if ui.view == ViewMode::Form && ui.form.draft.is_none() {
+        out.write(Requested(Action::StartDraft(own.form().cloned().unwrap_or_else(Form::starting))));
+    }
+}
+
+/// Draw the draft solid, and the ship faint wherever the draft differs from it, each changed part
+/// in its mark's color.
+#[allow(clippy::too_many_arguments)]
 fn show(
     mut commands: Commands,
-    own: Res<crate::parts::OwnForm>,
+    ui: Res<Ui>,
     mut shown: ResMut<Shown>,
     roots: Query<Entity, With<FormViewRoot>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
+    mut ghosts: ResMut<Assets<StandardMaterial>>,
     surfaces: Res<crate::surfaces::Surfaces>,
 ) {
-    let fresh = !shown.tried || own.is_changed();
+    let Some(draft) = &ui.form.draft else { return };
+    let fresh = shown.of.as_ref().is_none_or(|(form, ship)| *form != draft.form || *ship != draft.ship);
     // Respawned when missing too, since leaving the game takes the copies down.
     if !fresh && (!roots.is_empty() || shown.drawn.is_none()) {
         return;
     }
     if fresh {
-        let sdf = own.sdf().cloned().or_else(|| Sdf::new(&Form::starting(), &Balance::DEFAULT).ok());
-        shown.drawn = sdf.map(|sdf| {
-            let (min, max) = sdf.bounds();
+        let balance = Balance::DEFAULT;
+        let ghost = Sdf::new(&draft.ship, &balance).ok();
+        shown.drawn = Sdf::new(&draft.form, &balance).ok().map(|sdf| {
+            let (mut min, mut max) = sdf.bounds();
+            if let Some(ghost) = &ghost {
+                let (gmin, gmax) = ghost.bounds();
+                (min, max) = (min.min(gmin), max.max(gmax));
+            }
             (sdf, Extent { min, max })
         });
-        shown.tried = true;
+        shown.ghost = ghost;
+        shown.marks = draft.marks(&balance);
+        shown.of = Some((draft.form.clone(), draft.ship.clone()));
     }
     for root in &roots {
         commands.entity(root).despawn();
@@ -405,7 +457,10 @@ fn show(
     let root = commands.spawn((Transform::from_rotation(turn), Visibility::default(), FormViewRoot)).id();
     for piece in sdf.pieces() {
         let (mesh, scale) = crate::parts::solid(&piece.shape);
-        let paint = crate::parts::paint(piece.kind);
+        let mut paint = crate::parts::paint(piece.kind);
+        if let Some(mark) = shown.marks.get(&piece.part) {
+            paint = paint.lerp(mark.color().to_linear().to_vec4(), MARK_TINT).with_w(paint.w);
+        }
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(surfaces.flat.material(hangar(paint, DVec3::Z)))),
@@ -415,6 +470,34 @@ fn show(
             HangarPaint(paint),
             ChildOf(root),
         ));
+    }
+    let Some(ghost) = &shown.ghost else { return };
+    for piece in ghost.pieces().iter().filter(|p| shown.marks.contains_key(&p.part)) {
+        let (mesh, scale) = crate::parts::solid(&piece.shape);
+        let mark = shown.marks[&piece.part];
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(ghosts.add(ghost_material(mark))),
+            crate::parts::local(piece, scale),
+            NoFrustumCulling,
+            RenderLayers::layer(FORM_LAYER),
+            ChildOf(root),
+        ));
+    }
+}
+
+/// How far a changed part's paint goes toward its mark's color.
+const MARK_TINT: f32 = 0.45;
+const GHOST_ALPHA: f32 = 0.18;
+
+/// Unlit, so the hangar's light does not decide how faint it is.
+fn ghost_material(mark: crate::draft::Mark) -> StandardMaterial {
+    StandardMaterial {
+        base_color: mark.color().with_alpha(GHOST_ALPHA),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
     }
 }
 
@@ -456,7 +539,7 @@ fn relight(
 }
 
 /// Aim the camera, and switch it on only while the editor is the view.
-fn place(
+pub(crate) fn place(
     mut ui: ResMut<Ui>,
     shown: Res<Shown>,
     surface: Res<FormSurface>,
@@ -649,17 +732,14 @@ pub fn read_drag(
     }
     let size = Vec2::new(rect.width(), rect.height());
     if buttons.just_pressed(MouseButton::Left) {
+        // The part is the one the handles would pick, so a press slides exactly where it selects
+        // nothing.
+        let lens = crate::form_handles::Lens { orbit: ui.form.orbit.held_to(extent), extent: *extent, rect };
         *last = cursor
             .filter(|at| pointer_free(&egui, &controls) && inside(rect, hole, *at))
             .filter(|at| {
-                let orbit = ui.form.orbit;
-                let ndc = DVec2::new(
-                    ((at.x - rect.min.x) / size.x * 2.0 - 1.0) as f64,
-                    (1.0 - (at.y - rect.min.y) / size.y * 2.0) as f64,
-                );
-                let (origin, direction) = orbit.ray(extent, FORM_FOV as f64, (size.x / size.y.max(1.0)) as f64, ndc);
-                let limit = (orbit.distance + FAR_SIZES) * extent.size_m();
-                drag_of(MouseButton::Left, on_part(sdf, origin, direction, limit)) == Some(FormDrag::Slide)
+                let on_part = crate::form_handles::pick_part(sdf, &lens, *at).is_some();
+                drag_of(MouseButton::Left, on_part) == Some(FormDrag::Slide)
             });
         return;
     }
@@ -680,11 +760,12 @@ fn inside(rect: egui::Rect, hole: egui::Rect, at: Vec2) -> bool {
 pub fn read_slide_keys(
     keys: Res<ButtonInput<KeyCode>>,
     egui: Res<EguiWantsInput>,
+    typing: em_ui::Typing,
     ui: Res<Ui>,
     time: Res<Time>,
     mut out: MessageWriter<Requested>,
 ) {
-    if egui.wants_any_keyboard_input() || ui.reading.book.is_some() {
+    if egui.wants_any_keyboard_input() || typing.active() || ui.reading.book.is_some() {
         return;
     }
     let way: f64 = crate::input::slide_bindings()

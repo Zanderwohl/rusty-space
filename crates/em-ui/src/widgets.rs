@@ -47,6 +47,11 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         }
     }
 
+    /// Adds to or replaces what a widget was built with, for a caller laying it out its own way.
+    pub fn insert(&mut self, entity: Entity, bundle: impl Bundle) {
+        self.commands.entity(entity).insert(bundle);
+    }
+
     pub fn panel_width(mut self, width: f32) -> Self {
         self.panel_width = width;
         self
@@ -231,15 +236,16 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
 pub enum Edge {
     Top,
     Bottom,
+    Left,
+    Right,
 }
 
 impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
-    /// A full-width node against one edge of the window that centers what is put in it, for
-    /// chrome over a view rather than a screen of its own. It takes no pointer: only what is
-    /// put in it does.
+    /// A node against one edge of the window, for chrome over a view rather than a screen of
+    /// its own: full width and centering what is put in it against the top or bottom, a column
+    /// from the top against a side. It takes no pointer: only what is put in it does.
     pub fn docked(&mut self, marker: impl Bundle, edge: Edge, inset: f32) -> Entity {
         let mut node = Node {
-            width: Val::Percent(100.0),
             position_type: PositionType::Absolute,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
@@ -248,6 +254,12 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         match edge {
             Edge::Top => node.top = Val::Px(inset),
             Edge::Bottom => node.bottom = Val::Px(inset),
+            Edge::Left => node.left = Val::Px(inset),
+            Edge::Right => node.right = Val::Px(inset),
+        }
+        match edge {
+            Edge::Top | Edge::Bottom => node.width = Val::Percent(100.0),
+            Edge::Left | Edge::Right => node.align_items = AlignItems::Stretch,
         }
         self.commands.spawn((node, marker)).id()
     }
@@ -308,6 +320,85 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         self.button_in(parent, text, action, node, 15.0)
     }
 }
+
+impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
+    /// A [`MenuUi::small_button`] that shows whether it is the one chosen, for a toggle or a
+    /// selection. Chosen wears the hover color at rest; its words should say so too, since color
+    /// is never the only signal.
+    pub fn chosen_button<A: Component>(&mut self, parent: Entity, text: &str, chosen: bool, action: A) -> Entity {
+        let button = self.small_button(parent, text, action);
+        if chosen {
+            let theme = self.theme;
+            self.commands.entity(button).insert((
+                BackgroundColor(theme.button_hover),
+                MenuButton { rest: theme.button_hover, hover: theme.button_hover },
+            ));
+        }
+        button
+    }
+
+    /// One line of a tree: a left-aligned button indented by `depth`, the whole width of its
+    /// column.
+    pub fn tree_row<A: Component>(&mut self, parent: Entity, depth: usize, text: &str, chosen: bool, action: A) -> Entity {
+        let row = self.chosen_button(parent, text, chosen, action);
+        self.commands.entity(row).insert(Node {
+            padding: UiRect { left: Val::Px(6.0 + TREE_INDENT * depth as f32), right: Val::Px(6.0), top: Val::Px(2.0), bottom: Val::Px(2.0) },
+            justify_content: JustifyContent::FlexStart,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(if chosen { 1.0 } else { 0.0 })),
+            ..default()
+        });
+        row
+    }
+
+    /// A labeled number field on a line of its own, carrying `marker` for the caller to find its
+    /// [`Committed`](crate::field::Committed) by. Filled darker than the panel, or an empty field
+    /// reads as a label with no input.
+    pub fn field<A: Component>(&mut self, parent: Entity, label: &str, text: &str, marker: A) -> Entity {
+        let theme = self.theme;
+        let font = self.font.clone();
+        let row = self
+            .commands
+            .spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::SpaceBetween,
+                column_gap: Val::Px(8.0),
+                ..default()
+            })
+            .id();
+        self.commands.entity(parent).add_child(row);
+        self.inline(row, label, FIELD_TEXT, theme.text_dim);
+        let mut editable = bevy::text::EditableText::new(text);
+        editable.visible_width = Some(FIELD_GLYPHS);
+        editable.max_characters = Some(24);
+        let field = self
+            .commands
+            .spawn((
+                Node { padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), border: UiRect::all(Val::Px(1.0)), ..default() },
+                editable,
+                bevy::text::EditableTextFilter::new(crate::field::numeric),
+                bevy::text::TextCursorStyle { color: theme.text, ..default() },
+                TextLayout::no_wrap(),
+                TextFont { font: font.map(FontSource::Handle).unwrap_or_default(), font_size: FontSize::Px(FIELD_TEXT), ..default() },
+                TextColor(theme.text),
+                BackgroundColor(theme.field_bg),
+                BorderColor::all(theme.border),
+                // So the pointer over it is a control's, and the view behind stands down.
+                Interaction::default(),
+                crate::field::NumberField::default(),
+                marker,
+            ))
+            .id();
+        self.commands.entity(row).add_child(field);
+        field
+    }
+}
+
+const TREE_INDENT: f32 = 12.0;
+const FIELD_TEXT: f32 = 13.0;
+/// Room for `-1.2345e-6` and a little more.
+const FIELD_GLYPHS: f32 = 10.0;
 
 /// How far above the ordinary screens an overlay sits. Room underneath for anything that wants
 /// to be between.

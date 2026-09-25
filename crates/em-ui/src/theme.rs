@@ -23,6 +23,8 @@ pub mod vfd {
     /// gamut boundary is at `C = 0.164`.
     pub const AMBER: Color = Color::srgb(1.0, 0.77, 0.18);
     pub const OVERLAY_BACKDROP: Color = Color::srgba(0.0, 0.0, 0.0, 0.70);
+    /// Darker than the panel, so an empty field still reads as an input.
+    pub const FIELD_BG: Color = Color::srgb(0.01, 0.04, 0.02);
 }
 
 #[cfg(test)]
@@ -53,6 +55,8 @@ pub struct MenuTheme {
     pub border: Color,
     pub text: Color,
     pub text_dim: Color,
+    /// What a text field is filled with.
+    pub field_bg: Color,
     /// The wash behind a modal. See [`MenuUi::overlay`](crate::widgets::MenuUi::overlay).
     pub overlay_backdrop: Color,
 }
@@ -65,6 +69,7 @@ impl MenuTheme {
         border: vfd::BUTTON_BORDER,
         text: vfd::TEXT,
         text_dim: vfd::TEXT_DIM,
+        field_bg: vfd::FIELD_BG,
         overlay_backdrop: vfd::OVERLAY_BACKDROP,
     };
 }
