@@ -24,6 +24,9 @@ pub struct Held {
     pub bodies: Vec<BodyBelief>,
     pub plane: SystemPlane,
     targets: HashMap<BodyId, Target>,
+    /// Each body's label and guessed mass in kilograms, beside it in [`Held::bodies`]. Built with
+    /// the list, because a guessed mass rebuilds the body's belief at every sighting.
+    called: Vec<(String, f64)>,
 }
 
 impl Held {
@@ -40,7 +43,12 @@ impl Held {
     /// A list made by hand, for a test that needs one without a session behind it.
     #[cfg(test)]
     pub(crate) fn from_parts(bodies: Vec<BodyBelief>, targets: HashMap<BodyId, Target>) -> Self {
-        Self { bodies, plane: SystemPlane::Unknown, targets }
+        Self { bodies, plane: SystemPlane::Unknown, targets, called: Vec::new() }
+    }
+
+    /// What the `index`th body is called and weighs, if the list was built with a session.
+    pub fn called(&self, index: usize) -> Option<&(String, f64)> {
+        self.called.get(index)
     }
 
     /// The belief held about whatever is at a target, if anything is.
@@ -83,6 +91,7 @@ impl Beliefs {
         if self.key != Some(key) {
             self.key = Some(key);
             self.held = build(&session.knowledge, system, key.0, now_s);
+            self.held.called = called(session, &self.held.bodies);
             #[cfg(test)]
             {
                 self.builds += 1;
@@ -99,7 +108,20 @@ impl Beliefs {
 /// has no world to hold one in.
 pub fn of(session: &Session) -> Held {
     let Some(system) = session.system.as_ref() else { return Held::default() };
-    build(&session.knowledge, system, system.star, session.coordinate_time_s())
+    let mut held = build(&session.knowledge, system, system.star, session.coordinate_time_s());
+    held.called = called(session, &held.bodies);
+    held
+}
+
+fn called(session: &Session, bodies: &[BodyBelief]) -> Vec<(String, f64)> {
+    let star = session.system.as_ref().and_then(|s| session.star(s.star)).map(|c| c.star);
+    bodies
+        .iter()
+        .map(|belief| {
+            let weight = star.and_then(|star| session.knowledge.guessed_mass_kg(belief, &star));
+            (session.called(belief), weight.unwrap_or(0.0))
+        })
+        .collect()
 }
 
 fn build(knowledge: &Knowledge, system: &LocalSystem, star: StarId, now_s: f64) -> Held {
@@ -113,7 +135,7 @@ fn build(knowledge: &Knowledge, system: &LocalSystem, star: StarId, now_s: f64) 
             _ => None,
         })
         .collect();
-    Held { bodies, plane, targets }
+    Held { bodies, plane, targets, called: Vec::new() }
 }
 
 #[cfg(test)]
@@ -208,6 +230,7 @@ mod tests {
         let first = beliefs.held(&session).bodies[0].subject;
         session.knowledge.name_it(first, "Newfound", 1.0);
         assert_eq!(beliefs.held(&session).bodies[0].given.as_deref(), Some("Newfound"));
+        assert_eq!(beliefs.held(&session).called(0).map(|c| c.0.as_str()), Some("Newfound"));
         assert_eq!(beliefs.builds, 2);
     }
 

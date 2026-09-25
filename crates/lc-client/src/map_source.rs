@@ -297,7 +297,7 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
         lc_world::knowledge::SystemPlane::Known { pole, .. } => pole,
         _ => em_map::Plane::Galactic.about(DVec3::Z).normal(),
     };
-    for belief in &held.bodies {
+    for (index, belief) in held.bodies.iter().enumerate() {
         let named = match held.target(belief.body) {
             Some(lc_world::navigation::Target::Body(name)) => Some(name.clone()),
             _ => None,
@@ -306,12 +306,17 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
             .as_deref()
             .map(ItemKey::from_name)
             .unwrap_or_else(|| ItemKey::from_id("phantom", belief.body.get()));
-        let label = session.called(belief);
+        let (label, weight) = match held.called(index) {
+            Some((label, weight)) => (label.clone(), *weight),
+            None => (
+                session.called(belief),
+                star.and_then(|star| session.knowledge.guessed_mass_kg(belief, &star)).unwrap_or(0.0),
+            ),
+        };
         // Keyed by what the body is targeted by, never by what it is called. Two bodies
         // nobody has named are both "unnamed body", so a label as a key made every one of
         // them the same subject: picking one focused nothing and hovering one lit them all.
         let subject = named.map(|target| Subject::Body(target, label.clone()));
-        let weight = star.and_then(|star| session.knowledge.guessed_mass_kg(belief, &star)).unwrap_or(0.0);
         match belief.position_now {
             // Where on the ring it is, with the error drawn along the ring rather than across
             // it: what is uncertain is how far round it has got.
