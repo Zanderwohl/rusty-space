@@ -164,7 +164,7 @@ graph LR
 
 ### D1 · Static drawables per system
 
-- status: todo
+- status: active claude/client-frame-2
 - needs: —
 - touches: `crates/lc-world/src/system.rs`, `crates/lc-client/src/starfield.rs`, `crates/lc-client/src/session.rs`
 - read: 26, 07
@@ -473,6 +473,20 @@ browser readout is where the heap after a tour of Sol belongs.
 temperature above 1000 K, so every such star read the spectrum of whichever was cached first.
 It fed `bare()`: exposure metering, a body's reflected light, star beauty shots and the
 telescope's received flux. Fixed in its own commit, with a test that fails on the old key.
+
+### After K1, K2, B1, B2, B3, S1, 2026-09-25
+
+Indicative only: traced, and the window was 2560×1440 against the baseline's 1280×720, so
+anything that scales with pixels (egui, `map_panel::draw`) is not comparable. Of what does not:
+
+| ms per frame, traced | baseline A | now A | baseline C | now C |
+|---|---|---|---|---|
+| all `lc_client::` systems | 0.63 | 0.52 | 0.67 | 0.62 |
+| `map::survey` | 0.09 | 0.04 | 0.09 | 0.05 |
+| `pick::survey` | 0.09 | 0.07 | 0.13 | 0.11 |
+| `starfield::update_bodies` (D1's) | 0.22 | 0.21 | 0.22 | 0.22 |
+
+Small on native, as T1 predicted. What they are worth in the browser is T2's to say.
 
 ## Not yet agreed
 
