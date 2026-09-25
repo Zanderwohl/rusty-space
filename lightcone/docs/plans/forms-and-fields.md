@@ -110,6 +110,7 @@ graph LR
   R12["R12 The cone in the game"]
   R13["R13 The engine grid on the open face"]
   R14["R14 Refits in the game"]
+  R15["R15 Construction on the real hull in the game"]
   C1["C1 Editor view"]
   C2["C2 Editing the draft"]
   C3["C3 Undo and redo"]
@@ -186,6 +187,9 @@ graph LR
   R12 --> R13
   R4 --> R14
   S1 --> R14
+  R8 --> R15
+  R10 --> R15
+  R14 --> R15
   R1 --> C1
   C1 --> C2
   F5 --> C2
@@ -217,6 +221,7 @@ graph LR
   R11 --> X1
   R13 --> X1
   R14 --> X1
+  R15 --> X1
 ```
 <!-- /graph -->
 
@@ -612,6 +617,15 @@ graph LR
 - deliver: a `Refit` built from the player's round in `Fitted` and from other ships' rounds in `Presence`, and `Frame::canceled` drawn on a cancel. `--demo refit` stays as the fixture.
 - done when: a refit applied in the game draws on the ship as `--demo refit` does, and a cancel runs the step backward.
 
+### R15 · Construction on the real hull in the game
+
+- status: todo
+- needs: R8, R10, R14
+- touches: `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/hull.rs`
+- read: 32 §A build step is a frontier, §Materials by kind
+- deliver: `refit_hull`'s truss, plating and bands draw every craft with a round in the game, not only `--demo refit`, and the placeholders' cage retires; lights by kind at real powers through the exposure, replacing `refit_hull`'s stand-in shares of the exposure's reference.
+- done when: a refit applied in the game photographs as `--demo refit` does, on the player's ship and on another's, and the living lights show on a night side and vanish in sunlight.
+
 ## C: client
 
 ### C1 · Editor view
@@ -700,7 +714,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, R8, R9, R10, R11, R13, R14
+- needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, R8, R9, R10, R11, R13, R14, R15
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
