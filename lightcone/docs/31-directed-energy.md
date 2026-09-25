@@ -380,8 +380,10 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 
 ## Client
 
-- **Intercept**: two buttons beside Company and Intimate, **Courteous** and **Direct**, so a
-  chase is chosen as a pair. The HUD line that says who is being followed says which.
+- **Intercept**: a chase starts courteous and in company. Beside the button that closes in or
+  stands off is one that switches to **direct** or back to **courteous**, and either re-sends the
+  order, so a chase is chosen as a pair. The HUD line that says who is being followed says which
+  pair, as the server states it.
 - **Emit window**, on `E`, with the same toolkit and rules as the other windows. Aim at a known
   craft, at the reticle, or along a bearing. Before sending, it shows:
   - the diffraction floor, the chosen spread, and the spot at the target
