@@ -42,7 +42,8 @@ The Ringworld is Niven's: one astronomical unit, a million miles wide, thousand-
 ## Where they come from
 
 **Decided: none are generated.** A ring habitat is something a civilization builds. The only
-ones that exist without being built are the solar-system demo's two Orbitals.
+ones that exist without being built are the demos: two Orbitals in the solar system, and the
+Ringworld around HD 189567.
 
 They are records in `lc_world::ring_habitat`, keyed by an `em-sim` body id, the way
 `lc_world::rings` hangs ring systems off planets. They are added to the `System` when the world is
@@ -65,9 +66,11 @@ constraint on its look.
 ### The Orbital at L1
 
 `em-sim` has no motive for this. `Fixed` is fixed relative to a parent, not co-rotating with a
-pair. It wants a new `MotiveSelection` for a Lagrange point of two bodies. The pair is the Sun and
-the Earth–Moon barycenter, which is the convention the real L1 missions use. The addition is
-additive, and Exotic Matters keeps building.
+pair. It wants a new `MotiveSelection` for a Lagrange point of two bodies. The point itself is
+already solved: `em_foundations::lagrange::Collinear` is the root of Lagrange's quintic, and
+`lc_world::navigation`'s `Course::Lagrange` puts ships there with it. The pair is the Sun and the
+Earth–Moon barycenter, which is the convention the real L1 missions use. The new motive is an
+addition, so Exotic Matters keeps building.
 
 L1 is unstable. The habitat is taken to station-keep, the way SOHO does, and is drawn at the point
 itself.
@@ -90,12 +93,41 @@ worst one to live on.
 
 ### The Ringworld
 
-The Ringworld is `Fixed` at its star with zero offset. It has no orbital motion to model. Its
-mass, about Jupiter's, is left out of `em-sim`. A ring's field is not a point mass, and nothing
-orbits inside one in any system built so far. Its famous instability is not modeled either. It is
-held by attitude jets, and so are we.
+The Ringworld is `Fixed` at its star with zero offset, and its axis is the generated system's
+pole, so it lies in the plane its planets orbit in. It has no orbital motion to model. Its mass,
+about Jupiter's, is left out of `em-sim`, and the planets inside it keep their Keplerian orbits.
+A ring's field is not a point mass, and pulls an interior planet outward, toward the nearest arc,
+not inward. Its famous instability is not modeled either. It is held by attitude jets, and so are
+we.
 
-Which star it goes around is open. It cannot go around the Sun at one astronomical unit.
+**Decided: it goes around HD 189567.** It cannot go around the Sun at one astronomical unit,
+because Earth is there. HD 189567 is HIP 98959, a G2V dwarf in Pavo 57.8 ly away, HYG row 98643,
+`StarId` `0x6344b3af85c80770`. It is the closest match to the Sun within 25 pc in the catalog's own
+numbers:
+
+| | HD 189567 | Sun |
+|---|---|---|
+| absolute magnitude | 4.83 | 4.83 |
+| B−V | 0.648 | 0.656 |
+| luminosity | 1.02 | 1 |
+| mass | 1.006 | 1 |
+
+At one astronomical unit the floor gets 2% more light than Earth does.
+
+It also has room. The generator gives it six rocky planets inside 0.69 AU, the outermost of which
+is at 0.64 AU, e 0.077, and a seventh at 1.25 AU, e 0.037, which comes no closer than 1.20 AU.
+Nothing crosses one astronomical unit. From the floor, the inner planets are in the sky, beside the
+Arch. The outer one is under the floor. Every other close twin gets a planet that crosses 1 AU:
+
+- **18 Scorpii**, the famous solar twin, gets a planet at 1.13 AU with an eccentricity of 0.12.
+- **HD 10307** is clear from 0.13 to 11.6 AU, but it shines at 1.47 suns.
+
+The gap is the generator's output, not the catalog's. A test pins it: HD 189567's generated
+planets stay clear of the Ringworld's radius, so a change to the generator's tuning cannot quietly
+run a planet through the floor.
+
+The Ringworld is reached with `teleport 0x6344b3af85c80770`, or in singleplayer with a dev flag
+beside `--at` that starts the ship at a star by id. That flag does not exist yet.
 
 ## Scale is the design constraint
 
@@ -256,11 +288,10 @@ Either one is among the loudest artificial things in a sky, which seems right.
 4. The mid tier: re-authored vavatch graphs as `.tgraph`, periodic, baked as strips.
 5. Chunking with f64 origins, then the near-tier clipmap. This is the texture-graph work.
 6. The analytic self-shadow and the specular term.
-7. The Ringworld, its shadow squares, and its band on the emission shell.
+7. The Ringworld at HD 189567, its shadow squares, and its band on the emission shell.
 
 ## Open
 
-- **Which star the Ringworld goes around.**
 - **The L1 ring's size and orientation:** eclipse seasons, or an axis turning once a year.
 - **Shadow squares:** count, size, orbit and sense of rotation.
 - **Tearing one apart.** Deferred. The chunks are vavatch's columns so that it stays possible.
