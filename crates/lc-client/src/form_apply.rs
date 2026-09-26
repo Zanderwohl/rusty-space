@@ -67,7 +67,8 @@ pub(crate) struct Answer(bool);
 /// cannot be planned says why in the first.
 pub fn budget_figures(preview: &Preview, module_j: f64) -> [String; 4] {
     use lc_world::refit::rounds::Refusal;
-    let me = |j: f64| format!("{} ME", crate::draft::figure(j / module_j));
+    // Plus zero, so nothing spent reads 0 rather than -0.
+    let me = |j: f64| format!("{} ME", crate::draft::figure(j / module_j + 0.0));
     let budget = match &preview.budget {
         Ok(budget) => budget,
         Err(refusal) => {
@@ -137,9 +138,11 @@ fn build(commands: &mut Commands, built: Built, font: Handle<Font>) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
     let root = ui.docked(built.clone(), Edge::Bottom, INSET);
     let strip = ui.strip(root);
-    let figures = ui.row(strip);
+    // Storage on one line and the field on the next, so the strip stays narrow enough to keep
+    // clear of the corners.
+    let (storage, field) = (ui.row(strip), ui.row(strip));
     for index in 0..4 {
-        let figure = ui.inline(figures, "", TEXT, em_ui::vfd::TEXT);
+        let figure = ui.inline(if index < 3 { storage } else { field }, "", TEXT, em_ui::vfd::TEXT);
         ui.insert(figure, BudgetFigure(index));
     }
     let row = ui.row(strip);
@@ -254,5 +257,46 @@ pub(crate) fn press(
 fn put_away(mut commands: Commands, built: Query<Entity, Or<(With<Built>, With<Asking>)>>) {
     for entity in &built {
         commands.entity(entity).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lc_world::fitting::{Balance, Fitting};
+    use lc_world::form::{Form, Kind};
+    use lc_world::sky::AuthoredStars;
+
+    use super::*;
+    use crate::draft::Draft;
+
+    fn previewed(draft: Draft, stored_me: f64) -> (Preview, f64) {
+        let b = Balance::DEFAULT;
+        let mut s = crate::session::Session::new(&AuthoredStars::sample(), 3);
+        s.ship.fit(Some(Fitting::full(Form::starting(), b, 0.0)));
+        let full = s.ship.fitting().unwrap().capacity_j_at(0.0);
+        s.ship.drain(full - stored_me * b.module_energy_j(), 0.0);
+        let mut ui = crate::ui::UiState::default();
+        ui.form.draft = Some(draft);
+        (Preview::of(&s, &ui, None).unwrap(), b.module_energy_j())
+    }
+
+    fn resized(kind: Kind, by: f64) -> Draft {
+        let mut d = Draft::new(Form::starting());
+        let part = *d.form.parts.iter().find(|p| p.kind == kind).unwrap();
+        d.apply(&d.resize(part.id, part.volume_m3 * by).unwrap(), &Balance::DEFAULT).unwrap();
+        d
+    }
+
+    #[test]
+    fn the_budget_says_the_vent_in_the_fields_terms_and_names_a_collapse() {
+        let (unchanged, me) = previewed(Draft::new(Form::starting()), 30.0);
+        assert_eq!(budget_figures(&unchanged, me)[1], "spent 0 ME");
+        assert_eq!(budget_figures(&unchanged, me)[3], "vents nothing");
+        let (vent, me) = previewed(resized(Kind::Storage, 1.0 / 3.0), 30.0);
+        let said = budget_figures(&vent, me);
+        assert!(vent.collapses() && said[3].contains("collapses at 4577 K"), "{said:?}");
+        let (short, me) = previewed(resized(Kind::Engine, 2.0), 0.0);
+        let said = budget_figures(&short, me);
+        assert!(said[0].starts_with("short by ") && said[1..].iter().all(String::is_empty), "{said:?}");
     }
 }
