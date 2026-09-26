@@ -319,13 +319,18 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
         // them the same subject: picking one focused nothing and hovering one lit them all.
         let subject = named.map(|target| Subject::Body(target, label.clone()));
         match belief.position_now {
-            // A cross: out from what it goes round and out of its plane as straight bars, and
-            // how far round it has got as an arc along the orbit itself.
+            // A cross: straight bars out from what it goes round, sideways in its plane (a
+            // primary's error, carried rigidly) and out of its plane, and how far round it has
+            // got as an arc along the orbit itself.
             Placed::Known { offset_au, error } => {
                 let at = star_ly + offset_au * AU_LY;
                 let mut item = MapItem::body(key, label, ItemKind::Planet, at, 0.0, pole).weighing(weight);
-                for (direction, sigma_au) in [(error.outward, error.outward_au()), (error.pole, error.normal_au())] {
-                    if sigma_au > 0.0 {
+                // A planet's sideways sigma is zero only to rounding, and a bar that short is a
+                // degenerate mesh rather than an invisible one.
+                let floor = error.total_au() * 1.0e-6;
+                for direction in [error.outward, error.sideways(), error.pole] {
+                    let sigma_au = error.sigma_au(direction);
+                    if sigma_au > floor {
                         let reach = direction * (sigma_au * AU_LY);
                         item = item.spread(at - reach, at + reach);
                     }

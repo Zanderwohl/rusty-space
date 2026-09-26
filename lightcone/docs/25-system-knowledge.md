@@ -1461,7 +1461,10 @@ knowledge. Today:
      ellipse and not a chord. Once the sigma reaches half a turn the arc is the whole orbit,
      uncapped. **Corrected from item 2:** the pole's error lifts a body out of its plane; it does
      not carry it along its ring. The eccentricity's error now enters too, as `a cos E` outward.
-     A moon takes its primary's error rigidly, the part along its own path as phase.
+     A moon takes its primary's error rigidly, drawn as a third bar sideways in its plane, and
+     never as phase: folded into the moon's phase, Earth's error, larger than the Moon's orbit,
+     drew a Moon that could be anywhere round an Earth it is known to be beside.
+     Spreads draw at an eighth of a mark's brightness, and the selected item's at the mark's own.
      `em_map::MapItem::spread_ly` became a list of `Spread` pieces, `Bar` or `Arc`, drawn by
      `lc_client::map_spread`.
      **Open:** the orbit fit (`arc::Spread`) states no epoch sigma, so a freshly fitted body shows

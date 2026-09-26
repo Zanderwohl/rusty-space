@@ -33,7 +33,8 @@ pub enum Placed {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlaceError {
     /// Covariance of everything but how far round it has got, AU², simulation axes. A
-    /// primary's error is in here too, less its part along this body's path.
+    /// primary's whole error is in here too: it moves this orbit rigidly, and says nothing
+    /// about how far round it this body is.
     pub across_au2: DMat3,
     /// One sigma of mean anomaly, radians. At π it could be anywhere on its orbit.
     pub along_rad: f64,
@@ -64,6 +65,12 @@ impl PlaceError {
 
     pub fn normal_au(&self) -> f64 {
         self.sigma_au(self.pole)
+    }
+
+    /// In the orbit's plane and square to [`Self::outward`]: zero for a body about its star,
+    /// and a primary's error for a moon.
+    pub fn sideways(&self) -> DVec3 {
+        self.pole.cross(self.outward).normalize_or_zero()
     }
 
     /// Along the path, linearized: good for a short arc, and a ring's reach past half a turn.
@@ -228,20 +235,13 @@ pub(super) fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
 pub(super) fn added(primary: Placed, own: Placed) -> Placed {
     match (primary, own) {
         (Placed::Known { offset_au: up, error: a }, Placed::Known { offset_au: here, error: b }) => {
-            // The primary's whole error moves this orbit rigidly. What of it lies along this
-            // body's own path is a phase error, and is carried as one.
-            let mut carried = a.across_au2 + outer(a.pace_au * a.along_rad.min(PI));
-            let mut along_rad = b.along_rad;
-            let pace = b.pace_au.length();
-            if pace > 0.0 {
-                let t = b.pace_au / pace;
-                along_rad = (along_rad.powi(2) + t.dot(carried * t).max(0.0) / (pace * pace)).sqrt().min(PI);
-                let across = DMat3::IDENTITY - outer(t);
-                carried = across * carried * across;
-            }
+            // Rigidly, not as phase: a planet's error can be larger than its moon's whole orbit,
+            // and folded into the moon's phase that read as a moon that could be anywhere
+            // round a planet it is known to be beside.
+            let carried = a.across_au2 + outer(a.pace_au * a.along_rad.min(PI));
             Placed::Known {
                 offset_au: up + here,
-                error: PlaceError { across_au2: b.across_au2 + carried, along_rad, ..b },
+                error: PlaceError { across_au2: b.across_au2 + carried, ..b },
             }
         }
         // A shell about a primary whose own place is known is still a shell, just a wider one:
@@ -364,8 +364,7 @@ mod tests {
         track(o, placed_at(o, t), t).unwrap_or(Track { points_au: Vec::new(), closed: false })
     }
 
-    /// A primary's error moves its moon's orbit whole. Along the moon's path it is a phase;
-    /// across it, it widens the cross.
+    /// A primary's error moves its moon's orbit whole, and is never the moon's phase.
     #[test]
     fn a_moon_carries_its_planets_error() {
         let planet = placed_at(&Orbit { semi_major_au: (1.0, 0.01), ..orbit(None, 0.0) }, 0.0);
@@ -379,14 +378,16 @@ mod tests {
         assert_eq!(alone.along_rad, 0.0);
 
         // A quarter period on, both are at +Y going -X, and the planet's phase error lies
-        // along the moon's path: a hundredth of an AU of it is most of a radian of the moon's.
+        // along the moon's path. It moves the moon rigidly, sideways; the moon's own phase is
+        // its own.
         let now = 0.25 * PERIOD_S;
         let planet = placed_at(&Orbit { semi_major_au: (1.0, 0.0), ..orbit(None, 0.0) }, now);
         let moon = placed_at(&moon_orbit, now);
         let (Placed::Known { error: p, .. }, Placed::Known { error: alone, .. }) = (planet, moon) else { panic!() };
         let Placed::Known { error: m, .. } = added(planet, moon) else { panic!() };
-        let want = alone.along_rad.hypot(p.along_au() / alone.pace_au.length());
-        assert!((m.along_rad - want).abs() < 1.0e-9, "{} against {want}", m.along_rad);
-        assert!(m.sigma_au(m.pace_au) < 1.0e-9, "and it is not also counted across the path");
+        assert_eq!(m.along_rad, alone.along_rad);
+        let sideways = m.sigma_au(m.sideways());
+        assert!((sideways - p.along_au()).abs() < 1.0e-12, "{sideways} against {}", p.along_au());
+        assert_eq!(alone.sigma_au(alone.sideways()), 0.0, "alone, a body has nothing sideways");
     }
 }
