@@ -375,6 +375,16 @@ pub fn build_mesh(points: &[Point], origin_ly: DVec3) -> Mesh {
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
+    // Bevy's mesh allocator skips a mesh with no vertices but still copies it, logging a
+    // use-after-free each frame it is extracted. One vertex three times is a triangle of no area
+    // whatever the shader makes of it.
+    if points.is_empty() {
+        positions.push([0.0; 3]);
+        corners.push([0.0; 2]);
+        params.push([0.0; 4]);
+        warm.push([0.0; 4]);
+        indices.extend_from_slice(&[0, 0, 0]);
+    }
 
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
@@ -754,6 +764,13 @@ mod tests {
         let mesh = build_mesh(&points_of(&s), DVec3::ZERO);
         assert_eq!(mesh.count_vertices(), s.stars.len() * 4);
         assert_eq!(mesh.indices().unwrap().len(), s.stars.len() * 6);
+    }
+
+    #[test]
+    fn an_empty_pass_still_has_a_vertex() {
+        let mesh = build_mesh(&[], DVec3::ZERO);
+        assert!(mesh.get_vertex_buffer_size() > 0);
+        assert!(mesh.indices().unwrap().iter().all(|i| i == 0));
     }
 
     /// The bake origin is the point of the whole arrangement: positions come out small and
