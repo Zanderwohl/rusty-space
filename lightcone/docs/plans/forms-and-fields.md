@@ -659,7 +659,7 @@ graph LR
 
 - status: active card "Build C4: budget and preview"
 - needs: C2, F7, F8, H1
-- touches: `crates/lc-client/src/form_panel.rs`
+- touches: `crates/lc-client/src/form_panel.rs`, `crates/lc-client/src/preview.rs`, `crates/lc-client/src/form_preview.rs`, `crates/lc-client/src/form_apply.rs`, `crates/lc-client/src/form_handles.rs`, `crates/lc-client/src/form_carry.rs`, `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/draft.rs`, `crates/lc-client/src/refit_panel.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/lib.rs`, `crates/em-ui/src/widgets.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/form/grid.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §The budget, §What else it shows
 - deliver: the local planner's round: available, spent, peak in storage, the vent and the field's peak temperature from it; capacities, shadow, slew, headroom and brightness; handles stop at what the budget allows; Apply asks again when the vent would collapse the field.
 - done when: the preview is a pure function tested without a window, and matches the server's plan for the same round.
