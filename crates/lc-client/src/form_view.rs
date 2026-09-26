@@ -42,8 +42,8 @@ pub const FORM_FOV: f32 = std::f32::consts::FRAC_PI_4;
 #[derive(Component)]
 pub struct FormCamera;
 
-/// The camera the editor's handles are drawn for: a child of [`FormCamera`], into the same image
-/// after it, with the depth cleared so a handle is never buried in a hull.
+/// Draws the handles into [`FormCamera`]'s image after it, depth cleared, so a hull never buries
+/// them.
 #[derive(Component)]
 pub struct FormHandleCamera;
 
@@ -93,18 +93,13 @@ pub struct FormView {
     pub orbit: FormOrbit,
     /// Where `H` and `Escape` go back to. Never [`ViewMode::Form`].
     pub from: ViewMode,
-    /// Started from the ship's own form the first time the editor opens, and kept across leaving
-    /// it. `None` until then.
+    /// From the ship's form the first time the editor opens; kept across leaving it.
     pub draft: Option<crate::draft::Draft>,
-    /// The part the handles and the fields are on.
     pub selected: Option<lc_world::form::PartId>,
     /// Which of [`crate::draft::PRIMITIVES`] a part taken from the list is made as.
     pub new_shape: usize,
-    /// Whether the ship as it is is drawn under the draft, faint, wherever the draft differs from
-    /// it: what it removes, the size a part had, the place it was moved from, the shape it is
-    /// rebuilt from. Nothing hangs from any of it either way.
+    /// Whether the ship as it is is drawn, faint, where the draft differs from it.
     pub show_current: bool,
-    /// Whether the selected part's numbers are shown, or only what it does.
     pub advanced: bool,
 }
 
@@ -249,8 +244,8 @@ pub enum FormDrag {
 
 /// What a press over the editor's view starts, by button and by whether it landed on a part.
 ///
-/// **A left-press on a part is not the camera's.** It selects the part or adds to it
-/// ([`crate::form_handles`]), so it starts nothing here; only one on empty space slides.
+/// A left-press on a part is not the camera's: it selects the part and picks it up
+/// ([`crate::form_carry`]). Only one on empty space slides.
 pub fn drag_of(button: MouseButton, on_part: bool) -> Option<FormDrag> {
     match button {
         crate::input::LOOK_BUTTON => Some(FormDrag::Orbit),
@@ -304,8 +299,7 @@ pub fn on_part(sdf: &Sdf, origin: DVec3, direction: DVec3, limit_m: f64) -> bool
     false
 }
 
-/// Whether the ship as it is is drawn this frame: always while the toggle is on, and while the
-/// pointer is on it.
+/// Whether the ship as it is is drawn this frame: while the toggle is on or hovered.
 #[derive(Resource, Default)]
 pub struct Revealed(pub bool);
 
@@ -313,19 +307,16 @@ pub struct Revealed(pub bool);
 #[derive(Component)]
 struct Current;
 
-/// The draft as drawn, and the ship it is drawn over.
 #[derive(Resource, Default)]
 pub struct Shown {
-    /// The draft's field, and the bounds of it and the ship together, which the camera frames.
+    /// The draft's field, and the bounds of it and the ship together.
     drawn: Option<(Sdf, Extent)>,
     ghost: Option<Sdf>,
     marks: std::collections::BTreeMap<lc_world::form::PartId, crate::draft::Mark>,
-    /// The draft and the ship last drawn, so a frame that changed neither draws nothing. A
-    /// failure to solve is kept too, so it is not retried every frame.
+    /// Last drawn, so a frame that changed neither draws nothing and a failure is not retried.
     of: Option<(Form, Form)>,
-    /// What the camera frames and the handles are laid against: the drawn bounds, except that
-    /// they hold still through a gesture. A carried part that moved the camera as it hung would
-    /// move the part under the pointer, which would hang it somewhere else again.
+    /// The bounds the camera frames, held still through a gesture: a camera that followed a
+    /// carried part's bounds would move the part under the pointer, and it would hang elsewhere.
     framed: Option<Extent>,
 }
 
@@ -348,12 +339,12 @@ impl Shown {
     }
 }
 
-/// Where the picture is on the window, logical pixels, while the editor is the view.
+/// Logical pixels, while the editor is the view.
 pub fn picture(surface: &FormSurface) -> Option<egui::Rect> {
     surface.laid
 }
 
-/// Whether `at`, logical pixels, is on the picture rather than the corner square or the readout.
+/// Whether `at`, logical pixels, is on the picture rather than the readout.
 pub fn on_picture(surface: &FormSurface, at: Vec2) -> bool {
     surface.laid.is_some_and(|rect| rect.contains(egui::pos2(at.x, at.y)))
 }
@@ -446,12 +437,11 @@ struct FormViewRoot;
 #[derive(Component)]
 pub(crate) struct HangarPaint(pub Vec4);
 
-/// Which part a copy of the draft's is, so a carried one can be hidden.
+/// So a carried part's copies can be hidden.
 #[derive(Component)]
 pub struct DrawnPart(pub lc_world::form::PartId);
 
-/// Start the draft from the ship's own form the first time the editor opens, or from the
-/// starting form for a ship that has none.
+
 fn start_draft(
     ui: Res<Ui>,
     own: Res<crate::parts::OwnForm>,
@@ -470,8 +460,7 @@ fn start_draft(
     }
 }
 
-/// Draw the draft solid, and the ship faint wherever the draft differs from it, each changed part
-/// in its mark's color.
+
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn show(
@@ -556,8 +545,7 @@ fn show(
     }
 }
 
-/// What the camera frames: the latest bounds, except through a gesture, when it holds the framing
-/// it had unless it had none.
+/// The latest bounds, or through a gesture the ones already held.
 pub fn framing(held: Option<Extent>, latest: Option<Extent>, gesture: bool) -> Option<Extent> {
     if gesture && held.is_some() { held } else { latest }
 }
@@ -809,8 +797,7 @@ pub fn read_drag(
     }
     let size = Vec2::new(rect.width(), rect.height());
     if buttons.just_pressed(MouseButton::Left) {
-        // The part is the one the handles would pick, so a press slides exactly where it selects
-        // nothing.
+        // The same pick as selection's, so a press slides exactly where it selects nothing.
         let lens = crate::form_handles::Lens { orbit: ui.form.orbit.held_to(&extent), extent, rect };
         *last = cursor
             // A press while carrying a part puts it down, and slides nothing.
@@ -1048,9 +1035,7 @@ mod tests {
         assert_eq!(rect.max, egui::pos2(1280.0, 720.0));
     }
 
-    /// **The camera holds still through a gesture**: a part hung somewhere new changes the bounds,
-    /// and a camera that followed them would move the part under the pointer, and hang it
-    /// somewhere else again.
+
     #[test]
     fn the_framing_holds_through_a_gesture_and_follows_after_it() {
         let a = Extent { min: DVec3::splat(-1.0), max: DVec3::ONE };

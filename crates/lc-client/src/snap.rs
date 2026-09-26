@@ -1,8 +1,6 @@
-//! The editor's preferred steps. The server never snaps: this is feel, so it is a table in the
-//! client, and tuning it is a change to [`SNAPS`]. See `lightcone/docs/29-ship-form.md` §Snapping.
-//!
-//! Volumes and proportions go by ratios rather than fixed amounts, so a handle is as fine on a
-//! 500 m ship as on a 50 km one.
+//! The editor's preferred steps, as data in [`SNAPS`]; the server never snaps. Volumes and
+//! proportions go by ratios, so a handle is as fine on a 500 m ship as on a 50 km one. See
+//! `lightcone/docs/29-ship-form.md` §Snapping.
 
 use glam::DVec3;
 
@@ -16,10 +14,9 @@ pub const R40: [f64; 40] = [
     6.30, 6.70, 7.10, 7.50, 8.00, 8.50, 9.00, 9.50,
 ];
 
-/// One set of steps: the default, or the one the modifier gives.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Steps {
-    /// Volume, and proportions as ratios, one decade of it.
+    /// One decade, for volume and for proportions.
     pub ladder: &'static [f64],
     /// Twist and tilt, radians.
     pub angle_rad: f64,
@@ -32,7 +29,6 @@ pub struct Steps {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Snaps {
     pub coarse: Steps,
-    /// With the modifier held.
     pub fine: Steps,
 }
 
@@ -49,7 +45,7 @@ pub const SNAPS: Snaps = Snaps {
 
 const DEG: f64 = std::f64::consts::PI / 180.0;
 
-/// `value` on `ladder` repeated every decade from `anchor`, nearest in ratio. Positive values only.
+/// Nearest in ratio on `ladder` repeated every decade from `anchor`. Positive values only.
 pub fn on_ladder(value: f64, anchor: f64, ladder: &[f64]) -> f64 {
     if !(value > 0.0 && value.is_finite()) {
         return value;
@@ -67,17 +63,15 @@ pub fn on_ladder(value: f64, anchor: f64, ladder: &[f64]) -> f64 {
     anchor * 10f64.powf(base + nearest)
 }
 
-/// A volume on the ladder anchored at `min_part_m3`, and never below it.
 pub fn volume(volume_m3: f64, min_part_m3: f64, fine: bool) -> f64 {
     on_ladder(volume_m3, min_part_m3, SNAPS.steps(fine).ladder).max(min_part_m3)
 }
 
-/// A proportion, as a ratio on the same series about one.
 pub fn ratio(ratio: f64, fine: bool) -> f64 {
     on_ladder(ratio, 1.0, SNAPS.steps(fine).ladder)
 }
 
-/// Twist or tilt, radians.
+/// Radians.
 pub fn angle(rad: f64, fine: bool) -> f64 {
     let step = SNAPS.steps(fine).angle_rad;
     (rad / step).round() * step
@@ -85,12 +79,11 @@ pub fn angle(rad: f64, fine: bool) -> f64 {
 
 pub fn standoff(reaches: f64, fine: bool) -> f64 {
     let step = SNAPS.steps(fine).standoff;
-    // Rounded again, so a tenth reads as 0.1 and not 0.30000000000000004 in a field.
+    // Rounded again, so 0.3 does not read as 0.30000000000000004 in a field.
     ((reaches / step).round() * step * 1.0e6).round() / 1.0e6
 }
 
-/// An anchor on the nearest of the parent's six axes, twelve edge diagonals and eight corner
-/// diagonals, or unit and otherwise free.
+/// The nearest of the 26 axes and diagonals, or free and unit.
 pub fn anchor(direction: DVec3, fine: bool) -> DVec3 {
     let unit = direction.normalize_or(DVec3::X);
     if !SNAPS.steps(fine).anchor_on_axes {
@@ -123,12 +116,10 @@ mod tests {
 
     const MIN: f64 = 1_000.0;
 
-    /// **The size handle's ladder.** Anchored at the smallest part, ten steps a decade, and the
-    /// modifier gives forty.
     #[test]
     fn a_size_snaps_to_the_r10_ladder_and_the_modifier_gives_r40() {
         assert_eq!(volume(1_300.0, MIN, false), 1_250.0);
-        // Past the geometric middle of 1.25 and 1.6, which is 1.414.
+        // Past 1.414, the geometric middle of 1.25 and 1.6.
         assert_eq!(volume(1_450.0, MIN, false), 1_600.0);
         assert_eq!(volume(1_450.0, MIN, true), 1_500.0);
         assert!((volume(2.36e6, MIN, false) - 2.5e6).abs() < 1e-6);
@@ -138,7 +129,6 @@ mod tests {
         assert_eq!(volume(10.0, MIN, false), MIN, "nothing below the smallest part");
     }
 
-    /// Every step of the ladder is a fixed point, and each is about 26% past the last.
     #[test]
     fn the_ladder_is_its_own_fixed_points() {
         for (i, step) in R10.iter().enumerate() {

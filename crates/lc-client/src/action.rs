@@ -1034,8 +1034,7 @@ mod tests {
         ui.form.draft.as_ref().expect("a draft")
     }
 
-    /// **Every edit is an action**, and each carries its before and after: sent the other way
-    /// round it puts the draft back exactly, a removal's subtree and ids included.
+    /// Each edit's inverse puts the draft back exactly, a removal's subtree and ids included.
     #[test]
     fn every_edit_is_an_action_that_writes_back_exactly() {
         use crate::draft::{PRIMITIVES, What, stretched};
@@ -1071,7 +1070,6 @@ mod tests {
         }
         let mounted = draft(&ui).part(PartId(4)).unwrap().placement.unwrap();
         assert!(matches!(mounted.mount, Mount::Enclosing) && mounted.mirror);
-        // The whole draft back to the ship is one edit too.
         let reset = draft(&ui).reset();
         assert_eq!(reset.what, What::Whole);
         apply(Action::EditForm(Ok(reset)), &mut ui, &mut s);

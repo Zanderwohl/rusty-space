@@ -1,9 +1,8 @@
-//! The editor's side panels: the tree of parts on the left, and the selected part's fields on the
-//! right, in [`em_ui`]'s widgets like the handles. **Every handle has a field**, so anything done
-//! with the mouse can be typed exactly, and a typed number is not snapped.
+//! The editor's side panels: the palette on the left, and on the right the tree of parts and the
+//! selected part's detail, whose numbers include a field for every handle.
 //!
-//! Both are rebuilt only when what they list changes, since Bevy UI is retained and a button
-//! rebuilt every frame never shows a hover; the numbers in the fields are written in place.
+//! Each is rebuilt only when what it lists changes, since a Bevy UI button rebuilt every frame
+//! never shows a hover; numbers are written in place.
 
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
@@ -19,13 +18,12 @@ use crate::input::Requested;
 use crate::ui::ViewMode;
 
 const WIDTH: f32 = 250.0;
-/// From the readout above and the window's edges.
 const GAP: f32 = 6.0;
 const INSET: f32 = 12.0;
 /// Of the window's height, the most the tree takes before it is cut off.
 const TREE_SHARE: f32 = 45.0;
 
-/// What a panel button asks for, turned into an action against the draft as it is when pressed.
+/// A panel button, turned into an action against the draft as it is when pressed.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub enum Tap {
     Select(PartId),
@@ -35,20 +33,15 @@ pub enum Tap {
     SparMode(SparMode),
     Mirror(bool),
     Delete,
-    /// A new part of this kind onto the pointer.
     Take(Kind),
-    /// The next shape new parts are made in.
     NextShape,
     Reset,
-    /// Held on, it draws the ship as it is under the draft; pressed, it keeps it drawn until
-    /// pressed again.
+    /// Hovered, it shows the ship as it is; pressed, it keeps it shown.
     ShowCurrent,
-    /// The part's numbers, or only what it does.
     Advanced,
 }
 
-/// The action `tap` asks for against the editor as it is. A [`Tap::Take`] is no action: it puts
-/// a part on the pointer.
+/// `None` for [`Tap::Take`], which puts a part on the pointer instead.
 pub fn action_of(tap: Tap, draft: &Draft, form: &crate::form_view::FormView) -> Option<Action> {
     let (selected, new_shape) = (form.selected, form.new_shape);
     let part = selected.and_then(|id| draft.part(id));
@@ -68,15 +61,14 @@ pub fn action_of(tap: Tap, draft: &Draft, form: &crate::form_view::FormView) -> 
     })
 }
 
-/// Which of the part's stats a figure is, so it can be written in place as a drag changes it.
+/// Which of the part's stats a figure is.
 #[derive(Component)]
 struct Stat(usize);
 
-/// Which number a field is.
 #[derive(Component, Clone, Copy)]
 pub struct FieldOf(pub Field);
 
-/// What a panel was built for, compared with what it would be built for now.
+/// What a panel was built for.
 #[derive(Component, PartialEq)]
 struct Built(Vec<String>);
 
@@ -96,7 +88,7 @@ impl Plugin for FormPanelPlugin {
     }
 }
 
-/// The tree's lines: each part under its parent, with its mark in words as well as color.
+/// Marks in words as well as color.
 fn tree_lines(draft: &Draft, marks: &std::collections::BTreeMap<PartId, Mark>) -> Vec<(usize, PartId, String)> {
     draft
         .tree()
@@ -153,7 +145,7 @@ fn lay_out(
             commands.entity(entity).despawn();
         }
     }
-    // The tree first and the part's detail under it, so a rebuilt tree takes its detail with it.
+    // A rebuilt tree takes its detail with it, so the detail stays under it.
     if !current[Side::Tree as usize] && current[Side::Fields as usize] {
         for (entity, _, side) in &panels {
             if *side == Side::Fields {
@@ -184,23 +176,16 @@ fn lay_out(
     }
 }
 
-/// The right-hand side: the tree, and the selected part's detail under it.
 #[derive(Component)]
 struct RightColumn;
 
-/// Which of the three panels this is.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Side {
-    /// What new parts are taken from, down the whole left side; a carried part dropped on it is
-    /// deleted.
     Palette,
-    /// The parts, at the top right.
     Tree,
-    /// The selected part: what it does, what it weighs, and its numbers behind "advanced".
     Fields,
 }
 
-/// The palette, down the left side.
 fn root(ui: &mut MenuUi, side: Side, built: Built, place: Node) -> Entity {
     let root = ui.docked((side, built), Edge::Left, INSET);
     ui.insert(root, Node { width: Val::Px(WIDTH), ..place });
@@ -209,7 +194,6 @@ fn root(ui: &mut MenuUi, side: Side, built: Built, place: Node) -> Entity {
     panel
 }
 
-/// A panel in the right-hand column.
 fn stacked(ui: &mut MenuUi, column: Entity, side: Side, built: Built) -> Entity {
     let panel = ui.strip(column);
     ui.insert(panel, (Node { align_items: AlignItems::Stretch, ..panel_node() }, side, built));
@@ -251,7 +235,7 @@ fn build_tree(
 ) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
     let panel = stacked(&mut ui, column, Side::Tree, built);
-    // At most so much of the window, so the detail under it always has room.
+    // So the detail under it always has room.
     ui.insert(panel, Node { max_height: Val::Vh(TREE_SHARE), overflow: Overflow::clip_y(), align_items: AlignItems::Stretch, ..panel_node() });
     ui.inline(panel, "PARTS", 15.0, em_ui::vfd::TEXT);
     for (depth, id, what) in tree_lines(draft, marks) {
@@ -273,7 +257,7 @@ fn build_fields(commands: &mut Commands, column: Entity, draft: &Draft, form: &c
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
     let panel = stacked(&mut ui, column, Side::Fields, built);
     let Some(part) = form.selected.and_then(|id| draft.part(id)) else {
-        // Kept, empty, so the key it was built for is still there to compare.
+        // Kept, empty, so its key is still there to compare.
         ui.insert(panel, Node { display: Display::None, ..default() });
         return;
     };
@@ -327,7 +311,6 @@ fn panel_node() -> Node {
     }
 }
 
-/// The parts the draft removes are drawn while the toggle is on, or while the pointer is on it.
 fn reveal(ui: Res<Ui>, taps: Query<(&Interaction, &Tap)>, mut revealed: ResMut<crate::form_view::Revealed>) {
     let held = taps.iter().any(|(i, t)| *t == Tap::ShowCurrent && *i != Interaction::None);
     let wanted = ui.view == ViewMode::Form && (ui.form.show_current || held);
@@ -336,7 +319,6 @@ fn reveal(ui: Res<Ui>, taps: Query<(&Interaction, &Tap)>, mut revealed: ResMut<c
     }
 }
 
-/// Write each figure and field's number in place, except the field being typed in.
 fn show_numbers(
     ui: Res<Ui>,
     focus: Option<Res<InputFocus>>,
@@ -362,7 +344,6 @@ fn show_numbers(
     }
 }
 
-/// Panel buttons and committed fields, as actions.
 pub fn press(
     ui: Res<Ui>,
     mut carried: ResMut<crate::form_carry::Carried>,

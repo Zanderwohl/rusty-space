@@ -1,10 +1,7 @@
-//! Carrying a part, as a spaceplane hangar does. A click on an attached part picks it up; it hangs
-//! wherever the pointer meets another part, re-parenting to it, and the next click puts it down. A
-//! part taken from the list of kinds is carried the same way, and anything dropped on that list
-//! is deleted.
-//!
-//! While carried, each move is an unsettled edit measured from where the part was picked up, and
-//! putting it down sends it settled, so the whole carry is one entry in the history.
+//! Carrying a part, as a spaceplane hangar does: a click picks up an attached part, it hangs from
+//! whatever part the pointer meets, and the next click puts it down. New parts come off the
+//! palette the same way, and a drop on the palette deletes. Each move is an unsettled edit from
+//! where it was picked up, so the whole carry is one entry in the history.
 
 use std::collections::BTreeSet;
 
@@ -26,7 +23,6 @@ use crate::form_view::{FormSurface, Shown};
 use crate::input::Requested;
 use crate::snap;
 
-/// The part on the pointer, if any.
 #[derive(Resource, Default)]
 pub struct Carried(Option<Carry>, bool);
 
@@ -35,8 +31,7 @@ impl Carried {
         self.0.is_some()
     }
 
-    /// Whether this frame's press put a part down. The press is the drop's, so a button under it
-    /// is not pressed: a part dropped on the list is deleted, not traded for a new one.
+    /// Whether this frame's press put a part down, so a button under it does not also fire.
     pub fn just_dropped(&self) -> bool {
         self.1
     }
@@ -50,38 +45,32 @@ impl Carried {
     }
 }
 
-/// Where a drop on it deletes what is carried: the list new parts are taken from, buttons and all.
+/// A drop on it, buttons included, deletes what is carried.
 #[derive(Component)]
 pub struct DropZone;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Carry {
-    /// As it was when picked up, or `None` for a part taken from the list.
+    /// `None` for a new part.
     pub was: Option<Part>,
-    /// As it last hung, while [`hung`](Self::hung).
     pub part: Part,
-    /// Whether it hangs from a part in the draft. Otherwise the draft is as it was before the
-    /// carry began, and the part floats at the pointer.
+    /// Otherwise the draft is as it was before the carry, and the part floats at the pointer.
     pub hung: bool,
-    /// The part and everything under it, which it cannot hang from.
+    /// What it cannot hang from: itself and what hangs from it.
     pub subtree: BTreeSet<PartId>,
     pub float: Float,
 }
 
-/// What floats at the pointer while nothing is under it to hang from.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Float {
-    /// The carried part and everything hanging from it, about the carried part's middle.
+    /// The subtree, about the carried part's middle.
     pub pieces: Vec<Piece>,
-    /// How the carried part was turned when it was taken.
     pub rotation: DMat3,
-    /// How far in front of the eye it was taken, meters. `None` for a part from the list,
-    /// which floats at the focus.
+    /// How far in front of the eye it was taken, meters. `None` floats at the focus.
     pub depth_m: Option<f64>,
 }
 
 impl Float {
-    /// The pieces with their middle at the pointer, at the depth the part was taken at.
     pub fn at(&self, lens: &Lens, at: Vec2) -> Vec<Piece> {
         let (origin, direction) = lens.ray(at);
         let forward = lens.orbit.basis()[0];
@@ -93,8 +82,7 @@ impl Float {
 }
 
 impl Carry {
-    /// An attached part, as it is drawn in `sdf`. The Mind and an enclosing part stay where they
-    /// are.
+    /// Attached parts only.
     pub fn pick_up(draft: &Draft, sdf: &Sdf, lens: &Lens, id: PartId) -> Option<Carry> {
         let part = *draft.part(id)?;
         if !matches!(part.placement?.mount, Mount::Attached { .. }) {
@@ -109,7 +97,6 @@ impl Carry {
         Some(Carry { was: Some(part), part, hung: true, subtree, float: Float { pieces, rotation: about.rotation, depth_m } })
     }
 
-    /// A new part of `kind`, floating at the pointer until it is hung somewhere.
     pub fn new_part(draft: &Draft, kind: Kind, primitive: Primitive, balance: &Balance) -> Option<Carry> {
         let mind = draft.form.parts.iter().find(|p| p.kind == Kind::Mind)?.id;
         let part = *draft.add(mind, kind, primitive, DVec3::X, balance).ok()?.after.first()?;
@@ -118,8 +105,7 @@ impl Carry {
         Some(Carry { was: None, part, hung: false, subtree: BTreeSet::from([part.id]), float })
     }
 
-    /// Hung from whatever part is under `at`, other than itself and what hangs from it, or
-    /// floating if there is none. The edit that shows the change, if there is one.
+    /// Hangs it from the part under `at`, or floats it. The edit, if anything changed.
     pub fn follow(&mut self, draft: &Draft, sdf: &Sdf, lens: &Lens, at: Vec2, keys: Modifiers, balance: &Balance) -> Option<Edit> {
         let (origin, direction) = lens.ray(at);
         let Some((index, point)) = hit_except(sdf, origin, direction, 10.0 * lens.extent.size_m(), &self.subtree) else {
@@ -134,7 +120,7 @@ impl Carry {
                 let mount = Mount::Attached { anchor, standoff };
                 Part { placement: Some(Placement { parent: piece.part, mount, ..placement }), ..was }
             }
-            // Sized against what it hangs from, so it arrives in proportion wherever it goes.
+            // Sized against what it hangs from.
             None => Part { id: self.part.id, ..*draft.add(piece.part, self.part.kind, self.part.primitive, anchor, balance).ok()?.after.first()? },
         };
         if self.hung && part == self.part {
@@ -145,7 +131,6 @@ impl Carry {
         Some(self.edit(false))
     }
 
-    /// Off everything: the draft goes back to how it was before the carry, and the part floats.
     fn unhang(&mut self) -> Option<Edit> {
         if !self.hung {
             return None;
@@ -166,8 +151,7 @@ impl Carry {
         Edit { what, part: self.part.id, before, after: vec![self.part], settled }
     }
 
-    /// Put down where it hangs: the settled edit, or `None` when there is nothing to record.
-    /// A floating part cannot be put down.
+    /// `None` when there is nothing to record, or it floats.
     pub fn put_down(&self) -> Option<Edit> {
         match self.was {
             _ if !self.hung => None,
@@ -176,7 +160,7 @@ impl Carry {
         }
     }
 
-    /// The draft back as it was before the carry began, with nothing recorded.
+    /// Unsettled, so nothing is recorded.
     pub fn cancel(&self) -> Option<Edit> {
         match self.was {
             Some(was) if was != self.part => {
@@ -189,8 +173,8 @@ impl Carry {
         }
     }
 
-    /// Dropped on the list. A part picked up is deleted with its subtree, the removal recording
-    /// it as it was before it was picked up; a new one is taken back out, with nothing recorded.
+    /// The removal records a picked-up part as it was before the carry, so undo puts it back
+    /// there.
     pub fn discard(&self, draft: &Draft) -> Vec<Action> {
         match self.was {
             Some(was) => {
@@ -207,9 +191,7 @@ impl Carry {
     }
 }
 
-/// A click on the picture while carrying puts the part down, deletes it over the list, and does
-/// nothing while it floats. A click on a part otherwise selects it and picks it up. Between
-/// clicks the carried part follows the pointer.
+
 #[allow(clippy::too_many_arguments)]
 pub fn carry(
     ui: Res<Ui>,
@@ -229,7 +211,6 @@ pub fn carry(
     mut out: MessageWriter<Requested>,
 ) {
     let balance = Balance::DEFAULT;
-    // A press on a handle is the handle's.
     if grabbed.is_holding() {
         return;
     }
@@ -241,7 +222,7 @@ pub fn carry(
     if buttons.just_pressed(MouseButton::Left) && !egui.wants_any_pointer_input() {
         if let Some(carry) = carried.0.clone() {
             carried.1 = true;
-            // A button in the list holds the pointer rather than the list, so over either.
+            // A button holds the pointer rather than the list under it.
             let over_list = zones.iter().any(|(zone, own)| {
                 *own != Interaction::None || children.iter_descendants(zone).flat_map(|b| inside.get(b)).any(|i| *i != Interaction::None)
             });
@@ -272,8 +253,7 @@ pub fn carry(
     }
 }
 
-/// Escape while carrying puts the part back where it was, and is taken from the key bindings, which
-/// would otherwise close a window or leave the editor on it. Before them.
+/// Before the key bindings, which would otherwise take Escape to close a window or the editor.
 pub fn cancel_on_escape(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     typing: em_ui::Typing,
@@ -290,7 +270,6 @@ pub fn cancel_on_escape(
     }
 }
 
-/// Out of the editor, nothing is carried: a part picked up goes back where it was.
 pub fn drop_on_leaving(ui: Res<Ui>, mut carried: ResMut<Carried>, mut out: MessageWriter<Requested>) {
     if ui.view == crate::ui::ViewMode::Form {
         return;
@@ -301,17 +280,14 @@ pub fn drop_on_leaving(ui: Res<Ui>, mut carried: ResMut<Carried>, mut out: Messa
     }
 }
 
-/// The ship's frame for what floats, as the draft's copies have their own.
 #[derive(Component)]
 pub struct FloatRoot;
 
-/// A copy drawn at the pointer while a part floats: which of the float's pieces, and its mesh's
-/// scale.
+/// Which of the float's pieces, and its mesh's scale.
 #[derive(Component)]
 pub struct Floating(usize, Vec3);
 
-/// While a part floats: the draft's own copies of it hidden, and a copy of it and its subtree at
-/// the pointer.
+
 #[allow(clippy::too_many_arguments)]
 pub fn draw_float(
     mut commands: Commands,
@@ -328,7 +304,6 @@ pub fn draw_float(
     surfaces: Res<crate::surfaces::Surfaces>,
 ) {
     let float = carried.carry().filter(|c| !c.hung && ui.view == crate::ui::ViewMode::Form);
-    // A part picked up is still in the draft where it was, and is not also drawn there.
     let hidden = float.filter(|c| c.was.is_some()).map(|c| &c.subtree);
     for (part, mut visibility) in &mut drawn {
         let wanted = if hidden.is_some_and(|h| h.contains(&part.0)) { Visibility::Hidden } else { Visibility::Inherited };
@@ -403,7 +378,6 @@ mod tests {
         lens.project(DVec3::new(0.0, 0.0, 33.0)).unwrap().0
     }
 
-    /// **Picked up, hung somewhere else, put down: one settled move** from where it was.
     #[test]
     fn a_part_picked_up_and_put_down_is_one_move() {
         let mut draft = Draft::new(Form::starting());
@@ -414,7 +388,6 @@ mod tests {
         let edit = carry.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
         assert!(!edit.settled);
         apply(&mut draft, &edit);
-        // Onto the deck, which is what is drawn there.
         let placement = draft.part(data).unwrap().placement.unwrap();
         assert_eq!(placement.parent, PartId(4));
         let Mount::Attached { anchor, standoff } = placement.mount else { panic!() };
@@ -425,14 +398,12 @@ mod tests {
         assert_eq!(down.before, vec![was], "measured from where it was picked up");
     }
 
-    /// It re-parents to whatever it hangs on, as a hangar does, but never onto itself.
     #[test]
     fn a_carried_part_hangs_from_the_part_under_the_pointer_but_not_from_itself() {
         let draft = Draft::new(Form::starting());
         let (sdf, lens) = scene(&draft);
         let mut deck = Carry::pick_up(&draft, &sdf, &lens, PartId(4)).unwrap();
-        // The deck is drawn over this point and looks through itself to the storage, where it
-        // already hangs, so there is nothing to show.
+        // It looks through itself to the storage, where it already hangs.
         assert!(deck.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).is_none());
         let engine = lens.project(sdf.pieces().iter().find(|p| p.part == PartId(2)).unwrap().pose.position).unwrap().0;
         let edit = deck.follow(&draft, &sdf, &lens, engine, Modifiers::default(), &B).unwrap();
@@ -454,15 +425,13 @@ mod tests {
         assert_eq!(draft.part(carry.part.id).unwrap().kind, Kind::Bay);
         let down = carry.put_down().unwrap();
         assert!(down.settled && down.what == What::Add && down.before.is_empty());
-        // Dropped on the list instead, it goes again and nothing is recorded.
         let [Action::EditForm(Ok(out))] = &carry.discard(&draft)[..] else { panic!() };
         assert!(!out.settled);
         apply(&mut draft, out);
         assert_eq!(draft.form, draft.ship);
     }
 
-    /// **Nothing hangs from a part the draft removes**, drawn or not: it looks straight through
-    /// to what is still there.
+
     #[test]
     fn nothing_hangs_from_a_dismantled_part() {
         let mut draft = Draft::new(Form::starting());
@@ -480,8 +449,7 @@ mod tests {
         assert_ne!(parent, Some(PartId(5)));
     }
 
-    /// Off every part it floats: the draft goes back to how it was, it cannot be put down, and
-    /// it is drawn at the pointer, at the depth it was taken from, with what hangs from it.
+
     #[test]
     fn off_every_part_it_floats_at_the_pointer() {
         let mut draft = Draft::new(Form::starting());
@@ -508,7 +476,6 @@ mod tests {
         assert!((own.pose.rotation - before).abs_diff_eq(glam::DMat3::ZERO, 1e-9), "turned as it was");
     }
 
-    /// Escape puts it back as it was, and a part from the list goes again, with nothing recorded.
     #[test]
     fn a_cancel_puts_the_draft_back() {
         let mut draft = Draft::new(Form::starting());
@@ -528,8 +495,7 @@ mod tests {
         assert_eq!(draft.form, draft.ship);
     }
 
-    /// Dropped on the list, a part picked up is deleted, and the deletion remembers it as it was
-    /// before it was picked up, so undoing it puts it back there.
+
     #[test]
     fn a_part_dropped_on_the_list_is_deleted_as_it_was() {
         let mut draft = Draft::new(Form::starting());
@@ -543,7 +509,6 @@ mod tests {
         assert!(draft.part(PartId(5)).is_none());
         apply(&mut draft, &removal.inverse());
         assert_eq!(draft.form, draft.ship);
-        // The last drones too: a draft may have none on the way to a design.
         let drones = Carry::pick_up(&draft, &sdf, &lens, PartId(3)).unwrap();
         let [Action::EditForm(Ok(removal))] = &drones.discard(&draft)[..] else { panic!() };
         apply(&mut draft, removal);

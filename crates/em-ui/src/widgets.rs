@@ -47,7 +47,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         }
     }
 
-    /// Adds to or replaces what a widget was built with, for a caller laying it out its own way.
+    /// Adds to or replaces a widget's components, for a caller laying it out its own way.
     pub fn insert(&mut self, entity: Entity, bundle: impl Bundle) {
         self.commands.entity(entity).insert(bundle);
     }
@@ -241,9 +241,8 @@ pub enum Edge {
 }
 
 impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
-    /// A node against one edge of the window, for chrome over a view rather than a screen of
-    /// its own: full width and centering what is put in it against the top or bottom, a column
-    /// from the top against a side. It takes no pointer: only what is put in it does.
+    /// Chrome over a view against one edge: full width at the top or bottom, a column at a side.
+    /// It takes no pointer; only what is put in it does.
     pub fn docked(&mut self, marker: impl Bundle, edge: Edge, inset: f32) -> Entity {
         let mut node = Node {
             position_type: PositionType::Absolute,
@@ -322,9 +321,8 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
 }
 
 impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
-    /// A [`MenuUi::small_button`] that shows whether it is the one chosen, for a toggle or a
-    /// selection. Chosen wears the hover color at rest; its words should say so too, since color
-    /// is never the only signal.
+    /// Chosen wears the hover color at rest. Say so in its words too: color is never the only
+    /// signal.
     pub fn chosen_button<A: Component>(&mut self, parent: Entity, text: &str, chosen: bool, action: A) -> Entity {
         let button = self.small_button(parent, text, action);
         if chosen {
@@ -337,8 +335,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         button
     }
 
-    /// One line of a tree: a left-aligned button indented by `depth`, the whole width of its
-    /// column.
+    /// Left-aligned, indented by `depth`, the width of its column.
     pub fn tree_row<A: Component>(&mut self, parent: Entity, depth: usize, text: &str, chosen: bool, action: A) -> Entity {
         let row = self.chosen_button(parent, text, chosen, action);
         self.commands.entity(row).insert(Node {
@@ -351,15 +348,12 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         row
     }
 
-    /// A labeled number field on a line of its own, carrying `marker` for the caller to find its
-    /// [`Committed`](crate::field::Committed) by. Filled darker than the panel, or an empty field
-    /// reads as a label with no input.
+    /// `marker` is what the caller finds its [`Committed`](crate::field::Committed) by.
     pub fn field<A: Component>(&mut self, parent: Entity, label: &str, text: &str, marker: A) -> Entity {
         self.fields(parent, label, [(text.to_owned(), marker)])[0]
     }
 
-    /// One label and several number fields beside each other, sharing the line: the components
-    /// of one vector, say.
+    /// Several fields on one labeled line, as the components of a vector.
     pub fn fields<A: Component>(&mut self, parent: Entity, label: &str, cells: impl IntoIterator<Item = (String, A)>) -> Vec<Entity> {
         let theme = self.theme;
         let font = self.font.clone();
@@ -411,8 +405,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
 
 const TREE_INDENT: f32 = 12.0;
 const FIELD_TEXT: f32 = 13.0;
-/// A line's room for numbers, shared among its fields: one takes `-1.2345e-6` with room over,
-/// and each of three a short one.
+/// Shared among a line's fields: one takes `-1.2345e-6`, each of three a short number.
 const FIELD_GLYPHS: f32 = 16.0;
 const FIELD_LEAST_GLYPHS: f32 = 4.0;
 

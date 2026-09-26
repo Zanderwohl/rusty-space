@@ -1,9 +1,8 @@
 //! The draft: the form being edited, beside the ship's own, and every edit to it as a value.
 //!
-//! An [`Edit`] is the parts it touches before and after, by id, so writing its `after` back makes
-//! the edit and writing its `before` back undoes it: a removal keeps the part, its id and its
-//! subtree. The handles and fields build edits here and send them as
-//! [`Action::EditForm`](crate::action::Action::EditForm); nothing else writes the draft. See
+//! An [`Edit`] is the parts it touches before and after, by id, so writing its `before` back
+//! undoes it exactly, a removal's subtree and ids included. Only
+//! [`Action::EditForm`](crate::action::Action::EditForm) writes the draft. See
 //! `lightcone/docs/29-ship-form.md` §The editor.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,14 +19,12 @@ use crate::snap;
 pub struct Draft {
     /// In id order.
     pub form: Form,
-    /// The ship as it is, which the draft is marked against.
     pub ship: Form,
-    /// An enclosing part's last anchor and standoff, so switching it back to attached restores
-    /// them. Editor state: the form has nowhere to keep them.
+    /// An enclosing part's last anchor and standoff, restored when it is attached again.
     remembered: BTreeMap<PartId, (DVec3, f64)>,
 }
 
-/// What an edit did, in the terms the history lists it by.
+/// What an edit did, for the history to list it by.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum What {
     Add,
@@ -38,7 +35,6 @@ pub enum What {
     /// Parent, mount, anchor, twist, tilt, standoff or blend.
     Move,
     Mirror,
-    /// The whole draft, as a reset to the ship does.
     Whole,
 }
 
@@ -46,12 +42,11 @@ pub enum What {
 pub struct Edit {
     pub what: What,
     pub part: PartId,
-    /// The parts it touches as they were, and as they will be. An id in one and not the other is
-    /// a part removed or added.
+    /// An id in only one of these is a part removed or added.
     pub before: Vec<Part>,
     pub after: Vec<Part>,
-    /// False while a handle is still held. Each frame of a drag carries the part as it was when
-    /// the drag began, so the settled one is the whole gesture.
+    /// False while a handle is held. Every frame's `before` is the part as the drag began, so the
+    /// settled edit is the whole gesture.
     pub settled: bool,
 }
 
@@ -64,9 +59,7 @@ impl Edit {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Refused {
     NoSuchPart(PartId),
-    /// The Mind cannot be deleted, resized, reshaped or moved.
     Mind,
-    /// The draft would stop being a form, or a part would be too small.
     Fault(FormError),
 }
 
@@ -80,17 +73,16 @@ impl std::fmt::Display for Refused {
     }
 }
 
-/// How a part of the draft differs from the ship, as the round would do it.
+/// How a part differs from the ship, as the round would change it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mark {
     Build,
-    /// Taken apart entirely: in the ship and not in the draft. Hidden unless asked for, and
-    /// nothing hangs from it.
+    /// In the ship and not in the draft.
     Dismantle,
-    /// Partly taken apart: smaller, or a mirrored copy fewer. Still there.
+    /// Smaller, or a mirrored copy fewer, and still there.
     Shrink,
     Move,
-    /// Taken apart and built again: a reshape or a change of kind.
+    /// A reshape or a change of kind.
     Rebuild,
 }
 
@@ -105,8 +97,8 @@ impl Mark {
         }
     }
 
-    /// `18-ui-style.md` §Refit marks: four hues at the phosphor green's lightness, one per phase
-    /// of the round, so a shrink is a dismantle's color and says which it is in words.
+    /// `18-ui-style.md` §Refit marks. One hue per phase of the round, so a shrink wears the
+    /// dismantle's.
     pub fn color(self) -> Color {
         match self {
             Mark::Build => em_ui::vfd::TEXT,
@@ -117,7 +109,7 @@ impl Mark {
     }
 }
 
-/// Every number the fields panel shows, and a handle's field.
+/// A number the fields panel edits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Field {
     Volume,
@@ -129,9 +121,9 @@ pub enum Field {
     Taper,
     Anchor(usize),
     Standoff,
-    /// Degrees in the field.
+    /// Degrees.
     Twist,
-    /// Degrees in the field, along the twisted y and z.
+    /// Degrees, along the twisted y and z.
     Tilt(usize),
     Blend,
     Parent,
@@ -147,7 +139,6 @@ pub const PRIMITIVES: [Primitive; 6] = [
     Primitive::Frustum { length: 2.0, taper: 1.5 },
 ];
 
-/// The kinds a part may be added as. The Mind is not one.
 pub const KINDS: [Kind; 7] =
     [Kind::Storage, Kind::Drone, Kind::Engine, Kind::Living, Kind::Data, Kind::Bay, Kind::Spar(SparMode::Saddle)];
 
@@ -181,7 +172,6 @@ pub fn kind_name(kind: Kind) -> &'static str {
     }
 }
 
-/// The next of `list` after `current`, by what sort of thing it is, round again at the end.
 pub fn next_primitive(current: &Primitive) -> Primitive {
     let at = PRIMITIVES.iter().position(|p| primitive_name(p) == primitive_name(current)).unwrap_or(0);
     PRIMITIVES[(at + 1) % PRIMITIVES.len()]
@@ -213,7 +203,7 @@ impl Draft {
         self.form.parts.iter().filter(move |p| p.placement.is_some_and(|pl| pl.parent == id))
     }
 
-    /// The part and everything hanging from it, the part first.
+    /// The part first.
     pub fn subtree(&self, id: PartId) -> Vec<Part> {
         let mut out: Vec<Part> = self.part(id).into_iter().copied().collect();
         let mut at = 0;
@@ -225,7 +215,7 @@ impl Draft {
         out
     }
 
-    /// The Mind first, then each part under its parent, children in id order, with its depth.
+    /// Depth first from the Mind, children in id order, each with its depth.
     pub fn tree(&self) -> Vec<(usize, &Part)> {
         let mut out = Vec::new();
         let mut stack: Vec<(usize, &Part)> =
@@ -239,10 +229,9 @@ impl Draft {
         out
     }
 
-    /// Writes `edit.after` over the parts `edit` names. Refused, leaving the draft as it was,
-    /// when the result is no form or makes a part too small; a fault the draft already had
-    /// does not refuse an edit that leaves it. Too few drones is Apply's to refuse, not the
-    /// draft's, which may pass through none on the way to a design.
+    /// Refused, changing nothing, when the result is no form or has a part too small that was
+    /// not too small before. Too few drones is left for Apply to refuse: a draft may pass through
+    /// none on the way to a design.
     pub fn apply(&mut self, edit: &Edit, balance: &Balance) -> Result<(), Refused> {
         let named: BTreeSet<PartId> = edit.before.iter().chain(&edit.after).map(|p| p.id).collect();
         let mut next = self.form.clone();
@@ -289,7 +278,6 @@ impl Draft {
         Ok(self.one(What::Reshape, part, Part { kind, ..part }))
     }
 
-    /// A spar cut the other way: a reshape, since the cut changes and the charged volume does not.
     pub fn spar_mode(&self, id: PartId, mode: SparMode) -> Result<Edit, Refused> {
         self.set_kind(id, Kind::Spar(mode))
     }
@@ -311,7 +299,6 @@ impl Draft {
         self.place(id, Placement { mirror: on, ..self.placement(id)? })
     }
 
-    /// Attached or enclosing. Back to attached takes the anchor and standoff it last had.
     pub fn toggle_mount(&self, id: PartId) -> Result<Edit, Refused> {
         let placement = self.placement(id)?;
         let mount = match placement.mount {
@@ -324,8 +311,7 @@ impl Draft {
         self.place(id, Placement { mount, ..placement })
     }
 
-    /// Where an attached part hangs, as a direction in its parent's frame. An enclosing part has
-    /// no anchor, and this leaves it as it is.
+    /// `anchor` in the parent's frame. An enclosing part is left as it is.
     pub fn anchor(&self, id: PartId, anchor: DVec3) -> Result<Edit, Refused> {
         let placement = self.placement(id)?;
         let mount = match placement.mount {
@@ -335,8 +321,7 @@ impl Draft {
         self.place(id, Placement { mount, ..placement })
     }
 
-    /// Refused where it would leave the part floating free of its parent, which Apply would
-    /// refuse as detached.
+    /// Refused where the part would no longer touch its parent.
     pub fn standoff(&self, id: PartId, standoff: f64, balance: &Balance) -> Result<Edit, Refused> {
         let placement = self.placement(id)?;
         let part = self.editable(id)?;
@@ -360,7 +345,6 @@ impl Draft {
         self.place(id, Placement { twist, ..self.placement(id)? })
     }
 
-    /// A new part of `kind`, attached to `parent` along `anchor`, a tenth of the parent's size.
     pub fn add(&self, parent: PartId, kind: Kind, primitive: Primitive, anchor: DVec3, balance: &Balance) -> Result<Edit, Refused> {
         let host = self.part(parent).ok_or(Refused::NoSuchPart(parent))?;
         if kind == Kind::Mind {
@@ -381,26 +365,23 @@ impl Draft {
         Ok(Edit { what: What::Add, part: id, before: Vec::new(), after: vec![part], settled: true })
     }
 
-    /// The part and its subtree. The last drones may go too: a draft is a design in progress,
-    /// and a target with too few is refused when it is applied, not while it is drawn.
+    /// The part and its subtree. The last drones may go: see [`Draft::apply`].
     pub fn remove(&self, id: PartId) -> Result<Edit, Refused> {
         self.editable(id)?;
         let before = self.subtree(id);
         Ok(Edit { what: What::Remove, part: id, before, after: Vec::new(), settled: true })
     }
 
-    /// Back to the ship as it is.
     pub fn reset(&self) -> Edit {
         self.replace(self.ship.clone())
     }
 
-    /// The whole draft, as applying a preset does.
     pub fn replace(&self, form: Form) -> Edit {
         let mind = self.form.parts.iter().find(|p| p.kind == Kind::Mind).map_or(PartId(0), |p| p.id);
         Edit { what: What::Whole, part: mind, before: self.form.parts.clone(), after: form.parts, settled: true }
     }
 
-    /// A typed number, exactly: fields do not snap. Angles arrive in degrees.
+    /// Not snapped. Angles in degrees.
     pub fn set_field(&self, id: PartId, field: Field, value: f64) -> Result<Edit, Refused> {
         let part = *self.editable(id)?;
         let placement = part.placement.ok_or(Refused::Mind)?;
@@ -445,8 +426,8 @@ impl Draft {
         }
     }
 
-    /// What the part does for its kind, then what it weighs, every copy counted: dry, and wet
-    /// for a store, full.
+    /// Labeled figures: what the part does for its kind, then its mass, every copy counted. A
+    /// store's wet mass is full.
     pub fn stats(&self, id: PartId, balance: &Balance) -> Vec<(&'static str, String)> {
         use lc_world::fitting::{C2, ONBOARD_DATA_BYTES};
         use lc_world::form::capacity::{Capacities, dry_mass_kg, part_kg};
@@ -485,8 +466,7 @@ impl Draft {
         out
     }
 
-    /// Each changed part's mark, by F8's own diff. Parts the draft removed are marked too; they
-    /// are in the ship, not the draft.
+    /// By F8's own diff, so the marks are the round's steps. Includes parts only in the ship.
     pub fn marks(&self, balance: &Balance) -> BTreeMap<PartId, Mark> {
         let mut seen: BTreeMap<PartId, Vec<Change>> = BTreeMap::new();
         for (id, change) in changes(&self.ship, &self.form, balance) {
@@ -515,8 +495,7 @@ impl Draft {
 
 }
 
-/// A draft to photograph, by `--draft`'s spelling: `edits` for one of each mark on `ship`, or a
-/// preset by `--form`'s.
+/// `--draft`: `edits` for one of each mark on `ship`, or a preset by `--form`'s spelling.
 pub fn staged(name: &str, ship: &Form, balance: &Balance) -> Option<Form> {
     if name != "edits" {
         return crate::parts::fixture(name);
@@ -551,20 +530,17 @@ fn number_of(field: Field, primitive: &Primitive) -> lc_world::form::Number {
     }
 }
 
-/// Directions the touch test samples a part's surface along.
 const TOUCH_SAMPLES: usize = 256;
 /// Of the child's smallest half-extent, how near its surface must come to the parent's to touch.
 const TOUCH_TOLERANCE: f64 = 0.02;
 
-/// Whether `child`, placed by `placement` on `parent`, reaches it anywhere: some point of the
-/// child's surface within a sliver of the parent's, or inside it. The placement rules judge this
-/// on the grid at Apply; this is the editor's quicker reading of the same thing, so a handle can
-/// stop where a part would come away. Tilt matters: it swings a part back into its parent, so a
-/// standoff above zero is not by itself floating.
+/// Whether any sampled point of `child`'s surface is within [`TOUCH_TOLERANCE`] of `parent`. A
+/// quicker reading of the grid rule Apply checks, so a handle can stop before the part comes away.
+/// A positive standoff alone is not floating: tilt swings a part back into its parent.
 pub fn touches(parent: &lc_world::form::primitive::Shape, child: &lc_world::form::primitive::Shape, placement: &Placement) -> bool {
     let pose = lc_world::form::place::relative(parent, child, placement);
     let tolerance = TOUCH_TOLERANCE * child.extent(glam::DMat3::IDENTITY, 0.0).min_element();
-    // A Fibonacci sphere: even enough that no side of the child is missed.
+    // Fibonacci sphere.
     let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
     (0..TOUCH_SAMPLES).any(|k| {
         let z = 1.0 - 2.0 * (k as f64 + 0.5) / TOUCH_SAMPLES as f64;
@@ -575,10 +551,9 @@ pub fn touches(parent: &lc_world::form::primitive::Shape, child: &lc_world::form
     })
 }
 
-/// `primitive` stretched along its own `axis` by `factor` at fixed volume, the stretched ratio
-/// snapped. Volume is stored and scale solved, so changing a ratio cannot change the volume.
+/// At fixed volume: volume is stored and scale solved, so a ratio alone cannot change it.
 pub fn stretched(primitive: Primitive, axis: usize, factor: f64, fine: bool) -> Primitive {
-    // Along the axis a length grows; across it the radius does, which is the length shrinking.
+    // Across the axis the radius grows, which is the length ratio shrinking.
     let along = |ratio: f64| {
         let f = if axis == 0 { factor } else { 1.0 / factor };
         snap::ratio(ratio.max(MIN_RATIO) * f, fine)
@@ -603,13 +578,11 @@ pub fn stretched(primitive: Primitive, axis: usize, factor: f64, fine: bool) -> 
     }
 }
 
-/// `part` stretched along its own `axis` by `factor`, the stretched ratio snapped, keeping every
-/// dimension across that axis: its volume grows with it. [`stretched`] is the same at fixed volume.
+/// Like [`stretched`], but keeping the other dimensions, so the volume changes.
 pub fn grown(part: &Part, axis: usize, factor: f64, fine: bool) -> Part {
     let primitive = stretched(part.primitive, axis, factor, fine);
     let scale = part.primitive.scale(part.volume_m3);
-    // Scale is the ellipsoid's and slab's first semi-axis or edge, the round primitives' radius
-    // and the torus's minor radius. Whichever of those the stretch moves goes with it.
+    // Scale is the first semi-axis or edge, the radius, or a torus's minor radius.
     let kept = match (part.primitive, primitive) {
         (Primitive::Ellipsoid { axes: a }, Primitive::Ellipsoid { axes: b }) => scale * b.x / a.x,
         (Primitive::Slab { edges: a, .. }, Primitive::Slab { edges: b, .. }) => scale * b.x / a.x,
@@ -623,10 +596,10 @@ pub fn grown(part: &Part, axis: usize, factor: f64, fine: bool) -> Part {
     Part { primitive, volume_m3: primitive.volume(kept), ..*part }
 }
 
-/// So a sphere of a capsule, whose length is zero, can still be stretched into one.
+/// So a capsule of length zero can still be stretched.
 const MIN_RATIO: f64 = 0.1;
 
-/// A figure to read rather than type: three significant digits.
+/// Three significant digits, for reading.
 pub fn figure(x: f64) -> String {
     let trimmed = |s: String| s.trim_end_matches('0').trim_end_matches('.').to_string();
     if x == 0.0 || !x.is_finite() {
@@ -642,7 +615,7 @@ pub fn figure(x: f64) -> String {
     }
 }
 
-/// A field's number as typed back to it: short, and exact enough to round-trip what a handle set.
+/// For a field: short, and exact enough to round-trip what a handle set.
 pub fn shown(x: f64) -> String {
     let trimmed = |s: String| s.trim_end_matches('0').trim_end_matches('.').to_string();
     if x != 0.0 && (x.abs() >= 1.0e5 || x.abs() < 1.0e-3) {
@@ -654,7 +627,6 @@ pub fn shown(x: f64) -> String {
     }
 }
 
-/// The value `field` shows for `part`, if the part has one.
 pub fn value(part: &Part, field: Field) -> Option<f64> {
     let placement = part.placement;
     let attached = placement.and_then(|p| match p.mount {
@@ -681,7 +653,7 @@ pub fn value(part: &Part, field: Field) -> Option<f64> {
     }
 }
 
-/// The fields `part` has, as the panel lists them: a label and the numbers on its line.
+/// A label and the fields on its line.
 pub fn fields(part: &Part) -> Vec<(&'static str, Vec<Field>)> {
     let three = |make: fn(usize) -> Field| vec![make(0), make(1), make(2)];
     let mut out = vec![("volume m3", vec![Field::Volume])];
@@ -737,7 +709,6 @@ mod tests {
         assert_eq!(d.add(PartId(0), Kind::Mind, PRIMITIVES[0], DVec3::X, &B), Err(Refused::Mind));
     }
 
-    /// A removal keeps the whole subtree, so writing its `before` back is exact.
     #[test]
     fn a_removal_carries_the_part_and_its_subtree_and_undoes_exactly() {
         let mut d = draft();
@@ -770,7 +741,6 @@ mod tests {
         assert_eq!(d.form, d.ship);
     }
 
-    /// 29: switching an enclosing part back to attached restores its anchor and standoff.
     #[test]
     fn an_enclosing_part_keeps_its_last_anchor_and_standoff() {
         let mut d = draft();
@@ -782,7 +752,6 @@ mod tests {
         assert_eq!(d.form, d.ship);
     }
 
-    /// Marks come from the planner's own diff.
     #[test]
     fn each_change_is_marked_as_the_round_would_make_it() {
         let mut d = draft();
@@ -802,7 +771,6 @@ mod tests {
         assert_eq!(marks[&PartId(6)], Mark::Build);
     }
 
-    /// The staged draft the shots are taken of carries one of each mark.
     #[test]
     fn the_staged_draft_has_every_mark() {
         let mut d = draft();
@@ -818,13 +786,10 @@ mod tests {
             panic!()
         };
         assert_eq!(axes, DVec3::new(5.0, 4.0, 1.0));
-        // Across a capsule's axis it is the radius that grows, which is the length shrinking.
         assert_eq!(stretched(Primitive::Capsule { length: 2.0 }, 2, 2.0, false), Primitive::Capsule { length: 1.0 });
         assert_eq!(stretched(Primitive::Torus { major: 3.0 }, 0, 4.0, false), Primitive::Torus { major: 1.0 });
     }
 
-    /// Without the modifier an axis handle moves one dimension and leaves the others alone, so
-    /// the volume goes with it.
     #[test]
     fn a_free_stretch_keeps_the_other_dimensions() {
         use lc_world::form::primitive::Shape;
@@ -856,8 +821,7 @@ mod tests {
         assert!(close(m, major) && n > minor, "along: a fatter tube on the same ring");
     }
 
-    /// A standoff that lifts a part clear of its parent is refused; one that a tilt swings back
-    /// into it is not, which is how the starting form's drone pod hangs.
+    /// The starting pod's standoff is positive and its tilt keeps it touching.
     #[test]
     fn a_part_cannot_be_stood_off_its_parent() {
         let d = draft();
@@ -885,7 +849,6 @@ mod tests {
         }
     }
 
-    /// The detail says what a part does for its kind, and what it weighs.
     #[test]
     fn a_part_is_described_by_what_it_does_for_its_kind() {
         let d = draft();

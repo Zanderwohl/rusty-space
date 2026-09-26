@@ -1,17 +1,12 @@
-//! The editor's handles: picking a part where it is drawn, and the handles that edit it there.
+//! Picking a part where it is drawn, and the handles that edit it there: a line per axis with a
+//! square end, a diagonal for size with a ball, one ring for twist, and an arrow for standoff.
 //!
-//! Drawn after newseum's editor controls: a line per axis of the part in red, green and blue with a
-//! square end, a line along its diagonal for size, one ring for its twist, and an arrow into its
-//! parent for its standoff. They are meshes on their own layer, drawn by a camera of their own
-//! after the parts so they are never buried in a hull, and sized in pixels so they read the same
-//! on a 500 m ship and a 50 km one.
-//!
-//! A line drags by the point on it nearest the pointer's ray, and the ring by where the ray meets
-//! its plane, so a handle stays under the pointer however the camera is turned. Both are measured
-//! against the handle as it stood when the drag began. Picking is in screen space over the same
-//! geometry that is drawn, and a press on a handle is neither the camera's nor a part's. A drag
-//! sends an edit each frame it moves and a settled one on release: one gesture, one entry in the
-//! history. See `lightcone/docs/29-ship-form.md` §Handles.
+//! Meshes on their own layer, drawn by a camera of their own after the parts so a hull never
+//! buries them, and sized in pixels. A line drags by its point nearest the pointer's ray and the
+//! ring by where the ray meets its plane, so a handle stays under the pointer however the camera
+//! is turned; both are measured against the handle as it was when the drag began. Picking is in
+//! screen space over the drawn geometry: the picture is an image in Bevy UI, which mesh picking
+//! cannot see into. See `lightcone/docs/29-ship-form.md` §Handles.
 
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::input::mouse::MouseButton;
@@ -34,23 +29,17 @@ use crate::input::Requested;
 use crate::snap;
 use crate::ui::ViewMode;
 
-/// The handles' own layer, drawn by the handle camera over the parts.
 pub const FORM_HANDLE_LAYER: usize = 6;
 
-/// Which edit a handle makes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Grip {
-    /// Volume at fixed proportions, along the part's diagonal.
     Size,
-    /// One dimension, along the part's own axis. The volume goes with it, or with the
-    /// constant-volume modifier the others give way instead.
+    /// One dimension; the volume goes with it unless the modifier holds it.
     Axis(usize),
     Twist,
-    /// Into the parent, and back out to resting on it.
     Standoff,
 }
 
-/// Past the part's half-extent, how far out a handle reaches.
 const REACH_OUT: f64 = 1.3;
 /// However small the part is drawn, a handle is at least this long.
 const MIN_ARM_PX: f64 = 50.0;
@@ -60,11 +49,10 @@ const HEAD_PX: (f64, f64) = (18.0, 7.0);
 /// A ball the width of a square reads smaller than it.
 const BALL_OVER_END: f64 = 1.2;
 const RING_SEGMENTS: usize = 48;
-/// Of its start, the least a line handle may be pulled in to, so a part cannot be dragged through
-/// nothing.
+/// Of where it was taken hold of, the least a line may be pulled in to.
 const LEAST_PULL: f64 = 0.05;
 
-/// The camera the handles are laid against: its orbit over the draft, into the picture.
+/// The editor's camera, as the handles see it.
 #[derive(Clone, Copy, Debug)]
 pub struct Lens {
     pub orbit: FormOrbit,
@@ -82,8 +70,7 @@ impl Lens {
         (self.rect.width() / self.rect.height().max(1.0)) as f64
     }
 
-    /// Where `p`, ship frame, is drawn, logical pixels, and how far in front of the eye. `None`
-    /// behind it.
+    /// Logical pixels, and depth in meters. `None` behind the eye.
     pub fn project(&self, p: DVec3) -> Option<(Vec2, f64)> {
         let [forward, right, up] = self.orbit.basis();
         let v = p - self.orbit.eye_m(&self.extent);
@@ -97,7 +84,7 @@ impl Lens {
         Some((Vec2::new(x as f32, y as f32), depth))
     }
 
-    /// The ray under `at`, logical pixels: from the eye, unit, ship frame.
+    /// From the eye, unit, ship frame.
     pub fn ray(&self, at: Vec2) -> (DVec3, DVec3) {
         let ndc = DVec2::new(
             ((at.x - self.rect.min.x) / self.rect.width() * 2.0 - 1.0) as f64,
@@ -106,14 +93,13 @@ impl Lens {
         self.orbit.ray(&self.extent, FORM_FOV as f64, self.aspect(), ndc)
     }
 
-    /// Meters across a pixel at `depth` meters.
     pub fn m_per_px(&self, depth: f64) -> f64 {
         depth * 2.0 * self.half_tan() / self.rect.height().max(1.0) as f64
     }
 }
 
-/// Where the ray first meets a part as drawn, the part's primitive uncut and unblended, as the
-/// editor's meshes are. The piece's index and the point.
+/// The piece the ray first meets, and where. Against the uncut, unblended primitives, which is
+/// what the editor's meshes draw.
 pub fn hit(sdf: &Sdf, origin: DVec3, direction: DVec3, limit_m: f64) -> Option<(usize, DVec3)> {
     hit_except(sdf, origin, direction, limit_m, &std::collections::BTreeSet::new())
 }
@@ -147,9 +133,8 @@ pub fn hit_except(
     None
 }
 
-/// The part under `at`: the one a ray meets outright, else the nearest drawn within
-/// [`SLACK_PX`], so a part a few pixels across can still be taken. Both are built from the pieces
-/// as drawn, so picking agrees with the picture.
+/// The part a ray meets outright, else the nearest within [`SLACK_PX`], so a part a few pixels
+/// across can still be taken.
 pub fn pick_part(sdf: &Sdf, lens: &Lens, at: Vec2) -> Option<PartId> {
     let (origin, direction) = lens.ray(at);
     let limit = 10.0 * lens.extent.size_m() * lens.orbit.distance.max(1.0);
@@ -170,39 +155,33 @@ pub(crate) fn original(sdf: &Sdf, part: PartId) -> Option<(usize, &Piece)> {
     sdf.pieces().iter().enumerate().find(|(_, p)| p.part == part && p.side == Side::Original)
 }
 
-/// The part's own half-extents along its own axes.
 fn half(piece: &Piece) -> DVec3 {
     piece.shape.extent(DMat3::IDENTITY, 0.0)
 }
 
-/// Where the selected part's handles are, ship frame, meters.
+/// Ship frame, meters.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Handles {
     pub center: DVec3,
-    /// The part's axes, unit.
     pub axes: DMat3,
-    /// Each axis line's length.
     pub arms: DVec3,
     /// The size line's end.
     pub diagonal: DVec3,
     pub ring: Ring,
-    /// The standoff arrow's root and tip, for an attached part: along the parent's normal at
-    /// the anchor, pointing into the parent.
+    /// Root and tip, into the parent along its normal at the anchor. Attached parts only.
     pub sink: Option<(DVec3, DVec3)>,
-    /// Meters across a pixel at the part.
     pub m_per_px: f64,
-    /// The parent's shape and the part's, for where a standoff would leave it touching.
+    /// The parent's and the part's, for the touch test.
     pub shapes: (lc_world::form::primitive::Shape, lc_world::form::primitive::Shape),
 }
 
-/// What a part's twist turns it about: its parent's surface normal through its foot, or its
-/// parent's axis when it encloses. Not the part's own axis, which a tilt takes off it.
+/// What twist turns a part about: the parent's normal through the foot, or the parent's axis for
+/// an enclosing part. Not the part's own axis, which a tilt moves off it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ring {
     pub center: DVec3,
     pub axis: DVec3,
-    /// Across the axis, with `across.0 × across.1 = axis`, so an angle measured from the first
-    /// toward the second is a right-handed turn, as a twist is.
+    /// `across.0 × across.1 = axis`, so angles run right-handed, as twist does.
     pub across: (DVec3, DVec3),
     pub radius: f64,
 }
@@ -211,7 +190,7 @@ impl Ring {
     fn about(axis: DVec3, through: DVec3, part: DVec3, h: DVec3, least: f64) -> Ring {
         let axis = axis.normalize();
         let (a, _) = axis.any_orthonormal_pair();
-        // Level with the part, and wide enough to go round it where a tilt swings it off the axis.
+        // Wide enough to go round a part a tilt swings off the axis.
         let center = through + axis * (part - through).dot(axis);
         let off = (part - center).length();
         Ring { center, axis, across: (a, axis.cross(a)), radius: (off + h.y.max(h.z) * REACH_OUT * 1.1).max(least) }
@@ -231,8 +210,7 @@ impl Handles {
         let center = piece.pose.position;
         let (ring, sink) = match placement.mount {
             Mount::Attached { anchor, .. } => {
-                // As placement finds it: where a ray from the parent's middle along the anchor
-                // leaves it.
+                // As `place::relative` finds it.
                 let exit = parent.shape.exit((anchor / anchor.abs().max_element()).normalize());
                 let normal = (parent.pose.rotation * exit.normal).normalize();
                 let foot = center - axes.x_axis * piece.shape.reach();
@@ -262,7 +240,6 @@ impl Handles {
         out
     }
 
-    /// A line handle, from its root to its end.
     fn line(&self, grip: Grip) -> Option<(DVec3, DVec3)> {
         match grip {
             Grip::Axis(i) => Some((self.center, self.center + self.axes.col(i) * self.arms[i])),
@@ -282,8 +259,7 @@ impl Handles {
             .collect()
     }
 
-    /// The handle under `at`, by what is drawn: a line along its length, its end as a square, the
-    /// ring all round.
+
     pub fn under(&self, lens: &Lens, at: Vec2) -> Option<Grip> {
         let grips = self.grips();
         let mut candidates = Vec::new();
@@ -291,7 +267,7 @@ impl Handles {
             let points: Vec<DVec3> = match self.line(*grip) {
                 Some((from, to)) => {
                     if let Some((end, _)) = lens.project(to) {
-                        // Ends before lines, so a square where a line crosses it is the square's.
+                        // Ends outrank lines where they cross.
                         candidates.push(Candidate { id: index as u64, at: end, radius_px: (END_PX * 0.5) as f32, rank: rank::CRAFT });
                     }
                     vec![from, to]
@@ -307,8 +283,7 @@ impl Handles {
     }
 }
 
-/// The parameter along the line through `origin` in unit `direction` of its point nearest the ray.
-/// `None` for a ray nearly along the line.
+/// Along the line, of its point nearest the ray. `None` for a ray nearly along it.
 fn along_line(origin: DVec3, direction: DVec3, ray: (DVec3, DVec3)) -> Option<f64> {
     let (from, toward) = ray;
     let b = toward.dot(direction);
@@ -317,8 +292,7 @@ fn along_line(origin: DVec3, direction: DVec3, ray: (DVec3, DVec3)) -> Option<f6
     (denom.abs() > 1e-9).then(|| (w.dot(direction) - b * w.dot(toward)) / denom)
 }
 
-/// The angle about `handles`' axis of where the ray meets the ring's plane. `None` for a ray
-/// along the plane.
+/// Where the ray meets the ring's plane, as an angle. `None` for a ray in the plane.
 fn angle_on_ring(handles: &Handles, ray: (DVec3, DVec3)) -> Option<f64> {
     let (from, toward) = ray;
     let Ring { center, axis, across: (a, b), .. } = handles.ring;
@@ -330,14 +304,13 @@ fn angle_on_ring(handles: &Handles, ray: (DVec3, DVec3)) -> Option<f64> {
     Some(v.dot(b).atan2(v.dot(a)))
 }
 
-/// A drag under way: what was grabbed, the part and its handles as they were when it began, and
-/// where on the handle the pointer took hold.
+/// A drag under way, with the part and its handles as they were when it began.
 #[derive(Clone, Copy, Debug)]
 pub struct Held {
     pub grip: Grip,
     pub part: Part,
     pub handles: Handles,
-    /// Along a line from its root, meters, or the angle round the ring.
+    /// Where the pointer took hold: meters along a line, or radians round the ring.
     pub start: f64,
     pub reach_m: f64,
 }
@@ -356,12 +329,10 @@ impl Held {
         }
     }
 
-    /// The edit a drag to `at` makes.
     pub fn edit(&self, lens: &Lens, at: Vec2, keys: Modifiers, balance: &Balance) -> Result<Edit, Refused> {
         let fine = keys.fine;
         let placement = self.part.placement.ok_or(Refused::Mind)?;
         let now = Self::measure(self.grip, &self.handles, lens, at).ok_or(Refused::NoSuchPart(self.part.id))?;
-        // How far out a line was pulled, as a ratio of where it was taken hold of.
         let pulled = (now / self.start).max(LEAST_PULL);
         let (what, after) = match self.grip {
             Grip::Size => {
@@ -382,8 +353,7 @@ impl Held {
             }
             Grip::Standoff => {
                 let Mount::Attached { anchor, standoff } = placement.mount else { return Err(Refused::Mind) };
-                // The arrow points into the parent, so pulling along it sinks the part. Never out
-                // past where it would come away from the parent.
+                // Pulling along the arrow sinks the part.
                 let wanted = snap::standoff(standoff - (now - self.start) / self.reach_m, fine);
                 let at = |s: f64| Placement { mount: Mount::Attached { anchor, standoff: s }, ..placement };
                 let (parent, child) = self.handles.shapes;
@@ -399,8 +369,8 @@ impl Held {
     }
 }
 
-/// Between `from`, which touches, and `to`, which does not, the furthest standoff that still
-/// touches, on the snapping steps.
+/// Between `from`, which touches, and `to`, which does not, the furthest snapped standoff that
+/// still touches.
 fn furthest_touching(from: f64, to: f64, fine: bool, touches: impl Fn(f64) -> bool) -> f64 {
     let (mut near, mut far) = (from, to);
     for _ in 0..32 {
@@ -430,15 +400,13 @@ impl Plugin for FormHandlesPlugin {
     }
 }
 
-/// The lens for this frame, while the editor is the view and has something to draw.
 pub fn lens(ui: &Ui, shown: &Shown, surface: &FormSurface) -> Option<Lens> {
     let extent = shown.extent()?;
     let rect = crate::form_view::picture(surface)?;
     (ui.view == ViewMode::Form).then(|| Lens { orbit: ui.form.orbit.held_to(&extent), extent, rect })
 }
 
-/// The modifiers a drag reads: Alt for the finer snapping steps, and Shift to stretch an axis
-/// at fixed volume.
+/// Alt for the finer snapping steps; Shift to stretch an axis at fixed volume.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Modifiers {
     pub fine: bool,
@@ -454,8 +422,8 @@ impl Modifiers {
     }
 }
 
-/// The handle being dragged, and the last edit it sent. A press that takes hold of one is
-/// neither the slide's nor a part's.
+/// The handle being dragged and the last edit it sent. While set, a press is neither the slide's
+/// nor a part's.
 #[derive(Resource, Default)]
 pub struct Grabbed(Option<(Held, Option<Edit>, Vec2)>);
 
@@ -465,15 +433,13 @@ impl Grabbed {
     }
 }
 
-/// The selected part and its handles this frame.
 fn selected_handles<'a>(ui: &Ui, sdf: &'a Sdf, lens: &Lens) -> Option<(Part, &'a Piece, Handles)> {
     let part = *ui.form.draft.as_ref()?.part(ui.form.selected?)?;
     let (_, piece) = original(sdf, part.id)?;
     Some((part, piece, Handles::of(&part, piece, sdf, lens)?))
 }
 
-/// A drag on a handle, as edits. Each frame the pointer moves sends one measured from the press,
-/// and the release sends it settled.
+/// An unsettled edit each frame the pointer moves, and the last settled on release.
 #[allow(clippy::too_many_arguments)]
 pub fn drag_handles(
     ui: Res<Ui>,
@@ -522,7 +488,6 @@ pub fn drag_handles(
     }
 }
 
-/// Delete takes the selected part and its subtree, unless the part is one that may not go.
 pub fn delete_key(
     ui: Res<Ui>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -539,7 +504,7 @@ pub fn delete_key(
     }
 }
 
-/// Each handle's paint at rest and under the pointer.
+/// Each handle's paint at rest and lit.
 #[derive(Resource)]
 struct Looks {
     axes: [(Handle<StandardMaterial>, Handle<StandardMaterial>); 3],
@@ -550,7 +515,7 @@ struct Looks {
     head: Handle<Mesh>,
 }
 
-/// 18 §Handles: the usual red, green and blue for the part's axes, brighter under the pointer.
+/// 18 §Handles.
 const AXIS_COLORS: [Color; 3] = [Color::srgb(0.95, 0.25, 0.22), Color::srgb(0.30, 0.85, 0.30), Color::srgb(0.30, 0.50, 1.0)];
 const NEUTRAL: Color = Color::srgb(0.85, 0.85, 0.80);
 
@@ -584,11 +549,9 @@ impl Looks {
     }
 }
 
-/// The ship's frame for the handles.
 #[derive(Component)]
 struct HandleRoot(Option<PartId>);
 
-/// One mesh of a handle, and which: a line's shaft, its end, or a stretch of the ring.
 #[derive(Component, Clone, Copy, PartialEq)]
 enum Bit {
     Shaft(Grip),
@@ -605,7 +568,7 @@ impl Bit {
     }
 }
 
-/// A unit mesh along +y, laid from `from` to `to` at `width` meters across.
+/// A unit mesh along +y, laid from `from` to `to`, `width` meters across.
 fn laid(from: DVec3, to: DVec3, width: f64) -> Transform {
     let span = to - from;
     Transform {
@@ -621,7 +584,6 @@ impl Bit {
         match self {
             Bit::Shaft(grip) => {
                 let (from, to) = handles.line(grip).unwrap_or_default();
-                // The arrow's shaft stops where its head begins.
                 let back = if grip == Grip::Standoff { (to - from).normalize_or(DVec3::X) * HEAD_PX.0 * px } else { DVec3::ZERO };
                 laid(from, to - back, LINE_PX * px)
             }
@@ -645,8 +607,7 @@ impl Bit {
     }
 }
 
-/// The selected part's handles, rebuilt when the selection or its set of handles changes and
-/// moved every frame; lit under the pointer and while held.
+/// Rebuilt when the selection or its set of handles changes; moved every frame.
 #[allow(clippy::too_many_arguments)]
 fn draw(
     mut commands: Commands,
@@ -695,7 +656,6 @@ fn build(commands: &mut Commands, looks: &Looks, part: PartId, handles: &Handles
         match grip {
             Grip::Twist => bits.extend((0..RING_SEGMENTS).map(|k| (Bit::Arc(k), looks.line.clone()))),
             Grip::Standoff => bits.push((Bit::End(grip), looks.head.clone())),
-            // Round, so the one that scales everything reads apart from the three that scale one way.
             Grip::Size => bits.push((Bit::End(grip), looks.ball.clone())),
             _ => bits.push((Bit::End(grip), looks.end.clone())),
         }
@@ -749,7 +709,6 @@ mod tests {
         lens.project(p).unwrap().0
     }
 
-    /// A projected point comes back along the ray through the pixel it was drawn at.
     #[test]
     fn a_point_projects_to_the_pixel_whose_ray_passes_through_it() {
         let (_, _, lens) = scene();
@@ -760,8 +719,7 @@ mod tests {
         assert!(off.length() < 1e-3 * (p - origin).length(), "{off}");
     }
 
-    /// **Picking agrees with what is drawn**: a pixel on a part picks that part, and a pixel far
-    /// from the ship picks nothing.
+
     #[test]
     fn the_part_drawn_under_a_pixel_is_the_part_picked() {
         let (_, sdf, lens) = scene();
@@ -774,7 +732,6 @@ mod tests {
         assert_eq!(pick_part(&sdf, &lens, Vec2::new(5.0, 700.0)), None);
     }
 
-    /// Each handle is picked where it is drawn: its end, and anywhere along it.
     #[test]
     fn a_handle_is_picked_where_it_is_drawn() {
         let (draft, sdf, lens) = scene();
@@ -791,7 +748,6 @@ mod tests {
         assert!(h.sink.is_none() && !h.grips().contains(&Grip::Standoff), "{:?} encloses, so no standoff", storage.id);
     }
 
-    /// However small the part is drawn, a handle is long enough to take hold of.
     #[test]
     fn a_handle_is_never_shorter_than_a_grip() {
         let (draft, sdf, mut lens) = scene();
@@ -802,8 +758,7 @@ mod tests {
         }
     }
 
-    /// Pulled out to twice where it was taken hold of, the size line grows the part eightfold,
-    /// on the ladder.
+    /// Twice as far out is eight times the volume.
     #[test]
     fn the_size_line_scales_the_part_as_far_as_it_is_pulled() {
         let (draft, sdf, lens) = scene();
@@ -820,8 +775,6 @@ mod tests {
         assert!(!edit.settled, "a drag is settled on release");
     }
 
-    /// An axis line grows that dimension and the volume with it; with Shift the volume is kept
-    /// and the other dimensions give way.
     #[test]
     fn an_axis_line_grows_the_part_unless_the_volume_is_held() {
         let (draft, sdf, lens) = scene();
@@ -837,9 +790,7 @@ mod tests {
         assert_ne!(kept.primitive, part.primitive);
     }
 
-    /// A quarter turn round the ring is a quarter turn of the part about what twist turns it
-    /// about, the way the pointer went: for the drone pod, tilted to lie under the keel, that is
-    /// the hull's normal and not the pod's own axis.
+    /// The drone pod is tilted, so its twist axis is the hull's normal, not the pod's own axis.
     #[test]
     fn the_ring_turns_the_part_about_its_twist_axis_as_far_as_the_pointer_goes() {
         let (draft, sdf, lens) = scene();
@@ -860,7 +811,6 @@ mod tests {
         assert!(pod.ring.axis.dot(piece.pose.rotation.x_axis).abs() < 0.9, "the pod is tilted off the normal");
     }
 
-    /// The arrow runs along the parent's normal at the anchor, into the parent, whatever the tilt.
     #[test]
     fn the_standoff_arrow_is_the_parents_normal() {
         let (draft, sdf, lens) = scene();
@@ -876,8 +826,7 @@ mod tests {
         assert!((after - before).normalize().dot((tip - root).normalize()) > 0.999, "sinking moves it along the arrow");
     }
 
-    /// The arrow points into the parent: pulled along it the part sinks, by tenths, and pushed
-    /// back it stops resting on the parent.
+
     #[test]
     fn the_standoff_arrow_sinks_the_part_and_stops_where_it_would_come_away() {
         let (draft, sdf, lens) = scene();

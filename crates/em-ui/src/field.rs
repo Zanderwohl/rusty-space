@@ -1,12 +1,7 @@
-//! A text field for a number, over Bevy's own [`EditableText`].
+//! A text field for a number, over Bevy's own [`EditableText`], which does the editing.
 //!
-//! Bevy 0.19 edits text itself, with `bevy_ui_widgets` turning keys and presses into edits, so
-//! this is only what a number needs on top: which characters it takes, when it is committed, and
-//! showing a value changed elsewhere without trampling one being typed.
-//!
-//! **Enter or leaving the field commits it; Escape puts back what it showed.** A commit is a
-//! [`Committed`] message naming the field, which the caller reads its own marker off, as a button
-//! carries its action.
+//! Enter or leaving the field commits it, as a [`Committed`] naming the field for the caller to
+//! read its own marker off; Escape puts back what it showed.
 
 use bevy::ecs::system::SystemParam;
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -14,20 +9,18 @@ use bevy::input_focus::{FocusLost, FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 
-/// A field holding a number. What it last showed, so a commit that changed nothing is not one.
+/// What it last showed, so a commit that changed nothing is not one.
 #[derive(Component, Default)]
 pub struct NumberField {
     shown: String,
 }
 
-/// A number typed and committed.
 #[derive(Message, Clone, Debug, PartialEq)]
 pub struct Committed {
     pub field: Entity,
     pub value: f64,
 }
 
-/// What a number field lets through: digits, a point, a sign and an exponent.
 pub fn numeric(c: char) -> bool {
     c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')
 }
@@ -37,8 +30,7 @@ pub fn parse(text: &str) -> Option<f64> {
 }
 
 impl NumberField {
-    /// Show `text`, unless the field is being typed in: a value moved by a drag elsewhere reaches
-    /// every field but the one with the keyboard.
+    /// Unless it is being typed in.
     pub fn show(&mut self, editable: &mut EditableText, focused: bool, text: &str) {
         if focused || (self.shown == text && editable.value().to_string() == text) {
             return;
@@ -48,7 +40,7 @@ impl NumberField {
     }
 }
 
-/// Whether the keyboard belongs to a text field, so key bindings stand down while one is typed in.
+/// Whether a text field has the keyboard, so key bindings stand down.
 #[derive(SystemParam)]
 pub struct Typing<'w, 's> {
     focus: Option<Res<'w, InputFocus>>,
@@ -72,7 +64,6 @@ impl Plugin for FieldPlugin {
     }
 }
 
-/// The field's number, if it was changed and is one.
 fn committed(field: &NumberField, editable: &EditableText) -> Option<f64> {
     let text = editable.value().to_string();
     (text != field.shown).then(|| parse(&text)).flatten()
@@ -115,8 +106,7 @@ fn on_focus_lost(lost: On<FocusLost>, fields: Query<(&NumberField, &EditableText
     }
 }
 
-/// A press anywhere but the field takes the keyboard from it, which commits it. Bevy moves the
-/// focus only to something focusable, and a rendered view is not.
+/// Bevy moves the focus only to something focusable, and a rendered view is not.
 fn blur_on_press_elsewhere(
     buttons: Res<ButtonInput<MouseButton>>,
     focus: Option<ResMut<InputFocus>>,
@@ -189,8 +179,7 @@ mod tests {
         messages.get_cursor().read(messages).cloned().collect()
     }
 
-    /// Enter commits a changed number and gives the keyboard back; its systems and observers
-    /// are valid together, which nothing but running them checks.
+    /// Runs the observers, which is the only check that their queries do not conflict.
     #[test]
     fn enter_commits_the_number_typed() {
         let (mut app, field) = app_with_field("1", "2.5e6");

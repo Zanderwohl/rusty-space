@@ -55,7 +55,6 @@ pub struct MenuTheme {
     pub border: Color,
     pub text: Color,
     pub text_dim: Color,
-    /// What a text field is filled with.
     pub field_bg: Color,
     /// The wash behind a modal. See [`MenuUi::overlay`](crate::widgets::MenuUi::overlay).
     pub overlay_backdrop: Color,
