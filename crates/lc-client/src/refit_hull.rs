@@ -93,6 +93,32 @@ pub struct Ending {
     waited_s: f32,
 }
 
+/// What a round's last meshes do once the round is over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HandBack {
+    /// There are none to take down.
+    Nothing,
+    /// Stay up: the real hull is not yet the form the round left.
+    Keep,
+    Handed,
+    /// Waited [`HAND_BACK_S`] for a hull that never agreed.
+    GaveUp,
+}
+
+/// `ending` is the [`form_hash`] the round left, `own_current` the one the real hull is current
+/// in, and `waited_s` how long since the round was over.
+fn hand_back(ending: Option<u64>, own_current: Option<u64>, waited_s: f32, meshes_up: bool) -> HandBack {
+    if !meshes_up {
+        HandBack::Nothing
+    } else if ending.is_none_or(|form| own_current == Some(form)) {
+        HandBack::Handed
+    } else if waited_s > HAND_BACK_S {
+        HandBack::GaveUp
+    } else {
+        HandBack::Keep
+    }
+}
+
 /// Draw the player's refit over its real hull.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_refit(
@@ -121,13 +147,15 @@ pub fn draw_refit(
     };
     let Some(refit) = refit.filter(|_| own.is_formed()) else {
         unready.0 = false;
-        let handed = ending.form.is_none_or(|form| real.own_current() == Some(form));
-        ending.waited_s += time.delta_secs();
-        if handed || ending.waited_s > HAND_BACK_S || generations.is_empty() {
-            match (handed, generations.is_empty()) {
-                (_, true) => {}
-                (true, false) => info!("refit_hull: handed back to the real hull after {:.2} s", ending.waited_s),
-                (false, false) => warn!("refit_hull: the real hull never became the form the round left"),
+        if ending.form.is_some() {
+            ending.waited_s += time.delta_secs();
+        }
+        let decided = hand_back(ending.form, real.own_current(), ending.waited_s, !generations.is_empty());
+        if decided != HandBack::Keep {
+            match decided {
+                HandBack::Handed => info!("refit_hull: handed back to the real hull after {:.2} s", ending.waited_s),
+                HandBack::GaveUp => warn!("refit_hull: the real hull never became the form the round left"),
+                HandBack::Nothing | HandBack::Keep => {}
             }
             for (root, ..) in &generations {
                 commands.entity(root).despawn();
@@ -436,6 +464,19 @@ mod tests {
             assert!(a.position.distance(b.position) > 1.0, "{:?} did not ride", rider.part);
             assert!(b.position.distance(rider.pose.position) < 1e-3, "{:?} ends apart from the grown form", rider.part);
         }
+    }
+
+    /// A round's last meshes stay up until the real hull is the form the round left, and no
+    /// longer than [`HAND_BACK_S`] if it never is.
+    #[test]
+    fn the_last_meshes_wait_for_the_real_hull() {
+        let (left, earlier) = (Some(7), Some(3));
+        assert_eq!(hand_back(left, None, 0.1, true), HandBack::Keep, "not meshed yet");
+        assert_eq!(hand_back(left, earlier, 0.1, true), HandBack::Keep, "meshed in the form before the round");
+        assert_eq!(hand_back(left, left, 0.1, true), HandBack::Handed);
+        assert_eq!(hand_back(left, earlier, HAND_BACK_S + 0.1, true), HandBack::GaveUp);
+        assert_eq!(hand_back(left, earlier, 0.1, false), HandBack::Nothing);
+        assert_eq!(hand_back(None, None, 0.0, true), HandBack::Handed, "no round was seen to end");
     }
 
     /// The truss the demo's grown hull puts up is meshed, and within the budget by a margin.

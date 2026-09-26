@@ -238,6 +238,14 @@ pub struct ShipHull {
     placeholders: Option<(u64, Entity)>,
 }
 
+#[cfg(test)]
+impl ShipHull {
+    /// A root for `craft` with no mesh yet, for a test that only needs one to exist.
+    pub(crate) fn bare(craft: Option<ShipId>, mesh: Entity) -> Self {
+        ShipHull { craft, form: None, shown_roll: 0.0, rotation: Quat::IDENTITY, mesh, placeholders: None }
+    }
+}
+
 /// The mesh under a [`ShipHull`]. It has no [`HullForm`] until the form's roll is known.
 #[derive(Component)]
 pub struct HullMesh;
@@ -265,9 +273,27 @@ pub struct Stated {
 struct Wanted {
     craft: Option<ShipId>,
     form: Decoded,
+    /// What the form is solved with, so its hash and its mesh cannot disagree.
+    balance: Balance,
     at_ly: DVec3,
     placed: Transform,
     facing: DVec3,
+}
+
+/// What a craft's hull shows this frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Shown {
+    mesh: bool,
+    placeholders: bool,
+    /// Whether [`RealHulls`] says it is drawn, which stands the player's placeholders aside.
+    drawn: bool,
+}
+
+/// `own` for the player's ship, `has_mesh` once any mesh of it has landed, `aside` while a
+/// refit's meshes stand in for it. The player's placeholders are [`crate::parts`]'s, which draw a
+/// refit's as well.
+fn shown(own: bool, has_mesh: bool, aside: bool) -> Shown {
+    Shown { mesh: has_mesh && !(own && aside), placeholders: !own && !has_mesh, drawn: has_mesh }
 }
 
 /// Draw every craft with a form as its real hull, and the player's own while no refit stands it
@@ -285,7 +311,7 @@ pub fn draw_hulls(
     (mut materials, mut flat, mut meshes): (ResMut<Assets<HullMaterial>>, ResMut<Assets<BodySurfaceMaterial>>, ResMut<Assets<Mesh>>),
     mut hulls: Query<(Entity, &mut ShipHull, &mut Transform)>,
     mut drawn: Query<
-        (Option<&mut HullForm>, Option<&HullMeshState>, Has<Mesh3d>, &MeshMaterial3d<HullMaterial>, &mut Visibility),
+        (Option<&mut HullForm>, Option<&HullMeshState>, Has<Mesh3d>, Option<&MeshMaterial3d<HullMaterial>>, &mut Visibility),
         With<HullMesh>,
     >,
     placeholders: Query<(&Placeholder, &MeshMaterial3d<BodySurfaceMaterial>)>,
@@ -293,10 +319,8 @@ pub fn draw_hulls(
 ) {
     real.drawn.clear();
     real.own_current = None;
-    let Some((albedo, light_tiles)) = palette.ready() else {
-        unready.0 |= own.is_formed() || uplink.contacts.iter().any(|c| !c.form.parts.is_empty());
-        return;
-    };
+    // Only the mesh waits for the palette: until it is baked a craft is drawn as placeholders.
+    let palette = palette.ready();
     let session = &game.0;
     let star = lighting(session);
     let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
@@ -311,8 +335,7 @@ pub fn draw_hulls(
     for want in &wanted {
         let uniforms = finished(session, star, want.at_ly);
         let Some((root, mut hull, mut transform)) = hulls.iter_mut().find(|(_, h, _)| h.craft == want.craft) else {
-            let material = materials.add(HullMaterial { uniforms, albedo: albedo.clone(), lights: light_tiles.clone() });
-            spawn(&mut commands, want, material);
+            spawn(&mut commands, want);
             unready.0 = true;
             continue;
         };
@@ -320,18 +343,23 @@ pub fn draw_hulls(
 
         // Another craft's roll is worked out before its form is handed over, so the mesh and the
         // roll it is drawn at arrive together. The player's is the fitting's.
-        if hull.form.is_none_or(|(hash, _)| hash != want.form.hash) {
+        if hull.form.is_none_or(|(hash, _)| hash != want.form.hash)
+            && let Some((albedo, lights)) = &palette
+        {
             let roll = match want.craft {
                 None => Some(0.0),
-                Some(_) => rolls.get(want.form.hash, &want.form.form, balance),
+                Some(_) => rolls.get(want.form.hash, &want.form.form, want.balance),
             };
             if let Some(roll) = roll {
                 hull.form = Some((want.form.hash, roll));
-                let source = HullSource::Form(want.form.form.clone(), balance);
+                let source = HullSource::Form(want.form.form.clone(), want.balance);
                 match form {
                     Some(mut form) => form.source = source,
                     None => {
-                        commands.entity(hull.mesh).insert(HullForm { source, finish: Finish::Smooth, cells: None });
+                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone() });
+                        commands
+                            .entity(hull.mesh)
+                            .insert((HullForm { source, finish: Finish::Smooth, cells: None }, MeshMaterial3d(material)));
                     }
                 }
             }
@@ -351,14 +379,15 @@ pub fn draw_hulls(
                 Transform { rotation: hull.rotation, ..want.placed }
             }
         };
-        if let Some(mut asset) = materials.get_mut(&material.0)
+        if let Some(material) = material
+            && let Some(mut asset) = materials.get_mut(&material.0)
             && asset.uniforms != uniforms
         {
             asset.uniforms = uniforms;
         }
-        let aside = want.craft.is_none() && showing.0;
-        *visibility = if has_mesh && !aside { Visibility::Inherited } else { Visibility::Hidden };
-        if has_mesh {
+        let shows = shown(want.craft.is_none(), has_mesh, showing.0);
+        *visibility = if shows.mesh { Visibility::Inherited } else { Visibility::Hidden };
+        if shows.drawn {
             real.drawn.insert(want.craft);
         }
         if want.craft.is_none() && current {
@@ -367,8 +396,7 @@ pub fn draw_hulls(
         // A mesh that failed is settled too: its placeholders stay.
         unready.0 |= !has_mesh && !state.is_some_and(HullMeshState::current);
 
-        // The player's placeholders are `crate::parts`'s, which draw a refit's as well.
-        let wants_placeholders = want.craft.is_some() && !has_mesh;
+        let wants_placeholders = shows.placeholders;
         match hull.placeholders {
             Some((hash, parts)) if wants_placeholders && hash == want.form.hash => {
                 for child in children.get(parts).into_iter().flatten() {
@@ -386,7 +414,7 @@ pub fn draw_hulls(
                     commands.entity(old).despawn();
                 }
                 let paint = |kind| lit(session, star, want.at_ly, crate::parts::paint(kind));
-                let parts = spawn_placeholders(&mut commands, &want.form.form, balance, &mut meshes, &mut flat, &surfaces, paint);
+                let parts = spawn_placeholders(&mut commands, &want.form.form, want.balance, &mut meshes, &mut flat, &surfaces, paint);
                 commands.entity(parts).insert(ChildOf(root));
                 hull.placeholders = Some((want.form.hash, parts));
             }
@@ -421,6 +449,7 @@ fn wanted(
             out.push(Wanted {
                 craft: None,
                 form: decoded.clone(),
+                balance: own.balance(),
                 at_ly: session.ship.motion.position_ly,
                 placed: crate::parts::ship_frame(session, eye, ui),
                 facing: DVec3::ZERO,
@@ -439,6 +468,7 @@ fn wanted(
         out.push(Wanted {
             craft: Some(contact.ship_id),
             form: decoded.clone(),
+            balance,
             at_ly: contact.position_ly,
             placed: Transform {
                 translation: sim_to_render(eye.offset_m(contact.position_ly, Some(contact.ship_id), look) / UNIT_M).as_vec3(),
@@ -451,10 +481,10 @@ fn wanted(
     out
 }
 
-fn spawn(commands: &mut Commands, want: &Wanted, material: Handle<HullMaterial>) {
+/// A craft's root and its mesh, which is handed its form and material once the palette is baked.
+fn spawn(commands: &mut Commands, want: &Wanted) {
     let mesh = commands
         .spawn((
-            MeshMaterial3d(material),
             Transform::IDENTITY,
             Visibility::Hidden,
             NoFrustumCulling,
@@ -526,6 +556,19 @@ mod tests {
 
     fn session() -> Session {
         Session::new(&lc_world::sky::AuthoredStars::sample(), 3)
+    }
+
+    /// A craft's mesh is shown once any of it has landed, and its placeholders until then; the
+    /// player's stand aside for a refit's meshes, and its placeholders are never drawn here.
+    #[test]
+    fn a_hull_shows_its_mesh_once_one_lands() {
+        let s = |mesh, placeholders, drawn| Shown { mesh, placeholders, drawn };
+        assert_eq!(shown(false, false, false), s(false, true, false), "another craft before its mesh");
+        assert_eq!(shown(false, true, false), s(true, false, true));
+        assert_eq!(shown(false, true, true), s(true, false, true), "only the player's is stood aside");
+        assert_eq!(shown(true, false, false), s(false, false, false), "the player's placeholders are parts'");
+        assert_eq!(shown(true, true, false), s(true, false, true));
+        assert_eq!(shown(true, true, true), s(false, false, true), "a refit's meshes stand in for it");
     }
 
     /// A form the shard states is the form a round's plan holds, so the hand-back after a round

@@ -258,7 +258,10 @@ impl Plugin for ClientPlugin {
                     // Before the real hulls, which stand the player's aside for a round's meshes,
                     // and those before the placeholders, so the frame a mesh is first shown is the
                     // frame the placeholders go.
-                    (crate::refit_hull::draw_refit, crate::ship_hull::draw_hulls, crate::parts::update_parts).chain(),
+                    // After the meshes land, so a new form's roll is taken the frame its mesh is shown.
+                    (crate::refit_hull::draw_refit, crate::ship_hull::draw_hulls, crate::parts::update_parts)
+                        .chain()
+                        .after(crate::hull_mesh::HullMeshSystems),
                     // And the exhaust after the ship, so it is placed against the same frame.
                     crate::plume::update_plumes,
                 )
@@ -409,6 +412,9 @@ fn leave_scene(
             With<crate::envelope::EnvelopeMesh>,
             With<crate::envelope::RingMesh>,
             With<crate::hull::Hull>,
+            With<crate::ship_hull::ShipHull>,
+            With<crate::parts::FormRoot>,
+            With<crate::refit_hull::Generation>,
             With<crate::plume::Plume>,
         )>,
     >,
@@ -747,6 +753,9 @@ mod tests {
         world.spawn(crate::envelope::RingMesh { body: 0, radius: 1.0 });
         world.spawn(crate::hull::Hull(None));
         world.spawn(crate::plume::Plume(None));
+        let mesh = world.spawn(Name::new("a hull's mesh")).id();
+        let hull = world.spawn(crate::ship_hull::ShipHull::bare(Some(lc_proto::ShipId(1)), mesh)).id();
+        world.entity_mut(mesh).insert(ChildOf(hull));
         let bystander = world.spawn(Name::new("not the scene")).id();
         app.update();
 
@@ -756,6 +765,8 @@ mod tests {
         let left: Vec<Entity> = world.query::<Entity>().iter(world).collect();
         assert!(left.contains(&bystander));
         assert_eq!(world.query::<&crate::hull::Hull>().iter(world).count(), 0);
+        assert_eq!(world.query::<&crate::ship_hull::ShipHull>().iter(world).count(), 0);
+        assert!(!left.contains(&mesh), "a hull's mesh outlived its root");
         assert_eq!(world.query::<&crate::resolved::ResolvedBody>().iter(world).count(), 0);
         assert_eq!(world.query::<&crate::envelope::RingMesh>().iter(world).count(), 0);
         assert_eq!(world.query::<&crate::envelope::EnvelopeMesh>().iter(world).count(), 0);
