@@ -86,7 +86,11 @@ impl std::fmt::Display for Refused {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mark {
     Build,
+    /// Taken apart entirely: in the ship and not in the draft. Hidden unless asked for, and
+    /// nothing hangs from it.
     Dismantle,
+    /// Partly taken apart: smaller, or a mirrored copy fewer. Still there.
+    Shrink,
     Move,
     /// Taken apart and built again: a reshape or a change of kind.
     Rebuild,
@@ -97,16 +101,18 @@ impl Mark {
         match self {
             Mark::Build => "build",
             Mark::Dismantle => "dismantle",
+            Mark::Shrink => "shrink",
             Mark::Move => "move",
             Mark::Rebuild => "rebuild",
         }
     }
 
-    /// `18-ui-style.md` §Refit marks: four hues at the phosphor green's lightness.
+    /// `18-ui-style.md` §Refit marks: four hues at the phosphor green's lightness, one per phase
+    /// of the round, so a shrink is a dismantle's color and says which it is in words.
     pub fn color(self) -> Color {
         match self {
             Mark::Build => em_ui::vfd::TEXT,
-            Mark::Dismantle => Color::srgb(1.0, 0.70, 0.78),
+            Mark::Dismantle | Mark::Shrink => Color::srgb(1.0, 0.70, 0.78),
             Mark::Move => Color::srgb(0.45, 0.83, 1.0),
             Mark::Rebuild => Color::srgb(0.85, 0.76, 1.0),
         }
@@ -445,8 +451,10 @@ impl Draft {
                     Mark::Rebuild
                 } else if has(Change::Add) || has(Change::Grow) {
                     Mark::Build
-                } else if has(Change::Remove) || has(Change::Shrink) {
+                } else if !in_draft {
                     Mark::Dismantle
+                } else if has(Change::Remove) || has(Change::Shrink) {
+                    Mark::Shrink
                 } else {
                     Mark::Move
                 };
@@ -493,9 +501,10 @@ pub fn staged(name: &str, ship: &Form, balance: &Balance) -> Option<Form> {
     let mut d = Draft::new(ship.clone());
     let by_kind = |d: &Draft, kind: Kind| d.form.parts.iter().find(|p| p.kind == kind).copied();
     let edits = [
-        by_kind(&d, Kind::Drone).map(|p| d.resize(p.id, snap::volume(p.volume_m3 * 2.0, balance.min_part_m3, false))),
+        by_kind(&d, Kind::Drone).map(|p| d.reshape(p.id, PRIMITIVES[0])),
         by_kind(&d, Kind::Engine).map(|p| d.resize(p.id, snap::volume(p.volume_m3 * 0.6, balance.min_part_m3, false))),
-        by_kind(&d, Kind::Data).map(|p| d.reshape(p.id, PRIMITIVES[0])),
+        by_kind(&d, Kind::Data).map(|p| d.remove(p.id)),
+        by_kind(&d, Kind::Storage).map(|p| d.add(p.id, Kind::Bay, PRIMITIVES[3], DVec3::new(0.0, -1.0, 0.0), balance)),
     ];
     for edit in edits.into_iter().flatten() {
         d.apply(&edit.ok()?, balance).ok()?;
@@ -738,13 +747,14 @@ mod tests {
         d.apply(&d.reshape(PartId(5), PRIMITIVES[0]).unwrap(), &B).unwrap();
         d.apply(&d.remove(PartId(2)).unwrap(), &B).unwrap();
         d.apply(&d.add(PartId(1), Kind::Living, PRIMITIVES[2], DVec3::Y, &B).unwrap(), &B).unwrap();
+        d.apply(&d.resize(PartId(3), 5.0e5).unwrap(), &B).unwrap();
         let marks = d.marks(&B);
+        assert_eq!(marks[&PartId(3)], Mark::Shrink, "smaller, and still there");
         assert_eq!(marks[&PartId(1)], Mark::Build);
         assert_eq!(marks[&PartId(4)], Mark::Move);
         assert_eq!(marks[&PartId(5)], Mark::Rebuild);
-        assert_eq!(marks[&PartId(2)], Mark::Dismantle);
+        assert_eq!(marks[&PartId(2)], Mark::Dismantle, "gone from the draft");
         assert_eq!(marks[&PartId(6)], Mark::Build);
-        assert!(!marks.contains_key(&PartId(3)));
     }
 
     /// The staged draft the shots are taken of carries one of each mark.
@@ -754,7 +764,7 @@ mod tests {
         let staged = staged("edits", &d.ship, &B).unwrap();
         d.apply(&d.replace(staged), &B).unwrap();
         let marks: BTreeSet<&str> = d.marks(&B).values().map(|m| m.word()).collect();
-        assert_eq!(marks, ["build", "dismantle", "move", "rebuild"].into_iter().collect());
+        assert_eq!(marks, ["build", "dismantle", "shrink", "move", "rebuild"].into_iter().collect());
     }
 
     #[test]

@@ -37,11 +37,14 @@ pub enum Tap {
     /// The next shape new parts are made in.
     NextShape,
     Reset,
+    /// Held on, it draws what the draft removes; pressed, it keeps them drawn until pressed again.
+    ShowDismantled,
 }
 
-/// The action `tap` asks for, given the draft, what is selected and which shape new parts take.
-/// A [`Tap::Take`] is no action: it puts a part on the pointer.
-pub fn action_of(tap: Tap, draft: &Draft, selected: Option<PartId>, new_shape: usize) -> Option<Action> {
+/// The action `tap` asks for against the editor as it is. A [`Tap::Take`] is no action: it puts
+/// a part on the pointer.
+pub fn action_of(tap: Tap, draft: &Draft, form: &crate::form_view::FormView) -> Option<Action> {
+    let (selected, new_shape) = (form.selected, form.new_shape);
     let part = selected.and_then(|id| draft.part(id));
     Some(match tap {
         Tap::Select(id) => Action::SelectPart((selected != Some(id)).then_some(id)),
@@ -54,6 +57,7 @@ pub fn action_of(tap: Tap, draft: &Draft, selected: Option<PartId>, new_shape: u
         Tap::Take(_) => return None,
         Tap::NextShape => Action::SetNewShape(new_shape + 1),
         Tap::Reset => Action::EditForm(Ok(draft.reset())),
+        Tap::ShowDismantled => Action::ShowDismantled(!form.show_dismantled),
     })
 }
 
@@ -77,7 +81,7 @@ impl Plugin for FormPanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (lay_out, show_numbers)
+            (lay_out, show_numbers, reveal)
                 .chain()
                 .in_set(crate::app::Stage::Scene)
                 .after(crate::form_view::place)
@@ -116,12 +120,12 @@ fn lay_out(
 
     let tree_key = draft.map(|d| {
         let mut key: Vec<String> = tree_lines(d, shown.marks()).into_iter().map(|(depth, id, what)| format!("{depth}{id}{what}")).collect();
-        key.push(format!("{:?} {}", ui.form.selected, ui.form.new_shape));
+        key.push(format!("{:?} {} {}", ui.form.selected, ui.form.new_shape, ui.form.show_dismantled));
         key
     });
     rebuild(&mut commands, trees.iter_mut(), tree_key, top, |commands, key| {
         let draft = draft.expect("keyed on the draft");
-        build_tree(commands, draft, shown.marks(), ui.form.selected, ui.form.new_shape, key, top, font());
+        build_tree(commands, draft, shown.marks(), &ui.form, key, top, font());
     });
 
     let fields_key = draft.map(|d| {
@@ -164,12 +168,12 @@ fn build_tree(
     commands: &mut Commands,
     draft: &Draft,
     marks: &std::collections::BTreeMap<PartId, Mark>,
-    selected: Option<PartId>,
-    new_shape: usize,
+    form: &crate::form_view::FormView,
     built: Built,
     top: f32,
     font: Handle<Font>,
 ) {
+    let (selected, new_shape) = (form.selected, form.new_shape);
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
     let root = ui.docked((TreePanel, built), Edge::Left, crate::map_panel::CORNER_INSET);
     ui.insert(root, Node { top: Val::Px(top), width: Val::Px(WIDTH), ..column(Edge::Left) });
@@ -186,6 +190,10 @@ fn build_tree(
     }
     let row = ui.row(panel);
     ui.small_button(row, "reset to the ship", Tap::Reset);
+    let removed = marks.values().filter(|m| **m == Mark::Dismantle).count();
+    let on = if form.show_dismantled { "on" } else { "off" };
+    let row = ui.row(panel);
+    ui.chosen_button(row, &format!("show dismantled ({removed}): {on}"), form.show_dismantled, Tap::ShowDismantled);
 
     // The list new parts come from, and where a carried part is dropped to delete it.
     let list = ui.strip(root);
@@ -258,6 +266,15 @@ fn panel_node() -> Node {
     }
 }
 
+/// The parts the draft removes are drawn while the toggle is on, or while the pointer is on it.
+fn reveal(ui: Res<Ui>, taps: Query<(&Interaction, &Tap)>, mut revealed: ResMut<crate::form_view::Revealed>) {
+    let held = taps.iter().any(|(i, t)| *t == Tap::ShowDismantled && *i != Interaction::None);
+    let wanted = ui.view == ViewMode::Form && (ui.form.show_dismantled || held);
+    if revealed.0 != wanted {
+        revealed.0 = wanted;
+    }
+}
+
 /// Write each field's number in place, except the one being typed in.
 fn show_numbers(
     ui: Res<Ui>,
@@ -293,7 +310,7 @@ pub fn press(
             && let Some(carry) = crate::form_carry::Carry::new_part(draft, kind, draft::PRIMITIVES[ui.form.new_shape % draft::PRIMITIVES.len()], &Balance::DEFAULT)
         {
             carried.take(carry);
-        } else if let Some(action) = action_of(*tap, draft, ui.form.selected, ui.form.new_shape) {
+        } else if let Some(action) = action_of(*tap, draft, &ui.form) {
             out.write(Requested(action));
         }
     }
@@ -315,20 +332,33 @@ mod tests {
     use lc_world::form::Form;
 
     use super::*;
+    use crate::form_view::FormView;
+
+    fn view(selected: Option<PartId>, new_shape: usize) -> FormView {
+        FormView { selected, new_shape, ..FormView::default() }
+    }
+
+    #[test]
+    fn the_dismantled_toggle_flips() {
+        let d = Draft::new(Form::starting());
+        assert_eq!(action_of(Tap::ShowDismantled, &d, &view(None, 0)), Some(Action::ShowDismantled(true)));
+        let on = FormView { show_dismantled: true, ..view(None, 0) };
+        assert_eq!(action_of(Tap::ShowDismantled, &d, &on), Some(Action::ShowDismantled(false)));
+    }
 
     #[test]
     fn a_tap_on_the_selected_row_lets_it_go() {
         let d = Draft::new(Form::starting());
-        assert_eq!(action_of(Tap::Select(PartId(2)), &d, None, 0), Some(Action::SelectPart(Some(PartId(2)))));
-        assert_eq!(action_of(Tap::Select(PartId(2)), &d, Some(PartId(2)), 0), Some(Action::SelectPart(None)));
+        assert_eq!(action_of(Tap::Select(PartId(2)), &d, &view(None, 0)), Some(Action::SelectPart(Some(PartId(2)))));
+        assert_eq!(action_of(Tap::Select(PartId(2)), &d, &view(Some(PartId(2)), 0)), Some(Action::SelectPart(None)));
     }
 
     #[test]
     fn a_part_button_needs_a_part_and_the_shape_button_cycles() {
         let d = Draft::new(Form::starting());
-        assert_eq!(action_of(Tap::Delete, &d, None, 0), None);
-        assert_eq!(action_of(Tap::NextShape, &d, None, 5), Some(Action::SetNewShape(6)));
-        assert_eq!(action_of(Tap::Take(Kind::Bay), &d, None, 0), None, "it goes on the pointer, not into an action");
+        assert_eq!(action_of(Tap::Delete, &d, &view(None, 0)), None);
+        assert_eq!(action_of(Tap::NextShape, &d, &view(None, 5)), Some(Action::SetNewShape(6)));
+        assert_eq!(action_of(Tap::Take(Kind::Bay), &d, &view(None, 0)), None, "it goes on the pointer, not into an action");
     }
 
     #[test]

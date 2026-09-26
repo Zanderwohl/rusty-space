@@ -424,6 +424,7 @@ fn lay_out(
     shown: Res<Shown>,
     surface: Res<FormSurface>,
     assets: Res<AssetServer>,
+    revealed: Res<crate::form_view::Revealed>,
     layers: Query<(Entity, &Built), With<Layer>>,
     mut placed: Query<(&mut Node, Option<&Grip>, Option<&Badge>, Option<&mut Text>, Has<RoleLabel>), Without<Layer>>,
     mut gizmos: Gizmos<FormGizmos>,
@@ -453,6 +454,13 @@ fn lay_out(
         let at = if let Some(grip) = grip {
             knob_at.iter().find(|(g, _)| g == grip).map(|(_, at)| *at - KNOB * 0.5)
         } else if let Some(Badge(id)) = badge {
+            let gone = shown.marks().get(id) == Some(&crate::draft::Mark::Dismantle);
+            if gone && !revealed.0 {
+                if node.display != Display::None {
+                    node.display = Display::None;
+                }
+                continue;
+            }
             let piece = original(sdf, *id).map(|(_, p)| p).or_else(|| shown.ghost().and_then(|g| original(g, *id).map(|(_, p)| p)));
             piece.and_then(|p| lens.project(p.pose.position)).map(|(at, _)| at + Vec2::new(-24.0, 14.0))
         } else if role {
@@ -534,7 +542,7 @@ fn sign(mark: crate::draft::Mark) -> &'static str {
     use crate::draft::Mark;
     match mark {
         Mark::Build => "+",
-        Mark::Dismantle => "-",
+        Mark::Dismantle | Mark::Shrink => "-",
         Mark::Move => ">",
         Mark::Rebuild => "*",
     }

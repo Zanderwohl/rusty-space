@@ -352,6 +352,25 @@ mod tests {
         assert_eq!(draft.form, draft.ship);
     }
 
+    /// **Nothing hangs from a part the draft removes**, drawn or not: it looks straight through
+    /// to what is still there.
+    #[test]
+    fn nothing_hangs_from_a_dismantled_part() {
+        let mut draft = Draft::new(Form::starting());
+        let (ship, lens) = scene(&draft);
+        let nose = ship.pieces().iter().find(|p| p.part == PartId(5)).unwrap().pose.to_outer(DVec3::X * 40.0);
+        let at = lens.project(nose).unwrap().0;
+        let mut before = Carry::new_part(&draft, Kind::Living, crate::draft::PRIMITIVES[0], &B).unwrap();
+        let edit = before.hang(&draft, &ship, &lens, at, Modifiers::default(), &B).unwrap();
+        assert_eq!(edit.after[0].placement.unwrap().parent, PartId(5), "while it is there, it is hung from");
+        let removal = draft.remove(PartId(5)).unwrap();
+        apply(&mut draft, &removal);
+        let (drawn, _) = scene(&draft);
+        let mut after = Carry::new_part(&draft, Kind::Living, crate::draft::PRIMITIVES[0], &B).unwrap();
+        let parent = after.hang(&draft, &drawn, &lens, at, Modifiers::default(), &B).map(|e| e.after[0].placement.unwrap().parent);
+        assert_ne!(parent, Some(PartId(5)));
+    }
+
     /// Dropped on the list, a part picked up is deleted, and the deletion remembers it as it was
     /// before it was picked up, so undoing it puts it back there.
     #[test]
