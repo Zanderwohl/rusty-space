@@ -443,8 +443,10 @@ pub(crate) fn type_at_the_console(
     out.write(Requested(Action::RunCommand(line.clone())));
 }
 
+/// `--apply` and `--cancel-at`. Once the round is under way the view is pinned to the world,
+/// where the ship is drawn building.
 pub(crate) fn apply_and_cancel(
-    dev: Res<DevEntry>,
+    mut dev: ResMut<DevEntry>,
     ui: Res<Ui>,
     game: Res<crate::app::Game>,
     mut out: MessageWriter<Requested>,
@@ -461,6 +463,9 @@ pub(crate) fn apply_and_cancel(
     }
     let now = session.coordinate_time_s();
     let running = session.ship.fitting().and_then(|f| f.refit()).filter(|_| session.ship.is_refitting(now));
+    if done.0 && running.is_some() {
+        dev.view = Some(crate::ui::ViewMode::World);
+    }
     if let (Some(at), Some(plan), false) = (dev.cancel_at, running, done.1)
         && crate::ledger::standing(plan, now).fraction >= at
     {

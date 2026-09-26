@@ -3,8 +3,7 @@
 //!
 //! 32 §Temporary assets. No blends, spars uncut and a slab's corners square; the mesher replaces
 //! all of it. The pieces sit in the ship's frame (x nose, y port, z up) in meters under one root,
-//! which is the only thing placed each frame. Only the player's own ship has a form so far, and
-//! only from `--form`.
+//! which is the only thing placed each frame. Only the player's own ship has a form so far.
 
 use std::borrow::Cow;
 
@@ -119,20 +118,25 @@ pub fn adopt_fixture(dev: Res<crate::dev::DevEntry>, mut ui: ResMut<crate::app::
 }
 
 /// Take the player's form from the server's last `Fitted` whenever it changes: at sign-in, and as
-/// each refit step finishes. `--form` and `--demo refit` hold their own and are left alone.
+/// each refit step finishes. Framed to hold both ends of a round under way, as `--demo refit` is.
+/// `--form` and `--demo refit` hold their own and are left alone.
 pub fn adopt_fitted(
     uplink: Res<crate::uplink::Uplink>,
     dev: Res<crate::dev::DevEntry>,
     mut own: ResMut<OwnForm>,
-    mut adopted: Local<Option<lc_proto::Form>>,
+    mut adopted: Local<Option<(lc_proto::Form, Option<lc_proto::Round>)>>,
 ) {
     let Some(hull) = uplink.hull.as_ref().filter(|_| dev.form.is_none() && dev.refit.is_none()) else { return };
-    if adopted.as_ref() == Some(&hull.form) {
+    let round = uplink.fitting.as_ref().and_then(|f| f.refit.clone());
+    if adopted.as_ref().is_some_and(|(form, was)| *form == hull.form && *was == round) {
         return;
     }
-    *adopted = Some(hull.form.clone());
+    *adopted = Some((hull.form.clone(), round.clone()));
     let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
-    match OwnForm::new(&(&hull.form).into(), &balance) {
+    let form = Form::from(&hull.form);
+    let ends = round.map(|r| [Form::from(&r.from), Form::from(&r.target)]);
+    let forms: Vec<&Form> = std::iter::once(&form).chain(ends.iter().flatten()).collect();
+    match OwnForm::spanning(&forms, &balance) {
         Ok(formed) => *own = formed,
         // A form partway through a round may not place. The last one that did stays drawn.
         Err(e) => debug!("the ship's form does not place yet: {e}"),
@@ -282,6 +286,7 @@ pub fn update_parts(
     mut roots: Query<(Entity, &mut Transform, &FormRoot), (Without<Painted>, Without<Cage>)>,
     mut pieces: Query<(&MeshMaterial3d<BodySurfaceMaterial>, &Painted, &mut Transform, &mut Visibility), Without<Cage>>,
     mut cages: Query<(&MeshMaterial3d<BodyWireframeMaterial>, &Cage, &mut Transform, &mut Visibility), Without<Painted>>,
+    showing: Res<crate::refit_hull::Showing>,
 ) {
     if own.0.is_none() && !own.is_changed() {
         return;
@@ -290,8 +295,8 @@ pub fn update_parts(
     let at_ly = session.ship.motion.position_ly;
     let star = lighting(session);
     let placed = ship_frame(session, &eye, &ui);
-    // `crate::refit_hull` draws a staged refit on the hull meshes instead.
-    let formed = own.0.as_ref().filter(|_| refit.is_none());
+    // `crate::refit_hull` draws a refit on the hull meshes instead, once it has meshed a step.
+    let formed = own.0.as_ref().filter(|_| !showing.0);
     let Some(formed) = formed else {
         for (root, _, _) in &roots {
             commands.entity(root).despawn();

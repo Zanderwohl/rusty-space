@@ -98,6 +98,9 @@ pub struct Contact {
     pub jet_power_w: f64,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
+    /// Its form and the round it was running, as the statement's light left it.
+    pub form: lc_proto::Form,
+    pub refit: Option<lc_proto::Round>,
     reckoning: Reckoning,
     /// What the statement said the drive was doing, at the statement's own instant.
     stated_power_w: f64,
@@ -137,6 +140,8 @@ impl Contact {
             facing: DVec3::from_array(presence.facing).normalize_or_zero(),
             jet_power_w: presence.jet_power_w,
             emitted_s,
+            form: presence.form,
+            refit: presence.refit,
             reckoning: Reckoning::new(system, sighting),
             stated_power_w: presence.jet_power_w,
         }
