@@ -31,13 +31,12 @@ use em_render::exhaust_cone_material::{
 };
 use em_spectra::{Band, BandMapping, PerBand, blackbody, presets};
 use glam::{DQuat, DVec3};
+use lc_client::ui::HAZARD;
 use lc_world::courtesy::{cooking_flux_w_m2, drive_courtesy_radius_m};
 use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH};
 use lc_world::emit::{aperture_temperature_k, rating_w};
 use lc_world::fitting::Balance;
 
-/// `18-ui-style.md`'s hazard color.
-const HAZARD: Color = Color::srgb(1.0, 0.30, 0.10);
 /// How bright the cone is where it would cook, and at the courtesy radius, in the hazard color.
 const HOT_GAIN: f32 = 0.35;
 const FAINT_GAIN: f32 = 0.02;

@@ -666,7 +666,7 @@ graph LR
 
 ### C5 · Ledger and Apply
 
-- status: done #102
+- status: done #102. Apply is in the editor only, since C2 landed first and 29 puts refits there
 - needs: S1, F8
 - touches: `crates/lc-client/src/refit_panel.rs`, `crates/lc-client/src/ledger.rs`, `crates/lc-client/src/form_apply.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/draft.rs`, `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/lib.rs`, `crates/em-ui/src/widgets.rs`, `lightcone/docs/29-ship-form.md`, `AGENTS.md`
 - read: 29 §The editor

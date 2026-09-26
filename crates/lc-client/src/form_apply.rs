@@ -45,10 +45,9 @@ struct StandingLine;
 
 fn follow_ship(ui: Res<Ui>, game: Res<crate::app::Game>, mut out: MessageWriter<Requested>) {
     let (Some(draft), Some(fitting)) = (ui.form.draft.as_ref(), game.0.ship.fitting()) else { return };
-    let mut base = ledger::base(fitting).clone();
-    base.parts.sort_by_key(|p| p.id);
-    if base != draft.ship {
-        out.write(Requested(Action::RebaseDraft(base)));
+    let base = ledger::base(fitting);
+    if !draft.is_based_on(base) {
+        out.write(Requested(Action::RebaseDraft(base.clone())));
     }
 }
 
@@ -101,7 +100,7 @@ fn build(commands: &mut Commands, built: Built, font: Handle<Font>) {
         }
     }
     if let Some(why) = &built.refusal {
-        ui.inline(strip, &format!("refused: {why}"), TEXT, crate::draft::Mark::Dismantle.color());
+        ui.inline(strip, &format!("refused: {why}"), TEXT, em_ui::vfd::TEXT);
     }
     let line = ui.inline(strip, "", TEXT, em_ui::vfd::TEXT);
     ui.insert(line, StandingLine);

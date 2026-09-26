@@ -510,6 +510,8 @@ fn fold(
             ..
         } => {
             info!(?ship_id, %name, at = ?ship.at_ly, doing = ?ship.motive, "welcomed");
+            // A new session: an Apply sent on the old one will never be answered.
+            ui.0.form.applying = crate::ledger::Applying::Idle;
             // The server's clock, adopted whole. Both ends propagate analytically from a
             // coordinate time, so agreeing on it is the whole of agreeing about where anything
             // is — and the client's own clock started whenever this process did.
@@ -825,9 +827,11 @@ fn fold(
                 uplink.chasing = None;
             }
             let said = refused(reason);
-            // Orders are answered in the order sent, so a refusal while a refit awaits its answer
-            // is the refit's, and it is shown beside the Apply that sent it.
-            if let crate::ledger::Applying::Sent(target) = &ui.0.form.applying {
+            // Orders are answered in the order sent, but another may have gone just before the
+            // refit, so only a refusal a refit can earn is filed against the Apply that sent it.
+            if let crate::ledger::Applying::Sent(target) = &ui.0.form.applying
+                && refits_refuse(reason)
+            {
                 let target = target.clone();
                 ui.0.form.applying = crate::ledger::Applying::Refused { target, why: said.clone() };
             }
@@ -899,6 +903,13 @@ fn fold(
     }
 }
 
+fn refits_refuse(reason: Refusal) -> bool {
+    matches!(
+        reason,
+        Refusal::Form(_) | Refusal::Short(_) | Refusal::UnderWay | Refusal::Refitting | Refusal::NoEnergy | Refusal::Impossible
+    )
+}
+
 /// What a refusal reads as. Something to act on, per `lightcone/docs/18-ui-style.md`.
 pub fn refused(reason: Refusal) -> String {
     match reason {
@@ -908,7 +919,7 @@ pub fn refused(reason: Refusal) -> String {
         Refusal::TooFast => "too fast to match; kill the closing speed first".into(),
         Refusal::NoEnergy => "not enough energy stored for that".into(),
         Refusal::Refitting => "the drones are working: cancel the refit to fly".into(),
-        Refusal::UnderWay => "under way: cut the drive before refitting".into(),
+        Refusal::UnderWay => crate::ledger::Blocked::UnderWay.reason().into(),
         Refusal::Short(short) => crate::refit_panel::shortfall(short),
         // Their key has to arrive before it can be used, and asking for it is a
         // message like any other — which is to say, it takes as long as the light does.
@@ -2028,5 +2039,12 @@ mod tests {
 
         fold(&mut uplink, &mut game, &mut ui, Outbound::Refused { ship_id: ShipId(7), reason: Refusal::NoKey });
         assert_eq!(ui.0.form.applying, Applying::Idle, "with nothing sent, a refusal is some other order's");
+
+        ui.0.form.applying = Applying::Sent(target.clone());
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Refused { ship_id: ShipId(7), reason: Refusal::NoKey });
+        assert_eq!(ui.0.form.applying, Applying::Sent(target.clone()), "a refit is never refused for want of a key");
+
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        assert_eq!(ui.0.form.applying, Applying::Idle, "a new session answers nothing sent on the old one");
     }
 }

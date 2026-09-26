@@ -196,6 +196,13 @@ impl Draft {
         self.ship = ship;
     }
 
+    /// Whether [`Draft::ship`] is `ship`, in any order. Ids are unique, so the same count with
+    /// every part found is the same set.
+    pub fn is_based_on(&self, ship: &Form) -> bool {
+        let found = |p: &Part| self.ship.parts.binary_search_by_key(&p.id, |q| q.id).is_ok_and(|i| self.ship.parts[i] == *p);
+        self.ship.parts.len() == ship.parts.len() && ship.parts.iter().all(found)
+    }
+
     pub fn part(&self, id: PartId) -> Option<&Part> {
         self.form.parts.iter().find(|p| p.id == id)
     }

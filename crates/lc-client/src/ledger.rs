@@ -22,7 +22,7 @@ pub struct Budget {
     /// In storage as the dismantle phase ends, against the capacity the form has then.
     pub peak_j: f64,
     pub peak_capacity_j: f64,
-    /// Burst into the field over the round. H3 turns this into the field's peak temperature, and
+    /// Burst into the field over the round. C4 turns this into the field's peak temperature, and
     /// Apply's second question when it would collapse the field.
     pub vented_j: f64,
 }
@@ -139,12 +139,18 @@ pub fn standing(plan: &Plan, now_s: f64) -> Standing {
 
 impl Standing {
     pub fn line(&self) -> String {
-        let to_go = crate::refit_panel::span(self.left_s);
+        let to_go = span(self.left_s);
         match &self.step {
             Some((what, n, f)) => format!("refitting: {what}, {:.0}%, step {n} of {}, {to_go} to go", f * 100.0, self.total),
             None => format!("refitting: {to_go} to go"),
         }
     }
+}
+
+/// A duration a refit is measured in: days, or years past a few hundred of them.
+pub fn span(seconds: f64) -> String {
+    let days = seconds / 86_400.0;
+    if days < 400.0 { format!("{days:.1} days") } else { format!("{:.1} years", days / 365.25) }
 }
 
 /// Where the last Apply stands. A refusal belongs to the target it refused, so it goes quiet as
@@ -182,7 +188,7 @@ impl Blocked {
             Blocked::Offline => "no shard to refit at",
             Blocked::Sent => "waiting for the shard",
             Blocked::Refitting => "a refit is running",
-            Blocked::UnderWay => "under way: cut the drive to refit",
+            Blocked::UnderWay => "under way: cut the drive before refitting",
             Blocked::NoChange => "no change to apply",
         }
     }
@@ -337,5 +343,16 @@ mod tests {
         assert_eq!(base(&fitting), &Form::starting());
         fitting.begin_refit(p.clone());
         assert_eq!(base(&fitting), p.target());
+    }
+
+    #[test]
+    fn a_draft_is_based_on_its_ship_in_any_order() {
+        let d = edited();
+        let mut shuffled = Form::starting();
+        shuffled.parts.reverse();
+        assert!(d.is_based_on(&shuffled));
+        assert!(!d.is_based_on(&d.form), "the draft's own edit is not the ship");
+        shuffled.parts.pop();
+        assert!(!d.is_based_on(&shuffled), "a part fewer");
     }
 }

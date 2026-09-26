@@ -86,12 +86,6 @@ pub fn length(meters: f64) -> String {
     if meters < 1.0e4 { format!("{meters:.0} m") } else { format!("{:.2} km", meters / 1.0e3) }
 }
 
-/// A duration a refit is measured in: days, or years past a few hundred of them.
-pub fn span(seconds: f64) -> String {
-    let days = seconds / 86_400.0;
-    if days < 400.0 { format!("{days:.1} days") } else { format!("{:.1} years", days / 365.25) }
-}
-
 pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut MessageWriter<Requested>) {
     let now = game.coordinate_time_s();
     let ship = &game.ship;
@@ -127,35 +121,37 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
 
     match fitting.refit().filter(|_| ship.is_refitting(now)) {
         Some(running) => round(ui, running, fitting.balance(), now, out),
-        None => idle(ui, &state.form),
+        None => idle(ui, &state.form, fitting.balance()),
     }
 }
 
 /// What the editor has that the ship does not, when no round is running.
-fn idle(ui: &mut egui::Ui, form: &crate::form_view::FormView) {
+fn idle(ui: &mut egui::Ui, form: &crate::form_view::FormView, balance: &Balance) {
     use crate::ledger::Applying;
     let Some(draft) = &form.draft else {
         ui.weak("no refit under way");
         return;
     };
     if let Some(why) = form.applying.refusal(draft) {
-        ui.colored_label(HAZARD, format!("refused: {why}"));
+        ui.label(format!("refused: {why}"));
     }
     match &form.applying {
         Applying::Sent(_) => ui.label("applied; waiting for the shard"),
         _ if draft.form == draft.ship => ui.weak("no refit under way"),
         _ => {
-            let changed = draft.marks(&Balance::DEFAULT).len();
+            let changed = draft.marks(balance).len();
             ui.label(format!("draft: {changed} {} changed, not applied", if changed == 1 { "part" } else { "parts" }))
         }
     };
 }
 
-/// 18's hazard, since a vent heats the field.
-const HAZARD: egui::Color32 = egui::Color32::from_rgb(255, 77, 26);
+/// A vent heats the field, so it wears 18's hazard.
+fn hazard() -> egui::Color32 {
+    crate::map_panel::color_of(crate::ui::HAZARD)
+}
 
 fn round(ui: &mut egui::Ui, plan: &Plan, balance: &Balance, now: f64, out: &mut MessageWriter<Requested>) {
-    use crate::ledger::{Budget, StepState, phase_name, phases, standing};
+    use crate::ledger::{Budget, StepState, phase_name, phases, span, standing};
     let module_j = balance.module_energy_j();
     let at = standing(plan, now);
     ui.strong("REFIT UNDER WAY");
@@ -174,7 +170,7 @@ fn round(ui: &mut egui::Ui, plan: &Plan, balance: &Balance, now: f64, out: &mut 
         row("peak in storage", format!("{} of {}", me(budget.peak_j, module_j), me(budget.peak_capacity_j, module_j)));
         if budget.vented_j > 0.0 {
             ui.label("vented");
-            ui.colored_label(HAZARD, format!("{:.3e} J", budget.vented_j));
+            ui.colored_label(hazard(), format!("{:.3e} J", budget.vented_j));
             ui.end_row();
         }
     });
@@ -199,7 +195,7 @@ fn round(ui: &mut egui::Ui, plan: &Plan, balance: &Balance, now: f64, out: &mut 
                     StepState::Waiting => ui.label(span(row.duration_s)),
                 };
                 if row.vented_j > 0.0 {
-                    ui.colored_label(HAZARD, format!("vents {:.3e} J", row.vented_j));
+                    ui.colored_label(hazard(), format!("vents {:.3e} J", row.vented_j));
                 } else if row.stored_j != 0.0 {
                     ui.label(format!("{:+.2} ME", row.stored_j / module_j));
                 } else {

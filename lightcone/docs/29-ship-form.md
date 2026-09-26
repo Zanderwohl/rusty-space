@@ -521,8 +521,10 @@ three phases, progress, and Cancel.
   draft is the ship. `ledger::gate` is that rule, tested without a window.
 - **A refusal is shown where Apply was pressed**, worded by `refit_panel::form_fault`, and in the
   ledger. It belongs to the target it refused, so it goes quiet as soon as the draft changes. The
-  shard answers orders in the order sent, so a refusal while an Apply awaits its answer is the
-  Apply's.
+  shard answers orders in the order sent, but another may have gone just before the refit, so only
+  a refusal a refit can earn (a fault in the form, a shortfall, under way, refitting) is filed
+  against the Apply awaiting its answer. A new session clears the wait, since nothing sent on the
+  old one will be answered.
 - **The draft is edited against what the ship becomes** (`ledger::base`): the target of a round
   the shard is running, and otherwise the form the ship has settled into. Accepted, the draft and
   the ship agree and the marks go; the editor's strip says what the round is doing. Canceled, the
@@ -532,8 +534,8 @@ three phases, progress, and Cancel.
   the round from `Plan::at`, and Cancel. With no round it says whether the draft differs, or what
   was refused. `Budget::of` is the one computation, and the editor's live budget (C4) calls it on a
   round solved from the draft.
-- **The vent is shown in joules** until H3 gives the field's heat. H3 adds Apply's second question
-  when the vent would collapse the field.
+- **The vent is shown in joules** until C4 gives the field's peak temperature from it, on H3's heat
+  model. C4 adds Apply's second question when the vent would collapse the field.
 - `--apply` presses Apply once the shard has welcomed the client, `--cancel-at <f>` cancels the
   round that far through, and `--draft askew` tilts the engine off the nose axis, which Apply
   refuses.
