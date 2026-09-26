@@ -402,7 +402,8 @@ radiated loss is not recovered: putting a part back costs its whole mass-energy.
 pay, the dismantling finishes at once instead, and its return goes to storage as far as there is
 room. A move snaps back. Whatever the reversal or the finish loses, and whatever has no room, is a
 burst at the moment of cancel. The ship is left partway between its form and the
-target, which may be worse than either, and that is intended.
+target, which may be worse than either, and that is intended. The picture runs the step backward
+from where it was, at its own pace ([32](32-ship-rendering.md#the-other-steps)).
 
 Flying and refitting still exclude each other, as in 19.
 
@@ -754,6 +755,14 @@ photographs it, and `--form <preset>` stages a draft.
   shard settled. A craft loaded mid-round was seen in the round's forms back to its start and in the
   form it began from before that. Past `HISTORY_FORMS` it forgets the oldest, and a presence from
   before then carries no form rather than a later one, and the length of the oldest it remembers.
+- **The round goes with the form.** `Presence.refit` is the recipe of the round in force when the light
+  left, from the same remembered history: each form is kept with the round it was part of, from the
+  round's start, and a round's end, finish or cancel, is a form without one. So a watcher sees a
+  build begin, run and stop only as each arrives. A cancel is not sent as such: a round that stops
+  being stated before it is done was canceled then ([32-ship-rendering.md](32-ship-rendering.md#rounds-in-the-game)).
+  The recipe names the target, which the light has not shown yet; the client draws only what the
+  round had built by the time the light left, as the picture of a round is a function of its recipe
+  and the time.
 
 ## Balance
 
