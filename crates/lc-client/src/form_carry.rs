@@ -327,7 +327,7 @@ pub fn draw_float(
     for entity in &roots {
         commands.entity(entity).despawn();
     }
-    let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z));
+    let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z), 0.0);
     let root = commands.spawn((Transform::from_rotation(turn), Visibility::default(), FloatRoot)).id();
     for (i, piece) in pieces.iter().enumerate() {
         let (mesh, scale) = crate::parts::solid(&piece.shape);

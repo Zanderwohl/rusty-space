@@ -509,7 +509,7 @@ fn show(
     }
     let Some((sdf, _)) = &shown.drawn else { return };
     // Ship axes to render axes, the same turn a ship flying along +x with its back to +z takes.
-    let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z));
+    let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z), 0.0);
     let root = commands.spawn((Transform::from_rotation(turn), Visibility::default(), FormViewRoot)).id();
     for piece in sdf.pieces() {
         let (mesh, scale) = crate::parts::solid(&piece.shape);
@@ -630,7 +630,7 @@ pub(crate) fn place(
     if held != ui.form.orbit {
         ui.form.orbit = held;
     }
-    let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z));
+    let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z), 0.0);
     let eye = turn * held.eye_m(&extent).as_vec3();
     let focus = turn * held.focus_m(&extent).as_vec3();
     *transform = Transform::from_translation(eye).looking_at(focus, turn * Vec3::Z);

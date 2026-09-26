@@ -168,7 +168,7 @@ pub fn fov_x(fov_y: f32, aspect: f32) -> f32 {
 /// ecliptic north; a ship flying straight up the pole then has no preferred roll and any answer is
 /// as good as another.
 pub fn attitude(fore_sim: DVec3, to_star: Option<DVec3>) -> Quat {
-    let Some([fore, port, up]) = ship_axes(fore_sim, to_star) else { return Quat::IDENTITY };
+    let Some([fore, port, up]) = ship_axes(fore_sim, to_star, 0.0) else { return Quat::IDENTITY };
     Quat::from_mat3(&Mat3::from_cols(
         sim_to_render(port).as_vec3(),
         sim_to_render(up).as_vec3(),
@@ -177,9 +177,10 @@ pub fn attitude(fore_sim: DVec3, to_star: Option<DVec3>) -> Quat {
 }
 
 /// The same attitude for a craft drawn in its own frame — x the nose, y port, z up, as 29
-/// §Placement is relative gives it — so its dorsal face is the one turned to the star.
-pub fn frame(fore_sim: DVec3, to_star: Option<DVec3>) -> Quat {
-    let Some([fore, port, up]) = ship_axes(fore_sim, to_star) else { return Quat::IDENTITY };
+/// §Placement is relative gives it — rolled `roll_rad` further, so the face
+/// `lc_world::solar::roll_rad` names is the one turned to the star.
+pub fn frame(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Quat {
+    let Some([fore, port, up]) = ship_axes(fore_sim, to_star, roll_rad) else { return Quat::IDENTITY };
     Quat::from_mat3(&Mat3::from_cols(
         sim_to_render(fore).as_vec3(),
         sim_to_render(port).as_vec3(),
@@ -187,8 +188,10 @@ pub fn frame(fore_sim: DVec3, to_star: Option<DVec3>) -> Quat {
     ))
 }
 
-/// Nose, port and dorsal directions in simulation axes, or `None` with no nose.
-fn ship_axes(fore_sim: DVec3, to_star: Option<DVec3>) -> Option<[DVec3; 3]> {
+/// Nose, port and dorsal directions in simulation axes, or `None` with no nose. The roll turns
+/// the ship about its nose so that the direction it carries dorsal onto, not dorsal itself, faces
+/// the star: `lc_world::solar::toward_star` in the ship's frame.
+fn ship_axes(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Option<[DVec3; 3]> {
     let fore = fore_sim.normalize_or_zero();
     if fore == DVec3::ZERO {
         return None;
@@ -200,9 +203,16 @@ fn ship_axes(fore_sim: DVec3, to_star: Option<DVec3>) -> Option<[DVec3; 3]> {
         let reference = if fore.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
         (reference - fore * reference.dot(fore)).normalize_or_zero()
     });
+    let (sin, cos) = roll_rad.sin_cos();
+    let up = up * cos + up.cross(fore) * sin;
     // `fore x port = up`, so both bases built from these are right-handed and survive the
     // change of axes as proper rotations rather than mirrors.
     Some([fore, up.cross(fore), up])
+}
+
+/// The roll the player's form presents its broadside at. Zero for the ovoid, whose broadside is +z.
+pub(crate) fn own_roll_rad(session: &Session) -> f64 {
+    session.ship.fitting().map_or(0.0, |fitting| lc_world::solar::roll_rad(fitting.geometry()))
 }
 
 /// The mesh scale for a hull of `length_m`, in render units.
@@ -234,7 +244,7 @@ pub fn place_eye(
         let session = &game.0;
         let fore = session.ship.facing_at(session.coordinate_time_s()).unwrap_or(DVec3::X);
         let to_star = lighting(session).map(|(star_ly, _, _)| star_ly - session.ship.motion.position_ly);
-        let [x, y, z] = ship_axes(fore, to_star).unwrap_or([DVec3::X, DVec3::Y, DVec3::Z]);
+        let [x, y, z] = ship_axes(fore, to_star, own_roll_rad(session)).unwrap_or([DVec3::X, DVec3::Y, DVec3::Z]);
         eye.aim_m = x * at.x + y * at.y + z * at.z;
         eye.boom_m = distance_m;
         eye.anchored = anchored;
@@ -639,6 +649,23 @@ mod tests {
         let along = attitude(DVec3::X, Some(DVec3::X * 2.0));
         assert!(along.is_normalized());
         assert!((along * Vec3::Z - render(DVec3::X)).length() < 1e-5);
+    }
+
+    /// **The face drawn toward the star is the one collection reads.** A cluster's broadside leans
+    /// its nose and rolls it an eighth of a turn, so an idle one drawn in its frame puts the star
+    /// where `solar` says it is in that frame.
+    #[test]
+    fn a_form_is_drawn_presenting_the_shadow_it_collects_on() {
+        use lc_world::form::grid::FormGrid;
+        use lc_world::form::presets::Builtin;
+        use lc_world::solar;
+        let g = FormGrid::new(&Builtin::Cluster.form(), &lc_world::fitting::Balance::DEFAULT).unwrap().geometry(1.0);
+        assert!(solar::roll_rad(&g).abs() > 0.5, "premise: it rolls");
+        let to_star = DVec3::new(-2.0, 1.0, 0.5);
+        let nose = solar::idle_nose(DVec3::Y, to_star, solar::idle_cos(&g));
+        let q = frame(nose, Some(to_star), solar::roll_rad(&g));
+        let drawn = q * solar::toward_star(&g, solar::idle_cos(&g)).as_vec3();
+        assert!((drawn - render(to_star.normalize())).length() < 1e-5, "{drawn}");
     }
 
     /// Five by three by one, at whatever size, in the renderer's own units.
