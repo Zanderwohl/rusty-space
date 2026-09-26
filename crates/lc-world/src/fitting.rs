@@ -7,7 +7,9 @@
 //! Only a player's ship carries a [`Fitting`]. Everything else flies on
 //! [`Kind::drive`](crate::craft::Kind::drive).
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use lc_proto::form::Geometry;
 
 use crate::cost;
 use crate::flight::{C_M_S, G0};
@@ -240,15 +242,20 @@ pub struct Hull {
 }
 
 impl Hull {
-    /// `Err` only for a form whose envelope never closes, which [`rules::check`] refuses, so never
-    /// for a ship's.
+    /// `Err` for a form whose envelope never closes, which [`rules::check`] refuses, or one partway
+    /// through a round that does not place.
     ///
     /// [`rules::check`]: crate::form::rules::check
     pub fn of(form: &Form, balance: &Balance) -> Result<Hull, FormError> {
-        let (extent_m, gyration_m) = measured(form, balance)?;
-        let mut hull = Self::cheap(form, balance, 0.0, 0.0, 0.0);
+        Self::measure(form, balance).map(|(hull, _)| hull)
+    }
+
+    /// With the grid's geometry, per kilogram of the ship.
+    fn measure(form: &Form, balance: &Balance) -> Result<(Hull, Arc<Geometry>), FormError> {
+        let measured = measured(form, balance)?;
+        let mut hull = Self::cheap(form, balance, 0.0, measured.extent_m, measured.gyration_m);
         hull.thrust_n = aft_aperture_w(form, balance).unwrap_or(0.0) / C_M_S;
-        Ok(Hull { extent_m, gyration_m, ..hull })
+        Ok((hull, measured.geometry))
     }
 
     /// Everything but the grid, which keeps `was`'s: a form partway through a round, which may
@@ -264,39 +271,47 @@ impl Hull {
     fn cheap(form: &Form, balance: &Balance, thrust_n: f64, extent_m: f64, gyration_m: f64) -> Hull {
         Hull { capacities: Capacities::of(form, balance), dry_kg: dry_mass_kg(form, balance), thrust_n, extent_m, gyration_m }
     }
-
-    /// Settled at a step's end, when the form it was partway through becomes the ship's.
-    fn after_step(form: &Form, balance: &Balance, was: &Hull) -> Hull {
-        Self::of(form, balance).unwrap_or_else(|_| Self::partway(form, balance, was))
-    }
 }
 
-/// The grid's extent and transverse radius of gyration, built once per form and balance for the
-/// process: every ship today is the starting form, so a shard or a test run builds one.
-fn measured(form: &Form, balance: &Balance) -> Result<(f64, f64), FormError> {
-    type Built = (Form, Balance, Result<(f64, f64), FormError>);
+#[derive(Clone)]
+struct Measured {
+    extent_m: f64,
+    gyration_m: f64,
+    geometry: Arc<Geometry>,
+}
+
+/// What the grid gives, built once per form and balance for the process: most ships are the
+/// starting form, so a shard fitting a hundred builds one.
+fn measured(form: &Form, balance: &Balance) -> Result<Measured, FormError> {
+    type Cell = Arc<OnceLock<Result<Measured, FormError>>>;
     const KEPT: usize = 16;
-    static BUILT: Mutex<Vec<Built>> = Mutex::new(Vec::new());
-    // Held across the build, so threads asking for one form wait for it rather than each
-    // building it. That also blocks callers asking about any other form, which is harmless while
-    // every ship is the starting form; once S1 lets forms differ, build outside the lock with a
-    // once per key.
-    let mut built = BUILT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some((_, _, answer)) = built.iter().find(|(f, b, _)| f == form && b == balance) {
-        return *answer;
-    }
-    let answer = FormGrid::new(form, balance).map(|grid| {
-        let i = grid.inertia().per_kg;
-        let (a, c, b) = (i.y_axis.y, i.z_axis.z, i.z_axis.y);
-        // The larger eigenvalue of the tensor's block across the nose.
-        let across_m2 = 0.5 * (a + c) + (0.25 * (a - c) * (a - c) + b * b).sqrt();
-        (grid.extent_m(), across_m2.sqrt())
-    });
-    if built.len() == KEPT {
-        built.drain(..1);
-    }
-    built.push((form.clone(), *balance, answer));
-    answer
+    static BUILT: Mutex<Vec<(Form, Balance, Cell)>> = Mutex::new(Vec::new());
+    // Built outside the lock, once per key: a thread asking for one form waits for whoever is
+    // building it, and never for a build of another.
+    let cell = {
+        let mut built = BUILT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match built.iter().find(|(f, b, _)| f == form && b == balance) {
+            Some((_, _, cell)) => cell.clone(),
+            None => {
+                if built.len() == KEPT {
+                    built.drain(..1);
+                }
+                let cell = Cell::default();
+                built.push((form.clone(), *balance, cell.clone()));
+                cell
+            }
+        }
+    };
+    cell.get_or_init(|| {
+        FormGrid::new(form, balance).map(|grid| {
+            let i = grid.inertia().per_kg;
+            let (a, c, b) = (i.y_axis.y, i.z_axis.z, i.z_axis.y);
+            // The larger eigenvalue of the tensor's block across the nose.
+            let across_m2 = 0.5 * (a + c) + (0.25 * (a - c) * (a - c) + b * b).sqrt();
+            Measured { extent_m: grid.extent_m(), gyration_m: across_m2.sqrt(), geometry: Arc::new(grid.geometry(1.0)) }
+        })
+    })
+    .clone()
 }
 
 /// A ship's form and the energy in it, as a closed form in coordinate time.
@@ -308,6 +323,8 @@ fn measured(form: &Form, balance: &Balance) -> Result<(f64, f64), FormError> {
 pub struct Fitting {
     form: Form,
     hull: Hull,
+    /// Of the last form the grid measured, per kilogram, which a step that does not place keeps.
+    geometry: Arc<Geometry>,
     /// Not saved: a server stamps its own on every craft it loads.
     balance: Balance,
     stored_j: f64,
@@ -338,13 +355,17 @@ pub struct Account {
 
 impl Fitting {
     /// A ship of this form with its storage full. `form` must be one [`Hull::of`] can measure, as
-    /// every form a ship is given is.
+    /// every target `rules::check` passes is.
     pub fn full(form: Form, balance: Balance, now_s: f64) -> Self {
-        let hull = Hull::of(&form, &balance)
-            .expect("a ship's form closes: it is the starting form scaled, until S1 checks targets with rules::check");
+        let (hull, geometry) = Hull::measure(&form, &balance).expect("a ship's form closes: every target passes rules::check");
+        Self::holding(form, hull, geometry, balance, now_s)
+    }
+
+    fn holding(form: Form, hull: Hull, geometry: Arc<Geometry>, balance: Balance, now_s: f64) -> Self {
         Self {
             form,
             hull,
+            geometry,
             balance,
             stored_j: hull.capacities.storage_j,
             since_s: now_s,
@@ -368,14 +389,26 @@ impl Fitting {
     }
 
     /// Put an account back. A refit whose recipe no longer plans is dropped, which leaves the
-    /// ship as the account says it was when the refit began.
+    /// ship in the form it had settled into.
+    ///
+    /// A form settled partway through a round need not place, so it is measured as the steps
+    /// measure one: keeping the extent and gyration of the round's start. Neither placing, it keeps
+    /// the starting form's.
     pub fn from_account(account: &Account, balance: Balance) -> Self {
         let refit = account.refit.as_ref().and_then(|round| round.solve(&balance).ok());
-        let full = Self::full(account.form.clone(), balance, account.since_s);
+        let form = account.form.clone();
+        let (hull, geometry) = Hull::measure(&form, &balance).unwrap_or_else(|_| {
+            let was = account.refit.as_ref().map(|round| &round.from).and_then(|from| Hull::measure(from, &balance).ok());
+            let (was, geometry) = was.unwrap_or_else(|| {
+                Hull::measure(&Form::starting(), &balance).expect("the starting form closes")
+            });
+            (Hull::partway(&form, &balance, &was), geometry)
+        });
+        let full = Self::holding(form, hull, geometry, balance, account.since_s);
         Self {
             refit,
             // What the store holds may not be more than it can: a form re-measured under another
-            // balance, or a loadout laid out other than it was, can hold less than was saved.
+            // balance can hold less than was saved.
             stored_j: account.stored_j.min(full.stored_j),
             since_s: account.since_s,
             rapidity_since: account.rapidity_since,
@@ -393,7 +426,20 @@ impl Fitting {
     /// densities and the envelope's margin are the balance's.
     pub fn set_balance(&mut self, balance: Balance) {
         self.balance = balance;
-        self.hull = Hull::after_step(&self.form, &balance, &self.hull);
+        self.take_form(self.form.clone());
+    }
+
+    /// Become `form`, measuring it if the grid can: at a step's end, when the form it was partway
+    /// through becomes the ship's, and wherever else the form changes.
+    fn take_form(&mut self, form: Form) {
+        match Hull::measure(&form, &self.balance) {
+            Ok((hull, geometry)) => {
+                self.hull = hull;
+                self.geometry = geometry;
+            }
+            Err(_) => self.hull = Hull::partway(&form, &self.balance, &self.hull),
+        }
+        self.form = form;
     }
 
     /// The form as of the last settlement, counting refit steps finished by then.
@@ -519,13 +565,12 @@ impl Fitting {
         let stored = self.stored_j_at(motion, now_s);
         self.committed_j = self.committed_j_at(motion, now_s);
         if let Some(plan) = &self.refit {
-            let progress = plan.at(now_s);
-            if progress.form != self.form {
-                self.hull = Hull::after_step(&progress.form, &self.balance, &self.hull);
-                self.form = progress.form;
-            }
-            if plan.is_done(now_s) {
+            let (progress, done) = (plan.at(now_s), plan.is_done(now_s));
+            if done {
                 self.refit = None;
+            }
+            if progress.form != self.form {
+                self.take_form(progress.form);
             }
         }
         self.stored_j = stored;
@@ -575,8 +620,7 @@ impl Fitting {
         let Some(plan) = self.refit.take() else { return false };
         let end = plan.at(plan.round().start_s + plan.duration_s());
         let remaining_j = plan.at(self.since_s).stored_j - end.stored_j;
-        self.hull = Hull::after_step(&end.form, &self.balance, &self.hull);
-        self.form = end.form;
+        self.take_form(end.form);
         self.stored_j = (self.stored_j - remaining_j).clamp(0.0, self.hull.capacities.storage_j.max(0.0));
         true
     }
@@ -584,7 +628,7 @@ impl Fitting {
     /// For nothing, dropping any refit under way. Storage is cut to the new capacity. Settle
     /// first. Refused for a form the grid cannot measure.
     pub fn refit_at_once(&mut self, form: Form) -> Result<(), FormError> {
-        self.hull = Hull::of(&form, &self.balance)?;
+        (self.hull, self.geometry) = Hull::measure(&form, &self.balance)?;
         self.refit = None;
         self.form = form;
         self.stored_j = self.stored_j.min(self.hull.capacities.storage_j.max(0.0));
@@ -596,65 +640,20 @@ impl Fitting {
     pub fn cancel_refit(&mut self, now_s: f64) {
         let Some(plan) = self.refit.take() else { return };
         let canceled = plan.cancel(now_s, self.stored_j);
-        self.hull = Hull::after_step(&canceled.form, &self.balance, &self.hull);
-        self.form = canceled.form;
+        self.take_form(canceled.form);
         self.stored_j = canceled.stored_j;
     }
-}
 
-// S1 deletes everything from here to the tests: the wire and saves still carry 19's loadout, so a
-// ship crossing either is 29's starting form scaled to its counts, and its counts are read back
-// off its capacities.
-
-/// Each of the starting form's kinds in 19's slots.
-const STARTING_COUNTS: lc_proto::Loadout = lc_proto::Loadout { storage: 6, drones: 2, living: 1, engines: 5, slots: 20, data: 1 };
-
-/// The starting form, each kind scaled by its count over the starting ship's. A count of zero
-/// leaves that part out, and what hung from it hangs from the storage or the Mind. One that will
-/// not lay out is said so and comes back as the starting form, whose stored energy
-/// [`Fitting::from_account`] clamps to its store.
-fn form_of(loadout: lc_proto::Loadout, balance: &Balance) -> Form {
-    let start = Form::starting();
-    if (lc_proto::Loadout { slots: STARTING_COUNTS.slots, ..loadout }) == STARTING_COUNTS {
-        return start;
+    /// The form each refit step leaves, and the coordinate second its step ends, for the steps
+    /// ending after `after_s` and by `until_s`. Steps ending together leave one form.
+    pub fn steps_ending(&self, after_s: f64, until_s: f64) -> Vec<(f64, Form)> {
+        let Some(plan) = &self.refit else { return Vec::new() };
+        let start_s = plan.round().start_s;
+        let mut ends: Vec<f64> =
+            plan.steps().iter().map(|s| start_s + s.ends_s()).filter(|&end| end > after_s && end <= until_s).collect();
+        ends.dedup();
+        ends.into_iter().map(|end| (end, plan.at(end).form)).collect()
     }
-    use crate::form::Kind;
-    let count = |kind: Kind| match kind {
-        Kind::Storage => loadout.storage,
-        Kind::Drone => loadout.drones,
-        Kind::Living => loadout.living,
-        Kind::Engine => loadout.engines,
-        Kind::Data => loadout.data,
-        Kind::Mind | Kind::Bay | Kind::Spar(_) => 0,
-    };
-    // A layout keeps a ship's totals, and each kind is one part here, so these are the totals.
-    let totals = Form {
-        parts: start.parts.iter().map(|p| crate::form::Part { volume_m3: f64::from(count(p.kind)) * SLOT_M3, ..*p }).collect(),
-    };
-    match start.as_layout(&totals, balance.min_part_m3) {
-        Ok(layout) => layout.form,
-        Err(why) => {
-            eprintln!("loadout {loadout:?} does not lay out ({why}), so the ship comes back as the starting form");
-            start
-        }
-    }
-}
-
-fn loadout_of(capacities: &Capacities, balance: &Balance) -> lc_proto::Loadout {
-    let me = balance.module_energy_j();
-    let slots = |total: f64, per_slot: f64| (total / (per_slot * SLOT_M3)).round() as u32;
-    let aperture_per_m3 = balance.engine_density_w;
-    let mut loadout = lc_proto::Loadout {
-        storage: slots(capacities.storage_j, balance.storage_density * me),
-        drones: slots(capacities.building_w, balance.drone_density_w),
-        living: slots(capacities.drain_w, balance.living_density_w),
-        engines: slots(capacities.aperture_w, aperture_per_m3),
-        data: slots(capacities.data_b - ONBOARD_DATA_BYTES, balance.data_density_b),
-        slots: 0,
-    };
-    let modules = loadout.storage + loadout.drones + loadout.living + loadout.engines + loadout.data;
-    loadout.slots = modules.max(STARTING_COUNTS.slots);
-    loadout
 }
 
 impl From<lc_proto::Balance> for Balance {
@@ -702,22 +701,13 @@ impl From<lc_proto::Balance> for Balance {
 }
 
 impl From<Balance> for lc_proto::Balance {
-    /// The per-module fields are the densities over 19's slot. The frame's density has no
-    /// counterpart, since structure goes by area.
     fn from(b: Balance) -> Self {
         Self {
             drive_efficiency: b.drive_efficiency,
             recovery: b.recovery,
-            storage_per_module: b.storage_density * SLOT_M3,
-            engine_thrust_n: b.engine_density_w * SLOT_M3 / C_M_S,
-            drone_power_w: b.drone_density_w * SLOT_M3,
-            living_drain_w: b.living_density_w * SLOT_M3,
-            hull_density_kg_m3: 0.0,
-            slot_volume_m3: SLOT_M3,
             module_density_kg_m3: b.module_density_kg_m3,
             conversion_efficiency: b.conversion_efficiency,
             solar_gain: b.solar_gain,
-            data_per_module: b.data_density_b * SLOT_M3,
             data_mass_fraction: b.data_mass_fraction,
             data_work_factor: b.data_work_factor,
             storage_density: b.storage_density,
@@ -754,39 +744,72 @@ impl From<Balance> for lc_proto::Balance {
     }
 }
 
+impl From<&Round> for lc_proto::Round {
+    fn from(r: &Round) -> Self {
+        Self { from: (&r.from).into(), target: (&r.target).into(), stored_j: r.stored_j, start_s: r.start_s }
+    }
+}
+
+impl From<&lc_proto::Round> for Round {
+    fn from(r: &lc_proto::Round) -> Self {
+        Self { from: (&r.from).into(), target: (&r.target).into(), stored_j: r.stored_j, start_s: r.start_s }
+    }
+}
+
 impl From<&Fitting> for lc_proto::Fitting {
-    /// A round cannot be written as two loadouts, so a refit under way is not sent. None can be
-    /// begun until S1.
     fn from(f: &Fitting) -> Self {
         let a = f.account();
         Self {
             balance: f.balance.into(),
-            loadout: loadout_of(&f.hull.capacities, &f.balance),
+            form: (&a.form).into(),
             stored_j: a.stored_j,
             since_s: a.since_s,
             rapidity_since: a.rapidity_since,
             committed_j: a.committed_j,
             solar_w: a.solar_w,
-            refit: None,
+            refit: a.refit.as_ref().map(Into::into),
         }
     }
 }
 
 impl From<&lc_proto::Fitting> for Fitting {
-    /// A loadout refit is dropped, as one whose recipe no longer plans always was, which leaves
-    /// the ship as it was when the refit began.
     fn from(f: &lc_proto::Fitting) -> Self {
-        let balance = Balance::from(f.balance);
         let account = Account {
-            form: form_of(f.loadout, &balance),
+            form: (&f.form).into(),
             stored_j: f.stored_j,
             since_s: f.since_s,
             rapidity_since: f.rapidity_since,
             committed_j: f.committed_j,
             solar_w: f.solar_w,
-            refit: None,
+            refit: f.refit.as_ref().map(Into::into),
         };
-        Fitting::from_account(&account, balance)
+        Fitting::from_account(&account, f.balance.into())
+    }
+}
+
+impl From<&Fitting> for lc_proto::Hull {
+    /// As settled. The inertia is the whole ship's, stored energy included, at the settlement.
+    fn from(f: &Fitting) -> Self {
+        let mut geometry = (*f.geometry).clone();
+        let mass_kg = f.settled_mass_kg();
+        for moment in &mut geometry.inertia_kg_m2 {
+            *moment *= mass_kg;
+        }
+        let (c, aft_w) = (&f.hull.capacities, f.hull.thrust_n * C_M_S);
+        Self {
+            form: (&f.form).into(),
+            scales_m: f.form.parts.iter().map(|p| p.scale_m(f.balance.min_part_m3)).collect(),
+            capacities: lc_proto::form::Capacities {
+                storage_j: c.storage_j,
+                drone_w: c.building_w,
+                aft_w,
+                fore_w: (c.aperture_w - aft_w).max(0.0),
+                living_w: c.drain_w,
+                data_b: c.data_b,
+                dry_mass_kg: f.hull.dry_kg,
+            },
+            geometry,
+        }
     }
 }
 
@@ -857,19 +880,6 @@ mod tests {
         let wire: lc_proto::Balance = b.into();
         assert_eq!(wire.conversion_efficiency, b.conversion_efficiency);
         assert_eq!(Balance::from(wire), b);
-    }
-
-    /// The wire's per-module fields, which the balance no longer has, are 19's defaults again.
-    #[test]
-    fn the_wires_per_module_fields_are_a_slot_of_each_density() {
-        let wire = lc_proto::Balance::from(Balance::DEFAULT);
-        let me = Balance::DEFAULT.module_energy_j();
-        assert!((wire.storage_per_module - 5.0).abs() < 1e-12);
-        assert_eq!(format!("{:.2e}", wire.engine_thrust_n), "7.17e10");
-        assert_eq!(format!("{:.2e}", wire.drone_power_w), "2.31e19");
-        assert_eq!(format!("{:.2e}", wire.living_drain_w), "4.43e15");
-        assert_eq!(format!("{:.2e}", wire.data_per_module), "2.95e6");
-        assert!((wire.drone_power_w * 7.0 * 86_400.0 / me - 1.0).abs() < 1e-12, "a slot of drones builds an ME a week");
     }
 
     #[test]
@@ -985,8 +995,7 @@ mod tests {
         assert_eq!(after.extent_m, fitting.hull().extent_m, "measured only once settled");
     }
 
-    /// A loadout refit on the wire cannot be planned as a round, so it is dropped, as one whose
-    /// recipe no longer planned always was. Until S1 no round can be begun on a shard to be sent.
+    /// A round crosses the wire as its recipe, and both ends solve it to the same plan.
     #[test]
     fn an_account_survives_the_wire() {
         let b = Balance::DEFAULT;
@@ -994,38 +1003,81 @@ mod tests {
         let mut fitting = Fitting::full(Form::starting(), b, 10.0);
         fitting.settle(&motion, 20.0);
         fitting.drain(3.0 * b.module_energy_j());
-        let wire = lc_proto::Fitting::from(&fitting);
-        assert_eq!(wire.loadout, STARTING_COUNTS);
-        let back = Fitting::from(&lc_proto::decode::<lc_proto::Fitting>(&lc_proto::encode(&wire)).unwrap());
+        let across = |f: &Fitting| Fitting::from(&lc_proto::decode::<lc_proto::Fitting>(&lc_proto::encode(&lc_proto::Fitting::from(f))).unwrap());
+        assert_eq!(across(&fitting), fitting);
+
+        begun(&mut fitting, more_engine(), 20.0, &motion);
+        let end_s = fitting.refit().unwrap().duration_s();
+        fitting.settle(&motion, 20.0 + 0.5 * end_s);
+        let back = across(&fitting);
+        assert!(back.refit().is_some(), "the round was dropped");
         assert_eq!(back, fitting);
-
-        let refitting = lc_proto::Fitting {
-            refit: Some(lc_proto::RefitOrder { from: wire.loadout, target: wire.loadout, stored_j: 0.0, start_s: 20.0 }),
-            ..wire
-        };
-        assert_eq!(Fitting::from(&refitting), fitting);
     }
 
-    /// Every ship is a starting ship, and one saved with other counts comes back as the starting
-    /// form with each kind scaled to them.
+    /// Partway through a round the settled form may not place: a move waiting for a parent the
+    /// build phase has not made. It still loads, keeping the round's start's extent.
     #[test]
-    fn a_loadout_becomes_the_starting_form_scaled_to_its_counts() {
-        let wire = |loadout| lc_proto::Fitting { loadout, ..lc_proto::Fitting::from(&full()) };
-        let other = lc_proto::Loadout { storage: 9, living: 2, data: 0, slots: 25, ..STARTING_COUNTS };
-        let fitting = Fitting::from(&wire(other));
-        let c = fitting.hull().capacities;
-        let start = full().hull().capacities;
-        assert!((c.storage_j / start.storage_j - 1.5).abs() < 1e-12);
-        assert!((c.drain_w / start.drain_w - 2.0).abs() < 1e-12);
-        assert_eq!(c.data_b, ONBOARD_DATA_BYTES, "no data part");
-        assert_eq!((c.building_w, c.aperture_w), (start.building_w, start.aperture_w));
-        assert!(fitting.form().parts.iter().all(|p| p.kind != crate::form::Kind::Data));
-        // And its counts are read back off what it holds.
-        assert_eq!(lc_proto::Fitting::from(&fitting).loadout, lc_proto::Loadout { slots: 20, ..other });
+    fn a_form_settled_partway_that_does_not_place_still_loads() {
+        let b = Balance::DEFAULT;
+        let start = Fitting::full(Form::starting(), b, 0.0);
+        let mut orphan = Form::starting();
+        let hung = orphan.parts.iter_mut().find(|p| p.placement.is_some()).unwrap();
+        hung.placement.as_mut().unwrap().parent = PartId(99);
+        assert!(Hull::of(&orphan, &b).is_err(), "premise: it does not place");
+        let round = Round { from: Form::starting(), target: more_engine(), stored_j: 0.0, start_s: 0.0 };
+        let account = Account { form: orphan.clone(), refit: Some(round), ..start.account() };
+        let back = Fitting::from_account(&account, b);
+        assert_eq!(back.form(), &orphan);
+        assert_eq!(back.hull().extent_m, start.hull().extent_m);
+        assert_eq!(back.hull().gyration_m, start.hull().gyration_m);
     }
 
-    /// An account put back into a form whose store holds less than it saved, as a loadout that fell
-    /// back to the starting form would be, keeps only what the store holds.
+    /// What `Fitted` states: a scale per part, the aft engines apart from the rest, and the grid's
+    /// moments scaled to the ship as it stands.
+    #[test]
+    fn the_wires_hull_is_the_settled_form_measured() {
+        let fitting = full();
+        let hull = lc_proto::Hull::from(&fitting);
+        let b = Balance::DEFAULT;
+        assert_eq!(hull.form, lc_proto::Form::from(fitting.form()));
+        assert_eq!(hull.scales_m.len(), fitting.form().parts.len());
+        for (part, scale) in fitting.form().parts.iter().zip(&hull.scales_m) {
+            assert!((part.shape(b.min_part_m3).volume() / part.drawn().volume(*scale) - 1.0).abs() < 1e-12);
+        }
+        assert_eq!(hull.capacities.storage_j, fitting.hull().capacities.storage_j);
+        assert_eq!(hull.capacities.aft_w, fitting.hull().thrust_n * C_M_S);
+        assert_eq!(hull.capacities.fore_w, 0.0, "the starting form's one bell fires aft");
+        assert_eq!(hull.geometry.extent_m, fitting.hull().extent_m);
+        let grid = FormGrid::new(fitting.form(), &b).unwrap();
+        let mass_kg = fitting.mass_kg_at(&ShipState::at(DVec3::ZERO), 0.0);
+        let whole = grid.geometry(mass_kg).inertia_kg_m2;
+        for (sent, whole) in hull.geometry.inertia_kg_m2.iter().zip(whole) {
+            assert!((sent - whole).abs() <= 1e-12 * whole.abs().max(1.0), "{sent} vs {whole}");
+        }
+    }
+
+    #[test]
+    fn each_step_that_ends_leaves_its_form_at_its_end() {
+        let motion = ShipState::at(DVec3::ZERO);
+        let mut fitting = full();
+        let mut target = more_engine();
+        target.parts.iter_mut().find(|p| p.kind == crate::form::Kind::Storage).unwrap().volume_m3 *= 1.1;
+        begun(&mut fitting, target.clone(), 0.0, &motion);
+        let plan = fitting.refit().unwrap().clone();
+        assert!(plan.steps().len() >= 2, "premise: {} steps", plan.steps().len());
+        let ends = fitting.steps_ending(0.0, f64::INFINITY);
+        assert_eq!(ends.len(), plan.steps().len());
+        assert_eq!(ends.last().unwrap().1, target);
+        for ((end, form), step) in ends.iter().zip(plan.steps()) {
+            assert_eq!(*end, step.ends_s());
+            assert_eq!(form, &plan.at(*end).form);
+            assert_ne!(form, &plan.at(end - 1e-3 * step.duration_s).form, "it changed only at the end");
+        }
+        assert!(fitting.steps_ending(ends[0].0, ends[0].0).is_empty(), "a step is counted once");
+    }
+
+    /// An account put back into a form whose store holds less than it saved, as one measured under
+    /// another balance may, keeps only what the store holds.
     #[test]
     fn an_account_holds_no_more_than_its_store() {
         let me = Balance::DEFAULT.module_energy_j();
