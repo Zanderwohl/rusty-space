@@ -557,10 +557,13 @@ const MIN_RATIO: f64 = 0.1;
 
 /// A field's number as typed back to it: short, and exact enough to round-trip what a handle set.
 pub fn shown(x: f64) -> String {
+    let trimmed = |s: String| s.trim_end_matches('0').trim_end_matches('.').to_string();
     if x != 0.0 && (x.abs() >= 1.0e5 || x.abs() < 1.0e-3) {
-        format!("{x:.4e}")
+        let written = format!("{x:.4e}");
+        let (mantissa, exponent) = written.split_once('e').unwrap_or((&written, "0"));
+        format!("{}e{exponent}", trimmed(mantissa.to_string()))
     } else {
-        format!("{:.4}", x).trim_end_matches('0').trim_end_matches('.').to_string()
+        trimmed(format!("{x:.4}"))
     }
 }
 
@@ -591,25 +594,26 @@ pub fn value(part: &Part, field: Field) -> Option<f64> {
     }
 }
 
-/// The fields `part` has, in the order the panel lists them.
-pub fn fields(part: &Part) -> Vec<(Field, &'static str)> {
-    let mut out = vec![(Field::Volume, "volume m3")];
+/// The fields `part` has, as the panel lists them: a label and the numbers on its line.
+pub fn fields(part: &Part) -> Vec<(&'static str, Vec<Field>)> {
+    let three = |make: fn(usize) -> Field| vec![make(0), make(1), make(2)];
+    let mut out = vec![("volume m3", vec![Field::Volume])];
     out.extend(match part.primitive {
-        Primitive::Ellipsoid { .. } => vec![(Field::Axis(0), "axis x"), (Field::Axis(1), "axis y"), (Field::Axis(2), "axis z")],
-        Primitive::Slab { .. } => {
-            vec![(Field::Axis(0), "edge x"), (Field::Axis(1), "edge y"), (Field::Axis(2), "edge z"), (Field::Corner, "corner")]
-        }
-        Primitive::Capsule { .. } | Primitive::Cylinder { .. } => vec![(Field::Length, "length")],
-        Primitive::Frustum { .. } => vec![(Field::Length, "length"), (Field::Taper, "taper")],
-        Primitive::Torus { .. } => vec![(Field::Major, "major")],
+        Primitive::Ellipsoid { .. } => vec![("axes", three(Field::Axis))],
+        Primitive::Slab { .. } => vec![("edges", three(Field::Axis)), ("corner", vec![Field::Corner])],
+        Primitive::Capsule { .. } | Primitive::Cylinder { .. } => vec![("length", vec![Field::Length])],
+        Primitive::Frustum { .. } => vec![("length", vec![Field::Length]), ("taper", vec![Field::Taper])],
+        Primitive::Torus { .. } => vec![("major", vec![Field::Major])],
     });
     let Some(placement) = part.placement else { return out };
-    out.push((Field::Parent, "parent"));
+    out.push(("parent", vec![Field::Parent]));
     if matches!(placement.mount, Mount::Attached { .. }) {
-        out.extend([(Field::Anchor(0), "anchor x"), (Field::Anchor(1), "anchor y"), (Field::Anchor(2), "anchor z")]);
-        out.push((Field::Standoff, "standoff"));
+        out.push(("anchor", three(Field::Anchor)));
+        out.push(("standoff", vec![Field::Standoff]));
     }
-    out.extend([(Field::Twist, "twist deg"), (Field::Tilt(0), "tilt y deg"), (Field::Tilt(1), "tilt z deg"), (Field::Blend, "blend")]);
+    out.push(("twist deg", vec![Field::Twist]));
+    out.push(("tilt deg", vec![Field::Tilt(0), Field::Tilt(1)]));
+    out.push(("blend", vec![Field::Blend]));
     out
 }
 
@@ -781,7 +785,7 @@ mod tests {
         assert_eq!(edit.after[0].volume_m3, 123_456.0);
         assert!(d.set_field(PartId(1), Field::Anchor(0), 1.0).is_err(), "an enclosing part has no anchor");
         assert!(d.set_field(PartId(1), Field::Length, 1.0).is_err(), "an ellipsoid has no length");
-        for (field, _) in fields(d.part(PartId(2)).unwrap()) {
+        for field in fields(d.part(PartId(2)).unwrap()).into_iter().flat_map(|(_, line)| line) {
             let v = value(d.part(PartId(2)).unwrap(), field).unwrap();
             let edit = d.set_field(PartId(2), field, v).unwrap();
             assert_eq!(edit.after[0].id, PartId(2), "{field:?}");
@@ -791,6 +795,8 @@ mod tests {
     #[test]
     fn numbers_read_short() {
         assert_eq!(shown(2_356_194.49), "2.3562e6");
+        assert_eq!(shown(1.25e6), "1.25e6");
+        assert_eq!(shown(3.0e-5), "3e-5");
         assert_eq!(shown(0.25), "0.25");
     }
 }

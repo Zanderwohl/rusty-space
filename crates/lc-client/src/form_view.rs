@@ -2,7 +2,7 @@
 //!
 //! Its own camera on [`FORM_LAYER`], drawing copies of the placeholder parts in the ship's frame
 //! (x nose, y port, z up), in meters about the render origin, into an image laid out under the
-//! editor's chrome with the sky in the corner square. Copies rather than [`crate::parts`]' own
+//! editor's chrome, which is the whole view: the editor has no corner square. Copies rather than [`crate::parts`]' own
 //! pieces: those are placed relative to the eye in astronomical units and lit by the star, and
 //! an entity has one transform and one material. An image rather than the window, because two
 //! cameras sharing the window's texture clear and tone-map over each other; the map does the same.
@@ -41,6 +41,11 @@ pub const FORM_FOV: f32 = std::f32::consts::FRAC_PI_4;
 /// The camera the editor is drawn for.
 #[derive(Component)]
 pub struct FormCamera;
+
+/// The camera the editor's handles are drawn for: a child of [`FormCamera`], into the same image
+/// after it, with the depth cleared so a handle is never buried in a hull.
+#[derive(Component)]
+pub struct FormHandleCamera;
 
 /// Where the camera starts: aft of the starboard beam, a little above, with the nose to the right.
 const START_AZIMUTH: f64 = -120.0 * std::f64::consts::PI / 180.0;
@@ -338,12 +343,12 @@ impl Shown {
 
 /// Where the picture is on the window, logical pixels, while the editor is the view.
 pub fn picture(surface: &FormSurface) -> Option<egui::Rect> {
-    surface.laid.map(|(rect, _)| rect)
+    surface.laid
 }
 
 /// Whether `at`, logical pixels, is on the picture rather than the corner square or the readout.
 pub fn on_picture(surface: &FormSurface, at: Vec2) -> bool {
-    surface.laid.is_some_and(|(rect, hole)| inside(rect, hole, at))
+    surface.laid.is_some_and(|rect| rect.contains(egui::pos2(at.x, at.y)))
 }
 
 /// Where the picture goes on the window, logical pixels, and the target it is drawn into.
@@ -352,16 +357,16 @@ pub struct FormSurface {
     image: Handle<Image>,
     size: UVec2,
     /// The picture's rect and the corner square left out of it, or `None` outside the editor.
-    laid: Option<(egui::Rect, egui::Rect)>,
+    laid: Option<egui::Rect>,
 }
 
 /// Where the picture goes on a window of `window` logical pixels whose readout ends at `foot`:
-/// everything under the readout, less the corner square.
-pub fn layout_of(window: Vec2, foot: f32) -> (egui::Rect, egui::Rect) {
+/// everything under the readout.
+pub fn layout_of(window: Vec2, foot: f32) -> egui::Rect {
     let whole = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(window.x, window.y));
     let mut rect = whole;
     rect.min.y = foot.clamp(whole.min.y, whole.max.y);
-    (rect, crate::map_panel::corner(whole))
+    rect
 }
 
 pub struct FormViewPlugin;
@@ -392,22 +397,37 @@ pub fn editing(ui: Res<Ui>) -> bool {
 pub fn spawn_camera(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let image = images.add(crate::map::target_image(UVec2::splat(INITIAL_SIDE)));
     commands.insert_resource(FormSurface { image: image.clone(), size: UVec2::splat(INITIAL_SIDE), laid: None });
+    let camera = commands
+        .spawn((
+            Camera3d::default(),
+            FormCamera,
+            RenderLayers::layer(FORM_LAYER),
+            RenderTarget::Image(image.clone().into()),
+            Camera {
+                // Before the window's cameras, whose frame shows what this one drew. The map's is -1.
+                order: -3,
+                is_active: false,
+                clear_color: ClearColorConfig::Custom(BACKDROP),
+                ..default()
+            },
+            Projection::Perspective(PerspectiveProjection { fov: FORM_FOV, ..default() }),
+            // The parts' material tone-maps itself, as the map's lines do.
+            Tonemapping::None,
+            Transform::default(),
+        ))
+        .id();
+    // Everything that makes the two share one texture matches: the target, no HDR, the same
+    // sample count. `ClearColorConfig::None` keeps the parts; the depth is cleared regardless.
     commands.spawn((
         Camera3d::default(),
-        FormCamera,
-        RenderLayers::layer(FORM_LAYER),
+        FormHandleCamera,
+        RenderLayers::layer(crate::form_handles::FORM_HANDLE_LAYER),
         RenderTarget::Image(image.into()),
-        Camera {
-            // Before the window's cameras, whose frame shows what this one drew. The map's is -1.
-            order: -2,
-            is_active: false,
-            clear_color: ClearColorConfig::Custom(BACKDROP),
-            ..default()
-        },
+        Camera { order: -2, is_active: false, clear_color: ClearColorConfig::None, ..default() },
         Projection::Perspective(PerspectiveProjection { fov: FORM_FOV, ..default() }),
-        // The parts' material tone-maps itself, as the map's lines do.
         Tonemapping::None,
         Transform::default(),
+        ChildOf(camera),
     ));
 }
 
@@ -586,11 +606,14 @@ pub(crate) fn place(
     shown: Res<Shown>,
     surface: Res<FormSurface>,
     camera: Single<(&mut Camera, &mut Transform, &mut Projection), With<FormCamera>>,
+    handles: Single<(&mut Camera, &mut Projection), (With<FormHandleCamera>, Without<FormCamera>)>,
 ) {
     let (mut camera, mut transform, mut projection) = camera.into_inner();
+    let (mut over, mut over_projection) = handles.into_inner();
     let active = ui.view == ViewMode::Form && surface.laid.is_some() && shown.extent().is_some();
     if camera.is_active != active {
         camera.is_active = active;
+        over.is_active = active;
     }
     let Some(extent) = shown.extent().filter(|_| active) else { return };
     let held = ui.form.orbit.held_to(&extent);
@@ -606,6 +629,7 @@ pub(crate) fn place(
         perspective.near = standoff * 1.0e-3;
         perspective.far = standoff * 10.0 + extent.size_m() as f32 * 2.0;
     }
+    *over_projection = projection.clone();
 }
 
 /// Everything on screen that is the editor's and not the camera's.
@@ -614,9 +638,6 @@ struct Chrome;
 
 #[derive(Component)]
 struct Picture;
-
-#[derive(Component)]
-struct Piece(usize);
 
 #[derive(Component)]
 pub(crate) struct Emit(Action);
@@ -634,23 +655,22 @@ fn lay_out(
     assets: Res<AssetServer>,
     mut surface: ResMut<FormSurface>,
     mut images: ResMut<Assets<Image>>,
-    mut chrome: Query<(Entity, &mut Node), (With<Chrome>, Without<Piece>)>,
-    pictures: Query<Entity, With<Picture>>,
-    mut pieces: Query<(&Piece, &mut Node, &mut ImageNode), Without<Chrome>>,
+    mut chrome: Query<(Entity, &mut Node), (With<Chrome>, Without<Picture>)>,
+    mut pictures: Query<(Entity, &mut Node), (With<Picture>, Without<Chrome>)>,
 ) {
     if ui.view != ViewMode::Form {
         surface.laid = None;
         for (entity, ..) in &mut chrome {
             commands.entity(entity).despawn();
         }
-        for entity in &pictures {
+        for (entity, _) in &pictures {
             commands.entity(entity).despawn();
         }
         return;
     }
 
-    let (rect, hole) = layout_of(Vec2::new(window.width(), window.height()), foot.0);
-    surface.laid = Some((rect, hole));
+    let rect = layout_of(Vec2::new(window.width(), window.height()), foot.0);
+    surface.laid = Some(rect);
     let scale = window.scale_factor();
     let wanted = (Vec2::new(rect.width(), rect.height()) * scale)
         .round()
@@ -675,31 +695,16 @@ fn lay_out(
         build_chrome(&mut commands, top, assets.load(crate::faces::UI_FILE));
     }
 
-    let laid = crate::map_panel::around(rect, hole);
-    if pictures.is_empty() {
-        let picture = commands.spawn((Node { position_type: PositionType::Absolute, ..default() },
-            GlobalZIndex(-1), Picture)).id();
-        for index in 0..4 {
-            commands.spawn((Node::default(), ImageNode::new(surface.image.clone()), Piece(index), ChildOf(picture)));
+    let want = placed(rect);
+    let mut drawn = false;
+    for (_, mut node) in &mut pictures {
+        drawn = true;
+        if *node != want {
+            *node = want.clone();
         }
-        return;
     }
-    let texels = surface.size.as_vec2();
-    for (piece, mut node, mut image) in &mut pieces {
-        let want = match laid.get(piece.0) {
-            Some(at) => {
-                let uv = crate::map_panel::uv(rect, *at);
-                let texture = Rect::new(uv.min.x * texels.x, uv.min.y * texels.y, uv.max.x * texels.x, uv.max.y * texels.y);
-                (placed(*at), Some(texture))
-            }
-            None => (Node { display: Display::None, ..default() }, None),
-        };
-        if *node != want.0 {
-            *node = want.0;
-        }
-        if image.rect != want.1 {
-            image.rect = want.1;
-        }
+    if !drawn {
+        commands.spawn((want, ImageNode::new(surface.image.clone()), GlobalZIndex(-1), Picture));
     }
 }
 
@@ -720,7 +725,6 @@ fn build_chrome(commands: &mut Commands, top: f32, font: Handle<Font>) {
     let strip = ui.strip(root);
     let row = ui.row(strip);
     ui.inline(row, "SHIP EDITOR", 16.0, em_ui::vfd::TEXT);
-    ui.inline(row, "current ship", 14.0, em_ui::vfd::TEXT_DIM);
     ui.small_button(row, "Back", Emit(Action::ToggleForm));
 }
 
@@ -769,11 +773,12 @@ pub fn read_drag(
     shown: Res<Shown>,
     surface: Res<FormSurface>,
     carried: Res<crate::form_carry::Carried>,
+    grabbed: Res<crate::form_handles::Grabbed>,
     mut last: Local<Option<Vec2>>,
     mut out: MessageWriter<Requested>,
 ) {
     let cursor = window.cursor_position();
-    let (Some((sdf, extent)), Some((rect, hole))) = (&shown.drawn, surface.laid) else {
+    let (Some((sdf, extent)), Some(rect)) = (&shown.drawn, surface.laid) else {
         *last = None;
         return;
     };
@@ -788,9 +793,9 @@ pub fn read_drag(
         let lens = crate::form_handles::Lens { orbit: ui.form.orbit.held_to(extent), extent: *extent, rect };
         *last = cursor
             // A press while carrying a part puts it down, and slides nothing.
-            .filter(|at| pointer_free(&egui, &controls) && inside(rect, hole, *at) && !carried.is_carrying())
+            .filter(|at| pointer_free(&egui, &controls) && rect.contains(egui::pos2(at.x, at.y)) && !carried.is_carrying())
             .filter(|at| {
-                let on_part = crate::form_handles::pick_part(sdf, &lens, *at).is_some();
+                let on_part = crate::form_handles::pick_part(sdf, &lens, *at).is_some() || grabbed.is_holding();
                 drag_of(MouseButton::Left, on_part) == Some(FormDrag::Slide)
             });
         return;
@@ -801,11 +806,6 @@ pub fn read_drag(
     if standoffs != 0.0 {
         out.write(Requested(Action::SlideForm(standoffs)));
     }
-}
-
-fn inside(rect: egui::Rect, hole: egui::Rect, at: Vec2) -> bool {
-    let at = egui::pos2(at.x, at.y);
-    rect.contains(at) && !hole.contains(at)
 }
 
 /// The keyboard path for the slide, held like the arrows. Not while a book has the page keys.
@@ -1019,16 +1019,12 @@ mod tests {
         }
     }
 
-    /// The picture is under the readout and leaves the corner to the sky.
+    /// The picture is everything under the readout; the editor has no corner square.
     #[test]
-    fn the_picture_is_under_the_readout_with_the_sky_in_the_corner() {
-        let (rect, hole) = layout_of(Vec2::new(1280.0, 720.0), 61.0);
-        assert_eq!(rect.min.y, 61.0);
+    fn the_picture_is_everything_under_the_readout() {
+        let rect = layout_of(Vec2::new(1280.0, 720.0), 61.0);
+        assert_eq!(rect.min, egui::pos2(0.0, 61.0));
         assert_eq!(rect.max, egui::pos2(1280.0, 720.0));
-        assert_eq!(hole, crate::map_panel::corner(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))));
-        assert!(inside(rect, hole, Vec2::new(640.0, 360.0)));
-        assert!(!inside(rect, hole, Vec2::new(hole.center().x, hole.center().y)), "the corner is the sky's");
-        assert!(!inside(rect, hole, Vec2::new(640.0, 20.0)), "the readout is egui's");
     }
 
     /// The hangar light comes from the viewer's side, so the face being looked at is lit.

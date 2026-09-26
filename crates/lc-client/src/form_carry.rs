@@ -224,10 +224,15 @@ pub fn carry(
     shown: Res<Shown>,
     surface: Res<FormSurface>,
     mut carried: ResMut<Carried>,
+    grabbed: Res<crate::form_handles::Grabbed>,
     mut seen: Local<Option<Vec2>>,
     mut out: MessageWriter<Requested>,
 ) {
     let balance = Balance::DEFAULT;
+    // A press on a handle is the handle's.
+    if grabbed.is_holding() {
+        return;
+    }
     let (Some(lens), Some(sdf), Some(draft)) = (lens(&ui, &shown, &surface), shown.sdf(), ui.form.draft.as_ref()) else {
         return;
     };

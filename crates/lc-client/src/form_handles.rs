@@ -1,19 +1,25 @@
-//! The editor's handles: picking a part where it is drawn, and knobs that edit it there.
+//! The editor's handles: picking a part where it is drawn, and the handles that edit it there.
 //!
-//! Every knob is a Bevy UI button over the picture, so [`em_ui::Controls`] keeps the camera off a
-//! drag that starts on one, as [`form_view::drag_of`] keeps it off a press on a part. A drag sends
-//! an edit each frame it moves, every one carrying the part as it was when the drag began, and a
-//! settled one on release: one gesture, one entry in the history. The lines between the knobs are
-//! gizmos on the editor's own layer. See `lightcone/docs/29-ship-form.md` §Handles.
+//! Drawn after newseum's editor controls: a line per axis of the part in red, green and blue with a
+//! square end, a line along its diagonal for size, one ring for its twist, and an arrow into its
+//! parent for its standoff. They are meshes on their own layer, drawn by a camera of their own
+//! after the parts so they are never buried in a hull, and sized in pixels so they read the same
+//! on a 500 m ship and a 50 km one.
+//!
+//! A line drags by the point on it nearest the pointer's ray, and the ring by where the ray meets
+//! its plane, so a handle stays under the pointer however the camera is turned. Both are measured
+//! against the handle as it stood when the drag began. Picking is in screen space over the same
+//! geometry that is drawn, and a press on a handle is neither the camera's nor a part's. A drag
+//! sends an edit each frame it moves and a settled one on release: one gesture, one entry in the
+//! history. See `lightcone/docs/29-ship-form.md` §Handles.
 
-use bevy::camera::visibility::RenderLayers;
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::input::mouse::MouseButton;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::egui;
 use bevy_egui::input::EguiWantsInput;
-use em_ui::picking::{Candidate, SLACK_PX, pick, rank};
-use em_ui::{MenuTheme, MenuUi};
+use em_ui::picking::{Candidate, SLACK_PX, nearest_on_path, pick, rank};
 use glam::{DMat3, DVec2, DVec3};
 use lc_world::fitting::Balance;
 use lc_world::form::place::Side;
@@ -23,43 +29,38 @@ use lc_world::form::{Mount, Part, PartId, Placement};
 use crate::action::Action;
 use crate::app::Ui;
 use crate::draft::{Edit, Refused, What, grown, stretched};
-use crate::form_view::{Extent, FORM_FOV, FORM_LAYER, FormOrbit, FormSurface, Shown};
+use crate::form_view::{Extent, FORM_FOV, FormOrbit, FormSurface, Shown};
 use crate::input::Requested;
 use crate::snap;
 use crate::ui::ViewMode;
 
-/// Which edit a knob makes.
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+/// The handles' own layer, drawn by the handle camera over the parts.
+pub const FORM_HANDLE_LAYER: usize = 6;
+
+/// Which edit a handle makes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Grip {
-    /// Volume at fixed proportions.
+    /// Volume at fixed proportions, along the part's diagonal.
     Size,
     /// One dimension, along the part's own axis. The volume goes with it, or with the
     /// constant-volume modifier the others give way instead.
     Axis(usize),
     Twist,
+    /// Into the parent, and back out to resting on it.
     Standoff,
 }
 
-impl Grip {
-    fn label(self) -> &'static str {
-        match self {
-            Grip::Size => "SIZE",
-            Grip::Axis(0) => "X",
-            Grip::Axis(1) => "Y",
-            Grip::Axis(_) => "Z",
-            Grip::Twist => "TWIST",
-            Grip::Standoff => "SINK",
-        }
-    }
-}
-
-/// Pixels of drag for volume to grow by a factor of e.
-const SIZE_PX: f64 = 80.0;
-/// Pixels of drag for a ratio to grow by a factor of e.
-const STRETCH_PX: f64 = 120.0;
-/// Past the part's own half-extent, how far out the axis knobs and the twist ring sit.
+/// Past the part's half-extent, how far out a handle reaches.
 const REACH_OUT: f64 = 1.3;
-const KNOB: Vec2 = Vec2::new(46.0, 20.0);
+/// However small the part is drawn, a handle is at least this long.
+const MIN_ARM_PX: f64 = 50.0;
+const LINE_PX: f64 = 3.0;
+const END_PX: f64 = 13.0;
+const HEAD_PX: (f64, f64) = (18.0, 7.0);
+const RING_SEGMENTS: usize = 48;
+/// Of its start, the least a line handle may be pulled in to, so a part cannot be dragged through
+/// nothing.
+const LEAST_PULL: f64 = 0.05;
 
 /// The camera the handles are laid against: its orbit over the draft, into the picture.
 #[derive(Clone, Copy, Debug)]
@@ -172,112 +173,179 @@ fn half(piece: &Piece) -> DVec3 {
     piece.shape.extent(DMat3::IDENTITY, 0.0)
 }
 
-/// Where each knob of `part` goes, ship frame, or `None` for one placed on screen from the
-/// part's middle: the size knob, which has no direction of its own.
-fn anchors(part: &Part, piece: &Piece) -> Vec<(Grip, Option<DVec3>)> {
-    if part.placement.is_none() {
-        return Vec::new();
-    }
-    let h = half(piece);
-    let pose = &piece.pose;
-    let mut out = vec![(Grip::Size, None)];
-    for i in 0..3 {
-        out.push((Grip::Axis(i), Some(pose.to_outer(DVec3::AXES[i] * h[i] * REACH_OUT))));
-    }
-    out.push((Grip::Twist, Some(pose.to_outer(DVec3::Z * h.y.max(h.z) * REACH_OUT * 1.2))));
-    if matches!(part.placement.map(|p| p.mount), Some(Mount::Attached { .. })) {
-        out.push((Grip::Standoff, Some(pose.to_outer(-DVec3::X * piece.shape.reach()))));
-    }
-    out
+/// Where the selected part's handles are, ship frame, meters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Handles {
+    pub center: DVec3,
+    /// The part's axes, unit.
+    pub axes: DMat3,
+    /// Each axis line's length.
+    pub arms: DVec3,
+    /// The size line's end.
+    pub diagonal: DVec3,
+    pub ring_m: f64,
+    /// The standoff arrow's tip, for an attached part.
+    pub sink: Option<DVec3>,
+    /// Meters across a pixel at the part.
+    pub m_per_px: f64,
 }
 
-/// Every knob of the selected part, on screen.
-pub fn knobs(part: &Part, piece: &Piece, lens: &Lens) -> Vec<(Grip, Vec2)> {
-    let Some((center, depth)) = lens.project(piece.pose.position) else { return Vec::new() };
-    let radius_px = (half(piece).max_element() / lens.m_per_px(depth)) as f32;
-    anchors(part, piece)
-        .into_iter()
-        .filter_map(|(grip, at)| match at {
-            Some(at) => lens.project(at).map(|(px, _)| (grip, px)),
-            None => Some((grip, center + Vec2::new(0.8, -0.8) * radius_px.max(30.0))),
+impl Handles {
+    pub fn of(part: &Part, piece: &Piece, lens: &Lens) -> Option<Handles> {
+        part.placement?;
+        let (_, depth) = lens.project(piece.pose.position)?;
+        let m_per_px = lens.m_per_px(depth);
+        let least = MIN_ARM_PX * m_per_px;
+        let h = half(piece);
+        let arms = (h * REACH_OUT).max(DVec3::splat(least));
+        let axes = piece.pose.rotation;
+        let center = piece.pose.position;
+        let attached = matches!(part.placement.map(|p| p.mount), Some(Mount::Attached { .. }));
+        let sink = attached.then(|| center - axes.x_axis * (piece.shape.reach() * REACH_OUT).max(least));
+        Some(Handles {
+            center,
+            axes,
+            arms,
+            diagonal: center + axes * (h.normalize_or(DVec3::ONE) * (h.length() * REACH_OUT).max(least)),
+            ring_m: (h.y.max(h.z) * REACH_OUT * 1.1).max(least),
+            sink,
+            m_per_px,
         })
-        .collect()
+    }
+
+    pub fn grips(&self) -> Vec<Grip> {
+        let mut out = vec![Grip::Axis(0), Grip::Axis(1), Grip::Axis(2), Grip::Size, Grip::Twist];
+        if self.sink.is_some() {
+            out.push(Grip::Standoff);
+        }
+        out
+    }
+
+    /// A line handle, from its root to its end.
+    fn line(&self, grip: Grip) -> Option<(DVec3, DVec3)> {
+        match grip {
+            Grip::Axis(i) => Some((self.center, self.center + self.axes.col(i) * self.arms[i])),
+            Grip::Size => Some((self.center, self.diagonal)),
+            Grip::Standoff => self.sink.map(|tip| (self.center, tip)),
+            Grip::Twist => None,
+        }
+    }
+
+    /// Around the part's own axis, where its twist turns it.
+    fn ring(&self) -> Vec<DVec3> {
+        (0..=RING_SEGMENTS)
+            .map(|k| {
+                let angle = k as f64 * std::f64::consts::TAU / RING_SEGMENTS as f64;
+                self.center + (self.axes.y_axis * angle.cos() + self.axes.z_axis * angle.sin()) * self.ring_m
+            })
+            .collect()
+    }
+
+    /// The handle under `at`, by what is drawn: a line along its length, its end as a square, the
+    /// ring all round.
+    pub fn under(&self, lens: &Lens, at: Vec2) -> Option<Grip> {
+        let grips = self.grips();
+        let mut candidates = Vec::new();
+        for (index, grip) in grips.iter().enumerate() {
+            let points: Vec<DVec3> = match self.line(*grip) {
+                Some((from, to)) => {
+                    if let Some((end, _)) = lens.project(to) {
+                        // Ends before lines, so a square where a line crosses it is the square's.
+                        candidates.push(Candidate { id: index as u64, at: end, radius_px: (END_PX * 0.5) as f32, rank: rank::CRAFT });
+                    }
+                    vec![from, to]
+                }
+                None => self.ring(),
+            };
+            let run: Option<Vec<Vec2>> = points.iter().map(|p| lens.project(*p).map(|(px, _)| px)).collect();
+            if let Some((nearest, _)) = run.and_then(|run| nearest_on_path(&[run], at)) {
+                candidates.push(Candidate { id: index as u64, at: nearest, radius_px: 0.0, rank: rank::BODY });
+            }
+        }
+        pick(&candidates, at, (LINE_PX as f32).max(6.0)).map(|i| grips[i as usize])
+    }
 }
 
-/// A drag under way: what was grabbed, and everything about the part it is measured against, as
-/// it was when the drag began.
+/// The parameter along the line through `origin` in unit `direction` of its point nearest the ray.
+/// `None` for a ray nearly along the line.
+fn along_line(origin: DVec3, direction: DVec3, ray: (DVec3, DVec3)) -> Option<f64> {
+    let (from, toward) = ray;
+    let b = toward.dot(direction);
+    let w = from - origin;
+    let denom = 1.0 - b * b;
+    (denom.abs() > 1e-9).then(|| (w.dot(direction) - b * w.dot(toward)) / denom)
+}
+
+/// The angle about `handles`' axis of where the ray meets the ring's plane. `None` for a ray
+/// along the plane.
+fn angle_on_ring(handles: &Handles, ray: (DVec3, DVec3)) -> Option<f64> {
+    let (from, toward) = ray;
+    let normal = handles.axes.x_axis;
+    let denom = toward.dot(normal);
+    if denom.abs() < 1e-9 {
+        return None;
+    }
+    let hit = from + toward * (handles.center - from).dot(normal) / denom;
+    let v = hit - handles.center;
+    Some(v.dot(handles.axes.z_axis).atan2(v.dot(handles.axes.y_axis)))
+}
+
+/// A drag under way: what was grabbed, the part and its handles as they were when it began, and
+/// where on the handle the pointer took hold.
 #[derive(Clone, Copy, Debug)]
 pub struct Held {
     pub grip: Grip,
     pub part: Part,
-    pub from: Vec2,
-    /// The part's middle on screen, and the knob.
-    pub center: Vec2,
-    pub knob: Vec2,
-    /// The part's axes on screen, unit, and whether its own x points away from the eye.
-    pub axes: [Vec2; 3],
-    pub away: bool,
-    pub m_per_px: f64,
+    pub handles: Handles,
+    /// Along a line from its root, meters, or the angle round the ring.
+    pub start: f64,
     pub reach_m: f64,
 }
 
 impl Held {
-    pub fn new(grip: Grip, part: Part, sdf: &Sdf, lens: &Lens, from: Vec2) -> Option<Held> {
-        let (_, piece) = original(sdf, part.id)?;
-        let (center, depth) = lens.project(piece.pose.position)?;
-        let knob = knobs(&part, piece, lens).into_iter().find(|(g, _)| *g == grip).map_or(from, |(_, at)| at);
-        let axes = [0, 1, 2].map(|i| {
-            let tip = piece.pose.position + piece.pose.rotation.col(i) * half(piece)[i].max(1.0);
-            lens.project(tip).map_or(Vec2::X, |(px, _)| (px - center).normalize_or(Vec2::X))
-        });
-        let away = piece.pose.axis().dot(lens.orbit.basis()[0]) > 0.0;
-        Some(Held {
-            grip,
-            part,
-            from,
-            center,
-            knob,
-            axes,
-            away,
-            m_per_px: lens.m_per_px(depth),
-            reach_m: piece.shape.reach().max(f64::MIN_POSITIVE),
-        })
+    pub fn new(grip: Grip, part: Part, handles: Handles, piece: &Piece, lens: &Lens, at: Vec2) -> Option<Held> {
+        let start = Self::measure(grip, &handles, lens, at)?;
+        Some(Held { grip, part, handles, start, reach_m: piece.shape.reach().max(f64::MIN_POSITIVE) })
+    }
+
+    fn measure(grip: Grip, handles: &Handles, lens: &Lens, at: Vec2) -> Option<f64> {
+        let ray = lens.ray(at);
+        match handles.line(grip) {
+            Some((from, to)) => along_line(from, (to - from).normalize(), ray),
+            None => angle_on_ring(handles, ray),
+        }
     }
 
     /// The edit a drag to `at` makes.
-    pub fn edit(&self, at: Vec2, keys: Modifiers, balance: &Balance) -> Result<Edit, Refused> {
+    pub fn edit(&self, lens: &Lens, at: Vec2, keys: Modifiers, balance: &Balance) -> Result<Edit, Refused> {
         let fine = keys.fine;
-        let drag = at - self.from;
-        let along = |direction: Vec2| drag.dot(direction.normalize_or(Vec2::X)) as f64;
         let placement = self.part.placement.ok_or(Refused::Mind)?;
+        let now = Self::measure(self.grip, &self.handles, lens, at).ok_or(Refused::NoSuchPart(self.part.id))?;
+        // How far out a line was pulled, as a ratio of where it was taken hold of.
+        let pulled = (now / self.start).max(LEAST_PULL);
         let (what, after) = match self.grip {
             Grip::Size => {
-                let factor = (along(self.knob - self.center) / SIZE_PX).exp();
-                let volume_m3 = snap::volume(self.part.volume_m3 * factor, balance.min_part_m3, fine);
+                let volume_m3 = snap::volume(self.part.volume_m3 * pulled.powi(3), balance.min_part_m3, fine);
                 (What::Resize, Part { volume_m3, ..self.part })
             }
             Grip::Axis(i) => {
-                let factor = (along(self.axes[i]) / STRETCH_PX).exp();
                 let after = match keys.keep_volume {
-                    true => Part { primitive: stretched(self.part.primitive, i, factor, fine), ..self.part },
-                    false => grown(&self.part, i, factor, fine),
+                    true => Part { primitive: stretched(self.part.primitive, i, pulled, fine), ..self.part },
+                    false => grown(&self.part, i, pulled, fine),
                 };
                 (What::Reshape, after)
             }
             Grip::Twist => {
-                let (a, b) = (self.from - self.center, at - self.center);
-                // Clockwise on a screen whose y is down, which turns a part pointing away from
-                // the eye the right-handed way about its axis.
-                let turned = (a.perp_dot(b) as f64).atan2(a.dot(b) as f64);
-                let sign = if self.away { 1.0 } else { -1.0 };
-                let twist = snap::angle(placement.twist + sign * turned, fine);
+                let turned = (now - self.start + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                let twist = snap::angle(placement.twist + turned, fine);
                 (What::Move, Part { placement: Some(Placement { twist, ..placement }), ..self.part })
             }
             Grip::Standoff => {
                 let Mount::Attached { anchor, standoff } = placement.mount else { return Err(Refused::Mind) };
-                // Never out past resting on the parent, which would leave it floating.
-                let moved = snap::standoff(standoff + along(self.axes[0]) * self.m_per_px / self.reach_m, fine).min(0.0);
-                let mount = Mount::Attached { anchor, standoff: moved };
+                // The arrow points into the parent, so pulling along it sinks the part. Never out
+                // past resting on the parent, which would leave it floating.
+                let sunk = snap::standoff(standoff - (now - self.start) / self.reach_m, fine).min(0.0);
+                let mount = Mount::Attached { anchor, standoff: sunk };
                 (What::Move, Part { placement: Some(Placement { mount, ..placement }), ..self.part })
             }
         };
@@ -289,29 +357,18 @@ pub struct FormHandlesPlugin;
 
 impl Plugin for FormHandlesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_gizmo_group::<FormGizmos>()
-            .init_resource::<crate::form_carry::Carried>()
-            .add_systems(Startup, configure_gizmos)
+        app.init_resource::<crate::form_carry::Carried>()
+            .init_resource::<Grabbed>()
+            .add_systems(Startup, make_looks)
             .add_systems(
                 Update,
-                (lay_out, crate::form_carry::drop_on_leaving, crate::form_carry::draw_float)
+                (draw, crate::form_carry::drop_on_leaving, crate::form_carry::draw_float)
                     .in_set(crate::app::Stage::Scene)
                     .after(crate::form_view::place)
                     .run_if(in_state(crate::app::AppState::InGame)),
             )
             .add_systems(OnExit(crate::app::AppState::InGame), (put_away, crate::form_carry::put_away));
     }
-}
-
-#[derive(Default, Reflect, GizmoConfigGroup)]
-struct FormGizmos;
-
-fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
-    let (config, _) = store.config_mut::<FormGizmos>();
-    config.render_layers = RenderLayers::layer(FORM_LAYER);
-    config.line.width = 2.0;
-    // In front of the parts, so a ring through a hull is seen whole.
-    config.depth_bias = -1.0;
 }
 
 /// The lens for this frame, while the editor is the view and has something to draw.
@@ -338,47 +395,66 @@ impl Modifiers {
     }
 }
 
-/// A drag on a knob, as edits. Each frame the pointer moves sends one measured from the press,
+/// The handle being dragged, and the last edit it sent. A press that takes hold of one is
+/// neither the slide's nor a part's.
+#[derive(Resource, Default)]
+pub struct Grabbed(Option<(Held, Option<Edit>, Vec2)>);
+
+impl Grabbed {
+    pub fn is_holding(&self) -> bool {
+        self.0.is_some()
+    }
+}
+
+/// The selected part and its handles this frame.
+fn selected_handles<'a>(ui: &Ui, sdf: &'a Sdf, lens: &Lens) -> Option<(Part, &'a Piece, Handles)> {
+    let part = *ui.form.draft.as_ref()?.part(ui.form.selected?)?;
+    let (_, piece) = original(sdf, part.id)?;
+    Some((part, piece, Handles::of(&part, piece, lens)?))
+}
+
+/// A drag on a handle, as edits. Each frame the pointer moves sends one measured from the press,
 /// and the release sends it settled.
 #[allow(clippy::too_many_arguments)]
-pub fn drag_knobs(
+pub fn drag_handles(
     ui: Res<Ui>,
     buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
-    knobs: Query<(&Interaction, &Grip)>,
+    egui: Res<EguiWantsInput>,
+    controls: em_ui::Controls,
     window: Single<&Window, With<PrimaryWindow>>,
     shown: Res<Shown>,
     surface: Res<FormSurface>,
     carried: Res<crate::form_carry::Carried>,
-    mut held: Local<Option<(Held, Option<Edit>, Vec2)>>,
+    mut grabbed: ResMut<Grabbed>,
     mut out: MessageWriter<Requested>,
 ) {
     let cursor = window.cursor_position();
     // A press while carrying a part puts the part down, whatever it lands on.
     let (Some(lens), Some(sdf), false) = (lens(&ui, &shown, &surface), shown.sdf(), carried.is_carrying()) else {
-        *held = None;
+        grabbed.0 = None;
         return;
     };
     if buttons.just_pressed(MouseButton::Left) {
-        let grabbed = knobs.iter().find(|(i, _)| **i == Interaction::Pressed).map(|(_, g)| *g);
-        let part = ui.form.selected.and_then(|id| ui.form.draft.as_ref()?.part(id).copied());
-        *held = match (grabbed, part, cursor) {
-            (Some(grip), Some(part), Some(at)) => Held::new(grip, part, sdf, &lens, at).map(|h| (h, None, at)),
-            _ => None,
-        };
+        let free = !egui.wants_any_pointer_input() && !controls.under_pointer();
+        grabbed.0 = cursor.filter(|at| free && crate::form_view::on_picture(&surface, *at)).and_then(|at| {
+            let (part, piece, handles) = selected_handles(&ui, sdf, &lens)?;
+            let grip = handles.under(&lens, at)?;
+            Some((Held::new(grip, part, handles, piece, &lens, at)?, None, at))
+        });
         return;
     }
-    let Some((grip, last, seen)) = held.as_mut() else { return };
+    let Some((held, last, seen)) = grabbed.0.as_mut() else { return };
     if !buttons.pressed(MouseButton::Left) {
         if let Some(edit) = last.take() {
             out.write(Requested(Action::EditForm(Ok(Edit { settled: true, ..edit }))));
         }
-        *held = None;
+        grabbed.0 = None;
         return;
     }
     let Some(at) = cursor.filter(|at| at != seen) else { return };
     *seen = at;
-    match grip.edit(at, Modifiers::of(&keys), &Balance::DEFAULT) {
+    match held.edit(&lens, at, Modifiers::of(&keys), &Balance::DEFAULT) {
         Ok(edit) if last.as_ref() != Some(&edit) => {
             *last = Some(edit.clone());
             out.write(Requested(Action::EditForm(Ok(edit))));
@@ -404,101 +480,179 @@ pub fn delete_key(
     }
 }
 
-/// Everything laid over the picture that is the handles'.
+/// Each handle's paint at rest and under the pointer.
+#[derive(Resource)]
+struct Looks {
+    axes: [(Handle<StandardMaterial>, Handle<StandardMaterial>); 3],
+    neutral: (Handle<StandardMaterial>, Handle<StandardMaterial>),
+    line: Handle<Mesh>,
+    end: Handle<Mesh>,
+    head: Handle<Mesh>,
+}
+
+/// 18 §Handles: the usual red, green and blue for the part's axes, brighter under the pointer.
+const AXIS_COLORS: [Color; 3] = [Color::srgb(0.95, 0.25, 0.22), Color::srgb(0.30, 0.85, 0.30), Color::srgb(0.30, 0.50, 1.0)];
+const NEUTRAL: Color = Color::srgb(0.85, 0.85, 0.80);
+
+fn make_looks(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let mut paint = |color: Color| {
+        let lit = color.mix(&Color::WHITE, 0.55);
+        let at = |c: Color| StandardMaterial { base_color: c, unlit: true, ..default() };
+        (materials.add(at(color)), materials.add(at(lit)))
+    };
+    let axes = AXIS_COLORS.map(&mut paint);
+    let neutral = paint(NEUTRAL);
+    commands.insert_resource(Looks {
+        axes,
+        neutral,
+        line: meshes.add(Cylinder::new(0.5, 1.0)),
+        end: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+        head: meshes.add(Cone::new(0.5, 1.0)),
+    });
+}
+
+impl Looks {
+    fn of(&self, grip: Grip, lit: bool) -> Handle<StandardMaterial> {
+        let (rest, hover) = match grip {
+            Grip::Axis(i) => &self.axes[i],
+            // The ring turns the part about its own x.
+            Grip::Twist => &self.axes[0],
+            Grip::Size | Grip::Standoff => &self.neutral,
+        };
+        if lit { hover.clone() } else { rest.clone() }
+    }
+}
+
+/// The ship's frame for the handles.
 #[derive(Component)]
-struct Layer;
+struct HandleRoot(Option<PartId>);
 
-/// What the layer was built for: the selected part and which knobs it has.
-#[derive(Component, PartialEq)]
-struct Built(Option<PartId>, Vec<Grip>);
+/// One mesh of a handle, and which: a line's shaft, its end, or a stretch of the ring.
+#[derive(Component, Clone, Copy, PartialEq)]
+enum Bit {
+    Shaft(Grip),
+    End(Grip),
+    Arc(usize),
+}
 
+impl Bit {
+    fn grip(self) -> Grip {
+        match self {
+            Bit::Shaft(g) | Bit::End(g) => g,
+            Bit::Arc(_) => Grip::Twist,
+        }
+    }
+}
+
+/// A unit mesh along +y, laid from `from` to `to` at `width` meters across.
+fn laid(from: DVec3, to: DVec3, width: f64) -> Transform {
+    let span = to - from;
+    Transform {
+        translation: ((from + to) * 0.5).as_vec3(),
+        rotation: Quat::from_rotation_arc(Vec3::Y, span.normalize_or(DVec3::Y).as_vec3()),
+        scale: Vec3::new(width as f32, span.length() as f32, width as f32),
+    }
+}
+
+impl Bit {
+    fn place(self, handles: &Handles, ring: &[DVec3]) -> Transform {
+        let px = handles.m_per_px;
+        match self {
+            Bit::Shaft(grip) => {
+                let (from, to) = handles.line(grip).unwrap_or_default();
+                // The arrow's shaft stops where its head begins.
+                let back = if grip == Grip::Standoff { (to - from).normalize_or(DVec3::X) * HEAD_PX.0 * px } else { DVec3::ZERO };
+                laid(from, to - back, LINE_PX * px)
+            }
+            Bit::End(Grip::Standoff) => {
+                let (from, to) = handles.line(Grip::Standoff).unwrap_or_default();
+                let root = to - (to - from).normalize_or(DVec3::X) * HEAD_PX.0 * px;
+                let mut head = laid(root, to, HEAD_PX.1 * 2.0 * px);
+                head.scale.y = (HEAD_PX.0 * px) as f32;
+                head
+            }
+            Bit::End(grip) => {
+                let (_, to) = handles.line(grip).unwrap_or_default();
+                Transform {
+                    translation: to.as_vec3(),
+                    rotation: Quat::from_mat3(&handles.axes.as_mat3()),
+                    scale: Vec3::splat((END_PX * px) as f32),
+                }
+            }
+            Bit::Arc(k) => laid(ring[k], ring[k + 1], LINE_PX * px),
+        }
+    }
+}
+
+/// The selected part's handles, rebuilt when the selection or its set of handles changes and
+/// moved every frame; lit under the pointer and while held.
 #[allow(clippy::too_many_arguments)]
-fn lay_out(
+fn draw(
     mut commands: Commands,
     ui: Res<Ui>,
     shown: Res<Shown>,
     surface: Res<FormSurface>,
-    assets: Res<AssetServer>,
-    layers: Query<(Entity, &Built), With<Layer>>,
-    mut placed: Query<(&mut Node, &Grip), Without<Layer>>,
-    mut gizmos: Gizmos<FormGizmos>,
+    looks: Res<Looks>,
+    grabbed: Res<Grabbed>,
+    carried: Res<crate::form_carry::Carried>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    roots: Query<(Entity, &HandleRoot)>,
+    mut bits: Query<(&Bit, &mut Transform, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
-    let (Some(lens), Some(sdf), Some(draft)) = (lens(&ui, &shown, &surface), shown.sdf(), ui.form.draft.as_ref()) else {
-        for (entity, _) in &layers {
+    let found = lens(&ui, &shown, &surface).zip(shown.sdf()).filter(|_| !carried.is_carrying());
+    let selected = found.and_then(|(lens, sdf)| Some((lens, selected_handles(&ui, sdf, &lens)?)));
+    let wanted = selected.as_ref().map(|(_, (part, _, handles))| (part.id, handles.sink.is_some()));
+    let built = roots.iter().next();
+    let current = built.is_some_and(|(_, root)| root.0 == wanted.map(|(id, _)| id)) && bits.iter().any(|(b, ..)| *b == Bit::End(Grip::Standoff)) == wanted.is_some_and(|(_, sink)| sink);
+    if !current || wanted.is_none() {
+        for (entity, _) in &roots {
             commands.entity(entity).despawn();
         }
-        return;
-    };
-    let selected = ui.form.selected.and_then(|id| Some((*draft.part(id)?, original(sdf, id)?.1)));
-    let grips: Vec<Grip> = selected.map(|(part, piece)| anchors(&part, piece).into_iter().map(|(g, _)| g).collect()).unwrap_or_default();
-    let wanted = Built(selected.map(|(p, _)| p.id), grips);
-    if !layers.iter().any(|(_, built)| *built == wanted) {
-        for (entity, _) in &layers {
-            commands.entity(entity).despawn();
+        if let Some((_, (part, _, handles))) = &selected {
+            build(&mut commands, &looks, part.id, handles);
         }
-        build(&mut commands, wanted, assets.load(crate::faces::UI_FILE));
         return;
     }
+    let Some((lens, (_, _, handles))) = selected else { return };
+    let ring = handles.ring();
+    let lit = grabbed.0.as_ref().map(|(held, ..)| held.grip).or_else(|| window.cursor_position().and_then(|at| handles.under(&lens, at)));
+    for (bit, mut transform, mut material) in &mut bits {
+        transform.set_if_neq(bit.place(&handles, &ring));
+        let paint = looks.of(bit.grip(), lit == Some(bit.grip()));
+        if material.0 != paint {
+            material.0 = paint;
+        }
+    }
+}
 
+fn build(commands: &mut Commands, looks: &Looks, part: PartId, handles: &Handles) {
     let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z));
-    let to_render = |p: DVec3| turn * p.as_vec3();
-    let knob_at = selected.map(|(part, piece)| knobs(&part, piece, &lens)).unwrap_or_default();
-    for (mut node, grip) in &mut placed {
-        let at = knob_at.iter().find(|(g, _)| g == grip).map(|(_, at)| *at - KNOB * 0.5);
-        let (display, left, top) = match at {
-            Some(at) => (Display::Flex, Val::Px(at.x), Val::Px(at.y)),
-            None => (Display::None, node.left, node.top),
-        };
-        if node.display != display || node.left != left || node.top != top {
-            node.display = display;
-            node.left = left;
-            node.top = top;
+    let root = commands.spawn((Transform::from_rotation(turn), Visibility::default(), HandleRoot(Some(part)))).id();
+    let mut bits = Vec::new();
+    for grip in handles.grips() {
+        bits.push((Bit::Shaft(grip), looks.line.clone()));
+        match grip {
+            Grip::Twist => bits.extend((0..RING_SEGMENTS).map(|k| (Bit::Arc(k), looks.line.clone()))),
+            Grip::Standoff => bits.push((Bit::End(grip), looks.head.clone())),
+            _ => bits.push((Bit::End(grip), looks.end.clone())),
         }
     }
-
-    let Some((part, piece)) = selected else { return };
-    let color = em_ui::vfd::TEXT;
-    let center = piece.pose.position;
-    for (grip, at) in anchors(&part, piece) {
-        match (grip, at) {
-            (Grip::Axis(_) | Grip::Standoff, Some(at)) => {
-                gizmos.line(to_render(center), to_render(at), color);
-            }
-            (Grip::Twist, Some(at)) => {
-                let radius = (at - center).length() as f32;
-                let axis = turn * piece.pose.axis().as_vec3();
-                gizmos.circle(Isometry3d::new(to_render(center), Quat::from_rotation_arc(Vec3::Z, axis)), radius, color);
-            }
-            _ => {}
-        }
+    let ring = handles.ring();
+    for (bit, mesh) in bits.into_iter().filter(|(b, _)| *b != Bit::Shaft(Grip::Twist)) {
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(looks.of(bit.grip(), false)),
+            bit.place(handles, &ring),
+            bit,
+            NoFrustumCulling,
+            RenderLayers::layer(FORM_HANDLE_LAYER),
+            ChildOf(root),
+        ));
     }
 }
 
-fn build(commands: &mut Commands, built: Built, font: Handle<Font>) {
-    let layer = commands
-        .spawn((
-            Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
-            Layer,
-        ))
-        .id();
-    let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
-    let absolute = |node: Node| Node { position_type: PositionType::Absolute, display: Display::None, ..node };
-    for &grip in &built.1 {
-        let knob = ui.small_button(layer, grip.label(), grip);
-        ui.insert(knob, absolute(Node {
-            width: Val::Px(KNOB.x),
-            height: Val::Px(KNOB.y),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            border: UiRect::all(Val::Px(1.0)),
-            ..default()
-        }));
-    }
-    ui.insert(layer, built);
-}
-
-fn put_away(mut commands: Commands, layers: Query<Entity, With<Layer>>) {
-    for entity in &layers {
+fn put_away(mut commands: Commands, roots: Query<Entity, With<HandleRoot>>) {
+    for entity in &roots {
         commands.entity(entity).despawn();
     }
 }
@@ -507,9 +661,8 @@ fn put_away(mut commands: Commands, layers: Query<Entity, With<Layer>>) {
 mod tests {
     use lc_world::form::Form;
 
-    use crate::draft::Draft;
-
     use super::*;
+    use crate::draft::Draft;
 
     const B: Balance = Balance::DEFAULT;
 
@@ -521,6 +674,16 @@ mod tests {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 60.0), egui::vec2(1280.0, 660.0));
         let orbit = FormOrbit::default().held_to(&extent);
         (draft, sdf, Lens { orbit, extent, rect })
+    }
+
+    fn handles(draft: &Draft, sdf: &Sdf, lens: &Lens, id: u16) -> (Part, Piece, Handles) {
+        let part = *draft.part(PartId(id)).unwrap();
+        let (_, piece) = original(sdf, part.id).unwrap();
+        (part, piece.clone(), Handles::of(&part, piece, lens).unwrap())
+    }
+
+    fn px(lens: &Lens, p: DVec3) -> Vec2 {
+        lens.project(p).unwrap().0
     }
 
     /// A projected point comes back along the ray through the pixel it was drawn at.
@@ -548,68 +711,107 @@ mod tests {
         assert_eq!(pick_part(&sdf, &lens, Vec2::new(5.0, 700.0)), None);
     }
 
-    /// Dragging the size knob outward grows the part on the R10 ladder, and the edit carries the
-    /// part as it was at the press.
+    /// Each handle is picked where it is drawn: its end, and anywhere along it.
     #[test]
-    fn the_size_knob_grows_the_part_on_the_ladder() {
+    fn a_handle_is_picked_where_it_is_drawn() {
         let (draft, sdf, lens) = scene();
-        let part = *draft.part(PartId(3)).unwrap();
-        let held = Held::new(Grip::Size, part, &sdf, &lens, Vec2::ZERO).unwrap();
-        let out = (held.knob - held.center).normalize() * 40.0;
-        let edit = held.edit(held.from + out, Modifiers::default(), &B).unwrap();
+        let (_, _, h) = handles(&draft, &sdf, &lens, 5);
+        for grip in [Grip::Axis(0), Grip::Axis(1), Grip::Axis(2), Grip::Size, Grip::Standoff] {
+            let (from, to) = h.line(grip).unwrap();
+            assert_eq!(h.under(&lens, px(&lens, to)), Some(grip), "{grip:?} at its end");
+            let along = px(&lens, from + (to - from) * 0.8);
+            assert_eq!(h.under(&lens, along), Some(grip), "{grip:?} along it");
+        }
+        assert_eq!(h.under(&lens, px(&lens, h.ring()[5])), Some(Grip::Twist));
+        assert_eq!(h.under(&lens, Vec2::new(5.0, 700.0)), None);
+        let (storage, _, h) = handles(&draft, &sdf, &lens, 1);
+        assert!(h.sink.is_none() && !h.grips().contains(&Grip::Standoff), "{:?} encloses, so no standoff", storage.id);
+    }
+
+    /// However small the part is drawn, a handle is long enough to take hold of.
+    #[test]
+    fn a_handle_is_never_shorter_than_a_grip() {
+        let (draft, sdf, mut lens) = scene();
+        lens.orbit.distance = 4.0;
+        let (_, _, h) = handles(&draft, &sdf, &lens, 5);
+        for i in 0..3 {
+            assert!(h.arms[i] / h.m_per_px >= MIN_ARM_PX - 1e-9);
+        }
+    }
+
+    /// Pulled out to twice where it was taken hold of, the size line grows the part eightfold,
+    /// on the ladder.
+    #[test]
+    fn the_size_line_scales_the_part_as_far_as_it_is_pulled() {
+        let (draft, sdf, lens) = scene();
+        let (part, piece, h) = handles(&draft, &sdf, &lens, 3);
+        let (from, to) = h.line(Grip::Size).unwrap();
+        let held = Held::new(Grip::Size, part, h, &piece, &lens, px(&lens, to)).unwrap();
+        let edit = held.edit(&lens, px(&lens, from + (to - from) * 2.0), Modifiers::default(), &B).unwrap();
         assert_eq!(edit.before, vec![part]);
         let grown = edit.after[0].volume_m3;
-        assert!(grown > part.volume_m3);
-        assert!((snap::volume(grown, B.min_part_m3, false) - grown).abs() < 1e-6 * grown, "{grown} is on the ladder");
-        let shrunk = held.edit(held.from - out, Modifiers::default(), &B).unwrap().after[0].volume_m3;
-        assert!(shrunk < part.volume_m3);
+        assert!((grown / part.volume_m3 - 8.0).abs() < 1.5, "{}", grown / part.volume_m3);
+        assert!((snap::volume(grown, B.min_part_m3, false) - grown).abs() < 1e-6 * grown, "on the ladder");
+        let shrunk = held.edit(&lens, px(&lens, from + (to - from) * 0.5), Modifiers::default(), &B).unwrap();
+        assert!(shrunk.after[0].volume_m3 < part.volume_m3);
         assert!(!edit.settled, "a drag is settled on release");
     }
 
-    /// An axis knob grows that dimension and the volume with it; with Shift the volume is kept
+    /// An axis line grows that dimension and the volume with it; with Shift the volume is kept
     /// and the other dimensions give way.
     #[test]
-    fn an_axis_knob_grows_the_part_unless_the_volume_is_held() {
+    fn an_axis_line_grows_the_part_unless_the_volume_is_held() {
         let (draft, sdf, lens) = scene();
-        let part = *draft.part(PartId(3)).unwrap();
-        let held = Held::new(Grip::Axis(0), part, &sdf, &lens, Vec2::ZERO).unwrap();
-        let at = held.from + held.axes[0] * 100.0;
-        let free = held.edit(at, Modifiers::default(), &B).unwrap().after[0];
+        let (part, piece, h) = handles(&draft, &sdf, &lens, 3);
+        let (from, to) = h.line(Grip::Axis(0)).unwrap();
+        let held = Held::new(Grip::Axis(0), part, h, &piece, &lens, px(&lens, to)).unwrap();
+        let at = px(&lens, from + (to - from) * 1.6);
+        let free = held.edit(&lens, at, Modifiers::default(), &B).unwrap().after[0];
         assert!(free.volume_m3 > part.volume_m3 * 1.2, "{} to {}", part.volume_m3, free.volume_m3);
-        let kept = held.edit(at, Modifiers { keep_volume: true, ..Modifiers::default() }, &B).unwrap().after[0];
+        let kept = held.edit(&lens, at, Modifiers { keep_volume: true, ..Modifiers::default() }, &B).unwrap().after[0];
         assert_eq!(kept.volume_m3, part.volume_m3);
         assert_eq!(kept.primitive, free.primitive, "the same stretch either way");
         assert_ne!(kept.primitive, part.primitive);
     }
 
+    /// A quarter turn round the ring is a quarter turn of the part, the way the pointer went: the
+    /// ring point taken hold of ends up where the pointer let go.
     #[test]
-    fn a_twist_drag_goes_by_fifteen_degrees() {
+    fn the_ring_turns_the_part_as_far_as_the_pointer_goes_round_it() {
         let (draft, sdf, lens) = scene();
-        let part = *draft.part(PartId(5)).unwrap();
-        let held = Held::new(Grip::Twist, part, &sdf, &lens, Vec2::ZERO).unwrap();
-        let from = held.center + Vec2::new(100.0, 0.0);
-        let held = Held { from, ..held };
-        let quarter = held.edit(held.center + Vec2::new(0.0, 100.0), Modifiers::default(), &B).unwrap();
-        let twist = quarter.after[0].placement.unwrap().twist;
+        let (part, piece, h) = handles(&draft, &sdf, &lens, 5);
+        let from = h.center + h.axes.y_axis * h.ring_m;
+        let to = h.center + h.axes.z_axis * h.ring_m;
+        let held = Held::new(Grip::Twist, part, h, &piece, &lens, px(&lens, from)).unwrap();
+        let edit = held.edit(&lens, px(&lens, to), Modifiers::default(), &B).unwrap();
+        let twist = edit.after[0].placement.unwrap().twist;
         assert!((twist.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{twist}");
-        let step = snap::SNAPS.coarse.angle_rad;
-        assert!((twist / step - (twist / step).round()).abs() < 1e-9);
+        let mut moved = draft.clone();
+        moved.apply(&edit, &B).unwrap();
+        let turned = original(&Sdf::new(&moved.form, &B).unwrap(), PartId(5)).unwrap().1.pose.rotation;
+        assert!(turned.y_axis.dot(h.axes.z_axis) > 0.99, "its y went where the pointer did: {}", turned.y_axis);
+    }
+
+    /// The arrow points into the parent: pulled along it the part sinks, by tenths, and pushed
+    /// back it stops resting on the parent.
+    #[test]
+    fn the_standoff_arrow_sinks_the_part_and_stops_at_the_surface() {
+        let (draft, sdf, lens) = scene();
+        let (part, piece, h) = handles(&draft, &sdf, &lens, 2);
+        let (from, to) = h.line(Grip::Standoff).unwrap();
+        let held = Held::new(Grip::Standoff, part, h, &piece, &lens, px(&lens, to)).unwrap();
+        let deeper = held.edit(&lens, px(&lens, from + (to - from) * 1.4), Modifiers::default(), &B).unwrap();
+        let Mount::Attached { standoff, .. } = deeper.after[0].placement.unwrap().mount else { panic!() };
+        assert!(standoff < -0.2 && (standoff * 10.0 - (standoff * 10.0).round()).abs() < 1e-9, "{standoff}");
+        let out = held.edit(&lens, px(&lens, from - (to - from) * 3.0), Modifiers::default(), &B).unwrap();
+        let Mount::Attached { standoff, .. } = out.after[0].placement.unwrap().mount else { panic!() };
+        assert_eq!(standoff, 0.0);
     }
 
     #[test]
-    fn the_sink_knob_goes_by_tenths_stops_at_the_surface_and_an_enclosing_part_has_none() {
+    fn the_mind_has_no_handles() {
         let (draft, sdf, lens) = scene();
-        let part = *draft.part(PartId(2)).unwrap();
-        let held = Held::new(Grip::Standoff, part, &sdf, &lens, Vec2::ZERO).unwrap();
-        let edit = held.edit(held.from + held.axes[0] * 200.0, Modifiers::default(), &B).unwrap();
-        let Mount::Attached { standoff, .. } = edit.after[0].placement.unwrap().mount else { panic!() };
-        assert!(standoff > -0.2 && (standoff * 10.0 - (standoff * 10.0).round()).abs() < 1e-9, "{standoff}");
-        let far = held.edit(held.from + held.axes[0] * 5000.0, Modifiers::default(), &B).unwrap();
-        let Mount::Attached { standoff, .. } = far.after[0].placement.unwrap().mount else { panic!() };
-        assert_eq!(standoff, 0.0, "it stops resting on the parent");
-        let storage = *draft.part(PartId(1)).unwrap();
-        let grips: Vec<Grip> = anchors(&storage, original(&sdf, PartId(1)).unwrap().1).into_iter().map(|(g, _)| g).collect();
-        assert!(!grips.contains(&Grip::Standoff));
-        assert!(anchors(draft.part(PartId(0)).unwrap(), original(&sdf, PartId(0)).unwrap().1).is_empty(), "the Mind has none");
+        let mind = *draft.part(PartId(0)).unwrap();
+        assert!(Handles::of(&mind, original(&sdf, PartId(0)).unwrap().1, &lens).is_none());
     }
 }

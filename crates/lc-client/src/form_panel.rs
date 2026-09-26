@@ -19,8 +19,11 @@ use crate::input::Requested;
 use crate::ui::ViewMode;
 
 const WIDTH: f32 = 250.0;
-/// Below the editor's own strip across the top.
-const BELOW_STRIP: f32 = 44.0;
+/// From the readout above and the window's edges.
+const GAP: f32 = 6.0;
+const INSET: f32 = 12.0;
+/// Of the window, the most the tree takes before it is cut off.
+const TREE_SHARE: f32 = 45.0;
 
 /// What a panel button asks for, turned into an action against the draft as it is when pressed.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
@@ -65,12 +68,6 @@ pub fn action_of(tap: Tap, draft: &Draft, form: &crate::form_view::FormView) -> 
 #[derive(Component, Clone, Copy)]
 pub struct FieldOf(pub Field);
 
-#[derive(Component)]
-struct TreePanel;
-
-#[derive(Component)]
-struct FieldsPanel;
-
 /// What a panel was built for, compared with what it would be built for now.
 #[derive(Component, PartialEq)]
 struct Built(Vec<String>);
@@ -111,59 +108,98 @@ fn lay_out(
     shown: Res<crate::form_view::Shown>,
     foot: Res<crate::panels::HudFoot>,
     assets: Res<AssetServer>,
-    mut trees: Query<(Entity, &Built, &mut Node), (With<TreePanel>, Without<FieldsPanel>)>,
-    mut fields: Query<(Entity, &Built, &mut Node), (With<FieldsPanel>, Without<TreePanel>)>,
+    mut panels: Query<(Entity, &Built, &Side, &mut Node)>,
 ) {
     let draft = ui.form.draft.as_ref().filter(|_| ui.view == ViewMode::Form);
-    let top = foot.0 + BELOW_STRIP;
+    let top = foot.0 + GAP;
     let font = || assets.load(crate::faces::UI_FILE);
 
+    let palette_key = draft.map(|_| vec![format!("{}", ui.form.new_shape)]);
     let tree_key = draft.map(|d| {
         let mut key: Vec<String> = tree_lines(d, shown.marks()).into_iter().map(|(depth, id, what)| format!("{depth}{id}{what}")).collect();
-        key.push(format!("{:?} {} {}", ui.form.selected, ui.form.new_shape, ui.form.show_dismantled));
+        key.push(format!("{:?} {}", ui.form.selected, ui.form.show_dismantled));
         key
     });
-    rebuild(&mut commands, trees.iter_mut(), tree_key, top, |commands, key| {
-        let draft = draft.expect("keyed on the draft");
-        build_tree(commands, draft, shown.marks(), &ui.form, key, top, font());
+    let fields_key = draft.and_then(|d| {
+        let p = d.part(ui.form.selected?)?;
+        let placement = p.placement.map(|pl| (matches!(pl.mount, Mount::Enclosing), pl.mirror));
+        Some(vec![format!("{:?}", (p.id, p.kind, draft::primitive_name(&p.primitive), draft::fields(p), placement))])
     });
 
-    let fields_key = draft.map(|d| {
-        let part = ui.form.selected.and_then(|id| d.part(id));
-        vec![format!("{:?}", part.map(|p| (p.id, p.kind, draft::primitive_name(&p.primitive), draft::fields(p), p.placement.map(|pl| (matches!(pl.mount, Mount::Enclosing), pl.mirror)))))]
-    });
-    rebuild(&mut commands, fields.iter_mut(), fields_key, top, |commands, key| {
-        let draft = draft.expect("keyed on the draft");
-        build_fields(commands, draft, ui.form.selected, key, top, font());
-    });
-}
-
-/// Build a panel when what it would show differs from what it shows, and keep it under the
-/// readout otherwise.
-fn rebuild<'a>(
-    commands: &mut Commands,
-    panels: impl Iterator<Item = (Entity, &'a Built, Mut<'a, Node>)>,
-    key: Option<Vec<String>>,
-    top: f32,
-    build: impl FnOnce(&mut Commands, Built),
-) {
-    let mut current = false;
-    for (entity, built, mut node) in panels {
-        if key.as_ref() == Some(&built.0) {
-            current = true;
-            if node.top != Val::Px(top) {
-                node.top = Val::Px(top);
-            }
-        } else {
+    let mut current = [false; 3];
+    for (entity, built, side, mut node) in &mut panels {
+        let key = match side {
+            Side::Palette => &palette_key,
+            Side::Tree => &tree_key,
+            Side::Fields => &fields_key,
+        };
+        if key.as_ref() != Some(&built.0) {
             commands.entity(entity).despawn();
+            continue;
+        }
+        current[*side as usize] = true;
+        // Only the panels hung from the top move with the readout.
+        if *side != Side::Fields && node.top != Val::Px(top) {
+            node.top = Val::Px(top);
         }
     }
-    if let (false, Some(key)) = (current, key) {
-        build(commands, Built(key));
+    let Some(draft) = draft else { return };
+    if let (false, Some(key)) = (current[Side::Palette as usize], palette_key) {
+        build_palette(&mut commands, ui.form.new_shape, Built(key), top, font());
+    }
+    if let (false, Some(key)) = (current[Side::Tree as usize], tree_key) {
+        build_tree(&mut commands, draft, shown.marks(), &ui.form, Built(key), top, font());
+    }
+    if let (false, Some(key)) = (current[Side::Fields as usize], fields_key) {
+        build_fields(&mut commands, draft, ui.form.selected, Built(key), font());
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Which of the three panels this is.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    /// What new parts are taken from, down the whole left side; a carried part dropped on it is
+    /// deleted.
+    Palette,
+    /// The parts, at the top right.
+    Tree,
+    /// The selected part's numbers, at the bottom right.
+    Fields,
+}
+
+fn root(ui: &mut MenuUi, side: Side, built: Built, place: Node) -> Entity {
+    let edge = if side == Side::Palette { Edge::Left } else { Edge::Right };
+    let root = ui.docked((side, built), edge, INSET);
+    ui.insert(root, Node { width: Val::Px(WIDTH), ..place });
+    let panel = ui.strip(root);
+    ui.insert(panel, Node { align_items: AlignItems::Stretch, flex_grow: 1.0, ..panel_node() });
+    panel
+}
+
+fn column(edge: Edge) -> Node {
+    let mut node = Node { position_type: PositionType::Absolute, flex_direction: FlexDirection::Column, align_items: AlignItems::Stretch, ..default() };
+    match edge {
+        Edge::Left => node.left = Val::Px(INSET),
+        _ => node.right = Val::Px(INSET),
+    }
+    node
+}
+
+fn build_palette(commands: &mut Commands, new_shape: usize, built: Built, top: f32, font: Handle<Font>) {
+    let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
+    let place = Node { top: Val::Px(top), bottom: Val::Px(INSET), ..column(Edge::Left) };
+    let panel = root(&mut ui, Side::Palette, built, place);
+    ui.insert(panel, (Interaction::None, crate::form_carry::DropZone));
+    ui.inline(panel, "ADD A PART", 15.0, em_ui::vfd::TEXT);
+    let shape = draft::PRIMITIVES[new_shape % draft::PRIMITIVES.len()];
+    let row = ui.row(panel);
+    ui.inline(row, "shape", 13.0, em_ui::vfd::TEXT_DIM);
+    ui.small_button(row, draft::primitive_name(&shape), Tap::NextShape);
+    for kind in draft::KINDS {
+        ui.tree_row(panel, 0, draft::kind_name(kind), false, Tap::Take(kind));
+    }
+}
+
 fn build_tree(
     commands: &mut Commands,
     draft: &Draft,
@@ -173,15 +209,13 @@ fn build_tree(
     top: f32,
     font: Handle<Font>,
 ) {
-    let (selected, new_shape) = (form.selected, form.new_shape);
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
-    let root = ui.docked((TreePanel, built), Edge::Left, crate::map_panel::CORNER_INSET);
-    ui.insert(root, Node { top: Val::Px(top), width: Val::Px(WIDTH), ..column(Edge::Left) });
-    let panel = ui.strip(root);
-    ui.insert(panel, Node { align_items: AlignItems::Stretch, ..panel_node() });
+    // At most the top half, so the fields always have the bottom.
+    let place = Node { top: Val::Px(top), max_height: Val::Percent(TREE_SHARE), overflow: Overflow::clip_y(), ..column(Edge::Right) };
+    let panel = root(&mut ui, Side::Tree, built, place);
     ui.inline(panel, "PARTS", 15.0, em_ui::vfd::TEXT);
     for (depth, id, what) in tree_lines(draft, marks) {
-        let chosen = selected == Some(id);
+        let chosen = form.selected == Some(id);
         let text = if chosen { format!("> {what}") } else { what };
         let row = ui.tree_row(panel, depth, &text, chosen, Tap::Select(id));
         if let Some(mark) = marks.get(&id) {
@@ -194,30 +228,14 @@ fn build_tree(
     let on = if form.show_dismantled { "on" } else { "off" };
     let row = ui.row(panel);
     ui.chosen_button(row, &format!("show dismantled ({removed}): {on}"), form.show_dismantled, Tap::ShowDismantled);
-
-    // The list new parts come from, and where a carried part is dropped to delete it.
-    let list = ui.strip(root);
-    ui.insert(list, (Node { align_items: AlignItems::Stretch, margin: UiRect::top(Val::Px(6.0)), ..panel_node() }, Interaction::None, crate::form_carry::DropZone));
-    ui.inline(list, "ADD A PART", 15.0, em_ui::vfd::TEXT);
-    let shape = draft::PRIMITIVES[new_shape % draft::PRIMITIVES.len()];
-    let row = ui.row(list);
-    ui.inline(row, "shape", 13.0, em_ui::vfd::TEXT_DIM);
-    ui.small_button(row, draft::primitive_name(&shape), Tap::NextShape);
-    for kind in draft::KINDS {
-        ui.tree_row(list, 0, draft::kind_name(kind), false, Tap::Take(kind));
-    }
 }
 
-fn build_fields(commands: &mut Commands, draft: &Draft, selected: Option<PartId>, built: Built, top: f32, font: Handle<Font>) {
+fn build_fields(commands: &mut Commands, draft: &Draft, selected: Option<PartId>, built: Built, font: Handle<Font>) {
+    let Some(part) = selected.and_then(|id| draft.part(id)) else { return };
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
-    let root = ui.docked((FieldsPanel, built), Edge::Right, crate::map_panel::CORNER_INSET);
-    ui.insert(root, Node { top: Val::Px(top), width: Val::Px(WIDTH), ..column(Edge::Right) });
-    let panel = ui.strip(root);
+    let place = Node { bottom: Val::Px(INSET), ..column(Edge::Right) };
+    let panel = root(&mut ui, Side::Fields, built, place);
     ui.insert(panel, Node { align_items: AlignItems::Stretch, row_gap: Val::Px(3.0), ..panel_node() });
-    let Some(part) = selected.and_then(|id| draft.part(id)) else {
-        ui.inline(panel, "Select a part to edit it.", 14.0, em_ui::vfd::TEXT_DIM);
-        return;
-    };
     ui.inline(panel, &format!("PART {}", part.id.0), 15.0, em_ui::vfd::TEXT);
     let row = ui.row(panel);
     ui.small_button(row, draft::kind_name(part.kind), Tap::NextKind);
@@ -237,23 +255,14 @@ fn build_fields(commands: &mut Commands, draft: &Draft, selected: Option<PartId>
             ui.chosen_button(row, "strap", mode == SparMode::Strap, Tap::SparMode(SparMode::Strap));
         }
     }
-    for (field, label) in draft::fields(part) {
-        let text = draft::value(part, field).map(draft::shown).unwrap_or_default();
-        ui.field(panel, label, &text, FieldOf(field));
+    for (label, line) in draft::fields(part) {
+        let cells = line.into_iter().map(|field| (draft::value(part, field).map(draft::shown).unwrap_or_default(), FieldOf(field)));
+        ui.fields(panel, label, cells);
     }
     if part.kind != Kind::Mind {
         let row = ui.row(panel);
         ui.small_button(row, "delete", Tap::Delete);
     }
-}
-
-fn column(edge: Edge) -> Node {
-    let mut node = Node { position_type: PositionType::Absolute, flex_direction: FlexDirection::Column, align_items: AlignItems::Stretch, ..default() };
-    match edge {
-        Edge::Left => node.left = Val::Px(crate::map_panel::CORNER_INSET),
-        _ => node.right = Val::Px(crate::map_panel::CORNER_INSET),
-    }
-    node
 }
 
 fn panel_node() -> Node {
@@ -321,7 +330,7 @@ pub fn press(
     }
 }
 
-fn put_away(mut commands: Commands, panels: Query<Entity, Or<(With<TreePanel>, With<FieldsPanel>)>>) {
+fn put_away(mut commands: Commands, panels: Query<Entity, With<Side>>) {
     for entity in &panels {
         commands.entity(entity).despawn();
     }

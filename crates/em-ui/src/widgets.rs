@@ -355,6 +355,12 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     /// [`Committed`](crate::field::Committed) by. Filled darker than the panel, or an empty field
     /// reads as a label with no input.
     pub fn field<A: Component>(&mut self, parent: Entity, label: &str, text: &str, marker: A) -> Entity {
+        self.fields(parent, label, [(text.to_owned(), marker)])[0]
+    }
+
+    /// One label and several number fields beside each other, sharing the line: the components
+    /// of one vector, say.
+    pub fn fields<A: Component>(&mut self, parent: Entity, label: &str, cells: impl IntoIterator<Item = (String, A)>) -> Vec<Entity> {
         let theme = self.theme;
         let font = self.font.clone();
         let row = self
@@ -369,36 +375,46 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             .id();
         self.commands.entity(parent).add_child(row);
         self.inline(row, label, FIELD_TEXT, theme.text_dim);
-        let mut editable = bevy::text::EditableText::new(text);
-        editable.visible_width = Some(FIELD_GLYPHS);
-        editable.max_characters = Some(24);
-        let field = self
-            .commands
-            .spawn((
-                Node { padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), border: UiRect::all(Val::Px(1.0)), ..default() },
-                editable,
-                bevy::text::EditableTextFilter::new(crate::field::numeric),
-                bevy::text::TextCursorStyle { color: theme.text, ..default() },
-                TextLayout::no_wrap(),
-                TextFont { font: font.map(FontSource::Handle).unwrap_or_default(), font_size: FontSize::Px(FIELD_TEXT), ..default() },
-                TextColor(theme.text),
-                BackgroundColor(theme.field_bg),
-                BorderColor::all(theme.border),
-                // So the pointer over it is a control's, and the view behind stands down.
-                Interaction::default(),
-                crate::field::NumberField::default(),
-                marker,
-            ))
-            .id();
-        self.commands.entity(row).add_child(field);
-        field
+        let cells: Vec<(String, A)> = cells.into_iter().collect();
+        let line = self.commands.spawn(Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(4.0), ..default() }).id();
+        self.commands.entity(row).add_child(line);
+        let glyphs = (FIELD_GLYPHS / cells.len().max(1) as f32).max(FIELD_LEAST_GLYPHS);
+        let mut spawned = Vec::new();
+        for (text, marker) in cells {
+            let mut editable = bevy::text::EditableText::new(&text);
+            editable.visible_width = Some(glyphs);
+            editable.max_characters = Some(24);
+            let field = self
+                .commands
+                .spawn((
+                    Node { padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), border: UiRect::all(Val::Px(1.0)), ..default() },
+                    editable,
+                    bevy::text::EditableTextFilter::new(crate::field::numeric),
+                    bevy::text::TextCursorStyle { color: theme.text, ..default() },
+                    TextLayout::no_wrap(),
+                    TextFont { font: font.clone().map(FontSource::Handle).unwrap_or_default(), font_size: FontSize::Px(FIELD_TEXT), ..default() },
+                    TextColor(theme.text),
+                    BackgroundColor(theme.field_bg),
+                    BorderColor::all(theme.border),
+                    // So the pointer over it is a control's, and the view behind stands down.
+                    Interaction::default(),
+                    crate::field::NumberField::default(),
+                    marker,
+                ))
+                .id();
+            self.commands.entity(line).add_child(field);
+            spawned.push(field);
+        }
+        spawned
     }
 }
 
 const TREE_INDENT: f32 = 12.0;
 const FIELD_TEXT: f32 = 13.0;
-/// Room for `-1.2345e-6` and a little more.
-const FIELD_GLYPHS: f32 = 10.0;
+/// A line's room for numbers, shared among its fields: one takes `-1.2345e-6` with room over,
+/// and each of three a short one.
+const FIELD_GLYPHS: f32 = 16.0;
+const FIELD_LEAST_GLYPHS: f32 = 4.0;
 
 /// How far above the ordinary screens an overlay sits. Room underneath for anything that wants
 /// to be between.

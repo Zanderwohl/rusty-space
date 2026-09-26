@@ -191,7 +191,7 @@ impl Plugin for ClientPlugin {
                         (
                             crate::form_view::press,
                             // Before the slide and the carry, which a press on a knob is neither.
-                            crate::form_handles::drag_knobs,
+                            crate::form_handles::drag_handles,
                             // Before the carry, which a press that puts a part down ends.
                             crate::form_view::read_drag,
                             crate::form_carry::carry,
