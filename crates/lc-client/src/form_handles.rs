@@ -48,7 +48,7 @@ impl Grip {
             Grip::Axis(1) => "Y",
             Grip::Axis(_) => "Z",
             Grip::Twist => "TWIST",
-            Grip::Standoff => "OUT",
+            Grip::Standoff => "SINK",
         }
     }
 }
@@ -275,7 +275,8 @@ impl Held {
             }
             Grip::Standoff => {
                 let Mount::Attached { anchor, standoff } = placement.mount else { return Err(Refused::Mind) };
-                let moved = snap::standoff(standoff + along(self.axes[0]) * self.m_per_px / self.reach_m, fine);
+                // Never out past resting on the parent, which would leave it floating.
+                let moved = snap::standoff(standoff + along(self.axes[0]) * self.m_per_px / self.reach_m, fine).min(0.0);
                 let mount = Mount::Attached { anchor, standoff: moved };
                 (What::Move, Part { placement: Some(Placement { mount, ..placement }), ..self.part })
             }
@@ -407,15 +408,9 @@ pub fn delete_key(
 #[derive(Component)]
 struct Layer;
 
-#[derive(Component)]
-struct RoleLabel;
-
-#[derive(Component)]
-struct Badge(PartId);
-
-/// What the layer was built for: the selected part and which knobs it has, and the marks.
+/// What the layer was built for: the selected part and which knobs it has.
 #[derive(Component, PartialEq)]
-struct Built(Option<PartId>, Vec<Grip>, Vec<(PartId, crate::draft::Mark)>);
+struct Built(Option<PartId>, Vec<Grip>);
 
 #[allow(clippy::too_many_arguments)]
 fn lay_out(
@@ -424,9 +419,8 @@ fn lay_out(
     shown: Res<Shown>,
     surface: Res<FormSurface>,
     assets: Res<AssetServer>,
-    revealed: Res<crate::form_view::Revealed>,
     layers: Query<(Entity, &Built), With<Layer>>,
-    mut placed: Query<(&mut Node, Option<&Grip>, Option<&Badge>, Option<&mut Text>, Has<RoleLabel>), Without<Layer>>,
+    mut placed: Query<(&mut Node, &Grip), Without<Layer>>,
     mut gizmos: Gizmos<FormGizmos>,
 ) {
     let (Some(lens), Some(sdf), Some(draft)) = (lens(&ui, &shown, &surface), shown.sdf(), ui.form.draft.as_ref()) else {
@@ -437,8 +431,7 @@ fn lay_out(
     };
     let selected = ui.form.selected.and_then(|id| Some((*draft.part(id)?, original(sdf, id)?.1)));
     let grips: Vec<Grip> = selected.map(|(part, piece)| anchors(&part, piece).into_iter().map(|(g, _)| g).collect()).unwrap_or_default();
-    let marks: Vec<(PartId, crate::draft::Mark)> = shown.marks().iter().map(|(id, m)| (*id, *m)).collect();
-    let wanted = Built(selected.map(|(p, _)| p.id), grips, marks);
+    let wanted = Built(selected.map(|(p, _)| p.id), grips);
     if !layers.iter().any(|(_, built)| *built == wanted) {
         for (entity, _) in &layers {
             commands.entity(entity).despawn();
@@ -450,30 +443,8 @@ fn lay_out(
     let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z));
     let to_render = |p: DVec3| turn * p.as_vec3();
     let knob_at = selected.map(|(part, piece)| knobs(&part, piece, &lens)).unwrap_or_default();
-    for (mut node, grip, badge, text, role) in &mut placed {
-        let at = if let Some(grip) = grip {
-            knob_at.iter().find(|(g, _)| g == grip).map(|(_, at)| *at - KNOB * 0.5)
-        } else if let Some(Badge(id)) = badge {
-            let gone = shown.marks().get(id) == Some(&crate::draft::Mark::Dismantle);
-            if gone && !revealed.0 {
-                if node.display != Display::None {
-                    node.display = Display::None;
-                }
-                continue;
-            }
-            let piece = original(sdf, *id).map(|(_, p)| p).or_else(|| shown.ghost().and_then(|g| original(g, *id).map(|(_, p)| p)));
-            piece.and_then(|p| lens.project(p.pose.position)).map(|(at, _)| at + Vec2::new(-24.0, 14.0))
-        } else if role {
-            if let (Some(mut text), Some((part, _))) = (text, selected) {
-                let said = draft.role(part.id, &Balance::DEFAULT);
-                if text.0 != said {
-                    text.0 = said;
-                }
-            }
-            selected.and_then(|(_, piece)| lens.project(piece.pose.position)).map(|(at, _)| at + Vec2::new(-60.0, -46.0))
-        } else {
-            continue;
-        };
+    for (mut node, grip) in &mut placed {
+        let at = knob_at.iter().find(|(g, _)| g == grip).map(|(_, at)| *at - KNOB * 0.5);
         let (display, left, top) = match at {
             Some(at) => (Display::Flex, Val::Px(at.x), Val::Px(at.y)),
             None => (Display::None, node.left, node.top),
@@ -523,29 +494,7 @@ fn build(commands: &mut Commands, built: Built, font: Handle<Font>) {
             ..default()
         }));
     }
-    if built.0.is_some() {
-        let role = ui.inline(layer, "", 14.0, em_ui::vfd::TEXT);
-        ui.insert(role, absolute(Node::default()));
-        ui.insert(role, RoleLabel);
-    }
-    for &(id, mark) in &built.2 {
-        let text = format!("{} {}", sign(mark), mark.word());
-        let badge = ui.inline(layer, &text, 12.0, mark.color());
-        ui.insert(badge, absolute(Node::default()));
-        ui.insert(badge, Badge(id));
-    }
     ui.insert(layer, built);
-}
-
-/// A second signal beside the color.
-fn sign(mark: crate::draft::Mark) -> &'static str {
-    use crate::draft::Mark;
-    match mark {
-        Mark::Build => "+",
-        Mark::Dismantle | Mark::Shrink => "-",
-        Mark::Move => ">",
-        Mark::Rebuild => "*",
-    }
 }
 
 fn put_away(mut commands: Commands, layers: Query<Entity, With<Layer>>) {
@@ -648,13 +597,16 @@ mod tests {
     }
 
     #[test]
-    fn the_standoff_knob_goes_by_tenths_and_an_enclosing_part_has_none() {
+    fn the_sink_knob_goes_by_tenths_stops_at_the_surface_and_an_enclosing_part_has_none() {
         let (draft, sdf, lens) = scene();
         let part = *draft.part(PartId(2)).unwrap();
         let held = Held::new(Grip::Standoff, part, &sdf, &lens, Vec2::ZERO).unwrap();
         let edit = held.edit(held.from + held.axes[0] * 200.0, Modifiers::default(), &B).unwrap();
         let Mount::Attached { standoff, .. } = edit.after[0].placement.unwrap().mount else { panic!() };
         assert!(standoff > -0.2 && (standoff * 10.0 - (standoff * 10.0).round()).abs() < 1e-9, "{standoff}");
+        let far = held.edit(held.from + held.axes[0] * 5000.0, Modifiers::default(), &B).unwrap();
+        let Mount::Attached { standoff, .. } = far.after[0].placement.unwrap().mount else { panic!() };
+        assert_eq!(standoff, 0.0, "it stops resting on the parent");
         let storage = *draft.part(PartId(1)).unwrap();
         let grips: Vec<Grip> = anchors(&storage, original(&sdf, PartId(1)).unwrap().1).into_iter().map(|(g, _)| g).collect();
         assert!(!grips.contains(&Grip::Standoff));

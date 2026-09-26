@@ -10,9 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bevy::color::Color;
 use glam::{DVec2, DVec3};
-use lc_world::fitting::{Balance, C2, ONBOARD_DATA_BYTES};
-use lc_world::flight::{C_M_S, G0};
-use lc_world::form::capacity::{Capacities, dry_mass_kg};
+use lc_world::fitting::Balance;
 use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode, rules};
 use lc_world::refit::rounds::{Change, changes};
 
@@ -337,8 +335,13 @@ impl Draft {
         self.place(id, Placement { mount, ..placement })
     }
 
+    /// At most zero, resting on the parent: above it the part would float free of it, which the
+    /// placement rules refuse as detached.
     pub fn standoff(&self, id: PartId, standoff: f64) -> Result<Edit, Refused> {
         let placement = self.placement(id)?;
+        if standoff > 0.0 {
+            return Err(Refused::Fault(FormError::Detached(id)));
+        }
         let mount = match placement.mount {
             Mount::Attached { anchor, .. } => Mount::Attached { anchor, standoff },
             Mount::Enclosing => Mount::Enclosing,
@@ -463,33 +466,6 @@ impl Draft {
             .collect()
     }
 
-    /// What a part does, as its handle says it: capacity by kind and, for an engine, what it
-    /// pushes this ship at, full.
-    pub fn role(&self, id: PartId, balance: &Balance) -> String {
-        let Some(part) = self.part(id) else { return String::new() };
-        let copies = f64::from(self.form.copies().get(&id).copied().unwrap_or(1));
-        let alone = Form { parts: vec![Part { volume_m3: part.volume_m3 * copies, placement: None, ..*part }] };
-        let held = Capacities::of(&alone, balance);
-        match part.kind {
-            Kind::Mind => "the Mind".into(),
-            Kind::Storage => format!("storage, {} ME", sci(held.storage_j / balance.module_energy_j())),
-            Kind::Drone => format!("drones, {} W of building", sci(held.building_w)),
-            Kind::Engine => {
-                let full = Capacities::of(&self.form, balance).storage_j / C2;
-                let mass_kg = dry_mass_kg(&self.form, balance) + full;
-                let g = held.aperture_w / C_M_S / mass_kg / G0;
-                format!("drive section, {} W, {g:.1} g full on this ship", sci(held.aperture_w))
-            }
-            Kind::Living => format!("living, {} W of drain", sci(held.drain_w)),
-            Kind::Data => format!("data, {}B", si(held.data_b - ONBOARD_DATA_BYTES)),
-            Kind::Bay => {
-                let mouth = part.shape(balance.min_part_m3).extent(glam::DMat3::IDENTITY, 0.0);
-                format!("bay, a mouth {} m across", sci(2.0 * mouth.y.min(mouth.z)))
-            }
-            Kind::Spar(SparMode::Saddle) => "spar, cut to what it joins".into(),
-            Kind::Spar(SparMode::Strap) => "spar, strapped to its parent".into(),
-        }
-    }
 }
 
 /// A draft to photograph, by `--draft`'s spelling: `edits` for one of each mark on `ship`, or a
@@ -578,28 +554,6 @@ pub fn grown(part: &Part, axis: usize, factor: f64, fine: bool) -> Part {
 
 /// So a sphere of a capsule, whose length is zero, can still be stretched into one.
 const MIN_RATIO: f64 = 0.1;
-
-/// `1.1 × 10^20`. Quantico has no superscript digits.
-pub fn sci(x: f64) -> String {
-    if x == 0.0 || !x.is_finite() {
-        return format!("{x}");
-    }
-    let exponent = x.abs().log10().floor();
-    if (-2.0..4.0).contains(&exponent) {
-        return format!("{:.3}", x).trim_end_matches('0').trim_end_matches('.').to_string();
-    }
-    let mantissa = x / 10f64.powf(exponent);
-    // Rounding can carry the mantissa to ten.
-    let (mantissa, exponent) = if (mantissa.abs() * 10.0).round() >= 100.0 { (mantissa / 10.0, exponent + 1.0) } else { (mantissa, exponent) };
-    format!("{mantissa:.1} × 10^{exponent}")
-}
-
-/// `2.9 M`, for bytes.
-fn si(x: f64) -> String {
-    const PREFIXES: [(f64, &str); 5] = [(1e12, "T"), (1e9, "G"), (1e6, "M"), (1e3, "k"), (1.0, "")];
-    let (scale, prefix) = PREFIXES.into_iter().find(|(s, _)| x.abs() >= *s).unwrap_or((1.0, ""));
-    format!("{:.1} {prefix}", x / scale)
-}
 
 /// A field's number as typed back to it: short, and exact enough to round-trip what a handle set.
 pub fn shown(x: f64) -> String {
@@ -812,6 +766,13 @@ mod tests {
     }
 
     #[test]
+    fn a_part_cannot_be_stood_off_its_parent() {
+        let d = draft();
+        assert_eq!(d.standoff(PartId(2), 0.3), Err(Refused::Fault(FormError::Detached(PartId(2)))));
+        assert!(d.standoff(PartId(2), 0.0).is_ok() && d.standoff(PartId(2), -0.7).is_ok());
+    }
+
+    #[test]
     fn a_typed_field_is_taken_exactly() {
         let d = draft();
         let edit = d.set_field(PartId(3), Field::Twist, 12.5).unwrap();
@@ -828,19 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn a_handle_says_what_the_part_does() {
-        let d = draft();
-        let engine = d.role(PartId(2), &B);
-        assert!(engine.starts_with("drive section, 1.1 × 10^20 W"), "{engine}");
-        assert!(engine.contains("4.9 g full") || engine.contains("5.0 g full"), "{engine}");
-        assert!(d.role(PartId(1), &B).contains("30 ME"), "{}", d.role(PartId(1), &B));
-    }
-
-    #[test]
     fn numbers_read_short() {
-        assert_eq!(sci(1.07e20), "1.1 × 10^20");
-        assert_eq!(sci(9.96e19), "1.0 × 10^20");
-        assert_eq!(sci(30.0), "30");
         assert_eq!(shown(2_356_194.49), "2.3562e6");
         assert_eq!(shown(0.25), "0.25");
     }

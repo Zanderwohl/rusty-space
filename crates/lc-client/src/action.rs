@@ -1047,7 +1047,7 @@ mod tests {
             Box::new(|d| d.reshape(PartId(3), stretched(d.part(PartId(3)).unwrap().primitive, 0, 2.0, false)).unwrap()),
             Box::new(|d| d.anchor(PartId(5), glam::DVec3::new(1.0, 0.0, 1.0)).unwrap()),
             Box::new(|d| d.twist(PartId(5), 0.5).unwrap()),
-            Box::new(|d| d.standoff(PartId(4), 0.2).unwrap()),
+            Box::new(|d| d.standoff(PartId(4), -0.2).unwrap()),
             Box::new(|d| d.toggle_mount(PartId(4)).unwrap()),
             Box::new(|d| d.mirror(PartId(4), true).unwrap()),
             Box::new(|d| d.set_kind(PartId(5), Kind::Bay).unwrap()),
