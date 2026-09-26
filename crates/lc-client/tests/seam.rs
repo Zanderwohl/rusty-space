@@ -70,16 +70,20 @@ async fn greet(link: &mut WebSocketLink, protocol: u32, ticket: &str) {
 async fn hear(link: &mut WebSocketLink, what: &str) -> Outbound {
     let deadline = tokio::time::Instant::now() + PATIENCE;
     loop {
-        // A ship's account follows its welcome and every order, and what it knows is paged to it
-        // from the welcome on, arriving either side of any answer. None of these tests is about
-        // either.
+        // A ship's account follows its welcome and every order, its presets follow the welcome, and
+        // what it knows is paged to it from the welcome on, arriving either side of any answer.
+        // None of these tests is about any of them.
         let heard = link
             .poll()
             .into_iter()
             .find(|m| {
                 !matches!(
                     m,
-                    Outbound::Fitted { .. } | Outbound::Learned { .. } | Outbound::Logged { .. } | Outbound::Observing { .. }
+                    Outbound::Fitted { .. }
+                        | Outbound::Presets(_)
+                        | Outbound::Learned { .. }
+                        | Outbound::Logged { .. }
+                        | Outbound::Observing { .. }
                 )
             });
         if let Some(message) = heard {

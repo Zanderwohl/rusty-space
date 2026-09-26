@@ -396,6 +396,32 @@ mod tests {
     use super::*;
     use bevy::mesh::VertexAttributeValues;
 
+    /// The server's word on the form becomes the player's own, and again when a step changes it.
+    #[test]
+    fn the_players_form_is_read_from_fitted() {
+        let mut app = App::new();
+        app.init_resource::<crate::uplink::Uplink>()
+            .init_resource::<crate::dev::DevEntry>()
+            .init_resource::<OwnForm>()
+            .add_systems(Update, adopt_fitted);
+        app.update();
+        assert!(!app.world().resource::<OwnForm>().is_formed(), "nothing said, nothing formed");
+
+        let fitted = |form: &Form| {
+            let fitting = lc_world::fitting::Fitting::full(form.clone(), Balance::DEFAULT, 0.0);
+            (lc_proto::Fitting::from(&fitting), lc_proto::Hull::from(&fitting))
+        };
+        for form in [Form::starting(), lc_world::form::presets::Builtin::Cluster.form()] {
+            let (fitting, hull) = fitted(&form);
+            let mut uplink = app.world_mut().resource_mut::<crate::uplink::Uplink>();
+            (uplink.fitting, uplink.hull) = (Some(fitting), Some(hull));
+            app.update();
+            let own = app.world().resource::<OwnForm>();
+            let expected = OwnForm::new(&form, &Balance::DEFAULT).unwrap();
+            assert_eq!(own.length_m(), expected.length_m());
+        }
+    }
+
     /// Every vertex of `shape`'s mesh, in the part's frame.
     fn vertices(shape: &Shape) -> Vec<Vec3> {
         let (mesh, scale) = solid(shape);
