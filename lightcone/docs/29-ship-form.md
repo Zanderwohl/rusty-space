@@ -499,7 +499,8 @@ for the reasons the map is not one ([07-rendering.md](07-rendering.md), [13-clie
   every drag.
 - One surface at a time ([18-ui-style.md](18-ui-style.md)).
 
-The sky takes the corner square, as in the map's mode. The clock does not stop.
+The editor is the whole view: it has no corner square, and the sky's camera draws behind its
+picture. The clock does not stop.
 
 **The editor's camera carries a zero-sized marker, `FormCamera`,** as `SkyCamera`, `MapCamera` and
 `UiCamera` do, and every query that wants it filters on that marker. Bevy gives no order between
@@ -518,8 +519,7 @@ three phases, progress, and Cancel.
 |---|---|---|---|
 | `H` | the editor | the editor | back to where it was entered from |
 | `M` | the map | the world | the map |
-| `Escape` | closes the top window, or opens the menu | the same | closes the top window, or leaves to where it was entered from |
-| click on the corner square | the map | the world | the world |
+| `Escape` | closes the top window, or opens the menu | the same | puts a carried part back; else closes the top window, or leaves to where it was entered from |
 
 The editor is the one mode with somewhere to go back to, so `Escape` goes there before it opens the
 menu. `M` always means the map; from the map it means out of it.
@@ -534,10 +534,9 @@ other two modes have, with the same sensitivities, so a drag means the same turn
 | right-drag (the cursor is locked) | turns the view | turns the camera | orbits the ship |
 | held arrow keys | turn the view | nothing | orbit the ship |
 | wheel, `=` / `-` | the boom, in hull lengths | zooms toward the pointer | in and out, in the form's own size |
-| left-drag | picks | pans the plane | on empty space, slides the focus fore and aft; on a part, nothing yet: reserved for selection and handles |
+| left-drag | picks | pans the plane | on empty space, slides the focus fore and aft; a left-click on a part selects it and picks it up; on a handle, drags it |
 | Shift+wheel | the boom | zooms | slides the focus fore and aft |
 | held `PgUp` / `PgDn` | nothing | nothing | slide the focus toward the nose / the stern |
-| right-drag on the corner square | — | turns the ship's view | turns the ship's view |
 
 - **Fore and aft is the spaceplane hangar's move.** The focus slides along the nose axis and stops
   at the stem and the stern. Long ships are the point: a 50 km hull is navigable end to end, and
@@ -551,9 +550,13 @@ other two modes have, with the same sensitivities, so a drag means the same turn
   axis inside it. The far stop leaves the whole form a small thing in the middle.
 - **Up tilts the view up** on the arrows and the drag alike, as it does over the sky, which on an
   orbit is the camera sinking under the ship. The map's turn has the same signs.
-- **The press decides.** A drag that starts on a window, on the corner square or on one of the
-  editor's own controls belongs to it wherever it goes, and one that starts on a part belongs to
-  the part. `form_view::drag_of` is that rule, and it is tested without a window.
+- **The press decides.** A drag that starts on a window, on one of the editor's own controls or on
+  a handle belongs to it wherever it goes, and a press on a part belongs to the part.
+  `form_view::drag_of` is that rule, and it is tested without a window.
+- **The framing holds still through a gesture.** The camera frames the draft's bounds, and a carried
+  part or a dragged handle changes them. A camera that followed would move the part under the pointer,
+  which would hang the carried part somewhere else, and so on every frame. It reframes when the part is
+  put down or the handle let go.
 - The page keys are the reader's while a book is open, as the arrows are, and the slide stands down
   then.
 
@@ -565,21 +568,28 @@ other two modes have, with the same sensitivities, so a drag means the same turn
   transform and one material; the draft will differ from the ship anyway. An image, because two
   cameras on the window's own texture clear and tone-map over each other, which is why the map
   renders into one too.
-- **The image is laid out in Bevy UI**, under the readout and around the corner square, where the
-  sky's camera draws exactly as it does in the map's mode.
-- **The editor's own controls are Bevy UI**, in `em_ui`'s widgets, so C2's handles, tree and fields
-  composite over the rendered view. egui draws over Bevy UI, so every window still floats over the
-  editor. Bevy UI has its own pointer: the look button, the wheel and the slide all stand down over
-  an `em_ui` control as they do over an egui one (`em_ui::Controls`).
+- **The image is laid out in Bevy UI**, everything under the readout.
+- **The panels are Bevy UI**, in `em_ui`'s widgets. egui draws over Bevy UI, so every window still
+  floats over the editor. Bevy UI has its own pointer: the look button, the wheel and the slide all
+  stand down over an `em_ui` control as they do over an egui one (`em_ui::Controls`), and the key
+  bindings stand down while an `em_ui` number field has the keyboard (`em_ui::Typing`). The fields are
+  Bevy 0.19's own `EditableText`, wrapped as `em_ui::NumberField`.
+- **The handles are meshes, not Bevy UI**, on a layer of their own, drawn by `FormHandleCamera`, a
+  child of `FormCamera` rendering into the same image after it with the depth cleared, so a hull
+  never buries a handle. They are sized in pixels. Bevy's mesh picking cannot see into an image laid
+  out in UI, so the handles and the parts are picked in screen space with `em_ui::picking`, over the
+  same geometry that is drawn: the parts' uncut primitives, as the placeholder meshes draw them.
 - **A hangar's light, not the star's.** A key light over the camera's shoulder and a fill under it,
   so the side being looked at is always lit. The star is honest and leaves half the ship black, and
   what is being judged here is shape: which part is where, and how big. How the ship looks under
-  its own star is one key away, and in the corner square the whole time.
-- **Until the draft exists it shows the ship's own form**, or the starting form for a ship that has
-  none yet.
+  its own star is one key away.
+- **The draft starts as the ship's own form** the first time the editor opens, or the starting form
+  for a ship that has none, and is kept across leaving the editor.
 
 `--view form` starts in the editor; `--turn`, `--pitch`, `--zoom` and `--slide` move its camera, and
-`--form spindle*100` stages the preset a hundred times larger, a hull 92 km long.
+`--form spindle*100` stages the preset a hundred times larger, a hull 92 km long. `--draft edits`
+starts the draft with one of each mark, `--draft <preset>` as a preset, and `--select <id>` selects a
+part.
 
 ### The budget
 
@@ -596,21 +606,29 @@ Apply asks once more when the vent would collapse the field.
 
 ### Handles
 
-| handle | does |
-|---|---|
-| drag the part | slides its anchor over the parent's surface |
-| ring | twist |
-| size | grows or shrinks it **at fixed proportions**, snapped |
-| arrows on each axis | stretch the proportions **at fixed volume**, snapped. This is a reshape, so the part is rebuilt |
-| standoff arrow | out along the normal, or in to embed |
-| mount | attached or enclosing. While a part is enclosing, the editor keeps its last anchor and standoff so switching back restores them. They are editor state, not part of the form |
-| spar mode | saddle or strap. A reshape: the cut changes, the charged volume does not |
-| mirror | for the subtree |
-| add | a primitive and a kind, attached where the pointer is |
-| delete | the part and its subtree. Refused for the Mind and for the last drones |
+After the controls of the `newseum` editor: lines with ends, a ring, an arrow. No text is drawn over
+the ship.
 
-Handles show **what a part does, not how big it is**: "drive section 1.1 × 10²⁰ W, 5 g on this ship",
-not a count of cubic meters. The volume is in the side panel for anyone who wants it.
+| handle | looks like | does |
+|---|---|---|
+| carry | — | a click on an attached part picks it up, and it hangs from whatever part the pointer meets, re-parenting to it, as the spaceplane hangar does. The next click puts it down; `Escape` puts it back. Off every part it floats at the pointer at the depth it was taken from, and the draft is as it was before the carry; a click then does nothing |
+| axes | a red, green and blue line along the part's own axes, square ends | that one dimension, the volume going with it. Shift keeps the volume and lets the others give way. Snapped as a ratio. A reshape, so the part is rebuilt |
+| size | a line along the part's diagonal, ending in a ball | grows or shrinks it **at fixed proportions**, snapped |
+| twist | one ring | twist, about what twist turns the part about: its parent's normal through its foot, or its parent's axis when it encloses. Not its own axis, which a tilt takes off it |
+| standoff | an arrow into the parent along its normal at the anchor | sinks the part, and back out no further than it still touches its parent. A positive standoff is not by itself floating, since a tilt swings a part back into its parent: the starting form's drone pod hangs at +0.38 |
+| mount | a button | attached or enclosing. While a part is enclosing, the editor keeps its last anchor and standoff so switching back restores them. They are editor state, not part of the form |
+| spar mode | a button | saddle or strap. A reshape: the cut changes, the charged volume does not |
+| mirror | a button | for the subtree |
+| add | the palette | a kind, in the palette's current shape, taken onto the pointer and carried as above |
+| delete | a button, `Delete`, or a drop on the palette | the part and its subtree. Refused for the Mind. The last drones may go: a draft may pass through none on the way to a design, and Apply refuses a target with too few |
+
+A line drags by its point nearest the pointer's ray and the ring by where the ray meets its plane, so
+a handle stays under the pointer however the camera is turned, and both are measured against the
+handle as it stood when the drag began. Every drag and every carry is an `Action` each frame it moves,
+carrying the part as it was when it began, and settled on release: one gesture, one entry for undo.
+
+Whether a part still touches its parent is judged in the editor by sampling its surface where the
+placement puts it, a quicker reading of the grid rule Apply checks.
 
 ### Snapping
 
@@ -619,11 +637,13 @@ the client, so tuning the feel is a data change:
 
 | what | default steps |
 |---|---|
-| volume | the R10 series: ten steps per decade, each about 26% larger than the last, anchored at `min_part_m3`. A modifier gives R40 |
+| volume | the R10 series: ten steps per decade, each about 26% larger than the last, anchored at `min_part_m3`. The modifier gives R40 |
 | proportions | ratios on the same series |
 | twist and tilt | 15°, and 5° with the modifier |
 | anchor | the parent's axes and their diagonals, and free with the modifier |
-| standoff | tenths of the child's reach |
+| standoff | tenths of the child's reach, and hundredths with the modifier |
+
+The modifier is Alt, since Shift keeps an axis handle's volume. The table is `snap::SNAPS`.
 
 A ladder of ratios rather than fixed amounts means the same handle is fine on a 500 m ship and on a
 50 km one. The server never snaps anything. A console command or a hand-built target may ask for any
@@ -631,11 +651,16 @@ volume above the minimum.
 
 ### What else it shows
 
-- **The draft**, drawn as structure over the ship as it is, drawn as a faint ghost. Parts to be built,
-  dismantled, moved and rebuilt each get a mark from [18-ui-style.md](18-ui-style.md)'s palette.
-- **Side panels**, in `em_ui`'s widgets like the rest of the editor's controls: the tree of parts,
-  and the selected part's primitive, kind, volume and placement as editable numbers. Every handle
-  has a field, so anything done with the mouse can be typed exactly.
+- **The draft**, solid, each changed part tinted with its mark from [18-ui-style.md](18-ui-style.md):
+  build, dismantle, shrink, move or rebuild. The marks are F8's own diff, `refit::rounds::changes`. A
+  shrink is a dismantle-phase step on a part that stays, so it is marked apart from a part removed.
+- **The ship as it is**, faint, wherever the draft differs from it, on **show current**: hovered to
+  look, pressed to keep it on. Hidden otherwise. Nothing hangs from it either way.
+- **Side panels**: the palette down the left, and on the right the tree of parts with each mark in
+  words, and under it the selected part's detail. The detail says what the part does for its kind
+  (storage's capacity, drones' building power, an engine's aperture, thrust and what it gives this
+  ship full, living's drain, data's capacity, a bay's mouth) and what it weighs, dry and, for a store,
+  wet. Its numbers, a field for every handle and typed exactly, are behind **advanced**.
 - **The preview**, a pure function of `Session` and `Ui`: capacities, acceleration, broadside shadow,
   envelope area, slew rate, the field's rated load and headroom, brightness at the ship's current
   distance from its star, and the round's duration.
