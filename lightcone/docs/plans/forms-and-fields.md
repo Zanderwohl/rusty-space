@@ -610,7 +610,7 @@ graph LR
 
 ### R14 · Refits in the game
 
-- status: todo
+- status: active card "Build R14: refits in the game"
 - needs: R4, S1
 - touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/src/parts.rs`
 - read: 32 §Building, as a function of time; 29 §Cancel
@@ -657,7 +657,7 @@ graph LR
 
 ### C4 · Budget and preview
 
-- status: todo
+- status: active card "Build C4: budget and preview"
 - needs: C2, F7, F8, H1
 - touches: `crates/lc-client/src/form_panel.rs`
 - read: 29 §The budget, §What else it shows
