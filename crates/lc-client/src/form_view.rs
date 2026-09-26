@@ -2,7 +2,7 @@
 //!
 //! Its own camera on [`FORM_LAYER`], drawing copies of the placeholder parts in the ship's frame
 //! (x nose, y port, z up), in meters about the render origin, into an image laid out under the
-//! editor's chrome with the sky in the corner square. Copies rather than [`crate::parts`]' own
+//! editor's chrome, which is the whole view: the editor has no corner square. Copies rather than [`crate::parts`]' own
 //! pieces: those are placed relative to the eye in astronomical units and lit by the star, and
 //! an entity has one transform and one material. An image rather than the window, because two
 //! cameras sharing the window's texture clear and tone-map over each other; the map does the same.
@@ -41,6 +41,11 @@ pub const FORM_FOV: f32 = std::f32::consts::FRAC_PI_4;
 /// The camera the editor is drawn for.
 #[derive(Component)]
 pub struct FormCamera;
+
+/// Draws the handles into [`FormCamera`]'s image after it, depth cleared, so a hull never buries
+/// them.
+#[derive(Component)]
+pub struct FormHandleCamera;
 
 /// Where the camera starts: aft of the starboard beam, a little above, with the nose to the right.
 const START_AZIMUTH: f64 = -120.0 * std::f64::consts::PI / 180.0;
@@ -83,11 +88,19 @@ const MAX_SIDE: u32 = 8192;
 const CHROME_GAP: f32 = 6.0;
 
 /// The editor's state in the interface.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct FormView {
     pub orbit: FormOrbit,
     /// Where `H` and `Escape` go back to. Never [`ViewMode::Form`].
     pub from: ViewMode,
+    /// From the ship's form the first time the editor opens; kept across leaving it.
+    pub draft: Option<crate::draft::Draft>,
+    pub selected: Option<lc_world::form::PartId>,
+    /// Which of [`crate::draft::PRIMITIVES`] a part taken from the list is made as.
+    pub new_shape: usize,
+    /// Whether the ship as it is is drawn, faint, where the draft differs from it.
+    pub show_current: bool,
+    pub advanced: bool,
 }
 
 /// The editor's camera: an orbit about a focus on the ship's nose axis.
@@ -231,8 +244,8 @@ pub enum FormDrag {
 
 /// What a press over the editor's view starts, by button and by whether it landed on a part.
 ///
-/// **A left-press on a part is not the camera's.** It is where selection and every handle will
-/// begin (C2), so it starts nothing here; only one on empty space slides.
+/// A left-press on a part is not the camera's: it selects the part and picks it up
+/// ([`crate::form_carry`]). Only one on empty space slides.
 pub fn drag_of(button: MouseButton, on_part: bool) -> Option<FormDrag> {
     match button {
         crate::input::LOOK_BUTTON => Some(FormDrag::Orbit),
@@ -286,19 +299,54 @@ pub fn on_part(sdf: &Sdf, origin: DVec3, direction: DVec3, limit_m: f64) -> bool
     false
 }
 
-/// The form the editor shows: the ship's own, or the starting form while it has none. C2 puts
-/// the draft here.
+/// Whether the ship as it is is drawn this frame: while the toggle is on or hovered.
+#[derive(Resource, Default)]
+pub struct Revealed(pub bool);
+
+/// The ship as it is, where the draft differs from it.
+#[derive(Component)]
+struct Current;
+
 #[derive(Resource, Default)]
 pub struct Shown {
+    /// The draft's field, and the bounds of it and the ship together.
     drawn: Option<(Sdf, Extent)>,
-    /// Set once a form has been solved or has failed to, so a failure is not retried every frame.
-    tried: bool,
+    ghost: Option<Sdf>,
+    marks: std::collections::BTreeMap<lc_world::form::PartId, crate::draft::Mark>,
+    /// Last drawn, so a frame that changed neither draws nothing and a failure is not retried.
+    of: Option<(Form, Form)>,
+    /// The bounds the camera frames, held still through a gesture: a camera that followed a
+    /// carried part's bounds would move the part under the pointer, and it would hang elsewhere.
+    framed: Option<Extent>,
 }
 
 impl Shown {
     pub fn extent(&self) -> Option<Extent> {
-        self.drawn.as_ref().map(|(_, extent)| *extent)
+        self.framed
     }
+
+    pub fn sdf(&self) -> Option<&Sdf> {
+        self.drawn.as_ref().map(|(sdf, _)| sdf)
+    }
+
+    /// The ship as it is, where the draft differs from it.
+    pub fn ghost(&self) -> Option<&Sdf> {
+        self.ghost.as_ref()
+    }
+
+    pub fn marks(&self) -> &std::collections::BTreeMap<lc_world::form::PartId, crate::draft::Mark> {
+        &self.marks
+    }
+}
+
+/// Logical pixels, while the editor is the view.
+pub fn picture(surface: &FormSurface) -> Option<egui::Rect> {
+    surface.laid
+}
+
+/// Whether `at`, logical pixels, is on the picture rather than the readout.
+pub fn on_picture(surface: &FormSurface, at: Vec2) -> bool {
+    surface.laid.is_some_and(|rect| rect.contains(egui::pos2(at.x, at.y)))
 }
 
 /// Where the picture goes on the window, logical pixels, and the target it is drawn into.
@@ -307,16 +355,16 @@ pub struct FormSurface {
     image: Handle<Image>,
     size: UVec2,
     /// The picture's rect and the corner square left out of it, or `None` outside the editor.
-    laid: Option<(egui::Rect, egui::Rect)>,
+    laid: Option<egui::Rect>,
 }
 
 /// Where the picture goes on a window of `window` logical pixels whose readout ends at `foot`:
-/// everything under the readout, less the corner square.
-pub fn layout_of(window: Vec2, foot: f32) -> (egui::Rect, egui::Rect) {
+/// everything under the readout.
+pub fn layout_of(window: Vec2, foot: f32) -> egui::Rect {
     let whole = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(window.x, window.y));
     let mut rect = whole;
     rect.min.y = foot.clamp(whole.min.y, whole.max.y);
-    (rect, crate::map_panel::corner(whole))
+    rect
 }
 
 pub struct FormViewPlugin;
@@ -324,9 +372,10 @@ pub struct FormViewPlugin;
 impl Plugin for FormViewPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Shown>()
+            .init_resource::<Revealed>()
             .add_systems(
                 Update,
-                (show, lay_out, place, relight)
+                (start_draft, show, reveal, lay_out, place, relight)
                     .chain()
                     .in_set(crate::app::Stage::Scene)
                     .after(crate::app::Placed)
@@ -346,22 +395,37 @@ pub fn editing(ui: Res<Ui>) -> bool {
 pub fn spawn_camera(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let image = images.add(crate::map::target_image(UVec2::splat(INITIAL_SIDE)));
     commands.insert_resource(FormSurface { image: image.clone(), size: UVec2::splat(INITIAL_SIDE), laid: None });
+    let camera = commands
+        .spawn((
+            Camera3d::default(),
+            FormCamera,
+            RenderLayers::layer(FORM_LAYER),
+            RenderTarget::Image(image.clone().into()),
+            Camera {
+                // Before the window's cameras, whose frame shows what this one drew. The map's is -1.
+                order: -3,
+                is_active: false,
+                clear_color: ClearColorConfig::Custom(BACKDROP),
+                ..default()
+            },
+            Projection::Perspective(PerspectiveProjection { fov: FORM_FOV, ..default() }),
+            // The parts' material tone-maps itself, as the map's lines do.
+            Tonemapping::None,
+            Transform::default(),
+        ))
+        .id();
+    // Everything that makes the two share one texture matches: the target, no HDR, the same
+    // sample count. `ClearColorConfig::None` keeps the parts; the depth is cleared regardless.
     commands.spawn((
         Camera3d::default(),
-        FormCamera,
-        RenderLayers::layer(FORM_LAYER),
+        FormHandleCamera,
+        RenderLayers::layer(crate::form_handles::FORM_HANDLE_LAYER),
         RenderTarget::Image(image.into()),
-        Camera {
-            // Before the window's cameras, whose frame shows what this one drew. The map's is -1.
-            order: -2,
-            is_active: false,
-            clear_color: ClearColorConfig::Custom(BACKDROP),
-            ..default()
-        },
+        Camera { order: -2, is_active: false, clear_color: ClearColorConfig::None, ..default() },
         Projection::Perspective(PerspectiveProjection { fov: FORM_FOV, ..default() }),
-        // The parts' material tone-maps itself, as the map's lines do.
         Tonemapping::None,
         Transform::default(),
+        ChildOf(camera),
     ));
 }
 
@@ -371,30 +435,73 @@ struct FormViewRoot;
 
 /// A copy's paint, kept to relight it with.
 #[derive(Component)]
-struct HangarPaint(Vec4);
+pub(crate) struct HangarPaint(pub Vec4);
 
-/// Take up the ship's form when it changes, and draw it on the editor's layer.
+/// So a carried part's copies can be hidden.
+#[derive(Component)]
+pub struct DrawnPart(pub lc_world::form::PartId);
+
+
+fn start_draft(
+    ui: Res<Ui>,
+    own: Res<crate::parts::OwnForm>,
+    dev: Res<crate::dev::DevEntry>,
+    mut out: MessageWriter<Requested>,
+) {
+    if ui.view != ViewMode::Form || ui.form.draft.is_some() {
+        return;
+    }
+    let ship = own.form().cloned().unwrap_or_else(Form::starting);
+    out.write(Requested(Action::StartDraft(ship.clone())));
+    let staged = dev.draft.as_deref().and_then(|name| crate::draft::staged(name, &ship, &Balance::DEFAULT));
+    if let Some(form) = staged {
+        let edit = crate::draft::Draft::new(ship).replace(form);
+        out.write(Requested(Action::EditForm(Ok(edit))));
+    }
+}
+
+
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn show(
     mut commands: Commands,
-    own: Res<crate::parts::OwnForm>,
+    ui: Res<Ui>,
+    carried: Res<crate::form_carry::Carried>,
+    grabbed: Res<crate::form_handles::Grabbed>,
+    revealed: Res<Revealed>,
     mut shown: ResMut<Shown>,
     roots: Query<Entity, With<FormViewRoot>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
+    mut ghosts: ResMut<Assets<StandardMaterial>>,
     surfaces: Res<crate::surfaces::Surfaces>,
 ) {
-    let fresh = !shown.tried || own.is_changed();
+    let Some(draft) = &ui.form.draft else { return };
+    let gesture = carried.is_carrying() || grabbed.is_holding();
+    let framed = framing(shown.framed, shown.drawn.as_ref().map(|(_, extent)| *extent), gesture);
+    if shown.framed != framed {
+        shown.framed = framed;
+    }
+    let fresh = shown.of.as_ref().is_none_or(|(form, ship)| *form != draft.form || *ship != draft.ship);
     // Respawned when missing too, since leaving the game takes the copies down.
     if !fresh && (!roots.is_empty() || shown.drawn.is_none()) {
         return;
     }
     if fresh {
-        let sdf = own.sdf().cloned().or_else(|| Sdf::new(&Form::starting(), &Balance::DEFAULT).ok());
-        shown.drawn = sdf.map(|sdf| {
-            let (min, max) = sdf.bounds();
+        let balance = Balance::DEFAULT;
+        let ghost = Sdf::new(&draft.ship, &balance).ok();
+        shown.drawn = Sdf::new(&draft.form, &balance).ok().map(|sdf| {
+            let (mut min, mut max) = sdf.bounds();
+            if let Some(ghost) = &ghost {
+                let (gmin, gmax) = ghost.bounds();
+                (min, max) = (min.min(gmin), max.max(gmax));
+            }
             (sdf, Extent { min, max })
         });
-        shown.tried = true;
+        shown.ghost = ghost;
+        shown.marks = draft.marks(&balance);
+        shown.of = Some((draft.form.clone(), draft.ship.clone()));
+        shown.framed = framing(shown.framed, shown.drawn.as_ref().map(|(_, extent)| *extent), gesture);
     }
     for root in &roots {
         commands.entity(root).despawn();
@@ -405,7 +512,10 @@ fn show(
     let root = commands.spawn((Transform::from_rotation(turn), Visibility::default(), FormViewRoot)).id();
     for piece in sdf.pieces() {
         let (mesh, scale) = crate::parts::solid(&piece.shape);
-        let paint = crate::parts::paint(piece.kind);
+        let mut paint = crate::parts::paint(piece.kind);
+        if let Some(mark) = shown.marks.get(&piece.part) {
+            paint = paint.lerp(mark.color().to_linear().to_vec4(), MARK_TINT).with_w(paint.w);
+        }
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(surfaces.flat.material(hangar(paint, DVec3::Z)))),
@@ -413,13 +523,57 @@ fn show(
             NoFrustumCulling,
             RenderLayers::layer(FORM_LAYER),
             HangarPaint(paint),
+            DrawnPart(piece.part),
+            ChildOf(root),
+        ));
+    }
+    let Some(ghost) = &shown.ghost else { return };
+    for piece in ghost.pieces().iter().filter(|p| shown.marks.contains_key(&p.part)) {
+        let (mesh, scale) = crate::parts::solid(&piece.shape);
+        let mark = shown.marks[&piece.part];
+        let visibility = if revealed.0 { Visibility::Inherited } else { Visibility::Hidden };
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(ghosts.add(ghost_material(mark))),
+            crate::parts::local(piece, scale),
+            NoFrustumCulling,
+            RenderLayers::layer(FORM_LAYER),
+            Current,
+            visibility,
             ChildOf(root),
         ));
     }
 }
 
+/// The latest bounds, or through a gesture the ones already held.
+pub fn framing(held: Option<Extent>, latest: Option<Extent>, gesture: bool) -> Option<Extent> {
+    if gesture && held.is_some() { held } else { latest }
+}
+
+/// How far a changed part's paint goes toward its mark's color.
+const MARK_TINT: f32 = 0.45;
+const GHOST_ALPHA: f32 = 0.18;
+
+/// Unlit, so the hangar's light does not decide how faint it is.
+fn ghost_material(mark: crate::draft::Mark) -> StandardMaterial {
+    StandardMaterial {
+        base_color: mark.color().with_alpha(GHOST_ALPHA),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
+    }
+}
+
+fn reveal(revealed: Res<Revealed>, mut ghosts: Query<&mut Visibility, With<Current>>) {
+    let wanted = if revealed.0 { Visibility::Inherited } else { Visibility::Hidden };
+    for mut visibility in &mut ghosts {
+        visibility.set_if_neq(wanted);
+    }
+}
+
 /// A part lit from `key`, ship frame, whatever the star is doing.
-fn hangar(paint: Vec4, key: DVec3) -> BodySurfaceUniform {
+pub(crate) fn hangar(paint: Vec4, key: DVec3) -> BodySurfaceUniform {
     let tone = crate::tonemap::ToneMap {
         surface_reference: HANGAR_REFERENCE,
         surface_stops: HANGAR_STOPS,
@@ -456,16 +610,19 @@ fn relight(
 }
 
 /// Aim the camera, and switch it on only while the editor is the view.
-fn place(
+pub(crate) fn place(
     mut ui: ResMut<Ui>,
     shown: Res<Shown>,
     surface: Res<FormSurface>,
     camera: Single<(&mut Camera, &mut Transform, &mut Projection), With<FormCamera>>,
+    handles: Single<(&mut Camera, &mut Projection), (With<FormHandleCamera>, Without<FormCamera>)>,
 ) {
     let (mut camera, mut transform, mut projection) = camera.into_inner();
+    let (mut over, mut over_projection) = handles.into_inner();
     let active = ui.view == ViewMode::Form && surface.laid.is_some() && shown.extent().is_some();
     if camera.is_active != active {
         camera.is_active = active;
+        over.is_active = active;
     }
     let Some(extent) = shown.extent().filter(|_| active) else { return };
     let held = ui.form.orbit.held_to(&extent);
@@ -481,6 +638,7 @@ fn place(
         perspective.near = standoff * 1.0e-3;
         perspective.far = standoff * 10.0 + extent.size_m() as f32 * 2.0;
     }
+    *over_projection = projection.clone();
 }
 
 /// Everything on screen that is the editor's and not the camera's.
@@ -489,9 +647,6 @@ struct Chrome;
 
 #[derive(Component)]
 struct Picture;
-
-#[derive(Component)]
-struct Piece(usize);
 
 #[derive(Component)]
 pub(crate) struct Emit(Action);
@@ -509,23 +664,22 @@ fn lay_out(
     assets: Res<AssetServer>,
     mut surface: ResMut<FormSurface>,
     mut images: ResMut<Assets<Image>>,
-    mut chrome: Query<(Entity, &mut Node), (With<Chrome>, Without<Piece>)>,
-    pictures: Query<Entity, With<Picture>>,
-    mut pieces: Query<(&Piece, &mut Node, &mut ImageNode), Without<Chrome>>,
+    mut chrome: Query<(Entity, &mut Node), (With<Chrome>, Without<Picture>)>,
+    mut pictures: Query<(Entity, &mut Node), (With<Picture>, Without<Chrome>)>,
 ) {
     if ui.view != ViewMode::Form {
         surface.laid = None;
         for (entity, ..) in &mut chrome {
             commands.entity(entity).despawn();
         }
-        for entity in &pictures {
+        for (entity, _) in &pictures {
             commands.entity(entity).despawn();
         }
         return;
     }
 
-    let (rect, hole) = layout_of(Vec2::new(window.width(), window.height()), foot.0);
-    surface.laid = Some((rect, hole));
+    let rect = layout_of(Vec2::new(window.width(), window.height()), foot.0);
+    surface.laid = Some(rect);
     let scale = window.scale_factor();
     let wanted = (Vec2::new(rect.width(), rect.height()) * scale)
         .round()
@@ -550,31 +704,16 @@ fn lay_out(
         build_chrome(&mut commands, top, assets.load(crate::faces::UI_FILE));
     }
 
-    let laid = crate::map_panel::around(rect, hole);
-    if pictures.is_empty() {
-        let picture = commands.spawn((Node { position_type: PositionType::Absolute, ..default() },
-            GlobalZIndex(-1), Picture)).id();
-        for index in 0..4 {
-            commands.spawn((Node::default(), ImageNode::new(surface.image.clone()), Piece(index), ChildOf(picture)));
+    let want = placed(rect);
+    let mut drawn = false;
+    for (_, mut node) in &mut pictures {
+        drawn = true;
+        if *node != want {
+            *node = want.clone();
         }
-        return;
     }
-    let texels = surface.size.as_vec2();
-    for (piece, mut node, mut image) in &mut pieces {
-        let want = match laid.get(piece.0) {
-            Some(at) => {
-                let uv = crate::map_panel::uv(rect, *at);
-                let texture = Rect::new(uv.min.x * texels.x, uv.min.y * texels.y, uv.max.x * texels.x, uv.max.y * texels.y);
-                (placed(*at), Some(texture))
-            }
-            None => (Node { display: Display::None, ..default() }, None),
-        };
-        if *node != want.0 {
-            *node = want.0;
-        }
-        if image.rect != want.1 {
-            image.rect = want.1;
-        }
+    if !drawn {
+        commands.spawn((want, ImageNode::new(surface.image.clone()), GlobalZIndex(-1), Picture));
     }
 }
 
@@ -595,11 +734,18 @@ fn build_chrome(commands: &mut Commands, top: f32, font: Handle<Font>) {
     let strip = ui.strip(root);
     let row = ui.row(strip);
     ui.inline(row, "SHIP EDITOR", 16.0, em_ui::vfd::TEXT);
-    ui.inline(row, "current ship", 14.0, em_ui::vfd::TEXT_DIM);
     ui.small_button(row, "Back", Emit(Action::ToggleForm));
 }
 
-pub(crate) fn press(buttons: Query<(&Interaction, &Emit), Changed<Interaction>>, mut out: MessageWriter<Requested>) {
+pub(crate) fn press(
+    buttons: Query<(&Interaction, &Emit), Changed<Interaction>>,
+    carried: Res<crate::form_carry::Carried>,
+    mut out: MessageWriter<Requested>,
+) {
+    // A press while carrying a part is the drop's, whatever button is under it.
+    if carried.is_carrying() {
+        return;
+    }
     for (interaction, emit) in &buttons {
         if *interaction == Interaction::Pressed {
             out.write(Requested(emit.0.clone()));
@@ -635,11 +781,13 @@ pub fn read_drag(
     window: Single<&Window, With<PrimaryWindow>>,
     shown: Res<Shown>,
     surface: Res<FormSurface>,
+    carried: Res<crate::form_carry::Carried>,
+    grabbed: Res<crate::form_handles::Grabbed>,
     mut last: Local<Option<Vec2>>,
     mut out: MessageWriter<Requested>,
 ) {
     let cursor = window.cursor_position();
-    let (Some((sdf, extent)), Some((rect, hole))) = (&shown.drawn, surface.laid) else {
+    let (Some(sdf), Some(extent), Some(rect)) = (shown.sdf(), shown.extent(), surface.laid) else {
         *last = None;
         return;
     };
@@ -649,17 +797,14 @@ pub fn read_drag(
     }
     let size = Vec2::new(rect.width(), rect.height());
     if buttons.just_pressed(MouseButton::Left) {
+        // The same pick as selection's, so a press slides exactly where it selects nothing.
+        let lens = crate::form_handles::Lens { orbit: ui.form.orbit.held_to(&extent), extent, rect };
         *last = cursor
-            .filter(|at| pointer_free(&egui, &controls) && inside(rect, hole, *at))
+            // A press while carrying a part puts it down, and slides nothing.
+            .filter(|at| pointer_free(&egui, &controls) && rect.contains(egui::pos2(at.x, at.y)) && !carried.is_carrying())
             .filter(|at| {
-                let orbit = ui.form.orbit;
-                let ndc = DVec2::new(
-                    ((at.x - rect.min.x) / size.x * 2.0 - 1.0) as f64,
-                    (1.0 - (at.y - rect.min.y) / size.y * 2.0) as f64,
-                );
-                let (origin, direction) = orbit.ray(extent, FORM_FOV as f64, (size.x / size.y.max(1.0)) as f64, ndc);
-                let limit = (orbit.distance + FAR_SIZES) * extent.size_m();
-                drag_of(MouseButton::Left, on_part(sdf, origin, direction, limit)) == Some(FormDrag::Slide)
+                let on_part = crate::form_handles::pick_part(sdf, &lens, *at).is_some() || grabbed.is_holding();
+                drag_of(MouseButton::Left, on_part) == Some(FormDrag::Slide)
             });
         return;
     }
@@ -671,20 +816,16 @@ pub fn read_drag(
     }
 }
 
-fn inside(rect: egui::Rect, hole: egui::Rect, at: Vec2) -> bool {
-    let at = egui::pos2(at.x, at.y);
-    rect.contains(at) && !hole.contains(at)
-}
-
 /// The keyboard path for the slide, held like the arrows. Not while a book has the page keys.
 pub fn read_slide_keys(
     keys: Res<ButtonInput<KeyCode>>,
     egui: Res<EguiWantsInput>,
+    typing: em_ui::Typing,
     ui: Res<Ui>,
     time: Res<Time>,
     mut out: MessageWriter<Requested>,
 ) {
-    if egui.wants_any_keyboard_input() || ui.reading.book.is_some() {
+    if egui.wants_any_keyboard_input() || typing.active() || ui.reading.book.is_some() {
         return;
     }
     let way: f64 = crate::input::slide_bindings()
@@ -886,16 +1027,22 @@ mod tests {
         }
     }
 
-    /// The picture is under the readout and leaves the corner to the sky.
+    /// The picture is everything under the readout; the editor has no corner square.
     #[test]
-    fn the_picture_is_under_the_readout_with_the_sky_in_the_corner() {
-        let (rect, hole) = layout_of(Vec2::new(1280.0, 720.0), 61.0);
-        assert_eq!(rect.min.y, 61.0);
+    fn the_picture_is_everything_under_the_readout() {
+        let rect = layout_of(Vec2::new(1280.0, 720.0), 61.0);
+        assert_eq!(rect.min, egui::pos2(0.0, 61.0));
         assert_eq!(rect.max, egui::pos2(1280.0, 720.0));
-        assert_eq!(hole, crate::map_panel::corner(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))));
-        assert!(inside(rect, hole, Vec2::new(640.0, 360.0)));
-        assert!(!inside(rect, hole, Vec2::new(hole.center().x, hole.center().y)), "the corner is the sky's");
-        assert!(!inside(rect, hole, Vec2::new(640.0, 20.0)), "the readout is egui's");
+    }
+
+
+    #[test]
+    fn the_framing_holds_through_a_gesture_and_follows_after_it() {
+        let a = Extent { min: DVec3::splat(-1.0), max: DVec3::ONE };
+        let b = Extent { min: DVec3::splat(-2.0), max: DVec3::ONE };
+        assert_eq!(framing(Some(a), Some(b), true), Some(a));
+        assert_eq!(framing(Some(a), Some(b), false), Some(b), "put down, it reframes");
+        assert_eq!(framing(None, Some(b), true), Some(b), "something is framed from the first");
     }
 
     /// The hangar light comes from the viewer's side, so the face being looked at is lit.

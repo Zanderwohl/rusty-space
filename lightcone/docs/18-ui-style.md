@@ -18,13 +18,12 @@ rule below was learned by photographing something that looked wrong.
 
 The editor's are Bevy UI because its handles have to sit on the rendered ship and take the pointer
 anywhere over it, and its tree and fields go with them so the editor is one surface; see
-[29-ship-form.md](29-ship-form.md#how-it-is-drawn). Its fields are therefore the custom text input
-this rule warns about, and belong in `em_ui` as a generic widget. Windows stay egui, which draws
-over Bevy UI.
+[29-ship-form.md](29-ship-form.md#how-it-is-drawn). Its number fields are `em_ui::NumberField`, a
+thin wrapper over Bevy 0.19's own `EditableText`. Windows stay egui, which draws over Bevy UI.
 
 The second is the exception and stays small. The first is the default because the game is mostly
-readouts, and because **Bevy UI has no text input at all** — a form is an egui surface or it is
-a custom widget nobody asked for.
+readouts, and because Bevy UI's text input is young: plain text, one line, no validation. A form
+of any size is an egui surface.
 
 A single egui surface *inside* a Bevy UI screen is allowed, and the password form is one. What
 it costs is a palette that has to be carried across the boundary by hand; see below.
@@ -154,6 +153,23 @@ it cooks ([32-ship-rendering.md](32-ship-rendering.md#the-exhaust-cone)). It is 
 body is drawn in. Green is a body and amber is a craft, so the hazard has to be neither of them.
 It is Lightcone's and not the shared palette's, so it lives beside the game's code, not in
 `em_ui::vfd`. Until the cone is wired into the client, `examples/cone_void.rs` holds it.
+
+
+### Refit marks
+
+The ship editor tints each part of the draft by what the round would do to it, one pale hue per
+phase: build is the phosphor green itself, sRGB
+`(0.35, 0.93, 0.69)`; dismantle and shrink share rose, `(1.0, 0.70, 0.78)`; move is sky blue,
+`(0.45, 0.83, 1.0)`; rebuild is lavender, `(0.85, 0.76, 1.0)`. The tree says each in words as well.
+They are Lightcone's, in `draft::Mark::color`.
+
+### Handles
+
+The editor's handles are the usual red, green and blue for a part's x, y and z, sRGB
+`(0.95, 0.25, 0.22)`, `(0.30, 0.85, 0.30)` and `(0.30, 0.50, 1.0)`, with the twist ring in the x's red
+and the size and standoff handles a warm white. They are outside the palette on purpose: every
+editor a player has used draws its axes this way, and a handle is read at a glance. Under the
+pointer and while held each is mixed 55% toward white.
 
 ## Three faces, and where each one stops
 

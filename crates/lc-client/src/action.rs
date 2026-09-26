@@ -38,6 +38,19 @@ pub enum Action {
     /// Slide the editor's focus along the ship's nose axis, in stand-offs: the same drag moves
     /// it as far across the screen at any zoom. Positive is toward the nose.
     SlideForm(f64),
+    /// Start the draft from this form, the ship's own, unless there is one already.
+    StartDraft(lc_world::form::Form),
+    /// Which part of the draft the handles and the fields are on.
+    SelectPart(Option<lc_world::form::PartId>),
+    /// Which of [`crate::draft::PRIMITIVES`] a new part is made as.
+    SetNewShape(usize),
+    /// Draw the ship as it is wherever the draft differs from it, or hide it again.
+    ShowCurrent(bool),
+    /// Show the selected part's numbers as fields, or only what it does.
+    ShowAdvanced(bool),
+    /// An edit to the draft as its handle or field built it, before and after, or why it could
+    /// not be built. See [`crate::draft`].
+    EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
     // --- the map ----------------------------------------------------------------------
     /// Turn the map's camera by a relative amount, radians.
     TurnMap { azimuth: f64, elevation: f64 },
@@ -461,6 +474,16 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     },
     Action::OrbitForm { azimuth, elevation } => ui.form.orbit.turn(azimuth, elevation),
     Action::SlideForm(standoffs) => ui.form.orbit.slide(standoffs),
+    Action::StartDraft(form) => {
+        if ui.form.draft.is_none() {
+            ui.form.draft = Some(crate::draft::Draft::new(form));
+        }
+    }
+    Action::SelectPart(part) => ui.form.selected = part,
+    Action::ShowCurrent(on) => ui.form.show_current = on,
+    Action::ShowAdvanced(on) => ui.form.advanced = on,
+    Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
+    Action::EditForm(edit) => edit_form(ui, edit, &mut effects),
     Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
     Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
         Some(anchor) => {
@@ -746,6 +769,29 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     effects
 }
 
+/// Only a settled edit's refusal is said: a drag refused partway is still being made.
+fn edit_form(ui: &mut UiState, edit: Result<crate::draft::Edit, crate::draft::Refused>, effects: &mut Vec<Effect>) {
+    let applied = match (&edit, ui.form.draft.as_mut()) {
+        (Ok(edit), Some(draft)) => draft.apply(edit, &lc_world::fitting::Balance::DEFAULT).map(|()| edit),
+        (Ok(_), None) => return effects.push(Effect::Notify("there is no draft to edit".into())),
+        (Err(refused), _) => Err(*refused),
+    };
+    match applied {
+        Ok(edit) => {
+            if edit.what == crate::draft::What::Add && edit.settled {
+                ui.form.selected = Some(edit.part);
+            }
+            if let Some(draft) = &ui.form.draft
+                && ui.form.selected.is_some_and(|id| draft.part(id).is_none())
+            {
+                ui.form.selected = None;
+            }
+        }
+        Err(_) if edit.as_ref().is_ok_and(|e| !e.settled) => {}
+        Err(refused) => effects.push(Effect::Notify(format!("refused: {refused}"))),
+    }
+}
+
 /// Run a nested action, keeping its effects. Only for actions composed of other actions.
 fn apply_to(ui: &mut UiState, session: &mut Session, action: Action, effects: &mut Vec<Effect>) {
     effects.extend(apply(action, ui, session));
@@ -962,6 +1008,90 @@ mod tests {
         assert!(!ui.is_open(Panel::Escape), "leaving the editor is not opening the menu");
         apply(Action::CloseTopPanel, &mut ui, &mut s);
         assert!(ui.is_open(Panel::Escape), "and anywhere else it is as it was");
+    }
+
+    fn editing() -> (UiState, Session) {
+        let (mut ui, mut s) = fixture();
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(Action::StartDraft(lc_world::form::Form::starting()), &mut ui, &mut s);
+        (ui, s)
+    }
+
+    fn draft(ui: &UiState) -> &crate::draft::Draft {
+        ui.form.draft.as_ref().expect("a draft")
+    }
+
+    /// Each edit's inverse puts the draft back exactly, a removal's subtree and ids included.
+    #[test]
+    fn every_edit_is_an_action_that_writes_back_exactly() {
+        use crate::draft::{PRIMITIVES, What, stretched};
+        use lc_world::form::{Kind, Mount, PartId, SparMode};
+        let (mut ui, mut s) = editing();
+        let b = lc_world::fitting::Balance::DEFAULT;
+        let start = draft(&ui).form.clone();
+        let spar = draft(&ui).add(PartId(1), Kind::Spar(SparMode::Saddle), PRIMITIVES[3], glam::DVec3::Y, &b).unwrap();
+        let spar_id = spar.part;
+        let edits: Vec<Box<dyn Fn(&crate::draft::Draft) -> crate::draft::Edit>> = vec![
+            Box::new(|d| d.resize(PartId(3), 1.0e6).unwrap()),
+            Box::new(|d| d.reshape(PartId(3), stretched(d.part(PartId(3)).unwrap().primitive, 0, 2.0, false)).unwrap()),
+            Box::new(|d| d.anchor(PartId(5), glam::DVec3::new(1.0, 0.0, 1.0)).unwrap()),
+            Box::new(|d| d.twist(PartId(5), 0.5).unwrap()),
+            Box::new(|d| d.standoff(PartId(4), -0.2, &lc_world::fitting::Balance::DEFAULT).unwrap()),
+            Box::new(|d| d.toggle_mount(PartId(4)).unwrap()),
+            Box::new(|d| d.mirror(PartId(4), true).unwrap()),
+            Box::new(|d| d.set_kind(PartId(5), Kind::Bay).unwrap()),
+            Box::new(|d| d.spar_mode(spar_id, SparMode::Strap).unwrap()),
+            Box::new(|d| d.remove(PartId(2)).unwrap()),
+        ];
+        apply(Action::EditForm(Ok(spar.clone())), &mut ui, &mut s);
+        assert_eq!(ui.form.selected, Some(spar_id), "an added part is selected");
+        for make in &edits {
+            let edit = make(draft(&ui));
+            let was = draft(&ui).form.clone();
+            let effects = apply(Action::EditForm(Ok(edit.clone())), &mut ui, &mut s);
+            assert!(effects.is_empty(), "{:?}: {effects:?}", edit.what);
+            assert_ne!(draft(&ui).form, was, "{:?} changed nothing", edit.what);
+            apply(Action::EditForm(Ok(edit.inverse())), &mut ui, &mut s);
+            assert_eq!(draft(&ui).form, was, "{:?} did not undo", edit.what);
+            apply(Action::EditForm(Ok(edit)), &mut ui, &mut s);
+        }
+        let mounted = draft(&ui).part(PartId(4)).unwrap().placement.unwrap();
+        assert!(matches!(mounted.mount, Mount::Enclosing) && mounted.mirror);
+        let reset = draft(&ui).reset();
+        assert_eq!(reset.what, What::Whole);
+        apply(Action::EditForm(Ok(reset)), &mut ui, &mut s);
+        assert_eq!(draft(&ui).form, start);
+    }
+
+    #[test]
+    fn a_refused_edit_says_why_unless_a_drag_is_still_being_made() {
+        use lc_world::form::PartId;
+        let (mut ui, mut s) = editing();
+        let refused = draft(&ui).remove(PartId(0));
+        let effects = apply(Action::EditForm(refused), &mut ui, &mut s);
+        assert_eq!(effects, vec![Effect::Notify("refused: the Mind cannot be changed".into())]);
+        let tiny = crate::draft::Edit { settled: false, ..draft(&ui).resize(PartId(5), 1.0).unwrap() };
+        assert!(apply(Action::EditForm(Ok(tiny.clone())), &mut ui, &mut s).is_empty(), "silent while held");
+        assert_eq!(draft(&ui).part(PartId(5)).unwrap().volume_m3, draft(&ui).ship.parts[5].volume_m3, "and not applied");
+        let settled = crate::draft::Edit { settled: true, ..tiny };
+        assert_eq!(apply(Action::EditForm(Ok(settled)), &mut ui, &mut s).len(), 1);
+    }
+
+    #[test]
+    fn the_draft_is_started_once_and_kept_across_leaving_the_editor() {
+        use lc_world::form::PartId;
+        let (mut ui, mut s) = editing();
+        let edit = draft(&ui).twist(PartId(5), 0.25).unwrap();
+        apply(Action::EditForm(Ok(edit)), &mut ui, &mut s);
+        apply(Action::SelectPart(Some(PartId(5))), &mut ui, &mut s);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(Action::StartDraft(lc_world::form::Form::starting()), &mut ui, &mut s);
+        assert_ne!(draft(&ui).form, draft(&ui).ship, "the edit survives");
+        assert_eq!(ui.form.selected, Some(PartId(5)));
+        let remove = draft(&ui).remove(PartId(5));
+        apply(Action::EditForm(remove), &mut ui, &mut s);
+        assert_eq!(ui.form.selected, None, "a part removed is no longer selected");
     }
 
     /// `=` and `-` and the wheel send one `Zoom`, and in the editor it is the editor's: the boom

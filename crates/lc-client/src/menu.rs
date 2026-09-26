@@ -26,8 +26,7 @@ pub struct MainMenuPlugin;
 
 impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(em_ui::MenuUiPlugin)
-            .add_systems(
+        app.add_systems(
                 OnEnter(AppState::MainMenu),
                 (install_backdrop, open_dev_page, crate::starfield::spawn_sky).chain(),
             )

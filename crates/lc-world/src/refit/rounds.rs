@@ -193,6 +193,83 @@ impl Pending {
     }
 }
 
+/// What a round does to each part, before it is ordered, timed or paid for.
+struct Diff {
+    dismantles: Vec<Pending>,
+    moves: Vec<PartId>,
+    builds: Vec<Pending>,
+    /// Whose added copy is built after the move phase, which must leave its mirror to that step.
+    gaining: BTreeSet<PartId>,
+}
+
+fn diff(from_form: &Form, target_form: &Form, balance: &Balance) -> Diff {
+    let from: Parts = from_form.parts.iter().map(|p| (p.id, *p)).collect();
+    let target: Parts = target_form.parts.iter().map(|p| (p.id, *p)).collect();
+    let from_copies = from_form.copies();
+    let target_copies = target_form.copies();
+    let mut dismantles = Vec::new();
+    let mut moves = Vec::new();
+    let mut builds = Vec::new();
+    let mut gaining = BTreeSet::new();
+    for id in from.keys().chain(target.keys()).copied().collect::<BTreeSet<_>>() {
+        match (from.get(&id), target.get(&id)) {
+            (Some(f), None) => dismantles.push(Pending::remove(f, from_copies[&id], balance)),
+            (None, Some(t)) => builds.push(Pending::add(t, target_copies[&id], balance)),
+            (Some(f), Some(t)) => {
+                // The Mind's stored shape and size are ignored, and it cannot move.
+                if f.kind == Kind::Mind {
+                    continue;
+                }
+                let (cf, ct) = (from_copies[&id], target_copies[&id]);
+                if f.kind != t.kind || f.primitive != t.primitive {
+                    dismantles.push(Pending::remove(f, cf, balance));
+                    builds.push(Pending::add(t, ct, balance));
+                } else {
+                    let mut kept = *f;
+                    if f.volume_m3 != t.volume_m3 {
+                        let resized = Part { volume_m3: t.volume_m3, ..*f };
+                        let transfer = Transfer::of(Some(f), Some(t), cf.min(ct), balance);
+                        let (change, after, list) = match transfer {
+                            Transfer::Build { .. } => (Change::Grow, *t, &mut builds),
+                            Transfer::Dismantle { .. } => {
+                                kept = resized;
+                                (Change::Shrink, resized, &mut dismantles)
+                            }
+                        };
+                        list.push(Pending { part: id, change, kind: f.kind, transfer, after: Some(after) });
+                    }
+                    // A copy lost goes at the size it had, and one gained comes at the size it will have.
+                    if cf > ct {
+                        let transfer = Transfer::of(Some(f), None, cf - ct, balance);
+                        let after = Some(with_mirror(kept, mirror(t)));
+                        dismantles.push(Pending { part: id, change: Change::Remove, kind: f.kind, transfer, after });
+                    } else if ct > cf {
+                        let transfer = Transfer::of(None, Some(t), ct - cf, balance);
+                        builds.push(Pending { part: id, change: Change::Add, kind: f.kind, transfer, after: Some(*t) });
+                        gaining.insert(id);
+                    }
+                }
+                // A mirror that changes the count is the copy's step; one that does not is a
+                // move of nothing, so the flag still lands.
+                if unmirrored(f) != unmirrored(t) || (f.placement != t.placement && cf == ct) {
+                    moves.push(id);
+                }
+            }
+            (None, None) => unreachable!(),
+        }
+    }
+    Diff { dismantles, moves, builds, gaining }
+}
+
+/// Each step's part and change, in no particular order, for a target that need not be affordable
+/// or even legal: the editor marks a draft with this while it is being made. Both forms must
+/// validate.
+pub fn changes(from: &Form, target: &Form, balance: &Balance) -> Vec<(PartId, Change)> {
+    let Diff { dismantles, moves, builds, .. } = diff(from, target, balance);
+    let matter = dismantles.iter().chain(&builds).map(|p| (p.part, p.change));
+    matter.chain(moves.into_iter().map(|id| (id, Change::Move))).collect()
+}
+
 impl Plan {
     fn new(round: Round, balance: &Balance) -> Result<Self, Refusal> {
         // Walked as a tree below, and it is the ship as it stands, so never a client's.
@@ -207,61 +284,7 @@ impl Plan {
         if from.get(&mind.id).map(|p| p.kind) != Some(Kind::Mind) {
             return Err(Refusal::Mind(mind.id));
         }
-
-        let from_copies = round.from.copies();
-        let target_copies = round.target.copies();
-        let mut dismantles = Vec::new();
-        let mut moves = Vec::new();
-        let mut builds = Vec::new();
-        // Whose added copy is built after the move phase, which must leave its mirror to that step.
-        let mut gaining = BTreeSet::new();
-        for id in from.keys().chain(target.keys()).copied().collect::<BTreeSet<_>>() {
-            match (from.get(&id), target.get(&id)) {
-                (Some(f), None) => dismantles.push(Pending::remove(f, from_copies[&id], balance)),
-                (None, Some(t)) => builds.push(Pending::add(t, target_copies[&id], balance)),
-                (Some(f), Some(t)) => {
-                    // The Mind's stored shape and size are ignored, and it cannot move.
-                    if f.kind == Kind::Mind {
-                        continue;
-                    }
-                    let (cf, ct) = (from_copies[&id], target_copies[&id]);
-                    if f.kind != t.kind || f.primitive != t.primitive {
-                        dismantles.push(Pending::remove(f, cf, balance));
-                        builds.push(Pending::add(t, ct, balance));
-                    } else {
-                        let mut kept = *f;
-                        if f.volume_m3 != t.volume_m3 {
-                            let resized = Part { volume_m3: t.volume_m3, ..*f };
-                            let transfer = Transfer::of(Some(f), Some(t), cf.min(ct), balance);
-                            let (change, after, list) = match transfer {
-                                Transfer::Build { .. } => (Change::Grow, *t, &mut builds),
-                                Transfer::Dismantle { .. } => {
-                                    kept = resized;
-                                    (Change::Shrink, resized, &mut dismantles)
-                                }
-                            };
-                            list.push(Pending { part: id, change, kind: f.kind, transfer, after: Some(after) });
-                        }
-                        // A copy lost goes at the size it had, and one gained comes at the size it will have.
-                        if cf > ct {
-                            let transfer = Transfer::of(Some(f), None, cf - ct, balance);
-                            let after = Some(with_mirror(kept, mirror(t)));
-                            dismantles.push(Pending { part: id, change: Change::Remove, kind: f.kind, transfer, after });
-                        } else if ct > cf {
-                            let transfer = Transfer::of(None, Some(t), ct - cf, balance);
-                            builds.push(Pending { part: id, change: Change::Add, kind: f.kind, transfer, after: Some(*t) });
-                            gaining.insert(id);
-                        }
-                    }
-                    // A mirror that changes the count is the copy's step; one that does not is a
-                    // move of nothing, so the flag still lands.
-                    if unmirrored(f) != unmirrored(t) || (f.placement != t.placement && cf == ct) {
-                        moves.push(id);
-                    }
-                }
-                (None, None) => unreachable!(),
-            }
-        }
+        let Diff { mut dismantles, mut moves, mut builds, gaining } = diff(&round.from, &round.target, balance);
         // Stable, so each group stays in id order.
         dismantles.sort_by_key(|p| p.kind == Kind::Drone);
         builds.sort_by_key(|p| p.kind != Kind::Drone);
@@ -603,6 +626,25 @@ mod tests {
 
     fn changes(plan: &Plan) -> Vec<(u16, Change)> {
         plan.steps().iter().map(|s| (s.part.0, s.change)).collect()
+    }
+
+    /// The editor's marks are the planner's own steps, and it has them for a draft that could
+    /// not be paid for.
+    #[test]
+    fn the_changes_are_the_plans_steps_whether_or_not_it_is_affordable() {
+        let target = with(&adding(&without(&ship(), &[4]), &[part(5, Kind::Data, ROD, 0.5, 1)]), 1, |p| {
+            p.volume_m3 *= 1.5;
+        });
+        let target = with(&target, 3, |p| p.primitive = TANK);
+        let target = with(&target, 2, |p| p.placement.as_mut().unwrap().twist = 0.5);
+        let mut planned = changes(&solve(&ship(), &target, capacity(&target)).unwrap());
+        let mut listed: Vec<(u16, Change)> = super::changes(&ship(), &target, &B).iter().map(|&(id, c)| (id.0, c)).collect();
+        planned.sort_by_key(|&(id, c)| (id, c as u8));
+        listed.sort_by_key(|&(id, c)| (id, c as u8));
+        assert_eq!(listed, planned);
+        assert!(listed.contains(&(3, Change::Remove)) && listed.contains(&(3, Change::Add)), "a reshape");
+        assert!(matches!(solve(&ship(), &target, 0.0), Err(Refusal::Energy { .. })));
+        assert_eq!(super::changes(&ship(), &ship(), &B), vec![]);
     }
 
     #[test]

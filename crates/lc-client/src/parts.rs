@@ -59,6 +59,11 @@ impl OwnForm {
         self.0.as_ref().map(|f| &f.sdf)
     }
 
+    /// The form standing still, which the editor's draft starts from.
+    pub fn form(&self) -> Option<&Form> {
+        self.0.as_ref().map(|f| &f.still.standing)
+    }
+
     /// Framed to hold every one of `forms`, drawn as the first: a refit's two ends, so the camera
     /// does not breathe as the round runs.
     pub fn spanning(forms: &[&Form], balance: &Balance) -> Result<OwnForm, FormError> {

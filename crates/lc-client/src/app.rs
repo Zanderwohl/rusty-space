@@ -121,11 +121,14 @@ impl Plugin for ClientPlugin {
             crate::library::LibraryPlugin,
             crate::faces::FacesPlugin,
             // The two modes beside the world, paired: a tuple of plugins stops at fifteen.
-            (crate::map::MapPlugin, crate::form_view::FormViewPlugin),
-            crate::bench::BenchPlugin,
-            crate::haze::HazePlugin,
+            (crate::map::MapPlugin, crate::form_view::FormViewPlugin,
+                crate::form_handles::FormHandlesPlugin, crate::form_panel::FormPanelPlugin),
+            (crate::bench::BenchPlugin, crate::haze::HazePlugin),
             // The beauty shots and the staged refit both photograph the ship.
             (crate::beauty::BeautyPlugin, crate::refit_hull::RefitHullPlugin),
+            // The menu's and the editor's widgets, so the browser build, which has no menu, has
+            // them too.
+            em_ui::MenuUiPlugin,
         ))
             // **Which camera egui draws on is not left to spawn order.**
             //
@@ -177,13 +180,28 @@ impl Plugin for ClientPlugin {
                     crate::dev::place_at_body.run_if(in_state(AppState::InGame)),
                     crate::dev::place_on_station.run_if(in_state(AppState::InGame)),
                     (
+                        // Before the bindings, which would take Escape to close a window.
+                        crate::form_carry::cancel_on_escape,
                         read_keys,
                         // Only while the view is a camera this reads the mouse for: the sky, or
                         // the editor's orbit. In the map's mode the world is a thumbnail in the
                         // corner, and a drag over the map turning the ship behind it would be the
                         // two modes fighting over one pointer.
                         (grab_cursor, look_around, crate::input::read_wheel).chain().run_if(steering),
-                        (crate::form_view::press, crate::form_view::read_drag, crate::form_view::read_slide_keys)
+                        (
+                            crate::form_view::press,
+                            // Before the slide and the carry, which a press on a knob is neither.
+                            crate::form_handles::drag_handles,
+                            // Before the carry, which a press that puts a part down ends.
+                            crate::form_view::read_drag,
+                            crate::form_carry::carry,
+                            // After the carry, so the press that takes a part from the list
+                            // does not also drop it there.
+                            crate::form_panel::press,
+                            crate::form_view::read_slide_keys,
+                            crate::form_handles::delete_key,
+                        )
+                            .chain()
                             .run_if(crate::form_view::editing),
                     )
                         .chain()

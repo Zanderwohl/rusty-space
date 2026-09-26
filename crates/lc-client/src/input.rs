@@ -235,6 +235,7 @@ pub fn look_around(
     motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
     state: Res<crate::app::Ui>,
+    typing: em_ui::Typing,
     mut out: MessageWriter<Requested>,
 ) {
     let mut yaw = 0.0;
@@ -246,7 +247,7 @@ pub fn look_around(
     // by either, because holding the look button is not something a field or a page can mean.
     let step = LOOK_STEP * time.delta_secs_f64() * 60.0;
     let paging = state.reading.book.is_some();
-    if !egui.wants_any_keyboard_input() && !paging {
+    if !egui.wants_any_keyboard_input() && !typing.active() && !paging {
         for (key, (y, p)) in held_bindings() {
             if keys.pressed(key) {
                 yaw += y * step;
@@ -310,17 +311,18 @@ pub fn bindings_in_force(reading: bool, book: bool) -> Vec<(KeyCode, Action)> {
     table
 }
 
-/// **Silent while the interface is taking text.** Every binding here is a bare letter, so a
-/// player typing a message into the radio window would otherwise open the telescope, cut the
-/// drive and fly somewhere, one keystroke at a time — and typing the name of a book into the
-/// shelf's filter would put the book away on `b`.
+/// **Silent while the interface is taking text**, in egui or in an `em_ui` field. Every binding
+/// here is a bare letter, so a player typing a message into the radio window would otherwise open
+/// the telescope, cut the drive and fly somewhere, one keystroke at a time — and typing the name
+/// of a book into the shelf's filter would put the book away on `b`.
 pub fn read_keys(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<crate::app::Ui>,
     egui: Res<EguiWantsInput>,
+    typing: em_ui::Typing,
     mut out: MessageWriter<Requested>,
 ) {
-    if egui.wants_any_keyboard_input() {
+    if egui.wants_any_keyboard_input() || typing.active() {
         return;
     }
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);

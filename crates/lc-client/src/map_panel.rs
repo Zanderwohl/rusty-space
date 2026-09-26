@@ -97,8 +97,13 @@ pub fn draw(
     let mode = ui_state.view;
     let per_point = ctx.pixels_per_point();
     let square = corner(ctx.viewport_rect());
-    // The editor keeps the square for the sky and has no map anywhere.
     map.shown = mode != ViewMode::Form;
+    // The editor is the whole view, with no square and no map: the sky's camera has the window
+    // back, under the editor's picture.
+    if mode == ViewMode::Form {
+        world.0 = None;
+        return;
+    }
 
     // What the world's camera is to draw into, which is the square it is the thumbnail in.
     world.0 = (mode != ViewMode::World).then(|| pixels(square, per_point));
@@ -107,11 +112,6 @@ pub fn draw(
     let swap = square_area(ctx, square, (mode == ViewMode::World).then_some(&*map));
     if swap.clicked() {
         ask(&mut out, Action::SetView(mode.other()));
-    }
-    if mode == ViewMode::Form {
-        // The rest of the screen is the editor's, which reads its own pointer.
-        read_input(ctx, &swap, square, ViewMode::World, ui_state.map, &map, &mut out);
-        return;
     }
 
     let (rect, response) = match mode {
