@@ -116,7 +116,7 @@ fn geometry(form: &Form, grid: &FormGrid, balance: &Balance) -> Vec<FormError> {
 /// The face an engine fires from or a bay opens through: where it crosses the part's axis, in
 /// its own x, and its radius. 31 makes an engine's aperture a frustum's wide end; every other
 /// primitive opens at +x, the end away from the foot it hangs by. A torus opens through its hole.
-fn face(shape: &Shape) -> (f64, f64) {
+pub(crate) fn face(shape: &Shape) -> (f64, f64) {
     match *shape {
         Shape::Ellipsoid { semi_axes } => (semi_axes.x, semi_axes.y.min(semi_axes.z)),
         Shape::Capsule { radius, length } => (length / 2.0 + radius, radius),

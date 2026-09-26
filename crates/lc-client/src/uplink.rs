@@ -827,7 +827,7 @@ fn fold(
                 Refusal::NoEnergy => "not enough energy stored for that".into(),
                 Refusal::Refitting => "the drones are working: cancel the refit to fly".into(),
                 Refusal::UnderWay => "under way: cut the drive before refitting".into(),
-                Refusal::Short(short) => crate::refit_panel::shortfall(short.into()).into(),
+                Refusal::Short(short) => crate::refit_panel::shortfall(short),
                 // Their key has to arrive before it can be used, and asking for it is a
                 // message like any other — which is to say, it takes as long as the light does.
                 Refusal::NoKey => "no key for them yet; send yours and ask for theirs".into(),

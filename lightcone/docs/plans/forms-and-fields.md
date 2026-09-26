@@ -330,9 +330,9 @@ graph LR
 
 ### F9 · The switch from loadout to form
 
-- status: active card "Build F9: the switch from loadout to form"
+- status: done #99
 - needs: F5, F6, F7, F8
-- touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-world/src/cost.rs`, `crates/lc-world/src/refit.rs`
+- touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-world/src/cost.rs`, `crates/lc-world/src/refit.rs`, `crates/lc-world/src/attitude.rs`, `crates/lc-world/src/courtesy.rs`, `crates/lc-world/src/emit.rs`, `crates/lc-world/src/field.rs`, `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/form/presets.rs`, `crates/lc-world/src/form/rules.rs`, `crates/lc-world/src/refit/rounds.rs`, `crates/lc-world/src/solar.rs`, `crates/lc-proto/src/fitting.rs`, `crates/lc-server/src/fitting.rs`, `crates/lc-server/src/persist.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/instruments.rs`, `crates/lc-server/src/command/`, `crates/lc-server/tests/checkpoint.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-client/src/refit_panel.rs`, `crates/lc-client/src/telescope_panel.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/examples/cone_void.rs`, `crates/lc-client/src/drones.rs`, `lightcone/docs/19-ship-fitting.md`, `lightcone/docs/29-ship-form.md`
 - read: 29 whole, 19 for what stays
 - deliver: `Loadout` removed from `lc-world`. `Craft` holds a `Form`; everything read from the loadout reads capacities; the rated acceleration counts aft engines; slew from the moments; `length_m` from the extent; the old planner and per-module `Balance` fields deleted.
 - done when: every existing `lc-world` test passes against the starting form, with numbers changed only where the new starting ship differs from the old and each such change is explained in its test.

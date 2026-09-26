@@ -84,7 +84,9 @@ pub fn blind_s(distance_m: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::Loadout;
+    use crate::fitting::Fitting;
+    use crate::form::presets::SLOT_M3;
+    use crate::form::Form;
     use crate::flight::{G0, JULIAN_YEAR_S};
     use crate::signal::Transmitter;
     use crate::solar::broadside_m2;
@@ -95,20 +97,21 @@ mod tests {
     #[test]
     fn the_starting_drive_section_is_rated_at_its_five_g() {
         let b = Balance::DEFAULT;
-        let drive_m3 = Loadout::STARTING.engines as f64 * b.slot_volume_m3;
+        let drive_m3 = 5.0 * SLOT_M3;
         assert_eq!(format!("{:.2e}", drive_m3), "1.96e6");
         let rated = rating_w(&b, drive_m3);
         assert_eq!(format!("{rated:.1e}"), "1.1e20");
-        let full_kg = b.engine_thrust_n / G0;
+        // Full is the anchored dry mass and 30 ME, so the form weighs this to the anchor's 1e-9.
+        let full_kg = Fitting::full(Form::starting(), b, 0.0).mass_kg_at(&crate::motion::ShipState::at(glam::DVec3::ZERO), 0.0);
         let five_g = thrust_power_w(full_kg, 5.0 * G0);
-        assert!((rated - five_g).abs() / rated < 1.0e-12, "{rated} against {five_g}");
+        assert!((rated - five_g).abs() / rated < 1.0e-9, "{rated} against {five_g}");
     }
 
     /// 32 §The exhaust cone: the starting drive, all of it through a 100 m face, is white-hot.
     #[test]
     fn the_starting_drive_s_face_is_white_hot() {
         let b = Balance::DEFAULT;
-        let rated = rating_w(&b, Loadout::STARTING.engines as f64 * b.slot_volume_m3);
+        let rated = rating_w(&b, 5.0 * SLOT_M3);
         let face_m2 = std::f64::consts::PI * 50.0 * 50.0;
         assert_eq!(format!("{:.1e}", aperture_temperature_k(rated, face_m2)), "7.0e5");
         assert_eq!(aperture_temperature_k(0.0, face_m2), 0.0, "an unlit drive has no face");

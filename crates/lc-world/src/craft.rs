@@ -167,7 +167,8 @@ pub struct Craft {
     pub motion: ShipState,
     /// How long the hull is, meters. Defaults to the kind's, and is a field rather than a
     /// lookup because two ships of one kind are allowed to be different sizes — see
-    /// [`LENGTH_RANGE_M`], which is the span the camera and the reticle are built for.
+    /// [`LENGTH_RANGE_M`], which is the span the camera and the reticle are built for. A fitted
+    /// craft's is its form's extent, kept in step by [`Craft::fit`] and [`Craft::settle`].
     pub length_m: f64,
     /// The system its motive is defined against, if it is in one.
     ///
@@ -191,7 +192,7 @@ pub struct Craft {
     past: Vec<Past>,
     /// The earliest coordinate second this craft can answer for.
     known_from_s: f64,
-    /// Modules and energy. Only a player's ship has one; see [`crate::fitting`].
+    /// Its form and energy. Only a player's ship has one; see [`crate::fitting`].
     ///
     /// Private for the reason `past` is: every change of motive has to settle it, and that
     /// happens in [`Craft::remembering`].
@@ -330,9 +331,13 @@ impl Craft {
         Flight::with_past(&self.motion, self.system.as_deref(), &self.past, self.known_from_s)
     }
 
-    /// How fast it can turn, radians a second. See [`crate::attitude`].
+    /// How fast it can turn, radians a second: from its form's moments if it has one, and from
+    /// its length if it is the ovoid. See [`crate::attitude`].
     pub fn slew_rate_rad_s(&self) -> f64 {
-        crate::attitude::rate_rad_s(self.length_m)
+        match &self.fitting {
+            Some(fitting) => crate::attitude::rate_for_gyration(fitting.hull().gyration_m),
+            None => crate::attitude::rate_rad_s(self.length_m),
+        }
     }
 
     /// `drive`, turning at *this hull's* rate rather than at whatever was stamped on it.
@@ -437,7 +442,7 @@ impl Craft {
         self.fitting.as_ref()
     }
 
-    /// Give it modules, or take them away. Its length follows its slots from here on.
+    /// Give it a form and an account, or take them away. Its length follows its form from here on.
     pub fn fit(&mut self, fitting: Option<Fitting>) {
         self.fitting = fitting;
         self.sync_length();
@@ -469,7 +474,7 @@ impl Craft {
             return 0.0;
         }
         let Some(distance_m) = self.star_distance_m_at(t) else { return 0.0 };
-        crate::solar::power_w(&fitting.balance, length_m, system.star_luminosity_w(), distance_m)
+        crate::solar::power_w(fitting.balance(), length_m, system.star_luminosity_w(), distance_m)
     }
 
     /// Start the income segment that begins at `from_s`, at the power collected at its midpoint.
@@ -508,7 +513,7 @@ impl Craft {
 
     fn sync_length(&mut self) {
         if let Some(fitting) = &self.fitting {
-            self.length_m = fitting.balance.length_m(fitting.loadout.slots);
+            self.length_m = fitting.hull().extent_m;
         }
     }
 
@@ -523,7 +528,7 @@ impl Craft {
     }
 
     /// The drive a new order is clamped against: the kind's, turning at this hull's rate, and
-    /// pulling what its engines can move this mass at if it has engines.
+    /// pulling what its aft engines can move this mass at if it has a form.
     pub fn rated_drive(&self, now_s: f64) -> crate::flight::Drive {
         let mut drive = self.turning(self.kind.drive());
         if let Some(fitting) = &self.fitting {
@@ -573,24 +578,22 @@ impl Craft {
         }
     }
 
-    /// Begin rebuilding toward `target`. Refused while under way, and when it cannot be done.
-    pub fn begin_refit(
-        &mut self,
-        target: crate::fitting::Loadout,
-        now_s: f64,
-    ) -> Result<(), crate::refit::Shortage> {
+    /// Begin a round toward `target`, when it plans. The caller refuses it under way and for a craft
+    /// with no fitting, whose `NoDrones` names no real part, and checks the placement rules first:
+    /// they need a grid, and [`crate::form::rules::check`] hands it back.
+    pub fn begin_refit(&mut self, target: crate::form::Form, now_s: f64) -> Result<(), crate::refit::rounds::Refusal> {
         self.settle(now_s);
         let Some(fitting) = &mut self.fitting else {
-            return Err(crate::refit::Shortage::NoDrones);
+            return Err(crate::refit::rounds::Refusal::NoDrones { part: crate::form::PartId(0) });
         };
-        let order = crate::refit::Order {
-            from: fitting.loadout,
+        let round = crate::refit::rounds::Round {
+            from: fitting.form().clone(),
             target,
             stored_j: fitting.stored_j_at(&self.motion, now_s),
             start_s: now_s,
         };
-        let refit = order.solve(&fitting.balance)?;
-        fitting.begin_refit(refit);
+        let plan = round.solve(fitting.balance())?;
+        fitting.begin_refit(plan);
         Ok(())
     }
 
@@ -602,13 +605,14 @@ impl Craft {
         finished
     }
 
-    /// Free, replacing any refit under way. `false` with no fitting.
-    pub fn refit_at_once(&mut self, loadout: crate::fitting::Loadout, now_s: f64) -> bool {
+    /// Free, replacing any refit under way. `false` with no fitting, or for a form the grid
+    /// cannot measure.
+    pub fn refit_at_once(&mut self, form: crate::form::Form, now_s: f64) -> bool {
         self.settle(now_s);
         let Some(fitting) = &mut self.fitting else { return false };
-        fitting.refit_at_once(loadout);
+        let done = fitting.refit_at_once(form).is_ok();
         self.sync_length();
-        true
+        done
     }
 
     /// Stop a refit where it is, reversing the step in progress.
@@ -758,7 +762,7 @@ impl Craft {
                 craft.solve_patch(now_s);
             }
         });
-        // A finished refit step changes the loadout, and a grown hull its length.
+        // A finished refit step changes the form, and so its length.
         if self.fitting.as_ref().is_some_and(|f| f.refit().is_some()) {
             self.settle(now_s);
         }
@@ -1050,9 +1054,9 @@ mod tests {
     const HOUR_AGO_US: f64 = -3_600.0 * 1.0e6;
 
     fn fitted() -> Craft {
-        use crate::fitting::{Balance, Loadout};
+        use crate::fitting::Balance;
         let mut craft = Craft::at(CraftId(9), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0)));
+        craft.fit(Some(Fitting::full(crate::form::Form::starting(), Balance::DEFAULT, 0.0)));
         craft
     }
 
@@ -1090,8 +1094,7 @@ mod tests {
         // of the burn. That remainder is the drain's mass times the burn's own fraction.
         craft.advance(end + 1.0, end + 1.0);
         assert!(!craft.motion.is_under_way(), "{:?}", craft.motion.motive);
-        let living = crate::fitting::Loadout::STARTING.living as f64;
-        let drain = living * crate::fitting::Balance::DEFAULT.living_drain_w * (end + 1.0);
+        let drain = craft.fitting().unwrap().hull().capacities.drain_w * (end + 1.0);
         let stored = craft.fitting().unwrap().stored_j_at(&craft.motion, end + 1.0);
         let expected = free - quoted - drain;
         assert!(stored >= expected * (1.0 - 1.0e-12), "{stored} vs {expected}");
@@ -1131,11 +1134,11 @@ mod tests {
     /// An empty fitted ship at rest `au` from the Sun, or on a conic through there with `speed`
     /// of circular.
     fn near_the_sun(system: &Arc<LocalSystem>, au: f64, speed: Option<f64>) -> Craft {
-        use crate::fitting::{Account, Balance, Loadout};
+        use crate::fitting::{Account, Balance};
         let star = system.star_position_at(0.0).expect("a star");
         let at = star + DVec3::X * au * crate::system::UNIT_M / crate::system::M_PER_LY;
         let mut craft = Craft::at(CraftId(9), Kind::Ship, at);
-        let full = Fitting::full(Loadout::STARTING, Balance::DEFAULT, 0.0);
+        let full = Fitting::full(crate::form::Form::starting(), Balance::DEFAULT, 0.0);
         let empty = Account { stored_j: 0.0, ..full.account() };
         craft.fit(Some(Fitting::from_account(&empty, Balance::DEFAULT)));
         craft.enter(Some(system.clone()), 0.0);
@@ -1153,7 +1156,11 @@ mod tests {
     }
 
     /// The anchor, flown rather than computed: a starting ship at rest a tenth of an AU from the
-    /// real Sun is about half full after half a year and full after a year.
+    /// real Sun fills at the anchor's rate after half a year and is full after a year.
+    ///
+    /// The anchor is a 500 m ovoid's broadside. The starting form is 571 m long, and until F10
+    /// reads its shadow it collects as the ovoid of that length, so the half year fills it the
+    /// square of that ratio further than half: about 65%.
     #[test]
     fn a_ship_holding_still_near_the_sun_fills_up() {
         let Some(system) = sol() else { return };
@@ -1167,7 +1174,8 @@ mod tests {
         }
         // The catalog Sun is not exactly the anchor's 1361 W/m², so a few per cent either way.
         let half = stored(&craft, t) / capacity;
-        assert!((half - 0.5).abs() < 0.03, "{half} full after half a year");
+        let anchored = 0.5 * (craft.length_m / 500.0).powi(2);
+        assert!((half - anchored).abs() < 0.03, "{half} full after half a year, not {anchored}");
         craft.advance(1.1 * year, 0.6 * year);
         assert_eq!(stored(&craft, 1.1 * year), capacity, "it stops at capacity");
     }
@@ -1217,7 +1225,7 @@ mod tests {
         let (by_hour, by_week) = (stored(&hourly, span), stored(&weekly, span));
         assert!((by_hour / by_week - 1.0).abs() < 1.0e-9, "{by_hour} vs {by_week}");
 
-        let drain = reference.fitting().unwrap().balance.drain_w(&crate::fitting::Loadout::STARTING);
+        let drain = reference.fitting().unwrap().hull().capacities.drain_w;
         let power = |t: f64| reference.solar_w_at(t) - drain;
         let (mut midpoint, mut start, mut exact) = (0.0, 0.0, 0.0);
         for k in 0..40 {
@@ -1301,18 +1309,47 @@ mod tests {
         assert!(head_on.dot(s).abs() < 1.0e-12 && head_on.is_normalized(), "{head_on}");
     }
 
+    /// A fitted craft is as long as its form's extent, not the 500 m its twenty slots made it, and
+    /// turns at its moments' rate. Both are measured again when a round finishes.
     #[test]
     fn a_refit_that_grows_the_hull_lengthens_it() {
-        use crate::fitting::Loadout;
+        use crate::form::grid::FormGrid;
+        use crate::form::{Form, PartId};
+        let b = crate::fitting::Balance::DEFAULT;
         let mut craft = fitted();
-        assert!((craft.length_m - 500.0).abs() < 1.0e-9);
-        craft.begin_refit(Loadout { slots: 22, ..Loadout::STARTING }, 0.0).unwrap();
+        let extent = |form: &Form| FormGrid::new(form, &b).unwrap().extent_m();
+        let start = Form::starting();
+        assert_eq!(craft.length_m, extent(&start));
+        assert!((craft.length_m - 570.6).abs() < 0.1, "{}", craft.length_m);
+
+        let mut target = start.clone();
+        target.parts.iter_mut().find(|p| p.id == PartId(1)).unwrap().volume_m3 *= 1.1;
+        let (length, slew) = (craft.length_m, craft.slew_rate_rad_s());
+        craft.begin_refit(target.clone(), 0.0).unwrap();
         assert!(craft.is_refitting(1.0));
         let year = crate::flight::JULIAN_YEAR_S;
         craft.advance(year, year);
         assert!(!craft.is_refitting(year));
-        assert_eq!(craft.fitting().unwrap().loadout.slots, 22);
-        assert!((craft.length_m / (500.0 * 1.1f64.cbrt()) - 1.0).abs() < 1.0e-12);
+        assert_eq!(craft.fitting().unwrap().form(), &target);
+        assert_eq!(craft.length_m, extent(&target));
+        assert!(craft.length_m > length && craft.slew_rate_rad_s() < slew);
+    }
+
+    /// Slew goes as one over the radius of gyration across the nose, anchored on the 500 m ovoid
+    /// every craft was before forms. The starting form is longer and carries its engine aft, so it
+    /// turns about 6% more slowly than that ovoid did: a flip in 64 s rather than 60.
+    #[test]
+    fn a_fitted_ship_turns_at_its_moments_rate() {
+        let craft = fitted();
+        let ovoid = crate::attitude::rate_rad_s(500.0);
+        let ratio = craft.slew_rate_rad_s() / ovoid;
+        assert!((ratio - 0.940).abs() < 0.002, "{ratio}");
+        let flip = crate::attitude::flip_time_s(craft.slew_rate_rad_s());
+        assert!((flip - 63.8).abs() < 0.2, "{flip} s");
+        // An unfitted craft of the same length is still the ovoid, turning by its length.
+        let mut plain = Craft::at(CraftId(3), Kind::Ship, DVec3::ZERO);
+        plain.length_m = craft.length_m;
+        assert_eq!(plain.slew_rate_rad_s(), crate::attitude::rate_rad_s(craft.length_m));
     }
 
     fn drifting(beta: DVec3, since_s: f64) -> Craft {

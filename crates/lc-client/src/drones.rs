@@ -405,7 +405,7 @@ const SEED: u32 = 1;
 /// `--rate 0` freezes both.
 fn clock_s(refit: Option<&Refit>, now_s: f64, origin_s: f64) -> f64 {
     match refit {
-        Some(r) if r.clock == Clock::Looping => r.now_s(now_s) - r.plan.round().start_s,
+        Some(r) if matches!(r.clock, Clock::Looping(_)) => r.now_s(now_s) - r.plan.round().start_s,
         _ => now_s - origin_s,
     }
 }
@@ -489,7 +489,7 @@ mod tests {
     const B: Balance = Balance::DEFAULT;
 
     fn plan() -> Plan {
-        demo_round(&B).solve(&B).expect("the demo round solves")
+        demo_round(&B, 1.0).solve(&B).expect("the demo round solves")
     }
 
     fn at(plan: &Plan, step: &Step, fraction: f64) -> Frame {

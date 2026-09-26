@@ -845,13 +845,11 @@ impl<J: Journal> Server<J> {
                 }
                 (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
             }
-            Order::RefitLoadout { target } => {
-                self.refit(id, (*target).into(), at_s)?;
-                // Drones are quiet. Nothing about a refit is visible from outside the hull.
-                (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::RefitLoadout { target: *target })
+            // S1, H6 and E3 build these. A ship is its form now, so there is no loadout to refit to,
+            // and S1 removes the order.
+            Order::RefitLoadout { .. } | Order::Refit { .. } | Order::FieldMode { .. } | Order::Emit { .. } => {
+                return Err(Refusal::NotBuilt);
             }
-            // S1, H6 and E3 build these.
-            Order::Refit { .. } | Order::FieldMode { .. } | Order::Emit { .. } => return Err(Refusal::NotBuilt),
             Order::CancelRefit => {
                 self.fleet.get_mut(id).ok_or(Refusal::NotYours)?.cancel_refit(at_s);
                 self.refitting.remove(&id);

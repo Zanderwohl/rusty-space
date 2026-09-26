@@ -1,10 +1,9 @@
 //! A refit round: from one form to another in three strict phases, one step per part change.
 //!
-//! As with the loadout planner above it, the [`Round`] is the recipe, both ends run
-//! [`Round::solve`], and progress is a closed form in time. The ledger is the store's own: what
-//! the round takes and returns, with drain and income left to the caller. A form partway through
-//! a round need not validate, since a moved part may wait for a parent the build phase has not
-//! made yet. See `lightcone/docs/29-ship-form.md` §Refits.
+//! The [`Round`] is the recipe, both ends run [`Round::solve`], and progress is a closed form in
+//! time. The ledger is the store's own: what the round takes and returns, with drain and income
+//! left to the caller. A form partway through a round need not validate, since a moved part may
+//! wait for a parent the build phase has not made yet. See `lightcone/docs/29-ship-form.md` §Refits.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -520,6 +519,7 @@ mod tests {
     use glam::{DVec2, DVec3};
 
     use super::*;
+    use crate::form::presets::SLOT_M3;
     use crate::form::{Mount, Placement, Primitive};
 
     const B: Balance = Balance::DEFAULT;
@@ -536,7 +536,7 @@ mod tests {
             blend: 0.0,
             mirror: false,
         };
-        Part { id: PartId(id), kind, primitive, volume_m3: slots * B.slot_volume_m3, placement: Some(placement) }
+        Part { id: PartId(id), kind, primitive, volume_m3: slots * SLOT_M3, placement: Some(placement) }
     }
 
     /// Two slots of storage, which hold 10 ME, a slot of drone, and an engine with living space
@@ -657,7 +657,7 @@ mod tests {
     fn room_is_what_the_phase_leaves_after_its_own_storage_losses() {
         let from = adding(&ship(), &[part(9, Kind::Storage, TANK, 2.0, 1)]);
         // The living space goes first, then the second store shrinks by half.
-        let target = with(&without(&from, &[4]), 9, |p| p.volume_m3 = B.slot_volume_m3);
+        let target = with(&without(&from, &[4]), 9, |p| p.volume_m3 = SLOT_M3);
         let left = capacity(&target);
         let living = 0.95 * energy(&get(&from, 4));
         let plan = solve(&from, &target, left - 0.1 * living).unwrap();
@@ -746,7 +746,7 @@ mod tests {
     fn drones_built_first_speed_up_what_follows() {
         let from = ship();
         let engine = part(5, Kind::Engine, NOZZLE, 1.0, 1);
-        let target = adding(&with(&from, 2, |p| p.volume_m3 = 3.0 * B.slot_volume_m3), &[engine]);
+        let target = adding(&with(&from, 2, |p| p.volume_m3 = 3.0 * SLOT_M3), &[engine]);
         let plan = solve(&from, &target, capacity(&from)).unwrap();
         assert_eq!(changes(&plan), [(2, Change::Grow), (5, Change::Add)]);
         let [grow, add] = [plan.steps()[0], plan.steps()[1]];
@@ -758,7 +758,7 @@ mod tests {
     #[test]
     fn drones_go_last_when_taken_apart() {
         let from = ship();
-        let target = with(&without(&from, &[3, 4]), 2, |p| p.volume_m3 = 0.25 * B.slot_volume_m3);
+        let target = with(&without(&from, &[3, 4]), 2, |p| p.volume_m3 = 0.25 * SLOT_M3);
         let plan = solve(&from, &target, 0.0).unwrap();
         assert_eq!(changes(&plan), [(3, Change::Remove), (4, Change::Remove), (2, Change::Shrink)]);
         assert!(close(plan.steps()[1].duration_s, energy(&get(&from, 4)) / power(&from)));
@@ -816,14 +816,14 @@ mod tests {
         let from = ship();
         let engine = part(5, Kind::Engine, NOZZLE, 1.0, 1);
         let living = part(6, Kind::Living, ROD, 0.5, 1);
-        let target = adding(&with(&from, 2, |p| p.volume_m3 = 2.0 * B.slot_volume_m3), &[engine, living]);
+        let target = adding(&with(&from, 2, |p| p.volume_m3 = 2.0 * SLOT_M3), &[engine, living]);
         let plan = solve(&from, &target, capacity(&from)).unwrap();
         assert_eq!(changes(&plan), [(2, Change::Grow), (5, Change::Add), (6, Change::Add)]);
         let step = plan.steps()[1];
         let now = 100.0 + step.begins_s + 0.5 * step.duration_s;
         let ledger = plan.at(now).stored_j;
         let canceled = plan.cancel(now, ledger);
-        assert_eq!(get(&canceled.form, 2).volume_m3, 2.0 * B.slot_volume_m3);
+        assert_eq!(get(&canceled.form, 2).volume_m3, 2.0 * SLOT_M3);
         assert!(!canceled.form.parts.iter().any(|p| p.id == PartId(5) || p.id == PartId(6)));
         assert!(close(canceled.stored_j, ledger + 0.95 * 0.5 * energy(&engine)));
         // The recovery's loss is a burst, so the field is told of it.
@@ -861,7 +861,7 @@ mod tests {
         // Between steps there is nothing to reverse.
         let between = plan.cancel(100.0 + step.begins_s, 1.0);
         assert_eq!(between.stored_j, 1.0);
-        assert_eq!(get(&between.form, 2).volume_m3, 2.0 * B.slot_volume_m3);
+        assert_eq!(get(&between.form, 2).volume_m3, 2.0 * SLOT_M3);
     }
 
     fn mirrored(form: &Form, id: u16, on: bool) -> Form {
@@ -872,7 +872,7 @@ mod tests {
     fn every_copy_of_a_mirrored_part_is_priced() {
         // The engine's living space is mirrored with it.
         let from = mirrored(&ship(), 3, true);
-        let grown = with(&from, 3, |p| p.volume_m3 = 2.0 * B.slot_volume_m3);
+        let grown = with(&from, 3, |p| p.volume_m3 = 2.0 * SLOT_M3);
         let plan = solve(&from, &grown, capacity(&from)).unwrap();
         assert_eq!(changes(&plan), [(3, Change::Grow)]);
         let difference = energy(&get(&grown, 3)) - energy(&get(&from, 3));
@@ -886,7 +886,7 @@ mod tests {
     #[test]
     fn a_copy_gained_or_lost_is_built_or_taken_apart_whole() {
         let from = ship();
-        let small = 0.5 * B.slot_volume_m3;
+        let small = 0.5 * SLOT_M3;
         let target = with(&mirrored(&from, 3, true), 3, |p| p.volume_m3 = small);
         let plan = solve(&from, &target, 0.5 * capacity(&from)).unwrap();
         // Mirroring is matter, not a move.
