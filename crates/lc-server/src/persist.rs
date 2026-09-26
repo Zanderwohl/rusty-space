@@ -267,6 +267,11 @@ impl<J: Journal> Server<J> {
                     }
                     craft.enter(system, row.saved_t as f64 * 1.0e-6);
                     catch_up(&mut craft, row.saved_t, checkpoint.now_t);
+                    // Its owner is told of each step from here, as before the restart.
+                    let refit = craft.fitting().and_then(|f| f.refit()).filter(|plan| !plan.is_done(now_s));
+                    if let Some(plan) = refit {
+                        self.refitting.insert(craft.id, plan.at(now_s).finished);
+                    }
                     if let Some(account) = &row.account {
                         self.by_account.insert(account.clone(), ShipId(craft.id.0));
                     }
