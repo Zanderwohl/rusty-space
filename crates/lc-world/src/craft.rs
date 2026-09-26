@@ -21,6 +21,7 @@ use crate::instrument::Instrument;
 use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
 use crate::navigation::Waypoint;
 use crate::refit::rounds::Round;
+use crate::seen::{History, Seen, running};
 use crate::solar;
 use crate::system::LocalSystem;
 
@@ -53,33 +54,6 @@ pub const HISTORY_S: f64 = 2.0 * crate::system::LOCAL_SHELL_LY * crate::flight::
 /// oldest stretches, and the observers far enough away to have wanted them stop seeing it —
 /// which is the safe way to be unable to answer.
 pub const HISTORY_STRETCHES: usize = 256;
-
-/// How many forms a craft remembers having had. A round is a step per part change, so this holds
-/// a few rounds of a large form; past it, the oldest is forgotten, and an observer asking about
-/// then is told nothing rather than a later form.
-pub const HISTORY_FORMS: usize = 1024;
-
-/// A form a craft had, the length it measured and the round it was running, from the coordinate
-/// second it took effect.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Seen {
-    pub from_s: f64,
-    pub form: Arc<crate::form::Form>,
-    pub length_m: f64,
-    /// As its recipe, which is what an observer draws the building from.
-    pub round: Option<Arc<Round>>,
-}
-
-impl Seen {
-    fn looks_like(&self, other: &Seen) -> bool {
-        self.form == other.form && self.length_m == other.length_m && self.round == other.round
-    }
-}
-
-/// The round `fitting` is running, and the coordinate second it ends.
-fn running(fitting: &Fitting) -> Option<(Arc<Round>, f64)> {
-    fitting.refit().map(|plan| (Arc::new(plan.round().clone()), plan.round().start_s + plan.duration_s()))
-}
 
 /// What a hull sits at, kelvin.
 ///
@@ -228,7 +202,7 @@ pub struct Craft {
     fitting: Option<Fitting>,
     /// The forms it has had, oldest first, so an observer is shown the one its light left with.
     /// See [`Craft::seen_at`]. Not saved, as `past` is not.
-    seen: Vec<Seen>,
+    seen: History,
 }
 
 impl Craft {
@@ -252,7 +226,7 @@ impl Craft {
             // about its past as there is.
             known_from_s: f64::NEG_INFINITY,
             fitting: None,
-            seen: Vec::new(),
+            seen: History::default(),
         }
     }
 
@@ -496,7 +470,7 @@ impl Craft {
             let length_m = self.length_m;
             self.seen.push(Seen { from_s: f64::NEG_INFINITY, form: from.clone(), length_m, round: None });
             if let Some((round, _)) = &running {
-                self.push_seen(Seen { from_s: round.start_s, form: from, length_m, round: Some(round.clone()) });
+                self.seen.push(Seen { from_s: round.start_s, form: from, length_m, round: Some(round.clone()) });
             }
             self.note_steps(steps, length_m, running);
         }
@@ -507,8 +481,7 @@ impl Craft {
     /// The form and length its light left with at `t`, coordinate seconds. `None` for a craft
     /// with no form, and before the oldest form it remembers.
     pub fn seen_at(&self, t: f64) -> Option<&Seen> {
-        let after = self.seen.partition_point(|seen| seen.from_s <= t);
-        after.checked_sub(1).map(|i| &self.seen[i])
+        self.seen.at(t)
     }
 
     /// The length its light left with at `t`, meters. Before the oldest form it remembers, that
@@ -540,7 +513,7 @@ impl Craft {
         for (i, (at_s, form)) in steps.into_iter().enumerate() {
             let length_m = if i == last { self.length_m } else { was_m };
             let round = running.as_ref().filter(|(_, end_s)| at_s < *end_s).map(|(round, _)| round.clone());
-            self.push_seen(Seen { from_s: at_s, form: Arc::new(form), length_m, round });
+            self.seen.push(Seen { from_s: at_s, form: Arc::new(form), length_m, round });
         }
     }
 
@@ -548,30 +521,7 @@ impl Craft {
     fn note_form(&mut self, at_s: f64) {
         let Some(fitting) = &self.fitting else { return };
         let round = running(fitting).map(|(round, _)| round);
-        let seen = Seen { from_s: at_s, form: Arc::new(fitting.form().clone()), length_m: self.length_m, round };
-        self.push_seen(seen);
-    }
-
-    fn push_seen(&mut self, mut seen: Seen) {
-        let Some(last) = self.seen.last() else {
-            self.seen.push(seen);
-            return;
-        };
-        if last.looks_like(&seen) {
-            return;
-        }
-        // One allocation a round, however many steps it has.
-        if let (Some(a), Some(b)) = (&last.round, &seen.round)
-            && a == b
-        {
-            seen.round = Some(a.clone());
-        }
-        let horizon = seen.from_s - HISTORY_S;
-        self.seen.push(seen);
-        // The first is wanted only before the second began.
-        let stale = self.seen.iter().skip(1).take_while(|s| s.from_s < horizon).count();
-        let excess = self.seen.len().saturating_sub(HISTORY_FORMS);
-        self.seen.drain(..stale.max(excess));
+        self.seen.push(Seen { from_s: at_s, form: Arc::new(fitting.form().clone()), length_m: self.length_m, round });
     }
 
     /// How far it is from its system's primary at `t`, meters. `None` between systems.
@@ -1700,7 +1650,6 @@ mod tests {
         assert!(at(Kind::Ship) > at(Kind::Relay));
         assert!(at(Kind::Relay) > at(Kind::Beacon));
     }
-
 
     /// What a burn costs in light, and the shape of the dependence: everything about it scales
     /// with what is being pushed and how hard.

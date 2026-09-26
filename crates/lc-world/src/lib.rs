@@ -46,6 +46,7 @@ pub mod resume;
 pub mod rings;
 pub mod rng;
 pub mod scenario;
+pub mod seen;
 pub mod shell;
 pub mod sighted;
 pub mod signal;
