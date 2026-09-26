@@ -57,6 +57,8 @@ const MIN_ARM_PX: f64 = 50.0;
 const LINE_PX: f64 = 3.0;
 const END_PX: f64 = 13.0;
 const HEAD_PX: (f64, f64) = (18.0, 7.0);
+/// A ball the width of a square reads smaller than it.
+const BALL_OVER_END: f64 = 1.2;
 const RING_SEGMENTS: usize = 48;
 /// Of its start, the least a line handle may be pulled in to, so a part cannot be dragged through
 /// nothing.
@@ -487,6 +489,7 @@ struct Looks {
     neutral: (Handle<StandardMaterial>, Handle<StandardMaterial>),
     line: Handle<Mesh>,
     end: Handle<Mesh>,
+    ball: Handle<Mesh>,
     head: Handle<Mesh>,
 }
 
@@ -507,6 +510,7 @@ fn make_looks(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
         neutral,
         line: meshes.add(Cylinder::new(0.5, 1.0)),
         end: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+        ball: meshes.add(Sphere::new(0.5).mesh().uv(24, 12)),
         head: meshes.add(Cone::new(0.5, 1.0)),
     });
 }
@@ -576,7 +580,7 @@ impl Bit {
                 Transform {
                     translation: to.as_vec3(),
                     rotation: Quat::from_mat3(&handles.axes.as_mat3()),
-                    scale: Vec3::splat((END_PX * px) as f32),
+                    scale: Vec3::splat((END_PX * if grip == Grip::Size { BALL_OVER_END } else { 1.0 } * px) as f32),
                 }
             }
             Bit::Arc(k) => laid(ring[k], ring[k + 1], LINE_PX * px),
@@ -634,6 +638,8 @@ fn build(commands: &mut Commands, looks: &Looks, part: PartId, handles: &Handles
         match grip {
             Grip::Twist => bits.extend((0..RING_SEGMENTS).map(|k| (Bit::Arc(k), looks.line.clone()))),
             Grip::Standoff => bits.push((Bit::End(grip), looks.head.clone())),
+            // Round, so the one that scales everything reads apart from the three that scale one way.
+            Grip::Size => bits.push((Bit::End(grip), looks.ball.clone())),
             _ => bits.push((Bit::End(grip), looks.end.clone())),
         }
     }
