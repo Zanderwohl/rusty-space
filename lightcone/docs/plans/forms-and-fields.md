@@ -580,7 +580,7 @@ graph LR
 
 - status: active card "Build R10: the real hull in the game"
 - needs: R2, R3, S1
-- touches: `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`
+- touches: `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`, `AGENTS.md`
 - read: 32 §The hull
 - deliver: the mesher and material replace the placeholders for every craft with a form, the player's from `Fitted` and others' from `Presence`.
 - done when: two clients photograph each other's ships in their own forms.
