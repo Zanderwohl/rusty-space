@@ -339,7 +339,7 @@ graph LR
 
 ### F10 · Solar from the shadow
 
-- status: todo
+- status: active card "Build F10: solar from the shadow"
 - needs: F9
 - touches: `crates/lc-world/src/solar.rs`, `crates/lc-world/src/craft.rs`
 - read: 29 §What the server computes, 20 §Attitude
@@ -666,7 +666,7 @@ graph LR
 
 ### C5 · Ledger and Apply
 
-- status: todo
+- status: active card "Build C5: ledger and Apply"
 - needs: S1, F8
 - touches: `crates/lc-client/src/refit_panel.rs`
 - read: 29 §The editor
