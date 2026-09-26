@@ -107,8 +107,9 @@ async fn debug_acts_on_its_own_ship_and_admins_on_anyone_s() {
     for line in [
         format!("teleport {far} ship:2"),
         "energize ship:2".into(),
+        "refit default ship:2".into(),
         "refit-finish ship:2".into(),
-        "refit-magic ship:2".into(),
+        "refit-magic default ship:2".into(),
         "drain ship:2".into(),
     ] {
         let (mut server, mut wire) = shard(Level::DEBUG);

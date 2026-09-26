@@ -703,7 +703,7 @@ photographs it, and `--form <preset>` stages a draft.
   light left, with the length it measured. Steps are stamped at their own ends, however coarsely the
   shard settled. A craft loaded mid-round was seen in the round's forms back to its start and in the
   form it began from before that. Past `HISTORY_FORMS` it forgets the oldest, and a presence from
-  before then carries no form rather than a later one.
+  before then carries no form rather than a later one, and the length of the oldest it remembers.
 
 ## Balance
 

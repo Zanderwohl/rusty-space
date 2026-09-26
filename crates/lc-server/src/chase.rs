@@ -179,7 +179,7 @@ pub fn sighting(
         position_ly: worldline.position_at(emitted) / LIGHT_US_PER_LY,
         beta: worldline.velocity_at(emitted),
         // A refit that has since lengthened it has not been seen yet.
-        length_m: quarry.seen_at(emitted_s).map_or(quarry.length_m, |seen| seen.length_m),
+        length_m: quarry.seen_length_m_at(emitted_s),
         emitted_s,
     })
 }

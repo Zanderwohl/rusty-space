@@ -155,18 +155,22 @@ async fn a_refit_round_survives_the_store_and_a_restart() {
     let mut new = Server::new(Memory::default(), 0, 1);
     new.set_rate(60.0);
     assert!(new.adopt(lc_server::persist::Checkpoint { now_t: checkpoint.now_t, next_ship: checkpoint.next_ship, ships }).is_empty());
-    let back = new.ship(ship).unwrap();
+    let back = new.ship(ship).unwrap().clone();
     assert!(back.is_refitting(now_s), "the round was dropped");
     assert_eq!(back.fitting().unwrap().refit().unwrap().steps(), plan.steps(), "and it plans the same");
     assert_eq!(back.fitting().unwrap().form(), old.ship(ship).unwrap().fitting().unwrap().form());
 
+    // Its pilot back, on a wire of its own: what the old shard said is not counted as the new one's.
+    let left = plan.steps().len() - plan.at(now_s).finished;
+    new.admit(ClientId(1), back, 0.0);
+    let mut wire = Loopback::new();
     let mut told = 0;
     while new.ship(ship).unwrap().is_refitting(new.now_t() as f64 * 1.0e-6) {
         new.tick(&mut wire).await.unwrap();
         told += wire.take(ClientId(1)).iter().filter(|m| matches!(m, Outbound::Fitted { .. })).count();
     }
     assert_eq!(new.ship(ship).unwrap().fitting().unwrap().form(), &target);
-    assert!(told >= 1, "nobody was told the round finished");
+    assert_eq!(told, left, "one Fitted for each step left");
 }
 
 /// Saving the same craft again replaces it, because a checkpoint is written over and over.

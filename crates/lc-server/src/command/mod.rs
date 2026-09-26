@@ -223,7 +223,6 @@ pub const COMMANDS: &[Spec] = &[
     },
 ];
 
-/// The most of any one module, or of slots, `refit-magic` will put on a hull.
 /// A form by name and size, and whose ship, for `refit` and `refit-magic`.
 const FORM_ARGS: &[ArgSpec] = &[
     ArgSpec {
@@ -356,12 +355,12 @@ impl<J: Journal> Server<J> {
     }
 }
 
-/// The same answer for a command that does not exist and one the asker may not run.
 fn form_named(args: &Bound) -> Result<lc_world::form::Form, String> {
     let name = args.word("form").unwrap_or_default();
     lc_world::form::presets::named(name, args.number("scale").unwrap_or(1.0)).ok_or_else(|| format!("no form {name}"))
 }
 
+/// The same answer for a command that does not exist and one the asker may not run.
 fn unknown(name: &str) -> String {
     format!("no command '{name}'; try help")
 }

@@ -35,7 +35,8 @@ pub enum Whereabouts {
 /// What is fitted, and what it is doing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Fit {
-    /// Parts by kind, the Mind apart. By name, not a field per kind: a new kind would otherwise be
+    /// Parts by kind, the Mind apart: entries in the form, as `MAX_PARTS` counts them, so a
+    /// mirrored part is one. By name, not a field per kind: a new kind would otherwise be
     /// a field the console's mirror lacks, and RON would refuse the whole payload. Named for
     /// 19's modules, which the console's mirror still calls them.
     pub modules: Vec<(String, u32)>,

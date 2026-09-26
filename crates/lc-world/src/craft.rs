@@ -488,6 +488,12 @@ impl Craft {
         after.checked_sub(1).map(|i| &self.seen[i])
     }
 
+    /// The length its light left with at `t`, meters. Before the oldest form it remembers, that
+    /// form's, the earliest it can answer with; with no form at all, its length now.
+    pub fn seen_length_m_at(&self, t: f64) -> f64 {
+        self.seen_at(t).or(self.seen.first()).map_or(self.length_m, |seen| seen.length_m)
+    }
+
     /// Every settlement of the fitting goes through here, so each refit step is noted at its own
     /// end rather than at whichever settlement found it finished. `before` is the motive in force
     /// up to `at_s`, where it is not the current one.
