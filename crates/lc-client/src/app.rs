@@ -225,7 +225,7 @@ impl Plugin for ClientPlugin {
                     // lightcone/docs/13-client-shell.md: the game does not pause.
                     advance_clock.run_if(in_state(AppState::InGame)),
                     // After the clock, so a contact is drawn at the same instant as the ship.
-                    crate::uplink::reckon_contacts.run_if(in_state(AppState::InGame)),
+                    (crate::uplink::reckon_contacts, crate::construction::adopt_round).run_if(in_state(AppState::InGame)),
                     observe.run_if(in_state(AppState::InGame)),
                     hold_exposure.run_if(in_state(AppState::InGame)),
                 )
@@ -254,8 +254,10 @@ impl Plugin for ClientPlugin {
                     // Last, because a hull is metered as part of the scene the exposure was
                     // just placed for.
                     crate::hull::update_hulls,
-                    crate::parts::update_parts,
+                    // Before the placeholders, so the frame the hull meshes are first shown, or
+                    // taken down, is the frame the placeholders go, or come back.
                     crate::refit_hull::draw_refit,
+                    crate::parts::update_parts,
                     // And the exhaust after the ship, so it is placed against the same frame.
                     crate::plume::update_plumes,
                 )

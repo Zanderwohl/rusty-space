@@ -175,12 +175,13 @@ On the placeholders the working part is solid at its volume at `t`, inside a cag
 outer size: rings and meridians through `Shape::exit` from the part's center, so one grid fits
 every primitive, drawn as tubes in `BodyWireframeMaterial`. The cage's thickness follows the scaffold
 averaged across the sliver, so it goes up with the truss and thins away as the scaffold comes down;
-the crossfade to solid is the solid filling the cage, since both materials are opaque. The game keeps
-this until R15 draws construction there the way the demo does.
+the crossfade to solid is the solid filling the cage, since both materials are opaque. They now draw a
+round only for the moment before its first step's meshes land.
 
-As built for truss and plating (`lc_client::refit_hull`, `lc_client::truss`): **`--demo refit` draws
-the whole ship on the mesher and the hull material**, and the placeholders stand aside. Plating is a
-mask on R3's material and means nothing on a Bevy primitive, so the demo could not wait for R10. A
+As built for truss and plating (`lc_client::refit_hull`, `lc_client::truss`): **while the player's
+ship has a round, the whole ship is drawn on the mesher and the hull material**, and the placeholders
+stand aside once the first step's meshes are shown. Plating is a mask on R3's material and means
+nothing on a Bevy primitive, so construction could not wait for R10. A
 step is meshed once, as it starts: the ship it leaves alone (`Frame::standing`, placed as a form, or as
 its bare copies where it hangs from a part not built yet), each copy it works on at its larger size,
 and each copy's truss. Within the step only uniforms and poses move: what hangs from a part being
@@ -220,7 +221,7 @@ so a fillet it has with the resized part is missing until the step is done.
 
 `--demo refit` stages one of each step on the starting form (the data core taken apart, the deck
 moved aft, the hull grown by half, a mirrored pair of pods on spars) as a client fixture beside
-`--form`, not a scenario: it is only the player's ship, and drawing a round from the game is R14's. The
+`--form`, not a scenario: it is only the player's ship. The
 Cluster preset would be the obvious target, and the planner refuses it from the starting form.
 
 ![0.1: the data core being taken apart](../images/refit-10.jpg)
@@ -228,6 +229,44 @@ Cluster preset would be the obvious target, and the planner refuses it from the 
 ![0.3: the deck sliding aft](../images/refit-30.jpg)
 ![0.5: the hull partway grown inside its cage](../images/refit-50.jpg)
 ![0.9: the mirrored pods being built](../images/refit-90.jpg)
+
+### Rounds in the game
+
+As built (`lc_client::construction`, R14): the game draws the player's round exactly as the demo does,
+from a `Refit` on the coordinate clock rather than a frozen or looping one. `follow` takes each
+statement of the round in `Fitted`, a pure function of what was stated: a new recipe starts a `Refit`, the same one stated
+again changes nothing, and **a round that stops being stated before it is done was canceled** at the
+statement that dropped it, with the form that statement carried, unless that form is the target:
+then the round was finished at once, and the drawing settles on it. A round replaced by some other
+form, as the console's refit at once does, is taken for a cancel and settles at once too, since the
+form it left is not where the step stood and nothing runs backward. The wire says nothing more about a
+cancel, and needs to say nothing more. From then the `Refit` draws `Frame::canceled`, and once
+`Refit::is_over` (the round done, or the reversal run back) it is stood down: the hull meshes go in the
+frame the placeholders come back, and nothing is left over.
+
+- **The player's round** is the plan the ledger reads, `Fitting::refit` from `Fitted`, so the picture
+  and the ledger agree step for step. The cancel's moment is the fitting's settlement, which is exact.
+  The camera is framed on both ends of the round, as the demo's is, until the `Refit` is stood down,
+  so a reversal is not reframed under it.
+- **Another craft** states no round, only the step its light shows, in its `Presence`
+  ([29-ship-form.md](29-ship-form.md#protocol-and-persistence)). `construction::sighted` draws that step
+  on the stated form, reckoned on at the step's pace to `Contact::emitted_s`, never to now, so a
+  distant ship is seen mid-build as it was; running back after a cancel, it runs back. Past the step's
+  end it draws the step finished until the next statement says what came next, at most a tick
+  later. Knowing one step, it stands in a missing parent from only the step's two ends, so a part
+  hanging from one the round has not built yet is not drawn. Nothing draws another craft's form until
+  R10, so this is for R10 and R15 to call.
+- Drones are placed in the ship's frame directly rather than under the placeholders' root, which is
+  gone while the hull meshes draw; under `--demo refit` since R8 they had not been drawn at all. Their
+  clock is the round's, from its start, in the game as in the demo.
+
+`--apply` pins the view back to the world once the round is under way, so a real refit can be
+photographed where it is drawn:
+
+![Applied in the game: the drones grown first, inside their truss](../images/refit-game-applied.jpg)
+![Canceled mid-step: the step running backward, truss coming down](../images/refit-game-cancel-early.jpg)
+![Later in the same reversal](../images/refit-game-cancel-late.jpg)
+![Run back: the placeholders again, and nothing left over](../images/refit-game-settled.jpg)
 
 ## Drones
 
@@ -279,7 +318,7 @@ that stretch at once. Targets still change from one step to the next, so traffic
 first tenth of each step, or one trip if that is shorter, and out over the last. That is also why
 no drone flies before a step starts or after it ends.
 
-The drones' clock is the round's while it loops. `--refit-at` freezes the construction but not the
+The drones' clock is the round's while it loops or runs in the game. `--refit-at` freezes the construction but not the
 traffic, so a burst of one step moves; `--rate 0` freezes both. Four consecutive frames of the
 dismantle at `--refit-at 0.1 --rate 3`, each mote a little further along:
 
@@ -295,6 +334,7 @@ example and 150 km in the client, whose unit is an AU, and turned every mote int
 ![0.9: the mirrored pods being built](../images/drones-build.jpg)
 ![the starting form idle: a thin patrol and nothing else](../images/drones-idle.jpg)
 ![a GSV-sized form idle, its motes capped](../images/drones-gsv-idle.jpg)
+![`--demo refit` at 0.5 with its drones, which it had not drawn from R8 to R14](../images/refit-demo-drones.jpg)
 
 ## The field
 

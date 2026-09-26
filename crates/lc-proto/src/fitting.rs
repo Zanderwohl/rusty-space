@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::form::{Form, PartId};
+use crate::form::{Form, Part, PartId};
 
 /// Why a round could not be begun toward a target that is itself a valid form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +65,36 @@ pub struct Round {
     pub target: Form,
     pub stored_j: f64,
     pub start_s: f64,
+}
+
+/// One step of a refit, as `lc_world::refit::rounds::Change`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Change {
+    Grow,
+    Shrink,
+    Add,
+    Remove,
+    Move,
+}
+
+/// The refit step another craft had under way as its light left it: an appearance, as the rest of
+/// a presence is. Never the round's recipe, which would show the form it becomes before its light
+/// does. See `lightcone/docs/08-networking.md` §Seeing other ships.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Building {
+    /// Which step of its round, from zero, so a receiver can tell one step from the next.
+    pub step: u32,
+    pub part: PartId,
+    pub change: Change,
+    /// The part as the step leaves it, `None` for one taken apart. Its scaffold stands at this size
+    /// from the step's start, so this much is visible.
+    pub after: Option<Part>,
+    /// Through the step, 0 to 1.
+    pub fraction: f64,
+    /// The whole step, coordinate seconds.
+    pub duration_s: f64,
+    /// Canceled, and running back toward nothing at the step's pace.
+    pub reversing: bool,
 }
 
 /// A ship's energy account, settled at `since_s`, with the balance it is read under.

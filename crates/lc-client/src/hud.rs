@@ -420,6 +420,7 @@ mod tests {
                 emitted_t: 0,
                 arrive_t: 0,
                 form: lc_proto::Form::default(),
+                building: None,
                 glow: None,
                 glare: None,
             },
