@@ -610,9 +610,9 @@ graph LR
 
 ### R14 · Refits in the game
 
-- status: active card "Build R14: refits in the game"
+- status: done #104
 - needs: R4, S1
-- touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/src/parts.rs`
+- touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/drones.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/fitting.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-world/src/seen.rs`, `crates/lc-world/src/lib.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/docs/29-ship-form.md`, `lightcone/images/`, `AGENTS.md`
 - read: 32 §Building, as a function of time; 29 §Cancel
 - deliver: a `Refit` built from the player's round in `Fitted` and from other ships' rounds in `Presence`, and `Frame::canceled` drawn on a cancel. `--demo refit` stays as the fixture.
 - done when: a refit applied in the game draws on the ship as `--demo refit` does, and a cancel runs the step backward.
