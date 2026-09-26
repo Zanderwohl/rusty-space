@@ -219,6 +219,7 @@ mod tests {
     use glam::DVec3;
     use lc_proto::{Inbound, Intent, Order};
     use lc_world::craft::Kind;
+    use crate::server::TICK_US;
 
     fn fitted_server(directs: bool) -> (Server<Memory>, Loopback, ClientId, ShipId) {
         let mut server = Server::new(Memory::default(), 0, 1);
@@ -483,6 +484,57 @@ mod tests {
                 "{approach:?}: {said:?}"
             );
         }
+    }
+
+    /// **Another ship's new form arrives with its light.** Two ships ten light-hours apart: the
+    /// watcher goes on seeing the old form for ten hours after the refit's step ends, and at every
+    /// tick sees exactly the form the step had left when the light it is shown left.
+    #[tokio::test]
+    async fn another_ship_sees_a_refit_only_when_its_light_arrives() {
+        const APART_US: f64 = 10.0 * 3_600.0 * 1.0e6;
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let (actor, watcher) = (ClientId(1), ClientId(2));
+        for (client, at) in [(actor, DVec3::ZERO), (watcher, DVec3::new(APART_US, 0.0, 0.0))] {
+            let mut craft = crate::world::still(ShipId(client.0 as i64), at);
+            server.fit_new(&mut craft);
+            server.admit(client, craft, 0.0);
+        }
+        server.tick(&mut wire).await.unwrap();
+        // A small growth: one step, hours long, so the light delay is most of what is measured.
+        let mut target = Form::starting();
+        target.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(2)).unwrap().volume_m3 *= 1.01;
+        wire.client_says(actor, refit_to(&target));
+        server.tick(&mut wire).await.unwrap();
+        let plan = server.ship(ShipId(1)).unwrap().fitting().unwrap().refit().expect("it began").clone();
+        let built_s = plan.round().start_s + plan.duration_s();
+        let arrives_s = built_s + APART_US * 1.0e-6;
+        assert!(arrives_s - built_s > 20.0 * TICK_US as f64 * 1.0e-6, "the delay is not worth testing");
+
+        let (start, target) = (lc_proto::Form::from(&Form::starting()), lc_proto::Form::from(&target));
+        let (mut old_after_build, mut new_seen_at) = (0, None);
+        while new_seen_at.is_none() && (server.now_t() as f64) < (arrives_s + 3_600.0) * 1.0e6 {
+            server.tick(&mut wire).await.unwrap();
+            let now_s = server.now_t() as f64 * 1.0e-6;
+            let seen = wire.take(watcher);
+            let contact = seen.iter().rev().find_map(|m| match m {
+                Outbound::Present(list) => list.iter().map(|c| c.get()).find(|p| p.ship_id == ShipId(1)).cloned(),
+                _ => None,
+            });
+            let contact = contact.expect("the other ship is in sight");
+            let emitted_s = contact.emitted_t as f64 * 1.0e-6;
+            let expected = if emitted_s < built_s { &start } else { &target };
+            assert_eq!(&contact.form, expected, "at {now_s}, light from {emitted_s}, built at {built_s}");
+            if contact.form == start && now_s > built_s {
+                old_after_build += 1;
+            }
+            if contact.form == target {
+                new_seen_at = Some(now_s);
+            }
+        }
+        let seen_at = new_seen_at.expect("the new form was never seen");
+        assert!(seen_at >= arrives_s && seen_at < arrives_s + TICK_US as f64 * 1.0e-6, "{seen_at} vs {arrives_s}");
+        assert!(old_after_build > 20, "premise: the old form was seen after the build, {old_after_build} times");
     }
 
     #[tokio::test]
