@@ -103,6 +103,8 @@ pub struct FormView {
     /// Whether the parts the draft removes are drawn. They are hidden otherwise, and never hung
     /// from either way.
     pub show_dismantled: bool,
+    /// Whether the selected part's numbers are shown, or only what it does.
+    pub advanced: bool,
 }
 
 /// The editor's camera: an orbit about a focus on the ship's nose axis.

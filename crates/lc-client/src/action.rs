@@ -46,6 +46,8 @@ pub enum Action {
     SetNewShape(usize),
     /// Draw the parts the draft removes, or hide them again.
     ShowDismantled(bool),
+    /// Show the selected part's numbers as fields, or only what it does.
+    ShowAdvanced(bool),
     /// An edit to the draft as its handle or field built it, before and after, or why it could
     /// not be built. See [`crate::draft`].
     EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
@@ -484,6 +486,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     }
     Action::SelectPart(part) => ui.form.selected = part,
     Action::ShowDismantled(on) => ui.form.show_dismantled = on,
+    Action::ShowAdvanced(on) => ui.form.advanced = on,
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
     Action::EditForm(edit) => edit_form(ui, edit, &mut effects),
     Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),

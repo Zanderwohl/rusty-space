@@ -445,6 +445,46 @@ impl Draft {
         }
     }
 
+    /// What the part does for its kind, then what it weighs, every copy counted: dry, and wet
+    /// for a store, full.
+    pub fn stats(&self, id: PartId, balance: &Balance) -> Vec<(&'static str, String)> {
+        use lc_world::fitting::{C2, ONBOARD_DATA_BYTES};
+        use lc_world::form::capacity::{Capacities, dry_mass_kg, part_kg};
+        let Some(part) = self.part(id) else { return Vec::new() };
+        let copies = f64::from(self.form.copies().get(&id).copied().unwrap_or(1));
+        let alone = Form { parts: vec![Part { volume_m3: part.volume_m3 * copies, placement: None, ..*part }] };
+        let held = Capacities::of(&alone, balance);
+        let dry_kg = part_kg(part, balance) * copies;
+        let mut out = match part.kind {
+            Kind::Storage => vec![("capacity", format!("{} ME", figure(held.storage_j / balance.module_energy_j())))],
+            Kind::Drone => vec![("building", format!("{} W", figure(held.building_w)))],
+            Kind::Engine => {
+                let thrust_n = held.aperture_w / lc_world::flight::C_M_S;
+                let full_kg = dry_mass_kg(&self.form, balance) + Capacities::of(&self.form, balance).storage_j / C2;
+                vec![
+                    ("aperture", format!("{} W", figure(held.aperture_w))),
+                    ("thrust", format!("{} N", figure(thrust_n))),
+                    ("ship, full", format!("{} g", figure(thrust_n / full_kg / lc_world::flight::G0))),
+                ]
+            }
+            Kind::Living => vec![("drain", format!("{} W", figure(held.drain_w)))],
+            Kind::Data => vec![("capacity", format!("{} B", figure(held.data_b - ONBOARD_DATA_BYTES)))],
+            Kind::Bay => {
+                let mouth = part.shape(balance.min_part_m3).extent(glam::DMat3::IDENTITY, 0.0);
+                vec![("mouth", format!("{} m", figure(2.0 * mouth.y.min(mouth.z))))]
+            }
+            Kind::Mind | Kind::Spar(_) => Vec::new(),
+        };
+        if copies > 1.0 {
+            out.push(("copies", format!("{copies}")));
+        }
+        out.push(("dry mass", format!("{} kg", figure(dry_kg))));
+        if part.kind == Kind::Storage {
+            out.push(("wet mass", format!("{} kg", figure(dry_kg + held.storage_j / C2))));
+        }
+        out
+    }
+
     /// Each changed part's mark, by F8's own diff. Parts the draft removed are marked too; they
     /// are in the ship, not the draft.
     pub fn marks(&self, balance: &Balance) -> BTreeMap<PartId, Mark> {
@@ -585,6 +625,22 @@ pub fn grown(part: &Part, axis: usize, factor: f64, fine: bool) -> Part {
 
 /// So a sphere of a capsule, whose length is zero, can still be stretched into one.
 const MIN_RATIO: f64 = 0.1;
+
+/// A figure to read rather than type: three significant digits.
+pub fn figure(x: f64) -> String {
+    let trimmed = |s: String| s.trim_end_matches('0').trim_end_matches('.').to_string();
+    if x == 0.0 || !x.is_finite() {
+        return format!("{x}");
+    }
+    let magnitude = x.abs().log10().floor();
+    if (-3.0..5.0).contains(&magnitude) {
+        trimmed(format!("{x:.*}", (2.0 - magnitude).max(0.0) as usize))
+    } else {
+        let written = format!("{x:.2e}");
+        let (mantissa, exponent) = written.split_once('e').unwrap_or((&written, "0"));
+        format!("{}e{exponent}", trimmed(mantissa.to_string()))
+    }
+}
 
 /// A field's number as typed back to it: short, and exact enough to round-trip what a handle set.
 pub fn shown(x: f64) -> String {
@@ -829,10 +885,30 @@ mod tests {
         }
     }
 
+    /// The detail says what a part does for its kind, and what it weighs.
+    #[test]
+    fn a_part_is_described_by_what_it_does_for_its_kind() {
+        let d = draft();
+        let stats = |id| d.stats(PartId(id), &B).into_iter().collect::<BTreeMap<_, _>>();
+        let storage = stats(1);
+        assert_eq!(storage["capacity"], "30 ME", "{storage:?}");
+        let (dry, wet): (f64, f64) = (storage["dry mass"].trim_end_matches(" kg").parse().unwrap(), storage["wet mass"].trim_end_matches(" kg").parse().unwrap());
+        assert!(wet > 2.0 * dry, "full, the store weighs more than its structure");
+        let engine = stats(2);
+        let g: f64 = engine["ship, full"].trim_end_matches(" g").parse().unwrap();
+        assert!((4.5..5.5).contains(&g), "29's starting ship does 5 g full: {g}");
+        assert!(!engine.contains_key("wet mass"));
+        assert!(stats(3).contains_key("building") && stats(4).contains_key("drain") && stats(5).contains_key("capacity"));
+        assert_eq!(stats(0).keys().copied().collect::<Vec<_>>(), vec!["dry mass"], "the Mind only weighs");
+    }
+
     #[test]
     fn numbers_read_short() {
         assert_eq!(shown(2_356_194.49), "2.3562e6");
         assert_eq!(shown(1.25e6), "1.25e6");
+        assert_eq!(figure(1.0744e20), "1.07e20");
+        assert_eq!(figure(4.9712), "4.97");
+        assert_eq!(figure(30.0), "30");
         assert_eq!(shown(3.0e-5), "3e-5");
         assert_eq!(shown(0.25), "0.25");
     }
