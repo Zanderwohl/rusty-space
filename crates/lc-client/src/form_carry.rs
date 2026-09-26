@@ -131,8 +131,31 @@ impl Carry {
         Some(self.edit(false))
     }
 
+    /// As [`Carry::follow`], but where `allows` refuses the part as it would hang (a part is sized
+    /// against its parent, so it may be paid for on one and not another) it floats instead,
+    /// coming off whatever it hung from before.
+    #[allow(clippy::too_many_arguments)]
+    pub fn follow_within(
+        &mut self,
+        draft: &Draft,
+        sdf: &Sdf,
+        lens: &Lens,
+        at: Vec2,
+        keys: Modifiers,
+        balance: &Balance,
+        allows: impl Fn(&Edit) -> bool,
+    ) -> Option<Edit> {
+        let before = self.clone();
+        let edit = self.follow(draft, sdf, lens, at, keys, balance)?;
+        if allows(&edit) {
+            return Some(edit);
+        }
+        *self = before;
+        self.unhang()
+    }
+
     /// Floats it, taking it off whatever it hung from.
-    pub fn unhang(&mut self) -> Option<Edit> {
+    fn unhang(&mut self) -> Option<Edit> {
         if !self.hung {
             return None;
         }
@@ -252,13 +275,9 @@ pub fn carry(
     if controls.under_pointer() || !crate::form_view::on_picture(&surface, at) {
         return;
     }
-    if let Some(edit) = carry.follow(draft, sdf, &lens, at, Modifiers::of(&keys), &balance) {
-        // Sized against what it hangs from, so a part may be paid for on one parent and not another.
-        let edit = match start.as_ref().is_none_or(|s| s.allows(draft, &edit)) {
-            true => Some(edit),
-            false => carry.unhang(),
-        };
-        out.write_batch(edit.map(|edit| Requested(Action::EditForm(Ok(edit)))));
+    let allows = |edit: &Edit| start.as_ref().is_none_or(|s| s.allows(draft, edit));
+    if let Some(edit) = carry.follow_within(draft, sdf, &lens, at, Modifiers::of(&keys), &balance, allows) {
+        out.write(Requested(Action::EditForm(Ok(edit))));
     }
 }
 
@@ -440,6 +459,24 @@ mod tests {
         assert_eq!(draft.form, draft.ship);
     }
 
+
+    /// Sized against what it would hang from, it costs something; with nothing stored it floats,
+    /// and the draft is never sent the part.
+    #[test]
+    fn a_part_storage_cannot_pay_for_floats_instead_of_hanging() {
+        let draft = Draft::new(Form::starting());
+        let (sdf, lens) = scene(&draft);
+        let broke = crate::preview::Start { from: Form::starting(), stored_j: 0.0, start_s: 0.0, balance: B };
+        let allows = |e: &Edit| broke.allows(&draft, e);
+        let mut carry = Carry::new_part(&draft, Kind::Bay, crate::draft::PRIMITIVES[3], &B).unwrap();
+        assert_eq!(carry.follow_within(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B, allows), None, "no edit, not even a removal");
+        assert!(!carry.hung && carry.put_down().is_none(), "so a click places nothing");
+
+        let flush = crate::preview::Start { stored_j: 1.0e40, ..broke.clone() };
+        let paid = |e: &Edit| flush.allows(&draft, e);
+        let edit = carry.follow_within(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B, paid).unwrap();
+        assert!(carry.hung && edit.after[0].kind == Kind::Bay, "paid for, it hangs");
+    }
 
     #[test]
     fn nothing_hangs_from_a_dismantled_part() {

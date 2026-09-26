@@ -102,8 +102,10 @@ pub struct FormView {
     pub show_current: bool,
     pub advanced: bool,
     pub applying: crate::ledger::Applying,
-    /// Apply's second question is up: the round would collapse the field.
-    pub asking: bool,
+    /// Apply's second question is up, about this draft: its round would collapse the field. Keyed
+    /// on the draft, so an edit made since, or a return to the editor with another, does not bring
+    /// it back.
+    pub asking: Option<lc_world::form::Form>,
 }
 
 /// The editor's camera: an orbit about a focus on the ship's nose axis.

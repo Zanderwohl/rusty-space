@@ -6,7 +6,7 @@
 //! what it stores now, and now. So the budget is [`Budget::of`] on the plan an Apply would get.
 //!
 //! Heat is not kept yet (H3), so the ship's `Q` is unknown: the field starts at its idle heat,
-//! `q_idle` over its envelope. H3 swaps in the ship's real `Q` at [`Heat::of`]'s `base_j`.
+//! `q_idle` over its envelope. C10, after H3, swaps in the ship's real `Q` at [`Heat::of`]'s `base_j`.
 
 use lc_world::field::Field;
 use lc_world::fitting::{Balance, C2, Fitting};
@@ -129,7 +129,7 @@ impl Heat {
     }
 }
 
-/// The ship's field as it stands, and the heat it starts a round with: idle, until H3.
+/// The ship's field as it stands, and the heat it starts a round with: idle, until C10.
 pub fn field_now(fitting: &Fitting) -> (Field, f64) {
     let field = Field::of(fitting.geometry().envelope_area_m2, fitting.balance());
     (field, field.idle_j_m2 * field.area_m2)

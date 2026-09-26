@@ -642,7 +642,7 @@ Apply asks once more when the vent would collapse the field.
   dismantling heats it by the 5% it loses spread over the step, and each vent lands as a burst at its
   step's end, which is where the heat peaks. Between them it relaxes toward what held it before. Heat
   is not kept until H3, so the starting heat is the idle field's, `q_idle` over the ship's envelope
-  as it stands; H3 replaces it with the ship's own `Q`.
+  as it stands; C10 replaces it with the ship's own `Q` once H3 keeps one.
 - **What the budget stops.** No edit may leave the draft further short than its gesture began, except
   one that replaces the whole draft (a preset, or the ship). Measured from the gesture's start, a
   handle held at its limit can still come back. A size or axis handle pulled past the limit stops on

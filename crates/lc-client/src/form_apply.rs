@@ -214,7 +214,8 @@ fn ask(
     assets: Res<AssetServer>,
     shown: Query<Entity, With<Asking>>,
 ) {
-    let wanted = ui.form.asking && ui.view == ViewMode::Form;
+    let asked = ui.form.draft.as_ref().is_some_and(|d| ui.form.asking.as_ref() == Some(&d.form));
+    let wanted = asked && ui.view == ViewMode::Form;
     if !wanted {
         for entity in &shown {
             commands.entity(entity).despawn();
