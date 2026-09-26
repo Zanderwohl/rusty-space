@@ -122,7 +122,7 @@ impl Plugin for ClientPlugin {
             crate::faces::FacesPlugin,
             // The two modes beside the world, paired: a tuple of plugins stops at fifteen.
             (crate::map::MapPlugin, crate::form_view::FormViewPlugin,
-                crate::form_handles::FormHandlesPlugin, crate::form_panel::FormPanelPlugin),
+                crate::form_handles::FormHandlesPlugin, crate::form_panel::FormPanelPlugin, crate::form_apply::FormApplyPlugin),
             (crate::bench::BenchPlugin, crate::haze::HazePlugin),
             // The beauty shots and the staged refit both photograph the ship.
             (crate::beauty::BeautyPlugin, crate::refit_hull::RefitHullPlugin),
@@ -191,6 +191,7 @@ impl Plugin for ClientPlugin {
                         (grab_cursor, look_around, crate::input::read_wheel).chain().run_if(steering),
                         (
                             crate::form_view::press,
+                            crate::form_apply::press,
                             // Before the slide and the carry, which a press on a knob is neither.
                             crate::form_handles::drag_handles,
                             // Before the carry, which a press that puts a part down ends.
@@ -214,6 +215,7 @@ impl Plugin for ClientPlugin {
                     crate::dev::frame_the_cast.run_if(in_state(AppState::InGame)),
                     crate::dev::open_the_radio.run_if(in_state(AppState::InGame)),
                     crate::dev::type_at_the_console.run_if(in_state(AppState::InGame)),
+                    crate::dev::apply_and_cancel.run_if(in_state(AppState::InGame)),
                     // After the framing, because a pin overrules everything including that.
                     crate::dev::pin_camera.run_if(in_state(AppState::InGame)),
                     crate::dev::pin_view.run_if(in_state(AppState::InGame)),

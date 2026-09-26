@@ -334,6 +334,9 @@ pub struct Notification {
 }
 
 /// How many notifications are kept. Older ones fall off rather than accumulating.
+/// `18-ui-style.md` §Hazard: anything that will hurt. Lightcone's, so not in `em_ui::vfd`.
+pub const HAZARD: bevy::color::Color = bevy::color::Color::srgb(1.0, 0.30, 0.10);
+
 pub const NOTIFICATION_LIMIT: usize = 6;
 
 /// Clock multipliers a development build offers, and what each one means to watch.

@@ -610,7 +610,7 @@ graph LR
 
 ### R14 · Refits in the game
 
-- status: todo
+- status: active card "Build R14: refits in the game"
 - needs: R4, S1
 - touches: `crates/lc-client/src/construction.rs`, `crates/lc-client/src/parts.rs`
 - read: 32 §Building, as a function of time; 29 §Cancel
@@ -657,7 +657,7 @@ graph LR
 
 ### C4 · Budget and preview
 
-- status: todo
+- status: active card "Build C4: budget and preview"
 - needs: C2, F7, F8, H1
 - touches: `crates/lc-client/src/form_panel.rs`
 - read: 29 §The budget, §What else it shows
@@ -666,9 +666,9 @@ graph LR
 
 ### C5 · Ledger and Apply
 
-- status: active card "Build C5: ledger and Apply"
+- status: done #102. Apply is in the editor only, since C2 landed first and 29 puts refits there
 - needs: S1, F8
-- touches: `crates/lc-client/src/refit_panel.rs`
+- touches: `crates/lc-client/src/refit_panel.rs`, `crates/lc-client/src/ledger.rs`, `crates/lc-client/src/form_apply.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/draft.rs`, `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/lib.rs`, `crates/em-ui/src/widgets.rs`, `lightcone/docs/29-ship-form.md`, `AGENTS.md`
 - read: 29 §The editor
 - deliver: the refit window as the ledger (budget, phases, progress, Cancel), with a list of parts and snapped size fields as the editor until C2 lands; Apply sends `Order::Refit { target }` from either.
 - done when: a refit can be made, applied and cancelled from the window alone.

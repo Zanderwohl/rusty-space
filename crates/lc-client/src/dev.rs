@@ -128,6 +128,11 @@ pub struct DevEntry {
     pub say: Option<String>,
     /// Sent once the shard has welcomed this client. The only way to photograph an answer.
     pub console: Option<String>,
+    /// Press the editor's Apply once the shard has welcomed this client and Apply is open.
+    pub apply: bool,
+    /// Cancel the round once it is this fraction through. The only way to photograph a ship left
+    /// between its forms.
+    pub cancel_at: Option<f64>,
     /// Run once on reaching the sky. Actions rather than flags, so a development entry can
     /// reach anything the interface can and needs no plumbing of its own.
     pub actions: Vec<Action>,
@@ -436,6 +441,32 @@ pub(crate) fn type_at_the_console(
     *done = true;
     out.write(Requested(Action::OpenPanel(crate::ui::Panel::Console)));
     out.write(Requested(Action::RunCommand(line.clone())));
+}
+
+pub(crate) fn apply_and_cancel(
+    dev: Res<DevEntry>,
+    ui: Res<Ui>,
+    game: Res<crate::app::Game>,
+    mut out: MessageWriter<Requested>,
+    mut done: Local<(bool, bool)>,
+) {
+    let session = &game.0;
+    if dev.apply
+        && !done.0
+        && let Some(draft) = &ui.form.draft
+        && crate::ledger::gate(draft, &ui.form.applying, crate::ledger::Situation::of(session)).is_ok()
+    {
+        done.0 = true;
+        out.write(Requested(Action::ApplyDraft));
+    }
+    let now = session.coordinate_time_s();
+    let running = session.ship.fitting().and_then(|f| f.refit()).filter(|_| session.ship.is_refitting(now));
+    if let (Some(at), Some(plan), false) = (dev.cancel_at, running, done.1)
+        && crate::ledger::standing(plan, now).fraction >= at
+    {
+        done.1 = true;
+        out.write(Requested(Action::CancelRefit));
+    }
 }
 
 /// Hold the camera still, so two runs photograph the same view.
