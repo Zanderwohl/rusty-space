@@ -16,6 +16,7 @@ use glam::DVec3;
 
 use crate::map::{MAP_LAYER, Map, MapCamera};
 use crate::map_line::MapLineMaterial;
+use crate::map_spread::{self, ArcShape, MapSpreadOf};
 
 /// How wide a line is drawn, in pixels. Held there per vertex by `map_line.wgsl`.
 pub(crate) const LINE_PX: f32 = 1.6;
@@ -125,17 +126,6 @@ pub struct MapRingOf(pub usize);
 /// The drop-line under an item.
 #[derive(Component)]
 pub struct MapDropOf(pub ItemKey);
-
-/// An error bar, capped at each end, and which of the three pieces.
-#[derive(Component)]
-pub struct MapSpreadOf(pub ItemKey, pub SpreadPart);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SpreadPart {
-    Bar,
-    NearCap,
-    FarCap,
-}
 
 /// A belt, a ring system or a cloud, drawn as its own outline rather than as a point.
 #[derive(Component)]
@@ -298,7 +288,7 @@ fn material_of(
 
 /// Culled like anything else, with room for what the shader adds. See [`UNIT_REACH`]. Held
 /// fixed: Bevy would otherwise refit it to the mesh at every change of form, without the room.
-fn unit_bounds() -> (Aabb, NoAutoAabb) {
+pub(crate) fn unit_bounds() -> (Aabb, NoAutoAabb) {
     (Aabb::from_min_max(Vec3::splat(-UNIT_REACH), Vec3::splat(UNIT_REACH)), NoAutoAabb)
 }
 
@@ -323,43 +313,6 @@ pub(crate) fn drop_transform(placement: &Placement) -> Transform {
             true => Quat::from_rotation_arc(Vec3::Y, span / length),
             false => Quat::IDENTITY,
         },
-        scale: Vec3::new(1.0, length, 1.0),
-    }
-}
-
-/// The unit line along `+Y`, laid from `near` to `far`.
-fn segment_transform(near: Vec3, far: Vec3) -> Transform {
-    let (near, far) = (render(near.as_dvec3()), render(far.as_dvec3()));
-    let span = far - near;
-    let length = span.length();
-    Transform {
-        translation: near,
-        rotation: match length > f32::EPSILON {
-            true => Quat::from_rotation_arc(Vec3::Y, span / length),
-            false => Quat::IDENTITY,
-        },
-        scale: Vec3::new(1.0, length, 1.0),
-    }
-}
-
-pub(crate) fn spread_transform(near: Vec3, far: Vec3, part: SpreadPart, rad_per_px: f32) -> Transform {
-    match part {
-        SpreadPart::Bar => segment_transform(near, far),
-        SpreadPart::NearCap => cap_transform(near, far, rad_per_px),
-        SpreadPart::FarCap => cap_transform(far, near, rad_per_px),
-    }
-}
-
-/// Square to both the bar and the line of sight, so it looks square from any angle. The eye is
-/// the render origin, so a point is its own line of sight.
-pub(crate) fn cap_transform(end: Vec3, other: Vec3, rad_per_px: f32) -> Transform {
-    let (end, other) = (render(end.as_dvec3()), render(other.as_dvec3()));
-    let along = (other - end).normalize_or(Vec3::Y);
-    let across = along.cross(end).try_normalize().unwrap_or_else(|| along.any_orthonormal_vector());
-    let length = end.length() * rad_per_px * SPREAD_CAP_PX;
-    Transform {
-        translation: end - across * (0.5 * length),
-        rotation: Quat::from_rotation_arc(Vec3::Y, across),
         scale: Vec3::new(1.0, length, 1.0),
     }
 }
@@ -453,12 +406,12 @@ struct Parts {
     item: Option<Entity>,
     drop: Option<Entity>,
     annulus: Option<Entity>,
-    spread: Option<[Entity; 3]>,
+    spread: map_spread::Spawned,
 }
 
 impl Parts {
     fn despawn(self, commands: &mut Commands) {
-        let spread = self.spread.into_iter().flatten();
+        let spread = self.spread.entities.into_iter();
         for entity in [self.item, self.drop, self.annulus].into_iter().flatten().chain(spread) {
             commands.entity(entity).despawn();
         }
@@ -524,7 +477,7 @@ pub(crate) fn lay(
             Without<MapSpreadOf>),
     >,
     mut spreads: Query<
-        (&MapSpreadOf, &mut Transform),
+        (&MapSpreadOf, &mut Transform, &mut Mesh3d, Option<&mut ArcShape>),
         (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
             Without<MapDropOf>),
     >,
@@ -585,9 +538,9 @@ pub(crate) fn lay(
             mesh.0 = wanted.clone();
         }
     }
-    for (of, mut place) in spreads.iter_mut() {
-        let Some((near, far)) = at.get(&of.0).and_then(|p| p.spread) else { continue };
-        *place = spread_transform(near, far, of.1, view.rad_per_px);
+    for (of, mut place, mut mesh, shape) in spreads.iter_mut() {
+        let Some(placement) = at.get(&of.key) else { continue };
+        map_spread::lay(placement, of, &mut place, &mut mesh, shape, &mut meshes, view.rad_per_px);
     }
     for (of, mut place, mut shown) in rings.iter_mut() {
         match frame.rings.get(of.0) {
@@ -708,32 +661,16 @@ fn sync(
             }
             _ => {}
         }
-        match (placement.spread, parts.spread) {
-            (Some((near, far)), None) => {
-                let material = material_of(palette, materials, placement.kind, None);
-                parts.spread = Some([SpreadPart::Bar, SpreadPart::NearCap, SpreadPart::FarCap].map(|part| {
-                    commands
-                        .spawn((
-                            // One dash: a solid line.
-                            Mesh3d(shapes.drops[0].clone()),
-                            MeshMaterial3d(material.clone()),
-                            spread_transform(near, far, part, view.rad_per_px),
-                            unit_bounds(),
-                            layer.clone(),
-                            MapDrawn,
-                            MapSpreadOf(key, part),
-                        ))
-                        .id()
-                }));
-            }
-            (None, Some(pieces)) => {
-                for entity in pieces {
-                    commands.entity(entity).despawn();
-                }
-                parts.spread = None;
-            }
-            _ => {}
-        }
+        map_spread::sync(
+            commands,
+            &mut parts.spread,
+            placement,
+            || material_of(palette, materials, placement.kind, None),
+            &shapes.drops[0],
+            meshes,
+            &layer,
+            view.rad_per_px,
+        );
         match (placement.has_drop_line(), parts.drop) {
             (true, None) => {
                 let place = drop_transform(placement);
@@ -781,7 +718,13 @@ mod tests {
             angular_radius: 1.0 / 40.0,
             annulus: None,
             pole: Vec3::Z,
-            spread: spread.then_some((at * 0.9, at * 1.1)),
+            spread: match spread {
+                true => vec![
+                    em_map::Spread::Bar(at * 0.9, at * 1.1),
+                    em_map::Spread::Arc { points: vec![at, at + Vec3::X, at + Vec3::new(1.0, 1.0, 0.0)], closed: false },
+                ],
+                false => Vec::new(),
+            },
         }
     }
 
@@ -825,8 +768,9 @@ mod tests {
 
         draw(&mut world, &mut scene, &frame(vec![placed("kept", false), placed("left", true)]));
         let before = items(&mut world);
-        assert_eq!((before.len(), spreads(&mut world)), (2, 3));
-        let scenery = everything(&mut world) - 2 - 3;
+        // A bar and an arc, each with its two caps.
+        assert_eq!((before.len(), spreads(&mut world)), (2, 6));
+        let scenery = everything(&mut world) - 2 - 6;
         assert_eq!(scenery, MAX_RINGS + 1, "the ring pool and the spokes");
 
         draw(&mut world, &mut scene, &frame(vec![placed("kept", false), placed("came", false)]));

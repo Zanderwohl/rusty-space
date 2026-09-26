@@ -332,7 +332,7 @@ fn believed_range(
 /// A believed distance, or that there is not one.
 fn distance_text(belief: &BodyBelief) -> String {
     match belief.position_now {
-        Placed::Known { offset_au, .. } => format!("{:.3} AU", offset_au.length()),
+        Placed::Known { offset_au, error } => with_error(offset_au.length(), error.toward_au(offset_au), "AU"),
         Placed::Shell { radius_au, sigma_au } => with_error(radius_au, sigma_au, "AU"),
         Placed::Unknown => "distance unknown".to_string(),
     }

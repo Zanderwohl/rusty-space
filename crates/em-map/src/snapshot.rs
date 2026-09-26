@@ -94,10 +94,42 @@ pub struct MapItem {
     /// Meters, and it carries the half-angle as well as the two radii: without it a cloud and
     /// a belt are the same pair of numbers, and one of them is a shell.
     pub annulus_m: Option<crate::outline::Extent>,
-    /// Where else it might be: the ends of a segment, light-years from the world origin, for a
-    /// position known only to an error. A star placed by parallax is uncertain along the line
-    /// of sight far more than across it, and the map should show which way.
-    pub spread_ly: Option<(DVec3, DVec3)>,
+    /// Where else it might be, light-years from the world origin, for a position known only to
+    /// an error. Each piece is one direction of it: a star placed by parallax is uncertain along
+    /// the line of sight far more than across it, and the map should show which way.
+    pub spread_ly: Vec<Spread>,
+}
+
+/// One direction of where something might be.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Spread<P = DVec3> {
+    /// A straight error bar between its two ends.
+    Bar(P, P),
+    /// An error along a curve, such as a phase along an orbit, where a chord would cut inside
+    /// the path the thing is actually on. `closed` is a whole loop, and has no ends to cap.
+    Arc { points: Vec<P>, closed: bool },
+}
+
+impl<P: Copy> Spread<P> {
+    pub fn map<Q>(&self, f: impl Fn(P) -> Q) -> Spread<Q> {
+        match self {
+            Spread::Bar(near, far) => Spread::Bar(f(*near), f(*far)),
+            Spread::Arc { points, closed } => Spread::Arc { points: points.iter().map(|p| f(*p)).collect(), closed: *closed },
+        }
+    }
+
+    /// Each open end, with the point beside it that a cap is squared against.
+    pub fn ends(&self) -> Vec<(P, P)> {
+        match self {
+            Spread::Bar(near, far) => vec![(*near, *far), (*far, *near)],
+            Spread::Arc { closed: true, .. } => Vec::new(),
+            Spread::Arc { points, .. } if points.len() >= 2 => {
+                let n = points.len();
+                vec![(points[0], points[1]), (points[n - 1], points[n - 2])]
+            }
+            Spread::Arc { .. } => Vec::new(),
+        }
+    }
 }
 
 impl MapItem {
@@ -113,13 +145,19 @@ impl MapItem {
             weight: 0.0,
             pole,
             annulus_m: None,
-            spread_ly: None,
+            spread_ly: Vec::new(),
         }
     }
 
     /// Say that it is somewhere between `near_ly` and `far_ly`, not exactly where it is drawn.
     pub fn spread(mut self, near_ly: DVec3, far_ly: DVec3) -> Self {
-        self.spread_ly = Some((near_ly, far_ly));
+        self.spread_ly.push(Spread::Bar(near_ly, far_ly));
+        self
+    }
+
+    /// Say that it is somewhere along a curve through `points_ly`.
+    pub fn spread_along(mut self, points_ly: Vec<DVec3>, closed: bool) -> Self {
+        self.spread_ly.push(Spread::Arc { points: points_ly, closed });
         self
     }
 
@@ -146,7 +184,7 @@ impl MapItem {
                 outer: extent.inner.max(extent.outer),
                 ..extent
             }),
-            spread_ly: None,
+            spread_ly: Vec::new(),
         }
     }
 }

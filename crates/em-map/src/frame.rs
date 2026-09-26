@@ -5,7 +5,7 @@ use glam::{DVec3, Vec3};
 use crate::camera::Orbit;
 use crate::plane::Datum;
 use crate::rings::{self, MAX_RINGS, Ring};
-use crate::snapshot::{ItemKey, ItemKind, M_PER_LY, MapSnapshot};
+use crate::snapshot::{ItemKey, ItemKind, M_PER_LY, MapSnapshot, Spread};
 
 /// How far out anything may be placed, in render units.
 ///
@@ -46,8 +46,8 @@ pub struct Placement {
     pub annulus: Option<Annulus>,
     /// Spin axis or ring normal, simulation axes, unit length.
     pub pole: Vec3,
-    /// The ends of where it might be, render units: see [`crate::MapItem::spread_ly`].
-    pub spread: Option<(Vec3, Vec3)>,
+    /// Where it might be, render units: see [`crate::MapItem::spread_ly`].
+    pub spread: Vec<Spread<Vec3>>,
 }
 
 impl Placement {
@@ -163,8 +163,13 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Datum, meters_per_u
             pole: item.pole.normalize_or(DVec3::Z).as_vec3(),
             spread: item
                 .spread_ly
-                .map(|(near, far)| (relative(near), relative(far)))
-                .filter(|(near, far)| near.is_finite() && far.is_finite()),
+                .iter()
+                .map(|piece| piece.map(relative))
+                .filter(|piece| match piece {
+                    Spread::Bar(near, far) => near.is_finite() && far.is_finite(),
+                    Spread::Arc { points, .. } => points.len() >= 2 && points.iter().all(|p| p.is_finite()),
+                })
+                .collect(),
         });
     }
 
@@ -240,6 +245,28 @@ mod tests {
                 assert!(above.abs() < 1e-3, "{plane:?}: foot {above} units off the plane");
             }
         }
+    }
+
+    /// Every piece of a spread reaches the frame on its own, and one that cannot be placed is
+    /// dropped without taking the others with it.
+    #[test]
+    fn each_piece_of_a_spread_is_placed_or_dropped_alone() {
+        let here = au(1.0, 0.0, 0.0);
+        let arc = vec![au(1.0, -0.1, 0.0), here, au(1.0, 0.1, 0.0)];
+        let item = at(1, here, 6.4e6)
+            .spread(au(0.9, 0.0, 0.0), au(1.1, 0.0, 0.0))
+            .spread_along(arc, false)
+            .spread(here, DVec3::new(f64::INFINITY, 0.0, 0.0));
+        let orbit = Orbit::framing(DVec3::ZERO, 10.0 * M_PER_AU);
+        let frame = compose(&MapSnapshot::observed(0.0, vec![item]), &orbit, Plane::System.about(DVec3::Z), M_PER_AU);
+
+        let spread = &frame.placements[0].spread;
+        assert_eq!(spread.len(), 2, "{spread:?}");
+        let Spread::Arc { points, closed: false } = &spread[1] else { panic!("{spread:?}") };
+        assert_eq!(points.len(), 3);
+        assert_eq!(spread[1].ends().len(), 2, "an open arc has two ends to cap");
+        let whole = Spread::Arc { points: points.clone(), closed: true };
+        assert!(whole.ends().is_empty(), "a closed one has none");
     }
 
     /// Something in the plane has nowhere to fall, and a zero-length tube is degenerate

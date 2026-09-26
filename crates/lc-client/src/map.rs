@@ -419,6 +419,7 @@ mod tests {
 
     use super::*;
     use crate::map_scene::*;
+    use crate::map_spread::cap_transform;
 
     /// The main view draws every frame; the corner every tenth of a second, or at once when
     /// something about it has changed.
@@ -730,7 +731,7 @@ mod tests {
             angular_radius: radius / distance,
             annulus: None,
             pole: glam::Vec3::Z,
-            spread: None,
+            spread: Vec::new(),
         }
     }
 

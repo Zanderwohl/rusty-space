@@ -1308,7 +1308,7 @@ confidence and nothing comes back:
   from whatever the camera sits on.
 - **Fainter-for-less-certain** needs a variant or a field. `ItemKind` is eight body types —
   `Star, Planet, Moon, Minor, Station, Ship, Population, Observer` — with no confidence on it.
-- **The error bar already exists.** `MapItem::spread_ly`, an `Option<(DVec3, DVec3)>` built from
+- **The error bar already exists.** `MapItem::spread_ly`, then an `Option<(DVec3, DVec3)>` built from
   `Distance::Measured`'s sigma along the line of sight, and already drawn as a segment
   (`map.rs:856`). A body's radial bar reuses it directly.
 - **Dashes exist, but in the client.** `map.rs` has a dash ladder, `map.drops[dashes - 1]`, used
@@ -1417,7 +1417,8 @@ knowledge. Today:
      it, so an older file is refused loudly rather than read wrong quietly.
    - `knowledge/body.rs` holds both beliefs. `Placed::Known` turned out to be buildable now
      rather than in phase 6: a full orientation plus an epoch propagates through Kepler's
-     equation, and the pole's own error carries the body along its ring. Without both it is a
+     equation, and the pole's own error carries the body along its ring (wrong, and corrected
+     under item 3: it lifts it out of the plane). Without both it is a
      `Shell`.
    - Two details in the plane fold earn their code. A pole's sign is the direction of travel,
      which an edge-on reading does not settle, so poles are folded onto one half before
@@ -1447,10 +1448,24 @@ knowledge. Today:
      outline — the Oort cloud draws one — and its inner and outer radii carry the distance error
      as the shell's own thickness. So the *camera-facing dashed circle* and the *radial error
      bar* below are one existing shape, and an orbit of known size and unknown orientation is
-     drawn as the sphere it is. A placed body draws its error **along** the ring rather than
-     across it, since what is uncertain is how far round it has got. Keys are the ones truth's
+     drawn as the sphere it is. A placed body draws its error as a **cross** (2026-09-26):
+     straight bars outward and out of its plane, and an arc *along the orbit itself* for how far
+     round it has got. Keys are the ones truth's
      bodies had, joined through the generator key, or `primary` and the focus would name keys
      nothing draws.
+   - ✅ **A placed body's error has directions** (2026-09-26). `Placed::Known` had carried one
+     sigma, mixing the axis's error (outward), the pole's (out of the plane) and the period's
+     drift (along the orbit), and the map drew all of it along the ring. `knowledge::placed`
+     splits it: `PlaceError` holds a covariance across the path and a mean-anomaly sigma along
+     it, and `Knowledge::along_track` samples the orbit across that sigma so the arc is the
+     ellipse and not a chord. Once the sigma reaches half a turn the arc is the whole orbit,
+     uncapped. **Corrected from item 2:** the pole's error lifts a body out of its plane; it does
+     not carry it along its ring. The eccentricity's error now enters too, as `a cos E` outward.
+     A moon takes its primary's error rigidly, the part along its own path as phase.
+     `em_map::MapItem::spread_ly` became a list of `Spread` pieces, `Bar` or `Arc`, drawn by
+     `lc_client::map_spread`.
+     **Open:** the orbit fit (`arc::Spread`) states no epoch sigma, so a freshly fitted body shows
+     almost no arc until its period's error has had time to drift.
    - ⬜ **Candidates are not drawn.** Their radius needs a period turned through a mass prior,
      and the client builds no `Prior` — adding one to draw faint rings is the wrong trade when
      the panel lists them already. The shard computes that radius at settle, so **sending it** is

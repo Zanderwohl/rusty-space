@@ -290,6 +290,7 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
     let Some(system) = session.system.as_ref() else { return };
     let star_ly = system.star_position_ly();
     let star = session.star(system.star).map(|c| c.star);
+    let now_s = session.coordinate_time_s();
     // The galactic normal where no plane is solved, for the reason `MapView::resolved_plane`
     // gives: `+Z` is Sol's plane and drawing another star's error bars about it is a
     // measurement of one system shown around another.
@@ -318,18 +319,22 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
         // them the same subject: picking one focused nothing and hovering one lit them all.
         let subject = named.map(|target| Subject::Body(target, label.clone()));
         match belief.position_now {
-            // Where on the ring it is, with the error drawn along the ring rather than across
-            // it: what is uncertain is how far round it has got.
+            // A cross: out from what it goes round and out of its plane as straight bars, and
+            // how far round it has got as an arc along the orbit itself.
             Placed::Known { offset_au, error } => {
-                let sigma_au = error.total_au();
                 let at = star_ly + offset_au * AU_LY;
-                let along = offset_au.normalize_or(DVec3::X).cross(pole).normalize_or(DVec3::X);
-                build.push(
-                    MapItem::body(key, label, ItemKind::Planet, at, 0.0, pole)
-                        .weighing(weight)
-                        .spread(at - along * (sigma_au * AU_LY), at + along * (sigma_au * AU_LY)),
-                    subject,
-                );
+                let mut item = MapItem::body(key, label, ItemKind::Planet, at, 0.0, pole).weighing(weight);
+                for (direction, sigma_au) in [(error.outward, error.outward_au()), (error.pole, error.normal_au())] {
+                    if sigma_au > 0.0 {
+                        let reach = direction * (sigma_au * AU_LY);
+                        item = item.spread(at - reach, at + reach);
+                    }
+                }
+                if let Some(track) = session.knowledge.along_track(system.star, belief.body, now_s) {
+                    let points = track.points_au.iter().map(|p| star_ly + *p * AU_LY).collect();
+                    item = item.spread_along(points, track.closed);
+                }
+                build.push(item, subject);
             }
             // A sphere of that radius, dashed, and its thickness *is* the error: an orbit of
             // known size and unknown orientation is not a ring in a guessed plane. The shell

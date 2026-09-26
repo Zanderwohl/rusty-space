@@ -52,6 +52,12 @@ impl PlaceError {
         d.dot(self.across_au2 * d).max(0.0).sqrt()
     }
 
+    /// One sigma in `direction` from every source, the phase linearized: a range's error.
+    pub fn toward_au(&self, direction: DVec3) -> f64 {
+        let d = direction.normalize_or_zero();
+        self.sigma_au(d).hypot(self.pace_au.dot(d) * self.along_rad.min(PI))
+    }
+
     pub fn outward_au(&self) -> f64 {
         self.sigma_au(self.outward)
     }

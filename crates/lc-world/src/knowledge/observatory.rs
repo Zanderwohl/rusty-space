@@ -556,7 +556,7 @@ pub fn chart_system(knowledge: &mut Knowledge, system: &LocalSystem, now_s: f64)
         let mu = sim.mu(body);
         let Some(elements) = state::from_state(mu, at - parent_at, moving - parent_moving) else { continue };
         let (a_m, e) = (elements.semi_major_axis, elements.eccentricity);
-        // Unbound or nearly so: `body::placed_at` holds eccentricity below this, and a comet on
+        // Unbound or nearly so: `placed::placed_at` holds eccentricity below this, and a comet on
         // its way out has no period to chart.
         if !(a_m > 0.0 && a_m.is_finite() && e < 0.999 && mu > 0.0) {
             continue;
@@ -573,7 +573,7 @@ pub fn chart_system(knowledge: &mut Knowledge, system: &LocalSystem, now_s: f64)
                 period_s: (period_s, period_s * 1.0e-9),
                 semi_major_au: (a_m / generate::AU, a_m / generate::AU * 1.0e-9),
                 eccentricity: Some((e, 1.0e-9)),
-                // The same angles `body::placed_at` reads back into `state::to_state`, so an
+                // The same angles `placed::placed_at` reads back into `state::to_state`, so an
                 // orbit charted here is placed exactly where the body is.
                 orientation: Orientation::Known {
                     pole,

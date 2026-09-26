@@ -711,7 +711,7 @@ impl Fitted {
     /// The plane's basis here is [`basis`], which is whatever `any_orthonormal_vector` returns
     /// and so is not a frame anything else shares. The record wants the standard pair instead:
     /// the ascending node's longitude in simulation axes, and periapsis measured round from
-    /// that node. `knowledge::body::placed_at` reads them straight into
+    /// that node. `knowledge::placed::placed_at` reads them straight into
     /// `em_foundations::kepler::state::Elements`, so a wrong convention here is a body drawn in
     /// the wrong place and nothing that complains.
     pub fn stated(

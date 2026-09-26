@@ -36,7 +36,7 @@ pub use camera::Orbit;
 pub use frame::{Annulus, MapFrame, Placement, RingPlacement, compose};
 pub use plane::{Datum, Plane};
 pub use rings::Ring;
-pub use snapshot::{ItemKey, ItemKind, MapItem, MapSnapshot, Provenance};
+pub use snapshot::{ItemKey, ItemKind, MapItem, MapSnapshot, Provenance, Spread};
 
 #[cfg(test)]
 mod standalone {
