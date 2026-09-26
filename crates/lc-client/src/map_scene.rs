@@ -49,8 +49,9 @@ pub(crate) const SCALE_PX: f32 = LINE_PX * 0.5;
 const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
 /// A population's outline, dashed. At full brightness a shell's six curves outshine the map.
 const POPULATION_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
-/// An error bar sits well under the line it qualifies.
-const SPREAD_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.25;
+/// An error bar sits well under the line it qualifies: a system of them is a thicket. The
+/// selected item's are drawn at full brightness, which is when anyone is reading them.
+const SPREAD_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
 /// Length of the cap across each end of an error bar.
 pub(crate) const SPREAD_CAP_PX: f32 = 8.0;
 
@@ -171,6 +172,13 @@ pub(crate) enum Form {
     Dot,
 }
 
+/// What a material is drawn for: an item's own mark, or its spread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Look {
+    Mark(Form),
+    Spread { selected: bool },
+}
+
 /// The outline mesh for a population, normalized so its outer edge is one unit.
 ///
 /// Built in simulation axes and converted here, so the pole arrives on `+Y` — what
@@ -265,21 +273,22 @@ fn mesh_of(form: Form, shapes: &Shapes) -> &Handle<Mesh> {
     }
 }
 
-/// The shared material for an item of `kind` drawn as `form`, or for its spread when `None`.
-fn material_of(
-    palette: &mut std::collections::HashMap<(ItemKind, Option<Form>), Handle<MapLineMaterial>>,
+/// The shared material for an item of `kind` drawn as `look`.
+pub(crate) fn material_of(
+    palette: &mut std::collections::HashMap<(ItemKind, Look), Handle<MapLineMaterial>>,
     materials: &mut Assets<MapLineMaterial>,
     kind: ItemKind,
-    form: Option<Form>,
+    look: Look,
 ) -> Handle<MapLineMaterial> {
     palette
-        .entry((kind, form))
+        .entry((kind, look))
         .or_insert_with(|| {
-            let (cap, scale) = match form {
-                Some(Form::Sphere) => (SPHERE_TUBE_FRACTION, LINE_COLOR_SCALE),
-                Some(Form::Circle) => (CIRCLE_TUBE_FRACTION, LINE_COLOR_SCALE),
-                Some(Form::Dot) => (DOT_TUBE_FRACTION, LINE_COLOR_SCALE),
-                None => (LINE_TUBE_FRACTION, SPREAD_COLOR_SCALE),
+            let (cap, scale) = match look {
+                Look::Mark(Form::Sphere) => (SPHERE_TUBE_FRACTION, LINE_COLOR_SCALE),
+                Look::Mark(Form::Circle) => (CIRCLE_TUBE_FRACTION, LINE_COLOR_SCALE),
+                Look::Mark(Form::Dot) => (DOT_TUBE_FRACTION, LINE_COLOR_SCALE),
+                Look::Spread { selected: true } => (LINE_TUBE_FRACTION, LINE_COLOR_SCALE),
+                Look::Spread { selected: false } => (LINE_TUBE_FRACTION, SPREAD_COLOR_SCALE),
             };
             materials.add(line_material(color_of(kind), cap, LINE_PX, scale))
         })
@@ -448,7 +457,7 @@ pub(crate) struct Scene {
     spokes: Option<Entity>,
     /// One material per kind and form, and per kind for spreads (`None`), shared by every item
     /// drawn with it: a material each was a bind group each, and a draw each.
-    palette: HashMap<(ItemKind, Option<Form>), Handle<MapLineMaterial>>,
+    palette: HashMap<(ItemKind, Look), Handle<MapLineMaterial>>,
     lines: Option<Lines>,
     /// What the frame was composed for: the viewport and the camera's stand-off in render units.
     pub(crate) view: Option<(Viewport, f32)>,
@@ -465,6 +474,7 @@ pub(crate) fn lay(
     mut map: ResMut<Map>,
     mut materials: ResMut<Assets<MapLineMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    ui: Res<crate::app::Ui>,
     existing: Query<Entity, With<MapDrawn>>,
     mut items: Query<
         (&MapItemOf, &mut Transform, &mut Mesh3d, &mut MeshMaterial3d<MapLineMaterial>),
@@ -477,7 +487,7 @@ pub(crate) fn lay(
             Without<MapSpreadOf>),
     >,
     mut spreads: Query<
-        (&MapSpreadOf, &mut Transform, &mut Mesh3d, Option<&mut ArcShape>),
+        (&MapSpreadOf, &mut Transform, &mut Mesh3d, &mut MeshMaterial3d<MapLineMaterial>, Option<&mut ArcShape>),
         (Without<MapCamera>, Without<MapItemOf>, Without<MapRingOf>, Without<MapSpokes>, Without<MapAnnulusOf>,
             Without<MapDropOf>),
     >,
@@ -523,7 +533,7 @@ pub(crate) fn lay(
         if mesh.0 != *wanted {
             mesh.0 = wanted.clone();
         }
-        let wanted = material_of(&mut map.scene.palette, &mut materials, placement.kind, Some(form));
+        let wanted = material_of(&mut map.scene.palette, &mut materials, placement.kind, Look::Mark(form));
         if material.0 != wanted {
             material.0 = wanted;
         }
@@ -538,9 +548,16 @@ pub(crate) fn lay(
             mesh.0 = wanted.clone();
         }
     }
-    for (of, mut place, mut mesh, shape) in spreads.iter_mut() {
+    let selected = crate::pick::selected(&ui)
+        .and_then(|chosen| map.subjects.iter().find(|(_, s)| s.is(&chosen)).map(|(key, _)| *key));
+    for (of, mut place, mut mesh, mut material, shape) in spreads.iter_mut() {
         let Some(placement) = at.get(&of.key) else { continue };
         map_spread::lay(placement, of, &mut place, &mut mesh, shape, &mut meshes, view.rad_per_px);
+        let look = Look::Spread { selected: selected == Some(of.key) };
+        let wanted = material_of(&mut map.scene.palette, &mut materials, placement.kind, look);
+        if material.0 != wanted {
+            material.0 = wanted;
+        }
     }
     for (of, mut place, mut shown) in rings.iter_mut() {
         match frame.rings.get(of.0) {
@@ -629,7 +646,7 @@ fn sync(
                 commands
                     .spawn((
                         Mesh3d(mesh_of(form, shapes).clone()),
-                        MeshMaterial3d(material_of(palette, materials, placement.kind, Some(form))),
+                        MeshMaterial3d(material_of(palette, materials, placement.kind, Look::Mark(form))),
                         item_transform(placement, view),
                         unit_bounds(),
                         layer.clone(),
@@ -665,7 +682,7 @@ fn sync(
             commands,
             &mut parts.spread,
             placement,
-            || material_of(palette, materials, placement.kind, None),
+            || material_of(palette, materials, placement.kind, Look::Spread { selected: false }),
             &shapes.drops[0],
             meshes,
             &layer,
@@ -739,6 +756,21 @@ mod tests {
             placements,
             rings: Vec::new(),
         }
+    }
+
+    /// A spread is an eighth as bright as the planet's own mark, and exactly as bright once
+    /// its planet is selected.
+    #[test]
+    fn a_spread_is_dim_until_its_item_is_selected() {
+        let mut materials = Assets::<MapLineMaterial>::default();
+        let mut palette = HashMap::new();
+        let mut red = |look| {
+            let handle = material_of(&mut palette, &mut materials, ItemKind::Planet, look);
+            materials.get(&handle).unwrap().base_color.red
+        };
+        let mark = red(Look::Mark(Form::Circle));
+        assert!((red(Look::Spread { selected: false }) * 8.0 - mark).abs() < 1.0e-6);
+        assert_eq!(red(Look::Spread { selected: true }), mark);
     }
 
     /// A change to what is drawn spawns what arrived and despawns what left, and leaves the
