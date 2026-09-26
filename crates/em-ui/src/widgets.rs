@@ -110,6 +110,29 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         screen
     }
 
+    /// A question over everything, answered by one of two buttons. The wash holds the pointer, so
+    /// nothing behind it is pressed through it, and the panel is opaque: a translucent panel over
+    /// another reads as one muddled thing.
+    pub fn confirm<Y: Component, N: Component>(
+        &mut self,
+        marker: impl Bundle,
+        title: &str,
+        message: &str,
+        yes: (&str, Y),
+        no: (&str, N),
+    ) -> Entity {
+        let screen = self.overlay((marker, Interaction::default()));
+        let theme = self.theme;
+        self.theme.panel_bg = theme.panel_bg.with_alpha(1.0);
+        let panel = self.panel(screen);
+        self.theme = theme;
+        self.title(panel, title);
+        self.message(panel, message);
+        self.button(panel, yes.0, yes.1);
+        self.button(panel, no.0, no.1);
+        screen
+    }
+
     /// The bordered column every screen is built inside.
     pub fn panel(&mut self, parent: Entity) -> Entity {
         let panel = self
@@ -458,5 +481,35 @@ pub fn button_hover_system(
             Interaction::Hovered | Interaction::Pressed => button.hover.into(),
             Interaction::None => button.rest.into(),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Component)]
+    struct Asked;
+    #[derive(Component)]
+    struct Yes;
+    #[derive(Component)]
+    struct No;
+
+    fn ask(mut commands: Commands) {
+        MenuUi::new(&mut commands, MenuTheme::VFD).confirm(Asked, "SURE?", "it cannot be undone", ("Do it", Yes), ("Back", No));
+    }
+
+    #[test]
+    fn a_question_holds_the_pointer_over_an_opaque_panel_with_both_answers() {
+        let mut app = App::new();
+        app.add_systems(Update, ask);
+        app.update();
+        let world = app.world_mut();
+        let (screen, z) = world.query_filtered::<(Entity, &GlobalZIndex), (With<Asked>, With<Interaction>)>().single(world).unwrap();
+        assert_eq!(z.0, OVERLAY_Z);
+        let panel = world.entity(screen).get::<Children>().unwrap()[0];
+        assert_eq!(world.entity(panel).get::<BackgroundColor>().unwrap().0.alpha(), 1.0);
+        assert_eq!(world.query_filtered::<(), (With<Yes>, With<Button>)>().iter(world).count(), 1);
+        assert_eq!(world.query_filtered::<(), (With<No>, With<Button>)>().iter(world).count(), 1);
     }
 }

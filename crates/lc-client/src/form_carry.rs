@@ -131,12 +131,14 @@ impl Carry {
         Some(self.edit(false))
     }
 
-    fn unhang(&mut self) -> Option<Edit> {
+    /// Floats it, taking it off whatever it hung from.
+    pub fn unhang(&mut self) -> Option<Edit> {
         if !self.hung {
             return None;
         }
-        self.hung = false;
+        // Before it stops being hung, which is what says a new part is in the draft to take out.
         let back = self.cancel();
+        self.hung = false;
         if let Some(was) = self.was {
             self.part = was;
         }
@@ -207,6 +209,7 @@ pub fn carry(
     surface: Res<FormSurface>,
     mut carried: ResMut<Carried>,
     grabbed: Res<crate::form_handles::Grabbed>,
+    game: Res<crate::app::Game>,
     mut seen: Local<Option<Vec2>>,
     mut out: MessageWriter<Requested>,
 ) {
@@ -244,12 +247,18 @@ pub fn carry(
     }
     let Some(carry) = carried.0.as_mut() else { return };
     let Some(at) = cursor.filter(|at| Some(*at) != *seen) else { return };
+    let start = crate::preview::Start::of(&game.0);
     *seen = Some(at);
     if controls.under_pointer() || !crate::form_view::on_picture(&surface, at) {
         return;
     }
     if let Some(edit) = carry.follow(draft, sdf, &lens, at, Modifiers::of(&keys), &balance) {
-        out.write(Requested(Action::EditForm(Ok(edit))));
+        // Sized against what it hangs from, so a part may be paid for on one parent and not another.
+        let edit = match start.as_ref().is_none_or(|s| s.allows(draft, &edit)) {
+            true => Some(edit),
+            false => carry.unhang(),
+        };
+        out.write_batch(edit.map(|edit| Requested(Action::EditForm(Ok(edit)))));
     }
 }
 

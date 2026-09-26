@@ -61,6 +61,8 @@ pub enum Refused {
     NoSuchPart(PartId),
     Mind,
     Fault(FormError),
+    /// It would leave the draft further short of what storage can pay.
+    Unpaid,
 }
 
 impl std::fmt::Display for Refused {
@@ -69,6 +71,7 @@ impl std::fmt::Display for Refused {
             Self::NoSuchPart(id) => write!(f, "there is no {id}"),
             Self::Mind => write!(f, "the Mind cannot be changed"),
             Self::Fault(e) => e.fmt(f),
+            Self::Unpaid => write!(f, "storage cannot pay for it"),
         }
     }
 }
@@ -509,8 +512,15 @@ impl Draft {
 }
 
 /// `--draft`: `edits` for one of each mark on `ship`, `askew` for its engine off the nose axis,
-/// which Apply refuses, or a preset by `--form`'s spelling.
+/// which Apply refuses, `vent` for its storage shrunk to a third, which spills a full store past
+/// what the field can take, or a preset by `--form`'s spelling.
 pub fn staged(name: &str, ship: &Form, balance: &Balance) -> Option<Form> {
+    if name == "vent" {
+        let mut form = ship.clone();
+        let storage = form.parts.iter_mut().find(|p| p.kind == Kind::Storage)?;
+        storage.volume_m3 = snap::volume(storage.volume_m3 / 3.0, balance.min_part_m3, false);
+        return Some(form);
+    }
     if name == "askew" {
         let mut form = ship.clone();
         let engine = form.parts.iter_mut().find(|p| p.kind == Kind::Engine)?;

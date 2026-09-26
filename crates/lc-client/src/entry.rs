@@ -244,6 +244,7 @@ pub fn parse(args: &[String]) -> Entry {
         lift_deg: value(args, "--lift"),
         form: after("--form"),
         draft: after("--draft"),
+        pull: value(args, "--pull"),
         // Only the player's own ship, and no round on the wire yet, so no shard: see
         // `construction`. `--refit-at` on its own asks for the same scene.
         refit: match (value::<f64>(args, "--refit-at"), value::<f64>(args, "--refit-from")) {

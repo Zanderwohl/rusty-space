@@ -534,8 +534,9 @@ three phases, progress, and Cancel.
   the round from `Plan::at`, and Cancel. With no round it says whether the draft differs, or what
   was refused. `Budget::of` is the one computation, and the editor's live budget (C4) calls it on a
   round solved from the draft.
-- **The vent is shown in joules** until C4 gives the field's peak temperature from it, on H3's heat
-  model. C4 adds Apply's second question when the vent would collapse the field.
+- **The vent is shown as the field's peak temperature**, and after which step it peaks, from
+  `preview::Heat` (see §The budget). Apply asks a second question when the vent would collapse the
+  field.
 - `--apply` presses Apply once the shard has welcomed the client, `--cancel-at <f>` cancels the
   round that far through, and `--draft askew` tilts the engine off the nose axis, which Apply
   refuses.
@@ -631,6 +632,31 @@ A part that cannot be paid for cannot be placed, and a handle stops at the size 
 Venting is shown in the field's own terms, as the peak temperature it would reach. It is allowed, but
 Apply asks once more when the vent would collapse the field.
 
+- **The round is solved locally from the shard's inputs.** `preview::Start` is what
+  `Craft::begin_refit` would take: the ship's form, what it stores now, and now. While a round runs
+  the draft is edited against its target, so the next round starts there with what the running one
+  will leave. The budget is `ledger::Budget::of` on that plan, and a test holds the local plan equal
+  to the one the shard makes of the same Apply. A draft storage cannot pay for has no plan, and the
+  budget says how short it is instead.
+- **The strip over Apply** reads available, spent, the peak in storage against capacity, and the
+  vent as `vents 1.2 ME: field to 2950 K`, in the hazard color, and saying so, when it collapses.
+- **The peak temperature** walks the plan: the field starts at its heat before the round, a
+  dismantling heats it by the 5% it loses spread over the step, and each vent lands as a burst at its
+  step's end, which is where the heat peaks. Between them it relaxes toward what held it before. Heat
+  is not kept until H3, so the starting heat is the idle field's, `q_idle` over the ship's envelope
+  as it stands; H3 replaces it with the ship's own `Q`.
+- **What the budget stops.** No edit may leave the draft further short than its gesture began, except
+  one that replaces the whole draft (a preset, or the ship). Measured from the gesture's start, a
+  handle held at its limit can still come back. A size or axis handle pulled past the limit stops on
+  the last snapped step storage pays for, found by bisecting the pull; a carried part that storage
+  cannot pay for where it would hang floats at the pointer instead, since a part is sized against its
+  parent; and anything else is refused with "storage cannot pay for it". `Start::allows` is the rule.
+- **Apply's second question** is an `em_ui` modal (`MenuUi::confirm`) naming the vent, the peak and
+  the temperature at which the field fails: **Apply anyway** or **Back**.
+- `--draft vent` shrinks the storage to a third, which spills a full store past collapse, and
+  `--pull <k>` pulls the selected part's size handle out `k` times its length once the shard has
+  stated the ship, so both the question and a handle at its limit can be photographed.
+
 ### Handles
 
 After the controls of the `newseum` editor: lines with ends, a ring, an arrow. No text is drawn over
@@ -690,7 +716,17 @@ volume above the minimum.
   wet. Its numbers, a field for every handle and typed exactly, are behind **advanced**.
 - **The preview**, a pure function of `Session` and `Ui`: capacities, acceleration, broadside shadow,
   envelope area, slew rate, the field's rated load and headroom, brightness at the ship's current
-  distance from its star, and the round's duration.
+  distance from its star, and the round's duration. It is `preview::Preview::of`, in a panel at the
+  bottom of the left column under the palette. Choices the list leaves open:
+  - Its geometry comes from the draft's grid, which takes tens of milliseconds and much longer in a
+    debug build, so it is measured off the frame each time the draft changes, and the grid's figures
+    hold their last values until the new one arrives. It is passed to `Preview::of` beside the two.
+  - Acceleration is with storage full, the state the engine's anchor names. Slew is shown as the
+    time to flip end for end.
+  - Headroom is the heat between the field's idle and collapse: the largest burst it can take.
+  - Brightness is the starlight the draft would collect broadside where the ship is now, which is
+    also what it gives back in reflected light. It is the `solar` function the craft collects by,
+    at the draft's extent; zero under way and between systems.
 
 ### Undo and redo
 

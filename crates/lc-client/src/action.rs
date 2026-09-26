@@ -51,8 +51,11 @@ pub enum Action {
     /// An edit to the draft as its handle or field built it, before and after, or why it could
     /// not be built. See [`crate::draft`].
     EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
-    /// Send the draft to the shard as the ship's target.
+    /// Send the draft to the shard as the ship's target, first asking again when its round would
+    /// collapse the field.
     ApplyDraft,
+    /// The answer to that: send it anyway, or go back to the draft.
+    ApplyPastCollapse(bool),
     /// Edit the draft against this form of the ship's. See [`crate::ledger::base`].
     RebaseDraft(lc_world::form::Form),
     // --- the map ----------------------------------------------------------------------
@@ -487,8 +490,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::ShowCurrent(on) => ui.form.show_current = on,
     Action::ShowAdvanced(on) => ui.form.advanced = on,
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
-    Action::EditForm(edit) => edit_form(ui, edit, &mut effects),
-    Action::ApplyDraft => apply_draft(ui, session, &mut effects),
+    Action::EditForm(edit) => edit_form(ui, session, edit, &mut effects),
+    Action::ApplyDraft => apply_draft(ui, session, false, &mut effects),
+    Action::ApplyPastCollapse(apply) => {
+        ui.form.asking = false;
+        if apply {
+            apply_draft(ui, session, true, &mut effects);
+        }
+    }
     Action::RebaseDraft(form) => {
         if let Some(draft) = ui.form.draft.as_mut() {
             draft.rebase(form);
@@ -780,8 +789,10 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 }
 
 /// Only a settled edit's refusal is said: a drag refused partway is still being made.
-fn edit_form(ui: &mut UiState, edit: Result<crate::draft::Edit, crate::draft::Refused>, effects: &mut Vec<Effect>) {
+fn edit_form(ui: &mut UiState, session: &Session, edit: Result<crate::draft::Edit, crate::draft::Refused>, effects: &mut Vec<Effect>) {
+    let start = crate::preview::Start::of(session);
     let applied = match (&edit, ui.form.draft.as_mut()) {
+        (Ok(edit), Some(draft)) if start.as_ref().is_some_and(|s| !s.allows(draft, edit)) => Err(crate::draft::Refused::Unpaid),
         (Ok(edit), Some(draft)) => draft.apply(edit, &lc_world::fitting::Balance::DEFAULT).map(|()| edit),
         (Ok(_), None) => return effects.push(Effect::Notify("there is no draft to edit".into())),
         (Err(refused), _) => Err(*refused),
@@ -803,11 +814,14 @@ fn edit_form(ui: &mut UiState, edit: Result<crate::draft::Edit, crate::draft::Re
 }
 
 /// The refusal, if one comes, is the shard's, and [`crate::uplink`] files it against this target.
-fn apply_draft(ui: &mut UiState, session: &Session, effects: &mut Vec<Effect>) {
+/// A round that would collapse the field is allowed, since a player may choose to die, once asked
+/// twice.
+fn apply_draft(ui: &mut UiState, session: &Session, asked: bool, effects: &mut Vec<Effect>) {
     let Some(draft) = &ui.form.draft else {
         return effects.push(Effect::Notify("there is no draft to apply".into()));
     };
     match crate::ledger::gate(draft, &ui.form.applying, crate::ledger::Situation::of(session)) {
+        Ok(()) if !asked && crate::preview::collapses(session, draft) => ui.form.asking = true,
         Ok(()) => {
             effects.push(Effect::Send(lc_proto::Order::Refit { target: (&draft.form).into() }));
             ui.form.applying = crate::ledger::Applying::Sent(draft.form.clone());

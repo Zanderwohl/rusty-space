@@ -102,6 +102,8 @@ pub struct FormView {
     pub show_current: bool,
     pub advanced: bool,
     pub applying: crate::ledger::Applying,
+    /// Apply's second question is up: the round would collapse the field.
+    pub asking: bool,
 }
 
 /// The editor's camera: an orbit about a focus on the ship's nose axis.

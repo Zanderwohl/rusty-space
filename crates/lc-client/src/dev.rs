@@ -130,6 +130,9 @@ pub struct DevEntry {
     pub console: Option<String>,
     /// Press the editor's Apply once the shard has welcomed this client and Apply is open.
     pub apply: bool,
+    /// Pull the selected part's size handle out to this many times its length once the shard has
+    /// stated the ship, stopping where the budget does. The only way to photograph that stop.
+    pub pull: Option<f64>,
     /// Cancel the round once it is this fraction through. The only way to photograph a ship left
     /// between its forms.
     pub cancel_at: Option<f64>,

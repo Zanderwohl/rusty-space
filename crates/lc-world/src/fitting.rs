@@ -304,11 +304,7 @@ fn measured(form: &Form, balance: &Balance) -> Result<Measured, FormError> {
     };
     cell.get_or_init(|| {
         FormGrid::new(form, balance).map(|grid| {
-            let i = grid.inertia().per_kg;
-            let (a, c, b) = (i.y_axis.y, i.z_axis.z, i.z_axis.y);
-            // The larger eigenvalue of the tensor's block across the nose.
-            let across_m2 = 0.5 * (a + c) + (0.25 * (a - c) * (a - c) + b * b).sqrt();
-            Measured { extent_m: grid.extent_m(), gyration_m: across_m2.sqrt(), geometry: Arc::new(grid.geometry(1.0)) }
+            Measured { extent_m: grid.extent_m(), gyration_m: grid.gyration_m(), geometry: Arc::new(grid.geometry(1.0)) }
         })
     })
     .clone()
@@ -454,6 +450,12 @@ impl Fitting {
 
     pub fn refit(&self) -> Option<&Plan> {
         self.refit.as_ref()
+    }
+
+    /// Of the last form the grid measured: the settled form, or partway through a round the one
+    /// it began from. Its inertia is per kilogram.
+    pub fn geometry(&self) -> &Geometry {
+        &self.geometry
     }
 
     pub fn since_s(&self) -> f64 {

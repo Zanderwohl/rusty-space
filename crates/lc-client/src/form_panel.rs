@@ -211,7 +211,8 @@ fn column(edge: Edge) -> Node {
 
 fn build_palette(commands: &mut Commands, new_shape: usize, built: Built, top: f32, font: Handle<Font>) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
-    let place = Node { top: Val::Px(top), bottom: Val::Px(INSET), ..column(Edge::Left) };
+    // Its own height, leaving the bottom of the column to the preview.
+    let place = Node { top: Val::Px(top), ..column(Edge::Left) };
     let panel = root(&mut ui, Side::Palette, built, place);
     ui.insert(panel, (Interaction::None, crate::form_carry::DropZone));
     ui.inline(panel, "ADD A PART", 15.0, em_ui::vfd::TEXT);

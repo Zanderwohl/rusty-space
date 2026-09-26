@@ -330,6 +330,14 @@ impl FormGrid {
         &self.inertia
     }
 
+    /// Radius of gyration about the axis across the nose the form turns slowest about, m: the
+    /// larger eigenvalue of the tensor's block across the nose, per kilogram. What slew goes by.
+    pub fn gyration_m(&self) -> f64 {
+        let i = self.inertia.per_kg;
+        let (a, c, b) = (i.y_axis.y, i.z_axis.z, i.z_axis.y);
+        (0.5 * (a + c) + (0.25 * (a - c) * (a - c) + b * b).sqrt()).sqrt()
+    }
+
     /// What `Fitted` states, for a ship weighing `mass_kg`.
     pub fn geometry(&self, mass_kg: f64) -> lc_proto::form::Geometry {
         let t = self.inertia.tensor_kg_m2(mass_kg);
