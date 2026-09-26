@@ -218,6 +218,7 @@ graph LR
   C7 --> X1
   C8 --> X1
   C9 --> X1
+  C10 --> X1
   R8 --> X1
   R9 --> X1
   R10 --> X1
@@ -726,7 +727,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, R8, R9, R10, R11, R13, R14, R15
+- needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
