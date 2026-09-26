@@ -335,6 +335,40 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         button
     }
 
+    /// A [`MenuUi::small_button`] that cannot be pressed: dimmed, no hover, no action. Style says a
+    /// disabled button also says why, so the caller puts the reason beside it.
+    ///
+    /// It keeps an [`Interaction`] so the pointer over it is still a control's, and a view reading
+    /// the mouse stands down there as it does over the live button.
+    pub fn disabled_button(&mut self, parent: Entity, text: &str) -> Entity {
+        let theme = self.theme;
+        let font = self.font.clone();
+        let button = self
+            .commands
+            .spawn((
+                Node {
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(theme.panel_bg),
+                BorderColor::all(theme.text_dim),
+                Interaction::default(),
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    Text::new(text),
+                    TextFont { font: font.map(FontSource::Handle).unwrap_or_default(), font_size: FontSize::Px(15.0), ..default() },
+                    TextColor(theme.text_dim),
+                ));
+            })
+            .id();
+        self.commands.entity(parent).add_child(button);
+        button
+    }
+
     /// Left-aligned, indented by `depth`, the width of its column.
     pub fn tree_row<A: Component>(&mut self, parent: Entity, depth: usize, text: &str, chosen: bool, action: A) -> Entity {
         let row = self.chosen_button(parent, text, chosen, action);

@@ -101,6 +101,7 @@ pub struct FormView {
     /// Whether the ship as it is is drawn, faint, where the draft differs from it.
     pub show_current: bool,
     pub advanced: bool,
+    pub applying: crate::ledger::Applying,
 }
 
 /// The editor's camera: an orbit about a focus on the ship's nose axis.

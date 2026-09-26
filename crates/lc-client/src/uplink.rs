@@ -510,6 +510,8 @@ fn fold(
             ..
         } => {
             info!(?ship_id, %name, at = ?ship.at_ly, doing = ?ship.motive, "welcomed");
+            // A new session: an Apply sent on the old one will never be answered.
+            ui.0.form.applying = crate::ledger::Applying::Idle;
             // The server's clock, adopted whole. Both ends propagate analytically from a
             // coordinate time, so agreeing on it is the whole of agreeing about where anything
             // is — and the client's own clock started whenever this process did.
@@ -765,7 +767,10 @@ fn fold(
                 // client learns of it the same way anyone else does: when its light arrives.
                 Order::Transmit { .. } | Order::Burn { .. } => None,
                 // What a refit does to the account arrives straight after, as `Fitted`.
-                Order::Refit { .. } => Some("refit begun".into()),
+                Order::Refit { .. } => {
+                    ui.0.form.applying = crate::ledger::Applying::Idle;
+                    Some("refit begun".into())
+                }
                 // Refused as not built until H6 and E3.
                 Order::FieldMode { .. } | Order::Emit { .. } => None,
                 Order::CancelRefit => Some("refit stopped where it was".into()),
@@ -821,29 +826,16 @@ fn fold(
             if matches!(reason, Refusal::NotInSight | Refusal::TooFast) {
                 uplink.chasing = None;
             }
-            uplink.applied = Some(match reason {
-                Refusal::Impossible => "the server refused that order".into(),
-                Refusal::NotYours | Refusal::NotYou => "that is not your ship".into(),
-                Refusal::NotInSight => "there is nothing there to close on".into(),
-                Refusal::TooFast => "too fast to match; kill the closing speed first".into(),
-                Refusal::NoEnergy => "not enough energy stored for that".into(),
-                Refusal::Refitting => "the drones are working: cancel the refit to fly".into(),
-                Refusal::UnderWay => "under way: cut the drive before refitting".into(),
-                Refusal::Short(short) => crate::refit_panel::shortfall(short),
-                // Their key has to arrive before it can be used, and asking for it is a
-                // message like any other — which is to say, it takes as long as the light does.
-                Refusal::NoKey => "no key for them yet; send yours and ask for theirs".into(),
-                Refusal::NothingNew => "nothing new to report since the last one".into(),
-                Refusal::NotBuilt => "this shard cannot do that yet".into(),
-                Refusal::Switching => "the field is already switching".into(),
-                Refusal::NoAperture => "engines at one end only: emit fore or aft".into(),
-                Refusal::OverRating => "more power than those apertures are rated for".into(),
-                Refusal::Form(fault) => crate::refit_panel::form_fault(fault),
-                Refusal::TooManyPresets => "no room for another preset; delete one first".into(),
-                Refusal::PresetName => {
-                    format!("a preset needs a name of 1 to {} bytes", lc_proto::form::PRESET_NAME_LIMIT)
-                }
-            });
+            let said = refused(reason);
+            // Orders are answered in the order sent, but another may have gone just before the
+            // refit, so only a refusal a refit can earn is filed against the Apply that sent it.
+            if let crate::ledger::Applying::Sent(target) = &ui.0.form.applying
+                && refits_refuse(reason)
+            {
+                let target = target.clone();
+                ui.0.form.applying = crate::ledger::Applying::Refused { target, why: said.clone() };
+            }
+            uplink.applied = Some(said);
         }
         Outbound::Throttled { retry_after_ticks } => {
             warn!(retry_after_ticks, "throttled");
@@ -908,6 +900,40 @@ fn fold(
         }
         // Sent once H4, E3 and S2 are built.
         Outbound::Collapsed { .. } | Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
+    }
+}
+
+fn refits_refuse(reason: Refusal) -> bool {
+    matches!(
+        reason,
+        Refusal::Form(_) | Refusal::Short(_) | Refusal::UnderWay | Refusal::Refitting | Refusal::NoEnergy | Refusal::Impossible
+    )
+}
+
+/// What a refusal reads as. Something to act on, per `lightcone/docs/18-ui-style.md`.
+pub fn refused(reason: Refusal) -> String {
+    match reason {
+        Refusal::Impossible => "the server refused that order".into(),
+        Refusal::NotYours | Refusal::NotYou => "that is not your ship".into(),
+        Refusal::NotInSight => "there is nothing there to close on".into(),
+        Refusal::TooFast => "too fast to match; kill the closing speed first".into(),
+        Refusal::NoEnergy => "not enough energy stored for that".into(),
+        Refusal::Refitting => "the drones are working: cancel the refit to fly".into(),
+        Refusal::UnderWay => crate::ledger::Blocked::UnderWay.reason().into(),
+        Refusal::Short(short) => crate::refit_panel::shortfall(short),
+        // Their key has to arrive before it can be used, and asking for it is a
+        // message like any other — which is to say, it takes as long as the light does.
+        Refusal::NoKey => "no key for them yet; send yours and ask for theirs".into(),
+        Refusal::NothingNew => "nothing new to report since the last one".into(),
+        Refusal::NotBuilt => "this shard cannot do that yet".into(),
+        Refusal::Switching => "the field is already switching".into(),
+        Refusal::NoAperture => "engines at one end only: emit fore or aft".into(),
+        Refusal::OverRating => "more power than those apertures are rated for".into(),
+        Refusal::Form(fault) => crate::refit_panel::form_fault(fault),
+        Refusal::TooManyPresets => "no room for another preset; delete one first".into(),
+        Refusal::PresetName => {
+            format!("a preset needs a name of 1 to {} bytes", lc_proto::form::PRESET_NAME_LIMIT)
+        }
     }
 }
 
@@ -1990,5 +2016,35 @@ mod tests {
             uplink.joined().is_some(),
             "a refused order dropped the connection"
         );
+    }
+
+    /// A refusal while Apply awaits its answer is filed against the target sent, naming the part,
+    /// and an acceptance clears the way for the next.
+    #[test]
+    fn a_refit_refused_is_told_to_the_apply_that_sent_it() {
+        use crate::ledger::Applying;
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let target = lc_world::form::Form::starting();
+        ui.0.form.applying = Applying::Sent(target.clone());
+        let fault = lc_proto::FormFault::EngineOffAxis(lc_proto::form::PartId(2));
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Refused { ship_id: ShipId(7), reason: Refusal::Form(fault) });
+        let why = "part 2 must point fore or aft".to_string();
+        assert_eq!(ui.0.form.applying, Applying::Refused { target: target.clone(), why });
+
+        ui.0.form.applying = Applying::Sent(target.clone());
+        let order = Order::Refit { target: (&target).into() };
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Accepted { ship_id: ShipId(7), event_id: 1, at_t: 2_000_000, order });
+        assert_eq!(ui.0.form.applying, Applying::Idle);
+
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Refused { ship_id: ShipId(7), reason: Refusal::NoKey });
+        assert_eq!(ui.0.form.applying, Applying::Idle, "with nothing sent, a refusal is some other order's");
+
+        ui.0.form.applying = Applying::Sent(target.clone());
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Refused { ship_id: ShipId(7), reason: Refusal::NoKey });
+        assert_eq!(ui.0.form.applying, Applying::Sent(target.clone()), "a refit is never refused for want of a key");
+
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        assert_eq!(ui.0.form.applying, Applying::Idle, "a new session answers nothing sent on the old one");
     }
 }

@@ -513,6 +513,33 @@ or `bevy_egui` gives it the primary context.
 **The editor is where refits are made.** The refit window (`R`) is the ledger: the budget, the
 three phases, progress, and Cancel.
 
+### Apply and the ledger
+
+- **Apply is in the editor's chrome**, an `em_ui` strip along the bottom of the view, and sends
+  `Order::Refit { target }` with the draft. It is disabled, saying why beside it, with no shard,
+  while an Apply awaits its answer, while a round runs, while the ship is under way, and when the
+  draft is the ship. `ledger::gate` is that rule, tested without a window.
+- **A refusal is shown where Apply was pressed**, worded by `refit_panel::form_fault`, and in the
+  ledger. It belongs to the target it refused, so it goes quiet as soon as the draft changes. The
+  shard answers orders in the order sent, but another may have gone just before the refit, so only
+  a refusal a refit can earn (a fault in the form, a shortfall, under way, refitting) is filed
+  against the Apply awaiting its answer. A new session clears the wait, since nothing sent on the
+  old one will be answered.
+- **The draft is edited against what the ship becomes** (`ledger::base`): the target of a round
+  the shard is running, and otherwise the form the ship has settled into. Accepted, the draft and
+  the ship agree and the marks go; the editor's strip says what the round is doing. Canceled, the
+  draft still holds the target, marked against the ship as the cancel left it, so Apply resumes it.
+- **The ledger reads the plan the shard's recipe solves to**, `Fitting::refit`, on the client's
+  clock, never the draft: budget (`ledger::Budget`), each phase with its steps, progress through
+  the round from `Plan::at`, and Cancel. With no round it says whether the draft differs, or what
+  was refused. `Budget::of` is the one computation, and the editor's live budget (C4) calls it on a
+  round solved from the draft.
+- **The vent is shown in joules** until C4 gives the field's peak temperature from it, on H3's heat
+  model. C4 adds Apply's second question when the vent would collapse the field.
+- `--apply` presses Apply once the shard has welcomed the client, `--cancel-at <f>` cancels the
+  round that far through, and `--draft askew` tilts the engine off the nose axis, which Apply
+  refuses.
+
 ### Getting in and out
 
 | key | from World | from Map | from the editor |

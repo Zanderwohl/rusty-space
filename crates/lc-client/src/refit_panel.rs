@@ -1,13 +1,14 @@
 //! The refit panel and the development actions panel.
 //!
 //! The refit panel is the ledger: what the ship holds and what it is doing. A refit is begun from
-//! the editor, whose Apply C5 builds. See `lightcone/docs/29-ship-form.md`.
+//! the editor's Apply, and this window says what it is doing with the editor closed. The numbers
+//! are [`crate::ledger`]'s. See `lightcone/docs/29-ship-form.md`.
 
 use bevy::prelude::*;
 use bevy_egui::egui;
 
 use lc_world::fitting::Balance;
-use lc_world::refit::rounds::{Change, Step};
+use lc_world::refit::rounds::Plan;
 
 use crate::action::Action;
 use crate::input::Requested;
@@ -61,17 +62,6 @@ pub fn me(joules: f64, module_j: f64) -> String {
     format!("{:.2} ME", joules / module_j)
 }
 
-fn step_name(step: &Step) -> String {
-    let doing = match step.change {
-        Change::Grow => "growing",
-        Change::Shrink => "shrinking",
-        Change::Add => "building",
-        Change::Remove => "taking apart",
-        Change::Move => "moving",
-    };
-    format!("{doing} {} ({:?})", step.part, step.kind)
-}
-
 pub fn energy_per_km_s_j(balance: &Balance, mass_kg: f64) -> f64 {
     let rapidity = lc_world::cost::rapidity_between(
         glam::DVec3::ZERO,
@@ -96,13 +86,7 @@ pub fn length(meters: f64) -> String {
     if meters < 1.0e4 { format!("{meters:.0} m") } else { format!("{:.2} km", meters / 1.0e3) }
 }
 
-/// A duration a refit is measured in: days, or years past a few hundred of them.
-fn span(seconds: f64) -> String {
-    let days = seconds / 86_400.0;
-    if days < 400.0 { format!("{days:.1} days") } else { format!("{:.1} years", days / 365.25) }
-}
-
-pub fn refit(ui: &mut egui::Ui, _state: &UiState, game: &Session, out: &mut MessageWriter<Requested>) {
+pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut MessageWriter<Requested>) {
     let now = game.coordinate_time_s();
     let ship = &game.ship;
     let Some(fitting) = ship.fitting() else {
@@ -135,21 +119,96 @@ pub fn refit(ui: &mut egui::Ui, _state: &UiState, game: &Session, out: &mut Mess
     });
     ui.separator();
 
-    if let Some(running) = fitting.refit().filter(|_| ship.is_refitting(now)) {
-        let progress = running.at(now);
-        let total = running.steps().len();
-        ui.label(format!("refit: step {} of {total}", (progress.finished + 1).min(total)));
-        if let Some((step, fraction)) = progress.current {
-            ui.add(egui::ProgressBar::new(fraction as f32).text(step_name(&running.steps()[step])));
-        }
-        let left = running.round().start_s + running.duration_s() - now;
-        ui.weak(format!("{} to go", span(left.max(0.0))));
-        if ui.button("Cancel refit").on_hover_text("the step under way is undone").clicked() {
-            ask(out, Action::CancelRefit);
-        }
-        return;
+    match fitting.refit().filter(|_| ship.is_refitting(now)) {
+        Some(running) => round(ui, running, fitting.balance(), now, out),
+        None => idle(ui, &state.form, fitting.balance()),
     }
-    ui.weak("A ship is its parts now. Refits return with the form editor.");
+}
+
+/// What the editor has that the ship does not, when no round is running.
+fn idle(ui: &mut egui::Ui, form: &crate::form_view::FormView, balance: &Balance) {
+    use crate::ledger::Applying;
+    let Some(draft) = &form.draft else {
+        ui.weak("no refit under way");
+        return;
+    };
+    if let Some(why) = form.applying.refusal(draft) {
+        ui.label(format!("refused: {why}"));
+    }
+    match &form.applying {
+        Applying::Sent(_) => ui.label("applied; waiting for the shard"),
+        _ if draft.form == draft.ship => ui.weak("no refit under way"),
+        _ => {
+            let changed = draft.marks(balance).len();
+            ui.label(format!("draft: {changed} {} changed, not applied", if changed == 1 { "part" } else { "parts" }))
+        }
+    };
+}
+
+/// A vent heats the field, so it wears 18's hazard.
+fn hazard() -> egui::Color32 {
+    crate::map_panel::color_of(crate::ui::HAZARD)
+}
+
+fn round(ui: &mut egui::Ui, plan: &Plan, balance: &Balance, now: f64, out: &mut MessageWriter<Requested>) {
+    use crate::ledger::{Budget, StepState, phase_name, phases, span, standing};
+    let module_j = balance.module_energy_j();
+    let at = standing(plan, now);
+    ui.strong("REFIT UNDER WAY");
+    let step = at.step.as_ref().map_or(0, |(_, n, _)| *n);
+    ui.add(egui::ProgressBar::new(at.fraction as f32).text(format!("step {step} of {}, {} to go", at.total, span(at.left_s))));
+
+    let budget = Budget::of(plan, balance);
+    egui::Grid::new("refit-budget").num_columns(2).show(ui, |ui| {
+        let mut row = |key: &str, value: String| {
+            ui.label(key);
+            ui.label(value);
+            ui.end_row();
+        };
+        row("available", me(budget.available_j, module_j));
+        row("spent", me(budget.spent_j, module_j));
+        row("peak in storage", format!("{} of {}", me(budget.peak_j, module_j), me(budget.peak_capacity_j, module_j)));
+        if budget.vented_j > 0.0 {
+            ui.label("vented");
+            ui.colored_label(hazard(), format!("{:.3e} J", budget.vented_j));
+            ui.end_row();
+        }
+    });
+
+    for (phase, rows) in phases(plan, now) {
+        ui.separator();
+        ui.strong(phase_name(phase));
+        if rows.is_empty() {
+            ui.weak("nothing");
+            continue;
+        }
+        egui::Grid::new(("refit-phase", phase_name(phase))).num_columns(3).show(ui, |ui| {
+            for row in rows {
+                match row.state {
+                    StepState::Done => ui.weak(&row.what),
+                    StepState::Working(_) => ui.strong(&row.what),
+                    StepState::Waiting => ui.label(&row.what),
+                };
+                match row.state {
+                    StepState::Done => ui.weak("done"),
+                    StepState::Working(f) => ui.add(egui::ProgressBar::new(f as f32).desired_width(90.0).show_percentage()),
+                    StepState::Waiting => ui.label(span(row.duration_s)),
+                };
+                if row.vented_j > 0.0 {
+                    ui.colored_label(hazard(), format!("vents {:.3e} J", row.vented_j));
+                } else if row.stored_j != 0.0 {
+                    ui.label(format!("{:+.2} ME", row.stored_j / module_j));
+                } else {
+                    ui.label("");
+                }
+                ui.end_row();
+            }
+        });
+    }
+    ui.separator();
+    if ui.button("Cancel refit").on_hover_text("the step under way is undone").clicked() {
+        ask(out, Action::CancelRefit);
+    }
 }
 
 pub fn dev_actions(ui: &mut egui::Ui, game: &Session, out: &mut MessageWriter<Requested>) {
