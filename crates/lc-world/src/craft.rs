@@ -20,6 +20,7 @@ use crate::fitting::Fitting;
 use crate::instrument::Instrument;
 use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
 use crate::navigation::Waypoint;
+use crate::seen::{History, Refitting, Seen, running};
 use crate::solar;
 use crate::system::LocalSystem;
 
@@ -52,19 +53,6 @@ pub const HISTORY_S: f64 = 2.0 * crate::system::LOCAL_SHELL_LY * crate::flight::
 /// oldest stretches, and the observers far enough away to have wanted them stop seeing it —
 /// which is the safe way to be unable to answer.
 pub const HISTORY_STRETCHES: usize = 256;
-
-/// How many forms a craft remembers having had. A round is a step per part change, so this holds
-/// a few rounds of a large form; past it, the oldest is forgotten, and an observer asking about
-/// then is told nothing rather than a later form.
-pub const HISTORY_FORMS: usize = 1024;
-
-/// A form a craft had, and the length it measured, from the coordinate second it took effect.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Seen {
-    pub from_s: f64,
-    pub form: Arc<crate::form::Form>,
-    pub length_m: f64,
-}
 
 /// What a hull sits at, kelvin.
 ///
@@ -213,7 +201,7 @@ pub struct Craft {
     fitting: Option<Fitting>,
     /// The forms it has had, oldest first, so an observer is shown the one its light left with.
     /// See [`Craft::seen_at`]. Not saved, as `past` is not.
-    seen: Vec<Seen>,
+    seen: History,
 }
 
 impl Craft {
@@ -237,7 +225,7 @@ impl Craft {
             // about its past as there is.
             known_from_s: f64::NEG_INFINITY,
             fitting: None,
-            seen: Vec::new(),
+            seen: History::default(),
         }
     }
 
@@ -475,10 +463,16 @@ impl Craft {
         };
         let since = fitting.since_s();
         if self.seen.is_empty() {
-            let from = fitting.refit().map_or_else(|| fitting.form().clone(), |plan| plan.round().from.clone());
+            let running = running(fitting);
+            let round = fitting.refit().map(|plan| plan.round());
+            let from = Arc::new(round.map_or_else(|| fitting.form().clone(), |round| round.from.clone()));
             let steps = fitting.steps_ending(f64::NEG_INFINITY, since);
-            self.seen.push(Seen { from_s: f64::NEG_INFINITY, form: Arc::new(from), length_m: self.length_m });
-            self.note_steps(steps, self.length_m);
+            let length_m = self.length_m;
+            self.seen.push(Seen { from_s: f64::NEG_INFINITY, form: from.clone(), length_m, refit: None });
+            if let (Some(round), Some((refit, _))) = (round, &running) {
+                self.seen.push(Seen { from_s: round.start_s, form: from, length_m, refit: Some(refit.clone()) });
+            }
+            self.note_steps(steps, length_m, running);
         }
         self.note_form(since);
         self.begin_solar_segment(since);
@@ -487,8 +481,7 @@ impl Craft {
     /// The form and length its light left with at `t`, coordinate seconds. `None` for a craft
     /// with no form, and before the oldest form it remembers.
     pub fn seen_at(&self, t: f64) -> Option<&Seen> {
-        let after = self.seen.partition_point(|seen| seen.from_s <= t);
-        after.checked_sub(1).map(|i| &self.seen[i])
+        self.seen.at(t)
     }
 
     /// The length its light left with at `t`, meters. Before the oldest form it remembers, that
@@ -503,44 +496,37 @@ impl Craft {
     fn settle_fitting(&mut self, before: Option<&ShipState>, at_s: f64) {
         let Some(mut fitting) = self.fitting.take() else { return };
         let ended = fitting.steps_ending(fitting.since_s(), at_s);
+        // Before the settlement, which drops a round it finds done.
+        let running = running(&fitting);
         fitting.settle(before.unwrap_or(&self.motion), at_s);
         self.fitting = Some(fitting);
         let was = self.length_m;
         self.sync_length();
-        self.note_steps(ended, was);
+        self.note_steps(ended, was, running);
     }
 
     /// The last of `steps` is the form the settlement measured; those before it were never
-    /// measured, so they keep the length the craft had.
-    fn note_steps(&mut self, steps: Vec<(f64, crate::form::Form)>, was_m: f64) {
+    /// measured, so they keep the length the craft had. `running` is the round they belong to and
+    /// when it ends, and the step ending with it leaves no round running.
+    fn note_steps(&mut self, steps: Vec<(f64, crate::form::Form)>, was_m: f64, running: Option<(Refitting, f64)>) {
         let last = steps.len().saturating_sub(1);
         for (i, (at_s, form)) in steps.into_iter().enumerate() {
             let length_m = if i == last { self.length_m } else { was_m };
-            self.push_seen(Seen { from_s: at_s, form: Arc::new(form), length_m });
+            let refit = running.as_ref().filter(|(_, end_s)| at_s < *end_s).map(|(refit, _)| refit.clone());
+            self.seen.push(Seen { from_s: at_s, form: Arc::new(form), length_m, refit });
         }
     }
 
     /// After anything that may have changed the form at `at_s` other than a step ending.
     fn note_form(&mut self, at_s: f64) {
         let Some(fitting) = &self.fitting else { return };
-        let form = fitting.form();
-        if self.seen.last().is_some_and(|seen| *seen.form == *form && seen.length_m == self.length_m) {
-            return;
-        }
-        let seen = Seen { from_s: at_s, form: Arc::new(form.clone()), length_m: self.length_m };
-        self.push_seen(seen);
+        let refit = running(fitting).map(|(refit, _)| refit);
+        self.note(at_s, refit);
     }
 
-    fn push_seen(&mut self, seen: Seen) {
-        if self.seen.last().is_some_and(|last| *last.form == *seen.form && last.length_m == seen.length_m) {
-            return;
-        }
-        let horizon = seen.from_s - HISTORY_S;
-        self.seen.push(seen);
-        // The first is wanted only before the second began.
-        let stale = self.seen.iter().skip(1).take_while(|s| s.from_s < horizon).count();
-        let excess = self.seen.len().saturating_sub(HISTORY_FORMS);
-        self.seen.drain(..stale.max(excess));
+    fn note(&mut self, at_s: f64, refit: Option<Refitting>) {
+        let Some(fitting) = &self.fitting else { return };
+        self.seen.push(Seen { from_s: at_s, form: Arc::new(fitting.form().clone()), length_m: self.length_m, refit });
     }
 
     /// How far it is from its system's primary at `t`, meters. `None` between systems.
@@ -679,6 +665,7 @@ impl Craft {
         };
         let plan = round.solve(fitting.balance())?;
         fitting.begin_refit(plan);
+        self.note_form(now_s);
         Ok(())
     }
 
@@ -705,11 +692,17 @@ impl Craft {
     /// Stop a refit where it is, reversing the step in progress.
     pub fn cancel_refit(&mut self, now_s: f64) {
         self.settle(now_s);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.cancel_refit(now_s);
-        }
+        let Some(fitting) = &mut self.fitting else { return };
+        let plan = fitting.refit().cloned();
+        fitting.cancel_refit(now_s);
+        // Put back rather than finished when the cancel left the form the step stood on.
+        let refit = plan.map(|plan| Refitting::Canceled {
+            reverses: *fitting.form() == plan.at(now_s).form,
+            plan: Arc::new(plan),
+            at_s: now_s,
+        });
         self.sync_length();
-        self.note_form(now_s);
+        self.note(now_s, refit);
     }
 
     /// Cut to a straight line from a point, at a velocity. What a burn does.
@@ -1668,7 +1661,6 @@ mod tests {
         assert!(at(Kind::Ship) > at(Kind::Relay));
         assert!(at(Kind::Relay) > at(Kind::Beacon));
     }
-
 
     /// What a burn costs in light, and the shape of the dependence: everything about it scales
     /// with what is being pushed and how hard.

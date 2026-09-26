@@ -1,9 +1,9 @@
-//! `--demo refit` drawn on the hull meshes (R2) in the hull material (R3), with the truss (R8).
+//! A refit drawn on the hull meshes (R2) in the hull material (R3), with the truss (R8).
 //!
-//! The game keeps its placeholders until R10, and draws construction this way from R15. The demo
-//! cannot wait: plating is a mask on R3's material,
-//! and means nothing on a Bevy primitive. So under `--demo refit` the whole ship is meshed, and
-//! [`crate::parts`] stands aside.
+//! The game keeps its placeholders until R10, but plating is a mask on R3's material and means
+//! nothing on a Bevy primitive. So while the player's ship has a [`Refit`], `--demo refit`'s or a
+//! round in the game, the whole ship is meshed, and [`crate::parts`] stands aside once the first
+//! step's meshes are shown. When the round is over they go, and the placeholders come back.
 //!
 //! A step is meshed once, as it starts: the ship it leaves alone, each copy it works on at the
 //! larger of its two sizes, and each copy's truss. Within the step only uniforms move, each read
@@ -64,6 +64,7 @@ impl Plugin for RefitHullPlugin {
         app.add_plugins((HullMaterialPlugin, HullMeshPlugin))
             .init_resource::<Palette>()
             .init_resource::<Unready>()
+            .init_resource::<Showing>()
             .add_systems(Update, request_palette)
             .add_systems(Last, take_texels);
     }
@@ -163,6 +164,10 @@ pub enum Drawn {
 #[derive(Resource, Default)]
 pub struct Unready(pub bool);
 
+/// Whether a step's meshes are drawing the refit, which [`crate::parts`] stands aside for.
+#[derive(Resource, Default)]
+pub struct Showing(pub bool);
+
 /// Draw the staged refit, replacing [`crate::parts::update_parts`]'s placeholders.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_refit(
@@ -174,12 +179,19 @@ pub fn draw_refit(
     refit: Option<Res<Refit>>,
     palette: Res<Palette>,
     mut unready: ResMut<Unready>,
+    mut showing: ResMut<Showing>,
     mut materials: ResMut<Assets<HullMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut generations: Query<(Entity, &mut Generation, &mut Transform, &mut Visibility)>,
     mut drawn: Query<(&Drawn, &ChildOf, Option<&HullMeshState>, &mut Transform), Without<Generation>>,
 ) {
-    let (Some(refit), true) = (refit, own.is_formed()) else { return };
+    let Some(refit) = refit.filter(|_| own.is_formed()) else {
+        for (root, ..) in &generations {
+            commands.entity(root).despawn();
+        }
+        (unready.0, showing.0) = (false, false);
+        return;
+    };
     unready.0 = true;
     let Some((albedo, light_tiles)) = palette.ready.clone() else { return };
     let session = &game.0;
@@ -254,6 +266,7 @@ pub fn draw_refit(
         }
         unready.0 = !generation.shown;
     }
+    showing.0 = generations.iter().any(|(_, g, ..)| g.shown);
     if generations.iter().any(|(_, g, ..)| g.key == key && g.shown) {
         for (root, generation, ..) in &generations {
             if generation.key != key {
@@ -489,7 +502,7 @@ mod tests {
     #[test]
     fn the_starting_hulls_truss_is_meshed() {
         let plan = demo_round(&B, 1.0).solve(&B).unwrap();
-        let refit = Refit { plan, balance: B, clock: Clock::Frozen(0.5) };
+        let refit = Refit { plan, balance: B, clock: Clock::Frozen(0.5), canceled: None };
         let frame = refit.frame(0.0);
         let working = frame.working.as_ref().unwrap();
         let standing = standing(&frame, &B);

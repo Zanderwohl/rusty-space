@@ -80,7 +80,10 @@ A `Presence` is an **appearance**, never a state. The distinction is the whole o
 is a recipe a receiver evaluates at whatever time it likes, so handing one over for somebody
 else's ship would defeat the light cone in a different shape — the client would simply compute
 where that ship is *now*. So a presence carries one retarded sample — position, velocity,
-attitude, and the coordinate time the light left — and not the motive it is flying.
+attitude, and the coordinate time the light left — and not the motive it is flying. A refit is
+the same: a presence carries the step the light shows under way, never the round's recipe, which
+would name the form the ship becomes before its light shows it
+([29-ship-form.md](29-ship-form.md#protocol-and-persistence)).
 
 **A client reckons a contact forward between statements**, along the conic that sample puts it
 on inside a system and a straight line outside one, to the instant whose light reaches the ship

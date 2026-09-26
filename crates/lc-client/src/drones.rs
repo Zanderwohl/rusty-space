@@ -22,7 +22,7 @@ use lc_world::form::sdf::Piece;
 use lc_world::refit::rounds::{Phase, Plan};
 
 use crate::construction::{Clock, Look, Refit, Working};
-use crate::parts::{FormRoot, OwnForm};
+use crate::parts::OwnForm;
 use crate::session::TIME_RATE;
 
 /// Drones per cubic meter of drone part: 785 on the starting ship, one to each ten-meter cube.
@@ -400,12 +400,12 @@ pub struct Swarm {
 
 const SEED: u32 = 1;
 
-/// The drones' clock, coordinate seconds: the round's own while it loops, so traffic restarts with
-/// it. `--refit-at` freezes the construction but not the traffic, so a burst of one step moves;
-/// `--rate 0` freezes both.
+/// The drones' clock, coordinate seconds: the round's own while it runs or loops, so traffic
+/// restarts with it. `--refit-at` freezes the construction but not the traffic, so a burst of one
+/// step moves; `--rate 0` freezes both.
 fn clock_s(refit: Option<&Refit>, now_s: f64, origin_s: f64) -> f64 {
     match refit {
-        Some(r) if matches!(r.clock, Clock::Looping(_)) => r.now_s(now_s) - r.plan.round().start_s,
+        Some(r) if matches!(r.clock, Clock::Looping(_) | Clock::Coordinate) => r.now_s(now_s) - r.plan.round().start_s,
         _ => now_s - origin_s,
     }
 }
@@ -414,23 +414,28 @@ fn step_s(plan: &Plan, working: &Working) -> f64 {
     plan.steps().get(working.step).map_or(0.0, |s| s.duration_s)
 }
 
-/// Draw the player's drones over its form, in the frame [`crate::parts::update_parts`] placed.
+/// Draw the player's drones over its form, in the ship's frame. Placed from
+/// [`crate::parts::ship_frame`] rather than from a root, since the placeholders' root is gone
+/// while [`crate::refit_hull`] draws the ship.
+#[allow(clippy::too_many_arguments)]
 pub fn update_drones(
     mut commands: Commands,
     game: Res<crate::app::Game>,
+    ui: Res<crate::app::Ui>,
+    eye: Res<crate::hull::Eye>,
     own: Res<OwnForm>,
     refit: Option<Res<Refit>>,
-    roots: Query<&Transform, (With<FormRoot>, Without<Swarm>)>,
     mut swarms: Query<(Entity, &Swarm, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<DroneMaterial>>,
 ) {
-    let (Some(sdf), Some(root)) = (own.sdf(), roots.iter().next()) else {
+    let Some(sdf) = own.sdf() else {
         for (swarm, ..) in &swarms {
             commands.entity(swarm).despawn();
         }
         return;
     };
+    let root = crate::parts::ship_frame(&game.0, &eye, &ui);
     let now_s = game.0.coordinate_time_s();
     let refit = refit.as_deref();
     let frame = refit.map(|r| r.frame(now_s));
@@ -447,7 +452,7 @@ pub fn update_drones(
         commands.spawn((
             Mesh3d(meshes.add(drone_quads(MAX_DRONES))),
             MeshMaterial3d(material.clone()),
-            *root,
+            root,
             // The mesh's positions are not where anything is drawn.
             NoFrustumCulling,
             RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
@@ -455,7 +460,7 @@ pub fn update_drones(
         ));
         return;
     };
-    *transform = *root;
+    *transform = root;
     let next = traffic.uniform(clock_s(refit, now_s, swarm.origin_s), SEED);
     if let Some(mut material) = materials.get_mut(&swarm.material)
         && material.uniforms != next
