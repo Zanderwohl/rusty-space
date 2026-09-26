@@ -577,7 +577,7 @@ graph LR
 
 ### R10 · The real hull in the game
 
-- status: todo
+- status: active card "Build R10: the real hull in the game"
 - needs: R2, R3, S1
 - touches: `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`
 - read: 32 §The hull
