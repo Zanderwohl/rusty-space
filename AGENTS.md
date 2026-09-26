@@ -72,7 +72,8 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto. A pin: `--map` on its own holds the ship, so a hand on the mouse cannot pan a shot two runs are meant to agree about |
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`, `corona`. Brings its own shard |
 | `--console <line>` | type a line at the console once the shard has welcomed the client, with the console open. With `--local` the shard is directing, so every command is available |
-| `--demo-cam <yaw:pitch:booms>` | pin the camera for the run, so two shots of a scene are the same shot |
+| `--demo-cam <yaw:pitch:booms[:to]>` | pin the camera for the run, so two shots of a scene are the same shot. With `to`, the boom eases toward it once nothing is waiting to be drawn: `--frames 1 --burst 150` with `40:1.5` photographs every remesh of a hull on the way in |
+| `--watch-from <id>` | put the camera behind another craft, by its ship id: how two clients on one shard photograph each other |
 | `--demo-cam-at <x:y:z:m>` | orbit a point of the ship's frame, meters, from `m` meters, past the boom's stops, which are the whole ship's. Aim with `--demo-cam` |
 | `--apply` / `--cancel-at <f>` | with `--local --view form --draft <d>`: press the editor's Apply once the shard has welcomed the client, and cancel the round once it is that fraction through. Once the round runs the view is pinned to the world, where it is drawn building. A real refit end to end, photographed |
 | `--demo refit` / `--refit-at <f>` / `--refit-from <f>` | a staged refit on the player's ship, frozen at a fraction of its round or running from one. With `--form default*k`, `k` times larger. The shot waits for its meshes |
@@ -88,6 +89,22 @@ They are still *actions*, though, so they race whatever else aims the camera; th
 down about a pitch that did not land three runs in a row is about exactly that. `--demo-cam`
 does not race anything, because it is written every frame after the dispatcher rather than once
 on arrival. Prefer it for anything two runs are meant to agree about.
+
+**Two clients on one shard.** The first runs `--local` and prints the shard's address; its shard
+is directing, so every console command works for anyone who joins it. Ship ids go in order of
+joining:
+
+```bash
+lightcone --local --station l1:Venus --console "refit-magic cluster" --watch-from 2 \
+    --demo-cam 30:20:3 --shot a.png --frames 9000
+lightcone --server ws://127.0.0.1:<port> --station l1:Venus --console "teleport beside:1" \
+    --watch-from 1 --demo-cam 30:20:3 --shot b.png --frames 2500
+```
+
+The later window covers the earlier, and a covered window photographs black, so the first client
+has to shoot after the second has quit; a ship stays in the world when its client leaves. A fresh
+ship cannot Apply any preset, which the shard refuses for its length, its drones or its energy:
+`refit-magic` is how one gets a form without a round.
 
 A scene replaces what used to be `--traffic <n>` and `--chase`, and does more than either: the
 craft have names, sizes and somewhere to be, and `lc_world::scenario` is where what they do is

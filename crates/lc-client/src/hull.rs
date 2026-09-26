@@ -13,7 +13,8 @@
 //! parallax a ten-thousand-kilometer boom opens up against a nearby moon is simply correct
 //! instead of being an error nobody measured.
 //!
-//! A craft with a form is drawn by [`crate::parts`] instead, and its length here is its form's.
+//! A craft with a form is drawn by [`crate::ship_hull`] instead, and the player's length here is
+//! its form's.
 
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
@@ -415,12 +416,9 @@ fn drawn(game: &Session, uplink: &Uplink, eye: &Eye, look: DVec3) -> Vec<(Option
     out
 }
 
-/// The craft drawn as an ovoid: all but one with a form, which [`crate::parts`] draws. Only the
-/// player's own ship can have one so far.
-fn hulled(mut want: Vec<(Option<ShipId>, Placed)>, own_formed: bool) -> Vec<(Option<ShipId>, Placed)> {
-    if own_formed {
-        want.retain(|(id, _)| id.is_some());
-    }
+/// The craft drawn as an ovoid: those with no form, since [`crate::ship_hull`] draws the rest.
+fn hulled(mut want: Vec<(Option<ShipId>, Placed)>, formed: impl Fn(Option<ShipId>) -> bool) -> Vec<(Option<ShipId>, Placed)> {
+    want.retain(|(id, _)| !formed(*id));
     want
 }
 
@@ -454,7 +452,11 @@ pub fn update_hulls(
     mut placed: Query<(Entity, &mut Transform, &MeshMaterial3d<BodySurfaceMaterial>, &Hull)>,
 ) {
     let look = ui.look.forward();
-    let want = hulled(drawn(&game.0, &uplink, &eye, look), own_form.is_formed());
+    let formed = |id: Option<ShipId>| match id {
+        None => own_form.is_formed(),
+        Some(id) => uplink.contacts.iter().any(|c| c.ship_id == id && !c.form.parts.is_empty()),
+    };
+    let want = hulled(drawn(&game.0, &uplink, &eye, look), formed);
     let star = lighting(&game.0);
     let shade = |at: &Placed| lit(&game.0, star, at.at_ly, GRAY);
     let place = |at: &Placed| Transform {
@@ -593,8 +595,9 @@ mod tests {
         let placed = || Placed { offset_m: DVec3::ZERO, length_m: 500.0, facing: DVec3::X, at_ly: DVec3::ZERO };
         let want = || vec![(None, placed()), (Some(ShipId(7)), placed())];
         let ids = |v: Vec<(Option<ShipId>, Placed)>| v.into_iter().map(|(id, _)| id.map(|s| s.0)).collect::<Vec<_>>();
-        assert_eq!(ids(hulled(want(), false)), vec![None, Some(7)]);
-        assert_eq!(ids(hulled(want(), true)), vec![Some(7)], "the formed ship kept its ovoid");
+        assert_eq!(ids(hulled(want(), |_| false)), vec![None, Some(7)]);
+        assert_eq!(ids(hulled(want(), |id| id.is_none())), vec![Some(7)], "the formed ship kept its ovoid");
+        assert_eq!(ids(hulled(want(), |id| id.is_some())), vec![None], "a formed contact kept its ovoid");
     }
 
     fn render(v: DVec3) -> Vec3 {

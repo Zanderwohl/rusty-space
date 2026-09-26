@@ -56,6 +56,34 @@ until the new one lands. `cargo run -p lc-client --example mesh_void` photograph
 
 ![Consecutive frames across a remesh from 32 to 128 cells: the old mesh stays up until the new one lands](../images/mesh-remesh.jpg)
 
+### In the game
+
+As built (`lc_client::ship_hull`, R10): every craft with a form is drawn this way, the player's
+from `Fitted` and everyone else's from the form its `Presence` stated, as its light left it. Only
+a craft stated with no form is still the ovoid. Meshes are shared between craft of one design at
+one band, and a hull measures its band from its own pixels on screen, so a distant ship is 16 cells
+and a close one up to 256.
+
+- **Nothing blinks.** A new form or a new band keeps the mesh on screen until its replacement lands.
+  Until a craft's first mesh lands it is drawn as placeholders, which is the only place they are
+  still drawn.
+- **Another ship's roll** is its form's, from the same grid the server measures its broadside on,
+  worked out on the async pool. A new form's roll is taken as its mesh lands, so the old shape
+  never turns to the new one's roll.
+- **A refit is drawn over it.** `refit_hull` stands the player's hull aside once a step's meshes are
+  up. When the round is over, its last meshes stay until the real hull is the form the round left,
+  so the ship never flashes back to placeholders or to an earlier shape. Other craft's rounds are
+  R15's.
+- **Memory.** A vertex is 48 bytes and 24 of indices, held in the main world and on the GPU. The
+  starting form is 45 kB at 16 cells, 0.7 MB at 64 and 11 MB at 256; Cluster is a quarter larger.
+  A sky of a hundred distant designs is a few MB, and 32 meshes nothing wants are kept for zooming
+  back.
+
+![Two clients on one shard, each photographing the other: A rebuilt as Cluster, seen by B](../images/real-hull-b-sees-a.jpg)
+![And B in the starting form, seen by A](../images/real-hull-a-sees-b.jpg)
+![Cluster by Saturn, which was placeholders between refits until R10](../images/real-hull-cluster.jpg)
+![Consecutive frames across remeshes in the game, 16 to 32, 32 to 64 and 64 to 128 cells: a burst with the camera dollying in](../images/real-hull-remesh.jpg)
+
 ### Details are sized in meters
 
 The eye judges size by how small repeated detail is. So **every repeated detail has a fixed size
@@ -254,8 +282,8 @@ frame the placeholders come back, and nothing is left over.
   distant ship is seen mid-build as it was; running back after a cancel, it runs back. Past the step's
   end it draws the step finished until the next statement says what came next, at most a tick
   later. Knowing one step, it stands in a missing parent from only the step's two ends, so a part
-  hanging from one the round has not built yet is not drawn. Nothing draws another craft's form until
-  R10, so this is for R10 and R15 to call.
+  hanging from one the round has not built yet is not drawn. R10 draws another craft's form steady
+  from its `Presence`; drawing its round from this is R15's.
 - Drones are placed in the ship's frame directly rather than under the placeholders' root, which is
   gone while the hull meshes draw; under `--demo refit` since R8 they had not been drawn at all. Their
   clock is the round's, from its start, in the game as in the demo.
@@ -449,7 +477,9 @@ An observer inside someone's cone gets the blinding point, from the photometry, 
 ## Temporary assets
 
 Before the mesher, the construction pass or the field shader exist, everything above has a
-placeholder, so the rest can be built and a refit visibly changes the ship straight away:
+placeholder, so the rest can be built and a refit visibly changes the ship straight away. Since R10
+the hull's placeholders are drawn only until a craft's first mesh lands, and a refit's only until
+its first step's meshes do:
 
 - **Each part as a Bevy primitive mesh**, scaled to its solved size: `Sphere` scaled for an
   ellipsoid, `Capsule3d`, `Cuboid` for a slab and for the Mind, `Cylinder`, `Torus`,
@@ -459,8 +489,8 @@ placeholder, so the rest can be built and a refit visibly changes the ship strai
   during the truss phase, crossfading to solid.
 - **Drones as instanced motes** on straight lines.
 - **The field as a fresnel sphere** around the bounds, tinted by temperature once there is one.
-- **Spars uncut**: the plain primitive. The saddles and straps arrive with the distance-field
-  mesher.
+- **Spars uncut**: the plain primitive. Retired in the game with the placeholders; the mesher cuts
+  the saddles and straps.
 
 Until the grid gives a form its extent, the orbit camera frames the smallest sphere about the Mind
 holding the corners of the form's bounds, so its stops and standoff follow the form's size as the
@@ -499,7 +529,7 @@ own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the examp
 | crate | new | changed |
 |---|---|---|
 | `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` (the cone, and the aperture glow beside it) | `plume_material` retires once `plume.rs` stops drawing the reaction drive |
-| `lc-client` | `hull_mesh.rs` (finishes, painting, caching) over `surface_nets.rs` (any field), `truss.rs`, `refit_hull.rs`, `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws the form instead of the ovoid. `plume.rs` draws the aperture glow at `F c` and the cone |
+| `lc-client` | `hull_mesh.rs` (finishes, painting, caching) over `surface_nets.rs` (any field), `ship_hull.rs` (every craft's steady hull), `truss.rs`, `refit_hull.rs` (the construction overlay), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws only a craft with no form. `plume.rs` draws the aperture glow at `F c` and the cone |
 | `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl`, `exhaust_cone.wgsl`, `aperture_glow.wgsl` | |
 
 Materials go in `em-render` because nothing in them is specific to Lightcone. A hull with regions

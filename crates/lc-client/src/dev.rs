@@ -38,6 +38,9 @@ pub struct DevEntry {
     /// anything: it is written every frame, so the frame the shutter opens on is the one that
     /// was asked for.
     pub camera: Option<(f64, f64, f64)>,
+    /// A boom the pin eases toward once nothing is waiting to be drawn, a sixtieth of the way a
+    /// frame: a burst across a remesh. `--demo-cam yaw:pitch:booms:to`.
+    pub dolly_to: Option<f64>,
     /// Put the ship beside a body of the local system, by name. There is no action for this and
     /// there never will be; it exists so a thing too small to fly to can be looked at.
     pub at_body: Option<String>,
@@ -482,11 +485,22 @@ pub(crate) fn apply_and_cancel(
 /// Written every frame rather than once, which is the whole point: anything that aims the
 /// camera — an arriving crossing, a snap to a target, a hand on the mouse — is overruled on the
 /// frame after it, so there is nothing left for a shot to race.
-pub(crate) fn pin_camera(dev: Res<DevEntry>, mut ui: ResMut<Ui>) {
+pub(crate) fn pin_camera(
+    dev: Res<DevEntry>,
+    mut ui: ResMut<Ui>,
+    unready: Option<Res<crate::refit_hull::Unready>>,
+    mut dolly: Local<Option<f64>>,
+) {
     let Some((yaw_deg, pitch_deg, booms)) = dev.camera else { return };
     ui.look.yaw = yaw_deg.to_radians();
     ui.look.pitch = pitch_deg.to_radians();
-    ui.boom_lengths = booms;
+    let at = dolly.get_or_insert(booms);
+    if let Some(to) = dev.dolly_to
+        && !unready.is_some_and(|u| u.0)
+    {
+        *at *= (to / *at).powf(1.0 / 60.0);
+    }
+    ui.boom_lengths = *at;
 }
 
 /// What `--map-focus` asked for, before there is a system to resolve a star against.

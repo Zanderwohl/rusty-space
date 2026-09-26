@@ -610,6 +610,11 @@ impl HullMeshState {
         self.extent_m
     }
 
+    /// The [`form_hash`] or [`pieces_hash`] of the source wanted.
+    pub fn form(&self) -> u64 {
+        self.form
+    }
+
     pub fn cells(&self) -> Option<u32> {
         self.cells
     }

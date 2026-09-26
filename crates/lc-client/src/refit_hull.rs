@@ -1,54 +1,35 @@
-//! A refit drawn on the hull meshes (R2) in the hull material (R3), with the truss (R8).
+//! A refit drawn over the real hull (R10) with the truss (R8): the construction overlay.
 //!
-//! The game keeps its placeholders until R10, but plating is a mask on R3's material and means
-//! nothing on a Bevy primitive. So while the player's ship has a [`Refit`], `--demo refit`'s or a
-//! round in the game, the whole ship is meshed, and [`crate::parts`] stands aside once the first
-//! step's meshes are shown. When the round is over they go, and the placeholders come back.
+//! Plating is a mask on R3's material, so while the player's ship has a [`Refit`], `--demo
+//! refit`'s or a round in the game, the whole ship is meshed here as the step leaves it, and
+//! [`crate::ship_hull`] stands the player's hull aside once the first step's meshes are shown.
+//! When the round is over the last step's meshes stay up until that hull is the form the round
+//! left, so the ship never flashes back to an earlier shape or to placeholders.
 //!
 //! A step is meshed once, as it starts: the ship it leaves alone, each copy it works on at the
 //! larger of its two sizes, and each copy's truss. Within the step only uniforms move, each read
 //! from [`Working::sweep`], so a paused clock draws the same frame twice. A step's meshes are shown
 //! when all of them have landed, and the last step's stay up until then.
-
 use std::sync::Arc;
 
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
-use em_render::hull_material::{
-    ALL_PLATED, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array,
-};
+use em_render::hull_material::{ALL_PLATED, HullMaterial, HullUniform};
 use glam::DVec3;
 use lc_world::fitting::Balance;
 use lc_world::form::place::{Pose, Side};
 use lc_world::form::sdf::{Piece, Sdf};
-use lc_world::form::{Form, Kind, PartId, SparMode};
+use lc_world::form::{Form, PartId};
 
 use crate::construction::{Frame, Refit, Sweep};
 use lc_world::refit::rounds::Phase;
-use crate::hull::{ALBEDO, Eye, lighting, lit};
-use crate::hull_mesh::{Finish, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, Union, region};
-use crate::procedural::{Bakes, Shape, Target, placeholder};
+use crate::hull::{Eye, lighting};
+use crate::hull_mesh::{Finish, HullForm, HullMeshState, HullSource, Union, form_hash};
+use crate::ship_hull::{Palette, RealHulls};
 use crate::surface_nets::Field;
 use crate::truss::{self, GIRDER_RADIUS_M, PITCH_M, TrussBuffers};
-
-/// As `examples/hull_void.rs`: a graph's unit square is this many meters, in this many texels.
-const TILE_M: f32 = 64.0;
-const TILE_TEXELS: u32 = 512;
-
-/// Lights by kind, as shares of the exposure's reference. A stand-in until R15 gives them real
-/// powers: bright enough to read on a night side, lost on a lit one.
-fn lights(kind: &str) -> Vec3 {
-    match kind {
-        "drone" => 0.02 * Vec3::new(0.85, 0.92, 1.0),
-        "living" => 0.03 * Vec3::new(1.0, 0.8, 0.55),
-        "engine" => 0.08 * Vec3::new(0.75, 0.85, 1.0),
-        "mind" => 0.006 * Vec3::new(0.6, 0.9, 1.0),
-        "bay" => 0.02 * Vec3::new(1.0, 0.92, 0.8),
-        _ => Vec3::ZERO,
-    }
-}
 
 /// Girders are painted safety yellow and lit by their own work lights, so a frontier too far off
 /// to show a girder still reads as construction by its color.
@@ -56,80 +37,16 @@ const GIRDER_ALBEDO: Vec3 = Vec3::new(0.8, 0.52, 0.1);
 const WORK_LIGHTS: f32 = 1.0;
 /// Plating before it is fitted out.
 const BARE: f32 = 0.45;
+/// How long a round's last meshes wait for the real hull to be the form the round left, seconds of
+/// wall time. Past it the hull is shown as it is, which is a `Fitted` that never agreed.
+const HAND_BACK_S: f32 = 5.0;
 
 pub struct RefitHullPlugin;
 
 impl Plugin for RefitHullPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((HullMaterialPlugin, HullMeshPlugin))
-            .init_resource::<Palette>()
-            .init_resource::<Unready>()
-            .init_resource::<Showing>()
-            .add_systems(Update, request_palette)
-            .add_systems(Last, take_texels);
+        app.init_resource::<Unready>().init_resource::<Showing>();
     }
-}
-
-/// The hull graphs baked into one palette, on demand.
-#[derive(Resource, Default)]
-pub struct Palette {
-    requested: bool,
-    albedo: Vec<Handle<Image>>,
-    lights: Vec<Handle<Image>>,
-    albedo_texels: Vec<Option<Vec<u8>>>,
-    light_texels: Vec<Option<Vec<u8>>>,
-    ready: Option<(Handle<Image>, Handle<Image>)>,
-}
-
-fn request_palette(
-    refit: Option<Res<Refit>>,
-    mut palette: ResMut<Palette>,
-    assets: Res<AssetServer>,
-    mut images: ResMut<Assets<Image>>,
-    mut bakes: ResMut<Bakes>,
-) {
-    if refit.is_none() || palette.requested {
-        return;
-    }
-    let plane = Target::new(Shape::Plane(TILE_TEXELS));
-    let palette = &mut *palette;
-    palette.requested = true;
-    palette.albedo_texels = vec![None; REGION_GRAPHS.len()];
-    palette.light_texels = vec![None; REGION_GRAPHS.len()];
-    for kind in REGION_GRAPHS {
-        let graph = assets.load(format!("textures/hull/{kind}.tgraph"));
-        for (target, into) in [(plane.color(), &mut palette.albedo), (plane.layer("lights"), &mut palette.lights)] {
-            let image = images.add(placeholder(target));
-            bakes.request(graph.clone(), 1, target, image.clone());
-            into.push(image);
-        }
-    }
-}
-
-/// In `Last`, after a bake lands and before extraction takes its bytes away.
-fn take_texels(mut palette: ResMut<Palette>, mut images: ResMut<Assets<Image>>) {
-    let palette = &mut *palette;
-    if !palette.requested || palette.ready.is_some() {
-        return;
-    }
-    for (handles, texels) in [(&palette.albedo, &mut palette.albedo_texels), (&palette.lights, &mut palette.light_texels)] {
-        for (handle, slot) in handles.iter().zip(texels.iter_mut()) {
-            let Some(image) = images.get(handle) else { continue };
-            if slot.is_none() && image.width() == TILE_TEXELS {
-                *slot = image.data.clone();
-            }
-        }
-    }
-    let (Some(albedo), Some(lights)) = (
-        palette.albedo_texels.iter().cloned().collect::<Option<Vec<_>>>(),
-        palette.light_texels.iter().cloned().collect::<Option<Vec<_>>>(),
-    ) else {
-        return;
-    };
-    palette.ready = Some((
-        images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
-        images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
-    ));
 }
 
 /// One step's meshes, under one root in the ship's frame.
@@ -164,11 +81,45 @@ pub enum Drawn {
 #[derive(Resource, Default)]
 pub struct Unready(pub bool);
 
-/// Whether a step's meshes are drawing the refit, which [`crate::parts`] stands aside for.
+/// Whether a step's meshes are drawing the refit, which the player's real hull and
+/// [`crate::parts`] stand aside for.
 #[derive(Resource, Default)]
 pub struct Showing(pub bool);
 
-/// Draw the staged refit, replacing [`crate::parts::update_parts`]'s placeholders.
+/// The form a round leaves the ship in, and since when it has been waiting for the real hull.
+#[derive(Default)]
+pub struct Ending {
+    form: Option<u64>,
+    waited_s: f32,
+}
+
+/// What a round's last meshes do once the round is over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HandBack {
+    /// There are none to take down.
+    Nothing,
+    /// Stay up: the real hull is not yet the form the round left.
+    Keep,
+    Handed,
+    /// Waited [`HAND_BACK_S`] for a hull that never agreed.
+    GaveUp,
+}
+
+/// `ending` is the [`form_hash`] the round left, `own_current` the one the real hull is current
+/// in, and `waited_s` how long since the round was over.
+fn hand_back(ending: Option<u64>, own_current: Option<u64>, waited_s: f32, meshes_up: bool) -> HandBack {
+    if !meshes_up {
+        HandBack::Nothing
+    } else if ending.is_none_or(|form| own_current == Some(form)) {
+        HandBack::Handed
+    } else if waited_s > HAND_BACK_S {
+        HandBack::GaveUp
+    } else {
+        HandBack::Keep
+    }
+}
+
+/// Draw the player's refit over its real hull.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_refit(
     mut commands: Commands,
@@ -177,7 +128,8 @@ pub fn draw_refit(
     eye: Res<Eye>,
     own: Res<crate::parts::OwnForm>,
     refit: Option<Res<Refit>>,
-    palette: Res<Palette>,
+    (palette, real, time): (Res<Palette>, Res<RealHulls>, Res<Time<Real>>),
+    mut ending: Local<Ending>,
     mut unready: ResMut<Unready>,
     mut showing: ResMut<Showing>,
     mut materials: ResMut<Assets<HullMaterial>>,
@@ -185,37 +137,53 @@ pub fn draw_refit(
     mut generations: Query<(Entity, &mut Generation, &mut Transform, &mut Visibility)>,
     mut drawn: Query<(&Drawn, &ChildOf, Option<&HullMeshState>, &mut Transform), Without<Generation>>,
 ) {
+    let session = &game.0;
+    let placed = crate::parts::ship_frame(session, &eye, &ui);
+    let star = lighting(session);
+    let reference = crate::ship_hull::finished(session, star, session.ship.motion.position_ly);
+    let finished = HullUniform {
+        girder: GIRDER_ALBEDO.extend(WORK_LIGHTS * reference.exposure.x / GIRDER_ALBEDO.length()),
+        ..reference
+    };
     let Some(refit) = refit.filter(|_| own.is_formed()) else {
-        for (root, ..) in &generations {
-            commands.entity(root).despawn();
+        unready.0 = false;
+        if ending.form.is_some() {
+            ending.waited_s += time.delta_secs();
         }
-        (unready.0, showing.0) = (false, false);
+        let decided = hand_back(ending.form, real.own_current(), ending.waited_s, !generations.is_empty());
+        if decided != HandBack::Keep {
+            match decided {
+                HandBack::Handed => info!("refit_hull: handed back to the real hull after {:.2} s", ending.waited_s),
+                HandBack::GaveUp => warn!("refit_hull: the real hull never became the form the round left"),
+                HandBack::Nothing | HandBack::Keep => {}
+            }
+            for (root, ..) in &generations {
+                commands.entity(root).despawn();
+            }
+            *ending = Ending::default();
+            showing.0 = false;
+            return;
+        }
+        // As the round left the ship, until the real hull is that form.
+        for (_, generation, mut transform, _) in &mut generations {
+            *transform = placed;
+            for state in &generation.copies {
+                if let Some(mut asset) = materials.get_mut(&state.material) {
+                    asset.uniforms = building(&finished, state.end, state.meshed != Some(true));
+                }
+            }
+        }
+        showing.0 = generations.iter().any(|(_, g, ..)| g.shown);
         return;
     };
+    if refit.is_changed() || ending.form.is_none() {
+        let left = refit.canceled.as_ref().map_or(refit.plan.target(), |(_, left)| left);
+        *ending = Ending { form: Some(form_hash(left, &refit.balance)), waited_s: 0.0 };
+    }
     unready.0 = true;
-    let Some((albedo, light_tiles)) = palette.ready.clone() else { return };
-    let session = &game.0;
+    let Some((albedo, light_tiles)) = palette.ready() else { return };
     let frame = refit.frame(session.coordinate_time_s());
     let key = (frame.finished, frame.working.as_ref().map(|w| w.step));
-    let placed = crate::parts::ship_frame(session, &eye, &ui);
-
-    let star = lighting(session);
-    let base = lit(session, star, session.ship.motion.position_ly, Vec4::ONE);
-    let reference = base.exposure.x;
-    let mut emitted = [Vec4::ZERO; REGIONS];
-    for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS) {
-        *slot = (reference * lights(kind)).extend(0.0);
-    }
-    let finished = HullUniform {
-        to_star: base.to_star,
-        reflected: base.reflected / ALBEDO as f32,
-        exposure: base.exposure,
-        detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
-        bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
-        emitted,
-        girder: GIRDER_ALBEDO.extend(WORK_LIGHTS * reference / GIRDER_ALBEDO.length()),
-        ..default()
-    };
 
     if !generations.iter().any(|(_, g, ..)| g.key == key) {
         let root = spawn(&mut commands, &frame, &refit.balance, key, &finished, &albedo, &light_tiles, &mut materials);
@@ -496,6 +464,19 @@ mod tests {
             assert!(a.position.distance(b.position) > 1.0, "{:?} did not ride", rider.part);
             assert!(b.position.distance(rider.pose.position) < 1e-3, "{:?} ends apart from the grown form", rider.part);
         }
+    }
+
+    /// A round's last meshes stay up until the real hull is the form the round left, and no
+    /// longer than [`HAND_BACK_S`] if it never is.
+    #[test]
+    fn the_last_meshes_wait_for_the_real_hull() {
+        let (left, earlier) = (Some(7), Some(3));
+        assert_eq!(hand_back(left, None, 0.1, true), HandBack::Keep, "not meshed yet");
+        assert_eq!(hand_back(left, earlier, 0.1, true), HandBack::Keep, "meshed in the form before the round");
+        assert_eq!(hand_back(left, left, 0.1, true), HandBack::Handed);
+        assert_eq!(hand_back(left, earlier, HAND_BACK_S + 0.1, true), HandBack::GaveUp);
+        assert_eq!(hand_back(left, earlier, 0.1, false), HandBack::Nothing);
+        assert_eq!(hand_back(None, None, 0.0, true), HandBack::Handed, "no round was seen to end");
     }
 
     /// The truss the demo's grown hull puts up is meshed, and within the budget by a margin.

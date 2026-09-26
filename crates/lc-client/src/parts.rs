@@ -1,9 +1,10 @@
 //! A craft's form drawn as placeholder parts: one Bevy primitive per copy of each part, at its
 //! solved size and pose, flat colored by kind.
 //!
-//! 32 §Temporary assets. No blends, spars uncut and a slab's corners square; the mesher replaces
-//! all of it. The pieces sit in the ship's frame (x nose, y port, z up) in meters under one root,
-//! which is the only thing placed each frame. Only the player's own ship has a form so far.
+//! 32 §Temporary assets. No blends, spars uncut and a slab's corners square. Drawn only until the
+//! real hull ([`crate::ship_hull`]) has a mesh up, and for a refit until its meshes are. The pieces
+//! sit in the ship's frame (x nose, y port, z up) in meters under one root, which is the only thing
+//! placed each frame. Other craft's are [`crate::ship_hull`]'s, which never draw a refit.
 
 use std::borrow::Cow;
 
@@ -42,6 +43,7 @@ struct Formed {
     still: Frame,
     /// From the Mind to the farthest corner of the form's bounds, meters.
     reach_m: f64,
+    balance: Balance,
 }
 
 impl OwnForm {
@@ -50,7 +52,7 @@ impl OwnForm {
         let (min, max) = sdf.bounds();
         let reach_m = min.abs().max(max.abs()).length();
         let still = Frame { pieces: sdf.pieces().to_vec(), standing: form.clone(), finished: 0, working: None };
-        Ok(OwnForm(Some(Formed { sdf, still, reach_m })))
+        Ok(OwnForm(Some(Formed { sdf, still, reach_m, balance: *balance })))
     }
 
     /// The solved form, for the editor to draw and to cast the pointer into.
@@ -74,6 +76,11 @@ impl OwnForm {
             }
         }
         Ok(own)
+    }
+
+    /// What the form was solved with.
+    pub fn balance(&self) -> Balance {
+        self.0.as_ref().map_or(Balance::DEFAULT, |f| f.balance)
     }
 
     pub fn is_formed(&self) -> bool {
@@ -310,6 +317,7 @@ pub fn update_parts(
     mut pieces: Query<(&MeshMaterial3d<BodySurfaceMaterial>, &Painted, &mut Transform, &mut Visibility), Without<Cage>>,
     mut cages: Query<(&MeshMaterial3d<BodyWireframeMaterial>, &Cage, &mut Transform, &mut Visibility), Without<Painted>>,
     showing: Res<crate::refit_hull::Showing>,
+    real: Res<crate::ship_hull::RealHulls>,
 ) {
     if own.0.is_none() && !own.is_changed() {
         return;
@@ -318,8 +326,8 @@ pub fn update_parts(
     let at_ly = session.ship.motion.position_ly;
     let star = lighting(session);
     let placed = ship_frame(session, &eye, &ui);
-    // `crate::refit_hull` draws a refit on the hull meshes instead, once it has meshed a step.
-    let formed = own.0.as_ref().filter(|_| !showing.0);
+    // The real hull, or a refit's meshes over it, once either is up.
+    let formed = own.0.as_ref().filter(|_| !showing.0 && !real.drawn(None));
     let Some(formed) = formed else {
         for (root, _, _) in &roots {
             commands.entity(root).despawn();

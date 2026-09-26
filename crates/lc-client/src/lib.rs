@@ -68,6 +68,7 @@ pub mod refit_hull;
 pub mod refit_panel;
 pub mod resolved;
 pub mod session;
+pub mod ship_hull;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod signin_ui;
 pub mod sky_asset;
