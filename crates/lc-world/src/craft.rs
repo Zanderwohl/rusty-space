@@ -21,6 +21,7 @@ use crate::instrument::Instrument;
 use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
 use crate::navigation::Waypoint;
 use crate::refit::rounds::Round;
+use crate::solar;
 use crate::system::LocalSystem;
 
 /// A craft, by the identifier whoever owns it uses. Opaque here.
@@ -441,15 +442,17 @@ impl Craft {
     /// Where `state`'s nose points at `now_s`, for a motive that began at `began_s`.
     ///
     /// A plan points the nose where it needs it. A fitted craft with no plan, inside a system,
-    /// turns broadside to the star so its collectors face it — see
+    /// turns its form's broadside to the star so its collectors face it — see
     /// `lightcone/docs/20-solar-power.md` — swinging from the attitude its last order left it at,
-    /// at its hull's rate. The nose goes perpendicular to the star by the smallest turn; the
-    /// renderer rolls the belly toward the star about it.
+    /// at its hull's rate. The nose leans to the broadside's angle by the smallest turn; the
+    /// renderer rolls the hull to its broadside's roll about it.
     fn facing_of(&self, state: &ShipState, began_s: f64, now_s: f64) -> DVec3 {
-        let broadside = (self.fitting.is_some() && !state.is_under_way())
-            .then(|| self.to_star(state, now_s))
-            .flatten()
-            .map(|to_star| broadside_nose(state.attitude, to_star));
+        let broadside = self
+            .fitting
+            .as_ref()
+            .filter(|_| !state.is_under_way())
+            .zip(self.to_star(state, now_s))
+            .map(|(fitting, to_star)| solar::idle_nose(state.attitude, to_star, solar::idle_cos(fitting.geometry())));
         match broadside {
             Some(to) => crate::attitude::turned(state.attitude, to, self.slew_rate_rad_s(), now_s - began_s),
             None => motion::facing_at(state, self.length_m, now_s),
@@ -579,22 +582,22 @@ impl Craft {
         Some((at - star).length() * crate::system::M_PER_LY)
     }
 
-    /// What its hull would collect broadside at `t`, watts, at this length. Zero under way,
-    /// between systems, and for a craft with no fitting.
+    /// What its hull collects at `t`, watts: its shadow toward the star in the attitude it holds
+    /// then. Zero under way, between systems, and for a craft with no fitting.
     pub fn solar_w_at(&self, t: f64) -> f64 {
-        self.solar_w_for(self.length_m, t)
-    }
-
-    /// [`Craft::solar_w_at`] for a hull of another length, as a refit would leave it.
-    pub fn solar_w_for(&self, length_m: f64, t: f64) -> f64 {
         let (Some(fitting), Some(system)) = (&self.fitting, self.system.as_deref()) else {
             return 0.0;
         };
         if self.motion.is_under_way() {
             return 0.0;
         }
-        let Some(distance_m) = self.star_distance_m_at(t) else { return 0.0 };
-        crate::solar::power_w(fitting.balance(), length_m, system.star_luminosity_w(), distance_m)
+        let (Some(distance_m), Some(to_star), Some(nose)) =
+            (self.star_distance_m_at(t), self.to_star(&self.motion, t), self.facing_at(t))
+        else {
+            return 0.0;
+        };
+        let shadow_m2 = solar::shadow_m2(fitting.geometry(), nose.dot(to_star));
+        solar::power_w(fitting.balance(), shadow_m2, system.star_luminosity_w(), distance_m)
     }
 
     /// Start the income segment that begins at `from_s`, at the power collected at its midpoint.
@@ -604,7 +607,7 @@ impl Craft {
         let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else { return };
         let from_s = from_s.max(since);
         self.settle_fitting(None, from_s);
-        let middle = 0.5 * (from_s + crate::solar::segment_end(from_s));
+        let middle = 0.5 * (from_s + solar::segment_end(from_s));
         let watts = self.solar_w_at(middle);
         if let Some(fitting) = &mut self.fitting {
             fitting.set_solar_w(watts);
@@ -614,7 +617,7 @@ impl Craft {
     /// Settle at every income boundary up to `now_s`, starting each new segment as it goes.
     fn collect_to(&mut self, now_s: f64) {
         let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else { return };
-        let step = crate::solar::step_for(since, now_s);
+        let step = solar::step_for(since, now_s);
         let mut boundary = ((since / step).floor() + 1.0) * step;
         while boundary <= now_s {
             self.settle_fitting(None, boundary);
@@ -944,19 +947,6 @@ impl std::fmt::Debug for Craft {
     }
 }
 
-/// The nose direction nearest `attitude` that is perpendicular to `to_star`: `attitude` with its
-/// component along the star removed. A nose pointing straight at the star or away from it has no
-/// nearest perpendicular, and takes the one toward ecliptic north.
-pub fn broadside_nose(attitude: DVec3, to_star: DVec3) -> DVec3 {
-    let s = to_star.normalize_or_zero();
-    let across = attitude - s * attitude.dot(s);
-    if across.length_squared() > 1.0e-12 {
-        return across.normalize();
-    }
-    let reference = if s.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
-    (reference - s * reference.dot(s)).normalize_or_zero()
-}
-
 /// Every craft there is. The single source of truth for craft state.
 #[derive(Clone, Debug, Default)]
 pub struct Fleet {
@@ -1276,10 +1266,6 @@ mod tests {
 
     /// The anchor, flown rather than computed: a starting ship at rest a tenth of an AU from the
     /// real Sun fills at the anchor's rate after half a year and is full after a year.
-    ///
-    /// The anchor is a 500 m ovoid's broadside. The starting form is 571 m long, and until F10
-    /// reads its shadow it collects as the ovoid of that length, so the half year fills it the
-    /// square of that ratio further than half: about 65%.
     #[test]
     fn a_ship_holding_still_near_the_sun_fills_up() {
         let Some(system) = sol() else { return };
@@ -1293,8 +1279,7 @@ mod tests {
         }
         // The catalog Sun is not exactly the anchor's 1361 W/m², so a few per cent either way.
         let half = stored(&craft, t) / capacity;
-        let anchored = 0.5 * (craft.length_m / 500.0).powi(2);
-        assert!((half - anchored).abs() < 0.03, "{half} full after half a year, not {anchored}");
+        assert!((half - 0.5).abs() < 0.03, "{half} full after half a year");
         craft.advance(1.1 * year, 0.6 * year);
         assert_eq!(stored(&craft, 1.1 * year), capacity, "it stops at capacity");
     }
@@ -1360,8 +1345,9 @@ mod tests {
         assert!(mid_err * 10.0 < start_err, "midpoint off by {mid_err}, start by {start_err}");
     }
 
-    /// An idle fitted ship holds its nose perpendicular to the star, and after a flight it swings
-    /// back to broadside at its hull's own rate rather than snapping.
+    /// An idle fitted ship leans its nose to the angle that turns its form's broadside to the star,
+    /// and after a flight it swings back at its hull's own rate rather than snapping, collecting
+    /// what its attitude presents as it goes.
     #[test]
     fn an_idle_ship_turns_broadside_to_its_star() {
         let Some(system) = sol() else { return };
@@ -1369,8 +1355,11 @@ mod tests {
         let to_star = |craft: &Craft, t: f64| {
             (system.star_position_at(t).unwrap() - craft.motion.position_ly).normalize()
         };
+        let lean = solar::idle_cos(craft.fitting().unwrap().geometry());
+        let off_broadside = |craft: &Craft, t: f64| (craft.facing_at(t).unwrap().dot(to_star(craft, t)) - lean).abs();
         // Idle since before anything: already round, with no turn left to make.
-        assert!(craft.facing_at(0.0).unwrap().dot(to_star(&craft, 0.0)).abs() < 1.0e-9);
+        assert!(off_broadside(&craft, 0.0) < 1.0e-9);
+        let broadside_w = craft.solar_w_at(0.0);
 
         // Nothing unfitted turns: a probe keeps the attitude it was left with.
         let mut probe = Craft::at(CraftId(3), Kind::Probe, craft.motion.position_ly);
@@ -1393,10 +1382,16 @@ mod tests {
         let quarter = 0.5 * std::f64::consts::PI / craft.slew_rate_rad_s();
         let part_way = craft.facing_at(cut_at + 0.25 * quarter).unwrap();
         assert!(part_way.dot(flying) < 0.999, "it did not begin turning");
-        assert!(part_way.dot(to_star(&craft, cut_at)).abs() > 1.0e-6, "it arrived at once");
+        assert!(off_broadside(&craft, cut_at + 0.25 * quarter) > 1.0e-6, "it arrived at once");
         let settled = craft.facing_at(cut_at + quarter * 1.01).unwrap();
-        assert!(settled.dot(to_star(&craft, cut_at + quarter)).abs() < 1.0e-6, "{settled}");
+        assert!(off_broadside(&craft, cut_at + quarter * 1.01) < 1.0e-6, "{settled}");
         assert!(settled.is_normalized());
+        // Nose half toward the star it presents less than broadside, and all of it once round, less
+        // the few parts in a thousand the crossing moved it out.
+        let turning_w = craft.solar_w_at(cut_at + 1.0);
+        assert!(turning_w < 0.9 * broadside_w, "{turning_w} while turning, {broadside_w} broadside");
+        let round_w = craft.solar_w_at(cut_at + quarter * 1.01);
+        assert!((round_w / broadside_w - 1.0).abs() < 1.0e-2, "{round_w} against {broadside_w}");
     }
 
     /// **A plan is planned from the attitude the craft then records.** They are two halves of one
@@ -1417,15 +1412,6 @@ mod tests {
         let Motive::Crossing(cruise) = &craft.motion.motive else { panic!("not crossing") };
         assert_eq!(cruise.initial_attitude(), craft.motion.attitude);
         assert_eq!(craft.motion.attitude, nose, "it planned from somewhere the nose had not been");
-    }
-
-    #[test]
-    fn a_broadside_nose_is_the_nearest_perpendicular() {
-        let s = DVec3::X;
-        assert_eq!(broadside_nose(DVec3::new(1.0, 1.0, 0.0), s), DVec3::Y);
-        assert_eq!(broadside_nose(DVec3::Z, s), DVec3::Z);
-        let head_on = broadside_nose(-DVec3::X, s);
-        assert!(head_on.dot(s).abs() < 1.0e-12 && head_on.is_normalized(), "{head_on}");
     }
 
     /// A fitted craft is as long as its form's extent, not the 500 m its twenty slots made it, and

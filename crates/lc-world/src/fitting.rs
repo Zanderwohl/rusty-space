@@ -133,6 +133,10 @@ pub const FIELD_ANCHOR_ME: f64 = 10.0;
 /// `const`, and pinned there.
 pub const STARTING_ENVELOPE_M2: f64 = 339248.9593564414;
 
+/// The starting form's shadow broadside, m²: what [`Balance::solar_gain`] is solved on. Pinned by
+/// `solar`'s anchor tests for the same reason.
+pub const STARTING_BROADSIDE_M2: f64 = 77777.67035341849;
+
 impl Balance {
     pub const DEFAULT: Self = {
         let module_density_kg_m3 = MODULE_DENSITY_KG_M3;
@@ -149,11 +153,8 @@ impl Balance {
         let day_s = 86_400.0;
         let degree = std::f64::consts::PI / 180.0;
         // Collection that fills the starting storage in the anchor time and pays the drain too,
-        // over what real starlight on the broadside of a 500 m ovoid would give.
+        // over what real starlight on the starting form's broadside would give.
         let wanted_w = STARTING.storage * storage_density * me_j / SOLAR_ANCHOR_S + STARTING.living * living_density_w;
-        let broadside_m2 = std::f64::consts::PI
-            * 250.0
-            * (250.0 * crate::craft::BEAM_PER_LENGTH);
         let flux = crate::solar::SOLAR_CONSTANT_W_M2 / (SOLAR_ANCHOR_AU * SOLAR_ANCHOR_AU);
         let rated_load_gain = (SOLAR_ANCHOR_AU / RATED_LOAD_AU) * (SOLAR_ANCHOR_AU / RATED_LOAD_AU);
         Self {
@@ -161,7 +162,7 @@ impl Balance {
             recovery: 0.95,
             module_density_kg_m3,
             conversion_efficiency,
-            solar_gain: wanted_w / (conversion_efficiency * flux * broadside_m2),
+            solar_gain: wanted_w / (conversion_efficiency * flux * STARTING_BROADSIDE_M2),
             data_mass_fraction: DATA_MASS_FRACTION,
             data_work_factor: 3.0,
             storage_density,
@@ -458,6 +459,11 @@ impl Fitting {
 
     pub fn since_s(&self) -> f64 {
         self.since_s
+    }
+
+    /// The shadow table, broadside and moments per kilogram of the last form the grid measured.
+    pub fn geometry(&self) -> &Geometry {
+        &self.geometry
     }
 
     /// What starlight is adding in the segment in force, watts.

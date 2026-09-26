@@ -117,6 +117,27 @@ pub fn adopt_fixture(dev: Res<crate::dev::DevEntry>, mut ui: ResMut<crate::app::
     }
 }
 
+/// Fit an offline ship with the form `--form` draws, so it turns and collects as that form does.
+/// A shard's `Fitted` replaces it.
+///
+/// After `--station` has placed the ship: the placement writes its position without settling, and
+/// the first segment would be priced where it started.
+pub fn fit_fixture(dev: Res<crate::dev::DevEntry>, mut game: ResMut<crate::app::Game>, mut done: Local<bool>) {
+    let placing = dev.station.is_some() && !matches!(game.0.ship.motion.motive, lc_world::motion::Motive::Holding(_));
+    if *done || placing {
+        return;
+    }
+    *done = true;
+    if game.0.ship.fitting().is_some() {
+        return;
+    }
+    let Some(form) = dev.form.as_deref().and_then(fixture) else { return };
+    if lc_world::form::rules::check(&form, &Balance::DEFAULT).is_ok() {
+        let now = game.0.coordinate_time_s();
+        game.0.ship.fit(Some(lc_world::fitting::Fitting::full(form, Balance::DEFAULT, now)));
+    }
+}
+
 /// Take the player's form from the server's last `Fitted` whenever it changes: at sign-in, and as
 /// each refit step finishes. Framed to hold both ends of a round under way, as `--demo refit` is.
 /// `--form` and `--demo refit` hold their own and are left alone.
@@ -265,7 +286,7 @@ pub(crate) fn ship_frame(session: &crate::session::Session, eye: &Eye, ui: &crat
     let facing = session.ship.facing_at(session.coordinate_time_s()).unwrap_or(DVec3::X);
     Transform {
         translation: sim_to_render(eye.offset_m(at_ly, None, ui.look.forward()) / UNIT_M).as_vec3(),
-        rotation: frame(facing, star.map(|(star_ly, _, _)| star_ly - at_ly)),
+        rotation: frame(facing, star.map(|(star_ly, _, _)| star_ly - at_ly), crate::hull::own_roll_rad(session)),
         scale: Vec3::splat((1.0 / UNIT_M) as f32),
     }
 }
@@ -493,7 +514,7 @@ mod tests {
     #[test]
     fn the_ships_frame_points_its_nose_ahead_and_its_back_at_the_star() {
         let fore = DVec3::Y;
-        let q = frame(fore, Some(DVec3::X * 3.0));
+        let q = frame(fore, Some(DVec3::X * 3.0), 0.0);
         assert!(close(q * Vec3::X, render(fore)), "{}", q * Vec3::X);
         assert!(close(q * Vec3::Z, render(DVec3::X)), "{}", q * Vec3::Z);
         assert!(close((q * Vec3::X).cross(q * Vec3::Y), q * Vec3::Z), "handedness was lost");
