@@ -1,8 +1,7 @@
 //! The refit panel and the development actions panel.
 //!
-//! Until S1 the refit panel is the ledger: what the ship holds and what it is doing. A ship is its
-//! form, the shard refuses loadout refits, and the editor (C5) is where refits come back. See
-//! `lightcone/docs/29-ship-form.md`.
+//! The refit panel is the ledger: what the ship holds and what it is doing. A refit is begun from
+//! the editor, whose Apply C5 builds. See `lightcone/docs/29-ship-form.md`.
 
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -19,19 +18,11 @@ use crate::ui::UiState;
 /// What a shortage reads as. Something to act on, per `lightcone/docs/18-ui-style.md`.
 pub fn shortfall(short: lc_proto::Shortfall) -> String {
     use lc_proto::Shortfall;
-    let name = |module: lc_proto::Module| match module {
-        lc_proto::Module::Storage => "energy storage",
-        lc_proto::Module::Drone => "worker drones",
-        lc_proto::Module::Living => "living space",
-        lc_proto::Module::Engine => "engines",
-        lc_proto::Module::Data => "data storage",
-    };
     match short {
-        Shortfall::Unbuildable => "more modules than slots, or no drone left to build with".into(),
         Shortfall::Energy => "not enough energy, even taking apart what is not wanted".into(),
-        Shortfall::NoDrones => "no drones to do the work".into(),
-        Shortfall::CannotBuild(module) => format!("cannot build {}", name(module)),
-        Shortfall::CannotDismantle(module) => format!("cannot take apart {}", name(module)),
+        Shortfall::NoDrones(id) => {
+            format!("no drones left to work on {}: keep some until the build", lc_world::form::PartId::from(id))
+        }
     }
 }
 
@@ -61,6 +52,7 @@ pub fn form_fault(fault: lc_proto::FormFault) -> String {
         F::Extent => "the ship is too long or too short".into(),
         F::TooSmall(id) => format!("{} is smaller than the smallest part", part(id)),
         F::TooFewDrones => "fewer drones than a ship may keep".into(),
+        F::OtherMind(id) => format!("{} is not this ship's Mind, which it keeps", part(id)),
     }
 }
 
@@ -194,7 +186,8 @@ mod tests {
 
     #[test]
     fn a_shortfall_says_what_is_short() {
-        assert_eq!(shortfall(lc_proto::Shortfall::CannotBuild(lc_proto::Module::Data)), "cannot build data storage");
+        let short = lc_proto::Shortfall::NoDrones(lc_proto::form::PartId(3));
+        assert_eq!(shortfall(short), "no drones left to work on part 3: keep some until the build");
     }
 
     /// The rocket law's low-speed form, `m Δv c / ε`.

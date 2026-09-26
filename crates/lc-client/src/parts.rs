@@ -113,6 +113,27 @@ pub fn adopt_fixture(dev: Res<crate::dev::DevEntry>, mut ui: ResMut<crate::app::
     }
 }
 
+/// Take the player's form from the server's last `Fitted` whenever it changes: at sign-in, and as
+/// each refit step finishes. `--form` and `--demo refit` hold their own and are left alone.
+pub fn adopt_fitted(
+    uplink: Res<crate::uplink::Uplink>,
+    dev: Res<crate::dev::DevEntry>,
+    mut own: ResMut<OwnForm>,
+    mut adopted: Local<Option<lc_proto::Form>>,
+) {
+    let Some(hull) = uplink.hull.as_ref().filter(|_| dev.form.is_none() && dev.refit.is_none()) else { return };
+    if adopted.as_ref() == Some(&hull.form) {
+        return;
+    }
+    *adopted = Some(hull.form.clone());
+    let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
+    match OwnForm::new(&(&hull.form).into(), &balance) {
+        Ok(formed) => *own = formed,
+        // A form partway through a round may not place. The last one that did stays drawn.
+        Err(e) => debug!("the ship's form does not place yet: {e}"),
+    }
+}
+
 /// Flat albedo by kind, linear.
 pub(crate) fn paint(kind: Kind) -> Vec4 {
     let [r, g, b] = match kind {

@@ -6,7 +6,7 @@ tick and answers the connection that sent it. The client knows nothing about any
 is `lc_server::command` and `lc_client::console`.
 
 Status: **built** — `help`, `teleport`, `where`, `who-is`, `energize`, `drain`, `chart`,
-`refit-finish`, `refit-magic`, `stage`.
+`refit`, `refit-finish`, `refit-magic`, `stage`.
 
 ## Why text on the wire
 
@@ -62,7 +62,7 @@ reason `ability::allows` opens development there: the population is whoever ran 
 `energize` and `stage` sit at the levels the old `Inbound::Grant` and `Inbound::Stage` are allowed
 at, and a test holds the two tables to each other.
 
-`teleport`, `energize`, `drain`, `refit-finish` and `refit-magic` act on the asker's own ship from
+`teleport`, `energize`, `drain`, `refit`, `refit-finish` and `refit-magic` act on the asker's own ship from
 debug (3).
 Their `ship:` argument, which names any ship, starts at admin (2), so admins and superadmins act
 on anyone's.
@@ -101,23 +101,25 @@ moons about their planets. Without `star:` it is the system the craft is in. The
 and what kind of body each is are not charted: no orbit says them. `lc_world`'s
 `observatory::chart_system` is the mechanism.
 
+## Refit
+
+`refit <form> [scale] [ship:<id>]` begins a round toward a form, through the same checks and planner
+as `Order::Refit`, and says how many steps it takes and how long. The form is `default`, the starting
+form, or a built-in preset (`plate`, `spindle`, `cluster`); `scale` makes every part but the Mind that
+many times longer. Until the editor's Apply (C5) it is how a refit is begun from the client.
+
 ## Refit-finish
 
-`refit-finish [ship:<id>]` completes a refit under way now: the target loadout, and the energy the
+`refit-finish [ship:<id>]` completes a refit under way now: the target form, and the energy the
 remaining steps would have taken. Only the time is skipped, so the crew's upkeep over it is not
 charged, and a ship that is not refitting is an error.
 
 ## Refit-magic
 
-`refit-magic [storage:] [drones:] [living:] [engines:] [data:] [slots:] [ship:<id>]` makes a ship
-that loadout at once and spends nothing. Each count left out stays as it is. The one rule kept is
-that the modules fit the slots: energy and the drone a real refit needs are not asked for. A refit
-under way is dropped, not finished, and storage keeps what it holds only up to its new capacity.
-
-The refit panel's **Magic** button sends the draft as this line and opens the console for the
-answer. It is shown to everyone on a shard, as the dev actions are, and the shard refuses a player
-the way it refuses any command above them. A test in `lc-client` parses the button's line with the
-shard's own parser, so the two cannot drift.
+`refit-magic <form> [scale] [ship:<id>]` makes a ship that form at once and spends nothing, the form
+named as `refit` names it. The placement rules are kept, and a form that breaks one is refused
+naming the part: energy and the drones a real refit needs are not asked for. A refit under way is
+dropped, not finished, and storage keeps what it holds only up to its new capacity.
 
 ## Teleport
 

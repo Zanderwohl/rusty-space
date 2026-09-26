@@ -90,9 +90,7 @@ async fn a_craft_written_to_the_store_comes_back_bit_for_bit() {
     }
 }
 
-/// A fitted ship's row holds `lc_proto::Fitting`, whose shape F9 left alone: the loadout it
-/// carries is the one rows written before F9 hold, and it comes back as the starting form with
-/// its account whole.
+/// A fitted ship's row holds its form and account, and both come back whole.
 #[tokio::test]
 async fn a_fitted_ships_account_comes_back_through_the_store() {
     let Some(client) = store().await else { return };

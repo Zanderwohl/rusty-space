@@ -255,6 +255,8 @@ pub struct Uplink {
     drives: std::collections::HashMap<ShipId, Vec<DriveAt>>,
     /// The last account the server stated, re-applied with the placement for the same reason.
     pub fitting: Option<lc_proto::Fitting>,
+    /// What the server solved from the ship's form with that account. See [`crate::parts::adopt_fitted`].
+    pub hull: Option<lc_proto::Hull>,
     /// Every conversation this ship is in. See [`crate::chat`].
     pub chat: crate::chat::Chat,
     pub console: crate::console::Console,
@@ -763,9 +765,9 @@ fn fold(
                 // client learns of it the same way anyone else does: when its light arrives.
                 Order::Transmit { .. } | Order::Burn { .. } => None,
                 // What a refit does to the account arrives straight after, as `Fitted`.
-                Order::RefitLoadout { .. } => Some("refit begun".into()),
-                // Refused as not built until S1, H6 and E3.
-                Order::Refit { .. } | Order::FieldMode { .. } | Order::Emit { .. } => None,
+                Order::Refit { .. } => Some("refit begun".into()),
+                // Refused as not built until H6 and E3.
+                Order::FieldMode { .. } | Order::Emit { .. } => None,
                 Order::CancelRefit => Some("refit stopped where it was".into()),
                 // Recorded against the identifier the server minted, which is the only thing
                 // an acknowledgment will ever name it by. Not shown in the events box: that
@@ -871,12 +873,13 @@ fn fold(
             Err(why) => warn!(%why, "a log page that would not parse"),
         },
         Outbound::Observing { duty, integration_s } => game.0.adopt_duty(&duty, integration_s),
-        // Taken whole, like `Flying`: the authority's account, settled.
-        // The hull and the field are read once S1 and H3 send them.
-        Outbound::Fitted { ship_id, fitting, .. } => {
+        // Taken whole, like `Flying`: the authority's account, settled. The field is read once
+        // H3 sends it.
+        Outbound::Fitted { ship_id, fitting, hull, .. } => {
             if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
-                uplink.fitting = Some(fitting);
                 game.0.ship.fit(Some((&fitting).into()));
+                uplink.fitting = Some(fitting);
+                uplink.hull = Some(hull);
             }
         }
         Outbound::AutoAcking { ship_id, with } => {
@@ -956,7 +959,7 @@ impl Plugin for UplinkPlugin {
         app
             // Not gated on a state. The socket is not the game, and a connection that only
             // lived inside one screen would drop every time the player opened a menu.
-            .add_systems(Update, (connect, pump).chain().in_set(crate::app::Stage::Link));
+            .add_systems(Update, (connect, pump, crate::parts::adopt_fitted).chain().in_set(crate::app::Stage::Link));
     }
 }
 
