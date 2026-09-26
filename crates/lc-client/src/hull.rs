@@ -177,8 +177,8 @@ pub fn attitude(fore_sim: DVec3, to_star: Option<DVec3>) -> Quat {
 }
 
 /// The same attitude for a craft drawn in its own frame — x the nose, y port, z up, as 29
-/// §Placement is relative gives it — rolled `roll_rad` further, so the face its form's broadside
-/// roll names is the one turned to the star.
+/// §Placement is relative gives it — rolled `roll_rad` further, so the face
+/// `lc_world::solar::roll_rad` names is the one turned to the star.
 pub fn frame(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Quat {
     let Some([fore, port, up]) = ship_axes(fore_sim, to_star, roll_rad) else { return Quat::IDENTITY };
     Quat::from_mat3(&Mat3::from_cols(
@@ -212,7 +212,7 @@ fn ship_axes(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Option<[
 
 /// The roll the player's form presents its broadside at. Zero for the ovoid, whose broadside is +z.
 pub(crate) fn own_roll_rad(session: &Session) -> f64 {
-    session.ship.fitting().map_or(0.0, |fitting| fitting.geometry().broadside_roll_rad)
+    session.ship.fitting().map_or(0.0, |fitting| lc_world::solar::roll_rad(fitting.geometry()))
 }
 
 /// The mesh scale for a hull of `length_m`, in render units.
@@ -660,10 +660,10 @@ mod tests {
         use lc_world::form::presets::Builtin;
         use lc_world::solar;
         let g = FormGrid::new(&Builtin::Cluster.form(), &lc_world::fitting::Balance::DEFAULT).unwrap().geometry(1.0);
-        assert!(g.broadside_roll_rad.abs() > 0.5, "premise: it rolls");
+        assert!(solar::roll_rad(&g).abs() > 0.5, "premise: it rolls");
         let to_star = DVec3::new(-2.0, 1.0, 0.5);
         let nose = solar::idle_nose(DVec3::Y, to_star, solar::idle_cos(&g));
-        let q = frame(nose, Some(to_star), g.broadside_roll_rad);
+        let q = frame(nose, Some(to_star), solar::roll_rad(&g));
         let drawn = q * solar::toward_star(&g, solar::idle_cos(&g)).as_vec3();
         assert!((drawn - render(to_star.normalize())).length() < 1e-5, "{drawn}");
     }

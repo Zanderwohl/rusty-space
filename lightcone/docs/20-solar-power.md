@@ -4,7 +4,7 @@ Every hull is covered in collectors, so a ship earns energy from starlight when 
 near a star.
 
 **Status: built.** `lc_world::solar` reads the form's shadow table and the flux; `Craft` walks the
-segments and turns idle ships' broadside to the star. The first half of this doc is the
+segments and turns an idle ship's broadside to its star. The first half of this doc is the
 mechanic and the numbers behind it. The second half is how it fits into the energy account in
 [19-ship-fitting.md](19-ship-fitting.md).
 
@@ -48,8 +48,8 @@ For the starting form, 571 m long:
 | side-on, star along the beam | 5.50 × 10⁴ m² | 0.71 |
 | nose-on, star along the nose | 2.63 × 10⁴ m² | 0.34 |
 
-The ovoid this replaces, `π √((bc sₓ)² + (ac s_y)² + (ab s_z)²)` for a 500 m hull, put 1.18 × 10⁵ m²
-broadside. The starting form is longer and much slimmer than that ovoid.
+The ovoid this replaces, `π √((bc sₓ)² + (ac s_y)² + (ab s_z)²)` for a 500 m hull, put
+1.18 × 10⁵ m² broadside. The starting form is longer and much slimmer than that ovoid.
 
 **Shape now pays.** A plate collects half as much again as a spindle of the same volume
 (1.27 × 10⁵ m² against 8.5 × 10⁴ m²), so the choice between filling fast and turning fast is a
@@ -96,9 +96,10 @@ form two and ten times as long in every part but the Mind (`default*2` and `defa
 
 Against the tables the ovoid gave, the first column's rows to Mercury did not move: the anchor fixes
 what the starting ship collects, whatever its shadow. From Venus out they moved, break-even most,
-because the ovoid's tables assumed two slots of living space and the starting form has one. The larger hulls are now the starting form scaled, 5% living space rather than the old
-10%, collecting on its shadow scaled by the square: each breaks even further out, and fills in
-about the same time close in, where the drain is nothing against the income.
+because the ovoid's tables assumed two slots of living space and the starting form has one. The
+larger hulls are now the starting form scaled, 5% living space rather than the old 10%, collecting
+on its shadow scaled by the square: each breaks even further out, and fills in about the same time
+close in, where the drain is nothing against the income.
 
 A 1 AU hop at 5 g costs the starting ship about 0.85 ME and takes 1.3 game days. Earning it
 back takes 26 minutes at Mercury, 1.5 hours at Venus, 3 hours at Earth and 7 hours at Mars. A
@@ -224,9 +225,12 @@ An idle ship turns the largest shadow its form casts to the star: [29-ship-form.
 broadside, with its roll. The picture agrees, and collection reads the attitude rather than assuming
 it, in two halves.
 
-**The roll.** Every hull rolls about its nose so that the direction across the nose with the largest
-shadow faces the star: `hull::frame` rolls the height axis toward the star, then the form's
-broadside roll further. Roll about the nose changes no thrust, so every hull does it, under way or
+**The roll.** Every hull rolls about its nose so that its broadside's part across the nose faces
+the star: `hull::frame` rolls the height axis toward the star, then `solar::roll_rad` further, the
+broadside's azimuth about the nose. That is not 29's `broadside_roll_rad`, which is the best roll
+for a nose held square: a broadside that leans off square can lie at another azimuth altogether,
+and a slab pitched nose-up whose beam beats its height would lose a quarter of its collection to
+it. Roll about the nose changes no thrust, so every hull does it, under way or
 not. With it, where the star lies in the ship's frame is fixed by one angle, the nose's to the star,
 and `solar::toward_star` is that direction. With no star, or one along the nose where the roll
 toward it is undetermined, it falls back to ecliptic north as it did before. The ovoid, whose

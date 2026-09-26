@@ -259,7 +259,7 @@ pub struct Settled {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{FIELD_ANCHOR_ME, RATED_LOAD_AU, SOLAR_ANCHOR_AU, SOLAR_ANCHOR_S, STARTING_ENVELOPE_M2};
+    use crate::fitting::{FIELD_ANCHOR_ME, RATED_LOAD_AU, STARTING_ENVELOPE_M2};
     use crate::form::capacity::Capacities;
     use crate::form::grid::FormGrid;
     use crate::form::Form;
@@ -273,8 +273,7 @@ mod tests {
         field: Field,
         caps: Capacities,
         broadside_m2: f64,
-        /// 20's anchor solved on the shadow's broadside, as F10 re-anchors `solar_gain`: the gain
-        /// is on the star, so this is what the field takes in once H3 lands.
+        /// The balance's, which H3 moves onto the star's output: then this is what the field takes in.
         gain: f64,
     }
 
@@ -283,10 +282,7 @@ mod tests {
             let form = Form::starting();
             let grid = FormGrid::new(&form, b).unwrap();
             let caps = Capacities::of(&form, b);
-            let broadside_m2 = grid.broadside_m2();
-            let wanted_w = caps.storage_j / SOLAR_ANCHOR_S + caps.drain_w;
-            let collected_w = b.conversion_efficiency * flux_w_m2(SOLAR_ANCHOR_AU) * broadside_m2;
-            Start { field: Field::of(grid.envelope_area_m2(), b), caps, broadside_m2, gain: wanted_w / collected_w }
+            Start { field: Field::of(grid.envelope_area_m2(), b), caps, broadside_m2: grid.broadside_m2(), gain: b.solar_gain }
         }
 
         /// Broadside, `d_au` from a Sun-like star, before absorptivity.

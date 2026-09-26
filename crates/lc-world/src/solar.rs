@@ -6,9 +6,9 @@
 //! constant over segments of coordinate time — see [`segment_end`] — because distance from the star
 //! is not a closed form anyone can integrate cheaply.
 //!
-//! **Every hull rolls its broadside's roll toward its star**, under way or not, so the star lies
-//! across the nose along the direction the roll carries +z onto. What is left to say where the star
-//! is in the ship's frame is the one angle between it and the nose.
+//! **Every hull rolls its broadside toward its star**, under way or not, so the broadside's part
+//! across the nose faces the star. What is left to say where the star is in the ship's frame is the
+//! one angle between it and the nose.
 
 use glam::DVec3;
 use lc_proto::form::Geometry;
@@ -34,23 +34,46 @@ fn across_nose(roll_rad: f64) -> DVec3 {
     DVec3::new(0.0, -s, c)
 }
 
+/// The broadside signed so its part across the nose is where the roll carries +z, and that roll in
+/// `[−π/2, π/2)`. The roll is the broadside's own azimuth about the nose, not the grid's
+/// `broadside_roll_rad`: that one is best for a nose held square to the star, and a broadside that
+/// leans off square can lie at another azimuth altogether. A broadside along the nose has no
+/// azimuth, and takes the grid's.
+fn presented(geometry: &Geometry) -> (DVec3, f64) {
+    let b = DVec3::from_array(geometry.broadside);
+    if b.y.hypot(b.z) < 1.0e-6 {
+        return (b, geometry.broadside_roll_rad);
+    }
+    let roll = libm::atan2(-b.y, b.z);
+    let half = std::f64::consts::FRAC_PI_2;
+    if roll >= half {
+        (-b, roll - std::f64::consts::PI)
+    } else if roll < -half {
+        (-b, roll + std::f64::consts::PI)
+    } else {
+        (b, roll)
+    }
+}
+
+/// Radians, right-handed about the nose: how far a hull rolls from dorsal-to-the-star.
+pub fn roll_rad(geometry: &Geometry) -> f64 {
+    presented(geometry).1
+}
+
 /// The star in the ship's own frame, for a nose at `cos_nose` to it and the hull at its roll.
 pub fn toward_star(geometry: &Geometry, cos_nose: f64) -> DVec3 {
     let c = cos_nose.clamp(-1.0, 1.0);
-    DVec3::X * c + across_nose(geometry.broadside_roll_rad) * (1.0 - c * c).sqrt()
+    DVec3::X * c + across_nose(roll_rad(geometry)) * (1.0 - c * c).sqrt()
 }
 
-/// `nose · ŝ` with the broadside turned to the star. The broadside is signed by its largest
-/// component and the roll by its own range, so the one that faces the star is the sign that agrees
-/// with the roll.
+/// `nose · ŝ` with the broadside turned to the star.
 pub fn idle_cos(geometry: &Geometry) -> f64 {
-    let b = DVec3::from_array(geometry.broadside);
-    let facing = if b.dot(across_nose(geometry.broadside_roll_rad)) < 0.0 { -b } else { b };
-    facing.x.clamp(-1.0, 1.0)
+    presented(geometry).0.x.clamp(-1.0, 1.0)
 }
 
 /// The hull's shadow toward its star, m², with its nose at `cos_nose` to it.
 pub fn shadow_m2(geometry: &Geometry, cos_nose: f64) -> f64 {
+    debug_assert_eq!(geometry.shadow_m2.len(), SHADOW_DIRECTIONS, "a geometry the grid did not measure");
     let Ok(m2) = <[f64; SHADOW_DIRECTIONS]>::try_from(geometry.shadow_m2.as_slice()) else { return 0.0 };
     Shadow::from_m2(m2).along(toward_star(geometry, cos_nose))
 }
@@ -127,8 +150,9 @@ mod tests {
     use crate::form::capacity::Capacities;
     use crate::form::grid::FormGrid;
     use crate::form::presets::{named, Builtin};
-    use crate::form::Form;
+    use crate::form::{Form, Kind, Mount, Part, PartId, Placement, Primitive};
     use crate::star::Star;
+    use glam::DVec2;
     use crate::system::UNIT_M;
 
     /// **Checked against the integral it replaces**, not against itself: tessellate the ellipsoid
@@ -236,11 +260,28 @@ mod tests {
         assert!((exact - 1.0).abs() < 1.0e-9, "{exact}");
     }
 
+    /// A slab pitched nose-up, beamier than it is tall: its largest shadow leans off square, and
+    /// across the nose its beam beats its height, so the grid's roll turns it a quarter turn from
+    /// the roll that presents that shadow.
+    fn pitched_slab() -> Form {
+        let b = Balance::DEFAULT;
+        let placement = Placement { parent: PartId(0), mount: Mount::Enclosing, twist: 0.0, tilt: DVec2::new(0.65, 0.0), blend: 0.0, mirror: false };
+        let slab = Primitive::Ellipsoid { axes: DVec3::new(6.0, 1.2, 1.0) };
+        Form {
+            parts: vec![
+                Part::mind(PartId(0), b.min_part_m3),
+                Part { id: PartId(1), kind: Kind::Storage, primitive: slab, volume_m3: 2.4e6, placement: Some(placement) },
+            ],
+        }
+    }
+
     /// The idle attitude presents the largest shadow the table has, whichever way the form's
     /// broadside leans and rolls.
     #[test]
     fn idle_presents_the_broadside() {
-        let mut all = vec![Form::starting()];
+        let g = geometry(&pitched_slab());
+        assert!((roll_rad(&g) - g.broadside_roll_rad).abs() > 30.0_f64.to_radians(), "premise: the rolls differ");
+        let mut all = vec![Form::starting(), pitched_slab()];
         all.extend(Builtin::ALL.map(Builtin::form));
         for form in all {
             let grid = FormGrid::new(&form, &Balance::DEFAULT).unwrap();

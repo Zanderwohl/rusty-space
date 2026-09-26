@@ -212,7 +212,7 @@ complete.
 | quantity | how | read by |
 |---|---|---|
 | **shadow table** | area of the grid's projection along each of the 162 vertices of a twice-subdivided icosahedron, interpolated linearly across the face a direction passes through | starlight and beams arriving, brightness |
-| **broadside** | the direction of largest shadow, and the roll about the nose that carries +z onto the direction across the nose with the largest shadow | the idle attitude of [20-solar-power.md](20-solar-power.md) |
+| **broadside** | the direction of largest shadow, and the roll about the nose that carries +z onto the direction across the nose with the largest shadow | the idle attitude of [20-solar-power.md](20-solar-power.md), which turns the broadside itself onto the star and rolls by its azimuth about the nose; the roll is only for a broadside along the nose, which has none |
 | **envelope** | the union's distance field offset by `envelope_margin` and its two nearest parts blended over `ENVELOPE_BLEND = 0.5` of the cube root of hull volume; area and volume by marching tetrahedra | the field's area and volume, [30-the-field.md](30-the-field.md) |
 | **inertia tensor** | the filled cells, weighted by each part's density, as the full symmetric tensor per kilogram, scaled to the ship's whole mass: a form is symmetric only port to starboard, so the xz product is generally not zero | slew rate |
 | **extent** | the envelope's longest dimension: its widest width along the axes and the table's 81 directions, within about 1.2% of its diameter | `length_m`: the camera, the zoom limits, `Presence` |
@@ -267,9 +267,7 @@ A process builds each form's grid once: every ship today is the starting form, s
 hundred builds one. A step partway through a round, whose form may not place, keeps the last
 measured extent and gyration until it finishes. The starting form's extent is **571 m**, the
 envelope around 545 m of parts, where its
-twenty slots made 19's ship 500 m long. Until F10 reads the shadow, collection still takes the
-ovoid of the craft's length, so the starting form collects (571/500)², about 1.3 times, what
-[20](20-solar-power.md)'s anchor says.
+twenty slots made 19's ship 500 m long.
 
 **The shadow handles concave shapes.** A stack of plates shades
 itself and collects about what one plate would. A ship spread out collects more and turns more
