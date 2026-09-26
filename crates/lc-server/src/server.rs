@@ -183,6 +183,8 @@ pub struct Server<J: Journal> {
     pub(crate) balance: lc_world::fitting::Balance,
     /// Craft refitting, and how many of the round's steps their owner has been told of.
     pub(crate) refitting: HashMap<CraftId, usize>,
+    /// The forms each refitting craft's remaining steps leave, being measured off the tick.
+    pub(crate) reserved: HashMap<CraftId, lc_world::fitting::Reservation>,
     /// Console lines waiting for the tick.
     pub(crate) commands: std::collections::VecDeque<crate::command::Queued>,
 }
@@ -227,6 +229,7 @@ impl<J: Journal> Server<J> {
             stages: Default::default(),
             balance: lc_world::fitting::Balance::DEFAULT,
             refitting: HashMap::new(),
+            reserved: HashMap::new(),
             commands: std::collections::VecDeque::new(),
         }
     }
@@ -1200,34 +1203,44 @@ impl<J: Journal> Server<J> {
     /// there is not one.
     async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
-        // Cloned out first: the journal read borrows `self`, and the state update writes it.
-        let connections: Vec<(ClientId, Connected)> =
-            self.clients.iter().map(|(id, state)| (*id, state.clone())).collect();
         let mut contacts = chase::contacts(&self.fleet, &self.clients, now);
+        let ids: Vec<ClientId> = self.clients.keys().copied().collect();
 
-        for (id, state) in connections {
+        let mut reading: Vec<(ClientId, ShipId, i64)> = Vec::with_capacity(ids.len());
+        for id in ids {
+            let Some(state) = self.clients.get_mut(&id) else { continue };
             // Every tick there is anything to say, and once more when there stops being: a
             // client that has stopped hearing about a contact has to be able to tell that from
             // a message that did not arrive, and one that has never had any needs no message
             // twenty times a second repeating it.
             let seen = contacts.remove(&id).unwrap_or_default();
             if !seen.is_empty() || state.had_contacts {
-                let any = !seen.is_empty();
+                state.had_contacts = !seen.is_empty();
                 wire.send(id, Outbound::Present(seen));
-                if let Some(mine) = self.clients.get_mut(&id) {
-                    mine.had_contacts = any;
-                }
             }
-            let Some(ship) = self.fleet.get(CraftId(state.ship.0)).cloned() else {
+            let (ship, cursor_t, backlog_sent) = (state.ship, state.cursor_t, state.backlog_sent);
+            if self.fleet.get(CraftId(ship.0)).is_none() {
                 continue;
-            };
-            // The transcript, once per connection. See `crate::radio`.
-            if !state.backlog_sent {
-                self.send_backlog(id, state.ship, now, wire).await;
             }
-            // The proven read: one range scan over `(observer_id, arrive_t)`, already ordered.
-            let due = self.journal.due(state.ship, state.cursor_t, now).await?;
+            // The transcript, once per connection. See `crate::radio`.
+            if !backlog_sent {
+                self.send_backlog(id, ship, now, wire).await;
+            }
+            reading.push((id, ship, cursor_t));
+        }
 
+        // The proven read, one range scan over `(observer_id, arrive_t)` per client, all asked
+        // at once: one connection pipelines them, so the tick waits one round trip rather than
+        // one per client in turn.
+        let journal = &self.journal;
+        let dues = futures_util::future::try_join_all(
+            reading.iter().map(|&(_, ship, cursor_t)| journal.due(ship, cursor_t, now)),
+        )
+        .await?;
+
+        for ((id, ship_id, _), due) in reading.into_iter().zip(dues) {
+            let Some(ship) = self.fleet.get(CraftId(ship_id.0)) else { continue };
+            let Some(state) = self.clients.get_mut(&id) else { continue };
             let mut cleared = Vec::new();
             let mut latest = state.last_reception_t;
             for (scheduled, event) in due {
@@ -1241,7 +1254,7 @@ impl<J: Journal> Server<J> {
                     direction: direction.to_array(),
                     strength: scheduled.strength,
                     kind: event.kind,
-                    payload: crate::radio::redact(event.kind, &event.payload, state.ship),
+                    payload: crate::radio::redact(event.kind, &event.payload, ship_id),
                 };
                 match Cleared::<Sighting>::clear(sighting, now, ship.noise_floor) {
                     Ok(pass) => {
@@ -1254,10 +1267,8 @@ impl<J: Journal> Server<J> {
                     Err(Withheld::StillInFlight | Withheld::BelowNoiseFloor) => {}
                 }
             }
-            if let Some(mine) = self.clients.get_mut(&id) {
-                mine.cursor_t = now;
-                mine.last_reception_t = latest;
-            }
+            state.cursor_t = now;
+            state.last_reception_t = latest;
             if !cleared.is_empty() {
                 wire.send(id, Outbound::Sightings(cleared));
             }
