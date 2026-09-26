@@ -335,11 +335,18 @@ impl Draft {
         self.place(id, Placement { mount, ..placement })
     }
 
-    /// At most zero, resting on the parent: above it the part would float free of it, which the
-    /// placement rules refuse as detached.
-    pub fn standoff(&self, id: PartId, standoff: f64) -> Result<Edit, Refused> {
+    /// Refused where it would leave the part floating free of its parent, which Apply would
+    /// refuse as detached.
+    pub fn standoff(&self, id: PartId, standoff: f64, balance: &Balance) -> Result<Edit, Refused> {
         let placement = self.placement(id)?;
-        if standoff > 0.0 {
+        let part = self.editable(id)?;
+        let parent = self.part(placement.parent).ok_or(Refused::NoSuchPart(placement.parent))?;
+        let moved = match placement.mount {
+            Mount::Attached { anchor, .. } => Placement { mount: Mount::Attached { anchor, standoff }, ..placement },
+            Mount::Enclosing => placement,
+        };
+        let min = balance.min_part_m3;
+        if !touches(&parent.shape(min), &part.shape(min), &moved) {
             return Err(Refused::Fault(FormError::Detached(id)));
         }
         let mount = match placement.mount {
@@ -422,7 +429,7 @@ impl Draft {
                 }
                 Mount::Enclosing => Err(Refused::Fault(FormError::Malformed { part: id, number: lc_world::form::Number::Anchor })),
             },
-            (Field::Standoff, _) => self.standoff(id, value),
+            (Field::Standoff, _) => self.standoff(id, value, &Balance::DEFAULT),
             (Field::Twist, _) => self.twist(id, deg),
             (Field::Tilt(i), _) => {
                 let mut tilt = placement.tilt;
@@ -502,6 +509,30 @@ fn number_of(field: Field, primitive: &Primitive) -> lc_world::form::Number {
         (Field::Taper, _) => Number::Taper,
         _ => Number::Proportions,
     }
+}
+
+/// Directions the touch test samples a part's surface along.
+const TOUCH_SAMPLES: usize = 256;
+/// Of the child's smallest half-extent, how near its surface must come to the parent's to touch.
+const TOUCH_TOLERANCE: f64 = 0.02;
+
+/// Whether `child`, placed by `placement` on `parent`, reaches it anywhere: some point of the
+/// child's surface within a sliver of the parent's, or inside it. The placement rules judge this
+/// on the grid at Apply; this is the editor's quicker reading of the same thing, so a handle can
+/// stop where a part would come away. Tilt matters: it swings a part back into its parent, so a
+/// standoff above zero is not by itself floating.
+pub fn touches(parent: &lc_world::form::primitive::Shape, child: &lc_world::form::primitive::Shape, placement: &Placement) -> bool {
+    let pose = lc_world::form::place::relative(parent, child, placement);
+    let tolerance = TOUCH_TOLERANCE * child.extent(glam::DMat3::IDENTITY, 0.0).min_element();
+    // A Fibonacci sphere: even enough that no side of the child is missed.
+    let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
+    (0..TOUCH_SAMPLES).any(|k| {
+        let z = 1.0 - 2.0 * (k as f64 + 0.5) / TOUCH_SAMPLES as f64;
+        let r = (1.0 - z * z).sqrt();
+        let (s, c) = (golden * k as f64).sin_cos();
+        let on = child.exit(DVec3::new(r * c, r * s, z)).point;
+        parent.distance(pose.to_outer(on)) <= tolerance
+    })
 }
 
 /// `primitive` stretched along its own `axis` by `factor` at fixed volume, the stretched ratio
@@ -769,11 +800,17 @@ mod tests {
         assert!(close(m, major) && n > minor, "along: a fatter tube on the same ring");
     }
 
+    /// A standoff that lifts a part clear of its parent is refused; one that a tilt swings back
+    /// into it is not, which is how the starting form's drone pod hangs.
     #[test]
     fn a_part_cannot_be_stood_off_its_parent() {
         let d = draft();
-        assert_eq!(d.standoff(PartId(2), 0.3), Err(Refused::Fault(FormError::Detached(PartId(2)))));
-        assert!(d.standoff(PartId(2), 0.0).is_ok() && d.standoff(PartId(2), -0.7).is_ok());
+        assert_eq!(d.standoff(PartId(2), 0.3, &B), Err(Refused::Fault(FormError::Detached(PartId(2)))));
+        assert!(d.standoff(PartId(2), 0.0, &B).is_ok() && d.standoff(PartId(2), -0.7, &B).is_ok());
+        let Some(Placement { mount: Mount::Attached { standoff, .. }, .. }) = d.part(PartId(3)).unwrap().placement else { panic!() };
+        assert!(standoff > 0.3, "the pod's own standoff is above zero");
+        assert!(d.standoff(PartId(3), standoff, &B).is_ok());
+        assert!(d.standoff(PartId(3), standoff + 1.0, &B).is_err());
     }
 
     #[test]

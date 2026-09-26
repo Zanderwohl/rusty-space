@@ -185,16 +185,43 @@ pub struct Handles {
     pub arms: DVec3,
     /// The size line's end.
     pub diagonal: DVec3,
-    pub ring_m: f64,
-    /// The standoff arrow's tip, for an attached part.
-    pub sink: Option<DVec3>,
+    pub ring: Ring,
+    /// The standoff arrow's root and tip, for an attached part: along the parent's normal at
+    /// the anchor, pointing into the parent.
+    pub sink: Option<(DVec3, DVec3)>,
     /// Meters across a pixel at the part.
     pub m_per_px: f64,
+    /// The parent's shape and the part's, for where a standoff would leave it touching.
+    pub shapes: (lc_world::form::primitive::Shape, lc_world::form::primitive::Shape),
+}
+
+/// What a part's twist turns it about: its parent's surface normal through its foot, or its
+/// parent's axis when it encloses. Not the part's own axis, which a tilt takes off it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ring {
+    pub center: DVec3,
+    pub axis: DVec3,
+    /// Across the axis, with `across.0 × across.1 = axis`, so an angle measured from the first
+    /// toward the second is a right-handed turn, as a twist is.
+    pub across: (DVec3, DVec3),
+    pub radius: f64,
+}
+
+impl Ring {
+    fn about(axis: DVec3, through: DVec3, part: DVec3, h: DVec3, least: f64) -> Ring {
+        let axis = axis.normalize();
+        let (a, _) = axis.any_orthonormal_pair();
+        // Level with the part, and wide enough to go round it where a tilt swings it off the axis.
+        let center = through + axis * (part - through).dot(axis);
+        let off = (part - center).length();
+        Ring { center, axis, across: (a, axis.cross(a)), radius: (off + h.y.max(h.z) * REACH_OUT * 1.1).max(least) }
+    }
 }
 
 impl Handles {
-    pub fn of(part: &Part, piece: &Piece, lens: &Lens) -> Option<Handles> {
-        part.placement?;
+    pub fn of(part: &Part, piece: &Piece, sdf: &Sdf, lens: &Lens) -> Option<Handles> {
+        let placement = part.placement?;
+        let (_, parent) = original(sdf, placement.parent)?;
         let (_, depth) = lens.project(piece.pose.position)?;
         let m_per_px = lens.m_per_px(depth);
         let least = MIN_ARM_PX * m_per_px;
@@ -202,15 +229,27 @@ impl Handles {
         let arms = (h * REACH_OUT).max(DVec3::splat(least));
         let axes = piece.pose.rotation;
         let center = piece.pose.position;
-        let attached = matches!(part.placement.map(|p| p.mount), Some(Mount::Attached { .. }));
-        let sink = attached.then(|| center - axes.x_axis * (piece.shape.reach() * REACH_OUT).max(least));
+        let (ring, sink) = match placement.mount {
+            Mount::Attached { anchor, .. } => {
+                // As placement finds it: where a ray from the parent's middle along the anchor
+                // leaves it.
+                let exit = parent.shape.exit((anchor / anchor.abs().max_element()).normalize());
+                let normal = (parent.pose.rotation * exit.normal).normalize();
+                let foot = center - axes.x_axis * piece.shape.reach();
+                let ring = Ring::about(normal, foot, center, h, least);
+                let tip = ring.center - normal * (piece.shape.reach() * REACH_OUT).max(least);
+                (ring, Some((ring.center, tip)))
+            }
+            Mount::Enclosing => (Ring::about(parent.pose.rotation.x_axis, parent.pose.position, center, h, least), None),
+        };
         Some(Handles {
             center,
             axes,
             arms,
             diagonal: center + axes * (h.normalize_or(DVec3::ONE) * (h.length() * REACH_OUT).max(least)),
-            ring_m: (h.y.max(h.z) * REACH_OUT * 1.1).max(least),
+            ring,
             sink,
+            shapes: (parent.shape, piece.shape),
             m_per_px,
         })
     }
@@ -228,17 +267,17 @@ impl Handles {
         match grip {
             Grip::Axis(i) => Some((self.center, self.center + self.axes.col(i) * self.arms[i])),
             Grip::Size => Some((self.center, self.diagonal)),
-            Grip::Standoff => self.sink.map(|tip| (self.center, tip)),
+            Grip::Standoff => self.sink,
             Grip::Twist => None,
         }
     }
 
-    /// Around the part's own axis, where its twist turns it.
     fn ring(&self) -> Vec<DVec3> {
+        let Ring { center, across: (a, b), radius, .. } = self.ring;
         (0..=RING_SEGMENTS)
             .map(|k| {
                 let angle = k as f64 * std::f64::consts::TAU / RING_SEGMENTS as f64;
-                self.center + (self.axes.y_axis * angle.cos() + self.axes.z_axis * angle.sin()) * self.ring_m
+                center + (a * angle.cos() + b * angle.sin()) * radius
             })
             .collect()
     }
@@ -282,14 +321,13 @@ fn along_line(origin: DVec3, direction: DVec3, ray: (DVec3, DVec3)) -> Option<f6
 /// along the plane.
 fn angle_on_ring(handles: &Handles, ray: (DVec3, DVec3)) -> Option<f64> {
     let (from, toward) = ray;
-    let normal = handles.axes.x_axis;
-    let denom = toward.dot(normal);
+    let Ring { center, axis, across: (a, b), .. } = handles.ring;
+    let denom = toward.dot(axis);
     if denom.abs() < 1e-9 {
         return None;
     }
-    let hit = from + toward * (handles.center - from).dot(normal) / denom;
-    let v = hit - handles.center;
-    Some(v.dot(handles.axes.z_axis).atan2(v.dot(handles.axes.y_axis)))
+    let v = from + toward * (center - from).dot(axis) / denom - center;
+    Some(v.dot(b).atan2(v.dot(a)))
 }
 
 /// A drag under way: what was grabbed, the part and its handles as they were when it began, and
@@ -345,14 +383,33 @@ impl Held {
             Grip::Standoff => {
                 let Mount::Attached { anchor, standoff } = placement.mount else { return Err(Refused::Mind) };
                 // The arrow points into the parent, so pulling along it sinks the part. Never out
-                // past resting on the parent, which would leave it floating.
-                let sunk = snap::standoff(standoff - (now - self.start) / self.reach_m, fine).min(0.0);
-                let mount = Mount::Attached { anchor, standoff: sunk };
-                (What::Move, Part { placement: Some(Placement { mount, ..placement }), ..self.part })
+                // past where it would come away from the parent.
+                let wanted = snap::standoff(standoff - (now - self.start) / self.reach_m, fine);
+                let at = |s: f64| Placement { mount: Mount::Attached { anchor, standoff: s }, ..placement };
+                let (parent, child) = self.handles.shapes;
+                let sunk = if wanted <= standoff || crate::draft::touches(&parent, &child, &at(wanted)) {
+                    wanted
+                } else {
+                    furthest_touching(standoff, wanted, fine, |s| crate::draft::touches(&parent, &child, &at(s)))
+                };
+                (What::Move, Part { placement: Some(at(sunk)), ..self.part })
             }
         };
         Ok(Edit { what, part: self.part.id, before: vec![self.part], after: vec![after], settled: false })
     }
+}
+
+/// Between `from`, which touches, and `to`, which does not, the furthest standoff that still
+/// touches, on the snapping steps.
+fn furthest_touching(from: f64, to: f64, fine: bool, touches: impl Fn(f64) -> bool) -> f64 {
+    let (mut near, mut far) = (from, to);
+    for _ in 0..32 {
+        let mid = (near + far) / 2.0;
+        if touches(mid) { near = mid } else { far = mid }
+    }
+    let step = snap::SNAPS.steps(fine).standoff;
+    let snapped = (near / step).floor() * step;
+    if snapped >= from && touches(snapped) { snapped } else { from }
 }
 
 pub struct FormHandlesPlugin;
@@ -412,7 +469,7 @@ impl Grabbed {
 fn selected_handles<'a>(ui: &Ui, sdf: &'a Sdf, lens: &Lens) -> Option<(Part, &'a Piece, Handles)> {
     let part = *ui.form.draft.as_ref()?.part(ui.form.selected?)?;
     let (_, piece) = original(sdf, part.id)?;
-    Some((part, piece, Handles::of(&part, piece, lens)?))
+    Some((part, piece, Handles::of(&part, piece, sdf, lens)?))
 }
 
 /// A drag on a handle, as edits. Each frame the pointer moves sends one measured from the press,
@@ -685,7 +742,7 @@ mod tests {
     fn handles(draft: &Draft, sdf: &Sdf, lens: &Lens, id: u16) -> (Part, Piece, Handles) {
         let part = *draft.part(PartId(id)).unwrap();
         let (_, piece) = original(sdf, part.id).unwrap();
-        (part, piece.clone(), Handles::of(&part, piece, lens).unwrap())
+        (part, piece.clone(), Handles::of(&part, piece, sdf, lens).unwrap())
     }
 
     fn px(lens: &Lens, p: DVec3) -> Vec2 {
@@ -780,28 +837,49 @@ mod tests {
         assert_ne!(kept.primitive, part.primitive);
     }
 
-    /// A quarter turn round the ring is a quarter turn of the part, the way the pointer went: the
-    /// ring point taken hold of ends up where the pointer let go.
+    /// A quarter turn round the ring is a quarter turn of the part about what twist turns it
+    /// about, the way the pointer went: for the drone pod, tilted to lie under the keel, that is
+    /// the hull's normal and not the pod's own axis.
     #[test]
-    fn the_ring_turns_the_part_as_far_as_the_pointer_goes_round_it() {
+    fn the_ring_turns_the_part_about_its_twist_axis_as_far_as_the_pointer_goes() {
         let (draft, sdf, lens) = scene();
-        let (part, piece, h) = handles(&draft, &sdf, &lens, 5);
-        let from = h.center + h.axes.y_axis * h.ring_m;
-        let to = h.center + h.axes.z_axis * h.ring_m;
-        let held = Held::new(Grip::Twist, part, h, &piece, &lens, px(&lens, from)).unwrap();
-        let edit = held.edit(&lens, px(&lens, to), Modifiers::default(), &B).unwrap();
-        let twist = edit.after[0].placement.unwrap().twist;
-        assert!((twist.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{twist}");
+        for id in [5, 3] {
+            let (part, piece, h) = handles(&draft, &sdf, &lens, id);
+            let Ring { center, axis, across: (a, b), radius } = h.ring;
+            let held = Held::new(Grip::Twist, part, h, &piece, &lens, px(&lens, center + a * radius)).unwrap();
+            let edit = held.edit(&lens, px(&lens, center + b * radius), Modifiers::default(), &B).unwrap();
+            let twist = edit.after[0].placement.unwrap().twist;
+            assert!((twist - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "part {id}: {twist}");
+            let mut moved = draft.clone();
+            moved.apply(&edit, &B).unwrap();
+            let turned = original(&Sdf::new(&moved.form, &B).unwrap(), PartId(id)).unwrap().1.pose.rotation;
+            let expected = glam::DQuat::from_axis_angle(axis, std::f64::consts::FRAC_PI_2) * piece.pose.rotation.x_axis;
+            assert!(turned.x_axis.dot(expected) > 0.999, "part {id}: {} against {expected}", turned.x_axis);
+        }
+        let (_, piece, pod) = handles(&draft, &sdf, &lens, 3);
+        assert!(pod.ring.axis.dot(piece.pose.rotation.x_axis).abs() < 0.9, "the pod is tilted off the normal");
+    }
+
+    /// The arrow runs along the parent's normal at the anchor, into the parent, whatever the tilt.
+    #[test]
+    fn the_standoff_arrow_is_the_parents_normal() {
+        let (draft, sdf, lens) = scene();
+        let (part, piece, pod) = handles(&draft, &sdf, &lens, 3);
+        let (root, tip) = pod.sink.unwrap();
+        let before = piece.pose.position;
+        let sunk = draft.standoff(PartId(3), -1.0, &B).unwrap();
         let mut moved = draft.clone();
-        moved.apply(&edit, &B).unwrap();
-        let turned = original(&Sdf::new(&moved.form, &B).unwrap(), PartId(5)).unwrap().1.pose.rotation;
-        assert!(turned.y_axis.dot(h.axes.z_axis) > 0.99, "its y went where the pointer did: {}", turned.y_axis);
+        moved.apply(&sunk, &B).unwrap();
+        let after = original(&Sdf::new(&moved.form, &B).unwrap(), PartId(3)).unwrap().1.pose.position;
+        let Mount::Attached { standoff, .. } = part.placement.unwrap().mount else { panic!() };
+        assert!(standoff > -1.0);
+        assert!((after - before).normalize().dot((tip - root).normalize()) > 0.999, "sinking moves it along the arrow");
     }
 
     /// The arrow points into the parent: pulled along it the part sinks, by tenths, and pushed
     /// back it stops resting on the parent.
     #[test]
-    fn the_standoff_arrow_sinks_the_part_and_stops_at_the_surface() {
+    fn the_standoff_arrow_sinks_the_part_and_stops_where_it_would_come_away() {
         let (draft, sdf, lens) = scene();
         let (part, piece, h) = handles(&draft, &sdf, &lens, 2);
         let (from, to) = h.line(Grip::Standoff).unwrap();
@@ -811,13 +889,16 @@ mod tests {
         assert!(standoff < -0.2 && (standoff * 10.0 - (standoff * 10.0).round()).abs() < 1e-9, "{standoff}");
         let out = held.edit(&lens, px(&lens, from - (to - from) * 3.0), Modifiers::default(), &B).unwrap();
         let Mount::Attached { standoff, .. } = out.after[0].placement.unwrap().mount else { panic!() };
-        assert_eq!(standoff, 0.0);
+        let placed = Placement { mount: Mount::Attached { anchor: DVec3::NEG_X, standoff }, ..part.placement.unwrap() };
+        assert!(crate::draft::touches(&h.shapes.0, &h.shapes.1, &placed), "it stops touching: {standoff}");
+        let further = Placement { mount: Mount::Attached { anchor: DVec3::NEG_X, standoff: standoff + 0.1 }, ..placed };
+        assert!(!crate::draft::touches(&h.shapes.0, &h.shapes.1, &further), "and no further than that: {standoff}");
     }
 
     #[test]
     fn the_mind_has_no_handles() {
         let (draft, sdf, lens) = scene();
         let mind = *draft.part(PartId(0)).unwrap();
-        assert!(Handles::of(&mind, original(&sdf, PartId(0)).unwrap().1, &lens).is_none());
+        assert!(Handles::of(&mind, original(&sdf, PartId(0)).unwrap().1, &sdf, &lens).is_none());
     }
 }
