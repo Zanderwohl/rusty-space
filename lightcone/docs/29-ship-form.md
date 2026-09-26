@@ -755,14 +755,15 @@ photographs it, and `--form <preset>` stages a draft.
   shard settled. A craft loaded mid-round was seen in the round's forms back to its start and in the
   form it began from before that. Past `HISTORY_FORMS` it forgets the oldest, and a presence from
   before then carries no form rather than a later one, and the length of the oldest it remembers.
-- **The round goes with the form.** `Presence.refit` is the recipe of the round in force when the light
-  left, from the same remembered history: each form is kept with the round it was part of, from the
-  round's start, and a round's end, finish or cancel, is a form without one. So a watcher sees a
-  build begin, run and stop only as each arrives. A cancel is not sent as such: a round that stops
-  being stated before it is done was canceled then ([32-ship-rendering.md](32-ship-rendering.md#rounds-in-the-game)).
-  The recipe names the target, which the light has not shown yet; the client draws only what the
-  round had built by the time the light left, as the picture of a round is a function of its recipe
-  and the time.
+- **So does the step under way, and never the round.** `Presence.building` is the one step a craft's
+  light shows it working on: which step, the part and its change, the part as the step leaves it, how
+  far through, how long the step is, and whether a cancel is running it back. The round's recipe is
+  not sent, because it names the target, a form the light has not shown yet, and the energy the
+  ship began with, which no hull shows ([08](08-networking.md#seeing-other-ships)). The shard keeps
+  each remembered form with the plan it was part of, or the plan a cancel stopped and when, and reads
+  the step from it at the moment the light left (`lc_world::seen`). A receiver reckons the step on
+  at its own pace between statements, as it reckons a position, and learns of the next step, or of a
+  cancel, only when that light arrives.
 
 ## Balance
 
@@ -795,8 +796,8 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the round it was part of |
-| `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form and the round in force as its light left |
+| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the plan it was part of, and reads the step under way from them |
+| `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form and the refit step under way as its light left |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |
 | `lc-client` | `form_view.rs`, `form_panel.rs`, `snap.rs`, `form_history.rs`, `presets_panel.rs` | `ui.rs` gains the view mode. The refit window becomes the ledger |
