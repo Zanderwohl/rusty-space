@@ -16,7 +16,6 @@ use em_render::render_space::sim_to_render;
 use em_render::wire_mesh;
 use glam::DVec3;
 use lc_world::fitting::Balance;
-use lc_world::form::presets::Builtin;
 use lc_world::form::place::Side;
 use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::{Piece, Sdf};
@@ -90,15 +89,7 @@ impl OwnForm {
 /// how a hull tens of kilometers long is photographed before anything can build one.
 pub fn fixture(spec: &str) -> Option<Form> {
     let name = spec.split_once('*').map_or(spec, |(name, _)| name);
-    let scale = fixture_scale(spec)?;
-    let mut form = match name.eq_ignore_ascii_case("default") {
-        true => Form::starting(),
-        false => Builtin::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(name)).map(Builtin::form)?,
-    };
-    for part in form.parts.iter_mut().filter(|p| p.placement.is_some()) {
-        part.volume_m3 *= scale.powi(3);
-    }
-    Some(form)
+    lc_world::form::presets::named(name, fixture_scale(spec)?)
 }
 
 /// The `k` of a `--form` spelling's `*k`, one without it, and `None` for a `k` that is no scale.
@@ -475,7 +466,7 @@ mod tests {
     fn a_mirrored_pair_is_symmetric_about_the_port_starboard_plane() {
         use lc_world::form::PartId;
         use lc_world::form::place::Side;
-        let mut form = Builtin::Plate.form();
+        let mut form = lc_world::form::presets::Builtin::Plate.form();
         form.parts.retain(|p| p.id != PartId(3));
         let engine = form.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap();
         engine.placement.as_mut().unwrap().mirror = true;

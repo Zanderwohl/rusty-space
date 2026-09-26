@@ -108,6 +108,22 @@ pub enum Builtin {
     Cluster,
 }
 
+/// The names [`named`] reads, as the console and `--form` spell them.
+pub const NAMES: [&str; 4] = ["default", "plate", "spindle", "cluster"];
+
+/// A form by name, any case: `default` for the starting form, or a builtin's. `scale` makes every
+/// part but the Mind that many times longer at the same proportions.
+pub fn named(name: &str, scale: f64) -> Option<Form> {
+    let mut form = match name.eq_ignore_ascii_case("default") {
+        true => Form::starting(),
+        false => Builtin::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(name)).map(Builtin::form)?,
+    };
+    for part in form.parts.iter_mut().filter(|p| p.placement.is_some()) {
+        part.volume_m3 *= scale.powi(3);
+    }
+    Some(form)
+}
+
 impl Builtin {
     pub const ALL: [Builtin; 3] = [Builtin::Plate, Builtin::Spindle, Builtin::Cluster];
 

@@ -195,61 +195,18 @@ pub const COMMANDS: &[Spec] = &[
         }],
     },
     Spec {
+        name: "refit",
+        verb: Verb::Refit,
+        level: Level::DEBUG,
+        summary: "begin a refit round toward a form, as the order does",
+        args: FORM_ARGS,
+    },
+    Spec {
         name: "refit-magic",
         verb: Verb::RefitMagic,
         level: Level::DEBUG,
-        summary: "rebuild a ship at once and for nothing; refused until refits by form are built",
-        args: &[
-            ArgSpec {
-                name: "storage",
-                kind: Kind::Count(MOST_OF_ANY),
-                need: Need::Optional,
-                level: Level::DEBUG,
-                help: "storage modules; ignored until S1",
-            },
-            ArgSpec {
-                name: "drones",
-                kind: Kind::Count(MOST_OF_ANY),
-                need: Need::Optional,
-                level: Level::DEBUG,
-                help: "drone modules; ignored until S1",
-            },
-            ArgSpec {
-                name: "living",
-                kind: Kind::Count(MOST_OF_ANY),
-                need: Need::Optional,
-                level: Level::DEBUG,
-                help: "living modules; ignored until S1",
-            },
-            ArgSpec {
-                name: "engines",
-                kind: Kind::Count(MOST_OF_ANY),
-                need: Need::Optional,
-                level: Level::DEBUG,
-                help: "engine modules; ignored until S1",
-            },
-            ArgSpec {
-                name: "data",
-                kind: Kind::Count(MOST_OF_ANY),
-                need: Need::Optional,
-                level: Level::DEBUG,
-                help: "data modules; ignored until S1",
-            },
-            ArgSpec {
-                name: "slots",
-                kind: Kind::Count(MOST_OF_ANY),
-                need: Need::Optional,
-                level: Level::DEBUG,
-                help: "hull slots; ignored until S1",
-            },
-            ArgSpec {
-                name: "ship",
-                kind: Kind::Id,
-                need: Need::Optional,
-                level: Level::ADMIN,
-                help: "the ship to rebuild; default your own",
-            },
-        ],
+        summary: "rebuild a ship as a form at once and for nothing, dropping any round under way",
+        args: FORM_ARGS,
     },
     Spec {
         name: "stage",
@@ -267,7 +224,30 @@ pub const COMMANDS: &[Spec] = &[
 ];
 
 /// The most of any one module, or of slots, `refit-magic` will put on a hull.
-const MOST_OF_ANY: u32 = 10_000;
+/// A form by name and size, and whose ship, for `refit` and `refit-magic`.
+const FORM_ARGS: &[ArgSpec] = &[
+    ArgSpec {
+        name: "form",
+        kind: Kind::Word(&lc_world::form::presets::NAMES),
+        need: Need::Required,
+        level: Level::DEBUG,
+        help: "the starting form, or a built-in preset",
+    },
+    ArgSpec {
+        name: "scale",
+        kind: Kind::Number(&[Limit { level: Level::DEBUG, min: 0.01, max: 100.0 }]),
+        need: Need::Optional,
+        level: Level::DEBUG,
+        help: "every part but the Mind this many times longer; default 1",
+    },
+    ArgSpec {
+        name: "ship",
+        kind: Kind::Id,
+        need: Need::Optional,
+        level: Level::ADMIN,
+        help: "the ship to rebuild; default your own",
+    },
+];
 
 /// `lc_world::scenario::Scenario::ALL` by name, which a `const` cannot collect for itself.
 const SCENES: &[&str] = &["traffic", "meeting", "approach", "closing", "chase", "corona"];
@@ -338,9 +318,13 @@ impl<J: Journal> Server<J> {
                 let ship = self.owned_by(command.from).ok_or("you have no ship")?;
                 self.chart(ship, args.id("star"))
             }
+            Verb::Refit => {
+                let ship = self.ship_named(command.from, &args)?;
+                self.refit_command(ship, &form_named(&args)?, wire)
+            }
             Verb::RefitMagic => {
-                self.ship_named(command.from, &args)?;
-                self.refit_magic()
+                let ship = self.ship_named(command.from, &args)?;
+                self.refit_magic(ship, form_named(&args)?, wire)
             }
             Verb::RefitFinish => {
                 let ship = self.ship_named(command.from, &args)?;
@@ -373,6 +357,11 @@ impl<J: Journal> Server<J> {
 }
 
 /// The same answer for a command that does not exist and one the asker may not run.
+fn form_named(args: &Bound) -> Result<lc_world::form::Form, String> {
+    let name = args.word("form").unwrap_or_default();
+    lc_world::form::presets::named(name, args.number("scale").unwrap_or(1.0)).ok_or_else(|| format!("no form {name}"))
+}
+
 fn unknown(name: &str) -> String {
     format!("no command '{name}'; try help")
 }
