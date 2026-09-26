@@ -542,6 +542,30 @@ Gauss-Newton on a finite-difference Jacobian is the likely fix, and would give t
 a covariance rather than a walk. A moon's orbit is also only as good as its planet's place,
 which a moon's frame inherits whole: Jupiter placed 0.005 AU out is Europa's orbit wide.
 
+**So a satellite is followed up.** ✅ (2026-09-26) Bearings alone fix an orbit from about a third
+to three quarters of it, and measured in Jupiter's exact frame the number of looks hardly
+matters: six do what sixteen do. A survey's steady cadence gives each body one arc length, and
+evenly spaced looks alias the period besides. So a body found within 2° of a brighter one with no
+orbit of its own gets a run of nine looks, each gap twice the last — 1, 1, 2, 4 … 64 hours — and
+some prefix of it lands in that window whatever the period: Metis at 7 hours through Callisto
+at 17 days all fit from one, to a part in a thousand or better. `knowledge::follow_up`.
+
+- **The run is all the body holds while it lasts.** Its turn in the rotation is skipped, so
+  nothing of the run is decimated before it is fitted, and each doubled gap re-arms the fit.
+- **It shares the telescope.** Runs take at most half of a tick's turns, and at most 32 are in
+  their dense first looks at once; Sol's satellites are all started within a day.
+- **Gaps run from the look actually taken,** so a late one stretches the run rather than
+  squeezing the gap after it.
+- **Not everything.** Following every body without an orbit swamped the fit queue — one fit a
+  tick, and every run re-arming its body nine times — and Mars fitted to 1.79 AU. Only
+  something beside a brighter body is followed; from 5 AU that still takes in about one body in
+  six of those going round the Sun, since the inner system is a few degrees across.
+
+Measured on Sol from 5 AU over fifteen days, against the same survey without it: Metis 0.00086
+± 1.2e-5 AU where it had ± ∞, Amalthea within 7% where it was 75% out, Europa within 6% with a
+finite bar. The queue it takes is not free: Jupiter's own error bar came out four times wider,
+from which of its refits ran rather than from its looks, which were the same.
+
 **Not oblateness.** The arena's bodies are spheres, so there is no figure to measure and none is
 invented. Same decision as rings for generated planets in phase 5, for the same reason.
 

@@ -150,6 +150,15 @@ impl crate::knowledge::Knowledge {
             .map(|(_, subject)| subject)
     }
 
+    /// Whether this craft has fitted an orbit to `subject` from its own bearings.
+    pub fn orbited(&self, subject: Subject) -> bool {
+        self.file(subject).is_some_and(|file| {
+            file.orbits()
+                .iter()
+                .any(|o| o.witness == self.owner && o.method == crate::knowledge::Method::Astrometric)
+        })
+    }
+
     /// The mean direction a body was seen in, which points at whatever it goes round.
     fn mean_bearing(&self, subject: Subject) -> Option<DVec3> {
         let file = self.file(subject)?;
@@ -176,6 +185,22 @@ impl crate::knowledge::Knowledge {
         em_spectra::Band::ALL.into_iter().find_map(|band| {
             Some(self.mean_flux(primary, band)? > self.mean_flux(satellite, band)?)
         }) == Some(true)
+    }
+
+    /// Whether a body was last seen within `within_rad` of a brighter one: a satellite, then,
+    /// or something passing in front of one.
+    pub fn beside_brighter(&self, subject: Subject, within_rad: f64) -> bool {
+        let latest = |subject: Subject| {
+            let seen = self.file(subject)?.sightings().iter().max_by(|a, b| a.observed_s.total_cmp(&b.observed_s))?;
+            Some(seen.bearing.toward)
+        };
+        let (Some(star), Some(toward)) = (subject.star(), latest(subject)) else { return false };
+        self.members(star).any(|(other, _)| {
+            matches!(other, Subject::Body { .. })
+                && other != subject
+                && latest(other).is_some_and(|there| there.angle_between(toward) < within_rad)
+                && self.outshines(other, subject)
+        })
     }
 
     /// Candidate primaries for a body, the star first and then the nearest few in the sky that
