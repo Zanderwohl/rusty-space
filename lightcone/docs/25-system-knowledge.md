@@ -1464,7 +1464,8 @@ knowledge. Today:
      A moon takes its primary's error rigidly, drawn as a third bar sideways in its plane, and
      never as phase: folded into the moon's phase, Earth's error, larger than the Moon's orbit,
      drew a Moon that could be anywhere round an Earth it is known to be beside.
-     Spreads draw at an eighth of a mark's brightness, and the selected item's at the mark's own.
+     Spreads draw dashed at a sixteenth of a mark's brightness, and the selected item's solid at
+     the mark's own.
      `em_map::MapItem::spread_ly` became a list of `Spread` pieces, `Bar` or `Arc`, drawn by
      `lc_client::map_spread`.
      **Open:** the orbit fit (`arc::Spread`) states no epoch sigma, so a freshly fitted body shows

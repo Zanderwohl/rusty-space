@@ -49,9 +49,10 @@ pub(crate) const SCALE_PX: f32 = LINE_PX * 0.5;
 const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
 /// A population's outline, dashed. At full brightness a shell's six curves outshine the map.
 const POPULATION_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
-/// An error bar sits well under the line it qualifies: a system of them is a thicket. The
-/// selected item's are drawn at full brightness, which is when anyone is reading them.
-const SPREAD_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
+/// An error bar sits well under the line it qualifies: a system of them is a thicket, so they
+/// are dim and dashed. The selected item's are solid and at full brightness, which is when
+/// anyone is reading them.
+const SPREAD_COLOR_SCALE: f32 = LINE_COLOR_SCALE / 16.0;
 /// Length of the cap across each end of an error bar.
 pub(crate) const SPREAD_CAP_PX: f32 = 8.0;
 
@@ -176,7 +177,8 @@ pub(crate) enum Form {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Look {
     Mark(Form),
-    Spread { selected: bool },
+    /// A cap is never dashed: eight pixels cut by a dash reads as a broken end.
+    Spread { selected: bool, cap: bool },
 }
 
 /// The outline mesh for a population, normalized so its outer edge is one unit.
@@ -283,14 +285,15 @@ pub(crate) fn material_of(
     palette
         .entry((kind, look))
         .or_insert_with(|| {
-            let (cap, scale) = match look {
-                Look::Mark(Form::Sphere) => (SPHERE_TUBE_FRACTION, LINE_COLOR_SCALE),
-                Look::Mark(Form::Circle) => (CIRCLE_TUBE_FRACTION, LINE_COLOR_SCALE),
-                Look::Mark(Form::Dot) => (DOT_TUBE_FRACTION, LINE_COLOR_SCALE),
-                Look::Spread { selected: true } => (LINE_TUBE_FRACTION, LINE_COLOR_SCALE),
-                Look::Spread { selected: false } => (LINE_TUBE_FRACTION, SPREAD_COLOR_SCALE),
+            let (fraction, scale, dash_px) = match look {
+                Look::Mark(Form::Sphere) => (SPHERE_TUBE_FRACTION, LINE_COLOR_SCALE, 0.0),
+                Look::Mark(Form::Circle) => (CIRCLE_TUBE_FRACTION, LINE_COLOR_SCALE, 0.0),
+                Look::Mark(Form::Dot) => (DOT_TUBE_FRACTION, LINE_COLOR_SCALE, 0.0),
+                Look::Spread { selected: true, .. } => (LINE_TUBE_FRACTION, LINE_COLOR_SCALE, 0.0),
+                Look::Spread { selected: false, cap: true } => (LINE_TUBE_FRACTION, SPREAD_COLOR_SCALE, 0.0),
+                Look::Spread { selected: false, cap: false } => (LINE_TUBE_FRACTION, SPREAD_COLOR_SCALE, DASH_PX),
             };
-            materials.add(line_material(color_of(kind), cap, LINE_PX, scale))
+            materials.add(MapLineMaterial { dash_px, ..line_material(color_of(kind), fraction, LINE_PX, scale) })
         })
         .clone()
 }
@@ -553,7 +556,8 @@ pub(crate) fn lay(
     for (of, mut place, mut mesh, mut material, shape) in spreads.iter_mut() {
         let Some(placement) = at.get(&of.key) else { continue };
         map_spread::lay(placement, of, &mut place, &mut mesh, shape, &mut meshes, view.rad_per_px);
-        let look = Look::Spread { selected: selected == Some(of.key) };
+        let cap = matches!(of.part, map_spread::SpreadPart::Cap(_));
+        let look = Look::Spread { selected: selected == Some(of.key), cap };
         let wanted = material_of(&mut map.scene.palette, &mut materials, placement.kind, look);
         if material.0 != wanted {
             material.0 = wanted;
@@ -682,7 +686,7 @@ fn sync(
             commands,
             &mut parts.spread,
             placement,
-            || material_of(palette, materials, placement.kind, Look::Spread { selected: false }),
+            |cap| material_of(palette, materials, placement.kind, Look::Spread { selected: false, cap }),
             &shapes.drops[0],
             meshes,
             &layer,
@@ -758,19 +762,23 @@ mod tests {
         }
     }
 
-    /// A spread is an eighth as bright as the planet's own mark, and exactly as bright once
-    /// its planet is selected.
+    /// A spread is dashed and a sixteenth as bright as the planet's own mark, and solid and
+    /// exactly as bright once its planet is selected. Its caps are never dashed.
     #[test]
-    fn a_spread_is_dim_until_its_item_is_selected() {
+    fn a_spread_is_dim_and_dashed_until_its_item_is_selected() {
         let mut materials = Assets::<MapLineMaterial>::default();
         let mut palette = HashMap::new();
-        let mut red = |look| {
+        let mut drawn = |look| {
             let handle = material_of(&mut palette, &mut materials, ItemKind::Planet, look);
-            materials.get(&handle).unwrap().base_color.red
+            let m = materials.get(&handle).unwrap();
+            (m.base_color.red, m.dash_px)
         };
-        let mark = red(Look::Mark(Form::Circle));
-        assert!((red(Look::Spread { selected: false }) * 8.0 - mark).abs() < 1.0e-6);
-        assert_eq!(red(Look::Spread { selected: true }), mark);
+        let (mark, _) = drawn(Look::Mark(Form::Circle));
+        let (dim, dashed) = drawn(Look::Spread { selected: false, cap: false });
+        assert!((dim * 16.0 - mark).abs() < 1.0e-6 && dashed > 0.0);
+        assert_eq!(drawn(Look::Spread { selected: false, cap: true }), (dim, 0.0));
+        assert_eq!(drawn(Look::Spread { selected: true, cap: false }), (mark, 0.0));
+        assert_eq!(drawn(Look::Spread { selected: true, cap: true }), (mark, 0.0));
     }
 
     /// A change to what is drawn spawns what arrived and despawns what left, and leaves the

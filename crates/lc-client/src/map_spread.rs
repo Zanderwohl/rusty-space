@@ -60,7 +60,8 @@ pub(crate) fn sync(
     commands: &mut Commands,
     spawned: &mut Spawned,
     placement: &Placement,
-    material: impl FnOnce() -> Handle<MapLineMaterial>,
+    // The material for a line (`false`) or a cap (`true`).
+    mut material: impl FnMut(bool) -> Handle<MapLineMaterial>,
     bar: &Handle<Mesh>,
     meshes: &mut Assets<Mesh>,
     layer: &RenderLayers,
@@ -77,14 +78,14 @@ pub(crate) fn sync(
     if placement.spread.is_empty() {
         return;
     }
-    let material = material();
+    let (line_material, cap_material) = (material(false), material(true));
     for (piece, spread) in placement.spread.iter().enumerate() {
         let of = |part| MapSpreadOf { key: placement.key, piece, part };
         let line = match spread {
             Spread::Bar(near, far) => commands.spawn((
                 // One dash: a solid line.
                 Mesh3d(bar.clone()),
-                MeshMaterial3d(material.clone()),
+                MeshMaterial3d(line_material.clone()),
                 segment_transform(*near, *far),
                 unit_bounds(),
                 layer.clone(),
@@ -95,7 +96,7 @@ pub(crate) fn sync(
                 let shape = arc_shape(points, placement.at);
                 commands.spawn((
                     Mesh3d(meshes.add(arc_mesh(&shape))),
-                    MeshMaterial3d(material.clone()),
+                    MeshMaterial3d(line_material.clone()),
                     arc_transform(placement),
                     NoFrustumCulling,
                     layer.clone(),
@@ -109,7 +110,7 @@ pub(crate) fn sync(
         for (end, (at, beside)) in spread.ends().into_iter().enumerate() {
             let cap = commands.spawn((
                 Mesh3d(bar.clone()),
-                MeshMaterial3d(material.clone()),
+                MeshMaterial3d(cap_material.clone()),
                 cap_transform(at, beside, rad_per_px),
                 unit_bounds(),
                 layer.clone(),
