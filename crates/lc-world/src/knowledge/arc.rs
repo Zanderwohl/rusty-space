@@ -1457,13 +1457,13 @@ mod tests {
         assert!(sigma > 0.0 && sigma.is_finite());
 
         // And it places the body, which is the point of carrying an orientation and an epoch.
-        let crate::knowledge::Placed::Known { offset_au, sigma_au } = belief.position_now else {
+        let crate::knowledge::Placed::Known { offset_au, error } = belief.position_now else {
             panic!("a full orientation should place it, got {:?}", belief.position_now)
         };
         let want = truth.at(truth.fitted().epoch_s) / crate::navigation::AU;
         assert!(
             offset_au.distance(want) < 0.05,
-            "placed at {offset_au} against {want}, sigma {sigma_au}"
+            "placed at {offset_au} against {want}, sigma {}", error.total_au()
         );
     }
 

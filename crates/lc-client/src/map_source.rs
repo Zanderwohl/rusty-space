@@ -320,7 +320,8 @@ fn push_believed(build: &mut Build, session: &Session, held: &Held) {
         match belief.position_now {
             // Where on the ring it is, with the error drawn along the ring rather than across
             // it: what is uncertain is how far round it has got.
-            Placed::Known { offset_au, sigma_au } => {
+            Placed::Known { offset_au, error } => {
+                let sigma_au = error.total_au();
                 let at = star_ly + offset_au * AU_LY;
                 let along = offset_au.normalize_or(DVec3::X).cross(pole).normalize_or(DVec3::X);
                 build.push(

@@ -11,26 +11,8 @@ use super::record::{Colors, Method, Orbit, Orientation};
 use crate::sky::StarId;
 use super::subject::BodyId;
 use super::{Knowledge, Subject, Witness};
-
-/// Where a body is believed to be now, as an offset from its own **star**.
-///
-/// From the star rather than from the world origin: what an orbit says is where a body sits
-/// about its primary, and the star's own position is a separate belief with its own error. A
-/// reader that wants an absolute position adds the two and carries both errors.
-///
-/// From the star even for a moon, whose orbit is about its planet: `body_belief` walks the
-/// chain and adds each step, so one reader does not have to know how deep a body sits. The
-/// errors add in quadrature along the way, which is why a moon is always placed worse than its
-/// planet.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Placed {
-    /// A full orientation and an epoch: enough to say where on the orbit it is.
-    Known { offset_au: DVec3, sigma_au: f64 },
-    /// An orbit of known size and nothing else. A sphere of that radius, not a ring in a guessed
-    /// plane — rule 4 of doc 25.
-    Shell { radius_au: f64, sigma_au: f64 },
-    Unknown,
-}
+use super::placed::{Path, added, placed_at};
+pub use super::placed::{PlaceError, Placed, Track};
 
 /// What the system's plane is known to be, folded from the orbits held about its bodies.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -192,6 +174,13 @@ impl Knowledge {
             Some(_) => Placed::Unknown,
             None => here,
         }
+    }
+
+    /// Where a body might be along its orbit at `now_s`: the arc its phase error spans, AU
+    /// from its star. `None` for anything not placed, or placed with no phase error.
+    pub fn along_track(&self, star: StarId, body: BodyId, now_s: f64) -> Option<Track> {
+        let orbit = self.file(Subject::Body { star, body }).and_then(|f| self.orbit_of(f))?;
+        super::placed::track(orbit, self.placed_within(star, body, now_s, Self::CHAIN), now_s)
     }
 
     /// Bring beliefs built at another time to `now_s`. Only a place and a velocity move with
@@ -396,81 +385,6 @@ fn folded(pole: DVec3) -> DVec3 {
         pole
     }
 }
-
-/// What Kepler's equation is solved to, radians, and how many steps it may take.
-///
-/// Far tighter than a drawn position needs; Newton on an ellipse converges in a handful of
-/// steps, so the cost of asking for more is nothing and the cap is only a guard.
-const KEPLER_TOLERANCE: f64 = 1.0e-12;
-const KEPLER_STEPS: u32 = 32;
-
-/// Where an orbit puts its body at `now_s`.
-///
-/// Only a shell until the orientation is full and an epoch says where on the ring the body was:
-/// an orbit of known size and unknown orientation is a sphere of that radius, and drawing it as
-/// a ring in a guessed plane would be a claim nobody measured.
-///
-/// `epoch_s` is the periapsis passage. For a circle that is any point, which is why an
-/// eccentricity of `None` is read as zero here rather than as an obstacle: a circular orbit has
-/// no periapsis to be wrong about.
-fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
-    let (au, sigma_au) = orbit.semi_major_au;
-    let (Orientation::Known { pole, sigma_rad, node, periapsis }, Some(epoch_s)) =
-        (orbit.orientation, orbit.epoch_s)
-    else {
-        return Placed::Shell { radius_au: au, sigma_au };
-    };
-    if !(orbit.period_s.0 > 0.0) || !au.is_finite() {
-        return Placed::Shell { radius_au: au, sigma_au };
-    }
-    let e = orbit.eccentricity.map_or(0.0, |(e, _)| e).clamp(0.0, 0.999);
-    let mean = std::f64::consts::TAU * (now_s - epoch_s) / orbit.period_s.0;
-    let eccentric =
-        em_foundations::kepler::anomaly::eccentric_from_mean_newton(mean, e, KEPLER_TOLERANCE, KEPLER_STEPS);
-    let true_anomaly = em_foundations::kepler::anomaly::true_from_eccentric(eccentric, e);
-    let elements = em_foundations::kepler::state::Elements {
-        semi_major_axis: au,
-        eccentricity: e,
-        // The pole as an inclination and a node, the same way `sky::generate` writes one.
-        inclination: pole.z.clamp(-1.0, 1.0).acos(),
-        longitude_of_ascending_node: node,
-        argument_of_periapsis: periapsis,
-        true_anomaly,
-    };
-    // Only the geometry is wanted, so the gravitational parameter can be anything positive:
-    // `to_state`'s velocity half is discarded and its position half does not use mu.
-    let Some((offset_au, _)) = em_foundations::kepler::state::to_state(1.0, &elements) else {
-        return Placed::Shell { radius_au: au, sigma_au };
-    };
-    // **Where a body has got to is a phase, and a phase drifts.** A period known to a part in
-    // a hundred is a body a quarter of the way round its orbit after twenty-five turns, and a
-    // belief that reported only the size and the plane said a course could be flown against it.
-    // `M = tau (t - epoch) / P`, so the period's error carries `tau |t - epoch| sigma_P / P^2`
-    // of anomaly with it. Doc 25: the sigma is grown by how long since it was last seen.
-    let (period_s, period_sigma) = orbit.period_s;
-    let drift = std::f64::consts::TAU * (now_s - epoch_s).abs() * period_sigma / (period_s * period_s);
-    // Capped at half a turn, past which the body is simply somewhere on its ring and an error
-    // bar longer than the ring says nothing more than that.
-    let along = (sigma_rad * sigma_rad + drift * drift).sqrt().min(std::f64::consts::PI);
-    let along_au = offset_au.length() * along;
-    Placed::Known { offset_au, sigma_au: (sigma_au * sigma_au + along_au * along_au).sqrt() }
-}
-
-/// One place on top of another, carrying both errors.
-fn added(primary: Placed, own: Placed) -> Placed {
-    match (primary, own) {
-        (Placed::Known { offset_au: up, sigma_au: a }, Placed::Known { offset_au: here, sigma_au: b }) => {
-            Placed::Known { offset_au: up + here, sigma_au: (a * a + b * b).sqrt() }
-        }
-        // A shell about a primary whose own place is known is still a shell, just a wider one:
-        // the body is somewhere on a sphere about a point that is itself uncertain.
-        (Placed::Known { sigma_au: a, .. }, Placed::Shell { radius_au, sigma_au: b }) => {
-            Placed::Shell { radius_au, sigma_au: (a * a + b * b).sqrt() }
-        }
-        _ => Placed::Unknown,
-    }
-}
-
 impl Knowledge {
     /// What a body weighs, from whatever is believed to go round it.
     ///
@@ -538,36 +452,14 @@ fn measured_radius(file: &crate::knowledge::File) -> Option<(f64, f64)> {
 
 /// The velocity an orbit implies, meters a second in the star's frame.
 ///
-/// The one element `placed_at` throws away. It passes `mu = 1.0` because only the geometry is
-/// wanted there; a velocity needs the real one, which the orbit itself states -- `n^2 a^3` is
-/// Kepler's third law read backwards, exactly as `knowledge::arc` measures it.
+/// `dr/dM` times the mean motion: the orbit states its own `mu` as `n^2 a^3`, Kepler's third
+/// law read backwards, exactly as `knowledge::arc` measures it.
 fn moving_at(orbit: &Orbit, now_s: f64) -> Option<(DVec3, f64)> {
-    let (Orientation::Known { pole, sigma_rad, node, periapsis }, Some(epoch_s)) =
-        (orbit.orientation, orbit.epoch_s)
-    else {
-        return None;
-    };
+    let path = Path::of(orbit)?;
+    let Orientation::Known { sigma_rad, .. } = orbit.orientation else { return None };
     let (au, sigma_au) = orbit.semi_major_au;
-    if !(orbit.period_s.0 > 0.0 && au.is_finite() && au > 0.0) {
-        return None;
-    }
-    let a_m = au * crate::navigation::AU;
-    let n = std::f64::consts::TAU / orbit.period_s.0;
-    let mu = n * n * a_m * a_m * a_m;
-    let e = orbit.eccentricity.map_or(0.0, |(e, _)| e).clamp(0.0, 0.999);
-    let mean = std::f64::consts::TAU * (now_s - epoch_s) / orbit.period_s.0;
-    let eccentric = em_foundations::kepler::anomaly::eccentric_from_mean_newton(
-        mean, e, KEPLER_TOLERANCE, KEPLER_STEPS,
-    );
-    let elements = em_foundations::kepler::state::Elements {
-        semi_major_axis: a_m,
-        eccentricity: e,
-        inclination: pole.z.clamp(-1.0, 1.0).acos(),
-        longitude_of_ascending_node: node,
-        argument_of_periapsis: periapsis,
-        true_anomaly: em_foundations::kepler::anomaly::true_from_eccentric(eccentric, e),
-    };
-    let (_, velocity) = em_foundations::kepler::state::to_state(mu, &elements)?;
+    let (_, pace_au, _) = path.at(path.mean_at(now_s))?;
+    let velocity = pace_au * (crate::navigation::AU * path.mean_motion());
     // `mu` is not independent here -- it came from this same orbit's own period and axis -- so
     // the speed is `n a`, which is linear in the axis rather than going as its square root. The
     // axis's whole fractional error enters, not half of it. The direction is only as good as
@@ -688,18 +580,19 @@ mod tests {
         assert!((at(YEAR_S) - start).length() < 1.0e-6, "a whole period comes back");
     }
 
-    /// The pole's own error carries the body along its ring, and that is part of how well its
-    /// position is known.
+    /// A tilted pole lifts the body out of its plane; it says nothing about how far round it is.
     #[test]
-    fn an_uncertain_pole_widens_the_position() {
+    fn an_uncertain_pole_widens_the_position_out_of_its_plane() {
         let tight = knowledge_with(&[("b", orbit(1.0, known(DVec3::Z, 0.0), Some(0.0)))]);
         let loose = knowledge_with(&[("b", orbit(1.0, known(DVec3::Z, 0.1), Some(0.0)))]);
-        let sigma = |k: &Knowledge| match k.body_belief(star(), body("b"), 0.0).unwrap().position_now
-        {
-            Placed::Known { sigma_au, .. } => sigma_au,
+        let error = |k: &Knowledge| match k.body_belief(star(), body("b"), 0.0).unwrap().position_now {
+            Placed::Known { error, .. } => error,
             other => panic!("not placed: {other:?}"),
         };
-        assert!(sigma(&loose) > sigma(&tight) * 5.0, "{} vs {}", sigma(&loose), sigma(&tight));
+        let (tight, loose) = (error(&tight), error(&loose));
+        assert!(loose.total_au() > tight.total_au() * 5.0, "{} vs {}", loose.total_au(), tight.total_au());
+        assert!((loose.normal_au() - 0.1).abs() < 1.0e-9, "{}", loose.normal_au());
+        assert_eq!(loose.along_rad, tight.along_rad);
     }
 
     /// Nothing held means no plane, and an edge-on transit gets no further than the circle its
@@ -790,18 +683,19 @@ mod tests {
             lineage: Vec::new(),
         };
         let sigma_at = |t: f64| match placed_at(&orbit, t) {
-            Placed::Known { sigma_au, .. } => sigma_au,
+            Placed::Known { error, .. } => error.total_au(),
             other => panic!("{other:?}"),
         };
 
-        // At the epoch there is no drift, so it is the size and the plane and nothing else.
+        // At the epoch there is no drift, so it is the shape and the plane and nothing else: at
+        // periapsis the eccentricity's hundredth is a hundredth of an AU.
         let fresh = sigma_at(0.0);
-        assert!(fresh < 0.002, "at the epoch it is {fresh} AU");
+        assert!(fresh < 0.011, "at the epoch it is {fresh} AU");
 
         // Ten orbits on, a hundredth of a period is a tenth of a turn: most of an AU.
         let later = sigma_at(10.0 * period);
         assert!(later > 0.5, "ten orbits on it is only {later} AU");
-        assert!(later > 100.0 * fresh, "{later} against {fresh}");
+        assert!(later > 40.0 * fresh, "{later} against {fresh}");
 
         // It grows the same either side of the epoch: a belief is no better backwards.
         assert!((sigma_at(-10.0 * period) - later).abs() < 1.0e-9);
