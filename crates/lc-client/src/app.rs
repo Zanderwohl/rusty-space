@@ -126,7 +126,7 @@ impl Plugin for ClientPlugin {
                 crate::form_preview::FormPreviewPlugin),
             (crate::bench::BenchPlugin, crate::haze::HazePlugin),
             // The beauty shots and the staged refit both photograph the ship.
-            (crate::beauty::BeautyPlugin, crate::refit_hull::RefitHullPlugin),
+            (crate::beauty::BeautyPlugin, crate::ship_hull::ShipHullPlugin, crate::refit_hull::RefitHullPlugin),
             // The menu's and the editor's widgets, so the browser build, which has no menu, has
             // them too.
             em_ui::MenuUiPlugin,
@@ -255,10 +255,10 @@ impl Plugin for ClientPlugin {
                     // Last, because a hull is metered as part of the scene the exposure was
                     // just placed for.
                     crate::hull::update_hulls,
-                    // Before the placeholders, so the frame the hull meshes are first shown, or
-                    // taken down, is the frame the placeholders go, or come back.
-                    crate::refit_hull::draw_refit,
-                    crate::parts::update_parts,
+                    // Before the real hulls, which stand the player's aside for a round's meshes,
+                    // and those before the placeholders, so the frame a mesh is first shown is the
+                    // frame the placeholders go.
+                    (crate::refit_hull::draw_refit, crate::ship_hull::draw_hulls, crate::parts::update_parts).chain(),
                     // And the exhaust after the ship, so it is placed against the same frame.
                     crate::plume::update_plumes,
                 )
