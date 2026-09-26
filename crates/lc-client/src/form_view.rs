@@ -694,7 +694,15 @@ fn build_chrome(commands: &mut Commands, top: f32, font: Handle<Font>) {
     ui.small_button(row, "Back", Emit(Action::ToggleForm));
 }
 
-pub(crate) fn press(buttons: Query<(&Interaction, &Emit), Changed<Interaction>>, mut out: MessageWriter<Requested>) {
+pub(crate) fn press(
+    buttons: Query<(&Interaction, &Emit), Changed<Interaction>>,
+    carried: Res<crate::form_carry::Carried>,
+    mut out: MessageWriter<Requested>,
+) {
+    // A press while carrying a part is the drop's, whatever button is under it.
+    if carried.is_carrying() {
+        return;
+    }
     for (interaction, emit) in &buttons {
         if *interaction == Interaction::Pressed {
             out.write(Requested(emit.0.clone()));

@@ -1049,7 +1049,7 @@ mod tests {
             Box::new(|d| d.mirror(PartId(4), true).unwrap()),
             Box::new(|d| d.set_kind(PartId(5), Kind::Bay).unwrap()),
             Box::new(|d| d.spar_mode(spar_id, SparMode::Strap).unwrap()),
-            Box::new(|d| d.remove(PartId(2), &lc_world::fitting::Balance::DEFAULT).unwrap()),
+            Box::new(|d| d.remove(PartId(2)).unwrap()),
         ];
         apply(Action::EditForm(Ok(spar.clone())), &mut ui, &mut s);
         assert_eq!(ui.form.selected, Some(spar_id), "an added part is selected");
@@ -1076,7 +1076,7 @@ mod tests {
     fn a_refused_edit_says_why_unless_a_drag_is_still_being_made() {
         use lc_world::form::PartId;
         let (mut ui, mut s) = editing();
-        let refused = draft(&ui).remove(PartId(0), &lc_world::fitting::Balance::DEFAULT);
+        let refused = draft(&ui).remove(PartId(0));
         let effects = apply(Action::EditForm(refused), &mut ui, &mut s);
         assert_eq!(effects, vec![Effect::Notify("refused: the Mind cannot be changed".into())]);
         let tiny = crate::draft::Edit { settled: false, ..draft(&ui).resize(PartId(5), 1.0).unwrap() };
@@ -1098,7 +1098,7 @@ mod tests {
         apply(Action::StartDraft(lc_world::form::Form::starting()), &mut ui, &mut s);
         assert_ne!(draft(&ui).form, draft(&ui).ship, "the edit survives");
         assert_eq!(ui.form.selected, Some(PartId(5)));
-        let remove = draft(&ui).remove(PartId(5), &lc_world::fitting::Balance::DEFAULT);
+        let remove = draft(&ui).remove(PartId(5));
         apply(Action::EditForm(remove), &mut ui, &mut s);
         assert_eq!(ui.form.selected, None, "a part removed is no longer selected");
     }

@@ -27,11 +27,17 @@ use crate::snap;
 
 /// The part on the pointer, if any.
 #[derive(Resource, Default)]
-pub struct Carried(Option<Carry>);
+pub struct Carried(Option<Carry>, bool);
 
 impl Carried {
     pub fn is_carrying(&self) -> bool {
         self.0.is_some()
+    }
+
+    /// Whether this frame's press put a part down. The press is the drop's, so a button under it
+    /// is not pressed: a part dropped on the list is deleted, not traded for a new one.
+    pub fn just_dropped(&self) -> bool {
+        self.1
     }
 
     pub fn carry(&self) -> Option<&Carry> {
@@ -43,7 +49,7 @@ impl Carried {
     }
 }
 
-/// Where a drop on it deletes what is carried: the list new parts are taken from.
+/// Where a drop on it deletes what is carried: the list new parts are taken from, buttons and all.
 #[derive(Component)]
 pub struct DropZone;
 
@@ -124,19 +130,17 @@ impl Carry {
 
     /// Dropped on the list. A part picked up is deleted with its subtree, the removal recording
     /// it as it was before it was picked up; a new one is taken back out, with nothing recorded.
-    /// A deletion refused puts the part back where it was, and says why.
-    pub fn discard(&self, draft: &Draft, balance: &Balance) -> Vec<Action> {
-        let back = |part: Part| Edit { what: What::Move, part: part.id, before: vec![self.part], after: vec![part], settled: false };
+    pub fn discard(&self, draft: &Draft) -> Vec<Action> {
         match self.was {
-            Some(was) => match draft.remove(self.part.id, balance) {
-                Ok(mut removal) => {
+            Some(was) => {
+                let removal = draft.remove(self.part.id).map(|mut removal| {
                     for part in removal.before.iter_mut().filter(|p| p.id == was.id) {
                         *part = was;
                     }
-                    vec![Action::EditForm(Ok(removal))]
-                }
-                Err(refused) => vec![Action::EditForm(Ok(back(was))), Action::EditForm(Err(refused))],
-            },
+                    removal
+                });
+                vec![Action::EditForm(removal)]
+            }
             None if self.hung => {
                 let out = Edit { what: What::Remove, part: self.part.id, before: vec![self.part], after: Vec::new(), settled: false };
                 vec![Action::EditForm(Ok(out))]
@@ -156,7 +160,9 @@ pub fn carry(
     keys: Res<ButtonInput<KeyCode>>,
     egui: Res<EguiWantsInput>,
     controls: em_ui::Controls,
-    zones: Query<&Interaction, With<DropZone>>,
+    zones: Query<(Entity, &Interaction), With<DropZone>>,
+    children: Query<&Children>,
+    inside: Query<&Interaction, Without<DropZone>>,
     window: Single<&Window, With<PrimaryWindow>>,
     shown: Res<Shown>,
     surface: Res<FormSurface>,
@@ -169,11 +175,16 @@ pub fn carry(
         return;
     };
     let cursor = window.cursor_position();
+    carried.1 = false;
     if buttons.just_pressed(MouseButton::Left) && !egui.wants_any_pointer_input() {
         if let Some(carry) = carried.0.take() {
-            let over_list = zones.iter().any(|i| *i != Interaction::None);
+            carried.1 = true;
+            // A button in the list holds the pointer rather than the list, so over either.
+            let over_list = zones.iter().any(|(zone, own)| {
+                *own != Interaction::None || children.iter_descendants(zone).flat_map(|b| inside.get(b)).any(|i| *i != Interaction::None)
+            });
             let actions = match over_list {
-                true => carry.discard(draft, &balance),
+                true => carry.discard(draft),
                 false => carry.put_down().map(|edit| Action::EditForm(Ok(edit))).into_iter().collect(),
             };
             out.write_batch(actions.into_iter().map(Requested));
@@ -328,14 +339,14 @@ mod tests {
         let (sdf, lens) = scene(&draft);
         let mut carry = Carry::new_part(&draft, Kind::Bay, crate::draft::PRIMITIVES[3], &B).unwrap();
         assert_eq!(carry.put_down(), None, "not hung anywhere, so nothing to add");
-        assert!(carry.discard(&draft, &B).is_empty());
+        assert!(carry.discard(&draft).is_empty());
         let edit = carry.hang(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
         apply(&mut draft, &edit);
         assert_eq!(draft.part(carry.part.id).unwrap().kind, Kind::Bay);
         let down = carry.put_down().unwrap();
         assert!(down.settled && down.what == What::Add && down.before.is_empty());
         // Dropped on the list instead, it goes again and nothing is recorded.
-        let [Action::EditForm(Ok(out))] = &carry.discard(&draft, &B)[..] else { panic!() };
+        let [Action::EditForm(Ok(out))] = &carry.discard(&draft)[..] else { panic!() };
         assert!(!out.settled);
         apply(&mut draft, out);
         assert_eq!(draft.form, draft.ship);
@@ -350,15 +361,16 @@ mod tests {
         let mut carry = Carry::pick_up(&draft, PartId(5)).unwrap();
         let edit = carry.hang(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
         apply(&mut draft, &edit);
-        let [Action::EditForm(Ok(removal))] = &carry.discard(&draft, &B)[..] else { panic!() };
+        let [Action::EditForm(Ok(removal))] = &carry.discard(&draft)[..] else { panic!() };
         assert!(removal.settled && removal.what == What::Remove);
         apply(&mut draft, removal);
         assert!(draft.part(PartId(5)).is_none());
         apply(&mut draft, &removal.inverse());
         assert_eq!(draft.form, draft.ship);
-        // The last drones cannot go: they go back, and the refusal is said.
+        // The last drones too: a draft may have none on the way to a design.
         let drones = Carry::pick_up(&draft, PartId(3)).unwrap();
-        let actions = drones.discard(&draft, &B);
-        assert!(matches!(actions[..], [Action::EditForm(Ok(_)), Action::EditForm(Err(crate::draft::Refused::LastDrones))]));
+        let [Action::EditForm(Ok(removal))] = &drones.discard(&draft)[..] else { panic!() };
+        apply(&mut draft, removal);
+        assert!(draft.form.parts.iter().all(|p| p.kind != Kind::Drone));
     }
 }

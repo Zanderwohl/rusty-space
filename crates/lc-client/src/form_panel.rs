@@ -43,7 +43,6 @@ pub enum Tap {
 /// A [`Tap::Take`] is no action: it puts a part on the pointer.
 pub fn action_of(tap: Tap, draft: &Draft, selected: Option<PartId>, new_shape: usize) -> Option<Action> {
     let part = selected.and_then(|id| draft.part(id));
-    let b = Balance::DEFAULT;
     Some(match tap {
         Tap::Select(id) => Action::SelectPart((selected != Some(id)).then_some(id)),
         Tap::NextKind => Action::EditForm(draft.set_kind(part?.id, draft::next_kind(part?.kind))),
@@ -51,7 +50,7 @@ pub fn action_of(tap: Tap, draft: &Draft, selected: Option<PartId>, new_shape: u
         Tap::ToggleMount => Action::EditForm(draft.toggle_mount(part?.id)),
         Tap::SparMode(mode) => Action::EditForm(draft.spar_mode(part?.id, mode)),
         Tap::Mirror(on) => Action::EditForm(draft.mirror(part?.id, on)),
-        Tap::Delete => Action::EditForm(draft.remove(part?.id, &b)),
+        Tap::Delete => Action::EditForm(draft.remove(part?.id)),
         Tap::Take(_) => return None,
         Tap::NextShape => Action::SetNewShape(new_shape + 1),
         Tap::Reset => Action::EditForm(Ok(draft.reset())),
@@ -106,7 +105,6 @@ fn lay_out(
     mut commands: Commands,
     ui: Res<Ui>,
     shown: Res<crate::form_view::Shown>,
-    carried: Res<crate::form_carry::Carried>,
     foot: Res<crate::panels::HudFoot>,
     assets: Res<AssetServer>,
     mut trees: Query<(Entity, &Built, &mut Node), (With<TreePanel>, Without<FieldsPanel>)>,
@@ -118,12 +116,12 @@ fn lay_out(
 
     let tree_key = draft.map(|d| {
         let mut key: Vec<String> = tree_lines(d, shown.marks()).into_iter().map(|(depth, id, what)| format!("{depth}{id}{what}")).collect();
-        key.push(format!("{:?} {} {}", ui.form.selected, ui.form.new_shape, carried.is_carrying()));
+        key.push(format!("{:?} {}", ui.form.selected, ui.form.new_shape));
         key
     });
     rebuild(&mut commands, trees.iter_mut(), tree_key, top, |commands, key| {
         let draft = draft.expect("keyed on the draft");
-        build_tree(commands, draft, shown.marks(), ui.form.selected, ui.form.new_shape, carried.is_carrying(), key, top, font());
+        build_tree(commands, draft, shown.marks(), ui.form.selected, ui.form.new_shape, key, top, font());
     });
 
     let fields_key = draft.map(|d| {
@@ -168,7 +166,6 @@ fn build_tree(
     marks: &std::collections::BTreeMap<PartId, Mark>,
     selected: Option<PartId>,
     new_shape: usize,
-    carrying: bool,
     built: Built,
     top: f32,
     font: Handle<Font>,
@@ -193,10 +190,7 @@ fn build_tree(
     // The list new parts come from, and where a carried part is dropped to delete it.
     let list = ui.strip(root);
     ui.insert(list, (Node { align_items: AlignItems::Stretch, margin: UiRect::top(Val::Px(6.0)), ..panel_node() }, Interaction::None, crate::form_carry::DropZone));
-    match carrying {
-        true => ui.inline(list, "DROP HERE TO DELETE", 15.0, crate::draft::Mark::Dismantle.color()),
-        false => ui.inline(list, "ADD A PART", 15.0, em_ui::vfd::TEXT),
-    };
+    ui.inline(list, "ADD A PART", 15.0, em_ui::vfd::TEXT);
     let shape = draft::PRIMITIVES[new_shape % draft::PRIMITIVES.len()];
     let row = ui.row(list);
     ui.inline(row, "shape", 13.0, em_ui::vfd::TEXT_DIM);
@@ -288,6 +282,9 @@ pub fn press(
     mut out: MessageWriter<Requested>,
 ) {
     let Some(draft) = ui.form.draft.as_ref() else { return };
+    if carried.just_dropped() {
+        return;
+    }
     for (interaction, tap) in &taps {
         if *interaction != Interaction::Pressed {
             continue;

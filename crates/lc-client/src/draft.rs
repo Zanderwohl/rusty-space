@@ -68,8 +68,6 @@ pub enum Refused {
     NoSuchPart(PartId),
     /// The Mind cannot be deleted, resized, reshaped or moved.
     Mind,
-    /// Deleting it would leave fewer drones than a ship may keep, and it could never refit again.
-    LastDrones,
     /// The draft would stop being a form, or a part would be too small.
     Fault(FormError),
 }
@@ -79,7 +77,6 @@ impl std::fmt::Display for Refused {
         match self {
             Self::NoSuchPart(id) => write!(f, "there is no {id}"),
             Self::Mind => write!(f, "the Mind cannot be changed"),
-            Self::LastDrones => write!(f, "those are the last drones"),
             Self::Fault(e) => e.fmt(f),
         }
     }
@@ -240,7 +237,8 @@ impl Draft {
 
     /// Writes `edit.after` over the parts `edit` names. Refused, leaving the draft as it was,
     /// when the result is no form or makes a part too small; a fault the draft already had
-    /// does not refuse an edit that leaves it.
+    /// does not refuse an edit that leaves it. Too few drones is Apply's to refuse, not the
+    /// draft's, which may pass through none on the way to a design.
     pub fn apply(&mut self, edit: &Edit, balance: &Balance) -> Result<(), Refused> {
         let named: BTreeSet<PartId> = edit.before.iter().chain(&edit.after).map(|p| p.id).collect();
         let mut next = self.form.clone();
@@ -249,7 +247,8 @@ impl Draft {
         next.parts.sort_by_key(|p| p.id);
         next.validate().map_err(Refused::Fault)?;
         let had = rules::sizes(&self.form, balance);
-        if let Some(&fault) = rules::sizes(&next, balance).iter().find(|f| !had.contains(f)) {
+        let new = |f: &&FormError| !had.contains(f) && **f != FormError::TooFewDrones;
+        if let Some(&fault) = rules::sizes(&next, balance).iter().find(new) {
             return Err(Refused::Fault(fault));
         }
         for was in &edit.before {
@@ -366,23 +365,11 @@ impl Draft {
         Ok(Edit { what: What::Add, part: id, before: Vec::new(), after: vec![part], settled: true })
     }
 
-    /// The part and its subtree.
-    pub fn remove(&self, id: PartId, balance: &Balance) -> Result<Edit, Refused> {
+    /// The part and its subtree. The last drones may go too: a draft is a design in progress,
+    /// and a target with too few is refused when it is applied, not while it is drawn.
+    pub fn remove(&self, id: PartId) -> Result<Edit, Refused> {
         self.editable(id)?;
         let before = self.subtree(id);
-        let gone: BTreeSet<PartId> = before.iter().map(|p| p.id).collect();
-        let copies = self.form.copies();
-        let drones_left: f64 = self
-            .form
-            .parts
-            .iter()
-            .filter(|p| p.kind == Kind::Drone && !gone.contains(&p.id))
-            .map(|p| p.volume_m3 * f64::from(copies[&p.id]))
-            .sum();
-        let had_drones = before.iter().any(|p| p.kind == Kind::Drone);
-        if had_drones && drones_left < balance.min_drone_m3 {
-            return Err(Refused::LastDrones);
-        }
         Ok(Edit { what: What::Remove, part: id, before, after: Vec::new(), settled: true })
     }
 
@@ -691,7 +678,7 @@ mod tests {
     fn the_mind_cannot_be_changed() {
         let d = draft();
         assert_eq!(d.resize(PartId(0), 5e3), Err(Refused::Mind));
-        assert_eq!(d.remove(PartId(0), &B), Err(Refused::Mind));
+        assert_eq!(d.remove(PartId(0)), Err(Refused::Mind));
         assert_eq!(d.twist(PartId(0), 1.0), Err(Refused::Mind));
         assert_eq!(d.add(PartId(0), Kind::Mind, PRIMITIVES[0], DVec3::X, &B), Err(Refused::Mind));
     }
@@ -700,9 +687,9 @@ mod tests {
     #[test]
     fn a_removal_carries_the_part_and_its_subtree_and_undoes_exactly() {
         let mut d = draft();
-        let edit = d.remove(PartId(1), &B);
-        assert_eq!(edit, Err(Refused::LastDrones), "the drones hang from the storage");
-        let edit = d.remove(PartId(2), &B).unwrap();
+        let edit = d.remove(PartId(1)).unwrap();
+        assert_eq!(ids(&edit.before), vec![1, 2, 3, 4, 5], "everything but the Mind hangs from the storage");
+        let edit = d.remove(PartId(2)).unwrap();
         assert_eq!(ids(&edit.before), vec![2]);
         d.apply(&edit, &B).unwrap();
         assert!(d.part(PartId(2)).is_none());
@@ -710,13 +697,15 @@ mod tests {
         assert_eq!(d.form, d.ship);
     }
 
+    /// A draft may have no drones on the way to a design; Apply is what refuses one.
     #[test]
-    fn the_last_drones_cannot_be_deleted_but_one_of_two_can() {
+    fn the_last_drones_can_be_deleted_from_a_draft() {
         let mut d = draft();
-        assert_eq!(d.remove(PartId(3), &B), Err(Refused::LastDrones));
-        let second = d.add(PartId(1), Kind::Drone, PRIMITIVES[1], DVec3::Y, &B).unwrap();
-        d.apply(&second, &B).unwrap();
-        assert!(d.remove(PartId(3), &B).is_ok());
+        d.apply(&d.remove(PartId(3)).unwrap(), &B).unwrap();
+        assert!(d.form.parts.iter().all(|p| p.kind != Kind::Drone));
+        assert_eq!(rules::sizes(&d.form, &B), vec![FormError::TooFewDrones], "which Apply will refuse");
+        let tiny = d.add(PartId(1), Kind::Drone, PRIMITIVES[1], DVec3::Y, &B).unwrap();
+        d.apply(&tiny, &B).unwrap();
     }
 
     #[test]
@@ -747,7 +736,7 @@ mod tests {
         d.apply(&grow, &B).unwrap();
         d.apply(&d.twist(PartId(4), 0.5).unwrap(), &B).unwrap();
         d.apply(&d.reshape(PartId(5), PRIMITIVES[0]).unwrap(), &B).unwrap();
-        d.apply(&d.remove(PartId(2), &B).unwrap(), &B).unwrap();
+        d.apply(&d.remove(PartId(2)).unwrap(), &B).unwrap();
         d.apply(&d.add(PartId(1), Kind::Living, PRIMITIVES[2], DVec3::Y, &B).unwrap(), &B).unwrap();
         let marks = d.marks(&B);
         assert_eq!(marks[&PartId(1)], Mark::Build);

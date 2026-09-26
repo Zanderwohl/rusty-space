@@ -399,7 +399,7 @@ pub fn delete_key(
         return;
     }
     if let (Some(id), Some(draft)) = (ui.form.selected, ui.form.draft.as_ref()) {
-        out.write(Requested(Action::EditForm(draft.remove(id, &Balance::DEFAULT))));
+        out.write(Requested(Action::EditForm(draft.remove(id))));
     }
 }
 
