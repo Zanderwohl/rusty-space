@@ -488,7 +488,8 @@ mod tests {
 
     /// **Another ship's new form arrives with its light.** Two ships ten light-hours apart: the
     /// watcher goes on seeing the old form for ten hours after the refit's step ends, and at every
-    /// tick sees exactly the form the step had left when the light it is shown left.
+    /// tick sees exactly the form the step had left when the light it is shown left, and the round
+    /// only while that light left during it.
     #[tokio::test]
     async fn another_ship_sees_a_refit_only_when_its_light_arrives() {
         const APART_US: f64 = 10.0 * 3_600.0 * 1.0e6;
@@ -512,7 +513,8 @@ mod tests {
         assert!(arrives_s - built_s > 20.0 * TICK_US as f64 * 1.0e-6, "the delay is not worth testing");
 
         let (start, target) = (lc_proto::Form::from(&Form::starting()), lc_proto::Form::from(&target));
-        let (mut old_after_build, mut new_seen_at) = (0, None);
+        let round = lc_proto::Round::from(plan.round());
+        let (mut old_after_build, mut new_seen_at, mut building_seen) = (0, None, 0);
         while new_seen_at.is_none() && (server.now_t() as f64) < (arrives_s + 3_600.0) * 1.0e6 {
             server.tick(&mut wire).await.unwrap();
             let now_s = server.now_t() as f64 * 1.0e-6;
@@ -525,6 +527,9 @@ mod tests {
             let emitted_s = contact.emitted_t as f64 * 1.0e-6;
             let expected = if emitted_s < built_s { &start } else { &target };
             assert_eq!(&contact.form, expected, "at {now_s}, light from {emitted_s}, built at {built_s}");
+            let running = (plan.round().start_s..built_s).contains(&emitted_s);
+            assert_eq!(contact.refit.as_ref(), running.then_some(&round), "at {now_s}, light from {emitted_s}");
+            building_seen += running as usize;
             if contact.form == start && now_s > built_s {
                 old_after_build += 1;
             }
@@ -535,6 +540,61 @@ mod tests {
         let seen_at = new_seen_at.expect("the new form was never seen");
         assert!(seen_at >= arrives_s && seen_at < arrives_s + TICK_US as f64 * 1.0e-6, "{seen_at} vs {arrives_s}");
         assert!(old_after_build > 20, "premise: the old form was seen after the build, {old_after_build} times");
+        assert!(building_seen > 20, "premise: the round was seen under way, {building_seen} times");
+    }
+
+    /// **A cancel arrives with its light too.** The watcher goes on seeing the round under way for
+    /// the ten hours the cancel's light takes, then the round gone and the form it left.
+    #[tokio::test]
+    async fn another_ship_sees_a_cancel_only_when_its_light_arrives() {
+        const APART_US: f64 = 10.0 * 3_600.0 * 1.0e6;
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let (actor, watcher) = (ClientId(1), ClientId(2));
+        for (client, at) in [(actor, DVec3::ZERO), (watcher, DVec3::new(APART_US, 0.0, 0.0))] {
+            let mut craft = crate::world::still(ShipId(client.0 as i64), at);
+            server.fit_new(&mut craft);
+            server.admit(client, craft, 0.0);
+        }
+        server.tick(&mut wire).await.unwrap();
+        wire.client_says(actor, refit_to(&more_engine()));
+        server.tick(&mut wire).await.unwrap();
+        let plan = server.ship(ShipId(1)).unwrap().fitting().unwrap().refit().expect("it began").clone();
+        let first = plan.steps()[0];
+        while (server.now_t() as f64) * 1.0e-6 < plan.round().start_s + first.begins_s + 0.5 * first.duration_s {
+            server.tick(&mut wire).await.unwrap();
+        }
+        wire.client_says(actor, act(Order::CancelRefit));
+        server.tick(&mut wire).await.unwrap();
+        let canceled_s = server.now_t() as f64 * 1.0e-6;
+        let left = lc_proto::Form::from(server.ship(ShipId(1)).unwrap().fitting().unwrap().form());
+        let arrives_s = canceled_s + APART_US * 1.0e-6;
+        assert!(canceled_s < plan.round().start_s + first.ends_s(), "premise: canceled mid-step");
+
+        let round = lc_proto::Round::from(plan.round());
+        let (mut under_way_after_cancel, mut gone_at) = (0, None);
+        while gone_at.is_none() && (server.now_t() as f64) < (arrives_s + 3_600.0) * 1.0e6 {
+            server.tick(&mut wire).await.unwrap();
+            let now_s = server.now_t() as f64 * 1.0e-6;
+            let contact = wire.take(watcher).iter().rev().find_map(|m| match m {
+                Outbound::Present(list) => list.iter().map(|c| c.get()).find(|p| p.ship_id == ShipId(1)).cloned(),
+                _ => None,
+            });
+            let contact = contact.expect("the other ship is in sight");
+            let emitted_s = contact.emitted_t as f64 * 1.0e-6;
+            let running = (plan.round().start_s..canceled_s).contains(&emitted_s);
+            assert_eq!(contact.refit.as_ref(), running.then_some(&round), "at {now_s}, light from {emitted_s}");
+            if running && now_s > canceled_s {
+                under_way_after_cancel += 1;
+            }
+            if emitted_s >= canceled_s {
+                assert_eq!(contact.form, left, "the form the cancel left");
+                gone_at = Some(now_s);
+            }
+        }
+        let gone_at = gone_at.expect("the cancel was never seen");
+        assert!(gone_at >= arrives_s && gone_at < arrives_s + TICK_US as f64 * 1.0e-6, "{gone_at} vs {arrives_s}");
+        assert!(under_way_after_cancel > 20, "premise: seen under way after the cancel {under_way_after_cancel} times");
     }
 
     #[tokio::test]

@@ -1338,6 +1338,7 @@ mod tests {
             emitted_t: 500_000,
             arrive_t: 1_000_000,
             form: lc_proto::Form::default(),
+            refit: None,
             glow: None,
             glare: None,
         };
@@ -1401,6 +1402,7 @@ mod tests {
                 emitted_t: (emitted_s * 1e6) as i64,
                 arrive_t: (emitted_s * 1e6) as i64,
                 form: lc_proto::Form::default(),
+                refit: None,
                 glow: None,
                 glare: None,
             };
@@ -1768,6 +1770,7 @@ mod tests {
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),
+            refit: None,
             glow: None,
             glare: None,
         };
@@ -1824,6 +1827,7 @@ mod tests {
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),
+            refit: None,
             glow: None,
             glare: None,
         };

@@ -514,6 +514,9 @@ pub struct Presence {
     /// then. Empty for a craft with no form, and for one whose form then is past what its
     /// authority remembers.
     pub form: Form,
+    /// The round it was running as its light left, so the build is drawn as it stood then. A
+    /// round that stops before it is done was canceled; see `lightcone/docs/29-ship-form.md`.
+    pub refit: Option<Round>,
     /// `None` until H7.
     pub glow: Option<Glow>,
     /// Only for an observer inside the craft's beam. `None` until E3.
@@ -1095,6 +1098,7 @@ mod tests {
                     emitted_t: 500_000,
                     arrive_t: 1_000_000,
                     form: two_parts(),
+                    refit: Some(Round { from: Form::default(), target: two_parts(), stored_j: 4.2e26, start_s: 0.25 }),
                     glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear }),
                     glare: Some(Glare { wavelength_m: 1.0e-6, received_w: 3.5e12 }),
                 },
@@ -1859,6 +1863,7 @@ mod tests {
             emitted_t: arrive_t - 1_000,
             arrive_t,
             form: Form::default(),
+            refit: None,
             glow: None,
             glare: None,
         };

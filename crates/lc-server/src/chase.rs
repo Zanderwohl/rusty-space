@@ -203,6 +203,7 @@ pub fn contacts(
             let Some(sighted) = sighting(fleet, observer.id, ShipId(craft.id.0), now_t) else {
                 continue;
             };
+            let then = craft.seen_at(sighted.emitted_s);
             let presence = Presence {
                 ship_id: ShipId(craft.id.0),
                 name: craft.designation(),
@@ -225,7 +226,8 @@ pub fn contacts(
                 arrive_t: now_t,
                 // As its light left it, as everything else here is: a ship seen mid-refit is seen
                 // in the shape it had then, and a new one only once that light arrives.
-                form: craft.seen_at(sighted.emitted_s).map(|seen| (&*seen.form).into()).unwrap_or_default(),
+                form: then.map(|then| (&*then.form).into()).unwrap_or_default(),
+                refit: then.and_then(|then| then.round.as_deref()).map(Into::into),
                 glow: None,
                 glare: None,
             };
