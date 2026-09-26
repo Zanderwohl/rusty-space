@@ -40,8 +40,9 @@ pub enum Tap {
     /// The next shape new parts are made in.
     NextShape,
     Reset,
-    /// Held on, it draws what the draft removes; pressed, it keeps them drawn until pressed again.
-    ShowDismantled,
+    /// Held on, it draws the ship as it is under the draft; pressed, it keeps it drawn until
+    /// pressed again.
+    ShowCurrent,
     /// The part's numbers, or only what it does.
     Advanced,
 }
@@ -62,7 +63,7 @@ pub fn action_of(tap: Tap, draft: &Draft, form: &crate::form_view::FormView) -> 
         Tap::Take(_) => return None,
         Tap::NextShape => Action::SetNewShape(new_shape + 1),
         Tap::Reset => Action::EditForm(Ok(draft.reset())),
-        Tap::ShowDismantled => Action::ShowDismantled(!form.show_dismantled),
+        Tap::ShowCurrent => Action::ShowCurrent(!form.show_current),
         Tap::Advanced => Action::ShowAdvanced(!form.advanced),
     })
 }
@@ -133,7 +134,7 @@ fn lay_out(
 
     let palette_key = vec![format!("{}", ui.form.new_shape)];
     let mut tree_key: Vec<String> = tree_lines(draft, shown.marks()).into_iter().map(|(depth, id, what)| format!("{depth}{id}{what}")).collect();
-    tree_key.push(format!("{:?} {}", ui.form.selected, ui.form.show_dismantled));
+    tree_key.push(format!("{:?} {}", ui.form.selected, ui.form.show_current));
     let fields_key = vec![format!("{:?}", ui.form.selected.and_then(|id| draft.part(id)).map(|p| {
         let placement = p.placement.map(|pl| (matches!(pl.mount, Mount::Enclosing), pl.mirror));
         (p.id, p.kind, draft::primitive_name(&p.primitive), draft::fields(p), placement, ui.form.advanced)
@@ -263,10 +264,9 @@ fn build_tree(
     }
     let row = ui.row(panel);
     ui.small_button(row, "reset to the ship", Tap::Reset);
-    let removed = marks.values().filter(|m| **m == Mark::Dismantle).count();
-    let on = if form.show_dismantled { "on" } else { "off" };
+    let on = if form.show_current { "on" } else { "off" };
     let row = ui.row(panel);
-    ui.chosen_button(row, &format!("show dismantled ({removed}): {on}"), form.show_dismantled, Tap::ShowDismantled);
+    ui.chosen_button(row, &format!("show current: {on}"), form.show_current, Tap::ShowCurrent);
 }
 
 fn build_fields(commands: &mut Commands, column: Entity, draft: &Draft, form: &crate::form_view::FormView, built: Built, font: Handle<Font>) {
@@ -329,8 +329,8 @@ fn panel_node() -> Node {
 
 /// The parts the draft removes are drawn while the toggle is on, or while the pointer is on it.
 fn reveal(ui: Res<Ui>, taps: Query<(&Interaction, &Tap)>, mut revealed: ResMut<crate::form_view::Revealed>) {
-    let held = taps.iter().any(|(i, t)| *t == Tap::ShowDismantled && *i != Interaction::None);
-    let wanted = ui.view == ViewMode::Form && (ui.form.show_dismantled || held);
+    let held = taps.iter().any(|(i, t)| *t == Tap::ShowCurrent && *i != Interaction::None);
+    let wanted = ui.view == ViewMode::Form && (ui.form.show_current || held);
     if revealed.0 != wanted {
         revealed.0 = wanted;
     }
@@ -412,11 +412,11 @@ mod tests {
     }
 
     #[test]
-    fn the_dismantled_toggle_flips() {
+    fn the_current_toggle_flips() {
         let d = Draft::new(Form::starting());
-        assert_eq!(action_of(Tap::ShowDismantled, &d, &view(None, 0)), Some(Action::ShowDismantled(true)));
-        let on = FormView { show_dismantled: true, ..view(None, 0) };
-        assert_eq!(action_of(Tap::ShowDismantled, &d, &on), Some(Action::ShowDismantled(false)));
+        assert_eq!(action_of(Tap::ShowCurrent, &d, &view(None, 0)), Some(Action::ShowCurrent(true)));
+        let on = FormView { show_current: true, ..view(None, 0) };
+        assert_eq!(action_of(Tap::ShowCurrent, &d, &on), Some(Action::ShowCurrent(false)));
     }
 
     #[test]

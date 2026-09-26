@@ -44,8 +44,8 @@ pub enum Action {
     SelectPart(Option<lc_world::form::PartId>),
     /// Which of [`crate::draft::PRIMITIVES`] a new part is made as.
     SetNewShape(usize),
-    /// Draw the parts the draft removes, or hide them again.
-    ShowDismantled(bool),
+    /// Draw the ship as it is wherever the draft differs from it, or hide it again.
+    ShowCurrent(bool),
     /// Show the selected part's numbers as fields, or only what it does.
     ShowAdvanced(bool),
     /// An edit to the draft as its handle or field built it, before and after, or why it could
@@ -485,7 +485,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
     }
     Action::SelectPart(part) => ui.form.selected = part,
-    Action::ShowDismantled(on) => ui.form.show_dismantled = on,
+    Action::ShowCurrent(on) => ui.form.show_current = on,
     Action::ShowAdvanced(on) => ui.form.advanced = on,
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
     Action::EditForm(edit) => edit_form(ui, edit, &mut effects),

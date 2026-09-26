@@ -100,9 +100,10 @@ pub struct FormView {
     pub selected: Option<lc_world::form::PartId>,
     /// Which of [`crate::draft::PRIMITIVES`] a part taken from the list is made as.
     pub new_shape: usize,
-    /// Whether the parts the draft removes are drawn. They are hidden otherwise, and never hung
-    /// from either way.
-    pub show_dismantled: bool,
+    /// Whether the ship as it is is drawn under the draft, faint, wherever the draft differs from
+    /// it: what it removes, the size a part had, the place it was moved from, the shape it is
+    /// rebuilt from. Nothing hangs from any of it either way.
+    pub show_current: bool,
     /// Whether the selected part's numbers are shown, or only what it does.
     pub advanced: bool,
 }
@@ -303,14 +304,14 @@ pub fn on_part(sdf: &Sdf, origin: DVec3, direction: DVec3, limit_m: f64) -> bool
     false
 }
 
-/// Whether the parts the draft removes are drawn this frame: always while the toggle is on, and
-/// while the pointer is on it.
+/// Whether the ship as it is is drawn this frame: always while the toggle is on, and while the
+/// pointer is on it.
 #[derive(Resource, Default)]
 pub struct Revealed(pub bool);
 
-/// A ghost of a part the draft removes.
+/// The ship as it is, where the draft differs from it.
 #[derive(Component)]
-struct Dismantled;
+struct Current;
 
 /// The draft as drawn, and the ship it is drawn over.
 #[derive(Resource, Default)]
@@ -478,6 +479,7 @@ fn show(
     ui: Res<Ui>,
     carried: Res<crate::form_carry::Carried>,
     grabbed: Res<crate::form_handles::Grabbed>,
+    revealed: Res<Revealed>,
     mut shown: ResMut<Shown>,
     roots: Query<Entity, With<FormViewRoot>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -540,19 +542,17 @@ fn show(
     for piece in ghost.pieces().iter().filter(|p| shown.marks.contains_key(&p.part)) {
         let (mesh, scale) = crate::parts::solid(&piece.shape);
         let mark = shown.marks[&piece.part];
-        let ghost = commands
-            .spawn((
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(ghosts.add(ghost_material(mark))),
-                crate::parts::local(piece, scale),
-                NoFrustumCulling,
-                RenderLayers::layer(FORM_LAYER),
-                ChildOf(root),
-            ))
-            .id();
-        if mark == crate::draft::Mark::Dismantle {
-            commands.entity(ghost).insert((Dismantled, Visibility::Hidden));
-        }
+        let visibility = if revealed.0 { Visibility::Inherited } else { Visibility::Hidden };
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(ghosts.add(ghost_material(mark))),
+            crate::parts::local(piece, scale),
+            NoFrustumCulling,
+            RenderLayers::layer(FORM_LAYER),
+            Current,
+            visibility,
+            ChildOf(root),
+        ));
     }
 }
 
@@ -577,7 +577,7 @@ fn ghost_material(mark: crate::draft::Mark) -> StandardMaterial {
     }
 }
 
-fn reveal(revealed: Res<Revealed>, mut ghosts: Query<&mut Visibility, With<Dismantled>>) {
+fn reveal(revealed: Res<Revealed>, mut ghosts: Query<&mut Visibility, With<Current>>) {
     let wanted = if revealed.0 { Visibility::Inherited } else { Visibility::Hidden };
     for mut visibility in &mut ghosts {
         visibility.set_if_neq(wanted);
