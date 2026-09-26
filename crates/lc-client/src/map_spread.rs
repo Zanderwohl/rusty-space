@@ -215,7 +215,9 @@ mod tests {
     fn an_arcs_cap_is_square_to_the_arc_at_its_end() {
         let at = Vec3::new(0.0, 40.0, 0.0);
         let points: Vec<Vec3> =
-            (0..=8).map(|i| at + Vec3::new((i as f32 * 0.1).sin(), 1.0 - (i as f32 * 0.1).cos(), 0.0)).collect();
+            // Curving in a plane that holds the line of sight, or square to the eye is square to
+            // both and the test tells the two apart by nothing.
+            (0..=8).map(|i| at + Vec3::new((i as f32 * 0.1).sin(), 0.0, 1.0 - (i as f32 * 0.1).cos())).collect();
         let arc = Spread::Arc { points: points.clone(), closed: false };
         let ends = arc.ends();
         let cap = cap_transform(ends[0].0, ends[0].1, 1.0e-3);
