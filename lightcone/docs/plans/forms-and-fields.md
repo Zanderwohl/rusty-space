@@ -361,7 +361,7 @@ graph LR
 
 - status: active card "Build S1: refits with forms, end to end"
 - needs: K3, F7, F9
-- touches: `crates/lc-server/src/fitting.rs`, `crates/lc-server/src/persist.rs`, `crates/lc-server/src/command/`, `crates/lc-proto/src/lib.rs`
+- touches: `crates/lc-server/src/fitting.rs`, `crates/lc-server/src/persist.rs`, `crates/lc-server/src/command/`, `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/fitting.rs`, `crates/lc-proto/src/form.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-world/src/form/presets.rs`, `crates/lc-world/src/form/primitive.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/status.rs`, `crates/lc-server/src/ability.rs`, `crates/lc-server/tests/checkpoint.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/refit_panel.rs`, `crates/lc-client/tests/seam.rs`, `lightcone/docs/29-ship-form.md`, `lightcone/docs/27-console.md`
 - read: 29 §Protocol and persistence
 - deliver: `Loadout` removed from the wire and saves; `Order::Refit { target: Form }` validated and run as rounds; `Fitted` carries the form, solved scales, capacities and geometry; `Presence` carries the form; the console's fitting commands take parts; the client reads the form from `Fitted` with no drawing change yet.
 - done when: a refit round runs on a shard and survives a restart, an invalid target is refused by name, and another client sees the new form only when its light arrives.
