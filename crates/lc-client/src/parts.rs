@@ -16,7 +16,6 @@ use em_render::render_space::sim_to_render;
 use em_render::wire_mesh;
 use glam::DVec3;
 use lc_world::fitting::Balance;
-use lc_world::form::presets::Builtin;
 use lc_world::form::place::Side;
 use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::{Piece, Sdf};
@@ -90,15 +89,7 @@ impl OwnForm {
 /// how a hull tens of kilometers long is photographed before anything can build one.
 pub fn fixture(spec: &str) -> Option<Form> {
     let name = spec.split_once('*').map_or(spec, |(name, _)| name);
-    let scale = fixture_scale(spec)?;
-    let mut form = match name.eq_ignore_ascii_case("default") {
-        true => Form::starting(),
-        false => Builtin::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(name)).map(Builtin::form)?,
-    };
-    for part in form.parts.iter_mut().filter(|p| p.placement.is_some()) {
-        part.volume_m3 *= scale.powi(3);
-    }
-    Some(form)
+    lc_world::form::presets::named(name, fixture_scale(spec)?)
 }
 
 /// The `k` of a `--form` spelling's `*k`, one without it, and `None` for a `k` that is no scale.
@@ -119,6 +110,27 @@ pub fn adopt_fixture(dev: Res<crate::dev::DevEntry>, mut ui: ResMut<crate::app::
     match OwnForm::new(&form, &Balance::DEFAULT) {
         Ok(formed) => *own = formed,
         Err(e) => ui.notify(format!("form {name} does not place: {e}"), 0.0),
+    }
+}
+
+/// Take the player's form from the server's last `Fitted` whenever it changes: at sign-in, and as
+/// each refit step finishes. `--form` and `--demo refit` hold their own and are left alone.
+pub fn adopt_fitted(
+    uplink: Res<crate::uplink::Uplink>,
+    dev: Res<crate::dev::DevEntry>,
+    mut own: ResMut<OwnForm>,
+    mut adopted: Local<Option<lc_proto::Form>>,
+) {
+    let Some(hull) = uplink.hull.as_ref().filter(|_| dev.form.is_none() && dev.refit.is_none()) else { return };
+    if adopted.as_ref() == Some(&hull.form) {
+        return;
+    }
+    *adopted = Some(hull.form.clone());
+    let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
+    match OwnForm::new(&(&hull.form).into(), &balance) {
+        Ok(formed) => *own = formed,
+        // A form partway through a round may not place. The last one that did stays drawn.
+        Err(e) => debug!("the ship's form does not place yet: {e}"),
     }
 }
 
@@ -384,6 +396,32 @@ mod tests {
     use super::*;
     use bevy::mesh::VertexAttributeValues;
 
+    /// The server's word on the form becomes the player's own, and again when a step changes it.
+    #[test]
+    fn the_players_form_is_read_from_fitted() {
+        let mut app = App::new();
+        app.init_resource::<crate::uplink::Uplink>()
+            .init_resource::<crate::dev::DevEntry>()
+            .init_resource::<OwnForm>()
+            .add_systems(Update, adopt_fitted);
+        app.update();
+        assert!(!app.world().resource::<OwnForm>().is_formed(), "nothing said, nothing formed");
+
+        let fitted = |form: &Form| {
+            let fitting = lc_world::fitting::Fitting::full(form.clone(), Balance::DEFAULT, 0.0);
+            (lc_proto::Fitting::from(&fitting), lc_proto::Hull::from(&fitting))
+        };
+        for form in [Form::starting(), lc_world::form::presets::Builtin::Cluster.form()] {
+            let (fitting, hull) = fitted(&form);
+            let mut uplink = app.world_mut().resource_mut::<crate::uplink::Uplink>();
+            (uplink.fitting, uplink.hull) = (Some(fitting), Some(hull));
+            app.update();
+            let own = app.world().resource::<OwnForm>();
+            let expected = OwnForm::new(&form, &Balance::DEFAULT).unwrap();
+            assert_eq!(own.length_m(), expected.length_m());
+        }
+    }
+
     /// Every vertex of `shape`'s mesh, in the part's frame.
     fn vertices(shape: &Shape) -> Vec<Vec3> {
         let (mesh, scale) = solid(shape);
@@ -475,7 +513,7 @@ mod tests {
     fn a_mirrored_pair_is_symmetric_about_the_port_starboard_plane() {
         use lc_world::form::PartId;
         use lc_world::form::place::Side;
-        let mut form = Builtin::Plate.form();
+        let mut form = lc_world::form::presets::Builtin::Plate.form();
         form.parts.retain(|p| p.id != PartId(3));
         let engine = form.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap();
         engine.placement.as_mut().unwrap().mirror = true;

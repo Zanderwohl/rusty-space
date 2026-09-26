@@ -52,6 +52,19 @@ pub const HISTORY_S: f64 = 2.0 * crate::system::LOCAL_SHELL_LY * crate::flight::
 /// which is the safe way to be unable to answer.
 pub const HISTORY_STRETCHES: usize = 256;
 
+/// How many forms a craft remembers having had. A round is a step per part change, so this holds
+/// a few rounds of a large form; past it, the oldest is forgotten, and an observer asking about
+/// then is told nothing rather than a later form.
+pub const HISTORY_FORMS: usize = 1024;
+
+/// A form a craft had, and the length it measured, from the coordinate second it took effect.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Seen {
+    pub from_s: f64,
+    pub form: Arc<crate::form::Form>,
+    pub length_m: f64,
+}
+
 /// What a hull sits at, kelvin.
 ///
 /// One temperature for every craft, and a deliberate simplification: a real hull has a sunward
@@ -197,6 +210,9 @@ pub struct Craft {
     /// Private for the reason `past` is: every change of motive has to settle it, and that
     /// happens in [`Craft::remembering`].
     fitting: Option<Fitting>,
+    /// The forms it has had, oldest first, so an observer is shown the one its light left with.
+    /// See [`Craft::seen_at`]. Not saved, as `past` is not.
+    seen: Vec<Seen>,
 }
 
 impl Craft {
@@ -220,6 +236,7 @@ impl Craft {
             // about its past as there is.
             known_from_s: f64::NEG_INFINITY,
             fitting: None,
+            seen: Vec::new(),
         }
     }
 
@@ -267,8 +284,8 @@ impl Craft {
             // had got to.
             self.motion.attitude = previous;
         } else {
+            self.settle_fitting(Some(&before), at_s);
             if let Some(fitting) = &mut self.fitting {
-                fitting.settle(&before, at_s);
                 fitting.commit(&self.motion, at_s);
             }
             // A new motive may collect where the old one could not, or stop collecting.
@@ -443,12 +460,84 @@ impl Craft {
     }
 
     /// Give it a form and an account, or take them away. Its length follows its form from here on.
+    ///
+    /// A craft first fitted mid-round, as one loaded is, has been seen in the round's forms back
+    /// to its start and in the form it began from before that, all at the length it has now.
     pub fn fit(&mut self, fitting: Option<Fitting>) {
         self.fitting = fitting;
         self.sync_length();
-        if let Some(since) = self.fitting.as_ref().map(Fitting::since_s) {
-            self.begin_solar_segment(since);
+        let Some(fitting) = &self.fitting else {
+            self.seen.clear();
+            return;
+        };
+        let since = fitting.since_s();
+        if self.seen.is_empty() {
+            let from = fitting.refit().map_or_else(|| fitting.form().clone(), |plan| plan.round().from.clone());
+            let steps = fitting.steps_ending(f64::NEG_INFINITY, since);
+            self.seen.push(Seen { from_s: f64::NEG_INFINITY, form: Arc::new(from), length_m: self.length_m });
+            self.note_steps(steps, self.length_m);
         }
+        self.note_form(since);
+        self.begin_solar_segment(since);
+    }
+
+    /// The form and length its light left with at `t`, coordinate seconds. `None` for a craft
+    /// with no form, and before the oldest form it remembers.
+    pub fn seen_at(&self, t: f64) -> Option<&Seen> {
+        let after = self.seen.partition_point(|seen| seen.from_s <= t);
+        after.checked_sub(1).map(|i| &self.seen[i])
+    }
+
+    /// The length its light left with at `t`, meters. Before the oldest form it remembers, that
+    /// form's, the earliest it can answer with; with no form at all, its length now.
+    pub fn seen_length_m_at(&self, t: f64) -> f64 {
+        self.seen_at(t).or(self.seen.first()).map_or(self.length_m, |seen| seen.length_m)
+    }
+
+    /// Every settlement of the fitting goes through here, so each refit step is noted at its own
+    /// end rather than at whichever settlement found it finished. `before` is the motive in force
+    /// up to `at_s`, where it is not the current one.
+    fn settle_fitting(&mut self, before: Option<&ShipState>, at_s: f64) {
+        let Some(mut fitting) = self.fitting.take() else { return };
+        let ended = fitting.steps_ending(fitting.since_s(), at_s);
+        fitting.settle(before.unwrap_or(&self.motion), at_s);
+        self.fitting = Some(fitting);
+        let was = self.length_m;
+        self.sync_length();
+        self.note_steps(ended, was);
+    }
+
+    /// The last of `steps` is the form the settlement measured; those before it were never
+    /// measured, so they keep the length the craft had.
+    fn note_steps(&mut self, steps: Vec<(f64, crate::form::Form)>, was_m: f64) {
+        let last = steps.len().saturating_sub(1);
+        for (i, (at_s, form)) in steps.into_iter().enumerate() {
+            let length_m = if i == last { self.length_m } else { was_m };
+            self.push_seen(Seen { from_s: at_s, form: Arc::new(form), length_m });
+        }
+    }
+
+    /// After anything that may have changed the form at `at_s` other than a step ending.
+    fn note_form(&mut self, at_s: f64) {
+        let Some(fitting) = &self.fitting else { return };
+        let form = fitting.form();
+        if self.seen.last().is_some_and(|seen| *seen.form == *form && seen.length_m == self.length_m) {
+            return;
+        }
+        let seen = Seen { from_s: at_s, form: Arc::new(form.clone()), length_m: self.length_m };
+        self.push_seen(seen);
+    }
+
+    fn push_seen(&mut self, seen: Seen) {
+        if self.seen.last().is_some_and(|last| *last.form == *seen.form && last.length_m == seen.length_m) {
+            return;
+        }
+        let horizon = seen.from_s - HISTORY_S;
+        self.seen.push(seen);
+        // The first is wanted only before the second began.
+        let stale = self.seen.iter().skip(1).take_while(|s| s.from_s < horizon).count();
+        let excess = self.seen.len().saturating_sub(HISTORY_FORMS);
+        self.seen.drain(..stale.max(excess));
     }
 
     /// How far it is from its system's primary at `t`, meters. `None` between systems.
@@ -483,9 +572,7 @@ impl Craft {
     fn begin_solar_segment(&mut self, from_s: f64) {
         let Some(since) = self.fitting.as_ref().map(Fitting::since_s) else { return };
         let from_s = from_s.max(since);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.settle(&self.motion, from_s);
-        }
+        self.settle_fitting(None, from_s);
         let middle = 0.5 * (from_s + crate::solar::segment_end(from_s));
         let watts = self.solar_w_at(middle);
         if let Some(fitting) = &mut self.fitting {
@@ -499,9 +586,7 @@ impl Craft {
         let step = crate::solar::step_for(since, now_s);
         let mut boundary = ((since / step).floor() + 1.0) * step;
         while boundary <= now_s {
-            if let Some(fitting) = &mut self.fitting {
-                fitting.settle(&self.motion, boundary);
-            }
+            self.settle_fitting(None, boundary);
             let middle = boundary + 0.5 * step;
             let watts = self.solar_w_at(middle);
             if let Some(fitting) = &mut self.fitting {
@@ -521,10 +606,7 @@ impl Craft {
     /// motive has burned.
     pub fn settle(&mut self, now_s: f64) {
         self.collect_to(now_s);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.settle(&self.motion, now_s);
-        }
-        self.sync_length();
+        self.settle_fitting(None, now_s);
     }
 
     /// The drive a new order is clamped against: the kind's, turning at this hull's rate, and
@@ -602,6 +684,7 @@ impl Craft {
         self.settle(now_s);
         let finished = self.fitting.as_mut().is_some_and(Fitting::finish_refit);
         self.sync_length();
+        self.note_form(now_s);
         finished
     }
 
@@ -612,6 +695,7 @@ impl Craft {
         let Some(fitting) = &mut self.fitting else { return false };
         let done = fitting.refit_at_once(form).is_ok();
         self.sync_length();
+        self.note_form(now_s);
         done
     }
 
@@ -622,6 +706,7 @@ impl Craft {
             fitting.cancel_refit(now_s);
         }
         self.sync_length();
+        self.note_form(now_s);
     }
 
     /// Cut to a straight line from a point, at a velocity. What a burn does.
@@ -631,11 +716,13 @@ impl Craft {
     /// craft here, which both lost everything that was not motion and left no trace of what it
     /// had been doing.
     pub fn drift_from(&mut self, at_ly: DVec3, beta: DVec3, now_s: f64) {
-        if let Some(fitting) = &mut self.fitting {
+        if self.fitting.is_some() {
             let was = motion::state_at(&self.motion, self.system.as_deref(), now_s)
                 .map_or(self.motion.beta, |(_, beta)| beta);
-            fitting.settle(&self.motion, now_s);
-            fitting.spend(crate::cost::rapidity_between(was, beta));
+            self.settle_fitting(None, now_s);
+            if let Some(fitting) = &mut self.fitting {
+                fitting.spend(crate::cost::rapidity_between(was, beta));
+            }
         }
         self.remembering(now_s, |craft| {
             craft.motion.position_ly = at_ly;
@@ -1333,6 +1420,51 @@ mod tests {
         assert_eq!(craft.fitting().unwrap().form(), &target);
         assert_eq!(craft.length_m, extent(&target));
         assert!(craft.length_m > length && craft.slew_rate_rad_s() < slew);
+    }
+
+    /// A far observer is shown the form the craft had when its light left, step by step, however
+    /// coarsely the craft was settled: here once a day through a round of minutes-long steps.
+    #[test]
+    fn it_is_seen_in_the_form_it_had_then() {
+        use crate::form::{Form, Kind as Part};
+        let mut craft = fitted();
+        let start = Form::starting();
+        let mut target = start.clone();
+        for part in target.parts.iter_mut().filter(|p| matches!(p.kind, Part::Engine | Part::Storage)) {
+            part.volume_m3 *= 1.2;
+        }
+        craft.advance(100.0, 100.0);
+        craft.begin_refit(target.clone(), 100.0).unwrap();
+        let plan = craft.fitting().unwrap().refit().unwrap().clone();
+        let ends: Vec<f64> = plan.steps().iter().map(|s| 100.0 + s.ends_s()).collect();
+        assert!(ends.len() >= 2 && ends[1] - ends[0] > 1.0, "premise: {ends:?}");
+        let day = 86_400.0;
+        let mut now = 100.0;
+        while craft.is_refitting(now) {
+            now += day;
+            craft.advance(now, day);
+        }
+        let seen = |craft: &Craft, t: f64| craft.seen_at(t).map(|s| (*s.form).clone());
+        assert_eq!(seen(&craft, 50.0), Some(start.clone()));
+        assert_eq!(seen(&craft, ends[0] - 1.0), Some(start.clone()), "a step shows before it ends");
+        for (i, end) in ends.iter().enumerate() {
+            assert_eq!(seen(&craft, *end), Some(plan.at(*end).form), "step {i}");
+        }
+        assert_eq!(seen(&craft, now), Some(target.clone()));
+        assert!(craft.seen_at(now).unwrap().length_m > craft.seen_at(50.0).unwrap().length_m);
+
+        // Loaded partway, it has been seen in the round's forms back to its start.
+        let mut partway = fitted();
+        partway.begin_refit(target, 0.0).unwrap();
+        let mid = 0.5 * (plan.steps()[0].ends_s() + plan.steps()[1].ends_s());
+        partway.settle(mid);
+        let account = partway.fitting().unwrap().account();
+        let mut loaded = Craft::at(CraftId(9), Kind::Ship, DVec3::ZERO);
+        loaded.fit(Some(Fitting::from_account(&account, *partway.fitting().unwrap().balance())));
+        assert_eq!(seen(&loaded, -1.0), Some(start));
+        assert_eq!(seen(&loaded, mid), Some(partway.fitting().unwrap().form().clone()));
+
+        assert!(Craft::at(CraftId(4), Kind::Ship, DVec3::ZERO).seen_at(0.0).is_none(), "no form, nothing seen");
     }
 
     /// Slew goes as one over the radius of gyration across the nose, anchored on the 500 m ovoid

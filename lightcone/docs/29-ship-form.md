@@ -4,9 +4,8 @@ What a ship is made of, what shape it is, and what it costs to change either.
 
 **Status: partly built.** It replaces the loadout of [19-ship-fitting.md](19-ship-fitting.md):
 **a ship is its parts**, and each part's volume is how much of its kind the ship has. 19's energy,
-mass and drive rules stand. Since F9 `lc-world` has no loadout: a craft's account is kept on its
-form (§What a craft reads). The wire and saves still carry the loadout until S1, and **refits are
-refused between F9 and S1** (§Protocol and persistence).
+mass and drive rules stand. A craft's account is kept on its form (§What a craft reads), and the
+wire and saves carry the form (§Protocol and persistence).
 [30-the-field.md](30-the-field.md) and [31-directed-energy.md](31-directed-energy.md) are what the
 shape does in play, and [32-ship-rendering.md](32-ship-rendering.md) is how it is drawn.
 
@@ -677,28 +676,34 @@ photographs it, and `--form <preset>` stages a draft.
 
 ## Protocol and persistence
 
-- `Loadout` is removed from the wire and from saves. `Order::Refit { target: Form }`.
-- **Between F9 and S1** `lc-world` has no loadout and the wire still does. A ship created or loaded
-  from a loadout is the starting form with each kind scaled by its count over the starting ship's,
-  a count of zero leaving the part out. A loadout the wire asks for is read back off the
-  capacities, a slot of each density a module, and the balance's per-module fields are each
-  density over 19's slot. A loadout refit on the wire or in a save is dropped, as one whose recipe
-  no longer planned always was. **The shard refuses `RefitLoadout` and `refit-magic` as
-  `NotBuilt`**, as it refuses `Order::Refit`, and the refit window is a ledger with no draft.
-  `lc_world::fitting`'s conversions are S1's to delete, and S1 also removes `lc_proto::Balance`'s
-  per-module fields.
+- `Loadout` is removed from the wire and from saves. `Order::Refit { target: Form }`, refused under
+  way and while a round runs; `CancelRefit` runs §Cancel.
+- The account on the wire and in a save, `lc_proto::Fitting`, holds the settled form and the round
+  under way as its recipe, `lc_proto::Round`: both forms, the stored energy it began with and when.
+  Both ends solve the recipe to the same plan, so a round survives a restart and a client runs the
+  same steps as the shard.
 - `Fitted` carries a `Hull`: the form, each part's solved scale, the capacities, and the geometry's
-  numbers.
+  numbers, its inertia scaled to the ship as settled. It is sent as each step finishes, as well as
+  after every accepted order.
 - An invalid target is `Refusal::Form(FormFault)`, naming the part: the structural checks, then each
-  placement rule.
+  placement rule, from the same `rules::check` the editor calls. A target the planner cannot run is
+  `Refusal::Short(Shortfall)`: `Energy`, or `NoDrones(part)`, the step that would begin with none. A
+  target whose Mind is not the ship's is `FormFault::OtherMind`.
 - The wire's form types are `lc_proto::form`, mirrors with arrays for glam's vectors, converted in
   `lc_world::form`.
-- A craft's form is saved. Old rows are not read: there are no players, so the format simply changes.
+- A craft's form is saved, and a round under way with it. Old rows are not read: there are no
+  players, so the format simply changes, and `SAVE_FORMAT` 10 refuses an older row by its number
+  rather than misreading it.
 - Presets: `Inbound::SavePreset { name, form }`, `Inbound::DeletePreset { name }`, and
   `Outbound::Presets`, the account's whole list, sent after `Welcome` and after each change. A
   `presets` table in `lc-store`, keyed by account and name.
 - **Other craft's forms reach a client only by being seen.** `Presence` gains the form, and it arrives with
-  the light, so a ship seen mid-refit is seen in the shape its light left in.
+  the light, so a ship seen mid-refit is seen in the shape its light left in. A craft keeps the forms
+  it has had, each from the instant its step ended, and a contact is given the one in force when its
+  light left, with the length it measured. Steps are stamped at their own ends, however coarsely the
+  shard settled. A craft loaded mid-round was seen in the round's forms back to its start and in the
+  form it began from before that. Past `HISTORY_FORMS` it forgets the oldest, and a presence from
+  before then carries no form rather than a later one, and the length of the oldest it remembers.
 
 ## Balance
 

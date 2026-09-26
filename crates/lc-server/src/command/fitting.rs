@@ -1,7 +1,7 @@
-//! `energize`, `drain`, `refit-finish` and `refit-magic`: a ship's energy and form, by fiat.
+//! `energize`, `drain`, `refit`, `refit-finish` and `refit-magic`: a ship's energy and form, by fiat.
 
-use lc_proto::Refusal;
 use lc_world::craft::CraftId;
+use lc_world::form::{Form, rules};
 
 use crate::journal::Journal;
 use crate::server::Server;
@@ -57,9 +57,32 @@ impl<J: Journal> Server<J> {
         ))
     }
 
-    /// Loadouts are gone, and S1 makes this take parts.
-    pub(super) fn refit_magic(&mut self) -> Result<String, String> {
-        Err(format!("{:?}: a ship is its form now, and refits by form are not built yet", Refusal::NotBuilt))
+    /// Through the order's own checks, so what the console begins the wire could have.
+    pub(super) fn refit_command(&mut self, id: CraftId, form: &Form, wire: &mut impl Transport) -> Result<String, String> {
+        let now_s = self.now_t() as f64 * 1.0e-6;
+        self.refit(id, &form.into(), now_s).map_err(|why| format!("refused: {why:?}"))?;
+        self.tell_fitted(wire, id);
+        let craft = self.fleet.get(id).ok_or("no such ship")?;
+        let plan = craft.fitting().and_then(|f| f.refit()).ok_or("the round did not begin")?;
+        Ok(format!("{}: {} steps, {:.1} days", craft.designation(), plan.steps().len(), plan.duration_s() / 86_400.0))
+    }
+
+    /// Placed by the rules, since nothing else would ever check it.
+    pub(super) fn refit_magic(&mut self, id: CraftId, form: Form, wire: &mut impl Transport) -> Result<String, String> {
+        let now_s = self.now_t() as f64 * 1.0e-6;
+        let craft = self.fleet.get_mut(id).ok_or("no such ship")?;
+        let name = craft.designation();
+        let balance = *craft.fitting().ok_or_else(|| format!("{name} has no form"))?.balance();
+        if let Err(faults) = rules::check(&form, &balance) {
+            let named: Vec<String> = faults.iter().map(ToString::to_string).collect();
+            return Err(format!("{name}: {}", named.join("; ")));
+        }
+        if !craft.refit_at_once(form, now_s) {
+            return Err(format!("{name}: the form does not measure"));
+        }
+        self.refitting.remove(&id);
+        self.tell_fitted(wire, id);
+        Ok(format!("{name}: rebuilt, {:.0} m", self.fleet.get(id).map_or(0.0, |c| c.length_m)))
     }
 
     pub(super) fn finish_refit(&mut self, id: CraftId, wire: &mut impl Transport) -> Result<String, String> {

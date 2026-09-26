@@ -107,8 +107,9 @@ async fn debug_acts_on_its_own_ship_and_admins_on_anyone_s() {
     for line in [
         format!("teleport {far} ship:2"),
         "energize ship:2".into(),
+        "refit default ship:2".into(),
         "refit-finish ship:2".into(),
-        "refit-magic ship:2".into(),
+        "refit-magic default ship:2".into(),
         "drain ship:2".into(),
     ] {
         let (mut server, mut wire) = shard(Level::DEBUG);
@@ -149,13 +150,6 @@ fn held(server: &Server<Memory>) -> (f64, f64) {
     (fitting.stored_j_at(&craft.motion, now_s) / me, fitting.capacity_j_at(now_s) / me)
 }
 
-/// The starting form with its bell grown by two fifths, as 19's refits built two more engines.
-fn more_engine() -> lc_world::form::Form {
-    let mut target = lc_world::form::Form::starting();
-    target.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(2)).unwrap().volume_m3 *= 1.4;
-    target
-}
-
 #[tokio::test]
 async fn energize_adds_what_is_asked_and_never_more_than_fits() {
     let (mut server, mut wire) = shard(Level::ADMIN);
@@ -172,8 +166,8 @@ async fn energize_adds_what_is_asked_and_never_more_than_fits() {
     assert!((stored - capacity).abs() < 1e-6, "an overcharge left {stored} of {capacity}");
 }
 
-/// Ship 2's refit is finished by an admin: the target form at once, and its owner told. No order
-/// begins one until S1, so the round is begun on the craft directly.
+/// Ship 2's refit, begun from the console as the order would, is finished by an admin: the
+/// target form at once, and its owner told.
 #[tokio::test]
 async fn refit_finish_completes_a_refit_under_way_and_only_one() {
     let (mut server, mut wire) = shard(Level::ADMIN);
@@ -183,47 +177,50 @@ async fn refit_finish_completes_a_refit_under_way_and_only_one() {
 
     let (ok, why) = ask(&mut server, &mut wire, 2, "energize ship:2").await;
     assert!(ok, "{why}");
+    let (ok, why) = ask(&mut server, &mut wire, 3, "refit default 1.05 ship:2").await;
+    assert!(ok && why.contains("steps"), "{why}");
     let now_s = server.now_t() as f64 * 1.0e-6;
-    let craft = server.fleet.get_mut(CraftId(2)).unwrap();
-    craft.begin_refit(more_engine(), now_s).expect("the refit plans");
-    server.refitting.insert(CraftId(2));
+    assert!(server.fleet.get(CraftId(2)).unwrap().is_refitting(now_s));
+    assert!(server.refitting.contains_key(&CraftId(2)), "its owner would not be told of its steps");
     wire.take(ClientId(2));
 
-    let (ok, why) = ask(&mut server, &mut wire, 3, "refit-finish ship:2").await;
+    let (ok, why) = ask(&mut server, &mut wire, 4, "refit-finish ship:2").await;
     assert!(ok, "{why}");
     let now_s = server.now_t() as f64 * 1.0e-6;
     let craft = server.fleet.get(CraftId(2)).unwrap();
     assert!(!craft.is_refitting(now_s));
-    assert_eq!(craft.fitting().unwrap().form(), &more_engine());
+    assert_eq!(craft.fitting().unwrap().form(), &lc_world::form::presets::named("default", 1.05).unwrap());
     assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
 }
 
-/// A loadout is not a ship any more, so `refit-magic` is refused until S1 makes it take parts,
-/// and leaves the ship and any refit under way as they were.
+/// `refit-magic` takes a form, drops the round under way, and is refused for a form that breaks
+/// a placement rule, naming the part.
 #[tokio::test]
-async fn refit_magic_is_refused_as_not_built() {
+async fn refit_magic_rebuilds_as_a_form_at_once() {
     let (mut server, mut wire) = shard(Level::ADMIN);
     emptied(&mut server);
     let (ok, why) = ask(&mut server, &mut wire, 1, "energize ship:2").await;
     assert!(ok, "{why}");
-    let now_s = server.now_t() as f64 * 1.0e-6;
-    let craft = server.fleet.get_mut(CraftId(2)).unwrap();
-    craft.begin_refit(more_engine(), now_s).expect("the refit plans");
-    server.refitting.insert(CraftId(2));
-    let recipe = |server: &Server<Memory>| {
-        let fitting = server.fleet.get(CraftId(2)).unwrap().fitting().unwrap();
-        (fitting.form().clone(), fitting.refit().map(|plan| plan.round().clone()))
-    };
-    let before = recipe(&server);
+    let (ok, why) = ask(&mut server, &mut wire, 2, "refit default 1.05 ship:2").await;
+    assert!(ok, "{why}");
     wire.take(ClientId(2));
 
-    let (ok, why) = ask(&mut server, &mut wire, 2, "refit-magic engines:30 slots:60 ship:2").await;
-    assert!(!ok && why.contains("NotBuilt"), "{why}");
+    let (ok, why) = ask(&mut server, &mut wire, 3, "refit-magic cluster ship:2").await;
+    assert!(ok, "{why}");
     let now_s = server.now_t() as f64 * 1.0e-6;
     let craft = server.fleet.get(CraftId(2)).unwrap();
-    assert!(craft.is_refitting(now_s));
-    assert_eq!(recipe(&server), before);
-    assert!(!wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+    assert!(!craft.is_refitting(now_s) && !server.refitting.contains_key(&CraftId(2)));
+    let cluster = lc_world::form::presets::Builtin::Cluster.form();
+    assert_eq!(craft.fitting().unwrap().form(), &cluster);
+    assert_eq!(craft.length_m, craft.fitting().unwrap().hull().extent_m);
+    assert!(wire.take(ClientId(2)).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
+
+    // Far too small to hold the least drone a ship may keep.
+    let (ok, why) = ask(&mut server, &mut wire, 4, "refit-magic default 0.05 ship:2").await;
+    assert!(!ok && why.contains("drone"), "{why}");
+    assert_eq!(server.fleet.get(CraftId(2)).unwrap().fitting().unwrap().form(), &cluster);
+    let (ok, why) = ask(&mut server, &mut wire, 5, "refit-magic hexagon ship:2").await;
+    assert!(!ok, "{why}");
 }
 
 #[tokio::test]

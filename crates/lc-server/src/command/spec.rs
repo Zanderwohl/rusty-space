@@ -35,6 +35,7 @@ pub enum Verb {
     Energize,
     Drain,
     Chart,
+    Refit,
     RefitMagic,
     RefitFinish,
     Stage,

@@ -126,10 +126,20 @@ impl Part {
 
     /// The part at its size. A Mind is the cube of `min_part_m3` whatever it stores.
     pub fn shape(&self, min_part_m3: f64) -> Shape {
+        self.drawn().at(self.scale_m(min_part_m3))
+    }
+
+    /// Meters its proportions are multiplied by.
+    pub fn scale_m(&self, min_part_m3: f64) -> f64 {
         match self.kind {
-            Kind::Mind => Primitive::MIND.at(Primitive::MIND.scale(min_part_m3)),
-            _ => self.primitive.at(self.primitive.scale(self.volume_m3)),
+            Kind::Mind => Primitive::MIND.scale(min_part_m3),
+            _ => self.primitive.scale(self.volume_m3),
         }
+    }
+
+    /// Its proportions. The Mind's are a cube, whatever it stores.
+    pub fn drawn(&self) -> Primitive {
+        if self.kind == Kind::Mind { Primitive::MIND } else { self.primitive }
     }
 }
 

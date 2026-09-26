@@ -181,8 +181,8 @@ pub struct Server<J: Journal> {
     pub(crate) answered: HashMap<CraftId, std::collections::VecDeque<(ShipId, lc_proto::MessageKey)>>,
     /// The tunables every fitted ship is read under. See [`Server::set_balance`].
     pub(crate) balance: lc_world::fitting::Balance,
-    /// Craft whose owner is to be told when their refit finishes.
-    pub(crate) refitting: std::collections::HashSet<CraftId>,
+    /// Craft refitting, and how many of the round's steps their owner has been told of.
+    pub(crate) refitting: HashMap<CraftId, usize>,
     /// Console lines waiting for the tick.
     pub(crate) commands: std::collections::VecDeque<crate::command::Queued>,
 }
@@ -226,7 +226,7 @@ impl<J: Journal> Server<J> {
             ticks: 0,
             stages: Default::default(),
             balance: lc_world::fitting::Balance::DEFAULT,
-            refitting: std::collections::HashSet::new(),
+            refitting: HashMap::new(),
             commands: std::collections::VecDeque::new(),
         }
     }
@@ -845,11 +845,14 @@ impl<J: Journal> Server<J> {
                 }
                 (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
             }
-            // S1, H6 and E3 build these. A ship is its form now, so there is no loadout to refit to,
-            // and S1 removes the order.
-            Order::RefitLoadout { .. } | Order::Refit { .. } | Order::FieldMode { .. } | Order::Emit { .. } => {
-                return Err(Refusal::NotBuilt);
+            Order::Refit { target } => {
+                self.refit(id, target, at_s)?;
+                // Drones are quiet. What a refit does to the hull is seen when its light arrives,
+                // as the form any contact is drawn in; see `chase::contacts`.
+                (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::Refit { target: target.clone() })
             }
+            // H6 and E3 build these.
+            Order::FieldMode { .. } | Order::Emit { .. } => return Err(Refusal::NotBuilt),
             Order::CancelRefit => {
                 self.fleet.get_mut(id).ok_or(Refusal::NotYours)?.cancel_refit(at_s);
                 self.refitting.remove(&id);
