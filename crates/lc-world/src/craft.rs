@@ -578,8 +578,9 @@ impl Craft {
         }
     }
 
-    /// Begin a round toward `target`, when it plans. The caller refuses it under way, and checks
-    /// the placement rules first: they need a grid, and [`crate::form::rules::check`] hands it back.
+    /// Begin a round toward `target`, when it plans. The caller refuses it under way and for a craft
+    /// with no fitting, whose `NoDrones` names no real part, and checks the placement rules first:
+    /// they need a grid, and [`crate::form::rules::check`] hands it back.
     pub fn begin_refit(&mut self, target: crate::form::Form, now_s: f64) -> Result<(), crate::refit::rounds::Refusal> {
         self.settle(now_s);
         let Some(fitting) = &mut self.fitting else {

@@ -1,7 +1,6 @@
 //! A ship's modules and energy account. `lc_world` has kept the account on a form since F9; the
-//! loadout here is converted at its boundary in `lc_world::fitting`, and S1 removes it.
-//! `Loadout` and the per-module fields leave with S1 and F9 of
-//! `lightcone/docs/plans/forms-and-fields.md`.
+//! loadout here is converted at its boundary in `lc_world::fitting`. S1 removes `Loadout` and
+//! [`Balance`]'s per-module fields together.
 
 use serde::{Deserialize, Serialize};
 

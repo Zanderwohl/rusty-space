@@ -266,7 +266,8 @@ a flip is about one of them and the nose never turns about itself.
 
 A process builds each form's grid once: every ship today is the starting form, so a shard fitting a
 hundred builds one. A step partway through a round, whose form may not place, keeps the last
-measured extent and gyration until it finishes. The starting form's extent is **571 m**, where its
+measured extent and gyration until it finishes. The starting form's extent is **571 m**, the
+envelope around 545 m of parts, where its
 twenty slots made 19's ship 500 m long. Until F10 reads the shadow, collection still takes the
 ovoid of the craft's length, so the starting form collects (571/500)², about 1.3 times, what
 [20](20-solar-power.md)'s anchor says.
@@ -684,7 +685,8 @@ photographs it, and `--form <preset>` stages a draft.
   density over 19's slot. A loadout refit on the wire or in a save is dropped, as one whose recipe
   no longer planned always was. **The shard refuses `RefitLoadout` and `refit-magic` as
   `NotBuilt`**, as it refuses `Order::Refit`, and the refit window is a ledger with no draft.
-  `lc_world::fitting`'s conversions are S1's to delete.
+  `lc_world::fitting`'s conversions are S1's to delete, and S1 also removes `lc_proto::Balance`'s
+  per-module fields.
 - `Fitted` carries a `Hull`: the form, each part's solved scale, the capacities, and the geometry's
   numbers.
 - An invalid target is `Refusal::Form(FormFault)`, naming the part: the structural checks, then each

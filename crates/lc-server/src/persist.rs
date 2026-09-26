@@ -48,8 +48,8 @@ pub struct Saved {
     /// The standing intercept it was flying, which outlives the process as it outlives the
     /// pilot's connection. Appended in format 3.
     pub pursuit: Option<lc_proto::Pursuit>,
-    /// Modules and energy, settled when saved. The balance in it is not read back: a shard
-    /// stamps its own. Appended in format 4.
+    /// Modules and energy, settled when saved. The balance in it lays out and measures the form it
+    /// loads as, and the shard then stamps its own over it. Appended in format 4.
     pub fitting: Option<lc_proto::Fitting>,
     /// What its telescope is committed to and how far it has reported to whom, so a sweep
     /// resumes where it was rather than starting again. What it *knows* is written beside the

@@ -278,7 +278,9 @@ fn measured(form: &Form, balance: &Balance) -> Result<(f64, f64), FormError> {
     const KEPT: usize = 16;
     static BUILT: Mutex<Vec<Built>> = Mutex::new(Vec::new());
     // Held across the build, so threads asking for one form wait for it rather than each
-    // building it.
+    // building it. That also blocks callers asking about any other form, which is harmless while
+    // every ship is the starting form; once S1 lets forms differ, build outside the lock with a
+    // once per key.
     let mut built = BUILT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some((_, _, answer)) = built.iter().find(|(f, b, _)| f == form && b == balance) {
         return *answer;
@@ -338,7 +340,8 @@ impl Fitting {
     /// A ship of this form with its storage full. `form` must be one [`Hull::of`] can measure, as
     /// every form a ship is given is.
     pub fn full(form: Form, balance: Balance, now_s: f64) -> Self {
-        let hull = Hull::of(&form, &balance).expect("a ship's form closes");
+        let hull = Hull::of(&form, &balance)
+            .expect("a ship's form closes: it is the starting form scaled, until S1 checks targets with rules::check");
         Self {
             form,
             hull,
@@ -368,14 +371,17 @@ impl Fitting {
     /// ship as the account says it was when the refit began.
     pub fn from_account(account: &Account, balance: Balance) -> Self {
         let refit = account.refit.as_ref().and_then(|round| round.solve(&balance).ok());
+        let full = Self::full(account.form.clone(), balance, account.since_s);
         Self {
             refit,
-            stored_j: account.stored_j,
+            // What the store holds may not be more than it can: a form re-measured under another
+            // balance, or a loadout laid out other than it was, can hold less than was saved.
+            stored_j: account.stored_j.min(full.stored_j),
             since_s: account.since_s,
             rapidity_since: account.rapidity_since,
             committed_j: account.committed_j,
             solar_w: account.solar_w,
-            ..Self::full(account.form.clone(), balance, account.since_s)
+            ..full
         }
     }
 
@@ -604,7 +610,9 @@ impl Fitting {
 const STARTING_COUNTS: lc_proto::Loadout = lc_proto::Loadout { storage: 6, drones: 2, living: 1, engines: 5, slots: 20, data: 1 };
 
 /// The starting form, each kind scaled by its count over the starting ship's. A count of zero
-/// leaves that part out, and what hung from it hangs from the storage or the Mind.
+/// leaves that part out, and what hung from it hangs from the storage or the Mind. One that will
+/// not lay out is said so and comes back as the starting form, whose stored energy
+/// [`Fitting::from_account`] clamps to its store.
 fn form_of(loadout: lc_proto::Loadout, balance: &Balance) -> Form {
     let start = Form::starting();
     if (lc_proto::Loadout { slots: STARTING_COUNTS.slots, ..loadout }) == STARTING_COUNTS {
@@ -623,7 +631,13 @@ fn form_of(loadout: lc_proto::Loadout, balance: &Balance) -> Form {
     let totals = Form {
         parts: start.parts.iter().map(|p| crate::form::Part { volume_m3: f64::from(count(p.kind)) * SLOT_M3, ..*p }).collect(),
     };
-    start.as_layout(&totals, balance.min_part_m3).map_or(start, |layout| layout.form)
+    match start.as_layout(&totals, balance.min_part_m3) {
+        Ok(layout) => layout.form,
+        Err(why) => {
+            eprintln!("loadout {loadout:?} does not lay out ({why}), so the ship comes back as the starting form");
+            start
+        }
+    }
 }
 
 fn loadout_of(capacities: &Capacities, balance: &Balance) -> lc_proto::Loadout {
@@ -1008,6 +1022,18 @@ mod tests {
         assert!(fitting.form().parts.iter().all(|p| p.kind != crate::form::Kind::Data));
         // And its counts are read back off what it holds.
         assert_eq!(lc_proto::Fitting::from(&fitting).loadout, lc_proto::Loadout { slots: 20, ..other });
+    }
+
+    /// An account put back into a form whose store holds less than it saved, as a loadout that fell
+    /// back to the starting form would be, keeps only what the store holds.
+    #[test]
+    fn an_account_holds_no_more_than_its_store() {
+        let me = Balance::DEFAULT.module_energy_j();
+        let overfull = Account { stored_j: 45.0 * me, ..full().account() };
+        let back = Fitting::from_account(&overfull, Balance::DEFAULT);
+        assert_eq!(back.stored_j, back.hull().capacities.storage_j);
+        let partial = Account { stored_j: 12.0 * me, ..full().account() };
+        assert_eq!(Fitting::from_account(&partial, Balance::DEFAULT).stored_j, 12.0 * me);
     }
 
     #[test]
