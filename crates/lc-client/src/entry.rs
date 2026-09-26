@@ -262,6 +262,8 @@ pub fn parse(args: &[String]) -> Entry {
         open_password_form: flag("--password"),
         say: after("--say"),
         console: after("--console"),
+        apply: flag("--apply"),
+        cancel_at: value(args, "--cancel-at"),
         actions,
     };
     // The first argument only. Scanning for any non-flag token would pick up a flag's own

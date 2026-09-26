@@ -51,6 +51,10 @@ pub enum Action {
     /// An edit to the draft as its handle or field built it, before and after, or why it could
     /// not be built. See [`crate::draft`].
     EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
+    /// Send the draft to the shard as the ship's target.
+    ApplyDraft,
+    /// Edit the draft against this form of the ship's. See [`crate::ledger::base`].
+    RebaseDraft(lc_world::form::Form),
     // --- the map ----------------------------------------------------------------------
     /// Turn the map's camera by a relative amount, radians.
     TurnMap { azimuth: f64, elevation: f64 },
@@ -484,6 +488,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::ShowAdvanced(on) => ui.form.advanced = on,
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
     Action::EditForm(edit) => edit_form(ui, edit, &mut effects),
+    Action::ApplyDraft => apply_draft(ui, session, &mut effects),
+    Action::RebaseDraft(form) => {
+        if let Some(draft) = ui.form.draft.as_mut() {
+            draft.rebase(form);
+        }
+    }
     Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
     Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
         Some(anchor) => {
@@ -792,6 +802,20 @@ fn edit_form(ui: &mut UiState, edit: Result<crate::draft::Edit, crate::draft::Re
     }
 }
 
+/// The refusal, if one comes, is the shard's, and [`crate::uplink`] files it against this target.
+fn apply_draft(ui: &mut UiState, session: &Session, effects: &mut Vec<Effect>) {
+    let Some(draft) = &ui.form.draft else {
+        return effects.push(Effect::Notify("there is no draft to apply".into()));
+    };
+    match crate::ledger::gate(draft, &ui.form.applying, crate::ledger::Situation::of(session)) {
+        Ok(()) => {
+            effects.push(Effect::Send(lc_proto::Order::Refit { target: (&draft.form).into() }));
+            ui.form.applying = crate::ledger::Applying::Sent(draft.form.clone());
+        }
+        Err(blocked) => effects.push(Effect::Notify(blocked.reason().into())),
+    }
+}
+
 /// Run a nested action, keeping its effects. Only for actions composed of other actions.
 fn apply_to(ui: &mut UiState, session: &mut Session, action: Action, effects: &mut Vec<Effect>) {
     effects.extend(apply(action, ui, session));
@@ -1075,6 +1099,35 @@ mod tests {
         assert_eq!(draft(&ui).part(PartId(5)).unwrap().volume_m3, draft(&ui).ship.parts[5].volume_m3, "and not applied");
         let settled = crate::draft::Edit { settled: true, ..tiny };
         assert_eq!(apply(Action::EditForm(Ok(settled)), &mut ui, &mut s).len(), 1);
+    }
+
+    #[test]
+    fn apply_sends_the_draft_once_and_only_to_a_shard() {
+        use lc_world::form::PartId;
+        let (mut ui, mut s) = editing();
+        let edit = draft(&ui).twist(PartId(5), 0.25).unwrap();
+        apply(Action::EditForm(Ok(edit)), &mut ui, &mut s);
+        assert_eq!(apply(Action::ApplyDraft, &mut ui, &mut s), vec![Effect::Notify("no shard to refit at".into())]);
+        s.remote = true;
+        let target = draft(&ui).form.clone();
+        let sent = apply(Action::ApplyDraft, &mut ui, &mut s);
+        assert_eq!(sent, vec![Effect::Send(lc_proto::Order::Refit { target: (&target).into() })]);
+        assert_eq!(ui.form.applying, crate::ledger::Applying::Sent(target));
+        assert_eq!(apply(Action::ApplyDraft, &mut ui, &mut s), vec![Effect::Notify("waiting for the shard".into())]);
+    }
+
+    #[test]
+    fn a_rebase_keeps_the_edits_and_marks_them_against_the_new_ship() {
+        use lc_world::form::PartId;
+        let (mut ui, mut s) = editing();
+        let edit = draft(&ui).twist(PartId(5), 0.25).unwrap();
+        apply(Action::EditForm(Ok(edit)), &mut ui, &mut s);
+        let target = draft(&ui).form.clone();
+        apply(Action::RebaseDraft(target.clone()), &mut ui, &mut s);
+        assert_eq!((&draft(&ui).form, &draft(&ui).ship), (&target, &target), "accepted, the draft is the ship's target");
+        apply(Action::RebaseDraft(lc_world::form::Form::starting()), &mut ui, &mut s);
+        assert_eq!(draft(&ui).form, target, "canceled, the target is still there to apply again");
+        assert_ne!(draft(&ui).form, draft(&ui).ship);
     }
 
     #[test]

@@ -184,10 +184,16 @@ pub fn next_kind(current: Kind) -> Kind {
 }
 
 impl Draft {
-    pub fn new(ship: Form) -> Self {
-        let mut form = ship.clone();
-        form.parts.sort_by_key(|p| p.id);
-        Self { form, ship, remembered: BTreeMap::new() }
+    pub fn new(mut ship: Form) -> Self {
+        ship.parts.sort_by_key(|p| p.id);
+        Self { form: ship.clone(), ship, remembered: BTreeMap::new() }
+    }
+
+    /// Edit against another form of the ship's, keeping the edits: the target of a round once one
+    /// is accepted, and wherever a cancel left the ship after that.
+    pub fn rebase(&mut self, mut ship: Form) {
+        ship.parts.sort_by_key(|p| p.id);
+        self.ship = ship;
     }
 
     pub fn part(&self, id: PartId) -> Option<&Part> {
@@ -495,8 +501,15 @@ impl Draft {
 
 }
 
-/// `--draft`: `edits` for one of each mark on `ship`, or a preset by `--form`'s spelling.
+/// `--draft`: `edits` for one of each mark on `ship`, `askew` for its engine off the nose axis,
+/// which Apply refuses, or a preset by `--form`'s spelling.
 pub fn staged(name: &str, ship: &Form, balance: &Balance) -> Option<Form> {
+    if name == "askew" {
+        let mut form = ship.clone();
+        let engine = form.parts.iter_mut().find(|p| p.kind == Kind::Engine)?;
+        engine.placement.as_mut()?.tilt = DVec2::new(0.0, 0.2);
+        return Some(form);
+    }
     if name != "edits" {
         return crate::parts::fixture(name);
     }
