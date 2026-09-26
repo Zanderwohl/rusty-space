@@ -1116,4 +1116,95 @@ mod tests {
         assert!(sky.source_of(Band::V, here, crate::sky::StarId::synthesize("nope", 1)).is_none());
     }
 
+
+    /// **Every body of Sol fitted as a shard would, against the truth.** A ship parked
+    /// `SOL_FITS_AU` out (default 5) surveys for `SOL_FITS_TICKS` ticks (default 3000, fifteen
+    /// days) and fits one body a tick, then prints each held orbit beside where the body really
+    /// is and what it really goes round. `SOL_FITS_FRAMES` adds, per moon, a fit from scratch
+    /// about the star, the believed planet and the planet's true place.
+    ///
+    /// A diagnostic, not a check: minutes of work even optimized, so run it with the workspace
+    /// optimized too, e.g. `CARGO_PROFILE_DEV_OPT_LEVEL=3 cargo test -p lc-world --lib
+    /// sol_fits_against_truth -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn sol_fits_against_truth() {
+        use super::super::{arc, body::Placed, BodyId};
+
+        let Some((mut sky, system)) = sol() else { panic!("the HYG catalog is not in assets/") };
+        let setting = |key: &str, default: f64| std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
+        let ticks = setting("SOL_FITS_TICKS", 3000.0) as usize;
+        let from = system.star_position_ly() + DVec3::X * setting("SOL_FITS_AU", 5.0) * AU_M / M_PER_LY;
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+
+        let sim = system.sim();
+        let name = |i| sim.info(i).name.clone().unwrap_or_else(|| sim.name(i).to_string());
+        let named: HashMap<BodyId, _> = sim.indices().map(|i| (BodyId::of(system.star, &name(i)), i)).collect();
+        let started = std::time::Instant::now();
+        let mut t = 0.0;
+        for tick in 0..ticks {
+            if tick % 500 == 0 {
+                eprintln!("tick {tick}, {:?}", started.elapsed());
+            }
+            t += TICK_S;
+            o.tick(&mut sky, Some(&system), &mut k, at(from), t);
+            let Some(star_ly) = k.belief(Subject::Star(system.star)).and_then(|b| b.distance.position_ly()) else {
+                continue;
+            };
+            let job = k.unfitted(system.star).and_then(|subject| k.fit_job(subject, star_ly, t));
+            if let Some(solved) = job.and_then(|job| job.solve()) {
+                k.file_fit(solved, t);
+            }
+        }
+        eprintln!("{ticks} ticks, {:.1} days, {:?}", t / 86_400.0, started.elapsed());
+
+        let relative = |i, at_s| Some(system.body_state_at(i, at_s)?.0 - system.body_state_at(system.primary(), at_s)?.0);
+        let mut rows = Vec::new();
+        for belief in k.bodies_of(system.star, t) {
+            let (Some(&i), Some((a, sigma_a))) = (named.get(&belief.body), belief.semi_major_au) else { continue };
+            let parent = sim.parent(i).map(name).unwrap_or_default();
+            let about = belief.about.and_then(|b| named.get(&b)).map_or("Sun".to_string(), |&p| name(p));
+            let (miss, sigma) = match (belief.position_now, relative(i, t)) {
+                (Placed::Known { offset_au, sigma_au }, Some(truth)) => ((offset_au - truth / AU_M).length(), sigma_au),
+                _ => (f64::NAN, f64::NAN),
+            };
+            rows.push(format!(
+                "{:>14} goes round {parent:>8}, fitted about {about:>10}: a {a:.5} +/- {sigma_a:.2e} AU, placed {miss:.2e} AU out +/- {sigma:.2e}",
+                name(i)
+            ));
+        }
+        rows.sort();
+        rows.iter().for_each(|row| eprintln!("{row}"));
+
+        if std::env::var("SOL_FITS_FRAMES").is_err() {
+            return;
+        }
+        let Some(star_ly) = k.belief(Subject::Star(system.star)).and_then(|b| b.distance.position_ly()) else { return };
+        let show = |fitted: Option<arc::Fitted>| {
+            fitted.map_or("none".to_string(), |f| {
+                format!("a {:.3e} AU, P {:.3e} d, miss {:.2e} rad", f.semi_major_m / AU_M, f.period_s / 86_400.0, f.residual_rad)
+            })
+        };
+        for i in sim.indices() {
+            let Some(p) = sim.parent(i).filter(|&p| p != system.primary()) else { continue };
+            let subject = Subject::Body { star: system.star, body: BodyId::of(system.star, &name(i)) };
+            if k.file(subject).is_none() {
+                continue;
+            }
+            let planet = BodyId::of(system.star, &name(p));
+            let star = k.looks_at(subject, &|_| Some(star_ly));
+            let believed = k.looks_at(subject, &|s| Some(star_ly + k.placed(system.star, planet, s)? / M_PER_LY));
+            let exact = k.looks_at(subject, &|s| Some(star_ly + relative(p, s)? / M_PER_LY));
+            eprintln!(
+                "{:>12} about {:>8}\n    star: {}\n    believed planet: {}\n    true planet: {}",
+                name(i),
+                name(p),
+                show(arc::fit(&star)),
+                show(arc::fit(&believed)),
+                show(arc::fit(&exact))
+            );
+        }
+    }
 }
