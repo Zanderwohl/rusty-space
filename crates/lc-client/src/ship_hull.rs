@@ -11,8 +11,13 @@
 //! left.
 //!
 //! Meshes are shared by form, resolution and finish, so a sky of one design costs one mesh per
-//! band. A hull is about 64 bytes a vertex with its indices; at 256 cells the starting form is
-//! about 32 MB, at 64 cells about 2 MB, and a distant ship is 16 cells and a few hundred kB.
+//! band. A vertex is 48 bytes and its share of the indices 24 more, held once in the main world
+//! and once on the GPU. The starting form is 300 vertices at 16 cells (45 kB both copies), 5 000
+//! at 64 (0.7 MB) and 80 000 at 256 (11 MB); Cluster is a quarter larger. A hundred distant
+//! ships of different designs are a few MB, and the most is the one close ship at 256 cells.
+//! `crate::hull_mesh` keeps 32 meshes nothing wants, so zooming back is free; a band's worth of
+//! those at 256 cells would be hundreds of MB, which only a camera flying close past many designs
+//! could fill.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
