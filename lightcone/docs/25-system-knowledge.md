@@ -466,6 +466,19 @@ explains the bearings best.
   loop about its primary and the middle of that loop is the primary. That ranks correctly at both
   levels — a planet's mean bearing points at the star, a moon's at its planet — and the star is
   always tried besides, which is what stops a planet being handed to a neighbor.
+- **Only something brighter.** ✅ (2026-09-26) Six elements fit sixteen bearings about almost
+  any point near the true primary, and a planet's nearest neighbors in the sky are its own
+  moons. Surveying Sol from 5 AU for fifteen days fitted Saturn about Albiorix, Luna about Ryugu,
+  Callisto about Amalthea, and Saturn's irregulars in chains about each other that placed
+  nothing. A satellite and its primary are one distance off, so the brighter is the bigger;
+  brightness is also a strict order, so a cycle cannot form.
+- **Inside the primary's Hill sphere.** ✅ (2026-09-26) An orbit about a body must have a period
+  under that body's own over √3 and an axis under its own over ∛3 — the masses cancel in the
+  first, and the second holds for any primary lighter than the star. That is what stops an
+  asteroid being fitted about a brighter asteroid at a few AU.
+- **A carried orbit does not keep its primary for good.** ✅ (2026-09-26) A refit carries the
+  last orbit in its own frame, and any candidate offered since is searched beside it: a moon
+  fitted before its planet was placed would otherwise stay about the star.
 - **A satellite's frame moves.** The looks go into the frame of where the primary was *at each
   look's own time*, not now: a moon's planet moves between one look and the next, and a frame
   that ignored that would be fitting the planet's orbit and the moon's at once.
@@ -515,6 +528,19 @@ rivals. From a close pass the ranges are measured and there is no search at all,
 weighed by visiting it**, which is a fair price and of a piece with the rest of this section. The
 fix, if it is wanted, is the classic visual-binary one: fit the *projected* ellipse in the plane
 of the sky, where the size and the inclination survive and only the depth's sign is lost.
+
+**Open: an arc many orbits long.** Measured on Sol from 5 AU (2026-09-26): after fifteen days
+the full search finds no orbit for Io, Europa, Ganymede, Callisto or Metis *even in the exact
+frame of Jupiter*, and a synthetic Earth fails from 0.9 orbits of arc upward. Two causes. The
+kept bearings are the sixteen most spread, so on a long arc they are orbits apart, past the
+twelve turns `knowledge::turns` searches; and anchors a whole orbit apart are one point, so the conic
+falls back to an assumed circle whose eccentricity the settle may not move. What works is the
+refit: it now counts turns from the orbit it carries, so a moon fitted once on a short arc stays
+fitted as the arc grows. A fresh search on a long arc still does not, and the settle — a pattern
+search — stalls short of the noise once the arc is long enough to need an eccentricity: a
+Gauss-Newton on a finite-difference Jacobian is the likely fix, and would give the error bars as
+a covariance rather than a walk. A moon's orbit is also only as good as its planet's place,
+which a moon's frame inherits whole: Jupiter placed 0.005 AU out is Europa's orbit wide.
 
 **Not oblateness.** The arena's bodies are spheres, so there is no figure to measure and none is
 invented. Same decision as rings for generated planets in phase 5, for the same reason.

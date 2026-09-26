@@ -299,7 +299,16 @@ fn conic(points: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
 /// arc that cross product is the arc's *curvature*, a part in ten thousand of the same
 /// magnitudes, and it fell under the degeneracy guard for every three-degree arc -- which is
 /// exactly the case ranging exists to rescue.
-fn through(places: &[(DVec3, f64)], looks: &[Look], reach_m: f64, bound: f64) -> Option<Fitted> {
+///
+/// `held_s` is an orbit already fitted, as seconds per radian, to count turns by: see
+/// [`unwrappings`].
+fn through(
+    places: &[(DVec3, f64)],
+    looks: &[Look],
+    reach_m: f64,
+    bound: f64,
+    held_s: Option<f64>,
+) -> Option<Fitted> {
     if places.len() < 3 {
         return None;
     }
@@ -353,7 +362,7 @@ fn through(places: &[(DVec3, f64)], looks: &[Look], reach_m: f64, bound: f64) ->
     // The anomalies may be saying more than one thing; the bearings say which. See
     // [`unwrappings`].
     let mut best: Option<Fitted> = None;
-    for (per_rad, epoch_s) in unwrappings(&means) {
+    for (per_rad, epoch_s) in unwrappings(&means, held_s) {
         let period_s = per_rad.abs() * std::f64::consts::TAU;
         if !sound(period_s) {
             continue;
@@ -800,6 +809,7 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     // the plane they define would be whatever the noise says. Ranged looks first where there
     // are three of them, since those skip the search entirely.
     let ranged: Vec<Look> = ordered.iter().copied().filter(|l| l.range_m.is_some()).collect();
+    let held_s = seed.map(|held| held.period_s / std::f64::consts::TAU);
     let anchors = if ranged.len() >= 3 { &ranged } else { &ordered };
     let (a, c) = (*anchors.first()?, *anchors.last()?);
     // The middle one is whichever look points furthest from both ends, not whichever sits in
@@ -839,7 +849,10 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     if ranged.len() >= RANGED_NEEDED {
         let places: Vec<(DVec3, f64)> =
             ranged.iter().filter_map(|l| Some((l.place()?, l.at_s))).collect();
-        let best = [through(&places, &ordered, reach, f64::INFINITY), super::state::from_motion(&places, &ordered, reach)]
+        let best = [
+            through(&places, &ordered, reach, f64::INFINITY, held_s),
+            super::state::from_motion(&places, &ordered, reach),
+        ]
             .into_iter()
             .flatten()
             .map(|found| settle(found, &ordered, SETTLINGS * 8))
@@ -859,7 +872,7 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
         let r2 = b.from_m + b.toward * rho_b;
         let rho_c = coplanar_range(r1, r2, c.from_m, c.toward)?;
         let r3 = c.from_m + c.toward * rho_c;
-        through(&[(r1, a.at_s), (r2, b.at_s), (r3, c.at_s)], &ordered, reach, bound)
+        through(&[(r1, a.at_s), (r2, b.at_s), (r3, c.at_s)], &ordered, reach, bound, held_s)
     };
 
     // A satellite's band is the stretch of its own ray that stays within `reach` of the
@@ -1184,6 +1197,24 @@ mod tests {
         assert!(off(carried.period_s, truth.period_s()) < 2.0e-3);
     }
 
+    /// **A refit counts whole turns from the orbit it carries.** Decimation keeps the looks
+    /// spread across the arc, so sixteen of them over forty orbits of a short-period body are
+    /// each a few orbits apart and the anomalies alone cannot say how many. The held period can.
+    #[test]
+    fn a_refit_counts_the_turns_a_search_cannot() {
+        let truth = like(0.387, 0.2056);
+        let period = truth.period_s();
+        let dense = looks(&truth, 5.0, 24, period / 20.0, SIGMA);
+        let held = fit(&dense).expect("an orbit and a fifth, well sampled, fits");
+        assert!(off(held.period_s, period) < 1.0e-3, "premise: the short arc fits");
+
+        // Irregularly spaced, as a survey's revisits are once decimated, over forty orbits.
+        let long = looks(&truth, 5.0, 16, period * 2.63, SIGMA);
+        let carried = refit(&held, &long).expect("the held period says how many turns");
+        assert!(off(carried.period_s, period) < 1.0e-5, "period off by {}", off(carried.period_s, period));
+        assert!(off(carried.semi_major_m, truth.semi_major_m) < 1.0e-3);
+    }
+
     /// **And never carries a wrong orbit forward**: seeded from one, it either finds its way to
     /// the truth or refuses, and a refusal sends the caller back to the full search.
     #[test]
@@ -1498,7 +1529,9 @@ mod tests {
         // enough sky the moon has gone round hundreds of times.
         let planet_span = planet.period_s() * 0.2;
         let moon_span = moon_period * 2.37;
-        let file_ranged = |k: &mut Knowledge, subject: Subject, seen: &[Look]| {
+        // Io is about a two-hundredth of Jupiter's brightness, and a primary has to outshine
+        // what goes round it.
+        let file_ranged = |k: &mut Knowledge, subject: Subject, seen: &[Look], flux: f64| {
             for look in seen {
                 k.sighted(
                     subject,
@@ -1514,20 +1547,18 @@ mod tests {
                         range_m: look.range_m,
                         spin_s: None,
                         band: em_spectra::Band::V,
-                        flux: 1.0e-9,
+                        flux,
                         flux_sigma: 1.0e-12,
                         lineage: Vec::new(),
                     },
                 );
             }
         };
-        let file = |k: &mut Knowledge, subject: Subject, seen: &[Look]| {
-            file_ranged(k, subject, seen);
-        };
         let planet_subject = Subject::Body { star, body: planet_id };
         let moon_id = crate::knowledge::BodyId::of(star, "Io");
         let moon_subject = Subject::Body { star, body: moon_id };
-        file(&mut k, planet_subject, &watched(&|t| planet.at(t), MU_SUN, 5.0, 24, planet_span / 24.0, SIGMA));
+        let planet_looks = watched(&|t| planet.at(t), MU_SUN, 5.0, 24, planet_span / 24.0, SIGMA);
+        file_ranged(&mut k, planet_subject, &planet_looks, 1.0e-9);
         // Ranged, which is to say visited. A moon's orbit from bearings alone at survey range
         // is the piece doc 25 records as open: the depth is observable at nine hundred sigma
         // but its basin is thirty times narrower than a step of the range grid, so the search
@@ -1542,7 +1573,7 @@ mod tests {
                 Look { range_m: Some((truth_range + slip, 1.0e-6 * truth_range)), ..*look }
             })
             .collect();
-        file_ranged(&mut k, moon_subject, &moon_ranged);
+        file_ranged(&mut k, moon_subject, &moon_ranged, 5.0e-12);
 
         // The planet first, because a moon cannot be placed against a planet nobody has placed.
         assert!(k.fit_orbit(planet_subject, star_ly, planet_span), "the planet fits");

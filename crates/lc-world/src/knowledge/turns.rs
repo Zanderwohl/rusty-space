@@ -26,9 +26,21 @@ const AMBIGUOUS_STEP_RAD: f64 = std::f64::consts::FRAC_PI_2;
 /// residual thirty-five thousand times the bearing noise, and nothing downstream refused it.
 ///
 /// Searched only when a step is over [`AMBIGUOUS_STEP_RAD`], so a well-sampled arc costs one
-/// candidate. A survey's cadence is nowhere near this for a period worth fitting.
-pub(crate) fn unwrappings(mean: &[(f64, f64)]) -> Vec<(f64, f64)> {
+/// candidate.
+///
+/// `held_s`, seconds per radian of an orbit already fitted, places every look on the turn that
+/// rate predicts, either way round. That is what a long arc needs: decimation spreads its looks
+/// many orbits apart, far past the turns searched here, and a moon's arc is hundreds of orbits
+/// within a day of play.
+pub(crate) fn unwrappings(mean: &[(f64, f64)], held_s: Option<f64>) -> Vec<(f64, f64)> {
     let mut out: Vec<(f64, f64)> = Vec::new();
+    if let (Some(rate), Some(first)) = (held_s.filter(|r| sound(*r)), mean.first()) {
+        for rate in [rate, -rate] {
+            if let Some(found) = regress(&placed(mean, *first, rate)) {
+                out.push((found.0, found.1));
+            }
+        }
+    }
     let walk = walked(mean);
     if let Some(found) = regress(&walk) {
         out.push((found.0, found.1));
@@ -145,13 +157,13 @@ mod tests {
         let implied = |rate: f64| rate.abs() * std::f64::consts::TAU / period;
 
         // A tenth of an orbit apart: nothing to search, and the one answer is the right one.
-        let dense = unwrappings(&at(0.1));
+        let dense = unwrappings(&at(0.1), None);
         assert_eq!(dense.len(), 1, "a tight arc is not ambiguous and must not cost a search");
         assert!((implied(dense[0].0) - 1.0).abs() < 1.0e-9, "{}", implied(dense[0].0));
 
         // Seven tenths apart: the forward walk cannot see it, and the truth is in the set
         // behind it for the bearings to pick out.
-        let coarse = unwrappings(&at(0.7));
+        let coarse = unwrappings(&at(0.7), None);
         assert!(coarse.len() > 1, "an ambiguous arc has to be searched");
         assert!((implied(coarse[0].0) - 1.0).abs() > 0.1, "the forward walk is the wrong one");
         let closest =

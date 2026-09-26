@@ -23,6 +23,15 @@ use crate::sky::StarId;
 /// bearing points at the star, a moon's at its planet.
 const PRIMARIES_TRIED: usize = 3;
 
+/// The edge of a primary's Hill sphere, `a_H = r (m / 3M)^(1/3)`, as bounds on what goes round
+/// it: nothing outside stays bound, so an orbit past either is a wrong orbit or a wrong primary.
+///
+/// With Kepler's third law on both sides the masses cancel and the period is `P_primary / sqrt 3`.
+/// The axis needs a mass, but a primary lighter than its star puts it inside `r / 3^(1/3)`,
+/// which is what stops an asteroid being fitted about a brighter one at a few AU.
+const HILL_PERIOD: f64 = 0.577_350_269_189_625_8;
+const HILL_REACH: f64 = 0.693_361_274_350_634_7;
+
 /// How far after the orbit it replaces a fit is stated, when both are filed at one instant.
 const FILED_AFTER_S: f64 = 1.0e-3;
 
@@ -34,7 +43,7 @@ const REFIT_GROWTH: f64 = 1.5;
 ///
 /// Not saved: after a restart the first fit of each body searches from scratch, which costs
 /// time and not correctness.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Attempt {
     pub at_s: f64,
     pub span_s: f64,
@@ -43,7 +52,15 @@ pub(crate) struct Attempt {
     /// When the looks behind the newest fit filed were taken. A fit on older looks that finishes
     /// after it is refused rather than filed over it.
     pub filed_taken_s: f64,
-    pub last: Option<(Option<BodyId>, Fitted)>,
+    pub last: Option<Held>,
+}
+
+/// The last orbit fitted, the primary it is about, and every primary it beat to it.
+#[derive(Clone, Debug)]
+pub(crate) struct Held {
+    about: Option<BodyId>,
+    fitted: Fitted,
+    offered: Vec<Option<BodyId>>,
 }
 
 /// Seconds from the oldest look held to the newest. Decimation keeps the ends, so this only
@@ -140,17 +157,44 @@ impl crate::knowledge::Knowledge {
         (mean.length_squared() > 0.0).then(|| mean.normalize())
     }
 
-    /// Candidate primaries for a body, the star first and then the nearest few in the sky.
+    /// Mean flux of a body in `band`, or `None` if it was never measured in it.
+    fn mean_flux(&self, subject: Subject, band: em_spectra::Band) -> Option<f64> {
+        let (sum, count) = self
+            .file(subject)?
+            .sightings()
+            .iter()
+            .filter(|s| s.band == band)
+            .fold((0.0, 0usize), |(sum, n), s| (sum + s.flux, n + 1));
+        (count > 0).then(|| sum / count as f64)
+    }
+
+    /// Whether `primary` is brighter than `satellite` in a band both were measured in.
+    ///
+    /// A satellite and its primary are at one distance from the observer, so the brighter is
+    /// the bigger, and the bigger is the one being gone round. `false` with no band in common.
+    fn outshines(&self, primary: Subject, satellite: Subject) -> bool {
+        em_spectra::Band::ALL.into_iter().find_map(|band| {
+            Some(self.mean_flux(primary, band)? > self.mean_flux(satellite, band)?)
+        }) == Some(true)
+    }
+
+    /// Candidate primaries for a body, the star first and then the nearest few in the sky that
+    /// outshine it.
     ///
     /// **Not a list of moons.** A Keplerian orbit puts its primary at a focus, so the candidate
     /// that works as a focus is the primary, and trying the star alongside the rest is what
     /// keeps a planet from being handed to one of its neighbors.
+    ///
+    /// **Brighter only.** Six elements fit sixteen bearings about almost any point near the
+    /// true primary, and a planet's nearest neighbors in the sky are its own moons: Saturn was
+    /// fitted about Albiorix, and chains of moons about each other ended nowhere. Brightness
+    /// also makes a cycle impossible, since it is a strict order.
     fn primaries(&self, star: StarId, subject: Subject, now_s: f64) -> Vec<Option<BodyId>> {
         let Some(toward) = self.mean_bearing(subject) else { return vec![None] };
         let mut near: Vec<(f64, BodyId)> = self
             .members(star)
             .filter_map(|(other, _)| match other {
-                Subject::Body { body, .. } if other != subject => {
+                Subject::Body { body, .. } if other != subject && self.outshines(other, subject) => {
                     let seen = self.mean_bearing(other)?;
                     Some((seen.angle_between(toward), body))
                 }
@@ -210,14 +254,22 @@ impl crate::knowledge::Knowledge {
                     None => Some(star_ly),
                     Some(body) => Some(star_ly + self.placed(star, body, t)? / crate::system::M_PER_LY),
                 };
-                (about, self.looks_at(subject, &at))
+                let held = about.and_then(|body| self.body_belief(star, body, now_s));
+                let bound = |element: Option<(f64, f64)>, scale: f64| element.map_or(f64::INFINITY, |(v, _)| v * scale);
+                Frame {
+                    about,
+                    looks: self.looks_at(subject, &at),
+                    longest_s: bound(held.as_ref().and_then(|b| b.period_s), HILL_PERIOD),
+                    widest_m: bound(held.as_ref().and_then(|b| b.semi_major_au), HILL_REACH * crate::navigation::AU),
+                }
             })
             .collect();
         let (span_s, ranged) =
             self.file(subject).map_or((0.0, 0), |file| (span_s(file.sightings()), ranged(file.sightings())));
         let held = self.tried.get(&subject);
-        let (last, filed_taken_s) = (held.and_then(|t| t.last), held.map_or(f64::NEG_INFINITY, |t| t.filed_taken_s));
-        self.tried.insert(subject, Attempt { at_s: now_s, span_s, ranged, filed_taken_s, last });
+        let (last, filed_taken_s) =
+            (held.and_then(|t| t.last.clone()), held.map_or(f64::NEG_INFINITY, |t| t.filed_taken_s));
+        self.tried.insert(subject, Attempt { at_s: now_s, span_s, ranged, filed_taken_s, last: last.clone() });
         Some(FitJob { subject, owner: self.owner, frames, warm: last, taken_s: now_s })
     }
 
@@ -237,7 +289,7 @@ impl crate::knowledge::Knowledge {
                 return false;
             }
             attempt.filed_taken_s = solved.taken_s;
-            attempt.last = Some((solved.about, solved.fitted));
+            attempt.last = Some(Held { about: solved.about, fitted: solved.fitted, offered: solved.offered });
         }
         // Strictly after whatever it replaces, which `Knowledge::orbits` requires: two fits of
         // one body can land on one tick.
@@ -254,6 +306,16 @@ impl crate::knowledge::Knowledge {
     }
 }
 
+/// One candidate primary: the looks in its frame, and the longest period and widest axis a
+/// satellite of it can have. See [`HILL_PERIOD`].
+#[derive(Clone, Debug)]
+struct Frame {
+    about: Option<BodyId>,
+    looks: Vec<Look>,
+    longest_s: f64,
+    widest_m: f64,
+}
+
 /// One body's fit, with nothing borrowed: the looks in each candidate primary's frame.
 ///
 /// Carries the time the looks were taken, so that a fit overtaken by one on later looks is
@@ -262,9 +324,9 @@ impl crate::knowledge::Knowledge {
 pub struct FitJob {
     pub subject: Subject,
     owner: super::Witness,
-    frames: Vec<(Option<BodyId>, Vec<Look>)>,
+    frames: Vec<Frame>,
     /// The last orbit fitted, to carry onto this arc before searching for a new one.
-    warm: Option<(Option<BodyId>, Fitted)>,
+    warm: Option<Held>,
     taken_s: f64,
 }
 
@@ -276,6 +338,7 @@ pub struct Solved {
     fitted: Fitted,
     orbit: super::Orbit,
     taken_s: f64,
+    offered: Vec<Option<BodyId>>,
 }
 
 impl Solved {
@@ -287,21 +350,35 @@ impl Solved {
 
 impl FitJob {
     /// The fit itself: pure, and the whole of the cost.
+    ///
+    /// **A carried orbit keeps its primary only against the candidates it beat.** A moon seen
+    /// before its planet was placed has only the star to be fitted about, and carrying that
+    /// fit onto every later arc would keep it about the star for good. So a candidate offered
+    /// now that was not offered then is searched as well, and the better of the two stands.
+    /// Only the new ones: the full search fails on an arc many orbits long, which a moon's is
+    /// within a day of play, and the carried fit is what still works there.
     pub fn solve(self) -> Option<Solved> {
-        let carried = self.warm.and_then(|(about, held)| {
-            let (_, looks) = self.frames.iter().find(|(frame, _)| *frame == about)?;
-            Some((about, arc::refit(&held, looks)?, looks.clone()))
+        let offered: Vec<Option<BodyId>> = self.frames.iter().map(|f| f.about).collect();
+        let bound = |frame: &Frame, fitted: Fitted| {
+            (fitted.period_s <= frame.longest_s && fitted.semi_major_m <= frame.widest_m).then_some(fitted)
+        };
+        let carried = self.warm.as_ref().and_then(|held| {
+            let frame = self.frames.iter().find(|f| f.about == held.about)?;
+            Some((frame.about, bound(frame, arc::refit(&held.fitted, &frame.looks)?)?, frame.looks.clone()))
         });
-        let (about, fitted, looks) = match carried {
-            Some(carried) => carried,
-            None => self
-                .frames
-                .into_iter()
-                .filter_map(|(about, looks)| Some((about, arc::fit(&looks)?, looks)))
-                .min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad))?,
+        let searched = |frame: Frame| Some((frame.about, bound(&frame, arc::fit(&frame.looks)?)?, frame.looks));
+        let best = |found: &mut dyn Iterator<Item = (Option<BodyId>, Fitted, Vec<Look>)>| {
+            found.min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad))
+        };
+        let (about, fitted, looks) = match (carried, &self.warm) {
+            (Some(carried), Some(held)) => {
+                let new = self.frames.into_iter().filter(|f| !held.offered.contains(&f.about));
+                best(&mut std::iter::once(carried).chain(new.filter_map(searched)))?
+            }
+            _ => best(&mut self.frames.into_iter().filter_map(searched))?,
         };
         let orbit = fitted.stated(self.owner, about, &looks, self.taken_s);
-        Some(Solved { subject: self.subject, about, fitted, orbit, taken_s: self.taken_s })
+        Some(Solved { subject: self.subject, about, fitted, orbit, taken_s: self.taken_s, offered })
     }
 }
 
@@ -343,7 +420,7 @@ mod tests {
             looks: LOOKS_NEEDED,
         };
         let orbit = fitted.stated(Witness(1), None, &[], taken_s);
-        Solved { subject, about: None, fitted, orbit, taken_s }
+        Solved { subject, about: None, fitted, orbit, taken_s, offered: vec![None] }
     }
 
     /// A fit filed after the reader's mark reaches the reader, however long before it the looks
@@ -384,6 +461,25 @@ mod tests {
         assert!(k.file_fit(solved(subject, 310.0, 4.0), 400.0));
         let held = k.file(subject).unwrap().orbits().iter().find(|o| o.witness == Witness(1)).unwrap().semi_major_au.0;
         assert_eq!(held, 4.0);
+    }
+
+    /// A body is never offered a primary fainter than itself, however near it sits in the sky.
+    #[test]
+    fn only_something_brighter_is_gone_round() {
+        let star = StarId::synthesize("primary", 4);
+        let (planet, moonlet) = (BodyId::of(star, "planet"), BodyId::of(star, "moonlet"));
+        let mut k = Knowledge::new(Witness(1));
+        for (body, flux) in [(planet, 1.0e-9), (moonlet, 1.0e-12)] {
+            let subject = Subject::Body { star, body };
+            for i in 0..LOOKS_NEEDED {
+                k.sighted(subject, Sighting { flux, ..look(10.0 * i as f64, None) });
+            }
+            k.fit_job(subject, DVec3::ZERO, 100.0);
+            assert!(k.file_fit(solved(subject, 100.0, 5.0), 100.0));
+        }
+        let offered = |of: BodyId| k.primaries(star, Subject::Body { star, body: of }, 100.0);
+        assert_eq!(offered(planet), vec![None], "a planet offered its own moon");
+        assert_eq!(offered(moonlet), vec![None, Some(planet)]);
     }
 
     /// A body tried on bearings alone waits for its arc to grow half again, but a close pass
