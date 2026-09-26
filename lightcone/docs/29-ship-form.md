@@ -722,9 +722,10 @@ volume above the minimum.
   - Acceleration is with storage full, the state the engine's anchor names. Slew is shown as the
     time to flip end for end.
   - Headroom is the heat between the field's idle and collapse: the largest burst it can take.
-  - Brightness is the starlight the draft would collect broadside where the ship is now, which is
-    also what it gives back in reflected light. It is the `solar` function the craft collects by,
-    at the draft's extent; zero under way and between systems.
+  - Brightness is the starlight the draft would collect where the ship is now, turned to the star
+    as an idle hull turns (`solar::idle_cos` on the draft's shadow table), which is also what it
+    gives back in reflected light. It is `solar::power_w`, the function the craft collects by; zero
+    under way and between systems.
 
 ### Undo and redo
 

@@ -453,12 +453,6 @@ impl Fitting {
         self.refit.as_ref()
     }
 
-    /// Of the last form the grid measured: the settled form, or partway through a round the one
-    /// it began from. Its inertia is per kilogram.
-    pub fn geometry(&self) -> &Geometry {
-        &self.geometry
-    }
-
     pub fn since_s(&self) -> f64 {
         self.since_s
     }

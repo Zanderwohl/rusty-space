@@ -15,6 +15,7 @@ use lc_world::form::capacity::{Capacities, aft_aperture_w, dry_mass_kg};
 use lc_world::form::grid::FormGrid;
 use lc_world::form::{Form, FormError};
 use lc_world::refit::rounds::{Phase, Plan, Refusal, Round};
+use lc_world::solar;
 
 use crate::draft::{Draft, Edit, What};
 use crate::ledger::Budget;
@@ -139,6 +140,8 @@ pub fn field_now(fitting: &Fitting) -> (Field, f64) {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Measured {
     pub form: Form,
+    /// Per kilogram, as `Fitted` states it.
+    pub geometry: lc_proto::form::Geometry,
     pub envelope_m2: f64,
     pub broadside_m2: f64,
     pub gyration_m: f64,
@@ -150,6 +153,7 @@ impl Measured {
         let grid = FormGrid::new(form, balance)?;
         Ok(Measured {
             form: form.clone(),
+            geometry: grid.geometry(1.0),
             envelope_m2: grid.envelope_area_m2(),
             broadside_m2: grid.broadside_m2(),
             gyration_m: grid.gyration_m(),
@@ -167,8 +171,9 @@ pub struct Shape {
     pub rated_load_w: f64,
     /// Between the field's idle heat and collapse, joules: the most a burst can add.
     pub headroom_j: f64,
-    /// Starlight collected broadside at the ship's distance from its star now, which is also how
-    /// bright it is in reflected light. Zero under way, and between systems.
+    /// Starlight collected at the ship's distance from its star now, held as an idle ship holds
+    /// itself to it, which is also how bright it is in reflected light. Zero under way, and between
+    /// systems.
     pub starlight_w: f64,
 }
 
@@ -207,7 +212,7 @@ impl Preview {
                 slew_rad_s: lc_world::attitude::rate_for_gyration(m.gyration_m),
                 rated_load_w: field.rated_load_w(),
                 headroom_j: field.heat_max_j() - field.idle_j_m2 * field.area_m2,
-                starlight_w: session.ship.solar_w_for(m.extent_m, start.start_s),
+                starlight_w: starlight_w(session, &m.geometry, balance, start.start_s),
             }
         });
         Some(Preview {
@@ -223,6 +228,16 @@ impl Preview {
     pub fn collapses(&self) -> bool {
         self.heat.is_some_and(|h| h.collapses())
     }
+}
+
+/// What `geometry` would collect where the ship is at `t`, turned as `solar` turns an idle hull.
+fn starlight_w(session: &Session, geometry: &lc_proto::form::Geometry, balance: &Balance, t: f64) -> f64 {
+    let ship = &session.ship;
+    let (Some(system), Some(distance_m), false) = (ship.system.as_deref(), ship.star_distance_m_at(t), ship.motion.is_under_way()) else {
+        return 0.0;
+    };
+    let shadow_m2 = solar::shadow_m2(geometry, solar::idle_cos(geometry));
+    solar::power_w(balance, shadow_m2, system.star_luminosity_w(), distance_m)
 }
 
 /// Whether Apply has to ask again: the draft's round would vent the field past collapse.
