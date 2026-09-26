@@ -186,7 +186,7 @@ async fn refit_finish_completes_a_refit_under_way_and_only_one() {
     let now_s = server.now_t() as f64 * 1.0e-6;
     let craft = server.fleet.get_mut(CraftId(2)).unwrap();
     craft.begin_refit(more_engine(), now_s).expect("the refit plans");
-    server.refitting.insert(CraftId(2));
+    server.refitting.insert(CraftId(2), 0);
     wire.take(ClientId(2));
 
     let (ok, why) = ask(&mut server, &mut wire, 3, "refit-finish ship:2").await;
@@ -209,7 +209,7 @@ async fn refit_magic_is_refused_as_not_built() {
     let now_s = server.now_t() as f64 * 1.0e-6;
     let craft = server.fleet.get_mut(CraftId(2)).unwrap();
     craft.begin_refit(more_engine(), now_s).expect("the refit plans");
-    server.refitting.insert(CraftId(2));
+    server.refitting.insert(CraftId(2), 0);
     let recipe = |server: &Server<Memory>| {
         let fitting = server.fleet.get(CraftId(2)).unwrap().fitting().unwrap();
         (fitting.form().clone(), fitting.refit().map(|plan| plan.round().clone()))

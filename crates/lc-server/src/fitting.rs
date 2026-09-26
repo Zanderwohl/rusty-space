@@ -6,11 +6,13 @@
 
 use std::collections::HashSet;
 
-use lc_proto::{ClientId, Outbound, Refusal, ShipId};
+use lc_proto::{ClientId, FormFault, Outbound, Refusal, ShipId, Shortfall};
 use lc_world::craft::{Craft, CraftId};
 use lc_world::fitting::{Balance, Fitting};
 use lc_world::flight::Drive;
+use lc_world::form::{Form, rules};
 use lc_world::motion::{Change, Event as Change_, ShipId as MotionId};
+use lc_world::refit::rounds;
 
 use crate::journal::Journal;
 use crate::server::{Server, refusal_for};
@@ -72,6 +74,16 @@ pub fn afford_burn(craft: &Craft, at_s: f64, to_beta: glam::DVec3) -> Result<(),
     if cost > craft.free_j_at(at_s) { Err(Refusal::NoEnergy) } else { Ok(()) }
 }
 
+/// Why a round toward a valid form cannot begin, naming the part where there is one.
+fn unplanned(why: rounds::Refusal) -> Refusal {
+    match why {
+        rounds::Refusal::Form(fault) => Refusal::Form(fault.into()),
+        rounds::Refusal::Mind(part) => Refusal::Form(FormFault::OtherMind(part.into())),
+        rounds::Refusal::NoDrones { part } => Refusal::Short(Shortfall::NoDrones(part.into())),
+        rounds::Refusal::Energy { .. } => Refusal::Short(Shortfall::Energy),
+    }
+}
+
 /// Whether a craft that is flying a plan can still finish it.
 pub fn can_pay_for_its_plan(craft: &Craft, now_s: f64) -> bool {
     let Some(fitting) = craft.fitting() else { return true };
@@ -101,12 +113,38 @@ impl<J: Journal> Server<J> {
         craft.fit(Some(Fitting::full(lc_world::form::Form::starting(), self.balance, now_s)));
     }
 
+    /// Begin a round toward `target`. Flying and refitting exclude each other, and one round runs
+    /// at a time.
+    ///
+    /// Every rule of 29 §Placement rules is checked before the planner runs, and the first fault
+    /// is the refusal: the editor marks all of them from the same `rules::check`. Its grid, tens
+    /// of milliseconds, is thrown away; the target is measured again as the round finishes.
+    pub(crate) fn refit(&mut self, id: CraftId, target: &lc_proto::Form, at_s: f64) -> Result<(), Refusal> {
+        let pursuing = self.pursuits.contains_key(&id);
+        let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
+        let balance = *craft.fitting().ok_or(Refusal::Impossible)?.balance();
+        if pursuing || craft.motion.is_under_way() {
+            return Err(Refusal::UnderWay);
+        }
+        if craft.is_refitting(at_s) {
+            return Err(Refusal::Refitting);
+        }
+        let target = Form::from(target);
+        if let Err(faults) = rules::check(&target, &balance) {
+            return Err(faults.first().map_or(Refusal::Impossible, |fault| Refusal::Form((*fault).into())));
+        }
+        craft.begin_refit(target, at_s).map_err(unplanned)?;
+        self.refitting.insert(id, 0);
+        Ok(())
+    }
+
     /// Tell a craft's owner what its account now says.
     pub(crate) fn tell_fitted(&self, wire: &mut impl Transport, id: CraftId) {
         let Some(craft) = self.fleet.get(id) else { return };
         let Some(fitting) = craft.fitting() else { return };
         let Some(owner) = self.owners.get(&id).copied() else { return };
-        wire.send(owner, Outbound::Fitted { ship_id: ShipId(id.0), fitting: fitting.into(), hull: None, field: None });
+        let (hull, fitting) = (fitting.into(), fitting.into());
+        wire.send(owner, Outbound::Fitted { ship_id: ShipId(id.0), fitting, hull, field: None });
     }
 
     /// **Development only.** Put energy into the asking client's ship, if it may develop.
@@ -133,19 +171,26 @@ impl<J: Journal> Server<J> {
         fitted.then_some(ship)
     }
 
-    /// Once a tick, after the pursuits: refits that finished, and chases that can no longer be
-    /// paid for. A plan committed when it was ordered cannot run dry; an escort keeping station
+    /// Once a tick, after the pursuits: refit steps that finished, and chases that can no longer
+    /// be paid for. A plan committed when it was ordered cannot run dry; an escort keeping station
     /// on a quarry that goes on burning can, and is broken off when it does.
     pub(crate) fn keep_accounts(&mut self, wire: &mut impl Transport) {
         let now_s = self.now_t as f64 * 1.0e-6;
-        let finished: Vec<CraftId> = self
+        // A finished step changes the form, and with it everything `Fitted` states.
+        let stepped: Vec<(CraftId, Option<usize>)> = self
             .refitting
             .iter()
-            .copied()
-            .filter(|id| self.fleet.get(*id).is_none_or(|craft| !craft.is_refitting(now_s)))
+            .filter_map(|(id, told)| {
+                let running = self.fleet.get(*id).filter(|craft| craft.is_refitting(now_s));
+                let finished = running.and_then(|craft| craft.fitting()?.refit()).map(|plan| plan.at(now_s).finished);
+                (finished != Some(*told)).then_some((*id, finished))
+            })
             .collect();
-        for id in finished {
-            self.refitting.remove(&id);
+        for (id, finished) in stepped {
+            match finished {
+                Some(finished) => self.refitting.insert(id, finished),
+                None => self.refitting.remove(&id),
+            };
             self.tell_fitted(wire, id);
         }
 
@@ -242,16 +287,136 @@ mod tests {
         );
     }
 
-    /// No order begins a round until S1, so it is begun on the craft, as S1's order will.
+    /// The starting form with more engine on its bell.
+    fn more_engine() -> Form {
+        let mut target = Form::starting();
+        target.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(2)).unwrap().volume_m3 *= 1.4;
+        target
+    }
+
+    fn refit_to(target: &Form) -> Inbound {
+        act(Order::Refit { target: target.into() })
+    }
+
+    /// Accepted, it runs as a round: the owner is told the round and the hull, again as each step
+    /// finishes, and last with the target as the ship.
+    #[tokio::test]
+    async fn a_refit_runs_as_a_round_and_says_each_step() {
+        let (mut server, mut wire, from, ship) = fitted_server(false);
+        // Hours a tick, where a step takes days.
+        server.set_rate(60.0);
+        server.tick(&mut wire).await.unwrap();
+        let _ = replies(&mut wire);
+        let mut target = more_engine();
+        target.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(1)).unwrap().volume_m3 *= 1.1;
+        wire.client_says(from, refit_to(&target));
+        server.tick(&mut wire).await.unwrap();
+        let said = replies(&mut wire);
+        assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { order: Order::Refit { .. }, .. })), "{said:?}");
+        let Some(Outbound::Fitted { fitting, hull, .. }) = said.iter().rev().find(|m| matches!(m, Outbound::Fitted { .. }))
+        else {
+            panic!("{said:?}")
+        };
+        let round = fitting.refit.as_ref().expect("the round is on the wire");
+        assert_eq!(round.target, lc_proto::Form::from(&target));
+        assert_eq!(hull.form, lc_proto::Form::from(&Form::starting()), "nothing is built yet");
+
+        let plan = server.ship(ship).unwrap().fitting().unwrap().refit().unwrap().clone();
+        assert!(plan.steps().len() >= 2, "premise: {:?}", plan.steps());
+        let mut told = 0;
+        while server.ship(ship).unwrap().is_refitting(server.now_t() as f64 * 1.0e-6) {
+            server.tick(&mut wire).await.unwrap();
+            told += replies(&mut wire).iter().filter(|m| matches!(m, Outbound::Fitted { .. })).count();
+        }
+        server.tick(&mut wire).await.unwrap();
+        let said = replies(&mut wire);
+        assert_eq!(told, plan.steps().len(), "one Fitted a step");
+        assert!(!said.iter().any(|m| matches!(m, Outbound::Fitted { .. })), "told again: {said:?}");
+        let craft = server.ship(ship).unwrap();
+        assert_eq!(craft.fitting().unwrap().form(), &target);
+        assert!(craft.fitting().unwrap().refit().is_none());
+    }
+
+    /// A target that breaks a placement rule is refused naming the part, and one the planner
+    /// cannot run says why; neither begins anything.
+    #[tokio::test]
+    async fn an_invalid_target_is_refused_by_name() {
+        use lc_proto::form::PartId;
+        let (mut server, mut wire, from, ship) = fitted_server(false);
+        server.tick(&mut wire).await.unwrap();
+        let before = server.ship(ship).unwrap().fitting().cloned();
+
+        let mut turned = Form::starting();
+        let engine = turned.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(2)).unwrap();
+        engine.placement.as_mut().unwrap().tilt = glam::DVec2::new(0.0, 1.0);
+        let mut tiny = Form::starting();
+        tiny.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(4)).unwrap().volume_m3 = 10.0;
+        let mut other_mind = Form::starting();
+        for part in &mut other_mind.parts {
+            if part.id == lc_world::form::PartId(0) {
+                part.id = lc_world::form::PartId(40);
+            }
+            if let Some(placement) = part.placement.as_mut().filter(|p| p.parent == lc_world::form::PartId(0)) {
+                placement.parent = lc_world::form::PartId(40);
+            }
+        }
+        let mut huge = Form::starting();
+        for part in huge.parts.iter_mut().filter(|p| p.placement.is_some()) {
+            part.volume_m3 *= 50.0;
+        }
+        let cases = [
+            (turned, Refusal::Form(FormFault::EngineOffAxis(PartId(2)))),
+            (tiny, Refusal::Form(FormFault::TooSmall(PartId(4)))),
+            (other_mind, Refusal::Form(FormFault::OtherMind(PartId(40)))),
+            (huge, Refusal::Short(Shortfall::Energy)),
+        ];
+        for (target, reason) in cases {
+            wire.client_says(from, refit_to(&target));
+            server.tick(&mut wire).await.unwrap();
+            let said = replies(&mut wire);
+            let refused: Vec<_> = said.iter().filter_map(|m| match m {
+                Outbound::Refused { reason, .. } => Some(*reason),
+                _ => None,
+            }).collect();
+            assert_eq!(refused, vec![reason], "{said:?}");
+        }
+        let after = server.ship(ship).unwrap().fitting().unwrap();
+        assert_eq!(after.form(), before.as_ref().unwrap().form());
+        assert!(after.refit().is_none() && server.refitting.is_empty());
+    }
+
+    /// Under way is flying a course. A ship that has only burned is adrift and may refit.
+    #[tokio::test]
+    async fn a_ship_under_way_cannot_refit() {
+        use crate::server::course_tests::{a_system, orbitable};
+        let Some(system) = a_system() else { return };
+        let Some(body) = orbitable(&system) else { return };
+        let (mut server, mut wire, from, ship) = fitted_server(false);
+        server.fleet.get_mut(CraftId(1)).unwrap().enter(Some(system), 0.0);
+        server.tick(&mut wire).await.unwrap();
+        let course = lc_proto::Course::Orbit { body, altitude_radii: 2.0, plane: lc_proto::Plane::Equatorial };
+        wire.client_says(from, act(Order::SetCourse { course, accel_g: 1.0, max_beta: 0.1 }));
+        server.tick(&mut wire).await.unwrap();
+        assert!(server.ship(ship).unwrap().motion.is_under_way(), "premise: {:?}", replies(&mut wire));
+        wire.client_says(from, refit_to(&more_engine()));
+        server.tick(&mut wire).await.unwrap();
+        let said = replies(&mut wire);
+        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::UnderWay, .. })), "{said:?}");
+    }
+
     #[tokio::test]
     async fn flying_is_refused_while_refitting_and_a_cancel_frees_it() {
         let (mut server, mut wire, from, _) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
-        let now_s = server.now_t() as f64 * 1.0e-6;
-        let mut target = lc_world::form::Form::starting();
-        target.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(2)).unwrap().volume_m3 *= 1.4;
-        server.fleet.get_mut(CraftId(1)).unwrap().begin_refit(target, now_s).expect("it plans");
-        server.refitting.insert(CraftId(1));
+        wire.client_says(from, refit_to(&more_engine()));
+        server.tick(&mut wire).await.unwrap();
+        wire.client_says(from, refit_to(&more_engine()));
+        server.tick(&mut wire).await.unwrap();
+        let said = replies(&mut wire);
+        assert!(
+            said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::Refitting, .. })),
+            "a second round began over the first: {said:?}"
+        );
 
         wire.client_says(from, act(Order::Burn { beta: [1.0e-5, 0.0, 0.0] }));
         server.tick(&mut wire).await.unwrap();
@@ -266,6 +431,7 @@ mod tests {
         let _ = replies(&mut wire);
         let now_s = server.now_t() as f64 * 1.0e-6;
         assert!(!server.ship(ShipId(1)).unwrap().is_refitting(now_s));
+        assert!(server.refitting.is_empty());
 
         wire.client_says(from, act(Order::Burn { beta: [1.0e-5, 0.0, 0.0] }));
         server.tick(&mut wire).await.unwrap();
@@ -273,17 +439,14 @@ mod tests {
         assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { .. })), "{said:?}");
     }
 
-    /// Each order the wire has before the shard can do it is refused as such, and does nothing. A
-    /// loadout refit is among them: a ship is its form, and S1 refits it by form.
+    /// Each order the wire has before the shard can do it is refused as such, and does nothing.
     #[tokio::test]
     async fn an_order_not_built_yet_is_refused_as_not_built() {
-        use lc_proto::{Aim, Apertures, Approach, Closeness, FieldMode, Form, Loadout};
+        use lc_proto::{Aim, Apertures, Approach, Closeness, FieldMode};
         let (mut server, mut wire, from, ship) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
         let before = server.ship(ship).unwrap().fitting().cloned();
         let unbuilt = [
-            act(Order::RefitLoadout { target: Loadout { engines: 6, ..lc_proto::Fitting::from(before.as_ref().unwrap()).loadout } }),
-            act(Order::Refit { target: Form::default() }),
             act(Order::FieldMode { mode: FieldMode::Clear }),
             act(Order::Emit {
                 aim: Aim::Omni,
