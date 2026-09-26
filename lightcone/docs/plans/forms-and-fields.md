@@ -639,7 +639,7 @@ graph LR
 
 ### C2 · Editing the draft
 
-- status: done PR_PLACEHOLDER
+- status: done #101
 - needs: C1, F5
 - touches: `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/form_panel.rs`, `crates/lc-client/src/snap.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/draft.rs`, `crates/lc-client/src/form_handles.rs`, `crates/lc-client/src/form_carry.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/input.rs`, `crates/lc-client/src/map_panel.rs`, `crates/lc-client/src/menu.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/em-ui/src/field.rs`, `crates/em-ui/src/lib.rs`, `crates/em-ui/src/theme.rs`, `crates/em-ui/src/widgets.rs`, `crates/lc-world/src/refit/rounds.rs`, `lightcone/docs/29-ship-form.md`, `lightcone/docs/18-ui-style.md`, `lightcone/images/editor-*.png`
 - read: 29 §Handles, §Snapping, §What else it shows
