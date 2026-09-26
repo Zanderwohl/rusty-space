@@ -180,6 +180,8 @@ impl Plugin for ClientPlugin {
                     crate::dev::place_at_body.run_if(in_state(AppState::InGame)),
                     crate::dev::place_on_station.run_if(in_state(AppState::InGame)),
                     (
+                        // Before the bindings, which would take Escape to close a window.
+                        crate::form_carry::cancel_on_escape,
                         read_keys,
                         // Only while the view is a camera this reads the mouse for: the sky, or
                         // the editor's orbit. In the map's mode the world is a thumbnail in the

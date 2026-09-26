@@ -12,9 +12,10 @@ use bevy::input::mouse::MouseButton;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::input::EguiWantsInput;
-use glam::DVec3;
+use glam::{DMat3, DVec3};
 use lc_world::fitting::Balance;
-use lc_world::form::sdf::Sdf;
+use lc_world::form::place::{Pose, Side};
+use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Kind, Mount, Part, PartId, Placement, Primitive};
 
 use crate::action::Action;
@@ -57,46 +58,79 @@ pub struct DropZone;
 pub struct Carry {
     /// As it was when picked up, or `None` for a part taken from the list.
     pub was: Option<Part>,
-    /// As it last hung. A new part's placement means nothing until it has hung anywhere.
+    /// As it last hung, while [`hung`](Self::hung).
     pub part: Part,
+    /// Whether it hangs from a part in the draft. Otherwise the draft is as it was before the
+    /// carry began, and the part floats at the pointer.
     pub hung: bool,
     /// The part and everything under it, which it cannot hang from.
     pub subtree: BTreeSet<PartId>,
+    pub float: Float,
+}
+
+/// What floats at the pointer while nothing is under it to hang from.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Float {
+    /// The carried part and everything hanging from it, about the carried part's middle.
+    pub pieces: Vec<Piece>,
+    /// How the carried part was turned when it was taken.
+    pub rotation: DMat3,
+    /// How far in front of the eye it was taken, meters. `None` for a part from the list,
+    /// which floats at the focus.
+    pub depth_m: Option<f64>,
+}
+
+impl Float {
+    /// The pieces with their middle at the pointer, at the depth the part was taken at.
+    pub fn at(&self, lens: &Lens, at: Vec2) -> Vec<Piece> {
+        let (origin, direction) = lens.ray(at);
+        let forward = lens.orbit.basis()[0];
+        let depth = self.depth_m.unwrap_or(lens.orbit.distance * lens.extent.size_m());
+        let middle = origin + direction * depth / direction.dot(forward).max(1e-6);
+        let turn = Pose { position: middle, rotation: self.rotation };
+        self.pieces.iter().map(|p| Piece { pose: turn.then(&p.pose), ..p.clone() }).collect()
+    }
 }
 
 impl Carry {
-    /// An attached part, as it is. The Mind and an enclosing part stay where they are.
-    pub fn pick_up(draft: &Draft, id: PartId) -> Option<Carry> {
+    /// An attached part, as it is drawn in `sdf`. The Mind and an enclosing part stay where they
+    /// are.
+    pub fn pick_up(draft: &Draft, sdf: &Sdf, lens: &Lens, id: PartId) -> Option<Carry> {
         let part = *draft.part(id)?;
-        matches!(part.placement?.mount, Mount::Attached { .. }).then(|| Carry {
-            was: Some(part),
-            part,
-            hung: true,
-            subtree: draft.subtree(id).iter().map(|p| p.id).collect(),
-        })
+        if !matches!(part.placement?.mount, Mount::Attached { .. }) {
+            return None;
+        }
+        let subtree: BTreeSet<PartId> = draft.subtree(id).iter().map(|p| p.id).collect();
+        let (_, own) = crate::form_handles::original(sdf, id)?;
+        let about = own.pose;
+        let inverse = Pose { position: about.rotation.transpose() * -about.position, rotation: about.rotation.transpose() };
+        let pieces = sdf.pieces().iter().filter(|p| subtree.contains(&p.part)).map(|p| Piece { pose: inverse.then(&p.pose), ..p.clone() }).collect();
+        let depth_m = lens.project(about.position).map(|(_, depth)| depth);
+        Some(Carry { was: Some(part), part, hung: true, subtree, float: Float { pieces, rotation: about.rotation, depth_m } })
     }
 
-    /// A new part of `kind`, not yet hung anywhere.
+    /// A new part of `kind`, floating at the pointer until it is hung somewhere.
     pub fn new_part(draft: &Draft, kind: Kind, primitive: Primitive, balance: &Balance) -> Option<Carry> {
         let mind = draft.form.parts.iter().find(|p| p.kind == Kind::Mind)?.id;
         let part = *draft.add(mind, kind, primitive, DVec3::X, balance).ok()?.after.first()?;
-        Some(Carry { was: None, part, hung: false, subtree: BTreeSet::from([part.id]) })
+        let piece = Piece { part: part.id, side: Side::Original, kind, shape: part.shape(balance.min_part_m3), pose: Pose::IDENTITY };
+        let float = Float { pieces: vec![piece], rotation: DMat3::IDENTITY, depth_m: None };
+        Some(Carry { was: None, part, hung: false, subtree: BTreeSet::from([part.id]), float })
     }
 
-    /// Hung from whatever part is under `at`, other than itself and what hangs from it, and the
-    /// edit that shows it there. `None` over empty space, where it stays as it last hung.
-    pub fn hang(&mut self, draft: &Draft, sdf: &Sdf, lens: &Lens, at: Vec2, keys: Modifiers, balance: &Balance) -> Option<Edit> {
+    /// Hung from whatever part is under `at`, other than itself and what hangs from it, or
+    /// floating if there is none. The edit that shows the change, if there is one.
+    pub fn follow(&mut self, draft: &Draft, sdf: &Sdf, lens: &Lens, at: Vec2, keys: Modifiers, balance: &Balance) -> Option<Edit> {
         let (origin, direction) = lens.ray(at);
-        let (index, point) = hit_except(sdf, origin, direction, 10.0 * lens.extent.size_m(), &self.subtree)?;
+        let Some((index, point)) = hit_except(sdf, origin, direction, 10.0 * lens.extent.size_m(), &self.subtree) else {
+            return self.unhang();
+        };
         let piece = &sdf.pieces()[index];
         let anchor = snap::anchor(piece.pose.to_local(point), keys.fine);
         let part = match self.was {
             Some(was) => {
                 let placement = was.placement?;
-                let standoff = match placement.mount {
-                    Mount::Attached { standoff, .. } => standoff,
-                    Mount::Enclosing => return None,
-                };
+                let Mount::Attached { standoff, .. } = placement.mount else { return None };
                 let mount = Mount::Attached { anchor, standoff };
                 Part { placement: Some(Placement { parent: piece.part, mount, ..placement }), ..was }
             }
@@ -111,6 +145,19 @@ impl Carry {
         Some(self.edit(false))
     }
 
+    /// Off everything: the draft goes back to how it was before the carry, and the part floats.
+    fn unhang(&mut self) -> Option<Edit> {
+        if !self.hung {
+            return None;
+        }
+        self.hung = false;
+        let back = self.cancel();
+        if let Some(was) = self.was {
+            self.part = was;
+        }
+        back
+    }
+
     fn edit(&self, settled: bool) -> Edit {
         let (what, before) = match self.was {
             Some(was) => (What::Move, vec![was]),
@@ -119,12 +166,26 @@ impl Carry {
         Edit { what, part: self.part.id, before, after: vec![self.part], settled }
     }
 
-    /// Put down where it last hung: the settled edit, or `None` when there is nothing to record.
+    /// Put down where it hangs: the settled edit, or `None` when there is nothing to record.
+    /// A floating part cannot be put down.
     pub fn put_down(&self) -> Option<Edit> {
         match self.was {
+            _ if !self.hung => None,
             Some(was) if was == self.part => None,
-            None if !self.hung => None,
             _ => Some(self.edit(true)),
+        }
+    }
+
+    /// The draft back as it was before the carry began, with nothing recorded.
+    pub fn cancel(&self) -> Option<Edit> {
+        match self.was {
+            Some(was) if was != self.part => {
+                Some(Edit { what: What::Move, part: was.id, before: vec![self.part], after: vec![was], settled: false })
+            }
+            None if self.hung => {
+                Some(Edit { what: What::Remove, part: self.part.id, before: vec![self.part], after: Vec::new(), settled: false })
+            }
+            _ => None,
         }
     }
 
@@ -141,18 +202,14 @@ impl Carry {
                 });
                 vec![Action::EditForm(removal)]
             }
-            None if self.hung => {
-                let out = Edit { what: What::Remove, part: self.part.id, before: vec![self.part], after: Vec::new(), settled: false };
-                vec![Action::EditForm(Ok(out))]
-            }
-            None => Vec::new(),
+            None => self.cancel().map(|out| Action::EditForm(Ok(out))).into_iter().collect(),
         }
     }
 }
 
-/// A click on the picture while carrying puts the part down, or deletes it over the list. A click
-/// on a part otherwise selects it and picks it up. Between clicks the carried part follows the
-/// pointer.
+/// A click on the picture while carrying puts the part down, deletes it over the list, and does
+/// nothing while it floats. A click on a part otherwise selects it and picks it up. Between
+/// clicks the carried part follows the pointer.
 #[allow(clippy::too_many_arguments)]
 pub fn carry(
     ui: Res<Ui>,
@@ -177,23 +234,25 @@ pub fn carry(
     let cursor = window.cursor_position();
     carried.1 = false;
     if buttons.just_pressed(MouseButton::Left) && !egui.wants_any_pointer_input() {
-        if let Some(carry) = carried.0.take() {
+        if let Some(carry) = carried.0.clone() {
             carried.1 = true;
             // A button in the list holds the pointer rather than the list, so over either.
             let over_list = zones.iter().any(|(zone, own)| {
                 *own != Interaction::None || children.iter_descendants(zone).flat_map(|b| inside.get(b)).any(|i| *i != Interaction::None)
             });
-            let actions = match over_list {
-                true => carry.discard(draft),
-                false => carry.put_down().map(|edit| Action::EditForm(Ok(edit))).into_iter().collect(),
+            let actions: Vec<Action> = match (over_list, carry.hung) {
+                (true, _) => carry.discard(draft),
+                (false, true) => carry.put_down().map(|edit| Action::EditForm(Ok(edit))).into_iter().collect(),
+                (false, false) => return,
             };
             out.write_batch(actions.into_iter().map(Requested));
+            carried.0 = None;
             return;
         }
         let Some(at) = cursor.filter(|at| !controls.under_pointer() && crate::form_view::on_picture(&surface, *at)) else { return };
         let Some(id) = pick_part(sdf, &lens, at) else { return };
         out.write(Requested(Action::SelectPart(Some(id))));
-        carried.0 = Carry::pick_up(draft, id);
+        carried.0 = Carry::pick_up(draft, sdf, &lens, id);
         *seen = Some(at);
         return;
     }
@@ -203,8 +262,37 @@ pub fn carry(
     if controls.under_pointer() || !crate::form_view::on_picture(&surface, at) {
         return;
     }
-    if let Some(edit) = carry.hang(draft, sdf, &lens, at, Modifiers::of(&keys), &balance) {
+    if let Some(edit) = carry.follow(draft, sdf, &lens, at, Modifiers::of(&keys), &balance) {
         out.write(Requested(Action::EditForm(Ok(edit))));
+    }
+}
+
+/// Escape while carrying puts the part back where it was, and is taken from the key bindings, which
+/// would otherwise close a window or leave the editor on it. Before them.
+pub fn cancel_on_escape(
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    typing: em_ui::Typing,
+    mut carried: ResMut<Carried>,
+    mut out: MessageWriter<Requested>,
+) {
+    if typing.active() || !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    let Some(carry) = carried.0.take() else { return };
+    keys.clear_just_pressed(KeyCode::Escape);
+    if let Some(back) = carry.cancel() {
+        out.write(Requested(Action::EditForm(Ok(back))));
+    }
+}
+
+/// Out of the editor, nothing is carried: a part picked up goes back where it was.
+pub fn drop_on_leaving(ui: Res<Ui>, mut carried: ResMut<Carried>, mut out: MessageWriter<Requested>) {
+    if ui.view == crate::ui::ViewMode::Form {
+        return;
+    }
+    let Some(carry) = carried.0.take() else { return };
+    if let Some(back) = carry.cancel() {
+        out.write(Requested(Action::EditForm(Ok(back))));
     }
 }
 
@@ -229,8 +317,8 @@ pub fn show_tag(
     };
     let what = format!("{}, {}", crate::draft::kind_name(carry.part.kind), crate::draft::primitive_name(&carry.part.primitive));
     let said = match carry.hung {
-        true => format!("{what}: click to put down, or drop on the list to delete"),
-        false => format!("{what}: point at a part to hang it there"),
+        true => format!("{what}: click to put down, Escape to cancel"),
+        false => format!("{what}: point at a part to hang it there, Escape to cancel"),
     };
     let (left, top) = (Val::Px(at.x + 16.0), Val::Px(at.y + 12.0));
     if let Some((_, mut node, mut text)) = tags.iter_mut().next() {
@@ -254,17 +342,80 @@ pub fn show_tag(
     ));
 }
 
-/// Out of the editor, nothing is carried: a part picked up goes back where it was.
-pub fn drop_on_leaving(ui: Res<Ui>, mut carried: ResMut<Carried>, mut out: MessageWriter<Requested>) {
-    if ui.view == crate::ui::ViewMode::Form {
+/// The ship's frame for what floats, as the draft's copies have their own.
+#[derive(Component)]
+pub struct FloatRoot;
+
+/// A copy drawn at the pointer while a part floats: which of the float's pieces, and its mesh's
+/// scale.
+#[derive(Component)]
+pub struct Floating(usize, Vec3);
+
+/// While a part floats: the draft's own copies of it hidden, and a copy of it and its subtree at
+/// the pointer.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_float(
+    mut commands: Commands,
+    ui: Res<Ui>,
+    carried: Res<Carried>,
+    shown: Res<Shown>,
+    surface: Res<FormSurface>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut drawn: Query<(&crate::form_view::DrawnPart, &mut Visibility)>,
+    mut floating: Query<(Entity, &mut Transform, &Floating)>,
+    roots: Query<Entity, With<FloatRoot>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<em_render::body_surface_material::BodySurfaceMaterial>>,
+    surfaces: Res<crate::surfaces::Surfaces>,
+) {
+    let float = carried.carry().filter(|c| !c.hung && ui.view == crate::ui::ViewMode::Form);
+    // A part picked up is still in the draft where it was, and is not also drawn there.
+    let hidden = float.filter(|c| c.was.is_some()).map(|c| &c.subtree);
+    for (part, mut visibility) in &mut drawn {
+        let wanted = if hidden.is_some_and(|h| h.contains(&part.0)) { Visibility::Hidden } else { Visibility::Inherited };
+        visibility.set_if_neq(wanted);
+    }
+    let placed = float.zip(lens(&ui, &shown, &surface)).zip(window.cursor_position()).map(|((c, lens), at)| c.float.at(&lens, at));
+    let Some(pieces) = placed else {
+        for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+    if floating.iter().count() == pieces.len() {
+        for (_, mut transform, floating) in &mut floating {
+            if let Some(piece) = pieces.get(floating.0) {
+                transform.set_if_neq(crate::parts::local(piece, floating.1));
+            }
+        }
         return;
     }
-    let Some(carry) = carried.0.take() else { return };
-    let restore = match carry.was {
-        Some(was) => Edit { what: What::Move, part: was.id, before: vec![carry.part], after: vec![was], settled: false },
-        None => Edit { what: What::Remove, part: carry.part.id, before: vec![carry.part], after: Vec::new(), settled: false },
-    };
-    out.write(Requested(Action::EditForm(Ok(restore))));
+    for entity in &roots {
+        commands.entity(entity).despawn();
+    }
+    let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z));
+    let root = commands.spawn((Transform::from_rotation(turn), Visibility::default(), FloatRoot)).id();
+    for (i, piece) in pieces.iter().enumerate() {
+        let (mesh, scale) = crate::parts::solid(&piece.shape);
+        let paint = crate::parts::paint(piece.kind);
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(surfaces.flat.material(crate::form_view::hangar(paint, DVec3::Z)))),
+            crate::parts::local(piece, scale),
+            bevy::camera::visibility::NoFrustumCulling,
+            bevy::camera::visibility::RenderLayers::layer(crate::form_view::FORM_LAYER),
+            crate::form_view::HangarPaint(paint),
+            Floating(i, scale),
+            ChildOf(root),
+        ));
+    }
+}
+
+pub fn put_away(mut commands: Commands, mut carried: ResMut<Carried>, roots: Query<Entity, With<FloatRoot>>) {
+    carried.0 = None;
+    for entity in &roots {
+        commands.entity(entity).despawn();
+    }
 }
 
 #[cfg(test)]
@@ -299,9 +450,9 @@ mod tests {
         let mut draft = Draft::new(Form::starting());
         let (sdf, lens) = scene(&draft);
         let data = PartId(5);
-        let mut carry = Carry::pick_up(&draft, data).unwrap();
+        let mut carry = Carry::pick_up(&draft, &sdf, &lens, data).unwrap();
         let was = *draft.part(data).unwrap();
-        let edit = carry.hang(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
+        let edit = carry.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
         assert!(!edit.settled);
         apply(&mut draft, &edit);
         // Onto the deck, which is what is drawn there.
@@ -320,17 +471,16 @@ mod tests {
     fn a_carried_part_hangs_from_the_part_under_the_pointer_but_not_from_itself() {
         let draft = Draft::new(Form::starting());
         let (sdf, lens) = scene(&draft);
-        let mut deck = Carry::pick_up(&draft, PartId(4)).unwrap();
+        let mut deck = Carry::pick_up(&draft, &sdf, &lens, PartId(4)).unwrap();
         // The deck is drawn over this point and looks through itself to the storage, where it
         // already hangs, so there is nothing to show.
-        assert!(deck.hang(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).is_none());
+        assert!(deck.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).is_none());
         let engine = lens.project(sdf.pieces().iter().find(|p| p.part == PartId(2)).unwrap().pose.position).unwrap().0;
-        let edit = deck.hang(&draft, &sdf, &lens, engine, Modifiers::default(), &B).unwrap();
+        let edit = deck.follow(&draft, &sdf, &lens, engine, Modifiers::default(), &B).unwrap();
         assert_eq!(edit.after[0].placement.unwrap().parent, PartId(2), "onto the engine");
-        let edit = deck.hang(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
+        let edit = deck.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
         assert_eq!(edit.after[0].placement.unwrap().parent, PartId(1), "and back");
-        assert!(deck.hang(&draft, &sdf, &lens, Vec2::new(5.0, 700.0), Modifiers::default(), &B).is_none(), "over nothing it stays");
-        assert!(Carry::pick_up(&draft, PartId(0)).is_none() && Carry::pick_up(&draft, PartId(1)).is_none(), "the Mind and an enclosing part stay put");
+        assert!(Carry::pick_up(&draft, &sdf, &lens, PartId(0)).is_none() && Carry::pick_up(&draft, &sdf, &lens, PartId(1)).is_none(), "the Mind and an enclosing part stay put");
     }
 
     #[test]
@@ -340,7 +490,7 @@ mod tests {
         let mut carry = Carry::new_part(&draft, Kind::Bay, crate::draft::PRIMITIVES[3], &B).unwrap();
         assert_eq!(carry.put_down(), None, "not hung anywhere, so nothing to add");
         assert!(carry.discard(&draft).is_empty());
-        let edit = carry.hang(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
+        let edit = carry.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
         apply(&mut draft, &edit);
         assert_eq!(draft.part(carry.part.id).unwrap().kind, Kind::Bay);
         let down = carry.put_down().unwrap();
@@ -361,14 +511,62 @@ mod tests {
         let nose = ship.pieces().iter().find(|p| p.part == PartId(5)).unwrap().pose.to_outer(DVec3::X * 40.0);
         let at = lens.project(nose).unwrap().0;
         let mut before = Carry::new_part(&draft, Kind::Living, crate::draft::PRIMITIVES[0], &B).unwrap();
-        let edit = before.hang(&draft, &ship, &lens, at, Modifiers::default(), &B).unwrap();
+        let edit = before.follow(&draft, &ship, &lens, at, Modifiers::default(), &B).unwrap();
         assert_eq!(edit.after[0].placement.unwrap().parent, PartId(5), "while it is there, it is hung from");
         let removal = draft.remove(PartId(5)).unwrap();
         apply(&mut draft, &removal);
         let (drawn, _) = scene(&draft);
         let mut after = Carry::new_part(&draft, Kind::Living, crate::draft::PRIMITIVES[0], &B).unwrap();
-        let parent = after.hang(&draft, &drawn, &lens, at, Modifiers::default(), &B).map(|e| e.after[0].placement.unwrap().parent);
+        let parent = after.follow(&draft, &drawn, &lens, at, Modifiers::default(), &B).map(|e| e.after[0].placement.unwrap().parent);
         assert_ne!(parent, Some(PartId(5)));
+    }
+
+    /// Off every part it floats: the draft goes back to how it was, it cannot be put down, and
+    /// it is drawn at the pointer, at the depth it was taken from, with what hangs from it.
+    #[test]
+    fn off_every_part_it_floats_at_the_pointer() {
+        let mut draft = Draft::new(Form::starting());
+        let (sdf, lens) = scene(&draft);
+        let mut deck = Carry::pick_up(&draft, &sdf, &lens, PartId(4)).unwrap();
+        let engine = lens.project(sdf.pieces().iter().find(|p| p.part == PartId(2)).unwrap().pose.position).unwrap().0;
+        let edit = deck.follow(&draft, &sdf, &lens, engine, Modifiers::default(), &B).unwrap();
+        apply(&mut draft, &edit);
+        assert_ne!(draft.form, draft.ship);
+        let empty = Vec2::new(40.0, 120.0);
+        let back = deck.follow(&draft, &sdf, &lens, empty, Modifiers::default(), &B).unwrap();
+        apply(&mut draft, &back);
+        assert_eq!(draft.form, draft.ship, "floating, the draft is as it was");
+        assert!(!deck.hung && deck.put_down().is_none(), "and a click puts nothing down");
+        assert!(deck.follow(&draft, &sdf, &lens, empty + Vec2::X, Modifiers::default(), &B).is_none());
+
+        let taken = lens.project(sdf.pieces().iter().find(|p| p.part == PartId(4)).unwrap().pose.position).unwrap().1;
+        let floating = deck.float.at(&lens, empty);
+        let own = floating.iter().find(|p| p.part == PartId(4)).unwrap();
+        let (at, depth) = lens.project(own.pose.position).unwrap();
+        assert!((at - empty).length() < 0.5, "its middle is on the pointer: {at}");
+        assert!((depth - taken).abs() < 1e-6 * taken, "at the depth it was taken from");
+        let before = sdf.pieces().iter().find(|p| p.part == PartId(4)).unwrap().pose.rotation;
+        assert!((own.pose.rotation - before).abs_diff_eq(glam::DMat3::ZERO, 1e-9), "turned as it was");
+    }
+
+    /// Escape puts it back as it was, and a part from the list goes again, with nothing recorded.
+    #[test]
+    fn a_cancel_puts_the_draft_back() {
+        let mut draft = Draft::new(Form::starting());
+        let (sdf, lens) = scene(&draft);
+        let mut data = Carry::pick_up(&draft, &sdf, &lens, PartId(5)).unwrap();
+        assert_eq!(data.cancel(), None, "not moved, nothing to put back");
+        let edit = data.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
+        apply(&mut draft, &edit);
+        let back = data.cancel().unwrap();
+        assert!(!back.settled);
+        apply(&mut draft, &back);
+        assert_eq!(draft.form, draft.ship);
+        let mut bay = Carry::new_part(&draft, Kind::Bay, crate::draft::PRIMITIVES[3], &B).unwrap();
+        let edit = bay.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
+        apply(&mut draft, &edit);
+        apply(&mut draft, &bay.cancel().unwrap());
+        assert_eq!(draft.form, draft.ship);
     }
 
     /// Dropped on the list, a part picked up is deleted, and the deletion remembers it as it was
@@ -377,8 +575,8 @@ mod tests {
     fn a_part_dropped_on_the_list_is_deleted_as_it_was() {
         let mut draft = Draft::new(Form::starting());
         let (sdf, lens) = scene(&draft);
-        let mut carry = Carry::pick_up(&draft, PartId(5)).unwrap();
-        let edit = carry.hang(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
+        let mut carry = Carry::pick_up(&draft, &sdf, &lens, PartId(5)).unwrap();
+        let edit = carry.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();
         apply(&mut draft, &edit);
         let [Action::EditForm(Ok(removal))] = &carry.discard(&draft)[..] else { panic!() };
         assert!(removal.settled && removal.what == What::Remove);
@@ -387,7 +585,7 @@ mod tests {
         apply(&mut draft, &removal.inverse());
         assert_eq!(draft.form, draft.ship);
         // The last drones too: a draft may have none on the way to a design.
-        let drones = Carry::pick_up(&draft, PartId(3)).unwrap();
+        let drones = Carry::pick_up(&draft, &sdf, &lens, PartId(3)).unwrap();
         let [Action::EditForm(Ok(removal))] = &drones.discard(&draft)[..] else { panic!() };
         apply(&mut draft, removal);
         assert!(draft.form.parts.iter().all(|p| p.kind != Kind::Drone));

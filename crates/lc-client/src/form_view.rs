@@ -417,7 +417,11 @@ struct FormViewRoot;
 
 /// A copy's paint, kept to relight it with.
 #[derive(Component)]
-struct HangarPaint(Vec4);
+pub(crate) struct HangarPaint(pub Vec4);
+
+/// Which part a copy of the draft's is, so a carried one can be hidden.
+#[derive(Component)]
+pub struct DrawnPart(pub lc_world::form::PartId);
 
 /// Start the draft from the ship's own form the first time the editor opens, or from the
 /// starting form for a ship that has none.
@@ -493,6 +497,7 @@ fn show(
             NoFrustumCulling,
             RenderLayers::layer(FORM_LAYER),
             HangarPaint(paint),
+            DrawnPart(piece.part),
             ChildOf(root),
         ));
     }
@@ -539,7 +544,7 @@ fn reveal(revealed: Res<Revealed>, mut ghosts: Query<&mut Visibility, With<Disma
 }
 
 /// A part lit from `key`, ship frame, whatever the star is doing.
-fn hangar(paint: Vec4, key: DVec3) -> BodySurfaceUniform {
+pub(crate) fn hangar(paint: Vec4, key: DVec3) -> BodySurfaceUniform {
     let tone = crate::tonemap::ToneMap {
         surface_reference: HANGAR_REFERENCE,
         surface_stops: HANGAR_STOPS,
