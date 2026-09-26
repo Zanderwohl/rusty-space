@@ -281,34 +281,104 @@ struct Measured {
     geometry: Arc<Geometry>,
 }
 
+type Cell = Arc<OnceLock<Result<Measured, FormError>>>;
+
 /// What the grid gives, built once per form and balance for the process: most ships are the
 /// starting form, so a shard fitting a hundred builds one.
 fn measured(form: &Form, balance: &Balance) -> Result<Measured, FormError> {
-    type Cell = Arc<OnceLock<Result<Measured, FormError>>>;
     const KEPT: usize = 16;
     static BUILT: Mutex<Vec<(Form, Balance, Cell)>> = Mutex::new(Vec::new());
     // Built outside the lock, once per key: a thread asking for one form waits for whoever is
     // building it, and never for a build of another.
-    let cell = {
-        let mut built = BUILT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        match built.iter().find(|(f, b, _)| f == form && b == balance) {
-            Some((_, _, cell)) => cell.clone(),
-            None => {
-                if built.len() == KEPT {
-                    built.drain(..1);
+    let cell = match reserved(form, balance) {
+        Some(cell) => cell,
+        None => {
+            let mut built = BUILT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            match built.iter().find(|(f, b, _)| f == form && b == balance) {
+                Some((_, _, cell)) => cell.clone(),
+                None => {
+                    if built.len() == KEPT {
+                        built.drain(..1);
+                    }
+                    let cell = Cell::default();
+                    built.push((form.clone(), *balance, cell.clone()));
+                    cell
                 }
-                let cell = Cell::default();
-                built.push((form.clone(), *balance, cell.clone()));
-                cell
             }
         }
     };
+    build(&cell, form, balance)
+}
+
+fn build(cell: &Cell, form: &Form, balance: &Balance) -> Result<Measured, FormError> {
     cell.get_or_init(|| {
         FormGrid::new(form, balance).map(|grid| {
             Measured { extent_m: grid.extent_m(), gyration_m: grid.gyration_m(), geometry: Arc::new(grid.geometry(1.0)) }
         })
     })
     .clone()
+}
+
+/// Forms held for a [`Reservation`], outside [`measured`]'s small cache: a round has a step per
+/// part changed, which is far more forms than it keeps.
+static RESERVED: Mutex<Vec<(u64, Form, Balance, Cell)>> = Mutex::new(Vec::new());
+
+fn reserved(form: &Form, balance: &Balance) -> Option<Cell> {
+    let held = RESERVED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    held.iter().find(|(_, f, b, _)| f == form && b == balance).map(|(_, _, _, cell)| cell.clone())
+}
+
+/// Forms a caller will ask this process to measure, held until dropped.
+///
+/// Measuring is the one costly thing a refit does, and it happens at a step's end on whatever
+/// thread settles the craft. [`Reservation::new`] returns the measuring as work for another
+/// thread, so the settle finds it done. The answer is the same function of the same form either
+/// way; only where it is computed moves. A settle that arrives first builds it as before, and
+/// one that arrives mid-build waits for that build rather than starting a second.
+///
+/// Holds no thread itself, so this crate still runs where there are none.
+pub struct Reservation {
+    id: u64,
+    dropped: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Reservation {
+    pub fn new(forms: impl IntoIterator<Item = Form>, balance: Balance) -> (Self, impl FnOnce() + Send + 'static) {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dropped = Arc::new(AtomicBool::new(false));
+        let mut work: Vec<(Form, Cell)> = Vec::new();
+        {
+            let mut held = RESERVED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            for form in forms {
+                if work.iter().any(|(f, _)| *f == form) {
+                    continue;
+                }
+                let cell = Cell::default();
+                held.push((id, form.clone(), balance, cell.clone()));
+                work.push((form, cell));
+            }
+        }
+        let stop = dropped.clone();
+        let measure = move || {
+            for (form, cell) in work {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                let _ = build(&cell, &form, &balance);
+            }
+        };
+        (Self { id, dropped }, measure)
+    }
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        self.dropped.store(true, std::sync::atomic::Ordering::Relaxed);
+        let mut held = RESERVED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        held.retain(|(id, ..)| *id != self.id);
+    }
 }
 
 /// A ship's form and the energy in it, as a closed form in coordinate time.
@@ -943,6 +1013,22 @@ mod tests {
         let mut target = Form::starting();
         target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 5.0;
         target
+    }
+
+    /// Measured on another thread, the answer is the one the settle would have built, and it is
+    /// held past the small cache until the reservation goes.
+    #[test]
+    fn a_reserved_form_is_measured_elsewhere_and_released_on_drop() {
+        let mut form = more_engine();
+        form.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 1.01;
+        let direct = FormGrid::new(&form, &Balance::DEFAULT).map(|g| (g.extent_m(), g.gyration_m()));
+        let (held, measure) = Reservation::new([form.clone(), form.clone()], Balance::DEFAULT);
+        std::thread::spawn(measure).join().unwrap();
+        let cell = reserved(&form, &Balance::DEFAULT).expect("held while the reservation lives");
+        let built = cell.get().expect("measured by the thread").clone();
+        assert_eq!(built.map(|m| (m.extent_m, m.gyration_m)), direct);
+        drop(held);
+        assert!(reserved(&form, &Balance::DEFAULT).is_none());
     }
 
     fn begun(fitting: &mut Fitting, target: Form, start_s: f64, motion: &ShipState) {
