@@ -76,9 +76,9 @@ default 5°:
 
 | burning ship, at 5 g | exhaust | cooking distance |
 |---|---|---|
-| 500 m | 1.1 × 10²⁰ W | 2.6 km |
-| 5 km | 1.1 × 10²³ W | 84 km |
-| 50 km | 1.1 × 10²⁶ W | 2 600 km |
+| 500 m | 1.1 × 10²⁰ W | 2.1 km |
+| 5 km | 1.1 × 10²³ W | 68 km |
+| 50 km | 1.1 × 10²⁶ W | 2 100 km |
 
 A Clear receiver's distance is a little over half of these. A receiver's shadow and its rated load
 both scale with its size squared, so **the distance does not depend on the receiver's size**. The same is true of a collapse's lethal radius. Inside that
@@ -89,7 +89,7 @@ What follows:
 
 - **Every burn points at something.** A ship braking into a rendezvous points its exhaust at it. A
   starting ship's exhaust is safe for a companion at the usual 5 km standoff. A GSV leaving at 5 g
-  cooks anything within 84 km behind it. Approach paths matter, and crowded space needs rules, which
+  cooks anything within 68 km behind it. Approach paths matter, and crowded space needs rules, which
   gives factions something real to legislate.
 - **Empty storage helps here too.** Exhaust arrives as sustained power, so a receiver with room
   converts it up to its rating, and being behind an ally's drive can refuel you.
@@ -123,9 +123,9 @@ spread over a 60° half-angle, they cook almost nothing:
 
 | ship | thrust power at 0.01 g | cooking distance |
 |---|---|---|
-| 500 m | 2.1 × 10¹⁷ W | 10 m |
-| 5 km | 2.1 × 10²⁰ W | 330 m |
-| 50 km | 2.1 × 10²³ W | 10 km |
+| 500 m | 2.1 × 10¹⁷ W | 8 m |
+| 5 km | 2.1 × 10²⁰ W | 260 m |
+| 50 km | 2.1 × 10²³ W | 8.4 km |
 
 A hundredth of a g is slow in game time and nothing in real time: five kilometers takes about
 seven and a half game minutes, a twentieth of a real second.
@@ -143,9 +143,9 @@ its size. It sets a **courtesy radius** around each drive, inside which its cone
 
 | ship at 5 g | courtesy radius |
 |---|---|
-| 500 m | 26 km |
-| 5 km | 840 km |
-| 50 km | 26 000 km |
+| 500 m | 21 km |
+| 5 km | 680 km |
+| 50 km | 21 000 km |
 
 Station-keeping thrusters are throttled to stay courteous too. A large ship holding station close to
 a small one maneuvers more slowly than its thrusters allow, rather than cooking it.

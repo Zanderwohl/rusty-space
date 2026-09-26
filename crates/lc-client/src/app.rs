@@ -168,6 +168,7 @@ impl Plugin for ClientPlugin {
             .add_systems(OnEnter(AppState::Loading), begin_load)
             .add_systems(OnExit(AppState::InGame), (crate::map_panel::release_world_frame, leave_scene))
             .add_systems(OnEnter(AppState::InGame), spawn_sky)
+            .add_systems(Update, crate::parts::fit_fixture.after(crate::dev::place_on_station).run_if(in_state(AppState::InGame)))
             .insert_resource(ClearColor(Color::BLACK))
             .add_systems(
                 Update,
