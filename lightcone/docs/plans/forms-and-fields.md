@@ -339,9 +339,9 @@ graph LR
 
 ### F10 · Solar from the shadow
 
-- status: active card "Build F10: solar from the shadow"
+- status: done #103
 - needs: F9
-- touches: `crates/lc-world/src/solar.rs`, `crates/lc-world/src/craft.rs`
+- touches: `crates/lc-world/src/solar.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/courtesy.rs`, `crates/lc-world/src/field.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/form_carry.rs`, `crates/lc-client/src/form_handles.rs`, `crates/lc-client/src/form_view.rs`, `lightcone/docs/20-solar-power.md`, `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/solar-idle-plate.png`, `lightcone/images/solar-idle-cluster.png`
 - read: 29 §What the server computes, 20 §Attitude
 - deliver: collection reads the shadow table; the idle attitude turns the largest shadow to the star; `solar_gain` re-anchored on the starting form; 20's tables recomputed.
 - done when: 20's anchor holds for the starting form to 1%, and a plate collects more than a spindle of the same volume broadside.
