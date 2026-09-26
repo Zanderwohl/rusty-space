@@ -293,7 +293,7 @@ impl Plugin for FormHandlesPlugin {
             .add_systems(Startup, configure_gizmos)
             .add_systems(
                 Update,
-                (lay_out, crate::form_carry::show_tag, crate::form_carry::drop_on_leaving, crate::form_carry::draw_float)
+                (lay_out, crate::form_carry::drop_on_leaving, crate::form_carry::draw_float)
                     .in_set(crate::app::Stage::Scene)
                     .after(crate::form_view::place)
                     .run_if(in_state(crate::app::AppState::InGame)),

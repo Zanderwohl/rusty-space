@@ -296,52 +296,6 @@ pub fn drop_on_leaving(ui: Res<Ui>, mut carried: ResMut<Carried>, mut out: Messa
     }
 }
 
-/// The words on the pointer while something is carried.
-#[derive(Component)]
-pub struct Tag;
-
-pub fn show_tag(
-    mut commands: Commands,
-    ui: Res<Ui>,
-    carried: Res<Carried>,
-    window: Single<&Window, With<PrimaryWindow>>,
-    assets: Res<AssetServer>,
-    mut tags: Query<(Entity, &mut Node, &mut Text), With<Tag>>,
-) {
-    let wanted = carried.carry().filter(|_| ui.view == crate::ui::ViewMode::Form).zip(window.cursor_position());
-    let Some((carry, at)) = wanted else {
-        for (entity, ..) in &tags {
-            commands.entity(entity).despawn();
-        }
-        return;
-    };
-    let what = format!("{}, {}", crate::draft::kind_name(carry.part.kind), crate::draft::primitive_name(&carry.part.primitive));
-    let said = match carry.hung {
-        true => format!("{what}: click to put down, Escape to cancel"),
-        false => format!("{what}: point at a part to hang it there, Escape to cancel"),
-    };
-    let (left, top) = (Val::Px(at.x + 16.0), Val::Px(at.y + 12.0));
-    if let Some((_, mut node, mut text)) = tags.iter_mut().next() {
-        if node.left != left || node.top != top {
-            node.left = left;
-            node.top = top;
-        }
-        if text.0 != said {
-            text.0 = said;
-        }
-        return;
-    }
-    commands.spawn((
-        Text::new(said),
-        TextFont { font: FontSource::Handle(assets.load(crate::faces::UI_FILE)), font_size: FontSize::Px(13.0), ..default() },
-        TextColor(em_ui::vfd::TEXT),
-        Node { position_type: PositionType::Absolute, left, top, ..default() },
-        GlobalZIndex(em_ui::widgets::OVERLAY_Z),
-        Pickable::IGNORE,
-        Tag,
-    ));
-}
-
 /// The ship's frame for what floats, as the draft's copies have their own.
 #[derive(Component)]
 pub struct FloatRoot;
