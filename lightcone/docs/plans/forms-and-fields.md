@@ -578,7 +578,7 @@ graph LR
 
 ### R10 · The real hull in the game
 
-- status: active card "Build R10: the real hull in the game"
+- status: done #106
 - needs: R2, R3, S1
 - touches: `crates/lc-client/src/hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`, `AGENTS.md`
 - read: 32 §The hull
