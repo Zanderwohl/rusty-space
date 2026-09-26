@@ -560,6 +560,26 @@ pub fn stretched(primitive: Primitive, axis: usize, factor: f64, fine: bool) -> 
     }
 }
 
+/// `part` stretched along its own `axis` by `factor`, the stretched ratio snapped, keeping every
+/// dimension across that axis: its volume grows with it. [`stretched`] is the same at fixed volume.
+pub fn grown(part: &Part, axis: usize, factor: f64, fine: bool) -> Part {
+    let primitive = stretched(part.primitive, axis, factor, fine);
+    let scale = part.primitive.scale(part.volume_m3);
+    // Scale is the ellipsoid's and slab's first semi-axis or edge, the round primitives' radius
+    // and the torus's minor radius. Whichever of those the stretch moves goes with it.
+    let kept = match (part.primitive, primitive) {
+        (Primitive::Ellipsoid { axes: a }, Primitive::Ellipsoid { axes: b }) => scale * b.x / a.x,
+        (Primitive::Slab { edges: a, .. }, Primitive::Slab { edges: b, .. }) => scale * b.x / a.x,
+        (
+            Primitive::Capsule { length: a } | Primitive::Cylinder { length: a } | Primitive::Frustum { length: a, .. },
+            Primitive::Capsule { length: b } | Primitive::Cylinder { length: b } | Primitive::Frustum { length: b, .. },
+        ) if axis != 0 && b > 0.0 => scale * a / b,
+        (Primitive::Torus { major: a }, Primitive::Torus { major: b }) if axis == 0 => scale * a / b,
+        _ => scale,
+    };
+    Part { primitive, volume_m3: primitive.volume(kept), ..*part }
+}
+
 /// So a sphere of a capsule, whose length is zero, can still be stretched into one.
 const MIN_RATIO: f64 = 0.1;
 
@@ -757,6 +777,39 @@ mod tests {
         // Across a capsule's axis it is the radius that grows, which is the length shrinking.
         assert_eq!(stretched(Primitive::Capsule { length: 2.0 }, 2, 2.0, false), Primitive::Capsule { length: 1.0 });
         assert_eq!(stretched(Primitive::Torus { major: 3.0 }, 0, 4.0, false), Primitive::Torus { major: 1.0 });
+    }
+
+    /// Without the modifier an axis handle moves one dimension and leaves the others alone, so
+    /// the volume goes with it.
+    #[test]
+    fn a_free_stretch_keeps_the_other_dimensions() {
+        use lc_world::form::primitive::Shape;
+        let min = B.min_part_m3;
+        let part = |primitive| Part { id: PartId(9), kind: Kind::Storage, primitive, volume_m3: 1.0e6, placement: None };
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9 * b.abs().max(1.0);
+
+        let egg = part(Primitive::Ellipsoid { axes: DVec3::new(2.0, 1.0, 1.0) });
+        let Shape::Ellipsoid { semi_axes: a } = egg.shape(min) else { panic!() };
+        let wider = grown(&egg, 1, 2.0, false);
+        let Shape::Ellipsoid { semi_axes: b } = wider.shape(min) else { panic!() };
+        assert!(close(b.x, a.x) && close(b.y, 2.0 * a.y) && close(b.z, a.z), "{a} to {b}");
+        assert!(close(wider.volume_m3, 2.0 * egg.volume_m3));
+        let Shape::Ellipsoid { semi_axes: c } = grown(&egg, 0, 2.0, false).shape(min) else { panic!() };
+        assert!(close(c.x, 2.0 * a.x) && close(c.y, a.y), "{a} to {c}");
+
+        let pod = part(Primitive::Capsule { length: 2.0 });
+        let Shape::Capsule { radius, length } = pod.shape(min) else { panic!() };
+        let Shape::Capsule { radius: r, length: l } = grown(&pod, 0, 2.0, false).shape(min) else { panic!() };
+        assert!(close(r, radius) && close(l, 2.0 * length), "along: the radius is kept");
+        let Shape::Capsule { radius: r, length: l } = grown(&pod, 2, 2.0, false).shape(min) else { panic!() };
+        assert!(close(r, 2.0 * radius) && close(l, length), "across: the length is kept");
+
+        let ring = part(Primitive::Torus { major: 2.0 });
+        let Shape::Torus { major, minor } = ring.shape(min) else { panic!() };
+        let Shape::Torus { major: m, minor: n } = grown(&ring, 1, 2.0, false).shape(min) else { panic!() };
+        assert!(close(n, minor) && close(m, 2.0 * major), "across: a wider ring of the same tube");
+        let Shape::Torus { major: m, minor: n } = grown(&ring, 0, 1.25, false).shape(min) else { panic!() };
+        assert!(close(m, major) && n > minor, "along: a fatter tube on the same ring");
     }
 
     #[test]

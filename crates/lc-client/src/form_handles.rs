@@ -22,7 +22,7 @@ use lc_world::form::{Mount, Part, PartId, Placement};
 
 use crate::action::Action;
 use crate::app::Ui;
-use crate::draft::{Draft, Edit, Refused, What, stretched};
+use crate::draft::{Edit, Refused, What, grown, stretched};
 use crate::form_view::{Extent, FORM_FOV, FORM_LAYER, FormOrbit, FormSurface, Shown};
 use crate::input::Requested;
 use crate::snap;
@@ -31,11 +31,10 @@ use crate::ui::ViewMode;
 /// Which edit a knob makes.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Grip {
-    /// Slides the anchor over the parent.
-    Move,
     /// Volume at fixed proportions.
     Size,
-    /// Proportions along the part's own axis, at fixed volume.
+    /// One dimension, along the part's own axis. The volume goes with it, or with the
+    /// constant-volume modifier the others give way instead.
     Axis(usize),
     Twist,
     Standoff,
@@ -44,7 +43,6 @@ pub enum Grip {
 impl Grip {
     fn label(self) -> &'static str {
         match self {
-            Grip::Move => "MOVE",
             Grip::Size => "SIZE",
             Grip::Axis(0) => "X",
             Grip::Axis(1) => "Y",
@@ -114,6 +112,17 @@ impl Lens {
 /// Where the ray first meets a part as drawn, the part's primitive uncut and unblended, as the
 /// editor's meshes are. The piece's index and the point.
 pub fn hit(sdf: &Sdf, origin: DVec3, direction: DVec3, limit_m: f64) -> Option<(usize, DVec3)> {
+    hit_except(sdf, origin, direction, limit_m, &std::collections::BTreeSet::new())
+}
+
+/// [`hit`], looking through the parts in `skip`.
+pub fn hit_except(
+    sdf: &Sdf,
+    origin: DVec3,
+    direction: DVec3,
+    limit_m: f64,
+    skip: &std::collections::BTreeSet<PartId>,
+) -> Option<(usize, DVec3)> {
     const STEPS: usize = 256;
     let (min, max) = sdf.bounds();
     let tolerance = (max - min).length() * 1.0e-4;
@@ -121,6 +130,7 @@ pub fn hit(sdf: &Sdf, origin: DVec3, direction: DVec3, limit_m: f64) -> Option<(
     for _ in 0..STEPS {
         let p = origin + direction * t;
         let (piece, d) = (0..sdf.pieces().len())
+            .filter(|&i| !skip.contains(&sdf.pieces()[i].part))
             .map(|i| (i, sdf.primitive(i, p)))
             .fold((0, f64::INFINITY), |best, next| if next.1 < best.1 { next } else { best });
         if d < tolerance {
@@ -153,7 +163,7 @@ pub fn pick_part(sdf: &Sdf, lens: &Lens, at: Vec2) -> Option<PartId> {
     pick(&candidates, at, SLACK_PX).map(|i| sdf.pieces()[i as usize].part)
 }
 
-fn original(sdf: &Sdf, part: PartId) -> Option<(usize, &Piece)> {
+pub(crate) fn original(sdf: &Sdf, part: PartId) -> Option<(usize, &Piece)> {
     sdf.pieces().iter().enumerate().find(|(_, p)| p.part == part && p.side == Side::Original)
 }
 
@@ -176,7 +186,6 @@ fn anchors(part: &Part, piece: &Piece) -> Vec<(Grip, Option<DVec3>)> {
     }
     out.push((Grip::Twist, Some(pose.to_outer(DVec3::Z * h.y.max(h.z) * REACH_OUT * 1.2))));
     if matches!(part.placement.map(|p| p.mount), Some(Mount::Attached { .. })) {
-        out.push((Grip::Move, Some(pose.position)));
         out.push((Grip::Standoff, Some(pose.to_outer(-DVec3::X * piece.shape.reach()))));
     }
     out
@@ -210,8 +219,6 @@ pub struct Held {
     pub away: bool,
     pub m_per_px: f64,
     pub reach_m: f64,
-    /// The parent's pose, for the move.
-    pub parent: Option<(usize, lc_world::form::place::Pose)>,
 }
 
 impl Held {
@@ -224,7 +231,6 @@ impl Held {
             lens.project(tip).map_or(Vec2::X, |(px, _)| (px - center).normalize_or(Vec2::X))
         });
         let away = piece.pose.axis().dot(lens.orbit.basis()[0]) > 0.0;
-        let parent = part.placement.and_then(|p| original(sdf, p.parent)).map(|(i, piece)| (i, piece.pose));
         Some(Held {
             grip,
             part,
@@ -235,12 +241,12 @@ impl Held {
             away,
             m_per_px: lens.m_per_px(depth),
             reach_m: piece.shape.reach().max(f64::MIN_POSITIVE),
-            parent,
         })
     }
 
-    /// The edit a drag to `at` makes. `fine` is the modifier's finer steps.
-    pub fn edit(&self, at: Vec2, fine: bool, sdf: &Sdf, lens: &Lens, balance: &Balance) -> Result<Edit, Refused> {
+    /// The edit a drag to `at` makes.
+    pub fn edit(&self, at: Vec2, keys: Modifiers, balance: &Balance) -> Result<Edit, Refused> {
+        let fine = keys.fine;
         let drag = at - self.from;
         let along = |direction: Vec2| drag.dot(direction.normalize_or(Vec2::X)) as f64;
         let placement = self.part.placement.ok_or(Refused::Mind)?;
@@ -252,7 +258,11 @@ impl Held {
             }
             Grip::Axis(i) => {
                 let factor = (along(self.axes[i]) / STRETCH_PX).exp();
-                (What::Reshape, Part { primitive: stretched(self.part.primitive, i, factor, fine), ..self.part })
+                let after = match keys.keep_volume {
+                    true => Part { primitive: stretched(self.part.primitive, i, factor, fine), ..self.part },
+                    false => grown(&self.part, i, factor, fine),
+                };
+                (What::Reshape, after)
             }
             Grip::Twist => {
                 let (a, b) = (self.from - self.center, at - self.center);
@@ -269,39 +279,9 @@ impl Held {
                 let mount = Mount::Attached { anchor, standoff: moved };
                 (What::Move, Part { placement: Some(Placement { mount, ..placement }), ..self.part })
             }
-            Grip::Move => {
-                let Mount::Attached { standoff, .. } = placement.mount else { return Err(Refused::Mind) };
-                let (index, pose) = self.parent.ok_or(Refused::NoSuchPart(placement.parent))?;
-                let (origin, direction) = lens.ray(at);
-                // On the parent where the ray meets it, and where it misses, the point of the ray
-                // nearest its middle, so the anchor keeps sliding off the rim.
-                let met = hit_one(sdf, index, origin, direction, 10.0 * lens.extent.size_m());
-                let point = met.unwrap_or_else(|| origin + direction * (pose.position - origin).dot(direction).max(0.0));
-                let anchor = snap::anchor(pose.to_local(point), fine);
-                let mount = Mount::Attached { anchor, standoff };
-                (What::Move, Part { placement: Some(Placement { mount, ..placement }), ..self.part })
-            }
         };
         Ok(Edit { what, part: self.part.id, before: vec![self.part], after: vec![after], settled: false })
     }
-}
-
-fn hit_one(sdf: &Sdf, piece: usize, origin: DVec3, direction: DVec3, limit_m: f64) -> Option<DVec3> {
-    let (min, max) = sdf.bounds();
-    let tolerance = (max - min).length() * 1.0e-4;
-    let mut t = 0.0;
-    for _ in 0..256 {
-        let p = origin + direction * t;
-        let d = sdf.primitive(piece, p);
-        if d < tolerance {
-            return Some(p);
-        }
-        t += d.max(tolerance);
-        if t > limit_m {
-            break;
-        }
-    }
-    None
 }
 
 pub struct FormHandlesPlugin;
@@ -309,10 +289,11 @@ pub struct FormHandlesPlugin;
 impl Plugin for FormHandlesPlugin {
     fn build(&self, app: &mut App) {
         app.init_gizmo_group::<FormGizmos>()
+            .init_resource::<crate::form_carry::Carried>()
             .add_systems(Startup, configure_gizmos)
             .add_systems(
                 Update,
-                lay_out
+                (lay_out, crate::form_carry::show_tag, crate::form_carry::drop_on_leaving)
                     .in_set(crate::app::Stage::Scene)
                     .after(crate::form_view::place)
                     .run_if(in_state(crate::app::AppState::InGame)),
@@ -339,57 +320,21 @@ pub fn lens(ui: &Ui, shown: &Shown, surface: &FormSurface) -> Option<Lens> {
     (ui.view == ViewMode::Form).then(|| Lens { orbit: ui.form.orbit.held_to(&extent), extent, rect })
 }
 
-fn fine(keys: &ButtonInput<KeyCode>) -> bool {
-    keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+/// The modifiers a drag reads: Alt for the finer snapping steps, and Shift to stretch an axis
+/// at fixed volume.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Modifiers {
+    pub fine: bool,
+    pub keep_volume: bool,
 }
 
-/// A left-press on a part selects it, or adds the armed part there. The press decides: one on a
-/// knob or a panel is theirs, and one on empty space is the slide's.
-#[allow(clippy::too_many_arguments)]
-pub fn press_parts(
-    ui: Res<Ui>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    egui: Res<EguiWantsInput>,
-    controls: em_ui::Controls,
-    window: Single<&Window, With<PrimaryWindow>>,
-    shown: Res<Shown>,
-    surface: Res<FormSurface>,
-    mut out: MessageWriter<Requested>,
-) {
-    if !buttons.just_pressed(MouseButton::Left) || egui.wants_any_pointer_input() || controls.under_pointer() {
-        return;
+impl Modifiers {
+    pub fn of(keys: &ButtonInput<KeyCode>) -> Self {
+        Self {
+            fine: keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]),
+            keep_volume: keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
+        }
     }
-    let (Some(at), Some(lens), Some(sdf), Some(draft)) =
-        (window.cursor_position(), lens(&ui, &shown, &surface), shown.sdf(), ui.form.draft.as_ref())
-    else {
-        return;
-    };
-    if !crate::form_view::on_picture(&surface, at) {
-        return;
-    }
-    let Some(part) = pick_part(sdf, &lens, at) else { return };
-    let action = match ui.form.adding {
-        Some((kind, primitive)) => Action::EditForm(add_at(draft, sdf, &lens, at, part, kind, primitive)),
-        None => Action::SelectPart(Some(part)),
-    };
-    out.write(Requested(action));
-}
-
-/// The armed part, attached to `parent` where the pointer meets it.
-fn add_at(
-    draft: &Draft,
-    sdf: &Sdf,
-    lens: &Lens,
-    at: Vec2,
-    parent: PartId,
-    kind: lc_world::form::Kind,
-    primitive: lc_world::form::Primitive,
-) -> Result<Edit, Refused> {
-    let (index, piece) = original(sdf, parent).ok_or(Refused::NoSuchPart(parent))?;
-    let (origin, direction) = lens.ray(at);
-    let point = hit_one(sdf, index, origin, direction, 10.0 * lens.extent.size_m()).unwrap_or(piece.pose.position + DVec3::X);
-    let anchor = snap::anchor(piece.pose.to_local(point), false);
-    draft.add(parent, kind, primitive, anchor, &Balance::DEFAULT)
 }
 
 /// A drag on a knob, as edits. Each frame the pointer moves sends one measured from the press,
@@ -403,11 +348,13 @@ pub fn drag_knobs(
     window: Single<&Window, With<PrimaryWindow>>,
     shown: Res<Shown>,
     surface: Res<FormSurface>,
+    carried: Res<crate::form_carry::Carried>,
     mut held: Local<Option<(Held, Option<Edit>, Vec2)>>,
     mut out: MessageWriter<Requested>,
 ) {
     let cursor = window.cursor_position();
-    let (Some(lens), Some(sdf)) = (lens(&ui, &shown, &surface), shown.sdf()) else {
+    // A press while carrying a part puts the part down, whatever it lands on.
+    let (Some(lens), Some(sdf), false) = (lens(&ui, &shown, &surface), shown.sdf(), carried.is_carrying()) else {
         *held = None;
         return;
     };
@@ -430,7 +377,7 @@ pub fn drag_knobs(
     }
     let Some(at) = cursor.filter(|at| at != seen) else { return };
     *seen = at;
-    match grip.edit(at, fine(&keys), sdf, &lens, &Balance::DEFAULT) {
+    match grip.edit(at, Modifiers::of(&keys), &Balance::DEFAULT) {
         Ok(edit) if last.as_ref() != Some(&edit) => {
             *last = Some(edit.clone());
             out.write(Requested(Action::EditForm(Ok(edit))));
@@ -445,9 +392,10 @@ pub fn delete_key(
     keys: Res<ButtonInput<KeyCode>>,
     typing: em_ui::Typing,
     egui: Res<EguiWantsInput>,
+    carried: Res<crate::form_carry::Carried>,
     mut out: MessageWriter<Requested>,
 ) {
-    if typing.active() || egui.wants_any_keyboard_input() || !keys.any_just_pressed([KeyCode::Delete, KeyCode::Backspace]) {
+    if typing.active() || carried.is_carrying() || egui.wants_any_keyboard_input() || !keys.any_just_pressed([KeyCode::Delete, KeyCode::Backspace]) {
         return;
     }
     if let (Some(id), Some(draft)) = (ui.form.selected, ui.form.draft.as_ref()) {
@@ -600,7 +548,9 @@ fn put_away(mut commands: Commands, layers: Query<Entity, With<Layer>>) {
 
 #[cfg(test)]
 mod tests {
-    use lc_world::form::{Form, Kind};
+    use lc_world::form::Form;
+
+    use crate::draft::Draft;
 
     use super::*;
 
@@ -649,14 +599,30 @@ mod tests {
         let part = *draft.part(PartId(3)).unwrap();
         let held = Held::new(Grip::Size, part, &sdf, &lens, Vec2::ZERO).unwrap();
         let out = (held.knob - held.center).normalize() * 40.0;
-        let edit = held.edit(held.from + out, false, &sdf, &lens, &B).unwrap();
+        let edit = held.edit(held.from + out, Modifiers::default(), &B).unwrap();
         assert_eq!(edit.before, vec![part]);
         let grown = edit.after[0].volume_m3;
         assert!(grown > part.volume_m3);
         assert!((snap::volume(grown, B.min_part_m3, false) - grown).abs() < 1e-6 * grown, "{grown} is on the ladder");
-        let shrunk = held.edit(held.from - out, false, &sdf, &lens, &B).unwrap().after[0].volume_m3;
+        let shrunk = held.edit(held.from - out, Modifiers::default(), &B).unwrap().after[0].volume_m3;
         assert!(shrunk < part.volume_m3);
         assert!(!edit.settled, "a drag is settled on release");
+    }
+
+    /// An axis knob grows that dimension and the volume with it; with Shift the volume is kept
+    /// and the other dimensions give way.
+    #[test]
+    fn an_axis_knob_grows_the_part_unless_the_volume_is_held() {
+        let (draft, sdf, lens) = scene();
+        let part = *draft.part(PartId(3)).unwrap();
+        let held = Held::new(Grip::Axis(0), part, &sdf, &lens, Vec2::ZERO).unwrap();
+        let at = held.from + held.axes[0] * 100.0;
+        let free = held.edit(at, Modifiers::default(), &B).unwrap().after[0];
+        assert!(free.volume_m3 > part.volume_m3 * 1.2, "{} to {}", part.volume_m3, free.volume_m3);
+        let kept = held.edit(at, Modifiers { keep_volume: true, ..Modifiers::default() }, &B).unwrap().after[0];
+        assert_eq!(kept.volume_m3, part.volume_m3);
+        assert_eq!(kept.primitive, free.primitive, "the same stretch either way");
+        assert_ne!(kept.primitive, part.primitive);
     }
 
     #[test]
@@ -666,24 +632,11 @@ mod tests {
         let held = Held::new(Grip::Twist, part, &sdf, &lens, Vec2::ZERO).unwrap();
         let from = held.center + Vec2::new(100.0, 0.0);
         let held = Held { from, ..held };
-        let quarter = held.edit(held.center + Vec2::new(0.0, 100.0), false, &sdf, &lens, &B).unwrap();
+        let quarter = held.edit(held.center + Vec2::new(0.0, 100.0), Modifiers::default(), &B).unwrap();
         let twist = quarter.after[0].placement.unwrap().twist;
         assert!((twist.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{twist}");
         let step = snap::SNAPS.coarse.angle_rad;
         assert!((twist / step - (twist / step).round()).abs() < 1e-9);
-    }
-
-    /// The move knob follows the pointer over the parent: dragged onto its top, the anchor goes up.
-    #[test]
-    fn the_move_knob_slides_the_anchor_to_where_the_pointer_meets_the_parent() {
-        let (draft, sdf, lens) = scene();
-        let part = *draft.part(PartId(5)).unwrap();
-        let held = Held::new(Grip::Move, part, &sdf, &lens, Vec2::ZERO).unwrap();
-        let top = lens.project(DVec3::new(0.0, 0.0, 60.0)).unwrap().0;
-        let edit = held.edit(top, false, &sdf, &lens, &B).unwrap();
-        let Mount::Attached { anchor, .. } = edit.after[0].placement.unwrap().mount else { panic!() };
-        assert!(anchor.z > 0.0 && anchor.x.abs() <= 1.0, "{anchor}");
-        assert_eq!(anchor, snap::anchor(anchor, false), "on an axis or a diagonal");
     }
 
     #[test]
@@ -691,24 +644,12 @@ mod tests {
         let (draft, sdf, lens) = scene();
         let part = *draft.part(PartId(2)).unwrap();
         let held = Held::new(Grip::Standoff, part, &sdf, &lens, Vec2::ZERO).unwrap();
-        let edit = held.edit(held.from + held.axes[0] * 200.0, false, &sdf, &lens, &B).unwrap();
+        let edit = held.edit(held.from + held.axes[0] * 200.0, Modifiers::default(), &B).unwrap();
         let Mount::Attached { standoff, .. } = edit.after[0].placement.unwrap().mount else { panic!() };
         assert!(standoff > -0.2 && (standoff * 10.0 - (standoff * 10.0).round()).abs() < 1e-9, "{standoff}");
         let storage = *draft.part(PartId(1)).unwrap();
         let grips: Vec<Grip> = anchors(&storage, original(&sdf, PartId(1)).unwrap().1).into_iter().map(|(g, _)| g).collect();
-        assert!(!grips.contains(&Grip::Standoff) && !grips.contains(&Grip::Move));
+        assert!(!grips.contains(&Grip::Standoff));
         assert!(anchors(draft.part(PartId(0)).unwrap(), original(&sdf, PartId(0)).unwrap().1).is_empty(), "the Mind has none");
-    }
-
-    #[test]
-    fn an_added_part_hangs_where_the_pointer_met_its_parent() {
-        let (draft, sdf, lens) = scene();
-        // On the storage's top, under the deck, which the add looks through to its parent.
-        let top = lens.project(DVec3::new(0.0, 0.0, 33.0)).unwrap().0;
-        let edit = add_at(&draft, &sdf, &lens, top, PartId(1), Kind::Bay, crate::draft::PRIMITIVES[3]).unwrap();
-        let placement = edit.after[0].placement.unwrap();
-        assert_eq!(placement.parent, PartId(1));
-        let Mount::Attached { anchor, .. } = placement.mount else { panic!() };
-        assert_eq!(anchor, DVec3::Z);
     }
 }

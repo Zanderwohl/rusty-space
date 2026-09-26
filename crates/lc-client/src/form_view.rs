@@ -93,8 +93,8 @@ pub struct FormView {
     pub draft: Option<crate::draft::Draft>,
     /// The part the handles and the fields are on.
     pub selected: Option<lc_world::form::PartId>,
-    /// What a press on a part adds there instead of selecting it.
-    pub adding: Option<(lc_world::form::Kind, lc_world::form::Primitive)>,
+    /// Which of [`crate::draft::PRIMITIVES`] a part taken from the list is made as.
+    pub new_shape: usize,
 }
 
 /// The editor's camera: an orbit about a focus on the ship's nose axis.
@@ -730,6 +730,7 @@ pub fn read_drag(
     window: Single<&Window, With<PrimaryWindow>>,
     shown: Res<Shown>,
     surface: Res<FormSurface>,
+    carried: Res<crate::form_carry::Carried>,
     mut last: Local<Option<Vec2>>,
     mut out: MessageWriter<Requested>,
 ) {
@@ -748,7 +749,8 @@ pub fn read_drag(
         // nothing.
         let lens = crate::form_handles::Lens { orbit: ui.form.orbit.held_to(extent), extent: *extent, rect };
         *last = cursor
-            .filter(|at| pointer_free(&egui, &controls) && inside(rect, hole, *at))
+            // A press while carrying a part puts it down, and slides nothing.
+            .filter(|at| pointer_free(&egui, &controls) && inside(rect, hole, *at) && !carried.is_carrying())
             .filter(|at| {
                 let on_part = crate::form_handles::pick_part(sdf, &lens, *at).is_some();
                 drag_of(MouseButton::Left, on_part) == Some(FormDrag::Slide)

@@ -42,8 +42,8 @@ pub enum Action {
     StartDraft(lc_world::form::Form),
     /// Which part of the draft the handles and the fields are on.
     SelectPart(Option<lc_world::form::PartId>),
-    /// What a press on a part adds there, or `None` for a press to select again.
-    ArmAdd(Option<(lc_world::form::Kind, lc_world::form::Primitive)>),
+    /// Which of [`crate::draft::PRIMITIVES`] a new part is made as.
+    SetNewShape(usize),
     /// An edit to the draft as its handle or field built it, before and after, or why it could
     /// not be built. See [`crate::draft`].
     EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
@@ -481,7 +481,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
     }
     Action::SelectPart(part) => ui.form.selected = part,
-    Action::ArmAdd(adding) => ui.form.adding = adding,
+    Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
     Action::EditForm(edit) => edit_form(ui, edit, &mut effects),
     Action::TurnMap { azimuth, elevation } => ui.map.orbit.turn(azimuth, elevation),
     Action::ZoomMap { notches, anchor_ly } => match anchor_ly {
@@ -785,9 +785,8 @@ fn edit_form(ui: &mut UiState, edit: Result<crate::draft::Edit, crate::draft::Re
     };
     match applied {
         Ok(edit) => {
-            if edit.what == crate::draft::What::Add {
+            if edit.what == crate::draft::What::Add && edit.settled {
                 ui.form.selected = Some(edit.part);
-                ui.form.adding = None;
             }
             if let Some(draft) = &ui.form.draft
                 && ui.form.selected.is_some_and(|id| draft.part(id).is_none())

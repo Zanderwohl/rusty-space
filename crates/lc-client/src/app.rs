@@ -188,11 +188,14 @@ impl Plugin for ClientPlugin {
                         (grab_cursor, look_around, crate::input::read_wheel).chain().run_if(steering),
                         (
                             crate::form_view::press,
-                            crate::form_panel::press,
-                            // Before the slide, which a press on a knob or a part is not.
+                            // Before the slide and the carry, which a press on a knob is neither.
                             crate::form_handles::drag_knobs,
-                            crate::form_handles::press_parts,
+                            // Before the carry, which a press that puts a part down ends.
                             crate::form_view::read_drag,
+                            crate::form_carry::carry,
+                            // After the carry, so the press that takes a part from the list
+                            // does not also drop it there.
+                            crate::form_panel::press,
                             crate::form_view::read_slide_keys,
                             crate::form_handles::delete_key,
                         )

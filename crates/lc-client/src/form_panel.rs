@@ -32,18 +32,18 @@ pub enum Tap {
     SparMode(SparMode),
     Mirror(bool),
     Delete,
-    /// Arm the add, or disarm it.
-    Add,
-    NextAddKind,
-    NextAddPrimitive,
+    /// A new part of this kind onto the pointer.
+    Take(Kind),
+    /// The next shape new parts are made in.
+    NextShape,
     Reset,
 }
 
-/// The action `tap` asks for, given the draft and what is selected and armed.
-pub fn action_of(tap: Tap, draft: &Draft, selected: Option<PartId>, adding: Option<(Kind, lc_world::form::Primitive)>) -> Option<Action> {
+/// The action `tap` asks for, given the draft, what is selected and which shape new parts take.
+/// A [`Tap::Take`] is no action: it puts a part on the pointer.
+pub fn action_of(tap: Tap, draft: &Draft, selected: Option<PartId>, new_shape: usize) -> Option<Action> {
     let part = selected.and_then(|id| draft.part(id));
     let b = Balance::DEFAULT;
-    let armed = adding.unwrap_or((draft::KINDS[0], draft::PRIMITIVES[0]));
     Some(match tap {
         Tap::Select(id) => Action::SelectPart((selected != Some(id)).then_some(id)),
         Tap::NextKind => Action::EditForm(draft.set_kind(part?.id, draft::next_kind(part?.kind))),
@@ -52,9 +52,8 @@ pub fn action_of(tap: Tap, draft: &Draft, selected: Option<PartId>, adding: Opti
         Tap::SparMode(mode) => Action::EditForm(draft.spar_mode(part?.id, mode)),
         Tap::Mirror(on) => Action::EditForm(draft.mirror(part?.id, on)),
         Tap::Delete => Action::EditForm(draft.remove(part?.id, &b)),
-        Tap::Add => Action::ArmAdd(adding.is_none().then_some(armed)),
-        Tap::NextAddKind => Action::ArmAdd(Some((draft::next_kind(armed.0), armed.1))),
-        Tap::NextAddPrimitive => Action::ArmAdd(Some((armed.0, draft::next_primitive(&armed.1)))),
+        Tap::Take(_) => return None,
+        Tap::NextShape => Action::SetNewShape(new_shape + 1),
         Tap::Reset => Action::EditForm(Ok(draft.reset())),
     })
 }
@@ -107,6 +106,7 @@ fn lay_out(
     mut commands: Commands,
     ui: Res<Ui>,
     shown: Res<crate::form_view::Shown>,
+    carried: Res<crate::form_carry::Carried>,
     foot: Res<crate::panels::HudFoot>,
     assets: Res<AssetServer>,
     mut trees: Query<(Entity, &Built, &mut Node), (With<TreePanel>, Without<FieldsPanel>)>,
@@ -118,12 +118,12 @@ fn lay_out(
 
     let tree_key = draft.map(|d| {
         let mut key: Vec<String> = tree_lines(d, shown.marks()).into_iter().map(|(depth, id, what)| format!("{depth}{id}{what}")).collect();
-        key.push(format!("{:?} {:?}", ui.form.selected, ui.form.adding));
+        key.push(format!("{:?} {} {}", ui.form.selected, ui.form.new_shape, carried.is_carrying()));
         key
     });
     rebuild(&mut commands, trees.iter_mut(), tree_key, top, |commands, key| {
         let draft = draft.expect("keyed on the draft");
-        build_tree(commands, draft, shown.marks(), ui.form.selected, ui.form.adding, key, top, font());
+        build_tree(commands, draft, shown.marks(), ui.form.selected, ui.form.new_shape, carried.is_carrying(), key, top, font());
     });
 
     let fields_key = draft.map(|d| {
@@ -167,7 +167,8 @@ fn build_tree(
     draft: &Draft,
     marks: &std::collections::BTreeMap<PartId, Mark>,
     selected: Option<PartId>,
-    adding: Option<(Kind, lc_world::form::Primitive)>,
+    new_shape: usize,
+    carrying: bool,
     built: Built,
     top: f32,
     font: Handle<Font>,
@@ -186,15 +187,23 @@ fn build_tree(
             ui.insert(row, BorderColor::all(mark.color()));
         }
     }
-    let (kind, primitive) = adding.unwrap_or((draft::KINDS[0], draft::PRIMITIVES[0]));
-    ui.inline(panel, "ADD", 15.0, em_ui::vfd::TEXT);
-    let row = ui.row(panel);
-    ui.small_button(row, draft::kind_name(kind), Tap::NextAddKind);
-    ui.small_button(row, draft::primitive_name(&primitive), Tap::NextAddPrimitive);
-    let arm = if adding.is_some() { "click a part" } else { "add" };
-    ui.chosen_button(row, arm, adding.is_some(), Tap::Add);
     let row = ui.row(panel);
     ui.small_button(row, "reset to the ship", Tap::Reset);
+
+    // The list new parts come from, and where a carried part is dropped to delete it.
+    let list = ui.strip(root);
+    ui.insert(list, (Node { align_items: AlignItems::Stretch, margin: UiRect::top(Val::Px(6.0)), ..panel_node() }, Interaction::None, crate::form_carry::DropZone));
+    match carrying {
+        true => ui.inline(list, "DROP HERE TO DELETE", 15.0, crate::draft::Mark::Dismantle.color()),
+        false => ui.inline(list, "ADD A PART", 15.0, em_ui::vfd::TEXT),
+    };
+    let shape = draft::PRIMITIVES[new_shape % draft::PRIMITIVES.len()];
+    let row = ui.row(list);
+    ui.inline(row, "shape", 13.0, em_ui::vfd::TEXT_DIM);
+    ui.small_button(row, draft::primitive_name(&shape), Tap::NextShape);
+    for kind in draft::KINDS {
+        ui.tree_row(list, 0, draft::kind_name(kind), false, Tap::Take(kind));
+    }
 }
 
 fn build_fields(commands: &mut Commands, draft: &Draft, selected: Option<PartId>, built: Built, top: f32, font: Handle<Font>) {
@@ -272,6 +281,7 @@ fn show_numbers(
 /// Panel buttons and committed fields, as actions.
 pub fn press(
     ui: Res<Ui>,
+    mut carried: ResMut<crate::form_carry::Carried>,
     taps: Query<(&Interaction, &Tap), Changed<Interaction>>,
     fields: Query<&FieldOf>,
     mut committed: MessageReader<Committed>,
@@ -279,9 +289,14 @@ pub fn press(
 ) {
     let Some(draft) = ui.form.draft.as_ref() else { return };
     for (interaction, tap) in &taps {
-        if *interaction == Interaction::Pressed
-            && let Some(action) = action_of(*tap, draft, ui.form.selected, ui.form.adding)
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if let Tap::Take(kind) = *tap
+            && let Some(carry) = crate::form_carry::Carry::new_part(draft, kind, draft::PRIMITIVES[ui.form.new_shape % draft::PRIMITIVES.len()], &Balance::DEFAULT)
         {
+            carried.take(carry);
+        } else if let Some(action) = action_of(*tap, draft, ui.form.selected, ui.form.new_shape) {
             out.write(Requested(action));
         }
     }
@@ -307,19 +322,16 @@ mod tests {
     #[test]
     fn a_tap_on_the_selected_row_lets_it_go() {
         let d = Draft::new(Form::starting());
-        assert_eq!(action_of(Tap::Select(PartId(2)), &d, None, None), Some(Action::SelectPart(Some(PartId(2)))));
-        assert_eq!(action_of(Tap::Select(PartId(2)), &d, Some(PartId(2)), None), Some(Action::SelectPart(None)));
+        assert_eq!(action_of(Tap::Select(PartId(2)), &d, None, 0), Some(Action::SelectPart(Some(PartId(2)))));
+        assert_eq!(action_of(Tap::Select(PartId(2)), &d, Some(PartId(2)), 0), Some(Action::SelectPart(None)));
     }
 
     #[test]
-    fn a_part_button_needs_a_part_and_the_add_cycles_what_it_adds() {
+    fn a_part_button_needs_a_part_and_the_shape_button_cycles() {
         let d = Draft::new(Form::starting());
-        assert_eq!(action_of(Tap::Delete, &d, None, None), None);
-        let Some(Action::ArmAdd(Some((kind, _)))) = action_of(Tap::Add, &d, None, None) else { panic!() };
-        assert_eq!(kind, draft::KINDS[0]);
-        assert_eq!(action_of(Tap::Add, &d, None, Some((kind, draft::PRIMITIVES[0]))), Some(Action::ArmAdd(None)));
-        let Some(Action::ArmAdd(Some((next, _)))) = action_of(Tap::NextAddKind, &d, None, None) else { panic!() };
-        assert_eq!(next, draft::KINDS[1]);
+        assert_eq!(action_of(Tap::Delete, &d, None, 0), None);
+        assert_eq!(action_of(Tap::NextShape, &d, None, 5), Some(Action::SetNewShape(6)));
+        assert_eq!(action_of(Tap::Take(Kind::Bay), &d, None, 0), None, "it goes on the pointer, not into an action");
     }
 
     #[test]
