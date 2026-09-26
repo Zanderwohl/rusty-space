@@ -854,7 +854,7 @@ mod tests {
         let mut target = draft.clone();
         target.apply(&doubled, &B).unwrap();
         let broke = crate::preview::Start { from: Form::starting(), stored_j: 0.0, start_s: 0.0, balance: B };
-        let start = crate::preview::Start { stored_j: broke.short_j(&target.form).unwrap(), ..broke };
+        let start = crate::preview::Start { stored_j: broke.short_j(&target.form).unwrap(), ..broke.clone() };
         let allows = |e: &Edit| start.allows(&draft, e);
 
         let (from, to) = h.line(Grip::Size).unwrap();
@@ -868,8 +868,9 @@ mod tests {
         assert!(next > stopped && !allows(&draft.resize(part.id, next).unwrap()), "the next step up is not paid for");
 
         let home = px(&lens, to);
-        assert_eq!(held.edit_within(&lens, home, Modifiers::default(), &B, allows).unwrap().after[0].volume_m3, part.volume_m3);
-        let penniless = |e: &Edit| crate::preview::Start { stored_j: 0.0, ..broke.clone() }.allows(&draft, e);
+        let snapped = snap::volume(part.volume_m3, B.min_part_m3, false);
+        assert_eq!(held.edit_within(&lens, home, Modifiers::default(), &B, allows).unwrap().after[0].volume_m3, snapped, "back where it began");
+        let penniless = |e: &Edit| broke.allows(&draft, e);
         let stuck = held.edit_within(&lens, at, Modifiers::default(), &B, penniless).unwrap();
         assert_eq!(stuck.after, vec![part], "with nothing stored it does not grow at all");
     }

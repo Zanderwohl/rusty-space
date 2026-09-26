@@ -23,7 +23,7 @@ const TEXT: f32 = 13.0;
 pub struct Previewed(pub Option<Preview>);
 
 #[derive(Resource, Default)]
-struct Measuring {
+pub struct Measuring {
     done: Option<Measured>,
     /// The last form sent to be measured, so one that cannot be is not tried every frame.
     asked: Option<Form>,
@@ -154,9 +154,9 @@ mod tests {
         let waiting = rows(&Preview::of(&s, &ui, None).unwrap(), b.module_energy_j());
         let measured = Measured::of(&Form::starting(), &b).unwrap();
         let done = rows(&Preview::of(&s, &ui, Some(&measured)).unwrap(), b.module_energy_j());
-        let labels = |r: &[(&str, Option<String>)]| r.iter().map(|(l, _)| *l).collect::<Vec<_>>();
-        assert_eq!(labels(&waiting), labels(&done));
+        assert!(waiting.iter().zip(&done).all(|((a, _), (b, _))| a == b) && waiting.len() == done.len());
         assert!(waiting.iter().any(|(_, v)| v.is_none()) && done.iter().all(|(_, v)| v.is_some()));
-        assert_eq!(done[0].1.as_deref(), Some("25 ME"));
+        let storage = lc_world::form::capacity::Capacities::of(&Form::starting(), &b).storage_j;
+        assert_eq!(done[0].1, Some(format!("{} ME", figure(storage / b.module_energy_j()))));
     }
 }

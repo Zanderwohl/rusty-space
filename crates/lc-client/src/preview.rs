@@ -306,7 +306,10 @@ mod tests {
         let now = s.coordinate_time_s();
         let full = s.ship.fitting().unwrap().capacity_j_at(now);
         s.ship.drain(full, now);
-        let preview = Preview::of(&s, &with(rebuilt()), None).unwrap();
+        let mut d = Draft::new(Form::starting());
+        let engine = *d.part(part(&d.form, Kind::Engine)).unwrap();
+        d.apply(&d.resize(engine.id, 2.0 * engine.volume_m3).unwrap(), &B).unwrap();
+        let preview = Preview::of(&s, &with(d), None).unwrap();
         let Err(Refusal::Energy { short_j }) = preview.budget else { panic!("{:?}", preview.budget) };
         assert!(short_j > 0.0);
         assert!(preview.heat.is_none() && preview.duration_s.is_none());
