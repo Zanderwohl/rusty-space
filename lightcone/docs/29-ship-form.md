@@ -795,8 +795,8 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments |
-| `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form |
+| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the round it was part of |
+| `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form and the round in force as its light left |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |
 | `lc-client` | `form_view.rs`, `form_panel.rs`, `snap.rs`, `form_history.rs`, `presets_panel.rs` | `ui.rs` gains the view mode. The refit window becomes the ledger |

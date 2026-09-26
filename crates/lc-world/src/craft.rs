@@ -20,8 +20,7 @@ use crate::fitting::Fitting;
 use crate::instrument::Instrument;
 use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
 use crate::navigation::Waypoint;
-use crate::refit::rounds::Round;
-use crate::seen::{History, Seen, running};
+use crate::seen::{History, Refitting, Seen, running};
 use crate::solar;
 use crate::system::LocalSystem;
 
@@ -465,12 +464,13 @@ impl Craft {
         let since = fitting.since_s();
         if self.seen.is_empty() {
             let running = running(fitting);
-            let from = Arc::new(running.as_ref().map_or_else(|| fitting.form().clone(), |(round, _)| round.from.clone()));
+            let round = fitting.refit().map(|plan| plan.round());
+            let from = Arc::new(round.map_or_else(|| fitting.form().clone(), |round| round.from.clone()));
             let steps = fitting.steps_ending(f64::NEG_INFINITY, since);
             let length_m = self.length_m;
-            self.seen.push(Seen { from_s: f64::NEG_INFINITY, form: from.clone(), length_m, round: None });
-            if let Some((round, _)) = &running {
-                self.seen.push(Seen { from_s: round.start_s, form: from, length_m, round: Some(round.clone()) });
+            self.seen.push(Seen { from_s: f64::NEG_INFINITY, form: from.clone(), length_m, refit: None });
+            if let (Some(round), Some((refit, _))) = (round, &running) {
+                self.seen.push(Seen { from_s: round.start_s, form: from, length_m, refit: Some(refit.clone()) });
             }
             self.note_steps(steps, length_m, running);
         }
@@ -508,20 +508,25 @@ impl Craft {
     /// The last of `steps` is the form the settlement measured; those before it were never
     /// measured, so they keep the length the craft had. `running` is the round they belong to and
     /// when it ends, and the step ending with it leaves no round running.
-    fn note_steps(&mut self, steps: Vec<(f64, crate::form::Form)>, was_m: f64, running: Option<(Arc<Round>, f64)>) {
+    fn note_steps(&mut self, steps: Vec<(f64, crate::form::Form)>, was_m: f64, running: Option<(Refitting, f64)>) {
         let last = steps.len().saturating_sub(1);
         for (i, (at_s, form)) in steps.into_iter().enumerate() {
             let length_m = if i == last { self.length_m } else { was_m };
-            let round = running.as_ref().filter(|(_, end_s)| at_s < *end_s).map(|(round, _)| round.clone());
-            self.seen.push(Seen { from_s: at_s, form: Arc::new(form), length_m, round });
+            let refit = running.as_ref().filter(|(_, end_s)| at_s < *end_s).map(|(refit, _)| refit.clone());
+            self.seen.push(Seen { from_s: at_s, form: Arc::new(form), length_m, refit });
         }
     }
 
     /// After anything that may have changed the form at `at_s` other than a step ending.
     fn note_form(&mut self, at_s: f64) {
         let Some(fitting) = &self.fitting else { return };
-        let round = running(fitting).map(|(round, _)| round);
-        self.seen.push(Seen { from_s: at_s, form: Arc::new(fitting.form().clone()), length_m: self.length_m, round });
+        let refit = running(fitting).map(|(refit, _)| refit);
+        self.note(at_s, refit);
+    }
+
+    fn note(&mut self, at_s: f64, refit: Option<Refitting>) {
+        let Some(fitting) = &self.fitting else { return };
+        self.seen.push(Seen { from_s: at_s, form: Arc::new(fitting.form().clone()), length_m: self.length_m, refit });
     }
 
     /// How far it is from its system's primary at `t`, meters. `None` between systems.
@@ -687,11 +692,17 @@ impl Craft {
     /// Stop a refit where it is, reversing the step in progress.
     pub fn cancel_refit(&mut self, now_s: f64) {
         self.settle(now_s);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.cancel_refit(now_s);
-        }
+        let Some(fitting) = &mut self.fitting else { return };
+        let plan = fitting.refit().cloned();
+        fitting.cancel_refit(now_s);
+        // Put back rather than finished when the cancel left the form the step stood on.
+        let refit = plan.map(|plan| Refitting::Canceled {
+            reverses: *fitting.form() == plan.at(now_s).form,
+            plan: Arc::new(plan),
+            at_s: now_s,
+        });
         self.sync_length();
-        self.note_form(now_s);
+        self.note(now_s, refit);
     }
 
     /// Cut to a straight line from a point, at a velocity. What a burn does.

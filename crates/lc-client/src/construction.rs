@@ -13,9 +13,10 @@
 //! On the hull meshes (`crate::refit_hull`) each point reads its own bands, through [`Sweep`].
 //!
 //! `--demo refit` is a client fixture beside `--form`, not a `Scenario`: it needs only the
-//! player's own ship. In the game a [`Refit`] follows the round the shard states, the player's in
-//! `Fitted` and another craft's in its `Presence`, through [`follow`]: a round that stops being
-//! stated before it is done was canceled, and is drawn by [`Frame::canceled`] from there.
+//! player's own ship. In the game a [`Refit`] follows the player's round from `Fitted` through
+//! [`follow`]: a round that stops being stated before it is done was canceled, and is drawn by
+//! [`Frame::canceled`] from there. Another craft states only the step its light shows, and is
+//! drawn from that alone by [`sighted`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -27,6 +28,7 @@ use lc_world::form::place::{Pose, Side};
 use lc_world::form::sdf::Piece;
 use lc_world::form::{Form, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 use lc_world::refit::rounds::{Change, Phase, Plan, Round};
+use lc_world::seen::Underway;
 
 /// Of a step, how long each point spends in each phase. The truss's is how far the sweep's front
 /// leads the plating.
@@ -257,10 +259,19 @@ impl Frame {
             },
             min_part_m3: balance.min_part_m3,
         };
-        let Some((step, fraction)) = current else {
+        let under = current.map(|(i, fraction)| {
+            let s = plan.steps()[i];
+            Underway { step: i, part: s.part, change: s.change, after: s.after, fraction, duration_s: s.duration_s, reversing: false }
+        });
+        Frame::stepped(&stand, before, finished, under)
+    }
+
+    /// `before` with `under` partway, placed by `stand`.
+    fn stepped(stand: &Stand, before: &Form, finished: usize, under: Option<Underway>) -> Frame {
+        let Some(s) = under else {
             return Frame { pieces: stand.place(before), standing: before.clone(), finished, working: None };
         };
-        let s = &plan.steps()[step];
+        let (step, fraction) = (s.step, s.fraction);
         let after = applied(before, s.part, s.after);
         let placed_before = stand.place(before);
         let placed_after = stand.place(&after);
@@ -340,10 +351,7 @@ impl Frame {
 /// The step a cancel at `at_s` is running backward at `now_s`, and how far through it is. `None`
 /// once it is back, and at once when the cancel finished the step rather than undoing it.
 fn backward(plan: &Plan, at_s: f64, left: &Form, now_s: f64) -> Option<(usize, f64)> {
-    let progress = plan.at(at_s);
-    let (i, fraction) = progress.current.filter(|_| *left == progress.form)?;
-    let back = fraction - (now_s - at_s).max(0.0) / plan.steps()[i].duration_s;
-    (back > 0.0).then_some((i, back))
+    lc_world::seen::reversal(plan, at_s, *left == plan.at(at_s).form, now_s)
 }
 
 /// Places a form partway through a round, standing in any parent it lacks.
@@ -617,21 +625,39 @@ impl Refit {
 
 /// Take one statement of a round into `building`: `running` is the round stated, if any, `left`
 /// the form stated with it, and `stated_s` when. A new recipe starts a new [`Refit`]; a round no
-/// longer stated before it is done was canceled then. Stating the same thing twice changes
-/// nothing, and whether anything changed is returned.
+/// longer stated before it is done was canceled then, unless it left the target, which is a round
+/// finished at once. Stating the same thing twice changes nothing, and whether anything changed
+/// is returned.
+///
+/// A round replaced at once by some other form is drawn as a cancel too: `left` is not where the
+/// step stood, so nothing runs backward and the drawing settles on `left` at once.
 pub fn follow(building: &mut Option<Refit>, running: Option<&Plan>, left: &Form, stated_s: f64, balance: &Balance) -> bool {
     match (running, building.as_mut()) {
-        (Some(plan), Some(b)) if b.canceled.is_none() && b.plan.round() == plan.round() => false,
+        (Some(plan), Some(b)) if b.canceled.is_none() && b.plan.round() == plan.round() && b.balance == *balance => false,
         (Some(plan), _) => {
             *building = Some(Refit { plan: plan.clone(), balance: *balance, clock: Clock::Coordinate, canceled: None });
             true
         }
         (None, Some(b)) if b.canceled.is_none() && !b.plan.is_done(stated_s) => {
-            b.canceled = Some((stated_s, left.clone()));
+            if same_parts(left, b.plan.target()) {
+                *building = None;
+            } else {
+                b.canceled = Some((stated_s, left.clone()));
+            }
             true
         }
         (None, _) => false,
     }
+}
+
+/// A plan's target keeps the order it was drafted in, and a form the shard settles is in id order.
+fn same_parts(a: &Form, b: &Form) -> bool {
+    let sorted = |f: &Form| {
+        let mut parts = f.parts.clone();
+        parts.sort_by_key(|p| p.id);
+        parts
+    };
+    a.parts.len() == b.parts.len() && sorted(a) == sorted(b)
 }
 
 /// Follow the player's round from `Fitted`, on the game's clock, and stand it down once it is
@@ -659,48 +685,33 @@ pub fn adopt_round(
     }
 }
 
-/// Other craft's rounds, each followed from its `Presence` and drawn as its light left it.
-#[derive(Resource, Default)]
-pub struct Sighted(std::collections::HashMap<lc_proto::ShipId, Watched>);
-
-#[derive(Default)]
-struct Watched {
-    stated: Option<lc_proto::Round>,
-    building: Option<Refit>,
-}
-
-impl Sighted {
-    /// Take this frame's contacts. A round is solved only when its recipe changes, and under
-    /// `balance`, the shard's: a client knows no other.
-    pub fn watch(&mut self, contacts: &[crate::uplink::Contact], balance: &Balance) {
-        self.0.retain(|id, _| contacts.iter().any(|c| c.ship_id == *id));
-        for contact in contacts {
-            let watched = self.0.entry(contact.ship_id).or_default();
-            if watched.stated == contact.refit {
-                continue;
-            }
-            watched.stated = contact.refit.clone();
-            let round = contact.refit.as_ref().map(Round::from);
-            let reused = watched.building.as_ref().filter(|b| Some(b.plan.round()) == round.as_ref()).map(|b| b.plan.clone());
-            let plan = reused.or_else(|| round.and_then(|r| r.solve(balance).ok()));
-            let left = Form::from(&contact.form);
-            follow(&mut watched.building, plan.as_ref(), &left, contact.emitted_s, balance);
-        }
+/// Another craft mid-step as its light left it: the step its `Presence` stated, reckoned forward to
+/// [`crate::uplink::Contact::emitted_s`] at the step's own pace, never to now. `None` with no step
+/// under way then. Only the one step is known, so a part hanging from one the round has not built
+/// yet is not drawn.
+pub fn sighted(contact: &crate::uplink::Contact, balance: &Balance) -> Option<Frame> {
+    let (stated_s, building) = contact.building.as_ref()?;
+    let mut under = Underway::from(building);
+    // A move inside a mirrored subtree takes no time, and stands where it was stated.
+    if under.duration_s > 0.0 {
+        let run_s = if under.reversing { stated_s - contact.emitted_s } else { contact.emitted_s - stated_s };
+        under.fraction += run_s / under.duration_s;
     }
-
-    /// `contact` mid-round as its light left it, at [`crate::uplink::Contact::emitted_s`] and never
-    /// at now. `None` when it is not refitting then.
-    pub fn frame(&self, contact: &crate::uplink::Contact) -> Option<Frame> {
-        let building = self.0.get(&contact.ship_id)?.building.as_ref()?;
-        (!building.is_over(contact.emitted_s)).then(|| building.frame(contact.emitted_s))
+    let before = Form::from(&contact.form);
+    let after = applied(&before, under.part, under.after);
+    let stand = Stand {
+        ends: match under.change.phase() {
+            Phase::Dismantle => [&before, &after],
+            _ => [&after, &before],
+        },
+        min_part_m3: balance.min_part_m3,
+    };
+    // Past the step's end the next statement is at most a tick away, and says what came next.
+    match under.fraction {
+        f if f <= 0.0 => None,
+        f if f >= 1.0 => Some(Frame::stepped(&stand, &after, under.step + 1, None)),
+        _ => Some(Frame::stepped(&stand, &before, under.step, Some(under))),
     }
-}
-
-/// Follow every contact's round. Nothing draws another craft's form until R10, so this is kept
-/// for it, and for R15 to draw.
-pub fn watch_contacts(uplink: Res<crate::uplink::Uplink>, mut sighted: ResMut<Sighted>) {
-    let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
-    sighted.watch(&uplink.contacts, &balance);
 }
 
 /// Stage `--demo refit` on the player's ship, with no server involved.
@@ -1000,7 +1011,8 @@ mod tests {
         assert!(refit.canceled.is_none() && refit.plan.round() == again.round());
     }
 
-    fn contact(round: Option<&Round>, form: &Form, emitted_s: f64) -> crate::uplink::Contact {
+    /// A presence stating `building` with light that left at `emitted_s`.
+    fn contact(building: Option<Underway>, form: &Form, emitted_s: f64) -> crate::uplink::Contact {
         let presence = lc_proto::Presence {
             ship_id: lc_proto::ShipId(9),
             name: "Vela".into(),
@@ -1012,37 +1024,56 @@ mod tests {
             emitted_t: (emitted_s * 1.0e6) as i64,
             arrive_t: (emitted_s * 1.0e6) as i64 + 3_600_000_000,
             form: form.into(),
-            refit: round.map(Into::into),
+            building: building.map(Into::into),
             glow: None,
             glare: None,
         };
         crate::uplink::Contact::seen(presence, None)
     }
 
-    /// Another craft is drawn as its light left it: mid-step for light that left mid-step,
-    /// whatever the time is here.
+    /// Step `i` of `plan`, `fraction` through.
+    fn underway(plan: &Plan, i: usize, fraction: f64, reversing: bool) -> Underway {
+        let s = plan.steps()[i];
+        Underway { step: i, part: s.part, change: s.change, after: s.after, fraction, duration_s: s.duration_s, reversing }
+    }
+
+    /// The same copies, the same sizes and places, to a part in a million: `emitted_t` is whole
+    /// microseconds.
+    fn assert_close(a: &[Piece], b: &[Piece], dt: f64) {
+        assert_eq!(a.len(), b.len(), "{dt} of a step on");
+        for (p, q) in a.iter().zip(b) {
+            let (vp, vq) = (p.shape.volume(), q.shape.volume());
+            assert!((p.part, p.side) == (q.part, q.side) && (vp - vq).abs() <= 1e-6 * vq, "{:?} at {dt}", p.part);
+            assert!(p.pose.position.distance(q.pose.position) < 1e-6, "{:?} at {dt}", p.part);
+        }
+    }
+
+    /// Another craft is drawn from the one step its light stated, as the round's own frame draws
+    /// it, and reckoned on at the step's pace to the light arriving now, never to now itself.
     #[test]
     fn another_craft_is_drawn_when_its_light_left() {
         let plan = plan();
         let i = plan.steps().iter().position(|s| s.change == Change::Grow).unwrap();
-        let emitted_s = midway(&plan, i);
-        let seen = contact(Some(plan.round()), &plan.at(emitted_s).form, emitted_s);
-        let mut sighted = Sighted::default();
-        sighted.watch(std::slice::from_ref(&seen), &B);
-        let frame = sighted.frame(&seen).expect("under way when its light left");
-        assert_eq!(frame, Frame::at(&plan, &B, seen.emitted_s));
-        let working = frame.working.expect("a step is under way");
-        assert!(working.step == i && (working.fraction - 0.5).abs() < 1e-6, "{} {}", working.step, working.fraction);
-
-        let later = contact(Some(plan.round()), &plan.at(emitted_s).form, start(&plan) + plan.duration_s() + 1.0);
-        sighted.watch(std::slice::from_ref(&later), &B);
-        assert_eq!(sighted.frame(&later), None, "its light left after the round was done");
-        sighted.watch(&[], &B);
-        assert_eq!(sighted.frame(&seen), None, "out of sight, forgotten");
+        let step = plan.steps()[i];
+        let stated_s = midway(&plan, i);
+        let mut seen = contact(Some(underway(&plan, i, 0.5, false)), &plan.at(stated_s).form, stated_s);
+        let (stated_s, _) = seen.building.clone().unwrap();
+        for dt in [0.0, 0.2, 0.45] {
+            seen.emitted_s = stated_s + dt * step.duration_s;
+            let frame = sighted(&seen, &B).expect("under way when its light left");
+            let own = Frame::at(&plan, &B, seen.emitted_s);
+            assert_close(&frame.pieces, &own.pieces, dt);
+            let (w, o) = (frame.working.unwrap(), own.working.unwrap());
+            assert!(w.step == o.step && (w.fraction - o.fraction).abs() < 1e-6, "{} {}", w.fraction, o.fraction);
+        }
+        seen.emitted_s = stated_s + 0.6 * step.duration_s;
+        let done = sighted(&seen, &B).expect("the step, finished");
+        assert_eq!((done.working, done.finished), (None, i + 1));
+        assert_close(&done.pieces, &Frame::at(&plan, &B, start(&plan) + step.ends_s()).pieces, 0.6);
+        assert_eq!(sighted(&contact(None, &plan.round().from, stated_s), &B), None, "nothing under way");
     }
 
-    /// Another craft's cancel is seen when a statement without the round arrives, and runs back
-    /// from there in its own light.
+    /// A step stated running back is drawn running back, and not at all once it is back.
     #[test]
     fn another_crafts_cancel_runs_backward_in_its_light() {
         let plan = plan();
@@ -1050,12 +1081,70 @@ mod tests {
         let step = plan.steps()[i];
         let at_s = midway(&plan, i);
         let left = plan.cancel(at_s, plan.at(at_s).stored_j).form;
-        let mut sighted = Sighted::default();
-        sighted.watch(&[contact(Some(plan.round()), &plan.at(at_s).form, at_s - 1.0)], &B);
-        sighted.watch(&[contact(None, &left, at_s)], &B);
-        let fraction = |dt: f64| sighted.frame(&contact(None, &left, at_s + dt * step.duration_s)).and_then(|f| f.working).map(|w| w.fraction);
+        let mut seen = contact(Some(underway(&plan, i, 0.5, true)), &left, at_s);
+        let (stated_s, _) = seen.building.clone().unwrap();
+        let mut fraction = |dt: f64| {
+            seen.emitted_s = stated_s + dt * step.duration_s;
+            sighted(&seen, &B).and_then(|f| f.working).map(|w| w.fraction)
+        };
         assert!((fraction(0.1).unwrap() - 0.4).abs() < 1e-9, "{:?}", fraction(0.1));
+        assert!(fraction(0.3).unwrap() < fraction(0.2).unwrap());
         assert_eq!(fraction(0.6), None, "back, and nothing left over");
+    }
+
+    /// Through the schedule: a round begun on the ship puts up a [`Refit`] on the game's clock, a
+    /// cancel is taken at the fitting's settlement, and the resource goes once the step is back.
+    #[test]
+    fn the_players_round_is_put_up_canceled_and_stood_down() {
+        use lc_world::sky::AuthoredStars;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::dev::DevEntry>()
+            .insert_resource(crate::app::Game(crate::session::Session::new(&AuthoredStars::sample(), 3)))
+            .add_systems(Update, adopt_round);
+        let t0 = 1.0e6;
+        let target = demo_round(&B, 1.0).target;
+        fn game(app: &mut App) -> &mut crate::session::Session {
+            &mut app.world_mut().resource_mut::<crate::app::Game>().into_inner().0
+        }
+        {
+            let session = game(&mut app);
+            session.set_coordinate_time_us((t0 * 1.0e6) as i64);
+            session.ship.fit(Some(lc_world::fitting::Fitting::full(Form::starting(), B, t0)));
+            session.ship.begin_refit(target, t0).expect("the demo's target plans");
+        }
+        app.update();
+        let refit = app.world().get_resource::<Refit>().expect("a round is drawn").clone();
+        assert_eq!((refit.clock, refit.canceled.is_none()), (Clock::Coordinate, true));
+
+        let i = refit.plan.steps().iter().position(|s| s.change == Change::Grow).unwrap();
+        let step = refit.plan.steps()[i];
+        let at_s = t0 + step.begins_s + 0.5 * step.duration_s;
+        let left = {
+            let session = game(&mut app);
+            session.set_coordinate_time_us((at_s * 1.0e6) as i64);
+            session.ship.cancel_refit(at_s);
+            session.ship.fitting().unwrap().form().clone()
+        };
+        app.update();
+        let canceled = app.world().get_resource::<Refit>().expect("the reversal is drawn").canceled.clone();
+        assert_eq!(canceled, Some((at_s, left)));
+
+        game(&mut app).set_coordinate_time_us(((at_s + 0.6 * step.duration_s) * 1.0e6) as i64);
+        app.update();
+        assert!(app.world().get_resource::<Refit>().is_none(), "run back, and stood down");
+    }
+
+    /// A round finished at once, leaving the target, is not drawn running backward.
+    #[test]
+    fn a_round_finished_at_once_is_not_a_cancel() {
+        let plan = plan();
+        let mut building = None;
+        follow(&mut building, Some(&plan), &plan.round().from, start(&plan), &B);
+        let mut target = plan.target().clone();
+        target.parts.reverse();
+        assert!(follow(&mut building, None, &target, midway(&plan, 0), &B));
+        assert!(building.is_none());
     }
 
     /// A part hanging from one not yet built still draws, from where the target will have it.

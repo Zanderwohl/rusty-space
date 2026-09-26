@@ -98,9 +98,10 @@ pub struct Contact {
     pub jet_power_w: f64,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
-    /// Its form and the round it was running, as the statement's light left it.
+    /// Its form and the refit step it had under way, as the statement's light left it, with when
+    /// that was, coordinate seconds.
     pub form: lc_proto::Form,
-    pub refit: Option<lc_proto::Round>,
+    pub building: Option<(f64, lc_proto::Building)>,
     reckoning: Reckoning,
     /// What the statement said the drive was doing, at the statement's own instant.
     stated_power_w: f64,
@@ -141,7 +142,7 @@ impl Contact {
             jet_power_w: presence.jet_power_w,
             emitted_s,
             form: presence.form,
-            refit: presence.refit,
+            building: presence.building.map(|b| (emitted_s, b)),
             reckoning: Reckoning::new(system, sighting),
             stated_power_w: presence.jet_power_w,
         }
@@ -1343,7 +1344,7 @@ mod tests {
             emitted_t: 500_000,
             arrive_t: 1_000_000,
             form: lc_proto::Form::default(),
-            refit: None,
+            building: None,
             glow: None,
             glare: None,
         };
@@ -1407,7 +1408,7 @@ mod tests {
                 emitted_t: (emitted_s * 1e6) as i64,
                 arrive_t: (emitted_s * 1e6) as i64,
                 form: lc_proto::Form::default(),
-                refit: None,
+                building: None,
                 glow: None,
                 glare: None,
             };
@@ -1775,7 +1776,7 @@ mod tests {
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),
-            refit: None,
+            building: None,
             glow: None,
             glare: None,
         };
@@ -1832,7 +1833,7 @@ mod tests {
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),
-            refit: None,
+            building: None,
             glow: None,
             glare: None,
         };

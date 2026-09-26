@@ -139,24 +139,26 @@ pub fn fit_fixture(dev: Res<crate::dev::DevEntry>, mut game: ResMut<crate::app::
 }
 
 /// Take the player's form from the server's last `Fitted` whenever it changes: at sign-in, and as
-/// each refit step finishes. Framed to hold both ends of a round under way, as `--demo refit` is.
-/// `--form` and `--demo refit` hold their own and are left alone.
+/// each refit step finishes. Framed to hold both ends of the round while it is drawn, a cancel's
+/// reversal included, as `--demo refit` is. `--form` and `--demo refit` hold their own and are
+/// left alone.
 pub fn adopt_fitted(
     uplink: Res<crate::uplink::Uplink>,
     dev: Res<crate::dev::DevEntry>,
+    refit: Option<Res<Refit>>,
     mut own: ResMut<OwnForm>,
-    mut adopted: Local<Option<(lc_proto::Form, Option<lc_proto::Round>)>>,
+    mut adopted: Local<Option<(lc_proto::Form, Option<f64>)>>,
 ) {
     let Some(hull) = uplink.hull.as_ref().filter(|_| dev.form.is_none() && dev.refit.is_none()) else { return };
-    let round = uplink.fitting.as_ref().and_then(|f| f.refit.clone());
-    if adopted.as_ref().is_some_and(|(form, was)| *form == hull.form && *was == round) {
+    let round = refit.as_deref().map(|r| r.plan.round());
+    let key = (hull.form.clone(), round.map(|r| r.start_s));
+    if adopted.as_ref() == Some(&key) {
         return;
     }
-    *adopted = Some((hull.form.clone(), round.clone()));
+    *adopted = Some(key);
     let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
     let form = Form::from(&hull.form);
-    let ends = round.map(|r| [Form::from(&r.from), Form::from(&r.target)]);
-    let forms: Vec<&Form> = std::iter::once(&form).chain(ends.iter().flatten()).collect();
+    let forms: Vec<&Form> = std::iter::once(&form).chain(round.into_iter().flat_map(|r| [&r.from, &r.target])).collect();
     match OwnForm::spanning(&forms, &balance) {
         Ok(formed) => *own = formed,
         // A form partway through a round may not place. The last one that did stays drawn.

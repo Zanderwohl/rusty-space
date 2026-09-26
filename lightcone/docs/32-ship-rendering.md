@@ -236,19 +236,25 @@ As built (`lc_client::construction`, R14): the game draws a round exactly as the
 `Refit` on the coordinate clock rather than a frozen or looping one. `follow` takes each statement of a
 round, which is a pure function of what was stated: a new recipe starts a `Refit`, the same one stated
 again changes nothing, and **a round that stops being stated before it is done was canceled** at the
-statement that dropped it, with the form that statement carried. The wire says nothing more about a
+statement that dropped it, with the form that statement carried, unless that form is the target:
+then the round was finished at once, and the drawing settles on it. A round replaced by some other
+form, as the console's refit at once does, is taken for a cancel and settles at once too, since the
+form it left is not where the step stood and nothing runs backward. The wire says nothing more about a
 cancel, and needs to say nothing more. From then the `Refit` draws `Frame::canceled`, and once
 `Refit::is_over` (the round done, or the reversal run back) it is stood down: the hull meshes go in the
 frame the placeholders come back, and nothing is left over.
 
 - **The player's round** is the plan the ledger reads, `Fitting::refit` from `Fitted`, so the picture
   and the ledger agree step for step. The cancel's moment is the fitting's settlement, which is exact.
-  The camera is framed on both ends of the round, as the demo's is.
+  The camera is framed on both ends of the round, as the demo's is, until the `Refit` is stood down,
+  so a reversal is not reframed under it.
 - **Another craft's round** comes in its `Presence`, released through the same gate as its form: a
   craft remembers the round in force with each form it has had, and a contact is given the one its
   light left with ([29-ship-form.md](29-ship-form.md#protocol-and-persistence)). It is drawn at
   `Contact::emitted_s`, never at now, so a distant ship is seen mid-build as it was. A cancel is dated by
-  the first statement without the round, which is within a tick of it. Nothing draws another craft's
+  the first statement without the round, which is within a tick of it. A round this client cannot
+  solve is not drawn and is not taken for a cancel, and it is solved again when the shard's balance
+  changes. Nothing draws another craft's
   form until R10, so `construction::Sighted` holds these frames for R10 and R15 to draw.
 - Drones are placed in the ship's frame directly rather than under the placeholders' root, which is
   gone while the hull meshes draw; under `--demo refit` since R8 they had not been drawn at all. Their
@@ -328,6 +334,7 @@ example and 150 km in the client, whose unit is an AU, and turned every mote int
 ![0.9: the mirrored pods being built](../images/drones-build.jpg)
 ![the starting form idle: a thin patrol and nothing else](../images/drones-idle.jpg)
 ![a GSV-sized form idle, its motes capped](../images/drones-gsv-idle.jpg)
+![`--demo refit` at 0.5 with its drones, which it had not drawn from R8 to R14](../images/refit-demo-drones.jpg)
 
 ## The field
 

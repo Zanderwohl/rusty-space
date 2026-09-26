@@ -514,9 +514,8 @@ pub struct Presence {
     /// then. Empty for a craft with no form, and for one whose form then is past what its
     /// authority remembers.
     pub form: Form,
-    /// The round it was running as its light left, so the build is drawn as it stood then. A
-    /// round that stops before it is done was canceled; see `lightcone/docs/29-ship-form.md`.
-    pub refit: Option<Round>,
+    /// The refit step it had under way as its light left, running back after a cancel.
+    pub building: Option<Building>,
     /// `None` until H7.
     pub glow: Option<Glow>,
     /// Only for an observer inside the craft's beam. `None` until E3.
@@ -968,7 +967,7 @@ mod knowing;
 mod radio;
 
 pub use field::{Apertures, Field, FieldMode, Glare, Glow, Shade, Switch};
-pub use fitting::{Balance, Fitting, Round, Shortfall};
+pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
 pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
@@ -1098,7 +1097,15 @@ mod tests {
                     emitted_t: 500_000,
                     arrive_t: 1_000_000,
                     form: two_parts(),
-                    refit: Some(Round { from: Form::default(), target: two_parts(), stored_j: 4.2e26, start_s: 0.25 }),
+                    building: Some(Building {
+                        step: 2,
+                        part: form::PartId(1),
+                        change: Change::Grow,
+                        after: two_parts().parts.pop(),
+                        fraction: 0.25,
+                        duration_s: 86_400.0,
+                        reversing: true,
+                    }),
                     glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear }),
                     glare: Some(Glare { wavelength_m: 1.0e-6, received_w: 3.5e12 }),
                 },
@@ -1863,7 +1870,7 @@ mod tests {
             emitted_t: arrive_t - 1_000,
             arrive_t,
             form: Form::default(),
-            refit: None,
+            building: None,
             glow: None,
             glare: None,
         };

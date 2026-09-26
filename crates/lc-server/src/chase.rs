@@ -227,7 +227,7 @@ pub fn contacts(
                 // As its light left it, as everything else here is: a ship seen mid-refit is seen
                 // in the shape it had then, and a new one only once that light arrives.
                 form: then.map(|then| (&*then.form).into()).unwrap_or_default(),
-                refit: then.and_then(|then| then.round.as_deref()).map(Into::into),
+                building: then.and_then(|then| then.underway(sighted.emitted_s)).map(Into::into),
                 glow: None,
                 glare: None,
             };
