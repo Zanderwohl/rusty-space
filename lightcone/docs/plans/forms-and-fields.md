@@ -359,7 +359,7 @@ graph LR
 
 ### S1 · Refits with forms, end to end
 
-- status: todo
+- status: active card "Build S1: refits with forms, end to end"
 - needs: K3, F7, F9
 - touches: `crates/lc-server/src/fitting.rs`, `crates/lc-server/src/persist.rs`, `crates/lc-server/src/command/`, `crates/lc-proto/src/lib.rs`
 - read: 29 §Protocol and persistence
