@@ -48,6 +48,8 @@ pub enum Action {
     ShowCurrent(bool),
     /// Show the selected part's numbers as fields, or only what it does.
     ShowAdvanced(bool),
+    /// Fold a side panel down to its heading, or open it again.
+    Fold(crate::form_view::Fold),
     /// An edit to the draft as its handle or field built it, before and after, or why it could
     /// not be built. See [`crate::draft`].
     EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
@@ -492,6 +494,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::SelectPart(part) => ui.form.selected = part,
     Action::ShowCurrent(on) => ui.form.show_current = on,
     Action::ShowAdvanced(on) => ui.form.advanced = on,
+    Action::Fold(panel) => ui.form.folded.toggle(panel),
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
     Action::EditForm(edit) => edit_form(ui, session, edit, &mut effects),
     Action::ApplyDraft => apply_draft(ui, session, false, &mut effects),

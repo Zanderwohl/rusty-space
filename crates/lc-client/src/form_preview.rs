@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
-use em_ui::{Edge, MenuTheme, MenuUi};
+use em_ui::{MenuTheme, MenuUi};
 use lc_world::fitting::Balance;
 use lc_world::form::Form;
 
@@ -15,8 +15,6 @@ use crate::draft::figure;
 use crate::preview::{Measured, Preview};
 use crate::ui::ViewMode;
 
-const WIDTH: f32 = 250.0;
-const INSET: f32 = 12.0;
 const TEXT: f32 = 13.0;
 
 #[derive(Resource, Default)]
@@ -90,36 +88,51 @@ pub fn rows(preview: &Preview, module_j: f64) -> Vec<(&'static str, Option<Strin
     ]
 }
 
-#[derive(Component)]
-struct PreviewPanel;
+/// Whether it was built open.
+#[derive(Component, PartialEq)]
+struct PreviewPanel(bool);
 
 #[derive(Component)]
 struct Row(usize);
 
-fn lay_out(mut commands: Commands, previewed: Res<Previewed>, game: Res<crate::app::Game>, assets: Res<AssetServer>, panels: Query<Entity, With<PreviewPanel>>) {
+/// Last in the right column, under the detail. The panels above it are rebuilt as the draft and
+/// the selection change, and a rebuilt one lands after it, so it is rebuilt too whenever it is no
+/// longer last. It has no buttons, so nothing is lost by that.
+fn lay_out(
+    mut commands: Commands,
+    ui: Res<Ui>,
+    previewed: Res<Previewed>,
+    game: Res<crate::app::Game>,
+    assets: Res<AssetServer>,
+    panels: Query<(Entity, &PreviewPanel)>,
+    columns: Query<(Entity, &Children), With<crate::form_panel::RightColumn>>,
+) {
+    let open = !ui.form.folded.preview;
+    let column = columns.iter().next().filter(|_| previewed.0.is_some());
+    let last = column.and_then(|(_, children)| children.last().copied());
+    let mut current = false;
+    for (panel, built) in &panels {
+        if column.is_some() && Some(panel) == last && built.0 == open {
+            current = true;
+        } else {
+            commands.entity(panel).try_despawn();
+        }
+    }
+    let (Some(preview), Some((column, _)), false) = (&previewed.0, column, current) else { return };
     let module_j = game.0.ship.fitting().map_or(Balance::DEFAULT, |f| *f.balance()).module_energy_j();
-    match (&previewed.0, panels.iter().next()) {
-        (None, _) => {
-            for entity in &panels {
-                commands.entity(entity).despawn();
-            }
-        }
-        (Some(preview), None) => {
-            let mut ui = MenuUi::new(&mut commands, MenuTheme::VFD).font(assets.load(crate::faces::UI_FILE));
-            let root = ui.docked(PreviewPanel, Edge::Left, INSET);
-            ui.insert(root, Node { position_type: PositionType::Absolute, left: Val::Px(INSET), bottom: Val::Px(INSET), width: Val::Px(WIDTH), flex_direction: FlexDirection::Column, align_items: AlignItems::Stretch, ..default() });
-            let panel = ui.strip(root);
-            ui.insert(panel, Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Stretch, padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)), border: UiRect::all(Val::Px(1.0)), row_gap: Val::Px(2.0), ..default() });
-            ui.inline(panel, "PREVIEW", 15.0, em_ui::vfd::TEXT);
-            for (index, (label, _)) in rows(preview, module_j).into_iter().enumerate() {
-                let row = ui.row(panel);
-                ui.insert(row, Node { flex_direction: FlexDirection::Row, justify_content: JustifyContent::SpaceBetween, ..default() });
-                ui.inline(row, label, TEXT, em_ui::vfd::TEXT_DIM);
-                let figure = ui.inline(row, "", TEXT, em_ui::vfd::TEXT);
-                ui.insert(figure, Row(index));
-            }
-        }
-        (Some(_), Some(_)) => {}
+    let mut ui = MenuUi::new(&mut commands, MenuTheme::VFD).font(assets.load(crate::faces::UI_FILE));
+    let panel = ui.strip(column);
+    ui.insert(panel, (PreviewPanel(open), Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Stretch, padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)), border: UiRect::all(Val::Px(1.0)), row_gap: Val::Px(2.0), ..default() }));
+    ui.fold_heading(panel, "PREVIEW", open, crate::form_panel::Tap::Fold(crate::form_view::Fold::Preview));
+    if !open {
+        return;
+    }
+    for (index, (label, value)) in rows(preview, module_j).into_iter().enumerate() {
+        let row = ui.row(panel);
+        ui.insert(row, Node { flex_direction: FlexDirection::Row, justify_content: JustifyContent::SpaceBetween, ..default() });
+        ui.inline(row, label, TEXT, em_ui::vfd::TEXT_DIM);
+        let figure = ui.inline(row, &value.unwrap_or_default(), TEXT, em_ui::vfd::TEXT);
+        ui.insert(figure, Row(index));
     }
 }
 
