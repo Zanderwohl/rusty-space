@@ -513,8 +513,8 @@ three phases, progress, and Cancel.
 
 ### Apply and the ledger
 
-- **Apply is in the editor's chrome**, an `em_ui` strip along the bottom of the view, and sends
-  `Order::Refit { target }` with the draft. It is disabled, saying why beside it, with no shard,
+- **Apply is on the editor's title bar**, after Back, and sends `Order::Refit { target }` with the
+  draft. It is disabled, saying why under it, with no shard,
   while an Apply awaits its answer, while a round runs, while the ship is under way, and when the
   draft is the ship. `ledger::gate` is that rule, tested without a window.
 - **A refusal is shown where Apply was pressed**, worded by `refit_panel::form_fault`, and in the
@@ -636,8 +636,10 @@ Apply asks once more when the vent would collapse the field.
   will leave. The budget is `ledger::Budget::of` on that plan, and a test holds the local plan equal
   to the one the shard makes of the same Apply. A draft storage cannot pay for has no plan, and the
   budget says how short it is instead.
-- **The strip over Apply** reads available, spent, the peak in storage against capacity, and the
-  vent as `vents 1.2 ME: field to 2950 K`, in the hazard color, and saying so, when it collapses.
+- **The title bar**, beside Apply, reads available, spent, the peak in storage against capacity,
+  and `vents 1.2 ME` when anything is vented, in the hazard color when it would collapse the field.
+  One bar, not a second strip at the bottom; the peak temperature is Apply's second question's to
+  say, and the ledger's.
 - **The peak temperature** walks the plan: the field starts at its heat before the round, a
   dismantling heats it by the 5% it loses spread over the step, and each vent lands as a burst at its
   step's end, which is where the heat peaks. Between them it relaxes toward what held it before. Heat
@@ -650,7 +652,7 @@ Apply asks once more when the vent would collapse the field.
   cannot pay for where it would hang floats at the pointer instead, since a part is sized against its
   parent; and anything else is refused with "storage cannot pay for it". `Start::allows` is the rule.
 - **Apply's second question** is an `em_ui` modal (`MenuUi::confirm`) naming the vent, the peak and
-  the temperature at which the field fails: **Apply anyway** or **Back**.
+  the temperature at which the field fails: **Apply anyway**, in the hazard color, or **Back**.
 - `--draft vent` shrinks the storage to a third, which spills a full store past collapse, and
   `--pull <k>` pulls the selected part's size handle out `k` times its length once the shard has
   stated the ship, so both the question and a handle at its limit can be photographed.
@@ -715,7 +717,9 @@ volume above the minimum.
 - **The preview**, a pure function of `Session` and `Ui`: capacities, acceleration, broadside shadow,
   envelope area, slew rate, the field's rated load and headroom, brightness at the ship's current
   distance from its star, and the round's duration. It is `preview::Preview::of`, in a panel at the
-  bottom of the left column under the palette. Choices the list leaves open:
+  right column under the selected part's detail; the left is the palette's alone. PARTS, the detail
+  and PREVIEW each fold to their heading on an arrow at its left, so a short window can keep what it
+  needs open (`--fold parts,detail,preview` for a shot). Choices the list leaves open:
   - Its geometry comes from the draft's grid, which takes tens of milliseconds and much longer in a
     debug build, so it is measured off the frame each time the draft changes, and the grid's figures
     hold their last values until the new one arrives. It is passed to `Preview::of` beside the two.

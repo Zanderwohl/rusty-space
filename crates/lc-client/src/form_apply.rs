@@ -223,12 +223,12 @@ fn ask(
     let module_j = game.0.ship.fitting().map_or(1.0, |f| f.balance().module_energy_j());
     let said = match previewed.0.as_ref().and_then(|p| Some((p.budget.as_ref().ok()?, p.heat?))) {
         Some((budget, heat)) => format!(
-            "This round vents {} ME into the field, taking it to {:.0} K, past {:.0} K where it fails.",
+            "This refit vents {} ME into the field, taking it to {:.0} K, past {:.0} K where it fails.",
             crate::draft::figure(budget.vented_j / module_j),
             heat.peak_k,
             heat.max_k,
         ),
-        None => "This round collapses the field.".into(),
+        None => "This refit collapses the field.".into(),
     };
     let mut menu = MenuUi::new(&mut commands, MenuTheme::VFD).panel_width(460.0).font(assets.load(crate::faces::UI_FILE)).warning(crate::ui::HAZARD);
     menu.confirm(Asking, "COLLAPSE THE FIELD?", &said, ("Apply anyway", Answer(true)), ("Back", Answer(false)));
