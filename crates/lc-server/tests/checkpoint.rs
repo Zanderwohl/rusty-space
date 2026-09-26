@@ -11,6 +11,8 @@ use glam::DVec3;
 use lc_server::persist::{SAVE_FORMAT, load, save};
 use lc_store::ships::{Shard, load_shard, load_ships, save_shard, save_ships};
 use lc_world::craft::{Craft, CraftId, Kind};
+use lc_world::fitting::{Balance, Fitting};
+use lc_world::form::Form;
 use lc_world::flight::{Cruise, Drive};
 use lc_world::motion::Motive;
 use tokio_postgres::Client;
@@ -86,6 +88,89 @@ async fn a_craft_written_to_the_store_comes_back_bit_for_bit() {
         }
         _ => unreachable!("a crossing"),
     }
+}
+
+/// A fitted ship's row holds its form and account, and both come back whole.
+#[tokio::test]
+async fn a_fitted_ships_account_comes_back_through_the_store() {
+    let Some(client) = store().await else { return };
+    let band = 7_103_000;
+    clear(&client, band).await;
+
+    let mut craft = Craft::at(CraftId(band), Kind::Ship, DVec3::ZERO);
+    craft.fit(Some(Fitting::full(Form::starting(), Balance::DEFAULT, 0.0)));
+    craft.drain(4.0e25, 30.0);
+    let row = save(&craft, Some("acct-fitted"), None, None, Default::default(), 60_000_000);
+    save_ships(&client, &[row]).await.unwrap();
+
+    let read = load_ships(&client).await.unwrap().into_iter().find(|s| s.ship_id == band).unwrap();
+    let back = load(&read, None).expect("it reads");
+    assert_eq!(back.fitting(), craft.fitting());
+    assert_eq!(back.fitting().unwrap().form(), &Form::starting());
+    assert_eq!(back.length_m, craft.length_m);
+}
+
+/// A round ordered on one shard, checkpointed partway through the real store, runs on in the
+/// next: the same plan, its owner told of the steps left, and the ship ending in the target.
+#[tokio::test]
+async fn a_refit_round_survives_the_store_and_a_restart() {
+    use lc_proto::{ClientId, Inbound, Intent, Order, Outbound, ShipId};
+    use lc_server::journal::Memory;
+    use lc_server::server::Server;
+    use lc_server::transport::Loopback;
+    use lc_world::form::PartId;
+
+    let Some(client) = store().await else { return };
+    let band = 7_104_000;
+    clear(&client, band).await;
+
+    let ship = ShipId(band);
+    let mut old = Server::new(Memory::default(), 0, 1);
+    // Hours a tick, where a step takes days.
+    old.set_rate(60.0);
+    let mut craft = lc_server::world::still(ship, DVec3::ZERO);
+    craft.fit(Some(Fitting::full(Form::starting(), old.balance(), 0.0)));
+    old.admit(ClientId(1), craft, 0.0);
+    let mut target = Form::starting();
+    target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 1.4;
+    target.parts.iter_mut().find(|p| p.id == PartId(1)).unwrap().volume_m3 *= 1.1;
+    let mut wire = Loopback::new();
+    let refit = Order::Refit { target: (&target).into() };
+    wire.client_says(ClientId(1), Inbound::Act(Intent { ship_id: ship, order: refit, issued_at_client_t: i64::MAX }));
+    old.tick(&mut wire).await.unwrap();
+    let plan = old.ship(ship).unwrap().fitting().unwrap().refit().expect("the round began").clone();
+    assert!(plan.steps().len() >= 2, "premise: {:?}", plan.steps());
+    let first_s = plan.round().start_s + plan.steps()[0].ends_s();
+    while (old.now_t() as f64) < first_s * 1.0e6 {
+        old.tick(&mut wire).await.unwrap();
+    }
+    let now_s = old.now_t() as f64 * 1.0e-6;
+    assert!(old.ship(ship).unwrap().is_refitting(now_s), "premise: it is partway");
+    assert_ne!(old.ship(ship).unwrap().fitting().unwrap().form(), &Form::starting(), "premise: a step is done");
+
+    let checkpoint = old.checkpoint();
+    lc_store::store::ensure_partitions(&client, 0, checkpoint.now_t + 1).await.unwrap();
+    save_ships(&client, &checkpoint.ships).await.unwrap();
+    let ships: Vec<_> = load_ships(&client).await.unwrap().into_iter().filter(|s| s.ship_id == band).collect();
+    let mut new = Server::new(Memory::default(), 0, 1);
+    new.set_rate(60.0);
+    assert!(new.adopt(lc_server::persist::Checkpoint { now_t: checkpoint.now_t, next_ship: checkpoint.next_ship, ships }).is_empty());
+    let back = new.ship(ship).unwrap().clone();
+    assert!(back.is_refitting(now_s), "the round was dropped");
+    assert_eq!(back.fitting().unwrap().refit().unwrap().steps(), plan.steps(), "and it plans the same");
+    assert_eq!(back.fitting().unwrap().form(), old.ship(ship).unwrap().fitting().unwrap().form());
+
+    // Its pilot back, on a wire of its own: what the old shard said is not counted as the new one's.
+    let left = plan.steps().len() - plan.at(now_s).finished;
+    new.admit(ClientId(1), back, 0.0);
+    let mut wire = Loopback::new();
+    let mut told = 0;
+    while new.ship(ship).unwrap().is_refitting(new.now_t() as f64 * 1.0e-6) {
+        new.tick(&mut wire).await.unwrap();
+        told += wire.take(ClientId(1)).iter().filter(|m| matches!(m, Outbound::Fitted { .. })).count();
+    }
+    assert_eq!(new.ship(ship).unwrap().fitting().unwrap().form(), &target);
+    assert_eq!(told, left, "one Fitted for each step left");
 }
 
 /// Saving the same craft again replaces it, because a checkpoint is written over and over.

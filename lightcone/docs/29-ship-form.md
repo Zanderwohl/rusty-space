@@ -2,9 +2,10 @@
 
 What a ship is made of, what shape it is, and what it costs to change either.
 
-**Status: designed, not built.** It replaces the loadout of [19-ship-fitting.md](19-ship-fitting.md):
+**Status: partly built.** It replaces the loadout of [19-ship-fitting.md](19-ship-fitting.md):
 **a ship is its parts**, and each part's volume is how much of its kind the ship has. 19's energy,
-mass and drive rules stand.
+mass and drive rules stand. A craft's account is kept on its form (§What a craft reads), and the
+wire and saves carry the form (§Protocol and persistence).
 [30-the-field.md](30-the-field.md) and [31-directed-energy.md](31-directed-energy.md) are what the
 shape does in play, and [32-ship-rendering.md](32-ship-rendering.md) is how it is drawn.
 
@@ -241,6 +242,35 @@ refused as `Extent`; no preset needs a second pass. Four choices the table leave
 Building one takes about 20 ms for the starting form and 50 ms for the Cluster with `lc-world`
 optimized, and a quarter to three quarters of a second unoptimized in the dev profile.
 
+### What a craft reads
+
+`lc_world::fitting::Hull` is what the account and the craft read off a form, worked out when the form
+changes and never per tick: at creation and load, and when a refit step finishes.
+
+| number | from | read by |
+|---|---|---|
+| capacities | volumes, as above | storage, drain, building, data |
+| dry mass | contents and structure | mass, and so every rating |
+| thrust | the aperture of the engines **firing aft**, over `c`: those whose open face points to −x | the rated acceleration. An engine firing fore pushes the other way, and is a weapon ([31](31-directed-energy.md)) |
+| extent | the grid | `length_m` |
+| gyration | the grid's tensor: the square root of the larger eigenvalue of its block across the nose, per kilogram | the slew rate |
+
+**Slew goes as one over the gyration.** Attitude thrust is sized to the ship as its drive is, so
+torque over mass is the same for every ship, angular acceleration goes as `1/k²` and the rate as
+`1/k`. For one shape `k` is a fixed fraction of the length, so this is the old `1/L` law, and it is
+anchored on the same hull: the 500 m ovoid turns at π/60 rad/s. The starting form's `k` is
+139 m against the ovoid's 130, so it flips in 64 s rather than 60. A craft with no form is still
+that ovoid and turns by its length. The flip's axis is the slower of those across the nose, since
+a flip is about one of them and the nose never turns about itself.
+
+A process builds each form's grid once: every ship today is the starting form, so a shard fitting a
+hundred builds one. A step partway through a round, whose form may not place, keeps the last
+measured extent and gyration until it finishes. The starting form's extent is **571 m**, the
+envelope around 545 m of parts, where its
+twenty slots made 19's ship 500 m long. Until F10 reads the shadow, collection still takes the
+ovoid of the craft's length, so the starting form collects (571/500)², about 1.3 times, what
+[20](20-solar-power.md)'s anchor says.
+
 **The shadow handles concave shapes.** A stack of plates shades
 itself and collects about what one plate would. A ship spread out collects more and turns more
 slowly, because spreading out also raises its moment of inertia.
@@ -399,6 +429,7 @@ what 19's starting ship does. Placed, it is about 545 m long, 200 m across and 1
 
 `hull_areal_density` is 1 215 kg/m², so this form weighs 19's dry starting ship, 2.65 × 10⁹ kg: every
 module, the data module at half, and 19's frame over all twenty slots, the five empty ones included.
+Its one bell fires aft, so it pulls 5 g full and 13.8 g empty, as 19's ship did.
 
 The anchors of 20 and 30 are derived from this form.
 
@@ -645,23 +676,40 @@ photographs it, and `--form <preset>` stages a draft.
 
 ## Protocol and persistence
 
-- `Loadout` is removed from the wire and from saves. `Order::Refit { target: Form }`.
+- `Loadout` is removed from the wire and from saves. `Order::Refit { target: Form }`, refused under
+  way and while a round runs; `CancelRefit` runs §Cancel.
+- The account on the wire and in a save, `lc_proto::Fitting`, holds the settled form and the round
+  under way as its recipe, `lc_proto::Round`: both forms, the stored energy it began with and when.
+  Both ends solve the recipe to the same plan, so a round survives a restart and a client runs the
+  same steps as the shard.
 - `Fitted` carries a `Hull`: the form, each part's solved scale, the capacities, and the geometry's
-  numbers.
+  numbers, its inertia scaled to the ship as settled. It is sent as each step finishes, as well as
+  after every accepted order.
 - An invalid target is `Refusal::Form(FormFault)`, naming the part: the structural checks, then each
-  placement rule.
+  placement rule, from the same `rules::check` the editor calls. A target the planner cannot run is
+  `Refusal::Short(Shortfall)`: `Energy`, or `NoDrones(part)`, the step that would begin with none. A
+  target whose Mind is not the ship's is `FormFault::OtherMind`.
 - The wire's form types are `lc_proto::form`, mirrors with arrays for glam's vectors, converted in
   `lc_world::form`.
-- A craft's form is saved. Old rows are not read: there are no players, so the format simply changes.
+- A craft's form is saved, and a round under way with it. Old rows are not read: there are no
+  players, so the format simply changes, and `SAVE_FORMAT` 10 refuses an older row by its number
+  rather than misreading it.
 - Presets: `Inbound::SavePreset { name, form }`, `Inbound::DeletePreset { name }`, and
   `Outbound::Presets`, the account's whole list, sent after `Welcome` and after each change. A
   `presets` table in `lc-store`, keyed by account and name.
 - **Other craft's forms reach a client only by being seen.** `Presence` gains the form, and it arrives with
-  the light, so a ship seen mid-refit is seen in the shape its light left in.
+  the light, so a ship seen mid-refit is seen in the shape its light left in. A craft keeps the forms
+  it has had, each from the instant its step ended, and a contact is given the one in force when its
+  light left, with the length it measured. Steps are stamped at their own ends, however coarsely the
+  shard settled. A craft loaded mid-round was seen in the round's forms back to its start and in the
+  form it began from before that. Past `HISTORY_FORMS` it forgets the oldest, and a presence from
+  before then carries no form rather than a later one, and the length of the oldest it remembers.
 
 ## Balance
 
-`Balance` loses the per-module fields and `slot_volume_m3`, and gains:
+`Balance` loses the per-module fields and `slot_volume_m3` (F9), and gains the fields below. 19's
+slot survives as `form::presets::SLOT_M3`, the volume a module-energy and the first guesses below
+are quoted per.
 
 | setting | first guess | meaning |
 |---|---|---|

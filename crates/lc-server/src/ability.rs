@@ -90,7 +90,6 @@ impl Act {
             | Order::CutDrive
             | Order::Intercept { .. }
             | Order::BreakOff
-            | Order::RefitLoadout { .. }
             | Order::Refit { .. }
             | Order::CancelRefit
             | Order::FieldMode { .. }
@@ -245,7 +244,7 @@ mod tests {
     /// exhaustive match in `Act::of` is exercised rather than merely written.
     #[test]
     fn every_order_is_gated_as_one_kind_or_the_other() {
-        use lc_proto::{Aim, Apertures, Approach, Closeness, FieldMode, Form, Loadout, MessageKey, Secrecy, ShipId};
+        use lc_proto::{Aim, Apertures, Approach, Closeness, FieldMode, Form, MessageKey, Secrecy, ShipId};
 
         let commands = [
             Order::Transmit { power_w: 1.0 },
@@ -253,7 +252,6 @@ mod tests {
             Order::CutDrive,
             Order::Intercept { ship_id: ShipId(1), closeness: Closeness::Company, approach: Approach::Courteous },
             Order::BreakOff,
-            Order::RefitLoadout { target: Loadout::default() },
             Order::Refit { target: Form::default() },
             Order::CancelRefit,
             Order::FieldMode { mode: FieldMode::Black },

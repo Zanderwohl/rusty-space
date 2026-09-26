@@ -34,7 +34,7 @@ use glam::{DQuat, DVec3};
 use lc_world::courtesy::{cooking_flux_w_m2, drive_courtesy_radius_m};
 use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH};
 use lc_world::emit::{aperture_temperature_k, rating_w};
-use lc_world::fitting::{Balance, Loadout};
+use lc_world::fitting::Balance;
 
 /// `18-ui-style.md`'s hazard color.
 const HAZARD: Color = Color::srgb(1.0, 0.30, 0.10);
@@ -112,7 +112,7 @@ impl Burn {
     /// 31's tables: the starting ship's drive section, scaled with the hull as length cubed.
     fn of(args: &Args) -> Self {
         let b = Balance::DEFAULT;
-        let drive_m3 = Loadout::STARTING.engines as f64 * b.slot_volume_m3;
+        let drive_m3 = 5.0 * lc_world::form::presets::SLOT_M3;
         let power_w = rating_w(&b, drive_m3 * (args.length_m / 500.0).powi(3));
         let aperture_m = args.aperture_m.unwrap_or(args.length_m * HEIGHT_PER_LENGTH);
         let face_m2 = std::f64::consts::PI * (0.5 * aperture_m).powi(2);

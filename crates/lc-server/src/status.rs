@@ -35,10 +35,14 @@ pub enum Whereabouts {
 /// What is fitted, and what it is doing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Fit {
-    /// By name, not a field per module: a new module would otherwise be a field the console's
-    /// mirror lacks, and RON would refuse the whole payload.
+    /// Parts by kind, the Mind apart: entries in the form, as `MAX_PARTS` counts them, so a
+    /// mirrored part is one. By name, not a field per kind: a new kind would otherwise be
+    /// a field the console's mirror lacks, and RON would refuse the whole payload. Named for
+    /// 19's modules, which the console's mirror still calls them.
     pub modules: Vec<(String, u32)>,
+    /// `MAX_PARTS`.
     pub hull_slots: u32,
+    /// Parts, the Mind included.
     pub used_slots: u32,
     /// Joules as of `saved_t`, not extrapolated forward from it.
     pub stored_j: f64,
@@ -128,18 +132,22 @@ fn whereabouts(at: glam::DVec3, stars: &[CatalogStar]) -> Whereabouts {
 }
 
 fn fit_of(fitting: &lc_proto::Fitting) -> Fit {
-    let loadout = &fitting.loadout;
+    use lc_proto::form::Kind;
+    let parts = &fitting.form.parts;
+    let count = |of: fn(Kind) -> bool| parts.iter().filter(|p| of(p.kind)).count() as u32;
     let modules = vec![
-        ("Engines".to_owned(), loadout.engines),
-        ("Storage".to_owned(), loadout.storage),
-        ("Drone bays".to_owned(), loadout.drones),
-        ("Living".to_owned(), loadout.living),
+        ("Engines".to_owned(), count(|k| k == Kind::Engine)),
+        ("Storage".to_owned(), count(|k| k == Kind::Storage)),
+        ("Drones".to_owned(), count(|k| k == Kind::Drone)),
+        ("Living".to_owned(), count(|k| k == Kind::Living)),
+        ("Data".to_owned(), count(|k| k == Kind::Data)),
+        ("Bays".to_owned(), count(|k| k == Kind::Bay)),
+        ("Spars".to_owned(), count(|k| matches!(k, Kind::Spar(_)))),
     ];
-    let used: u32 = modules.iter().map(|(_, n)| n).sum();
     Fit {
         modules,
-        hull_slots: loadout.slots,
-        used_slots: used,
+        hull_slots: lc_world::form::MAX_PARTS as u32,
+        used_slots: parts.len() as u32,
         stored_j: fitting.stored_j,
         solar_w: fitting.solar_w,
         committed_j: fitting.committed_j,

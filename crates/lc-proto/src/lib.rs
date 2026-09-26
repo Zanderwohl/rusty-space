@@ -342,10 +342,8 @@ pub enum Order {
     /// and the ship keeps whatever velocity the approach or the station left it with, on whatever
     /// conic that is.
     BreakOff,
-    /// Rebuild toward this loadout. Refused while under way. Deleted by S1, when [`Order::Refit`]
-    /// takes its place.
-    RefitLoadout { target: Loadout },
-    /// Stop a refit where it is; the step in progress is reversed.
+    /// Stop a refit where it is; the step in progress is reversed. See `lightcone/docs/29-ship-form.md`
+    /// §Cancel.
     CancelRefit,
     /// Put a message on the air, for `to`, pointed `aim`, readable by `secrecy`.
     ///
@@ -398,7 +396,8 @@ pub enum Order {
     /// Read every log this craft holds into a conclusion and consume it, to make room. Kept
     /// raw logs are left alone. Appended last.
     Analyze,
-    /// Rebuild toward this form, in one round. Refused while under way.
+    /// Rebuild toward this form, in one round. Refused while under way or already refitting, and
+    /// for a target that breaks a rule of 29 §Placement rules, as [`Refusal::Form`] naming the part.
     Refit { target: Form },
     /// Set the field. The change takes `field_switch_s`, and is refused while one is running.
     FieldMode { mode: FieldMode },
@@ -511,7 +510,9 @@ pub struct Presence {
     pub emitted_t: i64,
     /// Coordinate microseconds it arrives. Never later than the server's `t` when it is sent.
     pub arrive_t: i64,
-    /// Its silhouette, as its light left it. Empty until S1.
+    /// Its silhouette, as its light left it: a ship seen mid-refit is seen in the shape it had
+    /// then. Empty for a craft with no form, and for one whose form then is past what its
+    /// authority remembers.
     pub form: Form,
     /// `None` until H7.
     pub glow: Option<Glow>,
@@ -762,11 +763,12 @@ pub enum Outbound {
     /// while its pilot is away — so a client coming back has to be told there is one, or it
     /// has no way to break it off. Appended last.
     Pursuing { ship_id: ShipId, pursuit: Pursuit },
-    /// The ship's modules and energy, as settled by the authority. Sent on sign-in and whenever
-    /// the account changes other than by the passage of time. Appended last.
+    /// The ship's form and energy, as settled by the authority, and what it solved from the form.
+    /// Sent on sign-in and whenever the account changes other than by the passage of time, a
+    /// refit step finishing included. Appended last.
     ///
-    /// `hull` is `None` until S1, and `field` until H3.
-    Fitted { ship_id: ShipId, fitting: Fitting, hull: Option<Hull>, field: Option<Field> },
+    /// `field` is `None` until H3.
+    Fitted { ship_id: ShipId, fitting: Fitting, hull: Hull, field: Option<Field> },
     /// Everything this ship has ever said or been told, and whose keys it holds.
     ///
     /// Sent once, shortly after a welcome. A conversation outlives the connection it happened
@@ -877,7 +879,7 @@ pub enum Refusal {
     Refitting,
     /// The ship is under way, and cannot refit until it has stopped.
     UnderWay,
-    /// The refit cannot reach its target from here.
+    /// A round toward a valid target that cannot be run from here.
     Short(Shortfall),
     /// This ship does not hold the addressee's key, so it cannot seal anything to them.
     ///
@@ -963,7 +965,7 @@ mod knowing;
 mod radio;
 
 pub use field::{Apertures, Field, FieldMode, Glare, Glow, Shade, Switch};
-pub use fitting::{Balance, Fitting, Loadout, Module, RefitOrder, Shortfall};
+pub use fitting::{Balance, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
 pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
@@ -1324,23 +1326,15 @@ mod tests {
     }
 
     fn fitted() -> Outbound {
-        let loadout = Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 };
         Outbound::Fitted {
             ship_id: ShipId(42),
             fitting: Fitting {
                 balance: Balance {
                     drive_efficiency: 1.0,
                     recovery: 0.95,
-                    storage_per_module: 5.0,
-                    engine_thrust_n: 7.2e10,
-                    drone_power_w: 2.3e19,
-                    living_drain_w: 4.4e15,
-                    hull_density_kg_m3: 50.0,
-                    slot_volume_m3: 392_699.0,
                     module_density_kg_m3: 395.8,
                     conversion_efficiency: 0.7,
                     solar_gain: 1.18e9,
-                    data_per_module: 2.1e6,
                     data_mass_fraction: 0.5,
                     data_work_factor: 3.0,
                     storage_density: 1.27e-05,
@@ -1374,20 +1368,15 @@ mod tests {
                     rcs_spread_rad: 1.05,
                     courtesy_fraction: 0.01,
                 },
-                loadout,
+                form: two_parts(),
                 stored_j: 4.2e26,
                 since_s: 1.0e6,
                 rapidity_since: 0.125,
                 committed_j: 1.0e24,
                 solar_w: 2.5e17,
-                refit: Some(RefitOrder {
-                    from: loadout,
-                    target: Loadout { engines: 7, ..loadout },
-                    stored_j: 4.2e26,
-                    start_s: 1.0e6,
-                }),
+                refit: Some(Round { from: two_parts(), target: Form::default(), stored_j: 4.2e26, start_s: 1.0e6 }),
             },
-            hull: Some(Hull {
+            hull: Hull {
                 form: two_parts(),
                 scales_m: vec![5.0, 150.0, 60.0],
                 capacities: form::Capacities {
@@ -1408,7 +1397,7 @@ mod tests {
                     inertia_kg_m2: [2.0e13, 7.5e13, 8.5e13, 0.0, -1.5e12, 0.0],
                     extent_m: 530.0,
                 },
-            }),
+            },
             field: Some(Field {
                 heat_j: 5.0e23,
                 since_s: 1.0e6,
@@ -1693,7 +1682,12 @@ mod tests {
                     Outbound::Fitted { fitting, .. } => fitting,
                     _ => unreachable!(),
                 },
-                hull: None,
+                hull: Hull {
+                    form: Form::default(),
+                    scales_m: Vec::new(),
+                    capacities: form::Capacities::default(),
+                    geometry: form::Geometry::default(),
+                },
                 field: Some(Field {
                     heat_j: 0.0,
                     since_s: 0.0,
@@ -1713,6 +1707,8 @@ mod tests {
             },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Form(FormFault::EngineBlocked(form::PartId(2))) },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Form(FormFault::TooFewDrones) },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Form(FormFault::OtherMind(form::PartId(7))) },
+            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Short(Shortfall::NoDrones(form::PartId(4))) },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::TooManyPresets },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::PresetName },
         ];
@@ -1738,13 +1734,6 @@ mod tests {
             }),
             Inbound::ResumeFrom { arrive_t: -1 },
             Inbound::Grant { joules: 1.5e25 },
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::RefitLoadout {
-                    target: Loadout { storage: 6, drones: 2, living: 2, engines: 5, slots: 20, data: 0 },
-                },
-                issued_at_client_t: 0,
-            }),
             Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CancelRefit, issued_at_client_t: 0 }),
             say(),
             send_report(),

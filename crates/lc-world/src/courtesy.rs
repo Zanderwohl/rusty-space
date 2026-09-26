@@ -243,7 +243,8 @@ fn clearance_m(a: DVec3, b: DVec3) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::emit::{flux_w_m2, rating_w, received_fraction};
-    use crate::fitting::Loadout;
+    use crate::fitting::{C2, STARTING_DRY_KG};
+    use crate::form::presets::SLOT_M3;
     use crate::solar::broadside_m2;
 
     const LENGTHS_M: [f64; 3] = [500.0, 5_000.0, 50_000.0];
@@ -252,8 +253,9 @@ pub(crate) mod tests {
     /// go as length cubed.
     fn scaled(b: &Balance, length_m: f64) -> (f64, f64) {
         let k = (length_m / 500.0).powi(3);
-        let drive_m3 = Loadout::STARTING.engines as f64 * b.slot_volume_m3;
-        (rating_w(b, drive_m3 * k), b.engine_thrust_n / G0 * k)
+        let drive_m3 = 5.0 * SLOT_M3;
+        let full_kg = STARTING_DRY_KG + 30.0 * b.module_energy_j() / C2;
+        (rating_w(b, drive_m3 * k), full_kg * k)
     }
 
     /// Two significant figures, as 31 writes them.

@@ -163,4 +163,6 @@ pub enum FormFault {
     Extent,
     TooSmall(PartId),
     TooFewDrones,
+    /// The target's Mind is not the ship's: a ship keeps its Mind through every refit.
+    OtherMind(PartId),
 }

@@ -192,11 +192,6 @@ pub enum Action {
     FillStorage,
 
     // --- fitting ----------------------------------------------------------------------
-    /// What the refit panel's sliders say. Nothing is built until [`Action::ApplyRefit`].
-    DraftRefit(lc_world::fitting::Loadout),
-    /// Put the sliders back to the ship as it is.
-    ResetRefitDraft,
-    ApplyRefit,
     CancelRefit,
 
     // --- radio ------------------------------------------------------------------------
@@ -753,7 +748,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
 
         // Energy and refits exist only against a server: the account is its to keep.
-        Action::GrantEnergy(_) | Action::FillStorage | Action::ApplyRefit | Action::CancelRefit
+        Action::GrantEnergy(_) | Action::FillStorage | Action::CancelRefit
             if !session.remote =>
         {
             effects.push(Effect::Notify("no server, so nothing to refit or fill".into()));
@@ -767,14 +762,6 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 if room > 0.0 {
                     effects.push(Effect::Grant(room));
                 }
-            }
-        }
-        Action::DraftRefit(loadout) => ui.refit_draft = Some(loadout),
-        Action::ResetRefitDraft => ui.refit_draft = None,
-        Action::ApplyRefit => {
-            // Kept, so a refused refit leaves the sliders where they were.
-            if let Some(target) = ui.refit_draft {
-                effects.push(Effect::Send(lc_proto::Order::RefitLoadout { target: target.into() }));
             }
         }
         Action::CancelRefit => effects.push(Effect::Send(lc_proto::Order::CancelRefit)),

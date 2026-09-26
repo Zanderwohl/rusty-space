@@ -483,8 +483,6 @@ pub struct UiState {
     pub time_rate: f64,
     pub notifications: Vec<Notification>,
     pub reading: Reading,
-    /// The loadout the refit panel's sliders are set to, or `None` to follow the ship.
-    pub refit_draft: Option<lc_world::fitting::Loadout>,
     /// Which conversation the radio window is showing.
     ///
     /// Here rather than local to the panel because a click in the events box has to be able to
@@ -562,7 +560,6 @@ impl Default for UiState {
             time_rate: DESIGN_TIME_RATE,
             notifications: Vec::new(),
             reading: Reading::default(),
-            refit_draft: None,
             chat_with: Channel::default(),
         }
     }

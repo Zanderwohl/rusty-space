@@ -6,9 +6,18 @@ What a ship is made of, what it costs to change that, and what it costs to fly.
 (`R`) and Dev actions (`F5`) panels. Where the build departed from the plan, this says what was
 built.
 
-**Being replaced in part.** [29-ship-form.md](29-ship-form.md) removes the loadout, module counts
+**Replaced in part.** [29-ship-form.md](29-ship-form.md) removes the loadout, module counts
 and hull slots: a ship becomes parts whose volumes are its capacities, and refits become rounds
-of edits paid for in energy. The mass, the rocket law and the energy account here stand.
+of edits paid for in energy. The mass, the rocket law and the energy account here stand, as do
+recovery, flying and refitting excluding each other, and data's work factor.
+
+Since F9 `lc-world` has no `Loadout`, no `Module` and no planner below. The account is kept on
+the ship's form and reads its capacities; a round's steps are 29's; `length_m` is the form's
+extent and the slew rate comes from its moments (29 §What a craft reads). Every per-module figure
+below survives as a density over the slot, and the starting form holds exactly the starting
+ship's slots, so the tables of energies, masses and accelerations still hold. **Refits are refused
+until S1**: the wire and saves still carry the loadout, and the shard answers a loadout refit
+`NotBuilt`. What follows is kept as the argument for the numbers, not a description of the code.
 
 Energy is the currency of everything. A ship stores it, spends it on every burn, spends it
 building modules, gets most of it back by taking modules apart, and bleeds a little of it

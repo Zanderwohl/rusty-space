@@ -174,13 +174,13 @@ impl<J: Journal> Server<J> {
         })
     }
 
-    /// Bytes: data modules plus the onboard store.
+    /// Bytes: data parts plus the onboard store.
     fn data_capacity(&self, id: CraftId) -> f64 {
         let now_s = self.now_t as f64 * 1.0e-6;
         self.fleet
             .get(id)
             .and_then(|c| c.fitting())
-            .map_or(ONBOARD_DATA_BYTES, |f| f.balance.data_capacity(&f.loadout_at(now_s)))
+            .map_or(ONBOARD_DATA_BYTES, |f| f.capacities_at(now_s).data_b)
     }
 
     /// Recount what a craft's knowledge takes if its room changed, or if `recount`.

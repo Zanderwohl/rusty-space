@@ -173,12 +173,14 @@ pub fn sighting(
     // No root means light that has not arrived or has already gone past. A worldline that
     // jumped has one per piece, and the newest is where the craft appears now.
     let emitted = retarded_times_at(now_t as f64, here, &worldline).last().copied()?;
+    let emitted_s = emitted * 1.0e-6;
     Some(pursuit::Sighting {
         target: lc_world::motion::ShipId(quarry.id.0),
         position_ly: worldline.position_at(emitted) / LIGHT_US_PER_LY,
         beta: worldline.velocity_at(emitted),
-        length_m: quarry.length_m,
-        emitted_s: emitted * 1.0e-6,
+        // A refit that has since lengthened it has not been seen yet.
+        length_m: quarry.seen_length_m_at(emitted_s),
+        emitted_s,
     })
 }
 
@@ -204,7 +206,7 @@ pub fn contacts(
             let presence = Presence {
                 ship_id: ShipId(craft.id.0),
                 name: craft.designation(),
-                length_m: craft.length_m,
+                length_m: sighted.length_m,
                 at_ly: sighted.position_ly.to_array(),
                 beta: sighted.beta.to_array(),
                 // Where the nose actually was when the light left, part-way through a turn
@@ -221,7 +223,9 @@ pub fn contacts(
                 // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by
                 // construction, so this is the light landing at this instant.
                 arrive_t: now_t,
-                form: lc_proto::Form::default(),
+                // As its light left it, as everything else here is: a ship seen mid-refit is seen
+                // in the shape it had then, and a new one only once that light arrives.
+                form: craft.seen_at(sighted.emitted_s).map(|seen| (&*seen.form).into()).unwrap_or_default(),
                 glow: None,
                 glare: None,
             };

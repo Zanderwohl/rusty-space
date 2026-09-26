@@ -75,7 +75,10 @@ pub fn step_for(from_s: f64, to_s: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{Balance, C2, Loadout};
+    use crate::fitting::{Balance, C2};
+    use crate::form::capacity::Capacities;
+    use crate::form::presets::SLOT_M3;
+    use crate::form::Form;
     use crate::flight::JULIAN_YEAR_S;
     use crate::system::UNIT_M;
     use crate::star::Star;
@@ -148,10 +151,10 @@ mod tests {
     #[test]
     fn the_starting_ship_fills_in_a_year_at_a_tenth_of_an_au() {
         let b = Balance::DEFAULT;
-        let start = Loadout::STARTING;
+        let start = Capacities::of(&Form::starting(), &b);
         let net = power_w(&b, 500.0, SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * UNIT_M * UNIT_M, 0.1 * UNIT_M)
-            - b.drain_w(&start);
-        let years = b.capacity_j(&start) / net / JULIAN_YEAR_S;
+            - start.drain_w;
+        let years = start.storage_j / net / JULIAN_YEAR_S;
         assert!((years - 1.0).abs() < 1.0e-9, "{years}");
         let _ = C2;
     }
@@ -162,8 +165,8 @@ mod tests {
         let b = Balance::DEFAULT;
         let sol = SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * UNIT_M * UNIT_M;
         for (length, expected_au) in [(500.0, 3.87), (1_000.0, 2.74), (5_000.0, 1.23)] {
-            let slots = (b.length_m(20) / length).powi(-3) * 20.0;
-            let drain = 0.1 * slots * b.living_drain_w;
+            let slots: f64 = (length / 500.0f64).powi(3) * 20.0;
+            let drain = 0.1 * slots * SLOT_M3 * b.living_density_w;
             let at_one_au = power_w(&b, length, sol, UNIT_M);
             let au = (at_one_au / drain).sqrt();
             assert!((au - expected_au).abs() < 0.01, "{length} m breaks even at {au} AU");
