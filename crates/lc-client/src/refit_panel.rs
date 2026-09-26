@@ -120,7 +120,7 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     ui.separator();
 
     match fitting.refit().filter(|_| ship.is_refitting(now)) {
-        Some(running) => round(ui, running, fitting.balance(), now, out),
+        Some(running) => round(ui, running, fitting, now, out),
         None => idle(ui, &state.form, fitting.balance()),
     }
 }
@@ -150,8 +150,9 @@ fn hazard() -> egui::Color32 {
     crate::map_panel::color_of(crate::ui::HAZARD)
 }
 
-fn round(ui: &mut egui::Ui, plan: &Plan, balance: &Balance, now: f64, out: &mut MessageWriter<Requested>) {
+fn round(ui: &mut egui::Ui, plan: &Plan, fitting: &lc_world::fitting::Fitting, now: f64, out: &mut MessageWriter<Requested>) {
     use crate::ledger::{Budget, StepState, phase_name, phases, span, standing};
+    let balance = fitting.balance();
     let module_j = balance.module_energy_j();
     let at = standing(plan, now);
     ui.strong("REFIT UNDER WAY");
@@ -169,8 +170,11 @@ fn round(ui: &mut egui::Ui, plan: &Plan, balance: &Balance, now: f64, out: &mut 
         row("spent", me(budget.spent_j, module_j));
         row("peak in storage", format!("{} of {}", me(budget.peak_j, module_j), me(budget.peak_capacity_j, module_j)));
         if budget.vented_j > 0.0 {
+            let (field, base_j) = crate::preview::field_now(fitting);
+            let heat = crate::preview::Heat::of(plan, &field, base_j, balance);
+            let at = heat.step.map(|i| format!(", after {}", crate::ledger::step_name(&plan.steps()[i]))).unwrap_or_default();
             ui.label("vented");
-            ui.colored_label(hazard(), format!("{:.3e} J", budget.vented_j));
+            ui.colored_label(hazard(), format!("{}: field to {:.0} K{at}", me(budget.vented_j, module_j), heat.peak_k));
             ui.end_row();
         }
     });

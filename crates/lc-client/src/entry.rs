@@ -165,6 +165,16 @@ pub fn parse(args: &[String]) -> Entry {
     if let Some(id) = value::<u16>(args, "--select") {
         actions.push(Action::SelectPart(Some(lc_world::form::PartId(id))));
     }
+    // The editor's side panels to fold, by heading: `parts`, `detail`, `preview`, comma-separated.
+    for name in after("--fold").iter().flat_map(|names| names.split(',')) {
+        use crate::form_view::Fold;
+        match name {
+            "parts" => actions.push(Action::Fold(Fold::Parts)),
+            "detail" => actions.push(Action::Fold(Fold::Detail)),
+            "preview" => actions.push(Action::Fold(Fold::Preview)),
+            _ => {}
+        }
+    }
     // Stand-offs toward the nose; both ends are clamps, as the zoom's are.
     if let Some(standoffs) = value::<f64>(args, "--slide") {
         actions.push(Action::SlideForm(standoffs));
@@ -244,6 +254,7 @@ pub fn parse(args: &[String]) -> Entry {
         lift_deg: value(args, "--lift"),
         form: after("--form"),
         draft: after("--draft"),
+        pull: value(args, "--pull"),
         // Only the player's own ship, and no round on the wire yet, so no shard: see
         // `construction`. `--refit-at` on its own asks for the same scene.
         refit: match (value::<f64>(args, "--refit-at"), value::<f64>(args, "--refit-from")) {

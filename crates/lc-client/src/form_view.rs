@@ -102,6 +102,45 @@ pub struct FormView {
     pub show_current: bool,
     pub advanced: bool,
     pub applying: crate::ledger::Applying,
+    /// Apply's second question is up, about this draft: its round would collapse the field. Keyed
+    /// on the draft, so an edit made since, or a return to the editor with another, does not bring
+    /// it back.
+    pub asking: Option<lc_world::form::Form>,
+    /// Side panels folded down to their headings, to make room for the others.
+    pub folded: Folded,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fold {
+    Parts,
+    Detail,
+    Preview,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Folded {
+    pub parts: bool,
+    pub detail: bool,
+    pub preview: bool,
+}
+
+impl Folded {
+    pub fn get(&self, fold: Fold) -> bool {
+        match fold {
+            Fold::Parts => self.parts,
+            Fold::Detail => self.detail,
+            Fold::Preview => self.preview,
+        }
+    }
+
+    pub fn toggle(&mut self, fold: Fold) {
+        let flag = match fold {
+            Fold::Parts => &mut self.parts,
+            Fold::Detail => &mut self.detail,
+            Fold::Preview => &mut self.preview,
+        };
+        *flag = !*flag;
+    }
 }
 
 /// The editor's camera: an orbit about a focus on the ship's nose axis.
@@ -734,9 +773,14 @@ fn build_chrome(commands: &mut Commands, top: f32, font: Handle<Font>) {
     let root = ui.docked(Chrome, Edge::Top, top);
     let strip = ui.strip(root);
     let row = ui.row(strip);
+    ui.insert(row, TitleRow);
     ui.inline(row, "SHIP EDITOR", 16.0, em_ui::vfd::TEXT);
     ui.small_button(row, "Back", Emit(Action::ToggleForm));
 }
+
+/// The title bar's line, which [`crate::form_apply`] puts Apply and the budget on, after Back.
+#[derive(Component)]
+pub(crate) struct TitleRow;
 
 pub(crate) fn press(
     buttons: Query<(&Interaction, &Emit), Changed<Interaction>>,

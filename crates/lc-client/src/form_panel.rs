@@ -14,6 +14,7 @@ use lc_world::form::{Kind, Mount, PartId, SparMode};
 use crate::action::Action;
 use crate::app::Ui;
 use crate::draft::{self, Draft, Field, Mark};
+use crate::form_view::Fold;
 use crate::input::Requested;
 use crate::ui::ViewMode;
 
@@ -39,6 +40,7 @@ pub enum Tap {
     /// Hovered, it shows the ship as it is; pressed, it keeps it shown.
     ShowCurrent,
     Advanced,
+    Fold(crate::form_view::Fold),
 }
 
 /// `None` for [`Tap::Take`], which puts a part on the pointer instead.
@@ -58,6 +60,7 @@ pub fn action_of(tap: Tap, draft: &Draft, form: &crate::form_view::FormView) -> 
         Tap::Reset => Action::EditForm(Ok(draft.reset())),
         Tap::ShowCurrent => Action::ShowCurrent(!form.show_current),
         Tap::Advanced => Action::ShowAdvanced(!form.advanced),
+        Tap::Fold(panel) => Action::Fold(panel),
     })
 }
 
@@ -126,10 +129,10 @@ fn lay_out(
 
     let palette_key = vec![format!("{}", ui.form.new_shape)];
     let mut tree_key: Vec<String> = tree_lines(draft, shown.marks()).into_iter().map(|(depth, id, what)| format!("{depth}{id}{what}")).collect();
-    tree_key.push(format!("{:?} {}", ui.form.selected, ui.form.show_current));
+    tree_key.push(format!("{:?} {} {}", ui.form.selected, ui.form.show_current, ui.form.folded.parts));
     let fields_key = vec![format!("{:?}", ui.form.selected.and_then(|id| draft.part(id)).map(|p| {
         let placement = p.placement.map(|pl| (matches!(pl.mount, Mount::Enclosing), pl.mirror));
-        (p.id, p.kind, draft::primitive_name(&p.primitive), draft::fields(p), placement, ui.form.advanced)
+        (p.id, p.kind, draft::primitive_name(&p.primitive), draft::fields(p), placement, ui.form.advanced, ui.form.folded.detail)
     }))];
 
     let mut current = [false; 3];
@@ -176,8 +179,9 @@ fn lay_out(
     }
 }
 
+/// The tree, the detail under it, and [`crate::form_preview`]'s panel under that.
 #[derive(Component)]
-struct RightColumn;
+pub(crate) struct RightColumn;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Side {
@@ -237,7 +241,11 @@ fn build_tree(
     let panel = stacked(&mut ui, column, Side::Tree, built);
     // So the detail under it always has room.
     ui.insert(panel, Node { max_height: Val::Vh(TREE_SHARE), overflow: Overflow::clip_y(), align_items: AlignItems::Stretch, ..panel_node() });
-    ui.inline(panel, "PARTS", 15.0, em_ui::vfd::TEXT);
+    let open = !form.folded.parts;
+    ui.fold_heading(panel, "PARTS", open, Tap::Fold(Fold::Parts));
+    if !open {
+        return;
+    }
     for (depth, id, what) in tree_lines(draft, marks) {
         let chosen = form.selected == Some(id);
         let text = if chosen { format!("> {what}") } else { what };
@@ -262,7 +270,11 @@ fn build_fields(commands: &mut Commands, column: Entity, draft: &Draft, form: &c
         return;
     };
     ui.insert(panel, Node { align_items: AlignItems::Stretch, row_gap: Val::Px(3.0), ..panel_node() });
-    ui.inline(panel, &format!("PART {}", part.id.0), 15.0, em_ui::vfd::TEXT);
+    let open = !form.folded.detail;
+    ui.fold_heading(panel, &format!("PART {}", part.id.0), open, Tap::Fold(Fold::Detail));
+    if !open {
+        return;
+    }
     let row = ui.row(panel);
     ui.small_button(row, draft::kind_name(part.kind), Tap::NextKind);
     ui.small_button(row, draft::primitive_name(&part.primitive), Tap::NextPrimitive);
@@ -398,6 +410,18 @@ mod tests {
         assert_eq!(action_of(Tap::ShowCurrent, &d, &view(None, 0)), Some(Action::ShowCurrent(true)));
         let on = FormView { show_current: true, ..view(None, 0) };
         assert_eq!(action_of(Tap::ShowCurrent, &d, &on), Some(Action::ShowCurrent(false)));
+    }
+
+    #[test]
+    fn a_heading_folds_its_panel_and_opens_it_again() {
+        let d = Draft::new(Form::starting());
+        let (mut ui, mut s) = (crate::ui::UiState::default(), crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3));
+        let tap = Tap::Fold(Fold::Preview);
+        let fold = action_of(tap, &d, &ui.form).unwrap();
+        crate::action::apply(fold.clone(), &mut ui, &mut s);
+        assert!(ui.form.folded.preview && !ui.form.folded.parts && !ui.form.folded.detail);
+        crate::action::apply(fold, &mut ui, &mut s);
+        assert_eq!(ui.form.folded, crate::form_view::Folded::default());
     }
 
     #[test]

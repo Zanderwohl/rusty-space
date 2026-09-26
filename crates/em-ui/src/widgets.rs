@@ -30,6 +30,9 @@ pub struct MenuUi<'a, 'w, 's> {
     /// say — wants the interface face rather than a display one.
     title_font: Option<Handle<Font>>,
     title_size: f32,
+    /// What a [`MenuUi::confirm`] that cannot be taken back paints its yes in. `None` paints it as
+    /// any other button.
+    warning: Option<Color>,
 }
 
 impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
@@ -44,6 +47,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             font: None,
             title_font: None,
             title_size: Self::DEFAULT_TITLE_SIZE,
+            warning: None,
         }
     }
 
@@ -62,6 +66,13 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     /// the caller is the one holding it.
     pub fn font(mut self, font: Handle<Font>) -> Self {
         self.font = Some(font);
+        self
+    }
+
+    /// The color an irreversible answer is painted in: its words and its border, on a dark wash of
+    /// it. The caller's, as every color here is.
+    pub fn warning(mut self, color: Color) -> Self {
+        self.warning = Some(color);
         self
     }
 
@@ -107,6 +118,33 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             BackgroundColor(self.theme.overlay_backdrop),
             GlobalZIndex(OVERLAY_Z),
         ));
+        screen
+    }
+
+    /// A question over everything, answered by one of two buttons. The wash holds the pointer, so
+    /// nothing behind it is pressed through it, and the panel is opaque: a translucent panel over
+    /// another reads as one muddled thing.
+    pub fn confirm<Y: Component, N: Component>(
+        &mut self,
+        marker: impl Bundle,
+        title: &str,
+        message: &str,
+        yes: (&str, Y),
+        no: (&str, N),
+    ) -> Entity {
+        let screen = self.overlay((marker, Interaction::default()));
+        let theme = self.theme;
+        self.theme.panel_bg = theme.panel_bg.with_alpha(1.0);
+        let panel = self.panel(screen);
+        self.theme = theme;
+        self.title(panel, title);
+        self.message(panel, message);
+        let (words, action) = yes;
+        match self.warning {
+            Some(color) => self.warning_button(panel, words, action, color),
+            None => self.button(panel, words, action),
+        };
+        self.button(panel, no.0, no.1);
         screen
     }
 
@@ -192,6 +230,17 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
             ..default()
         };
         self.button_in(panel, text, action, node, 18.0)
+    }
+
+    /// A [`MenuUi::button`] with its words and border in `color`, on a dark wash of it that
+    /// brightens under the pointer.
+    fn warning_button<A: Component>(&mut self, panel: Entity, text: &str, action: A, color: Color) -> Entity {
+        let wash = |share: f32| Color::BLACK.mix(&color, share);
+        let theme = self.theme;
+        self.theme = MenuTheme { button_bg: wash(0.18), button_hover: wash(0.32), border: color, text: color, ..theme };
+        let button = self.button(panel, text, action);
+        self.theme = theme;
+        button
     }
 
     fn button_in<A: Component>(
@@ -382,6 +431,34 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         row
     }
 
+    /// A panel's heading that folds it: an arrow on the left, pointing at the words while folded
+    /// and turned down while open, and the whole line pressable. `›` turned rather than a triangle,
+    /// which interface faces often lack.
+    pub fn fold_heading<A: Component>(&mut self, parent: Entity, text: &str, open: bool, action: A) -> Entity {
+        let theme = self.theme;
+        let font = self.font.clone();
+        let face = |size: f32| TextFont { font: font.clone().map(FontSource::Handle).unwrap_or_default(), font_size: FontSize::Px(size), ..default() };
+        let turned = if open { UiTransform::from_rotation(Rot2::degrees(90.0)) } else { UiTransform::IDENTITY };
+        let heading = self
+            .commands
+            .spawn((
+                Button,
+                Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() },
+                BackgroundColor(Color::NONE),
+                MenuButton { rest: Color::NONE, hover: theme.button_hover },
+                action,
+            ))
+            .with_children(|line| {
+                // A square box, so the turn is about the arrow's middle.
+                line.spawn((Node { width: Val::Px(FOLD_ARROW), height: Val::Px(FOLD_ARROW), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }, turned))
+                    .with_child((Text::new("›"), face(FOLD_ARROW), TextColor(theme.text)));
+                line.spawn((Text::new(text), face(HEADING_TEXT), TextColor(theme.text)));
+            })
+            .id();
+        self.commands.entity(parent).add_child(heading);
+        heading
+    }
+
     /// `marker` is what the caller finds its [`Committed`](crate::field::Committed) by.
     pub fn field<A: Component>(&mut self, parent: Entity, label: &str, text: &str, marker: A) -> Entity {
         self.fields(parent, label, [(text.to_owned(), marker)])[0]
@@ -438,6 +515,8 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
 }
 
 const TREE_INDENT: f32 = 12.0;
+const HEADING_TEXT: f32 = 15.0;
+const FOLD_ARROW: f32 = 16.0;
 const FIELD_TEXT: f32 = 13.0;
 /// Shared among a line's fields: one takes `-1.2345e-6`, each of three a short number.
 const FIELD_GLYPHS: f32 = 16.0;
@@ -458,5 +537,41 @@ pub fn button_hover_system(
             Interaction::Hovered | Interaction::Pressed => button.hover.into(),
             Interaction::None => button.rest.into(),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RED: Color = Color::srgb(1.0, 0.3, 0.1);
+
+    #[derive(Component)]
+    struct Asked;
+    #[derive(Component)]
+    struct Yes;
+    #[derive(Component)]
+    struct No;
+
+    fn ask(mut commands: Commands) {
+        MenuUi::new(&mut commands, MenuTheme::VFD).warning(RED).confirm(Asked, "SURE?", "it cannot be undone", ("Do it", Yes), ("Back", No));
+    }
+
+    #[test]
+    fn a_question_holds_the_pointer_over_an_opaque_panel_with_both_answers() {
+        let mut app = App::new();
+        app.add_systems(Update, ask);
+        app.update();
+        let world = app.world_mut();
+        let (screen, z) = world.query_filtered::<(Entity, &GlobalZIndex), (With<Asked>, With<Interaction>)>().single(world).unwrap();
+        assert_eq!(z.0, OVERLAY_Z);
+        let panel = world.entity(screen).get::<Children>().unwrap()[0];
+        assert_eq!(world.entity(panel).get::<BackgroundColor>().unwrap().0.alpha(), 1.0);
+        let yes = world.query_filtered::<(&BorderColor, &Children), (With<Yes>, With<Button>)>().single(world).unwrap();
+        let words = yes.1[0];
+        assert_eq!(yes.0.top, RED, "the answer that cannot be taken back wears the warning");
+        assert_eq!(world.entity(words).get::<TextColor>().unwrap().0, RED);
+        let no = world.query_filtered::<&BorderColor, (With<No>, With<Button>)>().single(world).unwrap();
+        assert_eq!(no.top, MenuTheme::VFD.border, "and the way back does not");
     }
 }

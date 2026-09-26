@@ -122,7 +122,8 @@ impl Plugin for ClientPlugin {
             crate::faces::FacesPlugin,
             // The two modes beside the world, paired: a tuple of plugins stops at fifteen.
             (crate::map::MapPlugin, crate::form_view::FormViewPlugin,
-                crate::form_handles::FormHandlesPlugin, crate::form_panel::FormPanelPlugin, crate::form_apply::FormApplyPlugin),
+                crate::form_handles::FormHandlesPlugin, crate::form_panel::FormPanelPlugin, crate::form_apply::FormApplyPlugin,
+                crate::form_preview::FormPreviewPlugin),
             (crate::bench::BenchPlugin, crate::haze::HazePlugin),
             // The beauty shots and the staged refit both photograph the ship.
             (crate::beauty::BeautyPlugin, crate::refit_hull::RefitHullPlugin),

@@ -48,11 +48,16 @@ pub enum Action {
     ShowCurrent(bool),
     /// Show the selected part's numbers as fields, or only what it does.
     ShowAdvanced(bool),
+    /// Fold a side panel down to its heading, or open it again.
+    Fold(crate::form_view::Fold),
     /// An edit to the draft as its handle or field built it, before and after, or why it could
     /// not be built. See [`crate::draft`].
     EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
-    /// Send the draft to the shard as the ship's target.
+    /// Send the draft to the shard as the ship's target, first asking again when its round would
+    /// collapse the field.
     ApplyDraft,
+    /// The answer to that: send it anyway, or go back to the draft.
+    ApplyPastCollapse(bool),
     /// Edit the draft against this form of the ship's. See [`crate::ledger::base`].
     RebaseDraft(lc_world::form::Form),
     // --- the map ----------------------------------------------------------------------
@@ -282,6 +287,9 @@ fn set_view(ui: &mut UiState, view: ViewMode) {
     if view == ViewMode::Form && ui.view != ViewMode::Form {
         ui.form.from = ui.view;
     }
+    if view != ViewMode::Form {
+        ui.form.asking = None;
+    }
     ui.view = view;
 }
 
@@ -486,9 +494,16 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::SelectPart(part) => ui.form.selected = part,
     Action::ShowCurrent(on) => ui.form.show_current = on,
     Action::ShowAdvanced(on) => ui.form.advanced = on,
+    Action::Fold(panel) => ui.form.folded.toggle(panel),
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
-    Action::EditForm(edit) => edit_form(ui, edit, &mut effects),
-    Action::ApplyDraft => apply_draft(ui, session, &mut effects),
+    Action::EditForm(edit) => edit_form(ui, session, edit, &mut effects),
+    Action::ApplyDraft => apply_draft(ui, session, false, &mut effects),
+    Action::ApplyPastCollapse(apply) => {
+        let asked = ui.form.asking.take();
+        if apply && asked.is_some() && asked.as_ref() == ui.form.draft.as_ref().map(|d| &d.form) {
+            apply_draft(ui, session, true, &mut effects);
+        }
+    }
     Action::RebaseDraft(form) => {
         if let Some(draft) = ui.form.draft.as_mut() {
             draft.rebase(form);
@@ -780,8 +795,10 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
 }
 
 /// Only a settled edit's refusal is said: a drag refused partway is still being made.
-fn edit_form(ui: &mut UiState, edit: Result<crate::draft::Edit, crate::draft::Refused>, effects: &mut Vec<Effect>) {
+fn edit_form(ui: &mut UiState, session: &Session, edit: Result<crate::draft::Edit, crate::draft::Refused>, effects: &mut Vec<Effect>) {
+    let start = crate::preview::Start::of(session);
     let applied = match (&edit, ui.form.draft.as_mut()) {
+        (Ok(edit), Some(draft)) if start.as_ref().is_some_and(|s| !s.allows(draft, edit)) => Err(crate::draft::Refused::Unpaid),
         (Ok(edit), Some(draft)) => draft.apply(edit, &lc_world::fitting::Balance::DEFAULT).map(|()| edit),
         (Ok(_), None) => return effects.push(Effect::Notify("there is no draft to edit".into())),
         (Err(refused), _) => Err(*refused),
@@ -803,11 +820,14 @@ fn edit_form(ui: &mut UiState, edit: Result<crate::draft::Edit, crate::draft::Re
 }
 
 /// The refusal, if one comes, is the shard's, and [`crate::uplink`] files it against this target.
-fn apply_draft(ui: &mut UiState, session: &Session, effects: &mut Vec<Effect>) {
+/// A round that would collapse the field is allowed, since a player may choose to die, once asked
+/// twice.
+fn apply_draft(ui: &mut UiState, session: &Session, asked: bool, effects: &mut Vec<Effect>) {
     let Some(draft) = &ui.form.draft else {
         return effects.push(Effect::Notify("there is no draft to apply".into()));
     };
     match crate::ledger::gate(draft, &ui.form.applying, crate::ledger::Situation::of(session)) {
+        Ok(()) if !asked && crate::preview::collapses(session, draft) => ui.form.asking = Some(draft.form.clone()),
         Ok(()) => {
             effects.push(Effect::Send(lc_proto::Order::Refit { target: (&draft.form).into() }));
             ui.form.applying = crate::ledger::Applying::Sent(draft.form.clone());
@@ -1114,6 +1134,68 @@ mod tests {
         assert_eq!(sent, vec![Effect::Send(lc_proto::Order::Refit { target: (&target).into() })]);
         assert_eq!(ui.form.applying, crate::ledger::Applying::Sent(target));
         assert_eq!(apply(Action::ApplyDraft, &mut ui, &mut s), vec![Effect::Notify("waiting for the shard".into())]);
+    }
+
+    /// Docked at a shard with a full starting ship.
+    fn fitted() -> (UiState, Session) {
+        let (ui, mut s) = editing();
+        let form = lc_world::form::Form::starting();
+        s.ship.fit(Some(lc_world::fitting::Fitting::full(form, lc_world::fitting::Balance::DEFAULT, s.coordinate_time_s())));
+        s.remote = true;
+        (ui, s)
+    }
+
+    fn resized(ui: &UiState, kind: lc_world::form::Kind, by: f64) -> crate::draft::Edit {
+        let part = *draft(ui).form.parts.iter().find(|p| p.kind == kind).unwrap();
+        draft(ui).resize(part.id, part.volume_m3 * by).unwrap()
+    }
+
+    #[test]
+    fn an_edit_storage_cannot_pay_for_is_refused_and_a_whole_draft_is_not() {
+        let (mut ui, mut s) = fitted();
+        let now = s.coordinate_time_s();
+        let full = s.ship.fitting().unwrap().capacity_j_at(now);
+        s.ship.drain(full, now);
+        let grow = resized(&ui, lc_world::form::Kind::Engine, 2.0);
+        let effects = apply(Action::EditForm(Ok(grow)), &mut ui, &mut s);
+        assert_eq!(effects, vec![Effect::Notify("refused: storage cannot pay for it".into())]);
+        assert_eq!(draft(&ui).form, draft(&ui).ship, "and nothing changed");
+        let mut bigger = draft(&ui).form.clone();
+        bigger.parts.iter_mut().find(|p| p.kind == lc_world::form::Kind::Engine).unwrap().volume_m3 *= 2.0;
+        let whole = draft(&ui).replace(bigger.clone());
+        assert!(apply(Action::EditForm(Ok(whole)), &mut ui, &mut s).is_empty());
+        assert_eq!(draft(&ui).form, bigger, "a preset or a reset is the player's to choose");
+    }
+
+    #[test]
+    fn a_round_that_collapses_the_field_is_sent_only_when_asked_twice() {
+        let (mut ui, mut s) = fitted();
+        let vent = resized(&ui, lc_world::form::Kind::Storage, 1.0 / 3.0);
+        apply(Action::EditForm(Ok(vent)), &mut ui, &mut s);
+        let target = draft(&ui).form.clone();
+        assert!(apply(Action::ApplyDraft, &mut ui, &mut s).is_empty(), "nothing sent yet");
+        assert_eq!(ui.form.asking.as_ref(), Some(&target));
+        assert!(apply(Action::ApplyPastCollapse(false), &mut ui, &mut s).is_empty());
+        assert_eq!((ui.form.asking.as_ref(), &ui.form.applying), (None, &crate::ledger::Applying::Idle), "back is back");
+
+        apply(Action::ApplyDraft, &mut ui, &mut s);
+        let sent = apply(Action::ApplyPastCollapse(true), &mut ui, &mut s);
+        assert_eq!(sent, vec![Effect::Send(lc_proto::Order::Refit { target: (&target).into() })]);
+        assert_eq!(ui.form.asking, None);
+    }
+
+    #[test]
+    fn the_question_belongs_to_the_draft_it_asked_about() {
+        let (mut ui, mut s) = fitted();
+        let vent = resized(&ui, lc_world::form::Kind::Storage, 1.0 / 3.0);
+        apply(Action::EditForm(Ok(vent)), &mut ui, &mut s);
+        apply(Action::ApplyDraft, &mut ui, &mut s);
+        let twist = draft(&ui).twist(lc_world::form::PartId(5), 0.25).unwrap();
+        apply(Action::EditForm(Ok(twist)), &mut ui, &mut s);
+        assert!(apply(Action::ApplyPastCollapse(true), &mut ui, &mut s).is_empty(), "not an answer about this draft");
+        apply(Action::ApplyDraft, &mut ui, &mut s);
+        apply(Action::ToggleForm, &mut ui, &mut s);
+        assert_eq!(ui.form.asking, None, "leaving the editor puts the question away");
     }
 
     #[test]

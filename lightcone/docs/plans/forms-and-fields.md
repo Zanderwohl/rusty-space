@@ -120,6 +120,7 @@ graph LR
   C7["C7 Field bar"]
   C8["C8 Emit window"]
   C9["C9 Approach buttons"]
+  C10["C10 Preview from the ship's heat"]
   X1["X1 Docs brought current"]
   K1 --> K3
   K1 --> F1
@@ -205,6 +206,8 @@ graph LR
   H6 --> C7
   E3 --> C8
   E5 --> C9
+  H3 --> C10
+  C4 --> C10
   F10 --> X1
   H7 --> X1
   E4 --> X1
@@ -657,9 +660,9 @@ graph LR
 
 ### C4 · Budget and preview
 
-- status: active card "Build C4: budget and preview"
+- status: done #105
 - needs: C2, F7, F8, H1
-- touches: `crates/lc-client/src/form_panel.rs`
+- touches: `crates/lc-client/src/form_panel.rs`, `crates/lc-client/src/preview.rs`, `crates/lc-client/src/form_preview.rs`, `crates/lc-client/src/form_apply.rs`, `crates/lc-client/src/form_handles.rs`, `crates/lc-client/src/form_carry.rs`, `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/draft.rs`, `crates/lc-client/src/refit_panel.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/lib.rs`, `crates/em-ui/src/widgets.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/form/grid.rs`, `lightcone/docs/29-ship-form.md`
 - read: 29 §The budget, §What else it shows
 - deliver: the local planner's round: available, spent, peak in storage, the vent and the field's peak temperature from it; capacities, shadow, slew, headroom and brightness; handles stop at what the budget allows; Apply asks again when the vent would collapse the field.
 - done when: the preview is a pure function tested without a window, and matches the server's plan for the same round.
@@ -708,6 +711,15 @@ graph LR
 - read: 31 §Two ways to approach
 - deliver: Courteous and Direct beside Company and Intimate; the HUD line names the approach.
 - done when: both styles can be ordered from the panel, and the HUD says which is flown.
+
+### C10 · Preview from the ship's heat
+
+- status: todo
+- needs: H3, C4
+- touches: `crates/lc-client/src/preview.rs`, `crates/lc-client/src/refit_panel.rs`
+- read: 29 §The budget; 30 §The heat account
+- deliver: `preview::field_now` returns the ship's own `Q` from `Fitted` as `base_j` rather than the idle field's, and while a round runs the next round's field starts from its target's envelope. The collapse question and the vent's peak temperature, in the editor and the ledger, then start from the heat the ship holds.
+- done when: a warm ship's collapse question fires on a vent an idle ship survives.
 
 ## X: closing
 
