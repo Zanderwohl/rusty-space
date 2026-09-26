@@ -322,11 +322,15 @@ pub struct Shown {
     /// The draft and the ship last drawn, so a frame that changed neither draws nothing. A
     /// failure to solve is kept too, so it is not retried every frame.
     of: Option<(Form, Form)>,
+    /// What the camera frames and the handles are laid against: the drawn bounds, except that
+    /// they hold still through a gesture. A carried part that moved the camera as it hung would
+    /// move the part under the pointer, which would hang it somewhere else again.
+    framed: Option<Extent>,
 }
 
 impl Shown {
     pub fn extent(&self) -> Option<Extent> {
-        self.drawn.as_ref().map(|(_, extent)| *extent)
+        self.framed
     }
 
     pub fn sdf(&self) -> Option<&Sdf> {
@@ -468,9 +472,12 @@ fn start_draft(
 /// Draw the draft solid, and the ship faint wherever the draft differs from it, each changed part
 /// in its mark's color.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn show(
     mut commands: Commands,
     ui: Res<Ui>,
+    carried: Res<crate::form_carry::Carried>,
+    grabbed: Res<crate::form_handles::Grabbed>,
     mut shown: ResMut<Shown>,
     roots: Query<Entity, With<FormViewRoot>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -479,6 +486,11 @@ fn show(
     surfaces: Res<crate::surfaces::Surfaces>,
 ) {
     let Some(draft) = &ui.form.draft else { return };
+    let gesture = carried.is_carrying() || grabbed.is_holding();
+    let framed = framing(shown.framed, shown.drawn.as_ref().map(|(_, extent)| *extent), gesture);
+    if shown.framed != framed {
+        shown.framed = framed;
+    }
     let fresh = shown.of.as_ref().is_none_or(|(form, ship)| *form != draft.form || *ship != draft.ship);
     // Respawned when missing too, since leaving the game takes the copies down.
     if !fresh && (!roots.is_empty() || shown.drawn.is_none()) {
@@ -498,6 +510,7 @@ fn show(
         shown.ghost = ghost;
         shown.marks = draft.marks(&balance);
         shown.of = Some((draft.form.clone(), draft.ship.clone()));
+        shown.framed = framing(shown.framed, shown.drawn.as_ref().map(|(_, extent)| *extent), gesture);
     }
     for root in &roots {
         commands.entity(root).despawn();
@@ -541,6 +554,12 @@ fn show(
             commands.entity(ghost).insert((Dismantled, Visibility::Hidden));
         }
     }
+}
+
+/// What the camera frames: the latest bounds, except through a gesture, when it holds the framing
+/// it had unless it had none.
+pub fn framing(held: Option<Extent>, latest: Option<Extent>, gesture: bool) -> Option<Extent> {
+    if gesture && held.is_some() { held } else { latest }
 }
 
 /// How far a changed part's paint goes toward its mark's color.
@@ -780,7 +799,7 @@ pub fn read_drag(
     mut out: MessageWriter<Requested>,
 ) {
     let cursor = window.cursor_position();
-    let (Some((sdf, extent)), Some(rect)) = (&shown.drawn, surface.laid) else {
+    let (Some(sdf), Some(extent), Some(rect)) = (shown.sdf(), shown.extent(), surface.laid) else {
         *last = None;
         return;
     };
@@ -792,7 +811,7 @@ pub fn read_drag(
     if buttons.just_pressed(MouseButton::Left) {
         // The part is the one the handles would pick, so a press slides exactly where it selects
         // nothing.
-        let lens = crate::form_handles::Lens { orbit: ui.form.orbit.held_to(extent), extent: *extent, rect };
+        let lens = crate::form_handles::Lens { orbit: ui.form.orbit.held_to(&extent), extent, rect };
         *last = cursor
             // A press while carrying a part puts it down, and slides nothing.
             .filter(|at| pointer_free(&egui, &controls) && rect.contains(egui::pos2(at.x, at.y)) && !carried.is_carrying())
@@ -1027,6 +1046,18 @@ mod tests {
         let rect = layout_of(Vec2::new(1280.0, 720.0), 61.0);
         assert_eq!(rect.min, egui::pos2(0.0, 61.0));
         assert_eq!(rect.max, egui::pos2(1280.0, 720.0));
+    }
+
+    /// **The camera holds still through a gesture**: a part hung somewhere new changes the bounds,
+    /// and a camera that followed them would move the part under the pointer, and hang it
+    /// somewhere else again.
+    #[test]
+    fn the_framing_holds_through_a_gesture_and_follows_after_it() {
+        let a = Extent { min: DVec3::splat(-1.0), max: DVec3::ONE };
+        let b = Extent { min: DVec3::splat(-2.0), max: DVec3::ONE };
+        assert_eq!(framing(Some(a), Some(b), true), Some(a));
+        assert_eq!(framing(Some(a), Some(b), false), Some(b), "put down, it reframes");
+        assert_eq!(framing(None, Some(b), true), Some(b), "something is framed from the first");
     }
 
     /// The hangar light comes from the viewer's side, so the face being looked at is lit.
