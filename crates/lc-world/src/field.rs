@@ -362,14 +362,15 @@ mod tests {
         assert_eq!(field.time_to_rise_s(0.0, field.heat_max_j(), field.heat_full_w(&farther)), None);
     }
 
-    /// The gain cancels the broadside, so the shadow's starlight is what `solar` collects on the old
-    /// ovoid today, and re-anchoring the gain in F10 moves no anchor.
+    /// The field is anchored on the starlight `solar` collects on the starting form's broadside, with
+    /// the gain `Balance::DEFAULT` solves there. Before F10 that was the old ovoid's, and the gain
+    /// cancelled the broadside, so moving collection to the shadow moved no anchor.
     #[test]
     fn the_starlight_anchored_on_is_todays() {
         let b = Balance::DEFAULT;
         let start = Start::new(&b);
         let luminosity_w = SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * AU_M * AU_M;
-        let today_w = solar::power_w(&b, 500.0, luminosity_w, RATED_LOAD_AU * AU_M) / b.conversion_efficiency;
+        let today_w = solar::power_w(&b, start.broadside_m2, luminosity_w, RATED_LOAD_AU * AU_M) / b.conversion_efficiency;
         assert!(close(start.starlight_w(RATED_LOAD_AU), today_w, 1e-9), "{} {today_w}", start.starlight_w(RATED_LOAD_AU));
     }
 

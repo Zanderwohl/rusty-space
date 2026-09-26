@@ -1,13 +1,19 @@
 //! Starlight collected by a hull. See `lightcone/docs/20-solar-power.md`.
 //!
-//! Collectors over a whole convex hull deliver `η · flux · ∫ max(0, n·ŝ) dA`, and for a convex body
-//! that integral is the shadow the hull casts along `ŝ`. A ship collects broadside and only when it
-//! is not under way. Income is held constant over segments of coordinate time — see [`segment_end`]
-//! — because distance from the star is not a closed form anyone can integrate cheaply.
+//! Collectors over a whole hull deliver `η · flux · ∫ max(0, n·ŝ) dA`, and for a convex body that
+//! integral is the shadow the hull casts along `ŝ`: the form's shadow table, which also counts a
+//! stack of plates shading itself. A ship collects only when it is not under way. Income is held
+//! constant over segments of coordinate time — see [`segment_end`] — because distance from the star
+//! is not a closed form anyone can integrate cheaply.
+//!
+//! **Every hull rolls its broadside's roll toward its star**, under way or not, so the star lies
+//! across the nose along the direction the roll carries +z onto. What is left to say where the star
+//! is in the ship's frame is the one angle between it and the nose.
 
 use glam::DVec3;
+use lc_proto::form::Geometry;
 
-use crate::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH};
+use crate::form::grid::{Shadow, SHADOW_DIRECTIONS};
 
 /// The grid income segments are cut on: one game day, about 2.4 real seconds at the design rate.
 ///
@@ -22,26 +28,47 @@ pub const SOLAR_MAX_SEGMENTS: f64 = 4_096.0;
 /// star's luminosity, since luminosity is not `const`.
 pub const SOLAR_CONSTANT_W_M2: f64 = 1_361.0;
 
-/// The hull's shadow along `to_star`, m², for a hull of `length_m`.
-///
-/// `to_star` in the hull's own axes: x along the nose, y across the beam, z through the height.
-/// Needs no normalization of the semi-axes' product form: `π √((bc sₓ)² + (ac s_y)² + (ab s_z)²)`
-/// for a unit `s`.
-pub fn silhouette_m2(length_m: f64, to_star: DVec3) -> f64 {
+/// Ship frame: the direction across the nose that `roll_rad` carries +z onto.
+fn across_nose(roll_rad: f64) -> DVec3 {
+    let (s, c) = libm::sincos(roll_rad);
+    DVec3::new(0.0, -s, c)
+}
+
+/// The star in the ship's own frame, for a nose at `cos_nose` to it and the hull at its roll.
+pub fn toward_star(geometry: &Geometry, cos_nose: f64) -> DVec3 {
+    let c = cos_nose.clamp(-1.0, 1.0);
+    DVec3::X * c + across_nose(geometry.broadside_roll_rad) * (1.0 - c * c).sqrt()
+}
+
+/// `nose · ŝ` with the broadside turned to the star. The broadside is signed by its largest
+/// component and the roll by its own range, so the one that faces the star is the sign that agrees
+/// with the roll.
+pub fn idle_cos(geometry: &Geometry) -> f64 {
+    let b = DVec3::from_array(geometry.broadside);
+    let facing = if b.dot(across_nose(geometry.broadside_roll_rad)) < 0.0 { -b } else { b };
+    facing.x.clamp(-1.0, 1.0)
+}
+
+/// The hull's shadow toward its star, m², with its nose at `cos_nose` to it.
+pub fn shadow_m2(geometry: &Geometry, cos_nose: f64) -> f64 {
+    let Ok(m2) = <[f64; SHADOW_DIRECTIONS]>::try_from(geometry.shadow_m2.as_slice()) else { return 0.0 };
+    Shadow::from_m2(m2).along(toward_star(geometry, cos_nose))
+}
+
+/// The nose nearest `attitude` at `cos_nose` to `to_star`: `attitude`'s own bearing about the star,
+/// leaned to that angle. A nose along the star has no bearing about it, and takes the one toward
+/// ecliptic north.
+pub fn idle_nose(attitude: DVec3, to_star: DVec3, cos_nose: f64) -> DVec3 {
     let s = to_star.normalize_or_zero();
-    let (a, b, c) = semi_axes(length_m);
-    std::f64::consts::PI
-        * ((b * c * s.x).powi(2) + (a * c * s.y).powi(2) + (a * b * s.z).powi(2)).sqrt()
-}
-
-/// The largest shadow a hull casts: the star along its short axis.
-pub fn broadside_m2(length_m: f64) -> f64 {
-    silhouette_m2(length_m, DVec3::Z)
-}
-
-fn semi_axes(length_m: f64) -> (f64, f64, f64) {
-    let a = 0.5 * length_m;
-    (a, a * BEAM_PER_LENGTH, a * HEIGHT_PER_LENGTH)
+    let across = attitude - s * attitude.dot(s);
+    let across = if across.length_squared() > 1.0e-12 {
+        across.normalize()
+    } else {
+        let reference = if s.z.abs() > 0.999 { DVec3::X } else { DVec3::Z };
+        (reference - s * reference.dot(s)).normalize_or_zero()
+    };
+    let c = cos_nose.clamp(-1.0, 1.0);
+    (s * c + across * (1.0 - c * c).sqrt()).normalize_or_zero()
 }
 
 /// Starlight at `distance_m` from a star putting out `luminosity_w`, W/m².
@@ -52,12 +79,32 @@ pub fn flux_w_m2(luminosity_w: f64, distance_m: f64) -> f64 {
     luminosity_w / (4.0 * std::f64::consts::PI * distance_m * distance_m)
 }
 
-/// What a hull collects broadside, W: the balance's efficiency and gain times flux times shadow.
-pub fn power_w(balance: &crate::fitting::Balance, length_m: f64, luminosity_w: f64, distance_m: f64) -> f64 {
-    balance.solar_gain
-        * balance.conversion_efficiency
-        * flux_w_m2(luminosity_w, distance_m)
-        * broadside_m2(length_m)
+/// What a shadow of `shadow_m2` collects, W: the balance's efficiency and gain times flux times
+/// shadow. Server and client both price a segment through here.
+pub fn power_w(balance: &crate::fitting::Balance, shadow_m2: f64, luminosity_w: f64, distance_m: f64) -> f64 {
+    balance.solar_gain * balance.conversion_efficiency * flux_w_m2(luminosity_w, distance_m) * shadow_m2
+}
+
+/// The shadow along `to_star` of the ovoid an unformed craft is drawn as, m², for tests that state a
+/// hull by its length. `to_star` in the ovoid's axes: x along the nose, y across the beam, z through
+/// the height.
+#[cfg(test)]
+pub(crate) fn silhouette_m2(length_m: f64, to_star: DVec3) -> f64 {
+    let s = to_star.normalize_or_zero();
+    let (a, b, c) = semi_axes(length_m);
+    std::f64::consts::PI * ((b * c * s.x).powi(2) + (a * c * s.y).powi(2) + (a * b * s.z).powi(2)).sqrt()
+}
+
+/// The ovoid's largest shadow: the star along its short axis.
+#[cfg(test)]
+pub(crate) fn broadside_m2(length_m: f64) -> f64 {
+    silhouette_m2(length_m, DVec3::Z)
+}
+
+#[cfg(test)]
+fn semi_axes(length_m: f64) -> (f64, f64, f64) {
+    let a = 0.5 * length_m;
+    (a, a * crate::craft::BEAM_PER_LENGTH, a * crate::craft::HEIGHT_PER_LENGTH)
 }
 
 /// Where the segment that starts at `from_s` ends: the next grid boundary strictly after it.
@@ -75,13 +122,14 @@ pub fn step_for(from_s: f64, to_s: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{Balance, C2};
-    use crate::form::capacity::Capacities;
-    use crate::form::presets::SLOT_M3;
-    use crate::form::Form;
+    use crate::fitting::{Balance, SOLAR_ANCHOR_AU, STARTING_BROADSIDE_M2};
     use crate::flight::JULIAN_YEAR_S;
-    use crate::system::UNIT_M;
+    use crate::form::capacity::Capacities;
+    use crate::form::grid::FormGrid;
+    use crate::form::presets::{named, Builtin};
+    use crate::form::Form;
     use crate::star::Star;
+    use crate::system::UNIT_M;
 
     /// **Checked against the integral it replaces**, not against itself: tessellate the ellipsoid
     /// and sum `max(0, n·ŝ) dA` over its faces.
@@ -146,31 +194,101 @@ mod tests {
         assert!((flux / SOLAR_CONSTANT_W_M2 - 1.0).abs() < 0.01, "{flux}");
     }
 
-    /// The anchor the gain was derived from, reached the other way round: at 0.1 AU the starting
-    /// ship's collection, less its drain, fills its storage in one Julian year.
-    #[test]
-    fn the_starting_ship_fills_in_a_year_at_a_tenth_of_an_au() {
-        let b = Balance::DEFAULT;
-        let start = Capacities::of(&Form::starting(), &b);
-        let net = power_w(&b, 500.0, SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * UNIT_M * UNIT_M, 0.1 * UNIT_M)
-            - start.drain_w;
-        let years = start.storage_j / net / JULIAN_YEAR_S;
-        assert!((years - 1.0).abs() < 1.0e-9, "{years}");
-        let _ = C2;
+    fn geometry(form: &Form) -> Geometry {
+        FormGrid::new(form, &Balance::DEFAULT).unwrap().geometry(1.0)
     }
 
-    /// Break-even — collection equal to drain — for the doc's three hulls, with its scaled loadouts.
+    fn sol_w() -> f64 {
+        SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * UNIT_M * UNIT_M
+    }
+
+    /// Years to fill from empty, net of the drain, collecting over `shadow_m2` at `d_au`.
+    fn years_to_fill(form: &Form, shadow_m2: f64, d_au: f64) -> f64 {
+        let b = Balance::DEFAULT;
+        let caps = Capacities::of(form, &b);
+        caps.storage_j / (power_w(&b, shadow_m2, sol_w(), d_au * UNIT_M) - caps.drain_w) / JULIAN_YEAR_S
+    }
+
+    #[test]
+    fn the_starting_broadside_is_pinned() {
+        let solved = FormGrid::new(&Form::starting(), &Balance::DEFAULT).unwrap().broadside_m2();
+        assert!((solved / STARTING_BROADSIDE_M2 - 1.0).abs() < 1.0e-9, "pinned {STARTING_BROADSIDE_M2}, the starting form solves to {solved:?}");
+    }
+
+    /// 20's anchor, reached the other way round: at 0.1 AU the starting ship fills in a year on the
+    /// table it collects on, idle, at the broadside itself, and within a couple of degrees of it.
+    /// The table is interpolated, so a direction off its vertices is the one worth checking.
+    #[test]
+    fn the_starting_ship_fills_in_a_year_at_a_tenth_of_an_au() {
+        let form = Form::starting();
+        let g = geometry(&form);
+        let idle = years_to_fill(&form, shadow_m2(&g, idle_cos(&g)), SOLAR_ANCHOR_AU);
+        assert!((idle - 1.0).abs() < 0.01, "idle: {idle} years");
+        let table = Shadow::from_m2(g.shadow_m2.clone().try_into().unwrap());
+        let broadside = DVec3::from_array(g.broadside);
+        let (e1, e2) = (broadside.cross(DVec3::X).normalize(), broadside.cross(DVec3::Y).normalize());
+        for off in [DVec3::ZERO, e1, -e1, e2, e2 + e1, -e2 - 0.5 * e1] {
+            let s = (broadside + off * 2.0_f64.to_radians()).normalize();
+            let years = years_to_fill(&form, table.along(s), SOLAR_ANCHOR_AU);
+            assert!((years - 1.0).abs() < 0.01, "{s}: {years} years");
+        }
+        let exact = years_to_fill(&form, STARTING_BROADSIDE_M2, SOLAR_ANCHOR_AU);
+        assert!((exact - 1.0).abs() < 1.0e-9, "{exact}");
+    }
+
+    /// The idle attitude presents the largest shadow the table has, whichever way the form's
+    /// broadside leans and rolls.
+    #[test]
+    fn idle_presents_the_broadside() {
+        let mut all = vec![Form::starting()];
+        all.extend(Builtin::ALL.map(Builtin::form));
+        for form in all {
+            let grid = FormGrid::new(&form, &Balance::DEFAULT).unwrap();
+            let g = grid.geometry(1.0);
+            let idle = shadow_m2(&g, idle_cos(&g));
+            assert!((idle / grid.broadside_m2() - 1.0).abs() < 0.01, "{idle} against {}", grid.broadside_m2());
+            assert!(toward_star(&g, idle_cos(&g)).dot(grid.broadside()).abs() > 0.999);
+            let largest = g.shadow_m2.iter().copied().fold(0.0, f64::max);
+            assert!(idle > 0.99 * largest, "{idle} against the table's {largest}");
+        }
+    }
+
+    #[test]
+    fn a_plate_collects_more_than_a_spindle_of_the_same_volume() {
+        let (plate, spindle) = (Builtin::Plate.form(), Builtin::Spindle.form());
+        let volume = |form: &Form| form.parts.iter().map(|p| p.volume_m3).sum::<f64>();
+        assert!((volume(&plate) / volume(&spindle) - 1.0).abs() < 1.0e-9, "premise: the same volume");
+        let collected = |form: &Form| {
+            let g = geometry(form);
+            shadow_m2(&g, idle_cos(&g))
+        };
+        let (flat, long) = (collected(&plate), collected(&spindle));
+        assert!(flat > 1.4 * long, "the plate casts {flat}, the spindle {long}");
+    }
+
+    /// Break-even — collection equal to drain — for 20's three hulls: the starting form, twice and
+    /// ten times as long.
     #[test]
     fn break_even_moves_inward_as_hulls_grow() {
         let b = Balance::DEFAULT;
-        let sol = SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * UNIT_M * UNIT_M;
-        for (length, expected_au) in [(500.0, 3.87), (1_000.0, 2.74), (5_000.0, 1.23)] {
-            let slots: f64 = (length / 500.0f64).powi(3) * 20.0;
-            let drain = 0.1 * slots * SLOT_M3 * b.living_density_w;
-            let at_one_au = power_w(&b, length, sol, UNIT_M);
-            let au = (at_one_au / drain).sqrt();
-            assert!((au - expected_au).abs() < 0.01, "{length} m breaks even at {au} AU");
+        for (scale, expected_au) in [(1.0, 5.47), (2.0, 3.87), (10.0, 1.73)] {
+            let form = named("default", scale).unwrap();
+            let g = geometry(&form);
+            let at_one_au = power_w(&b, shadow_m2(&g, idle_cos(&g)), sol_w(), UNIT_M);
+            let au = (at_one_au / Capacities::of(&form, &b).drain_w).sqrt();
+            assert!((au - expected_au).abs() < 0.01, "{scale}× breaks even at {au} AU");
         }
+    }
+
+    #[test]
+    fn an_idle_nose_keeps_its_bearing_about_the_star() {
+        let s = DVec3::X;
+        assert_eq!(idle_nose(DVec3::new(1.0, 1.0, 0.0), s, 0.0), DVec3::Y);
+        assert_eq!(idle_nose(DVec3::Z, s, 0.0), DVec3::Z);
+        let head_on = idle_nose(-DVec3::X, s, 0.0);
+        assert!(head_on.dot(s).abs() < 1.0e-12 && head_on.is_normalized(), "{head_on}");
+        let leaning = idle_nose(DVec3::new(-1.0, 1.0, 0.0), s, 0.5);
+        assert!((leaning.dot(s) - 0.5).abs() < 1.0e-12 && leaning.z == 0.0 && leaning.y > 0.0, "{leaning}");
     }
 
     #[test]

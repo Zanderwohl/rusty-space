@@ -648,7 +648,7 @@ fn draw(
 }
 
 fn build(commands: &mut Commands, looks: &Looks, part: PartId, handles: &Handles) {
-    let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z));
+    let turn = crate::hull::frame(DVec3::X, Some(DVec3::Z), 0.0);
     let root = commands.spawn((Transform::from_rotation(turn), Visibility::default(), HandleRoot(Some(part)))).id();
     let mut bits = Vec::new();
     for grip in handles.grips() {

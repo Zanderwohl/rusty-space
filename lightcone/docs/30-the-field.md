@@ -172,9 +172,9 @@ starting envelope, through `envelope_margin` say, moves them with it.
 
 The starlight in the third anchor falls on the shadow table's broadside, with the gain that
 [20-solar-power.md](20-solar-power.md)'s anchor gives on that broadside. That is what the account
-reads once collection moves to the shadow and the gain moves to the star. Since that anchor fixes
-what the starting ship collects, the broadside cancels: `τ` is the same whichever shadow it is
-worked on, and agrees with the old ovoid's collection. The gain has to be solved on the same
+reads now that collection is on the shadow, and will once the gain moves to the star. Since that
+anchor fixes what the starting ship collects, the broadside cancels: `τ` is the same whichever
+shadow it is worked on, and agrees with the old ovoid's collection. The gain has to be solved on the same
 broadside the starlight falls on: the old gain on the new, smaller broadside would give
 2.79 × 10⁶ s and a field failing at 4 126 K.
 
@@ -264,7 +264,7 @@ receiver's shadow toward the source.
   contact or inside a bay.
 - **A collapse's spike** is a burst: all of it becomes heat on arrival, whatever storage is empty.
 - **A neighbor's exhaust** is directed, spreads at `drive_spread_rad`, and cooks a full ship within a
-  few kilometers behind a starting ship's drive and within 84 km behind a 5 km ship's. See
+  few kilometers behind a starting ship's drive and within 68 km behind a 5 km ship's. See
   [31-directed-energy.md](31-directed-energy.md#exhaust-lands-on-whatever-is-behind).
 - **Beams** are directed, and are [31-directed-energy.md](31-directed-energy.md).
 

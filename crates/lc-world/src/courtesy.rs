@@ -243,7 +243,7 @@ fn clearance_m(a: DVec3, b: DVec3) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::emit::{flux_w_m2, rating_w, received_fraction};
-    use crate::fitting::{C2, STARTING_DRY_KG};
+    use crate::fitting::{C2, STARTING_BROADSIDE_M2, STARTING_DRY_KG};
     use crate::form::presets::SLOT_M3;
     use crate::solar::broadside_m2;
 
@@ -267,14 +267,14 @@ pub(crate) mod tests {
     #[test]
     fn the_cooking_flux_is_the_rated_load_over_the_shadow() {
         let flux = cooking_flux_w_m2(&Balance::DEFAULT);
-        assert_eq!(sig2(flux * broadside_m2(500.0)), "7.6e19");
+        assert_eq!(sig2(flux * STARTING_BROADSIDE_M2), "7.6e19");
     }
 
     /// 31 §Exhaust lands on whatever is behind.
     #[test]
     fn exhaust_cooking_distance_table() {
         let b = Balance::DEFAULT;
-        let rows = [("1.1e20", "2.6e3"), ("1.1e23", "8.4e4"), ("1.1e26", "2.6e6")];
+        let rows = [("1.1e20", "2.1e3"), ("1.1e23", "6.8e4"), ("1.1e26", "2.1e6")];
         for (length, (power, distance)) in LENGTHS_M.into_iter().zip(rows) {
             let (p, _) = scaled(&b, length);
             assert_eq!(sig2(p), power, "{length} m");
@@ -291,7 +291,7 @@ pub(crate) mod tests {
     #[test]
     fn thrusters_cooking_distance_table() {
         let b = Balance::DEFAULT;
-        let rows = [("2.1e17", "1.0e1"), ("2.1e20", "3.3e2"), ("2.1e23", "1.0e4")];
+        let rows = [("2.1e17", "8.4e0"), ("2.1e20", "2.6e2"), ("2.1e23", "8.4e3")];
         for (length, (power, distance)) in LENGTHS_M.into_iter().zip(rows) {
             let (_, kg) = scaled(&b, length);
             let p = thrusters_power_w(&b, kg);
@@ -304,7 +304,7 @@ pub(crate) mod tests {
     #[test]
     fn drive_courtesy_radius_table() {
         let b = Balance::DEFAULT;
-        for (length, radius) in LENGTHS_M.into_iter().zip(["2.6e4", "8.4e5", "2.6e7"]) {
+        for (length, radius) in LENGTHS_M.into_iter().zip(["2.1e4", "6.8e5", "2.1e7"]) {
             let (p, _) = scaled(&b, length);
             assert_eq!(sig2(drive_courtesy_radius_m(&b, p)), radius, "{length} m");
         }
