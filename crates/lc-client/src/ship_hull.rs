@@ -295,7 +295,7 @@ pub fn draw_hulls(
     let session = &game.0;
     let star = lighting(session);
     let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
-    let wanted = wanted(&mut stated, session, &uplink, &eye, &ui, &own, balance);
+    let wanted = wanted(&mut stated, session, &uplink, &eye, &ui, (&own, own.is_changed()), balance);
     rolls.land(&wanted.iter().map(|w| w.form.hash).collect());
 
     for (entity, hull, _) in &hulls {
@@ -401,14 +401,14 @@ fn wanted(
     uplink: &crate::uplink::Uplink,
     eye: &Eye,
     ui: &crate::app::Ui,
-    own: &Res<crate::parts::OwnForm>,
+    (own, own_changed): (&crate::parts::OwnForm, bool),
     balance: Balance,
 ) -> Vec<Wanted> {
     let look = ui.look.forward();
     let mut out = Vec::with_capacity(uplink.contacts.len() + 1);
     match own.form() {
         Some(form) => {
-            if own.is_changed() || stated.own.is_none() {
+            if own_changed || stated.own.is_none() {
                 let hash = form_hash(form, &own.balance());
                 stated.own = Some(Decoded { form: Arc::new(form.clone()), hash });
             }
@@ -491,4 +491,75 @@ fn spawn_placeholders(
         ));
     }
     root
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lc_world::form::presets::Builtin;
+
+    const B: Balance = Balance::DEFAULT;
+
+    fn contact(id: i64, form: &Form) -> crate::uplink::Contact {
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(id),
+            name: format!("ship {id}"),
+            length_m: 500.0,
+            at_ly: [0.0; 3],
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            jet_power_w: 0.0,
+            emitted_t: 0,
+            arrive_t: 3_600_000_000,
+            form: form.into(),
+            building: None,
+            glow: None,
+            glare: None,
+        };
+        crate::uplink::Contact::seen(presence, None)
+    }
+
+    fn session() -> Session {
+        Session::new(&lc_world::sky::AuthoredStars::sample(), 3)
+    }
+
+    /// A form the shard states is the form a round's plan holds, so the hand-back after a round
+    /// matches on the hash rather than waiting out its timeout.
+    #[test]
+    fn a_form_hashes_alike_after_the_wire() {
+        for form in [Form::starting(), Builtin::Cluster.form(), Builtin::Plate.form(), Builtin::Spindle.form()] {
+            let across = Form::from(&lc_proto::Form::from(&form));
+            assert_eq!(form_hash(&form, &B), form_hash(&across, &B));
+        }
+    }
+
+    /// Every craft with a form is wanted and no other, a stated form is decoded once while it
+    /// stands, and one swapped under a ship is decoded anew.
+    #[test]
+    fn each_formed_craft_is_wanted_and_decoded_once() {
+        let (session, eye, ui) = (session(), Eye::default(), crate::app::Ui(Default::default()));
+        let own = crate::parts::OwnForm::new(&Form::starting(), &B).unwrap();
+        let mut uplink = crate::uplink::Uplink::default();
+        uplink.contacts = vec![contact(1, &Builtin::Cluster.form()), contact(2, &Form { parts: vec![] }), contact(3, &Form::starting())];
+        let mut stated = Stated::default();
+
+        let first = wanted(&mut stated, &session, &uplink, &eye, &ui, (&own, true), B);
+        let crafts: Vec<_> = first.iter().map(|w| w.craft).collect();
+        assert_eq!(crafts, [None, Some(ShipId(1)), Some(ShipId(3))], "the formless contact is the ovoid's");
+        assert_eq!(first[0].form.hash, first[2].form.hash, "one design, one hash, one mesh");
+
+        let again = wanted(&mut stated, &session, &uplink, &eye, &ui, (&own, false), B);
+        for (a, b) in first.iter().zip(&again) {
+            assert!(Arc::ptr_eq(&a.form.form, &b.form.form), "{:?} decoded again", a.craft);
+        }
+
+        uplink.contacts[0] = contact(1, &Builtin::Plate.form());
+        let swapped = wanted(&mut stated, &session, &uplink, &eye, &ui, (&own, false), B);
+        assert_ne!(swapped[1].form.hash, first[1].form.hash, "the new form was not taken");
+        assert_eq!(swapped[1].form.hash, form_hash(&Builtin::Plate.form(), &B));
+
+        uplink.contacts.truncate(1);
+        wanted(&mut stated, &session, &uplink, &eye, &ui, (&own, false), B);
+        assert_eq!(stated.contacts.len(), 1, "a contact gone out of sight kept its decoded form");
+    }
 }

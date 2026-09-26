@@ -124,8 +124,10 @@ pub fn draw_refit(
         let handed = ending.form.is_none_or(|form| real.own_current() == Some(form));
         ending.waited_s += time.delta_secs();
         if handed || ending.waited_s > HAND_BACK_S || generations.is_empty() {
-            if !handed && !generations.is_empty() {
-                warn!("refit_hull: the real hull never became the form the round left");
+            match (handed, generations.is_empty()) {
+                (_, true) => {}
+                (true, false) => info!("refit_hull: handed back to the real hull after {:.2} s", ending.waited_s),
+                (false, false) => warn!("refit_hull: the real hull never became the form the round left"),
             }
             for (root, ..) in &generations {
                 commands.entity(root).despawn();
