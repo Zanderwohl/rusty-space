@@ -269,7 +269,11 @@ impl<J: Journal> Server<J> {
                         fitting.set_balance(self.balance);
                         craft.fit(Some(fitting));
                     }
+                    // Entering starts a starlight segment, and the saved one is still in force:
+                    // sampled again, a restart would move a collapse.
+                    let fitting = craft.fitting().cloned();
                     craft.enter(system, row.saved_t as f64 * 1.0e-6);
+                    craft.fit(fitting);
                     catch_up(&mut craft, row.saved_t, checkpoint.now_t);
                     // Its owner is told of each step from here, as before the restart.
                     let refit = craft.fitting().and_then(|f| f.refit()).filter(|plan| !plan.is_done(now_s));
