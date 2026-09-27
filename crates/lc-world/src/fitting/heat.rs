@@ -56,40 +56,64 @@ impl Fitting {
     /// land. Room and free storage carry across cuts, so where settlements fall changes nothing.
     /// A refit's transfers and a burn's spending are left out, as the settled terms leave them out.
     pub(super) fn flow(&self, now_s: f64) -> Flow {
+        self.walk(now_s, |_, _, _, _| false)
+    }
+
+    /// When `Q` first reaches `Q_max` from the settlement on, if the inputs in force hold and the
+    /// round runs as planned. A vent that crosses it does so at the end of its step.
+    pub fn collapse_s(&self) -> Option<f64> {
+        let field = self.field();
+        let max_j = field.heat_max_j();
+        let mut found = None;
+        self.walk(f64::INFINITY, |from_s, segment, heat_j, dt_s| {
+            found = field.segment_time_to_rise_s(segment, heat_j, max_j).filter(|&t| t <= dt_s).map(|t| from_s + t);
+            found.is_some()
+        });
+        found
+    }
+
+    /// Settle stretch by stretch to `until_s`, first offering `stop` each stretch of constant
+    /// inputs as its start, inputs, heat and length. Stops where `stop` says, with the flow to that
+    /// stretch's start. A vent lands between stretches, so the next starts from it.
+    fn walk(&self, until_s: f64, mut stop: impl FnMut(f64, &Segment, f64, f64) -> bool) -> Flow {
         let field = self.field();
         let mut flow = Flow { heat_j: self.heat_j, income_j: 0.0 };
-        if now_s <= self.since_s {
+        if until_s <= self.since_s {
             return flow;
         }
         let mut room_j = self.hull.capacities.storage_j - self.stored_j;
         let mut free_j = self.stored_j - self.committed_j;
         let mut at_s = self.since_s;
-        for (until_s, losing_w, vent_j) in pieces(self.refit.as_ref(), &self.balance, self.since_s, now_s) {
-            let (heat_j, storage_j) = settle(&field, &self.intake(losing_w, room_j), flow.heat_j, free_j, until_s - at_s);
-            flow.heat_j = heat_j + vent_j;
-            flow.income_j += storage_j;
-            room_j -= storage_j;
-            free_j += storage_j;
-            at_s = until_s;
+        for (end_s, losing_w, vent_j) in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s) {
+            for (part, dt_s) in split(self.intake(losing_w, room_j), free_j, end_s - at_s) {
+                if stop(at_s, &part, flow.heat_j, dt_s) {
+                    return flow;
+                }
+                let settled = field.settle(&part, flow.heat_j, dt_s);
+                flow.heat_j = settled.heat_j;
+                flow.income_j += settled.storage_j;
+                room_j -= settled.storage_j;
+                free_j += settled.storage_j;
+                at_s += dt_s;
+            }
+            flow.heat_j += vent_j;
+            at_s = end_s;
         }
         flow
     }
 }
 
-/// [`Field::settle`], split where storage runs down to what is committed. From there the draw takes
-/// only what conversion brings in, and what it cannot pay makes no heat.
-fn settle(field: &Field, segment: &Segment, heat_j: f64, free_j: f64, dt_s: f64) -> (f64, f64) {
+/// A segment over `dt_s`, split where storage runs down to what is committed. From there the draw
+/// takes only what conversion brings in, and what it cannot pay makes no heat.
+fn split(segment: Segment, free_j: f64, dt_s: f64) -> impl Iterator<Item = (Segment, f64)> {
     let short_w = segment.draw_w - segment.stored_w();
     let empty_s = if short_w > 0.0 { free_j.max(0.0) / short_w } else { f64::INFINITY };
     if empty_s >= dt_s {
-        let settled = field.settle(segment, heat_j, dt_s);
-        return (settled.heat_j, settled.storage_j);
+        return [Some((segment, dt_s)), None].into_iter().flatten();
     }
-    let draining = field.settle(segment, heat_j, empty_s);
     let paid_w = segment.stored_w();
-    let starved = Segment { draw_w: paid_w, internal_w: segment.internal_w - segment.draw_w + paid_w, ..*segment };
-    let rest = field.settle(&starved, draining.heat_j, dt_s - empty_s);
-    (rest.heat_j, draining.storage_j + rest.storage_j)
+    let starved = Segment { draw_w: paid_w, internal_w: segment.internal_w - segment.draw_w + paid_w, ..segment };
+    [Some((segment, empty_s)), Some((starved, dt_s - empty_s))].into_iter().flatten()
 }
 
 /// `(until_s, losing_w, vent_j)` for each stretch of constant refit heat from `since_s` to `now_s`:
