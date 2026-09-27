@@ -842,7 +842,7 @@ impl From<&Fitting> for lc_proto::Fitting {
             since_s: a.since_s,
             rapidity_since: a.rapidity_since,
             committed_j: a.committed_j,
-            solar_w: a.starlight_w,
+            starlight_w: a.starlight_w,
             refit: a.refit.as_ref().map(Into::into),
         }
     }
@@ -858,7 +858,7 @@ impl Fitting {
             rapidity_since: f.rapidity_since,
             committed_j: f.committed_j,
             heat_j: 0.0,
-            starlight_w: f.solar_w,
+            starlight_w: f.starlight_w,
             refit: f.refit.as_ref().map(Into::into),
         };
         let mut fitting = Fitting::from_account(&account, f.balance.into());
@@ -874,7 +874,7 @@ impl From<&lc_proto::Fitting> for Fitting {
 }
 
 impl From<&Fitting> for lc_proto::Field {
-    /// In [`MODE`], with no switch: nothing orders one until the modes are kept.
+    /// In [`MODE`], with no switch: nothing orders one until the modes are built (H6).
     fn from(f: &Fitting) -> Self {
         use lc_proto::{FieldMode, Shade};
         let (mode, shade) = match MODE {

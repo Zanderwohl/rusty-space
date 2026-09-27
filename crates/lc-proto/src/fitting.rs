@@ -108,6 +108,6 @@ pub struct Fitting {
     pub rapidity_since: f64,
     pub committed_j: f64,
     /// Starlight arriving at the field in the segment that began at `since_s`, watts.
-    pub solar_w: f64,
+    pub starlight_w: f64,
     pub refit: Option<Round>,
 }

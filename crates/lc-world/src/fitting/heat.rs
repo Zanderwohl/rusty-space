@@ -5,7 +5,7 @@ use super::{Balance, Fitting, Hull};
 use crate::field::{Field, Mode, Segment};
 use crate::refit::rounds::{Phase, Plan, Step};
 
-/// Every field runs Black until the modes are kept.
+/// Every field runs Black until the modes are built (H6).
 pub const MODE: Mode = Mode::Black;
 
 /// Heat at `now_s`, and what conversion stored less what living space drew since the settlement.

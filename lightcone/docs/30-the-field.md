@@ -10,7 +10,8 @@ collapses yet. A ship whose storage has run down to what its motive has committe
 of the living drain as conversion brings in, and the rest makes no heat, so an empty ship far from
 a star cools below 400 K. A refit's transfers and a burn's spending are settled beside the account
 rather than inside it, so room a build opens in full storage is refilled from the next settlement,
-a game day at most, and until then what would have filled it is heat. It replaces the fixed 400 K hull
+a game day at most, and until then what would have filled it is heat; and a return landing in room
+starlight has already filled can hold storage above capacity until then. H8 closes both. It replaces the fixed 400 K hull
 (`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
 [20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
 Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
@@ -177,8 +178,8 @@ not move the idle anchor. The anchors hold for the default geometry: a shard tha
 starting envelope, through `envelope_margin` say, moves them with it.
 
 The starlight in the third anchor falls on the shadow table's broadside, with the gain that
-[20-solar-power.md](20-solar-power.md)'s anchor gives on that broadside. That is what the account
-reads now that collection is on the shadow, and will once the gain moves to the star. Since that
+[20-solar-power.md](20-solar-power.md)'s anchor gives on that broadside, and the gain now sits on
+the star's output. Since that
 anchor fixes what the starting ship collects, the broadside cancels: `τ` is the same whichever
 shadow it is worked on, and agrees with the old ovoid's collection. The gain has to be solved on the same
 broadside the starlight falls on: the old gain on the new, smaller broadside would give

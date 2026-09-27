@@ -871,11 +871,10 @@ fn fold(
             Err(why) => warn!(%why, "a log page that would not parse"),
         },
         Outbound::Observing { duty, integration_s } => game.0.adopt_duty(&duty, integration_s),
-        // Taken whole, like `Flying`: the authority's account, settled. The field is read once
-        // H3 sends it.
-        Outbound::Fitted { ship_id, fitting, hull, .. } => {
+        // Taken whole, like `Flying`: the authority's account and its field, settled together.
+        Outbound::Fitted { ship_id, fitting, hull, field } => {
             if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
-                game.0.ship.fit(Some((&fitting).into()));
+                game.0.ship.fit(Some(lc_world::fitting::Fitting::from_wire(&fitting, field.as_ref())));
                 uplink.fitting = Some(fitting);
                 uplink.hull = Some(hull);
             }
@@ -1053,6 +1052,29 @@ mod tests {
             )),
             crate::app::Ui(crate::ui::UiState::default()),
         )
+    }
+
+    /// Heat weighs, so a client that dropped the field would fly a lighter ship than the
+    /// authority's.
+    #[test]
+    fn a_fitted_field_is_the_ships_heat() {
+        use lc_world::fitting::{Account, Balance, Fitting};
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let b = Balance::DEFAULT;
+        let full = Fitting::full(lc_world::form::Form::starting(), b, 0.0);
+        let hot = Fitting::from_account(&Account { heat_j: 5.0 * b.module_energy_j(), ..full.account() }, b);
+        let fitted = Outbound::Fitted {
+            ship_id: ShipId(7),
+            fitting: (&hot).into(),
+            hull: (&hot).into(),
+            field: Some((&hot).into()),
+        };
+        fold(&mut uplink, &mut game, &mut ui, fitted);
+        let ship = &game.0.ship;
+        assert_eq!(ship.fitting(), Some(&hot));
+        let motion = &ship.motion;
+        assert_eq!(ship.fitting().unwrap().mass_kg_at(motion, 0.0), hot.mass_kg_at(motion, 0.0));
     }
 
     #[test]

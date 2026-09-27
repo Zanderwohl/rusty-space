@@ -1384,7 +1384,7 @@ mod tests {
                 since_s: 1.0e6,
                 rapidity_since: 0.125,
                 committed_j: 1.0e24,
-                solar_w: 2.5e17,
+                starlight_w: 2.5e17,
                 refit: Some(Round { from: two_parts(), target: Form::default(), stored_j: 4.2e26, start_s: 1.0e6 }),
             },
             hull: Hull {
