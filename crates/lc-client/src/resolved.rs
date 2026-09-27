@@ -200,13 +200,15 @@ pub fn sample_scene(
     let hull_star = crate::hull::lighting(&game.0);
     // The length the boom was counted in, so the disc and the standoff agree.
     let own_length_m = own_form.length_m().unwrap_or(game.ship.length_m);
-    let hulls = std::iter::once((own_length_m, eye.boom_m, observer))
+    let look = ui.look.forward();
+    let hulls = std::iter::once((own_length_m, eye.boom_m, game.0.ship.motion.position_ly, None))
         .chain(uplink.contacts.iter().map(|c| {
-            (c.length_m, c.position_ly.distance(observer) * M_PER_LY, c.position_ly)
+            (c.length_m, c.position_ly.distance(observer) * M_PER_LY, c.position_ly, Some(c.ship_id))
         }));
-    for (length_m, distance_m, at_ly) in hulls {
+    for (length_m, distance_m, at_ly, craft) in hulls {
+        let to_eye = -eye.offset_m(at_ly, craft, look);
         scene.discs.push(Disc {
-            radiance: crate::hull::radiance_at(hull_star, at_ly),
+            radiance: crate::hull::radiance_at(hull_star, at_ly, to_eye),
             solid_angle_sr: crate::hull::solid_angle_sr(length_m, distance_m),
         });
     }

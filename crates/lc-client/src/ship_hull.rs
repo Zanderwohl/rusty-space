@@ -160,7 +160,7 @@ pub(crate) fn finished(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly
         }
     }
     HullUniform {
-        to_star: base.to_star,
+        to_star: base.to_star.truncate().extend(crate::hull::HULL_NIGHT),
         reflected: base.reflected / ALBEDO as f32,
         exposure: base.exposure,
         detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
