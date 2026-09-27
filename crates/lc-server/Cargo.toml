@@ -38,6 +38,8 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 ureq = { version = "2", features = ["json", "tls"] }
 
 [dev-dependencies]
+# For `examples/knowledge_dump`, which names Sol's bodies from the catalog.
+lc-world = { path = "../lc-world", features = ["hyg"] }
 ed25519-dalek = { version = "2", features = ["pkcs8"] }
 base64 = "0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
