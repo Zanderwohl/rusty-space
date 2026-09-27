@@ -642,18 +642,19 @@ pub(super) fn pivot(looks: &[Look]) -> Option<f64> {
 /// by [`refit`] rather than searched for again.
 const STILL_AGREES: f64 = 3.0;
 
-/// An orbit already fitted, carried onto a longer arc of the same body: the search seeded with
-/// where that orbit puts the body rather than run over the whole grid. `None` when the arc no
+/// An orbit already fitted, carried onto a longer arc of the same body. `None` when the arc no
 /// longer agrees with it, which is the caller's cue to [`fit`] from scratch.
 ///
 /// **This is most of the fitting a survey does.** A body is refitted each time its arc grows by
-/// half, and the grid is sixty-five thousand range pairs; a seeded polish is a few hundred. The
-/// grid is what finds an orbit, not what improves one.
+/// half, and the grid is sixty-five thousand range pairs. The grid is what finds an orbit, not
+/// what improves one.
 ///
-/// Polished in the ranges and then settled, as a search's candidates are. With the pattern
-/// search that settle replaced, settling the old elements alone stalled three hundred times
-/// worse than the search. With Gauss-Newton it does not: measured, a settle from the held orbit
-/// lands where this does, turn counts included, in a third of the time. Not yet taken.
+/// Settled from the held elements first. Only where that does not land cleanly is the search
+/// seeded with where the held orbit puts the body, polished in the ranges and settled, as a
+/// search's candidates are, and the better of the two kept. The seeded search can recover a
+/// held orbit too far out for a settle, and a settle can beat it: over fifteen days of Sol, 13
+/// of 46 refits settled cleanly, and 3 more settled better than the search did. A refit costs
+/// milliseconds either way, so this is for the answer and not the time.
 ///
 /// A circle assumed for want of arc is never carried: a longer arc is exactly what may shape
 /// the conic it could not.
@@ -661,7 +662,28 @@ pub fn refit(held: &Fitted, looks: &[Look]) -> Option<Fitted> {
     if held.assumed_circular {
         return None;
     }
-    fit_from(looks, Some(held))
+    let settled = Some(settle(*held, looks, SETTLINGS * 8))
+        .filter(|f| !f.assumed_circular && residual(f, looks, f64::INFINITY).is_some());
+    if settled.is_some_and(|f| f.residual_rad <= held.residual_rad * SETTLED_CLEANLY) {
+        return settled;
+    }
+    // Agreeing is not enough on its own: a settle that stops in a nearby minimum three times
+    // worse still agrees, and on Sol that carried Mars from a fifth of its bar out to five.
+    let searched = fit_from(looks, Some(held));
+    [searched, settled.filter(|f| still_agrees(f, held))]
+        .into_iter()
+        .flatten()
+        .min_by(|a, b| a.residual_rad.total_cmp(&b.residual_rad))
+}
+
+/// How much worse than the orbit it carries a settle may explain the longer arc and be taken
+/// without the seeded search behind it. About the scatter of a noise-limited chi-square over
+/// sixteen looks, so a settle at the noise passes and one in a nearby minimum does not.
+const SETTLED_CLEANLY: f64 = 1.5;
+
+/// Whether a fit carried onto a longer arc explains it nearly as well as `held` did its own.
+fn still_agrees(carried: &Fitted, held: &Fitted) -> bool {
+    !carried.assumed_circular && carried.residual_rad <= held.residual_rad * STILL_AGREES
 }
 
 // Per thread, so tests running side by side do not count each other's searches.
@@ -1108,6 +1130,44 @@ mod tests {
         let carried = refit(&held, &long).expect("the held period says how many turns");
         assert!(off(carried.period_s, period) < 1.0e-5, "period off by {}", off(carried.period_s, period));
         assert!(off(carried.semi_major_m, truth.semi_major_m) < 1.0e-3);
+    }
+
+    /// **A refit is a settle where the held orbit is good,** and searches nothing: the seeded
+    /// search behind it costs three times as much and lands in the same place.
+    #[test]
+    fn a_good_orbit_is_carried_by_a_settle() {
+        let truth = like(1.524, 0.0934);
+        let seen = looks(&truth, 5.0, 48, 5.0 * DAY_S, SIGMA);
+        let half = fit(&seen[..24]).expect("half the arc fits");
+        SCORED.with(|n| n.set(0));
+        let carried = refit(&half, &seen).expect("the longer arc agrees");
+        assert_eq!(SCORED.with(|n| n.get()), 0, "a good orbit was searched for again");
+        let floor = residual(&truth.fitted(), &seen, f64::INFINITY).expect("the truth scores");
+        assert!(carried.residual_rad <= floor, "{} against a floor of {floor}", carried.residual_rad);
+    }
+
+    /// **A held period that miscounts the turns is not settled into a wrong count.** Two
+    /// percent out over forty orbits is most of a turn by the end, which a settle cannot climb
+    /// out of, so it disagrees and the seeded search takes over. From half a percent out the
+    /// settle lands on the truth where the seeded search alone took an alias 3.2 times the
+    /// period: sixteen looks 2.63 orbits apart fit several periods at the noise, and the search
+    /// counts turns from whatever period it is handed. That alias is still open behind the
+    /// settle, so this asserts only that the settle makes nothing worse.
+    #[test]
+    fn a_period_that_miscounts_the_turns_is_not_settled_into_a_wrong_count() {
+        let truth = like(0.387, 0.2056);
+        let period = truth.period_s();
+        let held = fit(&looks(&truth, 5.0, 24, period / 20.0, SIGMA)).expect("an orbit and a fifth fits");
+        let long = looks(&truth, 5.0, 16, period * 2.63, SIGMA);
+        for factor in [1.005, 1.02, 0.98, 1.1] {
+            let wrong = Fitted { period_s: held.period_s * factor, ..held };
+            let carried = refit(&wrong, &long);
+            let right = carried.is_some_and(|f| off(f.period_s, period) < 1.0e-5);
+            assert!(right || carried == fit_from(&long, Some(&wrong)), "{factor}: {carried:?}");
+            if factor == 1.005 {
+                assert!(right, "half a percent out is what a settle recovers: {carried:?}");
+            }
+        }
     }
 
     /// **And never carries a wrong orbit forward**: seeded from one, it either finds its way to

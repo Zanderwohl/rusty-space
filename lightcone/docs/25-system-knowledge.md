@@ -716,6 +716,17 @@ what it came to:
   of an orbit, and Earth, Mars and Mercury over 0.9 to 3 orbits. The grid, the polish and the
   rivalry are unchanged. Measured, the polish is still needed: settled straight from the grid,
   every arc of 0.6 orbits or less was refused for rivals. It costs about 15% of a fit.
+- **A refit settles the orbit it carries first.** With the pattern search that stalled three
+  hundred times worse than the seeded search; with Gauss-Newton it lands on it, turn counts
+  included. It is taken alone only within 1.5 times the residual it replaces, since agreeing
+  within `STILL_AGREES` let a settle stop in a nearby minimum and carried Mars from a fifth of
+  its bar out to five; otherwise the seeded search runs too and the better is kept. Over
+  fifteen days of Sol, 13 of 46 refits settled cleanly and 3 more beat the search. All 46
+  together cost half a second, so this is for the answer: the survey's time is elsewhere.
+- **Open: a seeded search takes aliases.** Sixteen looks 2.63 orbits apart fit periods 3.2 and
+  6.1 times the truth at the noise, and the seeded search counts turns from whatever period it
+  is handed: from a held period half a percent out it took the 3.2. The settle recovers that
+  seed; from two percent out neither does, and the search's alias is filed.
 - **Arc buys far more than a better bearing.** At the noise floor the period's error is the
   noise's, so bearings ten times worse give a period ten times worse. Doubling 71° of arc to 142°
   makes it sixty times better, 1.6e-6 to 2.5e-8. Nobody should buy a better telescope to get a
