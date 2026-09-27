@@ -1309,8 +1309,7 @@ confidence and nothing comes back:
 - **Fainter-for-less-certain** needs a variant or a field. `ItemKind` is eight body types —
   `Star, Planet, Moon, Minor, Station, Ship, Population, Observer` — with no confidence on it.
 - **The error bar already exists.** `MapItem::spread_ly`, then an `Option<(DVec3, DVec3)>` built from
-  `Distance::Measured`'s sigma along the line of sight, and already drawn as a segment
-  (`map.rs:856`). A body's radial bar reuses it directly.
+  `Distance::Measured`'s sigma along the line of sight, and already drawn as a segment. A body's radial bar reuses it directly.
 - **Dashes exist, but in the client.** `map.rs` has a dash ladder, `map.drops[dashes - 1]`, used
   for drop lines, where drifting further off the plane gains more dashes rather than longer ones.
   The spread segment is deliberately the solid member of that same ladder. So a dashed shell
@@ -1460,16 +1459,19 @@ knowledge. Today:
      it, and `Knowledge::along_track` samples the orbit across that sigma so the arc is the
      ellipse and not a chord. Once the sigma reaches half a turn the arc is the whole orbit,
      uncapped. **Corrected from item 2:** the pole's error lifts a body out of its plane; it does
-     not carry it along its ring. The eccentricity's error now enters too, as `a cos E` outward.
-     A moon takes its primary's error rigidly, drawn as a third bar sideways in its plane, and
+     not carry it along its ring.
+     The eccentricity's error is taken at a fixed mean anomaly, since the epoch fixes `M`: it moves
+     the body along its path as well as in and out, by up to twice as much. A moon takes its
+     primary's error rigidly, drawn as a third bar sideways in its plane, and
      never as phase: folded into the moon's phase, Earth's error, larger than the Moon's orbit,
      drew a Moon that could be anywhere round an Earth it is known to be beside.
      Error bars are **off by default**, behind an *error bars* toggle on the map's strip: across a
-     system of two hundred bodies they are a thicket. On, they draw at half a line's width and a
+     system of two hundred bodies they are a thicket. The toggle covers every error bar,
+     stars' distance bars included. On, they draw at half a line's width and a
      sixteenth of a mark's brightness, and the selected item's as a full line.
      `em_map::MapItem::spread_ly` became a list of `Spread` pieces, `Bar` or `Arc`, drawn by
      `lc_client::map_spread`.
-     **Open:** the orbit fit (`arc::Spread`) states no epoch sigma, so a freshly fitted body shows
+     **Open:** the orbit fit (`knowledge::arc::Spread`) states no epoch sigma, so a freshly fitted body shows
      almost no arc until its period's error has had time to drift.
    - ⬜ **Candidates are not drawn.** Their radius needs a period turned through a mass prior,
      and the client builds no `Prior` — adding one to draw faint rings is the wrong trade when

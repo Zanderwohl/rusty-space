@@ -67,8 +67,8 @@ impl PlaceError {
         self.sigma_au(self.pole)
     }
 
-    /// In the orbit's plane and square to [`Self::outward`]: zero for a body about its star,
-    /// and a primary's error for a moon.
+    /// In the orbit's plane and square to [`Self::outward`]: where the eccentricity's error
+    /// moves the body along its path, and for a moon its primary's error too.
     pub fn sideways(&self) -> DVec3 {
         self.pole.cross(self.outward).normalize_or_zero()
     }
@@ -114,6 +114,7 @@ const TRACK_SAMPLES: f64 = 64.0;
 /// `epoch_s` is the periapsis passage. For a circle that is any point, which is why an
 /// eccentricity of `None` is read as zero here rather than as an obstacle: a circular orbit has
 /// no periapsis to be wrong about.
+#[derive(Clone, Copy)]
 pub(super) struct Path {
     au: f64,
     e: f64,
@@ -172,6 +173,19 @@ impl Path {
         Some((offset, pace, eccentric))
     }
 
+    /// How far the body moves per unit of eccentricity, AU, holding the mean anomaly: the epoch
+    /// fixes `M`, so a different `e` moves `E` and the true anomaly as well as `r`.
+    ///
+    /// By difference rather than the partials, which are a page of trigonometry for what
+    /// `at` already does. Stepped inward near the clamp.
+    fn per_eccentricity(&self, mean: f64) -> Option<DVec3> {
+        const STEP: f64 = 1.0e-6;
+        let step = if self.e + STEP > 0.999 { -STEP } else { STEP };
+        let (here, _, _) = self.at(mean)?;
+        let (there, _, _) = Self { e: self.e + step, ..*self }.at(mean)?;
+        Some((there - here) / step)
+    }
+
     /// The arc `mean ± half`, a whole orbit once `half` reaches π, shifted by `base_au`.
     fn track(&self, mean: f64, half: f64, base_au: DVec3) -> Option<Track> {
         let half = half.min(PI);
@@ -198,16 +212,18 @@ pub(super) fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     let (Some(path), Orientation::Known { sigma_rad, .. }) = (Path::of(orbit), orbit.orientation) else {
         return shell;
     };
-    let Some((offset_au, pace_au, eccentric)) = path.at(path.mean_at(now_s)) else {
+    let mean = path.mean_at(now_s);
+    let (Some((offset_au, pace_au, _)), Some(per_e)) = (path.at(mean), path.per_eccentricity(mean)) else {
         return shell;
     };
     let r = offset_au.length();
     let outward = offset_au.normalize_or(DVec3::X);
 
-    // `r = a (1 - e cos E)`: the axis's error scales the whole orbit, and the eccentricity's
-    // moves the body in and out by `a cos E`.
+    // The axis's error scales the whole orbit about its focus. The eccentricity's is not
+    // outward only: at a fixed mean anomaly it moves the body along its path by up to twice as
+    // much as it moves it in or out.
     let sigma_e = orbit.eccentricity.map_or(0.0, |(_, s)| s);
-    let outward_au = (r / au * sigma_au).hypot(au * eccentric.cos() * sigma_e);
+    let axis_au = r / au * sigma_au;
     // A tilted pole lifts the body out of its plane, by `r` per radian at most.
     let normal_au = r * sigma_rad;
 
@@ -222,7 +238,7 @@ pub(super) fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     Placed::Known {
         offset_au,
         error: PlaceError {
-            across_au2: outer(outward * outward_au) + outer(path.pole * normal_au),
+            across_au2: outer(outward * axis_au) + outer(per_e * sigma_e) + outer(path.pole * normal_au),
             along_rad: drift.min(PI),
             pace_au,
             outward,
@@ -331,7 +347,28 @@ mod tests {
         assert!((apo.outward_au() - 0.0015).abs() < 1.0e-12, "{}", apo.outward_au());
 
         let (_, with_e) = error(&orbit(Some((0.5, 0.01)), 0.0), 0.5 * PERIOD_S);
-        assert!((with_e.outward_au() - 0.0015f64.hypot(0.01)).abs() < 1.0e-12);
+        assert!((with_e.outward_au() - 0.0015f64.hypot(0.01)).abs() < 1.0e-8);
+    }
+
+    /// **The epoch fixes the mean anomaly, not the eccentric one**, so away from the apsides
+    /// `dr/de = a (e - cos E) / (1 - e cos E)`, not `-a cos E`, and the true anomaly moves too:
+    /// by `2 sin M` radians per unit of eccentricity on a circle.
+    #[test]
+    fn the_eccentricitys_error_is_taken_at_a_fixed_mean_anomaly() {
+        let sigma_e = 0.01;
+        let at_mean = |m: f64| m / TAU * PERIOD_S;
+
+        // E = pi/2 with e = 0.5: outward by half the axis per unit of e, where -a cos E is zero.
+        let eccentric = orbit(Some((0.5, sigma_e)), 0.0);
+        let (_, quarter) = error(&Orbit { semi_major_au: (1.0, 0.0), ..eccentric }, at_mean(PI / 2.0 - 0.5));
+        assert!((quarter.outward_au() - 0.5 * sigma_e).abs() < 1.0e-7, "{}", quarter.outward_au());
+
+        // A circle a quarter turn on: nothing outward, twice the axis per unit of e sideways.
+        let circle = Orbit { semi_major_au: (1.0, 0.0), ..orbit(Some((0.0, sigma_e)), 0.0) };
+        let (_, side) = error(&circle, at_mean(PI / 2.0));
+        assert!(side.outward_au() < 1.0e-7, "{}", side.outward_au());
+        let sideways = side.sigma_au(side.sideways());
+        assert!((sideways - 2.0 * sigma_e).abs() < 1.0e-7, "{sideways}");
     }
 
     /// The arc is the orbit itself, not a chord: every point is the orbit's own radius and the

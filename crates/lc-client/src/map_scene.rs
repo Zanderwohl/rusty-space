@@ -827,5 +827,12 @@ mod tests {
         assert!(!after.iter().any(|(k, _)| *k == ItemKey::from_name("left")));
         assert_eq!(spreads(&mut world), 0, "what left took its spread with it");
         assert_eq!(everything(&mut world), 2 + scenery, "the scenery was spawned again");
+
+        // And turned off again, what was spawned goes.
+        let bars = frame(vec![placed("kept", true)]);
+        draw(&mut world, &mut scene, &bars, true);
+        assert_eq!(spreads(&mut world), 6);
+        draw(&mut world, &mut scene, &bars, false);
+        assert_eq!(spreads(&mut world), 0, "turning error bars off left some drawn");
     }
 }

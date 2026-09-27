@@ -166,8 +166,8 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Datum, meters_per_u
                 .iter()
                 .map(|piece| piece.map(relative))
                 .filter(|piece| match piece {
-                    Spread::Bar(near, far) => near.is_finite() && far.is_finite(),
-                    Spread::Arc { points, .. } => points.len() >= 2 && points.iter().all(|p| p.is_finite()),
+                    Spread::Bar(near, far) => resolvable(&[*near, *far]),
+                    Spread::Arc { points, .. } => points.len() >= 2 && resolvable(points),
                 })
                 .collect(),
         });
@@ -183,6 +183,16 @@ pub fn compose(snapshot: &MapSnapshot, orbit: &Orbit, plane: Datum, meters_per_u
         placements,
         rings,
     }
+}
+
+/// A step `f32` resolves at this distance from the eye, as a fraction of that distance: eight
+/// units in the last place. Below it a segment is rounding, and a cap squared against it points
+/// anywhere.
+const RESOLVABLE: f32 = 1.0e-6;
+
+fn resolvable(points: &[Vec3]) -> bool {
+    points.iter().all(|p| p.is_finite())
+        && points.windows(2).all(|w| w[0].distance(w[1]) > w[0].length().max(w[1].length()) * RESOLVABLE)
 }
 
 #[cfg(test)]
@@ -267,6 +277,10 @@ mod tests {
         assert_eq!(spread[1].ends().len(), 2, "an open arc has two ends to cap");
         let whole = Spread::Arc { points: points.clone(), closed: true };
         assert!(whole.ends().is_empty(), "a closed one has none");
+
+        let tiny = at(2, here, 6.4e6).spread(here, here + au(1.0e-12, 0.0, 0.0));
+        let tiny = compose(&MapSnapshot::observed(0.0, vec![tiny]), &orbit, Plane::System.about(DVec3::Z), M_PER_AU);
+        assert!(tiny.placements[0].spread.is_empty(), "a bar f32 cannot resolve is rounding");
     }
 
     /// Something in the plane has nowhere to fall, and a zero-length tube is degenerate

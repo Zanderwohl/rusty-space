@@ -152,7 +152,8 @@ pub(crate) fn lay(
     }
 }
 
-/// The arc about the item it belongs to, so `f32` resolves it however far off the eye is.
+/// The arc about the item it belongs to, so the mesh survives the camera moving and is rebuilt
+/// only when the arc itself does.
 fn arc_shape(points: &[Vec3], at: Vec3) -> Vec<Vec3> {
     points.iter().map(|p| render((*p - at).as_dvec3())).collect()
 }

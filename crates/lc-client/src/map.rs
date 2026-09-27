@@ -282,7 +282,7 @@ fn survey(
     // is what the crew worked out. See `lightcone/docs/25-system-knowledge.md`.
     ui.map.system_plane = held.plane;
     let picture = match ui.map.source {
-        Source::Observed => crate::map_source::observed(&game.0, &uplink, eye.at_ly, held),
+        Source::Observed => crate::map_source::observed(&game.0, &uplink, eye.at_ly, held, ui.map.error_bars),
         #[cfg(feature = "godview")]
         Source::God => crate::map_source::coordinate(&game.0, &uplink, eye.at_ly),
     };
