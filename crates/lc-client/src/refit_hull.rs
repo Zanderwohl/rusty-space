@@ -375,7 +375,7 @@ fn spawn(
         })
         .collect();
 
-    let root = commands.spawn(Visibility::Hidden).id();
+    let root = commands.spawn((Transform::IDENTITY, Visibility::Hidden)).id();
     let mut hull = |source: HullSource, drawn: Drawn, material: Handle<HullMaterial>, at: Transform| {
         commands.spawn((
             HullForm { source, finish: Finish::Smooth, cells: None },
