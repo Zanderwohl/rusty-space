@@ -6,6 +6,8 @@
 //! ([`Form::copies`]). See `lightcone/docs/29-ship-form.md` §Kinds and §Hull structure follows
 //! area.
 
+use glam::DVec3;
+
 use super::{rules, Form, Kind, Part};
 use crate::fitting::{Balance, C2, ONBOARD_DATA_BYTES};
 
@@ -59,14 +61,39 @@ impl Capacities {
 /// ship along its nose. `None` for a form that does not place, as one partway through a round may
 /// not.
 pub fn aft_aperture_w(form: &Form, balance: &Balance) -> Option<f64> {
+    Some(aft_faces_w(form, balance)?.iter().map(|(_, w)| w).sum())
+}
+
+/// Where an engine's exhaust leaves, in the ship's frame (x nose, z up), meters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Aperture {
+    pub center: DVec3,
+    /// Unit, along the exhaust.
+    pub out: DVec3,
+    pub radius_m: f64,
+    /// Of the drive's rating, which is how the drive's power divides between its faces.
+    pub share: f64,
+}
+
+/// Every copy of every engine firing aft, as [`aft_aperture_w`] counts them. `None` for a form
+/// that does not place.
+pub fn aft_apertures(form: &Form, balance: &Balance) -> Option<Vec<Aperture>> {
+    let faces = aft_faces_w(form, balance)?;
+    let total: f64 = faces.iter().map(|(_, w)| w).sum();
+    Some(faces.into_iter().map(|(aperture, w)| Aperture { share: w / total, ..aperture }).collect())
+}
+
+fn aft_faces_w(form: &Form, balance: &Balance) -> Option<Vec<(Aperture, f64)>> {
     let poses = form.place(balance.min_part_m3).ok()?;
     let aft = poses.iter().filter_map(|(id, _, pose)| {
         let part = form.parts.iter().find(|p| p.id == id && p.kind == Kind::Engine)?;
-        let (face_x, _) = rules::face(&part.shape(balance.min_part_m3));
-        let exhaust = pose.axis() * face_x.signum();
-        (exhaust.x < 0.0).then_some(part.volume_m3 * balance.engine_density_w)
+        let (face_x, radius_m) = rules::face(&part.shape(balance.min_part_m3));
+        let out = pose.axis() * face_x.signum();
+        let center = pose.to_outer(DVec3::X * face_x);
+        let aperture = Aperture { center, out, radius_m, share: 0.0 };
+        (out.x < 0.0).then_some((aperture, part.volume_m3 * balance.engine_density_w))
     });
-    Some(aft.sum())
+    Some(aft.collect())
 }
 
 /// Of module density.
@@ -429,5 +456,28 @@ mod tests {
         // The starting form's one bell flares aft.
         let start = Form::starting();
         assert!(close(aft_aperture_w(&start, &b).unwrap(), Capacities::of(&start, &b).aperture_w));
+    }
+
+    /// Each face sits at its engine's aft end and points aft, and their shares are the rating's.
+    #[test]
+    fn the_apertures_are_the_faces_that_fire_aft() {
+        let b = Balance::DEFAULT;
+        let start = aft_apertures(&Form::starting(), &b).unwrap();
+        assert_eq!(start.len(), 1);
+        let face = start[0];
+        assert!(close(face.share, 1.0) && (face.out + DVec3::X).length() < 1.0e-9, "{face:?}");
+        assert!(face.radius_m > 0.0 && face.center.x < 0.0, "{face:?}");
+
+        let plate = crate::form::presets::Builtin::Plate.form();
+        let mut turned = plate.clone();
+        let engine = turned.parts.iter_mut().find(|p| p.id == PartId(3)).unwrap();
+        let Some(Placement { mount: Mount::Attached { anchor, .. }, .. }) = engine.placement.as_mut() else { panic!() };
+        anchor.x = -anchor.x;
+        for (form, faces) in [(&plate, 2), (&turned, 1)] {
+            let apertures = aft_apertures(form, &b).unwrap();
+            assert_eq!(apertures.len(), faces);
+            assert!(close(apertures.iter().map(|a| a.share).sum(), 1.0));
+            assert!(apertures.iter().all(|a| a.out.x < 0.0));
+        }
     }
 }
