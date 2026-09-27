@@ -273,7 +273,7 @@ mod tests {
         field: Field,
         caps: Capacities,
         broadside_m2: f64,
-        /// The balance's, which H3 moves onto the star's output: then this is what the field takes in.
+        /// On the star's output.
         gain: f64,
     }
 
@@ -358,15 +358,13 @@ mod tests {
         assert_eq!(field.time_to_rise_s(0.0, field.heat_max_j(), field.heat_full_w(&farther)), None);
     }
 
-    /// The field is anchored on the starlight `solar` collects on the starting form's broadside, with
-    /// the gain `Balance::DEFAULT` solves there. Before F10 that was the old ovoid's, and the gain
-    /// cancelled the broadside, so moving collection to the shadow moved no anchor.
+    /// `τ` is solved on the broadside the gain is solved on.
     #[test]
-    fn the_starlight_anchored_on_is_todays() {
+    fn the_starlight_anchored_on_is_what_arrives() {
         let b = Balance::DEFAULT;
         let start = Start::new(&b);
         let luminosity_w = SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * AU_M * AU_M;
-        let today_w = solar::power_w(&b, start.broadside_m2, luminosity_w, RATED_LOAD_AU * AU_M) / b.conversion_efficiency;
+        let today_w = solar::intake_w(&b, start.broadside_m2, luminosity_w, RATED_LOAD_AU * AU_M);
         assert!(close(start.starlight_w(RATED_LOAD_AU), today_w, 1e-9), "{} {today_w}", start.starlight_w(RATED_LOAD_AU));
     }
 
