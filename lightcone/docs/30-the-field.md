@@ -8,10 +8,9 @@ fails, the ship is gone and the whole system sees it happen.
 carries it and a checkpoint keeps it. Every field runs Black until the modes are built, and nothing
 collapses yet. A ship whose storage has run down to what its motive has committed pays only as much
 of the living drain as conversion brings in, and the rest makes no heat, so an empty ship far from
-a star cools below 400 K. A refit's transfers and a burn's spending are settled beside the account
-rather than inside it, so room a build opens in full storage is refilled from the next settlement,
-a game day at most, and until then what would have filled it is heat; and a return landing in room
-starlight has already filled can hold storage above capacity until then. H8 closes both. It replaces the fixed 400 K hull
+a star cools below 400 K. A refit's transfers and a burn's spending are draws on storage inside the
+account, cut where each refit step begins and ends, so conversion refills what a build takes out
+as it goes, and the drain and the rating change where a step ends. It replaces the fixed 400 K hull
 (`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
 [20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
 Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
@@ -96,6 +95,12 @@ What arrives is converted to storage at up to the **conversion rating**, at
   however full it was, and conversion runs throughout.
 - A burst arrives faster than any rating, so **all of it is heat**. Empty storage stops sustained
   power, never a burst.
+
+- **A refit's transfers are draws on storage**, a build's cost out of it and a dismantling's return
+  into it, spread over each step. A return arriving at full storage is heat as it arrives, like
+  starlight: storage never holds more than its capacity. What the round planned to vent still
+  bursts at the end of its step, and a store that shrinks spills what it actually holds past its
+  new capacity, which starlight may have made more than the plan expected.
 
 Storage filling partway through a segment splits it. The fill time is linear in the segment's
 inputs, so the split is closed form too. Holding full storage full, rather than switching
@@ -411,6 +416,9 @@ puts a countdown in the text.
 - **Closed form against stepping.** An account with a starlight segment, a vent burst and a
   storage-fills split, stepped finely, agrees with the closed form. Break the equation of state on
   purpose (a linear `T` instead of a fourth root) and check that the temperature tests fail.
+- **A round under starlight.** A refit whose steps end between settlements, settled at every tick
+  and in one leap, agrees on heat and storage, and never holds more than capacity. A return into
+  room starlight has filled ends as heat, joule for joule.
 - **Collapse is on time.** A scheduled collapse fires at the predicted instant, and a change of
   input before it moves it.
 - **Light delay.** A collapse is observed by a distant client no earlier than the light allows,
