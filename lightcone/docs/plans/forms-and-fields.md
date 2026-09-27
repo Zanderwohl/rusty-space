@@ -91,6 +91,7 @@ graph LR
   H5["H5 Proximity"]
   H6["H6 Clear, Black and Auto"]
   H7["H7 What an observer sees"]
+  H8["H8 A refit's transfers inside the account"]
   E1["E1 Beam and courtesy math"]
   E2["E2 Exhaust from heat"]
   E3["E3 Emit"]
@@ -156,6 +157,7 @@ graph LR
   H4 --> H5
   H3 --> H6
   H6 --> H7
+  H3 --> H8
   K2 --> E1
   H3 --> E2
   E1 --> E3
@@ -210,6 +212,7 @@ graph LR
   C4 --> C10
   F10 --> X1
   H7 --> X1
+  H8 --> X1
   E4 --> X1
   R12 --> X1
   C3 --> X1
@@ -443,6 +446,15 @@ graph LR
 - read: 30 §What an observer sees
 - deliver: `HULL_K` retired; a ship's light is reflected (`1 − α`) plus thermal at its field's temperature over the envelope; `Presence` carries temperature and mode; instruments see it.
 - done when: a Black ship vanishes in V and not at ten microns, and a hot field's color moves through the bands as 30's table says.
+
+### H8 · A refit's transfers inside the account
+
+- status: todo
+- needs: H3
+- touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/craft.rs`
+- read: 30 §Conversion, 29 §Refits
+- deliver: a round's stores and draws, and a burn's spending, move storage's room inside `Fitting::flow`, so conversion refills what a build takes out as it goes and a return landing in room starlight has already filled is vented into `Q` instead of lifting storage past capacity; settlements cut at step ends, so the hull's drain and rating change where the step does.
+- done when: a round run under starlight never holds more than capacity, and settling it in one leap and at every tick agrees on heat and storage.
 
 ## E: energy
 
@@ -727,7 +739,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15
+- needs: F10, H7, H8, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
