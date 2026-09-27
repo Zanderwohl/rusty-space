@@ -413,7 +413,7 @@ graph LR
 
 ### H4 · Collapse
 
-- status: todo
+- status: active card "H4 · Collapse"
 - needs: H3
 - touches: `crates/lc-server/src/field.rs`, `crates/lc-world/src/field.rs`
 - read: 30 §Collapse
@@ -449,7 +449,7 @@ graph LR
 
 ### H8 · A refit's transfers inside the account
 
-- status: todo
+- status: active card "H8 · A refit's transfers inside the account"
 - needs: H3
 - touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/craft.rs`
 - read: 30 §Conversion, 29 §Refits
