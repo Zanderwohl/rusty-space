@@ -639,7 +639,7 @@ graph LR
 
 ### R15 · Construction on the real hull in the game
 
-- status: active card "R15 · Construction on the real hull in the game"
+- status: done #113
 - needs: R8, R10, R14
 - touches: `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/hull.rs`
 - read: 32 §A build step is a frontier, §Materials by kind
