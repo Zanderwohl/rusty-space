@@ -612,7 +612,7 @@ graph LR
 
 ### R12 · The cone in the game
 
-- status: todo
+- status: active card "R12 · The cone in the game"
 - needs: R7, F9
 - touches: `crates/lc-client/src/plume.rs`
 - read: 32 §The exhaust cone
@@ -740,7 +740,7 @@ graph LR
 
 ### C10 · Preview from the ship's heat
 
-- status: todo
+- status: active card "C10 · Preview from the ship's heat"
 - needs: H3, C4
 - touches: `crates/lc-client/src/preview.rs`, `crates/lc-client/src/refit_panel.rs`
 - read: 29 §The budget; 30 §The heat account
