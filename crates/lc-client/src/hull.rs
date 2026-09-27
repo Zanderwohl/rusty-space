@@ -66,9 +66,6 @@ const NIGHT: f32 = 0.10;
 /// window is the brightest thing there, even by Venus.
 pub(crate) const HULL_NIGHT: f32 = 0.003;
 
-/// What a night side is metered for: a lit window, luminance cd/m² and kelvin, as
-/// `crate::ship_hull` lights a living region.
-const METERED_LAMP: (f64, f64) = (300.0, 3000.0);
 
 /// Where the player is looking from, and how far back that is.
 ///
@@ -540,7 +537,7 @@ pub fn update_hulls(
 /// by the same one anyway.
 pub fn radiance_at(star: Option<(DVec3, f64, f64)>, at_ly: DVec3, to_eye: DVec3) -> PerBand<f32> {
     let own = hull_radiance();
-    let window = lamp_radiance(METERED_LAMP.0, METERED_LAMP.1);
+    let window = metered_lamp();
     let Some((star_ly, radius, teff)) = star else {
         return own.map(|band, x| x + window[band]);
     };
@@ -548,6 +545,12 @@ pub fn radiance_at(star: Option<(DVec3, f64, f64)>, at_ly: DVec3, to_eye: DVec3)
         crate::resolved::lit_radiance(ALBEDO, radius, teff, star_ly.distance(at_ly) * M_PER_LY);
     let seen = lit_share(star_ly - at_ly, to_eye);
     own.map(|band, x| x + lit[band] * seen + window[band])
+}
+
+/// What a night side is metered for: a lit window.
+fn metered_lamp() -> PerBand<f32> {
+    let (cd_m2, k) = crate::ship_hull::lamp_of("living").expect("a living region has lights");
+    lamp_radiance(cd_m2, k)
 }
 
 /// How much of a round hull's disc is lit, seen from `to_eye` with the star along `to_star`,
@@ -585,7 +588,7 @@ mod tests {
         let au_ly = lc_world::navigation::AU / M_PER_LY;
         let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
         let at = DVec3::X * au_ly;
-        let window = v(lamp_radiance(METERED_LAMP.0, METERED_LAMP.1));
+        let window = v(metered_lamp());
         let day = v(radiance_at(star, at, -DVec3::X));
         let night = v(radiance_at(star, at, DVec3::X));
         assert!(day > 30.0 * window, "{day} against a window's {window}");

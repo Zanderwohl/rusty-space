@@ -130,6 +130,23 @@ scales by a power per region.
 Living lights are emitters with a real (small) power, through the same exposure as everything
 else, so they show on a night side and vanish in sunlight as they should.
 
+As built (R15, `lc_client::ship_hull::lamp_of`, `lc_client::hull::lamp`): each kind's lights are a
+luminance and a color temperature, a blackbody scaled in V against white in full sun at 1 AU
+(40 000 cd/m²) and put through the band mapping as starlight is. A lit window is 300 cd/m² at
+3000 K, as are drone docks and a bay's decks at their own temperatures; the Mind's light is 90;
+the engine's grid is 2400 until R13 lights it at the exhaust's power. The girders' work lights are
+a floodlit yard's 2000 lux. Two things had to change for a night side to show them:
+
+- **A real hull's night fill is 0.3% of its starlight**, not the ovoid's 10%, which outshone a
+  window anywhere inside about 5 AU. Its own lights give its night side a shape instead.
+- **The exposure meters a hull by the share of its disc the eye sees lit**, plus a lit window. On
+  its day side that is starlight, and the windows are lost; on its night side it is the windows,
+  and the exposure opens for them. Between the stars the same rule exposes for the lights alone.
+
+![By day and by night: Cluster at Venus's L1 (top) and Jupiter's (bottom)](../images/lights-day-night.jpg)
+![Its living quarters close: lost by day at Venus; lit at night at Venus and at Jupiter](../images/lights-living-close.jpg)
+![Between the stars, `--demo refit` exposed for its lights](../images/lights-between-stars.jpg)
+
 ![Every kind by day and by night](../images/hull-kinds.png)
 
 ![The spar's bolt row on both spheres, and the plating reveal mask partway](../images/hull-seams.png)
@@ -287,7 +304,10 @@ frame the placeholders come back, and nothing is left over.
   clock is the round's, from its start, in the game as in the demo.
 
 `--apply` pins the view back to the world once the round is under way, so a real refit can be
-photographed where it is drawn:
+photographed where it is drawn. From R15 it draws another craft's round too, light-delayed:
+
+![Applied in the game and `--demo refit`, both from their night sides by Venus](../images/refit-game-and-demo.jpg)
+![One client watching another's applied round: its hull growing in its truss](../images/refit-other-craft.jpg)
 
 ![Applied in the game: the drones grown first, inside their truss](../images/refit-game-applied.jpg)
 ![Canceled mid-step: the step running backward, truss coming down](../images/refit-game-cancel-early.jpg)

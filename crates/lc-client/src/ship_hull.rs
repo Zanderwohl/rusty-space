@@ -51,7 +51,7 @@ const ROLLS_KEPT: usize = 64;
 /// lit window is some 300 cd/m² against 40 000 for white in full sun at 1 AU, so it is lost on a
 /// sunlit face near a star and is the brightest thing on a night side. The engine's grid is a
 /// stand-in until R13 lights it at the exhaust's power.
-fn lamp(kind: &str) -> Option<(f64, f64)> {
+pub(crate) fn lamp_of(kind: &str) -> Option<(f64, f64)> {
     match kind {
         "drone" => Some((300.0, 5000.0)),
         "living" => Some((300.0, 3000.0)),
@@ -155,7 +155,7 @@ pub(crate) fn finished(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly
     let base = lit(session, star, at_ly, Vec4::ONE);
     let mut emitted = [Vec4::ZERO; REGIONS];
     for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS) {
-        if let Some((cd_m2, k)) = lamp(kind) {
+        if let Some((cd_m2, k)) = lamp_of(kind) {
             *slot = crate::hull::lamp(session, cd_m2, k).extend(0.0);
         }
     }
