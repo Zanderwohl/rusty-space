@@ -70,10 +70,10 @@ and a close one up to 256.
 - **Another ship's roll** is its form's, from the same grid the server measures its broadside on,
   worked out on the async pool. A new form's roll is taken as its mesh lands, so the old shape
   never turns to the new one's roll.
-- **A refit is drawn over it.** `refit_hull` stands the player's hull aside once a step's meshes are
-  up. When the round is over, its last meshes stay until the real hull is the form the round left,
-  so the ship never flashes back to placeholders or to an earlier shape. Other craft's rounds are
-  R15's.
+- **A refit is drawn over it.** `refit_hull` stands a craft's hull aside once a step's meshes are
+  up, the player's and anyone else's alike (R15). When the round is over, its last meshes stay until
+  the real hull is the form the round left, so the craft never flashes back to placeholders or to an
+  earlier shape.
 - **Memory.** A vertex is 48 bytes and 24 of indices, held in the main world and on the GPU. The
   starting form is 45 kB at 16 cells, 0.7 MB at 64 and 11 MB at 256; Cluster is a quarter larger.
   A sky of a hundred distant designs is a few MB, and 32 meshes nothing wants are kept for zooming
@@ -129,6 +129,23 @@ scales by a power per region.
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
 else, so they show on a night side and vanish in sunlight as they should.
+
+As built (R15, `lc_client::ship_hull::lamp_of`, `lc_client::hull::lamp`): each kind's lights are a
+luminance and a color temperature, a blackbody scaled in V against white in full sun at 1 AU
+(40 000 cd/m²) and put through the band mapping as starlight is. A lit window is 300 cd/m² at
+3000 K, as are drone docks and a bay's decks at their own temperatures; the Mind's light is 90;
+the engine's grid is 2400 until R13 lights it at the exhaust's power. The girders' work lights are
+a floodlit yard's 2000 lux. Two things had to change for a night side to show them:
+
+- **A real hull's night fill is 0.3% of its starlight**, not the ovoid's 10%, which outshone a
+  window on the hull's paint anywhere inside about 2 AU. Its own lights give its night side a shape instead.
+- **The exposure meters a hull by the share of its disc the eye sees lit**, plus a lit window. On
+  its day side that is starlight, and the windows are lost; on its night side it is the windows,
+  and the exposure opens for them. Between the stars the same rule exposes for the lights alone.
+
+![By day and by night: Cluster at Venus's L1 (top) and Jupiter's (bottom)](../images/lights-day-night.jpg)
+![Its living quarters close: lost by day at Venus; lit at night at Venus and at Jupiter](../images/lights-living-close.jpg)
+![Between the stars, `--demo refit` exposed for its lights](../images/lights-between-stars.jpg)
 
 ![Every kind by day and by night](../images/hull-kinds.png)
 
@@ -199,15 +216,12 @@ so both copies of a mirrored part build together. Each point's phase is `Working
 way across the sliver from the joint; each point spends 30%, 15%, 15% and 10% of the step in the four
 phases, and the rest is the front's travel, so the far edge finishes as the step does.
 
-On the placeholders the working part is solid at its volume at `t`, inside a cage at the sliver's
-outer size: rings and meridians through `Shape::exit` from the part's center, so one grid fits
-every primitive, drawn as tubes in `BodyWireframeMaterial`. The cage's thickness follows the scaffold
-averaged across the sliver, so it goes up with the truss and thins away as the scaffold comes down;
-the crossfade to solid is the solid filling the cage, since both materials are opaque. They now draw a
-round only for the moment before its first step's meshes land.
+On the placeholders the working part is solid at its volume at `t`. They draw a round only for the
+moment before its first step's meshes land. Until R15 a cage of tubes at the sliver's outer size stood
+for the truss there; it retired once every craft's round was drawn on the meshes.
 
-As built for truss and plating (`lc_client::refit_hull`, `lc_client::truss`): **while the player's
-ship has a round, the whole ship is drawn on the mesher and the hull material**, and the placeholders
+As built for truss and plating (`lc_client::refit_hull`, `lc_client::truss`): **while a craft has
+a round, the whole craft is drawn on the mesher and the hull material**, and the placeholders
 stand aside once the first step's meshes are shown. Plating is a mask on R3's material and means
 nothing on a Bevy primitive, so construction could not wait for R10. A
 step is meshed once, as it starts: the ship it leaves alone (`Frame::standing`, placed as a form, or as
@@ -255,7 +269,7 @@ Cluster preset would be the obvious target, and the planner refuses it from the 
 ![0.1: the data core being taken apart](../images/refit-10.jpg)
 ![0.2: further through the dismantle](../images/refit-20.jpg)
 ![0.3: the deck sliding aft](../images/refit-30.jpg)
-![0.5: the hull partway grown inside its cage](../images/refit-50.jpg)
+![0.5: the hull partway grown, on the placeholders and their cage before R8](../images/refit-50.jpg)
 ![0.9: the mirrored pods being built](../images/refit-90.jpg)
 
 ### Rounds in the game
@@ -282,14 +296,18 @@ frame the placeholders come back, and nothing is left over.
   distant ship is seen mid-build as it was; running back after a cancel, it runs back. Past the step's
   end it draws the step finished until the next statement says what came next, at most a tick
   later. Knowing one step, it stands in a missing parent from only the step's two ends, so a part
-  hanging from one the round has not built yet is not drawn. R10 draws another craft's form steady
-  from its `Presence`; drawing its round from this is R15's.
+  hanging from one the round has not built yet is not drawn. `refit_hull` draws that frame over the
+  craft's real hull as it draws the player's (R15), under the craft's own root, so it is placed and
+  rolled as its hull is. Its drones are not drawn yet (R16).
 - Drones are placed in the ship's frame directly rather than under the placeholders' root, which is
   gone while the hull meshes draw; under `--demo refit` since R8 they had not been drawn at all. Their
   clock is the round's, from its start, in the game as in the demo.
 
 `--apply` pins the view back to the world once the round is under way, so a real refit can be
-photographed where it is drawn:
+photographed where it is drawn. From R15 it draws another craft's round too, light-delayed:
+
+![Applied in the game and `--demo refit`, both from their night sides by Venus](../images/refit-game-and-demo.jpg)
+![One client watching another's applied round: its hull growing in its truss](../images/refit-other-craft.jpg)
 
 ![Applied in the game: the drones grown first, inside their truss](../images/refit-game-applied.jpg)
 ![Canceled mid-step: the step running backward, truss coming down](../images/refit-game-cancel-early.jpg)
