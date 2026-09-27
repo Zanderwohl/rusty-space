@@ -212,6 +212,8 @@ pub struct MapView {
     /// leaving it leaves the camera where it is.
     pub bearing: Option<f64>,
     pub source: crate::map_source::Source,
+    /// Whether error bars are drawn. Off unless asked for: across a system they are a thicket.
+    pub error_bars: bool,
 }
 
 impl MapView {
