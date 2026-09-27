@@ -135,7 +135,19 @@ impl<J: Journal> Server<J> {
         }
         craft.begin_refit(target, at_s).map_err(unplanned)?;
         self.refitting.insert(id, 0);
+        self.reserve_steps(id, at_s);
         Ok(())
+    }
+
+    /// Measure the forms the round's steps ending after `after_s` leave, on a thread of their
+    /// own. Each would otherwise be a grid built on the tick that step ends in, tens of
+    /// milliseconds apiece.
+    pub(crate) fn reserve_steps(&mut self, id: CraftId, after_s: f64) {
+        let Some(fitting) = self.fleet.get(id).and_then(Craft::fitting) else { return };
+        let forms = fitting.steps_ending(after_s, f64::INFINITY).into_iter().map(|(_, form)| form);
+        let (held, measure) = lc_world::fitting::Reservation::new(forms, *fitting.balance());
+        std::thread::spawn(measure);
+        self.reserved.insert(id, held);
     }
 
     /// Tell a craft's owner what its account now says.
@@ -193,6 +205,8 @@ impl<J: Journal> Server<J> {
             };
             self.tell_fitted(wire, id);
         }
+        // Here rather than at every way a round ends: finished, canceled, completed or replaced.
+        self.reserved.retain(|id, _| self.refitting.contains_key(id));
 
         let broke: HashSet<CraftId> = self
             .pursuits

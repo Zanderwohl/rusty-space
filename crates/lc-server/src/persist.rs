@@ -269,6 +269,7 @@ impl<J: Journal> Server<J> {
                     catch_up(&mut craft, row.saved_t, checkpoint.now_t);
                     // Its owner is told of each step from here, as before the restart.
                     let refit = craft.fitting().and_then(|f| f.refit()).filter(|plan| !plan.is_done(now_s));
+                    let refitting = refit.is_some();
                     if let Some(plan) = refit {
                         self.refitting.insert(craft.id, plan.at(now_s).finished);
                     }
@@ -305,7 +306,11 @@ impl<J: Journal> Server<J> {
                         });
                     }
                     self.next_ship = self.next_ship.max(craft.id.0 + 1);
+                    let id = craft.id;
                     self.fleet.insert(craft);
+                    if refitting {
+                        self.reserve_steps(id, now_s);
+                    }
                 }
                 Err(why) => {
                     if let Some(account) = &row.account {

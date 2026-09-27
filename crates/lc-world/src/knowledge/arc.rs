@@ -720,7 +720,7 @@ impl Fitted {
     /// The plane's basis here is [`basis`], which is whatever `any_orthonormal_vector` returns
     /// and so is not a frame anything else shares. The record wants the standard pair instead:
     /// the ascending node's longitude in simulation axes, and periapsis measured round from
-    /// that node. `knowledge::body::placed_at` reads them straight into
+    /// that node. `knowledge::placed::placed_at` reads them straight into
     /// `em_foundations::kepler::state::Elements`, so a wrong convention here is a body drawn in
     /// the wrong place and nothing that complains.
     pub fn stated(
@@ -1488,13 +1488,13 @@ mod tests {
         assert!(sigma > 0.0 && sigma.is_finite());
 
         // And it places the body, which is the point of carrying an orientation and an epoch.
-        let crate::knowledge::Placed::Known { offset_au, sigma_au } = belief.position_now else {
+        let crate::knowledge::Placed::Known { offset_au, error } = belief.position_now else {
             panic!("a full orientation should place it, got {:?}", belief.position_now)
         };
         let want = truth.at(truth.fitted().epoch_s) / crate::navigation::AU;
         assert!(
             offset_au.distance(want) < 0.05,
-            "placed at {offset_au} against {want}, sigma {sigma_au}"
+            "placed at {offset_au} against {want}, sigma {}", error.total_au()
         );
     }
 

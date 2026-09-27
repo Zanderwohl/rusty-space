@@ -313,19 +313,21 @@ impl crate::knowledge::Knowledge {
                 let held = about.and_then(|body| self.body_belief(star, body, now_s));
                 let bound = |element: Option<(f64, f64)>, scale: f64| element.map_or(f64::INFINITY, |(v, _)| v * scale);
                 let looks = self.looks_at(subject, &at);
-                // The frame keeps the depth believed, so its error is a scale on the whole orbit.
-                // How wrong that depth is, nothing measures; how far the believed orbit misses
-                // across the line of sight, the sightlines do, and an orbit that far out sideways
-                // is taken to be as far out in depth. The planet's own bar alone is not enough:
-                // an orbit fitted to the wrong minimum is sure of itself.
+                // The frame keeps the depth believed, so its error is a scale on the whole orbit:
+                // the planet's own error along the line of sight, over its distance. The
+                // sightlines' miss is a floor under it, since an orbit fitted to the wrong
+                // minimum can be sure of itself; bearings pin the depth far worse than they pin
+                // the miss, so it is only a floor.
                 let missed_m = (seen.iter().map(|(_, c)| c.length_squared()).sum::<f64>()
                     / seen.len().max(1) as f64)
                     .sqrt();
-                let placed_m = match held.as_ref().map(|b| b.position_now) {
-                    Some(super::Placed::Known { sigma_au, .. }) => sigma_au * crate::navigation::AU,
-                    _ => 0.0,
-                };
-                let depth = looks.last().map_or(0.0, |look| missed_m.max(placed_m) / look.from_m.length());
+                let depth = looks.last().map_or(0.0, |look| {
+                    let along_m = match held.as_ref().map(|b| b.position_now) {
+                        Some(super::Placed::Known { error, .. }) => error.toward_au(-look.from_m) * crate::navigation::AU,
+                        _ => 0.0,
+                    };
+                    along_m.max(missed_m) / look.from_m.length()
+                });
                 Frame {
                     about,
                     looks,

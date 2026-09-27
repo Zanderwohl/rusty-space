@@ -40,6 +40,9 @@ pub struct World {
     loaded: HashMap<StarId, Held>,
     /// Where each star sits in `stars`. Built once, because the catalog never changes.
     index: HashMap<StarId, usize>,
+    /// Catalog positions of the stars in each [`LOCAL_SHELL_LY`] cube, ascending. Asked for every
+    /// craft every tick, idle shard included, where a scan was the whole catalog.
+    cells: HashMap<[i64; 3], Vec<usize>>,
 }
 
 /// One loaded system, and when anything last wanted it.
@@ -72,15 +75,27 @@ fn index_of(stars: &[CatalogStar]) -> HashMap<StarId, usize> {
     stars.iter().enumerate().map(|(k, star)| (star.id, k)).collect()
 }
 
+fn cell_of(position_ly: DVec3) -> [i64; 3] {
+    let c = (position_ly / LOCAL_SHELL_LY).floor();
+    [c.x as i64, c.y as i64, c.z as i64]
+}
+
+fn cells_of(stars: &[CatalogStar]) -> HashMap<[i64; 3], Vec<usize>> {
+    let mut cells: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
+    for (k, star) in stars.iter().enumerate() {
+        cells.entry(cell_of(star.position_ly)).or_default().push(k);
+    }
+    cells
+}
+
 impl World {
     pub fn new(stars: Vec<CatalogStar>) -> Self {
-        let stars = Arc::new(stars);
-        Self { index: index_of(&stars), stars, loaded: HashMap::new() }
+        Self::from_shared(Arc::new(stars))
     }
 
     /// So the process carries one catalog however many readers it has.
     pub fn from_shared(stars: Arc<Vec<CatalogStar>>) -> Self {
-        Self { index: index_of(&stars), stars, loaded: HashMap::new() }
+        Self { index: index_of(&stars), cells: cells_of(&stars), stars, loaded: HashMap::new() }
     }
 
     pub fn stars(&self) -> Arc<Vec<CatalogStar>> {
@@ -128,12 +143,31 @@ impl World {
     ///
     /// `None` between the stars, which is most of the volume and most of the flying.
     pub fn system_at(&mut self, position_ly: DVec3, now_s: f64) -> Option<Arc<LocalSystem>> {
-        let id = self
-            .stars
-            .iter()
-            .find(|star| star.position_ly.distance(position_ly) < LOCAL_SHELL_LY)?
-            .id;
+        let id = self.stars[self.containing(position_ly)?].id;
         self.system_for(id, now_s)
+    }
+
+    /// The first star in catalog order whose shell holds `position_ly`: where shells overlap,
+    /// the client's linear scan picks that one, so this must too.
+    fn containing(&self, position_ly: DVec3) -> Option<usize> {
+        let [x, y, z] = cell_of(position_ly);
+        let mut first = None;
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let key = [x.saturating_add(dx), y.saturating_add(dy), z.saturating_add(dz)];
+                    let Some(here) = self.cells.get(&key) else { continue };
+                    let inside = here
+                        .iter()
+                        .copied()
+                        .find(|&k| self.stars[k].position_ly.distance(position_ly) < LOCAL_SHELL_LY);
+                    if let Some(k) = inside {
+                        first = Some(first.map_or(k, |f: usize| f.min(k)));
+                    }
+                }
+            }
+        }
+        first
     }
 
     /// One star's system, by its catalog id, loaded if nothing has asked yet.
@@ -304,6 +338,45 @@ mod tests {
 
     fn ship(id: i64, at: DVec3) -> Craft {
         still(ShipId(id), at)
+    }
+
+    /// Stars close enough that shells overlap and straddle cells, some at negative coordinates,
+    /// probed on a lattice finer than a shell.
+    #[test]
+    fn the_cell_lookup_picks_the_star_the_catalog_scan_picks() {
+        use lc_world::sky::StarProvider;
+        let base = lc_world::sky::AuthoredStars::sample().stars()[0].clone();
+        let places = [
+            DVec3::ZERO,
+            DVec3::new(1.0, 0.2, 0.0),
+            DVec3::new(-1.7, 0.1, 0.4),
+            DVec3::new(0.5, -2.9, 1.1),
+            DVec3::new(3.2, 3.2, -3.2),
+            DVec3::new(1.59, 0.0, 0.0),
+        ];
+        let stars: Vec<CatalogStar> = places
+            .iter()
+            .enumerate()
+            .map(|(k, at)| {
+                let mut star = base.clone();
+                star.id = StarId::from_raw(k as u64 + 1);
+                star.position_ly = *at;
+                star
+            })
+            .collect();
+        let world = World::new(stars.clone());
+        let scan = |at: DVec3| stars.iter().position(|s| s.position_ly.distance(at) < LOCAL_SHELL_LY);
+        let mut inside = 0;
+        for i in -12..=12 {
+            for j in -12..=12 {
+                for k in -12..=12 {
+                    let at = DVec3::new(i as f64, j as f64, k as f64) * 0.37;
+                    assert_eq!(world.containing(at), scan(at), "at {at}");
+                    inside += usize::from(scan(at).is_some());
+                }
+            }
+        }
+        assert!(inside > 100, "premise: the probe lands inside shells ({inside})");
     }
 
     fn pulse(t: i64, at: DVec3, power_w: f64) -> Event {

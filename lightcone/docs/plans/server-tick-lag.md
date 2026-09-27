@@ -49,6 +49,26 @@ the reported sigmas).
 Taking the checkpoint snapshot costs about 1 ms for ten surveying craft (721 files, 1.2 MB).
 It stays on the tick, so the checkpoint is still the shard at one tick.
 
+## After the refit work
+
+A second pass, once forms, refits and the solar account had merged:
+
+- `Postgres::prepare` recorded the window it was asked for rather than the partitions it made, so
+  the next tick's window was always one tick past it: three `lc_ensure_partitions` round trips
+  every tick, idle included. Now once per partition span.
+- `World::system_at` looks in a cell grid of the catalog instead of scanning it, per craft per tick.
+  Same answer, overlapping shells included.
+- `flush` asks every client's deliveries at once, so the tick waits one round trip rather than
+  one per client, and no longer clones each connected craft and its form history.
+- A refit round's step forms are measured on a thread when the round begins or is loaded
+  (`lc_world::fitting::Reservation`), instead of a grid on the tick each step ends.
+
+Still on the tick, in rough order: `rules::check` on a `Refit` intent (a grid plus the placement
+scans, tens of ms per order); `read_logs`' transit search; `fix()` and `sweep_between` building a
+source per catalog star; `chase::contacts` converting a form per observer and craft;
+`retained_subjects()` per client; the recount of one craft a tick with nothing new; building a
+`LocalSystem` on arrival.
+
 ## Phase 0 — Measure the tick
 
 Nothing here fixes anything. It makes the rest checkable.

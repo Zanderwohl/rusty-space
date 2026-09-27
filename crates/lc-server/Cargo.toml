@@ -32,7 +32,7 @@ tokio-tungstenite = "0.24"
 ron = "0.10"
 # One read-only route for the administration console, on its own port. See src/admin.rs.
 axum = "0.8"
-futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "alloc"] }
 # One GET at boot, for the broker's published keys. Blocking, before the runtime matters, and
 # not worth an async HTTP stack.
 ureq = { version = "2", features = ["json", "tls"] }

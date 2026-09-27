@@ -328,7 +328,12 @@ impl Journal for Postgres {
             return Ok(());
         }
         lc_store::store::ensure_partitions(&self.client, from_t, to_t).await?;
-        self.prepared = Some((from_t, to_t));
+        // To the end of the last partition made, which is what was actually made ready. Recording
+        // `to_t` alone put the window's edge one tick behind the next ask, so every tick
+        // went back to the store.
+        let last = lc_store::store::partition_of(to_t);
+        let hi = last.saturating_add(1).saturating_mul(lc_store::store::PARTITION_SPAN_US) - 1;
+        self.prepared = Some((from_t, hi));
         Ok(())
     }
 

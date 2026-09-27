@@ -78,10 +78,11 @@ pub struct Map {
 }
 
 /// What a player moves the map's camera with. A change is drawn at once, however the map is shown.
-type Controls = (f64, f64, f64, em_map::Plane, crate::ui::MapFocus, Source);
+type Controls = (f64, f64, f64, em_map::Plane, crate::ui::MapFocus, Source, bool);
 
 fn controls(view: &crate::ui::MapView) -> Controls {
-    (view.orbit.azimuth, view.orbit.elevation, view.orbit.log_distance_m, view.plane, view.focus, view.source)
+    (view.orbit.azimuth, view.orbit.elevation, view.orbit.log_distance_m, view.plane, view.focus, view.source,
+        view.error_bars)
 }
 
 /// How often the corner thumbnail is drawn while nobody is moving it. The texture holds the
@@ -281,7 +282,7 @@ fn survey(
     // is what the crew worked out. See `lightcone/docs/25-system-knowledge.md`.
     ui.map.system_plane = held.plane;
     let picture = match ui.map.source {
-        Source::Observed => crate::map_source::observed(&game.0, &uplink, eye.at_ly, held),
+        Source::Observed => crate::map_source::observed(&game.0, &uplink, eye.at_ly, held, ui.map.error_bars),
         #[cfg(feature = "godview")]
         Source::God => crate::map_source::coordinate(&game.0, &uplink, eye.at_ly),
     };
@@ -419,6 +420,7 @@ mod tests {
 
     use super::*;
     use crate::map_scene::*;
+    use crate::map_spread::cap_transform;
 
     /// The main view draws every frame; the corner every tenth of a second, or at once when
     /// something about it has changed.
@@ -730,7 +732,7 @@ mod tests {
             angular_radius: radius / distance,
             annulus: None,
             pole: glam::Vec3::Z,
-            spread: None,
+            spread: Vec::new(),
         }
     }
 
