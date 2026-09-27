@@ -623,6 +623,11 @@ fn controls(
                 em_map::ItemKey::from_id("star", star.get()),
             )));
         }
+
+        ui.separator();
+        if ui.selectable_label(state.map.error_bars, "error bars").clicked() {
+            ask(out, Action::ShowErrorBars(!state.map.error_bars));
+        }
     });
 }
 

@@ -50,9 +50,9 @@ const SCALE_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.5;
 /// A population's outline, dashed. At full brightness a shell's six curves outshine the map.
 const POPULATION_COLOR_SCALE: f32 = LINE_COLOR_SCALE * 0.125;
 /// An error bar sits well under the line it qualifies: a system of them is a thicket, so they
-/// are dim and dashed. The selected item's are solid and at full brightness, which is when
-/// anyone is reading them.
+/// are thin and dim. The selected item's are a full line, which is when anyone is reading them.
 const SPREAD_COLOR_SCALE: f32 = LINE_COLOR_SCALE / 16.0;
+const SPREAD_PX: f32 = LINE_PX * 0.5;
 /// Length of the cap across each end of an error bar.
 pub(crate) const SPREAD_CAP_PX: f32 = 8.0;
 
@@ -177,8 +177,7 @@ pub(crate) enum Form {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Look {
     Mark(Form),
-    /// A cap is never dashed: eight pixels cut by a dash reads as a broken end.
-    Spread { selected: bool, cap: bool },
+    Spread { selected: bool },
 }
 
 /// The outline mesh for a population, normalized so its outer edge is one unit.
@@ -285,15 +284,14 @@ pub(crate) fn material_of(
     palette
         .entry((kind, look))
         .or_insert_with(|| {
-            let (fraction, scale, dash_px) = match look {
-                Look::Mark(Form::Sphere) => (SPHERE_TUBE_FRACTION, LINE_COLOR_SCALE, 0.0),
-                Look::Mark(Form::Circle) => (CIRCLE_TUBE_FRACTION, LINE_COLOR_SCALE, 0.0),
-                Look::Mark(Form::Dot) => (DOT_TUBE_FRACTION, LINE_COLOR_SCALE, 0.0),
-                Look::Spread { selected: true, .. } => (LINE_TUBE_FRACTION, LINE_COLOR_SCALE, 0.0),
-                Look::Spread { selected: false, cap: true } => (LINE_TUBE_FRACTION, SPREAD_COLOR_SCALE, 0.0),
-                Look::Spread { selected: false, cap: false } => (LINE_TUBE_FRACTION, SPREAD_COLOR_SCALE, DASH_PX),
+            let (fraction, width, scale) = match look {
+                Look::Mark(Form::Sphere) => (SPHERE_TUBE_FRACTION, LINE_PX, LINE_COLOR_SCALE),
+                Look::Mark(Form::Circle) => (CIRCLE_TUBE_FRACTION, LINE_PX, LINE_COLOR_SCALE),
+                Look::Mark(Form::Dot) => (DOT_TUBE_FRACTION, LINE_PX, LINE_COLOR_SCALE),
+                Look::Spread { selected: true } => (LINE_TUBE_FRACTION, LINE_PX, LINE_COLOR_SCALE),
+                Look::Spread { selected: false } => (LINE_TUBE_FRACTION, SPREAD_PX, SPREAD_COLOR_SCALE),
             };
-            materials.add(MapLineMaterial { dash_px, ..line_material(color_of(kind), fraction, LINE_PX, scale) })
+            materials.add(line_material(color_of(kind), fraction, width, scale))
         })
         .clone()
 }
@@ -525,7 +523,9 @@ pub(crate) fn lay(
     }
     let (Some(frame), Some((view, standoff))) = (map.frame.as_ref(), map.scene.view) else { return };
     let at: HashMap<ItemKey, &Placement> = frame.placements.iter().map(|p| (p.key, p)).collect();
-    sync(&mut commands, &mut map.scene, &map.shapes, frame, &at, view, standoff, &mut meshes, &mut materials);
+    let error_bars = ui.map.error_bars;
+    sync(&mut commands, &mut map.scene, &map.shapes, frame, &at, view, standoff, &mut meshes, &mut materials,
+        error_bars);
 
     for (of, mut place, mut mesh, mut material) in items.iter_mut() {
         let Some(placement) = at.get(&of.0) else { continue };
@@ -556,8 +556,7 @@ pub(crate) fn lay(
     for (of, mut place, mut mesh, mut material, shape) in spreads.iter_mut() {
         let Some(placement) = at.get(&of.key) else { continue };
         map_spread::lay(placement, of, &mut place, &mut mesh, shape, &mut meshes, view.rad_per_px);
-        let cap = matches!(of.part, map_spread::SpreadPart::Cap(_));
-        let look = Look::Spread { selected: selected == Some(of.key), cap };
+        let look = Look::Spread { selected: selected == Some(of.key) };
         let wanted = material_of(&mut map.scene.palette, &mut materials, placement.kind, look);
         if material.0 != wanted {
             material.0 = wanted;
@@ -596,6 +595,7 @@ fn sync(
     standoff: f32,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<MapLineMaterial>,
+    error_bars: bool,
 ) {
     let layer = RenderLayers::layer(MAP_LAYER);
     let Scene { parts: held, rings, spokes, palette, lines, .. } = scene;
@@ -686,7 +686,8 @@ fn sync(
             commands,
             &mut parts.spread,
             placement,
-            |cap| material_of(palette, materials, placement.kind, Look::Spread { selected: false, cap }),
+            if error_bars { &placement.spread } else { &[] },
+            || material_of(palette, materials, placement.kind, Look::Spread { selected: false }),
             &shapes.drops[0],
             meshes,
             &layer,
@@ -762,23 +763,22 @@ mod tests {
         }
     }
 
-    /// A spread is dashed and a sixteenth as bright as the planet's own mark, and solid and
-    /// exactly as bright once its planet is selected. Its caps are never dashed.
+    /// A spread is half a line wide and a sixteenth as bright as the planet's own mark, and a
+    /// full line once its planet is selected.
     #[test]
-    fn a_spread_is_dim_and_dashed_until_its_item_is_selected() {
+    fn a_spread_is_thin_and_dim_until_its_item_is_selected() {
         let mut materials = Assets::<MapLineMaterial>::default();
         let mut palette = HashMap::new();
         let mut drawn = |look| {
             let handle = material_of(&mut palette, &mut materials, ItemKind::Planet, look);
             let m = materials.get(&handle).unwrap();
-            (m.base_color.red, m.dash_px)
+            (m.base_color.red, m.width_px)
         };
-        let (mark, _) = drawn(Look::Mark(Form::Circle));
-        let (dim, dashed) = drawn(Look::Spread { selected: false, cap: false });
-        assert!((dim * 16.0 - mark).abs() < 1.0e-6 && dashed > 0.0);
-        assert_eq!(drawn(Look::Spread { selected: false, cap: true }), (dim, 0.0));
-        assert_eq!(drawn(Look::Spread { selected: true, cap: false }), (mark, 0.0));
-        assert_eq!(drawn(Look::Spread { selected: true, cap: true }), (mark, 0.0));
+        let (mark, width) = drawn(Look::Mark(Form::Circle));
+        let (dim, thin) = drawn(Look::Spread { selected: false });
+        assert!((dim * 16.0 - mark).abs() < 1.0e-6);
+        assert_eq!(thin * 2.0, width);
+        assert_eq!(drawn(Look::Spread { selected: true }), (mark, width));
     }
 
     /// A change to what is drawn spawns what arrived and despawns what left, and leaves the
@@ -790,11 +790,11 @@ mod tests {
         let shapes = Shapes::new(&mut meshes);
         let mut scene = Scene::default();
         let view = Viewport::new(720, 0.8);
-        let mut draw = |world: &mut World, scene: &mut Scene, frame: &MapFrame| {
+        let mut draw = |world: &mut World, scene: &mut Scene, frame: &MapFrame, bars: bool| {
             let at: HashMap<ItemKey, &Placement> = frame.placements.iter().map(|p| (p.key, p)).collect();
             let mut queue = CommandQueue::default();
             let mut commands = Commands::new(&mut queue, world);
-            sync(&mut commands, scene, &shapes, frame, &at, view, 1.0, &mut meshes, &mut materials);
+            sync(&mut commands, scene, &shapes, frame, &at, view, 1.0, &mut meshes, &mut materials, bars);
             queue.apply(world);
         };
         let items = |world: &mut World| {
@@ -806,14 +806,19 @@ mod tests {
         let spreads = |world: &mut World| world.query::<&MapSpreadOf>().iter(world).count();
         let everything = |world: &mut World| world.query::<&MapDrawn>().iter(world).count();
 
-        draw(&mut world, &mut scene, &frame(vec![placed("kept", false), placed("left", true)]));
+        // Error bars are asked for, or there is nothing of them to count.
+        let first = frame(vec![placed("kept", false), placed("left", true)]);
+        draw(&mut world, &mut scene, &first, false);
+        assert_eq!(spreads(&mut world), 0, "error bars are off unless asked for");
+        assert!(!crate::ui::MapView::default().error_bars, "and the map starts with them off");
+        draw(&mut world, &mut scene, &first, true);
         let before = items(&mut world);
         // A bar and an arc, each with its two caps.
         assert_eq!((before.len(), spreads(&mut world)), (2, 6));
         let scenery = everything(&mut world) - 2 - 6;
         assert_eq!(scenery, MAX_RINGS + 1, "the ring pool and the spokes");
 
-        draw(&mut world, &mut scene, &frame(vec![placed("kept", false), placed("came", false)]));
+        draw(&mut world, &mut scene, &frame(vec![placed("kept", false), placed("came", false)]), true);
         let after = items(&mut world);
         let kept = ItemKey::from_name("kept");
         let entity_of = |list: &[(ItemKey, Entity)]| list.iter().find(|(k, _)| *k == kept).map(|(_, e)| *e);

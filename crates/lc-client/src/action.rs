@@ -79,6 +79,7 @@ pub enum Action {
     /// What the map is centered on.
     FocusMap(crate::ui::MapFocus),
     SetMapSource(crate::map_source::Source),
+    ShowErrorBars(bool),
 
     /// Begin the desktop sign-in: open the browser and listen for the answer.
     SignIn,
@@ -530,6 +531,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::SetMapPlane(plane) => ui.map.plane = plane,
     Action::ToggleMapPlane => ui.map.plane = ui.map.plane.other(),
     Action::FocusMap(key) => ui.map.focus = key,
+    Action::ShowErrorBars(on) => ui.map.error_bars = on,
     Action::SetMapSource(source) => {
         #[cfg(feature = "godview")]
         if source == crate::map_source::Source::God && !ui.may_see_everything {

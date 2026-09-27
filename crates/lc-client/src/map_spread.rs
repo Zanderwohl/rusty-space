@@ -54,20 +54,20 @@ fn layout(spread: &[Spread<Vec3>]) -> Vec<Layout> {
         .collect()
 }
 
-/// Spawn what `placement`'s spread needs, respawning only if its layout changed.
+/// Spawn what `spread` needs, respawning only if its layout changed. Empty despawns it all.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync(
     commands: &mut Commands,
     spawned: &mut Spawned,
     placement: &Placement,
-    // The material for a line (`false`) or a cap (`true`).
-    mut material: impl FnMut(bool) -> Handle<MapLineMaterial>,
+    spread: &[Spread<Vec3>],
+    material: impl FnOnce() -> Handle<MapLineMaterial>,
     bar: &Handle<Mesh>,
     meshes: &mut Assets<Mesh>,
     layer: &RenderLayers,
     rad_per_px: f32,
 ) {
-    let wanted = layout(&placement.spread);
+    let wanted = layout(spread);
     if wanted == spawned.layout {
         return;
     }
@@ -75,17 +75,17 @@ pub(crate) fn sync(
         commands.entity(entity).despawn();
     }
     spawned.layout = wanted;
-    if placement.spread.is_empty() {
+    if spread.is_empty() {
         return;
     }
-    let (line_material, cap_material) = (material(false), material(true));
-    for (piece, spread) in placement.spread.iter().enumerate() {
+    let material = material();
+    for (piece, spread) in spread.iter().enumerate() {
         let of = |part| MapSpreadOf { key: placement.key, piece, part };
         let line = match spread {
             Spread::Bar(near, far) => commands.spawn((
                 // One dash: a solid line.
                 Mesh3d(bar.clone()),
-                MeshMaterial3d(line_material.clone()),
+                MeshMaterial3d(material.clone()),
                 segment_transform(*near, *far),
                 unit_bounds(),
                 layer.clone(),
@@ -96,7 +96,7 @@ pub(crate) fn sync(
                 let shape = arc_shape(points, placement.at);
                 commands.spawn((
                     Mesh3d(meshes.add(arc_mesh(&shape))),
-                    MeshMaterial3d(line_material.clone()),
+                    MeshMaterial3d(material.clone()),
                     arc_transform(placement),
                     NoFrustumCulling,
                     layer.clone(),
@@ -110,7 +110,7 @@ pub(crate) fn sync(
         for (end, (at, beside)) in spread.ends().into_iter().enumerate() {
             let cap = commands.spawn((
                 Mesh3d(bar.clone()),
-                MeshMaterial3d(cap_material.clone()),
+                MeshMaterial3d(material.clone()),
                 cap_transform(at, beside, rad_per_px),
                 unit_bounds(),
                 layer.clone(),

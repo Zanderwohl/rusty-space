@@ -69,6 +69,7 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
 | `--map <bearing:elevation:au>` | pin the map's camera. A pin, so two shots of it are the same shot |
 | `--map-plane <system\|galactic>` | which plane the map lays its rings in. `ecliptic` is the old spelling of `system` and still works. A system's plane is a belief, so the option is refused until one is solved — see `lightcone/docs/25-system-knowledge.md` |
+| `--error-bars` | draw the map's error bars, which are off by default |
 | `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto. A pin: `--map` on its own holds the ship, so a hand on the mouse cannot pan a shot two runs are meant to agree about |
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`, `corona`. Brings its own shard |
 | `--console <line>` | type a line at the console once the shard has welcomed the client, with the console open. With `--local` the shard is directing, so every command is available |

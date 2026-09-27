@@ -200,6 +200,9 @@ pub fn parse(args: &[String]) -> Entry {
             actions.push(Action::SetMapPlane(plane));
         }
     }
+    if flag("--error-bars") {
+        actions.push(Action::ShowErrorBars(true));
+    }
 
     // The sign-in modal draws over the main menu, so it cannot be reached by an action that
     // runs on entering the sky. This is the only way to photograph it.

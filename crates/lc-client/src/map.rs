@@ -78,10 +78,11 @@ pub struct Map {
 }
 
 /// What a player moves the map's camera with. A change is drawn at once, however the map is shown.
-type Controls = (f64, f64, f64, em_map::Plane, crate::ui::MapFocus, Source);
+type Controls = (f64, f64, f64, em_map::Plane, crate::ui::MapFocus, Source, bool);
 
 fn controls(view: &crate::ui::MapView) -> Controls {
-    (view.orbit.azimuth, view.orbit.elevation, view.orbit.log_distance_m, view.plane, view.focus, view.source)
+    (view.orbit.azimuth, view.orbit.elevation, view.orbit.log_distance_m, view.plane, view.focus, view.source,
+        view.error_bars)
 }
 
 /// How often the corner thumbnail is drawn while nobody is moving it. The texture holds the
