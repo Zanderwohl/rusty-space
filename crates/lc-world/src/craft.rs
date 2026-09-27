@@ -537,9 +537,9 @@ impl Craft {
         Some((at - star).length() * crate::system::M_PER_LY)
     }
 
-    /// What its hull collects at `t`, watts: its shadow toward the star in the attitude it holds
-    /// then. Zero under way, between systems, and for a craft with no fitting.
-    pub fn solar_w_at(&self, t: f64) -> f64 {
+    /// Starlight arriving at its field at `t`, watts: its shadow toward the star in the attitude it
+    /// holds then. Zero under way, between systems, and for a craft with no fitting.
+    pub fn starlight_w_at(&self, t: f64) -> f64 {
         let (Some(fitting), Some(system)) = (&self.fitting, self.system.as_deref()) else {
             return 0.0;
         };
@@ -552,7 +552,7 @@ impl Craft {
             return 0.0;
         };
         let shadow_m2 = solar::shadow_m2(fitting.geometry(), nose.dot(to_star));
-        solar::power_w(fitting.balance(), shadow_m2, system.star_luminosity_w(), distance_m)
+        solar::intake_w(fitting.balance(), shadow_m2, system.star_luminosity_w(), distance_m)
     }
 
     /// Start the income segment that begins at `from_s`, at the power collected at its midpoint.
@@ -563,9 +563,9 @@ impl Craft {
         let from_s = from_s.max(since);
         self.settle_fitting(None, from_s);
         let middle = 0.5 * (from_s + solar::segment_end(from_s));
-        let watts = self.solar_w_at(middle);
+        let watts = self.starlight_w_at(middle);
         if let Some(fitting) = &mut self.fitting {
-            fitting.set_solar_w(watts);
+            fitting.set_starlight_w(watts);
         }
     }
 
@@ -577,9 +577,9 @@ impl Craft {
         while boundary <= now_s {
             self.settle_fitting(None, boundary);
             let middle = boundary + 0.5 * step;
-            let watts = self.solar_w_at(middle);
+            let watts = self.starlight_w_at(middle);
             if let Some(fitting) = &mut self.fitting {
-                fitting.set_solar_w(watts);
+                fitting.set_starlight_w(watts);
             }
             boundary += step;
         }
@@ -1291,7 +1291,8 @@ mod tests {
         assert!((by_hour / by_week - 1.0).abs() < 1.0e-9, "{by_hour} vs {by_week}");
 
         let drain = reference.fitting().unwrap().hull().capacities.drain_w;
-        let power = |t: f64| reference.solar_w_at(t) - drain;
+        let efficiency = reference.fitting().unwrap().balance().conversion_efficiency;
+        let power = |t: f64| efficiency * reference.starlight_w_at(t) - drain;
         let (mut midpoint, mut start, mut exact) = (0.0, 0.0, 0.0);
         for k in 0..40 {
             let t0 = k as f64 * day;
@@ -1320,7 +1321,7 @@ mod tests {
         let off_broadside = |craft: &Craft, t: f64| (craft.facing_at(t).unwrap().dot(to_star(craft, t)) - lean).abs();
         // Idle since before anything: already round, with no turn left to make.
         assert!(off_broadside(&craft, 0.0) < 1.0e-9);
-        let broadside_w = craft.solar_w_at(0.0);
+        let broadside_w = craft.starlight_w_at(0.0);
 
         // Nothing unfitted turns: a probe keeps the attitude it was left with.
         let mut probe = Craft::at(CraftId(3), Kind::Probe, craft.motion.position_ly);
@@ -1349,9 +1350,9 @@ mod tests {
         assert!(settled.is_normalized());
         // Nose half toward the star it presents less than broadside, and all of it once round, less
         // the few parts in a thousand the crossing moved it out.
-        let turning_w = craft.solar_w_at(cut_at + 1.0);
+        let turning_w = craft.starlight_w_at(cut_at + 1.0);
         assert!(turning_w < 0.9 * broadside_w, "{turning_w} while turning, {broadside_w} broadside");
-        let round_w = craft.solar_w_at(cut_at + quarter * 1.01);
+        let round_w = craft.starlight_w_at(cut_at + quarter * 1.01);
         assert!((round_w / broadside_w - 1.0).abs() < 1.0e-2, "{round_w} against {broadside_w}");
     }
 

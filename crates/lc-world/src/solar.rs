@@ -1,10 +1,13 @@
-//! Starlight collected by a hull. See `lightcone/docs/20-solar-power.md`.
+//! Starlight arriving at a ship's field. See `lightcone/docs/20-solar-power.md`, and
+//! `31-directed-energy.md` §The star's gain.
 //!
-//! Collectors over a whole hull deliver `η · flux · ∫ max(0, n·ŝ) dA`, and for a convex body that
-//! integral is the shadow the hull casts along `ŝ`: the form's shadow table, which also counts a
-//! stack of plates shading itself. A ship collects only when it is not under way. Income is held
-//! constant over segments of coordinate time — see [`segment_end`] — because distance from the star
-//! is not a closed form anyone can integrate cheaply.
+//! A field takes in `flux · ∫ max(0, n·ŝ) dA`, and for a convex body that integral is the shadow
+//! the hull casts along `ŝ`: the form's shadow table, which also counts a stack of plates shading
+//! itself. `flux` carries the balance's gain on the star's output, and nothing downstream multiplies
+//! again: what the field converts is the account's, in [`crate::field`]. A ship takes in starlight
+//! only when it is not under way. Intake is held constant over segments of coordinate time — see
+//! [`segment_end`] — because distance from the star is not a closed form anyone can integrate
+//! cheaply.
 //!
 //! **Every hull rolls its broadside toward its star**, under way or not, so the broadside's part
 //! across the nose faces the star. What is left to say where the star is in the ship's frame is the
@@ -102,10 +105,10 @@ pub fn flux_w_m2(luminosity_w: f64, distance_m: f64) -> f64 {
     luminosity_w / (4.0 * std::f64::consts::PI * distance_m * distance_m)
 }
 
-/// What a shadow of `shadow_m2` collects, W: the balance's efficiency and gain times flux times
-/// shadow. Server and client both price a segment through here.
-pub fn power_w(balance: &crate::fitting::Balance, shadow_m2: f64, luminosity_w: f64, distance_m: f64) -> f64 {
-    balance.solar_gain * balance.conversion_efficiency * flux_w_m2(luminosity_w, distance_m) * shadow_m2
+/// What arrives at a shadow of `shadow_m2`, W, from a star whose output carries the balance's gain.
+/// Server and client both price a segment through here.
+pub fn intake_w(balance: &crate::fitting::Balance, shadow_m2: f64, luminosity_w: f64, distance_m: f64) -> f64 {
+    flux_w_m2(balance.solar_gain * luminosity_w, distance_m) * shadow_m2
 }
 
 /// The shadow along `to_star` of the ovoid an unformed craft is drawn as, m², for tests that state a
@@ -230,7 +233,8 @@ mod tests {
     fn years_to_fill(form: &Form, shadow_m2: f64, d_au: f64) -> f64 {
         let b = Balance::DEFAULT;
         let caps = Capacities::of(form, &b);
-        caps.storage_j / (power_w(&b, shadow_m2, sol_w(), d_au * UNIT_M) - caps.drain_w) / JULIAN_YEAR_S
+        let stored_w = b.conversion_efficiency * intake_w(&b, shadow_m2, sol_w(), d_au * UNIT_M);
+        caps.storage_j / (stored_w - caps.drain_w) / JULIAN_YEAR_S
     }
 
     #[test]
@@ -315,7 +319,7 @@ mod tests {
         for (scale, expected_au) in [(1.0, 5.47), (2.0, 3.87), (10.0, 1.73)] {
             let form = named("default", scale).unwrap();
             let g = geometry(&form);
-            let at_one_au = power_w(&b, shadow_m2(&g, idle_cos(&g)), sol_w(), UNIT_M);
+            let at_one_au = b.conversion_efficiency * intake_w(&b, shadow_m2(&g, idle_cos(&g)), sol_w(), UNIT_M);
             let au = (at_one_au / Capacities::of(&form, &b).drain_w).sqrt();
             assert!((au - expected_au).abs() < 0.01, "{scale}× breaks even at {au} AU");
         }

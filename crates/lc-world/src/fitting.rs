@@ -20,6 +20,10 @@ use crate::form::{Form, FormError};
 use crate::motion::ShipState;
 use crate::refit::rounds::{Plan, Round};
 
+mod heat;
+
+pub use heat::MODE;
+
 pub const C2: f64 = C_M_S * C_M_S;
 
 /// A 40 ft ISO container at its maximum gross mass, over its outside volume.
@@ -381,10 +385,10 @@ impl Drop for Reservation {
     }
 }
 
-/// A ship's form and the energy in it, as a closed form in coordinate time.
+/// A ship's form, the energy in it and the heat in its field, as a closed form in coordinate time.
 ///
-/// The account is **settled** at an instant — stored energy, the form and the rapidity the motive
-/// had flown by then — and read forward from it. Anything that changes a term of the closed form
+/// The account is **settled** at an instant — stored energy, heat, the form and the rapidity the
+/// motive had flown by then — and read forward from it. Anything that changes a term of the closed form
 /// settles first: a new motive, a refit step, a grant.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fitting {
@@ -401,10 +405,11 @@ pub struct Fitting {
     /// Energy the motive in force still has to spend as of `since_s`, joules. Reserved, so the
     /// drain cannot eat it.
     committed_j: f64,
-    /// What starlight adds from `since_s`, watts, until the craft starts the next segment. See
-    /// [`crate::solar`].
-    solar_w: f64,
-    /// A round's vents are the field's, and are dropped here until the field is kept.
+    /// `Q`, the field's heat at `since_s`. See [`crate::field`].
+    heat_j: f64,
+    /// Starlight arriving at the field from `since_s`, watts, until the craft starts the next
+    /// segment. See [`crate::solar`].
+    starlight_w: f64,
     refit: Option<Plan>,
 }
 
@@ -416,7 +421,8 @@ pub struct Account {
     pub since_s: f64,
     pub rapidity_since: f64,
     pub committed_j: f64,
-    pub solar_w: f64,
+    pub heat_j: f64,
+    pub starlight_w: f64,
     pub refit: Option<Round>,
 }
 
@@ -438,7 +444,8 @@ impl Fitting {
             since_s: now_s,
             rapidity_since: 0.0,
             committed_j: 0.0,
-            solar_w: 0.0,
+            heat_j: heat::idle_j(&hull, &balance),
+            starlight_w: 0.0,
             refit: None,
         }
     }
@@ -450,7 +457,8 @@ impl Fitting {
             since_s: self.since_s,
             rapidity_since: self.rapidity_since,
             committed_j: self.committed_j,
-            solar_w: self.solar_w,
+            heat_j: self.heat_j,
+            starlight_w: self.starlight_w,
             refit: self.refit.as_ref().map(|plan| plan.round().clone()),
         }
     }
@@ -480,7 +488,8 @@ impl Fitting {
             since_s: account.since_s,
             rapidity_since: account.rapidity_since,
             committed_j: account.committed_j,
-            solar_w: account.solar_w,
+            heat_j: account.heat_j,
+            starlight_w: account.starlight_w,
             ..full
         }
     }
@@ -532,14 +541,14 @@ impl Fitting {
         &self.geometry
     }
 
-    /// What starlight is adding in the segment in force, watts.
-    pub fn solar_w(&self) -> f64 {
-        self.solar_w
+    /// Starlight arriving at the field in the segment in force, watts.
+    pub fn starlight_w(&self) -> f64 {
+        self.starlight_w
     }
 
     /// Start a segment at this power. Settle first, at the segment's start.
-    pub fn set_solar_w(&mut self, watts: f64) {
-        self.solar_w = watts.max(0.0);
+    pub fn set_starlight_w(&mut self, watts: f64) {
+        self.starlight_w = watts.max(0.0);
     }
 
     /// The hull at a coordinate time, counting refit steps finished by then. Its extent and
@@ -571,35 +580,24 @@ impl Fitting {
         cost::energy_j(self.settled_mass_kg(), flown, self.balance.drive_efficiency)
     }
 
+    /// Heat weighs what it holds, as stored energy does.
     fn settled_mass_kg(&self) -> f64 {
-        self.hull.dry_kg + self.stored_j / C2
-    }
-
-    /// What starlight has added, less what living space has drained, by `now_s`.
-    ///
-    /// Filling stops at capacity, and the excess is lost. Draining stops once only committed
-    /// energy is left, and running out costs nothing else. The clamp is on the segment's total
-    /// rather than its path, which is exact until a limit is reached and off by at most one
-    /// segment's income when one is.
-    fn income_j(&self, now_s: f64) -> f64 {
-        let elapsed = (now_s - self.since_s).max(0.0);
-        let net_w = self.solar_w - self.hull.capacities.drain_w;
-        if net_w >= 0.0 {
-            let room = (self.hull.capacities.storage_j - self.stored_j).max(0.0);
-            (net_w * elapsed).min(room)
-        } else {
-            let free = (self.stored_j - self.committed_j).max(0.0);
-            -(-net_w * elapsed).min(free)
-        }
+        self.hull.dry_kg + (self.stored_j + self.heat_j) / C2
     }
 
     /// Stored energy at a coordinate time, joules.
     pub fn stored_j_at(&self, motion: &ShipState, now_s: f64) -> f64 {
+        self.stored_with(self.flow(now_s).income_j, motion, now_s)
+    }
+
+    /// `income_j` is what conversion has stored less what living space has drawn: see
+    /// [`Fitting::flow`].
+    fn stored_with(&self, income_j: f64, motion: &ShipState, now_s: f64) -> f64 {
         let moved = match &self.refit {
             Some(plan) => plan.at(self.since_s).stored_j - plan.at(now_s).stored_j,
             None => 0.0,
         };
-        (self.stored_j + self.income_j(now_s) - self.burn_spent_j(motion, now_s) - moved).max(0.0)
+        (self.stored_j + income_j - self.burn_spent_j(motion, now_s) - moved).max(0.0)
     }
 
     /// What is stored and not committed, joules.
@@ -611,7 +609,7 @@ impl Fitting {
         self.capacities_at(now_s).storage_j
     }
 
-    /// The whole ship, stored energy included, kilograms.
+    /// The whole ship, stored energy and heat included, kilograms.
     pub fn mass_kg_at(&self, motion: &ShipState, now_s: f64) -> f64 {
         let (dry, in_hand) = match &self.refit {
             Some(plan) => {
@@ -620,7 +618,8 @@ impl Fitting {
             }
             None => (self.hull.dry_kg, 0.0),
         };
-        dry + in_hand + self.stored_j_at(motion, now_s) / C2
+        let flow = self.flow(now_s);
+        dry + in_hand + (self.stored_with(flow.income_j, motion, now_s) + flow.heat_j) / C2
     }
 
     /// The acceleration this ship's aft engines give it now, in g.
@@ -634,7 +633,8 @@ impl Fitting {
         if now_s <= self.since_s {
             return;
         }
-        let stored = self.stored_j_at(motion, now_s);
+        let flow = self.flow(now_s);
+        let stored = self.stored_with(flow.income_j, motion, now_s);
         self.committed_j = self.committed_j_at(motion, now_s);
         if let Some(plan) = &self.refit {
             let (progress, done) = (plan.at(now_s), plan.is_done(now_s));
@@ -646,6 +646,7 @@ impl Fitting {
             }
         }
         self.stored_j = stored;
+        self.heat_j = flow.heat_j;
         self.rapidity_since = cost::lit_rapidity(motion, now_s);
         self.since_s = now_s;
     }
@@ -687,11 +688,13 @@ impl Fitting {
         self.refit = Some(plan);
     }
 
-    /// Only the time is skipped: the remaining steps' energy is still taken. Settle first.
+    /// Only the time is skipped: the remaining steps' energy is still taken, and what they would
+    /// have lost and vented arrives as one burst. Settle first.
     pub fn finish_refit(&mut self) -> bool {
         let Some(plan) = self.refit.take() else { return false };
         let end = plan.at(plan.round().start_s + plan.duration_s());
         let remaining_j = plan.at(self.since_s).stored_j - end.stored_j;
+        self.heat_j += heat::left_j(&plan, self.since_s, &self.balance);
         self.take_form(end.form);
         self.stored_j = (self.stored_j - remaining_j).clamp(0.0, self.hull.capacities.storage_j.max(0.0));
         true
@@ -714,6 +717,7 @@ impl Fitting {
         let canceled = plan.cancel(now_s, self.stored_j);
         self.take_form(canceled.form);
         self.stored_j = canceled.stored_j;
+        self.heat_j += canceled.vented_j;
     }
 
     /// The form each refit step leaves, and the coordinate second its step ends, for the steps
@@ -838,24 +842,46 @@ impl From<&Fitting> for lc_proto::Fitting {
             since_s: a.since_s,
             rapidity_since: a.rapidity_since,
             committed_j: a.committed_j,
-            solar_w: a.solar_w,
+            solar_w: a.starlight_w,
             refit: a.refit.as_ref().map(Into::into),
         }
     }
 }
 
-impl From<&lc_proto::Fitting> for Fitting {
-    fn from(f: &lc_proto::Fitting) -> Self {
+impl Fitting {
+    /// A fitting and its field as they are sent and saved. With no field, the form's idle heat.
+    pub fn from_wire(f: &lc_proto::Fitting, field: Option<&lc_proto::Field>) -> Self {
         let account = Account {
             form: (&f.form).into(),
             stored_j: f.stored_j,
             since_s: f.since_s,
             rapidity_since: f.rapidity_since,
             committed_j: f.committed_j,
-            solar_w: f.solar_w,
+            heat_j: 0.0,
+            starlight_w: f.solar_w,
             refit: f.refit.as_ref().map(Into::into),
         };
-        Fitting::from_account(&account, f.balance.into())
+        let mut fitting = Fitting::from_account(&account, f.balance.into());
+        fitting.heat_j = field.map_or_else(|| heat::idle_j(&fitting.hull, &fitting.balance), |field| field.heat_j);
+        fitting
+    }
+}
+
+impl From<&lc_proto::Fitting> for Fitting {
+    fn from(f: &lc_proto::Fitting) -> Self {
+        Fitting::from_wire(f, None)
+    }
+}
+
+impl From<&Fitting> for lc_proto::Field {
+    /// In [`MODE`], with no switch: nothing orders one until the modes are kept.
+    fn from(f: &Fitting) -> Self {
+        use lc_proto::{FieldMode, Shade};
+        let (mode, shade) = match MODE {
+            crate::field::Mode::Clear => (FieldMode::Clear, Shade::Clear),
+            crate::field::Mode::Black => (FieldMode::Black, Shade::Black),
+        };
+        Self { heat_j: f.heat_j, since_s: f.since_s, mode, shade, switch: None }
     }
 }
 
@@ -970,13 +996,14 @@ mod tests {
     }
 
     /// 19's figures, unchanged: the starting form weighs its dry ship by the areal density's
-    /// anchor, and its one aft bell is its five engines. Empty is 13.8 g as it was.
+    /// anchor, and its one aft bell is its five engines. Empty is 13.8 g as it was. The idle field's
+    /// heat weighs about a part in 10⁵ of it.
     #[test]
     fn the_starting_ship_full_pulls_five_g_and_more_empty() {
         let motion = ShipState::at(DVec3::ZERO);
         let mut fitting = full();
         let g = fitting.rated_g_at(&motion, 0.0);
-        assert!((g / 5.0 - 1.0).abs() < 1.0e-9, "{g}");
+        assert!((g / 5.0 - 1.0).abs() < 2.0e-5, "{g}");
         fitting.drain(f64::INFINITY);
         let empty = fitting.rated_g_at(&motion, 0.0);
         assert!((empty - 13.81).abs() < 0.01, "{empty}");
@@ -987,7 +1014,7 @@ mod tests {
         let motion = ShipState::at(DVec3::ZERO);
         let fitting = full();
         let mass = fitting.mass_kg_at(&motion, 0.0);
-        let expected = fitting.hull().dry_kg + 30.0 * Balance::DEFAULT.module_energy_j() / C2;
+        let expected = fitting.hull().dry_kg + (30.0 * Balance::DEFAULT.module_energy_j() + fitting.heat_j_at(0.0)) / C2;
         assert!((mass / expected - 1.0).abs() < 1.0e-12, "{mass} vs {expected}");
         assert!((fitting.hull().dry_kg / STARTING_DRY_KG - 1.0).abs() < 1.0e-9);
     }
