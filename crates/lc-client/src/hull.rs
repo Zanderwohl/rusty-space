@@ -66,7 +66,6 @@ const NIGHT: f32 = 0.10;
 /// window is the brightest thing there, even by Venus.
 pub(crate) const HULL_NIGHT: f32 = 0.003;
 
-
 /// Where the player is looking from, and how far back that is.
 ///
 /// Recomputed at the head of every frame and read by everything that turns a world position

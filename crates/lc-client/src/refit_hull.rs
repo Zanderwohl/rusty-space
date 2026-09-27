@@ -39,7 +39,8 @@ use crate::truss::{self, GIRDER_RADIUS_M, PITCH_M, TrussBuffers};
 /// Girders are painted safety yellow and lit by their own work lights, so a frontier too far off
 /// to show a girder still reads as construction by its color.
 const GIRDER_ALBEDO: Vec3 = Vec3::new(0.8, 0.52, 0.1);
-/// The work lights on the girders, lux at the color temperature in kelvin: a floodlit yard's.
+/// The work lights on the girders, lux: a floodlit yard's. Only their luminance is used, since
+/// the girders' albedo carries their color.
 const WORK_LUX: f64 = 2000.0;
 const WORK_K: f64 = 4000.0;
 /// Plating before it is fitted out.
@@ -195,7 +196,7 @@ pub fn draw_refit(
     unready.0 = false;
     showing.0.clear();
 
-    // Crafts whose round is over, until their real hull is the form it left.
+    // Craft whose round is over, until their real hull is the form it left.
     let idle: HashSet<Option<ShipId>> =
         generations.iter().map(|(_, g, _)| g.craft).filter(|c| now.iter().all(|b| b.craft != *c)).collect();
     endings.retain(|craft, _| idle.contains(craft) || now.iter().any(|b| b.craft == *craft));
@@ -620,11 +621,23 @@ mod tests {
         assert_eq!(generations.len(), 1, "{generations:?}");
         let (generation, craft, key, parent) = generations[0];
         assert_eq!((craft, parent), (Some(ShipId(9)), root));
-        assert_eq!(key, (i, Some(i)), "drawn at the live step, not the one its light shows");
+        assert_eq!(key, (i, Some(i)), "drawn at the step its light shows, not the one it is on now");
         let hulls = world.query::<(&HullForm, &ChildOf)>().iter(world).filter(|(_, c)| c.parent() == generation).count();
         assert!(hulls >= 2, "the standing craft and its working copy: {hulls}");
         assert!(!world.resource::<Showing>().drawing(Some(ShipId(9))), "shown before its meshes landed");
         assert!(world.resource::<Unready>().0);
+
+        // Its round over: the last meshes wait for its hull to be the form it is stated in.
+        world.resource_mut::<crate::uplink::Uplink>().contacts[0].building = None;
+        world.resource_mut::<RealHulls>().set(Some(ShipId(9)), 7, 3);
+        app.update();
+        let world = app.world_mut();
+        assert_eq!(world.query::<&Generation>().iter(world).count(), 1, "handed back to a hull in an earlier form");
+        world.resource_mut::<RealHulls>().set(Some(ShipId(9)), 7, 7);
+        app.update();
+        let world = app.world_mut();
+        assert_eq!(world.query::<&Generation>().iter(world).count(), 0, "kept once its hull caught up");
+        assert!(!world.resource::<Showing>().drawing(Some(ShipId(9))));
     }
 
     /// The truss the demo's grown hull puts up is meshed, and within the budget by a margin.

@@ -138,7 +138,7 @@ the engine's grid is 2400 until R13 lights it at the exhaust's power. The girder
 a floodlit yard's 2000 lux. Two things had to change for a night side to show them:
 
 - **A real hull's night fill is 0.3% of its starlight**, not the ovoid's 10%, which outshone a
-  window anywhere inside about 5 AU. Its own lights give its night side a shape instead.
+  window on the hull's paint anywhere inside about 2 AU. Its own lights give its night side a shape instead.
 - **The exposure meters a hull by the share of its disc the eye sees lit**, plus a lit window. On
   its day side that is starlight, and the windows are lost; on its night side it is the windows,
   and the exposure opens for them. Between the stars the same rule exposes for the lights alone.

@@ -641,7 +641,7 @@ graph LR
 
 - status: done #113
 - needs: R8, R10, R14
-- touches: `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/hull.rs`
+- touches: `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-client/src/resolved.rs`, `crates/lc-client/src/construction.rs`, `crates/lc-client/src/tonemap.rs`, `crates/lc-client/src/app.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §A build step is a frontier, §Materials by kind
 - deliver: `refit_hull`'s truss, plating and bands draw every craft with a round in the game, not only `--demo refit`, and the placeholders' cage retires; lights by kind at real powers through the exposure, replacing `refit_hull`'s stand-in shares of the exposure's reference.
 - done when: a refit applied in the game photographs as `--demo refit` does, on the player's ship and on another's, and the living lights show on a night side and vanish in sunlight.

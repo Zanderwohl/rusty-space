@@ -235,6 +235,12 @@ impl RealHulls {
     pub fn current(&self, craft: Option<ShipId>) -> Option<u64> {
         self.current.get(&craft).copied()
     }
+
+    #[cfg(test)]
+    pub(crate) fn set(&mut self, craft: Option<ShipId>, stated: u64, current: u64) {
+        self.stated.insert(craft, stated);
+        self.current.insert(craft, current);
+    }
 }
 
 /// One craft's hull: a root placed in its frame each frame, with the mesh under it and, until
