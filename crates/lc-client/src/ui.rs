@@ -102,8 +102,11 @@ impl Panel {
 
 /// Which mode of play the main view is showing.
 ///
-/// The map is not a window over the world: it is the other thing the same screen can be, and
-/// whichever one is not in force is the thumbnail in the corner. Windows float above either.
+/// A star with [`ViewMode::World`] at its center. Every other mode has a key that goes into it
+/// from anywhere and, pressed again inside it, back to the world; `Escape` with no window left
+/// open is the same way back. Nothing remembers where a mode was entered from, so a new mode is
+/// a variant and its rows in the `match`es below, and no transition elsewhere has to learn it.
+/// Windows float above whichever mode is in force.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ViewMode {
     /// The sky, through the ship's own camera.
@@ -116,19 +119,42 @@ pub enum ViewMode {
 }
 
 impl ViewMode {
-    /// What the corner square shows, and where a click on it goes.
-    pub fn other(self) -> Self {
+    pub const ALL: [ViewMode; 3] = [ViewMode::World, ViewMode::Map, ViewMode::Form];
+
+    /// Where the key for `mode` goes from here: into it, or out of it to the world.
+    pub fn toggled(self, mode: ViewMode) -> Self {
+        if self == mode { ViewMode::World } else { mode }
+    }
+
+    /// Where `Escape` goes once no window is left to close, or `None` for the menu.
+    pub fn back(self) -> Option<Self> {
+        (self != ViewMode::World).then_some(ViewMode::World)
+    }
+
+    /// What the corner square shows, where a click on it goes; `None` where there is no square.
+    pub fn inset(self) -> Option<Self> {
         match self {
-            ViewMode::World => ViewMode::Map,
-            ViewMode::Map | ViewMode::Form => ViewMode::World,
+            ViewMode::World => Some(ViewMode::Map),
+            ViewMode::Map => Some(ViewMode::World),
+            ViewMode::Form => None,
         }
     }
 
-    /// Where `M` goes: into the map, or out of it to the world.
-    pub fn map_key(self) -> Self {
+    /// Whether the mouse steers a camera of ours directly, rather than egui reading it.
+    pub fn steers(self) -> bool {
         match self {
-            ViewMode::Map => ViewMode::World,
-            ViewMode::World | ViewMode::Form => ViewMode::Map,
+            ViewMode::World | ViewMode::Form => true,
+            ViewMode::Map => false,
+        }
+    }
+
+    /// `--view`'s spelling.
+    pub fn named(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "world" => Some(ViewMode::World),
+            "map" => Some(ViewMode::Map),
+            "form" | "editor" => Some(ViewMode::Form),
+            _ => None,
         }
     }
 }
@@ -453,7 +479,7 @@ pub struct UiState {
     pub view: ViewMode,
     /// The map's camera, plane and source. See [`MapView`].
     pub map: MapView,
-    /// The editor's camera, and the mode it was entered from.
+    /// The editor's camera and draft, kept across leaving it.
     pub form: crate::form_view::FormView,
     /// Whether this client may ask for the god view.
     ///

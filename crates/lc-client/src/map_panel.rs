@@ -97,26 +97,26 @@ pub fn draw(
     let mode = ui_state.view;
     let per_point = ctx.pixels_per_point();
     let square = corner(ctx.viewport_rect());
-    map.shown = mode != ViewMode::Form;
-    // The editor is the whole view, with no square and no map: the sky's camera has the window
-    // back, under the editor's picture.
-    if mode == ViewMode::Form {
-        world.0 = None;
+    let inset = mode.inset();
+    map.shown = mode == ViewMode::Map || inset == Some(ViewMode::Map);
+    // What the world's camera is to draw into, which is the square it is the thumbnail in.
+    // Otherwise it has the whole window, under whatever the mode draws over it.
+    world.0 = (inset == Some(ViewMode::World)).then(|| pixels(square, per_point));
+    let Some(inset) = inset else { return };
+
+    // The square holds the inset, and a click swaps them.
+    let swap = square_area(ctx, square, (inset == ViewMode::Map).then_some(&*map));
+    if swap.clicked() {
+        ask(&mut out, Action::SetView(inset));
+    }
+    if !map.shown {
         return;
     }
 
-    // What the world's camera is to draw into, which is the square it is the thumbnail in.
-    world.0 = (mode != ViewMode::World).then(|| pixels(square, per_point));
-
-    // The square holds whichever mode is not in force, and a click swaps them.
-    let swap = square_area(ctx, square, (mode == ViewMode::World).then_some(&*map));
-    if swap.clicked() {
-        ask(&mut out, Action::SetView(mode.other()));
-    }
-
+    // The map is the whole view or the square, and nothing past here is anything else.
     let (rect, response) = match mode {
         ViewMode::Map => whole(ctx, foot.0, &ui_state, &game, &map, square, &mut out),
-        ViewMode::World | ViewMode::Form => (square, swap.clone()),
+        _ => (square, swap.clone()),
     };
     map.wanted = pixels(rect, per_point).size().max(UVec2::ONE);
 
@@ -125,13 +125,13 @@ pub fn draw(
     let over = crate::pick::occupied_rects(ctx, &[corner_id()]);
     let hole = match mode {
         ViewMode::Map => square,
-        ViewMode::World | ViewMode::Form => egui::Rect::NOTHING,
+        _ => egui::Rect::NOTHING,
     };
     // Before the names, because a mark carries its own and the layout has to leave that one
     // out. Nothing is picked off the corner square: 190 points is a thumbnail, not a surface.
     let picked = match mode {
         ViewMode::Map => crate::map_pick::survey(&response, rect, &ui_state, &map, &mut out),
-        ViewMode::World | ViewMode::Form => crate::map_pick::Picked::default(),
+        _ => crate::map_pick::Picked::default(),
     };
     scale_rule(&painter, rect, ui_state.map, &over);
     labels(&painter, rect, hole, ui_state.map, &map, &picked.named);
