@@ -26,12 +26,9 @@ pub enum Action {
     GoToMenuPage(MenuPage),
     StartGame,
     Quit,
-    /// Which mode of play the main view shows. The map is one of two, not a window.
     SetView(ViewMode),
-    /// `M`: into the map, or out of it. See [`ViewMode::map_key`].
-    ToggleView,
-    /// `H`: into the editor, or back to the mode it was entered from.
-    ToggleForm,
+    /// A mode's key: into it, or out of it to the world.
+    ToggleView(ViewMode),
     // --- the editor -------------------------------------------------------------------
     /// Turn the editor's camera about its focus, radians.
     OrbitForm { azimuth: f64, elevation: f64 },
@@ -283,11 +280,7 @@ pub const SURVEY_CONE_RAD: f64 = 0.35;
 pub const MIN_ACCEL_G: f64 = 0.1;
 pub const MAX_ACCEL_G: f64 = 1000.0;
 
-/// Change the mode of the main view, remembering where the editor was entered from.
 fn set_view(ui: &mut UiState, view: ViewMode) {
-    if view == ViewMode::Form && ui.view != ViewMode::Form {
-        ui.form.from = ui.view;
-    }
     if view != ViewMode::Form {
         ui.form.asking = None;
     }
@@ -304,11 +297,11 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::CloseTopPanel => {
             // Nothing is modal, so "back" closes the most recently opened panel and opens
             // the escape menu only when there is nothing left to close.
-            // The editor is the one mode with somewhere to go back to, and it goes there first.
+            // The menu only opens over the world.
             if ui.close_top().is_none() {
-                match ui.view {
-                    ViewMode::Form => set_view(ui, ui.form.from),
-                    _ => ui.open(Panel::Escape),
+                match ui.view.back() {
+                    Some(view) => set_view(ui, view),
+                    None => ui.open(Panel::Escape),
                 }
             }
         }
@@ -480,11 +473,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::Look { yaw, pitch } => ui.look.turn(yaw, pitch),
 
     Action::SetView(view) => set_view(ui, view),
-    Action::ToggleView => set_view(ui, ui.view.map_key()),
-    Action::ToggleForm => match ui.view {
-        ViewMode::Form => set_view(ui, ui.form.from),
-        _ => set_view(ui, ViewMode::Form),
-    },
+    Action::ToggleView(view) => set_view(ui, ui.view.toggled(view)),
     Action::OrbitForm { azimuth, elevation } => ui.form.orbit.turn(azimuth, elevation),
     Action::SlideForm(standoffs) => ui.form.orbit.slide(standoffs),
     Action::StartDraft(form) => {
@@ -998,67 +987,68 @@ mod tests {
         (UiState::default(), session)
     }
 
+    const M: Action = Action::ToggleView(ViewMode::Map);
+    const H: Action = Action::ToggleView(ViewMode::Form);
+
     /// The map is a mode of the main view, so the key that shows it puts it away again and
     /// asking for the mode already in force is not a toggle.
     #[test]
-    fn the_map_is_the_other_mode_of_the_main_view() {
+    fn the_maps_key_is_a_toggle_and_set_view_is_not() {
         let (mut ui, mut s) = fixture();
         assert_eq!(ui.view, ViewMode::World, "a session starts flying");
-        apply(Action::ToggleView, &mut ui, &mut s);
+        apply(M, &mut ui, &mut s);
         assert_eq!(ui.view, ViewMode::Map);
-        apply(Action::ToggleView, &mut ui, &mut s);
+        apply(M, &mut ui, &mut s);
         assert_eq!(ui.view, ViewMode::World);
         apply(Action::SetView(ViewMode::Map), &mut ui, &mut s);
         apply(Action::SetView(ViewMode::Map), &mut ui, &mut s);
         assert_eq!(ui.view, ViewMode::Map);
     }
 
-    /// `H` goes into the editor and back out to wherever it was entered from; `M` always means
-    /// the map. The rule is 29 §Getting in and out.
+    /// 29 §Getting in and out. The way in is not remembered.
     #[test]
-    fn the_editor_goes_back_to_where_it_was_entered_from() {
+    fn every_modes_key_goes_into_it_and_out_to_the_world() {
+        for from in ViewMode::ALL {
+            for to in ViewMode::ALL {
+                let (mut ui, mut s) = fixture();
+                apply(Action::SetView(from), &mut ui, &mut s);
+                apply(Action::ToggleView(to), &mut ui, &mut s);
+                let expected = if from == to { ViewMode::World } else { to };
+                assert_eq!(ui.view, expected, "{to:?}'s key from {from:?}");
+            }
+        }
+
         let (mut ui, mut s) = fixture();
-        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(M, &mut ui, &mut s);
+        apply(H, &mut ui, &mut s);
         assert_eq!(ui.view, ViewMode::Form);
-        apply(Action::ToggleForm, &mut ui, &mut s);
-        assert_eq!(ui.view, ViewMode::World);
-
-        apply(Action::ToggleView, &mut ui, &mut s);
-        apply(Action::ToggleForm, &mut ui, &mut s);
-        assert_eq!(ui.view, ViewMode::Form);
-        // Asking again for the mode in force forgets nothing.
-        apply(Action::SetView(ViewMode::Form), &mut ui, &mut s);
-        apply(Action::ToggleForm, &mut ui, &mut s);
-        assert_eq!(ui.view, ViewMode::Map, "entered from the map, so back to it");
-
-        apply(Action::ToggleForm, &mut ui, &mut s);
-        apply(Action::ToggleView, &mut ui, &mut s);
+        apply(H, &mut ui, &mut s);
+        assert_eq!(ui.view, ViewMode::World, "entered from the map, and out to the world all the same");
+        apply(H, &mut ui, &mut s);
+        apply(M, &mut ui, &mut s);
         assert_eq!(ui.view, ViewMode::Map, "M from the editor is the map");
-        apply(Action::ToggleView, &mut ui, &mut s);
-        assert_eq!(ui.view, ViewMode::World, "and from the map, out of it");
-        // The corner square shows the world in the editor, so a click on it goes there.
-        assert_eq!(ViewMode::Form.other(), ViewMode::World);
     }
 
-    /// `Escape` closes windows first, and with none left the editor goes back before any menu opens.
+    /// With no window open, `Escape` leaves any mode for the world before it opens the menu.
     #[test]
-    fn escape_leaves_the_editor_once_its_windows_are_closed() {
-        let (mut ui, mut s) = fixture();
-        apply(Action::ToggleView, &mut ui, &mut s);
-        apply(Action::ToggleForm, &mut ui, &mut s);
-        apply(Action::OpenPanel(Panel::Telescope), &mut ui, &mut s);
-        apply(Action::CloseTopPanel, &mut ui, &mut s);
-        assert_eq!((ui.view, ui.open_panels().len()), (ViewMode::Form, 0), "a window first");
-        apply(Action::CloseTopPanel, &mut ui, &mut s);
-        assert_eq!(ui.view, ViewMode::Map);
-        assert!(!ui.is_open(Panel::Escape), "leaving the editor is not opening the menu");
-        apply(Action::CloseTopPanel, &mut ui, &mut s);
-        assert!(ui.is_open(Panel::Escape), "and anywhere else it is as it was");
+    fn escape_leaves_a_mode_once_its_windows_are_closed() {
+        for mode in [ViewMode::Map, ViewMode::Form] {
+            let (mut ui, mut s) = fixture();
+            apply(Action::SetView(mode), &mut ui, &mut s);
+            apply(Action::OpenPanel(Panel::Telescope), &mut ui, &mut s);
+            apply(Action::CloseTopPanel, &mut ui, &mut s);
+            assert_eq!((ui.view, ui.open_panels().len()), (mode, 0), "a window first");
+            apply(Action::CloseTopPanel, &mut ui, &mut s);
+            assert_eq!(ui.view, ViewMode::World);
+            assert!(!ui.is_open(Panel::Escape), "leaving {mode:?} is not opening the menu");
+            apply(Action::CloseTopPanel, &mut ui, &mut s);
+            assert!(ui.is_open(Panel::Escape), "and in the world it is the menu");
+        }
     }
 
     fn editing() -> (UiState, Session) {
         let (mut ui, mut s) = fixture();
-        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(H, &mut ui, &mut s);
         apply(Action::StartDraft(lc_world::form::Form::starting()), &mut ui, &mut s);
         (ui, s)
     }
@@ -1196,7 +1186,7 @@ mod tests {
         apply(Action::EditForm(Ok(twist)), &mut ui, &mut s);
         assert!(apply(Action::ApplyPastCollapse(true), &mut ui, &mut s).is_empty(), "not an answer about this draft");
         apply(Action::ApplyDraft, &mut ui, &mut s);
-        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(H, &mut ui, &mut s);
         assert_eq!(ui.form.asking, None, "leaving the editor puts the question away");
     }
 
@@ -1221,8 +1211,8 @@ mod tests {
         let edit = draft(&ui).twist(PartId(5), 0.25).unwrap();
         apply(Action::EditForm(Ok(edit)), &mut ui, &mut s);
         apply(Action::SelectPart(Some(PartId(5))), &mut ui, &mut s);
-        apply(Action::ToggleForm, &mut ui, &mut s);
-        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(H, &mut ui, &mut s);
+        apply(H, &mut ui, &mut s);
         apply(Action::StartDraft(lc_world::form::Form::starting()), &mut ui, &mut s);
         assert_ne!(draft(&ui).form, draft(&ui).ship, "the edit survives");
         assert_eq!(ui.form.selected, Some(PartId(5)));
@@ -1237,7 +1227,7 @@ mod tests {
     fn in_the_editor_zoom_moves_the_editors_camera_and_not_the_boom() {
         let (mut ui, mut s) = fixture();
         let boom = ui.boom_lengths;
-        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(H, &mut ui, &mut s);
         let before = ui.form.orbit;
         apply(Action::Zoom(2.0), &mut ui, &mut s);
         assert_eq!(ui.boom_lengths, boom);
@@ -1245,10 +1235,10 @@ mod tests {
         apply(Action::SlideForm(0.5), &mut ui, &mut s);
         apply(Action::OrbitForm { azimuth: 0.2, elevation: 0.1 }, &mut ui, &mut s);
         let held = ui.form.orbit;
-        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(H, &mut ui, &mut s);
         apply(Action::Zoom(2.0), &mut ui, &mut s);
         assert!(ui.boom_lengths < boom, "out of the editor it is the boom's again");
-        apply(Action::ToggleForm, &mut ui, &mut s);
+        apply(H, &mut ui, &mut s);
         assert_eq!(ui.form.orbit, held, "the editor's camera survives the round trip");
     }
 
@@ -1266,7 +1256,7 @@ mod tests {
 
         // Both ways in, because either could be the one that forgets.
         let held = ui.map;
-        apply(Action::ToggleView, &mut ui, &mut s);
+        apply(M, &mut ui, &mut s);
         assert_eq!(ui.map, held, "showing the map moved its camera");
         apply(Action::SetView(ViewMode::World), &mut ui, &mut s);
         assert_eq!(ui.view, ViewMode::World, "back where it started");

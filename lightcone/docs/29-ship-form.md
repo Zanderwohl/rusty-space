@@ -544,12 +544,15 @@ three phases, progress, and Cancel.
 
 | key | from World | from Map | from the editor |
 |---|---|---|---|
-| `H` | the editor | the editor | back to where it was entered from |
+| `H` | the editor | the editor | the world |
 | `M` | the map | the world | the map |
-| `Escape` | closes the top window, or opens the menu | the same | puts a carried part back; else closes the top window, or leaves to where it was entered from |
+| `Escape` | closes the top window, or opens the menu | closes the top window, or the world | puts a carried part back; else closes the top window, or the world |
 
-The editor is the one mode with somewhere to go back to, so `Escape` goes there before it opens the
-menu. `M` always means the map; from the map it means out of it.
+The modes are a star about the world, and the rule is the same for every mode that is not it: its
+key goes into it from anywhere and, pressed inside it, out to the world; `Escape`, with no window
+left, goes out to the world before it opens the menu. Nothing remembers the way in, so a mode added
+later — a larger view for what a window shows today — gets a key and its place in the table and no
+other row changes. `ViewMode` in `lc-client/src/ui.rs` is the rule in code.
 
 ### Its camera
 
