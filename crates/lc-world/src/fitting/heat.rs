@@ -350,6 +350,140 @@ mod tests {
         assert!(close(canceled.heat_j, 0.5 * loss_j, 1e-9), "{}", canceled.heat_j);
     }
 
+    /// With radiation and the drain off, a dismantling's return into a store starlight fills while
+    /// the step runs: storage stops at its capacity, and all of what it could not take is heat.
+    #[test]
+    fn a_return_into_room_starlight_has_filled_is_heat() {
+        let b = Balance { living_density_w: 0.0, field_tau_s: 1.0e40, ..Balance::DEFAULT };
+        let mut fitting = Fitting::full(Form::starting(), b, 0.0);
+        let capacity_j = fitting.hull().capacities.storage_j;
+        let room_j = 0.5 * me(&b);
+        fitting.drain(room_j);
+        let arriving_w = fitting.hull().capacities.aperture_w;
+        fitting.set_starlight_w(arriving_w);
+        let plan = begin(&mut fitting, shrunk_engine());
+        let [step] = plan.steps() else { panic!("{:?}", plan.steps()) };
+        assert!(close(step.stored_j, room_j, 1e-12), "premise: the plan fills the room itself");
+        let end_s = step.ends_s();
+        assert!(fitting.solar_w() * end_s > 4.0 * room_j, "premise: starlight fills it well before the end");
+
+        for k in 0..=400 {
+            let t = end_s * f64::from(k) / 400.0;
+            let stored_j = fitting.stored_j_at(&rest(), t);
+            assert!(stored_j <= capacity_j * (1.0 + 1e-14), "{t}: {stored_j} over {capacity_j}");
+        }
+        assert_eq!(fitting.stored_j_at(&rest(), 0.5 * end_s), capacity_j, "premise: full by halfway");
+
+        // Everything the step took apart, and all starlight brought, is storage or heat.
+        let heat_0 = fitting.heat_j;
+        // Until the step ends, the return it will vent is still in the part.
+        let taken_j = |t: f64| if t < end_s { ((1.0 - b.recovery) * step.gross_j + step.stored_j) * t / end_s } else { step.gross_j };
+        for t in [0.5 * end_s, end_s, 1.5 * end_s] {
+            let gained_j = fitting.heat_j_at(t) - heat_0 + fitting.stored_j_at(&rest(), t) - (capacity_j - room_j);
+            let want_j = arriving_w * t + taken_j(t);
+            assert!(close(gained_j, want_j, 1e-9), "{t}: {gained_j} {want_j}");
+        }
+
+        let mut finished = fitting.clone();
+        finished.settle(&rest(), 0.25 * end_s);
+        assert!(finished.finish_refit());
+        let gained_j = finished.heat_j - heat_0 + finished.stored_j - (capacity_j - room_j);
+        assert!(finished.stored_j <= capacity_j, "{}", finished.stored_j);
+        assert!(close(gained_j, arriving_w * 0.25 * end_s + step.gross_j, 1e-9), "finished: {gained_j}");
+    }
+
+    /// Storage shrinks with the ship full, then the engine grows out of it, under starlight that
+    /// refills what the build takes. The ticks put every step end between two settlements.
+    #[test]
+    fn a_round_settled_at_every_tick_agrees_with_one_leap() {
+        let b = Balance::DEFAULT;
+        let mut leap = Fitting::full(Form::starting(), b, 0.0);
+        leap.set_starlight_w(starlight_w(&b, 0.05));
+        let mut target = shrunk_engine();
+        target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 3.0;
+        target.parts.iter_mut().find(|p| p.kind == crate::form::Kind::Storage).unwrap().volume_m3 *= 0.9;
+        let plan = begin(&mut leap, target.clone());
+        assert!(plan.steps().len() >= 2, "premise: {:?}", plan.steps());
+        assert!(plan.steps().iter().any(|s| s.spilled_j > 0.0), "premise: the store spills");
+        let end_s = 1.3 * plan.duration_s();
+        let mut ticks = leap.clone();
+        let n = 997;
+        for k in 1..=n {
+            let t = end_s * f64::from(k) / f64::from(n);
+            ticks.settle(&rest(), t);
+            assert!(ticks.stored_j <= ticks.hull().capacities.storage_j * (1.0 + 1e-14), "{t}: over capacity");
+        }
+        assert!(plan.steps().iter().all(|s| (s.ends_s() * f64::from(n) / end_s).fract() > 1e-6), "premise: ends between ticks");
+        let (heat_j, stored_j) = (leap.heat_j_at(end_s), leap.stored_j_at(&rest(), end_s));
+        leap.settle(&rest(), end_s);
+        assert_eq!((leap.heat_j, leap.stored_j), (heat_j, stored_j), "a read agrees with a settlement");
+        assert_eq!(ticks.form(), &target);
+        assert!(close(ticks.heat_j, leap.heat_j, 1e-9), "{} {}", ticks.heat_j, leap.heat_j);
+        assert!(close(ticks.stored_j, leap.stored_j, 1e-9), "{} {}", ticks.stored_j, leap.stored_j);
+        assert_eq!(leap.stored_j, leap.hull().capacities.storage_j, "premise: refilled by the end");
+    }
+
+    /// Settled only at the round's start, the account still takes the finished form's drain and
+    /// rating from the instant its last step ends.
+    #[test]
+    fn the_drain_and_rating_change_at_the_step_end() {
+        let b = Balance::DEFAULT;
+        let mut fitting = starting(b, 20.0 * me(&b));
+        let mut target = Form::starting();
+        target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 5.0;
+        target.parts.iter_mut().find(|p| p.kind == crate::form::Kind::Living).unwrap().volume_m3 *= 1.5;
+        let plan = begin(&mut fitting, target.clone());
+        let (was, now) = (fitting.hull().capacities, Capacities::of(&target, &b));
+        assert!(now.aperture_w > was.aperture_w && now.drain_w > was.drain_w, "premise");
+        fitting.set_starlight_w(3.0 * now.aperture_w);
+        let end_s = plan.duration_s();
+        let dt_s = 1.0e3;
+        let rate_w = (fitting.stored_j_at(&rest(), end_s + dt_s) - fitting.stored_j_at(&rest(), end_s)) / dt_s;
+        let want_w = b.conversion_efficiency * now.aperture_w - now.drain_w;
+        assert!(close(rate_w, want_w, 1e-6), "{rate_w} {want_w}");
+
+        let heat_j = fitting.heat_j_at(end_s);
+        let absorbed_w = 3.0 * now.aperture_w;
+        let heat_w = absorbed_w - b.conversion_efficiency * now.aperture_w + now.drain_w;
+        let want_j = fitting.field().heat_after_j(heat_j, heat_w, dt_s);
+        assert!(close(fitting.heat_j_at(end_s + dt_s), want_j, 1e-9), "{} {want_j}", fitting.heat_j_at(end_s + dt_s));
+    }
+
+    /// Full under starlight, a burn opens room as it spends and conversion refills it; the drain is
+    /// still paid, and the burn comes out of its commitment.
+    #[test]
+    fn a_burn_is_paid_from_storage_as_it_goes() {
+        use crate::flight::{Cruise, Drive};
+        let b = Balance::DEFAULT;
+        let mut leap = Fitting::full(Form::starting(), b, 0.0);
+        leap.set_starlight_w(starlight_w(&b, 1.0));
+        let drive = Drive { accel_g: 1.0, ..Drive::DEFAULT };
+        let cruise = Cruise::plan(DVec3::ZERO, DVec3::X * 1.0e-3, 0.0, drive);
+        let end_s = cruise.duration_s();
+        let mut motion = rest();
+        motion.begin_crossing(cruise, None);
+        let committed_j = leap.commit(&motion, 0.0);
+        let capacity_j = leap.hull().capacities.storage_j;
+        assert!(committed_j > 0.0 && committed_j < capacity_j, "premise: {committed_j}");
+        let refilled_j = (leap.solar_w() - leap.hull().capacities.drain_w) * end_s;
+        assert!(refilled_j > 0.0 && refilled_j < 0.1 * committed_j, "premise: it never refills");
+
+        let mut ticks = leap.clone();
+        for k in 1..=1000 {
+            ticks.settle(&motion, end_s * f64::from(k) / 1000.0);
+        }
+        let stored_j = leap.stored_j_at(&motion, end_s);
+        assert!(close(stored_j, capacity_j - committed_j + refilled_j, 1e-9), "{stored_j}");
+        assert!(leap.committed_j_at(&motion, end_s) < 1e-9 * committed_j, "all of it spent");
+        let (mass_kg, heat_0) = (leap.settled_mass_kg(), leap.heat_j);
+        leap.settle(&motion, end_s);
+        // A burn is priced on the mass settled, which the refill and the heat change between ticks.
+        let repriced_j = 2.0 * committed_j * (refilled_j + (leap.heat_j - heat_0).abs()) / (mass_kg * crate::fitting::C2);
+        assert!(repriced_j < 0.5 * refilled_j, "premise: {repriced_j} {refilled_j}");
+        assert!((ticks.stored_j - leap.stored_j).abs() < repriced_j, "{} {}", ticks.stored_j, leap.stored_j);
+        assert!(close(ticks.heat_j, leap.heat_j, 1e-12), "{} {}", ticks.heat_j, leap.heat_j);
+    }
+
     #[test]
     fn heat_weighs_what_it_holds() {
         let b = Balance::DEFAULT;
