@@ -651,6 +651,20 @@ mod tests {
     use super::*;
     use lc_world::knowledge::SystemPlane;
 
+    /// `map_panel::draw` takes the map, the world's viewport and the square from `inset`, and
+    /// none of it can be asserted without a window.
+    #[test]
+    fn each_mode_says_what_the_corner_holds_and_whether_the_mouse_steers() {
+        use ViewMode::*;
+        let table: Vec<_> = ViewMode::ALL.iter().map(|m| (*m, m.inset(), m.steers())).collect();
+        assert_eq!(table, [(World, Some(Map), true), (Map, Some(World), false), (Form, None, true)]);
+        assert_eq!(ViewMode::named("Editor"), Some(Form));
+        assert_eq!(ViewMode::named("form"), Some(Form));
+        assert_eq!(ViewMode::named("map"), Some(Map));
+        assert_eq!(ViewMode::named("world"), Some(World));
+        assert_eq!(ViewMode::named("sky"), None);
+    }
+
     /// **The map lays its rings in the plane the crew solved, not the one the generator used.**
     /// A craft that has solved nothing gets a usable frame rather than a degenerate one, and the
     /// panel is what refuses the option -- see `map_panel::unsolved`.

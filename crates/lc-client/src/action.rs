@@ -994,7 +994,7 @@ mod tests {
     /// The map is a mode of the main view, so the key that shows it puts it away again and
     /// asking for the mode already in force is not a toggle.
     #[test]
-    fn the_map_is_the_other_mode_of_the_main_view() {
+    fn the_maps_key_is_a_toggle_and_set_view_is_not() {
         let (mut ui, mut s) = fixture();
         assert_eq!(ui.view, ViewMode::World, "a session starts flying");
         apply(M, &mut ui, &mut s);

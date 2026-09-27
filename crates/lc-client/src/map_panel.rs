@@ -116,7 +116,7 @@ pub fn draw(
     // The map is the whole view or the square, and nothing past here is anything else.
     let (rect, response) = match mode {
         ViewMode::Map => whole(ctx, foot.0, &ui_state, &game, &map, square, &mut out),
-        _ => (square, swap.clone()),
+        ViewMode::World | ViewMode::Form => (square, swap.clone()),
     };
     map.wanted = pixels(rect, per_point).size().max(UVec2::ONE);
 
@@ -125,13 +125,13 @@ pub fn draw(
     let over = crate::pick::occupied_rects(ctx, &[corner_id()]);
     let hole = match mode {
         ViewMode::Map => square,
-        _ => egui::Rect::NOTHING,
+        ViewMode::World | ViewMode::Form => egui::Rect::NOTHING,
     };
     // Before the names, because a mark carries its own and the layout has to leave that one
     // out. Nothing is picked off the corner square: 190 points is a thumbnail, not a surface.
     let picked = match mode {
         ViewMode::Map => crate::map_pick::survey(&response, rect, &ui_state, &map, &mut out),
-        _ => crate::map_pick::Picked::default(),
+        ViewMode::World | ViewMode::Form => crate::map_pick::Picked::default(),
     };
     scale_rule(&painter, rect, ui_state.map, &over);
     labels(&painter, rect, hole, ui_state.map, &map, &picked.named);
