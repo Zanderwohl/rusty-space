@@ -243,8 +243,9 @@ impl crate::knowledge::Knowledge {
             .sightings()
             .iter()
             .filter_map(|seen| {
-                let believed = star_ly * crate::system::M_PER_LY + self.placed(star, body, seen.observed_s)?;
-                let from = seen.bearing.observer_ly * crate::system::M_PER_LY;
+                // Relative to the star: absolute meters lose tens of km at 30,000 ly.
+                let believed = self.placed(star, body, seen.observed_s)?;
+                let from = (seen.bearing.observer_ly - star_ly) * crate::system::M_PER_LY;
                 let depth = (believed - from).length();
                 arc::sound(depth).then(|| (seen.observed_s, from + seen.bearing.toward * depth - believed))
             })
@@ -550,6 +551,82 @@ mod tests {
         let offered = |of: BodyId| k.primaries(star, Subject::Body { star, body: of }, 100.0);
         assert_eq!(offered(planet), vec![None], "a planet offered its own moon");
         assert_eq!(offered(moonlet), vec![None, Some(planet)]);
+    }
+
+    /// Bearings of an Earth-like orbit from a ship on a 5 AU circle, 24 looks over a fifth of a
+    /// year, nudged by `noise` radians, as `arc`'s tests make them. Its period, seconds.
+    fn circling(noise: f64) -> (Vec<Look>, f64) {
+        use std::f64::consts::TAU;
+        let (au, mu) = (crate::navigation::AU, 1.327_124_4e20);
+        let period = TAU * (au.powi(3) / mu).sqrt();
+        let truth = Fitted {
+            semi_major_m: au,
+            eccentricity: 0.0167,
+            period_s: period,
+            pole: DVec3::new(0.02, -0.03, 1.0).normalize(),
+            periapsis_rad: 1.8,
+            epoch_s: 4.0e6,
+            mu,
+            reach_m: f64::INFINITY,
+            assumed_circular: false,
+            residual_rad: 0.0,
+            looks: 0,
+        };
+        let ship_period = TAU * ((5.0 * au).powi(3) / mu).sqrt();
+        let looks = (0..24)
+            .map(|i| {
+                let t = i as f64 * period / 120.0;
+                let phase = TAU * t / ship_period;
+                let from = DVec3::new(phase.cos(), phase.sin(), 0.0) * 5.0 * au;
+                let toward = (truth.at(t) - from).normalize();
+                let (x, y) = toward.any_orthonormal_pair();
+                let gauss = |k: u64| crate::rng::gaussian(crate::rng::hash(&[i as u64, k])) * noise;
+                Look { from_m: from, toward: (toward + x * gauss(1) + y * gauss(2)).normalize(), at_s: t, sigma_rad: noise, range_m: None }
+            })
+            .collect();
+        (looks, period)
+    }
+
+    fn job(frames: Vec<Frame>, warm: Option<Held>) -> FitJob {
+        let star = StarId::synthesize("primary", 5);
+        FitJob { subject: Subject::Body { star, body: BodyId::of(star, "fitted") }, owner: Witness(1), frames, warm, taken_s: 0.0 }
+    }
+
+    fn frame(about: Option<BodyId>, looks: Vec<Look>, longest_s: f64, widest_m: f64) -> Frame {
+        Frame { about, looks, longest_s, widest_m, depth: 0.0 }
+    }
+
+    /// An orbit outside its primary's Hill sphere, by period or by axis, is refused.
+    #[test]
+    fn a_satellite_stays_inside_the_hill_sphere() {
+        let noise = 2.979e-7 * crate::knowledge::astrometry::CENTROID_FLOOR;
+        let (looks, period) = circling(noise);
+        let about = Some(BodyId::of(StarId::synthesize("primary", 5), "planet"));
+        let au = crate::navigation::AU;
+        let solve = |longest_s: f64, widest_m: f64| job(vec![frame(about, looks.clone(), longest_s, widest_m)], None).solve();
+        assert!(solve(f64::INFINITY, f64::INFINITY).is_some(), "premise: the looks fit");
+        assert!(solve(period * 0.9, f64::INFINITY).is_none(), "a period past the bound was kept");
+        assert!(solve(f64::INFINITY, au * 0.9).is_none(), "an axis past the bound was kept");
+    }
+
+    /// A carried orbit loses to a primary offered since it was found, if that one fits better:
+    /// a moon fitted about the star before its planet was placed moves to the planet.
+    #[test]
+    fn a_carried_orbit_yields_to_a_primary_offered_since() {
+        let noise = 2.979e-7 * crate::knowledge::astrometry::CENTROID_FLOOR;
+        let (clean, _) = circling(noise);
+        // Far noisier than the clean fit's own stall, which is hundreds of times its noise.
+        let (noisy, _) = circling(noise * 3000.0);
+        let held = arc::fit(&noisy).expect("premise: the noisy looks fit");
+        let planet = Some(BodyId::of(StarId::synthesize("primary", 5), "planet"));
+        let warm = Held { about: None, fitted: held, offered: vec![None] };
+        let frames = vec![
+            frame(None, noisy, f64::INFINITY, f64::INFINITY),
+            frame(planet, clean, f64::INFINITY, f64::INFINITY),
+        ];
+        let solved = job(frames, Some(warm)).solve().expect("fits");
+        assert_eq!(solved.about, planet, "the carried orbit kept its primary");
+        assert_eq!(solved.offered, vec![None, planet]);
     }
 
     /// A body tried on bearings alone waits for its arc to grow half again, but a close pass

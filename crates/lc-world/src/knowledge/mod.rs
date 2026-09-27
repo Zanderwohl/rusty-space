@@ -846,6 +846,7 @@ mod tests {
             eccentricity: None,
             orientation: Orientation::Unknown,
             epoch_s: None,
+            pivot_s: None,
             method: Method::Transit,
             stated_s,
             lineage: Lineage::new(),

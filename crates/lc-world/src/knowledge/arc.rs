@@ -778,11 +778,22 @@ impl Fitted {
                 periapsis,
             },
             epoch_s: Some((self.epoch_s, spread.epoch_s)),
+            pivot_s: pivot(looks),
             method: crate::knowledge::Method::Astrometric,
             stated_s,
             lineage: Vec::new(),
         }
     }
+}
+
+/// The weighted centre of the looks' times, where a fit's phase and period errors are
+/// independent. `None` for no looks.
+fn pivot(looks: &[Look]) -> Option<f64> {
+    let (sum, weight) = looks.iter().fold((0.0, 0.0), |(sum, weight), look| {
+        let w = 1.0 / (look.sigma_rad * look.sigma_rad);
+        (sum + w * look.at_s, weight + w)
+    });
+    sound(weight).then(|| sum / weight)
 }
 
 /// How much worse than it was an orbit may explain a longer arc and still be carried onto it
@@ -1233,8 +1244,10 @@ mod tests {
         let held = fit(&dense).expect("an orbit and a fifth, well sampled, fits");
         assert!(off(held.period_s, period) < 1.0e-3, "premise: the short arc fits");
 
-        // Irregularly spaced, as a survey's revisits are once decimated, over forty orbits.
+        // Sixteen looks over forty orbits, each 2.63 orbits apart.
         let long = looks(&truth, 5.0, 16, period * 2.63, SIGMA);
+        let searched = fit(&long).map_or(f64::INFINITY, |f| off(f.period_s, period));
+        assert!(searched > 1.0e-2, "premise: a search finds the period to {searched}");
         let carried = refit(&held, &long).expect("the held period says how many turns");
         assert!(off(carried.period_s, period) < 1.0e-5, "period off by {}", off(carried.period_s, period));
         assert!(off(carried.semi_major_m, truth.semi_major_m) < 1.0e-3);
@@ -1804,6 +1817,7 @@ mod tests {
             eccentricity: None,
             orientation: crate::knowledge::Orientation::Unknown,
             epoch_s: None,
+            pivot_s: None,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 1.0e6,
             lineage: Vec::new(),
@@ -1930,6 +1944,7 @@ mod tests {
             eccentricity: None,
             orientation: crate::knowledge::Orientation::Unknown,
             epoch_s: None,
+            pivot_s: None,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 0.0,
             lineage: Vec::new(),

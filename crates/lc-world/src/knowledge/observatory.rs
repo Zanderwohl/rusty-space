@@ -356,7 +356,7 @@ pub fn survey_between(
     let turns = duty.visits(bodies, from_s, to_s);
     let mut detected = None;
     let due = following.due(to_s);
-    let followed = due.len().min(turns.len().div_ceil(2));
+    let followed = due.len().min(turns.len() / 2);
     for subject in due.into_iter().take(followed) {
         if let Some(seen) = slot_of(subject).and_then(|slot| look(knowledge, slot)) {
             detected = Some(seen);
@@ -615,6 +615,7 @@ pub fn chart_system(knowledge: &mut Knowledge, system: &LocalSystem, now_s: f64)
                 },
                 // The periapsis passage, as `placed_at` takes it.
                 epoch_s: Some((now_s - mean / std::f64::consts::TAU * period_s, 0.0)),
+                pivot_s: None,
                 method: Method::Claim,
                 stated_s: now_s,
                 lineage: vec![hop],
@@ -650,7 +651,7 @@ mod tests {
                 else {
                     continue;
                 };
-                let super::super::body::Placed::Known { offset_au, .. } = belief.position_now else {
+                let super::super::Placed::Known { offset_au, .. } = belief.position_now else {
                     panic!("{} was charted and not placed", key(body));
                 };
                 let truth_au = (system.body_state_at(body, later).unwrap().0 - star_at) / generate::AU;
@@ -1148,7 +1149,6 @@ mod tests {
         assert!(sky.source_of(Band::V, here, crate::sky::StarId::synthesize("nope", 1)).is_none());
     }
 
-
     /// A satellite without an orbit gets a run of doubling gaps, the survey goes on round it,
     /// and a planet is left to the survey's own cadence.
     #[test]
@@ -1211,7 +1211,7 @@ mod tests {
     #[test]
     #[ignore]
     fn sol_fits_against_truth() {
-        use super::super::{arc, body::Placed, BodyId};
+        use super::super::{arc, BodyId, Placed};
 
         let Some((mut sky, system)) = sol() else { panic!("the HYG catalog is not in assets/") };
         let setting = |key: &str, default: f64| std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default);

@@ -641,6 +641,7 @@ mod tests {
                 eccentricity: None,
                 orientation: lc_world::knowledge::Orientation::EdgeOnTo { toward: DVec3::X },
                 epoch_s: Some((0.0, 0.0)),
+                pivot_s: None,
                 method: lc_world::knowledge::Method::Transit,
                 stated_s: 0.0,
                 lineage: Vec::new(),

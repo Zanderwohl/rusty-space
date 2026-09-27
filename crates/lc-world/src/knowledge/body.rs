@@ -12,7 +12,7 @@ use crate::sky::StarId;
 use super::subject::BodyId;
 use super::{Knowledge, Subject, Witness};
 use super::placed::{Path, added, placed_at};
-pub use super::placed::{PlaceError, Placed, Track};
+use super::placed::{Placed, Track};
 
 /// What the system's plane is known to be, folded from the orbits held about its bodies.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -505,6 +505,7 @@ mod tests {
             eccentricity: None,
             orientation,
             epoch_s: epoch_s.map(|at| (at, 0.0)),
+            pivot_s: None,
             method: Method::Transit,
             stated_s: 0.0,
             lineage: Lineage::new(),
@@ -678,6 +679,7 @@ mod tests {
                 periapsis: 0.0,
             },
             epoch_s: Some((0.0, 0.0)),
+            pivot_s: None,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 0.0,
             lineage: Vec::new(),
@@ -857,6 +859,7 @@ mod tests {
             eccentricity: None,
             orientation: Orientation::Unknown,
             epoch_s: Some((0.0, 0.0)),
+            pivot_s: None,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 1.0,
             lineage: Vec::new(),

@@ -64,13 +64,17 @@ below.
 ```rust
 pub struct Orbit {
     pub witness: Witness,
+    pub about: Option<BodyId>,           // what it goes round; None is the star
     pub period_s: (f64, f64),            // value, sigma
     pub semi_major_au: (f64, f64),
     pub eccentricity: Option<(f64, f64)>,
     pub orientation: Orientation,
-    /// A time at which the body was at a known place on the orbit: a transit's mid-time, or an
-    /// astrometric fit's epoch. With a full orientation this places the body now.
-    pub epoch_s: Option<f64>,
+    /// A time at which the body was at a known place on the orbit, and one sigma: a transit's
+    /// mid-time, or an astrometric fit's periapsis passage. With a full orientation this places
+    /// the body now. A fit's sigma is the phase at `pivot_s`, as a time.
+    pub epoch_s: Option<(f64, f64)>,
+    /// Where the phase is best known and the period's drift grows from; `None` is the epoch.
+    pub pivot_s: Option<f64>,
     pub method: Method,                  // Transit, Astrometric, or Claim: stated by a craft that sent no raw data
     pub stated_s: f64,
     pub lineage: Lineage,
@@ -556,6 +560,10 @@ at 17 days all fit from one, to a part in a thousand or better. `knowledge::foll
   their dense first looks at once; Sol's satellites are all started within a day.
 - **Gaps run from the look actually taken,** so a late one stretches the run rather than
   squeezing the gap after it.
+- **Two runs a body.** A body still without an orbit after one gets a second with gaps four
+  times as long, for a period the first could not reach.
+- **Not saved.** After a restart, or a new duty, a body still without an orbit starts again,
+  its runs counted afresh, which costs telescope time and not correctness.
 - **Not everything.** Following every body without an orbit swamped the fit queue — one fit a
   tick, and every run re-arming its body nine times — and Mars fitted to 1.79 AU. Only
   something beside a brighter body is followed; from 5 AU that still takes in about one body in
@@ -580,18 +588,22 @@ as the orbit's error does and sixteen looks are enough to interpolate between.
   miss if that is larger. Bearings pin a planet across the line of sight far better than along
   it, so the second is a floor and not an estimate, and the bar is only as honest as the
   planet's.
-- Measured on Sol from 5 AU over fifteen days, against the true osculating axes: Io, Europa,
-  Ganymede and Callisto to 5–8 parts in 10,000 where they were 1–8% out, Amalthea and Thebe
-  within 0.3%. With the planet's error taken along the line of sight rather than in total, the
-  bars are four to seven times the error for the Galileans and every regular moon is within
-  2.3 of its own. The irregulars are 60–120 bars out: fifteen days is a few percent of their
-  orbits, and on an arc that short a fit's own bar is too sure.
+- Measured on Sol from 5 AU over fifteen days, against the true osculating axes (2026-09-27,
+  with the epoch sigma and the pivot): Io, Europa, Ganymede and Callisto to 5–8 parts in
+  10,000 where they were 1–8% out, Metis, Adrastea, Amalthea and Thebe within 0.7%, every
+  regular moon within one of its bar, and Themisto within 8%. The bars are tens to hundreds of
+  times the error, and the depth term is nearly all of them. Jupiter's own fit, a week of a
+  twelve-year orbit, states its epoch to 55 days and its period to 8 years, so its place along
+  the line of sight to 0.4 AU when it is 0.006 AU out: a stalled fit's walked bars again.
+  The irregulars other than Themisto are still wrong: fifteen days is a few percent of their
+  orbits.
 
 **Not oblateness.** The arena's bodies are spheres, so there is no figure to measure and none is
 invented. Same decision as rings for generated planets in phase 5, for the same reason.
 
 **And the velocity is not measured at all.** An orbit and a time *are* a velocity: `placed_at`
-throws that half away because only geometry is wanted there, and `body_belief` keeps it. The one
+takes only the geometry, with `dr/dM` for the direction of its phase error, and `body_belief`
+keeps the velocity through `moving_at`. The one
 thing needed is the real `mu`, which the orbit states — `n^2 a^3`, Kepler's third law read
 backwards, as `knowledge::arc` measures it.
 
@@ -1542,13 +1554,17 @@ knowledge. Today:
      sixteenth of a mark's brightness, and the selected item's as a full line.
      `em_map::MapItem::spread_ly` became a list of `Spread` pieces, `Bar` or `Arc`, drawn by
      `lc_client::map_spread`.
-     ✅ The orbit fit states an epoch sigma (2026-09-27), and the phase error is it and the
-     period's drift in quadrature, so a freshly fitted body has an arc from the start. It is
-     walked with the periapsis and the period held: at a small eccentricity the periapsis is
-     barely defined and an epoch walked with it free trades against it, reporting half an orbit
-     for a body whose place round it is known well. Measured, it is small beside the drift and
-     the eccentricity's own swing along the path, and no better calibrated than the rest of
+     ✅ The orbit fit states an epoch sigma and a pivot (2026-09-27), so a freshly fitted body
+     has an arc from the start. The sigma is walked with the periapsis and the period held: at
+     a small eccentricity the periapsis is barely defined, and an epoch walked with it free
+     trades against it and reports half an orbit for a body whose place round it is known well.
+     With the period held it is the phase's error where the looks are, so the period's drift
+     grows from the **pivot**, the looks' weighted centre, where the two errors are independent
+     and add in quadrature. It had grown from the periapsis passage, which can be half a period
+     from the looks: six years for Jupiter. Measured, the epoch term is small beside the drift
+     and the eccentricity's own swing along the path, and no better calibrated than the rest of
      `knowledge::arc::spread`: a fit stalled short of the noise walks every bar too steep.
+     A covariance would carry the phase from any time; that waits on a Gauss-Newton fit.
    - ⬜ **Candidates are not drawn.** Their radius needs a period turned through a mass prior,
      and the client builds no `Prior` — adding one to draw faint rings is the wrong trade when
      the panel lists them already. The shard computes that radius at settle, so **sending it** is
@@ -1713,7 +1729,7 @@ game has no players — so each of these is a change in place, not a versioned a
 | 6 | the sites that were listed for a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
 | 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |
 | 9 | `Order::SendReport` gains `about: Option<Subject>`, refused with `Impossible` when the craft does not `knows` that system. One new `Knowledge` method beside `report_upto`. **`REPORT_FORMAT` does not move**: `Report`, `Entry` and `Part` are unchanged, which is the point — and it must not move, because `Reported::format` is checked strictly on landing (`instruments.rs:215`), so a bump would make every report already in flight fail to land |
-| — | ✅ **`Orbit::epoch_s` grew a sigma** (2026-09-27), `Option<(f64, f64)>` like every other element: a fit's is the epoch walked with the periapsis and the period held, so it is the phase and not the periapsis passage, and a transit's is half its duration. `FILE_FORMAT` is 10 and `REPORT_FORMAT` is 9 |
+| — | ✅ **`Orbit::epoch_s` grew a sigma and `Orbit` a `pivot_s`** (2026-09-27): `epoch_s` is `Option<(f64, f64)>` like every other element, a fit's sigma the epoch walked with the periapsis and the period held, so the phase at the pivot; a transit's is its duration over √12. `pivot_s` is where that holds and the period's drift grows from. `FILE_FORMAT` is 10 and `REPORT_FORMAT` is 9 |
 
 ## Decided
 

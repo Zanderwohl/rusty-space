@@ -409,6 +409,11 @@ pub struct Orbit {
     ///
     /// A fit's sigma is taken with the periapsis and the period held: the phase, as a time.
     pub epoch_s: Option<(f64, f64)>,
+    /// When the phase is best known, coordinate seconds: where the period's drift grows from,
+    /// and where the epoch's sigma holds. A fit's is the weighted centre of its looks, where
+    /// the phase's error and the period's are independent; a periapsis passage can be half a
+    /// period away. `None` reads as the epoch.
+    pub pivot_s: Option<f64>,
     pub method: Method,
     /// Coordinate seconds the witness stated it.
     pub stated_s: f64,
@@ -444,6 +449,7 @@ impl Orbit {
             eccentricity: None,
             orientation,
             epoch_s,
+            pivot_s: None,
             method,
             stated_s,
             lineage: Lineage::new(),

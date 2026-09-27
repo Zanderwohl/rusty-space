@@ -232,10 +232,11 @@ pub(super) fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     // belief that reported only the size and the plane said a course could be flown against it.
     // `M = tau (t - epoch) / P`, so the period's error carries `tau |t - epoch| sigma_P / P^2`
     // of anomaly with it. Doc 25: the sigma is grown by how long since it was last seen.
-    // The epoch's error adds in quadrature: a fit states it with the period held, so nothing
-    // counts twice.
+    // It grows from the pivot, where the epoch's error holds and is independent of the
+    // period's, so the two add in quadrature.
     let (period_s, period_sigma) = orbit.period_s;
-    let drift = TAU * (now_s - path.epoch_s).abs() * period_sigma / (period_s * period_s);
+    let pivot_s = orbit.pivot_s.unwrap_or(path.epoch_s);
+    let drift = TAU * (now_s - pivot_s).abs() * period_sigma / (period_s * period_s);
     let at_epoch = TAU * orbit.epoch_s.map_or(0.0, |(_, sigma)| sigma) / period_s;
 
     Placed::Known {
@@ -304,6 +305,7 @@ mod tests {
             eccentricity: e,
             orientation: Orientation::Known { pole: DVec3::Z, sigma_rad: sigma_pole, node: 0.0, periapsis: 0.0 },
             epoch_s: Some((0.0, 0.0)),
+            pivot_s: None,
             method: Method::Astrometric,
             stated_s: 0.0,
             lineage: Lineage::new(),
@@ -338,6 +340,19 @@ mod tests {
         assert!((fresh.along_rad - TAU * 1.0e-3).abs() < 1.0e-12, "{}", fresh.along_rad);
         let (_, later) = error(&o, 10.0 * PERIOD_S);
         let drift = TAU * 10.0 * 0.01;
+        assert!((later.along_rad - drift.hypot(TAU * 1.0e-3)).abs() < 1.0e-9, "{}", later.along_rad);
+    }
+
+    /// The drift grows from the pivot, not from the epoch: a fit whose periapsis passage is years
+    /// from its looks is known best at the looks.
+    #[test]
+    fn the_drift_grows_from_the_pivot() {
+        let pivot = 10.0 * PERIOD_S;
+        let o = Orbit { epoch_s: Some((0.0, PERIOD_S * 1.0e-3)), pivot_s: Some(pivot), ..orbit(None, 1.0e-4) };
+        let (_, at_pivot) = error(&o, pivot);
+        assert!((at_pivot.along_rad - TAU * 1.0e-3).abs() < 1.0e-12, "{}", at_pivot.along_rad);
+        let (_, later) = error(&o, pivot + 2.0 * PERIOD_S);
+        let drift = TAU * 2.0 * 0.01;
         assert!((later.along_rad - drift.hypot(TAU * 1.0e-3)).abs() < 1.0e-9, "{}", later.along_rad);
     }
 

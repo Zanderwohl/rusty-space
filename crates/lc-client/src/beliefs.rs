@@ -179,6 +179,7 @@ mod tests {
                     periapsis: 0.0,
                 },
                 epoch_s: Some((0.0, 0.0)),
+                pivot_s: None,
                 method: Method::Transit,
                 stated_s: 0.0,
                 lineage: Vec::new(),

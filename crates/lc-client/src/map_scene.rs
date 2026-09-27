@@ -456,7 +456,7 @@ pub(crate) struct Scene {
     parts: HashMap<ItemKey, Parts>,
     rings: Vec<Entity>,
     spokes: Option<Entity>,
-    /// One material per kind and form, and per kind for spreads (`None`), shared by every item
+    /// One material per kind and look, a spread's by whether it is selected, shared by every item
     /// drawn with it: a material each was a bind group each, and a draw each.
     palette: HashMap<(ItemKind, Look), Handle<MapLineMaterial>>,
     lines: Option<Lines>,

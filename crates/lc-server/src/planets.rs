@@ -128,8 +128,8 @@ impl<J: Journal> Server<J> {
             mu,
             mu_fraction,
             Orientation::EdgeOnTo { toward },
-            // The middle of a transit is somewhere within it.
-            Some((transit.epoch_s, transit.duration_s * 0.5)),
+            // The middle of a transit is somewhere within it: uniform over its duration.
+            Some((transit.epoch_s, transit.duration_s / 12f64.sqrt())),
             Method::Transit,
             now_s,
         );
