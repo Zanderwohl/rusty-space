@@ -178,7 +178,7 @@ mod tests {
                     node: 0.0,
                     periapsis: 0.0,
                 },
-                epoch_s: Some(0.0),
+                epoch_s: Some((0.0, 0.0)),
                 method: Method::Transit,
                 stated_s: 0.0,
                 lineage: Vec::new(),

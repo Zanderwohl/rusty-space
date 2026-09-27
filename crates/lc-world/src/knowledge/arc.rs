@@ -561,11 +561,19 @@ fn polish(
 /// respect to its elements are a page of algebra to get wrong, and six parameters at a dozen
 /// probes a round is cheap enough that the difference does not pay for itself.
 fn settle(held: Fitted, looks: &[Look], rounds: usize) -> Fitted {
-    settle_but(held, looks, rounds, 7)
+    settle_but(held, looks, rounds, 0)
 }
 
-/// The same, holding one element fixed. `hold` of 7 holds none.
-fn settle_but(mut held: Fitted, looks: &[Look], rounds: usize, hold: usize) -> Fitted {
+/// The elements [`settle_but`] moves, one bit each, in the order it tries them.
+const AXIS: u8 = 1 << 0;
+const ECCENTRICITY: u8 = 1 << 1;
+const POLE_U: u8 = 1 << 2;
+const PERIAPSIS: u8 = 1 << 4;
+const EPOCH: u8 = 1 << 5;
+const PERIOD: u8 = 1 << 6;
+
+/// The same, holding the elements whose bits are set in `hold` fixed.
+fn settle_but(mut held: Fitted, looks: &[Look], rounds: usize, hold: u8) -> Fitted {
     let mut scale = 1.0;
     for _ in 0..rounds {
         let (u, v) = basis(held.pole);
@@ -591,7 +599,8 @@ fn settle_but(mut held: Fitted, looks: &[Look], rounds: usize, hold: usize) -> F
                 // eccentricity off zero and `stated` then reported none while keeping the
                 // periapsis and epoch that had been fitted *with* it -- which draws the body up
                 // to two eccentricities of arc from where it was seen.
-                if k == hold || (held.assumed_circular && (k == 1 || k == 4)) {
+                let bit = 1u8 << k;
+                if hold & bit != 0 || (held.assumed_circular && bit & (ECCENTRICITY | PERIAPSIS) != 0) {
                     continue;
                 }
                 let tried = way(&held, step, u, v);
@@ -619,6 +628,9 @@ pub struct Spread {
     pub eccentricity: f64,
     /// Radians the plane's pole can move.
     pub pole_rad: f64,
+    /// Seconds the epoch can move with the periapsis and the period held: how far round its
+    /// orbit the body was then, as a time. See [`spread`].
+    pub epoch_s: f64,
 }
 
 /// How far each element can move before the fit is a chi-square worse, the other elements
@@ -640,7 +652,13 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
     let weight = |l: &Look| if l.range_m.is_some() { 2.0 } else { 1.0 } / (l.sigma_rad * l.sigma_rad);
     let total: f64 = looks.iter().map(weight).sum();
     if !sound(total) {
-        return Spread { period_s: f64::INFINITY, semi_major_m: f64::INFINITY, eccentricity: f64::INFINITY, pole_rad: std::f64::consts::PI };
+        return Spread {
+            period_s: f64::INFINITY,
+            semi_major_m: f64::INFINITY,
+            eccentricity: f64::INFINITY,
+            pole_rad: PI,
+            epoch_s: fitted.period_s * 0.5,
+        };
     }
     // Chi-square one worse, in the weighted RMS this file works in -- or one reduced chi-square
     // worse where the fit misses by more than the errors allow. A two-body orbit is not the
@@ -654,7 +672,7 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
     // constraining it: an eccentricity walked past one is a hyperbola, and a pole is at most
     // half a turn from any other. Reporting the bound beats reporting infinity, which reads as
     // "unmeasured" when what is true is "unmeasured, and it cannot be worse than this".
-    let walk = |hold: usize, nudge: &dyn Fn(&Fitted, f64) -> Fitted, unit: f64, ceiling: f64| -> f64 {
+    let walk = |hold: u8, nudge: &dyn Fn(&Fitted, f64) -> Fitted, unit: f64, ceiling: f64| -> f64 {
         let mut step = unit.min(ceiling);
         for _ in 0..WALKS {
             let mut trial = nudge(fitted, step);
@@ -682,26 +700,38 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
     let pole_rad = [u, v]
         .into_iter()
         .map(|axis| {
-            walk(2, &|f, d| Fitted { pole: (f.pole + axis * d).normalize(), ..*f }, 1.0e-9, PI)
+            walk(POLE_U, &|f, d| Fitted { pole: (f.pole + axis * d).normalize(), ..*f }, 1.0e-9, PI)
         })
         .fold(0.0f64, f64::max);
 
     Spread {
         semi_major_m: walk(
-            0,
+            AXIS,
             &|f, d| Fitted { semi_major_m: f.semi_major_m * (1.0 + d), ..*f },
             1.0e-9,
             f64::INFINITY,
         ) * fitted.semi_major_m,
         eccentricity: walk(
-            1,
+            ECCENTRICITY,
             &|f, d| Fitted { eccentricity: (f.eccentricity + d).min(PARABOLIC), ..*f },
             1.0e-9,
             (PARABOLIC - fitted.eccentricity).max(0.0),
         ),
         pole_rad,
-        period_s: walk(6, &|f, d| Fitted { period_s: f.period_s * (1.0 + d), ..*f }, 1.0e-9, f64::INFINITY)
+        period_s: walk(PERIOD, &|f, d| Fitted { period_s: f.period_s * (1.0 + d), ..*f }, 1.0e-9, f64::INFINITY)
             * fitted.period_s,
+        // **The phase, not the periapsis passage.** At a small eccentricity the periapsis is
+        // barely defined, and an epoch walked with it free trades against it and comes out as
+        // large as the orbit although where the body is round it is known well. Held with the
+        // periapsis, the epoch's error is the phase's. Held with the period too, since the
+        // period's error is a drift from the epoch that `knowledge::placed` adds on its own.
+        // Half a turn is anywhere on the orbit.
+        epoch_s: walk(
+            EPOCH | PERIAPSIS | PERIOD,
+            &|f, d| Fitted { epoch_s: f.epoch_s + d * f.period_s, ..*f },
+            1.0e-9,
+            0.5,
+        ) * fitted.period_s,
     }
 }
 
@@ -751,7 +781,7 @@ impl Fitted {
                 node: node_dir.y.atan2(node_dir.x),
                 periapsis,
             },
-            epoch_s: Some(self.epoch_s),
+            epoch_s: Some((self.epoch_s, spread.epoch_s)),
             method: crate::knowledge::Method::Astrometric,
             stated_s,
             lineage: Vec::new(),
@@ -1328,6 +1358,35 @@ mod tests {
         }
     }
 
+    /// **A fit states how far round its orbit the body is**, as the epoch's error, and a
+    /// reader adds it to the period's drift. Small against the drift and the eccentricity's own
+    /// swing along the path, measured here, and not calibrated any better than the rest of
+    /// [`spread`]: the Earth-like fit sits at 800 times the noise and the truth is 4.5 of its
+    /// whole along-path bar out.
+    #[test]
+    fn a_fit_states_how_far_round_its_body_is() {
+        use crate::knowledge::placed::{Placed, placed_at};
+
+        for (au, e) in [(1.0, 0.0167), (1.524, 0.0934), (0.7, 0.0)] {
+            let truth = like(au, e);
+            let seen = looks(&truth, 5.0, 24, truth.period_s() / 120.0, SIGMA);
+            let fitted = fit(&seen).expect("fits");
+            let orbit = fitted.stated(crate::knowledge::Witness(1), None, &seen, 0.0);
+            let (epoch_s, sigma_s) = orbit.epoch_s.expect("an epoch");
+            assert!((0.0..truth.period_s() * 0.5).contains(&sigma_s), "{sigma_s} s");
+            if e > 0.0 {
+                assert!(sigma_s > 0.0, "an eccentric orbit's epoch stated as exact");
+            }
+
+            let end = seen.last().expect("looks").at_s;
+            let Placed::Known { error, .. } = placed_at(&orbit, end) else { panic!("placed") };
+            let exact = crate::knowledge::Orbit { epoch_s: Some((epoch_s, 0.0)), ..orbit.clone() };
+            let Placed::Known { error: drift, .. } = placed_at(&exact, end) else { panic!("placed") };
+            let at_epoch = std::f64::consts::TAU * sigma_s / fitted.period_s;
+            assert!((error.along_rad - drift.along_rad.hypot(at_epoch)).abs() < 1.0e-12);
+        }
+    }
+
     /// An error bar has to stay inside what the element means. An eccentricity walked past one
     /// is a hyperbola, and a pole is at most half a turn from any other, so a bar that runs off
     /// to infinity in either is reporting a shape the fit does not describe.
@@ -1372,7 +1431,7 @@ mod tests {
                 let mut trial = Fitted { pole: (fitted.pole + axis * step).normalize(), ..fitted };
                 let Some(fresh) = residual(&trial, &seen, f64::INFINITY) else { return step };
                 trial.residual_rad = fresh;
-                if settle_but(trial, &seen, PROFILINGS, 2).residual_rad > worse {
+                if settle_but(trial, &seen, PROFILINGS, POLE_U).residual_rad > worse {
                     return step;
                 }
                 step = (step * 1.6).min(PI);

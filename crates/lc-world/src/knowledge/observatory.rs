@@ -614,7 +614,7 @@ pub fn chart_system(knowledge: &mut Knowledge, system: &LocalSystem, now_s: f64)
                     periapsis: elements.argument_of_periapsis,
                 },
                 // The periapsis passage, as `placed_at` takes it.
-                epoch_s: Some(now_s - mean / std::f64::consts::TAU * period_s),
+                epoch_s: Some((now_s - mean / std::f64::consts::TAU * period_s, 0.0)),
                 method: Method::Claim,
                 stated_s: now_s,
                 lineage: vec![hop],

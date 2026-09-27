@@ -640,7 +640,7 @@ mod tests {
                 semi_major_au: (1.5, 0.15),
                 eccentricity: None,
                 orientation: lc_world::knowledge::Orientation::EdgeOnTo { toward: DVec3::X },
-                epoch_s: Some(0.0),
+                epoch_s: Some((0.0, 0.0)),
                 method: lc_world::knowledge::Method::Transit,
                 stated_s: 0.0,
                 lineage: Vec::new(),

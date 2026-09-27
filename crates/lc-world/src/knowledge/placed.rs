@@ -127,7 +127,7 @@ pub(super) struct Path {
 
 impl Path {
     pub(super) fn of(orbit: &Orbit) -> Option<Self> {
-        let (Orientation::Known { pole, node, periapsis, .. }, Some(epoch_s)) =
+        let (Orientation::Known { pole, node, periapsis, .. }, Some((epoch_s, _))) =
             (orbit.orientation, orbit.epoch_s)
         else {
             return None;
@@ -232,14 +232,17 @@ pub(super) fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     // belief that reported only the size and the plane said a course could be flown against it.
     // `M = tau (t - epoch) / P`, so the period's error carries `tau |t - epoch| sigma_P / P^2`
     // of anomaly with it. Doc 25: the sigma is grown by how long since it was last seen.
+    // The epoch's own error is where that drift starts from: `tau sigma_epoch / P`, which a
+    // fit states with the period held so that the two add without counting anything twice.
     let (period_s, period_sigma) = orbit.period_s;
     let drift = TAU * (now_s - path.epoch_s).abs() * period_sigma / (period_s * period_s);
+    let at_epoch = TAU * orbit.epoch_s.map_or(0.0, |(_, sigma)| sigma) / period_s;
 
     Placed::Known {
         offset_au,
         error: PlaceError {
             across_au2: outer(outward * axis_au) + outer(per_e * sigma_e) + outer(path.pole * normal_au),
-            along_rad: drift.min(PI),
+            along_rad: drift.hypot(at_epoch).min(PI),
             pace_au,
             outward,
             pole: path.pole,
@@ -300,7 +303,7 @@ mod tests {
             semi_major_au: (1.0, 0.001),
             eccentricity: e,
             orientation: Orientation::Known { pole: DVec3::Z, sigma_rad: sigma_pole, node: 0.0, periapsis: 0.0 },
-            epoch_s: Some(0.0),
+            epoch_s: Some((0.0, 0.0)),
             method: Method::Astrometric,
             stated_s: 0.0,
             lineage: Lineage::new(),
@@ -324,6 +327,18 @@ mod tests {
         assert!((fresh.normal_au() - 1.0e-3).abs() < 1.0e-12, "{}", fresh.normal_au());
         let along = fresh.pace_au.normalize();
         assert!(fresh.sigma_au(along) < 1.0e-12, "nothing across the path lies along it");
+    }
+
+    /// The epoch's error is where the drift starts: a body fitted a moment ago still has an
+    /// arc, and the two add in quadrature later.
+    #[test]
+    fn the_epoch_places_an_arc_before_anything_drifts() {
+        let o = Orbit { epoch_s: Some((0.0, PERIOD_S * 1.0e-3)), ..orbit(None, 1.0e-4) };
+        let (_, fresh) = error(&o, 0.0);
+        assert!((fresh.along_rad - TAU * 1.0e-3).abs() < 1.0e-12, "{}", fresh.along_rad);
+        let (_, later) = error(&o, 10.0 * PERIOD_S);
+        let drift = TAU * 10.0 * 0.01;
+        assert!((later.along_rad - drift.hypot(TAU * 1.0e-3)).abs() < 1.0e-9, "{}", later.along_rad);
     }
 
     /// The period's error is an angle along the orbit, and it grows with time either way.

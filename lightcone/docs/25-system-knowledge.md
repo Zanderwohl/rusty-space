@@ -1542,8 +1542,13 @@ knowledge. Today:
      sixteenth of a mark's brightness, and the selected item's as a full line.
      `em_map::MapItem::spread_ly` became a list of `Spread` pieces, `Bar` or `Arc`, drawn by
      `lc_client::map_spread`.
-     **Open:** the orbit fit (`knowledge::arc::Spread`) states no epoch sigma, so a freshly fitted body shows
-     almost no arc until its period's error has had time to drift.
+     ✅ The orbit fit states an epoch sigma (2026-09-27), and the phase error is it and the
+     period's drift in quadrature, so a freshly fitted body has an arc from the start. It is
+     walked with the periapsis and the period held: at a small eccentricity the periapsis is
+     barely defined and an epoch walked with it free trades against it, reporting half an orbit
+     for a body whose place round it is known well. Measured, it is small beside the drift and
+     the eccentricity's own swing along the path, and no better calibrated than the rest of
+     `knowledge::arc::spread`: a fit stalled short of the noise walks every bar too steep.
    - ⬜ **Candidates are not drawn.** Their radius needs a period turned through a mass prior,
      and the client builds no `Prior` — adding one to draw faint rings is the wrong trade when
      the panel lists them already. The shard computes that radius at settle, so **sending it** is
@@ -1708,6 +1713,7 @@ game has no players — so each of these is a change in place, not a versioned a
 | 6 | the sites that were listed for a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
 | 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |
 | 9 | `Order::SendReport` gains `about: Option<Subject>`, refused with `Impossible` when the craft does not `knows` that system. One new `Knowledge` method beside `report_upto`. **`REPORT_FORMAT` does not move**: `Report`, `Entry` and `Part` are unchanged, which is the point — and it must not move, because `Reported::format` is checked strictly on landing (`instruments.rs:215`), so a bump would make every report already in flight fail to land |
+| — | ✅ **`Orbit::epoch_s` grew a sigma** (2026-09-27), `Option<(f64, f64)>` like every other element: a fit's is the epoch walked with the periapsis and the period held, so it is the phase and not the periapsis passage, and a transit's is half its duration. `FILE_FORMAT` is 10 and `REPORT_FORMAT` is 9 |
 
 ## Decided
 

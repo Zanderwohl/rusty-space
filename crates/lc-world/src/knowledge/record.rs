@@ -404,9 +404,12 @@ pub struct Orbit {
     /// `None` when nothing has constrained it, which a circle is not the same as.
     pub eccentricity: Option<(f64, f64)>,
     pub orientation: Orientation,
-    /// A time the body was at a known place on the orbit: a transit's mid-time, or a fit's
-    /// epoch. With a full orientation this is what places the body now.
-    pub epoch_s: Option<f64>,
+    /// A time the body was at a known place on the orbit, and one sigma: a transit's mid-time,
+    /// or a fit's periapsis passage. With a full orientation this is what places the body now.
+    ///
+    /// A fit's sigma is taken with the periapsis and the period held, so it is how far round
+    /// the orbit the body was, as a time; the period's own error is a drift from here.
+    pub epoch_s: Option<(f64, f64)>,
     pub method: Method,
     /// Coordinate seconds the witness stated it.
     pub stated_s: f64,
@@ -426,7 +429,7 @@ impl Orbit {
         mu: f64,
         mu_fraction: f64,
         orientation: Orientation,
-        epoch_s: Option<f64>,
+        epoch_s: Option<(f64, f64)>,
         method: Method,
         stated_s: f64,
     ) -> Self {
