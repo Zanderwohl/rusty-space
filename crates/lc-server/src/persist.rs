@@ -213,6 +213,8 @@ impl<J: Journal> Server<J> {
             ships: self
                 .fleet
                 .iter()
+                // A wreck is kept only while its light is in flight, and its row is deleted.
+                .filter(|craft| craft.ended_s().is_none())
                 .map(|craft| {
                     let account = account_of.get(&ShipId(craft.id.0)).copied();
                     let pursuit = self.pursuits.get(&craft.id).map(|p| lc_proto::Pursuit {

@@ -444,6 +444,9 @@ pub mod kind {
     pub const VANISH: i16 = 8;
     /// Its arrival, at the same coordinate time. Each end is seen at its own light delay.
     pub const APPEAR: i16 = 9;
+    /// A field reached `Q_max` and the ship is gone, stamped when and where. The payload is a
+    /// [`super::Released`] as JSON.
+    pub const COLLAPSE: i16 = 10;
 }
 
 /// What a craft's drive became at a [`kind::DRIVE`] event.
@@ -453,6 +456,13 @@ pub struct DriveChange {
     pub power_w: f64,
     /// Unit vector the nose pointed along.
     pub facing: [f64; 3],
+}
+
+/// What a [`kind::COLLAPSE`] let go of.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Released {
+    /// Joules, as light: the field's limit and everything stored.
+    pub released_j: f64,
 }
 
 /// One event arriving at one observer: what the client is actually told.

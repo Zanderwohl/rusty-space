@@ -94,6 +94,32 @@ pub struct Connected {
     pub doing_sent: Option<Outbound>,
 }
 
+impl Connected {
+    /// A connection that has just taken `ship`, told nothing yet.
+    pub(crate) fn new(ship: ShipId, account: String, permission: crate::ability::Level) -> Self {
+        Self {
+            ship,
+            account,
+            // Nothing received yet, so nothing is provable: an intent may be stamped anywhere
+            // from the beginning of time up to now.
+            last_reception_t: i64::MIN,
+            // And nothing sent yet. Not `now_t`, which would mean "told everything up to this
+            // instant" and would swallow an event stamped at exactly this instant -- a ship's
+            // own act, on the tick it acts. The same start serves a brand-new client, which is
+            // the catch-up path run from the beginning.
+            cursor_t: i64::MIN,
+            had_contacts: false,
+            permission,
+            backlog_sent: false,
+            learned: Default::default(),
+            logged_s: f64::NEG_INFINITY,
+            retained_sent: false,
+            analyzing_sent: 0,
+            doing_sent: None,
+        }
+    }
+}
+
 pub struct Server<J: Journal> {
     pub(crate) now_t: i64,
     /// Every craft in the world. The physics is `lc-world`'s and this is the whole of it.
@@ -187,6 +213,8 @@ pub struct Server<J: Journal> {
     pub(crate) reserved: HashMap<CraftId, lc_world::fitting::Reservation>,
     /// Console lines waiting for the tick.
     pub(crate) commands: std::collections::VecDeque<crate::command::Queued>,
+    /// Craft destroyed since the last checkpoint took them, whose rows it is to delete.
+    pub(crate) destroyed: Vec<i64>,
 }
 
 impl<J: Journal> Server<J> {
@@ -231,6 +259,7 @@ impl<J: Journal> Server<J> {
             refitting: HashMap::new(),
             reserved: HashMap::new(),
             commands: std::collections::VecDeque::new(),
+            destroyed: Vec::new(),
         }
     }
 
@@ -394,30 +423,10 @@ impl<J: Journal> Server<J> {
         craft.noise_floor = noise_floor;
         self.owners.insert(craft.id, owner);
         self.fleet.insert(craft);
-        self.clients.insert(owner, Connected {
-            ship: ship_id,
-            // Admitted rather than signed in — a test, or a probe — so there is no account to
-            // keep a place in a book under.
-            account: String::new(),
-            // Nothing received yet, so nothing is provable: an intent may be stamped anywhere
-            // from the beginning of time up to now.
-            last_reception_t: i64::MIN,
-            // And nothing sent yet. Not `now_t`, which would mean "told everything up to this
-            // instant" and would swallow an event stamped at exactly this instant -- a ship's
-            // own act, on the tick it acts. The same start serves a brand-new client, which is
-            // the catch-up path run from the beginning.
-            cursor_t: i64::MIN,
-            had_contacts: false,
-            // Admitted, not ticketed: a test's client is a player, and `directing` is what lets it
-            // develop.
-            permission: crate::ability::Level::PLAYER,
-            backlog_sent: false,
-            learned: Default::default(),
-            logged_s: f64::NEG_INFINITY,
-            retained_sent: false,
-            analyzing_sent: 0,
-            doing_sent: None,
-        });
+        // Admitted rather than signed in — a test, or a probe — so there is no account to keep a
+        // place in a book under. A test's client is a player, and `directing` is what lets it
+        // develop.
+        self.clients.insert(owner, Connected::new(ship_id, String::new(), crate::ability::Level::PLAYER));
         self.aboard(CraftId(ship_id.0));
     }
 
@@ -428,6 +437,12 @@ impl<J: Journal> Server<J> {
         self.ticks += 1;
         self.now_t += self.tick_us();
         let now_s = self.now_t as f64 * 1.0e-6;
+        let after_t = self.now_t - self.tick_us();
+        let mut events = Vec::new();
+        let mut deliveries = Vec::new();
+        // Before anything settles an account past the instant: advancing crosses starlight's day
+        // boundaries, and a field over its limit at one cannot say when it got there.
+        self.collapse_fields(after_t, wire, &mut events, &mut deliveries);
         // Membership before motion, as the client orders it: a station and a conic are both
         // positions *in* a system, and one resolved against the wrong system is a craft in the
         // wrong place.
@@ -443,8 +458,6 @@ impl<J: Journal> Server<J> {
         self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
         self.stages.mark("prepare");
         // 2. Drain intents, validate, write events, schedule deliveries.
-        let mut events = Vec::new();
-        let mut deliveries = Vec::new();
         for (from, message) in wire.poll() {
             // Charged before the message is read, so a malformed one costs its sender as much
             // as a valid one and there is nothing to gain by sending rubbish quickly.
@@ -474,9 +487,12 @@ impl<J: Journal> Server<J> {
         // against the plan it just made.
         self.steer_pursuits(wire, &mut events, &mut deliveries);
         // After the intents, so an auto-ack switched off this tick answers nothing more.
-        self.answer_owed(self.now_t - self.tick_us(), &mut events, &mut deliveries);
-        self.announce_drives(self.now_t - self.tick_us(), &mut events, &mut deliveries);
+        self.answer_owed(after_t, &mut events, &mut deliveries);
+        self.announce_drives(after_t, &mut events, &mut deliveries);
         self.keep_accounts(wire);
+        // After every change of input this tick, each of which settled first.
+        self.collapse_fields(after_t, wire, &mut events, &mut deliveries);
+        self.sweep_wrecks();
         self.stages.mark("scene");
         self.schedule_landings(&events, &deliveries);
         self.land_reports();
@@ -517,48 +533,7 @@ impl<J: Journal> Server<J> {
                     return;
                 }
                 match self.sign_in(from, &ticket) {
-                    Some((ship_id, name, account)) => {
-                        let pursuing = self.pursuits.get(&CraftId(ship_id.0)).map(|p| lc_proto::Pursuit {
-                            quarry: p.quarry,
-                            closeness: p.closeness.into(),
-                            approach: p.approach,
-                        });
-                        // What it is doing, not merely where it is: an account coming back
-                        // finds its craft mid-orbit or mid-burn, and a welcome that said only
-                        // the position put it back at rest there. See `lc_world::resume`.
-                        let ship = self
-                            .ship(ship_id)
-                            .map(|craft| (&craft.motion.snapshot()).into())
-                            .unwrap_or_else(adrift_at_the_origin);
-                        wire.send(from, Outbound::Welcome {
-                            client_id: from,
-                            protocol: PROTOCOL_VERSION,
-                            ship_id,
-                            now_t: self.now_t,
-                            name,
-                            rate: self.rate,
-                            ship,
-                        });
-                        // After the welcome, which is the message a client has to have first.
-                        if let Some(pursuit) = pursuing {
-                            wire.send(from, Outbound::Pursuing { ship_id, pursuit });
-                        }
-                        self.tell_fitted(wire, CraftId(ship_id.0));
-                        self.tell_observing(wire, from, CraftId(ship_id.0));
-                        if self.auto_ack.contains_key(&CraftId(ship_id.0)) {
-                            self.tell_auto_acking(wire, from, ship_id);
-                        }
-                        // A shard with no shelf says nothing about one, and its clients show an
-                        // empty bookcase rather than a broken one.
-                        if !self.library.is_empty() {
-                            wire.send(from, Outbound::Library {
-                                base: self.library.base.clone(),
-                                books: self.library.books.clone(),
-                            });
-                            wire.send(from, Outbound::Reading(self.library.marks_for(&account)));
-                        }
-                        wire.send(from, Outbound::Presets(self.presets.for_account(&account)));
-                    }
+                    Some((ship_id, name, account)) => self.welcome(from, ship_id, name, &account, wire),
                     None => wire.send(from, Outbound::Unauthenticated),
                 }
             }
@@ -614,6 +589,44 @@ impl<J: Journal> Server<J> {
                 }
             }
         }
+    }
+
+    /// Everything a connection is told on taking a ship, the welcome first.
+    pub(crate) fn welcome(&mut self, from: ClientId, ship_id: ShipId, name: String, account: &str, wire: &mut impl Transport) {
+        let pursuing = self.pursuits.get(&CraftId(ship_id.0)).map(|p| lc_proto::Pursuit {
+            quarry: p.quarry,
+            closeness: p.closeness.into(),
+            approach: p.approach,
+        });
+        // What it is doing, not merely where it is: an account coming back finds its craft
+        // mid-orbit or mid-burn, and a welcome that said only the position put it back at rest
+        // there. See `lc_world::resume`.
+        let ship = self.ship(ship_id).map(|craft| (&craft.motion.snapshot()).into()).unwrap_or_else(adrift_at_the_origin);
+        wire.send(from, Outbound::Welcome {
+            client_id: from,
+            protocol: PROTOCOL_VERSION,
+            ship_id,
+            now_t: self.now_t,
+            name,
+            rate: self.rate,
+            ship,
+        });
+        // After the welcome, which is the message a client has to have first.
+        if let Some(pursuit) = pursuing {
+            wire.send(from, Outbound::Pursuing { ship_id, pursuit });
+        }
+        self.tell_fitted(wire, CraftId(ship_id.0));
+        self.tell_observing(wire, from, CraftId(ship_id.0));
+        if self.auto_ack.contains_key(&CraftId(ship_id.0)) {
+            self.tell_auto_acking(wire, from, ship_id);
+        }
+        // A shard with no shelf says nothing about one, and its clients show an empty bookcase
+        // rather than a broken one.
+        if !self.library.is_empty() {
+            wire.send(from, Outbound::Library { base: self.library.base.clone(), books: self.library.books.clone() });
+            wire.send(from, Outbound::Reading(self.library.marks_for(account)));
+        }
+        wire.send(from, Outbound::Presets(self.presets.for_account(account)));
     }
 
     /// Validate an intent, and if it stands, make it an event.
@@ -984,17 +997,7 @@ impl<J: Journal> Server<J> {
         let ship = match self.by_account.get(&claims.sub) {
             Some(ship) => *ship,
             None => {
-                // First sign-in: the account gets a craft. Where a new player starts is a game
-                // question and this is the crudest possible answer to it.
-                let ship = ShipId(self.next_ship);
-                self.next_ship += 1;
-                // Inside a system if this server has one, because the origin is empty space
-                // and a player put there has nothing to look at or fly to.
-                let at = self.world.start().unwrap_or(DVec3::ZERO);
-                let mut craft = Craft::at(CraftId(ship.0), Kind::Ship, at);
-                craft.name = Some(claims.name.clone());
-                self.fit_new(&mut craft);
-                self.fleet.insert(craft);
+                let ship = self.spawn(Some(claims.name.clone()));
                 self.by_account.insert(claims.sub.clone(), ship);
                 ship
             }
@@ -1002,26 +1005,28 @@ impl<J: Journal> Server<J> {
         // A reconnection replaces the old connection's claim on the craft rather than sharing
         // it: two sockets acting for one ship is two clients predicting different futures.
         self.clients.retain(|_, state| state.ship != ship);
-        self.clients.insert(from, Connected {
-            ship,
-            account: claims.sub.clone(),
-            last_reception_t: i64::MIN,
-            cursor_t: i64::MIN,
-            had_contacts: false,
-            permission: crate::ability::Level::from_claim(claims.perm),
-            backlog_sent: false,
-            learned: Default::default(),
-            logged_s: f64::NEG_INFINITY,
-            retained_sent: false,
-            analyzing_sent: 0,
-            doing_sent: None,
-        });
+        self.clients.insert(from, Connected::new(ship, claims.sub.clone(), crate::ability::Level::from_claim(claims.perm)));
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused
         // `NotYours` on every order it sends — which no in-process test caught, because the
         // ones about orders call `admit` and the ones about tickets never send an order.
         self.owners.insert(CraftId(ship.0), from);
         Some((ship, claims.name, claims.sub))
+    }
+
+    /// A new starting ship at the shard's spawn point. Where a new player starts is a game
+    /// question and this is the crudest possible answer to it.
+    pub(crate) fn spawn(&mut self, name: Option<String>) -> ShipId {
+        let ship = ShipId(self.next_ship);
+        self.next_ship += 1;
+        // Inside a system if this server has one, because the origin is empty space and a player
+        // put there has nothing to look at or fly to.
+        let at = self.world.start().unwrap_or(DVec3::ZERO);
+        let mut craft = Craft::at(CraftId(ship.0), Kind::Ship, at);
+        craft.name = name;
+        self.fit_new(&mut craft);
+        self.fleet.insert(craft);
+        ship
     }
 
     /// Put every craft in the system it is actually inside.
@@ -1308,6 +1313,7 @@ pub const KIND_BURN: i16 = lc_proto::kind::BURN;
 /// Cutting the engine. Distinct from a burn because it radiates nothing.
 pub const KIND_CUT: i16 = lc_proto::kind::CUT;
 pub const KIND_DRIVE: i16 = lc_proto::kind::DRIVE;
+pub const KIND_COLLAPSE: i16 = lc_proto::kind::COLLAPSE;
 
 /// What a burn radiates, until there is a drive model to ask.
 pub const BURN_POWER_W: f64 = 1.0e12;
