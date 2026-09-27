@@ -13,7 +13,7 @@
 use super::File;
 
 /// What writes a file's bytes today.
-pub const FILE_FORMAT: i32 = 9;
+pub const FILE_FORMAT: i32 = 10;
 
 /// A file's bytes, in whichever format wrote them.
 pub fn decode(format: i32, bytes: &[u8]) -> Result<File, String> {

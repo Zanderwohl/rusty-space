@@ -23,6 +23,11 @@ use crate::sky::StarId;
 /// bearing points at the star, a moon's at its planet.
 const PRIMARIES_TRIED: usize = 3;
 
+/// Hill-sphere bounds on a satellite: a period under the primary's own over sqrt 3, where the
+/// masses cancel, and an axis under its own over cbrt 3, for any primary lighter than its star.
+const HILL_PERIOD: f64 = 0.577_350_269_189_625_8;
+const HILL_REACH: f64 = 0.693_361_274_350_634_7;
+
 /// How far after the orbit it replaces a fit is stated, when both are filed at one instant.
 const FILED_AFTER_S: f64 = 1.0e-3;
 
@@ -34,7 +39,7 @@ const REFIT_GROWTH: f64 = 1.5;
 ///
 /// Not saved: after a restart the first fit of each body searches from scratch, which costs
 /// time and not correctness.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Attempt {
     pub at_s: f64,
     pub span_s: f64,
@@ -43,7 +48,15 @@ pub(crate) struct Attempt {
     /// When the looks behind the newest fit filed were taken. A fit on older looks that finishes
     /// after it is refused rather than filed over it.
     pub filed_taken_s: f64,
-    pub last: Option<(Option<BodyId>, Fitted)>,
+    pub last: Option<Held>,
+}
+
+/// The last orbit fitted, its primary, and every primary it was chosen over.
+#[derive(Clone, Debug)]
+pub(crate) struct Held {
+    about: Option<BodyId>,
+    fitted: Fitted,
+    offered: Vec<Option<BodyId>>,
 }
 
 /// Seconds from the oldest look held to the newest. Decimation keeps the ends, so this only
@@ -133,6 +146,15 @@ impl crate::knowledge::Knowledge {
             .map(|(_, subject)| subject)
     }
 
+    /// Whether this craft has fitted an orbit to `subject` from its own bearings.
+    pub fn orbited(&self, subject: Subject) -> bool {
+        self.file(subject).is_some_and(|file| {
+            file.orbits()
+                .iter()
+                .any(|o| o.witness == self.owner && o.method == crate::knowledge::Method::Astrometric)
+        })
+    }
+
     /// The mean direction a body was seen in, which points at whatever it goes round.
     fn mean_bearing(&self, subject: Subject) -> Option<DVec3> {
         let file = self.file(subject)?;
@@ -140,17 +162,53 @@ impl crate::knowledge::Knowledge {
         (mean.length_squared() > 0.0).then(|| mean.normalize())
     }
 
-    /// Candidate primaries for a body, the star first and then the nearest few in the sky.
+    fn mean_flux(&self, subject: Subject, band: em_spectra::Band) -> Option<f64> {
+        let (sum, count) = self
+            .file(subject)?
+            .sightings()
+            .iter()
+            .filter(|s| s.band == band)
+            .fold((0.0, 0usize), |(sum, n), s| (sum + s.flux, n + 1));
+        (count > 0).then(|| sum / count as f64)
+    }
+
+    /// A satellite and its primary are at one distance, so the brighter is the bigger. `false`
+    /// with no band in common.
+    fn outshines(&self, primary: Subject, satellite: Subject) -> bool {
+        em_spectra::Band::ALL.into_iter().find_map(|band| {
+            Some(self.mean_flux(primary, band)? > self.mean_flux(satellite, band)?)
+        }) == Some(true)
+    }
+
+    pub fn beside_brighter(&self, subject: Subject, within_rad: f64) -> bool {
+        let latest = |subject: Subject| {
+            let seen = self.file(subject)?.sightings().iter().max_by(|a, b| a.observed_s.total_cmp(&b.observed_s))?;
+            Some(seen.bearing.toward)
+        };
+        let (Some(star), Some(toward)) = (subject.star(), latest(subject)) else { return false };
+        self.members(star).any(|(other, _)| {
+            matches!(other, Subject::Body { .. })
+                && other != subject
+                && latest(other).is_some_and(|there| there.angle_between(toward) < within_rad)
+                && self.outshines(other, subject)
+        })
+    }
+
+    /// Candidate primaries for a body: the star, then the nearest few in the sky that outshine it.
     ///
     /// **Not a list of moons.** A Keplerian orbit puts its primary at a focus, so the candidate
     /// that works as a focus is the primary, and trying the star alongside the rest is what
     /// keeps a planet from being handed to one of its neighbors.
+    ///
+    /// Brighter only: six elements fit sixteen bearings about almost any point near the true
+    /// primary, and a planet's nearest neighbors are its own moons. A strict order also rules
+    /// out cycles.
     fn primaries(&self, star: StarId, subject: Subject, now_s: f64) -> Vec<Option<BodyId>> {
         let Some(toward) = self.mean_bearing(subject) else { return vec![None] };
         let mut near: Vec<(f64, BodyId)> = self
             .members(star)
             .filter_map(|(other, _)| match other {
-                Subject::Body { body, .. } if other != subject => {
+                Subject::Body { body, .. } if other != subject && self.outshines(other, subject) => {
                     let seen = self.mean_bearing(other)?;
                     Some((seen.angle_between(toward), body))
                 }
@@ -170,6 +228,30 @@ impl crate::knowledge::Knowledge {
             }
         }
         tried
+    }
+
+    /// At each look held, how far the believed place misses the ray the body was seen along, at
+    /// the believed distance. Meters, in time order.
+    ///
+    /// Corrects a moon's frame: across the line of sight a planet's bearings place it to 75 km
+    /// from 5 AU, where its orbit may be 0.005 AU out, wider than Europa's. A position rather
+    /// than an angle, so it varies only as the orbit's error does and interpolates between the
+    /// few looks kept.
+    fn sightlines(&self, star: StarId, body: BodyId, star_ly: DVec3) -> Vec<(f64, DVec3)> {
+        let Some(file) = self.file(Subject::Body { star, body }) else { return Vec::new() };
+        let mut out: Vec<(f64, DVec3)> = file
+            .sightings()
+            .iter()
+            .filter_map(|seen| {
+                // Relative to the star: absolute meters lose tens of km at 30,000 ly.
+                let believed = self.placed(star, body, seen.observed_s)?;
+                let from = (seen.bearing.observer_ly - star_ly) * crate::system::M_PER_LY;
+                let depth = (believed - from).length();
+                arc::sound(depth).then(|| (seen.observed_s, from + seen.bearing.toward * depth - believed))
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.total_cmp(&b.0));
+        out
     }
 
     /// Where a body is believed to be, as an offset from its star in meters, or `None`.
@@ -206,18 +288,43 @@ impl crate::knowledge::Knowledge {
             .primaries(star, subject, now_s)
             .into_iter()
             .map(|about| {
+                let seen = about.map_or_else(Vec::new, |body| self.sightlines(star, body, star_ly));
                 let at = |t: f64| match about {
                     None => Some(star_ly),
-                    Some(body) => Some(star_ly + self.placed(star, body, t)? / crate::system::M_PER_LY),
+                    Some(body) => {
+                        Some(star_ly + (self.placed(star, body, t)? + along(&seen, t)) / crate::system::M_PER_LY)
+                    }
                 };
-                (about, self.looks_at(subject, &at))
+                let held = about.and_then(|body| self.body_belief(star, body, now_s));
+                let bound = |element: Option<(f64, f64)>, scale: f64| element.map_or(f64::INFINITY, |(v, _)| v * scale);
+                let looks = self.looks_at(subject, &at);
+                // The frame keeps the believed depth, whose error scales the whole orbit. The
+                // sightlines' miss is only a floor: bearings pin depth far worse than the miss.
+                let missed_m = (seen.iter().map(|(_, c)| c.length_squared()).sum::<f64>()
+                    / seen.len().max(1) as f64)
+                    .sqrt();
+                let depth = looks.last().map_or(0.0, |look| {
+                    let along_m = match held.as_ref().map(|b| b.position_now) {
+                        Some(super::Placed::Known { error, .. }) => error.toward_au(-look.from_m) * crate::navigation::AU,
+                        _ => 0.0,
+                    };
+                    along_m.max(missed_m) / look.from_m.length()
+                });
+                Frame {
+                    about,
+                    looks,
+                    longest_s: bound(held.as_ref().and_then(|b| b.period_s), HILL_PERIOD),
+                    widest_m: bound(held.as_ref().and_then(|b| b.semi_major_au), HILL_REACH * crate::navigation::AU),
+                    depth,
+                }
             })
             .collect();
         let (span_s, ranged) =
             self.file(subject).map_or((0.0, 0), |file| (span_s(file.sightings()), ranged(file.sightings())));
         let held = self.tried.get(&subject);
-        let (last, filed_taken_s) = (held.and_then(|t| t.last), held.map_or(f64::NEG_INFINITY, |t| t.filed_taken_s));
-        self.tried.insert(subject, Attempt { at_s: now_s, span_s, ranged, filed_taken_s, last });
+        let (last, filed_taken_s) =
+            (held.and_then(|t| t.last.clone()), held.map_or(f64::NEG_INFINITY, |t| t.filed_taken_s));
+        self.tried.insert(subject, Attempt { at_s: now_s, span_s, ranged, filed_taken_s, last: last.clone() });
         Some(FitJob { subject, owner: self.owner, frames, warm: last, taken_s: now_s })
     }
 
@@ -237,7 +344,7 @@ impl crate::knowledge::Knowledge {
                 return false;
             }
             attempt.filed_taken_s = solved.taken_s;
-            attempt.last = Some((solved.about, solved.fitted));
+            attempt.last = Some(Held { about: solved.about, fitted: solved.fitted, offered: solved.offered });
         }
         // Strictly after whatever it replaces, which `Knowledge::orbits` requires: two fits of
         // one body can land on one tick.
@@ -254,6 +361,30 @@ impl crate::knowledge::Knowledge {
     }
 }
 
+/// A [`Knowledge::sightlines`] correction at `t`: linear between the looks either side, the
+/// nearest one's beyond them.
+fn along(seen: &[(f64, DVec3)], t: f64) -> DVec3 {
+    let after = seen.partition_point(|(at, _)| *at < t);
+    match (after.checked_sub(1).and_then(|i| seen.get(i)), seen.get(after)) {
+        (Some((t0, c0)), Some((t1, c1))) if t1 > t0 => c0.lerp(*c1, (t - t0) / (t1 - t0)),
+        (Some((_, c)), _) | (None, Some((_, c))) => *c,
+        (None, None) => DVec3::ZERO,
+    }
+}
+
+/// One candidate primary: the looks in its frame, and the longest period and widest axis a
+/// satellite of it can have. See [`HILL_PERIOD`].
+#[derive(Clone, Debug)]
+struct Frame {
+    about: Option<BodyId>,
+    looks: Vec<Look>,
+    longest_s: f64,
+    widest_m: f64,
+    /// Fractional error on the scale of anything fitted in this frame: the primary's depth error
+    /// over its distance.
+    depth: f64,
+}
+
 /// One body's fit, with nothing borrowed: the looks in each candidate primary's frame.
 ///
 /// Carries the time the looks were taken, so that a fit overtaken by one on later looks is
@@ -262,9 +393,9 @@ impl crate::knowledge::Knowledge {
 pub struct FitJob {
     pub subject: Subject,
     owner: super::Witness,
-    frames: Vec<(Option<BodyId>, Vec<Look>)>,
+    frames: Vec<Frame>,
     /// The last orbit fitted, to carry onto this arc before searching for a new one.
-    warm: Option<(Option<BodyId>, Fitted)>,
+    warm: Option<Held>,
     taken_s: f64,
 }
 
@@ -276,6 +407,7 @@ pub struct Solved {
     fitted: Fitted,
     orbit: super::Orbit,
     taken_s: f64,
+    offered: Vec<Option<BodyId>>,
 }
 
 impl Solved {
@@ -287,21 +419,37 @@ impl Solved {
 
 impl FitJob {
     /// The fit itself: pure, and the whole of the cost.
+    ///
+    /// A carried orbit competes with candidates offered since it was found, or a moon fitted
+    /// before its planet was placed would stay about the star. Only those are searched: the full
+    /// search fails on an arc many orbits long, which a moon's is within a day.
     pub fn solve(self) -> Option<Solved> {
-        let carried = self.warm.and_then(|(about, held)| {
-            let (_, looks) = self.frames.iter().find(|(frame, _)| *frame == about)?;
-            Some((about, arc::refit(&held, looks)?, looks.clone()))
-        });
-        let (about, fitted, looks) = match carried {
-            Some(carried) => carried,
-            None => self
-                .frames
-                .into_iter()
-                .filter_map(|(about, looks)| Some((about, arc::fit(&looks)?, looks)))
-                .min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad))?,
+        let offered: Vec<Option<BodyId>> = self.frames.iter().map(|f| f.about).collect();
+        let bound = |frame: &Frame, fitted: Fitted| {
+            (fitted.period_s <= frame.longest_s && fitted.semi_major_m <= frame.widest_m).then_some(fitted)
         };
-        let orbit = fitted.stated(self.owner, about, &looks, self.taken_s);
-        Some(Solved { subject: self.subject, about, fitted, orbit, taken_s: self.taken_s })
+        let carried = self.warm.as_ref().and_then(|held| {
+            let frame = self.frames.iter().find(|f| f.about == held.about)?;
+            let fitted = bound(frame, arc::refit(&held.fitted, &frame.looks)?)?;
+            Some((frame.about, fitted, frame.looks.clone(), frame.depth))
+        });
+        let searched = |frame: Frame| {
+            Some((frame.about, bound(&frame, arc::fit(&frame.looks)?)?, frame.looks, frame.depth))
+        };
+        let best = |found: &mut dyn Iterator<Item = (Option<BodyId>, Fitted, Vec<Look>, f64)>| {
+            found.min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad))
+        };
+        let (about, fitted, looks, depth) = match (carried, &self.warm) {
+            (Some(carried), Some(held)) => {
+                let new = self.frames.into_iter().filter(|f| !held.offered.contains(&f.about));
+                best(&mut std::iter::once(carried).chain(new.filter_map(searched)))?
+            }
+            _ => best(&mut self.frames.into_iter().filter_map(searched))?,
+        };
+        let mut orbit = fitted.stated(self.owner, about, &looks, self.taken_s);
+        let (au, sigma_au) = orbit.semi_major_au;
+        orbit.semi_major_au = (au, sigma_au.hypot(au * depth));
+        Some(Solved { subject: self.subject, about, fitted, orbit, taken_s: self.taken_s, offered })
     }
 }
 
@@ -343,7 +491,7 @@ mod tests {
             looks: LOOKS_NEEDED,
         };
         let orbit = fitted.stated(Witness(1), None, &[], taken_s);
-        Solved { subject, about: None, fitted, orbit, taken_s }
+        Solved { subject, about: None, fitted, orbit, taken_s, offered: vec![None] }
     }
 
     /// A fit filed after the reader's mark reaches the reader, however long before it the looks
@@ -384,6 +532,101 @@ mod tests {
         assert!(k.file_fit(solved(subject, 310.0, 4.0), 400.0));
         let held = k.file(subject).unwrap().orbits().iter().find(|o| o.witness == Witness(1)).unwrap().semi_major_au.0;
         assert_eq!(held, 4.0);
+    }
+
+    /// A body is never offered a primary fainter than itself, however near it sits in the sky.
+    #[test]
+    fn only_something_brighter_is_gone_round() {
+        let star = StarId::synthesize("primary", 4);
+        let (planet, moonlet) = (BodyId::of(star, "planet"), BodyId::of(star, "moonlet"));
+        let mut k = Knowledge::new(Witness(1));
+        for (body, flux) in [(planet, 1.0e-9), (moonlet, 1.0e-12)] {
+            let subject = Subject::Body { star, body };
+            for i in 0..LOOKS_NEEDED {
+                k.sighted(subject, Sighting { flux, ..look(10.0 * i as f64, None) });
+            }
+            k.fit_job(subject, DVec3::ZERO, 100.0);
+            assert!(k.file_fit(solved(subject, 100.0, 5.0), 100.0));
+        }
+        let offered = |of: BodyId| k.primaries(star, Subject::Body { star, body: of }, 100.0);
+        assert_eq!(offered(planet), vec![None], "a planet offered its own moon");
+        assert_eq!(offered(moonlet), vec![None, Some(planet)]);
+    }
+
+    /// Bearings of an Earth-like orbit from a ship on a 5 AU circle, 24 looks over a fifth of a
+    /// year, nudged by `noise` radians, as `arc`'s tests make them. Its period, seconds.
+    fn circling(noise: f64) -> (Vec<Look>, f64) {
+        use std::f64::consts::TAU;
+        let (au, mu) = (crate::navigation::AU, 1.327_124_4e20);
+        let period = TAU * (au.powi(3) / mu).sqrt();
+        let truth = Fitted {
+            semi_major_m: au,
+            eccentricity: 0.0167,
+            period_s: period,
+            pole: DVec3::new(0.02, -0.03, 1.0).normalize(),
+            periapsis_rad: 1.8,
+            epoch_s: 4.0e6,
+            mu,
+            reach_m: f64::INFINITY,
+            assumed_circular: false,
+            residual_rad: 0.0,
+            looks: 0,
+        };
+        let ship_period = TAU * ((5.0 * au).powi(3) / mu).sqrt();
+        let looks = (0..24)
+            .map(|i| {
+                let t = i as f64 * period / 120.0;
+                let phase = TAU * t / ship_period;
+                let from = DVec3::new(phase.cos(), phase.sin(), 0.0) * 5.0 * au;
+                let toward = (truth.at(t) - from).normalize();
+                let (x, y) = toward.any_orthonormal_pair();
+                let gauss = |k: u64| crate::rng::gaussian(crate::rng::hash(&[i as u64, k])) * noise;
+                Look { from_m: from, toward: (toward + x * gauss(1) + y * gauss(2)).normalize(), at_s: t, sigma_rad: noise, range_m: None }
+            })
+            .collect();
+        (looks, period)
+    }
+
+    fn job(frames: Vec<Frame>, warm: Option<Held>) -> FitJob {
+        let star = StarId::synthesize("primary", 5);
+        FitJob { subject: Subject::Body { star, body: BodyId::of(star, "fitted") }, owner: Witness(1), frames, warm, taken_s: 0.0 }
+    }
+
+    fn frame(about: Option<BodyId>, looks: Vec<Look>, longest_s: f64, widest_m: f64) -> Frame {
+        Frame { about, looks, longest_s, widest_m, depth: 0.0 }
+    }
+
+    /// An orbit outside its primary's Hill sphere, by period or by axis, is refused.
+    #[test]
+    fn a_satellite_stays_inside_the_hill_sphere() {
+        let noise = 2.979e-7 * crate::knowledge::astrometry::CENTROID_FLOOR;
+        let (looks, period) = circling(noise);
+        let about = Some(BodyId::of(StarId::synthesize("primary", 5), "planet"));
+        let au = crate::navigation::AU;
+        let solve = |longest_s: f64, widest_m: f64| job(vec![frame(about, looks.clone(), longest_s, widest_m)], None).solve();
+        assert!(solve(f64::INFINITY, f64::INFINITY).is_some(), "premise: the looks fit");
+        assert!(solve(period * 0.9, f64::INFINITY).is_none(), "a period past the bound was kept");
+        assert!(solve(f64::INFINITY, au * 0.9).is_none(), "an axis past the bound was kept");
+    }
+
+    /// A carried orbit loses to a primary offered since it was found, if that one fits better:
+    /// a moon fitted about the star before its planet was placed moves to the planet.
+    #[test]
+    fn a_carried_orbit_yields_to_a_primary_offered_since() {
+        let noise = 2.979e-7 * crate::knowledge::astrometry::CENTROID_FLOOR;
+        let (clean, _) = circling(noise);
+        // Far noisier than the clean fit's own stall, which is hundreds of times its noise.
+        let (noisy, _) = circling(noise * 3000.0);
+        let held = arc::fit(&noisy).expect("premise: the noisy looks fit");
+        let planet = Some(BodyId::of(StarId::synthesize("primary", 5), "planet"));
+        let warm = Held { about: None, fitted: held, offered: vec![None] };
+        let frames = vec![
+            frame(None, noisy, f64::INFINITY, f64::INFINITY),
+            frame(planet, clean, f64::INFINITY, f64::INFINITY),
+        ];
+        let solved = job(frames, Some(warm)).solve().expect("fits");
+        assert_eq!(solved.about, planet, "the carried orbit kept its primary");
+        assert_eq!(solved.offered, vec![None, planet]);
     }
 
     /// A body tried on bearings alone waits for its arc to grow half again, but a close pass

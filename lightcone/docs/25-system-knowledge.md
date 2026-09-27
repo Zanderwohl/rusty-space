@@ -64,13 +64,17 @@ below.
 ```rust
 pub struct Orbit {
     pub witness: Witness,
+    pub about: Option<BodyId>,           // what it goes round; None is the star
     pub period_s: (f64, f64),            // value, sigma
     pub semi_major_au: (f64, f64),
     pub eccentricity: Option<(f64, f64)>,
     pub orientation: Orientation,
-    /// A time at which the body was at a known place on the orbit: a transit's mid-time, or an
-    /// astrometric fit's epoch. With a full orientation this places the body now.
-    pub epoch_s: Option<f64>,
+    /// A time at which the body was at a known place on the orbit, and one sigma: a transit's
+    /// mid-time, or an astrometric fit's periapsis passage. With a full orientation this places
+    /// the body now. A fit's sigma is the phase at `pivot_s`, as a time.
+    pub epoch_s: Option<(f64, f64)>,
+    /// Where the phase is best known and the period's drift grows from; `None` is the epoch.
+    pub pivot_s: Option<f64>,
     pub method: Method,                  // Transit, Astrometric, or Claim: stated by a craft that sent no raw data
     pub stated_s: f64,
     pub lineage: Lineage,
@@ -466,6 +470,19 @@ explains the bearings best.
   loop about its primary and the middle of that loop is the primary. That ranks correctly at both
   levels — a planet's mean bearing points at the star, a moon's at its planet — and the star is
   always tried besides, which is what stops a planet being handed to a neighbor.
+- **Only something brighter.** ✅ (2026-09-26) Six elements fit sixteen bearings about almost
+  any point near the true primary, and a planet's nearest neighbors in the sky are its own
+  moons. Surveying Sol from 5 AU for fifteen days fitted Saturn about Albiorix, Luna about Ryugu,
+  Callisto about Amalthea, and Saturn's irregulars in chains about each other that placed
+  nothing. A satellite and its primary are one distance off, so the brighter is the bigger;
+  brightness is also a strict order, so a cycle cannot form.
+- **Inside the primary's Hill sphere.** ✅ (2026-09-26) An orbit about a body must have a period
+  under that body's own over √3 and an axis under its own over ∛3 — the masses cancel in the
+  first, and the second holds for any primary lighter than the star. That is what stops an
+  asteroid being fitted about a brighter asteroid at a few AU.
+- **A carried orbit does not keep its primary for good.** ✅ (2026-09-26) A refit carries the
+  last orbit in its own frame, and any candidate offered since is searched beside it: a moon
+  fitted before its planet was placed would otherwise stay about the star.
 - **A satellite's frame moves.** The looks go into the frame of where the primary was *at each
   look's own time*, not now: a moon's planet moves between one look and the next, and a frame
   that ignored that would be fitting the planet's orbit and the moon's at once.
@@ -516,11 +533,77 @@ weighed by visiting it**, which is a fair price and of a piece with the rest of 
 fix, if it is wanted, is the classic visual-binary one: fit the *projected* ellipse in the plane
 of the sky, where the size and the inclination survive and only the depth's sign is lost.
 
+**Open: an arc many orbits long.** Measured on Sol from 5 AU (2026-09-26): after fifteen days
+the full search finds no orbit for Io, Europa, Ganymede, Callisto or Metis *even in the exact
+frame of Jupiter*, and a synthetic Earth fails from 0.9 orbits of arc upward. Two causes. The
+kept bearings are the sixteen most spread, so on a long arc they are orbits apart, past the
+twelve turns `knowledge::turns` searches; and anchors a whole orbit apart are one point, so the conic
+falls back to an assumed circle whose eccentricity the settle may not move. What works is the
+refit: it now counts turns from the orbit it carries, so a moon fitted once on a short arc stays
+fitted as the arc grows. A fresh search on a long arc still does not, and the settle — a pattern
+search — stalls short of the noise once the arc is long enough to need an eccentricity: a
+Gauss-Newton on a finite-difference Jacobian is the likely fix, and would give the error bars as
+a covariance rather than a walk. A moon's orbit is also only as good as its planet's place,
+which a moon's frame inherits whole: Jupiter placed 0.005 AU out is Europa's orbit wide.
+
+**So a satellite is followed up.** ✅ (2026-09-26) Bearings alone fix an orbit from about a third
+to three quarters of it, and measured in Jupiter's exact frame the number of looks hardly
+matters: six do what sixteen do. A survey's steady cadence gives each body one arc length, and
+evenly spaced looks alias the period besides. So a body found within 2° of a brighter one with no
+orbit of its own gets a run of nine looks, each gap twice the last — 1, 1, 2, 4 … 64 hours — and
+some prefix of it lands in that window whatever the period: Metis at 7 hours through Callisto
+at 17 days all fit from one, to a part in a thousand or better. `knowledge::follow_up`.
+
+- **The run is all the body holds while it lasts.** Its turn in the rotation is skipped, so
+  nothing of the run is decimated before it is fitted, and each doubled gap re-arms the fit.
+- **It shares the telescope.** Runs take at most half of a tick's turns, and at most 32 are in
+  their dense first looks at once; Sol's satellites are all started within a day.
+- **Gaps run from the look actually taken,** so a late one stretches the run rather than
+  squeezing the gap after it.
+- **Two runs a body.** A body still without an orbit after one gets a second with gaps four
+  times as long, for a period the first could not reach.
+- **Not saved.** After a restart, or a new duty, a body still without an orbit starts again,
+  its runs counted afresh, which costs telescope time and not correctness.
+- **Not everything.** Following every body without an orbit swamped the fit queue — one fit a
+  tick, and every run re-arming its body nine times — and Mars fitted to 1.79 AU. Only
+  something beside a brighter body is followed; from 5 AU that still takes in about one body in
+  six of those going round the Sun, since the inner system is a few degrees across.
+
+Measured on Sol from 5 AU over fifteen days, against the same survey without it: Metis 0.00086
+± 1.2e-5 AU where it had ± ∞, Amalthea within 7% where it was 75% out, Europa within 6% with a
+finite bar. The queue it takes is not free: Jupiter's own error bar came out four times wider,
+from which of its refits ran rather than from its looks, which were the same.
+
+**And a moon is fitted against where its planet was seen.** ✅ (2026-09-27) A moon's frame was
+its planet's believed orbit, so a planet placed 0.005 AU out moved every look by Europa's orbit.
+Across the line of sight the planet's own bearings say where it was, to 75 km at 5 AU; so at
+each of its looks held, the believed place is moved across onto the ray it was seen along, and
+that correction is interpolated to the moon's looks. A place and not an angle, so it moves only
+as the orbit's error does and sixteen looks are enough to interpolate between.
+`Knowledge::sightlines`.
+
+- **Along the line of sight nothing is measured,** and a depth error scales the moon's whole
+  orbit by its fraction of the distance. So the axis's bar carries the planet's placement error
+  along the line of sight (`PlaceError::toward_au`) over its distance, or the sightlines' own
+  miss if that is larger. Bearings pin a planet across the line of sight far better than along
+  it, so the second is a floor and not an estimate, and the bar is only as honest as the
+  planet's.
+- Measured on Sol from 5 AU over fifteen days, against the true osculating axes (2026-09-27,
+  with the epoch sigma and the pivot): Io, Europa, Ganymede and Callisto to 5–8 parts in
+  10,000 where they were 1–8% out, Metis, Adrastea, Amalthea and Thebe within 0.7%, every
+  regular moon within one of its bar, and Themisto within 8%. The bars are tens to hundreds of
+  times the error, and the depth term is nearly all of them. Jupiter's own fit, a week of a
+  twelve-year orbit, states its epoch to 55 days and its period to 8 years, so its place along
+  the line of sight to 0.4 AU when it is 0.006 AU out: a stalled fit's walked bars again.
+  The irregulars other than Themisto are still wrong: fifteen days is a few percent of their
+  orbits.
+
 **Not oblateness.** The arena's bodies are spheres, so there is no figure to measure and none is
 invented. Same decision as rings for generated planets in phase 5, for the same reason.
 
 **And the velocity is not measured at all.** An orbit and a time *are* a velocity: `placed_at`
-throws that half away because only geometry is wanted there, and `body_belief` keeps it. The one
+takes only the geometry, with `dr/dM` for the direction of its phase error, and `body_belief`
+keeps the velocity through `moving_at`. The one
 thing needed is the real `mu`, which the orbit states — `n^2 a^3`, Kepler's third law read
 backwards, as `knowledge::arc` measures it.
 
@@ -1308,9 +1391,8 @@ confidence and nothing comes back:
   from whatever the camera sits on.
 - **Fainter-for-less-certain** needs a variant or a field. `ItemKind` is eight body types —
   `Star, Planet, Moon, Minor, Station, Ship, Population, Observer` — with no confidence on it.
-- **The error bar already exists.** `MapItem::spread_ly`, an `Option<(DVec3, DVec3)>` built from
-  `Distance::Measured`'s sigma along the line of sight, and already drawn as a segment
-  (`map.rs:856`). A body's radial bar reuses it directly.
+- **The error bar already exists.** `MapItem::spread_ly`, then an `Option<(DVec3, DVec3)>` built from
+  `Distance::Measured`'s sigma along the line of sight, and already drawn as a segment. A body's radial bar reuses it directly.
 - **Dashes exist, but in the client.** `map.rs` has a dash ladder, `map.drops[dashes - 1]`, used
   for drop lines, where drifting further off the plane gains more dashes rather than longer ones.
   The spread segment is deliberately the solid member of that same ladder. So a dashed shell
@@ -1417,7 +1499,8 @@ knowledge. Today:
      it, so an older file is refused loudly rather than read wrong quietly.
    - `knowledge/body.rs` holds both beliefs. `Placed::Known` turned out to be buildable now
      rather than in phase 6: a full orientation plus an epoch propagates through Kepler's
-     equation, and the pole's own error carries the body along its ring. Without both it is a
+     equation, and the pole's own error carries the body along its ring (wrong, and corrected
+     under item 3: it lifts it out of the plane). Without both it is a
      `Shell`.
    - Two details in the plane fold earn their code. A pole's sign is the direction of travel,
      which an edge-on reading does not settle, so poles are folded onto one half before
@@ -1447,10 +1530,41 @@ knowledge. Today:
      outline — the Oort cloud draws one — and its inner and outer radii carry the distance error
      as the shell's own thickness. So the *camera-facing dashed circle* and the *radial error
      bar* below are one existing shape, and an orbit of known size and unknown orientation is
-     drawn as the sphere it is. A placed body draws its error **along** the ring rather than
-     across it, since what is uncertain is how far round it has got. Keys are the ones truth's
+     drawn as the sphere it is. A placed body draws its error as a **cross** (2026-09-26):
+     straight bars outward and out of its plane, and an arc *along the orbit itself* for how far
+     round it has got. Keys are the ones truth's
      bodies had, joined through the generator key, or `primary` and the focus would name keys
      nothing draws.
+   - ✅ **A placed body's error has directions** (2026-09-26). `Placed::Known` had carried one
+     sigma, mixing the axis's error (outward), the pole's (out of the plane) and the period's
+     drift (along the orbit), and the map drew all of it along the ring. `knowledge::placed`
+     splits it: `PlaceError` holds a covariance across the path and a mean-anomaly sigma along
+     it, and `Knowledge::along_track` samples the orbit across that sigma so the arc is the
+     ellipse and not a chord. Once the sigma reaches half a turn the arc is the whole orbit,
+     uncapped. **Corrected from item 2:** the pole's error lifts a body out of its plane; it does
+     not carry it along its ring.
+     The eccentricity's error is taken at a fixed mean anomaly, since the epoch fixes `M`: it moves
+     the body along its path as well as in and out, by up to twice as much. A moon takes its
+     primary's error rigidly, drawn as a third bar sideways in its plane, and
+     never as phase: folded into the moon's phase, Earth's error, larger than the Moon's orbit,
+     drew a Moon that could be anywhere round an Earth it is known to be beside.
+     Error bars are **off by default**, behind an *error bars* toggle on the map's strip: across a
+     system of two hundred bodies they are a thicket. The toggle covers every error bar,
+     stars' distance bars included. On, they draw at half a line's width and a
+     sixteenth of a mark's brightness, and the selected item's as a full line.
+     `em_map::MapItem::spread_ly` became a list of `Spread` pieces, `Bar` or `Arc`, drawn by
+     `lc_client::map_spread`.
+     ✅ The orbit fit states an epoch sigma and a pivot (2026-09-27), so a freshly fitted body
+     has an arc from the start. The sigma is walked with the periapsis and the period held: at
+     a small eccentricity the periapsis is barely defined, and an epoch walked with it free
+     trades against it and reports half an orbit for a body whose place round it is known well.
+     With the period held it is the phase's error where the looks are, so the period's drift
+     grows from the **pivot**, the looks' weighted centre, where the two errors are independent
+     and add in quadrature. It had grown from the periapsis passage, which can be half a period
+     from the looks: six years for Jupiter. Measured, the epoch term is small beside the drift
+     and the eccentricity's own swing along the path, and no better calibrated than the rest of
+     `knowledge::arc::spread`: a fit stalled short of the noise walks every bar too steep.
+     A covariance would carry the phase from any time; that waits on a Gauss-Newton fit.
    - ⬜ **Candidates are not drawn.** Their radius needs a period turned through a mass prior,
      and the client builds no `Prior` — adding one to draw faint rings is the wrong trade when
      the panel lists them already. The shard computes that radius at settle, so **sending it** is
@@ -1615,6 +1729,7 @@ game has no players — so each of these is a change in place, not a versioned a
 | 6 | the sites that were listed for a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
 | 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |
 | 9 | `Order::SendReport` gains `about: Option<Subject>`, refused with `Impossible` when the craft does not `knows` that system. One new `Knowledge` method beside `report_upto`. **`REPORT_FORMAT` does not move**: `Report`, `Entry` and `Part` are unchanged, which is the point — and it must not move, because `Reported::format` is checked strictly on landing (`instruments.rs:215`), so a bump would make every report already in flight fail to land |
+| — | ✅ **`Orbit::epoch_s` grew a sigma and `Orbit` a `pivot_s`** (2026-09-27): `epoch_s` is `Option<(f64, f64)>` like every other element, a fit's sigma the epoch walked with the periapsis and the period held, so the phase at the pivot; a transit's is its duration over √12. `pivot_s` is where that holds and the period's drift grows from. `FILE_FORMAT` is 10 and `REPORT_FORMAT` is 9 |
 
 ## Decided
 

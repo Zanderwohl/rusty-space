@@ -11,6 +11,7 @@ use em_spectra::Band;
 use glam::DVec3;
 use lc_spacetime::{Coord, Micros, frame::SystemFrame};
 
+use super::follow_up::Following;
 use super::survey::{self, Duty, Optics, Source, Sweep};
 use crate::system::LocalSystem;
 use super::{Bearing, Claim, Distance, Hop, Knowledge, NameKind, Naming, Sample, Sighting, Subject, Witness};
@@ -162,6 +163,9 @@ pub struct Observatory {
     /// last detected, which the craft therefore holds. For a readout; not kept across a restart.
     #[serde(skip)]
     observed: Option<Subject>,
+    /// Bodies a survey is following up. Not saved: see [`super::follow_up`].
+    #[serde(skip)]
+    following: Following,
 }
 
 impl Default for Observatory {
@@ -174,6 +178,7 @@ impl Default for Observatory {
             slot: i64::MIN,
             pointing: None,
             observed: None,
+            following: Following::default(),
         }
     }
 }
@@ -199,6 +204,7 @@ impl Observatory {
         self.slot = i64::MIN;
         self.pointing = duty.target_at(now_s);
         self.observed = None;
+        self.following = Following::default();
         self.duty = duty;
     }
 
@@ -256,7 +262,8 @@ impl Observatory {
             duty @ Duty::Survey { star, .. } => {
                 self.pointing = Some(star);
                 if let Some(system) = system.filter(|s| s.star == star)
-                    && let Some(seen) = survey_between(sky, system, knowledge, at, &duty, self.swept_s, now_s)
+                    && let Some(seen) =
+                        survey_between(sky, system, knowledge, &mut self.following, at, &duty, self.swept_s, now_s)
                 {
                     self.observed = Some(seen);
                 }
@@ -275,11 +282,17 @@ impl Observatory {
 /// star light-years off cannot outshine a planet at 5 AU, so it can neither glare on one nor
 /// hide behind one.
 ///
+/// A body beside a brighter one with no orbit is followed up ([`super::follow_up`]), in up to
+/// half the tick's turns. Its own rotation turn is skipped meanwhile, so the run is all it holds
+/// and none of it is decimated before it is fitted.
+///
 /// Returns the last body it detected, if any.
+#[allow(clippy::too_many_arguments)]
 pub fn survey_between(
     sky: &mut Sky,
     system: &LocalSystem,
     knowledge: &mut Knowledge,
+    following: &mut Following,
     at: Station,
     duty: &Duty,
     from_s: f64,
@@ -319,16 +332,12 @@ pub fn survey_between(
         knowledge.sighted(Subject::Star(system.star), seen);
     }
 
-    let mut detected = None;
-    for slot in duty.visits(bodies, from_s, to_s) {
+    let look = |knowledge: &mut Knowledge, slot: usize| -> Option<Subject> {
         let index = star_last + slot;
-        let Some(source) = sources.get(index) else { continue };
-        let Some(sighting) =
-            survey::look(&optics, &sources, index, survey::SURVEY_DWELL_S, at.position_ly, to_s, witness)
-        else {
-            continue;
-        };
-        let Some(flux) = lit.every_band(slot, at.position_ly) else { continue };
+        let source = sources.get(index)?;
+        let sighting =
+            survey::look(&optics, &sources, index, survey::SURVEY_DWELL_S, at.position_ly, to_s, witness)?;
+        let flux = lit.every_band(slot, at.position_ly)?;
         // One visit, one row, folded and freed: the per-band fluxes go into a digest that is
         // the same size after a thousand visits as after one, which is what lets a survey run
         // for game months inside a fixed store.
@@ -340,7 +349,30 @@ pub fn survey_between(
         );
         knowledge.sighted(source.subject, sighting);
         knowledge.measured_colors(source.subject, witness, to_s, &colors);
-        detected = Some(source.subject);
+        Some(source.subject)
+    };
+    let slot_of = |subject: Subject| sources.iter().skip(star_last).position(|s| s.subject == subject);
+
+    let turns = duty.visits(bodies, from_s, to_s);
+    let mut detected = None;
+    let due = following.due(to_s);
+    let followed = due.len().min(turns.len() / 2);
+    for subject in due.into_iter().take(followed) {
+        if let Some(seen) = slot_of(subject).and_then(|slot| look(knowledge, slot)) {
+            detected = Some(seen);
+        }
+        following.took(subject, to_s);
+    }
+    for slot in turns.into_iter().skip(followed) {
+        let subject = sources.get(star_last + slot).map(|s| s.subject);
+        if subject.is_some_and(|s| following.following(s)) {
+            continue;
+        }
+        let Some(seen) = look(knowledge, slot) else { continue };
+        if !knowledge.orbited(seen) && knowledge.beside_brighter(seen, super::follow_up::BESIDE_RAD) {
+            following.begin(seen, to_s);
+        }
+        detected = Some(seen);
     }
     detected
 }
@@ -556,7 +588,7 @@ pub fn chart_system(knowledge: &mut Knowledge, system: &LocalSystem, now_s: f64)
         let mu = sim.mu(body);
         let Some(elements) = state::from_state(mu, at - parent_at, moving - parent_moving) else { continue };
         let (a_m, e) = (elements.semi_major_axis, elements.eccentricity);
-        // Unbound or nearly so: `body::placed_at` holds eccentricity below this, and a comet on
+        // Unbound or nearly so: `placed::placed_at` holds eccentricity below this, and a comet on
         // its way out has no period to chart.
         if !(a_m > 0.0 && a_m.is_finite() && e < 0.999 && mu > 0.0) {
             continue;
@@ -573,7 +605,7 @@ pub fn chart_system(knowledge: &mut Knowledge, system: &LocalSystem, now_s: f64)
                 period_s: (period_s, period_s * 1.0e-9),
                 semi_major_au: (a_m / generate::AU, a_m / generate::AU * 1.0e-9),
                 eccentricity: Some((e, 1.0e-9)),
-                // The same angles `body::placed_at` reads back into `state::to_state`, so an
+                // The same angles `placed::placed_at` reads back into `state::to_state`, so an
                 // orbit charted here is placed exactly where the body is.
                 orientation: Orientation::Known {
                     pole,
@@ -582,7 +614,8 @@ pub fn chart_system(knowledge: &mut Knowledge, system: &LocalSystem, now_s: f64)
                     periapsis: elements.argument_of_periapsis,
                 },
                 // The periapsis passage, as `placed_at` takes it.
-                epoch_s: Some(now_s - mean / std::f64::consts::TAU * period_s),
+                epoch_s: Some((now_s - mean / std::f64::consts::TAU * period_s, 0.0)),
+                pivot_s: None,
                 method: Method::Claim,
                 stated_s: now_s,
                 lineage: vec![hop],
@@ -618,7 +651,7 @@ mod tests {
                 else {
                     continue;
                 };
-                let super::super::body::Placed::Known { offset_au, .. } = belief.position_now else {
+                let super::super::Placed::Known { offset_au, .. } = belief.position_now else {
                     panic!("{} was charted and not placed", key(body));
                 };
                 let truth_au = (system.body_state_at(body, later).unwrap().0 - star_at) / generate::AU;
@@ -1084,7 +1117,7 @@ mod tests {
             let mut knowledge = Knowledge::new(Witness(1));
             let duty = Duty::Survey { star: system.star, started_s: 0.0 };
             let where_from = at(system.origin_ly + DVec3::X * 3.0e-5);
-            survey_between(&mut sky, &system, &mut knowledge, where_from, &duty, 0.0, 400.0);
+            survey_between(&mut sky, &system, &mut knowledge, &mut Following::default(), where_from, &duty, 0.0, 400.0);
             knowledge
         };
         let (one, many) = (surveyed(alone), surveyed(crowded));
@@ -1116,4 +1149,152 @@ mod tests {
         assert!(sky.source_of(Band::V, here, crate::sky::StarId::synthesize("nope", 1)).is_none());
     }
 
+    /// A satellite without an orbit gets a run of doubling gaps, the survey goes on round it,
+    /// and a planet is left to the survey's own cadence.
+    #[test]
+    fn a_survey_follows_up_what_it_cannot_yet_fit() {
+        let Some((mut sky, system)) = sol() else { return };
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        let from = system.star_position_ly() + DVec3::X * 5.0 * AU_M / M_PER_LY;
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+        let hours = 40.0;
+        let mut t = 0.0;
+        while t < hours * 3600.0 {
+            t += TICK_S;
+            o.tick(&mut sky, Some(&system), &mut k, at(from), t);
+        }
+        let gaps_h = |name: &str| -> Vec<f64> {
+            let subject = Subject::Body { star: system.star, body: crate::knowledge::BodyId::of(system.star, name) };
+            let file = k.file(subject).unwrap_or_else(|| panic!("{name} was never seen"));
+            let times: Vec<f64> = file.sightings().iter().map(|s| s.observed_s / 3600.0).collect();
+            times.windows(2).map(|w| w[1] - w[0]).collect()
+        };
+
+        // Io is bright and followed from its first look. A tick is 0.12 hours, and the run
+        // shares the telescope, so each gap is its plan or a little more.
+        let io = gaps_h("Io");
+        for (gap, plan) in io.iter().zip([1.0, 1.0, 2.0, 4.0, 8.0]) {
+            assert!((plan..plan * 1.6).contains(gap), "Io's gaps {io:.2?} are not 1, 1, 2, 4, 8 hours");
+        }
+        // Metis is faint and waits for room, but gets its run the same day. Unfollowed, a
+        // survey of two hundred bodies comes back to it every three and a half hours.
+        let metis = gaps_h("Metis");
+        assert!(metis.iter().any(|gap| *gap < 1.6), "Metis was never followed up: {metis:.2?}");
+        assert!(k.len() > 100, "the follow-ups starved the survey: {} subjects", k.len());
+        // From 5 AU the inner system is a few degrees across, so some bodies about the star pass
+        // a brighter one: Mars sits within a degree of Venus.
+        let sim = system.sim();
+        let (mut satellites, mut others) = ((0, 0), (0, 0));
+        for i in sim.indices().filter(|&i| i != system.primary()) {
+            let name = sim.info(i).name.clone().unwrap_or_else(|| sim.name(i).to_string());
+            let subject = Subject::Body { star: system.star, body: crate::knowledge::BodyId::of(system.star, &name) };
+            if k.file(subject).is_none() {
+                continue;
+            }
+            let followed = usize::from(gaps_h(&name).iter().any(|gap| *gap < 1.6));
+            let tally = if sim.parent(i) == Some(system.primary()) { &mut others } else { &mut satellites };
+            *tally = (tally.0 + followed, tally.1 + 1);
+        }
+        assert!(satellites.0 * 2 > satellites.1, "{} of {} satellites followed", satellites.0, satellites.1);
+        assert!(others.0 * 4 < others.1, "{} of {} bodies about the star followed", others.0, others.1);
+    }
+
+    /// Every body of Sol fitted as a shard would, printed against the truth. A ship parked
+    /// `SOL_FITS_AU` out (default 5) surveys for `SOL_FITS_TICKS` ticks (default 3000, fifteen
+    /// days). `SOL_FITS_FRAMES` adds, per moon, fits from scratch about the star, the believed
+    /// planet and the true planet.
+    ///
+    /// A diagnostic, not a check, and minutes of work: run it optimized, e.g.
+    /// `CARGO_PROFILE_DEV_OPT_LEVEL=3 cargo test -p lc-world --lib sol_fits_against_truth --
+    /// --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn sol_fits_against_truth() {
+        use super::super::{arc, BodyId, Placed};
+
+        let Some((mut sky, system)) = sol() else { panic!("the HYG catalog is not in assets/") };
+        let setting = |key: &str, default: f64| std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
+        let ticks = setting("SOL_FITS_TICKS", 3000.0) as usize;
+        let from = system.star_position_ly() + DVec3::X * setting("SOL_FITS_AU", 5.0) * AU_M / M_PER_LY;
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory::default();
+        o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
+
+        let sim = system.sim();
+        let name = |i| sim.info(i).name.clone().unwrap_or_else(|| sim.name(i).to_string());
+        let named: HashMap<BodyId, _> = sim.indices().map(|i| (BodyId::of(system.star, &name(i)), i)).collect();
+        let started = std::time::Instant::now();
+        let mut t = 0.0;
+        for tick in 0..ticks {
+            if tick % 500 == 0 {
+                eprintln!("tick {tick}, {:?}", started.elapsed());
+            }
+            t += TICK_S;
+            o.tick(&mut sky, Some(&system), &mut k, at(from), t);
+            let Some(star_ly) = k.belief(Subject::Star(system.star)).and_then(|b| b.distance.position_ly()) else {
+                continue;
+            };
+            let job = k.unfitted(system.star).and_then(|subject| k.fit_job(subject, star_ly, t));
+            if let Some(solved) = job.and_then(|job| job.solve()) {
+                k.file_fit(solved, t);
+            }
+        }
+        eprintln!("{ticks} ticks, {:.1} days, {:?}", t / 86_400.0, started.elapsed());
+
+        let relative = |i, at_s| Some(system.body_state_at(i, at_s)?.0 - system.body_state_at(system.primary(), at_s)?.0);
+        let mut rows = Vec::new();
+        for belief in k.bodies_of(system.star, t) {
+            let (Some(&i), Some((a, sigma_a))) = (named.get(&belief.body), belief.semi_major_au) else { continue };
+            let parent = sim.parent(i).map(name).unwrap_or_default();
+            let about = belief.about.and_then(|b| named.get(&b)).map_or("Sun".to_string(), |&p| name(p));
+            let (miss, sigma) = match (belief.position_now, relative(i, t)) {
+                (Placed::Known { offset_au, error }, Some(truth)) => ((offset_au - truth / AU_M).length(), error.total_au()),
+                _ => (f64::NAN, f64::NAN),
+            };
+            // The osculating axis about the true parent, by vis-viva.
+            let truth_a = sim.parent(i).and_then(|p| {
+                let ((r, v), (rp, vp)) = (system.body_state_at(i, t)?, system.body_state_at(p, t)?);
+                let mu = 6.674_30e-11 * (sim.mass(p) + sim.mass(i));
+                Some(1.0 / (2.0 / (r - rp).length() - (v - vp).length_squared() / mu) / AU_M)
+            });
+            let truth_a = truth_a.unwrap_or(f64::NAN);
+            rows.push(format!(
+                "{:>14} goes round {parent:>8}, fitted about {about:>10}: a {a:.6e} +/- {sigma_a:.1e} AU, truly {truth_a:.6e} ({:.1} sigma), placed {miss:.2e} AU out +/- {sigma:.2e}",
+                name(i),
+                (a - truth_a) / sigma_a
+            ));
+        }
+        rows.sort();
+        rows.iter().for_each(|row| eprintln!("{row}"));
+
+        if std::env::var("SOL_FITS_FRAMES").is_err() {
+            return;
+        }
+        let Some(star_ly) = k.belief(Subject::Star(system.star)).and_then(|b| b.distance.position_ly()) else { return };
+        let show = |fitted: Option<arc::Fitted>| {
+            fitted.map_or("none".to_string(), |f| {
+                format!("a {:.3e} AU, P {:.3e} d, miss {:.2e} rad", f.semi_major_m / AU_M, f.period_s / 86_400.0, f.residual_rad)
+            })
+        };
+        for i in sim.indices() {
+            let Some(p) = sim.parent(i).filter(|&p| p != system.primary()) else { continue };
+            let subject = Subject::Body { star: system.star, body: BodyId::of(system.star, &name(i)) };
+            if k.file(subject).is_none() {
+                continue;
+            }
+            let planet = BodyId::of(system.star, &name(p));
+            let star = k.looks_at(subject, &|_| Some(star_ly));
+            let believed = k.looks_at(subject, &|s| Some(star_ly + k.placed(system.star, planet, s)? / M_PER_LY));
+            let exact = k.looks_at(subject, &|s| Some(star_ly + relative(p, s)? / M_PER_LY));
+            eprintln!(
+                "{:>12} about {:>8}\n    star: {}\n    believed planet: {}\n    true planet: {}",
+                name(i),
+                name(p),
+                show(arc::fit(&star)),
+                show(arc::fit(&believed)),
+                show(arc::fit(&exact))
+            );
+        }
+    }
 }

@@ -262,7 +262,7 @@ async fn chart_hands_a_craft_a_system_it_can_place() {
     let bodies = server.aboard(CraftId(1)).knowledge.bodies_of(far, now_s);
     assert!(!bodies.is_empty(), "{why}");
     assert!(
-        bodies.iter().all(|b| matches!(b.position_now, lc_world::knowledge::body::Placed::Known { .. })),
+        bodies.iter().all(|b| matches!(b.position_now, lc_world::knowledge::Placed::Known { .. })),
         "a charted body was not placed",
     );
 

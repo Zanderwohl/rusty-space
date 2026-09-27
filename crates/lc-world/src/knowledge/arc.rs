@@ -299,7 +299,16 @@ fn conic(points: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
 /// arc that cross product is the arc's *curvature*, a part in ten thousand of the same
 /// magnitudes, and it fell under the degeneracy guard for every three-degree arc -- which is
 /// exactly the case ranging exists to rescue.
-fn through(places: &[(DVec3, f64)], looks: &[Look], reach_m: f64, bound: f64) -> Option<Fitted> {
+///
+/// `held_s` is an orbit already fitted, as seconds per radian, to count turns by: see
+/// [`unwrappings`].
+fn through(
+    places: &[(DVec3, f64)],
+    looks: &[Look],
+    reach_m: f64,
+    bound: f64,
+    held_s: Option<f64>,
+) -> Option<Fitted> {
     if places.len() < 3 {
         return None;
     }
@@ -353,7 +362,7 @@ fn through(places: &[(DVec3, f64)], looks: &[Look], reach_m: f64, bound: f64) ->
     // The anomalies may be saying more than one thing; the bearings say which. See
     // [`unwrappings`].
     let mut best: Option<Fitted> = None;
-    for (per_rad, epoch_s) in unwrappings(&means) {
+    for (per_rad, epoch_s) in unwrappings(&means, held_s) {
         let period_s = per_rad.abs() * std::f64::consts::TAU;
         if !sound(period_s) {
             continue;
@@ -552,11 +561,19 @@ fn polish(
 /// respect to its elements are a page of algebra to get wrong, and six parameters at a dozen
 /// probes a round is cheap enough that the difference does not pay for itself.
 fn settle(held: Fitted, looks: &[Look], rounds: usize) -> Fitted {
-    settle_but(held, looks, rounds, 7)
+    settle_but(held, looks, rounds, 0)
 }
 
-/// The same, holding one element fixed. `hold` of 7 holds none.
-fn settle_but(mut held: Fitted, looks: &[Look], rounds: usize, hold: usize) -> Fitted {
+/// The elements [`settle_but`] moves, one bit each, in the order it tries them.
+const AXIS: u8 = 1 << 0;
+const ECCENTRICITY: u8 = 1 << 1;
+const POLE_U: u8 = 1 << 2;
+const PERIAPSIS: u8 = 1 << 4;
+const EPOCH: u8 = 1 << 5;
+const PERIOD: u8 = 1 << 6;
+
+/// The same, holding the elements whose bits are set in `hold` fixed.
+fn settle_but(mut held: Fitted, looks: &[Look], rounds: usize, hold: u8) -> Fitted {
     let mut scale = 1.0;
     for _ in 0..rounds {
         let (u, v) = basis(held.pole);
@@ -582,7 +599,8 @@ fn settle_but(mut held: Fitted, looks: &[Look], rounds: usize, hold: usize) -> F
                 // eccentricity off zero and `stated` then reported none while keeping the
                 // periapsis and epoch that had been fitted *with* it -- which draws the body up
                 // to two eccentricities of arc from where it was seen.
-                if k == hold || (held.assumed_circular && (k == 1 || k == 4)) {
+                let bit = 1u8 << k;
+                if hold & bit != 0 || (held.assumed_circular && bit & (ECCENTRICITY | PERIAPSIS) != 0) {
                     continue;
                 }
                 let tried = way(&held, step, u, v);
@@ -610,6 +628,8 @@ pub struct Spread {
     pub eccentricity: f64,
     /// Radians the plane's pole can move.
     pub pole_rad: f64,
+    /// Seconds, with the periapsis and the period held: the phase at the epoch, as a time.
+    pub epoch_s: f64,
 }
 
 /// How far each element can move before the fit is a chi-square worse, the other elements
@@ -631,7 +651,13 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
     let weight = |l: &Look| if l.range_m.is_some() { 2.0 } else { 1.0 } / (l.sigma_rad * l.sigma_rad);
     let total: f64 = looks.iter().map(weight).sum();
     if !sound(total) {
-        return Spread { period_s: f64::INFINITY, semi_major_m: f64::INFINITY, eccentricity: f64::INFINITY, pole_rad: std::f64::consts::PI };
+        return Spread {
+            period_s: f64::INFINITY,
+            semi_major_m: f64::INFINITY,
+            eccentricity: f64::INFINITY,
+            pole_rad: PI,
+            epoch_s: fitted.period_s * 0.5,
+        };
     }
     // Chi-square one worse, in the weighted RMS this file works in -- or one reduced chi-square
     // worse where the fit misses by more than the errors allow. A two-body orbit is not the
@@ -645,7 +671,7 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
     // constraining it: an eccentricity walked past one is a hyperbola, and a pole is at most
     // half a turn from any other. Reporting the bound beats reporting infinity, which reads as
     // "unmeasured" when what is true is "unmeasured, and it cannot be worse than this".
-    let walk = |hold: usize, nudge: &dyn Fn(&Fitted, f64) -> Fitted, unit: f64, ceiling: f64| -> f64 {
+    let walk = |hold: u8, nudge: &dyn Fn(&Fitted, f64) -> Fitted, unit: f64, ceiling: f64| -> f64 {
         let mut step = unit.min(ceiling);
         for _ in 0..WALKS {
             let mut trial = nudge(fitted, step);
@@ -673,26 +699,35 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
     let pole_rad = [u, v]
         .into_iter()
         .map(|axis| {
-            walk(2, &|f, d| Fitted { pole: (f.pole + axis * d).normalize(), ..*f }, 1.0e-9, PI)
+            walk(POLE_U, &|f, d| Fitted { pole: (f.pole + axis * d).normalize(), ..*f }, 1.0e-9, PI)
         })
         .fold(0.0f64, f64::max);
 
     Spread {
         semi_major_m: walk(
-            0,
+            AXIS,
             &|f, d| Fitted { semi_major_m: f.semi_major_m * (1.0 + d), ..*f },
             1.0e-9,
             f64::INFINITY,
         ) * fitted.semi_major_m,
         eccentricity: walk(
-            1,
+            ECCENTRICITY,
             &|f, d| Fitted { eccentricity: (f.eccentricity + d).min(PARABOLIC), ..*f },
             1.0e-9,
             (PARABOLIC - fitted.eccentricity).max(0.0),
         ),
         pole_rad,
-        period_s: walk(6, &|f, d| Fitted { period_s: f.period_s * (1.0 + d), ..*f }, 1.0e-9, f64::INFINITY)
+        period_s: walk(PERIOD, &|f, d| Fitted { period_s: f.period_s * (1.0 + d), ..*f }, 1.0e-9, f64::INFINITY)
             * fitted.period_s,
+        // The periapsis is held because at small eccentricity it trades against the epoch, which
+        // would then come out as large as the orbit; the period, because `knowledge::placed`
+        // adds its drift itself. Half a turn is anywhere on the orbit.
+        epoch_s: walk(
+            EPOCH | PERIAPSIS | PERIOD,
+            &|f, d| Fitted { epoch_s: f.epoch_s + d * f.period_s, ..*f },
+            1.0e-9,
+            0.5,
+        ) * fitted.period_s,
     }
 }
 
@@ -711,7 +746,7 @@ impl Fitted {
     /// The plane's basis here is [`basis`], which is whatever `any_orthonormal_vector` returns
     /// and so is not a frame anything else shares. The record wants the standard pair instead:
     /// the ascending node's longitude in simulation axes, and periapsis measured round from
-    /// that node. `knowledge::body::placed_at` reads them straight into
+    /// that node. `knowledge::placed::placed_at` reads them straight into
     /// `em_foundations::kepler::state::Elements`, so a wrong convention here is a body drawn in
     /// the wrong place and nothing that complains.
     pub fn stated(
@@ -742,12 +777,23 @@ impl Fitted {
                 node: node_dir.y.atan2(node_dir.x),
                 periapsis,
             },
-            epoch_s: Some(self.epoch_s),
+            epoch_s: Some((self.epoch_s, spread.epoch_s)),
+            pivot_s: pivot(looks),
             method: crate::knowledge::Method::Astrometric,
             stated_s,
             lineage: Vec::new(),
         }
     }
+}
+
+/// The weighted centre of the looks' times, where a fit's phase and period errors are
+/// independent. `None` for no looks.
+fn pivot(looks: &[Look]) -> Option<f64> {
+    let (sum, weight) = looks.iter().fold((0.0, 0.0), |(sum, weight), look| {
+        let w = 1.0 / (look.sigma_rad * look.sigma_rad);
+        (sum + w * look.at_s, weight + w)
+    });
+    sound(weight).then(|| sum / weight)
 }
 
 /// How much worse than it was an orbit may explain a longer arc and still be carried onto it
@@ -800,6 +846,7 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     // the plane they define would be whatever the noise says. Ranged looks first where there
     // are three of them, since those skip the search entirely.
     let ranged: Vec<Look> = ordered.iter().copied().filter(|l| l.range_m.is_some()).collect();
+    let held_s = seed.map(|held| held.period_s / std::f64::consts::TAU);
     let anchors = if ranged.len() >= 3 { &ranged } else { &ordered };
     let (a, c) = (*anchors.first()?, *anchors.last()?);
     // The middle one is whichever look points furthest from both ends, not whichever sits in
@@ -839,7 +886,10 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     if ranged.len() >= RANGED_NEEDED {
         let places: Vec<(DVec3, f64)> =
             ranged.iter().filter_map(|l| Some((l.place()?, l.at_s))).collect();
-        let best = [through(&places, &ordered, reach, f64::INFINITY), super::state::from_motion(&places, &ordered, reach)]
+        let best = [
+            through(&places, &ordered, reach, f64::INFINITY, held_s),
+            super::state::from_motion(&places, &ordered, reach),
+        ]
             .into_iter()
             .flatten()
             .map(|found| settle(found, &ordered, SETTLINGS * 8))
@@ -859,7 +909,7 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
         let r2 = b.from_m + b.toward * rho_b;
         let rho_c = coplanar_range(r1, r2, c.from_m, c.toward)?;
         let r3 = c.from_m + c.toward * rho_c;
-        through(&[(r1, a.at_s), (r2, b.at_s), (r3, c.at_s)], &ordered, reach, bound)
+        through(&[(r1, a.at_s), (r2, b.at_s), (r3, c.at_s)], &ordered, reach, bound, held_s)
     };
 
     // A satellite's band is the stretch of its own ray that stays within `reach` of the
@@ -1184,6 +1234,25 @@ mod tests {
         assert!(off(carried.period_s, truth.period_s()) < 2.0e-3);
     }
 
+    /// A refit counts whole turns from the period it carries, which a search cannot do over
+    /// sixteen looks spread across forty orbits.
+    #[test]
+    fn a_refit_counts_the_turns_a_search_cannot() {
+        let truth = like(0.387, 0.2056);
+        let period = truth.period_s();
+        let dense = looks(&truth, 5.0, 24, period / 20.0, SIGMA);
+        let held = fit(&dense).expect("an orbit and a fifth, well sampled, fits");
+        assert!(off(held.period_s, period) < 1.0e-3, "premise: the short arc fits");
+
+        // Sixteen looks over forty orbits, each 2.63 orbits apart.
+        let long = looks(&truth, 5.0, 16, period * 2.63, SIGMA);
+        let searched = fit(&long).map_or(f64::INFINITY, |f| off(f.period_s, period));
+        assert!(searched > 1.0e-2, "premise: a search finds the period to {searched}");
+        let carried = refit(&held, &long).expect("the held period says how many turns");
+        assert!(off(carried.period_s, period) < 1.0e-5, "period off by {}", off(carried.period_s, period));
+        assert!(off(carried.semi_major_m, truth.semi_major_m) < 1.0e-3);
+    }
+
     /// **And never carries a wrong orbit forward**: seeded from one, it either finds its way to
     /// the truth or refuses, and a refusal sends the caller back to the full search.
     #[test]
@@ -1297,6 +1366,32 @@ mod tests {
         }
     }
 
+    /// A fit states the epoch's error and a reader adds it to the period's drift. No better
+    /// calibrated than the rest of [`spread`]: the Earth-like fit is 4.5 of its along-path bar out.
+    #[test]
+    fn a_fit_states_how_far_round_its_body_is() {
+        use crate::knowledge::placed::{Placed, placed_at};
+
+        for (au, e) in [(1.0, 0.0167), (1.524, 0.0934), (0.7, 0.0)] {
+            let truth = like(au, e);
+            let seen = looks(&truth, 5.0, 24, truth.period_s() / 120.0, SIGMA);
+            let fitted = fit(&seen).expect("fits");
+            let orbit = fitted.stated(crate::knowledge::Witness(1), None, &seen, 0.0);
+            let (epoch_s, sigma_s) = orbit.epoch_s.expect("an epoch");
+            assert!((0.0..truth.period_s() * 0.5).contains(&sigma_s), "{sigma_s} s");
+            if e > 0.0 {
+                assert!(sigma_s > 0.0, "an eccentric orbit's epoch stated as exact");
+            }
+
+            let end = seen.last().expect("looks").at_s;
+            let Placed::Known { error, .. } = placed_at(&orbit, end) else { panic!("placed") };
+            let exact = crate::knowledge::Orbit { epoch_s: Some((epoch_s, 0.0)), ..orbit.clone() };
+            let Placed::Known { error: drift, .. } = placed_at(&exact, end) else { panic!("placed") };
+            let at_epoch = std::f64::consts::TAU * sigma_s / fitted.period_s;
+            assert!((error.along_rad - drift.along_rad.hypot(at_epoch)).abs() < 1.0e-12);
+        }
+    }
+
     /// An error bar has to stay inside what the element means. An eccentricity walked past one
     /// is a hyperbola, and a pole is at most half a turn from any other, so a bar that runs off
     /// to infinity in either is reporting a shape the fit does not describe.
@@ -1341,7 +1436,7 @@ mod tests {
                 let mut trial = Fitted { pole: (fitted.pole + axis * step).normalize(), ..fitted };
                 let Some(fresh) = residual(&trial, &seen, f64::INFINITY) else { return step };
                 trial.residual_rad = fresh;
-                if settle_but(trial, &seen, PROFILINGS, 2).residual_rad > worse {
+                if settle_but(trial, &seen, PROFILINGS, POLE_U).residual_rad > worse {
                     return step;
                 }
                 step = (step * 1.6).min(PI);
@@ -1457,13 +1552,13 @@ mod tests {
         assert!(sigma > 0.0 && sigma.is_finite());
 
         // And it places the body, which is the point of carrying an orientation and an epoch.
-        let crate::knowledge::Placed::Known { offset_au, sigma_au } = belief.position_now else {
+        let crate::knowledge::Placed::Known { offset_au, error } = belief.position_now else {
             panic!("a full orientation should place it, got {:?}", belief.position_now)
         };
         let want = truth.at(truth.fitted().epoch_s) / crate::navigation::AU;
         assert!(
             offset_au.distance(want) < 0.05,
-            "placed at {offset_au} against {want}, sigma {sigma_au}"
+            "placed at {offset_au} against {want}, sigma {}", error.total_au()
         );
     }
 
@@ -1498,7 +1593,9 @@ mod tests {
         // enough sky the moon has gone round hundreds of times.
         let planet_span = planet.period_s() * 0.2;
         let moon_span = moon_period * 2.37;
-        let file_ranged = |k: &mut Knowledge, subject: Subject, seen: &[Look]| {
+        // Io is about a two-hundredth of Jupiter's brightness, and a primary has to outshine
+        // what goes round it.
+        let file_ranged = |k: &mut Knowledge, subject: Subject, seen: &[Look], flux: f64| {
             for look in seen {
                 k.sighted(
                     subject,
@@ -1514,20 +1611,18 @@ mod tests {
                         range_m: look.range_m,
                         spin_s: None,
                         band: em_spectra::Band::V,
-                        flux: 1.0e-9,
+                        flux,
                         flux_sigma: 1.0e-12,
                         lineage: Vec::new(),
                     },
                 );
             }
         };
-        let file = |k: &mut Knowledge, subject: Subject, seen: &[Look]| {
-            file_ranged(k, subject, seen);
-        };
         let planet_subject = Subject::Body { star, body: planet_id };
         let moon_id = crate::knowledge::BodyId::of(star, "Io");
         let moon_subject = Subject::Body { star, body: moon_id };
-        file(&mut k, planet_subject, &watched(&|t| planet.at(t), MU_SUN, 5.0, 24, planet_span / 24.0, SIGMA));
+        let planet_looks = watched(&|t| planet.at(t), MU_SUN, 5.0, 24, planet_span / 24.0, SIGMA);
+        file_ranged(&mut k, planet_subject, &planet_looks, 1.0e-9);
         // Ranged, which is to say visited. A moon's orbit from bearings alone at survey range
         // is the piece doc 25 records as open: the depth is observable at nine hundred sigma
         // but its basin is thirty times narrower than a step of the range grid, so the search
@@ -1542,7 +1637,7 @@ mod tests {
                 Look { range_m: Some((truth_range + slip, 1.0e-6 * truth_range)), ..*look }
             })
             .collect();
-        file_ranged(&mut k, moon_subject, &moon_ranged);
+        file_ranged(&mut k, moon_subject, &moon_ranged, 5.0e-12);
 
         // The planet first, because a moon cannot be placed against a planet nobody has placed.
         assert!(k.fit_orbit(planet_subject, star_ly, planet_span), "the planet fits");
@@ -1581,6 +1676,98 @@ mod tests {
 
         // The moon has no satellite of its own, so nothing weighs it.
         assert_eq!(moon.mass_kg, None, "nothing goes round the moon");
+    }
+
+    /// A moon is fitted against where its planet was seen: a planet's orbit three hours late, a
+    /// third of Io's orbit out, is taken out of the moon's frame by the planet's own bearings.
+    #[test]
+    fn a_moon_is_fitted_against_where_its_planet_was_seen() {
+        use crate::knowledge::{BodyId, Knowledge, Sighting, Witness};
+
+        let star = StarId::synthesize("arc", 5);
+        let star_ly = DVec3::new(3.0, -1.0, 0.5);
+        let mut k = Knowledge::new(Witness(7));
+        let file = |k: &mut Knowledge, subject: Subject, seen: &[Look], flux: f64| {
+            for look in seen {
+                let bearing = Bearing {
+                    observer_ly: star_ly + look.from_m / crate::system::M_PER_LY,
+                    toward: look.toward,
+                    sigma_rad: look.sigma_rad,
+                };
+                k.sighted(
+                    subject,
+                    Sighting {
+                        witness: Witness(7),
+                        observed_s: look.at_s,
+                        bearing,
+                        size: None,
+                        range_m: None,
+                        spin_s: None,
+                        band: em_spectra::Band::V,
+                        flux,
+                        flux_sigma: flux * 1.0e-3,
+                        lineage: Vec::new(),
+                    },
+                );
+            }
+        };
+
+        let planet = like(5.2, 0.048);
+        let planet_id = BodyId::of(star, "Jupiter");
+        let planet_subject = Subject::Body { star, body: planet_id };
+        let moon_mu = MU_SUN * 9.54e-4;
+        let moon_r = 4.217e8;
+        let moon_period = kepler::period::third_law(moon_r, moon_mu);
+        let (u, v) = planet.pole.normalize().any_orthonormal_pair();
+        let moon_at = |t: f64| {
+            let turn = std::f64::consts::TAU * t / moon_period;
+            planet.at(t) + (u * turn.cos() + v * turn.sin()) * moon_r
+        };
+
+        // The planet seen every six hours across the moon's run, and believed three hours late.
+        let hour = 3600.0;
+        let planet_looks = watched(&|t| planet.at(t), MU_SUN, 5.0, 24, 6.0 * hour, SIGMA);
+        file(&mut k, planet_subject, &planet_looks, 1.0e-9);
+        let late = Fitted { epoch_s: planet.fitted().epoch_s + 3.0 * hour, ..planet.fitted() };
+        k.orbits(planet_subject, late.stated(Witness(7), None, &planet_looks, 0.0));
+
+        // The moon on a follow-up run, as far as its fit has got: 0, 1, 2, 4 ... 32 hours,
+        // three quarters of Io's orbit.
+        let moon_subject = Subject::Body { star, body: BodyId::of(star, "Io") };
+        let ship_period = kepler::period::third_law(5.0 * AU_M, MU_SUN);
+        let times: Vec<f64> = std::iter::once(0.0).chain((0..6).map(|n| hour * 2f64.powi(n))).collect();
+        let moon_looks: Vec<Look> = times
+            .iter()
+            .enumerate()
+            .map(|(i, &t)| {
+                let phase = std::f64::consts::TAU * t / ship_period;
+                let from = DVec3::new(phase.cos(), phase.sin(), 0.0) * 5.0 * AU_M;
+                let toward = (moon_at(t) - from).normalize();
+                let (x, y) = toward.any_orthonormal_pair();
+                let nudge = x * rng::gaussian(rng::hash(&[i as u64, 41])) * SIGMA
+                    + y * rng::gaussian(rng::hash(&[i as u64, 42])) * SIGMA;
+                Look { from_m: from, toward: (toward + nudge).normalize(), at_s: t, sigma_rad: SIGMA, range_m: None }
+            })
+            .collect();
+        file(&mut k, moon_subject, &moon_looks, 5.0e-12);
+
+        // Premise: in the frame of the believed orbit alone, the moon comes out wrong or not
+        // at all.
+        let believed = k.looks_at(moon_subject, &|t| Some(star_ly + k.placed(star, planet_id, t)? / crate::system::M_PER_LY));
+        let alone = fit(&believed).map_or(f64::INFINITY, |f| off(f.semi_major_m, moon_r));
+        assert!(alone > 0.01, "premise: the believed frame alone fits the moon to {alone}");
+
+        let end = *times.last().expect("looks");
+        assert!(k.fit_orbit(moon_subject, star_ly, end), "the moon fits");
+        let moon = k.body_belief(star, BodyId::of(star, "Io"), end).expect("held");
+        assert_eq!(moon.about, Some(planet_id));
+        let (au, sigma_au) = moon.semi_major_au.expect("an orbit");
+        let axis = off(au * crate::navigation::AU, moon_r);
+        assert!(axis < 1.0e-3, "axis off by {axis}, against {alone} in the believed frame");
+        let miss = (au * crate::navigation::AU - moon_r).abs() / crate::navigation::AU;
+        assert!(miss < 3.0 * sigma_au, "{miss:e} AU out against a bar of {sigma_au:e}");
+        let period = off(moon.period_s.expect("a period").0, moon_period);
+        assert!(period < 1.0e-3, "period off by {period}");
     }
 
     /// A body is fitted when its bearings have outgrown its orbit, oldest statement first, and
@@ -1630,6 +1817,7 @@ mod tests {
             eccentricity: None,
             orientation: crate::knowledge::Orientation::Unknown,
             epoch_s: None,
+            pivot_s: None,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 1.0e6,
             lineage: Vec::new(),
@@ -1756,6 +1944,7 @@ mod tests {
             eccentricity: None,
             orientation: crate::knowledge::Orientation::Unknown,
             epoch_s: None,
+            pivot_s: None,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 0.0,
             lineage: Vec::new(),

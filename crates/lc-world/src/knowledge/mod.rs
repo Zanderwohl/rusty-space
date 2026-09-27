@@ -21,11 +21,13 @@ pub mod astrometry;
 pub mod body;
 pub mod called;
 pub mod conclusion;
+pub mod follow_up;
 pub mod formats;
 pub mod moments;
 pub mod mass;
 pub mod names;
 pub mod observatory;
+pub mod placed;
 pub mod primary;
 pub mod prior;
 pub mod sort;
@@ -40,7 +42,8 @@ mod tracked;
 pub mod turns;
 
 pub use astrometry::{Bearing, Distance};
-pub use body::{BodyBelief, Placed, SystemPlane};
+pub use body::{BodyBelief, SystemPlane};
+pub use placed::{PlaceError, Placed, Track};
 pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;
 pub use report::{ENTRIES_PER_REPORT, Entry, Log, Logs, Mark, Part, Report, Reporting};
@@ -843,6 +846,7 @@ mod tests {
             eccentricity: None,
             orientation: Orientation::Unknown,
             epoch_s: None,
+            pivot_s: None,
             method: Method::Transit,
             stated_s,
             lineage: Lineage::new(),
