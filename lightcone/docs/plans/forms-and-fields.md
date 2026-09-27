@@ -113,6 +113,7 @@ graph LR
   R14["R14 Refits in the game"]
   R15["R15 Construction on the real hull in the game"]
   R16["R16 Drones at work on another craft"]
+  R17["R17 A burn's power on the wire as `F c`"]
   C1["C1 Editor view"]
   C2["C2 Editing the draft"]
   C3["C3 Undo and redo"]
@@ -196,6 +197,7 @@ graph LR
   R14 --> R15
   R9 --> R16
   R15 --> R16
+  R12 --> R17
   R1 --> C1
   C1 --> C2
   F5 --> C2
@@ -233,6 +235,7 @@ graph LR
   R14 --> X1
   R15 --> X1
   R16 --> X1
+  R17 --> X1
 ```
 <!-- /graph -->
 
@@ -655,6 +658,15 @@ graph LR
 - deliver: another craft's drones drawn at its round from the step its `Presence` states, as `refit_hull` draws its hull, placed under that craft's root; today only the player's `Refit` has drones.
 - done when: a client watching another's applied round photographs its drones working the frontier.
 
+### R17 · A burn's power on the wire as `F c`
+
+- status: todo
+- needs: R12
+- touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-world/src/flight.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`
+- read: 31 §The drive is the radiator, 32 §The exhaust cone
+- deliver: `Presence` states what a burn sends aft as a photon drive's `F c` rather than a reaction drive's `½ F v`, and `Drive` gives it; `plume::exhaust_w` and its guess at another ship's exhaust speed go.
+- done when: another ship's cone and face are drawn from the power it stated, with no exhaust speed assumed.
+
 ## C: client
 
 ### C1 · Editor view
@@ -752,7 +764,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16
+- needs: F10, H7, H8, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
