@@ -5,8 +5,8 @@ fails, the ship is gone and the whole system sees it happen.
 
 **Status: in the account.** The closed forms are `lc_world::field`, with their anchors derived in
 `Balance::DEFAULT`. A fitting settles `Q` beside stored energy (`lc_world::fitting::heat`), `Fitted`
-carries it and a checkpoint keeps it. Every field runs Black until the modes are built, and nothing
-collapses yet. A ship whose storage has run down to what its motive has committed pays only as much
+carries it and a checkpoint keeps it. Every field runs Black until the modes are built. A field that
+reaches `Q_max` collapses (`lc_server::field`); its spike does not yet reach neighbors. A ship whose storage has run down to what its motive has committed pays only as much
 of the living drain as conversion brings in, and the rest makes no heat, so an empty ship far from
 a star cools below 400 K. A refit's transfers and a burn's spending are settled beside the account
 rather than inside it, so room a build opens in full storage is refilled from the next settlement,
@@ -261,6 +261,25 @@ How it looks from the next system, taking the spike as one second long:
 A war lights up its neighbors' skies **in order of their distance**, for years, each system
 seeing it replayed as the light passes.
 
+### As built
+
+- **The instant is solved, not stepped.** `Fitting::collapse_s` walks the account's stretches from
+  its settlement, fill and empty storage splits and refit steps included, and takes the closed form in
+  each. A vent that crosses `Q_max` crosses it at its step's end. The shard walks that across the
+  day-long starlight segments the account will be settled at and fires what falls due, once before
+  the tick advances anything and once after its orders. Nothing is stored for it: every change of
+  input settles the account first, so asking again is the re-solve, and a checkpoint restores it with
+  the account.
+- **The event** is `kind::COLLAPSE`, stamped at the instant and where the ship was, carrying a
+  `Released`. It goes through the journal like a burn. Its power is the spike taken as a second
+  long, until [Proximity](#proximity) gives the spike somewhere to land.
+- **The wreck** stays in the fleet with its worldline ended at the instant. A ship that could see
+  it goes on seeing it until the light of the end arrives, then stops, and the wreck is dropped once
+  that light has passed every craft. It is not checkpointed, and its row and what it knew are
+  deleted at the next one: the successor carries the account, and an account holds one row.
+- **The successor** is a new ship, with a new id, at the spawn point. A connected owner is sent
+  `Collapsed` and then welcomed to it as on signing in.
+
 ## Proximity
 
 Everything a field emits heats whatever is near, through the same intake as starlight. The
@@ -428,7 +447,11 @@ puts a countdown in the text.
 
 - **Death.** A new starting ship, knowing nothing, is the harshest reading. Whether the Mind, the
   data part's contents or a faction's relays survive the ship is a question for
-  [22-provenance.md](22-provenance.md).
+  [22-provenance.md](22-provenance.md). An owner signed out when it happens is told nothing and
+  finds the new ship on signing in; the transcript and knowledge went with the old one.
+- **A wreck across a restart.** A wreck is not checkpointed, so a shard that restarts while its
+  light is still in flight forgets it, and a ship that had not yet seen the end stops seeing the
+  wreck at the restart instead. The event and its deliveries are in the journal and survive.
 - **Air under the field.** Parks held by the field would cap its temperature well below 4 600 K.
   Whether that is a real rule or only a look is undecided. The two layers are drawn either way.
 - **Direction of intake.** Reciprocity says an aperture receives best along its own axis. The
