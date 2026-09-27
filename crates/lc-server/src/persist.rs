@@ -52,6 +52,7 @@ pub struct Saved {
     /// planned from, which solves to the same plan on load. The balance in it measures the form it
     /// loads as, and the shard then stamps its own over it.
     pub fitting: Option<lc_proto::Fitting>,
+    pub field: Option<lc_proto::Field>,
     /// What its telescope is committed to and how far it has reported to whom, so a sweep
     /// resumes where it was rather than starting again. What it *knows* is written beside the
     /// craft, in [`crate::archive`].
@@ -87,7 +88,7 @@ pub struct SavedInstruments {
 /// 10 is a ship kept as its form. Every older row held a loadout, which no ship is any more, so
 /// none is read: there are no players, and a row refused names its format rather than coming
 /// back as some other ship.
-pub const SAVE_FORMAT: i32 = 10;
+pub const SAVE_FORMAT: i32 = 11;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -129,6 +130,7 @@ pub fn save(
         motion: (&craft.motion.snapshot()).into(),
         pursuit,
         fitting: craft.fitting().map(Into::into),
+        field: craft.fitting().map(Into::into),
         instruments,
         radio,
     };
@@ -162,7 +164,7 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     // a leak either way, because nothing after the save is involved. From here on the craft
     // records its stretches like any other, and `catch_up` fills the gap to now with real ones.
     craft.motion = snapshot.restore(system, row.saved_t as f64 * 1.0e-6);
-    craft.fit(saved.fitting.as_ref().map(Fitting::from));
+    craft.fit(saved.fitting.as_ref().map(|fitting| Fitting::from_wire(fitting, saved.field.as_ref())));
     Ok(craft)
 }
 
@@ -446,7 +448,7 @@ mod tests {
         let mut row = save(&a_craft(), None, None, None, Radio::default(), 0);
         row.format = SAVE_FORMAT - 1;
         let why = load(&row, None).expect_err("it should refuse");
-        assert!(why.contains("format 9"), "{why}");
+        assert!(why.contains("format 10"), "{why}");
     }
 
     /// A pursuit is written down with the craft, so a ship hanging about with another is still
@@ -505,6 +507,18 @@ mod tests {
         assert!(!resumed.is_refitting(end_s));
         assert_eq!(resumed.fitting().unwrap().form(), &target);
         assert_eq!(resumed.fitting(), ran.fitting());
+    }
+
+    #[test]
+    fn a_ships_heat_survives_the_round_trip() {
+        use lc_world::fitting::{Account, Balance};
+        let b = Balance::DEFAULT;
+        let full = Fitting::full(lc_world::form::Form::starting(), b, 0.0);
+        let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        craft.fit(Some(Fitting::from_account(&Account { heat_j: 3.0 * b.module_energy_j(), ..full.account() }, b)));
+        let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), 0), None).expect("it reads");
+        assert_eq!(back.fitting().unwrap().heat_j_at(0.0), 3.0 * b.module_energy_j());
+        assert_eq!(back.fitting(), craft.fitting());
     }
 
     /// A row that cannot be read is an error and never a fresh ship at the origin.

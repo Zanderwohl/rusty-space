@@ -31,6 +31,7 @@ pub mod placed;
 pub mod primary;
 pub mod prior;
 pub mod sort;
+mod settle;
 mod state;
 pub mod record;
 pub mod report;
@@ -847,6 +848,7 @@ mod tests {
             orientation: Orientation::Unknown,
             epoch_s: None,
             pivot_s: None,
+            phase_period_rho: 0.0,
             method: Method::Transit,
             stated_s,
             lineage: Lineage::new(),

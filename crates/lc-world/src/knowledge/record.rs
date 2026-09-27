@@ -407,13 +407,17 @@ pub struct Orbit {
     /// A time the body was at a known place on the orbit, and one sigma: a transit's mid-time,
     /// or a fit's periapsis passage. With a full orientation this is what places the body now.
     ///
-    /// A fit's sigma is taken with the periapsis and the period held: the phase, as a time.
+    /// A fit's sigma is the phase's at [`Self::pivot_s`], as a time: the mean longitude's, so
+    /// the periapsis's error is in it once.
     pub epoch_s: Option<(f64, f64)>,
-    /// When the phase is best known, coordinate seconds: where the period's drift grows from,
-    /// and where the epoch's sigma holds. A fit's is the weighted centre of its looks, where
-    /// the phase's error and the period's are independent; a periapsis passage can be half a
-    /// period away. `None` reads as the epoch.
+    /// Coordinate seconds at which the epoch's sigma holds: where the period's drift grows from.
+    /// A fit's is the weighted center of its looks; a periapsis passage can be half a period
+    /// away. `None` reads as the epoch.
     pub pivot_s: Option<f64>,
+    /// Correlation of the phase at the pivot with the period, -1 to 1: positive when a longer
+    /// period goes with a body further round at the pivot. With it the phase's error can be
+    /// carried to any time, `knowledge::placed` says how; zero for anything not fitted.
+    pub phase_period_rho: f64,
     pub method: Method,
     /// Coordinate seconds the witness stated it.
     pub stated_s: f64,
@@ -450,6 +454,7 @@ impl Orbit {
             orientation,
             epoch_s,
             pivot_s: None,
+            phase_period_rho: 0.0,
             method,
             stated_s,
             lineage: Lineage::new(),
