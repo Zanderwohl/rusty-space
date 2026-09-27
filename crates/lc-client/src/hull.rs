@@ -62,8 +62,7 @@ const GRAY: Vec4 = Vec4::new(0.30, 0.31, 0.33, 1.0);
 /// enough that its dark half is most of its silhouette and a hard terminator eats the shape.
 const NIGHT: f32 = 0.10;
 
-/// The same for a real hull, whose own lights give its night side a shape: low enough that a lit
-/// window is the brightest thing there, even by Venus.
+/// A real hull's, low enough that a lit window outshines its night side even by Venus.
 pub(crate) const HULL_NIGHT: f32 = 0.003;
 
 /// Where the player is looking from, and how far back that is.
@@ -350,8 +349,7 @@ fn hull_radiance() -> PerBand<f32> {
     *RADIANCE
 }
 
-/// Luminance of a white surface square to the Sun at 1 AU, cd/m²: 1361 W/m² at 93 lm/W, over π.
-/// What a lamp's luminance is stated against.
+/// Luminance of white square to the Sun at 1 AU, cd/m²: 1361 W/m² at 93 lm/W, over π.
 const WHITE_AT_AU_CD_M2: f64 = 40_000.0;
 const SUN_TEFF_K: f64 = 5772.0;
 
@@ -527,9 +525,8 @@ pub fn update_hulls(
 /// the optical and its own heat in the infrared, and which one dominates is a question about
 /// the band mapping rather than about the ship.
 ///
-/// Starlight by the share of the disc the eye sees lit, from `to_eye`, so a camera on the night
-/// side opens up, and a lit window on top, so what it opens up for is the lights. Zero `to_eye`
-/// meters the disc as full.
+/// Starlight by the share of the disc lit as seen from `to_eye` (zero: all of it), plus a lit
+/// window, so a camera on the night side exposes for the lights.
 ///
 /// `star` is [`lighting`]'s answer, passed in rather than asked for: between the stars that is
 /// a search over the whole catalog, and a caller metering a scene wants every hull in it lit
@@ -546,14 +543,12 @@ pub fn radiance_at(star: Option<(DVec3, f64, f64)>, at_ly: DVec3, to_eye: DVec3)
     own.map(|band, x| x + lit[band] * seen + window[band])
 }
 
-/// What a night side is metered for: a lit window.
 fn metered_lamp() -> PerBand<f32> {
     let (cd_m2, k) = crate::ship_hull::lamp_of("living").expect("a living region has lights");
     lamp_radiance(cd_m2, k)
 }
 
-/// How much of a round hull's disc is lit, seen from `to_eye` with the star along `to_star`,
-/// floored at the night fill.
+/// A sphere's lit share of its disc, floored at the night fill.
 fn lit_share(to_star: DVec3, to_eye: DVec3) -> f32 {
     if to_eye == DVec3::ZERO {
         return 1.0;
@@ -579,8 +574,7 @@ pub fn solid_angle_sr(length_m: f64, distance_m: f64) -> f32 {
 mod tests {
     use super::*;
 
-    /// A camera on a hull's night side meters it dark, so the exposure opens for its lights; on
-    /// its day side the lights are nothing beside the starlight.
+    /// A night side is metered for its lights, a day side for its starlight.
     #[test]
     fn a_night_side_is_metered_for_its_lights() {
         let v = |r: PerBand<f32>| r[em_spectra::Band::V];

@@ -39,8 +39,7 @@ use crate::truss::{self, GIRDER_RADIUS_M, PITCH_M, TrussBuffers};
 /// Girders are painted safety yellow and lit by their own work lights, so a frontier too far off
 /// to show a girder still reads as construction by its color.
 const GIRDER_ALBEDO: Vec3 = Vec3::new(0.8, 0.52, 0.1);
-/// The work lights on the girders, lux: a floodlit yard's. Only their luminance is used, since
-/// the girders' albedo carries their color.
+/// The girders' work lights, lux. Only their luminance is used; the albedo carries the color.
 const WORK_LUX: f64 = 2000.0;
 const WORK_K: f64 = 4000.0;
 /// Plating before it is fitted out.
@@ -134,7 +133,6 @@ fn hand_back(ending: Option<u64>, current: Option<u64>, waited_s: f32, meshes_up
     }
 }
 
-/// A craft's round this frame.
 pub(crate) struct Building {
     pub craft: Option<ShipId>,
     pub frame: Frame,
@@ -142,9 +140,7 @@ pub(crate) struct Building {
     pub at_ly: DVec3,
 }
 
-/// Every craft with a round to draw: the player's from its [`Refit`] on the round's clock, and
-/// each contact's as its light left it. Contacts are solved with the player's `balance`, as
-/// [`crate::ship_hull`] solves their forms.
+/// Contacts are solved with the player's `balance`, as [`crate::ship_hull`] solves their forms.
 pub(crate) fn buildings(
     session: &Session,
     refit: Option<&Refit>,
@@ -172,7 +168,6 @@ fn uniforms(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3) ->
     }
 }
 
-/// Draw every craft's refit over its real hull.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_refit(
     mut commands: Commands,

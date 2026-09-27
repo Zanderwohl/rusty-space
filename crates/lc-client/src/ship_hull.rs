@@ -47,10 +47,8 @@ const TILE_TEXELS: u32 = 512;
 /// Rolls kept for forms no craft is drawn in any more.
 const ROLLS_KEPT: usize = 64;
 
-/// A fully lit texel of each kind's lights: luminance, cd/m², and color temperature, kelvin. A
-/// lit window is some 300 cd/m² against 40 000 for white in full sun at 1 AU, so it is lost on a
-/// sunlit face near a star and is the brightest thing on a night side. The engine's grid is a
-/// stand-in until R13 lights it at the exhaust's power.
+/// A fully lit texel of each kind's lights: luminance, cd/m², and color temperature, kelvin. A lit
+/// window is 300 against 40 000 for white in full sun at 1 AU. The engine's is a stand-in until R13.
 pub(crate) fn lamp_of(kind: &str) -> Option<(f64, f64)> {
     match kind {
         "drone" => Some((300.0, 5000.0)),
@@ -599,9 +597,7 @@ mod tests {
         assert_eq!(shown(true, true, true), s(false, false, true), "a refit's meshes stand in for it");
     }
 
-    /// Lights are fixed powers: the exposure does not move them, a lit window is its share of white
-    /// in full sun at 1 AU, and starlight falls off under them, so by 10 AU it is a hundred times
-    /// less a match for them.
+    /// The lights do not follow the exposure, and gain on starlight as distance squared.
     #[test]
     fn lights_are_real_powers() {
         let mut session = session();
