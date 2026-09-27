@@ -401,7 +401,7 @@ graph LR
 
 ### H3 · Heat in the account
 
-- status: todo
+- status: active card "H3 · Heat in the account"
 - needs: H2, F10, S1
 - touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/solar.rs`, `crates/lc-server/src/fitting.rs`
 - read: 30 §The inputs, 31 §The star's gain
@@ -623,7 +623,7 @@ graph LR
 
 ### R15 · Construction on the real hull in the game
 
-- status: todo
+- status: active card "R15 · Construction on the real hull in the game"
 - needs: R8, R10, R14
 - touches: `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/hull.rs`
 - read: 32 §A build step is a frontier, §Materials by kind
