@@ -414,7 +414,6 @@ fn leave_scene(
             With<crate::hull::Hull>,
             With<crate::ship_hull::ShipHull>,
             With<crate::parts::FormRoot>,
-            With<crate::refit_hull::Generation>,
             With<crate::plume::Plume>,
         )>,
     >,

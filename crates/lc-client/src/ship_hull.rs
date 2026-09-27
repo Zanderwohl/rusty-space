@@ -6,9 +6,8 @@
 //! player's by [`crate::parts`], anyone else's here. After that a new form or band keeps the old
 //! mesh up until the new one lands.
 //!
-//! A refit is drawn over this by [`crate::refit_hull`], which stands the player's hull aside
-//! while a step's meshes are shown and hands the ship back once this hull is the form the round
-//! left.
+//! A refit is drawn over this by [`crate::refit_hull`], which stands a craft's hull aside while a
+//! step's meshes are shown and hands the craft back once this hull is the form the round left.
 //!
 //! Meshes are shared by form, resolution and finish, so a sky of one design costs one mesh per
 //! band. A vertex is 48 bytes and its share of the indices 24 more, held once in the main world
@@ -48,16 +47,18 @@ const TILE_TEXELS: u32 = 512;
 /// Rolls kept for forms no craft is drawn in any more.
 const ROLLS_KEPT: usize = 64;
 
-/// Lights by kind, as shares of the exposure's reference. A stand-in until R15 gives them real
-/// powers: bright enough to read on a night side, lost on a lit one.
-fn lights(kind: &str) -> Vec3 {
+/// A fully lit texel of each kind's lights: luminance, cd/m², and color temperature, kelvin. A
+/// lit window is some 300 cd/m² against 40 000 for white in full sun at 1 AU, so it is lost on a
+/// sunlit face near a star and is the brightest thing on a night side. The engine's grid is a
+/// stand-in until R13 lights it at the exhaust's power.
+fn lamp(kind: &str) -> Option<(f64, f64)> {
     match kind {
-        "drone" => 0.02 * Vec3::new(0.85, 0.92, 1.0),
-        "living" => 0.03 * Vec3::new(1.0, 0.8, 0.55),
-        "engine" => 0.08 * Vec3::new(0.75, 0.85, 1.0),
-        "mind" => 0.006 * Vec3::new(0.6, 0.9, 1.0),
-        "bay" => 0.02 * Vec3::new(1.0, 0.92, 0.8),
-        _ => Vec3::ZERO,
+        "drone" => Some((300.0, 5000.0)),
+        "living" => Some((300.0, 3000.0)),
+        "engine" => Some((2400.0, 9000.0)),
+        "mind" => Some((90.0, 9000.0)),
+        "bay" => Some((300.0, 4000.0)),
+        _ => None,
     }
 }
 
@@ -89,6 +90,13 @@ impl Palette {
     /// The albedo and lights tile arrays, once baked.
     pub fn ready(&self) -> Option<(Handle<Image>, Handle<Image>)> {
         self.ready.clone()
+    }
+}
+
+#[cfg(test)]
+impl Palette {
+    pub(crate) fn baked() -> Self {
+        Palette { requested: true, ready: Some((Handle::default(), Handle::default())), ..default() }
     }
 }
 
@@ -145,10 +153,11 @@ fn take_texels(mut palette: ResMut<Palette>, mut images: ResMut<Assets<Image>>) 
 /// A finished hull at `at_ly`, lit by `star`.
 pub(crate) fn finished(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3) -> HullUniform {
     let base = lit(session, star, at_ly, Vec4::ONE);
-    let reference = base.exposure.x;
     let mut emitted = [Vec4::ZERO; REGIONS];
     for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS) {
-        *slot = (reference * lights(kind)).extend(0.0);
+        if let Some((cd_m2, k)) = lamp(kind) {
+            *slot = crate::hull::lamp(session, cd_m2, k).extend(0.0);
+        }
     }
     HullUniform {
         to_star: base.to_star,
@@ -202,13 +211,14 @@ impl Rolls {
     }
 }
 
-/// Which craft's real hulls have a mesh up, and the form the player's is current in. Read by
+/// Which craft's real hulls have a mesh up, and the forms each is stated in and drawn in. Read by
 /// [`crate::parts`], which draws placeholders only for a craft missing here, and by
-/// [`crate::refit_hull`] to hand the ship back after a round.
+/// [`crate::refit_hull`] to hand a craft back after a round.
 #[derive(Resource, Default)]
 pub struct RealHulls {
     drawn: HashSet<Option<ShipId>>,
-    own_current: Option<u64>,
+    stated: HashMap<Option<ShipId>, u64>,
+    current: HashMap<Option<ShipId>, u64>,
 }
 
 impl RealHulls {
@@ -216,9 +226,14 @@ impl RealHulls {
         self.drawn.contains(&craft)
     }
 
-    /// The [`form_hash`] the player's hull is drawn in, once its mesh is the one wanted.
-    pub fn own_current(&self) -> Option<u64> {
-        self.own_current
+    /// The [`form_hash`] of the form `craft` is stated in.
+    pub fn stated(&self, craft: Option<ShipId>) -> Option<u64> {
+        self.stated.get(&craft).copied()
+    }
+
+    /// The [`form_hash`] `craft`'s hull is drawn in, once its mesh is the one wanted.
+    pub fn current(&self, craft: Option<ShipId>) -> Option<u64> {
+        self.current.get(&craft).copied()
     }
 }
 
@@ -236,6 +251,12 @@ pub struct ShipHull {
     rotation: Quat,
     mesh: Entity,
     placeholders: Option<(u64, Entity)>,
+}
+
+impl ShipHull {
+    pub fn craft(&self) -> Option<ShipId> {
+        self.craft
+    }
 }
 
 #[cfg(test)]
@@ -290,14 +311,12 @@ struct Shown {
 }
 
 /// `own` for the player's ship, `has_mesh` once any mesh of it has landed, `aside` while a
-/// refit's meshes stand in for it. The player's placeholders are [`crate::parts`]'s, which draw a
-/// refit's as well.
+/// refit's meshes stand in for it. The player's placeholders are [`crate::parts`]'s.
 fn shown(own: bool, has_mesh: bool, aside: bool) -> Shown {
-    Shown { mesh: has_mesh && !(own && aside), placeholders: !own && !has_mesh, drawn: has_mesh }
+    Shown { mesh: has_mesh && !aside, placeholders: !own && !has_mesh && !aside, drawn: has_mesh }
 }
 
-/// Draw every craft with a form as its real hull, and the player's own while no refit stands it
-/// aside.
+/// Draw every craft with a form as its real hull, while no refit stands it aside.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_hulls(
     mut commands: Commands,
@@ -318,7 +337,8 @@ pub fn draw_hulls(
     children: Query<&Children>,
 ) {
     real.drawn.clear();
-    real.own_current = None;
+    real.stated.clear();
+    real.current.clear();
     // Only the mesh waits for the palette: until it is baked a craft is drawn as placeholders.
     let palette = palette.ready();
     let session = &game.0;
@@ -385,13 +405,14 @@ pub fn draw_hulls(
         {
             asset.uniforms = uniforms;
         }
-        let shows = shown(want.craft.is_none(), has_mesh, showing.0);
+        let shows = shown(want.craft.is_none(), has_mesh, showing.drawing(want.craft));
         *visibility = if shows.mesh { Visibility::Inherited } else { Visibility::Hidden };
         if shows.drawn {
             real.drawn.insert(want.craft);
         }
-        if want.craft.is_none() && current {
-            real.own_current = hull.form.map(|(hash, _)| hash);
+        real.stated.insert(want.craft, want.form.hash);
+        if current && let Some((hash, _)) = hull.form {
+            real.current.insert(want.craft, hash);
         }
         // A mesh that failed is settled too: its placeholders stay.
         unready.0 |= !has_mesh && !state.is_some_and(HullMeshState::current);
@@ -558,17 +579,43 @@ mod tests {
         Session::new(&lc_world::sky::AuthoredStars::sample(), 3)
     }
 
-    /// A craft's mesh is shown once any of it has landed, and its placeholders until then; the
-    /// player's stand aside for a refit's meshes, and its placeholders are never drawn here.
+    /// A craft's mesh is shown once any of it has landed, and its placeholders until then; both
+    /// stand aside for a refit's meshes, and the player's placeholders are never drawn here.
     #[test]
     fn a_hull_shows_its_mesh_once_one_lands() {
         let s = |mesh, placeholders, drawn| Shown { mesh, placeholders, drawn };
         assert_eq!(shown(false, false, false), s(false, true, false), "another craft before its mesh");
         assert_eq!(shown(false, true, false), s(true, false, true));
-        assert_eq!(shown(false, true, true), s(true, false, true), "only the player's is stood aside");
+        assert_eq!(shown(false, true, true), s(false, false, true), "another craft's refit stands its mesh aside");
+        assert_eq!(shown(false, false, true), s(false, false, false), "and its placeholders");
         assert_eq!(shown(true, false, false), s(false, false, false), "the player's placeholders are parts'");
         assert_eq!(shown(true, true, false), s(true, false, true));
         assert_eq!(shown(true, true, true), s(false, false, true), "a refit's meshes stand in for it");
+    }
+
+    /// Lights are fixed powers: the exposure does not move them, a lit window is its share of white
+    /// in full sun at 1 AU, and starlight falls off under them, so by 10 AU it is a hundred times
+    /// less a match for them.
+    #[test]
+    fn lights_are_real_powers() {
+        let mut session = session();
+        let living = REGION_GRAPHS.iter().position(|k| *k == "living").unwrap();
+        let au_ly = lc_world::navigation::AU / crate::system::M_PER_LY;
+        let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
+        let at = |session: &Session, au: f64| finished(session, star, DVec3::X * au * au_ly);
+        let luma = |v: Vec4| v.truncate().dot(crate::tonemap::LUMA);
+
+        let near = at(&session, 1.0);
+        session.tone = session.tone.exposed(6.0);
+        let opened = at(&session, 1.0);
+        assert_eq!(near.emitted[living], opened.emitted[living], "the lights followed the exposure");
+        assert!(near.exposure != opened.exposure);
+
+        let share = luma(near.emitted[living]) / luma(near.reflected);
+        assert!((0.0075 / 1.5..0.0075 * 1.5).contains(&share), "{share} of white in full sun");
+        let far = at(&session, 10.0);
+        let gained = (luma(far.emitted[living]) / luma(far.reflected)) / share;
+        assert!((gained - 100.0).abs() < 1.0, "{gained}");
     }
 
     /// A form the shard states is the form a round's plan holds, so the hand-back after a round

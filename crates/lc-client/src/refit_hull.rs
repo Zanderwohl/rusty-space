@@ -1,15 +1,18 @@
 //! A refit drawn over the real hull (R10) with the truss (R8): the construction overlay.
 //!
-//! Plating is a mask on R3's material, so while the player's ship has a [`Refit`], `--demo
-//! refit`'s or a round in the game, the whole ship is meshed here as the step leaves it, and
-//! [`crate::ship_hull`] stands the player's hull aside once the first step's meshes are shown.
+//! Plating is a mask on R3's material, so while a craft has a round the whole craft is meshed here
+//! as the step leaves it, and [`crate::ship_hull`] stands its hull aside once the first step's
+//! meshes are shown. The player's round is its [`Refit`], `--demo refit`'s or the one in
+//! `Fitted`; another craft's is the step its light shows, from [`crate::construction::sighted`].
 //! When the round is over the last step's meshes stay up until that hull is the form the round
-//! left, so the ship never flashes back to an earlier shape or to placeholders.
+//! left, so the craft never flashes back to an earlier shape or to placeholders.
 //!
-//! A step is meshed once, as it starts: the ship it leaves alone, each copy it works on at the
+//! A step is meshed once, as it starts: the craft it leaves alone, each copy it works on at the
 //! larger of its two sizes, and each copy's truss. Within the step only uniforms move, each read
 //! from [`Working::sweep`], so a paused clock draws the same frame twice. A step's meshes are shown
-//! when all of them have landed, and the last step's stay up until then.
+//! when all of them have landed, and the last step's stay up until then. They hang under the
+//! craft's [`ShipHull`] root, which places them and takes them down with it.
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -18,6 +21,7 @@ use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use em_render::hull_material::{ALL_PLATED, HullMaterial, HullUniform};
 use glam::DVec3;
+use lc_proto::ShipId;
 use lc_world::fitting::Balance;
 use lc_world::form::place::{Pose, Side};
 use lc_world::form::sdf::{Piece, Sdf};
@@ -25,16 +29,19 @@ use lc_world::form::{Form, PartId};
 
 use crate::construction::{Frame, Refit, Sweep};
 use lc_world::refit::rounds::Phase;
-use crate::hull::{Eye, lighting};
+use crate::hull::lighting;
 use crate::hull_mesh::{Finish, HullForm, HullMeshState, HullSource, Union, form_hash};
-use crate::ship_hull::{Palette, RealHulls};
+use crate::session::Session;
+use crate::ship_hull::{Palette, RealHulls, ShipHull};
 use crate::surface_nets::Field;
 use crate::truss::{self, GIRDER_RADIUS_M, PITCH_M, TrussBuffers};
 
 /// Girders are painted safety yellow and lit by their own work lights, so a frontier too far off
 /// to show a girder still reads as construction by its color.
 const GIRDER_ALBEDO: Vec3 = Vec3::new(0.8, 0.52, 0.1);
-const WORK_LIGHTS: f32 = 1.0;
+/// The work lights on the girders, lux at the color temperature in kelvin: a floodlit yard's.
+const WORK_LUX: f64 = 2000.0;
+const WORK_K: f64 = 4000.0;
 /// Plating before it is fitted out.
 const BARE: f32 = 0.45;
 /// How long a round's last meshes wait for the real hull to be the form the round left, seconds of
@@ -49,9 +56,10 @@ impl Plugin for RefitHullPlugin {
     }
 }
 
-/// One step's meshes, under one root in the ship's frame.
+/// One step's meshes of one craft, under one root in its frame.
 #[derive(Component)]
 pub struct Generation {
+    craft: Option<ShipId>,
     key: (usize, Option<usize>),
     shown: bool,
     copies: Vec<Sliver>,
@@ -81,12 +89,18 @@ pub enum Drawn {
 #[derive(Resource, Default)]
 pub struct Unready(pub bool);
 
-/// Whether a step's meshes are drawing the refit, which the player's real hull and
+/// The craft whose refit meshes are drawn, which their real hulls and, for the player's,
 /// [`crate::parts`] stand aside for.
 #[derive(Resource, Default)]
-pub struct Showing(pub bool);
+pub struct Showing(HashSet<Option<ShipId>>);
 
-/// The form a round leaves the ship in, and since when it has been waiting for the real hull.
+impl Showing {
+    pub fn drawing(&self, craft: Option<ShipId>) -> bool {
+        self.0.contains(&craft)
+    }
+}
+
+/// The form a round leaves a craft in, and since when it has been waiting for the real hull.
 #[derive(Default)]
 pub struct Ending {
     form: Option<u64>,
@@ -105,12 +119,12 @@ enum HandBack {
     GaveUp,
 }
 
-/// `ending` is the [`form_hash`] the round left, `own_current` the one the real hull is current
-/// in, and `waited_s` how long since the round was over.
-fn hand_back(ending: Option<u64>, own_current: Option<u64>, waited_s: f32, meshes_up: bool) -> HandBack {
+/// `ending` is the [`form_hash`] the round left, `current` the one the real hull is current in,
+/// and `waited_s` how long since the round was over.
+fn hand_back(ending: Option<u64>, current: Option<u64>, waited_s: f32, meshes_up: bool) -> HandBack {
     if !meshes_up {
         HandBack::Nothing
-    } else if ending.is_none_or(|form| own_current == Some(form)) {
+    } else if ending.is_none_or(|form| current == Some(form)) {
         HandBack::Handed
     } else if waited_s > HAND_BACK_S {
         HandBack::GaveUp
@@ -119,132 +133,196 @@ fn hand_back(ending: Option<u64>, own_current: Option<u64>, waited_s: f32, meshe
     }
 }
 
-/// Draw the player's refit over its real hull.
+/// A craft's round this frame.
+pub(crate) struct Building {
+    pub craft: Option<ShipId>,
+    pub frame: Frame,
+    pub balance: Balance,
+    pub at_ly: DVec3,
+}
+
+/// Every craft with a round to draw: the player's from its [`Refit`] on the round's clock, and
+/// each contact's as its light left it. Contacts are solved with the player's `balance`, as
+/// [`crate::ship_hull`] solves their forms.
+pub(crate) fn buildings(
+    session: &Session,
+    refit: Option<&Refit>,
+    contacts: &[crate::uplink::Contact],
+    balance: &Balance,
+) -> Vec<Building> {
+    let own = refit.map(|r| Building {
+        craft: None,
+        frame: r.frame(session.coordinate_time_s()),
+        balance: r.balance,
+        at_ly: session.ship.motion.position_ly,
+    });
+    let others = contacts.iter().filter(|c| !c.form.parts.is_empty()).filter_map(|c| {
+        Some(Building { craft: Some(c.ship_id), frame: crate::construction::sighted(c, balance)?, balance: *balance, at_ly: c.position_ly })
+    });
+    own.into_iter().chain(others).collect()
+}
+
+/// A finished hull at `at_ly` with the girders' work lights.
+fn uniforms(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3) -> HullUniform {
+    let work = crate::hull::lamp(session, WORK_LUX / std::f64::consts::PI, WORK_K);
+    HullUniform {
+        girder: GIRDER_ALBEDO.extend(work.dot(crate::tonemap::LUMA)),
+        ..crate::ship_hull::finished(session, star, at_ly)
+    }
+}
+
+/// Draw every craft's refit over its real hull.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_refit(
     mut commands: Commands,
-    game: Res<crate::app::Game>,
-    ui: Res<crate::app::Ui>,
-    eye: Res<Eye>,
-    own: Res<crate::parts::OwnForm>,
-    refit: Option<Res<Refit>>,
+    (game, uplink, own, refit): (Res<crate::app::Game>, Res<crate::uplink::Uplink>, Res<crate::parts::OwnForm>, Option<Res<Refit>>),
     (palette, real, time): (Res<Palette>, Res<RealHulls>, Res<Time<Real>>),
-    mut ending: Local<Ending>,
+    mut endings: Local<HashMap<Option<ShipId>, Ending>>,
     mut unready: ResMut<Unready>,
     mut showing: ResMut<Showing>,
     mut materials: ResMut<Assets<HullMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut generations: Query<(Entity, &mut Generation, &mut Transform, &mut Visibility)>,
+    hulls: Query<(Entity, &ShipHull)>,
+    mut generations: Query<(Entity, &mut Generation, &mut Visibility)>,
     mut drawn: Query<(&Drawn, &ChildOf, Option<&HullMeshState>, &mut Transform), Without<Generation>>,
 ) {
     let session = &game.0;
-    let placed = crate::parts::ship_frame(session, &eye, &ui);
     let star = lighting(session);
-    let reference = crate::ship_hull::finished(session, star, session.ship.motion.position_ly);
-    let finished = HullUniform {
-        girder: GIRDER_ALBEDO.extend(WORK_LIGHTS * reference.exposure.x / GIRDER_ALBEDO.length()),
-        ..reference
-    };
-    let Some(refit) = refit.filter(|_| own.is_formed()) else {
-        unready.0 = false;
-        if ending.form.is_some() {
-            ending.waited_s += time.delta_secs();
-        }
-        let decided = hand_back(ending.form, real.own_current(), ending.waited_s, !generations.is_empty());
+    let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
+    let refit_changed = refit.as_ref().is_some_and(|r| r.is_changed());
+    let refit = refit.as_deref().filter(|_| own.is_formed());
+    let now = buildings(session, refit, &uplink.contacts, &balance);
+    unready.0 = false;
+    showing.0.clear();
+
+    // Crafts whose round is over, until their real hull is the form it left.
+    let idle: HashSet<Option<ShipId>> =
+        generations.iter().map(|(_, g, _)| g.craft).filter(|c| now.iter().all(|b| b.craft != *c)).collect();
+    endings.retain(|craft, _| idle.contains(craft) || now.iter().any(|b| b.craft == *craft));
+    for craft in idle {
+        let ending = endings.entry(craft).or_default();
+        ending.waited_s += time.delta_secs();
+        // Another craft's round has left it in the form it is stated in.
+        let left = if craft.is_none() { ending.form } else { real.stated(craft) };
+        let decided = hand_back(left, real.current(craft), ending.waited_s, true);
         if decided != HandBack::Keep {
             match decided {
-                HandBack::Handed => info!("refit_hull: handed back to the real hull after {:.2} s", ending.waited_s),
-                HandBack::GaveUp => warn!("refit_hull: the real hull never became the form the round left"),
+                HandBack::Handed => info!("refit_hull: {craft:?} handed back to the real hull after {:.2} s", ending.waited_s),
+                HandBack::GaveUp => warn!("refit_hull: {craft:?}'s real hull never became the form the round left"),
                 HandBack::Nothing | HandBack::Keep => {}
             }
-            for (root, ..) in &generations {
-                commands.entity(root).despawn();
+            for (root, generation, _) in &generations {
+                if generation.craft == craft {
+                    commands.entity(root).despawn();
+                }
             }
-            *ending = Ending::default();
-            showing.0 = false;
-            return;
+            endings.remove(&craft);
+            continue;
         }
-        // As the round left the ship, until the real hull is that form.
-        for (_, generation, mut transform, _) in &mut generations {
-            *transform = placed;
+        let at_ly = uplink.contacts.iter().find(|c| Some(c.ship_id) == craft).map_or(session.ship.motion.position_ly, |c| c.position_ly);
+        let finished = uniforms(session, star, at_ly);
+        for (_, generation, _) in generations.iter().filter(|(_, g, _)| g.craft == craft) {
             for state in &generation.copies {
                 if let Some(mut asset) = materials.get_mut(&state.material) {
                     asset.uniforms = building(&finished, state.end, state.meshed != Some(true));
                 }
             }
+            if generation.shown {
+                showing.0.insert(craft);
+            }
         }
-        showing.0 = generations.iter().any(|(_, g, ..)| g.shown);
-        return;
-    };
-    if refit.is_changed() || ending.form.is_none() {
-        let left = refit.canceled.as_ref().map_or(refit.plan.target(), |(_, left)| left);
-        *ending = Ending { form: Some(form_hash(left, &refit.balance)), waited_s: 0.0 };
-    }
-    unready.0 = true;
-    let Some((albedo, light_tiles)) = palette.ready() else { return };
-    let frame = refit.frame(session.coordinate_time_s());
-    let key = (frame.finished, frame.working.as_ref().map(|w| w.step));
-
-    if !generations.iter().any(|(_, g, ..)| g.key == key) {
-        let root = spawn(&mut commands, &frame, &refit.balance, key, &finished, &albedo, &light_tiles, &mut materials);
-        commands.entity(root).insert(placed);
     }
 
-    for (root, mut generation, mut transform, mut visibility) in &mut generations {
-        *transform = placed;
-        let current = generation.key == key;
-        let working = frame.working.as_ref().filter(|_| current);
-        for (copy, state) in generation.copies.iter_mut().enumerate() {
-            if let Some(task) = state.truss.as_mut()
-                && let Some(done) = check_ready(task)
-            {
-                state.truss = None;
-                state.meshed = Some(done.is_some());
-                if let Some(buffers) = done {
-                    info!("refit_hull: copy {copy}'s truss is {} girders", buffers.count);
-                    commands.spawn((
-                        Mesh3d(meshes.add(buffers.into_mesh())),
-                        MeshMaterial3d(state.material.clone()),
-                        Transform::IDENTITY,
-                        NoFrustumCulling,
-                        RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
-                        Drawn::Working,
-                        ChildOf(root),
-                    ));
+    for b in &now {
+        let ending = endings.entry(b.craft).or_default();
+        ending.waited_s = 0.0;
+        if b.craft.is_none()
+            && let Some(refit) = refit
+            && (refit_changed || ending.form.is_none())
+        {
+            let left = refit.canceled.as_ref().map_or(refit.plan.target(), |(_, left)| left);
+            ending.form = Some(form_hash(left, &refit.balance));
+        }
+        let (Some((albedo, light_tiles)), Some((hull, _))) = (palette.ready(), hulls.iter().find(|(_, h)| h.craft() == b.craft)) else {
+            unready.0 = true;
+            continue;
+        };
+        let finished = uniforms(session, star, b.at_ly);
+        let key = (b.frame.finished, b.frame.working.as_ref().map(|w| w.step));
+        let ours = |g: &Generation| g.craft == b.craft;
+
+        if !generations.iter().any(|(_, g, _)| ours(g) && g.key == key) {
+            let root = spawn(&mut commands, b, key, &finished, &albedo, &light_tiles, &mut materials);
+            commands.entity(root).insert(ChildOf(hull));
+        }
+
+        let mut current_shown = false;
+        for (root, mut generation, mut visibility) in &mut generations {
+            if !ours(&generation) {
+                continue;
+            }
+            let current = generation.key == key;
+            let working = b.frame.working.as_ref().filter(|_| current);
+            for (copy, state) in generation.copies.iter_mut().enumerate() {
+                if let Some(task) = state.truss.as_mut()
+                    && let Some(done) = check_ready(task)
+                {
+                    state.truss = None;
+                    state.meshed = Some(done.is_some());
+                    if let Some(buffers) = done {
+                        info!("refit_hull: {:?}'s copy {copy}'s truss is {} girders", b.craft, buffers.count);
+                        commands.spawn((
+                            Mesh3d(meshes.add(buffers.into_mesh())),
+                            MeshMaterial3d(state.material.clone()),
+                            Transform::IDENTITY,
+                            NoFrustumCulling,
+                            RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+                            Drawn::Working,
+                            ChildOf(root),
+                        ));
+                    }
+                }
+                let Some(mut asset) = materials.get_mut(&state.material) else { continue };
+                let sweep = if current { working.and_then(|w| w.sweep(copy)) } else { state.end };
+                let next = building(&finished, sweep, state.meshed != Some(true));
+                if asset.uniforms != next {
+                    asset.uniforms = next;
                 }
             }
-            let Some(mut asset) = materials.get_mut(&state.material) else { continue };
-            let sweep = if current { working.and_then(|w| w.sweep(copy)) } else { state.end };
-            let next = building(&finished, sweep, state.meshed != Some(true));
-            if asset.uniforms != next {
-                asset.uniforms = next;
+            if !current {
+                continue;
             }
+            let meshed = drawn
+                .iter()
+                .filter(|(_, parent, ..)| parent.parent() == root)
+                .all(|(_, _, state, _)| state.is_none_or(HullMeshState::current));
+            let trussed = generation.copies.iter().all(|c| c.meshed.is_some());
+            if !generation.shown && meshed && trussed {
+                generation.shown = true;
+                *visibility = Visibility::Inherited;
+            }
+            current_shown = generation.shown;
         }
-        if generation.key != key {
-            continue;
+        unready.0 |= !current_shown;
+        if generations.iter().any(|(_, g, _)| ours(g) && g.shown) {
+            showing.0.insert(b.craft);
         }
-        let meshed = drawn
-            .iter()
-            .filter(|(_, parent, ..)| parent.parent() == root)
-            .all(|(_, _, state, _)| state.is_none_or(HullMeshState::current));
-        let trussed = generation.copies.iter().all(|c| c.meshed.is_some());
-        if !generation.shown && meshed && trussed {
-            generation.shown = true;
-            *visibility = Visibility::Inherited;
-        }
-        unready.0 = !generation.shown;
-    }
-    showing.0 = generations.iter().any(|(_, g, ..)| g.shown);
-    if generations.iter().any(|(_, g, ..)| g.key == key && g.shown) {
-        for (root, generation, ..) in &generations {
-            if generation.key != key {
-                commands.entity(root).despawn();
+        if current_shown {
+            for (root, generation, _) in &generations {
+                if ours(generation) && generation.key != key {
+                    commands.entity(root).despawn();
+                }
             }
         }
     }
-    for (drawn, _, _, mut transform) in &mut drawn {
+
+    let frames: HashMap<Entity, &Frame> = generations
+        .iter()
+        .filter_map(|(root, g, _)| Some((root, &now.iter().find(|b| b.craft == g.craft)?.frame)))
+        .collect();
+    for (drawn, parent, _, mut transform) in &mut drawn {
         if let Drawn::Carried(part, side) = *drawn
-            && let Some(piece) = frame.piece(part, side)
+            && let Some(piece) = frames.get(&parent.parent()).and_then(|f| f.piece(part, side))
         {
             *transform = posed(&piece.pose);
         }
@@ -255,8 +333,7 @@ pub fn draw_refit(
 #[allow(clippy::too_many_arguments)]
 fn spawn(
     commands: &mut Commands,
-    frame: &Frame,
-    balance: &Balance,
+    b: &Building,
     key: (usize, Option<usize>),
     finished: &HullUniform,
     albedo: &Handle<Image>,
@@ -266,6 +343,7 @@ fn spawn(
     let mut material = |uniforms: HullUniform| {
         materials.add(HullMaterial { uniforms, albedo: albedo.clone(), lights: light_tiles.clone() })
     };
+    let (frame, balance) = (&b.frame, &b.balance);
     let standing = standing(frame, balance);
     let finish = material(finished.clone());
     let working = frame.working.as_ref();
@@ -322,7 +400,7 @@ fn spawn(
             hull(HullSource::Pieces(Arc::from([alone])), Drawn::Carried(part, side), finish.clone(), posed(&piece.pose));
         }
     }
-    commands.entity(root).insert(Generation { key, shown: false, copies });
+    commands.entity(root).insert(Generation { craft: b.craft, key, shown: false, copies });
     root
 }
 
@@ -477,6 +555,76 @@ mod tests {
         assert_eq!(hand_back(left, earlier, HAND_BACK_S + 0.1, true), HandBack::GaveUp);
         assert_eq!(hand_back(left, earlier, 0.1, false), HandBack::Nothing);
         assert_eq!(hand_back(None, None, 0.0, true), HandBack::Handed, "no round was seen to end");
+    }
+
+    /// Another craft's round is meshed under that craft's own root, at the step its light shows
+    /// rather than the one it is on now, and nothing of it is shown before its meshes land.
+    #[test]
+    fn another_crafts_round_is_meshed_for_it_as_its_light_left() {
+        use lc_world::sky::AuthoredStars;
+        let plan = demo_round(&B, 1.0).solve(&B).unwrap();
+        let i = plan.steps().iter().position(|s| s.change == lc_world::refit::rounds::Change::Grow).unwrap();
+        let step = plan.steps()[i];
+        let stated_s = plan.round().start_s + step.begins_s + 0.25 * step.duration_s;
+        let under = lc_world::seen::Underway {
+            step: i,
+            part: step.part,
+            change: step.change,
+            after: step.after,
+            fraction: 0.25,
+            duration_s: step.duration_s,
+            reversing: false,
+        };
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(9),
+            name: "Vela".into(),
+            length_m: 500.0,
+            at_ly: [0.0; 3],
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            jet_power_w: 0.0,
+            emitted_t: (stated_s * 1.0e6) as i64,
+            arrive_t: (stated_s * 1.0e6) as i64 + 3_600_000_000,
+            form: (&plan.at(stated_s).form).into(),
+            building: Some(under.into()),
+            glow: None,
+            glare: None,
+        };
+        let mut uplink = crate::uplink::Uplink::default();
+        uplink.contacts = vec![crate::uplink::Contact::seen(presence, None)];
+        uplink.contacts[0].emitted_s = stated_s + 0.25 * step.duration_s;
+
+        let mut session = crate::session::Session::new(&AuthoredStars::sample(), 3);
+        // Long after the round is over where the craft is now.
+        session.set_coordinate_time_us(((stated_s + 10.0 * plan.duration_s()) * 1.0e6) as i64);
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::app::Game(session))
+            .insert_resource(uplink)
+            .init_resource::<crate::parts::OwnForm>()
+            .insert_resource(Palette::baked())
+            .init_resource::<RealHulls>()
+            .init_resource::<Unready>()
+            .init_resource::<Showing>()
+            .init_resource::<Assets<HullMaterial>>()
+            .init_resource::<Assets<Mesh>>()
+            .add_systems(Update, draw_refit);
+        let world = app.world_mut();
+        let mesh = world.spawn_empty().id();
+        let root = world.spawn(ShipHull::bare(Some(ShipId(9)), mesh)).id();
+        app.update();
+        app.update();
+
+        let world = app.world_mut();
+        let generations: Vec<_> = world.query::<(Entity, &Generation, &ChildOf)>().iter(world).map(|(e, g, c)| (e, g.craft, g.key, c.parent())).collect();
+        assert_eq!(generations.len(), 1, "{generations:?}");
+        let (generation, craft, key, parent) = generations[0];
+        assert_eq!((craft, parent), (Some(ShipId(9)), root));
+        assert_eq!(key, (i, Some(i)), "drawn at the live step, not the one its light shows");
+        let hulls = world.query::<(&HullForm, &ChildOf)>().iter(world).filter(|(_, c)| c.parent() == generation).count();
+        assert!(hulls >= 2, "the standing craft and its working copy: {hulls}");
+        assert!(!world.resource::<Showing>().drawing(Some(ShipId(9))), "shown before its meshes landed");
+        assert!(world.resource::<Unready>().0);
     }
 
     /// The truss the demo's grown hull puts up is meshed, and within the budget by a margin.

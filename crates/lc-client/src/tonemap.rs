@@ -4,7 +4,7 @@ use em_spectra::{BandMapping, PerBand};
 use glam::Vec3;
 
 /// Rec. 709 luminance weights.
-const LUMA: Vec3 = Vec3::new(0.2126, 0.7152, 0.0722);
+pub(crate) const LUMA: Vec3 = Vec3::new(0.2126, 0.7152, 0.0722);
 
 /// What a pixel gets, what the glow pass gets, and how far the source really was from the
 /// window.

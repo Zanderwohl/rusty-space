@@ -346,6 +346,21 @@ fn hull_radiance() -> PerBand<f32> {
     *RADIANCE
 }
 
+/// Luminance of a white surface square to the Sun at 1 AU, cd/m²: 1361 W/m² at 93 lm/W, over π.
+/// What a lamp's luminance is stated against.
+const WHITE_AT_AU_CD_M2: f64 = 40_000.0;
+const SUN_TEFF_K: f64 = 5772.0;
+
+/// A lamp of `cd_m2` as display light, in the units of a lit hull's `reflected`: a blackbody at
+/// `k` kelvin as bright in V as that share of [`WHITE_AT_AU_CD_M2`], through the band mapping as
+/// starlight is. A fixed power, so the exposure decides whether it shows.
+pub(crate) fn lamp(session: &Session, cd_m2: f64, k: f64) -> Vec3 {
+    let sun = crate::resolved::lit_radiance(1.0, em_spectra::stellar::SOLAR_RADIUS, SUN_TEFF_K, lc_world::navigation::AU);
+    let glow = crate::session::spectrum_at(k);
+    let scale = (cd_m2 / WHITE_AT_AU_CD_M2 * sun[em_spectra::Band::V] as f64 / glow[em_spectra::Band::V] as f64) as f32;
+    Vec3::from_array(session.mapping.apply(&glow.map(|_, x| x * scale)))
+}
+
 /// A hull at `at_ly` painted `paint`, lit by [`lighting`]'s `star`.
 pub(crate) fn lit(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, paint: Vec4) -> BodySurfaceUniform {
     let own = emitted(session);
