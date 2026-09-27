@@ -66,16 +66,14 @@ impl Subject {
     /// click in the view and a click in the list are the same event as far as everything
     /// downstream is concerned.
     ///
-    /// `None` for a craft. Every [`Target`] is somewhere a course can be plotted to, and a
-    /// course to a ship is a rendezvous with something that is moving and that this client
-    /// only knows the past of. Until that exists a contact is something to see and read the
-    /// name of, not something to select.
+    /// A craft is selected apart from any [`Target`]: every one of those is somewhere a course
+    /// can be plotted to, and there is no course to a ship.
     pub(crate) fn select(&self) -> Option<Action> {
         match self {
             Subject::Body(key, _) => Some(Action::FocusTarget(Some(Target::Body(key.clone())))),
             Subject::Star(id, _) => Some(Action::SelectTarget(Some(*id))),
             Subject::Swarm(index, _) => Some(Action::FocusTarget(Some(Target::Band(*index)))),
-            Subject::Craft(..) => None,
+            Subject::Craft(id, _) => Some(Action::SelectCraft(Some(*id))),
         }
     }
 }
@@ -232,18 +230,20 @@ fn survey(
     }
 
     // Every craft, named, whether or not anyone is pointing at it — and against the middle of
-    // the view for the same reason a selection is. The one hovered is dropped from the list so
-    // it is not painted twice, once faint and once not.
+    // the view for the same reason a selection is. The one hovered or selected is dropped from
+    // the list so it is not painted twice, once faint and once not.
+    let chosen = selected(&ui);
     picked.contacts = sighted
         .iter()
         .filter(|seen| matches!(seen.subject, Subject::Craft(..)))
         .filter(|seen| !picked.hover.as_ref().is_some_and(|m| m.label == label_of(seen)))
+        .filter(|seen| !chosen.as_ref().is_some_and(|c| seen.subject.is(c)))
         .map(|seen| mark(seen, viewport, viewport * 0.5))
         .collect();
 
     // The selection is marked whether or not it is on screen: an arrow at the edge is the only
     // way to say where something went.
-    if let Some(chosen) = selected(&ui)
+    if let Some(chosen) = chosen
         && let Some(seen) = sighted.iter().find(|s| s.subject.is(&chosen))
     {
         // Marked against the middle of the view rather than the cursor: a selection stands
@@ -254,6 +254,9 @@ fn survey(
 
 /// What the interface says is selected, as a subject. The map marks the same thing.
 pub(crate) fn selected(ui: &Ui) -> Option<Subject> {
+    if let Some(craft) = ui.selected_craft {
+        return Some(Subject::Craft(craft, String::new()));
+    }
     match &ui.focus {
         // Matched on the key alone, like a star on its identifier.
         Some(Target::Body(key)) => Some(Subject::Body(key.clone(), String::new())),
@@ -773,11 +776,11 @@ mod tests {
         assert_eq!(star.select(), Some(Action::SelectTarget(Some(id))));
     }
 
-    /// A craft is marked and named and is not a destination. Every `Target` is somewhere a
-    /// course can be plotted to, and there is no course to a ship.
+    /// A craft is selected as itself, not as a destination: there is no course to a ship.
     #[test]
-    fn clicking_a_craft_asks_for_nothing() {
-        assert_eq!(Subject::Craft(lc_proto::ShipId(3), "Ship 3".into()).select(), None);
+    fn clicking_a_craft_selects_it() {
+        let craft = lc_proto::ShipId(3);
+        assert_eq!(Subject::Craft(craft, "Ship 3".into()).select(), Some(Action::SelectCraft(Some(craft))));
     }
 
     /// A belt is a donut, and the model already says so: a spread of semi-major axes, a

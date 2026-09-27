@@ -25,30 +25,15 @@ use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::render_resource::{TextureFormat, TextureUsages};
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-use em_render::exhaust_cone_material::{
-    ApertureGlowMaterial, ApertureGlowUniform, ExhaustConeMaterial, ExhaustConeMaterialPlugin,
-    ExhaustConeUniform,
-};
+use em_render::exhaust_cone_material::{ApertureGlowMaterial, ExhaustConeMaterial, ExhaustConeMaterialPlugin};
 use em_spectra::{Band, BandMapping, PerBand, blackbody, presets};
 use glam::{DQuat, DVec3};
-use lc_client::ui::HAZARD;
-use lc_world::courtesy::{cooking_flux_w_m2, drive_courtesy_radius_m};
+use lc_client::plume::{GLOW_REACH, GLOW_WIDTH, aperture_uniform, cone_uniform};
+use lc_world::courtesy::drive_courtesy_radius_m;
 use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH};
 use lc_world::emit::{aperture_temperature_k, rating_w};
 use lc_world::fitting::Balance;
 
-/// How bright the cone is where it would cook, and at the courtesy radius, in the hazard color.
-const HOT_GAIN: f32 = 0.35;
-const FAINT_GAIN: f32 = 0.02;
-
-/// How far the near-field glow runs aft of the face and how wide it is, in aperture radii.
-const GLOW_REACH: f32 = 6.0;
-const GLOW_WIDTH: f32 = 1.0;
-/// How far over the exposure's reference the glow sits side-on through its middle. A display
-/// choice, as `plume::CORE_STOPS` is: the face is ten decades over and carries the physics.
-const GLOW_STOPS: f64 = 4.0;
-/// See `PlumeUniform::exposure`.
-const OVERFLOW_GAIN: f32 = 0.5;
 const STOPS: f32 = 5.0;
 
 const SUN_RADIUS_M: f64 = 6.957e8;
@@ -102,7 +87,6 @@ struct Burn {
     power_w: f64,
     half_angle_rad: f64,
     courtesy_m: f64,
-    hot_w_m2: f64,
     aperture_m: f64,
     face_k: f64,
 }
@@ -119,7 +103,6 @@ impl Burn {
             power_w,
             half_angle_rad: b.drive_spread_rad,
             courtesy_m: drive_courtesy_radius_m(&b, power_w),
-            hot_w_m2: cooking_flux_w_m2(&b),
             aperture_m,
             face_k: aperture_temperature_k(power_w, face_m2),
         }
@@ -211,24 +194,12 @@ fn stage(
     let sunlit = planck(SUN_K).map(|_, v| v * lc_client::hull::ALBEDO * (SUN_RADIUS_M / AU_M).powi(2));
     let reference = luminance(mapped(&mapping, &sunlit));
     let face = mapped(&mapping, &planck(burn.face_k));
-    let glow = face * (reference * 2f64.powf(GLOW_STOPS) / luminance(face));
     info!("exposure {reference:.3e}, face {:.3e} ({:.1} stops over)", luminance(face), (luminance(face) / reference).log2());
 
-    let hazard = LinearRgba::from(HAZARD).to_vec3();
     commands.spawn((
         Mesh3d(meshes.add(ExhaustConeMaterial::proxy(burn.half_angle_rad as f32))),
         MeshMaterial3d(cones.add(ExhaustConeMaterial {
-            uniforms: ExhaustConeUniform {
-                emission: Vec4::new(
-                    burn.power_w as f32,
-                    burn.half_angle_rad as f32,
-                    burn.courtesy_m as f32,
-                    burn.hot_w_m2 as f32,
-                ),
-                faint: (hazard * FAINT_GAIN).extend(0.0),
-                hot: (hazard * HOT_GAIN).extend(0.0),
-                ..default()
-            },
+            uniforms: cone_uniform(burn.power_w, &Balance::DEFAULT, burn.courtesy_m),
         })),
         Transform::default(),
         NoFrustumCulling,
@@ -237,13 +208,7 @@ fn stage(
     commands.spawn((
         Mesh3d(meshes.add(ApertureGlowMaterial::proxy(GLOW_REACH, GLOW_WIDTH))),
         MeshMaterial3d(glows.add(ApertureGlowMaterial {
-            uniforms: ApertureGlowUniform {
-                face: face.as_vec3().extend(0.0),
-                glow: glow.as_vec3().extend(0.0),
-                shape: Vec4::new(GLOW_REACH, GLOW_WIDTH, 0.0, 0.0),
-                exposure: Vec4::new(reference as f32, STOPS, OVERFLOW_GAIN, 0.0),
-                ..default()
-            },
+            uniforms: aperture_uniform(face, reference, STOPS),
         })),
         Transform::default(),
         NoFrustumCulling,

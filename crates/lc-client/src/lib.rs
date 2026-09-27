@@ -46,6 +46,7 @@ pub mod ledger;
 pub mod library;
 pub mod link;
 pub mod map;
+pub mod map_cone;
 pub mod map_panel;
 pub mod map_line;
 pub mod map_pick;

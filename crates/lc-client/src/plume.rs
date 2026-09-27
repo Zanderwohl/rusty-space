@@ -1,608 +1,513 @@
-//! What a burn looks like: how big the exhaust is, and how hot.
+//! A photon drive's burn: each aft engine's open face glowing at the flux leaving it, and the
+//! exhaust's cone out to the courtesy radius. 32 §The exhaust cone.
 //!
-//! One number decides all of it — the jet power, `½ F v`, which [`lc_world::flight::Drive`]
-//! works out from what is being pushed and how hard. A heavier ship or a harder burn is a
-//! longer, hotter plume, and that is not a rule imposed here, it is what more power in the same
-//! nozzle means.
+//! The glow is light, drawn on every burning craft with a form, under its hull's root so it moves
+//! with the hull. The cone is an indicator, drawn for the player's own burn, for a burn whose
+//! courtesy radius the player is inside, and for a selected ship; [`Exhausts`] hands the same cones
+//! to the map. Another craft is drawn as its light shows it, from what its `Presence` stated.
 //!
-//! **The shape is a display model and the light is not.** How long the cone is drawn and how
-//! far it flares are choices, made here and tunable; the temperature is then forced, because
-//! the power has to go somewhere and a blackbody of that area at that temperature is the only
-//! surface that radiates it. So a plume's color is a consequence rather than a setting, and a
-//! fifty-kilometer ship's drive comes out blue-white next to a tug's orange without anyone
-//! choosing that.
-//!
-//! The streaks follow the same division. *That* the gas is uneven is physics — a drive burns
-//! fuel-rich and the flow combs what leaves the injector unmixed into lanes — and so is what
-//! those lanes radiate, which is a cooler graybody worked out here and handed over as a second
-//! color. How fast they travel is not: see [`CHURN_EXPONENT`].
+//! Each proxy is told where the eye is in its own space, worked out in `f64`: a render unit is an
+//! AU, and a cone is thousands of hull lengths.
 
+use std::collections::HashMap;
+
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
-use em_render::plume_material::{CHURN_PERIOD, PlumeMaterial, PlumeUniform};
-use em_render::render_space::sim_to_render;
-use glam::DVec3;
+use em_render::exhaust_cone_material::{
+    ApertureGlowMaterial, ApertureGlowUniform, ExhaustConeMaterial, ExhaustConeUniform,
+};
+use em_render::render_space::{render_to_sim, sim_to_render};
+use glam::{DQuat, DVec3};
 use lc_proto::ShipId;
+use lc_world::courtesy::{cooking_distance_m, cooking_flux_w_m2, drive_courtesy_radius_m};
+use lc_world::emit::aperture_temperature_k;
+use lc_world::fitting::Balance;
+use lc_world::flight::{C_M_S, Drive};
+use lc_world::form::Form;
+use lc_world::form::capacity::{Aperture, aft_apertures};
 
+use crate::hull::Eye;
 use crate::session::Session;
+use crate::ship_hull::{RealHulls, ShipHull};
 use crate::system::{M_PER_LY, UNIT_M};
 
-/// The Stefan-Boltzmann constant, watts per square meter per kelvin to the fourth.
-pub const SIGMA: f64 = 5.670_374_419e-8;
+/// The cone's brightness in the hazard color where it would cook, and at the courtesy radius.
+pub const HOT_GAIN: f32 = 0.35;
+pub const FAINT_GAIN: f32 = 0.02;
 
-/// How long a plume is at the drive's own rated acceleration, in hull lengths.
+/// How far the near-field glow runs aft of the face and how wide it is, in aperture radii.
+pub const GLOW_REACH: f32 = 6.0;
+pub const GLOW_WIDTH: f32 = 1.0;
+/// How far over the exposure's reference the glow sits side-on through its middle. A display
+/// choice: the face is decades over and carries the physics.
+pub const GLOW_STOPS: f64 = 4.0;
+/// What a stop past the top of the exposure's window is worth as HDR value, so the face blooms.
+pub const OVERFLOW_GAIN: f32 = 0.5;
+
+const LUMA: DVec3 = DVec3::new(0.2126, 0.7152, 0.0722);
+
+/// `F c`, watts: what a photon drive of the thrust a reaction drive states as `½ F v` sends aft.
 ///
-/// A choice, and the main one. Long enough to read as a torch, and short enough to fit beside
-/// the ship at the zoom the camera opens at — which is framed on the hull, so a plume of three
-/// lengths was most of the screen and the ship was a detail in the corner of its own exhaust.
-pub const LENGTHS_AT_RATED: f64 = 1.5;
+/// `Drive` and the wire still state `½ F v`; courtesy and emission are photon drives.
+pub fn exhaust_w(jet_power_w: f64, exhaust_v_m_s: f64) -> f64 {
+    if jet_power_w <= 0.0 || exhaust_v_m_s <= 0.0 {
+        return 0.0;
+    }
+    2.0 * jet_power_w * C_M_S / exhaust_v_m_s
+}
 
-/// How the length answers to being throttled, as an exponent on the fraction of rated thrust.
-///
-/// A half, so a quarter-thrust burn is half the plume. Linear made a gentle correction
-/// invisible and a hard burn no more impressive than a moderate one.
-pub const LENGTH_EXPONENT: f64 = 0.5;
+/// A craft with its drive lit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lit {
+    /// `None` for the player's own.
+    pub craft: Option<ShipId>,
+    /// `F c`, watts.
+    pub power_w: f64,
+    pub at_ly: DVec3,
+    /// Simulation axes, unit.
+    pub facing: DVec3,
+    pub length_m: f64,
+}
 
-/// The nozzle's radius, as a fraction of the hull's beam.
-pub const THROAT_OF_BEAM: f64 = 0.35;
+/// The cone's length, which is the drive's courtesy radius, when `lit`'s cone is drawn for an
+/// observer at `here_ly` with `selected` picked out.
+pub fn cone_m(lit: &Lit, here_ly: DVec3, selected: Option<ShipId>, balance: &Balance) -> Option<f64> {
+    if lit.power_w <= 0.0 {
+        return None;
+    }
+    let radius_m = drive_courtesy_radius_m(balance, lit.power_w);
+    let inside = lit.at_ly.distance(here_ly) * M_PER_LY <= radius_m;
+    let chosen = lit.craft.is_some() && lit.craft == selected;
+    (lit.craft.is_none() || inside || chosen).then_some(radius_m)
+}
 
-/// How much wider the gas is where it ends than where it leaves the nozzle.
-///
-/// The expansion ratio, and the other shape knob. A plume in vacuum has no ambient pressure to
-/// hold it in, so it keeps spreading — this is how far it gets by the time it has faded.
-pub const EXPANSION: f64 = 5.0;
+/// An open face's temperature, kelvin: its share of `power_w` through its area.
+pub fn face_k(power_w: f64, aperture: &Aperture) -> f64 {
+    aperture_temperature_k(power_w * aperture.share, std::f64::consts::PI * aperture.radius_m.powi(2))
+}
 
-/// How much wider the proxy is than the gas, so the feathered edge has somewhere to be drawn.
-pub const MARGIN: f64 = 1.3;
+/// A cone for a drive of `power_w`, `length_m` long, in the hazard color. The eye is the caller's.
+pub fn cone_uniform(power_w: f64, balance: &Balance, length_m: f64) -> ExhaustConeUniform {
+    let hazard = LinearRgba::from(crate::ui::HAZARD).to_vec3();
+    ExhaustConeUniform {
+        emission: Vec4::new(
+            power_w as f32,
+            balance.drive_spread_rad as f32,
+            length_m as f32,
+            cooking_flux_w_m2(balance) as f32,
+        ),
+        faint: (hazard * FAINT_GAIN).extend(0.0),
+        hot: (hazard * HOT_GAIN).extend(0.0),
+        eye_local: Vec4::ZERO,
+    }
+}
 
-/// How sharply the density falls off across the plume, and how fast it thins along it.
-pub const EDGE: f32 = 2.5;
-pub const TAPER: f32 = 1.5;
+/// A face radiating `face`, band-mapped linear RGB on the exposure's scale, under a tone map of
+/// `reference` and `stops`. The eye is the caller's.
+pub fn aperture_uniform(face: DVec3, reference: f64, stops: f32) -> ApertureGlowUniform {
+    let luminance = face.dot(LUMA);
+    let glow = if luminance > 0.0 { face * (reference * GLOW_STOPS.exp2() / luminance) } else { DVec3::ZERO };
+    ApertureGlowUniform {
+        face: face.as_vec3().extend(0.0),
+        glow: glow.as_vec3().extend(0.0),
+        shape: Vec4::new(GLOW_REACH, GLOW_WIDTH, 0.0, 0.0),
+        eye_local: Vec4::ZERO,
+        exposure: Vec4::new(reference as f32, stops, OVERFLOW_GAIN, 0.0),
+    }
+}
 
-/// Radial and lengthwise divisions of the shared proxy.
-pub const SIDES: u32 = 24;
+/// One cone drawn this frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Drawn {
+    pub craft: Option<ShipId>,
+    pub apex_ly: DVec3,
+    /// Along the exhaust, simulation axes, unit.
+    pub aft: DVec3,
+    pub length_m: f64,
+    pub half_angle_rad: f64,
+    /// From the apex to where a Black receiver cooks, meters.
+    pub cooking_m: f64,
+}
 
-/// How far above the exposure's reference the core of a plume sits, in stops.
-///
-/// **The one number that is not physics.** A plume's color is forced — see
-/// [`temperature_k`] — but its *brightness* is not, because the gas is optically thin by an
-/// amount nothing here models: what reaches the eye is a fraction of the blackbody radiance,
-/// and that fraction is the fudge. Four stops over the reference puts the core past the top of
-/// a two-and-a-half stop window, so the middle overflows and blooms like something that hot
-/// should — see [`OVERFLOW_GAIN`] for where the overflow goes — while the falloff carries the
-/// edges back down through the window and the cone has a shape.
-///
-/// Left as a multiple of the reference rather than an absolute, so it holds when the exposure
-/// moves. Set it from the color instead and a hot plume is a white rectangle: a blackbody at
-/// fifty thousand kelvin is ten decades over a planet, and there is no window that holds both.
-pub const CORE_STOPS: f64 = 4.0;
-
-/// What a stop past the top of the exposure window is worth as HDR value.
-///
-/// The core sits [`CORE_STOPS`] over the reference and the window is two and a half stops wide,
-/// so most of the cone has nowhere left to go inside it. Clipped there, the whole column came
-/// back as one flat lavender: the tone curve holds hue and saturation constant and scales only
-/// the value, so a ray through the deep middle and a ray grazing the flank — which differ by
-/// decades of column depth — drew the same color, and the plume read as a cut-out rather than
-/// as a volume.
-///
-/// Letting the overflow out as HDR is what the starfield already does with a star twenty stops
-/// over, and for the same reason: the excess becomes a halo rather than a whiter white. The
-/// display transform desaturates the middle toward white, bloom spreads it, and the thin edges
-/// stay inside the window with their color.
-///
-/// The sky uses a quarter. A plume wants an order more, and the case that decides it is
-/// `thermal`: clipped, its core sat at a saturation of 0.37, and one stop of gain only brings
-/// that to 0.33 — still a flat blue shape. Three brings it to 0.16 against a flank of 0.89,
-/// which is a white-hot core in a colored cone with the sooty lanes reading against it. Six
-/// buys 0.09 and nothing else, every channel's peak already being at 255. A plume wants more
-/// than the sky does because it is a near object filling a good part of the frame rather than a
-/// point a few pixels across, so its overflow has somewhere to go.
-pub const OVERFLOW_GAIN: f32 = 3.0;
-
-/// Lattice cells across the cone's own radius, and along its whole length.
-///
-/// Their ratio is the aspect of a filament, and it wants to be lopsided: at anything near one
-/// the noise reads as a dirty cloud hanging in the exhaust rather than as gas being drawn out.
-/// Seven to one and a half puts about fourteen filaments across the plume, each running most of
-/// its length. Fewer and the plume is draped rather than striated; many more and a ray crosses
-/// enough of them to average them flat again, which is the failure this whole coordinate choice
-/// exists to avoid.
-pub const CHURN_ACROSS: f32 = 7.0;
-pub const CHURN_ALONG: f32 = 1.5;
-
-/// How much of the gas the streaks may claim.
-pub const CHURN_BITE: f32 = 1.0;
-
-/// How cool the fuel-rich gas runs, as a fraction of the core's temperature.
-pub const SOOT_FRACTION: f64 = 0.6;
-
-/// How much of a blackbody's output the soot actually manages.
-///
-/// The only place in this file something is *not* a blackbody, and it is the honest correction
-/// rather than a fudge: soot is the one constituent of a plume that is optically thick, so it
-/// radiates as a graybody. It also guarantees the streaks read. A temperature ratio alone does
-/// not: at fifty thousand kelvin the visible band is on the Rayleigh-Jeans side, where radiance
-/// goes as `T` and not as `T^4`, so a plume that hot would have shown streaks six per cent
-/// darker than the gas around them and looked exactly as smooth as before.
-pub const SOOT_EMISSIVITY: f32 = 0.25;
-
-/// How far the churn travels in a second of real time while the clock runs at real time, in
-/// plume lengths.
-pub const TRAVERSES_AT_REAL_TIME: f64 = 0.12;
-
-/// The root by which the clock's speed is compressed into the churn's.
-///
-/// The ladder in [`crate::ui::RATE_LADDER`] spans seven decades, from real time to a Julian year
-/// a second. The band in which a moving pattern reads as *moving* — rather than as a still
-/// picture at one end or as static at the other — spans well under one. An eighth root is what
-/// maps the one onto the other: every rung is a visibly different churn, the top of the ladder
-/// is about eight times the bottom, and no rung is a strobe.
-///
-/// **What it must not do is decouple.** The gas itself crosses the plume in milliseconds, so
-/// there is no rung at which the true rate is anything but a blur, and drawing the churn at all
-/// is already a display model. The one thing that has to be exact is the end of the range: a
-/// stopped clock is a still plume, which is what every `--rate 0` photograph depends on.
-pub const CHURN_EXPONENT: f64 = 0.125;
-
-/// Which craft's exhaust this is, as [`crate::hull::Hull`] keys a hull.
-#[derive(Component)]
-pub struct Plume(pub Option<ShipId>);
-
-/// The shared proxy, and where the churn has got to.
+/// The cones drawn this frame, and what drawing them keeps.
 #[derive(Resource, Default)]
-pub struct Plumes {
-    proxy: Option<Handle<Mesh>>,
-    /// How far aft the streaks have traveled, in lattice cells, wrapped at [`CHURN_PERIOD`].
-    phase: f64,
-    /// The coordinate clock last frame. `None` until the first, which therefore advances by
-    /// nothing rather than by however long the client spent loading.
-    clock_s: Option<f64>,
+pub struct Exhausts {
+    pub cones: Vec<Drawn>,
+    /// Each craft's faces, by the hash of the form they were worked out from.
+    apertures: HashMap<Option<ShipId>, (u64, Vec<Aperture>)>,
+    /// By the half-angle's bits.
+    cone_proxy: Option<(u64, Handle<Mesh>)>,
+    glow_proxy: Option<Handle<Mesh>>,
 }
 
-/// How long the exhaust runs and how wide it is at each end, meters.
-///
-/// The length answers to the throttle and the width does not: a nozzle is a nozzle whatever is
-/// going through it, and what changes when a drive is pushed is how far the gas gets before it
-/// has spent itself.
-pub fn extent(length_m: f64, throttle: f64) -> (f64, f64, f64) {
-    let long = length_m * LENGTHS_AT_RATED * throttle.clamp(0.0, 4.0).powf(LENGTH_EXPONENT);
-    let throat = length_m * lc_world::craft::BEAM_PER_LENGTH * 0.5 * THROAT_OF_BEAM;
-    (long, throat, throat * EXPANSION)
+/// A craft's exhaust cone.
+#[derive(Component)]
+pub struct Cone(pub Option<ShipId>);
+
+/// One aft face's glow, under its craft's [`ShipHull`], by its place in [`aft_apertures`].
+#[derive(Component)]
+pub struct Glow {
+    craft: Option<ShipId>,
+    face: usize,
 }
 
-/// The lateral area of the cone the gas fills, square meters.
-///
-/// What the power has to radiate through, which is what sets the temperature. A frustum's
-/// slant surface: `π (r0 + r1) √(L² + (r1 − r0)²)`.
-pub fn radiating_area_m2(long_m: f64, throat_m: f64, mouth_m: f64) -> f64 {
-    let flare = mouth_m - throat_m;
-    std::f64::consts::PI * (throat_m + mouth_m) * (long_m * long_m + flare * flare).sqrt()
+/// A hull root's transform in `f64`: the ship's frame in meters to render units about the eye.
+#[derive(Clone, Copy, Debug)]
+struct Root {
+    translation: DVec3,
+    rotation: DQuat,
+    scale: f64,
 }
 
-/// How hot a plume of that size has to be to carry that power away, kelvin.
-///
-/// Stefan-Boltzmann, inverted. Nothing is being fitted here: the drive makes `power_w`, the gas
-/// is the only thing to carry it, and a blackbody of this area radiating that much has exactly
-/// one temperature. Which is why the color cannot be set — push a bigger ship harder and the
-/// plume goes blue whether or not anybody wanted it to.
-pub fn temperature_k(power_w: f64, area_m2: f64) -> f64 {
-    if power_w <= 0.0 || area_m2 <= 0.0 {
-        return 0.0;
-    }
-    (power_w / (SIGMA * area_m2)).powf(0.25)
-}
-
-/// How far the churn travels this frame, in plume lengths.
-///
-/// Measured in plume *lengths* rather than meters, so a fifty-kilometer ship's exhaust and a
-/// tug's churn at the same rate on the screen. The camera frames on the hull, so that is the
-/// comparison that matters; in meters per second the big one is a hundred times the faster,
-/// which is also true.
-pub fn churn_step(real_s: f64, simulated_s: f64) -> f64 {
-    if real_s <= 0.0 || simulated_s <= 0.0 {
-        return 0.0;
-    }
-    TRAVERSES_AT_REAL_TIME * (simulated_s / real_s).powf(CHURN_EXPONENT) * real_s
-}
-
-/// Where in the pattern a craft's plume starts, in lattice cells.
-///
-/// The noise repeats at [`CHURN_PERIOD`], so offsetting the phase is the whole of giving every
-/// ship its own streaks — no second uniform, and two craft burning alongside each other do not
-/// flicker in step.
-pub fn seed(of: Option<ShipId>) -> f64 {
-    // The player's own ship has no id of its own, so it takes one no id can collide with.
-    let key = match of {
-        None => u64::MAX,
-        Some(ShipId(n)) => n as u64,
-    };
-    let mut h = key ^ 0x2545_f491_4f6c_dd1d;
-    h = (h ^ (h >> 33)).wrapping_mul(0xff51_afd7_ed55_8ccd);
-    h = (h ^ (h >> 33)).wrapping_mul(0xc4ce_b9fe_1a85_ec53);
-    h ^= h >> 33;
-    (h >> 40) as f64 / (1u64 << 24) as f64 * CHURN_PERIOD as f64
-}
-
-/// A craft with its drive lit, reduced to what the proxy needs.
-struct Burning {
-    /// From the eye, in simulation axes, meters.
-    offset_m: DVec3,
-    /// The hull's own length, so the nozzle can be put at its tail.
-    hull_m: f64,
-    /// Which way the nose points, so the exhaust can go the other way.
-    facing: DVec3,
-    long_m: f64,
-    throat_m: f64,
-    mouth_m: f64,
-    power_w: f64,
-}
-
-impl Burning {
-    fn of(length_m: f64, power_w: f64, rated_w: f64, facing: DVec3, offset_m: DVec3) -> Option<Self> {
-        if power_w <= 0.0 || facing == DVec3::ZERO {
-            return None;
-        }
-        // Against what this ship's own drive would make at its rating, so a tug at full thrust
-        // gets a full plume and is not measured against a warship's.
-        let throttle = if rated_w > 0.0 { power_w / rated_w } else { 1.0 };
-        let (long_m, throat_m, mouth_m) = extent(length_m, throttle);
-        Some(Self { offset_m, hull_m: length_m, facing, long_m, throat_m, mouth_m, power_w })
-    }
-}
-
-/// Everything with its drive lit this frame.
-fn burning(game: &Session, uplink: &crate::uplink::Uplink, eye: &crate::hull::Eye, look: DVec3) -> Vec<(Option<ShipId>, Burning)> {
-    let now = game.coordinate_time_s();
-    let mut out = Vec::new();
-    let mine = &game.ship;
-    let rated = mine.motion.drive.jet_power_w(mine.mass_kg_at(now), mine.motion.drive.accel_g);
-    if let Some(lit) = Burning::of(
-        mine.length_m,
-        mine.jet_power_w(now),
-        rated,
-        mine.facing_at(now).unwrap_or(DVec3::X),
-        look * eye.boom_m,
-    ) {
-        out.push((None, lit));
-    }
-    for contact in &uplink.contacts {
-        // A contact's rating is not known — only what it is doing — so its own burn is taken
-        // as full. The cost is that a ship seen easing off looks like a smaller ship at full
-        // thrust, which is a thing an observer genuinely cannot tell apart.
-        let power = contact.jet_power_w;
-        if let Some(lit) = Burning::of(
-            contact.length_m,
-            power,
-            power,
-            contact.facing,
-            (contact.position_ly - eye.at_ly) * M_PER_LY,
-        ) {
-            out.push((Some(contact.ship_id), lit));
+impl Root {
+    fn of(transform: &Transform) -> Self {
+        Self {
+            translation: transform.translation.as_dvec3(),
+            rotation: transform.rotation.as_dquat(),
+            scale: transform.scale.x as f64,
         }
     }
-    out
-}
 
-/// The proxy: a closed cylinder wide enough to hold the gas, with its axis on `+y`.
-fn proxy() -> Mesh {
-    Cylinder::new(1.0, 1.0).mesh().resolution(SIDES).segments(1).build()
-}
+    fn to_render(&self, ship_m: DVec3) -> DVec3 {
+        self.translation + self.rotation * (ship_m * self.scale)
+    }
 
-/// The rotation putting the proxy's `+y` down the exhaust, which is aft of the nose.
-fn along_exhaust(facing: DVec3) -> Quat {
-    let aft = sim_to_render(-facing.normalize_or_zero()).as_vec3();
-    Quat::from_rotation_arc(Vec3::Y, aft)
-}
+    /// The eye, which is the render origin, in the ship's frame.
+    fn eye(&self) -> DVec3 {
+        self.rotation.inverse() * -self.translation / self.scale
+    }
 
-/// What a blackbody at `kelvin` looks like through this observer's bands, linear display RGB.
-fn shine(session: &Session, kelvin: f64) -> Vec3 {
-    Vec3::from_array(session.mapping.apply(&crate::session::spectrum_at(kelvin)))
-}
-
-fn uniforms(lit: &Burning, session: &Session, eye_local: Vec3, phase: f64) -> PlumeUniform {
-    let area = radiating_area_m2(lit.long_m, lit.throat_m, lit.mouth_m);
-    let kelvin = temperature_k(lit.power_w, area);
-    let glow = shine(session, kelvin);
-    // The same mapping at a lower temperature, so the streaks' color is as forced as the
-    // core's and the ratio between them is the physics rather than a tint.
-    let soot = shine(session, kelvin * SOOT_FRACTION) * SOOT_EMISSIVITY;
-    // Scaled so the core lands where [`CORE_STOPS`] says, whatever the color came out as.
-    // Against the clean gas, which is what the core is made of: the streaks are faded out
-    // toward the axis, so calibrating against a mixture would move the exposure with the churn.
-    let luminance = glow.dot(Vec3::new(0.2126, 0.7152, 0.0722)) as f64;
-    let scale = if luminance > 0.0 {
-        session.tone.surface_reference as f64 * 2f64.powf(CORE_STOPS) / luminance
-    } else {
-        0.0
-    };
-    let wall = lit.mouth_m * MARGIN;
-    PlumeUniform {
-        glow: glow.extend(0.0),
-        shape: Vec4::new(
-            (lit.throat_m / wall) as f32,
-            (lit.mouth_m / wall) as f32,
-            EDGE,
-            TAPER,
-        ),
-        eye_local: eye_local.extend(0.0),
-        soot: soot.extend(0.0),
-        churn: Vec4::new(phase as f32, CHURN_ACROSS, CHURN_ALONG, CHURN_BITE),
-        // The march sums a density with no units, so the brightness is a scale rather than a
-        // measurement — the *color* is the physics and this only says how much of it there is.
-        exposure: Vec4::new(
-            session.tone.surface_reference,
-            session.tone.stops,
-            scale as f32,
-            OVERFLOW_GAIN,
-        ),
+    /// Along the exhaust, render axes: out of the stern.
+    fn aft(&self) -> DVec3 {
+        (self.rotation * DVec3::NEG_X).normalize()
     }
 }
 
-/// Keep a proxy for every craft with its drive lit, and take it away when the drive goes out.
-pub fn update_plumes(
+/// A proxy with `+y` along `axis` at `origin`, `scale` per local unit, all about the eye; and
+/// the eye in its local space.
+fn about_eye(origin: DVec3, axis: DVec3, scale: f64) -> (Transform, DVec3) {
+    let rotation = DQuat::from_rotation_arc(DVec3::Y, axis);
+    let transform = Transform {
+        translation: origin.as_vec3(),
+        rotation: rotation.as_quat(),
+        scale: Vec3::splat(scale as f32),
+    };
+    (transform, rotation.inverse() * -origin / scale)
+}
+
+fn lits(session: &Session, uplink: &crate::uplink::Uplink) -> Vec<Lit> {
+    let now = session.coordinate_time_s();
+    let ship = &session.ship;
+    let own = Lit {
+        craft: None,
+        power_w: exhaust_w(ship.jet_power_w(now), ship.motion.drive.exhaust_v_m_s),
+        at_ly: ship.motion.position_ly,
+        facing: ship.facing_at(now).unwrap_or(DVec3::X),
+        length_m: ship.length_m,
+    };
+    // A contact's exhaust speed is not stated, and every craft with a drive worth drawing is a ship.
+    let contacts = uplink.contacts.iter().map(|c| Lit {
+        craft: Some(c.ship_id),
+        power_w: exhaust_w(c.jet_power_w, Drive::DEFAULT.exhaust_v_m_s),
+        at_ly: c.position_ly,
+        facing: c.facing,
+        length_m: c.length_m,
+    });
+    std::iter::once(own)
+        .chain(contacts)
+        .map(|lit| Lit { facing: lit.facing.normalize_or_zero(), ..lit })
+        .filter(|lit| lit.power_w > 0.0 && lit.facing != DVec3::ZERO)
+        .collect()
+}
+
+/// `craft`'s aft faces, from the form it is stated in, worked out again only when that changes.
+fn faces<'a>(
+    cache: &'a mut HashMap<Option<ShipId>, (u64, Vec<Aperture>)>,
+    craft: Option<ShipId>,
+    stated: Option<u64>,
+    form: impl FnOnce() -> Option<(Form, Balance)>,
+) -> Option<&'a [Aperture]> {
+    let hash = stated?;
+    if cache.get(&craft).is_none_or(|(held, _)| *held != hash) {
+        let (form, balance) = form()?;
+        cache.insert(craft, (hash, aft_apertures(&form, &balance).unwrap_or_default()));
+    }
+    cache.get(&craft).map(|(_, faces)| faces.as_slice())
+}
+
+/// What a blackbody at `kelvin` looks like through this observer's bands, on the exposure's scale.
+fn shine(session: &Session, kelvin: f64) -> DVec3 {
+    Vec3::from_array(session.mapping.apply(&crate::session::spectrum_at(kelvin))).as_dvec3()
+}
+
+/// Glow every burning craft's aft faces, and draw the cones [`cone_m`] asks for. After the hulls,
+/// whose roots the glows hang from.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn draw_exhaust(
     mut commands: Commands,
-    time: Res<Time>,
-    game: Res<crate::app::Game>,
-    ui: Res<crate::app::Ui>,
-    uplink: Res<crate::uplink::Uplink>,
-    eye: Res<crate::hull::Eye>,
-    mut plumes: ResMut<Plumes>,
+    (game, ui, uplink, eye): (Res<crate::app::Game>, Res<crate::app::Ui>, Res<crate::uplink::Uplink>, Res<Eye>),
+    (own, real): (Res<crate::parts::OwnForm>, Res<RealHulls>),
+    mut exhausts: ResMut<Exhausts>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<PlumeMaterial>>,
-    churn: Res<crate::procedural::PlumeChurn>,
-    mut placed: Query<(Entity, &mut Transform, &MeshMaterial3d<PlumeMaterial>, &Plume)>,
+    (mut cone_materials, mut glow_materials): (ResMut<Assets<ExhaustConeMaterial>>, ResMut<Assets<ApertureGlowMaterial>>),
+    roots: Query<(Entity, &ShipHull, &Transform)>,
+    mut glows: Query<(Entity, &Glow, &mut Transform, &MeshMaterial3d<ApertureGlowMaterial>), Without<ShipHull>>,
+    mut cones: Query<
+        (Entity, &Cone, &mut Transform, &MeshMaterial3d<ExhaustConeMaterial>),
+        (Without<ShipHull>, Without<Glow>),
+    >,
 ) {
+    let session = &game.0;
+    let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
     let look = ui.look.forward();
-    let want = burning(&game.0, &uplink, &eye, look);
+    let here = session.ship.motion.position_ly;
+    let lit = lits(session, &uplink);
+    let tone = &session.tone;
+    let exhausts = &mut *exhausts;
+    exhausts.cones.clear();
+    exhausts.apertures.retain(|craft, _| real.stated(*craft).is_some());
 
-    // Taken from the clock itself rather than from the rate knob, so a correction from the
-    // server moves the churn with everything else and the churn does not need to know who owns
-    // the rate.
-    let now = game.0.coordinate_time_s();
-    let simulated = plumes.clock_s.map_or(0.0, |was| now - was);
-    plumes.clock_s = Some(now);
-    let traveled = churn_step(time.delta_secs_f64(), simulated) * CHURN_ALONG as f64;
-    plumes.phase = (plumes.phase + traveled).rem_euclid(CHURN_PERIOD as f64);
+    let mut want_glows = Vec::new();
+    let mut want_cones = Vec::new();
+    for burn in &lit {
+        let root = roots.iter().find(|(_, hull, _)| hull.craft() == burn.craft).map(|(e, _, t)| (e, Root::of(t)));
+        let form = || match burn.craft {
+            None => own.form().map(|f| (f.clone(), own.balance())),
+            Some(id) => uplink
+                .contacts
+                .iter()
+                .find(|c| c.ship_id == id)
+                .filter(|c| !c.form.parts.is_empty())
+                .map(|c| (Form::from(&c.form), balance)),
+        };
+        let apertures = root
+            .and_then(|_| faces(&mut exhausts.apertures, burn.craft, real.stated(burn.craft), form))
+            .unwrap_or_default();
 
-    let place = |lit: &Burning| {
-        let wall = lit.mouth_m * MARGIN;
-        // The nozzle is at the hull's tail — half a hull aft of its center — and the proxy's
-        // own center is half a plume further aft again. Measuring from the hull's center put
-        // the gas half inside the ship.
-        let tail = lit.offset_m - lit.facing * (lit.hull_m * 0.5 + lit.long_m * 0.5);
-        Transform {
-            translation: sim_to_render(tail / UNIT_M).as_vec3(),
-            rotation: along_exhaust(lit.facing),
-            scale: Vec3::new(
-                (wall / UNIT_M) as f32,
-                (lit.long_m / UNIT_M) as f32,
-                (wall / UNIT_M) as f32,
-            ),
+        if let Some((entity, root)) = root {
+            let eye_ship = root.eye();
+            for (index, face) in apertures.iter().enumerate() {
+                let rotation = DQuat::from_rotation_arc(DVec3::Y, face.out);
+                let transform = Transform {
+                    translation: face.center.as_vec3(),
+                    rotation: rotation.as_quat(),
+                    scale: Vec3::splat(face.radius_m as f32),
+                };
+                let eye_local = rotation.inverse() * (eye_ship - face.center) / face.radius_m;
+                let mut uniforms = aperture_uniform(
+                    shine(session, face_k(burn.power_w, face)),
+                    tone.surface_reference as f64,
+                    tone.surface_stops,
+                );
+                uniforms.eye_local = eye_local.as_vec3().extend(0.0);
+                want_glows.push((burn.craft, index, entity, transform, uniforms));
+            }
         }
-    };
-    let churned = plumes.phase;
-    let shade = |id: Option<ShipId>, lit: &Burning, transform: &Transform| {
-        // The eye is at the render origin, so where it sits in the proxy's own space is the
-        // transform undone. The march needs it there and nowhere else.
-        let eye_local = transform.to_matrix().inverse().transform_point3(Vec3::ZERO);
-        let phase = (churned + seed(id)).rem_euclid(CHURN_PERIOD as f64);
-        uniforms(lit, &game.0, eye_local, phase)
-    };
 
-    let mut kept = Vec::with_capacity(want.len());
-    for (entity, mut transform, material, marker) in placed.iter_mut() {
-        let Some((id, lit)) = want.iter().find(|(id, _)| *id == marker.0) else {
+        let Some(length_m) = cone_m(burn, here, ui.selected_craft, &balance) else { continue };
+        // From the faces' power-weighted middle, or the stern of a craft drawn with none.
+        let (apex, aft, apex_from_center_m) = match root {
+            Some((_, root)) if !apertures.is_empty() => {
+                let middle: DVec3 = apertures.iter().map(|a| a.center * a.share).sum();
+                (root.to_render(middle), root.aft(), render_to_sim(root.rotation * middle))
+            }
+            _ => {
+                let stern = -burn.facing * burn.length_m * 0.5;
+                let at = eye.offset_m(burn.at_ly, burn.craft, look) + stern;
+                (sim_to_render(at / UNIT_M), sim_to_render(-burn.facing), stern)
+            }
+        };
+        let (transform, eye_local) = about_eye(apex, aft, length_m / UNIT_M);
+        let mut uniforms = cone_uniform(burn.power_w, &balance, length_m);
+        uniforms.eye_local = eye_local.as_vec3().extend(0.0);
+        want_cones.push((burn.craft, transform, uniforms));
+        exhausts.cones.push(Drawn {
+            craft: burn.craft,
+            apex_ly: burn.at_ly + apex_from_center_m / M_PER_LY,
+            aft: render_to_sim(aft),
+            length_m,
+            half_angle_rad: balance.drive_spread_rad,
+            cooking_m: cooking_distance_m(&balance, burn.power_w, balance.drive_spread_rad, 1.0),
+        });
+    }
+
+    let mut kept = Vec::with_capacity(want_glows.len());
+    for (entity, glow, mut transform, material) in glows.iter_mut() {
+        let Some((_, _, _, placed, uniforms)) =
+            want_glows.iter().find(|(craft, face, ..)| *craft == glow.craft && *face == glow.face)
+        else {
             commands.entity(entity).despawn();
             continue;
         };
-        kept.push(*id);
-        *transform = place(lit);
-        let Some(mut asset) = materials.get_mut(&material.0) else { continue };
-        let next = shade(*id, lit, &transform);
-        if asset.uniforms != next {
-            asset.uniforms = next;
+        kept.push((glow.craft, glow.face));
+        *transform = *placed;
+        if let Some(mut asset) = glow_materials.get_mut(&material.0)
+            && asset.uniforms != *uniforms
+        {
+            asset.uniforms = uniforms.clone();
         }
     }
-
-    for (id, lit) in want.iter().filter(|(id, _)| !kept.contains(id)) {
-        let proxy = plumes.proxy.get_or_insert_with(|| meshes.add(proxy())).clone();
-        let transform = place(lit);
+    for (craft, face, root, transform, uniforms) in want_glows {
+        if kept.contains(&(craft, face)) {
+            continue;
+        }
+        let proxy = exhausts
+            .glow_proxy
+            .get_or_insert_with(|| meshes.add(ApertureGlowMaterial::proxy(GLOW_REACH, GLOW_WIDTH)))
+            .clone();
         commands.spawn((
             Mesh3d(proxy),
-            MeshMaterial3d(materials.add(PlumeMaterial {
-                uniforms: shade(*id, lit, &transform),
-                churn: churn.image.clone(),
-            })),
+            MeshMaterial3d(glow_materials.add(ApertureGlowMaterial { uniforms })),
             transform,
-            // Placed by hand at a scale where the mesh's own bounds say nothing about
-            // where it lands, exactly as a hull is.
-            bevy::camera::visibility::NoFrustumCulling,
-            bevy::camera::visibility::RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
-            Plume(*id),
+            NoFrustumCulling,
+            RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+            Glow { craft, face },
+            ChildOf(root),
+        ));
+    }
+
+    let half_angle = balance.drive_spread_rad;
+    if exhausts.cone_proxy.as_ref().is_none_or(|(bits, _)| *bits != half_angle.to_bits()) {
+        exhausts.cone_proxy = Some((half_angle.to_bits(), meshes.add(ExhaustConeMaterial::proxy(half_angle as f32))));
+    }
+    let proxy = exhausts.cone_proxy.as_ref().map(|(_, mesh)| mesh.clone()).expect("just made");
+    let mut kept = Vec::with_capacity(want_cones.len());
+    for (entity, cone, mut transform, material) in cones.iter_mut() {
+        let Some((_, placed, uniforms)) = want_cones.iter().find(|(craft, ..)| *craft == cone.0) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        kept.push(cone.0);
+        *transform = *placed;
+        if let Some(mut asset) = cone_materials.get_mut(&material.0)
+            && asset.uniforms != *uniforms
+        {
+            asset.uniforms = uniforms.clone();
+        }
+    }
+    for (craft, transform, uniforms) in want_cones {
+        if kept.contains(&craft) {
+            continue;
+        }
+        commands.spawn((
+            Mesh3d(proxy.clone()),
+            MeshMaterial3d(cone_materials.add(ExhaustConeMaterial { uniforms })),
+            transform,
+            NoFrustumCulling,
+            RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+            Cone(craft),
         ));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use em_spectra::{Band, PerBand, blackbody};
+    use lc_world::form::capacity::aft_aperture_w;
+    use lc_world::form::presets::Builtin;
 
     use super::*;
 
-    const SHIP_M: f64 = 500.0;
+    const B: Balance = Balance::DEFAULT;
 
-    /// A harder burn is a longer plume, and an unlit drive has none at all.
-    #[test]
-    fn the_length_answers_to_the_throttle() {
-        let (full, _, _) = extent(SHIP_M, 1.0);
-        let (quarter, _, _) = extent(SHIP_M, 0.25);
-        assert!((quarter / full - 0.5).abs() < 1.0e-9, "a quarter thrust is half the plume");
-        assert_eq!(extent(SHIP_M, 0.0).0, 0.0);
-        // And it is a plume rather than a wisp or a tail: a few hull lengths.
-        assert!(full > SHIP_M && full < SHIP_M * 10.0, "{full} m off a {SHIP_M} m ship");
+    fn lit(craft: Option<ShipId>, power_w: f64, at_m: DVec3) -> Lit {
+        Lit { craft, power_w, at_ly: at_m / M_PER_LY, facing: DVec3::X, length_m: 500.0 }
     }
 
-    /// The nozzle does not change size when the drive is throttled; only the gas goes further.
+    /// Your own burn, a burn whose courtesy radius you are in, and a selected ship's; nobody
+    /// else's, and nothing that is not burning.
     #[test]
-    fn the_nozzle_is_the_same_nozzle_at_any_thrust() {
-        let (_, throat, mouth) = extent(SHIP_M, 1.0);
-        let (_, quiet_throat, quiet_mouth) = extent(SHIP_M, 0.1);
-        assert_eq!(throat, quiet_throat);
-        assert_eq!(mouth, quiet_mouth);
-        assert!((mouth / throat - EXPANSION).abs() < 1.0e-9, "that is the expansion ratio");
+    fn which_burns_have_a_cone() {
+        let power = 1.1e20;
+        let radius = drive_courtesy_radius_m(&B, power);
+        let here = DVec3::ZERO;
+        let (near, far) = (DVec3::Y * radius * 0.9, DVec3::Y * radius * 1.1);
+        let other = Some(ShipId(4));
+        let cone = |l: Lit, selected| cone_m(&l, here, selected, &B);
+
+        assert_eq!(cone(lit(None, power, far), None), Some(radius), "your own, wherever it is");
+        assert_eq!(cone(lit(other, power, near), None), Some(radius), "inside its radius");
+        assert_eq!(cone(lit(other, power, far), None), None, "outside and unselected");
+        assert_eq!(cone(lit(other, power, far), other), Some(radius), "selected");
+        assert_eq!(cone(lit(other, power, far), Some(ShipId(5))), None, "another selected");
+        assert_eq!(cone(lit(None, 0.0, here), None), None, "coasting");
+        assert_eq!(cone(lit(other, 0.0, here), other), None, "selected and coasting");
     }
 
-    /// **The color is forced, not chosen.** The power has to go somewhere, and a blackbody of
-    /// that area radiating it has exactly one temperature.
+    /// The cone runs out at the courtesy radius, which grows as the root of the power.
     #[test]
-    fn a_bigger_ship_burns_hotter_without_anyone_deciding_to() {
-        let at = |length_m: f64| {
-            let power = lc_world::flight::Drive::DEFAULT.jet_power_w(mass_of(length_m), 5.0);
-            let (long, throat, mouth) = extent(length_m, 1.0);
-            temperature_k(power, radiating_area_m2(long, throat, mouth))
-        };
-        let small = at(500.0);
-        let large = at(50_000.0);
-        assert!(large > small * 2.0, "{small} K against {large} K");
-        // Both in a range that reads as fire rather than as a light bulb or a nuclear weapon.
-        assert!(small > 3_000.0 && small < 1.0e5, "{small} K");
-        assert!(large > 3_000.0 && large < 1.0e6, "{large} K");
+    fn the_cone_is_as_long_as_the_courtesy_radius() {
+        let at = |power| cone_m(&lit(None, power, DVec3::ZERO), DVec3::ZERO, None, &B).unwrap();
+        assert_eq!(at(1.1e20), drive_courtesy_radius_m(&B, 1.1e20));
+        assert!((at(4.4e20) / at(1.1e20) - 2.0).abs() < 1.0e-9);
     }
 
-    /// Harder thrust is hotter too, for the same reason: more power through a nozzle that grew
-    /// only in length.
+    /// Each face radiates its share of the drive's power through its own area.
     #[test]
-    fn a_harder_burn_is_a_hotter_one() {
-        let at = |accel_g: f64| {
-            let power = lc_world::flight::Drive::DEFAULT.jet_power_w(mass_of(SHIP_M), accel_g);
-            let (long, throat, mouth) = extent(SHIP_M, accel_g / 5.0);
-            temperature_k(power, radiating_area_m2(long, throat, mouth))
-        };
-        assert!(at(20.0) > at(5.0));
-        assert_eq!(at(0.0), 0.0, "an unlit drive is not a cold plume, it is no plume");
-    }
+    fn a_face_glows_at_its_share_of_the_drive() {
+        let power = 3.0e19;
+        let start = aft_apertures(&Form::starting(), &B).unwrap();
+        let face = start[0];
+        let area = std::f64::consts::PI * face.radius_m * face.radius_m;
+        assert_eq!(face_k(power, &face), aperture_temperature_k(power, area));
 
-    /// The property every `--rate 0` photograph rests on. Two frames of a stopped clock are the
-    /// same picture, and an hour of them is the same picture.
-    #[test]
-    fn a_stopped_clock_is_a_still_plume() {
-        assert_eq!(churn_step(1.0 / 60.0, 0.0), 0.0);
-        assert_eq!(churn_step(3600.0, 0.0), 0.0);
-        // And a clock corrected *backwards* holds rather than running the plume in reverse.
-        assert_eq!(churn_step(1.0 / 60.0, -5.0), 0.0);
-    }
-
-    /// Every rung of the ladder is a different churn, and the whole ladder is a small factor.
-    ///
-    /// Both halves matter. Without the first the clock is decoration; without the second the top
-    /// of the ladder moves the pattern further than a streak between one frame and the next,
-    /// which is not a fast plume, it is static.
-    #[test]
-    fn a_faster_clock_is_a_faster_churn_but_not_by_much() {
-        let frame = 1.0 / 60.0;
-        let at = |rung: f64| churn_step(frame, frame * rung * crate::session::TIME_RATE);
-        let rungs: Vec<f64> = crate::ui::RATE_LADDER
-            .iter()
-            .map(|(r, _)| *r)
-            .filter(|r| *r > 0.0)
-            .collect();
-        let steps: Vec<f64> = rungs.iter().map(|r| at(*r)).collect();
-        assert!(steps.windows(2).all(|w| w[1] > w[0] * 1.05), "{steps:?}");
-        let span = steps[steps.len() - 1] / steps[0];
-        assert!(span > 4.0 && span < 20.0, "the ladder spans {span} in churn");
-        // A streak is about `1 / CHURN_ALONG` of a lattice cell; crossing half of one in a frame
-        // is where a moving pattern turns into a hissing one.
-        let worst = steps[steps.len() - 1] * CHURN_ALONG as f64;
-        assert!(worst < 0.5, "{worst} lattice cells in a frame");
-    }
-
-    /// Two ships burning side by side do not flicker in step.
-    ///
-    /// Consecutive ids are the case that matters, because that is what a shard hands out, and
-    /// `ShipId(0)` is the one that catches a multiply with nothing mixed into it.
-    #[test]
-    fn every_craft_gets_its_own_streaks() {
-        let period = CHURN_PERIOD as f64;
-        let seeds: Vec<f64> =
-            (0..64).map(|n| seed(Some(ShipId(n)))).chain([seed(None)]).collect();
-        assert!(seeds.iter().all(|s| (0.0..period).contains(s)), "{seeds:?}");
-        let mut sorted = seeds.clone();
-        sorted.sort_by(f64::total_cmp);
-        assert!(sorted.windows(2).all(|w| w[0] != w[1]), "two craft share a seed");
-        // And spread over the period rather than clustered in a corner of it.
-        for eighth in 0..8 {
-            let low = period * eighth as f64 / 8.0;
-            assert!(
-                seeds.iter().any(|s| *s >= low && *s < low + period / 8.0),
-                "nothing in the {eighth}th of the period",
-            );
+        let plate = aft_apertures(&Builtin::Plate.form(), &B).unwrap();
+        assert_eq!(plate.len(), 2);
+        for face in &plate {
+            let area = std::f64::consts::PI * face.radius_m * face.radius_m;
+            assert_eq!(face_k(power, face), aperture_temperature_k(power / 2.0, area));
         }
     }
 
-    /// The streaks are darker than the gas around them at *any* plume temperature.
-    ///
-    /// The bug this is here for: a temperature ratio on its own does not do it. Above about ten
-    /// thousand kelvin the visible band is on the Rayleigh-Jeans side of the peak, radiance goes
-    /// as `T` rather than as `T^4`, and a streak six per cent down is a plume with no streaks.
-    /// [`SOOT_EMISSIVITY`] is what carries it there.
+    /// 32's figure: the starting drive at its rating.
     #[test]
-    fn a_streak_is_darker_than_the_gas_beside_it_however_hot_the_plume() {
-        for kelvin in [2_000.0, 6_000.0, 50_000.0, 500_000.0] {
-            let visible = |t: f64| blackbody::band_radiance(Band::ALL[2], t);
-            let ratio = visible(kelvin * SOOT_FRACTION) / visible(kelvin)
-                * SOOT_EMISSIVITY as f64;
-            // A stop and a half down at the very least, which is a lane one can see.
-            assert!(ratio < 0.35, "{kelvin} K: streaks at {ratio} of the core");
-            assert!(ratio > 0.0, "{kelvin} K: streaks are not holes");
-        }
+    fn the_starting_face_is_seven_hundred_thousand_kelvin() {
+        let start = Form::starting();
+        let face = aft_apertures(&start, &B).unwrap()[0];
+        let k = face_k(aft_aperture_w(&start, &B).unwrap(), &face);
+        assert!((k / 7.0e5 - 1.0).abs() < 0.03, "{k} K");
     }
 
-    /// Why the overflow is spent per channel rather than along one chroma.
-    ///
-    /// Under a natural mapping the plume's three channels are close enough that a single
-    /// overflow along the chroma is nearly right. Under a false-color one they are decades
-    /// apart — ten microns, two microns and green are three quite different questions to ask a
-    /// fifty-thousand-kelvin gas — and asking only the brightest of them reports its answer as
-    /// the color of all three. That is how the hottest object in the frame came back a flat
-    /// saturated blue.
-    ///
-    /// This is the premise rather than the rendering, which no test can reach. If a preset is
-    /// retuned until it fails, the shader's per-channel overflow is what to revisit.
+    /// What pushes a photon drive is `F c`, from the reaction drive's `½ F v` of the same thrust.
     #[test]
-    fn a_false_color_mapping_pulls_the_plume_s_channels_decades_apart() {
-        let radiance = PerBand::new(std::array::from_fn(|i| {
-            blackbody::band_radiance(Band::ALL[i], 50_000.0) as f32
-        }));
-        let spread = |mapping: &em_spectra::BandMapping| {
-            let rgb = mapping.apply(&radiance);
-            let (low, high) = rgb.iter().fold((f32::MAX, 0.0f32), |(l, h), c| (l.min(*c), h.max(*c)));
-            // Stops between the dimmest channel and the brightest.
-            (high / low.max(1e-30)).log2()
-        };
-        let natural = spread(&em_spectra::presets::natural());
-        let thermal = spread(&em_spectra::presets::thermal());
-        assert!(natural < 2.0, "natural spreads the channels {natural} stops");
-        assert!(thermal > 3.0, "thermal spreads them only {thermal} stops");
+    fn the_exhaust_carries_thrust_times_c() {
+        let drive = Drive::DEFAULT;
+        let (mass, g) = (2.0e9, 5.0);
+        let photon = lc_world::emit::thrust_power_w(mass, g * lc_world::flight::G0);
+        let from = exhaust_w(drive.jet_power_w(mass, g), drive.exhaust_v_m_s);
+        assert!((from / photon - 1.0).abs() < 1.0e-12, "{from} against {photon}");
+        assert_eq!(exhaust_w(0.0, drive.exhaust_v_m_s), 0.0);
     }
 
-    fn mass_of(length_m: f64) -> f64 {
-        let mut craft = lc_world::craft::Craft::at(
-            lc_world::craft::CraftId(1),
-            lc_world::craft::Kind::Ship,
-            DVec3::ZERO,
-        );
-        craft.length_m = length_m;
-        craft.mass_kg()
-    }
-
-    /// The exhaust goes aft, which is the one thing about its direction that must never be
-    /// wrong: a plume drawn forward is a ship visibly pushing itself backwards.
+    /// The exhaust leaves the stern: a cone drawn forward is a ship pushing itself backwards.
     #[test]
-    fn the_exhaust_points_away_from_the_nose() {
+    fn the_cone_points_away_from_the_nose() {
         for facing in [DVec3::X, DVec3::Y, DVec3::new(1.0, -2.0, 0.5).normalize()] {
-            let aft = along_exhaust(facing) * Vec3::Y;
-            let want = sim_to_render(-facing.normalize()).as_vec3();
-            assert!((aft - want).length() < 1.0e-6, "{facing} sent the exhaust to {aft}");
+            let rotation = crate::hull::frame(facing, Some(DVec3::Z), 0.3);
+            let root = Root::of(&Transform::from_rotation(rotation));
+            let want = sim_to_render(-facing);
+            assert!((root.aft() - want).length() < 1.0e-6, "{facing} sent the exhaust to {}", root.aft());
         }
+    }
+
+    /// The eye each proxy is handed is where the camera really is in the proxy's space.
+    #[test]
+    fn a_proxy_knows_where_the_eye_is() {
+        let apex = DVec3::new(3.0e-7, -1.0e-7, 2.0e-7);
+        let (transform, eye) = about_eye(apex, DVec3::new(0.2, -1.0, 0.1).normalize(), 1.4e-7);
+        let back = transform.transform_point(eye.as_vec3());
+        assert!(back.length() < 1.0e-12, "the eye lands {back} from the origin");
+
+        let root = Root { translation: apex, rotation: DQuat::from_rotation_z(0.7), scale: 1.0 / UNIT_M };
+        assert!(root.to_render(root.eye()).length() < 1.0e-18);
+    }
+
+    /// The reaction drive's plume is retired, with its material, shader and churn.
+    #[test]
+    fn no_plume_material_remains() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        for gone in ["assets/shaders/plume.wgsl", "assets/textures/plume.tgraph", "../em-render/src/plume_material.rs"] {
+            assert!(!std::path::Path::new(root).join(gone).exists(), "{gone} is back");
+        }
+        assert!(!include_str!("../../em-render/src/lib.rs").contains("plume"));
     }
 }

@@ -60,7 +60,7 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--charted` | seed what the ship knows from truth. **A ship knows nothing on creation, so it photographs nothing**: without this every body shot is a ship staring at an empty panel and `--focus` names a body the panel does not list. The charting office kept as a dev tool |
 | `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
 | `--panel <name>` / `--tune` | open a panel. `--panel map` is the exception: the map is a mode of the main view, so this is a pin holding it there |
-| `--focus <body>` / `--focus band:<n>` | what is **selected**, as a click on either view would leave it. Everything else that aims is a camera, so this is the only way to photograph a reticle. `--station` sets the focus itself and stands aside when this is given |
+| `--focus <body>` / `--focus band:<n>` / `--focus craft:<id>` | what is **selected**, as a click on either view would leave it; a selected craft draws its exhaust cone. Everything else that aims is a camera, so this is the only way to photograph a reticle. `--station` sets the focus itself and stands aside when this is given |
 | `--book <id>` | open a book from `crates/lc-client/assets/books/<id>.epub`; `--chapter <n>` and `--pages <n>` move within it |
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |

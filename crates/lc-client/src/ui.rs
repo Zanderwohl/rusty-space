@@ -463,6 +463,8 @@ pub struct UiState {
     /// Open panels, most recently opened last. Order is what "back" walks.
     open: Vec<Panel>,
     pub selected: Option<StarId>,
+    /// Another craft picked out, which draws its exhaust's cone wherever it is.
+    pub selected_craft: Option<lc_proto::ShipId>,
     /// What is picked out of the local system's inventory, and which of its courses is armed.
     ///
     /// Here rather than in the panel because picking a body out of the sky will set the same
@@ -565,6 +567,7 @@ impl Default for UiState {
             menu_page: MenuPage::Root,
             open: Vec::new(),
             selected: None,
+            selected_craft: None,
             focus: None,
             course: None,
             look: Look::default(),
