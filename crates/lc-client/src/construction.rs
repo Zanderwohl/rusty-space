@@ -8,15 +8,14 @@
 //! taken apart or not built yet. Such a parent stands in at the end of the round it belongs to:
 //! the start's while taking apart, the target's once moving and building.
 //!
-//! On the placeholders a working part is drawn solid at its volume at `t`, inside a cage at the
-//! sliver's outer size that thickens as the truss goes up and thins as the scaffold comes down.
-//! On the hull meshes (`crate::refit_hull`) each point reads its own bands, through [`Sweep`].
+//! On the hull meshes (`crate::refit_hull`) each point reads its own bands, through [`Sweep`]. The
+//! placeholders draw a working part solid at its volume at `t`, until those meshes are up.
 //!
 //! `--demo refit` is a client fixture beside `--form`, not a `Scenario`: it needs only the
 //! player's own ship. In the game a [`Refit`] follows the player's round from `Fitted` through
 //! [`follow`]: a round that stops being stated before it is done was canceled, and is drawn by
 //! [`Frame::canceled`] from there. Another craft states only the step its light shows, and is
-//! drawn from that alone by [`sighted`].
+//! drawn from that alone by [`sighted`], and every craft's round goes to `crate::refit_hull`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,8 +40,6 @@ const TRAVEL: f64 = 1.0 - (TRUSS + PLATING + FITTING + SCAFFOLD);
 
 /// How high a moved subtree arcs off the straight line, in lengths of that line.
 const ARC: f64 = 0.25;
-/// Points [`Working::mean`] averages over.
-const MEAN_SAMPLES: usize = 32;
 /// Directions a sliver's far edge is sought along.
 const SPAN_SAMPLES: usize = 96;
 
@@ -198,20 +195,6 @@ impl Working {
     /// out on a resized part.
     pub fn moving(&self) -> impl Iterator<Item = (PartId, Side)> + '_ {
         self.carried.iter().copied().chain(self.riders.iter().map(|p| (p.part, p.side)))
-    }
-
-    /// Each layer averaged across the sliver: what a placeholder with one mesh per part draws.
-    pub fn mean(&self) -> Look {
-        let mut sum = Look::default();
-        for i in 0..MEAN_SAMPLES {
-            let l = self.look((i as f64 + 0.5) / MEAN_SAMPLES as f64);
-            sum.truss += l.truss;
-            sum.plating += l.plating;
-            sum.fitted += l.fitted;
-            sum.scaffold += l.scaffold;
-        }
-        let n = MEAN_SAMPLES as f64;
-        Look { truss: sum.truss / n, plating: sum.plating / n, fitted: sum.fitted / n, scaffold: sum.scaffold / n }
     }
 }
 

@@ -112,6 +112,7 @@ graph LR
   R13["R13 The engine grid on the open face"]
   R14["R14 Refits in the game"]
   R15["R15 Construction on the real hull in the game"]
+  R16["R16 Drones at work on another craft"]
   C1["C1 Editor view"]
   C2["C2 Editing the draft"]
   C3["C3 Undo and redo"]
@@ -193,6 +194,8 @@ graph LR
   R8 --> R15
   R10 --> R15
   R14 --> R15
+  R9 --> R16
+  R15 --> R16
   R1 --> C1
   C1 --> C2
   F5 --> C2
@@ -229,6 +232,7 @@ graph LR
   R13 --> X1
   R14 --> X1
   R15 --> X1
+  R16 --> X1
 ```
 <!-- /graph -->
 
@@ -608,7 +612,7 @@ graph LR
 
 ### R12 · The cone in the game
 
-- status: todo
+- status: active card "R12 · The cone in the game"
 - needs: R7, F9
 - touches: `crates/lc-client/src/plume.rs`
 - read: 32 §The exhaust cone
@@ -635,12 +639,21 @@ graph LR
 
 ### R15 · Construction on the real hull in the game
 
-- status: active card "R15 · Construction on the real hull in the game"
+- status: done #113
 - needs: R8, R10, R14
-- touches: `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/hull.rs`
+- touches: `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-client/src/resolved.rs`, `crates/lc-client/src/construction.rs`, `crates/lc-client/src/tonemap.rs`, `crates/lc-client/src/app.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/`
 - read: 32 §A build step is a frontier, §Materials by kind
 - deliver: `refit_hull`'s truss, plating and bands draw every craft with a round in the game, not only `--demo refit`, and the placeholders' cage retires; lights by kind at real powers through the exposure, replacing `refit_hull`'s stand-in shares of the exposure's reference.
 - done when: a refit applied in the game photographs as `--demo refit` does, on the player's ship and on another's, and the living lights show on a night side and vanish in sunlight.
+
+### R16 · Drones at work on another craft
+
+- status: todo
+- needs: R9, R15
+- touches: `crates/lc-client/src/drones.rs`
+- read: 32 §Drones, §Rounds in the game
+- deliver: another craft's drones drawn at its round from the step its `Presence` states, as `refit_hull` draws its hull, placed under that craft's root; today only the player's `Refit` has drones.
+- done when: a client watching another's applied round photographs its drones working the frontier.
 
 ## C: client
 
@@ -727,7 +740,7 @@ graph LR
 
 ### C10 · Preview from the ship's heat
 
-- status: todo
+- status: active card "C10 · Preview from the ship's heat"
 - needs: H3, C4
 - touches: `crates/lc-client/src/preview.rs`, `crates/lc-client/src/refit_panel.rs`
 - read: 29 §The budget; 30 §The heat account
@@ -739,7 +752,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15
+- needs: F10, H7, H8, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.

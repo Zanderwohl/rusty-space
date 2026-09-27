@@ -62,6 +62,9 @@ const GRAY: Vec4 = Vec4::new(0.30, 0.31, 0.33, 1.0);
 /// enough that its dark half is most of its silhouette and a hard terminator eats the shape.
 const NIGHT: f32 = 0.10;
 
+/// A real hull's, low enough that a lit window outshines its night side even by Venus.
+pub(crate) const HULL_NIGHT: f32 = 0.003;
+
 /// Where the player is looking from, and how far back that is.
 ///
 /// Recomputed at the head of every frame and read by everything that turns a world position
@@ -346,6 +349,24 @@ fn hull_radiance() -> PerBand<f32> {
     *RADIANCE
 }
 
+/// Luminance of white square to the Sun at 1 AU, cd/m²: 1361 W/m² at 93 lm/W, over π.
+const WHITE_AT_AU_CD_M2: f64 = 40_000.0;
+const SUN_TEFF_K: f64 = 5772.0;
+
+/// A lamp of `cd_m2`, per band: a blackbody at `k` kelvin as bright in V as that share of
+/// [`WHITE_AT_AU_CD_M2`]. A fixed power, so the exposure decides whether it shows.
+pub(crate) fn lamp_radiance(cd_m2: f64, k: f64) -> PerBand<f32> {
+    let sun = crate::resolved::lit_radiance(1.0, em_spectra::stellar::SOLAR_RADIUS, SUN_TEFF_K, lc_world::navigation::AU);
+    let glow = crate::session::spectrum_at(k);
+    let scale = (cd_m2 / WHITE_AT_AU_CD_M2 * sun[em_spectra::Band::V] as f64 / glow[em_spectra::Band::V] as f64) as f32;
+    glow.map(|_, x| x * scale)
+}
+
+/// [`lamp_radiance`] as display light, in the units of a lit hull's `reflected`.
+pub(crate) fn lamp(session: &Session, cd_m2: f64, k: f64) -> Vec3 {
+    Vec3::from_array(session.mapping.apply(&lamp_radiance(cd_m2, k)))
+}
+
 /// A hull at `at_ly` painted `paint`, lit by [`lighting`]'s `star`.
 pub(crate) fn lit(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, paint: Vec4) -> BodySurfaceUniform {
     let own = emitted(session);
@@ -504,18 +525,36 @@ pub fn update_hulls(
 /// the optical and its own heat in the infrared, and which one dominates is a question about
 /// the band mapping rather than about the ship.
 ///
+/// Starlight by the share of the disc lit as seen from `to_eye` (zero: all of it), plus a lit
+/// window, so a camera on the night side exposes for the lights.
+///
 /// `star` is [`lighting`]'s answer, passed in rather than asked for: between the stars that is
 /// a search over the whole catalog, and a caller metering a scene wants every hull in it lit
 /// by the same one anyway.
-pub fn radiance_at(star: Option<(DVec3, f64, f64)>, at_ly: DVec3) -> PerBand<f32> {
+pub fn radiance_at(star: Option<(DVec3, f64, f64)>, at_ly: DVec3, to_eye: DVec3) -> PerBand<f32> {
     let own = hull_radiance();
-    let Some((star_ly, radius, teff)) = star else { return own };
+    let window = metered_lamp();
+    let Some((star_ly, radius, teff)) = star else {
+        return own.map(|band, x| x + window[band]);
+    };
     let lit =
         crate::resolved::lit_radiance(ALBEDO, radius, teff, star_ly.distance(at_ly) * M_PER_LY);
-    PerBand::new(std::array::from_fn(|i| {
-        let band = em_spectra::Band::ALL[i];
-        lit[band] + own[band]
-    }))
+    let seen = lit_share(star_ly - at_ly, to_eye);
+    own.map(|band, x| x + lit[band] * seen + window[band])
+}
+
+fn metered_lamp() -> PerBand<f32> {
+    let (cd_m2, k) = crate::ship_hull::lamp_of("living").expect("a living region has lights");
+    lamp_radiance(cd_m2, k)
+}
+
+/// A sphere's lit share of its disc, floored at the night fill.
+fn lit_share(to_star: DVec3, to_eye: DVec3) -> f32 {
+    if to_eye == DVec3::ZERO {
+        return 1.0;
+    }
+    let cos_phase = to_star.normalize_or_zero().dot(to_eye.normalize_or_zero());
+    (0.5 * (1.0 + cos_phase) as f32).max(HULL_NIGHT)
 }
 
 /// How much sky a hull of `length_m` covers from `distance_m`, steradians.
@@ -534,6 +573,22 @@ pub fn solid_angle_sr(length_m: f64, distance_m: f64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A night side is metered for its lights, a day side for its starlight.
+    #[test]
+    fn a_night_side_is_metered_for_its_lights() {
+        let v = |r: PerBand<f32>| r[em_spectra::Band::V];
+        let au_ly = lc_world::navigation::AU / M_PER_LY;
+        let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
+        let at = DVec3::X * au_ly;
+        let window = v(metered_lamp());
+        let day = v(radiance_at(star, at, -DVec3::X));
+        let night = v(radiance_at(star, at, DVec3::X));
+        assert!(day > 30.0 * window, "{day} against a window's {window}");
+        assert!(night < 3.0 * window, "{night}: the night side was metered as lit");
+        assert!(night >= window);
+        assert_eq!(v(radiance_at(star, at, DVec3::ZERO)), day, "no eye meters the disc full");
+    }
 
     const RAD_PER_PX: f32 = 7.67e-4;
 
