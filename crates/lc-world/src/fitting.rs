@@ -585,16 +585,12 @@ impl Fitting {
 
     /// Stored energy at a coordinate time, joules.
     pub fn stored_j_at(&self, motion: &ShipState, now_s: f64) -> f64 {
-        self.stored_with(self.flow(now_s).income_j, motion, now_s)
+        self.stored_with(self.flow(Some(motion), now_s).income_j)
     }
 
     /// `income_j` from [`Fitting::flow`].
-    fn stored_with(&self, income_j: f64, motion: &ShipState, now_s: f64) -> f64 {
-        let moved = match &self.refit {
-            Some(plan) => plan.at(self.since_s).stored_j - plan.at(now_s).stored_j,
-            None => 0.0,
-        };
-        (self.stored_j + income_j - self.burn_spent_j(motion, now_s) - moved).max(0.0)
+    fn stored_with(&self, income_j: f64) -> f64 {
+        (self.stored_j + income_j).max(0.0)
     }
 
     /// What is stored and not committed, joules.
@@ -615,8 +611,8 @@ impl Fitting {
             }
             None => (self.hull.dry_kg, 0.0),
         };
-        let flow = self.flow(now_s);
-        dry + in_hand + (self.stored_with(flow.income_j, motion, now_s) + flow.heat_j) / C2
+        let flow = self.flow(Some(motion), now_s);
+        dry + in_hand + (self.stored_with(flow.income_j) + flow.heat_j) / C2
     }
 
     /// The acceleration this ship's aft engines give it now, in g.
@@ -630,8 +626,8 @@ impl Fitting {
         if now_s <= self.since_s {
             return;
         }
-        let flow = self.flow(now_s);
-        let stored = self.stored_with(flow.income_j, motion, now_s);
+        let flow = self.flow(Some(motion), now_s);
+        let stored = self.stored_with(flow.income_j);
         self.committed_j = self.committed_j_at(motion, now_s);
         if let Some(plan) = &self.refit {
             let (progress, done) = (plan.at(now_s), plan.is_done(now_s));
@@ -689,11 +685,10 @@ impl Fitting {
     /// vents arrive as one burst. Settle first.
     pub fn finish_refit(&mut self) -> bool {
         let Some(plan) = self.refit.take() else { return false };
-        let end = plan.at(plan.round().start_s + plan.duration_s());
-        let remaining_j = plan.at(self.since_s).stored_j - end.stored_j;
-        self.heat_j += heat::left_j(&plan, self.since_s, &self.balance);
-        self.take_form(end.form);
-        self.stored_j = (self.stored_j - remaining_j).clamp(0.0, self.hull.capacities.storage_j.max(0.0));
+        let (stored_j, vented_j) = heat::skip(&plan, self.since_s, self.stored_j, &self.balance);
+        self.heat_j += vented_j;
+        self.take_form(plan.at(plan.round().start_s + plan.duration_s()).form);
+        self.stored_j = stored_j;
         true
     }
 
