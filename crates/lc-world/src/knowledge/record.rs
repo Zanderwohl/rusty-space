@@ -407,8 +407,7 @@ pub struct Orbit {
     /// A time the body was at a known place on the orbit, and one sigma: a transit's mid-time,
     /// or a fit's periapsis passage. With a full orientation this is what places the body now.
     ///
-    /// A fit's sigma is taken with the periapsis and the period held, so it is how far round
-    /// the orbit the body was, as a time; the period's own error is a drift from here.
+    /// A fit's sigma is taken with the periapsis and the period held: the phase, as a time.
     pub epoch_s: Option<(f64, f64)>,
     pub method: Method,
     /// Coordinate seconds the witness stated it.

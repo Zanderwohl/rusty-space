@@ -28,10 +28,8 @@ const AMBIGUOUS_STEP_RAD: f64 = std::f64::consts::FRAC_PI_2;
 /// Searched only when a step is over [`AMBIGUOUS_STEP_RAD`], so a well-sampled arc costs one
 /// candidate.
 ///
-/// `held_s`, seconds per radian of an orbit already fitted, places every look on the turn that
-/// rate predicts, either way round. That is what a long arc needs: decimation spreads its looks
-/// many orbits apart, far past the turns searched here, and a moon's arc is hundreds of orbits
-/// within a day of play.
+/// `held_s`, seconds per radian of an orbit already fitted, puts each look on the turn it
+/// predicts, either way round. A long arc needs it: decimation keeps looks many orbits apart.
 pub(crate) fn unwrappings(mean: &[(f64, f64)], held_s: Option<f64>) -> Vec<(f64, f64)> {
     let mut out: Vec<(f64, f64)> = Vec::new();
     if let (Some(rate), Some(first)) = (held_s.filter(|r| sound(*r)), mean.first()) {

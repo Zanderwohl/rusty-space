@@ -1,14 +1,11 @@
 //! A run of looks at a satellite, each gap twice the last, for an orbit whose period is unknown.
 //!
-//! Bearings alone fix an orbit from an arc of about a third to three quarters of it: shorter
-//! does not bend enough, and longer is more turns than the fit can count. A survey's steady
-//! cadence gives one arc length per body and aliases the period besides. Doubling gaps put
-//! some prefix of the run in that window whatever the period, and the uneven spacing breaks
-//! the aliasing. Measured on Jupiter's moons from 5 AU, nine looks over 128 hours fit every
-//! one from Metis (7 h) to Callisto (17 d).
+//! Bearings alone fix an orbit from about a third to three quarters of it: less does not bend
+//! enough, more is too many turns to count. Doubling gaps put some prefix of the run in that
+//! window whatever the period, and uneven spacing avoids aliasing it. Measured from 5 AU, nine
+//! looks over 128 hours fit Jupiter's moons from Metis (7 h) to Callisto (17 d).
 //!
-//! Not saved, like [`super::primary::Attempt`]: after a restart a body still without an orbit
-//! starts again.
+//! Not saved: after a restart a body still without an orbit starts again.
 
 use std::collections::BTreeMap;
 
@@ -16,11 +13,9 @@ use super::Subject;
 
 /// How near a brighter body a body must be seen to be followed up, radians.
 ///
-/// Only a satellite needs a run: anything going round the star has a period of months at the
-/// least, which the survey's own cadence samples well, and running it anyway re-arms its fit
-/// with every doubled gap and starves the queue. Callisto, at 0.013 AU, is within this of
-/// Jupiter from anywhere more than 0.36 AU off; ten degrees took in Mars beside Earth from
-/// 5 AU. A moon whose period is past the weeks a run covers is left to the survey.
+/// Only satellites need a run; running anything else re-arms its fit at every gap and starves
+/// the fit queue. Takes in Callisto from anywhere more than 0.36 AU from Jupiter; ten degrees
+/// took in Mars beside Earth from 5 AU.
 pub const BESIDE_RAD: f64 = 2.0 * std::f64::consts::PI / 180.0;
 
 /// Looks in one run, counting the one that started it.
@@ -29,16 +24,13 @@ pub const LOOKS: usize = 9;
 /// The first gap, seconds. Nine looks then span 128 hours.
 pub const FIRST_GAP_S: f64 = 3600.0;
 
-/// Runs one body may have. A second starts with gaps this many times longer, for a period the
-/// first could not reach.
+/// Runs one body may have. A second has gaps this many times longer, for a longer period.
 pub const ROUNDS: u32 = 2;
 const STRETCH: f64 = 4.0;
 
-/// Runs whose next gap is under this many first gaps at once. The early looks of a run are
-/// what compete for the telescope, and a survey starting in a system finds two hundred bodies
-/// in its first cycle. Half a tick's turns is about 29 looks an hour and a run's dense looks
-/// are three in four hours, so this keeps the follow-ups inside their share and gets round
-/// Sol in about a day.
+/// Runs at once whose next gap is under this many first gaps. Half a tick's turns is about 29
+/// looks an hour and a run's early looks are three in four hours, so this keeps runs inside
+/// their share and starts all of Sol's satellites within a day.
 pub const DENSE: usize = 32;
 const DENSE_GAPS: f64 = 4.0;
 
@@ -51,8 +43,7 @@ struct Run {
 }
 
 impl Run {
-    /// Gaps of 1, 1, 2, 4 and so on, from the look actually taken last: a late look stretches
-    /// the run rather than squeezing the gap after it.
+    /// Gaps of 1, 1, 2, 4 ... from the last look taken, so a late look stretches the run.
     fn gap_s(&self) -> f64 {
         self.first_gap_s * 2f64.powi(self.taken.saturating_sub(2) as i32)
     }
@@ -74,8 +65,8 @@ pub struct Following {
 }
 
 impl Following {
-    /// Start a run on `subject`, seen at `at_s`, if it has had fewer than [`ROUNDS`] and the
-    /// telescope has room. `false` otherwise; the survey offers it again on its next pass.
+    /// `false` when it has had [`ROUNDS`] runs or the telescope is full; the survey offers it
+    /// again on its next pass.
     pub fn begin(&mut self, subject: Subject, at_s: f64) -> bool {
         let rounds = self.rounds.get(&subject).copied().unwrap_or(0);
         if self.runs.contains_key(&subject) || rounds >= ROUNDS {
@@ -102,8 +93,8 @@ impl Following {
         due.into_iter().map(|(_, subject)| subject).collect()
     }
 
-    /// A look was taken, or tried: one that found nothing still counts, or a body gone behind
-    /// its planet would hold its place in the queue for good.
+    /// A look that found nothing still counts, or a body hidden behind its planet would stay
+    /// due for good.
     pub fn took(&mut self, subject: Subject, at_s: f64) {
         let Some(run) = self.runs.get_mut(&subject) else { return };
         run.taken += 1;

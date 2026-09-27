@@ -23,12 +23,8 @@ use crate::sky::StarId;
 /// bearing points at the star, a moon's at its planet.
 const PRIMARIES_TRIED: usize = 3;
 
-/// The edge of a primary's Hill sphere, `a_H = r (m / 3M)^(1/3)`, as bounds on what goes round
-/// it: nothing outside stays bound, so an orbit past either is a wrong orbit or a wrong primary.
-///
-/// With Kepler's third law on both sides the masses cancel and the period is `P_primary / sqrt 3`.
-/// The axis needs a mass, but a primary lighter than its star puts it inside `r / 3^(1/3)`,
-/// which is what stops an asteroid being fitted about a brighter one at a few AU.
+/// Hill-sphere bounds on a satellite: a period under the primary's own over sqrt 3, where the
+/// masses cancel, and an axis under its own over cbrt 3, for any primary lighter than its star.
 const HILL_PERIOD: f64 = 0.577_350_269_189_625_8;
 const HILL_REACH: f64 = 0.693_361_274_350_634_7;
 
@@ -55,7 +51,7 @@ pub(crate) struct Attempt {
     pub last: Option<Held>,
 }
 
-/// The last orbit fitted, the primary it is about, and every primary it beat to it.
+/// The last orbit fitted, its primary, and every primary it was chosen over.
 #[derive(Clone, Debug)]
 pub(crate) struct Held {
     about: Option<BodyId>,
@@ -166,7 +162,6 @@ impl crate::knowledge::Knowledge {
         (mean.length_squared() > 0.0).then(|| mean.normalize())
     }
 
-    /// Mean flux of a body in `band`, or `None` if it was never measured in it.
     fn mean_flux(&self, subject: Subject, band: em_spectra::Band) -> Option<f64> {
         let (sum, count) = self
             .file(subject)?
@@ -177,18 +172,14 @@ impl crate::knowledge::Knowledge {
         (count > 0).then(|| sum / count as f64)
     }
 
-    /// Whether `primary` is brighter than `satellite` in a band both were measured in.
-    ///
-    /// A satellite and its primary are at one distance from the observer, so the brighter is
-    /// the bigger, and the bigger is the one being gone round. `false` with no band in common.
+    /// A satellite and its primary are at one distance, so the brighter is the bigger. `false`
+    /// with no band in common.
     fn outshines(&self, primary: Subject, satellite: Subject) -> bool {
         em_spectra::Band::ALL.into_iter().find_map(|band| {
             Some(self.mean_flux(primary, band)? > self.mean_flux(satellite, band)?)
         }) == Some(true)
     }
 
-    /// Whether a body was last seen within `within_rad` of a brighter one: a satellite, then,
-    /// or something passing in front of one.
     pub fn beside_brighter(&self, subject: Subject, within_rad: f64) -> bool {
         let latest = |subject: Subject| {
             let seen = self.file(subject)?.sightings().iter().max_by(|a, b| a.observed_s.total_cmp(&b.observed_s))?;
@@ -203,17 +194,15 @@ impl crate::knowledge::Knowledge {
         })
     }
 
-    /// Candidate primaries for a body, the star first and then the nearest few in the sky that
-    /// outshine it.
+    /// Candidate primaries for a body: the star, then the nearest few in the sky that outshine it.
     ///
     /// **Not a list of moons.** A Keplerian orbit puts its primary at a focus, so the candidate
     /// that works as a focus is the primary, and trying the star alongside the rest is what
     /// keeps a planet from being handed to one of its neighbors.
     ///
-    /// **Brighter only.** Six elements fit sixteen bearings about almost any point near the
-    /// true primary, and a planet's nearest neighbors in the sky are its own moons: Saturn was
-    /// fitted about Albiorix, and chains of moons about each other ended nowhere. Brightness
-    /// also makes a cycle impossible, since it is a strict order.
+    /// Brighter only: six elements fit sixteen bearings about almost any point near the true
+    /// primary, and a planet's nearest neighbors are its own moons. A strict order also rules
+    /// out cycles.
     fn primaries(&self, star: StarId, subject: Subject, now_s: f64) -> Vec<Option<BodyId>> {
         let Some(toward) = self.mean_bearing(subject) else { return vec![None] };
         let mut near: Vec<(f64, BodyId)> = self
@@ -241,18 +230,13 @@ impl crate::knowledge::Knowledge {
         tried
     }
 
-    /// How far a body's believed place misses the line of sight it was actually seen along, at
-    /// each look held, meters and in time order: the believed point moved across onto the ray,
-    /// at the distance believed.
+    /// At each look held, how far the believed place misses the ray the body was seen along, at
+    /// the believed distance. Meters, in time order.
     ///
-    /// **What a moon's frame is corrected by.** A moon's looks are put into its planet's frame,
-    /// and a planet placed 0.005 AU out is Europa's orbit wide. Across the line of sight the
-    /// planet's own bearings say where it was to their noise, 75 km at 5 AU. Along it they say
-    /// nothing, but that error only scales the moon's orbit by the depth's fraction of the
-    /// distance: a part in a thousand for Jupiter from 5 AU.
-    ///
-    /// A place and not an angle, so it moves only as the orbit's error does, however the craft
-    /// is moving, and the few looks decimation keeps are enough to interpolate it between.
+    /// Corrects a moon's frame: across the line of sight a planet's bearings place it to 75 km
+    /// from 5 AU, where its orbit may be 0.005 AU out, wider than Europa's. A position rather
+    /// than an angle, so it varies only as the orbit's error does and interpolates between the
+    /// few looks kept.
     fn sightlines(&self, star: StarId, body: BodyId, star_ly: DVec3) -> Vec<(f64, DVec3)> {
         let Some(file) = self.file(Subject::Body { star, body }) else { return Vec::new() };
         let mut out: Vec<(f64, DVec3)> = file
@@ -313,11 +297,8 @@ impl crate::knowledge::Knowledge {
                 let held = about.and_then(|body| self.body_belief(star, body, now_s));
                 let bound = |element: Option<(f64, f64)>, scale: f64| element.map_or(f64::INFINITY, |(v, _)| v * scale);
                 let looks = self.looks_at(subject, &at);
-                // The frame keeps the depth believed, so its error is a scale on the whole orbit:
-                // the planet's own error along the line of sight, over its distance. The
-                // sightlines' miss is a floor under it, since an orbit fitted to the wrong
-                // minimum can be sure of itself; bearings pin the depth far worse than they pin
-                // the miss, so it is only a floor.
+                // The frame keeps the believed depth, whose error scales the whole orbit. The
+                // sightlines' miss is only a floor: bearings pin depth far worse than the miss.
                 let missed_m = (seen.iter().map(|(_, c)| c.length_squared()).sum::<f64>()
                     / seen.len().max(1) as f64)
                     .sqrt();
@@ -379,8 +360,8 @@ impl crate::knowledge::Knowledge {
     }
 }
 
-/// A [`Knowledge::sightlines`] correction at `t`: straight between the looks either side, and
-/// the nearest one's beyond them.
+/// A [`Knowledge::sightlines`] correction at `t`: linear between the looks either side, the
+/// nearest one's beyond them.
 fn along(seen: &[(f64, DVec3)], t: f64) -> DVec3 {
     let after = seen.partition_point(|(at, _)| *at < t);
     match (after.checked_sub(1).and_then(|i| seen.get(i)), seen.get(after)) {
@@ -398,8 +379,8 @@ struct Frame {
     looks: Vec<Look>,
     longest_s: f64,
     widest_m: f64,
-    /// The primary's placement error over its distance: how far off the scale of anything fitted
-    /// in this frame can be, whatever its bearings say. See [`Knowledge::sightlines`].
+    /// Fractional error on the scale of anything fitted in this frame: the primary's depth error
+    /// over its distance.
     depth: f64,
 }
 
@@ -438,12 +419,9 @@ impl Solved {
 impl FitJob {
     /// The fit itself: pure, and the whole of the cost.
     ///
-    /// **A carried orbit keeps its primary only against the candidates it beat.** A moon seen
-    /// before its planet was placed has only the star to be fitted about, and carrying that
-    /// fit onto every later arc would keep it about the star for good. So a candidate offered
-    /// now that was not offered then is searched as well, and the better of the two stands.
-    /// Only the new ones: the full search fails on an arc many orbits long, which a moon's is
-    /// within a day of play, and the carried fit is what still works there.
+    /// A carried orbit competes with candidates offered since it was found, or a moon fitted
+    /// before its planet was placed would stay about the star. Only those are searched: the full
+    /// search fails on an arc many orbits long, which a moon's is within a day.
     pub fn solve(self) -> Option<Solved> {
         let offered: Vec<Option<BodyId>> = self.frames.iter().map(|f| f.about).collect();
         let bound = |frame: &Frame, fitted: Fitted| {

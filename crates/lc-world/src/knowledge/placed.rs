@@ -232,8 +232,8 @@ pub(super) fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     // belief that reported only the size and the plane said a course could be flown against it.
     // `M = tau (t - epoch) / P`, so the period's error carries `tau |t - epoch| sigma_P / P^2`
     // of anomaly with it. Doc 25: the sigma is grown by how long since it was last seen.
-    // The epoch's own error is where that drift starts from: `tau sigma_epoch / P`, which a
-    // fit states with the period held so that the two add without counting anything twice.
+    // The epoch's error adds in quadrature: a fit states it with the period held, so nothing
+    // counts twice.
     let (period_s, period_sigma) = orbit.period_s;
     let drift = TAU * (now_s - path.epoch_s).abs() * period_sigma / (period_s * period_s);
     let at_epoch = TAU * orbit.epoch_s.map_or(0.0, |(_, sigma)| sigma) / period_s;

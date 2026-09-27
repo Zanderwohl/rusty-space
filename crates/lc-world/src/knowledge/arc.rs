@@ -628,8 +628,7 @@ pub struct Spread {
     pub eccentricity: f64,
     /// Radians the plane's pole can move.
     pub pole_rad: f64,
-    /// Seconds the epoch can move with the periapsis and the period held: how far round its
-    /// orbit the body was then, as a time. See [`spread`].
+    /// Seconds, with the periapsis and the period held: the phase at the epoch, as a time.
     pub epoch_s: f64,
 }
 
@@ -720,12 +719,9 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
         pole_rad,
         period_s: walk(PERIOD, &|f, d| Fitted { period_s: f.period_s * (1.0 + d), ..*f }, 1.0e-9, f64::INFINITY)
             * fitted.period_s,
-        // **The phase, not the periapsis passage.** At a small eccentricity the periapsis is
-        // barely defined, and an epoch walked with it free trades against it and comes out as
-        // large as the orbit although where the body is round it is known well. Held with the
-        // periapsis, the epoch's error is the phase's. Held with the period too, since the
-        // period's error is a drift from the epoch that `knowledge::placed` adds on its own.
-        // Half a turn is anywhere on the orbit.
+        // The periapsis is held because at small eccentricity it trades against the epoch, which
+        // would then come out as large as the orbit; the period, because `knowledge::placed`
+        // adds its drift itself. Half a turn is anywhere on the orbit.
         epoch_s: walk(
             EPOCH | PERIAPSIS | PERIOD,
             &|f, d| Fitted { epoch_s: f.epoch_s + d * f.period_s, ..*f },
@@ -1227,9 +1223,8 @@ mod tests {
         assert!(off(carried.period_s, truth.period_s()) < 2.0e-3);
     }
 
-    /// **A refit counts whole turns from the orbit it carries.** Decimation keeps the looks
-    /// spread across the arc, so sixteen of them over forty orbits of a short-period body are
-    /// each a few orbits apart and the anomalies alone cannot say how many. The held period can.
+    /// A refit counts whole turns from the period it carries, which a search cannot do over
+    /// sixteen looks spread across forty orbits.
     #[test]
     fn a_refit_counts_the_turns_a_search_cannot() {
         let truth = like(0.387, 0.2056);
@@ -1358,11 +1353,8 @@ mod tests {
         }
     }
 
-    /// **A fit states how far round its orbit the body is**, as the epoch's error, and a
-    /// reader adds it to the period's drift. Small against the drift and the eccentricity's own
-    /// swing along the path, measured here, and not calibrated any better than the rest of
-    /// [`spread`]: the Earth-like fit sits at 800 times the noise and the truth is 4.5 of its
-    /// whole along-path bar out.
+    /// A fit states the epoch's error and a reader adds it to the period's drift. No better
+    /// calibrated than the rest of [`spread`]: the Earth-like fit is 4.5 of its along-path bar out.
     #[test]
     fn a_fit_states_how_far_round_its_body_is() {
         use crate::knowledge::placed::{Placed, placed_at};
@@ -1673,9 +1665,8 @@ mod tests {
         assert_eq!(moon.mass_kg, None, "nothing goes round the moon");
     }
 
-    /// **A moon is fitted against where its planet was seen**, not only where its planet's orbit
-    /// says it was. The planet's orbit here is three hours out, a thousandth of an AU along its
-    /// path and a third of Io's orbit, and its own bearings take that out of the moon's frame.
+    /// A moon is fitted against where its planet was seen: a planet's orbit three hours late, a
+    /// third of Io's orbit out, is taken out of the moon's frame by the planet's own bearings.
     #[test]
     fn a_moon_is_fitted_against_where_its_planet_was_seen() {
         use crate::knowledge::{BodyId, Knowledge, Sighting, Witness};

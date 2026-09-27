@@ -282,9 +282,9 @@ impl Observatory {
 /// star light-years off cannot outshine a planet at 5 AU, so it can neither glare on one nor
 /// hide behind one.
 ///
-/// A body found beside a brighter one with no orbit is followed up: see [`super::follow_up`]. Its looks take up to
-/// half the tick's turns, and while it is followed its own turn in the rotation is skipped, so
-/// the run is all it holds and nothing of it is decimated before it is fitted.
+/// A body beside a brighter one with no orbit is followed up ([`super::follow_up`]), in up to
+/// half the tick's turns. Its own rotation turn is skipped meanwhile, so the run is all it holds
+/// and none of it is decimated before it is fitted.
 ///
 /// Returns the last body it detected, if any.
 #[allow(clippy::too_many_arguments)]
@@ -1149,8 +1149,8 @@ mod tests {
     }
 
 
-    /// **A satellite found without an orbit is followed up**, each gap twice the last, and the
-    /// rest of the survey goes on round it. A planet is left to the survey's own cadence.
+    /// A satellite without an orbit gets a run of doubling gaps, the survey goes on round it,
+    /// and a planet is left to the survey's own cadence.
     #[test]
     fn a_survey_follows_up_what_it_cannot_yet_fit() {
         let Some((mut sky, system)) = sol() else { return };
@@ -1182,9 +1182,8 @@ mod tests {
         let metis = gaps_h("Metis");
         assert!(metis.iter().any(|gap| *gap < 1.6), "Metis was never followed up: {metis:.2?}");
         assert!(k.len() > 100, "the follow-ups starved the survey: {} subjects", k.len());
-        // Satellites are what it is for. Something going round the star is followed only when
-        // it happens to pass a brighter body in the sky, which from 5 AU the inner system does
-        // often: Mars sits within a degree of Venus, and near-Earth asteroids near Earth.
+        // From 5 AU the inner system is a few degrees across, so some bodies about the star pass
+        // a brighter one: Mars sits within a degree of Venus.
         let sim = system.sim();
         let (mut satellites, mut others) = ((0, 0), (0, 0));
         for i in sim.indices().filter(|&i| i != system.primary()) {
@@ -1201,15 +1200,14 @@ mod tests {
         assert!(others.0 * 4 < others.1, "{} of {} bodies about the star followed", others.0, others.1);
     }
 
-    /// **Every body of Sol fitted as a shard would, against the truth.** A ship parked
+    /// Every body of Sol fitted as a shard would, printed against the truth. A ship parked
     /// `SOL_FITS_AU` out (default 5) surveys for `SOL_FITS_TICKS` ticks (default 3000, fifteen
-    /// days) and fits one body a tick, then prints each held orbit beside where the body really
-    /// is and what it really goes round. `SOL_FITS_FRAMES` adds, per moon, a fit from scratch
-    /// about the star, the believed planet and the planet's true place.
+    /// days). `SOL_FITS_FRAMES` adds, per moon, fits from scratch about the star, the believed
+    /// planet and the true planet.
     ///
-    /// A diagnostic, not a check: minutes of work even optimized, so run it with the workspace
-    /// optimized too, e.g. `CARGO_PROFILE_DEV_OPT_LEVEL=3 cargo test -p lc-world --lib
-    /// sol_fits_against_truth -- --ignored --nocapture`.
+    /// A diagnostic, not a check, and minutes of work: run it optimized, e.g.
+    /// `CARGO_PROFILE_DEV_OPT_LEVEL=3 cargo test -p lc-world --lib sol_fits_against_truth --
+    /// --ignored --nocapture`.
     #[test]
     #[ignore]
     fn sol_fits_against_truth() {
