@@ -1254,9 +1254,17 @@ mod tests {
                 (Placed::Known { offset_au, sigma_au }, Some(truth)) => ((offset_au - truth / AU_M).length(), sigma_au),
                 _ => (f64::NAN, f64::NAN),
             };
+            // The osculating axis about the true parent, by vis-viva.
+            let truth_a = sim.parent(i).and_then(|p| {
+                let ((r, v), (rp, vp)) = (system.body_state_at(i, t)?, system.body_state_at(p, t)?);
+                let mu = 6.674_30e-11 * (sim.mass(p) + sim.mass(i));
+                Some(1.0 / (2.0 / (r - rp).length() - (v - vp).length_squared() / mu) / AU_M)
+            });
+            let truth_a = truth_a.unwrap_or(f64::NAN);
             rows.push(format!(
-                "{:>14} goes round {parent:>8}, fitted about {about:>10}: a {a:.5} +/- {sigma_a:.2e} AU, placed {miss:.2e} AU out +/- {sigma:.2e}",
-                name(i)
+                "{:>14} goes round {parent:>8}, fitted about {about:>10}: a {a:.6e} +/- {sigma_a:.1e} AU, truly {truth_a:.6e} ({:.1} sigma), placed {miss:.2e} AU out +/- {sigma:.2e}",
+                name(i),
+                (a - truth_a) / sigma_a
             ));
         }
         rows.sort();

@@ -241,6 +241,34 @@ impl crate::knowledge::Knowledge {
         tried
     }
 
+    /// How far a body's believed place misses the line of sight it was actually seen along, at
+    /// each look held, meters and in time order: the believed point moved across onto the ray,
+    /// at the distance believed.
+    ///
+    /// **What a moon's frame is corrected by.** A moon's looks are put into its planet's frame,
+    /// and a planet placed 0.005 AU out is Europa's orbit wide. Across the line of sight the
+    /// planet's own bearings say where it was to their noise, 75 km at 5 AU. Along it they say
+    /// nothing, but that error only scales the moon's orbit by the depth's fraction of the
+    /// distance: a part in a thousand for Jupiter from 5 AU.
+    ///
+    /// A place and not an angle, so it moves only as the orbit's error does, however the craft
+    /// is moving, and the few looks decimation keeps are enough to interpolate it between.
+    fn sightlines(&self, star: StarId, body: BodyId, star_ly: DVec3) -> Vec<(f64, DVec3)> {
+        let Some(file) = self.file(Subject::Body { star, body }) else { return Vec::new() };
+        let mut out: Vec<(f64, DVec3)> = file
+            .sightings()
+            .iter()
+            .filter_map(|seen| {
+                let believed = star_ly * crate::system::M_PER_LY + self.placed(star, body, seen.observed_s)?;
+                let from = seen.bearing.observer_ly * crate::system::M_PER_LY;
+                let depth = (believed - from).length();
+                arc::sound(depth).then(|| (seen.observed_s, from + seen.bearing.toward * depth - believed))
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.total_cmp(&b.0));
+        out
+    }
+
     /// Where a body is believed to be, as an offset from its star in meters, or `None`.
     pub(crate) fn placed(&self, star: StarId, body: BodyId, at_s: f64) -> Option<DVec3> {
         match self.body_belief(star, body, at_s)?.position_now {
@@ -275,17 +303,35 @@ impl crate::knowledge::Knowledge {
             .primaries(star, subject, now_s)
             .into_iter()
             .map(|about| {
+                let seen = about.map_or_else(Vec::new, |body| self.sightlines(star, body, star_ly));
                 let at = |t: f64| match about {
                     None => Some(star_ly),
-                    Some(body) => Some(star_ly + self.placed(star, body, t)? / crate::system::M_PER_LY),
+                    Some(body) => {
+                        Some(star_ly + (self.placed(star, body, t)? + along(&seen, t)) / crate::system::M_PER_LY)
+                    }
                 };
                 let held = about.and_then(|body| self.body_belief(star, body, now_s));
                 let bound = |element: Option<(f64, f64)>, scale: f64| element.map_or(f64::INFINITY, |(v, _)| v * scale);
+                let looks = self.looks_at(subject, &at);
+                // The frame keeps the depth believed, so its error is a scale on the whole orbit.
+                // How wrong that depth is, nothing measures; how far the believed orbit misses
+                // across the line of sight, the sightlines do, and an orbit that far out sideways
+                // is taken to be as far out in depth. The planet's own bar alone is not enough:
+                // an orbit fitted to the wrong minimum is sure of itself.
+                let missed_m = (seen.iter().map(|(_, c)| c.length_squared()).sum::<f64>()
+                    / seen.len().max(1) as f64)
+                    .sqrt();
+                let placed_m = match held.as_ref().map(|b| b.position_now) {
+                    Some(super::Placed::Known { sigma_au, .. }) => sigma_au * crate::navigation::AU,
+                    _ => 0.0,
+                };
+                let depth = looks.last().map_or(0.0, |look| missed_m.max(placed_m) / look.from_m.length());
                 Frame {
                     about,
-                    looks: self.looks_at(subject, &at),
+                    looks,
                     longest_s: bound(held.as_ref().and_then(|b| b.period_s), HILL_PERIOD),
                     widest_m: bound(held.as_ref().and_then(|b| b.semi_major_au), HILL_REACH * crate::navigation::AU),
+                    depth,
                 }
             })
             .collect();
@@ -331,6 +377,17 @@ impl crate::knowledge::Knowledge {
     }
 }
 
+/// A [`Knowledge::sightlines`] correction at `t`: straight between the looks either side, and
+/// the nearest one's beyond them.
+fn along(seen: &[(f64, DVec3)], t: f64) -> DVec3 {
+    let after = seen.partition_point(|(at, _)| *at < t);
+    match (after.checked_sub(1).and_then(|i| seen.get(i)), seen.get(after)) {
+        (Some((t0, c0)), Some((t1, c1))) if t1 > t0 => c0.lerp(*c1, (t - t0) / (t1 - t0)),
+        (Some((_, c)), _) | (None, Some((_, c))) => *c,
+        (None, None) => DVec3::ZERO,
+    }
+}
+
 /// One candidate primary: the looks in its frame, and the longest period and widest axis a
 /// satellite of it can have. See [`HILL_PERIOD`].
 #[derive(Clone, Debug)]
@@ -339,6 +396,9 @@ struct Frame {
     looks: Vec<Look>,
     longest_s: f64,
     widest_m: f64,
+    /// The primary's placement error over its distance: how far off the scale of anything fitted
+    /// in this frame can be, whatever its bearings say. See [`Knowledge::sightlines`].
+    depth: f64,
 }
 
 /// One body's fit, with nothing borrowed: the looks in each candidate primary's frame.
@@ -389,20 +449,25 @@ impl FitJob {
         };
         let carried = self.warm.as_ref().and_then(|held| {
             let frame = self.frames.iter().find(|f| f.about == held.about)?;
-            Some((frame.about, bound(frame, arc::refit(&held.fitted, &frame.looks)?)?, frame.looks.clone()))
+            let fitted = bound(frame, arc::refit(&held.fitted, &frame.looks)?)?;
+            Some((frame.about, fitted, frame.looks.clone(), frame.depth))
         });
-        let searched = |frame: Frame| Some((frame.about, bound(&frame, arc::fit(&frame.looks)?)?, frame.looks));
-        let best = |found: &mut dyn Iterator<Item = (Option<BodyId>, Fitted, Vec<Look>)>| {
+        let searched = |frame: Frame| {
+            Some((frame.about, bound(&frame, arc::fit(&frame.looks)?)?, frame.looks, frame.depth))
+        };
+        let best = |found: &mut dyn Iterator<Item = (Option<BodyId>, Fitted, Vec<Look>, f64)>| {
             found.min_by(|a, b| a.1.residual_rad.total_cmp(&b.1.residual_rad))
         };
-        let (about, fitted, looks) = match (carried, &self.warm) {
+        let (about, fitted, looks, depth) = match (carried, &self.warm) {
             (Some(carried), Some(held)) => {
                 let new = self.frames.into_iter().filter(|f| !held.offered.contains(&f.about));
                 best(&mut std::iter::once(carried).chain(new.filter_map(searched)))?
             }
             _ => best(&mut self.frames.into_iter().filter_map(searched))?,
         };
-        let orbit = fitted.stated(self.owner, about, &looks, self.taken_s);
+        let mut orbit = fitted.stated(self.owner, about, &looks, self.taken_s);
+        let (au, sigma_au) = orbit.semi_major_au;
+        orbit.semi_major_au = (au, sigma_au.hypot(au * depth));
         Some(Solved { subject: self.subject, about, fitted, orbit, taken_s: self.taken_s, offered })
     }
 }

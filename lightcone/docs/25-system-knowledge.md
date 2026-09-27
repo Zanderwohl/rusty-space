@@ -566,6 +566,25 @@ Measured on Sol from 5 AU over fifteen days, against the same survey without it:
 finite bar. The queue it takes is not free: Jupiter's own error bar came out four times wider,
 from which of its refits ran rather than from its looks, which were the same.
 
+**And a moon is fitted against where its planet was seen.** ✅ (2026-09-27) A moon's frame was
+its planet's believed orbit, so a planet placed 0.005 AU out moved every look by Europa's orbit.
+Across the line of sight the planet's own bearings say where it was, to 75 km at 5 AU; so at
+each of its looks held, the believed place is moved across onto the ray it was seen along, and
+that correction is interpolated to the moon's looks. A place and not an angle, so it moves only
+as the orbit's error does and sixteen looks are enough to interpolate between.
+`Knowledge::sightlines`.
+
+- **Along the line of sight nothing is measured,** and a depth error scales the moon's whole
+  orbit by its fraction of the distance. So the axis's bar carries the planet's placement error
+  over its distance, or the sightlines' own miss if that is larger. Bearings pin a planet
+  across the line of sight far better than along it, so the second is a floor and not an
+  estimate, and the bar is only as honest as the planet's.
+- Measured on Sol from 5 AU over fifteen days, against the true osculating axes: Io, Europa,
+  Ganymede and Callisto to 5–8 parts in 10,000 where they were 1–8% out, Amalthea and Thebe
+  within 0.3%, every one within 0.7 of its bar. The bars are twenty times wider than the error,
+  because Jupiter's placement bar is. The irregulars are still 4–12 bars out: fifteen days is
+  a few percent of their orbits, and on an arc that short a fit's own bar is too sure.
+
 **Not oblateness.** The arena's bodies are spheres, so there is no figure to measure and none is
 invented. Same decision as rings for generated planets in phase 5, for the same reason.
 

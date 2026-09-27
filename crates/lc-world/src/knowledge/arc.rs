@@ -1614,6 +1614,99 @@ mod tests {
         assert_eq!(moon.mass_kg, None, "nothing goes round the moon");
     }
 
+    /// **A moon is fitted against where its planet was seen**, not only where its planet's orbit
+    /// says it was. The planet's orbit here is three hours out, a thousandth of an AU along its
+    /// path and a third of Io's orbit, and its own bearings take that out of the moon's frame.
+    #[test]
+    fn a_moon_is_fitted_against_where_its_planet_was_seen() {
+        use crate::knowledge::{BodyId, Knowledge, Sighting, Witness};
+
+        let star = StarId::synthesize("arc", 5);
+        let star_ly = DVec3::new(3.0, -1.0, 0.5);
+        let mut k = Knowledge::new(Witness(7));
+        let file = |k: &mut Knowledge, subject: Subject, seen: &[Look], flux: f64| {
+            for look in seen {
+                let bearing = Bearing {
+                    observer_ly: star_ly + look.from_m / crate::system::M_PER_LY,
+                    toward: look.toward,
+                    sigma_rad: look.sigma_rad,
+                };
+                k.sighted(
+                    subject,
+                    Sighting {
+                        witness: Witness(7),
+                        observed_s: look.at_s,
+                        bearing,
+                        size: None,
+                        range_m: None,
+                        spin_s: None,
+                        band: em_spectra::Band::V,
+                        flux,
+                        flux_sigma: flux * 1.0e-3,
+                        lineage: Vec::new(),
+                    },
+                );
+            }
+        };
+
+        let planet = like(5.2, 0.048);
+        let planet_id = BodyId::of(star, "Jupiter");
+        let planet_subject = Subject::Body { star, body: planet_id };
+        let moon_mu = MU_SUN * 9.54e-4;
+        let moon_r = 4.217e8;
+        let moon_period = kepler::period::third_law(moon_r, moon_mu);
+        let (u, v) = planet.pole.normalize().any_orthonormal_pair();
+        let moon_at = |t: f64| {
+            let turn = std::f64::consts::TAU * t / moon_period;
+            planet.at(t) + (u * turn.cos() + v * turn.sin()) * moon_r
+        };
+
+        // The planet seen every six hours across the moon's run, and believed three hours late.
+        let hour = 3600.0;
+        let planet_looks = watched(&|t| planet.at(t), MU_SUN, 5.0, 24, 6.0 * hour, SIGMA);
+        file(&mut k, planet_subject, &planet_looks, 1.0e-9);
+        let late = Fitted { epoch_s: planet.fitted().epoch_s + 3.0 * hour, ..planet.fitted() };
+        k.orbits(planet_subject, late.stated(Witness(7), None, &planet_looks, 0.0));
+
+        // The moon on a follow-up run, as far as its fit has got: 0, 1, 2, 4 ... 32 hours,
+        // three quarters of Io's orbit.
+        let moon_subject = Subject::Body { star, body: BodyId::of(star, "Io") };
+        let ship_period = kepler::period::third_law(5.0 * AU_M, MU_SUN);
+        let times: Vec<f64> = std::iter::once(0.0).chain((0..6).map(|n| hour * 2f64.powi(n))).collect();
+        let moon_looks: Vec<Look> = times
+            .iter()
+            .enumerate()
+            .map(|(i, &t)| {
+                let phase = std::f64::consts::TAU * t / ship_period;
+                let from = DVec3::new(phase.cos(), phase.sin(), 0.0) * 5.0 * AU_M;
+                let toward = (moon_at(t) - from).normalize();
+                let (x, y) = toward.any_orthonormal_pair();
+                let nudge = x * rng::gaussian(rng::hash(&[i as u64, 41])) * SIGMA
+                    + y * rng::gaussian(rng::hash(&[i as u64, 42])) * SIGMA;
+                Look { from_m: from, toward: (toward + nudge).normalize(), at_s: t, sigma_rad: SIGMA, range_m: None }
+            })
+            .collect();
+        file(&mut k, moon_subject, &moon_looks, 5.0e-12);
+
+        // Premise: in the frame of the believed orbit alone, the moon comes out wrong or not
+        // at all.
+        let believed = k.looks_at(moon_subject, &|t| Some(star_ly + k.placed(star, planet_id, t)? / crate::system::M_PER_LY));
+        let alone = fit(&believed).map_or(f64::INFINITY, |f| off(f.semi_major_m, moon_r));
+        assert!(alone > 0.01, "premise: the believed frame alone fits the moon to {alone}");
+
+        let end = *times.last().expect("looks");
+        assert!(k.fit_orbit(moon_subject, star_ly, end), "the moon fits");
+        let moon = k.body_belief(star, BodyId::of(star, "Io"), end).expect("held");
+        assert_eq!(moon.about, Some(planet_id));
+        let (au, sigma_au) = moon.semi_major_au.expect("an orbit");
+        let axis = off(au * crate::navigation::AU, moon_r);
+        assert!(axis < 1.0e-3, "axis off by {axis}, against {alone} in the believed frame");
+        let miss = (au * crate::navigation::AU - moon_r).abs() / crate::navigation::AU;
+        assert!(miss < 3.0 * sigma_au, "{miss:e} AU out against a bar of {sigma_au:e}");
+        let period = off(moon.period_s.expect("a period").0, moon_period);
+        assert!(period < 1.0e-3, "period off by {period}");
+    }
+
     /// A body is fitted when its bearings have outgrown its orbit, oldest statement first, and
     /// never before it has enough of them to judge a candidate by.
     #[test]
