@@ -404,7 +404,7 @@ graph LR
 
 ### H3 · Heat in the account
 
-- status: active card "H3 · Heat in the account"
+- status: done #111
 - needs: H2, F10, S1
 - touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/solar.rs`, `crates/lc-server/src/fitting.rs`
 - read: 30 §The inputs, 31 §The star's gain
