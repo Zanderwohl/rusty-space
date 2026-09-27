@@ -100,13 +100,9 @@ impl Panel {
     }
 }
 
-/// Which mode of play the main view is showing.
-///
-/// A star with [`ViewMode::World`] at its center. Every other mode has a key that goes into it
-/// from anywhere and, pressed again inside it, back to the world; `Escape` with no window left
-/// open is the same way back. Nothing remembers where a mode was entered from, so a new mode is
-/// a variant and its rows in the `match`es below, and no transition elsewhere has to learn it.
-/// Windows float above whichever mode is in force.
+/// Every mode but [`ViewMode::World`] has a key that goes into it from anywhere and back to the
+/// world from inside it; `Escape` with no window open also goes back. Nothing records the way
+/// in, so a new mode is a variant and its rows in the `match`es below.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ViewMode {
     /// The sky, through the ship's own camera.
@@ -121,17 +117,16 @@ pub enum ViewMode {
 impl ViewMode {
     pub const ALL: [ViewMode; 3] = [ViewMode::World, ViewMode::Map, ViewMode::Form];
 
-    /// Where the key for `mode` goes from here: into it, or out of it to the world.
     pub fn toggled(self, mode: ViewMode) -> Self {
         if self == mode { ViewMode::World } else { mode }
     }
 
-    /// Where `Escape` goes once no window is left to close, or `None` for the menu.
+    /// Where `Escape` goes with no window open; `None` opens the menu.
     pub fn back(self) -> Option<Self> {
         (self != ViewMode::World).then_some(ViewMode::World)
     }
 
-    /// What the corner square shows, where a click on it goes; `None` where there is no square.
+    /// What the corner square shows and a click on it switches to.
     pub fn inset(self) -> Option<Self> {
         match self {
             ViewMode::World => Some(ViewMode::Map),
@@ -140,7 +135,7 @@ impl ViewMode {
         }
     }
 
-    /// Whether the mouse steers a camera of ours directly, rather than egui reading it.
+    /// Whether the mouse drives our camera rather than egui.
     pub fn steers(self) -> bool {
         match self {
             ViewMode::World | ViewMode::Form => true,
@@ -651,8 +646,7 @@ mod tests {
     use super::*;
     use lc_world::knowledge::SystemPlane;
 
-    /// `map_panel::draw` takes the map, the world's viewport and the square from `inset`, and
-    /// none of it can be asserted without a window.
+    /// `map_panel::draw` depends on these and cannot be tested without a window.
     #[test]
     fn each_mode_says_what_the_corner_holds_and_whether_the_mouse_steers() {
         use ViewMode::*;

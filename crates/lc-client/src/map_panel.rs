@@ -100,11 +100,10 @@ pub fn draw(
     let inset = mode.inset();
     map.shown = mode == ViewMode::Map || inset == Some(ViewMode::Map);
     // What the world's camera is to draw into, which is the square it is the thumbnail in.
-    // Otherwise it has the whole window, under whatever the mode draws over it.
+    // Otherwise the whole window.
     world.0 = (inset == Some(ViewMode::World)).then(|| pixels(square, per_point));
     let Some(inset) = inset else { return };
 
-    // The square holds the inset, and a click swaps them.
     let swap = square_area(ctx, square, (inset == ViewMode::Map).then_some(&*map));
     if swap.clicked() {
         ask(&mut out, Action::SetView(inset));
@@ -113,7 +112,7 @@ pub fn draw(
         return;
     }
 
-    // The map is the whole view or the square, and nothing past here is anything else.
+    // Past here the map is the whole view or the square.
     let (rect, response) = match mode {
         ViewMode::Map => whole(ctx, foot.0, &ui_state, &game, &map, square, &mut out),
         ViewMode::World | ViewMode::Form => (square, swap.clone()),

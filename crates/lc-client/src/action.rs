@@ -26,9 +26,8 @@ pub enum Action {
     GoToMenuPage(MenuPage),
     StartGame,
     Quit,
-    /// Which mode of play the main view shows. The map is one of them, not a window.
     SetView(ViewMode),
-    /// A mode's own key: into it, or out of it to the world. See [`ViewMode::toggled`].
+    /// A mode's key: into it, or out of it to the world.
     ToggleView(ViewMode),
     // --- the editor -------------------------------------------------------------------
     /// Turn the editor's camera about its focus, radians.
@@ -298,7 +297,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::CloseTopPanel => {
             // Nothing is modal, so "back" closes the most recently opened panel and opens
             // the escape menu only when there is nothing left to close.
-            // Out of a mode before the menu, so the menu is only ever over the world.
+            // The menu only opens over the world.
             if ui.close_top().is_none() {
                 match ui.view.back() {
                     Some(view) => set_view(ui, view),
@@ -1006,8 +1005,7 @@ mod tests {
         assert_eq!(ui.view, ViewMode::Map);
     }
 
-    /// A mode's key goes into it from every mode and out of it to the world, whatever the way in
-    /// was. The rule is 29 §Getting in and out.
+    /// 29 §Getting in and out. The way in is not remembered.
     #[test]
     fn every_modes_key_goes_into_it_and_out_to_the_world() {
         for from in ViewMode::ALL {
@@ -1031,8 +1029,7 @@ mod tests {
         assert_eq!(ui.view, ViewMode::Map, "M from the editor is the map");
     }
 
-    /// `Escape` closes windows first, and with none left any mode but the world goes back to it
-    /// before the menu opens.
+    /// With no window open, `Escape` leaves any mode for the world before it opens the menu.
     #[test]
     fn escape_leaves_a_mode_once_its_windows_are_closed() {
         for mode in [ViewMode::Map, ViewMode::Form] {
