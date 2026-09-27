@@ -25,17 +25,16 @@
 //!    the design doc means by the star's mass being refined once an orbit is held, and it is
 //!    why no mass has to be supplied to get here.
 //!
-//! Two numbers are searched and everything after them is closed form. The score is in radians
-//! against the bearings themselves: propagate the orbit to each observation time and measure
-//! the angle it misses by. See `lightcone/docs/25-system-knowledge.md`.
-
-use std::f64::consts::PI;
+//! Two numbers are searched and everything after them is closed form, until least squares over
+//! every element settles the answer and says how well it is known: `knowledge::settle`. The
+//! score is in radians against the bearings themselves: propagate the orbit to each observation
+//! time and measure the angle it misses by. See `lightcone/docs/25-system-knowledge.md`.
 
 use em_foundations::kepler;
 
+use super::settle::{self, settle};
 use super::turns::unwrappings;
 use glam::{DMat3, DVec3};
-
 
 /// Ranges tried per axis before refining, log-spaced across [`NEAR_AU`, `FAR_AU`].
 ///
@@ -100,9 +99,9 @@ const HEAVIEST: f64 = 300.0;
 /// Rounds of shrinking the search about the best pair, and the factor each round shrinks by.
 const REFINEMENTS: usize = 100;
 
-/// Rounds of least-squares settling every candidate gets. The one that wins gets eight times
-/// as many, because the comparison has to be even and only the answer has to be exact.
-const SETTLINGS: usize = 60;
+/// Gauss-Newton rounds every candidate gets. The one that wins gets eight times as many,
+/// because the comparison has to be even and only the answer has to be exact.
+const SETTLINGS: usize = 8;
 
 /// Bearings fewer than this cannot pin an orbit: three looks make the conic fit exact and the
 /// timing line nearly so, leaving nothing over to judge a candidate by.
@@ -214,6 +213,9 @@ pub struct Fitted {
     /// to separate those three, and over a few degrees it does not: the matrix is singular and
     /// the size is all that survives. A record made from this states its eccentricity as
     /// `None`, which doc 25's rule 4 distinguishes from stating a circle.
+    ///
+    /// Three anchors can also fail to shape a conic on an arc that bends plenty, by falling at
+    /// one phase; `settle::released` takes that circle back where the whole arc shapes one.
     pub assumed_circular: bool,
     /// Weighted root-mean-square of what the fit misses the bearings by, radians.
     pub residual_rad: f64,
@@ -397,51 +399,20 @@ fn through(
 /// candidates are hopeless within two or three of them. The bound is compared against the same
 /// quantity the function returns, so the exit changes the cost and not the answer.
 pub(super) fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f64> {
-    // Every candidate in this file is scored here and nowhere else, which is why the band of
-    // [`FAR_AU`] is enforced here rather than where the three-point solution lands: a fit
-    // settles its way out of the band, so checking only the starting point misses it.
-    if !sound(fitted.semi_major_m) || !sound(fitted.period_s) {
+    if !admissible(fitted) {
         return None;
     }
-    if fitted.semi_major_m > fitted.reach_m {
+    let total = total(looks);
+    if !sound(total) {
         return None;
     }
-    // And the thing at the focus has to be something: a star at the top of the chain, a planet
-    // under one, a moon under that. Only the ceiling is a real statement, since a primary can
-    // be as light as a rock.
-    let n = std::f64::consts::TAU / fitted.period_s;
-    let implied = n * n * fitted.semi_major_m.powi(3) / MU_SUN;
-    if !(implied > 0.0 && implied <= HEAVIEST) {
-        return None;
-    }
-    let bearings: f64 = looks.iter().map(|l| 1.0 / (l.sigma_rad * l.sigma_rad)).sum();
-    if !sound(bearings) {
-        return None;
-    }
-    // A ranged look is two measurements rather than one, so it carries its bearing's weight
-    // twice. Both terms below are squared standardized residuals -- how many sigma out -- so
-    // they add in one metric although one is an angle and the other a distance, and dividing
-    // by the summed bearing weight leaves the answer in radians as before.
-    let ranged: f64 = looks
-        .iter()
-        .filter(|l| l.range_m.is_some())
-        .map(|l| 1.0 / (l.sigma_rad * l.sigma_rad))
-        .sum();
-    let total = bearings + ranged;
     let ceiling = bound * bound * total;
     let mut sum = 0.0;
     for look in looks {
-        let offset = fitted.at(look.at_s) - look.from_m;
-        if look.range_m.is_none() && !sound(offset.length() - NOT_ABOARD * look.from_m.length()) {
-            return None;
-        }
+        let offset = offset(fitted, look)?;
         let miss = between(offset.normalize(), look.toward);
         sum += miss * miss / (look.sigma_rad * look.sigma_rad);
-        if let Some((range, sigma)) = look.range_m {
-            // **Proximity is the instrument.** A range measured on a close pass is the one
-            // thing that fixes the size of an orbit rather than its shape, and a fit that does
-            // not score it can walk away from it: see `lightcone/docs/25-system-knowledge.md`.
-            let out = (offset.length() - range) / sigma.max(range * super::survey::RANGE_FLOOR);
+        if let Some(out) = ranged_out(look, offset) {
             sum += out * out;
         }
         if sum > ceiling {
@@ -449,6 +420,75 @@ pub(super) fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f6
         }
     }
     sum.is_finite().then(|| (sum / total).sqrt())
+}
+
+/// What [`residual`] sums, one standardized residual each: a bearing's miss as its two
+/// components across the line of sight, and a ranged look's range. For the least squares in
+/// `knowledge::settle`, which needs the direction of each miss and not only its size.
+pub(super) fn terms(fitted: &Fitted, looks: &[Look]) -> Option<Vec<f64>> {
+    if !admissible(fitted) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(looks.len() * 3);
+    for look in looks {
+        let offset = offset(fitted, look)?;
+        let seen = offset.normalize();
+        let across = seen - look.toward * seen.dot(look.toward);
+        // Scaled to the angle rather than its sine, so the two square to exactly what
+        // `residual` adds, and a body behind the observer does not read as a small miss.
+        let scale = between(seen, look.toward) / look.sigma_rad / across.length().max(f64::MIN_POSITIVE);
+        let (x, y) = look.toward.any_orthonormal_pair();
+        out.push(across.dot(x) * scale);
+        out.push(across.dot(y) * scale);
+        out.extend(ranged_out(look, offset));
+    }
+    out.iter().all(|t| t.is_finite()).then_some(out)
+}
+
+/// The weight [`residual`] divides by, which leaves its answer in radians.
+///
+/// A ranged look is two measurements rather than one, so it carries its bearing's weight
+/// twice. Every term is a squared standardized residual -- how many sigma out -- so they add in
+/// one metric although one is an angle and the other a distance.
+pub(super) fn total(looks: &[Look]) -> f64 {
+    looks
+        .iter()
+        .map(|l| if l.range_m.is_some() { 2.0 } else { 1.0 } / (l.sigma_rad * l.sigma_rad))
+        .sum()
+}
+
+/// Whether an orbit is one this fit may answer with.
+///
+/// Every candidate in this file is scored through here and nowhere else, which is why the band
+/// of [`FAR_AU`] is enforced here rather than where the three-point solution lands: a fit
+/// settles its way out of the band, so checking only the starting point misses it.
+fn admissible(fitted: &Fitted) -> bool {
+    if !sound(fitted.semi_major_m) || !sound(fitted.period_s) || fitted.semi_major_m > fitted.reach_m {
+        return false;
+    }
+    // And the thing at the focus has to be something: a star at the top of the chain, a planet
+    // under one, a moon under that. Only the ceiling is a real statement, since a primary can
+    // be as light as a rock.
+    let n = std::f64::consts::TAU / fitted.period_s;
+    let implied = n * n * fitted.semi_major_m.powi(3) / MU_SUN;
+    implied > 0.0 && implied <= HEAVIEST
+}
+
+/// From the observer to where the orbit puts the body at the look's time. `None` for a
+/// bearing-only look that puts it aboard: see [`NOT_ABOARD`].
+fn offset(fitted: &Fitted, look: &Look) -> Option<DVec3> {
+    let offset = fitted.at(look.at_s) - look.from_m;
+    (look.range_m.is_some() || sound(offset.length() - NOT_ABOARD * look.from_m.length())).then_some(offset)
+}
+
+/// How many sigma a ranged look's range is out.
+///
+/// **Proximity is the instrument.** A range measured on a close pass is the one thing that
+/// fixes the size of an orbit rather than its shape, and a fit that does not score it can walk
+/// away from it: see `lightcone/docs/25-system-knowledge.md`.
+fn ranged_out(look: &Look, offset: DVec3) -> Option<f64> {
+    let (range, sigma) = look.range_m?;
+    Some((offset.length() - range) / sigma.max(range * super::survey::RANGE_FLOOR))
 }
 
 /// The angle between two unit vectors, stable when it is small.
@@ -461,14 +501,6 @@ pub(super) fn residual(fitted: &Fitted, looks: &[Look], bound: f64) -> Option<f6
 fn between(a: DVec3, b: DVec3) -> f64 {
     a.cross(b).length().atan2(a.dot(b))
 }
-
-/// Rounds of re-settling the other elements while one is held off its best, when measuring how
-/// far it can move. Few, because it starts from the solution and only has to follow it.
-const PROFILINGS: usize = 80;
-
-/// Times the sigma-finding walk grows its step before it gives up and calls the element
-/// unconstrained.
-const WALKS: usize = 40;
 
 /// Grid points kept for polishing, rather than only the best.
 ///
@@ -550,196 +582,6 @@ fn polish(
     (x, y, held)
 }
 
-/// Least squares over every element, from the three-point solution as its starting guess.
-///
-/// **Gauss, then least squares**, and the second half is not optional. A three-point solution
-/// passes *exactly* through three noisy rays, so it is an interpolation and carries their noise
-/// as a systematic. Measured on an Earth-like orbit: the three-point solution sits 420 times its
-/// own noise floor, and settling it over all six elements takes it to within a few.
-///
-/// A pattern search rather than a Gauss-Newton: the derivatives of a Kepler propagation with
-/// respect to its elements are a page of algebra to get wrong, and six parameters at a dozen
-/// probes a round is cheap enough that the difference does not pay for itself.
-fn settle(held: Fitted, looks: &[Look], rounds: usize) -> Fitted {
-    settle_but(held, looks, rounds, 0)
-}
-
-/// The elements [`settle_but`] moves, one bit each, in the order it tries them.
-const AXIS: u8 = 1 << 0;
-const ECCENTRICITY: u8 = 1 << 1;
-const POLE_U: u8 = 1 << 2;
-const PERIAPSIS: u8 = 1 << 4;
-const EPOCH: u8 = 1 << 5;
-const PERIOD: u8 = 1 << 6;
-
-/// The same, holding the elements whose bits are set in `hold` fixed.
-fn settle_but(mut held: Fitted, looks: &[Look], rounds: usize, hold: u8) -> Fitted {
-    let mut scale = 1.0;
-    for _ in 0..rounds {
-        let (u, v) = basis(held.pole);
-        let mut moved = false;
-        for step in [scale, -scale] {
-            /// One element nudged: the orbit, how far, and the plane's own two axes.
-            type Nudge = fn(&Fitted, f64, DVec3, DVec3) -> Fitted;
-            let ways: [Nudge; 7] = [
-                |f, d, _, _| Fitted { semi_major_m: f.semi_major_m * (1.0 + d * 1.0e-3), ..*f },
-                |f, d, _, _| Fitted {
-                    eccentricity: (f.eccentricity + d * 1.0e-3).clamp(0.0, 0.94),
-                    ..*f
-                },
-                |f, d, u, _| Fitted { pole: (f.pole + u * d * 1.0e-4).normalize(), ..*f },
-                |f, d, _, v| Fitted { pole: (f.pole + v * d * 1.0e-4).normalize(), ..*f },
-                |f, d, _, _| Fitted { periapsis_rad: f.periapsis_rad + d * 1.0e-4, ..*f },
-                |f, d, _, _| Fitted { epoch_s: f.epoch_s + d * f.period_s * 1.0e-5, ..*f },
-                |f, d, _, _| Fitted { period_s: f.period_s * (1.0 + d * 1.0e-4), ..*f },
-            ];
-            for (k, way) in ways.into_iter().enumerate() {
-                // A circle assumed because the arc could not shape a conic has no eccentricity
-                // to move and no periapsis to move it about. Left free, the settle walked the
-                // eccentricity off zero and `stated` then reported none while keeping the
-                // periapsis and epoch that had been fitted *with* it -- which draws the body up
-                // to two eccentricities of arc from where it was seen.
-                let bit = 1u8 << k;
-                if hold & bit != 0 || (held.assumed_circular && bit & (ECCENTRICITY | PERIAPSIS) != 0) {
-                    continue;
-                }
-                let tried = way(&held, step, u, v);
-                if let Some(found) = residual(&tried, looks, held.residual_rad) {
-                    held = Fitted { residual_rad: found, ..tried };
-                    moved = true;
-                }
-            }
-        }
-        scale *= if moved { 1.3 } else { 0.5 };
-        if scale < 1.0e-9 {
-            break;
-        }
-    }
-    let n = std::f64::consts::TAU / held.period_s;
-    held.mu = n * n * held.semi_major_m * held.semi_major_m * held.semi_major_m;
-    held
-}
-
-/// One sigma on each element of a fit.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Spread {
-    pub period_s: f64,
-    pub semi_major_m: f64,
-    pub eccentricity: f64,
-    /// Radians the plane's pole can move.
-    pub pole_rad: f64,
-    /// Seconds, with the periapsis and the period held: the phase at the epoch, as a time.
-    pub epoch_s: f64,
-}
-
-/// How far each element can move before the fit is a chi-square worse, the other elements
-/// re-settling as it goes.
-///
-/// Re-settling is the point: held fixed, the period's error comes out eighty times too small,
-/// because the period and the axis trade against each other and nothing is allowed to take up
-/// the slack. What this measures is the marginal error, which is the one to report.
-///
-/// **It is still a few times optimistic**, and knowingly. The re-settling is the same pattern
-/// search the fit itself uses, and it stops for the same reason the fit stops, so the profile
-/// is a little steeper than the truth: measured against a known orbit, the answer sits about
-/// eight sigma out rather than one. That is a bound on the search's patience and not on what
-/// the bearings say, and going further costs more than the fit did. Good enough for a display,
-/// for weighting one orbit's pole against another's, and for a reader deciding whether to care;
-/// not good enough to do statistics with.
-pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
-    // Weighted as `residual` weighs them, a ranged look counting twice.
-    let weight = |l: &Look| if l.range_m.is_some() { 2.0 } else { 1.0 } / (l.sigma_rad * l.sigma_rad);
-    let total: f64 = looks.iter().map(weight).sum();
-    if !sound(total) {
-        return Spread {
-            period_s: f64::INFINITY,
-            semi_major_m: f64::INFINITY,
-            eccentricity: f64::INFINITY,
-            pole_rad: PI,
-            epoch_s: fitted.period_s * 0.5,
-        };
-    }
-    // Chi-square one worse, in the weighted RMS this file works in -- or one reduced chi-square
-    // worse where the fit misses by more than the errors allow. A two-body orbit is not the
-    // whole of a body's motion: Earth's center swings 4700 km about the Earth-Moon barycenter.
-    let measured = looks.len() + looks.iter().filter(|l| l.range_m.is_some()).count();
-    let freedom = measured.saturating_sub(ELEMENTS).max(1) as f64;
-    let squared = fitted.residual_rad * fitted.residual_rad;
-    let worse = (squared + (1.0 / total).max(squared / freedom)).sqrt();
-
-    // `ceiling` is where an element stops meaning anything rather than where the data stops
-    // constraining it: an eccentricity walked past one is a hyperbola, and a pole is at most
-    // half a turn from any other. Reporting the bound beats reporting infinity, which reads as
-    // "unmeasured" when what is true is "unmeasured, and it cannot be worse than this".
-    let walk = |hold: u8, nudge: &dyn Fn(&Fitted, f64) -> Fitted, unit: f64, ceiling: f64| -> f64 {
-        let mut step = unit.min(ceiling);
-        for _ in 0..WALKS {
-            let mut trial = nudge(fitted, step);
-            // The nudged orbit carries the *old* residual in its field, and everything in this
-            // file treats that as the bound to beat. Left stale it rejects every settling move
-            // as an improvement it cannot make, so nothing settles and nothing ever exceeds the
-            // target: the walk runs to its end and reports the element unconstrained.
-            let Some(fresh) = residual(&trial, looks, f64::INFINITY) else { return step };
-            trial.residual_rad = fresh;
-            if settle_but(trial, looks, PROFILINGS, hold).residual_rad > worse {
-                return step;
-            }
-            if step >= ceiling {
-                return ceiling;
-            }
-            step = (step * 1.6).min(ceiling);
-        }
-        f64::INFINITY
-    };
-
-    // A pole's error is two-dimensional, and an arc pins the two directions differently: one
-    // seen edge-on fixes the plane's tilt and says almost nothing about its twist. Walking one
-    // basis vector reported whichever of the two that vector happened to be.
-    let (u, v) = basis(fitted.pole);
-    let pole_rad = [u, v]
-        .into_iter()
-        .map(|axis| {
-            walk(POLE_U, &|f, d| Fitted { pole: (f.pole + axis * d).normalize(), ..*f }, 1.0e-9, PI)
-        })
-        .fold(0.0f64, f64::max);
-
-    Spread {
-        semi_major_m: walk(
-            AXIS,
-            &|f, d| Fitted { semi_major_m: f.semi_major_m * (1.0 + d), ..*f },
-            1.0e-9,
-            f64::INFINITY,
-        ) * fitted.semi_major_m,
-        eccentricity: walk(
-            ECCENTRICITY,
-            &|f, d| Fitted { eccentricity: (f.eccentricity + d).min(PARABOLIC), ..*f },
-            1.0e-9,
-            (PARABOLIC - fitted.eccentricity).max(0.0),
-        ),
-        pole_rad,
-        period_s: walk(PERIOD, &|f, d| Fitted { period_s: f.period_s * (1.0 + d), ..*f }, 1.0e-9, f64::INFINITY)
-            * fitted.period_s,
-        // The periapsis is held because at small eccentricity it trades against the epoch, which
-        // would then come out as large as the orbit; the period, because `knowledge::placed`
-        // adds its drift itself. Half a turn is anywhere on the orbit.
-        epoch_s: walk(
-            EPOCH | PERIAPSIS | PERIOD,
-            &|f, d| Fitted { epoch_s: f.epoch_s + d * f.period_s, ..*f },
-            1.0e-9,
-            0.5,
-        ) * fitted.period_s,
-    }
-}
-
-/// What a fit solves for: the six elements, the period standing in for the primary's mass.
-const ELEMENTS: usize = 6;
-
-/// The closest to parabolic an ellipse is allowed to get.
-///
-/// Not one: at one the semi-latus rectum is finite and the axis is not, so every element the
-/// fit reports goes with it.
-const PARABOLIC: f64 = 0.999;
-
 impl Fitted {
     /// The fit as a record, in the elements [`crate::knowledge::Orientation`] is defined in.
     ///
@@ -756,7 +598,7 @@ impl Fitted {
         looks: &[Look],
         stated_s: f64,
     ) -> crate::knowledge::Orbit {
-        let spread = spread(self, looks);
+        let spread = settle::spread(self, looks);
         let node_dir = DVec3::Z.cross(self.pole).normalize_or(DVec3::X);
         let (u, v) = basis(self.pole);
         let periapsis_dir = u * self.periapsis_rad.cos() + v * self.periapsis_rad.sin();
@@ -779,6 +621,7 @@ impl Fitted {
             },
             epoch_s: Some((self.epoch_s, spread.epoch_s)),
             pivot_s: pivot(looks),
+            phase_period_rho: spread.phase_period_rho,
             method: crate::knowledge::Method::Astrometric,
             stated_s,
             lineage: Vec::new(),
@@ -786,9 +629,8 @@ impl Fitted {
     }
 }
 
-/// The weighted centre of the looks' times, where a fit's phase and period errors are
-/// independent. `None` for no looks.
-fn pivot(looks: &[Look]) -> Option<f64> {
+/// The weighted center of the looks' times, where a fit's phase is stated. `None` for no looks.
+pub(super) fn pivot(looks: &[Look]) -> Option<f64> {
     let (sum, weight) = looks.iter().fold((0.0, 0.0), |(sum, weight), look| {
         let w = 1.0 / (look.sigma_rad * look.sigma_rad);
         (sum + w * look.at_s, weight + w)
@@ -808,9 +650,10 @@ const STILL_AGREES: f64 = 3.0;
 /// half, and the grid is sixty-five thousand range pairs; a seeded polish is a few hundred. The
 /// grid is what finds an orbit, not what improves one.
 ///
-/// Not a settle from the old elements: measured on half an arc carried onto the whole of it,
-/// that stalls three hundred times worse than the search, because the pattern search over six
-/// elements cannot follow the valley the two ranges run along. Polishing the ranges can.
+/// Polished in the ranges and then settled, as a search's candidates are. With the pattern
+/// search that settle replaced, settling the old elements alone stalled three hundred times
+/// worse than the search. With Gauss-Newton it does not: measured, a settle from the held orbit
+/// lands where this does, turn counts included, in a third of the time. Not yet taken.
 ///
 /// A circle assumed for want of arc is never carried: a longer arc is exactly what may shape
 /// the conic it could not.
@@ -946,7 +789,10 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
         let (x, y) = (along(&a), along(&b));
         let start = score(x, y, f64::INFINITY)?;
         let polished = settle(polish(x, y, start, step, &score).2, &ordered, SETTLINGS);
-        let settled = settle(polished, &ordered, SETTLINGS * 8);
+        let mut settled = settle(polished, &ordered, SETTLINGS * 8);
+        if settled.assumed_circular {
+            settled = settle::released(&settled, &ordered, SETTLINGS * 8).unwrap_or(settled);
+        }
         let circle = settled.assumed_circular && ranged.len() < 3;
         return (!circle && settled.residual_rad <= held.residual_rad * STILL_AGREES).then_some(settled);
     }
@@ -979,7 +825,14 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
 
     let mut polished: Vec<Fitted> = found
         .into_iter()
-        .map(|(x, y, fitted)| settle(polish(x, y, fitted, step, &score).2, &ordered, SETTLINGS))
+        .map(|(x, y, fitted)| {
+            let settled = settle(polish(x, y, fitted, step, &score).2, &ordered, SETTLINGS);
+            // Before the rivalry, which a circle held on a conic it cannot fit would lose.
+            match settled.assumed_circular {
+                true => settle::released(&settled, &ordered, SETTLINGS).unwrap_or(settled),
+                false => settled,
+            }
+        })
         .collect();
 
     polished.sort_by(|p, q| p.residual_rad.total_cmp(&q.residual_rad));
@@ -999,25 +852,29 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
     if rivalled {
         return None;
     }
+    // The winner alone is settled properly. Every candidate got the same cheap budget above so
+    // that the comparison between them is fair; spending the long budget on all of them costs
+    // four times as much and changes which one wins not at all.
+    let best = settle(best, &ordered, SETTLINGS * 8);
+    if !best.assumed_circular {
+        return Some(best);
+    }
     // A circle is only an answer when the positions were known. Assuming one drops two
     // parameters, so an arc too short to shape a conic can still be *fitted* by a circle -- and
     // from bearings alone that circle can be anywhere, because nothing pins the range.
     // Measured on the shard: ten hours of bearings on a moon at 0.0097 AU fitted a circle at 63
     // AU, agreed with by every separated start, implying a star of 299 suns and so squeaking
     // past the mass bound by a hair. If the arc cannot shape a conic and no look ranged it,
-    // there is no orbit here.
-    if best.assumed_circular && ranged.len() < 3 {
-        return None;
-    }
-    // The winner alone is settled properly. Every candidate got the same cheap budget above so
-    // that the comparison between them is fair; spending the long budget on all of them costs
-    // four times as much and changes which one wins not at all.
-    Some(settle(best, &ordered, SETTLINGS * 8))
+    // there is no orbit here -- unless the anchors were only unlucky, and the whole arc shapes
+    // the conic they could not.
+    settle::released(&best, &ordered, SETTLINGS * 8).or((ranged.len() >= 3).then_some(best))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::settle::{PARABOLIC, spread};
+    use std::f64::consts::PI;
     use crate::knowledge::astrometry::Bearing;
     use crate::knowledge::Subject;
     use crate::rng;
@@ -1178,11 +1035,11 @@ mod tests {
         let tilt = fitted.pole.angle_between(truth.pole.normalize());
         assert!(tilt.to_degrees() < 0.1, "plane out by {} degrees", tilt.to_degrees());
 
-        // It cannot beat the noise it was given, and lands within a few hundred of it. The gap
-        // is the three-point solution's interpolation bias, which `settle` reduces and does not
-        // remove.
+        // At the noise it was given: a least-squares answer explains the bearings at least as
+        // well as the truth does, and a fit cannot beat noise by much.
         let floor = residual(&truth.fitted(), &seen, f64::INFINITY).expect("the truth scores");
         assert!(floor < 2.0 * SIGMA, "the floor should be the noise, got {floor}");
+        assert!(fitted.residual_rad <= floor, "{} against a floor of {floor}", fitted.residual_rad);
         assert!(fitted.residual_rad > floor * 0.5, "it beat the noise it was given");
     }
 
@@ -1299,29 +1156,27 @@ mod tests {
         }
     }
 
-    /// **Arc, not noise, is what an orbit costs.** Doubling the arc is four orders of
-    /// magnitude on the period; making the bearings a hundred times worse is nothing at all,
-    /// because over a short arc the error is the fit's own convergence and not the measurement.
-    /// Worth knowing before anybody buys a better telescope to get a better orbit.
+    /// **Arc buys far more than a better bearing.** At the noise floor the period's error is
+    /// the noise's, so it scales with the bearing: ten times worse is ten times worse. Doubling
+    /// the arc is sixty times better. Worth knowing before anybody buys a better telescope to
+    /// get a better orbit.
     #[test]
     fn a_longer_arc_buys_far_more_than_a_better_bearing() {
         let truth = like(1.0, 0.0167);
-        let period_off = |count: usize, every_s: f64, sigma: f64| {
-            let seen = looks(&truth, 5.0, count, every_s, sigma);
-            off(fit(&seen).expect("fits at what is tried here").period_s, truth.period_s())
+        let period = |count: usize, sigma: f64| {
+            let seen = looks(&truth, 5.0, count, 3.0 * DAY_S, sigma);
+            let fitted = fit(&seen).expect("fits at what is tried here");
+            let bar = spread(&fitted, &seen).period_s;
+            let miss = (fitted.period_s - truth.period_s()).abs();
+            assert!(miss < 4.0 * bar, "{count} looks at {sigma:e}: {miss} s out, sigma {bar} s");
+            bar
         };
 
-        let short = period_off(24, 3.0 * DAY_S, SIGMA);
-        let long = period_off(48, 3.0 * DAY_S, SIGMA);
-        assert!(short < 1.0e-3, "seventy degrees of arc gave {short}");
-        assert!(long < short / 1000.0, "twice the arc gave {long} against {short}");
-
-        // A hundred times the noise, over the short arc, is lost in that.
-        let noisy = period_off(24, 3.0 * DAY_S, SIGMA * 100.0);
-        assert!(noisy < short * 3.0, "{noisy} against {short}");
-        // A thousand times is not.
-        let hopeless = period_off(24, 3.0 * DAY_S, SIGMA * 1000.0);
-        assert!(hopeless > short * 2.0, "{hopeless} against {short}");
+        let short = period(24, SIGMA);
+        let long = period(48, SIGMA);
+        assert!(long < short / 30.0, "twice the arc gave {long} against {short}");
+        let noisy = period(24, SIGMA * 10.0);
+        assert!((noisy / short - 10.0).abs() < 1.0, "ten times the noise gave {noisy} against {short}");
     }
 
     /// A body going the other way round is a pole pointing the other way, not a negative
@@ -1366,8 +1221,7 @@ mod tests {
         }
     }
 
-    /// A fit states the epoch's error and a reader adds it to the period's drift. No better
-    /// calibrated than the rest of [`spread`]: the Earth-like fit is 4.5 of its along-path bar out.
+    /// A fit states the phase's error at its pivot, and a reader grows it from there.
     #[test]
     fn a_fit_states_how_far_round_its_body_is() {
         use crate::knowledge::placed::{Placed, placed_at};
@@ -1377,18 +1231,141 @@ mod tests {
             let seen = looks(&truth, 5.0, 24, truth.period_s() / 120.0, SIGMA);
             let fitted = fit(&seen).expect("fits");
             let orbit = fitted.stated(crate::knowledge::Witness(1), None, &seen, 0.0);
-            let (epoch_s, sigma_s) = orbit.epoch_s.expect("an epoch");
-            assert!((0.0..truth.period_s() * 0.5).contains(&sigma_s), "{sigma_s} s");
-            if e > 0.0 {
-                assert!(sigma_s > 0.0, "an eccentric orbit's epoch stated as exact");
-            }
+            let (_, sigma_s) = orbit.epoch_s.expect("an epoch");
+            assert!(sigma_s > 0.0 && sigma_s < truth.period_s() * 0.5, "{sigma_s} s");
 
-            let end = seen.last().expect("looks").at_s;
-            let Placed::Known { error, .. } = placed_at(&orbit, end) else { panic!("placed") };
-            let exact = crate::knowledge::Orbit { epoch_s: Some((epoch_s, 0.0)), ..orbit.clone() };
-            let Placed::Known { error: drift, .. } = placed_at(&exact, end) else { panic!("placed") };
-            let at_epoch = std::f64::consts::TAU * sigma_s / fitted.period_s;
-            assert!((error.along_rad - drift.along_rad.hypot(at_epoch)).abs() < 1.0e-12);
+            let pivot = orbit.pivot_s.expect("a fit has a pivot");
+            let along = |t: f64| match placed_at(&orbit, t) {
+                Placed::Known { error, .. } => error.along_rad,
+                other => panic!("{other:?}"),
+            };
+            let at_pivot = std::f64::consts::TAU * sigma_s / fitted.period_s;
+            assert!((along(pivot) - at_pivot).abs() < 1.0e-12 * at_pivot.max(1.0));
+            assert!(along(pivot + truth.period_s()) > at_pivot, "a year on it is no worse");
+        }
+    }
+
+    /// Looks as [`looks`] takes them, with the noise drawn from `seed`.
+    fn seeded(truth: &Truth, count: usize, every_s: f64, seed: u64) -> Vec<Look> {
+        looks(truth, 5.0, count, every_s, SIGMA)
+            .into_iter()
+            .enumerate()
+            .map(|(i, look)| {
+                let toward = (truth.at(look.at_s) - look.from_m).normalize();
+                let (x, y) = toward.any_orthonormal_pair();
+                let nudge = x * rng::gaussian(rng::hash(&[seed, i as u64, 51])) * SIGMA
+                    + y * rng::gaussian(rng::hash(&[seed, i as u64, 52])) * SIGMA;
+                Look { toward: (toward + nudge).normalize(), ..look }
+            })
+            .collect()
+    }
+
+    /// How far round its orbit `orbit` puts the body at `t` past where it truly is, radians of
+    /// mean anomaly, and the sigma it states for that.
+    fn along_miss(truth: &Truth, orbit: &crate::knowledge::Orbit, t: f64) -> (f64, f64) {
+        let crate::knowledge::Placed::Known { offset_au, error } = crate::knowledge::placed::placed_at(orbit, t) else {
+            panic!("placed")
+        };
+        let miss = offset_au - truth.at(t) / crate::navigation::AU;
+        (miss.dot(error.pace_au) / error.pace_au.length_squared(), error.along_rad)
+    }
+
+    /// **Least squares lands at the noise, whatever the shape and however long the arc.** The
+    /// pattern search it replaced stalled 800 times the noise over a fifth of an Earth-like
+    /// orbit and a million times over a whole one, and refused outright from 0.9 orbits up,
+    /// where the three anchors fall at one phase and the conic falls back to a circle.
+    #[test]
+    fn fits_land_at_the_noise_floor() {
+        for (name, truth, orbits) in [
+            ("Earth, a fifth", like(1.0, 0.0167), 0.2),
+            ("Mars, a fifth", like(1.524, 0.0934), 0.2),
+            ("a circle, a fifth", like(0.7, 0.0), 0.2),
+            ("Earth, 0.9", like(1.0, 0.0167), 0.9),
+            ("Mars, 1.5", like(1.524, 0.0934), 1.5),
+            ("Earth, 2", like(1.0, 0.0167), 2.0),
+            ("Mercury, 3", like(0.387, 0.2056), 3.0),
+        ] {
+            let seen = looks(&truth, 5.0, 24, truth.period_s() * orbits / 23.0, SIGMA);
+            let fitted = fit(&seen).unwrap_or_else(|| panic!("{name}: no orbit"));
+            let floor = residual(&truth.fitted(), &seen, f64::INFINITY).expect("the truth scores");
+            let over = fitted.residual_rad / floor;
+            assert!((0.7..=1.0).contains(&over), "{name}: {over} times the noise floor");
+            assert!(!fitted.assumed_circular, "{name}: a circle held on a conic");
+            let bar = spread(&fitted, &seen);
+            let z = (fitted.period_s - truth.period_s()) / bar.period_s;
+            assert!(z.abs() < 4.0, "{name}: period {z} sigma out");
+            let z = (fitted.eccentricity - truth.eccentricity) / bar.eccentricity;
+            assert!(z.abs() < 4.0, "{name}: eccentricity {z} sigma out");
+        }
+    }
+
+    /// **The bars cover the truth as often as they say.** Over seeded noise, each element's
+    /// truth lands within one sigma about two times in three and within three nearly always.
+    /// The walked bars this replaced put an Earth-like fit 4.5 sigma out on its phase alone.
+    ///
+    /// Settled from the truth, so what is tested is the covariance and not the search.
+    #[test]
+    fn the_bars_cover_the_truth_as_often_as_they_say() {
+        const SEEDS: u64 = 60;
+        for (name, truth, orbits) in [("Earth, a fifth", like(1.0, 0.0167), 0.2), ("Mars, 1.5", like(1.524, 0.0934), 1.5)] {
+            let mut z: Vec<f64> = Vec::new();
+            let mut poles = 0;
+            for seed in 0..SEEDS {
+                let seen = seeded(&truth, 24, truth.period_s() * orbits / 23.0, seed);
+                let fitted = settle(truth.fitted(), &seen, SETTLINGS * 8);
+                let bar = spread(&fitted, &seen);
+                let orbit = fitted.stated(crate::knowledge::Witness(1), None, &seen, 0.0);
+                let (phase, sigma) = along_miss(&truth, &orbit, orbit.pivot_s.expect("a pivot"));
+                z.extend([
+                    (fitted.period_s - truth.period_s()) / bar.period_s,
+                    (fitted.semi_major_m - truth.semi_major_m) / bar.semi_major_m,
+                    (fitted.eccentricity - truth.eccentricity) / bar.eccentricity,
+                    phase / sigma,
+                ]);
+                // The pole's bar is its worse direction, so it covers at least as often.
+                if fitted.pole.angle_between(truth.pole.normalize()) > 3.0 * bar.pole_rad {
+                    poles += 1;
+                }
+            }
+            let within = |k: f64| z.iter().filter(|z| z.abs() < k).count() as f64 / z.len() as f64;
+            assert!((0.55..0.8).contains(&within(1.0)), "{name}: {} within one sigma", within(1.0));
+            assert!(within(3.0) > 0.97, "{name}: {} within three", within(3.0));
+            assert!(poles <= 2, "{name}: the pole was {poles} of {SEEDS} times outside three sigma");
+        }
+    }
+
+    /// **The phase's error carried to any time matches the scatter.** A body's place along its
+    /// orbit, from a span before its pivot to ten spans after, against where it truly is: the
+    /// misses in their own sigma have an RMS of about one at the pivot and once the period's
+    /// drift dominates, and are never overconfident.
+    ///
+    /// Within a span or so of a short arc the bar is conservative, up to ten times: there the
+    /// period's error is cancelled by the eccentricity's, which a phase and a period alone cannot
+    /// say. See `lightcone/docs/25-system-knowledge.md`.
+    #[test]
+    fn the_phase_error_carried_forward_matches_the_scatter() {
+        const SEEDS: u64 = 60;
+        for (name, truth, orbits) in [("Earth, a fifth", like(1.0, 0.0167), 0.2), ("Mars, 1.5", like(1.524, 0.0934), 1.5)] {
+            let span = truth.period_s() * orbits;
+            let spans = [-1.0, 0.0, 0.5, 1.0, 2.0, 4.0, 10.0];
+            let mut z = vec![Vec::new(); spans.len()];
+            for seed in 0..SEEDS {
+                let seen = seeded(&truth, 24, span / 23.0, seed);
+                let fitted = settle(truth.fitted(), &seen, SETTLINGS * 8);
+                let orbit = fitted.stated(crate::knowledge::Witness(1), None, &seen, 0.0);
+                let pivot = orbit.pivot_s.expect("a fit has a pivot");
+                for (k, n) in spans.iter().enumerate() {
+                    let (miss, sigma) = along_miss(&truth, &orbit, pivot + n * span);
+                    z[k].push(miss / sigma);
+                }
+            }
+            for (n, z) in spans.iter().zip(&z) {
+                let rms = (z.iter().map(|z| z * z).sum::<f64>() / z.len() as f64).sqrt();
+                assert!(rms < 1.5, "{name}, {n} spans on: overconfident, the misses are {rms} sigma");
+                if *n == 0.0 || *n >= 2.0 {
+                    assert!(rms > 0.7, "{name}, {n} spans on: the misses are only {rms} sigma");
+                }
+            }
         }
     }
 
@@ -1416,43 +1393,9 @@ mod tests {
         assert!(checked > 0, "no arc fitted, so nothing was checked");
     }
 
-    /// A pole's error is two-dimensional and an arc pins the two directions differently. The
-    /// bar is the worse of them: walking one basis vector reported whichever that happened to
-    /// be, which for an edge-on arc is the direction that says nothing.
-    #[test]
-    fn the_pole_bar_is_the_worse_of_the_two_directions() {
-        let truth = like(1.0, 0.0167);
-        let seen = looks(&truth, 5.0, 48, 3.0 * DAY_S, SIGMA);
-        let fitted = fit(&seen).expect("fits");
-        let reported = spread(&fitted, &seen).pole_rad;
-
-        let worse = (fitted.residual_rad * fitted.residual_rad
-            + 1.0 / seen.iter().map(|l| 1.0 / (l.sigma_rad * l.sigma_rad)).sum::<f64>())
-        .sqrt();
-        let (u, v) = basis(fitted.pole);
-        let one_way = |axis: DVec3| {
-            let mut step = 1.0e-9;
-            for _ in 0..WALKS {
-                let mut trial = Fitted { pole: (fitted.pole + axis * step).normalize(), ..fitted };
-                let Some(fresh) = residual(&trial, &seen, f64::INFINITY) else { return step };
-                trial.residual_rad = fresh;
-                if settle_but(trial, &seen, PROFILINGS, POLE_U).residual_rad > worse {
-                    return step;
-                }
-                step = (step * 1.6).min(PI);
-            }
-            PI
-        };
-        let (along_u, along_v) = (one_way(u), one_way(v));
-        assert!(
-            (reported - along_u.max(along_v)).abs() < 1.0e-9,
-            "reported {reported}, u {along_u}, v {along_v}",
-        );
-    }
-
-    /// An element's error bar is how far it can move before the fit is a chi-square worse, with
-    /// everything else free to take up the slack. Held fixed instead, the period's comes out far
-    /// too small, because the period and the axis trade against each other.
+    /// An element's error bar is the marginal one, everything else free to take up the slack.
+    /// Held fixed instead, the period's comes out far too small, because the period and the axis
+    /// trade against each other.
     #[test]
     fn the_error_bars_are_the_marginal_ones() {
         let truth = like(1.0, 0.0167);
@@ -1463,16 +1406,14 @@ mod tests {
         assert!(spread.period_s > 0.0 && spread.period_s.is_finite(), "{:?}", spread);
         assert!(spread.semi_major_m > 0.0 && spread.eccentricity > 0.0 && spread.pole_rad > 0.0);
 
-        // The truth is within an order of the error bar, which is what the bar is for. Not
-        // within one sigma: see [`spread`] on why these are a few times optimistic.
         let period_miss = (fitted.period_s - truth.period_s()).abs();
         assert!(
-            period_miss < 20.0 * spread.period_s,
+            period_miss < 3.0 * spread.period_s,
             "{period_miss} s out with a sigma of {} s",
             spread.period_s
         );
         let axis_miss = (fitted.semi_major_m - truth.semi_major_m).abs();
-        assert!(axis_miss < 20.0 * spread.semi_major_m, "{axis_miss} m out of {}", spread.semi_major_m);
+        assert!(axis_miss < 3.0 * spread.semi_major_m, "{axis_miss} m out of {}", spread.semi_major_m);
         // And not absurdly wide either, or it would say nothing.
         assert!(spread.period_s / fitted.period_s < 1.0e-3, "{}", spread.period_s / fitted.period_s);
 
@@ -1818,6 +1759,7 @@ mod tests {
             orientation: crate::knowledge::Orientation::Unknown,
             epoch_s: None,
             pivot_s: None,
+            phase_period_rho: 0.0,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 1.0e6,
             lineage: Vec::new(),
@@ -1945,6 +1887,7 @@ mod tests {
             orientation: crate::knowledge::Orientation::Unknown,
             epoch_s: None,
             pivot_s: None,
+            phase_period_rho: 0.0,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 0.0,
             lineage: Vec::new(),
@@ -1980,9 +1923,16 @@ mod tests {
         assert!(period < 0.15, "period off by {period}");
 
         // The record says the eccentricity is unconstrained rather than saying it is zero,
-        // which doc 25's rule 4 is about.
+        // which doc 25's rule 4 is about, and its bars say so too: the true axis is inside the
+        // axis's bar, although the circle's size is the radius the body is at.
         let orbit = fitted.stated(crate::knowledge::Witness(1), None, &close, 0.0);
         assert_eq!(orbit.eccentricity, None);
+        let (au, sigma_au) = orbit.semi_major_au;
+        let z = (au - truth.semi_major_m / AU_M) / sigma_au;
+        assert!(z.abs() < 3.0, "the axis is {z} sigma out, a bar taken as if the circle were known");
+        let (period, sigma) = orbit.period_s;
+        let z = (period - truth.period_s()) / sigma;
+        assert!(z.abs() < 3.0, "the period is {z} sigma out");
 
         // A quarter of the orbit, ranged, does shape the conic and gets everything.
         let long = ranged(&truth, &looks(&truth, 5.0, 24, truth.period_s() / 96.0, SIGMA), 1.0e-3);
@@ -1996,6 +1946,22 @@ mod tests {
             better.eccentricity,
             truth.eccentricity
         );
+    }
+
+    /// **A circle is released only where the arc can shape a conic.** Ten hours of bearings on a
+    /// moon once fitted a circle at 63 AU, agreed with by every start, because a circle from
+    /// bearings alone can be anywhere. Releasing the circle must not bring that back: over a
+    /// twentieth of Ganymede's orbit the eccentricity is not pinned, so there is no orbit.
+    #[test]
+    fn a_short_arc_keeps_its_circle_refused() {
+        let mu = MU_SUN * 9.54e-4;
+        let truth = Truth { semi_major_m: 1.07e9, eccentricity: 0.0013, pole: DVec3::new(0.02, -0.03, 1.0), mu };
+        let seen = watched(&|t| truth.at(t), MU_SUN, 5.0, 24, 10.0 * 3600.0 / 23.0, SIGMA);
+        if let Some(fitted) = fit(&seen) {
+            assert!(!fitted.assumed_circular, "a circle from bearings alone");
+            let axis = off(fitted.semi_major_m, truth.semi_major_m);
+            assert!(axis < 0.1, "an orbit {axis} out of its axis");
+        }
     }
 
     /// **A circle assumed is a circle kept.** Where the arc cannot shape a conic the fit says
@@ -2021,10 +1987,12 @@ mod tests {
             let (range, _) = look.range_m.expect("these were ranged");
             let offset = fitted.at(look.at_s) - look.from_m;
             let out = (offset.length() - range).abs() / range;
-            assert!(out < 0.005, "drawn {out} of the way off its measured range");
-            // Not at the bearing noise, and it cannot be: a circle fitted through an arc of an
+            assert!(out < 0.01, "drawn {out} of the way off its measured range");
+            // Not at the noise, and it cannot be: a circle fitted through an arc of an
             // eccentricity-0.057 ellipse is the wrong shape by construction, and what it buys
-            // for that is a size and a plane it can state. Microradians, not milliradians.
+            // for that is a size and a plane it can state. Microradians, not milliradians, and
+            // under a percent on the range, which least squares gives up first because each
+            // range is worth millions of times less than a bearing.
             let miss = between(offset.normalize(), look.toward);
             assert!(miss < 1.0e-5, "drawn {miss} rad from where it was seen");
         }

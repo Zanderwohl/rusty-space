@@ -24,7 +24,7 @@ from.
 - The transit search concludes *a rocky or giant planet on a P-day orbit* about a **star**. No
   body is ever created from it: `Knowledge::found_planet` exists, letters a planet, and has no
   caller outside tests, not one. `Orbit` carries a single element, `semi_major_au`. *Now: the
-  shard calls it, and `Orbit` carries nine fields.*
+  shard calls it, and `Orbit` carries twelve fields.*
 - ~~The map's **Ecliptic** plane is `+Z`, the ecliptic of J2000, in every system~~ **Fixed,
   phase 1.** It was `+Z` in `normal()`, `basis()` and a comment, so a generated system's planets
   and belts — which orbit `generate::pole_for(seed)` — were tilted out of the plane drawn under
@@ -71,10 +71,12 @@ pub struct Orbit {
     pub orientation: Orientation,
     /// A time at which the body was at a known place on the orbit, and one sigma: a transit's
     /// mid-time, or an astrometric fit's periapsis passage. With a full orientation this places
-    /// the body now. A fit's sigma is the phase at `pivot_s`, as a time.
+    /// the body now. A fit's sigma is the phase along the path at `pivot_s`, as a time.
     pub epoch_s: Option<(f64, f64)>,
-    /// Where the phase is best known and the period's drift grows from; `None` is the epoch.
+    /// Where the epoch's sigma holds and the period's drift grows from; `None` is the epoch.
     pub pivot_s: Option<f64>,
+    /// Correlation of that phase with the period, so the phase's error grows right from any time.
+    pub phase_period_rho: f64,
     pub method: Method,                  // Transit, Astrometric, or Claim: stated by a craft that sent no raw data
     pub stated_s: f64,
     pub lineage: Lineage,
@@ -533,18 +535,22 @@ weighed by visiting it**, which is a fair price and of a piece with the rest of 
 fix, if it is wanted, is the classic visual-binary one: fit the *projected* ellipse in the plane
 of the sky, where the size and the inclination survive and only the depth's sign is lost.
 
-**Open: an arc many orbits long.** Measured on Sol from 5 AU (2026-09-26): after fifteen days
-the full search finds no orbit for Io, Europa, Ganymede, Callisto or Metis *even in the exact
-frame of Jupiter*, and a synthetic Earth fails from 0.9 orbits of arc upward. Two causes. The
-kept bearings are the sixteen most spread, so on a long arc they are orbits apart, past the
-twelve turns `knowledge::turns` searches; and anchors a whole orbit apart are one point, so the conic
-falls back to an assumed circle whose eccentricity the settle may not move. What works is the
-refit: it now counts turns from the orbit it carries, so a moon fitted once on a short arc stays
-fitted as the arc grows. A fresh search on a long arc still does not, and the settle — a pattern
-search — stalls short of the noise once the arc is long enough to need an eccentricity: a
-Gauss-Newton on a finite-difference Jacobian is the likely fix, and would give the error bars as
-a covariance rather than a walk. A moon's orbit is also only as good as its planet's place,
-which a moon's frame inherits whole: Jupiter placed 0.005 AU out is Europa's orbit wide.
+**An arc many orbits long.** Measured on Sol from 5 AU (2026-09-26): after fifteen days the full
+search found no orbit for Io, Europa, Ganymede, Callisto or Metis *even in the exact frame of
+Jupiter*, and a synthetic Earth failed from 0.9 orbits of arc upward. Two causes. The kept
+bearings are the sixteen most spread, so on a long arc they are orbits apart, past the twelve
+turns `knowledge::turns` searches; and anchors a whole orbit apart are one point, so the conic
+falls back to an assumed circle whose eccentricity the settle could not move. The refit answers
+the first: it counts turns from the orbit it carries, so a moon fitted once on a short arc stays
+fitted as the arc grows. ✅ The second is answered by the Gauss-Newton settle (2026-09-27,
+below): a circle assumed only because the anchors fell at one phase is **released** — settled
+again with the eccentricity free, and kept where the whole arc pins the eccentricity to 0.02 —
+and a synthetic Earth now fits at the noise from 0.9 orbits, 2, and Mercury over 3. It is tried
+on every candidate before the rivalry, since a circle held on an eccentric arc loses to rivals
+it should beat. An assumed circle on an arc that really is short stays refused: it cannot pin
+the eccentricity, which is why the circle was assumed. A moon's orbit is also only as good as
+its planet's place, which a moon's frame inherits whole: Jupiter placed 0.005 AU out is Europa's
+orbit wide.
 
 **So a satellite is followed up.** ✅ (2026-09-26) Bearings alone fix an orbit from about a third
 to three quarters of it, and measured in Jupiter's exact frame the number of looks hardly
@@ -597,6 +603,25 @@ as the orbit's error does and sixteen looks are enough to interpolate between.
   the line of sight to 0.4 AU when it is 0.006 AU out: a stalled fit's walked bars again.
   The irregulars other than Themisto are still wrong: fifteen days is a few percent of their
   orbits.
+- Measured again with the Gauss-Newton fit and covariance bars (2026-09-27, fifteen days):
+  Jupiter is an **assumed circle**, fitted while three of its looks were ranged, 2.0 sigma out
+  on its axis and placed 0.027 AU out against a bar of 0.15. Its bars had been taken with the
+  eccentricity held at zero, which put it 265 sigma out; a circle's bars are now marginalized
+  over the eccentricity it does not know. Io, Europa, Ganymede and Callisto are 0.6, 0.6, 0.6
+  and 2.1 sigma out, Metis, Adrastea, Amalthea and Thebe within 1.2, Mars, Mercury and Deimos
+  within 3. Every Jovian moon now inherits Jupiter's 0.027 AU, so none is placed better than
+  that. Dia and Chaldene are within 2.1 sigma, Themisto 3.5 and Pandia 4.8.
+- **Open: a fit well above the noise is biased, and its bars cannot say so.** S/2017 J7 is 20
+  sigma out on its axis, and 1566 Icarus, 99942 Apophis, 10 Hygiea and 2 Pallas 8 to 33.
+  Every one of them is held at 10 to 300 times the bearing noise, so the misfit is
+  systematic rather than noise, and inflating the covariance by the reduced chi-square widens
+  the bars without covering a bias over a few percent of an orbit. For a moon the cause is the
+  frame: Jupiter's depth error moves with time, and distorts the moon's orbit rather than
+  only scaling it. For the rest it is either what two bodies leave out, or a refit carried
+  forward: `STILL_AGREES` compares with the residual it replaces, so a slowly worsening fit
+  ratchets. Refusing a fit whose residual is far past the noise was tried once and rejected,
+  under the pattern search, because every good fit sat there too; at the noise floor that
+  objection is gone, and it is the likely next step.
 
 **Not oblateness.** The arena's bodies are spheres, so there is no figure to measure and none is
 invented. Same decision as rings for generated planets in phase 5, for the same reason.
@@ -677,11 +702,25 @@ what it came to:
   1000 for the Sun and exactly for a star three times heavier.
 - **Least squares is not optional.** A three-point solution passes *exactly* through three noisy
   rays, so it is an interpolation carrying their noise as a systematic: it sits 420 times its own
-  noise floor until the six elements are settled against every look.
-- **Arc, not noise, is what an orbit costs.** Over 71° the period comes out to 0.075% and
-  bearings a hundred times worse change that by nothing, because the error is the fit's own
-  convergence. Over 142° it is 8e-8, four orders better, at the noise floor. Nobody should buy a
-  better telescope to get a better orbit; they should watch for longer.
+  noise floor until the elements are settled against every look.
+- **Gauss-Newton, not a pattern search** (2026-09-27, `knowledge::settle`). The settle was a
+  pattern search over the elements, and it stalled: 800 times the noise over a fifth of an
+  Earth-like orbit, 92 times for Mars, a million times over a whole orbit, because it cannot
+  follow the valley the eccentricity, the periapsis and the epoch run along. It is now
+  Levenberg-Marquardt on a finite-difference Jacobian of the residual's terms — two components
+  of each bearing's miss, and a standardized range per ranged look — solved by a one-sided
+  Jacobi SVD of the Jacobian itself, since a short arc's condition number squared is past what
+  a double holds. The elements are moved as `h = e cos w, k = e sin w` and the mean longitude
+  at the pivot, in which that valley is a straight line and a circle is an ordinary point.
+  Every fit in the tests now lands *at* the noise floor: Earth, Mars and a circle over a fifth
+  of an orbit, and Earth, Mars and Mercury over 0.9 to 3 orbits. The grid, the polish and the
+  rivalry are unchanged. Measured, the polish is still needed: settled straight from the grid,
+  every arc of 0.6 orbits or less was refused for rivals. It costs about 15% of a fit.
+- **Arc buys far more than a better bearing.** At the noise floor the period's error is the
+  noise's, so bearings ten times worse give a period ten times worse. Doubling 71° of arc to 142°
+  makes it sixty times better, 1.6e-6 to 2.5e-8. Nobody should buy a better telescope to get a
+  better orbit; they should watch for longer. (Before the settle reached the noise this read
+  "noise changes nothing", which was the settle's stall talking.)
 - **A short arc gives no orbit, and that is the answer.** Three game months is 0.85% of Saturn's
   orbit, about three degrees, and the separated starts land on 2.7, 5.0, 2.6 and 230 AU with
   residuals within a factor of three of each other. **So the row above is wrong about Saturn**:
@@ -723,11 +762,26 @@ had to be got right, and one that was not:
   in simulation axes and periapsis measured round from it. A wrong conversion is a body drawn in
   the wrong place and nothing that complains, so the test puts the orbit through `placed_at` and
   checks it lands where the fit says, at eight points round three different orbits.
-- **The error bars are the marginal ones,** found by moving each element until the fit is a
-  chi-square worse *with the others re-settling*. Held fixed they come out eighty times too
-  small, because the period and the axis trade against each other. They are still a few times
-  optimistic, and [`spread`] says why: the re-settling is the same pattern search the fit uses
-  and stops for the same reason.
+- **The error bars are the marginal ones,** from the covariance `(J^T J)^-1` at the fit, scaled
+  by the reduced chi-square where the fit misses by more than the errors allow. Held fixed they
+  would come out eighty times too small, because the period and the axis trade against each
+  other. They were walked, each element moved until the fit was a chi-square worse with the
+  others re-settling, and the re-settling was the pattern search that stalled, so every walk was
+  too steep: truth sat 4.5 of its along-orbit bar out for an Earth-like fit, and Jupiter's
+  irregular moons 60 to 120. Now, over sixty seeds of noise, the truth lands within one sigma
+  about two times in three and within three nearly always, for the period, the axis, the
+  eccentricity and the phase. The ceilings are kept: an eccentricity's bar stops at parabolic,
+  a pole's at half a turn, a phase's at half a turn, which is anywhere.
+- **The phase is where the body is along its path,** from every element that moves it there and
+  not the mean longitude's alone: at the pivot the eccentricity's error moves the body along too,
+  and leaving it out put Mars over one and a half orbits three of its bars out. The phase's
+  covariance with the period is carried on `Orbit` as `phase_period_rho`, only the mean
+  longitude's part of it: the eccentricity's contribution is periodic, and drifted with the
+  period it made the bar worse than leaving the correlation out.
+- **The same Jacobian can schedule looks.** It says how much each look shrinks each element's
+  error, so a follow-up could be timed for when it shrinks the error that matters most, the
+  along-orbit one usually, rather than on a fixed doubling. Not built; a cheap interim is to
+  take a look when `PlaceError::along_rad` passes a threshold.
 - **An orbit has to be an orbit about a star,** and neither the geometry nor the timing says so
   on its own. `1/r = A + B cos + C sin` puts the semi-latus rectum at `1/A`, and three points
   nearly collinear in `(cos, sin)` put `A` near zero: nine hours of a generated system fitted to
@@ -1555,16 +1609,16 @@ knowledge. Today:
      `em_map::MapItem::spread_ly` became a list of `Spread` pieces, `Bar` or `Arc`, drawn by
      `lc_client::map_spread`.
      ✅ The orbit fit states an epoch sigma and a pivot (2026-09-27), so a freshly fitted body
-     has an arc from the start. The sigma is walked with the periapsis and the period held: at
-     a small eccentricity the periapsis is barely defined, and an epoch walked with it free
-     trades against it and reports half an orbit for a body whose place round it is known well.
-     With the period held it is the phase's error where the looks are, so the period's drift
-     grows from the **pivot**, the looks' weighted centre, where the two errors are independent
-     and add in quadrature. It had grown from the periapsis passage, which can be half a period
-     from the looks: six years for Jupiter. Measured, the epoch term is small beside the drift
-     and the eccentricity's own swing along the path, and no better calibrated than the rest of
-     `knowledge::arc::spread`: a fit stalled short of the noise walks every bar too steep.
-     A covariance would carry the phase from any time; that waits on a Gauss-Newton fit.
+     has an arc from the start. The sigma is the phase's along the path at the **pivot**, the
+     looks' weighted center, from the fit's covariance; the period's drift grows from there.
+     It had grown from the periapsis passage, which can be half a period from the looks: six
+     years for Jupiter. ✅ With the covariance (2026-09-27) the two are carried with their
+     correlation, `var M = var M0 - 2 dt rho sM0 sn + dt^2 sn^2`, so the phase's error is right
+     from any reference time. Measured over sixty seeds, the misses along the path are about one
+     of their bar at the pivot and from two arcs' length on, and never more than 1.5. Within
+     about an arc of a *short* fit the bar is conservative, up to ten times: there the period's
+     error is cancelled by the eccentricity's, and a phase, a period and a correlation cannot
+     say so. Carrying the whole covariance on `Orbit` would; it has not been worth a format.
    - ⬜ **Candidates are not drawn.** Their radius needs a period turned through a mass prior,
      and the client builds no `Prior` — adding one to draw faint rings is the wrong trade when
      the panel lists them already. The shard computes that radius at settle, so **sending it** is
@@ -1729,7 +1783,8 @@ game has no players — so each of these is a change in place, not a versioned a
 | 6 | the sites that were listed for a new `Duty` variant: the world enum (`survey.rs:306`) and its `target_at`, `slot_at`, `sweep`, `label`; `lc_proto::Duty` (`knowing.rs:52`) and `Duty::is_valid`; both `From` impls (`survey.rs:320`, `:340`); `Observatory::take_up` and `tick`; the `SetDuty` arm in `instruments.rs:322`; the golden vectors (`lib.rs:1232`, `:1251`, `:1359`; `golden.rs:208`, `:220`); and the client's three exhaustive matches in `telescope_panel.rs`, `action.rs` and `session.rs`. `persist.rs` needs no new arm — `SavedInstruments` carries the `Observatory` through serde wholesale — but the serialized shape changes |
 | 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |
 | 9 | `Order::SendReport` gains `about: Option<Subject>`, refused with `Impossible` when the craft does not `knows` that system. One new `Knowledge` method beside `report_upto`. **`REPORT_FORMAT` does not move**: `Report`, `Entry` and `Part` are unchanged, which is the point — and it must not move, because `Reported::format` is checked strictly on landing (`instruments.rs:215`), so a bump would make every report already in flight fail to land |
-| — | ✅ **`Orbit::epoch_s` grew a sigma and `Orbit` a `pivot_s`** (2026-09-27): `epoch_s` is `Option<(f64, f64)>` like every other element, a fit's sigma the epoch walked with the periapsis and the period held, so the phase at the pivot; a transit's is its duration over √12. `pivot_s` is where that holds and the period's drift grows from. `FILE_FORMAT` is 10 and `REPORT_FORMAT` is 9 |
+| — | ✅ **`Orbit::epoch_s` grew a sigma and `Orbit` a `pivot_s`** (2026-09-27): `epoch_s` is `Option<(f64, f64)>` like every other element, a fit's sigma the phase at the pivot; a transit's is its duration over √12. `pivot_s` is where that holds and the period's drift grows from. `FILE_FORMAT` is 10 and `REPORT_FORMAT` is 9 |
+| — | ✅ **`Orbit` grew `phase_period_rho: f64`** (2026-09-27): the correlation of the phase at the pivot with the period, from the Gauss-Newton fit's covariance, so `knowledge::placed` grows the phase's error right from any time. Zero for a transit. `FILE_FORMAT` is 11 and `REPORT_FORMAT` is 10 |
 
 ## Decided
 

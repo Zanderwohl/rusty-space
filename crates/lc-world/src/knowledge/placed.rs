@@ -232,18 +232,25 @@ pub(super) fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     // belief that reported only the size and the plane said a course could be flown against it.
     // `M = tau (t - epoch) / P`, so the period's error carries `tau |t - epoch| sigma_P / P^2`
     // of anomaly with it. Doc 25: the sigma is grown by how long since it was last seen.
-    // It grows from the pivot, where the epoch's error holds and is independent of the
-    // period's, so the two add in quadrature.
+    //
+    // It grows from the pivot, where the epoch's error is stated, carrying the two's
+    // covariance: `M = M0 - n' dt dP / P`, so `var M = var M0 - 2 dt rho sM0 sn + dt^2 sn^2`
+    // with `sn` the drift a second. A fit's phase and period are correlated wherever its
+    // looks are lopsided about the pivot, and the correlation is what makes that true
+    // at any time and not only one.
     let (period_s, period_sigma) = orbit.period_s;
     let pivot_s = orbit.pivot_s.unwrap_or(path.epoch_s);
-    let drift = TAU * (now_s - pivot_s).abs() * period_sigma / (period_s * period_s);
-    let at_epoch = TAU * orbit.epoch_s.map_or(0.0, |(_, sigma)| sigma) / period_s;
+    let dt = now_s - pivot_s;
+    let rate = TAU * period_sigma / (period_s * period_s);
+    let at_pivot = TAU * orbit.epoch_s.map_or(0.0, |(_, sigma)| sigma) / period_s;
+    let rho = orbit.phase_period_rho.clamp(-1.0, 1.0);
+    let along = at_pivot * at_pivot - 2.0 * dt * rho * at_pivot * rate + dt * dt * rate * rate;
 
     Placed::Known {
         offset_au,
         error: PlaceError {
             across_au2: outer(outward * axis_au) + outer(per_e * sigma_e) + outer(path.pole * normal_au),
-            along_rad: drift.hypot(at_epoch).min(PI),
+            along_rad: along.max(0.0).sqrt().min(PI),
             pace_au,
             outward,
             pole: path.pole,
@@ -306,6 +313,7 @@ mod tests {
             orientation: Orientation::Known { pole: DVec3::Z, sigma_rad: sigma_pole, node: 0.0, periapsis: 0.0 },
             epoch_s: Some((0.0, 0.0)),
             pivot_s: None,
+            phase_period_rho: 0.0,
             method: Method::Astrometric,
             stated_s: 0.0,
             lineage: Lineage::new(),
@@ -354,6 +362,24 @@ mod tests {
         let (_, later) = error(&o, pivot + 2.0 * PERIOD_S);
         let drift = TAU * 2.0 * 0.01;
         assert!((later.along_rad - drift.hypot(TAU * 1.0e-3)).abs() < 1.0e-9, "{}", later.along_rad);
+    }
+
+    /// A phase correlated with the period is known best somewhere other than the pivot, and
+    /// the covariance puts it there: `sM0^2 (1 - rho^2)` at `dt = rho sM0 / sn`, either side
+    /// by the sign of the correlation.
+    #[test]
+    fn a_correlated_phase_is_best_known_off_the_pivot() {
+        let sigma_epoch = PERIOD_S * 1.0e-3;
+        for rho in [0.8, -0.8] {
+            let o = Orbit { epoch_s: Some((0.0, sigma_epoch)), phase_period_rho: rho, ..orbit(None, 1.0e-4) };
+            let (phase, rate) = (TAU * 1.0e-3, TAU * 0.01 / PERIOD_S);
+            let best = rho * phase / rate;
+            let (_, there) = error(&o, best);
+            let want = phase * (1.0 - rho * rho).sqrt();
+            assert!((there.along_rad - want).abs() < 1.0e-12, "{} against {want}", there.along_rad);
+            assert!(error(&o, 0.0).1.along_rad > there.along_rad, "no better at the pivot");
+            assert!(error(&o, 2.0 * best).1.along_rad > there.along_rad);
+        }
     }
 
     /// The period's error is an angle along the orbit, and it grows with time either way.
