@@ -26,7 +26,6 @@ use bevy::render::render_resource::{
 };
 use bevy::render::renderer::{RenderAdapter, RenderDevice, RenderQueue};
 use em_render::body_surface_material::BodySurfaceMaterial;
-use em_render::plume_material::PlumeMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use texture_graph_core::{CUBE_FACES, EvalCtx, Graph, LoadError, ParamValue, load_from_str};
@@ -39,14 +38,6 @@ use texture_graph_gpu::{
 const POPULATION_GRAIN: &str = "textures/population_grain.tgraph";
 
 const CORONA: &str = "textures/corona.tgraph";
-
-const PLUME: &str = "textures/plume.tgraph";
-
-/// Texels along each edge of the plume's churn: six per cell across
-/// [`em_render::plume_material::CHURN_PERIOD`] cells. Measured against the graph evaluated
-/// exactly, six keeps the lanes within about one per cent, for seven megabytes; eight halves that
-/// for seventeen.
-const CHURN_TEXELS: u32 = 192;
 
 /// Texels along a corona cubemap face's edge. A corona samples a band about the great circle
 /// facing the viewer, about two thousand texels round, with its finest octave some five texels
@@ -395,7 +386,6 @@ fn run_bakes(
     mut populations: ResMut<Assets<PopulationMaterial>>,
     mut surfaces: ResMut<Assets<BodySurfaceMaterial>>,
     mut skies: ResMut<Assets<RelativisticStarfieldMaterial>>,
-    mut plumes: ResMut<Assets<PlumeMaterial>>,
 ) {
     let bakes = &mut *bakes;
     if bakes.baker.is_none() {
@@ -470,7 +460,6 @@ fn run_bakes(
         touch(&mut populations, &landed);
         touch(&mut surfaces, &landed);
         touch(&mut skies, &landed);
-        touch(&mut plumes, &landed);
     }
 }
 
@@ -515,13 +504,6 @@ impl Binds for RelativisticStarfieldMaterial {
     fn images(&self) -> Vec<AssetId<Image>> {
         let Self { uniforms: _, band_lut, corona_filaments, corona_reach } = self;
         vec![band_lut.id(), corona_filaments.id(), corona_reach.id()]
-    }
-}
-
-impl Binds for PlumeMaterial {
-    fn images(&self) -> Vec<AssetId<Image>> {
-        let Self { uniforms: _, churn } = self;
-        vec![churn.id()]
     }
 }
 
@@ -634,30 +616,6 @@ impl FromWorld for PopulationGrain {
     }
 }
 
-/// The churn every drive's exhaust streaks with. One for every plume: each craft's own streaks
-/// come from its phase, not from its texture.
-#[derive(Resource)]
-pub struct PlumeChurn {
-    pub image: Handle<Image>,
-}
-
-impl FromWorld for PlumeChurn {
-    fn from_world(world: &mut World) -> Self {
-        let graph = world.resource::<AssetServer>().load(PLUME);
-        let target = Target::new(Shape::Volume(CHURN_TEXELS));
-        let image = world
-            .resource_mut::<Assets<Image>>()
-            .add(placeholder(target));
-        world.resource_mut::<Bakes>().request(
-            graph,
-            EvalCtx::default().seed,
-            target,
-            image.clone(),
-        );
-        Self { image }
-    }
-}
-
 /// The corona's two fields, baked once and shared by every star.
 #[derive(Resource)]
 pub struct Corona {
@@ -696,7 +654,6 @@ impl Plugin for ProceduralTexturesPlugin {
             .init_resource::<Bakes>()
             .init_resource::<PopulationGrain>()
             .init_resource::<Corona>()
-            .init_resource::<PlumeChurn>()
             .add_plugins(crate::surfaces::SurfacesPlugin)
             .add_systems(Update, run_bakes);
     }
@@ -717,14 +674,15 @@ mod tests {
         let mut images = Assets::<Image>::default();
         let target = Target::new(Shape::Volume(2));
         let (landed, other) = (images.add(placeholder(target)), images.add(placeholder(target)));
-        let mut plumes = Assets::<PlumeMaterial>::default();
-        let plume = |churn: &Handle<Image>| PlumeMaterial {
-            uniforms: em_render::plume_material::PlumeUniform::default(),
-            churn: churn.clone(),
+        let mut populations = Assets::<PopulationMaterial>::default();
+        let population = |grain: &Handle<Image>| PopulationMaterial {
+            uniforms: em_render::population_material::PopulationUniform::default(),
+            profile: Handle::default(),
+            grain: grain.clone(),
         };
-        let binding = plumes.add(plume(&landed));
-        plumes.add(plume(&other));
-        assert_eq!(bound(&plumes, &[landed.id()]), [binding.id()]);
+        let binding = populations.add(population(&landed));
+        populations.add(population(&other));
+        assert_eq!(bound(&populations, &[landed.id()]), [binding.id()]);
     }
 
     fn asked(target: Target) -> Request {
@@ -856,35 +814,6 @@ mod tests {
             peak <= 0.66 * (1.0 + 0.42 + 0.42 * 0.42) + 1e-4,
             "filaments peak at {peak}"
         );
-    }
-
-    /// plume.wgsl's churn as it stood — two octaves at lacunarity 2, gain 0.5, normalized — and
-    /// what the shader and the host assume of it: that it repeats on every axis at
-    /// [`CHURN_PERIOD`], which is where the host wraps the phase. A period that disagreed would
-    /// make the streaks jump once every wrap, which no test of the shader could see.
-    #[test]
-    fn the_shipped_churn_repeats_where_the_host_wraps() {
-        use em_render::plume_material::CHURN_PERIOD;
-        let g = shipped(PLUME);
-        let n = noise(&g, "churn");
-        assert_eq!(
-            g.output.color,
-            g.layers.iter().find(|l| l.name == "churn").map(|l| l.id)
-        );
-        assert_eq!(
-            (n.dims, n.kernel, n.range),
-            (NoiseDims::D3, NoiseKernel::Value, NoiseRange::Unsigned)
-        );
-        assert_eq!(n.frequency, CHURN_PERIOD);
-        assert_eq!(n.period, [CHURN_PERIOD as u32; 3]);
-        let f = n.fractal;
-        assert_eq!(
-            (f.octaves, f.lacunarity, f.gain, f.mode, f.normalize),
-            (2, 2.0, 0.5, FractalMode::Standard, true)
-        );
-        // And the bake spends a whole number of texels on each cell, so a texel boundary falls
-        // on every lattice line.
-        assert_eq!(CHURN_TEXELS % CHURN_PERIOD as u32, 0);
     }
 
     /// What the shader assumes of the shipped grain, which an edit in the editor could break

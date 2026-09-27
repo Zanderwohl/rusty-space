@@ -34,7 +34,6 @@ use em_render::hull_material::{
     ATTRIBUTE_HULL_SEAM, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile,
     insert_region_weights, region_weights, tile_array,
 };
-use em_render::plume_material::PlumeMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use lc_client::hull_mesh::REGION_GRAPHS;
@@ -159,7 +158,6 @@ fn main() {
         .init_asset::<PopulationMaterial>()
         .init_asset::<BodySurfaceMaterial>()
         .init_asset::<RelativisticStarfieldMaterial>()
-        .init_asset::<PlumeMaterial>()
         .add_plugins((ProceduralTexturesPlugin, HullMaterialPlugin))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Scene {

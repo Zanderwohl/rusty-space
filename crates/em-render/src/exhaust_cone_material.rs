@@ -175,7 +175,7 @@ impl Material for ApertureGlowMaterial {
 }
 
 /// One fragment per pixel, and one still there with the camera inside the proxy: each fragment
-/// answers for its whole ray, so both faces would count it twice. See `plume_material`.
+/// answers for its whole ray, so both faces would count it twice.
 fn back_faces_only(descriptor: &mut RenderPipelineDescriptor) {
     descriptor.primitive.cull_mode = Some(Face::Front);
     if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {

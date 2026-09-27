@@ -18,7 +18,6 @@ pub mod exhaust_cone_material;
 pub mod field_material;
 pub mod hull_material;
 pub mod local_starfield_material;
-pub mod plume_material;
 pub mod population_material;
 pub mod relativistic_starfield_material;
 pub mod render_space;
