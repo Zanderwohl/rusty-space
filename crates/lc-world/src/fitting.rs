@@ -407,8 +407,7 @@ pub struct Fitting {
     committed_j: f64,
     /// `Q`, the field's heat at `since_s`. See [`crate::field`].
     heat_j: f64,
-    /// Starlight arriving at the field from `since_s`, watts, until the craft starts the next
-    /// segment. See [`crate::solar`].
+    /// Watts arriving at the field from `since_s` until the next segment. See [`crate::solar`].
     starlight_w: f64,
     refit: Option<Plan>,
 }
@@ -541,7 +540,7 @@ impl Fitting {
         &self.geometry
     }
 
-    /// Starlight arriving at the field in the segment in force, watts.
+    /// Watts, in the segment in force.
     pub fn starlight_w(&self) -> f64 {
         self.starlight_w
     }
@@ -580,7 +579,6 @@ impl Fitting {
         cost::energy_j(self.settled_mass_kg(), flown, self.balance.drive_efficiency)
     }
 
-    /// Heat weighs what it holds, as stored energy does.
     fn settled_mass_kg(&self) -> f64 {
         self.hull.dry_kg + (self.stored_j + self.heat_j) / C2
     }
@@ -590,8 +588,7 @@ impl Fitting {
         self.stored_with(self.flow(now_s).income_j, motion, now_s)
     }
 
-    /// `income_j` is what conversion has stored less what living space has drawn: see
-    /// [`Fitting::flow`].
+    /// `income_j` from [`Fitting::flow`].
     fn stored_with(&self, income_j: f64, motion: &ShipState, now_s: f64) -> f64 {
         let moved = match &self.refit {
             Some(plan) => plan.at(self.since_s).stored_j - plan.at(now_s).stored_j,
@@ -688,8 +685,8 @@ impl Fitting {
         self.refit = Some(plan);
     }
 
-    /// Only the time is skipped: the remaining steps' energy is still taken, and what they would
-    /// have lost and vented arrives as one burst. Settle first.
+    /// Only the time is skipped: the remaining steps' energy is still taken, and their loss and
+    /// vents arrive as one burst. Settle first.
     pub fn finish_refit(&mut self) -> bool {
         let Some(plan) = self.refit.take() else { return false };
         let end = plan.at(plan.round().start_s + plan.duration_s());
@@ -849,7 +846,7 @@ impl From<&Fitting> for lc_proto::Fitting {
 }
 
 impl Fitting {
-    /// A fitting and its field as they are sent and saved. With no field, the form's idle heat.
+    /// With no field, the form's idle heat.
     pub fn from_wire(f: &lc_proto::Fitting, field: Option<&lc_proto::Field>) -> Self {
         let account = Account {
             form: (&f.form).into(),
@@ -874,7 +871,7 @@ impl From<&lc_proto::Fitting> for Fitting {
 }
 
 impl From<&Fitting> for lc_proto::Field {
-    /// In [`MODE`], with no switch: nothing orders one until the modes are built (H6).
+    /// No switch until H6 builds the modes.
     fn from(f: &Fitting) -> Self {
         use lc_proto::{FieldMode, Shade};
         let (mode, shade) = match MODE {

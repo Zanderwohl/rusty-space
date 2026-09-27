@@ -266,7 +266,6 @@ mod tests {
         wire.take(ClientId(1))
     }
 
-    /// `Fitted` states the field's heat as the account holds it, settled at the same instant.
     #[tokio::test]
     async fn fitted_carries_the_fields_heat() {
         let (mut server, mut wire, _, ship) = fitted_server(false);

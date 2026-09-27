@@ -3,8 +3,8 @@
 //!
 //! A field takes in `flux · ∫ max(0, n·ŝ) dA`, and for a convex body that integral is the shadow
 //! the hull casts along `ŝ`: the form's shadow table, which also counts a stack of plates shading
-//! itself. `flux` carries the balance's gain on the star's output, and nothing downstream multiplies
-//! again: what the field converts is the account's, in [`crate::field`]. A ship takes in starlight
+//! itself. `flux` carries the balance's gain on the star's output; conversion is the account's, in
+//! [`crate::field`]. A ship takes in starlight
 //! only when it is not under way. Intake is held constant over segments of coordinate time — see
 //! [`segment_end`] — because distance from the star is not a closed form anyone can integrate
 //! cheaply.
@@ -105,7 +105,7 @@ pub fn flux_w_m2(luminosity_w: f64, distance_m: f64) -> f64 {
     luminosity_w / (4.0 * std::f64::consts::PI * distance_m * distance_m)
 }
 
-/// What arrives at a shadow of `shadow_m2`, W, from a star whose output carries the balance's gain.
+/// Watts arriving at a shadow of `shadow_m2`.
 /// Server and client both price a segment through here.
 pub fn intake_w(balance: &crate::fitting::Balance, shadow_m2: f64, luminosity_w: f64, distance_m: f64) -> f64 {
     flux_w_m2(balance.solar_gain * luminosity_w, distance_m) * shadow_m2
@@ -221,8 +221,7 @@ mod tests {
         assert!((flux / SOLAR_CONSTANT_W_M2 - 1.0).abs() < 0.01, "{flux}");
     }
 
-    /// 31 §The star's gain: the gain is on the star's output, once, and what the field does with
-    /// what arrives is not in it.
+    /// 31 §The star's gain: applied once, with no conversion in it.
     #[test]
     fn the_gain_is_on_the_star_and_nothing_else_multiplies() {
         let b = Balance::DEFAULT;

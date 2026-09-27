@@ -5,17 +5,17 @@ use super::{Balance, Fitting, Hull};
 use crate::field::{Field, Mode, Segment};
 use crate::refit::rounds::{Phase, Plan, Step};
 
-/// Every field runs Black until the modes are built (H6).
+/// Until H6 builds the modes.
 pub const MODE: Mode = Mode::Black;
 
-/// Heat at `now_s`, and what conversion stored less what living space drew since the settlement.
+/// Since the settlement: the heat reached, and what conversion stored less what the drain drew.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Flow {
     pub heat_j: f64,
     pub income_j: f64,
 }
 
-/// Where the living drain alone holds a field of this hull: far from any star, storage paying it.
+/// Far from any star, with storage paying the drain.
 pub(super) fn idle_j(hull: &Hull, balance: &Balance) -> f64 {
     hull.capacities.drain_w * balance.field_tau_s
 }
@@ -26,7 +26,6 @@ impl Fitting {
         Field::of(self.geometry.envelope_area_m2, &self.balance)
     }
 
-    /// `Q` at a coordinate time, joules.
     pub fn heat_j_at(&self, now_s: f64) -> f64 {
         self.flow(now_s).heat_j
     }
@@ -35,8 +34,7 @@ impl Fitting {
         self.field().temperature_k(self.heat_j_at(now_s))
     }
 
-    /// What starlight puts into storage while it has room, watts: converted up to the engines'
-    /// rating, at `conversion_efficiency`.
+    /// Watts starlight stores while storage has room: capped at the engines' rating.
     pub fn solar_w(&self) -> f64 {
         self.intake(0.0, 0.0).stored_w()
     }
@@ -54,12 +52,9 @@ impl Fitting {
         }
     }
 
-    /// From the settlement to `now_s`, cut wherever a refit step begins or ends: a dismantling
-    /// radiates its loss over its step, and a vent lands at the end of the step that frees it.
-    ///
-    /// Storage's room and what is free are carried across the cuts, so where they fall changes
-    /// nothing. A refit's own transfers and a burn's spending are left out of both, as the
-    /// settled terms leave them out; they are exact while neither runs.
+    /// Cut where refit steps begin and end, where a dismantling's loss starts and stops and vents
+    /// land. Room and free storage carry across cuts, so where settlements fall changes nothing.
+    /// A refit's transfers and a burn's spending are left out, as the settled terms leave them out.
     pub(super) fn flow(&self, now_s: f64) -> Flow {
         let field = self.field();
         let mut flow = Flow { heat_j: self.heat_j, income_j: 0.0 };
@@ -127,7 +122,6 @@ fn pieces(plan: Option<&Plan>, balance: &Balance, since_s: f64, now_s: f64) -> V
         .collect()
 }
 
-/// A dismantling's loss, spread over its step as the energy moves.
 fn losing_w(step: &Step, balance: &Balance) -> f64 {
     match step.change.phase() {
         Phase::Dismantle if step.duration_s > 0.0 => (1.0 - balance.recovery) * step.gross_j / step.duration_s,
@@ -135,8 +129,7 @@ fn losing_w(step: &Step, balance: &Balance) -> f64 {
     }
 }
 
-/// What the steps not yet done by `since_s` would still lose and vent, joules: a finish skips their
-/// time but not their heat.
+/// What the steps unfinished at `since_s` would still lose and vent, joules.
 pub(super) fn left_j(plan: &Plan, since_s: f64, balance: &Balance) -> f64 {
     let start_s = plan.round().start_s;
     plan.steps()
@@ -185,8 +178,7 @@ mod tests {
         Fitting::from_account(&Account { stored_j, ..full.account() }, b)
     }
 
-    /// 30's table: the starting ship full at 0.1 AU, and filling there half a year in, when it is
-    /// far from full and long past its time constant.
+    /// 30's table: full at 0.1 AU, and filling there half a year in.
     #[test]
     fn the_starting_ship_at_a_tenth_of_an_au_settles_at_thirtys_temperatures() {
         let b = Balance::DEFAULT;
@@ -207,7 +199,7 @@ mod tests {
         assert!((stored - 0.5).abs() < 0.01, "{stored} full");
     }
 
-    /// Past the engines' rating nothing more is converted, and what arrives beyond it is heat.
+    /// Beyond the rating, what arrives is heat.
     #[test]
     fn conversion_is_rated_by_the_engines() {
         let b = Balance::DEFAULT;
@@ -223,8 +215,7 @@ mod tests {
         assert!(close(heat_j, unconverted_j, 1e-4), "{heat_j} {unconverted_j}");
     }
 
-    /// A ship filling, then full partway, then held there: settled in one leap and in a thousand
-    /// small settlements, heat and storage agree.
+    /// Storage fills partway through; one leap and a thousand settlements agree.
     #[test]
     fn one_leap_and_many_settlements_agree() {
         let b = Balance::DEFAULT;
@@ -244,8 +235,7 @@ mod tests {
         assert_eq!(leap.stored_j, leap.hull().capacities.storage_j);
     }
 
-    /// Storage run down to nothing pays no more of the drain than conversion brings in, and what it
-    /// does not pay makes no heat: far from a star, an empty ship cools.
+    /// The drain storage cannot pay makes no heat.
     #[test]
     fn an_empty_ship_far_from_a_star_cools() {
         let b = Balance::DEFAULT;
@@ -290,9 +280,8 @@ mod tests {
         assert!(close(jump_j, overflow_j, 1e-9), "{jump_j} {overflow_j}");
     }
 
-    /// With the field's radiation switched off, heat is a ledger: a dismantling into full storage
-    /// ends with all it took apart in the field, its loss spread over the step and the rest vented
-    /// at the end. Settling across the step's end, or finishing early, lands in the same place.
+    /// With radiation off, a dismantling into full storage ends with all it took apart as heat,
+    /// however it is settled or finished.
     #[test]
     fn a_dismantling_into_full_storage_ends_as_heat() {
         let b = Balance { living_density_w: 0.0, field_tau_s: 1.0e40, ..Balance::DEFAULT };
@@ -331,7 +320,6 @@ mod tests {
         assert!(close(hot.settled_mass_kg() - cold.settled_mass_kg(), difference_kg, 1e-9));
     }
 
-    /// `Fitted` carries `Q`, and a fitting sent with its field comes back holding it.
     #[test]
     fn heat_crosses_the_wire() {
         let b = Balance::DEFAULT;

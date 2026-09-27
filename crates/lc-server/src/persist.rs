@@ -52,7 +52,6 @@ pub struct Saved {
     /// planned from, which solves to the same plan on load. The balance in it measures the form it
     /// loads as, and the shard then stamps its own over it.
     pub fitting: Option<lc_proto::Fitting>,
-    /// Its field's heat, settled with the fitting.
     pub field: Option<lc_proto::Field>,
     /// What its telescope is committed to and how far it has reported to whom, so a sweep
     /// resumes where it was rather than starting again. What it *knows* is written beside the
@@ -88,7 +87,7 @@ pub struct SavedInstruments {
 ///
 /// 10 is a ship kept as its form. Every older row held a loadout, which no ship is any more, so
 /// none is read: there are no players, and a row refused names its format rather than coming
-/// back as some other ship. 11 keeps the field's heat beside the fitting.
+/// back as some other ship.
 pub const SAVE_FORMAT: i32 = 11;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.

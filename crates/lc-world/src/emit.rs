@@ -101,8 +101,7 @@ mod tests {
         assert_eq!(format!("{:.2e}", drive_m3), "1.96e6");
         let rated = rating_w(&b, drive_m3);
         assert_eq!(format!("{rated:.1e}"), "1.1e20");
-        // Full is the anchored dry mass and 30 ME, so the form weighs this to the anchor's 1e-9. Its
-        // field's heat is not in the anchor.
+        // The anchor is dry mass and 30 ME, to 1e-9. The field's heat is not in it.
         let fitting = Fitting::full(Form::starting(), b, 0.0);
         let full_kg = fitting.hull().dry_kg + fitting.hull().capacities.storage_j / crate::fitting::C2;
         let five_g = thrust_power_w(full_kg, 5.0 * G0);

@@ -358,8 +358,7 @@ mod tests {
         assert_eq!(field.time_to_rise_s(0.0, field.heat_max_j(), field.heat_full_w(&farther)), None);
     }
 
-    /// The field is anchored on the starlight `solar` delivers to the starting form's broadside, with
-    /// the gain `Balance::DEFAULT` solves there.
+    /// `τ` is solved on the broadside the gain is solved on.
     #[test]
     fn the_starlight_anchored_on_is_what_arrives() {
         let b = Balance::DEFAULT;

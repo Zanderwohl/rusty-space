@@ -537,8 +537,8 @@ impl Craft {
         Some((at - star).length() * crate::system::M_PER_LY)
     }
 
-    /// Starlight arriving at its field at `t`, watts: its shadow toward the star in the attitude it
-    /// holds then. Zero under way, between systems, and for a craft with no fitting.
+    /// Watts arriving at its field at `t`, over its shadow in the attitude it holds then. Zero under
+    /// way, between systems, and with no fitting.
     pub fn starlight_w_at(&self, t: f64) -> f64 {
         let (Some(fitting), Some(system)) = (&self.fitting, self.system.as_deref()) else {
             return 0.0;

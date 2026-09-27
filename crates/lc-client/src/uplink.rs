@@ -871,7 +871,7 @@ fn fold(
             Err(why) => warn!(%why, "a log page that would not parse"),
         },
         Outbound::Observing { duty, integration_s } => game.0.adopt_duty(&duty, integration_s),
-        // Taken whole, like `Flying`: the authority's account and its field, settled together.
+        // Taken whole, like `Flying`.
         Outbound::Fitted { ship_id, fitting, hull, field } => {
             if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
                 game.0.ship.fit(Some(lc_world::fitting::Fitting::from_wire(&fitting, field.as_ref())));
@@ -1054,8 +1054,7 @@ mod tests {
         )
     }
 
-    /// Heat weighs, so a client that dropped the field would fly a lighter ship than the
-    /// authority's.
+    /// Heat weighs: dropping the field leaves the client's ship lighter than the authority's.
     #[test]
     fn a_fitted_field_is_the_ships_heat() {
         use lc_world::fitting::{Account, Balance, Fitting};
