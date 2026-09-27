@@ -221,6 +221,18 @@ mod tests {
         assert!((flux / SOLAR_CONSTANT_W_M2 - 1.0).abs() < 0.01, "{flux}");
     }
 
+    /// 31 §The star's gain: the gain is on the star's output, once, and what the field does with
+    /// what arrives is not in it.
+    #[test]
+    fn the_gain_is_on_the_star_and_nothing_else_multiplies() {
+        let b = Balance::DEFAULT;
+        let (shadow_m2, d_m) = (1.0e5, 0.3 * UNIT_M);
+        let arriving = intake_w(&b, shadow_m2, sol_w(), d_m);
+        assert!((arriving / (flux_w_m2(b.solar_gain * sol_w(), d_m) * shadow_m2) - 1.0).abs() < 1.0e-15);
+        let lossless = Balance { conversion_efficiency: 1.0, ..b };
+        assert_eq!(intake_w(&lossless, shadow_m2, sol_w(), d_m), arriving);
+    }
+
     fn geometry(form: &Form) -> Geometry {
         FormGrid::new(form, &Balance::DEFAULT).unwrap().geometry(1.0)
     }

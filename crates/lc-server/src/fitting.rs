@@ -155,8 +155,8 @@ impl<J: Journal> Server<J> {
         let Some(craft) = self.fleet.get(id) else { return };
         let Some(fitting) = craft.fitting() else { return };
         let Some(owner) = self.owners.get(&id).copied() else { return };
-        let (hull, fitting) = (fitting.into(), fitting.into());
-        wire.send(owner, Outbound::Fitted { ship_id: ShipId(id.0), fitting, hull, field: None });
+        let (hull, field, fitting) = (fitting.into(), Some(fitting.into()), fitting.into());
+        wire.send(owner, Outbound::Fitted { ship_id: ShipId(id.0), fitting, hull, field });
     }
 
     /// **Development only.** Put energy into the asking client's ship, if it may develop.
@@ -264,6 +264,25 @@ mod tests {
 
     fn replies(wire: &mut Loopback) -> Vec<Outbound> {
         wire.take(ClientId(1))
+    }
+
+    /// `Fitted` states the field's heat as the account holds it, settled at the same instant.
+    #[tokio::test]
+    async fn fitted_carries_the_fields_heat() {
+        let (mut server, mut wire, _, ship) = fitted_server(false);
+        server.tick(&mut wire).await.unwrap();
+        let craft = server.fleet.get_mut(CraftId(1)).unwrap();
+        let fitting = craft.fitting().unwrap().clone();
+        let hot = lc_world::fitting::Account { heat_j: 7.0e24, ..fitting.account() };
+        craft.fit(Some(Fitting::from_account(&hot, *fitting.balance())));
+        replies(&mut wire);
+        server.tell_fitted(&mut wire, CraftId(1));
+        let said = replies(&mut wire);
+        let Some(Outbound::Fitted { ship_id, fitting, field: Some(field), .. }) = said.first() else { panic!("{said:?}") };
+        assert_eq!(*ship_id, ship);
+        assert_eq!(field.heat_j, 7.0e24);
+        assert_eq!(field.since_s, fitting.since_s);
+        assert_eq!(field.shade, lc_proto::Shade::Black);
     }
 
     #[tokio::test]

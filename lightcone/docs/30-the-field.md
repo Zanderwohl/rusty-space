@@ -3,8 +3,14 @@
 Every ship is wrapped in a field. It is the collector, the radiator and the shield, and when it
 fails, the ship is gone and the whole system sees it happen.
 
-**Status: designed.** The account is `lc_world::field`, with its anchors derived in
-`Balance::DEFAULT`; nothing reads it yet. It replaces the fixed 400 K hull
+**Status: in the account.** The closed forms are `lc_world::field`, with their anchors derived in
+`Balance::DEFAULT`. A fitting settles `Q` beside stored energy (`lc_world::fitting::heat`), `Fitted`
+carries it and a checkpoint keeps it. Every field runs Black until the modes are built, and nothing
+collapses yet. A ship whose storage has run down to what its motive has committed pays only as much
+of the living drain as conversion brings in, and the rest makes no heat, so an empty ship far from
+a star cools below 400 K. A refit's transfers and a burn's spending are settled beside the account
+rather than inside it, so room a build opens in full storage is refilled from the next settlement,
+a game day at most, and until then what would have filled it is heat. It replaces the fixed 400 K hull
 (`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
 [20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
 Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
