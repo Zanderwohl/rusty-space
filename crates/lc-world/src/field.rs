@@ -825,4 +825,22 @@ mod tests {
         let hot = crate::fitting::Account { heat_j: 2.0 * fitting.field().heat_max_j(), since_s: 5.0, ..fitting.account() };
         assert_eq!(crate::fitting::Fitting::from_account(&hot, b).collapse_s(), Some(5.0));
     }
+
+    /// 30's lethal radii: a full starting ship, and one ten and a hundred times its size, collapsing
+    /// beside an idle Black starting ship broadside to it.
+    #[test]
+    fn the_lethal_radii_are_thirtys() {
+        let b = Balance::DEFAULT;
+        let victim = Start::new(&b);
+        let headroom_j = victim.field.heat_max_j() - victim.caps.drain_w * b.field_tau_s;
+        for (scale, want_m) in [(1.0, 150.0), (10.0, 4_200.0), (100.0, 130_000.0)] {
+            let form = crate::form::presets::named("default", scale).unwrap();
+            let field = Field::of(FormGrid::new(&form, &b).unwrap().envelope_area_m2(), &b);
+            let spike_j = b.collapse_spike_fraction * field.released_j(Capacities::of(&form, &b).storage_j);
+            let r_m = lethal_radius_m(1.0, spike_j, victim.broadside_m2, headroom_j);
+            assert!(close(r_m, want_m, 0.02), "{scale} times: {r_m} m");
+            let clear_m = lethal_radius_m(b.clear_absorptivity, spike_j, victim.broadside_m2, headroom_j);
+            assert!(close(clear_m, b.clear_absorptivity.sqrt() * r_m, 1e-12));
+        }
+    }
 }
