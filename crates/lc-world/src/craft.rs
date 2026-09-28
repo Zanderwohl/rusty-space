@@ -20,7 +20,7 @@ use crate::fitting::Fitting;
 use crate::instrument::Instrument;
 use crate::motion::{self, Event, Flight, Motive, Past, Rejected, ShipState};
 use crate::navigation::Waypoint;
-use crate::seen::{History, Refitting, Seen, running};
+use crate::seen::{Glows, History, Refitting, Seen, running};
 use crate::solar;
 use crate::system::LocalSystem;
 mod emit;
@@ -55,19 +55,6 @@ pub const HISTORY_S: f64 = 2.0 * crate::system::LOCAL_SHELL_LY * crate::flight::
 /// oldest stretches, and the observers far enough away to have wanted them stop seeing it —
 /// which is the safe way to be unable to answer.
 pub const HISTORY_STRETCHES: usize = 256;
-
-/// What a hull sits at, kelvin.
-///
-/// One temperature for every craft, and a deliberate simplification: a real hull has a sunward
-/// face and a shadowed one and a radiator problem that dominates its design. These are assumed
-/// to be advanced enough to hold an even skin and dump exactly what they make, so a craft is a
-/// blackbody at a single temperature and nothing about where it is or what it is doing changes
-/// that.
-///
-/// Four hundred kelvin puts a ship well below anything visible and squarely in the thermal
-/// infrared, which is the point: a craft running dark in the optical is a bright object at ten
-/// microns, and which band a player is looking through decides whether they can see it.
-pub const HULL_K: f64 = 400.0;
 
 /// The span of hull lengths the game is designed around, meters. Nothing enforces it; it is
 /// what the camera, the reticle and the point-source crossover are expected to cope with.
@@ -204,6 +191,8 @@ pub struct Craft {
     /// The forms it has had, oldest first, so an observer is shown the one its light left with.
     /// See [`Craft::seen_at`]. Not saved, as `past` is not.
     seen: History,
+    /// Its field at each settlement, so an observer is shown the one its light left with.
+    glows: Glows,
     /// When it was destroyed. See [`Craft::end`].
     ended_s: Option<f64>,
 }
@@ -230,6 +219,7 @@ impl Craft {
             known_from_s: f64::NEG_INFINITY,
             fitting: None,
             seen: History::default(),
+            glows: Glows::default(),
             ended_s: None,
         }
     }
@@ -470,10 +460,12 @@ impl Craft {
     /// Give it a form and an account, or take them away. Its length follows its form from here on.
     ///
     /// A craft first fitted mid-round, as one loaded is, has been seen in the round's forms back
-    /// to its start and in the form it began from before that, all at the length it has now.
+    /// to its start and in the form it began from before that, all at the length it has now. Its field
+    /// has always been the one it is given.
     pub fn fit(&mut self, fitting: Option<Fitting>) {
         self.fitting = fitting;
         self.sync_length();
+        self.glows.clear();
         let Some(fitting) = &self.fitting else {
             self.seen.clear();
             return;
@@ -528,6 +520,7 @@ impl Craft {
         let was = self.length_m;
         self.sync_length();
         self.note_steps(ended, was, running);
+        self.note_glow();
     }
 
     /// The last of `steps` is the form the settlement measured; those before it were never
@@ -661,6 +654,7 @@ impl Craft {
         if let Some(fitting) = &mut self.fitting {
             change(fitting);
         }
+        self.note_glow();
     }
 
     /// Add energy, as far as storage allows.
