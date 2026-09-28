@@ -247,23 +247,8 @@ async fn a_receiver_behind_a_burn_is_told_its_power_falling_at_the_retarded_time
 /// `rcs_spread_rad`.
 #[tokio::test]
 async fn a_thruster_leg_is_two_emissions_at_their_two_spreads() {
-    use lc_world::escort::{Burning, Station};
-    use lc_world::flight::C_M_S;
     let b = Balance::DEFAULT;
-    let mut craft = anvil(1);
-    let quarry = Burning { position_ly: DVec3::ZERO, beta: DVec3::ZERO, accel: DVec3::X * (G0 / C_M_S), since_t: 0.0 };
-    let thrusters = Drive { accel_g: b.rcs_accel_g, slew_rate_rad_s: 1.0, ..craft.kind.drive() };
-    let km_ly = 1.0e3 / M_PER_LY;
-    let station = Station {
-        from_ly: DVec3::Y * 50.0 * km_ly,
-        beta0: DVec3::ZERO,
-        to_ly: DVec3::Y * 10.0 * km_ly,
-        start_s: 0.0,
-        drive: thrusters,
-        quarry,
-        target: lc_world::motion::ShipId(9),
-    };
-    craft.motion.motive = lc_world::motion::Motive::Escort(station.solve(DVec3::X));
+    let craft = thruster_leg(anvil(1));
     let mass_kg = craft.mass_kg();
     let mut server = Server::new(Memory::default(), 0, 1);
     server.set_rate(ticking(10.0));
@@ -280,10 +265,51 @@ async fn a_thruster_leg_is_two_emissions_at_their_two_spreads() {
     assert!((rcs.power_w / Drive::exhaust_w(mass_kg, b.rcs_accel_g) - 1.0).abs() < 1.0e-6, "{}", rcs.power_w);
     assert!(DVec3::from_array(main.axis).angle_between(-DVec3::X) < 1.0e-3, "the main drive carries the quarry's burn");
     assert!(DVec3::from_array(rcs.axis).dot(DVec3::Y) > 0.9, "the thrusters close along -y, exhausting along +y");
-    let stated_w = lc_world::emit::drive_w(&server.fleet.get(CraftId(1)).unwrap(), &b, server.now_t() as f64 * 1.0e-6);
+    let stated_w = lc_world::emit::drive_w(server.fleet.get(CraftId(1)).unwrap(), &b, server.now_t() as f64 * 1.0e-6);
     assert!((stated_w / main.power_w - 1.0).abs() < 1.0e-6, "a thruster leg states its main drive alone, {stated_w}");
     let beams: Vec<i64> = emissions_of(&server, ShipId(1)).iter().map(|(_, e)| e.beam).collect();
     assert!(beams.contains(&main.beam.unwrap()) && beams.contains(&rcs.beam.unwrap()) && main.beam != rcs.beam);
+}
+
+/// A fitted ship lightening on a thruster leg: the thrusters turning over and going out are E4's
+/// instants, and none of them is a change of the main drive `Presence` states.
+#[tokio::test]
+async fn the_thrusters_changing_is_no_drive_event() {
+    let b = Balance::DEFAULT;
+    let craft = thruster_leg(ship(1, DVec3::ZERO, Form::starting()));
+    let end_s = 3_000.0;
+    let found = lc_world::ignition::transitions(&craft, &b, 0.0, end_s);
+    assert!(found.iter().any(|t| t.power_w > 0.0 && t.was_w > 0.0 && t.power_w != t.was_w), "premise: {found:?}");
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.set_rate(ticking(100.0));
+    server.fleet.insert(craft);
+    let mut wire = Loopback::new();
+    until(&mut server, &mut wire, end_s * 1.0e6).await;
+    let drives: Vec<i64> =
+        server.journal().events.iter().filter(|e| e.kind == crate::server::KIND_DRIVE && e.source == ShipId(1)).map(|e| e.t).collect();
+    assert!(drives.is_empty(), "the main drive never changed, yet it was said to at {drives:?}");
+}
+
+/// `craft` on an escort's leg on its thrusters, 50 km off a quarry burning at one g along +x,
+/// closing to 10 km along -y.
+fn thruster_leg(mut craft: Craft) -> Craft {
+    use lc_world::escort::{Burning, Station};
+    use lc_world::flight::C_M_S;
+    let b = Balance::DEFAULT;
+    let quarry = Burning { position_ly: DVec3::ZERO, beta: DVec3::ZERO, accel: DVec3::X * (G0 / C_M_S), since_t: 0.0 };
+    let thrusters = Drive { accel_g: b.rcs_accel_g, slew_rate_rad_s: 1.0, ..craft.kind.drive() };
+    let km_ly = 1.0e3 / M_PER_LY;
+    let station = Station {
+        from_ly: DVec3::Y * 50.0 * km_ly,
+        beta0: DVec3::ZERO,
+        to_ly: DVec3::Y * 10.0 * km_ly,
+        start_s: 0.0,
+        drive: thrusters,
+        quarry,
+        target: lc_world::motion::ShipId(9),
+    };
+    craft.motion.motive = lc_world::motion::Motive::Escort(station.solve(DVec3::X));
+    craft
 }
 
 /// The receiver behind a burn, settled across a hundred seconds of it in one tick and in a hundred:

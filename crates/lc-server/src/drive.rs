@@ -32,7 +32,7 @@ impl<J: Journal> Server<J> {
                 lc_world::ignition::transitions(craft, balance, after_s, until_s)
                     .into_iter()
                     // Only the main drive is stated; the rest are E4's instants to look at.
-                    .filter(|transition| transition.power_w != transition.was_w)
+                    .filter(|transition| transition.drive_stepped())
                     .map(move |transition| (craft.id, transition))
             })
             .collect();

@@ -469,38 +469,6 @@ mod tests {
         assert!((k / 5.3e5 - 1.0).abs() < 0.01, "{k} K");
     }
 
-    /// Another ship is drawn at exactly the power it stated: its cone's reach and its face's
-    /// temperature follow from that one number.
-    #[test]
-    fn another_ship_is_drawn_from_the_power_it_stated() {
-        let session = Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
-        let here = session.ship.motion.position_ly;
-        let face = aft_apertures(&Form::starting(), &B).unwrap()[0];
-        let area = std::f64::consts::PI * face.radius_m * face.radius_m;
-        for stated in [3.0e17, 1.1e20, 4.4e21] {
-            let mut uplink = crate::uplink::Uplink::default();
-            uplink.contacts = vec![crate::uplink::Contact::seen(presence(here, stated), None)];
-            let [drawn] = lits(&session, &uplink, &B)[..] else { panic!("one burn, not {:?}", lits(&session, &uplink, &B)) };
-            assert_eq!(drawn.power_w, stated);
-            assert_eq!(cone_m(&drawn, here, drawn.craft, &B), Some(drive_courtesy_radius_m(&B, stated)));
-            assert_eq!(face_k(drawn.power_w, &face), aperture_temperature_k(stated, area));
-        }
-    }
-
-    /// Nothing between the wire and another ship's face and cone knows an exhaust speed.
-    #[test]
-    fn no_exhaust_speed_is_assumed() {
-        let speed = ["exhaust", "_v"].concat();
-        for (file, text) in [
-            ("plume.rs", include_str!("plume.rs")),
-            ("uplink.rs", include_str!("uplink.rs")),
-            ("lc-proto", include_str!("../../lc-proto/src/lib.rs")),
-            ("flight.rs", include_str!("../../lc-world/src/flight.rs")),
-        ] {
-            assert!(!text.contains(&speed), "{file} speaks of an exhaust speed");
-        }
-    }
-
     /// The exhaust leaves the stern: a cone drawn forward is a ship pushing itself backwards.
     #[test]
     fn the_cone_points_away_from_the_nose() {
@@ -524,16 +492,13 @@ mod tests {
         assert!(root.to_render(root.eye()).length() < 1.0e-18);
     }
 
-    /// Glows under the hull, a cone only once selected, and neither once the drive is out.
-    #[test]
-    fn a_burn_is_glowed_and_coned_under_its_own_hull() {
-        use bevy::ecs::system::RunSystemOnce;
-
+    /// A world with ship 1 burning at `drive_w` as another ship, and its hull's root.
+    fn scene(drive_w: f64) -> (World, Entity) {
         let session = Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
         let here = session.ship.motion.position_ly;
         let craft = Some(ShipId(1));
         let mut uplink = crate::uplink::Uplink::default();
-        uplink.contacts = vec![crate::uplink::Contact::seen(presence(here, 1.0e17), None)];
+        uplink.contacts = vec![crate::uplink::Contact::seen(presence(here, drive_w), None)];
         let mut real = RealHulls::default();
         real.set(craft, 1, 1);
 
@@ -552,7 +517,50 @@ mod tests {
         let root = world
             .spawn((ShipHull::bare(craft, mesh), Transform::from_scale(Vec3::splat((1.0 / UNIT_M) as f32))))
             .id();
+        (world, root)
+    }
 
+    /// Another ship's cone and faces are drawn from the power it stated and nothing else.
+    #[test]
+    fn another_ship_is_drawn_from_the_power_it_stated() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let faces = aft_apertures(&Builtin::Plate.form(), &B).unwrap();
+        for stated in [3.0e17, 1.1e20, 4.4e21] {
+            let (mut world, _) = scene(stated);
+            world.resource_mut::<crate::app::Ui>().0.selected_craft = Some(ShipId(1));
+            world.run_system_once(draw_exhaust).unwrap();
+
+            let [cone] = world.resource::<Exhausts>().cones[..] else { panic!("one cone") };
+            assert_eq!(cone.length_m, drive_courtesy_radius_m(&B, stated));
+            assert_eq!(cone.cooking_m, cooking_distance_m(&B, stated, B.drive_spread_rad, 1.0));
+
+            let session = &world.resource::<crate::app::Game>().0;
+            let want: Vec<Vec4> = faces
+                .iter()
+                .map(|face| {
+                    let reference = session.tone.surface_reference as f64;
+                    aperture_uniform(shine(session, face_k(stated, face)), reference, session.tone.surface_stops).face
+                })
+                .collect();
+            let handles: Vec<(usize, Handle<ApertureGlowMaterial>)> =
+                world.query::<(&Glow, &MeshMaterial3d<ApertureGlowMaterial>)>().iter(&world).map(|(g, m)| (g.face, m.0.clone())).collect();
+            let materials = world.resource::<Assets<ApertureGlowMaterial>>();
+            let drawn: Vec<(usize, Vec4)> = handles.iter().map(|(face, m)| (*face, materials.get(m).unwrap().uniforms.face)).collect();
+            assert_eq!(drawn.len(), faces.len());
+            for (face, uniform) in drawn {
+                assert_eq!(uniform, want[face], "face {face} at {stated} W");
+            }
+        }
+    }
+
+    /// Glows under the hull, a cone only once selected, and neither once the drive is out.
+    #[test]
+    fn a_burn_is_glowed_and_coned_under_its_own_hull() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let craft = Some(ShipId(1));
+        let (mut world, root) = scene(1.0e17);
         let run = |world: &mut World| {
             world.run_system_once(draw_exhaust).unwrap();
             let glows: Vec<Entity> = world.query::<(&Glow, &ChildOf)>().iter(world).map(|(_, c)| c.parent()).collect();

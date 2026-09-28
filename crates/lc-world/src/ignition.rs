@@ -12,7 +12,7 @@
 use glam::DVec3;
 
 use crate::craft::Craft;
-use crate::emit::{Jet, drive_w, exhaust};
+use crate::emit::{Jet, exhaust};
 use crate::fitting::Balance;
 use crate::flight::Drive;
 use crate::motion::{self, Motive, ShipState};
@@ -36,6 +36,13 @@ pub struct Transition {
     pub was_w: f64,
     /// Unit vector the nose pointed along.
     pub facing: DVec3,
+}
+
+impl Transition {
+    /// Whether the main drive's power moved here, by the tolerance that decides every transition.
+    pub fn drive_stepped(&self) -> bool {
+        stepped(self.was_w, self.power_w)
+    }
 }
 
 /// Every instant in `(after_s, until_s]` that anything lit changed, in order.
@@ -77,13 +84,14 @@ fn stepped(was_w: f64, now_w: f64) -> bool {
 
 /// `F c` at `s` of the main drive, the thrusters and an emit flown as a burn, in that order.
 fn lit_w(craft: &Craft, balance: &Balance, s: f64) -> [f64; 3] {
-    let thrusters_w = exhaust(craft, balance, s).iter().filter(|j| j.jet == Jet::Thrusters).map(|j| j.power_w).sum();
+    let jets = exhaust(craft, balance, s);
+    let jet_w = |kind: Jet| jets.iter().filter(|j| j.jet == kind).map(|j| j.power_w).sum();
     let doing = craft.motion_at(s);
     let boost_w = match doing.motive {
         Motive::Boosting(_) => Drive::exhaust_w(craft.mass_kg_at(s), motion::thrust_g(doing, s)),
         _ => 0.0,
     };
-    [drive_w(craft, balance, s), thrusters_w, boost_w]
+    [jet_w(Jet::Drive), jet_w(Jet::Thrusters), boost_w]
 }
 
 /// World instants at which a motive's thrust can change. Empty for one that never burns.
