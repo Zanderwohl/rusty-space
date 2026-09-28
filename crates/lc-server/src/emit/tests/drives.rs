@@ -139,7 +139,8 @@ async fn a_presence_states_what_the_drive_is_lit_at() {
         let s = t as f64 * 1.0e-6;
         let jets = lc_world::emit::exhaust(craft, &b, s);
         assert!(matches!(jets[..], [lc_world::emit::Exhaust { jet: Jet::Drive, .. }]), "{jets:?}");
-        assert!((jets[0].power_w / Drive::exhaust_w(craft.mass_kg_at(s), 5.0) - 1.0).abs() < 1.0e-12);
+        let mac = craft.mass_kg_at(s) * 5.0 * G0 * lc_world::flight::C_M_S;
+        assert!((jets[0].power_w / mac - 1.0).abs() < 1.0e-12, "{} is not m a c, {mac}", jets[0].power_w);
         jets[0].power_w
     };
     for (t, drive_w) in &stated {
