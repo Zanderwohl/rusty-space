@@ -67,7 +67,7 @@ impl LitFaces {
 
 /// What another craft's faces send, as its `Presence` stated.
 pub fn stated(contact: &Contact) -> Ends {
-    Ends { fore_w: contact.emit_fore_w, aft_w: contact.emit_aft_w }.with_drive(contact.drive_w)
+    contact.emit.with_drive(contact.drive_w)
 }
 
 /// What the player's own faces send now.

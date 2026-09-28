@@ -97,8 +97,7 @@ pub struct Contact {
     /// What its main drive was sending aft, `F c`, watts, as last stated. Zero when coasting.
     pub drive_w: f64,
     /// What its emits were sending out of each end, watts, as last stated.
-    pub emit_fore_w: f64,
-    pub emit_aft_w: f64,
+    pub emit: lc_world::emit::Ends,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
     /// Its form and the refit step it had under way, as the statement's light left it, with when
@@ -145,8 +144,7 @@ impl Contact {
             beta,
             facing: DVec3::from_array(presence.facing).normalize_or_zero(),
             drive_w: presence.drive_w,
-            emit_fore_w: presence.emit_fore_w,
-            emit_aft_w: presence.emit_aft_w,
+            emit: lc_world::emit::Ends { fore_w: presence.emit_fore_w, aft_w: presence.emit_aft_w },
             emitted_s,
             form: presence.form,
             building: presence.building.map(|b| (emitted_s, b)),
