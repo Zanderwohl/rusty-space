@@ -637,9 +637,10 @@ Apply asks once more when the vent would collapse the field.
 - **The round is solved locally from the shard's inputs.** `preview::Start` is what
   `Craft::begin_refit` would take: the ship's form, what it stores now, and now. While a round runs
   the draft is edited against its target, and the shard begins no second round until the first
-  ends, so the next round starts there and then, with what the running one will leave. The budget is `ledger::Budget::of` on that plan, and a test holds the local plan equal
-  to the one the shard makes of the same Apply. A draft storage cannot pay for has no plan, and the
-  budget says how short it is instead.
+  ends, so the next round starts there and then, with what the running one will leave. The budget
+  is `ledger::Budget::of` on that plan, and a test holds the local plan equal to the one the shard
+  makes of the same Apply. A draft storage cannot pay for has no plan, and the budget says how short
+  it is instead.
 - **The title bar**, beside Apply, reads available, spent, the peak in storage against capacity,
   and `vents 1.2 ME` when anything is vented, in the hazard color when it would collapse the field.
   One bar, not a second strip at the bottom; the peak temperature is Apply's second question's to
@@ -651,7 +652,8 @@ Apply asks once more when the vent would collapse the field.
   heat peaks. Between them it goes where the account's own inputs take it — starlight less what is
   converted, and the drain — so a warm ship still cooling is asked about a vent an idle one survives.
   While a round runs, the next one begins where it ends: in its target's form and envelope, with
-  the heat and storage it leaves. The ledger reads the running round's peak still ahead the same way.
+  the heat and storage it leaves. The ledger reads the running round's peak still ahead off the
+  account as it stands.
 - **What the budget stops.** No edit may leave the draft further short than its gesture began, except
   one that replaces the whole draft (a preset, or the ship). Measured from the gesture's start, a
   handle held at its limit can still come back. A size or axis handle pulled past the limit stops on

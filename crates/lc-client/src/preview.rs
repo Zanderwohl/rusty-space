@@ -32,9 +32,7 @@ pub struct Start {
 impl Start {
     /// `None` for a ship with no form, which only a shard gives it.
     pub fn of(session: &Session) -> Option<Start> {
-        let (fitting, start_s) = settled(session)?;
-        let stored_j = fitting.stored_j_at(&session.ship.motion, start_s);
-        Some(Start { from: fitting.form().clone(), stored_j, start_s, balance: *fitting.balance() })
+        Settled::of(session).map(|settled| settled.start)
     }
 
     pub fn round(&self, target: &Form) -> Round {
@@ -115,9 +113,7 @@ impl Heat {
 
     /// `plan` begun on the ship where [`Start::of`] begins it.
     pub fn of(session: &Session, plan: &Plan) -> Option<Heat> {
-        let (mut fitting, start_s) = settled(session)?;
-        fitting.begin_refit(plan.clone());
-        Heat::ahead(&fitting, start_s)
+        Settled::of(session)?.heat(plan)
     }
 
     pub fn collapses(&self) -> bool {
@@ -129,12 +125,28 @@ impl Heat {
 /// the one running ends. The shard refuses a round while one runs, so the next begins in the form
 /// the running one leaves, with what it will have stored and the heat it will hold. Settled as the
 /// craft, so starlight is cut where the shard cuts it.
-fn settled(session: &Session) -> Option<(Fitting, f64)> {
-    let mut ship = session.ship.clone();
-    let now = session.coordinate_time_s();
-    let start_s = ship.fitting()?.refit().map_or(now, |plan| now.max(plan.round().start_s + plan.duration_s()));
-    ship.settle(start_s);
-    Some((ship.fitting()?.clone(), start_s))
+struct Settled {
+    fitting: Fitting,
+    start: Start,
+}
+
+impl Settled {
+    fn of(session: &Session) -> Option<Settled> {
+        let mut ship = session.ship.clone();
+        let now = session.coordinate_time_s();
+        let start_s = ship.fitting()?.refit().map_or(now, |plan| now.max(plan.round().start_s + plan.duration_s()));
+        ship.settle(start_s);
+        let fitting = ship.fitting()?.clone();
+        let stored_j = fitting.stored_j_at(&ship.motion, start_s);
+        let start = Start { from: fitting.form().clone(), stored_j, start_s, balance: *fitting.balance() };
+        Some(Settled { fitting, start })
+    }
+
+    fn heat(&self, plan: &Plan) -> Option<Heat> {
+        let mut fitting = self.fitting.clone();
+        fitting.begin_refit(plan.clone());
+        Heat::ahead(&fitting, self.start.start_s)
+    }
 }
 
 /// What the grid says about a form. Tens of milliseconds, so the editor builds it off the frame
@@ -195,10 +207,11 @@ impl Preview {
     /// `None` with no draft, or a ship with no form. `measured` counts only if it is of the draft.
     pub fn of(session: &Session, ui: &UiState, measured: Option<&Measured>) -> Option<Preview> {
         let draft = ui.form.draft.as_ref()?;
-        let start = Start::of(session)?;
+        let settled = Settled::of(session)?;
+        let start = &settled.start;
         let balance = &start.balance;
         let plan = start.solve(&draft.form);
-        let heat = plan.as_ref().ok().and_then(|plan| Heat::of(session, plan));
+        let heat = plan.as_ref().ok().and_then(|plan| settled.heat(plan));
         let capacities = Capacities::of(&draft.form, balance);
         let full_kg = dry_mass_kg(&draft.form, balance) + capacities.storage_j / C2;
         let thrust_n = aft_aperture_w(&draft.form, balance).unwrap_or(0.0) / C_M_S;
@@ -240,9 +253,9 @@ fn starlight_w(session: &Session, geometry: &lc_proto::form::Geometry, balance: 
 
 /// Whether Apply has to ask again: the draft's round would vent the field past collapse.
 pub fn collapses(session: &Session, draft: &Draft) -> bool {
-    let Some(start) = Start::of(session) else { return false };
-    let Ok(plan) = start.solve(&draft.form) else { return false };
-    Heat::of(session, &plan).is_some_and(|heat| heat.collapses())
+    let Some(settled) = Settled::of(session) else { return false };
+    let Ok(plan) = settled.start.solve(&draft.form) else { return false };
+    settled.heat(&plan).is_some_and(|heat| heat.collapses())
 }
 
 #[cfg(test)]
@@ -362,7 +375,8 @@ mod tests {
         let still = Start::of(&s).unwrap().solve(&target).unwrap();
         let heat = Heat::of(&s, &still).unwrap();
         assert_eq!(heat.max_j, Field::of(envelope_m2, &B).heat_max_j());
-        assert_eq!((heat.step, heat.peak_j), (None, left_j));
+        assert_eq!(heat.step, None);
+        assert!((heat.peak_j - left_j).abs() < 1e-12 * left_j, "{} {left_j}", heat.peak_j);
         assert!(left_j > heat_now(&s), "premise: the running round vents");
     }
 
