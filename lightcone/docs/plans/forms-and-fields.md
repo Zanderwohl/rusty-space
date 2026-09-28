@@ -420,7 +420,7 @@ graph LR
 
 ### H4 · Collapse
 
-- status: active card "H4 · Collapse"
+- status: done #117
 - needs: H3
 - touches: `crates/lc-server/src/field.rs`, `crates/lc-world/src/field.rs`
 - read: 30 §Collapse
