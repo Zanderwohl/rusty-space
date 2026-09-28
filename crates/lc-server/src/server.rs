@@ -692,12 +692,9 @@ impl<J: Journal> Server<J> {
         if lights_the_drive && self.fleet.get(id).is_some_and(|craft| craft.is_refitting(at_s)) {
             return Err(Refusal::Refitting);
         }
-        // An emit with net thrust is a burn, and refuses every other plan while it runs.
-        let boosting = |craft: &Craft| matches!(&craft.motion.motive, lc_world::motion::Motive::Boosting(b) if !b.has_ended(at_s));
-        if (lights_the_drive || matches!(intent.order, Order::Refit { .. })) && self.fleet.get(id).is_some_and(boosting) {
-            return Err(Refusal::UnderWay);
-        }
-        if matches!(intent.order, Order::Refit { .. }) && self.emissions.is_emitting(id) {
+        // One rating bounds the drive and whatever is emitted, and a burn-emit is a plan: nothing
+        // else lights while anything is lit.
+        if (lights_the_drive || matches!(intent.order, Order::Refit { .. })) && self.emissions.is_emitting(id) {
             return Err(Refusal::UnderWay);
         }
 

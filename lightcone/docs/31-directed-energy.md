@@ -240,15 +240,16 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   a burn's power is stated at its start and not again as the ship lightens.
 - **`power_w` is what each end sends.** A balanced emit sends it along the aim from the fore
   engines and against it from the aft ones, and draws twice it. Each end's rating is its engines'
-  together, and the diffraction floor is `λ / 2D` for the widest face at the end the aim leaves
-  from. A spread asked for below the floor is widened to it, and the acceptance says the spread
+  together, and the diffraction floor is `λ / 2D` for its widest face; a balanced emit's two beams
+  share one spread, never under either end's floor. A spread asked for below the floor is widened to it, and the acceptance says the spread
   that was lit. Wavelengths outside 1 nm to 3 cm, and an aim at everywhere, are refused.
 - **Committed when accepted**, as a plan is: what it will emit, against storage, refused
   `NoEnergy` when free storage cannot cover it, and drawn heat first as it goes. Heat's share
   leaves the commitment without leaving storage, and putting it out early releases the rest.
 - **As a burn it is `Motive::Boosting`**: the nose comes about with nothing lit, then a straight
   line at constant proper acceleration `P / (m c)` from the mass at the order, gravity ignored while
-  lit, then ballistic. It refuses flight orders and refits while it runs. **A balanced emit does not
+  lit, then ballistic. Anything lit, burn or balanced, refuses flight orders and refits while it runs, and a
+  balanced emit drops a standing intercept, whose re-plans would light the drive. **A balanced emit does not
   turn the hull**: its apertures are taken to point along the aim. A second emit while one is lit
   is refused `UnderWay`, `CutDrive` puts out whatever is lit, and a collapse puts out the wreck's.
 - **`Glare`** is the flux at the observer, W/m², and the spectrum: one line for a beam, a

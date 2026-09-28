@@ -29,6 +29,6 @@ pub const COLLAPSE: i16 = 10;
 /// A field switch completed, stamped when and where: what it absorbs and reflects changed then.
 /// The payload is a [`super::ShadeChange`] as JSON.
 pub const SHADE: i16 = 11;
-/// An emission lit, changed power or went out, stamped when and where. Its payload says
+/// An emission lit or went out, stamped when and where. Its payload says
 /// what it sends and along which cone; only craft inside that cone are delivered it.
 pub const EMIT: i16 = 12;

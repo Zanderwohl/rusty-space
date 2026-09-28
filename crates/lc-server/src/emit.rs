@@ -1,8 +1,8 @@
 //! Light a craft puts out, and where it lands. See `lightcone/docs/31-directed-energy.md` and
 //! `lightcone/docs/30-the-field.md` §Proximity.
 //!
-//! **One path, whatever lit it.** An emission is an event where it lights, another wherever its
-//! power changes, and one where it goes out, each fanned out along its cone by the event machinery
+//! **One path, whatever lit it.** An emission is an event where it lights and one where it goes
+//! out, each fanned out along its cone by the event machinery
 //! everything else uses. Every delivery to another craft is a [`Landing`] at its arrival. A
 //! sustained emission's landing restates what that beam puts on the receiver, as intake, tells the
 //! receiver's owner, and gives observers its `Glare`; a burst's is all heat at once. A collapse's
@@ -230,7 +230,8 @@ impl<J: Journal> Server<J> {
             return Err(Refusal::Impossible);
         }
         let axis = self.beam_for(id, &aim, at)?.axis;
-        let spread_rad = Transmitter::new(wavelength_m, ends[0].diameter_m).spread_rad(spread_rad);
+        // One spread for both ends of a balanced emit, never under either end's floor.
+        let spread_rad = ends.iter().map(|end| Transmitter::new(wavelength_m, end.diameter_m).spread_rad(spread_rad)).fold(0.0, f64::max);
         let spectrum = Spectrum::Line { wavelength_m };
         let lighting = |axis: DVec3, lights_t: i64, out_t: i64| Lighting {
             lights_t,
@@ -250,6 +251,7 @@ impl<J: Journal> Server<J> {
                 }
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
                 craft.adjust(at_s, |fitting| fitting.light(lit));
+                self.pursuits.remove(&id);
                 let out_t = to_us(lit.until_s);
                 vec![lighting(axis, at, out_t), lighting(-axis, at, out_t)]
             }

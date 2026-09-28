@@ -583,3 +583,37 @@ async fn a_beam_in_flight_comes_back_through_the_store() {
     let told = illuminated(&wire.take(ClientId(2)));
     assert!(matches!(told[..], [(_, w, t)] if w > 0.0 && t == arrive_t), "{told:?}, due at {arrive_t}");
 }
+
+/// One rating bounds the drive and what is emitted: while a balanced emit is lit, nothing lights
+/// the drive, and a standing intercept is dropped rather than left to re-plan a burn.
+#[tokio::test]
+async fn nothing_lights_the_drive_while_a_balanced_emit_runs() {
+    use lc_proto::{Approach, Closeness};
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
+    server.fleet.insert(ship(2, DVec3::Y * LIGHT_SECOND_US, Form::starting()));
+    server.pursuits.insert(CraftId(1), crate::chase::Pursuit {
+        quarry: ShipId(2),
+        closeness: lc_world::pursuit::Closeness::Company,
+        approach: Approach::Courteous,
+        last_plan_t: i64::MIN,
+        last_seen: None,
+    });
+    let mut wire = Loopback::new();
+    wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Both, 1.0e17, 1.0e-6, 0.01, HOUR_S));
+    server.tick(&mut wire).await.unwrap();
+    assert!(wire.take(EMITTING).iter().any(|m| matches!(m, Outbound::Accepted { .. })));
+    assert!(server.pursuits.is_empty(), "the intercept outlived the emit");
+    let before = server.ship(EMITTER).unwrap().clone();
+    let act = |order| Inbound::Act(Intent { ship_id: EMITTER, order, issued_at_client_t: i64::MAX });
+    wire.client_says(EMITTING, act(Order::Burn { beta: [1.0e-5, 0.0, 0.0] }));
+    wire.client_says(EMITTING, act(Order::Intercept { ship_id: ShipId(2), closeness: Closeness::Company, approach: Approach::Direct }));
+    server.tick(&mut wire).await.unwrap();
+    let said = wire.take(EMITTING);
+    let refused = said.iter().filter(|m| matches!(m, Outbound::Refused { reason: Refusal::UnderWay, .. })).count();
+    assert_eq!(refused, 2, "{said:?}");
+    let craft = server.ship(EMITTER).unwrap();
+    assert_eq!(craft.motion.motive, before.motion.motive);
+    assert_eq!(craft.fitting().unwrap().lit(), before.fitting().unwrap().lit());
+    assert!(server.pursuits.is_empty());
+}
