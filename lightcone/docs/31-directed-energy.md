@@ -446,6 +446,26 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 - **The plume** brightens under a dump. A fore emission lights the bow. How that is drawn is in
   [32-ship-rendering.md](32-ship-rendering.md).
 
+### As built
+
+- **The preview is `emit_panel::preview`**, a pure function of the draft, the ship and what is known
+  of the receiver. Spread and floor are the server's: each chosen end's `Transmitter`, never under
+  either floor. Heat's share is the ship's own account run with and without the emission, so it
+  splits exactly as the server will draw it.
+- **What is known of a receiver** is what its light carries. Its rating and the acceleration the
+  lead uncertainty assumes come from the form it was seen with: the engines' `aperture_w`, and its
+  aft rating over its dry mass, the most it could do. Its shade comes from its glow. Its room is
+  never known, and the window says so. The shadow is broadside, the most it can present, which is
+  the one [What arrives](#what-arrives) is worked for. The lead is counted from the light it was last
+  seen by, so a stale sighting shows a wider circle than a fresh one at the same range.
+- **The warning** is what it would absorb past its rating, taking an unknown shade as Black.
+- **The aim** at the reticle is sent as a bearing along the view's axis. A row of the incoming list
+  aims back along it.
+- **Put out** is `CutDrive`, which puts out whatever is lit.
+- **On the map** a beam's cone is drawn as far as its light has got, through the drive cones'
+  machinery, without the cooking ring. A beam landing here is a line back along its bearing, past
+  the edge of the view, since how far away its source is is not known.
+
 ## Where it goes
 
 | crate | new | changed |
