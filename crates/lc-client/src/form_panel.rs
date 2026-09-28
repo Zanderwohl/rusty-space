@@ -219,7 +219,9 @@ fn column_node(edge: Edge) -> Node {
 fn build_palette(commands: &mut Commands, column: Entity, form: &crate::form_view::FormView, built: Built, font: Handle<Font>) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
     let panel = stacked(&mut ui, column, Side::Palette, built);
-    ui.insert(panel, (Interaction::None, crate::form_carry::DropZone));
+    // The whole column, unless the history is under it.
+    let grow = if form.show_history { 0.0 } else { 1.0 };
+    ui.insert(panel, (Node { align_items: AlignItems::Stretch, flex_grow: grow, ..panel_node() }, Interaction::None, crate::form_carry::DropZone));
     let heading = ui.row(panel);
     ui.insert(heading, Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, justify_content: JustifyContent::SpaceBetween, ..default() });
     ui.inline(heading, "ADD A PART", 15.0, em_ui::vfd::TEXT);
