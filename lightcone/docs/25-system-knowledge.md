@@ -651,6 +651,17 @@ look can.
   the Sun went from a median of 2.6 sigma out to 1.3, and from ten past 3.7 sigma to six;
   Vesta 8.3 to 0.7, Pallas 7.6 to 1.2, Mars 5.5 to 2.6. The moons, 31 of 82 past 3.7 sigma, are
   unchanged: that is their primaries, not their bars.
+- **A primary has to be able to hold its satellite.** An orbit weighs its primary, `n^2 a^3`,
+  and the Hill bounds on period and axis took that mass as free: 18 of Sol's 80 irregular
+  moons went round a neighbor a few kilometers across, which then had to weigh as much as
+  Jupiter, or round the comet Tempel 1. So a fit about a body is refused if it makes that body
+  more than a fifth of what the body itself goes round, or sits outside the Hill sphere that
+  mass would have (`primary::Frame::holds`). Measured on Sol from Earth over 150 days
+  (2026-09-28): nothing is fitted about a comet, and moons past 3.7 sigma went from 31 to 26,
+  but six moons with wrong primaries now have no orbit at all, and three that had right ones
+  lost them. **Open:** the bound checks against beliefs that can themselves be wrong: Taygete,
+  itself once fitted about the Sun, passes as a Jupiter-mass primary for four moons, and a
+  refused refit leaves the orbit it failed to confirm filed.
 - `arc::basis` is written out rather than `any_orthonormal_vector`, since a stated covariance is
   in it and a library's basis may change under an upgrade.
 - Measured on Sol from 5 AU over fifteen days (2026-09-27): Jupiter 0.4 sigma out on its axis,
