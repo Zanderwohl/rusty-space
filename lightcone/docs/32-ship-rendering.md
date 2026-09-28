@@ -535,6 +535,13 @@ are inside its radius is measured to that place.
 `emit <fore|aft|both>` at the console ([27-console.md](27-console.md#emit)) lights them for a
 photograph, and `refit-magic plate fore:1` makes a ship with engines at both ends.
 
+![coasting in sunlight: the bell's open face is the emitter grid, its flanks the machinery](../images/r13-grid-and-flank.jpg)
+![`--demo closing`, your own drive: the face white-hot under its glow, the flanks unlit](../images/r13-drive.jpg)
+![an emit flown as a burn from the aft face, your own and another's seen by ship 1](../images/r13-own-aft.jpg)
+![](../images/r13-other-aft.jpg)
+![a balanced emit from the plate turned two-ended, both ends lit, your own and another's](../images/r13-own-balanced.jpg)
+![](../images/r13-other-balanced.jpg)
+
 ![your own burn from beside: the bell's face white-hot, the cone running aft](../images/r12-own-beside.jpg)
 ![from behind, just off the axis](../images/r12-own-behind.jpg)
 ![a selected ship's cone, 2 000 km out and past its courtesy radius](../images/r12-selected.jpg)
