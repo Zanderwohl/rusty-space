@@ -282,3 +282,208 @@ impl From<&lc_proto::Field> for Posture {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use glam::DVec3;
+
+    use super::*;
+    use crate::field::Burst;
+    use crate::fitting::{Account, STARTING_BROADSIDE_M2};
+    use crate::form::Form;
+    use crate::motion::ShipState;
+    use crate::solar::{intake_w, SOLAR_CONSTANT_W_M2};
+    use crate::system::UNIT_M as AU_M;
+
+    fn rest() -> ShipState {
+        ShipState::at(DVec3::ZERO)
+    }
+
+    fn close(got: f64, want: f64, rel: f64) -> bool {
+        (got - want).abs() <= rel * want.abs()
+    }
+
+    fn starlight_w(b: &Balance, d_au: f64) -> f64 {
+        let luminosity_w = SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * AU_M * AU_M;
+        intake_w(b, STARTING_BROADSIDE_M2, luminosity_w, d_au * AU_M)
+    }
+
+    fn ship(b: Balance, stored_j: f64, heat_j: Option<f64>, posture: Posture) -> Fitting {
+        let full = Fitting::full(Form::starting(), b, 0.0);
+        let heat_j = heat_j.unwrap_or(full.heat_j);
+        Fitting::from_account(&Account { stored_j, heat_j, posture, ..full.account() }, b)
+    }
+
+    fn auto(b: &Balance, shade: Mode) -> Posture {
+        Posture { setting: Setting::Auto(Thresholds::of(b)), shade, switch: None }
+    }
+
+    /// As the authority runs it: a switch taken when done, and Auto's next begun when due. Returns
+    /// each switch begun, and the heat it began at.
+    fn run(f: &mut Fitting, until_s: f64) -> Vec<(f64, Mode, f64)> {
+        let mut begun = Vec::new();
+        loop {
+            if let Some(switch) = f.posture.switch {
+                if switch.done_s > until_s {
+                    break;
+                }
+                f.settle(&rest(), switch.done_s);
+                assert_eq!(f.take_flip(), Some(switch));
+                continue;
+            }
+            match f.auto_s() {
+                Some((at_s, to)) if at_s <= until_s => {
+                    f.settle(&rest(), at_s);
+                    f.begin_switch(to).unwrap();
+                    begun.push((at_s, to, f.heat_j));
+                }
+                _ => break,
+            }
+        }
+        f.settle(&rest(), until_s);
+        begun
+    }
+
+    #[test]
+    fn a_switch_changes_nothing_until_it_completes() {
+        let b = Balance::DEFAULT;
+        let mut black = ship(b, 0.5 * Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j, None, Posture::BLACK);
+        black.set_starlight_w(starlight_w(&b, 0.1));
+        let mut clear = black.clone();
+        clear.set_setting(Setting::Clear).unwrap();
+        let done_s = b.field_switch_s;
+        assert_eq!(clear.posture.switch, Some(Switch { to: Mode::Clear, done_s }));
+        for t in [0.25 * done_s, 0.999_999 * done_s, done_s] {
+            assert_eq!(clear.heat_j_at(t), black.heat_j_at(t), "{t}");
+            assert_eq!(clear.stored_j_at(&rest(), t), black.stored_j_at(&rest(), t), "{t}");
+        }
+        let later_s = 3.0 * done_s;
+        assert!(clear.heat_j_at(later_s) < 0.99 * black.heat_j_at(later_s), "Clear absorbs less once done");
+
+        let mut ticks = clear.clone();
+        for k in 1..=997 {
+            ticks.settle(&rest(), later_s * f64::from(k) / 997.0);
+        }
+        assert!(close(ticks.heat_j, clear.heat_j_at(later_s), 1e-9), "{} {}", ticks.heat_j, clear.heat_j_at(later_s));
+        assert!(close(ticks.stored_j, clear.stored_j_at(&rest(), later_s), 1e-9));
+        assert_eq!(ticks.shade_at(later_s), Mode::Clear);
+        assert_eq!(ticks.take_flip(), Some(Switch { to: Mode::Clear, done_s }), "kept until taken");
+        assert_eq!((ticks.posture.shade, ticks.posture.switch, ticks.take_flip()), (Mode::Clear, None, None));
+    }
+
+    #[test]
+    fn a_second_switch_meanwhile_is_refused() {
+        let b = Balance::DEFAULT;
+        let mut f = Fitting::full(Form::starting(), b, 0.0);
+        f.set_setting(Setting::Clear).unwrap();
+        let running = f.posture;
+        assert_eq!(f.set_setting(Setting::Black), Err(Switching));
+        assert_eq!(f.set_setting(Setting::Auto(Thresholds::of(&b))), Err(Switching));
+        assert_eq!(f.begin_switch(Mode::Black), Err(Switching));
+        assert_eq!(f.posture, running, "a refusal changes nothing");
+        f.settle(&rest(), 0.5 * b.field_switch_s);
+        assert_eq!(f.set_setting(Setting::Black), Err(Switching));
+        f.settle(&rest(), b.field_switch_s);
+        assert_eq!(f.set_setting(Setting::Black), Ok(()));
+        assert_eq!(f.posture.switch, Some(Switch { to: Mode::Black, done_s: 2.0 * b.field_switch_s }));
+    }
+
+    /// Radiation and drain off, storage full: all that is absorbed is heat.
+    #[test]
+    fn clear_takes_its_fraction_of_starlight_and_a_spike_and_black_all_of_it() {
+        let b = Balance { living_density_w: 0.0, field_tau_s: 1.0e40, ..Balance::DEFAULT };
+        let arriving_w = starlight_w(&b, 1.0);
+        let capacity_j = Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j;
+        let dt_s = 1.0e4;
+        let spike_j = 1.0e24;
+        for (shade, fraction) in [(Mode::Clear, b.clear_absorptivity), (Mode::Black, 1.0)] {
+            let mut f = ship(b, capacity_j, Some(0.0), Posture { setting: Setting::Black, shade, switch: None });
+            f.set_starlight_w(arriving_w);
+            assert!(close(f.heat_j_at(dt_s), fraction * arriving_w * dt_s, 1e-9), "{shade:?} {}", f.heat_j_at(dt_s));
+            assert_eq!(Burst::Arriving(spike_j).heat_j(f.absorptivity_at(dt_s)), fraction * spike_j);
+        }
+        assert_eq!(b.clear_absorptivity, 0.3);
+    }
+
+    /// 30 §Auto: it fills Black, turns Clear when full and stays there at about 2 400 K.
+    #[test]
+    fn auto_at_a_tenth_of_an_au_fills_black_and_holds_clear() {
+        let b = Balance::DEFAULT;
+        let mut f = ship(b, 0.0, None, auto(&b, Mode::Black));
+        f.set_starlight_w(starlight_w(&b, 0.1));
+        let caps = f.hull().capacities;
+        let fill_s = caps.storage_j / (f.solar_w() - caps.drain_w);
+        let (at_s, to) = f.auto_s().expect("it fills");
+        assert!(close(at_s, fill_s, 1e-9) && to == Mode::Clear, "{at_s} {fill_s} {to:?}");
+        assert!(f.heat_j_at(at_s) < 0.5 * f.field().heat_max_j(), "premise: storage, not heat");
+
+        let year_s = crate::flight::JULIAN_YEAR_S;
+        let begun = run(&mut f, 2.0 * year_s);
+        assert_eq!(begun.iter().map(|&(t, to, _)| (t, to)).collect::<Vec<_>>(), vec![(at_s, Mode::Clear)]);
+        assert_eq!(f.stored_j, caps.storage_j);
+        let k = f.temperature_k_at(2.0 * year_s);
+        assert!((k - 2_400.0).abs() < 100.0, "{k}");
+    }
+
+    #[test]
+    fn a_burst_past_a_threshold_starts_the_switch_at_once() {
+        let b = Balance::DEFAULT;
+        let max_j = Fitting::full(Form::starting(), b, 0.0).field().heat_max_j();
+        let half_j = 0.5 * Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j;
+        let mut f = ship(b, half_j, Some(0.45 * max_j), auto(&b, Mode::Black));
+        f.settle(&rest(), 1.0e5);
+        assert_eq!(f.auto_s(), None, "premise: cooling, far from any star");
+        let spike_j = 0.1 * max_j;
+        let hit = Fitting::from_account(&Account { heat_j: f.heat_j + Burst::Arriving(spike_j).heat_j(f.absorptivity_at(f.since_s)), ..f.account() }, b);
+        assert_eq!(hit.auto_s(), Some((1.0e5, Mode::Clear)));
+    }
+
+    /// Starlight that heats Black past `clear_above` and lets Clear cool under `black_below`, with
+    /// storage too slow to fill: Auto cycles between them. Returns the switches begun, `Q_max` and
+    /// the switch's length.
+    fn cycle(thresholds: Thresholds) -> (Vec<(f64, Mode, f64)>, f64, f64) {
+        let b = Balance { conversion_efficiency: 0.01, living_density_w: 0.0, ..Balance::DEFAULT };
+        let max_j = Fitting::full(Form::starting(), b, 0.0).field().heat_max_j();
+        let half_j = 0.5 * Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j;
+        let posture = Posture { setting: Setting::Auto(thresholds), shade: Mode::Black, switch: None };
+        let mut f = ship(b, half_j, Some(0.1 * max_j), posture);
+        f.set_starlight_w(0.8 * f.field().rated_load_w());
+        let begun = run(&mut f, 400.0 * 86_400.0);
+        assert!(f.stored_j < thresholds.refill_below * f.hull().capacities.storage_j, "premise: storage never fills");
+        assert!(begun.len() >= 4, "premise: it cycles: {begun:?}");
+        (begun, max_j, b.field_switch_s)
+    }
+
+    /// Each shade is held a good while after its switch completes before the next begins.
+    fn assert_hysteresis(thresholds: Thresholds) {
+        let (begun, _, switch_s) = cycle(thresholds);
+        for pair in begun.windows(2) {
+            let held_s = pair[1].0 - (pair[0].0 + switch_s);
+            assert!(held_s >= 3.0 * switch_s, "chatters: {:?} held {held_s} s", pair[0].1);
+        }
+    }
+
+    /// And begins each switch as heat crosses its threshold.
+    #[test]
+    fn auto_holds_each_shade_between_its_thresholds() {
+        let thresholds = Thresholds::of(&Balance::DEFAULT);
+        assert_hysteresis(thresholds);
+        let (begun, max_j, _) = cycle(thresholds);
+        for (i, &(at_s, to, heat_j)) in begun.iter().enumerate() {
+            assert_eq!(to, if i % 2 == 0 { Mode::Clear } else { Mode::Black }, "alternates");
+            let want = match to {
+                Mode::Clear => thresholds.clear_above,
+                Mode::Black => thresholds.black_below,
+            };
+            assert!(close(heat_j / max_j, want, 1e-9), "{at_s}: {to:?} at {}", heat_j / max_j);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "chatters")]
+    fn equal_thresholds_fail_the_hysteresis_test() {
+        let equal = Thresholds { clear_above: 0.4, black_below: 0.4, refill_below: 0.95 };
+        assert!(!equal.is_valid());
+        assert_hysteresis(equal);
+    }
+}
