@@ -684,7 +684,7 @@ graph LR
 
 ### R13 · The engine grid on the open face
 
-- status: todo
+- status: active card "R13 · The engine grid on the open face"
 - needs: R10, R12
 - touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/src/hull.rs`
 - read: 32 §Materials by kind, §The exhaust cone
@@ -711,7 +711,7 @@ graph LR
 
 ### R16 · Drones at work on another craft
 
-- status: todo
+- status: active card "R16 · Drones at work on another craft"
 - needs: R9, R15
 - touches: `crates/lc-client/src/drones.rs`
 - read: 32 §Drones, §Rounds in the game
