@@ -302,6 +302,21 @@ impl Beams {
         }
     }
 
+    /// Fold this ship's accepted `Order::Emit`, aimed as this ship sees its target from `here_ly`.
+    pub fn lit(&mut self, order: &Order, event_id: i64, at_s: f64, here_ly: DVec3, contacts: &[Contact]) {
+        let Order::Emit { aim, apertures, power_w, spread_rad, duration_s, .. } = *order else { return };
+        let Some(axis) = axis_of(&aim, here_ly, contacts) else { return };
+        self.sent.push(Sent {
+            event_id,
+            axis,
+            apertures,
+            half_angle_rad: spread_rad,
+            power_w,
+            from_s: at_s,
+            until_s: at_s + duration_s,
+        });
+    }
+
     /// Put out at `at_s` whatever was still lit.
     pub fn put_out(&mut self, at_s: f64) {
         for sent in &mut self.sent {

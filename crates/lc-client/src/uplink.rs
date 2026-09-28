@@ -789,19 +789,9 @@ fn fold(
                 }
                 // What a mode order does to the account arrives straight after, as `Fitted`.
                 Order::FieldMode { .. } => None,
-                Order::Emit { aim, apertures, power_w, spread_rad, duration_s, .. } => {
-                    let here_ly = game.0.ship.motion.position_ly;
-                    let axis = crate::emit_panel::axis_of(aim, here_ly, &uplink.contacts);
-                    if let Some(axis) = axis.filter(|_| uplink.joined().is_some_and(|j| j.ship_id == ship_id)) {
-                        uplink.beams.sent.push(crate::emit_panel::Sent {
-                            event_id,
-                            axis,
-                            apertures: *apertures,
-                            half_angle_rad: *spread_rad,
-                            power_w: *power_w,
-                            from_s: at_s,
-                            until_s: at_s + duration_s,
-                        });
+                Order::Emit { .. } => {
+                    if uplink.joined().is_some_and(|j| j.ship_id == ship_id) {
+                        uplink.beams.lit(&order, event_id, at_s, game.0.ship.motion.position_ly, &uplink.contacts);
                     }
                     None
                 }
@@ -934,13 +924,13 @@ fn fold(
             uplink.beams = Default::default();
             ui.0.notify("The field collapsed", at_t as f64 * 1e-6)
         }
-        Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t } => {
-            if uplink.joined().is_some_and(|j| j.ship_id == ship_id) {
-                uplink.beams.illuminated(beam, bearing, spectrum, power_w, arrive_t as f64 * 1e-6);
-            }
+        Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t }
+            if uplink.joined().is_some_and(|j| j.ship_id == ship_id) =>
+        {
+            uplink.beams.illuminated(beam, bearing, spectrum, power_w, arrive_t as f64 * 1e-6)
         }
         // Sent once S2 is built.
-        Outbound::Presets(_) => {}
+        Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
     }
 }
 
