@@ -2,10 +2,8 @@
 //! share where storage fills and where it runs dry. See `lightcone/docs/30-the-field.md` §The heat
 //! account.
 //!
-//! What the ship emits is drawn from heat first and storage for the rest
-//! (`31-directed-energy.md` §The drive is the radiator). The commitment runs down by the whole of
-//! it whatever pays, so heat's share leaves the commitment without leaving storage: it is released
-//! as a cut releases what was not flown.
+//! What the ship emits is drawn from heat first (`31-directed-energy.md` §The drive is the
+//! radiator), and the commitment runs down by all of it whatever pays.
 
 use super::{Balance, Fitting, Hull};
 use crate::cost;

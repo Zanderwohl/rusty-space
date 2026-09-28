@@ -99,6 +99,7 @@ graph LR
   E3["E3 Emit"]
   E4["E4 Exhaust heats neighbors"]
   E5["E5 Courteous maneuvering"]
+  E6["E6 The drive's own heat"]
   R1["R1 Placeholder parts"]
   R2["R2 Mesher, in a void"]
   R3["R3 Hull material, in a void"]
@@ -175,6 +176,7 @@ graph LR
   H5 --> E4
   E1 --> E5
   K3 --> E5
+  E2 --> E6
   F2 --> R1
   F5 --> R1
   F3 --> R2
@@ -231,6 +233,7 @@ graph LR
   H9 --> X1
   H10 --> X1
   E4 --> X1
+  E6 --> X1
   R12 --> X1
   C3 --> X1
   C4 --> X1

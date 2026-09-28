@@ -112,9 +112,9 @@ While the drive is lit, exhaust draws on `Q` before storage
 ([31-directed-energy.md](31-directed-energy.md#the-drive-is-the-radiator)), and heat reaching zero
 splits a segment as well. **At the floor, all the heat the ship makes goes out with the exhaust as
 it is made**, conversion's loss and the drain's heat included, so storage pays the exhaust less
-that, and the drain costs nothing while the drive is lit. Within a segment, the floor ends only
-where storage fills there and the heat made outruns the exhaust. A segment is at most three stretches: filling, then full or
-at the floor, then the other.
+that, and the drain costs nothing there. Within a segment, the floor ends only where storage fills
+there and the heat made outruns the exhaust. A segment is at most three stretches: filling, then
+full or at the floor, then the other.
 
 ## Clear and Black
 

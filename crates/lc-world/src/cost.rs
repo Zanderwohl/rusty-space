@@ -110,6 +110,65 @@ mod tests {
         hull.dry_kg + hull.capacities.storage_j / C2
     }
 
+    /// Lit or dark at either end of every stretch between edges, a second in from each: an edge
+    /// misplaced by the frame's clock is hundreds of seconds out.
+    fn edges_bound_what_is_lit(state: &ShipState, until_s: f64) {
+        let edges = lit_edges(state, 0.0, until_s);
+        assert!(edges.len() >= 3, "premise: a boost, a coast and a brake: {edges:?}");
+        let bounds: Vec<f64> = [0.0].into_iter().chain(edges.iter().copied()).chain([until_s]).collect();
+        let rate = |t: f64| lit_rapidity(state, t + 0.1) - lit_rapidity(state, t - 0.1);
+        let ends: Vec<(f64, f64)> = bounds.windows(2).map(|w| (rate(w[0] + 1.0), rate(w[1] - 1.0))).collect();
+        let most = ends.iter().map(|&(a, b)| a.max(b)).fold(0.0, f64::max);
+        let lit = |r: f64| r > 1.0e-3 * most;
+        assert!(ends.iter().any(|&(a, _)| !lit(a)), "premise: it coasts");
+        for (w, (a, b)) in bounds.windows(2).zip(ends) {
+            assert_eq!(lit(a), lit(b), "lit at one end of {w:?} and not the other: {a} {b}");
+        }
+    }
+
+    fn coasting_drive() -> Drive {
+        Drive { accel_g: 1.0, max_beta: 1.0e-4, ..Drive::DEFAULT }
+    }
+
+    #[test]
+    fn a_rendezvous_lights_where_its_frame_says() {
+        let approach = crate::pursuit::Approach {
+            from_ly: DVec3::ZERO,
+            beta0: DVec3::ZERO,
+            to_ly: DVec3::X * 1.0e-6,
+            start_s: 0.0,
+            drive: coasting_drive(),
+            frame_from_ly: DVec3::ZERO,
+            frame_beta: DVec3::new(0.3, 0.1, 0.0),
+            since_t: 0.0,
+            target: crate::motion::ShipId(2),
+        };
+        let plan = approach.solve(DVec3::X);
+        let until_s = plan.since_t + plan.world_elapsed(plan.cruise.start_s + plan.cruise.duration_s()) + 10.0;
+        let mut state = ShipState::at(DVec3::ZERO);
+        state.begin_rendezvous(plan);
+        edges_bound_what_is_lit(&state, until_s);
+    }
+
+    #[test]
+    fn an_escort_lights_where_its_quarry_clock_says() {
+        let quarry = crate::escort::Burning { position_ly: DVec3::ZERO, beta: DVec3::new(0.3, 0.1, 0.0), accel: DVec3::ZERO, since_t: 0.0 };
+        let station = crate::escort::Station {
+            from_ly: DVec3::ZERO,
+            beta0: DVec3::ZERO,
+            to_ly: DVec3::X * 1.0e-6,
+            start_s: 0.0,
+            drive: coasting_drive(),
+            quarry,
+            target: crate::motion::ShipId(2),
+        };
+        let plan = station.solve(DVec3::X);
+        let until_s = quarry.since_t + quarry.world_elapsed(plan.cruise.start_s + plan.cruise.duration_s()) + 10.0;
+        let mut state = ShipState::at(DVec3::ZERO);
+        state.begin_escort(plan);
+        edges_bound_what_is_lit(&state, until_s);
+    }
+
     #[test]
     fn a_burn_cut_into_pieces_costs_what_the_whole_does() {
         let (m, eta) = (mass(), 0.549);
