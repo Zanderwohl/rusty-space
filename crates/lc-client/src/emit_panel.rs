@@ -139,7 +139,7 @@ pub struct Preview {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Landing {
     pub distance_m: f64,
-    /// Radius, meters.
+    /// Radius of the cap's rim, meters: `spread × d` for a narrow beam.
     pub spot_m: f64,
     pub lead_m: Option<f64>,
     pub fraction: f64,
@@ -162,12 +162,12 @@ pub fn preview(draft: &Draft, ship: &Craft, now_s: f64, receiver: Option<&Receiv
             Apertures::Both => vec![fore, aft],
         })
         .unwrap_or_default();
-    let floor_rad = chosen
-        .iter()
+    // An end with no engines has no face, and λ/0 would floor the other end's beam at a hemisphere.
+    let faced = || chosen.iter().filter(|end| end.diameter_m > 0.0);
+    let floor_rad = faced()
         .map(|end| Transmitter::new(draft.wavelength_m, end.diameter_m).half_angle_rad())
         .fold(0.0, f64::max);
-    let spread_rad = chosen
-        .iter()
+    let spread_rad = faced()
         .map(|end| Transmitter::new(draft.wavelength_m, end.diameter_m).spread_rad(draft.spread_rad))
         .fold(0.0, f64::max);
     let ends_lit = if draft.apertures == Apertures::Both { 2.0 } else { 1.0 };
@@ -211,7 +211,7 @@ fn landing(receiver: &Receiver, power_w: f64, spread_rad: f64) -> Landing {
     let absorbed_w = receiver.absorptivity.map(|a| a * arriving_w);
     Landing {
         distance_m: receiver.distance_m,
-        spot_m: spread_rad.tan() * receiver.distance_m,
+        spot_m: spread_rad.min(SPREAD_MAX_RAD).sin() * receiver.distance_m,
         lead_m: receiver.accel_m_s2.map(|a| lead_uncertainty_m(a, receiver.blind_s)),
         fraction,
         arriving_w,
@@ -418,8 +418,17 @@ pub(crate) fn emit(
     }
 
     aim_row(ui, uplink, draft);
+    let offered = offered(session.ship.fitting().and_then(|f| ends(f.form(), f.balance())));
+    if let Some(&last) = offered.last().filter(|_| !offered.contains(&draft.apertures)) {
+        draft.apertures = last;
+    }
     ui.horizontal(|ui| {
-        for (label, apertures) in [("fore", Apertures::Fore), ("aft", Apertures::Aft), ("both", Apertures::Both)] {
+        for apertures in offered {
+            let label = match apertures {
+                Apertures::Fore => "fore",
+                Apertures::Aft => "aft",
+                Apertures::Both => "both",
+            };
             if ui.selectable_label(draft.apertures == apertures, label).clicked() {
                 draft.apertures = apertures;
             }
@@ -494,6 +503,22 @@ pub(crate) fn emit(
 
     ui.separator();
     incoming(ui, session, uplink, draft);
+}
+
+/// The ends a ship with these can emit from, both last.
+fn offered(ends: Option<(End, End)>) -> Vec<Apertures> {
+    let Some((fore, aft)) = ends else { return Vec::new() };
+    let mut offered = Vec::new();
+    if fore.rating_w > 0.0 {
+        offered.push(Apertures::Fore);
+    }
+    if aft.rating_w > 0.0 {
+        offered.push(Apertures::Aft);
+    }
+    if offered.len() == 2 {
+        offered.push(Apertures::Both);
+    }
+    offered
 }
 
 fn aim_row(ui: &mut egui::Ui, uplink: &crate::uplink::Uplink, draft: &mut Draft) {
@@ -844,7 +869,13 @@ mod tests {
     #[test]
     fn what_the_server_would_refuse_is_said() {
         let starting = ship(Form::starting(), None);
-        assert_eq!(preview(&draft(Apertures::Both, 1.0e15), &starting, 0.0, None).refusal, Some(Refusal::NoAperture));
+        let both = preview(&draft(Apertures::Both, 1.0e15), &starting, 0.0, None);
+        assert_eq!(both.refusal, Some(Refusal::NoAperture));
+        let aft = preview(&draft(Apertures::Aft, 1.0e15), &starting, 0.0, None);
+        assert_eq!(both.floor_rad, aft.floor_rad, "an end with no engines floors nothing");
+        assert!(aft.floor_rad < 1.0e-6, "{}", aft.floor_rad);
+        assert_eq!(offered(ends(&Form::starting(), &B)), vec![Apertures::Aft]);
+        assert_eq!(offered(ends(&two_ended(), &B)), vec![Apertures::Fore, Apertures::Aft, Apertures::Both]);
         let craft = ship(two_ended(), None);
         let (fore, _) = ends(&two_ended(), &B).unwrap();
         assert_eq!(preview(&draft(Apertures::Both, 1.0e15), &craft, 0.0, None).refusal, None);

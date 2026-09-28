@@ -474,7 +474,8 @@ pub(crate) fn emit_at_selected(
         power_w: 1.0e18,
         wavelength_m: 1.0e-6,
         spread_rad: 0.1,
-        duration_s: 3_600.0,
+        // Longer than any shot, at any scene's rate.
+        duration_s: 1.0e7,
     })));
 }
 
