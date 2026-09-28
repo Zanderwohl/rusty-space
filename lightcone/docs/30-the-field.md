@@ -502,6 +502,23 @@ so it follows the physics rather than a table. `Field` is a pure function of `Se
 is, and is tested the same way: a hot ship's bar is past the Draper point, and a scheduled collapse
 puts a countdown in the text.
 
+#### As built
+
+- **The blue is the energy bar's fill**, egui's selection color, so a cold field bar and the energy
+  bar are one pair. `panels.rs` reads it and `hud::Field::color` takes it.
+- **The blackbody goes through the band mapping in force**, as the field shader's does: both read
+  `BandMapping::apply_f64` over `blackbody::per_band`. In Natural it is the red-orange-white above.
+- **The countdown is the shard's own answer**, `lc_world::ahead::collapse_by`, which the shard fires
+  from. It looks ninety days ahead, a quarter of an hour at the design rate, and is solved again only
+  when the account, the motive or the starlight segment changes. On a stopped clock it reads in days.
+- **Net heat flow too small to have a direction reads `steady`.**
+- **A switch under way reads `→ BLACK` in any setting**, not only Auto: a day is long enough to
+  wonder whether the order took.
+- **A marker lands on a hundredth**, held two hundredths from the other marker and from either end,
+  so both gaps stay open. `auto_refill_below` is storage, not heat, and is not on the bar; it travels
+  with the order unchanged.
+- **A mode order during a switch is refused before it is sent**, with the shard's own words.
+
 ### Elsewhere
 
 - **Refit panel:** what the plan does to the field: the peak temperature it reaches, and at which
