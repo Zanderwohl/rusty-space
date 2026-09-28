@@ -280,33 +280,96 @@ async fn one_leap_and_every_tick_agree() {
 }
 
 /// Restarted while a burn's light is on its way to a receiver, the shard lands it at its arrival
-/// once, and goes on stating the same drive rather than lighting it again.
+/// once, and goes on stating the same drive rather than lighting it again. Near the burn the light
+/// is followed from what the drive said; beyond its reach only the journal's deliveries bring it
+/// back, and a shard that did not read them feeds nothing.
 #[tokio::test]
 async fn a_burn_in_flight_across_a_restart_still_lands() {
     const RATE: f64 = 1.0e-7;
-    let at = -DVec3::X * 3_000.0;
-    let mut server = Server::new(Memory::default(), 0, 1);
-    server.set_rate(RATE);
-    server.fleet.insert(crossing(anvil(1), 1.0e-4, 1.0e10));
-    server.fleet.insert(ship(2, at, Form::starting()));
-    let mut wire = Loopback::new();
-    while drive_said(&server, ShipId(1)).is_empty() {
-        assert!(server.now_t() < 1_000, "premise: the drive lit");
-        server.tick(&mut wire).await.unwrap();
-    }
-    let (lit_t, lit) = drive_said(&server, ShipId(1))[0];
-    let arrive_t = (lit_t as f64 + at.length()).ceil() as i64;
-    assert!(server.now_t() < arrive_t, "premise: in flight");
+    let b = Balance::DEFAULT;
+    let reach_us = 1.0e3 * cooking_distance_m(&b, anvil_w(), b.drive_spread_rad, 1.0) * US_PER_M;
+    for (d_us, resume) in [(3_000.0, true), (1.0e6, true), (1.0e6, false)] {
+        assert_eq!(d_us > reach_us, d_us > 1.0e4, "premise: {d_us} µs against a reach of {reach_us}");
+        let at = -DVec3::X * d_us;
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.set_rate(RATE);
+        server.fleet.insert(crossing(anvil(1), 1.0e-4, 1.0e10));
+        server.fleet.insert(ship(2, at, Form::starting()));
+        let mut wire = Loopback::new();
+        while drive_said(&server, ShipId(1)).is_empty() {
+            assert!(server.now_t() < 1_000, "premise: the drive lit");
+            server.tick(&mut wire).await.unwrap();
+        }
+        let (lit_t, lit) = drive_said(&server, ShipId(1))[0];
+        let arrive_t = (lit_t as f64 + at.length()).ceil() as i64;
+        assert!(server.now_t() < arrive_t, "premise: in flight");
 
-    let mut restarted = restart(&server, 1.0e-5, true).await;
-    drop(server);
-    let receiver = restarted.ship(ShipId(2)).unwrap().clone();
-    restarted.admit(ClientId(2), receiver, 0.0);
-    until(&mut restarted, &mut wire, arrive_t as f64 + 1.0).await;
-    let told = illuminated(&wire.take(ClientId(2)));
-    assert!(matches!(told[..], [(beam, w, t)] if beam == lit.beam && w > 0.0 && t == arrive_t), "{told:?}");
-    until(&mut restarted, &mut wire, 5.0e6).await;
-    let beams: Vec<i64> = drive_said(&restarted, ShipId(1)).iter().map(|(_, e)| e.beam).collect();
-    assert!(beams.iter().all(|b| *b == lit.beam), "lit again after the restart: {beams:?}");
-    assert!(lit_w(&restarted, 2) > 0.0);
+        let mut restarted = restart(&server, 1.0e-4, resume).await;
+        drop(server);
+        let receiver = restarted.ship(ShipId(2)).unwrap().clone();
+        restarted.admit(ClientId(2), receiver, 0.0);
+        until(&mut restarted, &mut wire, arrive_t as f64 + 1.0).await;
+        let told = illuminated(&wire.take(ClientId(2)));
+        if d_us > reach_us && !resume {
+            assert!(told.is_empty() && lit_w(&restarted, 2) == 0.0, "{told:?}");
+            continue;
+        }
+        assert!(matches!(told[..], [(beam, w, t)] if beam == lit.beam && w > 0.0 && t == arrive_t), "{d_us} µs: {told:?}");
+        until(&mut restarted, &mut wire, 5.0e6).await;
+        let beams: Vec<i64> = drive_said(&restarted, ShipId(1)).iter().map(|(_, e)| e.beam).collect();
+        assert!(beams.iter().all(|b| *b == lit.beam), "lit again after the restart: {beams:?}");
+        assert!(lit_w(&restarted, 2) > 0.0);
+    }
+}
+
+/// A ship that collapses partway through a tick in which its drive was stated as lighting later
+/// never lit it: the lighting is withdrawn from what the tick writes, sends and keeps.
+#[tokio::test]
+async fn a_drive_stated_after_its_ship_collapsed_is_never_sent() {
+    let b = Balance::DEFAULT;
+    let probe = ship(2, -DVec3::X, Form::starting());
+    let (shadow_m2, rated_w) = (crate::field::shadow_toward_m2(&probe, DVec3::X, 0.0), probe.fitting().unwrap().field().rated_load_w());
+    let d_m = (anvil_w() * shadow_m2 / (lc_world::signal::cone_solid_angle_sr(b.drive_spread_rad) * 4.0 * rated_w)).sqrt();
+    // Facing away from where it is told to go, so it lights only once it has come about.
+    let mut victim = ship(2, -DVec3::X * d_m * US_PER_M, Form::starting());
+    victim.motion.attitude = -DVec3::X;
+    let heat_max_j = victim.fitting().unwrap().field().heat_max_j();
+    let first_w = anvil_w() * received_fraction(b.drive_spread_rad, shadow_m2, d_m);
+    account(&mut victim, |a| a.heat_j = heat_max_j - 0.5 * first_w);
+    let victim = crossing(victim, 0.5, 1.0e10);
+    let lights_s = match &victim.motion.motive {
+        lc_world::motion::Motive::Crossing(cruise) => cruise.phase_changes_s()[0],
+        other => panic!("{other:?}"),
+    };
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.set_rate(ticking(1.2 * lights_s));
+    server.fleet.insert(crossing(anvil(1), 1.0, 1.0e10));
+    server.fleet.insert(victim);
+    let mut wire = Loopback::new();
+    server.tick(&mut wire).await.unwrap();
+
+    let died_t = server.journal().events.iter().find(|e| e.kind == KIND_COLLAPSE && e.source == ShipId(2)).expect("premise: it collapsed").t;
+    assert!((died_t as f64) < lights_s * 1.0e6 && lights_s * 1.0e6 < server.now_t() as f64, "premise: it would have lit later that tick");
+    assert!(drive_said(&server, ShipId(2)).is_empty(), "a wreck's drive went out on the journal");
+    let written: Vec<i64> = server.journal().events.iter().map(|e| e.id).collect();
+    assert!(server.journal().deliveries.iter().all(|d| written.contains(&d.event)), "a delivery of an event never written");
+    assert!(!server.emissions.said.contains_key(&CraftId(2)) && server.emissions.landings.iter().all(|l| l.source != ShipId(2)));
+}
+
+/// An emit flown as a burn throttles as the drive does, and is said again as the ship lightens.
+#[tokio::test]
+async fn an_emit_flown_as_a_burn_is_said_again_as_the_ship_lightens() {
+    let power_w = 3.0e19;
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.set_rate(ticking(3_600.0));
+    server.admit(EMITTING, ship(1, DVec3::ZERO, Form::starting()), 0.0);
+    let mut wire = Loopback::new();
+    wire.client_says(EMITTING, emit(along(-DVec3::X), Apertures::Aft, power_w, 1.0e-6, 0.01, 10.0 * 86_400.0));
+    server.tick(&mut wire).await.unwrap();
+    assert!(wire.take(EMITTING).iter().any(|m| matches!(m, Outbound::Accepted { .. })));
+    until(&mut server, &mut wire, 10.5 * 86_400.0e6).await;
+    let said: Vec<f64> = emissions_of(&server, EMITTER).iter().map(|(_, e)| e.power_w).take_while(|w| *w > 0.0).collect();
+    assert!(said.len() >= 3, "{said:?}");
+    assert!((said[0] / power_w - 1.0).abs() < 1.0e-6, "{said:?}");
+    assert!(said.windows(2).all(|w| w[1] / w[0] < 0.99 && w[1] / w[0] > 0.985), "{said:?}");
 }

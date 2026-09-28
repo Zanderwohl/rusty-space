@@ -13,6 +13,8 @@
 //! emitter can still say, and otherwise from where the statement said. Only receivers within a
 //! beam's reach are followed; beyond it one is restated only as each statement's light lands.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use glam::DVec3;
 use lc_proto::ShipId;
 use lc_spacetime::{LIGHT_MICROSECOND_M, Worldline};
@@ -34,7 +36,8 @@ const SHARE_STEP: f64 = 0.01;
 const LOOK_AHEAD: f64 = 0.5;
 const SHORTEST_LOOK_US: i64 = 1_000;
 const LONGEST_LOOK_US: i64 = 10_000_000;
-/// A backstop on the looks one pair takes in a tick.
+/// A backstop on the looks one pair takes in a tick: past it, the rest of the tick is taken from
+/// where the next tick starts, and a leap and many ticks may differ.
 const MOST_LOOKS: usize = 100_000;
 
 /// How far a statement's light is followed, light-microseconds.
@@ -125,7 +128,7 @@ fn scan(emitter: Option<&Craft>, said: &[Said], receiver: &Craft, mut was: Taken
     let mut t = after_t;
     for _ in 0..MOST_LOOKS {
         if t >= now {
-            break;
+            return found;
         }
         let next = (t + look_us(emitter, receiver, look(t).as_ref(), t)).min(now);
         if !changed(was, look(next).as_ref()) {
@@ -146,8 +149,13 @@ fn scan(emitter: Option<&Craft>, said: &[Said], receiver: &Craft, mut was: Taken
         was = taken(there.as_ref());
         t = at;
     }
+    if t < now && !CUT_SHORT.swap(true, Ordering::Relaxed) {
+        eprintln!("WARNING: a receiver's share was followed only to {t} of a tick ending {now}; the rest is taken next tick");
+    }
     found
 }
+
+static CUT_SHORT: AtomicBool = AtomicBool::new(false);
 
 impl<J: Journal> Server<J> {
     /// Queue a landing at every instant in `(after_t, now]` a receiver's share of a beam changes.

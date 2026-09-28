@@ -254,7 +254,9 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   leaves stops. Each instant is a landing like any other, settled in time order with collapses. The
   looks between them are spaced at half the time the speed between the two needs to reach a step or
   the edge, and a change is bisected to its microsecond, so one leap and many ticks settle the same
-  instants. A receiver's turn is not in that spacing; it is caught at the next look.
+  instants, unless one pair needs more than a hundred thousand looks in a tick, when the rest waits
+  for the next and the shard warns. A receiver's turn is not in that spacing; it is caught at the
+  next look.
 - **Where the light left** is the emitter's worldline at the retarded instant, while the emitter can
   still say, and otherwise where the statement said. Each statement is kept with its emitter, in
   its checkpoint, until the next one's light has gone past the reach.

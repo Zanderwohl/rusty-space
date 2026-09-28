@@ -325,18 +325,35 @@ impl<J: Journal> Server<J> {
     /// here but by the change of motion, which [`drives`] states.
     pub(crate) fn put_out(&mut self, id: CraftId, at: i64, drives: bool, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
         let Some(lit) = self.emissions.emitting.get_mut(&id) else { return };
-        // A burn still coming about never lit.
-        lit.retain(|lighting| lighting.beam.is_some() || lighting.lights_t < at);
-        let mut out = Vec::new();
-        for lighting in lit.iter_mut().filter(|l| drives || l.jet.is_none()) {
+        let mut withdrawn = Vec::new();
+        lit.retain_mut(|lighting| {
+            if !(drives || lighting.jet.is_none()) {
+                return true;
+            }
+            // A burn still coming about never lit, and nor did a drive stated as lighting after it.
+            let lit_by_then = match lighting.beam {
+                Some(_) => lighting.lights_t <= at,
+                None => lighting.lights_t < at,
+            };
             lighting.out_t = lighting.out_t.min(at);
-            out.extend(lighting.beam);
-        }
-        // Anything said after the instant it went out was never sent.
+            withdrawn.extend(lighting.beam);
+            lit_by_then
+        });
+        // Anything said after the instant it went out was never sent, though this tick said it.
+        let unsaid = |source: ShipId, beam: i64, t: i64| source.0 == id.0 && withdrawn.contains(&beam) && t > at;
         if let Some(said) = self.emissions.said.get_mut(&id) {
-            said.retain(|s| !(out.contains(&s.emitted.beam) && s.t > at));
+            said.retain(|s| !unsaid(ShipId(id.0), s.emitted.beam, s.t));
         }
-        self.emissions.landings.retain(|l| !(l.source.0 == id.0 && out.contains(&l.emitted.beam) && l.said_t > at));
+        self.emissions.landings.retain(|l| !unsaid(l.source, l.emitted.beam, l.said_t));
+        let mut dropped = Vec::new();
+        events.retain(|e| {
+            let drop = e.kind == KIND_EMIT && emitted(&e.payload).is_some_and(|m| unsaid(e.source, m.beam, e.t));
+            if drop {
+                dropped.push(e.id);
+            }
+            !drop
+        });
+        deliveries.retain(|d| !dropped.contains(&d.event));
         if let Some(craft) = self.fleet.get_mut(id) {
             craft.adjust(at as f64 * 1.0e-6, |fitting| fitting.darken());
         }
