@@ -493,9 +493,12 @@ pub(crate) fn emit(
         if ui.add_enabled(seen.refusal.is_none() && session.remote, egui::Button::new("Emit")).clicked() {
             ask(out, Action::Emit(order));
         }
-        if let Some(why) = seen.refusal {
-            ui.colored_label(hazard(), crate::uplink::refused(why));
-        }
+        match seen.refusal {
+            // The shared wording is a refit's.
+            Some(Refusal::UnderWay) => ui.colored_label(hazard(), "under way"),
+            Some(why) => ui.colored_label(hazard(), crate::uplink::refused(why)),
+            None => ui.label(""),
+        };
     });
     if !uplink.beams.sent.is_empty() && ui.button("Put out").clicked() {
         ask(out, Action::PutOut);
@@ -588,12 +591,17 @@ fn show_preview(ui: &mut egui::Ui, seen: &Preview, receiver: Option<&Receiver>, 
         0.0 => "no net thrust".to_string(),
         a => format!("recoil {:.3} g away from the beam", a / G0),
     });
+    let me = |j: f64| match j / module_j {
+        0.0 => "0 ME".to_string(),
+        me if me < 0.01 => format!("{me:.2e} ME"),
+        me => format!("{me:.2} ME"),
+    };
     ui.label(format!(
-        "{} over {} · {} from heat, {} from storage",
-        crate::refit_panel::me(seen.cost_j, module_j),
+        "{} at {} · {} from heat, {} from storage",
+        me(seen.cost_j),
         watts(seen.drawn_w),
-        crate::refit_panel::me(seen.from_heat_j, module_j),
-        crate::refit_panel::me(seen.from_storage_j, module_j),
+        me(seen.from_heat_j),
+        me(seen.from_storage_j),
     ));
 }
 
