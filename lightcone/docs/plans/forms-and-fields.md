@@ -238,7 +238,6 @@ graph LR
   H10 --> X1
   E4 --> X1
   E6 --> X1
-  E7 --> X1
   R12 --> X1
   C3 --> X1
   C4 --> X1
@@ -536,9 +535,9 @@ graph LR
 - status: todo
 - needs: E3, H5
 - touches: `crates/lc-server/src/emit.rs`
-- read: 31 §Exhaust lands on whatever is behind
-- deliver: every lit drive, and every thruster leg at `rcs_spread_rad`, lit as one of E3's emissions at `drive_spread_rad` between ignition and cutoff, in the face's spectrum. E3's fan-out then changes neighbors' intake and hands observers in the cone the drive's `Glare` at the retarded times of both; nothing here fans out on its own.
-- done when: a full ship inside the cooking distance behind a burn walks to collapse, one beside the burn feels nothing, and an observer in the cone a light-year off is handed a `Glare` whose flux is `emit::flux_w_m2`.
+- read: 31 §Exhaust lands on whatever is behind, §What arrives and its As built
+- deliver: every lit drive, and every thruster leg at `rcs_spread_rad`, lit as one of E3's emissions at `drive_spread_rad` between ignition and cutoff, in the face's spectrum. E3's fan-out then changes neighbors' intake and hands observers in the cone the drive's `Glare` at the retarded times of both; nothing here fans out on its own. Every emission, beam or drive, is restated as it goes, which a drive needs more than any beam since both ends of it are usually moving: a craft that flies into a cone whose light is already passing is fed and told `Illuminated` from when it enters, one that leaves stops, the share follows the receiver's distance and shadow, and a burn's power is stated again as the ship lightens, at the rocket law's throttle. (Folded in from E7, which E3 added.)
+- done when: a full ship inside the cooking distance behind a burn walks to collapse, one beside the burn feels nothing, an observer in the cone a light-year off is handed a `Glare` whose flux is `emit::flux_w_m2`, a craft flying across a lit beam is fed only while inside it from its light's arrival there, and a receiver behind a burning emitter is told the falling power at the retarded times it falls.
 
 ### E5 · Courteous maneuvering
 
@@ -560,7 +559,7 @@ graph LR
 
 ### E7 · A beam restated as it goes
 
-- status: todo
+- status: dropped folded into E4: a drive is the emission that most needs restating as it goes, and both are `emit.rs`
 - needs: E3
 - touches: `crates/lc-server/src/emit.rs`
 - read: 31 §What arrives, §Protocol, and its As built
@@ -831,7 +830,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, H9, H10, E4, E6, E7, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
+- needs: F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
