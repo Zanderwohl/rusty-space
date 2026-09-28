@@ -472,7 +472,7 @@ mod tests {
         let mut row = save(&a_craft(), None, None, None, Radio::default(), 0);
         row.format = SAVE_FORMAT - 1;
         let why = load(&row, None).expect_err("it should refuse");
-        assert!(why.contains("format 10"), "{why}");
+        assert!(why.contains(&format!("format {}", SAVE_FORMAT - 1)), "{why}");
     }
 
     /// A pursuit is written down with the craft, so a ship hanging about with another is still
@@ -543,6 +543,18 @@ mod tests {
         let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), 0), None).expect("it reads");
         assert_eq!(back.fitting().unwrap().heat_j_at(0.0), 3.0 * b.module_energy_j());
         assert_eq!(back.fitting(), craft.fitting());
+    }
+
+    /// A wreck comes back as a wreck, ended where it was, and its row claims no account even when
+    /// handed one.
+    #[test]
+    fn a_wreck_comes_back_ended_and_owning_nothing() {
+        let mut craft = a_craft();
+        craft.end(12.5);
+        let row = save(&craft, Some("acct-1"), None, None, Radio::default(), 20_000_000);
+        assert_eq!(row.account, None);
+        assert_eq!(load(&row, None).expect("it reads").ended_s(), Some(12.5));
+        assert_eq!(load(&save(&a_craft(), None, None, None, Radio::default(), 0), None).unwrap().ended_s(), None);
     }
 
     /// A row that cannot be read is an error and never a fresh ship at the origin.

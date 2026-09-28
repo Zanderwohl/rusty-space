@@ -235,6 +235,21 @@ mod tests {
         assert_eq!(save_ships(&client, &[]).await.unwrap(), 0);
     }
 
+    /// A wreck is written with no account in the same checkpoint as its successor takes it, in
+    /// whichever order the two rows come.
+    #[tokio::test]
+    async fn an_account_passes_between_rows_written_together() {
+        let Some(client) = store().await else { return };
+        let band = 7_051_000;
+        clear(&client, band).await;
+        let account = format!("pass-{band}");
+        save_ships(&client, &[ship(band, Some(&account), "alive")]).await.unwrap();
+        save_ships(&client, &[ship(band + 1, Some(&account), "successor"), ship(band, None, "wreck")]).await.unwrap();
+        assert_eq!(ship_for_account(&client, &account).await.unwrap().unwrap().ship_id, band + 1);
+        let read = load_ships(&client).await.unwrap();
+        assert_eq!(read.iter().find(|s| s.ship_id == band).unwrap().account, None);
+    }
+
     /// A destroyed ship's account passes to its successor in the same write.
     #[tokio::test]
     async fn a_forgotten_ships_account_can_be_taken_again() {
