@@ -358,6 +358,12 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
   at the spawn point therefore feed each other their glow, which they convert like starlight.
 - **A shadow toward a neighbor** is read off the shadow table at the roll the hull presents to its
   star, the only roll a hull holds.
+- **`--demo cascade`** is five hot ships ten times the starting size, 23 km apart. The first vents
+  and each spike kills the next. Nothing draws a collapse yet: a wreck disappears when the light of
+  its end arrives, and the console says it collapsed.
+
+  ![`--demo cascade`: five ships running hot](../images/h5-cascade-before.jpg)
+  ![and partway through: the first two are gone, and the light of the third's end has not yet arrived](../images/h5-cascade-partway.jpg)
 - **A spike in flight is not checkpointed.** A restart between a collapse and its spike's arrival
   loses the spike, as a restart loses the wreck (see [Open](#open)).
 
