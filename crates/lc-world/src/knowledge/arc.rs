@@ -1336,6 +1336,38 @@ pub(super) mod tests {
         }
     }
 
+    /// **An orbit is only as good as the star it goes round.** Fitted about a star believed two
+    /// sigma off along the line of sight to it, which is where a parallax leaves a star, the fit
+    /// is a different orbit, and bars that take the star as known do not cover where the body
+    /// is. With the star's error in the covariance they do.
+    #[test]
+    fn a_fit_carries_its_stars_error() {
+        use crate::knowledge::placed::{Placed, placed_at};
+        let truth = like(1.524, 0.0934);
+        let seen = looks(&truth, 5.0, 24, truth.period_s() * 0.4 / 23.0, SIGMA);
+        let toward_star = -seen.iter().map(|l| l.from_m).sum::<DVec3>().normalize();
+        let sigma = toward_star * 3.8e6;
+        let believed: Vec<Look> = seen.iter().map(|l| Look { from_m: l.from_m - sigma * 2.0, ..*l }).collect();
+        let fitted = settle(truth.fitted(), &believed, SETTLINGS * 8);
+        let orbit = fitted.stated(crate::knowledge::Witness(1), None, &believed, 0.0);
+        let with = crate::knowledge::Orbit {
+            covariance: orbit.covariance.map(|c| c.with(&settle::origin_covariance(&fitted, &believed, sigma).expect("moves"))),
+            ..orbit.clone()
+        };
+        let out = |o: &crate::knowledge::Orbit, star_m2: glam::DMat3| {
+            let t = seen.last().expect("looks").at_s + 60.0 * DAY_S;
+            let Placed::Known { offset_au, error } = placed_at(o, t) else { panic!("placed") };
+            // Where a reader puts it: the believed star, plus the orbit about it.
+            let miss = sigma * 2.0 + offset_au * crate::navigation::AU - truth.at(t);
+            let c = error.whole_au2() * (crate::navigation::AU * crate::navigation::AU) + star_m2;
+            miss.dot(c.inverse() * miss).sqrt()
+        };
+        let star_m2 = glam::DMat3::from_cols(sigma * sigma.x, sigma * sigma.y, sigma * sigma.z);
+        let (without, carried) = (out(&orbit, star_m2), out(&with, star_m2));
+        assert!(carried < 3.7, "{carried} sigma out with the star's error carried");
+        assert!(without > carried * 2.0, "premise: without it, {without}");
+    }
+
     /// **A stated orbit reads back as the fit it came from,** which the covariance depends on:
     /// it is in the fit's own terms, so a reader that rebuilt the elements differently would
     /// read every number as something else.
