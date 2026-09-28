@@ -643,19 +643,25 @@ Apply asks once more when the vent would collapse the field.
 
 - **The round is solved locally from the shard's inputs.** `preview::Start` is what
   `Craft::begin_refit` would take: the ship's form, what it stores now, and now. While a round runs
-  the draft is edited against its target, so the next round starts there with what the running one
-  will leave. The budget is `ledger::Budget::of` on that plan, and a test holds the local plan equal
-  to the one the shard makes of the same Apply. A draft storage cannot pay for has no plan, and the
-  budget says how short it is instead.
+  the draft is edited against its target, and the shard begins no second round until the first
+  ends, so the next round starts there and then, with what the running one will leave. The budget
+  is `ledger::Budget::of` on that plan, and a test holds the local plan equal to the one the shard
+  makes of the same Apply. A draft storage cannot pay for has no plan, and the budget says how short
+  it is instead.
 - **The title bar**, beside Apply, reads available, spent, the peak in storage against capacity,
   and `vents 1.2 ME` when anything is vented, in the hazard color when it would collapse the field.
   One bar, not a second strip at the bottom; the peak temperature is Apply's second question's to
   say, and the ledger's.
-- **The peak temperature** walks the plan: the field starts at its heat before the round, a
-  dismantling heats it by the 5% it loses spread over the step, and each vent lands as a burst at its
-  step's end, which is where the heat peaks. Between them it relaxes toward what held it before. Heat
-  is not kept until H3, so the starting heat is the idle field's, `q_idle` over the ship's envelope
-  as it stands; C10 replaces it with the ship's own `Q` once H3 keeps one.
+- **The peak temperature** walks the plan on the ship's own heat account
+  ([30-the-field.md](30-the-field.md#the-heat-account)), with the round begun on it as the shard
+  would begin it: the field starts at the `Q` the ship holds, a dismantling heats it by the 5% it
+  loses spread over the step, and each vent lands as a burst at its step's end, which is where the
+  heat peaks. A return that finds storage already filled by starlight is heat as it arrives, so it
+  too peaks by the step's end. Between them it goes where the account's own inputs take it — starlight less what is
+  converted, and the drain — so a warm ship still cooling is asked about a vent an idle one survives.
+  While a round runs, the next one begins where it ends: in its target's form and envelope, with
+  the heat and storage it leaves. The ledger reads the running round's peak still ahead off the
+  account as it stands.
 - **What the budget stops.** No edit may leave the draft further short than its gesture began, except
   one that replaces the whole draft (a preset, or the ship). Measured from the gesture's start, a
   handle held at its limit can still come back. A size or axis handle pulled past the limit stops on
