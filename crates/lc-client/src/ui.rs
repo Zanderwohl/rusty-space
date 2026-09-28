@@ -504,8 +504,9 @@ pub struct UiState {
     /// How far a population's covering fraction is amplified for display. A belt blocks a
     /// millionth of the light and a millionth of a pixel is nothing.
     pub envelope_gain: f32,
-    /// Stops away from the automatic exposure.
-    pub exposure_offset: f32,
+    /// Stops away from the automatic exposure, or `None` for automatic. Zero is a manual
+    /// setting of its own, so stepping through it does not fall back to automatic.
+    pub exposure_offset: Option<f32>,
     pub preset: usize,
     pub integration_s: f64,
     pub god_view: bool,
@@ -585,7 +586,7 @@ impl Default for UiState {
             local: crate::starfield::LOCAL,
             bodies: crate::starfield::BODIES,
             envelope_gain: crate::envelope::OPACITY_GAIN,
-            exposure_offset: 0.0,
+            exposure_offset: None,
             preset: 0,
             integration_s: 1.0e4,
             god_view: false,

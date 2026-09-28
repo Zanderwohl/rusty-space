@@ -475,12 +475,12 @@ pub fn lines(session: &Session, ui: &UiState, collapse: &mut Collapse) -> Hud {
         mapping: name.to_uppercase(),
         mapping_code: mapping_code(name),
         exposure: match ui.exposure_offset {
-            o if o.abs() < 1e-6 => "auto".to_string(),
-            o => format!("{o:+.1} stops"),
+            None => "auto".to_string(),
+            Some(o) => format!("{o:+.1} stops"),
         },
         exposure_code: match ui.exposure_offset {
-            o if o.abs() < 1e-6 => "auto".to_string(),
-            o => format!("{o:+.1}"),
+            None => "auto".to_string(),
+            Some(o) => format!("{o:+.1}"),
         },
         flight: session.cruise().as_ref().map(|c| {
             let left = (c.duration_s() - (session.coordinate_time_s() - c.start_s)).max(0.0);
@@ -680,7 +680,7 @@ mod tests {
         assert_eq!(hud.band(Fit::Words), "BAND NATURAL");
         assert_eq!(hud.band(Fit::Codes), "B N");
         assert_eq!(hud.exposure(Fit::Codes), "E auto");
-        ui.exposure_offset = 1.5;
+        ui.exposure_offset = Some(1.5);
         let hud = lines(&session, &ui, &mut Collapse::default());
         assert_eq!(hud.exposure(Fit::Words), "EXPOSURE +1.5 stops");
         assert_eq!(hud.exposure(Fit::Keys), "E +1.5");
@@ -1008,6 +1008,7 @@ mod tests {
         apply(Action::ExposureUp, &mut ui, &mut s);
         assert_eq!(lines(&s, &ui, &mut Collapse::default()).exposure, "+0.5 stops");
         apply(Action::ExposureDown, &mut ui, &mut s);
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).exposure, "+0.0 stops");
         apply(Action::ExposureDown, &mut ui, &mut s);
         assert_eq!(lines(&s, &ui, &mut Collapse::default()).exposure, "-0.5 stops");
         apply(Action::ExposureAuto, &mut ui, &mut s);

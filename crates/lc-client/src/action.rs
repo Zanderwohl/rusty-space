@@ -363,7 +363,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::ExposureUp => adjust_exposure(ui, session, EXPOSURE_STEP),
         Action::ExposureDown => adjust_exposure(ui, session, -EXPOSURE_STEP),
         Action::ExposureAuto => {
-            ui.exposure_offset = 0.0;
+            ui.exposure_offset = None;
             session.auto_expose();
         }
 
@@ -962,7 +962,7 @@ fn set_preset(ui: &mut UiState, session: &mut Session, index: usize, effects: &m
 }
 
 fn adjust_exposure(ui: &mut UiState, session: &mut Session, stops: f32) {
-    ui.exposure_offset = (ui.exposure_offset + stops).clamp(-12.0, 12.0);
+    ui.exposure_offset = Some((ui.exposure_offset.unwrap_or(0.0) + stops).clamp(-12.0, 12.0));
     session.auto_expose();
     apply_exposure_offset(ui, session);
 }
@@ -977,7 +977,7 @@ pub fn refresh_exposure(ui: &UiState, session: &mut Session) {
 }
 
 fn apply_exposure_offset(ui: &UiState, session: &mut Session) {
-    session.tone = session.tone.exposed(ui.exposure_offset);
+    session.tone = session.tone.exposed(ui.exposure_offset.unwrap_or(0.0));
 }
 
 #[cfg(test)]
@@ -1331,10 +1331,12 @@ mod tests {
         let (mut ui, mut s) = fixture();
         let auto = s.tone.reference;
         apply(Action::ExposureUp, &mut ui, &mut s);
-        assert!((ui.exposure_offset - EXPOSURE_STEP).abs() < 1e-6);
+        assert_eq!(ui.exposure_offset, Some(EXPOSURE_STEP));
         assert!(s.tone.reference < auto, "opening up lowers the reference");
+        apply(Action::ExposureDown, &mut ui, &mut s);
+        assert_eq!(ui.exposure_offset, Some(0.0), "zero is manual, not automatic");
         apply(Action::ExposureAuto, &mut ui, &mut s);
-        assert_eq!(ui.exposure_offset, 0.0);
+        assert_eq!(ui.exposure_offset, None);
         assert!((s.tone.reference - auto).abs() < auto * 1e-6);
     }
 
@@ -1367,7 +1369,7 @@ mod tests {
         for _ in 0..200 {
             apply(Action::ExposureUp, &mut ui, &mut s);
         }
-        assert!(ui.exposure_offset <= 12.0);
+        assert_eq!(ui.exposure_offset, Some(12.0));
         assert!(s.tone.reference.is_finite() && s.tone.reference > 0.0);
     }
 
