@@ -666,19 +666,21 @@ fn aim_at(state: &ShipState, now_s: f64) -> Option<crate::flight::Aim> {
 /// station is held by thrust, but the thrust is whatever cancels the local gravity — milligravities
 /// against the whole-g burns everything else here is about, and a plume nobody would see.
 pub fn thrust_g(state: &ShipState, now_s: f64) -> f64 {
-    let lit = match &state.motive {
-        Motive::Crossing(cruise) => cruise.thrust_at(now_s) != DVec3::ZERO,
-        Motive::Transfer(transfer) => transfer.thrust_at(now_s) != DVec3::ZERO,
-        Motive::Rendezvous(plan) => plan.thrust_at(now_s) != DVec3::ZERO,
+    // A plan's own drive, not the craft's rating: a courteous leg flown on station-keeping
+    // thrusters is a hundredth of a g, and stated at the rating it read as the main drive
+    // flaming the quarry it was keeping clear of.
+    let (lit, accel_g) = match &state.motive {
+        Motive::Crossing(cruise) => (cruise.thrust_at(now_s) != DVec3::ZERO, cruise.drive.accel_g),
+        Motive::Transfer(transfer) => (transfer.thrust_at(now_s) != DVec3::ZERO, state.drive.accel_g),
+        Motive::Rendezvous(plan) => (plan.thrust_at(now_s) != DVec3::ZERO, plan.cruise.drive.accel_g),
         // Station-keeping beside it is the quarry's tidal difference, which is the same
         // simplification as holding a station.
-        Motive::Consort(plan) => plan.thrust_at(now_s) != DVec3::ZERO,
-        // The one motive whose burn is not the drive's rating: beside a quarry, it is the
-        // quarry's acceleration, and that is what a plume should show.
+        Motive::Consort(plan) => (plan.thrust_at(now_s) != DVec3::ZERO, plan.cruise.drive.accel_g),
+        // Beside a burning quarry, what is lit is the quarry's acceleration.
         Motive::Escort(plan) => return plan.thrust_g(now_s),
-        Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => false,
+        Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => (false, 0.0),
     };
-    if lit { state.drive.accel_g } else { 0.0 }
+    if lit { accel_g } else { 0.0 }
 }
 
 /// Move a ship to a coordinate time.

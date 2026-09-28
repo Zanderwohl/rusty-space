@@ -303,6 +303,15 @@ mod tests {
         assert!(worst <= 1.0, "{worst} of the courtesy flux");
         assert!(legs >= 2, "no ingress");
         assert!(crate::courtesy::on_thrusters(&b, &last.cruise.drive));
+        // And what an observer is told is burning is the thrusters, not the rated drive.
+        let mut flying = ship.clone();
+        flying.drive = who.drive;
+        flying.motive = crate::motion::Motive::Consort(last.clone());
+        let lit_s = (0..1000)
+            .map(|i| last.cruise.start_s + last.cruise.duration_s() * i as f64 / 1000.0)
+            .find(|t| last.thrust_at(*t) != DVec3::ZERO)
+            .expect("the thruster leg is never lit");
+        assert_eq!(crate::motion::thrust_g(&flying, lit_s), last.cruise.drive.accel_g);
         let (at, _) = last.state_at(&system, now).unwrap();
         let gap = at.distance(station.place_at(&system, now).unwrap()) * M_PER_LY;
         assert!((gap - standoff).abs() < 50.0, "{gap} m off a {standoff} m standoff");

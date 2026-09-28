@@ -265,6 +265,7 @@ pub fn parse(args: &[String]) -> Entry {
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),
+        burst_every: value(args, "--burst-every").unwrap_or(1),
         bench: value(args, "--bench"),
         menu_page,
         // The password form is the one egui surface in the menu, and it is opened by a button

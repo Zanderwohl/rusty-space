@@ -617,7 +617,7 @@ graph LR
 
 - status: active card "R12 · The cone in the game"
 - needs: R7, F9
-- touches: `crates/lc-client/src/plume.rs`, `crates/lc-client/src/map_cone.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/map_scene.rs`, `crates/lc-client/src/pick.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/procedural.rs`, `crates/lc-client/examples/`, `crates/em-render/src/plume_material.rs` (retired), `crates/lc-world/src/form/capacity.rs`, `lightcone/docs/07-rendering.md`, `lightcone/docs/18-ui-style.md`, `lightcone/docs/32-ship-rendering.md`, `AGENTS.md`
+- touches: `crates/lc-client/src/plume.rs`, `crates/lc-client/src/map_cone.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/map_scene.rs`, `crates/lc-client/src/pick.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/procedural.rs`, `crates/lc-client/examples/`, `crates/em-render/src/plume_material.rs` (retired), `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/motion.rs` (E5: a leg states its own drive), `crates/lc-world/src/consort.rs`, `lightcone/docs/07-rendering.md`, `lightcone/docs/18-ui-style.md`, `lightcone/docs/32-ship-rendering.md`, `AGENTS.md`
 - read: 32 §The exhaust cone
 - deliver: the aperture glow on each engine part's open face; the cone for your own burns, for any burn whose courtesy radius you are in, and for a selected ship; the map's lines.
 - done when: a burning ship photographs with its cone, and the old gas plume is gone.

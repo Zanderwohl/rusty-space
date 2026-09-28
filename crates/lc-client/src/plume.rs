@@ -44,6 +44,10 @@ pub const GLOW_STOPS: f64 = 4.0;
 /// What a stop past the top of the exposure's window is worth as HDR value, so the face blooms.
 pub const OVERFLOW_GAIN: f32 = 0.5;
 
+/// How far aft of the hull's face its glow's disk sits, in aperture radii. On the face itself the
+/// two fight for depth, and the mesh's cap is only as flat as its cells.
+const FACE_STANDOFF: f64 = 0.05;
+
 const LUMA: DVec3 = DVec3::new(0.2126, 0.7152, 0.0722);
 
 /// `F c`, watts: what a photon drive of the thrust a reaction drive states as `½ F v` sends aft.
@@ -288,12 +292,13 @@ pub fn draw_exhaust(
             let eye_ship = root.eye();
             for (index, face) in apertures.iter().enumerate() {
                 let rotation = DQuat::from_rotation_arc(DVec3::Y, face.out);
+                let center = face.center + face.out * face.radius_m * FACE_STANDOFF;
                 let transform = Transform {
-                    translation: face.center.as_vec3(),
+                    translation: center.as_vec3(),
                     rotation: rotation.as_quat(),
                     scale: Vec3::splat(face.radius_m as f32),
                 };
-                let eye_local = rotation.inverse() * (eye_ship - face.center) / face.radius_m;
+                let eye_local = rotation.inverse() * (eye_ship - center) / face.radius_m;
                 let mut uniforms = aperture_uniform(
                     shine(session, face_k(burn.power_w, face)),
                     tone.surface_reference as f64,

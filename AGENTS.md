@@ -55,6 +55,7 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 |---|---|
 | `--shot <path> --frames <n>` | photograph and quit |
 | `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
+| `--burst-every <k>` | space a burst's photographs `k` frames apart: one window that catches a moment whose frame cannot be known in advance, such as a staged scene's burn |
 | `--bench <n>` | time `n` frames after `--frames` of warm-up and quit: frame time, main-world CPU, render passes. See `src/bench.rs` |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
 | `--charted` | seed what the ship knows from truth. **A ship knows nothing on creation, so it photographs nothing**: without this every body shot is a ship staring at an empty panel and `--focus` names a body the panel does not list. The charting office kept as a dev tool |
