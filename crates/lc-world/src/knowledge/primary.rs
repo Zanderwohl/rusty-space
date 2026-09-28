@@ -28,6 +28,10 @@ const PRIMARIES_TRIED: usize = 3;
 const HILL_PERIOD: f64 = 0.577_350_269_189_625_8;
 const HILL_REACH: f64 = 0.693_361_274_350_634_7;
 
+/// The most a satellite's primary may weigh against its own primary, as the satellite's orbit
+/// weighs it. Generous: Luna is 1.2% of Earth, and Charon 12% of Pluto.
+const HEAVIEST_SATELLITE: f64 = 0.2;
+
 /// How far after the orbit it replaces a fit is stated, when both are filed at one instant.
 const FILED_AFTER_S: f64 = 1.0e-3;
 
@@ -313,12 +317,21 @@ impl crate::knowledge::Knowledge {
                     };
                     along_m.max(missed_m) / look.from_m.length()
                 });
+                let (host_mu, primary_axis_m) = match held.as_ref().and_then(|b| Some((b.period_s?, b.semi_major_au?))) {
+                    Some(((period_s, _), (au, _))) => {
+                        let (n, a) = (std::f64::consts::TAU / period_s, au * crate::navigation::AU);
+                        (n * n * a * a * a, a)
+                    }
+                    None => (f64::NAN, f64::NAN),
+                };
                 Frame {
                     about,
                     looks,
                     longest_s: bound(held.as_ref().and_then(|b| b.period_s), HILL_PERIOD),
                     widest_m: bound(held.as_ref().and_then(|b| b.semi_major_au), HILL_REACH * crate::navigation::AU),
                     depth,
+                    host_mu,
+                    primary_axis_m,
                 }
             })
             .collect();
@@ -394,6 +407,29 @@ struct Frame {
     /// Fractional error on the scale of anything fitted in this frame: the primary's depth error
     /// over its distance.
     depth: f64,
+    /// The primary's own primary's `mu`, and the primary's axis about it, meters, as the
+    /// primary's own orbit states them: NaN where it has none.
+    host_mu: f64,
+    primary_axis_m: f64,
+}
+
+impl Frame {
+    /// Whether an orbit about this frame's primary is one it could hold.
+    ///
+    /// **An orbit weighs its primary**, `n^2 a^3`, and the primary has to be able to be that
+    /// heavy. Fitted about another irregular moon a few kilometers across, an irregular moon of
+    /// Jupiter implied a Jupiter at the focus, and the Hill bounds on period and axis, which
+    /// take the primary's mass as free, let it through: 18 of Sol's 80 irregulars went round a
+    /// neighbor or a comet. So the mass is bounded against the primary's own primary, and the
+    /// orbit has to sit inside the Hill sphere that mass would have.
+    fn holds(&self, fitted: &Fitted) -> bool {
+        if self.about.is_none() || !arc::sound(self.host_mu) || !arc::sound(self.primary_axis_m) {
+            return true;
+        }
+        let ratio = fitted.mu / self.host_mu;
+        let hill_m = self.primary_axis_m * (ratio / 3.0).cbrt();
+        ratio <= HEAVIEST_SATELLITE && fitted.semi_major_m <= hill_m
+    }
 }
 
 /// One body's fit, with nothing borrowed: the looks in each candidate primary's frame.
@@ -440,7 +476,8 @@ impl FitJob {
     pub fn solve(self) -> Option<Solved> {
         let offered: Vec<Option<BodyId>> = self.frames.iter().map(|f| f.about).collect();
         let bound = |frame: &Frame, fitted: Fitted| {
-            (fitted.period_s <= frame.longest_s && fitted.semi_major_m <= frame.widest_m).then_some(fitted)
+            (fitted.period_s <= frame.longest_s && fitted.semi_major_m <= frame.widest_m && frame.holds(&fitted))
+                .then_some(fitted)
         };
         let carried = self.warm.as_ref().and_then(|held| {
             let frame = self.frames.iter().find(|f| f.about == held.about)?;
@@ -621,7 +658,30 @@ mod tests {
     }
 
     fn frame(about: Option<BodyId>, looks: Vec<Look>, longest_s: f64, widest_m: f64) -> Frame {
-        Frame { about, looks, longest_s, widest_m, depth: 0.0 }
+        Frame { about, looks, longest_s, widest_m, depth: 0.0, host_mu: f64::NAN, primary_axis_m: f64::NAN }
+    }
+
+    /// **An orbit about a primary has to be one the primary could hold.** The same looks, which
+    /// weigh their primary at a Sun, fitted about something whose own orbit says it goes round
+    /// a Sun: no moon weighs as much as its planet. And about something that goes round ten
+    /// Suns, heavy enough, but only inside the Hill sphere that weight would give it.
+    #[test]
+    fn a_primary_has_to_be_able_to_hold_its_satellite() {
+        let noise = 2.979e-7 * crate::knowledge::astrometry::CENTROID_FLOOR;
+        let (looks, _) = circling(noise);
+        let about = Some(BodyId::of(StarId::synthesize("primary", 5), "planet"));
+        let (au, mu) = (crate::navigation::AU, 1.327_124_4e20);
+        let solve = |host_mu: f64, primary_axis_m: f64| {
+            let frame = Frame { host_mu, primary_axis_m, ..frame(about, looks.clone(), f64::INFINITY, f64::INFINITY) };
+            job(vec![frame], None).solve()
+        };
+        assert!(solve(f64::NAN, f64::NAN).is_some(), "premise: the looks fit, the primary unweighed");
+        assert!(solve(1000.0 * mu, 20.0 * au).is_some(), "a primary heavy enough, far enough out");
+        assert!(solve(mu, 20.0 * au).is_none(), "a moon as heavy as its planet was kept");
+        // A tenth of the host: a Hill sphere of a third of the primary's axis, and this orbit
+        // is an AU wide.
+        assert!(solve(10.0 * mu, 5.0 * au).is_some(), "inside the Hill sphere");
+        assert!(solve(10.0 * mu, 2.0 * au).is_none(), "outside the Hill sphere was kept");
     }
 
     /// An orbit outside its primary's Hill sphere, by period or by axis, is refused.
