@@ -1,4 +1,4 @@
-//! Where a tick's wall-clock time went, stage by stage.
+//! Where a tick's wall-clock time went, stage by stage, and how much of it the next tick covers.
 //!
 //! Real time, not coordinate time: this is about whether the shard keeps its 50 ms, which the
 //! world's clock cannot see. See `lightcone/docs/plans/server-tick-lag.md`.
@@ -98,6 +98,35 @@ impl Overruns {
     }
 }
 
+/// The real time each tick covers, measured rather than assumed.
+///
+/// A tick that advanced a fixed fifty milliseconds lost however long it overran, for good,
+/// because the ticker delays rather than bursts. Clients run on real time, so they drifted ahead
+/// of a busy shard and were snapped back an hour of coordinate time or more at a go.
+#[derive(Debug)]
+pub struct Pacer {
+    nominal: Duration,
+    last: Option<Instant>,
+}
+
+impl Pacer {
+    /// The most one tick may cover. Past it — a suspended machine, a stopped process — the rest
+    /// is dropped rather than read in a single tick, and clients are corrected as they were before.
+    pub const LONGEST: Duration = Duration::from_secs(1);
+
+    pub fn new(nominal: Duration) -> Self {
+        Self { nominal, last: None }
+    }
+
+    /// Real time since the previous lap; the nominal tick on the first.
+    pub fn lap(&mut self) -> Duration {
+        let now = Instant::now();
+        let since = self.last.map_or(self.nominal, |last| now - last);
+        self.last = Some(now);
+        since.min(Self::LONGEST)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,5 +163,17 @@ mod tests {
         for _ in 0..3 {
             assert!(overruns.note(&stages(&[("a", 10)])).is_none());
         }
+    }
+
+    #[test]
+    fn a_pacer_measures_laps_and_caps_them() {
+        let nominal = Duration::from_millis(50);
+        let mut pacer = Pacer::new(nominal);
+        assert_eq!(pacer.lap(), nominal, "the first lap has nothing behind it");
+        std::thread::sleep(Duration::from_millis(20));
+        let lap = pacer.lap();
+        assert!(lap >= Duration::from_millis(20) && lap < Pacer::LONGEST, "{lap:?}");
+        pacer.last = Instant::now().checked_sub(Duration::from_secs(5));
+        assert_eq!(pacer.lap(), Pacer::LONGEST);
     }
 }

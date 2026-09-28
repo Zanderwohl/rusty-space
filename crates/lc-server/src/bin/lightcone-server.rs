@@ -265,9 +265,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("listening on {}", wire.local_addr);
 
     let mut ticker = tokio::time::interval(Duration::from_millis(TICK_MS as u64));
-    // The tick is the clock. Falling behind must not make the server sprint to catch up,
-    // because every skipped tick is a slice of coordinate time nothing was read in.
+    // Delay rather than burst: a tick that ran long is followed by one that covers the time it
+    // took, not by a sprint of empty ones.
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut pacer = lc_server::timing::Pacer::new(Duration::from_millis(TICK_MS as u64));
     // Interrupt and terminate both, because one is a keyboard and the other is `docker stop`,
     // and a world should survive being asked to stop politely by either.
     let mut interrupt = signal(SignalKind::interrupt())?;
@@ -299,7 +300,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // **Not `?`.** A tick the store would not take is one tick's events lost; ending the
         // process here lost every connected player instead, socket closed with no close frame,
         // and came back on the next order anyone gave.
-        match server.tick(&mut wire).await {
+        match server.tick_for(pacer.lap(), &mut wire).await {
             Ok(()) => failing = 0,
             Err(why) => {
                 if failing.is_multiple_of(COMPLAIN_EVERY_TICKS) {

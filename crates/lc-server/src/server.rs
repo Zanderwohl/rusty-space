@@ -288,9 +288,17 @@ impl<J: Journal> Server<J> {
         self.rate
     }
 
-    /// Coordinate microseconds this server's tick covers.
+    /// Coordinate microseconds this server's nominal tick covers.
+    #[cfg(test)]
     fn tick_us(&self) -> i64 {
-        (TICK_US as f64 * self.rate) as i64
+        self.span_us(std::time::Duration::from_millis(TICK_MS as u64))
+    }
+
+    /// Coordinate microseconds `real` buys at this server's rate. Integer until the rate, so the
+    /// nominal tick is exactly [`TICK_US`] times it.
+    fn span_us(&self, real: std::time::Duration) -> i64 {
+        let design = real.as_nanos().saturating_mul(TICK_US as u128) / (TICK_MS as u128 * 1_000_000);
+        (i64::try_from(design).unwrap_or(i64::MAX) as f64 * self.rate) as i64
     }
 
     pub fn now_t(&self) -> i64 {
@@ -436,14 +444,22 @@ impl<J: Journal> Server<J> {
         self.aboard(CraftId(ship_id.0));
     }
 
-    /// One tick. The order is the whole of it.
+    /// One nominal tick, fifty real milliseconds.
     pub async fn tick(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
+        self.tick_for(std::time::Duration::from_millis(TICK_MS as u64), wire).await
+    }
+
+    /// One tick covering `real` of wall-clock time, which is what a shard on a timer passes so
+    /// its clock keeps to the wall's. A long one costs coarser timestamps and nothing else.
+    /// The order is the whole of it.
+    pub async fn tick_for(&mut self, real: std::time::Duration, wire: &mut impl Transport) -> Result<(), JournalError> {
         // 1. Advance.
         self.stages.restart();
         self.ticks += 1;
-        self.now_t += self.tick_us();
+        let span_us = self.span_us(real);
+        let after_t = self.now_t;
+        self.now_t += span_us;
         let now_s = self.now_t as f64 * 1.0e-6;
-        let after_t = self.now_t - self.tick_us();
         let mut events = Vec::new();
         let mut deliveries = Vec::new();
         self.shine(after_t);
@@ -459,7 +475,7 @@ impl<J: Journal> Server<J> {
         // Nothing moved on the server before this. Reading a worldline never needed it — every
         // motive is a closed form — but the transitions do: a crossing that arrives becomes a
         // station, and a ballistic arc folds the patch it was solved for.
-        self.fleet.advance(now_s, self.tick_us() as f64 * 1.0e-6);
+        self.fleet.advance(now_s, span_us as f64 * 1.0e-6);
         self.stages.mark("advance");
         // Room to write into, kept ahead rather than made on demand. Cheap: the journal holds
         // the range it has already made and this is a comparison until the window moves.
@@ -1829,6 +1845,33 @@ use crate::transport::Loopback;
         assert_eq!(slow.now_t(), fast.now_t(), "sixty slow ticks is not one fast one");
         let there = |s: &Server<Memory>| s.ship(ShipId(1)).unwrap().motion.position_ly;
         assert_eq!(there(&slow), there(&fast), "the rate moved the ship");
+    }
+
+    /// **A long tick is the time it took.** A shard whose tick overran covers the overrun in the
+    /// next one, so its clock keeps to the wall's; three ticks of a real second are sixty
+    /// nominal ones, clock and craft alike.
+    #[tokio::test]
+    async fn a_long_tick_covers_the_real_time_it_took() {
+        let at = DVec3::new(500_000.0, 0.0, 0.0);
+        let beta = DVec3::new(0.3, -0.1, 0.0);
+
+        let mut steady = Server::new(Memory::default(), 0, 1);
+        steady.fleet_mut().insert(crate::world::coasting(ShipId(1), at, beta, 0));
+        let mut stalled = Server::new(Memory::default(), 0, 1);
+        stalled.fleet_mut().insert(crate::world::coasting(ShipId(1), at, beta, 0));
+
+        let mut wire = Loopback::new();
+        for _ in 0..60 {
+            steady.tick(&mut wire).await.unwrap();
+        }
+        for _ in 0..3 {
+            stalled.tick_for(std::time::Duration::from_secs(1), &mut wire).await.unwrap();
+        }
+
+        assert_eq!(steady.now_t(), 60 * TICK_US);
+        assert_eq!(stalled.now_t(), steady.now_t(), "the stall was time lost");
+        let there = |s: &Server<Memory>| s.ship(ShipId(1)).unwrap().motion.position_ly;
+        assert_eq!(there(&stalled), there(&steady), "the stall moved the ship");
     }
 
     /// A rate nobody could run at is not adopted. Zero would stop the clock and a negative one

@@ -103,6 +103,8 @@ async fn serve(
 ) {
     use futures_util::{SinkExt, StreamExt};
 
+    // No Nagle, as the client: every message is small and wanted now.
+    let _ = stream.set_nodelay(true);
     let Ok(socket) = tokio_tungstenite::accept_async_with_config(stream, Some(config())).await else { return };
     let (mut writer, mut reader) = socket.split();
     let (to_client, mut outbox) = unbounded_channel::<Outbound>();

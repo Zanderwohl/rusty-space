@@ -106,16 +106,18 @@ async fn serve(
         }
     }
 
-    let mut ticker = tokio::time::interval(std::time::Duration::from_millis(TICK_MS as u64));
-    // A tick missed because the machine was busy is a slice of coordinate time nothing was read
-    // in. Catching up by sprinting would read them all at once, which is not the same thing.
+    let nominal = std::time::Duration::from_millis(TICK_MS as u64);
+    let mut ticker = tokio::time::interval(nominal);
+    // As the standalone shard: a long tick is followed by one covering the time it took, so the
+    // world keeps to the wall clock the client runs on.
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut pacer = lc_server::timing::Pacer::new(nominal);
     loop {
         ticker.tick().await;
         for client in wire.departed() {
             server.disconnected(client);
         }
-        if let Err(why) = server.tick(&mut wire).await {
+        if let Err(why) = server.tick_for(pacer.lap(), &mut wire).await {
             bevy::log::error!("the local server stopped: {why}");
             return;
         }

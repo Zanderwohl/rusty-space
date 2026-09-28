@@ -219,6 +219,13 @@ The slack exists for the honest case, which is not cheating: a browser tab in th
 its frames throttled, so its clock nearly stops while the world does not. It comes back hours
 behind and is pulled straight.
 
+Both ends keep to the **wall clock**, and neither counts steps. A shard tick covers the real
+time since the last one (`lc_server::timing::Pacer`) rather than a nominal fifty milliseconds,
+and the client advances on Bevy's real clock rather than its virtual one, which is clamped to a
+quarter second a frame. Before, each end lost whatever its own stalls cost — a tick that
+overran, a frame that hitched — and the difference surfaced as corrections of one to four hours,
+each one a stall of about half a second to a second and a half.
+
 A correction moves the **world's** clock and not the crew's. The ship's proper time is however
 long they have actually lived through, and no amount of resynchronizing un-ages anybody — which
 is a distinct method for exactly that reason.

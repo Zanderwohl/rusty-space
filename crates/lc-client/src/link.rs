@@ -111,7 +111,7 @@ mod native {
                 return;
             }
         };
-        if let Err(why) = set_read_timeout(&mut socket, POLL_INTERVAL) {
+        if let Err(why) = tune_socket(&mut socket, POLL_INTERVAL) {
             // Without it the read below blocks forever and nothing is ever written.
             *status.lock().unwrap() = Status::Closed(why);
             return;
@@ -182,7 +182,7 @@ mod native {
     }
 
     /// Reach the `TcpStream` under whatever the scheme wrapped it in.
-    fn set_read_timeout(
+    fn tune_socket(
         socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
         how_long: Duration,
     ) -> Result<(), String> {
@@ -191,6 +191,9 @@ mod native {
             MaybeTlsStream::Rustls(stream) => stream.get_ref(),
             other => return Err(format!("unsupported stream: {other:?}")),
         };
+        // No Nagle: a message is small and sent the moment it exists, and batching it behind the
+        // peer's delayed ACK costs up to a fifth of a second over a long link.
+        stream.set_nodelay(true).map_err(|e| e.to_string())?;
         stream
             .set_read_timeout(Some(how_long))
             .map_err(|e| e.to_string())
