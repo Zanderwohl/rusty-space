@@ -223,6 +223,28 @@ async fn refit_magic_rebuilds_as_a_form_at_once() {
     assert!(!ok, "{why}");
 }
 
+/// `emit` lights the ends asked for through the order: both, on a ship `refit-magic` turned
+/// two-ended, and a second emit is refused while the first is lit.
+#[tokio::test]
+async fn emit_lights_the_ends_asked_for() {
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    emptied(&mut server);
+    assert!(ask(&mut server, &mut wire, 1, "energize ship:2").await.0);
+    let (ok, why) = ask(&mut server, &mut wire, 2, "refit-magic plate fore:1 ship:2").await;
+    assert!(ok, "{why}");
+    let (fore, aft) = lc_world::form::capacity::ends(server.fleet.get(CraftId(2)).unwrap().fitting().unwrap().form(), &server.balance).unwrap();
+    assert!(fore.rating_w > 0.0 && aft.rating_w > 0.0, "turned two-ended");
+
+    let (ok, why) = ask(&mut server, &mut wire, 3, "emit both 0.1 ship:2").await;
+    assert!(ok, "{why}");
+    let now_s = server.now_t() as f64 * 1.0e-6;
+    let lit = lc_world::emit::emit_w(server.fleet.get(CraftId(2)).unwrap(), now_s);
+    let per_end = 0.1 * fore.rating_w.min(aft.rating_w);
+    assert!((lit.fore_w / per_end - 1.0).abs() < 1.0e-9 && (lit.aft_w / per_end - 1.0).abs() < 1.0e-9, "{lit:?}");
+    let (ok, why) = ask(&mut server, &mut wire, 4, "emit aft ship:2").await;
+    assert!(!ok && why.contains("UnderWay"), "{why}");
+}
+
 #[tokio::test]
 async fn drain_takes_what_is_asked_and_never_below_empty() {
     let (mut server, mut wire) = shard(Level::ADMIN);
