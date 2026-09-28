@@ -190,7 +190,7 @@ impl Ends {
 }
 
 /// What `craft`'s emits send out of each end at `now_s`: an emit flown as a burn from the end it
-/// was ordered from, and a balanced one half from each. The drive is not in it. What `Presence`
+/// was ordered from, and a balanced one its `power_w` from each, half what it draws. The drive is not in it. What `Presence`
 /// states beside `drive_w`.
 pub fn emit_w(craft: &Craft, now_s: f64) -> Ends {
     let balanced = 0.5 * craft.balanced_w_at(now_s);

@@ -140,7 +140,7 @@ pub struct End {
 pub fn ends(form: &Form, balance: &Balance) -> Option<(End, End)> {
     let (mut fore, mut aft) = (End::default(), End::default());
     for (aperture, w) in faces_w(form, balance)? {
-        let end = if aperture.out.x > 0.0 { &mut fore } else if aperture.out.x < 0.0 { &mut aft } else { continue };
+        let end = if aperture.fore() { &mut fore } else if aperture.aft() { &mut aft } else { continue };
         end.rating_w += w;
         end.diameter_m = end.diameter_m.max(2.0 * aperture.radius_m);
     }

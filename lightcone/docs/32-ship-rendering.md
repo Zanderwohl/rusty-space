@@ -129,13 +129,16 @@ the index can be read flat. The material then draws one region, the engine's, as
 open faces, lit there by a color per face rather than per region, and as another layer, the
 flank's, everywhere else. The switch is chosen, not blended, so the tile is sampled once; it falls
 on the rim, which is a crease anyway. `em_render::hull_material::HullUniform::open` and `faces`.
+The uniform holds 16 faces. A form with more engine copies than that draws the grid on the first 16
+in placement order and machinery on the rest, which still take their aperture glow when lit; the
+client warns when it meshes one.
 
 | kind | look |
 |---|---|
 | storage | dark and smooth, faint seams. The mass of the ship |
 | drone | hangar doors in rows, docks lit when drones are home |
 | living | window bands. Lit on the night side, where they are the brightest thing on the hull |
-| engine | an emitter grid on the open face, glowing at whatever leaves through it, and greebled machinery on its flanks: housings, louvred recesses, fittings and pipe runs, unlit. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
+| engine | an emitter grid on the open face, glowing at whatever leaves through it, and greebled machinery on its flanks: housings, louvered recesses, fittings and pipe runs, unlit. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
 | data | fine dense panels |
 | mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
 | spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over. The mesher classes each seam whole, from the two primitives' gradients along it, as a ring about the spar's axis or a line along it, and measures it as meters around at the seam's mean radius or meters along. A boom's end and a rib's edge are both in meters, and a seam that climbs spreads its heads only by the cosine of its climb. Chosen per vertex, the heads shear where the choice changes |
@@ -524,7 +527,8 @@ photon drive has none but `c`.
 The faces are worked out once a frame, before the hulls: the engine's grid is lit on each face at
 its color ([Materials by kind](#materials-by-kind)), and the aperture glow
 ([`plume.rs`](../../crates/lc-client/src/plume.rs)) sits over each lit face under its craft's hull
-root. A distant craft's point reads the same faces and temperatures.
+root. R18's point for a craft too far to resolve is to read the same faces and temperatures
+rather than work them out again.
 
 The cone is the main drive's alone, at `drive_spread_rad`, so it is drawn from `drive_w` and its
 apex is the aft faces' power-weighted middle, or a formless craft's stern. The thrusters spread

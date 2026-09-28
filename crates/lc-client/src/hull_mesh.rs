@@ -451,6 +451,9 @@ fn engine_faces(pieces: &[Piece], form: &Form, balance: &Balance) -> Vec<(usize,
     let engines: Vec<usize> = (0..pieces.len()).filter(|&i| pieces[i].kind == Kind::Engine).collect();
     let faces = apertures(form, balance).unwrap_or_default();
     debug_assert_eq!(engines.len(), faces.len(), "an engine piece without its face");
+    if faces.len() > em_render::hull_material::FACES {
+        bevy::log::warn!("{} engine faces: the grid is drawn on the first {}", faces.len(), em_render::hull_material::FACES);
+    }
     engines.into_iter().zip(faces).collect()
 }
 

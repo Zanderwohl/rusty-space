@@ -502,7 +502,7 @@ pub struct Presence {
     /// acceleration. It is what a burn plainly shows: the face's temperature and the cone's reach.
     pub drive_w: f64,
     /// What its emits were sending out of its fore and its aft faces then, watts: an emit flown as
-    /// a burn from the end it was ordered from, a balanced one half from each. Not the drive,
+    /// a burn from the end it was ordered from, a balanced one its `power_w` from each, half what it draws. Not the drive,
     /// which is [`Presence::drive_w`] and leaves aft beside these.
     pub emit_fore_w: f64,
     pub emit_aft_w: f64,

@@ -3,8 +3,8 @@
 //!
 //! The player's own from what its craft has lit now, and another craft's from what its `Presence`
 //! stated of each end beside `drive_w`, as the light left it. Worked out once a frame, before the
-//! hulls, whose emitter grid it lights, and the exhaust, whose aperture glow it places. A distant
-//! craft's point reads the same.
+//! hulls, whose emitter grid it lights, and the exhaust, whose aperture glow it places. R18's
+//! distant point is to read them too.
 
 use std::collections::HashMap;
 
@@ -104,6 +104,7 @@ pub fn light_faces(
         if ends.is_dark() {
             continue;
         }
+        // Last frame's hash, since the hulls run after this: a lit craft's new form is a frame late.
         let Some(hash) = real.stated(craft) else { continue };
         let form = || match craft {
             None => own_form.form().map(|f| (f.clone(), own_form.balance())),

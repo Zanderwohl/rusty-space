@@ -2,7 +2,7 @@ TextureGraphFile(
     format_version: 2,
     metadata: FileMetadata(
         name: "engine flank hull",
-        description: Some("Engine, off its open faces: greebled machinery. Housings, louvred recesses and small fittings on grids at co-prime pitches, pipe runs along v, and plating seams every 8 m. Nothing lit. One tile is 64 m of hull and must repeat: integer frequencies, and noise with period == frequency. Output color is albedo; the layer named lights is the lit share of each texel. See em_render::hull_material."),
+        description: Some("Engine, off its open faces: greebled machinery. Housings, louvered recesses and small fittings on grids at co-prime pitches, pipe runs along v, and plating seams every 8 m. Nothing lit. One tile is 64 m of hull and must repeat: integer frequencies, and noise with period == frequency. Output color is albedo; the layer named lights is the lit share of each texel. See em_render::hull_material."),
         authors: [
             "Alexander Lowry",
         ],
@@ -673,7 +673,7 @@ TextureGraphFile(
             ),
             Layer(
                 id: 46,
-                name: "louvre wave",
+                name: "louver wave",
                 kind: Wave(Wave(
                     input: Layer(2),
                     shape: Triangle,
@@ -684,7 +684,7 @@ TextureGraphFile(
             ),
             Layer(
                 id: 47,
-                name: "louvre slat edge",
+                name: "louver slat edge",
                 kind: ColorRamp(ColorRamp(
                     stops: [
                         ColorStop(
@@ -711,7 +711,7 @@ TextureGraphFile(
             ),
             Layer(
                 id: 48,
-                name: "louvre slat",
+                name: "louver slat",
                 kind: Map(Map(
                     value: Some(46),
                     palette: Some(47),
@@ -719,7 +719,7 @@ TextureGraphFile(
             ),
             Layer(
                 id: 49,
-                name: "louvres",
+                name: "louvers",
                 kind: Mix(Mix(
                     a: Some(48),
                     b: Some(20),
@@ -822,7 +822,7 @@ TextureGraphFile(
             ),
             Layer(
                 id: 59,
-                name: "with louvres",
+                name: "with louvers",
                 kind: Mix(Mix(
                     a: Some(58),
                     b: Some(53),
