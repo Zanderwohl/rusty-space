@@ -485,10 +485,18 @@ whose open face is 176 m across, 5.3 × 10⁵ K.
 **In the game** ([`plume.rs`](../../crates/lc-client/src/plume.rs)) every aft-firing engine face,
 from `lc_world::form::capacity::aft_apertures`, glows under its craft's hull root, at its share of
 the drive's power by engine volume, as the rating divides. The cone's apex is the faces'
-power-weighted middle, or a formless craft's stern. The power is `F c`, worked from the `½ F v`
-that `Drive` and `Presence` still state, and another craft's from the default drive's exhaust speed,
-which the wire does not carry. Another craft is drawn where its light shows it, and whether you are
-inside its radius is measured to that place.
+power-weighted middle, or a formless craft's stern. The power is `F c`: your own from
+`lc_world::emit::drive_w`, and another craft's as its `Presence` states it, which is that same
+number at the instant its light left. No exhaust speed is assumed for anyone; a photon drive has
+none but `c`. Another craft is drawn where its light shows it, and whether you are inside its
+radius is measured to that place.
+
+`Presence` states the main drive alone, because the cone is the main drive's, at
+`drive_spread_rad`. The thrusters spread wider and draw no cone. An emit flown as a burn is its
+own emission at its own spread, and reaches an observer inside it as `Glare`. Its face should glow
+all the same, since the face's temperature depends only on what leaves through it, and so should
+the bow's when a fore emission lights it. Neither does yet: a face lit by an emit waits on R19,
+which states each end's emission on the wire.
 
 ![your own burn from beside: the bell's face white-hot, the cone running aft](../images/r12-own-beside.jpg)
 ![from behind, just off the axis](../images/r12-own-behind.jpg)

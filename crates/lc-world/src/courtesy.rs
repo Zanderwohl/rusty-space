@@ -11,9 +11,9 @@
 
 use glam::DVec3;
 
-use crate::emit::{distance_at_flux_m, thrust_power_w};
+use crate::emit::distance_at_flux_m;
 use crate::fitting::{Balance, RATED_LOAD_AU};
-use crate::flight::{C_M_S, Drive, G0};
+use crate::flight::Drive;
 use crate::motion::ShipId;
 use crate::signal::cone_solid_angle_sr;
 use crate::solar::SOLAR_CONSTANT_W_M2;
@@ -50,7 +50,7 @@ pub fn drive_courtesy_radius_m(balance: &Balance, power_w: f64) -> f64 {
 
 /// What station-keeping thrusters put out at full throttle on a craft of `mass_kg`, watts.
 pub fn thrusters_power_w(balance: &Balance, mass_kg: f64) -> f64 {
-    thrust_power_w(mass_kg, balance.rcs_accel_g * G0)
+    Drive::exhaust_w(mass_kg, balance.rcs_accel_g)
 }
 
 pub fn thrusters_courtesy_radius_m(balance: &Balance, mass_kg: f64) -> f64 {
@@ -120,13 +120,11 @@ pub fn flotilla_azimuth_rad(id: ShipId) -> f64 {
 impl Manners {
     /// For a pursuer of `mass_kg` whose main drive is `drive`, with id `id`.
     pub fn new(balance: &Balance, mass_kg: f64, drive: Drive, id: ShipId) -> Self {
-        let full_w = thrust_power_w(mass_kg, drive.accel_g * G0);
+        let full_w = Drive::exhaust_w(mass_kg, drive.accel_g);
         Self {
             ingress_m: INGRESS_MARGIN * drive_courtesy_radius_m(balance, full_w),
             thrusters_g: balance.rcs_accel_g,
-            courteous_g_per_m2: THROTTLE_HEADROOM
-                * courteous_power_w(balance, balance.rcs_spread_rad, 1.0)
-                / (mass_kg * C_M_S * G0),
+            courteous_g_per_m2: Drive::accel_g_at(mass_kg, THROTTLE_HEADROOM * courteous_power_w(balance, balance.rcs_spread_rad, 1.0)),
             azimuth_rad: flotilla_azimuth_rad(id),
         }
     }
@@ -243,6 +241,7 @@ fn clearance_m(a: DVec3, b: DVec3) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use crate::emit::{flux_w_m2, rating_w, received_fraction};
+    use crate::flight::{C_M_S, G0};
     use crate::fitting::{C2, STARTING_BROADSIDE_M2, STARTING_DRY_KG};
     use crate::form::presets::SLOT_M3;
     use crate::solar::broadside_m2;
@@ -387,7 +386,7 @@ pub(crate) mod tests {
     /// carrying the quarry's acceleration and the thrusters the closing; a main-drive leg is one.
     pub(crate) fn peak(b: &Balance, who: &Pursuer, cruise: &Cruise, quarry_g: DVec3) -> f64 {
         let limit = courtesy_flux_w_m2(b);
-        let watts = |g: f64| thrust_power_w(who.mass_kg, g * G0);
+        let watts = |g: f64| Drive::exhaust_w(who.mass_kg, g);
         let (start, span) = (cruise.start_s, cruise.duration_s());
         let even = (0..=SAMPLES).map(|k| start + span * k as f64 / SAMPLES as f64);
         let ends = (0..END_SAMPLES).flat_map(|k| {

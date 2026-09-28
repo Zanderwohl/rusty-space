@@ -698,7 +698,7 @@ mod tests {
                 at_ly: at_ly.to_array(),
                 beta: [0.0; 3],
                 facing: [1.0, 0.0, 0.0],
-                jet_power_w: 0.0,
+                drive_w: 0.0,
                 emitted_t: 0,
                 arrive_t: 0,
                 form: lc_proto::Form::default(),

@@ -468,7 +468,6 @@ fn drive_out(drive: Drive) -> lc_proto::Drive {
     lc_proto::Drive {
         accel_g: drive.accel_g,
         max_beta: drive.max_beta,
-        exhaust_v_m_s: drive.exhaust_v_m_s,
         slew_rate_rad_s: drive.slew_rate_rad_s,
     }
 }
@@ -477,7 +476,6 @@ fn drive_in(drive: lc_proto::Drive) -> Drive {
     Drive {
         accel_g: drive.accel_g,
         max_beta: drive.max_beta,
-        exhaust_v_m_s: drive.exhaust_v_m_s,
         slew_rate_rad_s: drive.slew_rate_rad_s,
     }
 }

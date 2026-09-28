@@ -12,6 +12,9 @@
 use glam::DVec3;
 
 use crate::craft::Craft;
+use crate::emit::{Jet, exhaust};
+use crate::fitting::Balance;
+use crate::flight::Drive;
 use crate::motion::{self, Motive, ShipState};
 
 /// Either side of a candidate instant, coordinate seconds. Well above the resolution of a
@@ -27,15 +30,23 @@ const POWER_TOLERANCE: f64 = 0.01;
 pub struct Transition {
     /// Coordinate seconds.
     pub at_s: f64,
-    /// Watts into the exhaust from this instant. Zero is the drive going out.
+    /// What the main drive sends aft from this instant, `F c`, watts: [`drive_w`]. Unchanged when
+    /// only the thrusters or an emit flown as a burn changed.
     pub power_w: f64,
     pub was_w: f64,
     /// Unit vector the nose pointed along.
     pub facing: DVec3,
 }
 
-/// Every transition in `(after_s, until_s]`, in order.
-pub fn transitions(craft: &Craft, after_s: f64, until_s: f64) -> Vec<Transition> {
+impl Transition {
+    /// Whether the main drive's power moved here, by the tolerance that decides every transition.
+    pub fn drive_stepped(&self) -> bool {
+        stepped(self.was_w, self.power_w)
+    }
+}
+
+/// Every instant in `(after_s, until_s]` that anything lit changed, in order.
+pub fn transitions(craft: &Craft, balance: &Balance, after_s: f64, until_s: f64) -> Vec<Transition> {
     let mut candidates = Vec::new();
     let mut began = f64::NEG_INFINITY;
     for (until, doing) in craft.stretches() {
@@ -50,27 +61,37 @@ pub fn transitions(craft: &Craft, after_s: f64, until_s: f64) -> Vec<Transition>
     candidates
         .into_iter()
         .filter_map(|at_s| {
-            let was_w = power_w(craft, at_s - STRADDLE_S);
-            let power_w = power_w(craft, at_s + STRADDLE_S);
-            let changed = if was_w == 0.0 || power_w == 0.0 {
-                (was_w == 0.0) != (power_w == 0.0)
-            } else {
-                (power_w - was_w).abs() > POWER_TOLERANCE * was_w
-            };
+            let was = lit_w(craft, balance, at_s - STRADDLE_S);
+            let now = lit_w(craft, balance, at_s + STRADDLE_S);
+            let changed = was.iter().zip(&now).any(|(was_w, now_w)| stepped(*was_w, *now_w));
             changed.then(|| Transition {
                 at_s,
-                power_w,
-                was_w,
+                power_w: now[0],
+                was_w: was[0],
                 facing: motion::facing_at(craft.motion_at(at_s), craft.length_m, at_s),
             })
         })
         .collect()
 }
 
-fn power_w(craft: &Craft, s: f64) -> f64 {
+fn stepped(was_w: f64, now_w: f64) -> bool {
+    if was_w == 0.0 || now_w == 0.0 {
+        (was_w == 0.0) != (now_w == 0.0)
+    } else {
+        (now_w - was_w).abs() > POWER_TOLERANCE * was_w
+    }
+}
+
+/// `F c` at `s` of the main drive, the thrusters and an emit flown as a burn, in that order.
+fn lit_w(craft: &Craft, balance: &Balance, s: f64) -> [f64; 3] {
+    let jets = exhaust(craft, balance, s);
+    let jet_w = |kind: Jet| jets.iter().filter(|j| j.jet == kind).map(|j| j.power_w).sum();
     let doing = craft.motion_at(s);
-    let accel_g = motion::thrust_g(doing, s);
-    if accel_g <= 0.0 { 0.0 } else { doing.drive.jet_power_w(craft.mass_kg(), accel_g) }
+    let boost_w = match doing.motive {
+        Motive::Boosting(_) => Drive::exhaust_w(craft.mass_kg_at(s), motion::thrust_g(doing, s)),
+        _ => 0.0,
+    };
+    [jet_w(Jet::Drive), jet_w(Jet::Thrusters), boost_w]
 }
 
 /// World instants at which a motive's thrust can change. Empty for one that never burns.
@@ -131,7 +152,7 @@ mod tests {
     fn a_crossing_lights_and_cuts_at_its_phase_boundaries() {
         let craft = crossing(10.0, DVec3::X);
         let [lit, _, flip, brake, arrive] = cruise(&craft).phase_changes_s();
-        let found = transitions(&craft, 0.0, arrive + 100.0);
+        let found = transitions(&craft, &Balance::DEFAULT, 0.0, arrive + 100.0);
         let at: Vec<f64> = found.iter().map(|t| t.at_s).collect();
         assert_eq!(at, [lit, flip, brake, arrive], "{found:?}");
         let on: Vec<bool> = found.iter().map(|t| t.power_w > 0.0).collect();
@@ -140,7 +161,7 @@ mod tests {
 
         // Split across two windows, the same four and none twice.
         let middle = 0.5 * (flip + brake);
-        let halves = [transitions(&craft, 0.0, middle), transitions(&craft, middle, arrive + 100.0)].concat();
+        let halves = [transitions(&craft, &Balance::DEFAULT, 0.0, middle), transitions(&craft, &Balance::DEFAULT, middle, arrive + 100.0)].concat();
         assert_eq!(halves, found);
     }
 
@@ -153,7 +174,7 @@ mod tests {
         let cut_at = 0.5 * (lit + flip);
         order(&mut craft, cut_at, Change::CutDrive);
 
-        let found = transitions(&craft, 0.0, arrive + 100.0);
+        let found = transitions(&craft, &Balance::DEFAULT, 0.0, arrive + 100.0);
         let at: Vec<f64> = found.iter().map(|t| t.at_s).collect();
         assert_eq!(at, [lit, cut_at], "{found:?}");
         assert_eq!(found[1].power_w, 0.0);
@@ -167,6 +188,6 @@ mod tests {
         let [lit, ..] = cruise(&craft).phase_changes_s();
         assert!(lit > 10.0, "premise: the ship has to come about before it lights");
         order(&mut craft, 10.0 + 0.5 * (lit - 10.0), Change::CutDrive);
-        assert_eq!(transitions(&craft, 0.0, lit + 1_000.0), []);
+        assert_eq!(transitions(&craft, &Balance::DEFAULT, 0.0, lit + 1_000.0), []);
     }
 }
