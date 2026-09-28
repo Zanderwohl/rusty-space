@@ -110,6 +110,17 @@ pub struct FormView {
     pub folded: Folded,
 }
 
+impl FormView {
+    /// Let go of a selected part the draft no longer has.
+    pub fn forget_gone(&mut self) {
+        if let Some(draft) = &self.draft
+            && self.selected.is_some_and(|id| draft.part(id).is_none())
+        {
+            self.selected = None;
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fold {
     Parts,

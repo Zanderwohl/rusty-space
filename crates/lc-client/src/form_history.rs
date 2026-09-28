@@ -116,6 +116,37 @@ pub fn label(edit: &Edit, ship: &Form) -> String {
     }
 }
 
+impl FormView {
+    /// Record an edit the draft has taken, and let go of a selected part it took away.
+    pub fn took(&mut self, edit: &Edit) {
+        if let Some(draft) = &self.draft {
+            self.history.record(edit, &draft.ship);
+        }
+        self.forget_gone();
+    }
+
+    /// The shard took the round Apply sent: the ship is the new starting point.
+    pub fn accepted(&mut self) {
+        self.applying = crate::ledger::Applying::Idle;
+        self.history.clear();
+    }
+}
+
+/// [`Action::Undo`], [`Action::Redo`] or [`Action::GoToEdit`]: what to tell the player, if the
+/// draft refused a step.
+pub fn step(form: &mut FormView, action: &Action) -> Option<String> {
+    let FormView { draft: Some(draft), history, .. } = form else { return None };
+    let to = match *action {
+        Action::Undo => history.cursor.saturating_sub(1),
+        Action::Redo => history.cursor + 1,
+        Action::GoToEdit(to) => to,
+        _ => return None,
+    };
+    let said = history.go(to, draft).err().map(|refused| format!("refused: {refused}"));
+    form.forget_gone();
+    said
+}
+
 /// `Cmd` or `Ctrl` with `Z` undoes, and `Shift` with them redoes.
 pub fn keyed(z: bool, command: bool, shift: bool) -> Option<Action> {
     match (z && command, shift) {

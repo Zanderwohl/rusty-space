@@ -778,9 +778,7 @@ fn fold(
                 Order::Transmit { .. } | Order::Burn { .. } => None,
                 // What a refit does to the account arrives straight after, as `Fitted`.
                 Order::Refit { .. } => {
-                    ui.0.form.applying = crate::ledger::Applying::Idle;
-                    // The ship is the new starting point.
-                    ui.0.form.history.clear();
+                    ui.0.form.accepted();
                     Some("refit begun".into())
                 }
                 // What a mode order does to the account arrives straight after, as `Fitted`.

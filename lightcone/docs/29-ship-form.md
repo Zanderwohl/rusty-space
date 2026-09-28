@@ -785,6 +785,8 @@ entry records what changed, before and after, on the parts it touched:
 - **It is temporary.** It lives in `Ui` beside the draft, survives leaving the view and coming back,
   and is cleared when the shard accepts a round, because the ship is then the new starting point. It is not
   saved and not sent. It holds `MAX_HISTORY` entries and drops the oldest.
+![The history five edits in, two undone](../images/editor-history.png)
+
 - `Cmd`/`Ctrl`+`Z` undoes, and `Shift` with it redoes. Both are `Action`s like any handle, so undo is
   tested without a window, as the preview is.
 
