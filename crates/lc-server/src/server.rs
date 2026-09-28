@@ -446,6 +446,7 @@ impl<J: Journal> Server<J> {
         self.shine(after_t);
         // Before anything settles an account past the instant: advancing crosses starlight's day
         // boundaries, and a field over its limit at one cannot say when it got there.
+        self.keep_field_modes(after_t, wire, &mut events, &mut deliveries);
         self.collapse_fields(after_t, wire, &mut events, &mut deliveries);
         // Membership before motion, as the client orders it: a station and a conic are both
         // positions *in* a system, and one resolved against the wrong system is a craft in the
@@ -495,6 +496,7 @@ impl<J: Journal> Server<J> {
         self.announce_drives(after_t, &mut events, &mut deliveries);
         self.keep_accounts(wire);
         // After every change of input this tick, each of which settled first.
+        self.keep_field_modes(after_t, wire, &mut events, &mut deliveries);
         self.collapse_fields(after_t, wire, &mut events, &mut deliveries);
         self.sweep_wrecks();
         self.stages.mark("scene");
@@ -670,6 +672,12 @@ impl<J: Journal> Server<J> {
             let order = self.act_on_knowledge(id, &intent.order, at_s)?;
             let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
             return Ok(Applied { event_id, at_t: at, order });
+        }
+        // A switch is not seen: its flip is, when it completes. See `crate::field`.
+        if let Order::FieldMode { mode } = intent.order {
+            let at = self.order_field_mode(id, mode, at, events, deliveries)?;
+            let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
+            return Ok(Applied { event_id, at_t: at, order: intent.order });
         }
         let lights_the_drive = matches!(
             intent.order,
@@ -871,15 +879,15 @@ impl<J: Journal> Server<J> {
                 // as the form any contact is drawn in; see `chase::contacts`.
                 (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::Refit { target: target.clone() })
             }
-            // H6 and E3 build these.
-            Order::FieldMode { .. } | Order::Emit { .. } => return Err(Refusal::NotBuilt),
+            // E3 builds this.
+            Order::Emit { .. } => return Err(Refusal::NotBuilt),
             Order::CancelRefit => {
                 self.fleet.get_mut(id).ok_or(Refusal::NotYours)?.cancel_refit(at_s);
                 self.refitting.remove(&id);
                 (KIND_CUT, 0.0, "{\"refit\":false}".to_string(), Order::CancelRefit)
             }
             // Returned from above, before anything is put on the air.
-            Order::SetDuty { .. } | Order::NameIt { .. } | Order::RetainRaw { .. } | Order::Analyze => {
+            Order::SetDuty { .. } | Order::NameIt { .. } | Order::RetainRaw { .. } | Order::Analyze | Order::FieldMode { .. } => {
                 return Err(Refusal::Impossible);
             }
             Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => {

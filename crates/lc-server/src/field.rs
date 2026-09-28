@@ -23,6 +23,12 @@ use crate::server::{KIND_COLLAPSE, Server};
 use crate::transport::Transport;
 use crate::world::{Event, Scheduled};
 
+mod mode;
+
+pub use mode::auto_by;
+#[cfg(test)]
+pub(crate) use mode::hold_black;
+
 /// 30 takes the spike as a second long.
 const SPIKE_S: f64 = 1.0;
 
@@ -327,6 +333,7 @@ mod tests {
         server.set_rate(60.0);
         let mut dying = still(DYING, near);
         server.fit_new(&mut dying);
+        hold_black(&mut dying);
         server.admit(OWNER, dying, 0.0);
         server.admit(WATCHER, still(WATCHING, near + DVec3::Y * APART_US), 0.0);
         server.next_ship = 3;
@@ -447,6 +454,7 @@ mod tests {
         server.set_rate(60.0);
         let mut craft = still(DYING, DVec3::ZERO);
         server.fit_new(&mut craft);
+        hold_black(&mut craft);
         craft.drain(server.balance().module_energy_j(), 0.0);
         server.admit(OWNER, craft, 0.0);
         server.next_ship = 2;
@@ -568,6 +576,7 @@ mod tests {
         let first = welcomed(wire.take(OWNER)).expect("welcomed");
         let mut dying = still(first, near);
         server.fit_new(&mut dying);
+        hold_black(&mut dying);
         server.fleet.remove(CraftId(first.0));
         server.fleet.insert(dying);
         server.disconnected(OWNER);
@@ -647,11 +656,13 @@ mod tests {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut dying = still(DYING, DVec3::ZERO);
         server.fit_new(&mut dying);
+        hold_black(&mut dying);
         heat_to(&mut dying, 1.0);
         server.fleet.insert(dying);
         for (k, (place, heat)) in at.iter().enumerate() {
             let mut craft = still(ShipId(2 + k as i64), *place);
             server.fit_new(&mut craft);
+            hold_black(&mut craft);
             if let Some(heat) = heat {
                 heat_to(&mut craft, *heat);
             }
@@ -673,11 +684,12 @@ mod tests {
         let spike_j = dying.balance().collapse_spike_fraction * dying.field().released_j(dying.hull().capacities.storage_j);
         let mut probe = still(ShipId(99), toward);
         server.fit_new(&mut probe);
+        hold_black(&mut probe);
         heat_to(&mut probe, heat);
         let fitting = probe.fitting().unwrap();
         let headroom_j = fitting.field().heat_max_j() - fitting.heat_j_at(&probe.motion, 0.0);
         let shadow_m2 = shadow_toward_m2(&probe, -toward, 0.0);
-        lc_world::field::lethal_radius_m(fitting.absorptivity(), spike_j, shadow_m2, headroom_j) * US_PER_M
+        lc_world::field::lethal_radius_m(fitting.absorptivity_at(0.0), spike_j, shadow_m2, headroom_j) * US_PER_M
     }
 
     fn died_at(server: &Server<Memory>, ship: ShipId) -> Option<i64> {
@@ -737,7 +749,7 @@ mod tests {
         for (k, mut quiet) in before.into_iter().enumerate() {
             let craft = server.fleet.get(quiet.id).unwrap();
             let arrive_t = (at_t as f64 + apart_us).ceil() as i64;
-            let absorbed_j = craft.fitting().unwrap().absorptivity() * received_j(craft, from, spike_j, arrive_t);
+            let absorbed_j = craft.fitting().unwrap().absorptivity_at(arrive_t as f64 * 1.0e-6) * received_j(craft, from, spike_j, arrive_t);
             // The dying ship's glow, which the tick began with.
             let lit_w = craft.fitting().unwrap().lit_w();
             quiet.adjust(0.0, |fitting| fitting.set_lit_w(lit_w));
@@ -760,10 +772,12 @@ mod tests {
         let mut server = Server::new(Memory::default(), 0, 1);
         let mut source = still(DYING, DVec3::ZERO);
         server.fit_new(&mut source);
+        hold_black(&mut source);
         heat_to(&mut source, 0.5);
         server.fleet.insert(source);
         let mut receiver = still(WATCHING, DVec3::Y * d_us);
         server.fit_new(&mut receiver);
+        hold_black(&mut receiver);
         let lone = receiver.clone();
         server.fleet.insert(receiver);
         let mut wire = Loopback::new();
@@ -787,7 +801,7 @@ mod tests {
             fitting.heat_j_at(&craft.motion, now_s) + fitting.stored_j_at(&craft.motion, now_s)
         };
         let rose_j = held_j(receiver) - held_j(&lone);
-        let lit_j = receiver.fitting().unwrap().absorptivity() * lit_w * 2.0 * crate::server::TICK_US as f64 * 1.0e-6;
+        let lit_j = receiver.fitting().unwrap().absorptivity_at(now_s) * lit_w * 2.0 * crate::server::TICK_US as f64 * 1.0e-6;
         assert!((rose_j - lit_j).abs() < 1.0e-3 * lit_j, "rose {rose_j}, lit {lit_j}");
     }
 
@@ -899,6 +913,7 @@ mod tests {
         let first = welcomed(wire.take(OWNER)).expect("welcomed");
         let mut dying = still(first, near);
         server.fit_new(&mut dying);
+        hold_black(&mut dying);
         server.fleet.remove(CraftId(first.0));
         server.fleet.insert(dying);
         // Clear of the identifiers the shard hands out.
@@ -945,6 +960,7 @@ mod tests {
         for (k, id) in wrecks.iter().enumerate() {
             let mut craft = still(*id, star + (near - star) * (1.0 + 0.01 * (k + 1) as f64));
             server.fit_new(&mut craft);
+            hold_black(&mut craft);
             server.fleet.insert(craft);
         }
         server.next_ship = 20;
@@ -1006,6 +1022,7 @@ mod tests {
         for k in 0..6 {
             let mut craft = still(ShipId(k + 1), DVec3::ZERO);
             server.fit_new(&mut craft);
+            hold_black(&mut craft);
             server.fleet.insert(craft);
         }
         let idle_j = server.balance().field_tau_s * server.ship(ShipId(1)).unwrap().fitting().unwrap().hull().capacities.drain_w;

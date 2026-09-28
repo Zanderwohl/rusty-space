@@ -209,6 +209,28 @@ pub const COMMANDS: &[Spec] = &[
         args: FORM_ARGS,
     },
     Spec {
+        name: "field",
+        verb: Verb::Field,
+        level: Level::DEBUG,
+        summary: "set a ship's field Clear, Black or Auto, as the order does",
+        args: &[
+            ArgSpec {
+                name: "mode",
+                kind: Kind::Word(&["clear", "black", "auto"]),
+                need: Need::Required,
+                level: Level::DEBUG,
+                help: "Auto at the shard's thresholds",
+            },
+            ArgSpec {
+                name: "ship",
+                kind: Kind::Id,
+                need: Need::Optional,
+                level: Level::ADMIN,
+                help: "the ship; default your own",
+            },
+        ],
+    },
+    Spec {
         name: "stage",
         verb: Verb::Stage,
         level: Level::DEBUG,
@@ -328,6 +350,10 @@ impl<J: Journal> Server<J> {
             Verb::RefitFinish => {
                 let ship = self.ship_named(command.from, &args)?;
                 self.finish_refit(ship, wire)
+            }
+            Verb::Field => {
+                let ship = self.ship_named(command.from, &args)?;
+                self.field_command(ship, args.word("mode").unwrap_or_default(), wire, events, deliveries)
             }
             Verb::Stage => {
                 let name = args.word("scene").unwrap_or_default();

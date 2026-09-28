@@ -828,7 +828,7 @@ mod tests {
                 let killer = server.fleet.get(*killer).unwrap();
                 let dying = killer.fitting().unwrap();
                 let spike_j = dying.balance().collapse_spike_fraction * dying.field().released_j(dying.stored_j_at(&killer.motion, now_s));
-                fitting.absorptivity() * crate::field::received_j(victim, killer.position_at(now_t as f64), spike_j, now_t)
+                fitting.absorptivity_at(now_s) * crate::field::received_j(victim, killer.position_at(now_t as f64), spike_j, now_t)
             };
             let neighbor = dose_j(&line[k - 1]) / headroom_j;
             let behind: f64 = line[..k - 1].iter().map(dose_j).sum::<f64>() / headroom_j;
