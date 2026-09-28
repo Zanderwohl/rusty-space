@@ -494,7 +494,7 @@ graph LR
 
 ### H10 · The afterglow
 
-- status: todo
+- status: active card "H10 · The afterglow"
 - needs: H4, H7
 - touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/instruments.rs`, `crates/lc-proto/src/lib.rs` (`Duty::Stare`), `crates/lc-world/src/knowledge/survey.rs` (`Duty`)
 - read: 30 §Collapse, §What an observer sees
