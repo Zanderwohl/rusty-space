@@ -1,14 +1,12 @@
 use lc_world::courtesy::cooking_distance_m;
 use lc_world::craft::Kind;
-use lc_world::emit::{received_fraction, thrust_power_w};
+use lc_world::emit::received_fraction;
 use lc_world::flight::{Drive, G0};
 use lc_world::motion::{Change, Event as Order_, ShipId as MotionId};
 use lc_world::system::M_PER_LY;
 
 use super::*;
 use crate::server::TICK_US;
-
-const FIVE_G: f64 = 5.0 * G0;
 
 /// A rate whose ticks are about `tick_s` coordinate seconds.
 fn ticking(tick_s: f64) -> f64 {
@@ -33,7 +31,7 @@ fn anvil(id: i64) -> Craft {
 }
 
 fn anvil_w() -> f64 {
-    thrust_power_w(anvil(1).mass_kg(), FIVE_G)
+    Drive::exhaust_w(anvil(1).mass_kg(), 5.0)
 }
 
 /// Every lit drive's statements `id` has written, oldest first.
@@ -116,6 +114,42 @@ async fn an_observer_a_light_year_off_is_handed_the_drives_glare() {
     assert_eq!(said.half_angle_rad, b.drive_spread_rad);
 }
 
+/// What a burning ship's `Presence` states is what its drive's emission is lit at: `m a c`, at the
+/// mass it had as the light left, through the same `exhaust` E4 lights it from.
+#[tokio::test]
+async fn a_presence_states_what_the_drive_is_lit_at() {
+    let b = Balance::DEFAULT;
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.set_rate(ticking(1.0));
+    server.fleet.insert(crossing(anvil(1), 1.0, 1.0e10));
+    server.admit(ClientId(2), ship(2, DVec3::Y * 1.0e3, Form::starting()), 0.0);
+    let mut wire = Loopback::new();
+    let mut stated = Vec::new();
+    while server.now_t() < 20_000_000 {
+        server.tick(&mut wire).await.unwrap();
+        for said in wire.take(ClientId(2)) {
+            if let Outbound::Present(list) = said {
+                stated.extend(list.iter().map(|p| p.get()).filter(|p| p.ship_id == ShipId(1) && p.drive_w > 0.0).map(|p| (p.emitted_t, p.drive_w)));
+            }
+        }
+    }
+    assert!(stated.len() > 3, "premise: seen burning, {stated:?}");
+    let craft = server.fleet.get(CraftId(1)).unwrap();
+    let lit_w = |t: i64| {
+        let s = t as f64 * 1.0e-6;
+        let jets = lc_world::emit::exhaust(craft, &b, s);
+        assert!(matches!(jets[..], [lc_world::emit::Exhaust { jet: Jet::Drive, .. }]), "{jets:?}");
+        let mac = craft.mass_kg_at(s) * 5.0 * G0 * lc_world::flight::C_M_S;
+        assert!((jets[0].power_w / mac - 1.0).abs() < 1.0e-12, "{} is not m a c, {mac}", jets[0].power_w);
+        jets[0].power_w
+    };
+    for (t, drive_w) in &stated {
+        assert!((drive_w / lit_w(*t) - 1.0).abs() < 1.0e-9, "stated {drive_w} at {t}, lit at {}", lit_w(*t));
+    }
+    let (lit_t, said) = drive_said(&server, ShipId(1))[0];
+    assert!((said.power_w / lit_w(lit_t) - 1.0).abs() < 1.0e-9, "{} at {lit_t}", said.power_w);
+}
+
 /// A craft drifting across a beam whose light has long been passing is fed from the microsecond it
 /// enters the cone until the one it leaves it, and at no tick outside.
 #[tokio::test]
@@ -178,7 +212,7 @@ async fn a_receiver_behind_a_burn_is_told_its_power_falling_at_the_retarded_time
     let b = Balance::DEFAULT;
     let at = -DVec3::X * LIGHT_HOUR_US;
     let emitter = crossing(ship(1, DVec3::ZERO, Form::starting()), 1.0, 8.0e12);
-    let first_w = thrust_power_w(emitter.mass_kg_at(1.0), FIVE_G);
+    let first_w = Drive::exhaust_w(emitter.mass_kg_at(1.0), 5.0);
     let mut server = Server::new(Memory::default(), 0, 1);
     server.set_rate(ticking(3_600.0));
     server.fleet.insert(emitter);
@@ -214,10 +248,55 @@ async fn a_receiver_behind_a_burn_is_told_its_power_falling_at_the_retarded_time
 /// `rcs_spread_rad`.
 #[tokio::test]
 async fn a_thruster_leg_is_two_emissions_at_their_two_spreads() {
+    let b = Balance::DEFAULT;
+    let craft = thruster_leg(anvil(1));
+    let mass_kg = craft.mass_kg();
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.set_rate(ticking(10.0));
+    server.fleet.insert(craft);
+    let mut wire = Loopback::new();
+    for _ in 0..3 {
+        server.tick(&mut wire).await.unwrap();
+    }
+    let lit = &server.emissions.emitting[&CraftId(1)];
+    let jet = |kind| lit.iter().find(|l| l.jet == Some(kind)).unwrap_or_else(|| panic!("no {kind:?} in {lit:?}"));
+    let (main, rcs) = (jet(Jet::Drive), jet(Jet::Thrusters));
+    assert_eq!((main.half_angle_rad, rcs.half_angle_rad), (b.drive_spread_rad, b.rcs_spread_rad));
+    assert!((main.power_w / Drive::exhaust_w(mass_kg, 1.0) - 1.0).abs() < 1.0e-6, "{}", main.power_w);
+    assert!((rcs.power_w / Drive::exhaust_w(mass_kg, b.rcs_accel_g) - 1.0).abs() < 1.0e-6, "{}", rcs.power_w);
+    assert!(DVec3::from_array(main.axis).angle_between(-DVec3::X) < 1.0e-3, "the main drive carries the quarry's burn");
+    assert!(DVec3::from_array(rcs.axis).dot(DVec3::Y) > 0.9, "the thrusters close along -y, exhausting along +y");
+    let stated_w = lc_world::emit::drive_w(server.fleet.get(CraftId(1)).unwrap(), &b, server.now_t() as f64 * 1.0e-6);
+    assert!((stated_w / main.power_w - 1.0).abs() < 1.0e-6, "a thruster leg states its main drive alone, {stated_w}");
+    let beams: Vec<i64> = emissions_of(&server, ShipId(1)).iter().map(|(_, e)| e.beam).collect();
+    assert!(beams.contains(&main.beam.unwrap()) && beams.contains(&rcs.beam.unwrap()) && main.beam != rcs.beam);
+}
+
+/// A fitted ship lightening on a thruster leg: the thrusters turning over and going out are E4's
+/// instants, and none of them is a change of the main drive `Presence` states.
+#[tokio::test]
+async fn the_thrusters_changing_is_no_drive_event() {
+    let b = Balance::DEFAULT;
+    let craft = thruster_leg(ship(1, DVec3::ZERO, Form::starting()));
+    let end_s = 3_000.0;
+    let found = lc_world::ignition::transitions(&craft, &b, 0.0, end_s);
+    assert!(found.iter().any(|t| t.power_w > 0.0 && t.was_w > 0.0 && t.power_w != t.was_w), "premise: {found:?}");
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.set_rate(ticking(100.0));
+    server.fleet.insert(craft);
+    let mut wire = Loopback::new();
+    until(&mut server, &mut wire, end_s * 1.0e6).await;
+    let drives: Vec<i64> =
+        server.journal().events.iter().filter(|e| e.kind == crate::server::KIND_DRIVE && e.source == ShipId(1)).map(|e| e.t).collect();
+    assert!(drives.is_empty(), "the main drive never changed, yet it was said to at {drives:?}");
+}
+
+/// `craft` on an escort's leg on its thrusters, 50 km off a quarry burning at one g along +x,
+/// closing to 10 km along -y.
+fn thruster_leg(mut craft: Craft) -> Craft {
     use lc_world::escort::{Burning, Station};
     use lc_world::flight::C_M_S;
     let b = Balance::DEFAULT;
-    let mut craft = anvil(1);
     let quarry = Burning { position_ly: DVec3::ZERO, beta: DVec3::ZERO, accel: DVec3::X * (G0 / C_M_S), since_t: 0.0 };
     let thrusters = Drive { accel_g: b.rcs_accel_g, slew_rate_rad_s: 1.0, ..craft.kind.drive() };
     let km_ly = 1.0e3 / M_PER_LY;
@@ -231,24 +310,7 @@ async fn a_thruster_leg_is_two_emissions_at_their_two_spreads() {
         target: lc_world::motion::ShipId(9),
     };
     craft.motion.motive = lc_world::motion::Motive::Escort(station.solve(DVec3::X));
-    let mass_kg = craft.mass_kg();
-    let mut server = Server::new(Memory::default(), 0, 1);
-    server.set_rate(ticking(10.0));
-    server.fleet.insert(craft);
-    let mut wire = Loopback::new();
-    for _ in 0..3 {
-        server.tick(&mut wire).await.unwrap();
-    }
-    let lit = &server.emissions.emitting[&CraftId(1)];
-    let jet = |kind| lit.iter().find(|l| l.jet == Some(kind)).unwrap_or_else(|| panic!("no {kind:?} in {lit:?}"));
-    let (main, rcs) = (jet(Jet::Drive), jet(Jet::Thrusters));
-    assert_eq!((main.half_angle_rad, rcs.half_angle_rad), (b.drive_spread_rad, b.rcs_spread_rad));
-    assert!((main.power_w / thrust_power_w(mass_kg, G0) - 1.0).abs() < 1.0e-6, "{}", main.power_w);
-    assert!((rcs.power_w / thrust_power_w(mass_kg, b.rcs_accel_g * G0) - 1.0).abs() < 1.0e-6, "{}", rcs.power_w);
-    assert!(DVec3::from_array(main.axis).angle_between(-DVec3::X) < 1.0e-3, "the main drive carries the quarry's burn");
-    assert!(DVec3::from_array(rcs.axis).dot(DVec3::Y) > 0.9, "the thrusters close along -y, exhausting along +y");
-    let beams: Vec<i64> = emissions_of(&server, ShipId(1)).iter().map(|(_, e)| e.beam).collect();
-    assert!(beams.contains(&main.beam.unwrap()) && beams.contains(&rcs.beam.unwrap()) && main.beam != rcs.beam);
+    craft
 }
 
 /// The receiver behind a burn, settled across a hundred seconds of it in one tick and in a hundred:

@@ -17,7 +17,7 @@ use crate::boost::gamma_of;
 use crate::craft::{BEAM_PER_LENGTH, Craft};
 use crate::escort::Burning;
 use crate::fitting::Balance;
-use crate::flight::{Aim, C_M_S, G0, JULIAN_YEAR_S};
+use crate::flight::{Aim, C_M_S, Drive, G0, JULIAN_YEAR_S};
 use crate::motion::{self, Motive};
 use crate::signal::cone_solid_angle_sr;
 
@@ -25,11 +25,6 @@ use crate::signal::cone_solid_angle_sr;
 /// conversion into storage are all bounded by this.
 pub fn rating_w(balance: &Balance, engine_m3: f64) -> f64 {
     balance.engine_density_w * engine_m3.max(0.0)
-}
-
-/// What a photon thruster puts out to push `mass_kg` at `accel_m_s2`, watts: thrust times `c`.
-pub fn thrust_power_w(mass_kg: f64, accel_m_s2: f64) -> f64 {
-    mass_kg * accel_m_s2 * C_M_S
 }
 
 /// The temperature of an aperture's open face, kelvin: a blackbody radiating all of `power_w`
@@ -140,10 +135,16 @@ pub fn exhaust(craft: &Craft, balance: &Balance, now_s: f64) -> Vec<Exhaust> {
         .map(|(jet, push_g)| Exhaust {
             jet,
             axis: -push_g.normalize(),
-            power_w: thrust_power_w(mass_kg, push_g.length() * G0),
+            power_w: Drive::exhaust_w(mass_kg, push_g.length()),
             half_angle_rad: if jet == Jet::Drive { balance.drive_spread_rad } else { balance.rcs_spread_rad },
         })
         .collect()
+}
+
+/// What `craft`'s main drive sends aft at `now_s`, watts: its [`Jet::Drive`] from [`exhaust`]. What
+/// `Presence` states, and what a face and a cone are drawn from. Zero on the thrusters alone.
+pub fn drive_w(craft: &Craft, balance: &Balance, now_s: f64) -> f64 {
+    exhaust(craft, balance, now_s).iter().filter(|j| j.jet == Jet::Drive).map(|j| j.power_w).sum()
 }
 
 /// The open faces a craft's exhaust leaves through, m²: its aft engines', or an unfitted hull's
@@ -312,7 +313,7 @@ mod tests {
         // The anchor is dry mass and 30 ME, to 1e-9. The field's heat is not in it.
         let fitting = Fitting::full(Form::starting(), b, 0.0);
         let full_kg = fitting.hull().dry_kg + fitting.hull().capacities.storage_j / crate::fitting::C2;
-        let five_g = thrust_power_w(full_kg, 5.0 * G0);
+        let five_g = Drive::exhaust_w(full_kg, 5.0);
         assert!((rated - five_g).abs() / rated < 1.0e-9, "{rated} against {five_g}");
     }
 
@@ -483,7 +484,7 @@ mod tests {
             let [out] = exhaust(&craft, &b, burning_s)[..] else { panic!("one jet") };
             assert_eq!((out.jet, out.half_angle_rad), (jet, spread));
             assert!(out.axis.angle_between(-DVec3::X) < 1.0e-9, "{}", out.axis);
-            let want_w = thrust_power_w(craft.mass_kg_at(burning_s), accel_g * G0);
+            let want_w = Drive::exhaust_w(craft.mass_kg_at(burning_s), accel_g);
             assert!((out.power_w / want_w - 1.0).abs() < 1.0e-12, "{} {want_w}", out.power_w);
             assert!(exhaust(&craft, &b, 0.5 * (flip + brake)).is_empty(), "lit through the flip");
         }

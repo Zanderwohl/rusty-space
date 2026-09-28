@@ -99,8 +99,9 @@ pub struct SavedInstruments {
 /// none is read: there are no players, and a row refused names its format rather than coming
 /// back as some other ship. 12 adds a wreck's end, 13 the craft's light and a field's lit
 /// emissions, 14 the drive's waste heat, 15 what a craft's beams have said and which of its
-/// lightings are drives, and 16 a wreck's afterglow and a stare at a place or a craft.
-pub const SAVE_FORMAT: i32 = 16;
+/// lightings are drives, 16 drops the drive's exhaust speed, and 17 adds a wreck's afterglow and a
+/// stare at a place or a craft.
+pub const SAVE_FORMAT: i32 = 17;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
