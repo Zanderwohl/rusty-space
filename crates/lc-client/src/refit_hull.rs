@@ -160,11 +160,11 @@ pub(crate) fn buildings(
 }
 
 /// A finished hull at `at_ly` with the girders' work lights.
-fn uniforms(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3) -> HullUniform {
+fn uniforms(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, glow: lc_proto::Glow) -> HullUniform {
     let work = crate::hull::lamp(session, WORK_LUX / std::f64::consts::PI, WORK_K);
     HullUniform {
         girder: GIRDER_ALBEDO.extend(work.dot(crate::tonemap::LUMA)),
-        ..crate::ship_hull::finished(session, star, at_ly)
+        ..crate::ship_hull::finished(session, star, at_ly, glow)
     }
 }
 
@@ -216,7 +216,7 @@ pub fn draw_refit(
             continue;
         }
         let at_ly = uplink.contacts.iter().find(|c| Some(c.ship_id) == craft).map_or(session.ship.motion.position_ly, |c| c.position_ly);
-        let finished = uniforms(session, star, at_ly);
+        let finished = uniforms(session, star, at_ly, crate::hull::glow_of(session, &uplink, craft));
         for (_, generation, _) in generations.iter().filter(|(_, g, _)| g.craft == craft) {
             for state in &generation.copies {
                 if let Some(mut asset) = materials.get_mut(&state.material) {
@@ -243,7 +243,7 @@ pub fn draw_refit(
             unready.0 = true;
             continue;
         };
-        let finished = uniforms(session, star, b.at_ly);
+        let finished = uniforms(session, star, b.at_ly, crate::hull::glow_of(session, &uplink, b.craft));
         let key = (b.frame.finished, b.frame.working.as_ref().map(|w| w.step));
         let ours = |g: &Generation| g.craft == b.craft;
 

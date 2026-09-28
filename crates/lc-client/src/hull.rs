@@ -22,9 +22,9 @@ use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use em_render::render_space::sim_to_render;
 use em_spectra::PerBand;
 use glam::DVec3;
-use lc_proto::ShipId;
-use em_spectra::blackbody;
-use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH, HULL_K};
+use lc_proto::{Glow, Shade, ShipId};
+use lc_world::craft::{BEAM_PER_LENGTH, HEIGHT_PER_LENGTH};
+use lc_world::fitting::Balance;
 
 use crate::session::Session;
 use crate::system::{M_PER_LY, UNIT_M};
@@ -50,9 +50,9 @@ pub const DEFAULT_BOOM_LENGTHS: f64 = 4.0;
 /// What one notch of the wheel multiplies the boom by.
 pub const ZOOM_STEP: f64 = 1.25;
 
-/// A hull's albedo. Gray paint, near enough, and the one number that says how bright a ship is
-/// against the planet behind it.
-pub const ALBEDO: f64 = 0.35;
+/// What a real hull's textures average. They are drawn scaled from it to the field's `1 − α`, which
+/// is what says how bright a ship is.
+pub const PAINT: f64 = 0.35;
 
 /// The two ends of the palette. Equal, because a hull has no generated surface: the material
 /// is a planet's and the pattern is turned off by a contrast of zero.
@@ -300,10 +300,40 @@ fn anchor(
 ///
 /// Through the band mapping and not the tone map, which the shader now evaluates itself — so a
 /// hull and the planet behind it are exposed by one curve rather than two that agree.
-fn shading(session: &Session, star_radius_m: f64, star_teff_k: f64, star_distance_m: f64) -> Vec3 {
+fn shading(session: &Session, glow: Glow, star_radius_m: f64, star_teff_k: f64, star_distance_m: f64) -> Vec3 {
     let radiance =
-        crate::resolved::lit_radiance(ALBEDO, star_radius_m, star_teff_k, star_distance_m);
+        crate::resolved::lit_radiance(reflectance(session, glow), star_radius_m, star_teff_k, star_distance_m);
     Vec3::from_array(session.mapping.apply(&radiance))
+}
+
+/// A craft's field as its hull is drawn: the player's own now, anyone else's as its light left it.
+pub(crate) fn glow_of(session: &Session, uplink: &Uplink, craft: Option<ShipId>) -> Glow {
+    match craft {
+        None => own_glow(session),
+        Some(id) => uplink.contacts.iter().find(|c| c.ship_id == id).map_or_else(|| own_glow_unfitted(session), |c| c.glow),
+    }
+}
+
+pub(crate) fn own_glow(session: &Session) -> Glow {
+    session.ship.glow_at(session.coordinate_time_s()).map_or_else(|| own_glow_unfitted(session), Into::into)
+}
+
+fn own_glow_unfitted(session: &Session) -> Glow {
+    lc_world::glow::Glow::unfitted(&balance(session)).into()
+}
+
+fn balance(session: &Session) -> Balance {
+    session.ship.fitting().map_or(Balance::DEFAULT, |fitting| *fitting.balance())
+}
+
+/// `1 − α`: Clear gives back most of the starlight, Black none of it.
+fn reflectance(session: &Session, glow: Glow) -> f64 {
+    lc_world::glow::reflectance(glow.shade.into(), &balance(session))
+}
+
+/// A Black field hides everything inside it but its own heat, the lit windows included.
+pub(crate) fn windows_show(glow: Glow) -> bool {
+    glow.shade == Shade::Clear
 }
 
 /// Where the light on a hull comes from, and how bright it is there.
@@ -324,29 +354,19 @@ pub fn lighting(session: &Session) -> Option<(DVec3, f64, f64)> {
     Some((nearest.position_ly, nearest.star.radius_m, nearest.star.teff_k))
 }
 
-/// What a hull radiates on its own account, as linear display light.
+/// What a craft's field radiates on its own account, as linear display light.
 ///
-/// A blackbody at [`HULL_K`], and nothing else about the craft enters it: a surface at `T` has
-/// radiance `B(T)` whichever way it is turned and however far from a star it is. So this is the
-/// term that makes a ship visible between the stars, and the term that makes one impossible to
-/// hide in the thermal bands.
-fn emitted(session: &Session) -> Vec3 {
-    Vec3::from_array(session.mapping.apply(&hull_radiance()))
+/// A blackbody at the field's temperature, whichever way it is turned and however far from a star:
+/// the term that makes a ship visible between the stars, and impossible to hide in the thermal
+/// bands.
+pub(crate) fn emitted(session: &Session, glow: Glow) -> Vec3 {
+    Vec3::from_array(session.mapping.apply(&thermal_radiance(glow)))
 }
 
-/// The same, before the band mapping. Split out because the exposure meters against radiance
-/// and the shader wants display light.
-///
-/// Computed once. It is a function of [`HULL_K`] alone, and each band is a 32-interval Simpson
-/// over the Planck curve — a couple of hundred `exp` calls that used to be paid again for every
-/// hull in the scene, twice a frame.
-fn hull_radiance() -> PerBand<f32> {
-    static RADIANCE: std::sync::LazyLock<PerBand<f32>> = std::sync::LazyLock::new(|| {
-        PerBand::new(std::array::from_fn(|i| {
-            blackbody::band_radiance(em_spectra::Band::ALL[i], HULL_K) as f32
-        }))
-    });
-    *RADIANCE
+/// The same, before the band mapping, which the exposure meters against. Cached by temperature, as
+/// a star's spectrum is.
+fn thermal_radiance(glow: Glow) -> PerBand<f32> {
+    crate::session::spectrum_at(glow.temperature_k)
 }
 
 /// Luminance of white square to the Sun at 1 AU, cd/m²: 1361 W/m² at 93 lm/W, over π.
@@ -367,13 +387,13 @@ pub(crate) fn lamp(session: &Session, cd_m2: f64, k: f64) -> Vec3 {
     Vec3::from_array(session.mapping.apply(&lamp_radiance(cd_m2, k)))
 }
 
-/// A hull at `at_ly` painted `paint`, lit by [`lighting`]'s `star`.
-pub(crate) fn lit(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, paint: Vec4) -> BodySurfaceUniform {
-    let own = emitted(session);
+/// A hull at `at_ly` painted `paint`, wearing `glow`, lit by [`lighting`]'s `star`.
+pub(crate) fn lit(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, paint: Vec4, glow: Glow) -> BodySurfaceUniform {
+    let own = emitted(session, glow);
     match star {
         Some((star_ly, radius, teff)) => {
             let distance = star_ly.distance(at_ly) * M_PER_LY;
-            uniforms(star_ly - at_ly, shading(session, radius, teff, distance), own, &session.tone, paint)
+            uniforms(star_ly - at_ly, shading(session, glow, radius, teff, distance), own, &session.tone, paint)
         }
         // No star to reflect. The hull still glows with its own heat, which is the whole
         // reason a ship between the stars is a thing you can see at all.
@@ -479,7 +499,7 @@ pub fn update_hulls(
     };
     let want = hulled(drawn(&game.0, &uplink, &eye, look), formed);
     let star = lighting(&game.0);
-    let shade = |at: &Placed| lit(&game.0, star, at.at_ly, GRAY);
+    let shade = |id: Option<ShipId>, at: &Placed| lit(&game.0, star, at.at_ly, GRAY, glow_of(&game.0, &uplink, id));
     let place = |at: &Placed| Transform {
         translation: sim_to_render(at.offset_m / UNIT_M).as_vec3(),
         rotation: attitude(at.facing, star.map(|(star_ly, _, _)| star_ly - at.at_ly)),
@@ -495,7 +515,7 @@ pub fn update_hulls(
         kept.push(*id);
         *transform = place(at);
         let Some(mut asset) = materials.get_mut(&material.0) else { continue };
-        let next = shade(at);
+        let next = shade(*id, at);
         if asset.uniforms != next {
             asset.uniforms = next;
         }
@@ -508,7 +528,7 @@ pub fn update_hulls(
             .clone();
         commands.spawn((
             Mesh3d(mesh),
-            MeshMaterial3d(materials.add(surfaces.flat.material(shade(at)))),
+            MeshMaterial3d(materials.add(surfaces.flat.material(shade(*id, at)))),
             place(at),
             // The same reason a resolved body carries it: these are placed by hand at a
             // scale where a mesh's own bounds say nothing useful about where it lands.
@@ -519,11 +539,29 @@ pub fn update_hulls(
     }
 }
 
-/// What a hull at `at_ly` sends the eye, per band, for metering.
+/// What a hull sends the eye per band, term by term. Metering wants the sum; anything else a craft
+/// lights adds a term here rather than a second point beside it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sent {
+    /// Starlight the field gives back, `1 − α` of it.
+    pub reflected: PerBand<f32>,
+    /// The field's own heat.
+    pub thermal: PerBand<f32>,
+    /// Lit windows, which only a Clear field shows.
+    pub windows: PerBand<f32>,
+}
+
+impl Sent {
+    pub fn total(&self) -> PerBand<f32> {
+        self.reflected.map(|band, x| x + self.thermal[band] + self.windows[band])
+    }
+}
+
+/// What a hull at `at_ly` wearing `glow` sends the eye, per band, for metering.
 ///
-/// Both halves, because the exposure has to account for both: a ship is reflected starlight in
-/// the optical and its own heat in the infrared, and which one dominates is a question about
-/// the band mapping rather than about the ship.
+/// Every term, because the exposure has to account for all of them: a ship is reflected starlight
+/// in the optical and its own heat in the infrared, and which one dominates is a question about the
+/// band mapping and the field rather than about the ship.
 ///
 /// Starlight by the share of the disc lit as seen from `to_eye` (zero: all of it), plus a lit
 /// window, so a camera on the night side exposes for the lights.
@@ -531,16 +569,17 @@ pub fn update_hulls(
 /// `star` is [`lighting`]'s answer, passed in rather than asked for: between the stars that is
 /// a search over the whole catalog, and a caller metering a scene wants every hull in it lit
 /// by the same one anyway.
-pub fn radiance_at(star: Option<(DVec3, f64, f64)>, at_ly: DVec3, to_eye: DVec3) -> PerBand<f32> {
-    let own = hull_radiance();
-    let window = metered_lamp();
-    let Some((star_ly, radius, teff)) = star else {
-        return own.map(|band, x| x + window[band]);
+pub fn radiance_at(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, to_eye: DVec3, glow: Glow) -> Sent {
+    let reflected = match star {
+        Some((star_ly, radius, teff)) => {
+            let lit = crate::resolved::lit_radiance(reflectance(session, glow), radius, teff, star_ly.distance(at_ly) * M_PER_LY);
+            let seen = lit_share(star_ly - at_ly, to_eye);
+            lit.map(|_, x| x * seen)
+        }
+        None => PerBand::splat(0.0),
     };
-    let lit =
-        crate::resolved::lit_radiance(ALBEDO, radius, teff, star_ly.distance(at_ly) * M_PER_LY);
-    let seen = lit_share(star_ly - at_ly, to_eye);
-    own.map(|band, x| x + lit[band] * seen + window[band])
+    let windows = if windows_show(glow) { metered_lamp() } else { PerBand::splat(0.0) };
+    Sent { reflected, thermal: thermal_radiance(glow), windows }
 }
 
 fn metered_lamp() -> PerBand<f32> {
@@ -574,20 +613,53 @@ pub fn solid_angle_sr(length_m: f64, distance_m: f64) -> f32 {
 mod tests {
     use super::*;
 
+    fn session() -> Session {
+        Session::new(&lc_world::sky::AuthoredStars::sample(), 3)
+    }
+
+    const IDLE: Glow = Glow { temperature_k: 400.0, shade: Shade::Clear };
+
     /// A night side is metered for its lights, a day side for its starlight.
     #[test]
     fn a_night_side_is_metered_for_its_lights() {
-        let v = |r: PerBand<f32>| r[em_spectra::Band::V];
+        let session = session();
+        let v = |r: Sent| r.total()[em_spectra::Band::V];
         let au_ly = lc_world::navigation::AU / M_PER_LY;
         let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
         let at = DVec3::X * au_ly;
-        let window = v(metered_lamp());
-        let day = v(radiance_at(star, at, -DVec3::X));
-        let night = v(radiance_at(star, at, DVec3::X));
+        let window = metered_lamp()[em_spectra::Band::V];
+        let day = v(radiance_at(&session, star, at, -DVec3::X, IDLE));
+        let night = v(radiance_at(&session, star, at, DVec3::X, IDLE));
         assert!(day > 30.0 * window, "{day} against a window's {window}");
         assert!(night < 3.0 * window, "{night}: the night side was metered as lit");
         assert!(night >= window);
-        assert_eq!(v(radiance_at(star, at, DVec3::ZERO)), day, "no eye meters the disc full");
+        assert_eq!(v(radiance_at(&session, star, at, DVec3::ZERO, IDLE)), day, "no eye meters the disc full");
+    }
+
+    /// Clear gives back twice what the old gray hull did; Black gives back nothing and shows no
+    /// windows, so in V only its heat is left, and at ten microns that heat is all there ever was.
+    #[test]
+    fn a_black_hull_is_dark_in_v_and_not_at_ten_microns() {
+        use em_spectra::Band;
+        let session = session();
+        let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
+        let at = DVec3::X * lc_world::navigation::AU / M_PER_LY;
+        let black = Glow { shade: Shade::Black, ..IDLE };
+        let (clear, dark) = (radiance_at(&session, star, at, -DVec3::X, IDLE), radiance_at(&session, star, at, -DVec3::X, black));
+        let gray = crate::resolved::lit_radiance(PAINT, em_spectra::stellar::SOLAR_RADIUS, 5772.0, lc_world::navigation::AU);
+        assert!((clear.reflected[Band::V] / gray[Band::V] - 0.7 / PAINT).abs() < 1.0e-5);
+        assert_eq!(dark.reflected[Band::V] + dark.windows[Band::V], 0.0);
+        assert!(dark.total()[Band::V] < 1.0e-12 * clear.total()[Band::V]);
+        assert_eq!(dark.total()[Band::ThermalIr], dark.thermal[Band::ThermalIr]);
+        assert!(dark.thermal[Band::ThermalIr] > 0.0);
+    }
+
+    /// The thermal term follows the field, not a fixed hull: past the Draper point it reaches V.
+    #[test]
+    fn a_hot_field_is_seen_in_v() {
+        let v = |k| radiance_at(&session(), None, DVec3::ZERO, DVec3::ZERO, Glow { temperature_k: k, shade: Shade::Black }).thermal[em_spectra::Band::V];
+        assert!(v(2400.0) > 1.0e10 * v(400.0));
+        assert!(v(4600.0) > 1.0e2 * v(2400.0));
     }
 
     const RAD_PER_PX: f32 = 7.67e-4;

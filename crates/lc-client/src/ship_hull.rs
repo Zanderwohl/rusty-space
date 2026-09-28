@@ -34,7 +34,7 @@ use lc_world::fitting::Balance;
 use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, Kind, SparMode};
 
-use crate::hull::{ALBEDO, Eye, frame, lighting, lit};
+use crate::hull::{Eye, PAINT, frame, glow_of, lighting, lit, windows_show};
 use crate::hull_mesh::{Finish, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
 use crate::procedural::{Bakes, Shape, Target, placeholder};
 use crate::session::Session;
@@ -148,18 +148,19 @@ fn take_texels(mut palette: ResMut<Palette>, mut images: ResMut<Assets<Image>>) 
     ));
 }
 
-/// A finished hull at `at_ly`, lit by `star`.
-pub(crate) fn finished(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3) -> HullUniform {
-    let base = lit(session, star, at_ly, Vec4::ONE);
+/// A finished hull at `at_ly` wearing `glow`, lit by `star`.
+pub(crate) fn finished(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, glow: lc_proto::Glow) -> HullUniform {
+    let base = lit(session, star, at_ly, Vec4::ONE, glow);
     let mut emitted = [Vec4::ZERO; REGIONS];
-    for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS) {
+    for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS).filter(|_| windows_show(glow)) {
         if let Some((cd_m2, k)) = lamp_of(kind) {
             *slot = crate::hull::lamp(session, cd_m2, k).extend(0.0);
         }
     }
     HullUniform {
         to_star: base.to_star.truncate().extend(crate::hull::HULL_NIGHT),
-        reflected: base.reflected / ALBEDO as f32,
+        reflected: base.reflected / PAINT as f32,
+        glow: base.emitted,
         exposure: base.exposure,
         detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
         bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
@@ -357,7 +358,8 @@ pub fn draw_hulls(
         }
     }
     for want in &wanted {
-        let uniforms = finished(session, star, want.at_ly);
+        let glow = glow_of(session, &uplink, want.craft);
+        let uniforms = finished(session, star, want.at_ly, glow);
         let Some((root, mut hull, mut transform)) = hulls.iter_mut().find(|(_, h, _)| h.craft == want.craft) else {
             spawn(&mut commands, want);
             unready.0 = true;
@@ -426,7 +428,7 @@ pub fn draw_hulls(
             Some((hash, parts)) if wants_placeholders && hash == want.form.hash => {
                 for child in children.get(parts).into_iter().flatten() {
                     let Ok((Placeholder(paint), material)) = placeholders.get(*child) else { continue };
-                    let next = lit(session, star, want.at_ly, *paint);
+                    let next = lit(session, star, want.at_ly, *paint, glow);
                     if let Some(mut asset) = flat.get_mut(&material.0)
                         && asset.uniforms != next
                     {
@@ -438,7 +440,7 @@ pub fn draw_hulls(
                 if let Some((_, old)) = hull.placeholders.take() {
                     commands.entity(old).despawn();
                 }
-                let paint = |kind| lit(session, star, want.at_ly, crate::parts::paint(kind));
+                let paint = |kind| lit(session, star, want.at_ly, crate::parts::paint(kind), glow);
                 let parts = spawn_placeholders(&mut commands, &want.form.form, want.balance, &mut meshes, &mut flat, &surfaces, paint);
                 commands.entity(parts).insert(ChildOf(root));
                 hull.placeholders = Some((want.form.hash, parts));
@@ -604,7 +606,8 @@ mod tests {
         let living = REGION_GRAPHS.iter().position(|k| *k == "living").unwrap();
         let au_ly = lc_world::navigation::AU / crate::system::M_PER_LY;
         let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
-        let at = |session: &Session, au: f64| finished(session, star, DVec3::X * au * au_ly);
+        let clear = lc_proto::Glow { temperature_k: 400.0, shade: lc_proto::Shade::Clear };
+        let at = |session: &Session, au: f64| finished(session, star, DVec3::X * au * au_ly, clear);
         let luma = |v: Vec4| v.truncate().dot(crate::tonemap::LUMA);
 
         let near = at(&session, 1.0);
@@ -613,7 +616,8 @@ mod tests {
         assert_eq!(near.emitted[living], opened.emitted[living], "the lights followed the exposure");
         assert!(near.exposure != opened.exposure);
 
-        let share = luma(near.emitted[living]) / luma(near.reflected);
+        // Of white: `reflected` is scaled from the textures' mean to Clear's `1 − α`.
+        let share = luma(near.emitted[living]) / (luma(near.reflected) * (PAINT / 0.7) as f32);
         assert!((0.0075 / 1.5..0.0075 * 1.5).contains(&share), "{share} of white in full sun");
         let far = at(&session, 10.0);
         let gained = (luma(far.emitted[living]) / luma(far.reflected)) / share;
