@@ -796,4 +796,65 @@ mod tests {
         assert!((gap - standoff).abs() < 0.05 * standoff, "{gap:.0} m off a {standoff:.0} m station at Io");
     }
 
+
+    /// Headless, the cascade falls in line order: the first when it vents, and each after it when
+    /// the last one's spike reaches it. Each spike is lethal to the next ship and not to the one
+    /// after, so every death is its neighbor's doing, and the player watching survives all five.
+    #[tokio::test]
+    async fn the_cascade_falls_in_order_one_light_time_apart() {
+        use lc_world::scenario::{BASE_ID, CASCADE};
+        let Some(star) = sol() else { return };
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.directing(true);
+        let pov = CraftId(1);
+        let mut kestrel = Craft::at(pov, Kind::Ship, star.position_ly + DVec3::X * 5.0 * lc_world::system::UNIT_M / M_PER_LY);
+        server.fit_new(&mut kestrel);
+        server.admit(ClientId(1), kestrel, 0.0);
+        server.load_world(World::new(vec![star]));
+        server.stage(&CASCADE).expect("the scene stages");
+        let mut wire = Loopback::new();
+        server.tick(&mut wire).await.unwrap();
+        let started_t = server.director.as_ref().and_then(|d| d.started_t).expect("staged");
+        let line: Vec<CraftId> = (0..CASCADE.cast.len() as i64).map(|k| CraftId(BASE_ID + k)).collect();
+
+        let now_t = server.now_t();
+        let now_s = now_t as f64 * 1.0e-6;
+        for (k, victim) in line.iter().enumerate().skip(1) {
+            let victim = server.fleet.get(*victim).unwrap();
+            let fitting = victim.fitting().unwrap();
+            let headroom_j = fitting.field().heat_max_j() - fitting.heat_j_at(now_s);
+            let dose_j = |killer: &CraftId| {
+                let killer = server.fleet.get(*killer).unwrap();
+                let dying = killer.fitting().unwrap();
+                let spike_j = dying.balance().collapse_spike_fraction * dying.field().released_j(dying.stored_j_at(&killer.motion, now_s));
+                fitting.absorptivity() * crate::field::received_j(victim, killer.position_at(now_t as f64), spike_j, now_t)
+            };
+            let neighbor = dose_j(&line[k - 1]) / headroom_j;
+            let behind: f64 = line[..k - 1].iter().map(dose_j).sum::<f64>() / headroom_j;
+            assert!(neighbor > 1.2, "{:?} survives its neighbor, at {neighbor} of its headroom", victim.name);
+            assert!(behind < 0.8, "{:?} dies of the spikes behind its neighbor, at {behind} of its headroom", victim.name);
+        }
+
+        for _ in 0..1_000 {
+            server.tick(&mut wire).await.unwrap();
+            if line.iter().all(|id| server.fleet.get(*id).is_none_or(|c| c.ended_s().is_some())) {
+                break;
+            }
+        }
+        let deaths: Vec<(i64, DVec3)> = line
+            .iter()
+            .map(|id| {
+                let event = server.journal().events.iter().find(|e| e.kind == crate::server::KIND_COLLAPSE && e.source.0 == id.0);
+                event.map(|e| (e.t, e.at)).unwrap_or_else(|| panic!("{id:?} never collapsed"))
+            })
+            .collect();
+        assert_eq!(deaths[0].0, started_t + (CASCADE.beats[0].after_s * 1.0e6) as i64, "the first is when it vents");
+        for pair in deaths.windows(2) {
+            let light_us = pair[0].1.distance(pair[1].1);
+            assert!(light_us > 70.0, "premise: a light-time many ticks long, {light_us} µs");
+            assert_eq!(pair[1].0, (pair[0].0 as f64 + light_us).ceil() as i64, "{deaths:?}");
+        }
+        let kestrel = server.fleet.get(pov).unwrap();
+        assert!(kestrel.ended_s().is_none() && kestrel.fitting().is_some(), "the player died watching");
+    }
 }
