@@ -462,8 +462,8 @@ impl Plan {
         parts
     }
 
-    /// A step's end is compared as `start_s + ends_s()`, the instant the account cuts at, so the two
-    /// agree on which side of it a settlement falls.
+    /// Step ends compare as `start_s + ends_s()`, as the account cuts, so both put a settlement on
+    /// the same side.
     pub fn at(&self, now_s: f64) -> Progress {
         let start_s = self.round.start_s;
         let since = now_s - start_s;
@@ -478,7 +478,7 @@ impl Plan {
                 continue;
             }
             if now_s > start_s + step.begins_s {
-                let fraction = (since - step.begins_s) / step.duration_s;
+                let fraction = ((since - step.begins_s) / step.duration_s).clamp(0.0, 1.0);
                 progress.stored_j += step.stored_j * fraction;
                 progress.current = Some((i, fraction));
                 progress.in_hand_kg = fraction

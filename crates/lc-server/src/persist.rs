@@ -164,7 +164,12 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     // a leak either way, because nothing after the save is involved. From here on the craft
     // records its stretches like any other, and `catch_up` fills the gap to now with real ones.
     craft.motion = snapshot.restore(system, row.saved_t as f64 * 1.0e-6);
-    craft.restore(saved.fitting.as_ref().map(|fitting| Fitting::from_wire(fitting, saved.field.as_ref())));
+    let fitting = saved.fitting.as_ref().map(|fitting| Fitting::from_wire(fitting, saved.field.as_ref()));
+    let starlight_w = fitting.as_ref().map(Fitting::starlight_w);
+    craft.fit(fitting);
+    if let Some(watts) = starlight_w {
+        craft.set_starlight_w(watts);
+    }
     Ok(craft)
 }
 
@@ -265,15 +270,17 @@ impl<J: Journal> Server<J> {
             let system = self.position_of(row).and_then(|at| self.world.system_at(at, now_s));
             match load(row, system.as_deref()) {
                 Ok(mut craft) => {
+                    // The saved segment is still in force, and fitting and entering both sample it
+                    // again: a restart would move a collapse.
+                    let starlight_w = craft.fitting().map(Fitting::starlight_w);
                     if let Some(mut fitting) = craft.fitting().cloned() {
                         fitting.set_balance(self.balance);
-                        craft.restore(Some(fitting));
+                        craft.fit(Some(fitting));
                     }
-                    // Entering starts a starlight segment, and the saved one is still in force:
-                    // sampled again, a restart would move a collapse.
-                    let fitting = craft.fitting().cloned();
                     craft.enter(system, row.saved_t as f64 * 1.0e-6);
-                    craft.restore(fitting);
+                    if let Some(watts) = starlight_w {
+                        craft.set_starlight_w(watts);
+                    }
                     catch_up(&mut craft, row.saved_t, checkpoint.now_t);
                     // Its owner is told of each step from here, as before the restart.
                     let refit = craft.fitting().and_then(|f| f.refit()).filter(|plan| !plan.is_done(now_s));

@@ -76,7 +76,8 @@ Constant over a segment unless marked as a burst. A burst jumps `Q` at the insta
 | the living drain | all of it |
 | the drive below ε = 1 | `1 − ε` of the exhaust power. Nothing at the default ε = 1 |
 | dismantling | the 5% a dismantling loses, spread over the step as the energy moves |
-| **vented storage** | **a burst**: what a refit round's dismantling returns and storage has no room for, at the end of the step that frees it ([29-ship-form.md](29-ship-form.md#refits)) |
+| a return arriving at full storage | all of it, as it arrives: room the round planned for that starlight filled first |
+| **vented storage** | **a burst**: what the round planned to vent for want of room, and what a shrinking store actually holds past its new capacity, at the end of the step ([29-ship-form.md](29-ship-form.md#refits)) |
 | **a collapse's spike** | **a burst**, on arrival: see below |
 
 ### Conversion

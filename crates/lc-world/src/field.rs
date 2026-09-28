@@ -762,6 +762,45 @@ mod tests {
         assert_eq!(fitting.collapse_s(), Some(end_s));
     }
 
+    /// A build held out of storage under starlight too weak for the drain: free storage runs out a
+    /// fifth of the way in and the drain starves, and the collapse is found where the settled heat
+    /// first reaches `Q_max`, after that.
+    #[test]
+    fn a_collapse_after_the_drain_starves_is_where_the_settled_heat_reaches_it() {
+        use crate::fitting::{Account, Fitting};
+        use crate::form::PartId;
+        use crate::refit::rounds::Round;
+        let mut target = Form::starting();
+        target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 5.0;
+        let begun = |b: Balance, stored_j: f64| {
+            let full = Fitting::full(Form::starting(), b, 0.0);
+            let mut fitting = Fitting::from_account(&Account { stored_j, heat_j: 0.0, ..full.account() }, b);
+            let drain_w = fitting.hull().capacities.drain_w;
+            fitting.set_starlight_w(0.5 * drain_w / b.conversion_efficiency);
+            let round = Round { from: Form::starting(), target: target.clone(), stored_j, start_s: 0.0 };
+            let plan = round.solve(&b).unwrap();
+            fitting.begin_refit(plan.clone());
+            (fitting, plan)
+        };
+        let b = Balance::DEFAULT;
+        let (trial, plan) = begun(b, 30.0 * me(&b));
+        let cost_j = -plan.steps().iter().map(|s| s.stored_j).sum::<f64>();
+        let duration_s = plan.duration_s();
+        let spare_j = 0.1 * trial.hull().capacities.drain_w * duration_s;
+        let (probe, _) = begun(b, cost_j + spare_j);
+        let heat_max_j = probe.heat_j_at(0.901_7 * duration_s);
+        assert!(probe.heat_j_at(0.2 * duration_s) < heat_max_j, "premise: still rising once starved");
+
+        let tight = Balance { field_capacity: heat_max_j / probe.field().area_m2, ..b };
+        let (fitting, _) = begun(tight, cost_j + spare_j);
+        let collapse_s = fitting.collapse_s().expect("it reaches the limit");
+        let n = 20_000;
+        let dt_s = duration_s / n as f64;
+        let first = (1..=n).find(|&k| fitting.heat_j_at(k as f64 * dt_s) >= heat_max_j).unwrap();
+        assert!((first - 1) as f64 * dt_s < collapse_s && collapse_s <= first as f64 * dt_s, "{collapse_s} at step {first}");
+        assert!(collapse_s > 0.5 * duration_s, "premise: in the starved stretch");
+    }
+
     #[test]
     fn a_field_already_past_q_max_collapses_at_once() {
         let b = Balance::DEFAULT;

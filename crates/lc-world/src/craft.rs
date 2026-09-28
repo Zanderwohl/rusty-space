@@ -493,12 +493,10 @@ impl Craft {
         self.begin_solar_segment(since);
     }
 
-    /// [`Craft::fit`] an account as it was saved. `fit` samples the starlight segment afresh from
-    /// the settlement, and a settlement partway through a segment would move it.
-    pub fn restore(&mut self, fitting: Option<Fitting>) {
-        let starlight_w = fitting.as_ref().map(Fitting::starlight_w);
-        self.fit(fitting);
-        if let (Some(fitting), Some(watts)) = (&mut self.fitting, starlight_w) {
+    /// Put back the power of the starlight segment in force, as saved: [`Craft::fit`] and
+    /// [`Craft::enter`] sample it afresh from the settlement, which may be partway through it.
+    pub fn set_starlight_w(&mut self, watts: f64) {
+        if let Some(fitting) = &mut self.fitting {
             fitting.set_starlight_w(watts);
         }
     }
