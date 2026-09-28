@@ -347,9 +347,9 @@ Omit the path for the three authored sample stars.
 
 | key | does |
 |---|---|
-| `Esc` | close the top panel, then the menu |
+| `Esc` | close the top panel; else out of the map or editor to the world; else the menu |
 | `T` `Y` `F` `F3` `F4` | telescope, system, flight, debug, starfield tuning |
-| `M` | switch the main view between the world and the map |
+| `M` `H` | into the map, the ship editor; the same key again goes back to the world. See 29 §Getting in and out |
 | arrows, right-drag | look |
 | | the cursor is pinned while the right button is held, and released on let go |
 | `L` | look at the selection |

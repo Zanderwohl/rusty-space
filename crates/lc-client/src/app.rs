@@ -319,9 +319,8 @@ impl Plugin for ClientPlugin {
     }
 }
 
-/// Whether the view is one the mouse steers directly, rather than the map, which egui reads.
 fn steering(ui: Res<Ui>) -> bool {
-    ui.view != crate::ui::ViewMode::Map
+    ui.view.steers()
 }
 
 /// The camera the sky is drawn for.
@@ -414,7 +413,6 @@ fn leave_scene(
             With<crate::hull::Hull>,
             With<crate::ship_hull::ShipHull>,
             With<crate::parts::FormRoot>,
-            With<crate::refit_hull::Generation>,
             With<crate::plume::Plume>,
         )>,
     >,
@@ -797,7 +795,7 @@ mod tests {
     #[test]
     fn the_clock_runs_in_the_editor() {
         let mut app = harness();
-        app.world_mut().write_message(Requested(Action::ToggleForm));
+        app.world_mut().write_message(Requested(Action::ToggleView(crate::ui::ViewMode::Form)));
         app.update();
         assert_eq!(app.world().resource::<Ui>().view, crate::ui::ViewMode::Form);
         let before = app.world().resource::<Game>().coordinate_time_s();

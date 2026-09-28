@@ -44,17 +44,6 @@ pub struct Entry {
     pub demo: Option<String>,
 }
 
-/// A mode of the main view by `--view`'s spelling.
-fn view_named(name: &str) -> Option<crate::ui::ViewMode> {
-    use crate::ui::ViewMode;
-    match name.to_ascii_lowercase().as_str() {
-        "world" => Some(ViewMode::World),
-        "map" => Some(ViewMode::Map),
-        "form" | "editor" => Some(ViewMode::Form),
-        _ => None,
-    }
-}
-
 /// Parses the flag vocabulary both binaries accept.
 pub fn parse(args: &[String]) -> Entry {
     let flag = |name: &str| args.iter().any(|a| a == name);
@@ -72,7 +61,7 @@ pub fn parse(args: &[String]) -> Entry {
     // reach the camera of the mode they are meant for.
     let view = after("--view")
         .or_else(|| after("--panel").filter(|name| name.eq_ignore_ascii_case("map")))
-        .and_then(|name| view_named(&name));
+        .and_then(|name| crate::ui::ViewMode::named(&name));
     let editing = view == Some(crate::ui::ViewMode::Form);
     if let Some(view) = view {
         actions.push(Action::SetView(view));

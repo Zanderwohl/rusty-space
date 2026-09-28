@@ -36,18 +36,11 @@ impl Start {
     pub fn of(session: &Session) -> Option<Start> {
         let fitting = session.ship.fitting()?;
         let now = session.coordinate_time_s();
-        let stored_j = fitting.stored_j_at(&session.ship.motion, now);
-        let start = Start { from: fitting.form().clone(), stored_j, start_s: now, balance: *fitting.balance() };
         // The draft is edited against a running round's target (`ledger::base`), so the next round
         // begins there, with what this one has still to take or return.
-        Some(match fitting.refit() {
-            Some(plan) => {
-                let end = plan.round().start_s + plan.duration_s();
-                let left_j = plan.at(end).stored_j - plan.at(now.max(plan.round().start_s)).stored_j;
-                Start { from: plan.target().clone(), stored_j: (stored_j + left_j).max(0.0), ..start }
-            }
-            None => start,
-        })
+        let from = fitting.refit().map_or_else(|| fitting.form().clone(), |plan| plan.target().clone());
+        let stored_j = fitting.stored_after_refit_j(&session.ship.motion, now);
+        Some(Start { from, stored_j, start_s: now, balance: *fitting.balance() })
     }
 
     pub fn round(&self, target: &Form) -> Round {
@@ -171,7 +164,7 @@ pub struct Shape {
     pub rated_load_w: f64,
     /// Between the field's idle heat and collapse, joules: the most a burst can add.
     pub headroom_j: f64,
-    /// Starlight collected at the ship's distance from its star now, held as an idle ship holds
+    /// Starlight arriving at the ship's distance from its star now, held as an idle ship holds
     /// itself to it, which is also how bright it is in reflected light. Zero under way, and between
     /// systems.
     pub starlight_w: f64,
@@ -230,14 +223,14 @@ impl Preview {
     }
 }
 
-/// What `geometry` would collect where the ship is at `t`, turned as `solar` turns an idle hull.
+/// What would arrive at `geometry` where the ship is at `t`, turned as `solar` turns an idle hull.
 fn starlight_w(session: &Session, geometry: &lc_proto::form::Geometry, balance: &Balance, t: f64) -> f64 {
     let ship = &session.ship;
     let (Some(system), Some(distance_m), false) = (ship.system.as_deref(), ship.star_distance_m_at(t), ship.motion.is_under_way()) else {
         return 0.0;
     };
     let shadow_m2 = solar::shadow_m2(geometry, solar::idle_cos(geometry));
-    solar::power_w(balance, shadow_m2, system.star_luminosity_w(), distance_m)
+    solar::intake_w(balance, shadow_m2, system.star_luminosity_w(), distance_m)
 }
 
 /// Whether Apply has to ask again: the draft's round would vent the field past collapse.

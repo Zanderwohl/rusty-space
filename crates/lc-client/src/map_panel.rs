@@ -97,23 +97,22 @@ pub fn draw(
     let mode = ui_state.view;
     let per_point = ctx.pixels_per_point();
     let square = corner(ctx.viewport_rect());
-    map.shown = mode != ViewMode::Form;
-    // The editor is the whole view, with no square and no map: the sky's camera has the window
-    // back, under the editor's picture.
-    if mode == ViewMode::Form {
-        world.0 = None;
+    let inset = mode.inset();
+    map.shown = mode == ViewMode::Map || inset == Some(ViewMode::Map);
+    // What the world's camera is to draw into, which is the square it is the thumbnail in.
+    // Otherwise the whole window.
+    world.0 = (inset == Some(ViewMode::World)).then(|| pixels(square, per_point));
+    let Some(inset) = inset else { return };
+
+    let swap = square_area(ctx, square, (inset == ViewMode::Map).then_some(&*map));
+    if swap.clicked() {
+        ask(&mut out, Action::SetView(inset));
+    }
+    if !map.shown {
         return;
     }
 
-    // What the world's camera is to draw into, which is the square it is the thumbnail in.
-    world.0 = (mode != ViewMode::World).then(|| pixels(square, per_point));
-
-    // The square holds whichever mode is not in force, and a click swaps them.
-    let swap = square_area(ctx, square, (mode == ViewMode::World).then_some(&*map));
-    if swap.clicked() {
-        ask(&mut out, Action::SetView(mode.other()));
-    }
-
+    // Past here the map is the whole view or the square.
     let (rect, response) = match mode {
         ViewMode::Map => whole(ctx, foot.0, &ui_state, &game, &map, square, &mut out),
         ViewMode::World | ViewMode::Form => (square, swap.clone()),

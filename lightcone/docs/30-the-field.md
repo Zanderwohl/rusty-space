@@ -3,8 +3,14 @@
 Every ship is wrapped in a field. It is the collector, the radiator and the shield, and when it
 fails, the ship is gone and the whole system sees it happen.
 
-**Status: designed.** The account is `lc_world::field`, with its anchors derived in
-`Balance::DEFAULT`; nothing reads it yet. It replaces the fixed 400 K hull
+**Status: in the account.** The closed forms are `lc_world::field`, with their anchors derived in
+`Balance::DEFAULT`. A fitting settles `Q` beside stored energy (`lc_world::fitting::heat`), `Fitted`
+carries it and a checkpoint keeps it. Every field runs Black until the modes are built, and nothing
+collapses yet. A ship whose storage has run down to what its motive has committed pays only as much
+of the living drain as conversion brings in, and the rest makes no heat, so an empty ship far from
+a star cools below 400 K. A refit's transfers and a burn's spending are draws on storage inside the
+account, cut where each refit step begins and ends, so conversion refills what a build takes out
+as it goes, and the drain and the rating change where a step ends. It replaces the fixed 400 K hull
 (`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
 [20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
 Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
@@ -69,7 +75,8 @@ Constant over a segment unless marked as a burst. A burst jumps `Q` at the insta
 | the living drain | all of it |
 | the drive below ε = 1 | `1 − ε` of the exhaust power. Nothing at the default ε = 1 |
 | dismantling | the 5% a dismantling loses, spread over the step as the energy moves |
-| **vented storage** | **a burst**: what a refit round's dismantling returns and storage has no room for, at the end of the step that frees it ([29-ship-form.md](29-ship-form.md#refits)) |
+| a return arriving at full storage | all of it, as it arrives: room the round planned for that starlight filled first |
+| **vented storage** | **a burst**: what the round planned to vent for want of room, and what a shrinking store actually holds past its new capacity, at the end of the step ([29-ship-form.md](29-ship-form.md#refits)) |
 | **a collapse's spike** | **a burst**, on arrival: see below |
 
 ### Conversion
@@ -89,6 +96,12 @@ What arrives is converted to storage at up to the **conversion rating**, at
   however full it was, and conversion runs throughout.
 - A burst arrives faster than any rating, so **all of it is heat**. Empty storage stops sustained
   power, never a burst.
+
+- **A refit's transfers are draws on storage**, a build's cost out of it and a dismantling's return
+  into it, spread over each step. A return arriving at full storage is heat as it arrives, like
+  starlight: storage never holds more than its capacity. What the round planned to vent still
+  bursts at the end of its step, and a store that shrinks spills what it actually holds past its
+  new capacity, which starlight may have made more than the plan expected.
 
 Storage filling partway through a segment splits it. The fill time is linear in the segment's
 inputs, so the split is closed form too. Holding full storage full, rather than switching
@@ -171,8 +184,8 @@ not move the idle anchor. The anchors hold for the default geometry: a shard tha
 starting envelope, through `envelope_margin` say, moves them with it.
 
 The starlight in the third anchor falls on the shadow table's broadside, with the gain that
-[20-solar-power.md](20-solar-power.md)'s anchor gives on that broadside. That is what the account
-reads now that collection is on the shadow, and will once the gain moves to the star. Since that
+[20-solar-power.md](20-solar-power.md)'s anchor gives on that broadside, and the gain now sits on
+the star's output. Since that
 anchor fixes what the starting ship collects, the broadside cancels: `τ` is the same whichever
 shadow it is worked on, and agrees with the old ovoid's collection. The gain has to be solved on the same
 broadside the starlight falls on: the old gain on the new, smaller broadside would give
@@ -404,6 +417,9 @@ puts a countdown in the text.
 - **Closed form against stepping.** An account with a starlight segment, a vent burst and a
   storage-fills split, stepped finely, agrees with the closed form. Break the equation of state on
   purpose (a linear `T` instead of a fourth root) and check that the temperature tests fail.
+- **A round under starlight.** A refit whose steps end between settlements, settled at every tick
+  and in one leap, agrees on heat and storage, and never holds more than capacity. A return into
+  room starlight has filled ends as heat, joule for joule.
 - **Collapse is on time.** A scheduled collapse fires at the predicted instant, and a change of
   input before it moves it.
 - **Light delay.** A collapse is observed by a distant client no earlier than the light allows,

@@ -149,7 +149,7 @@ fn fit_of(fitting: &lc_proto::Fitting) -> Fit {
         hull_slots: lc_world::form::MAX_PARTS as u32,
         used_slots: parts.len() as u32,
         stored_j: fitting.stored_j,
-        solar_w: fitting.solar_w,
+        solar_w: fitting.starlight_w,
         committed_j: fitting.committed_j,
         refitting: fitting.refit.is_some(),
     }

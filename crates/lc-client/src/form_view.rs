@@ -91,8 +91,6 @@ const CHROME_GAP: f32 = 6.0;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FormView {
     pub orbit: FormOrbit,
-    /// Where `H` and `Escape` go back to. Never [`ViewMode::Form`].
-    pub from: ViewMode,
     /// From the ship's form the first time the editor opens; kept across leaving it.
     pub draft: Option<crate::draft::Draft>,
     pub selected: Option<lc_world::form::PartId>,
@@ -775,7 +773,7 @@ fn build_chrome(commands: &mut Commands, top: f32, font: Handle<Font>) {
     let row = ui.row(strip);
     ui.insert(row, TitleRow);
     ui.inline(row, "SHIP EDITOR", 16.0, em_ui::vfd::TEXT);
-    ui.small_button(row, "Back", Emit(Action::ToggleForm));
+    ui.small_button(row, "Back", Emit(Action::ToggleView(ViewMode::Form)));
 }
 
 /// The title bar's line, which [`crate::form_apply`] puts Apply and the budget on, after Back.

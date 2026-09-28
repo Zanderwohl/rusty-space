@@ -31,9 +31,9 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::KeyC, Action::TogglePanel(Panel::Chat)),
         // Opens and never closes: once the field has the keyboard, a slash is a slash.
         (KeyCode::Slash, Action::OpenPanel(Panel::Console)),
-        (KeyCode::KeyM, Action::ToggleView),
+        (KeyCode::KeyM, Action::ToggleView(crate::ui::ViewMode::Map)),
         // For hangar, where KSP builds its planes.
-        (KeyCode::KeyH, Action::ToggleForm),
+        (KeyCode::KeyH, Action::ToggleView(crate::ui::ViewMode::Form)),
         (KeyCode::Digit1, Action::SetBandPreset(0)),
         (KeyCode::Digit2, Action::SetBandPreset(1)),
         (KeyCode::Digit3, Action::SetBandPreset(2)),
@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn a_letter_is_found_only_for_a_plain_letter_key() {
         assert_eq!(letter_for(&Action::TogglePanel(Panel::Telescope)), Some('T'));
-        assert_eq!(letter_for(&Action::ToggleView), Some('M'));
+        assert_eq!(letter_for(&Action::ToggleView(crate::ui::ViewMode::Map)), Some('M'));
         assert_eq!(letter_for(&Action::TogglePanel(Panel::Debug)), None, "F3 is not a letter");
         assert_eq!(letter_for(&Action::ToggleBeautyShots), None, "shifted, and not a letter");
     }
@@ -464,7 +464,7 @@ mod tests {
 
     #[test]
     fn h_is_the_editor() {
-        assert_eq!(letter_for(&Action::ToggleForm), Some('H'));
+        assert_eq!(letter_for(&Action::ToggleView(crate::ui::ViewMode::Form)), Some('H'));
     }
 
     /// Shift turns the wheel into the slide in the editor and nowhere else; `=` and `-` zoom the

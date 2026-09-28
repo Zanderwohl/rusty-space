@@ -2,18 +2,17 @@
 //! solved size and pose, flat colored by kind.
 //!
 //! 32 §Temporary assets. No blends, spars uncut and a slab's corners square. Drawn only until the
-//! real hull ([`crate::ship_hull`]) has a mesh up, and for a refit until its meshes are. The pieces
-//! sit in the ship's frame (x nose, y port, z up) in meters under one root, which is the only thing
-//! placed each frame. Other craft's are [`crate::ship_hull`]'s, which never draw a refit.
+//! real hull ([`crate::ship_hull`]) has a mesh up, and for a refit until its meshes are, each
+//! working copy solid at its size then. The pieces sit in the ship's frame (x nose, y port, z up)
+//! in meters under one root, which is the only thing placed each frame. Other craft's are
+//! [`crate::ship_hull`]'s.
 
 use std::borrow::Cow;
 
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
-use em_render::body_material::BodyWireframeMaterial;
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::render_space::sim_to_render;
-use em_render::wire_mesh;
 use glam::DVec3;
 use lc_world::fitting::Balance;
 use lc_world::form::place::Side;
@@ -236,46 +235,6 @@ pub struct Painted {
     reach_m: f64,
 }
 
-/// The cage around the sliver of the working step's `copy`th copy.
-#[derive(Component)]
-pub struct Cage {
-    copy: usize,
-    tube_m: f32,
-}
-
-/// Parallels and meridians of a copy's cage.
-const CAGE_RINGS: usize = 7;
-const CAGE_MERIDIANS: usize = 12;
-const CAGE_SAMPLES: usize = 48;
-/// Of the whole form's reach, so a small part's cage is as legible as a large one's.
-const CAGE_TUBE: f64 = 0.005;
-/// Linear, before the exposure; the cage is lit by its own work lights, not the star.
-const CAGE_COLOR: LinearRgba = LinearRgba::new(0.9, 0.55, 0.18, 1.0);
-const CAGE_EMISSION: f32 = 2.0;
-/// Of a cage's full thickness, while any of it stands.
-const CAGE_THINNEST: f32 = 0.3;
-
-/// Lines over a copy's surface, part frame, meters: each point where a ray from the center leaves
-/// it, so one grid of directions fits every primitive.
-fn cage(shape: &Shape) -> Vec<Vec<Vec3>> {
-    let on = |theta: f64, phi: f64| {
-        let d = DVec3::new(theta.cos(), theta.sin() * phi.cos(), theta.sin() * phi.sin());
-        shape.exit(d).point.as_vec3()
-    };
-    let tau = std::f64::consts::TAU;
-    let pi = std::f64::consts::PI;
-    let mut curves = Vec::new();
-    for r in 1..=CAGE_RINGS {
-        let theta = pi * r as f64 / (CAGE_RINGS + 1) as f64;
-        curves.push((0..=CAGE_SAMPLES).map(|i| on(theta, tau * i as f64 / CAGE_SAMPLES as f64)).collect());
-    }
-    for m in 0..CAGE_MERIDIANS {
-        let phi = tau * m as f64 / CAGE_MERIDIANS as f64;
-        curves.push((0..=CAGE_SAMPLES).map(|i| on(pi * i as f64 / CAGE_SAMPLES as f64, phi)).collect());
-    }
-    curves
-}
-
 /// What is drawn this frame: a refit's moment, or the form standing still.
 fn this_frame<'a>(own: &'a Formed, refit: Option<&Refit>, now_s: f64) -> (Cow<'a, Frame>, Option<(usize, Option<usize>)>) {
     match refit {
@@ -311,11 +270,9 @@ pub fn update_parts(
     refit: Option<Res<Refit>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BodySurfaceMaterial>>,
-    mut wires: ResMut<Assets<BodyWireframeMaterial>>,
     surfaces: Res<crate::surfaces::Surfaces>,
-    mut roots: Query<(Entity, &mut Transform, &FormRoot), (Without<Painted>, Without<Cage>)>,
-    mut pieces: Query<(&MeshMaterial3d<BodySurfaceMaterial>, &Painted, &mut Transform, &mut Visibility), Without<Cage>>,
-    mut cages: Query<(&MeshMaterial3d<BodyWireframeMaterial>, &Cage, &mut Transform, &mut Visibility), Without<Painted>>,
+    mut roots: Query<(Entity, &mut Transform, &FormRoot), Without<Painted>>,
+    mut pieces: Query<(&MeshMaterial3d<BodySurfaceMaterial>, &Painted, &mut Transform, &mut Visibility)>,
     showing: Res<crate::refit_hull::Showing>,
     real: Res<crate::ship_hull::RealHulls>,
 ) {
@@ -327,7 +284,7 @@ pub fn update_parts(
     let star = lighting(session);
     let placed = ship_frame(session, &eye, &ui);
     // The real hull, or a refit's meshes over it, once either is up.
-    let formed = own.0.as_ref().filter(|_| !showing.0 && !real.drawn(None));
+    let formed = own.0.as_ref().filter(|_| !showing.drawing(None) && !real.drawn(None));
     let Some(formed) = formed else {
         for (root, _, _) in &roots {
             commands.entity(root).despawn();
@@ -360,25 +317,6 @@ pub fn update_parts(
                 ChildOf(root),
             ));
         }
-        for (copy, piece) in outer.iter().enumerate() {
-            let tube_m = (CAGE_TUBE * formed.reach_m) as f32;
-            let material = BodyWireframeMaterial {
-                base_color: CAGE_COLOR,
-                emission_strength: CAGE_EMISSION,
-                base_tube_radius: tube_m,
-                target_tube_radius: 0.0,
-                ..default()
-            };
-            commands.spawn((
-                Mesh3d(meshes.add(wire_mesh::tube_curves(&cage(&piece.shape), tube_m, 4, 1.0))),
-                MeshMaterial3d(wires.add(material)),
-                caged(piece),
-                NoFrustumCulling,
-                RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
-                Cage { copy, tube_m },
-                ChildOf(root),
-            ));
-        }
         return;
     }
 
@@ -399,37 +337,12 @@ pub fn update_parts(
             asset.uniforms = next;
         }
     }
-    let Some(working) = &drawn.working else { return };
-    let scaffold = working.mean().scaffold as f32;
-    for (material, cage, mut transform, mut visibility) in &mut cages {
-        let Some(piece) = working.outer.get(cage.copy) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        *transform = caged(piece);
-        *visibility = if scaffold > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
-        let Some(mut asset) = wires.get_mut(&material.0) else { continue };
-        // Thinner than this the tubes alias into dots, which read as nothing being built.
-        let radius = cage.tube_m * (CAGE_THINNEST + (1.0 - CAGE_THINNEST) * scaffold);
-        if asset.target_tube_radius != radius {
-            asset.target_tube_radius = radius;
-        }
-    }
 }
 
 /// A painted copy at its size this frame: its mesh's scale times how much bigger it has grown.
 fn sized(piece: &Piece, painted: &Painted) -> Transform {
     let grown = (piece.shape.reach() / painted.reach_m) as f32;
     local(piece, painted.mesh_scale * grown)
-}
-
-/// The cage is built in the part's own frame, so it takes the pose without the quarter turn.
-fn caged(piece: &Piece) -> Transform {
-    Transform {
-        translation: piece.pose.position.as_vec3(),
-        rotation: Quat::from_mat3(&piece.pose.rotation.as_mat3()),
-        scale: Vec3::ONE,
-    }
 }
 
 #[cfg(test)]

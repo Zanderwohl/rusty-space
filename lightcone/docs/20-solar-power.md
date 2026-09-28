@@ -4,7 +4,10 @@ Every hull is covered in collectors, so a ship earns energy from starlight when 
 near a star.
 
 **Status: built.** `lc_world::solar` reads the form's shadow table and the flux; `Craft` walks the
-segments and turns an idle ship's broadside to its star. The first half of this doc is the
+segments and turns an idle ship's broadside to its star. Since the field's account
+([30-the-field.md](30-the-field.md)), `solar::intake_w` is what *arrives*, `G · L★ / (4π d²) · A(ŝ)`,
+and `η` and the engines' rating are applied where it is converted: the `P` below is what storage
+takes in while it has room and the rating is not reached. The first half of this doc is the
 mechanic and the numbers behind it. The second half is how it fits into the energy account in
 [19-ship-fitting.md](19-ship-fitting.md).
 
