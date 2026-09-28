@@ -280,6 +280,14 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     }
 }
 
+/// Where a [`MenuUi::cursor_row`] stands against its list's cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reached {
+    Behind,
+    At,
+    Ahead,
+}
+
 /// Which edge of the window a [`MenuUi::docked`] strip sits against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Edge {
@@ -431,6 +439,32 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         row
     }
 
+    /// A [`MenuUi::chosen_button`] as tall as it is wide, for a glyph or a letter.
+    pub fn square_button<A: Component>(&mut self, parent: Entity, text: &str, chosen: bool, action: A) -> Entity {
+        let button = self.chosen_button(parent, text, chosen, action);
+        self.commands.entity(button).insert(Node {
+            width: Val::Px(SQUARE),
+            height: Val::Px(SQUARE),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        });
+        button
+    }
+
+    /// A row of a list with a cursor, as [`MenuUi::tree_row`] at no depth: chosen at the cursor,
+    /// and dimmed past it.
+    pub fn cursor_row<A: Component>(&mut self, parent: Entity, text: &str, reached: Reached, action: A) -> Entity {
+        let theme = self.theme;
+        if reached == Reached::Ahead {
+            self.theme = MenuTheme { button_bg: theme.panel_bg, text: theme.text_dim, ..theme };
+        }
+        let row = self.tree_row(parent, 0, text, reached == Reached::At, action);
+        self.theme = theme;
+        row
+    }
+
     /// A panel's heading that folds it: an arrow on the left, pointing at the words while folded
     /// and turned down while open, and the whole line pressable. `›` turned rather than a triangle,
     /// which interface faces often lack.
@@ -515,6 +549,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
 }
 
 const TREE_INDENT: f32 = 12.0;
+const SQUARE: f32 = 24.0;
 const HEADING_TEXT: f32 = 15.0;
 const FOLD_ARROW: f32 = 16.0;
 const FIELD_TEXT: f32 = 13.0;
@@ -543,6 +578,7 @@ pub fn button_hover_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::vfd;
 
     const RED: Color = Color::srgb(1.0, 0.3, 0.1);
 
@@ -552,6 +588,40 @@ mod tests {
     struct Yes;
     #[derive(Component)]
     struct No;
+
+    #[derive(Component)]
+    struct Row(Reached);
+
+    fn list(mut commands: Commands) {
+        let mut ui = MenuUi::new(&mut commands, MenuTheme::VFD);
+        let root = ui.docked((), Edge::Left, 0.0);
+        let panel = ui.strip(root);
+        for reached in [Reached::Behind, Reached::At, Reached::Ahead] {
+            ui.cursor_row(panel, "row", reached, Row(reached));
+        }
+    }
+
+    #[test]
+    fn a_cursor_row_is_chosen_at_the_cursor_and_dim_past_it() {
+        let mut app = App::new();
+        app.add_systems(Update, list);
+        app.update();
+        let world = app.world_mut();
+        let rows: Vec<(Reached, f32, Color, Entity)> = world
+            .query::<(&Row, &Node, &BackgroundColor, &Children)>()
+            .iter(world)
+            .map(|(row, node, bg, children)| (row.0, match node.border.left { Val::Px(px) => px, _ => 0.0 }, bg.0, children[0]))
+            .collect();
+        let text = |world: &World, e: Entity| world.entity(e).get::<TextColor>().unwrap().0;
+        for (reached, border, bg, words) in rows {
+            let (want_border, want_bg, want_text) = match reached {
+                Reached::Behind => (0.0, vfd::BUTTON_BG, vfd::TEXT),
+                Reached::At => (1.0, vfd::BUTTON_HOVER, vfd::TEXT),
+                Reached::Ahead => (0.0, vfd::PANEL_BG, vfd::TEXT_DIM),
+            };
+            assert_eq!((border, bg, text(world, words)), (want_border, want_bg, want_text), "{reached:?}");
+        }
+    }
 
     fn ask(mut commands: Commands) {
         MenuUi::new(&mut commands, MenuTheme::VFD).warning(RED).confirm(Asked, "SURE?", "it cannot be undone", ("Do it", Yes), ("Back", No));

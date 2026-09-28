@@ -93,6 +93,10 @@ pub struct FormView {
     pub orbit: FormOrbit,
     /// From the ship's form the first time the editor opens; kept across leaving it.
     pub draft: Option<crate::draft::Draft>,
+    /// Beside the draft, and as temporary: never saved or sent.
+    pub history: crate::form_history::History,
+    /// Its panel, under the palette. Hidden until asked for.
+    pub show_history: bool,
     pub selected: Option<lc_world::form::PartId>,
     /// Which of [`crate::draft::PRIMITIVES`] a part taken from the list is made as.
     pub new_shape: usize,
@@ -106,6 +110,17 @@ pub struct FormView {
     pub asking: Option<lc_world::form::Form>,
     /// Side panels folded down to their headings, to make room for the others.
     pub folded: Folded,
+}
+
+impl FormView {
+    /// Let go of a selected part the draft no longer has.
+    pub fn forget_gone(&mut self) {
+        if let Some(draft) = &self.draft
+            && self.selected.is_some_and(|id| draft.part(id).is_none())
+        {
+            self.selected = None;
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -491,10 +506,16 @@ fn start_draft(
     }
     let ship = own.form().cloned().unwrap_or_else(Form::starting);
     out.write(Requested(Action::StartDraft(ship.clone())));
-    let staged = dev.draft.as_deref().and_then(|name| crate::draft::staged(name, &ship, &Balance::DEFAULT));
-    if let Some(form) = staged {
-        let edit = crate::draft::Draft::new(ship).replace(form);
+    let edits = match dev.draft.as_deref() {
+        Some("edits") => crate::draft::staged_edits(&ship, &Balance::DEFAULT).unwrap_or_default(),
+        Some(name) => crate::draft::staged(name, &ship, &Balance::DEFAULT).map(|form| crate::draft::Draft::new(ship).replace(form)).into_iter().collect(),
+        None => Vec::new(),
+    };
+    for edit in edits {
         out.write(Requested(Action::EditForm(Ok(edit))));
+    }
+    for _ in 0..dev.undo {
+        out.write(Requested(Action::Undo));
     }
 }
 

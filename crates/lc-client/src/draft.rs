@@ -531,6 +531,16 @@ pub fn staged(name: &str, ship: &Form, balance: &Balance) -> Option<Form> {
         return crate::parts::fixture(name);
     }
     let mut d = Draft::new(ship.clone());
+    for edit in staged_edits(ship, balance)? {
+        d.apply(&edit, balance).ok()?;
+    }
+    Some(d.form)
+}
+
+/// `edits` as the edits that make it, one at a time, so the history lists each.
+pub fn staged_edits(ship: &Form, balance: &Balance) -> Option<Vec<Edit>> {
+    let mut d = Draft::new(ship.clone());
+    let mut out = Vec::new();
     let by_kind = |d: &Draft, kind: Kind| d.form.parts.iter().find(|p| p.kind == kind).copied();
     let edits = [
         by_kind(&d, Kind::Drone).map(|p| d.reshape(p.id, PRIMITIVES[0])),
@@ -539,12 +549,16 @@ pub fn staged(name: &str, ship: &Form, balance: &Balance) -> Option<Form> {
         by_kind(&d, Kind::Storage).map(|p| d.add(p.id, Kind::Bay, PRIMITIVES[3], DVec3::new(0.0, -1.0, 0.0), balance)),
     ];
     for edit in edits.into_iter().flatten() {
-        d.apply(&edit.ok()?, balance).ok()?;
+        let edit = edit.ok()?;
+        d.apply(&edit, balance).ok()?;
+        out.push(edit);
     }
     if let Some(living) = by_kind(&d, Kind::Living) {
-        d.apply(&d.anchor(living.id, DVec3::new(-1.0, 0.0, 1.0)).ok()?, balance).ok()?;
+        let edit = d.anchor(living.id, DVec3::new(-1.0, 0.0, 1.0)).ok()?;
+        d.apply(&edit, balance).ok()?;
+        out.push(edit);
     }
-    Some(d.form)
+    Some(out)
 }
 
 fn number_of(field: Field, primitive: &Primitive) -> lc_world::form::Number {

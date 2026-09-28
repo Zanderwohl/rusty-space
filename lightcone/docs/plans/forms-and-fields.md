@@ -769,9 +769,9 @@ graph LR
 
 ### C3 · Undo and redo
 
-- status: active card "C3 · Undo and redo"
+- status: done #139
 - needs: C2
-- touches: `crates/lc-client/src/form_history.rs`
+- touches: `crates/lc-client/src/form_history.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/form_panel.rs`, `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/ledger.rs`, `crates/lc-client/src/draft.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/lib.rs`, `crates/em-ui/src/widgets.rs`, `crates/em-ui/src/lib.rs`, `lightcone/docs/29-ship-form.md`, `lightcone/images/editor-history.png`, `AGENTS.md`
 - read: 29 §Undo and redo
 - deliver: the history of before-and-after entries, the cursor, the panel, the keys, cleared on Apply.
 - done when: undoing a removal restores the same part with the same id and children, and a drag is one entry.
