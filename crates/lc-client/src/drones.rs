@@ -1,5 +1,6 @@
-//! Drones at work on the player's ship: what `em_render::drone_material` is told, from the refit's
-//! [`Frame`].
+//! Drones at work: what `em_render::drone_material` is told, from a refit's [`Frame`]. The player's
+//! from its [`Refit`]; another craft's from the step its light shows, as [`crate::refit_hull`] draws
+//! its hull, one swarm under each craft's root.
 //!
 //! Docks, targets, the count and the rest are pure functions of the frame, so a paused clock draws
 //! the same frame twice. Only a working step sends drones out: to the sliver's frontier on a build
@@ -11,15 +12,20 @@
 //! of the step's fraction: a fixed meridian of the part, crossed at a fixed share of the way
 //! through the band ([`targets`]).
 
+use std::collections::HashMap;
+
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
 use em_render::drone_material::{
     DroneMaterial, DroneMaterialPlugin, DroneUniform, MAX_DOCKS, MAX_TARGETS, drone_quads,
 };
 use glam::DVec3;
+use lc_proto::ShipId;
+use lc_world::fitting::Balance;
 use lc_world::form::Kind;
 use lc_world::form::sdf::Piece;
 use lc_world::refit::rounds::{Phase, Plan};
+use lc_world::seen::Underway;
 
 use crate::construction::{Clock, Look, Refit, Working};
 use crate::parts::OwnForm;
@@ -469,13 +475,117 @@ pub fn update_drones(
     }
 }
 
+/// Another craft's drones. `origin_s` is when the light left it as the view was spawned.
+#[derive(Component)]
+pub struct CraftSwarm {
+    craft: ShipId,
+    material: Handle<DroneMaterial>,
+    quads: u32,
+    origin_s: f64,
+}
+
+/// Pixels a craft spans before its drones are drawn. Below it their haze, never narrower than a few
+/// pixels, would be wider than the craft.
+const MIN_CRAFT_PX: f32 = 24.0;
+
+/// So no two crafts' swarms, nor one and the player's, move in step. Bijective on the id's low bits.
+fn seed(craft: ShipId) -> u32 {
+    (craft.0 as u32).wrapping_mul(0x9e37_79b9) ^ 0x2545_f491
+}
+
+/// Quads for `count` drones, a power of two so a drone part growing through a round remeshes a
+/// dozen times rather than every frame, and crafts of a size share one mesh.
+fn quads(count: u32) -> u32 {
+    count.max(1).next_power_of_two().min(MAX_DRONES)
+}
+
+/// Draw each other craft's drones while it has a round, under its
+/// [`ShipHull`](crate::ship_hull::ShipHull) root, from [`crate::refit_hull::buildings`]. Their clock
+/// is when its light left.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_craft_drones(
+    mut commands: Commands,
+    (game, uplink): (Res<crate::app::Game>, Res<crate::uplink::Uplink>),
+    cameras: Query<(&Camera, &Projection, &GlobalTransform), With<crate::app::SkyCamera>>,
+    hulls: Query<(Entity, &crate::ship_hull::ShipHull, Option<&GlobalTransform>)>,
+    mut swarms: Query<(Entity, &mut CraftSwarm, &mut Visibility, &mut Mesh3d)>,
+    mut shared: Local<HashMap<u32, Handle<Mesh>>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<DroneMaterial>>,
+) {
+    let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
+    let buildings = crate::refit_hull::buildings(&game.0, None, &uplink.contacts, &balance);
+    for (entity, swarm, ..) in &swarms {
+        if buildings.iter().all(|b| b.craft != Some(swarm.craft)) {
+            commands.entity(entity).despawn();
+        }
+    }
+    for b in &buildings {
+        let Some(craft) = b.craft else { continue };
+        let Some(contact) = uplink.contacts.iter().find(|c| c.ship_id == craft) else { continue };
+        let Some((hull, _, at)) = hulls.iter().find(|(_, h, _)| h.craft() == b.craft) else { continue };
+        let views = cameras.iter().filter(|(camera, ..)| camera.is_active).filter_map(|(camera, projection, eye)| {
+            let Projection::Perspective(perspective) = projection else { return None };
+            Some((perspective.fov, camera.physical_viewport_size()?.y as f32, eye.translation()))
+        });
+        let px = at.map_or(f32::INFINITY, |at| craft_px(contact.length_m, at, views));
+        let existing = swarms.iter_mut().find(|(_, s, ..)| s.craft == craft);
+        if px < MIN_CRAFT_PX {
+            if let Some((_, _, mut visibility, _)) = existing {
+                *visibility = Visibility::Hidden;
+            }
+            continue;
+        }
+        let step_s = contact.building.as_ref().map_or(0.0, |(_, s)| Underway::from(s).duration_s);
+        let traffic = traffic(&b.frame.pieces, b.frame.working.as_ref().map(|w| (w, step_s)));
+        let n = quads(traffic.count);
+        let mesh = shared.entry(n).or_insert_with(|| meshes.add(drone_quads(n))).clone();
+        let Some((_, mut swarm, mut visibility, mut mesh3d)) = existing else {
+            let uniforms = traffic.uniform(0.0, seed(craft));
+            let material = materials.add(DroneMaterial { uniforms });
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material.clone()),
+                Transform::IDENTITY,
+                Visibility::Inherited,
+                NoFrustumCulling,
+                RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+                CraftSwarm { craft, material, quads: n, origin_s: contact.emitted_s },
+                ChildOf(hull),
+            ));
+            continue;
+        };
+        visibility.set_if_neq(Visibility::Inherited);
+        if swarm.quads != n {
+            swarm.quads = n;
+            mesh3d.0 = mesh;
+        }
+        let next = traffic.uniform(contact.emitted_s - swarm.origin_s, seed(craft));
+        if let Some(mut material) = materials.get_mut(&swarm.material)
+            && material.uniforms != next
+        {
+            material.uniforms = next;
+        }
+    }
+}
+
+/// The most pixels a craft `length_m` long under the root at `at` spans in any of `views`, each a
+/// vertical field of view, a viewport height in pixels and an eye; unbounded with none to measure.
+fn craft_px(length_m: f64, at: &GlobalTransform, views: impl Iterator<Item = (f32, f32, Vec3)>) -> f32 {
+    let extent = length_m as f32 * at.scale().max_element();
+    views
+        .map(|(fov, height, eye)| crate::hull_mesh::pixels_across(extent, eye.distance(at.translation()), fov, height))
+        .reduce(f32::max)
+        .unwrap_or(f32::INFINITY)
+}
+
 pub struct DronesPlugin;
 
 impl Plugin for DronesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(DroneMaterialPlugin).add_systems(
             Update,
-            update_drones
+            (update_drones, draw_craft_drones)
                 .after(crate::parts::update_parts)
                 .in_set(crate::app::Stage::Scene)
                 .run_if(in_state(crate::app::AppState::InGame)),
@@ -489,6 +599,7 @@ mod tests {
     use crate::construction::{Frame, demo_round};
     use lc_world::fitting::Balance;
     use lc_world::form::Form;
+    use crate::ship_hull::ShipHull;
     use lc_world::refit::rounds::{Change, Step};
 
     const B: Balance = Balance::DEFAULT;
@@ -671,6 +782,135 @@ mod tests {
             assert!(traffic_at(1.0 - 1e-9).working < 1e-3, "{:?} busy as it ends", s.change);
             assert_eq!(traffic_at(0.5).carrying > 0.0, s.change.phase() == Phase::Dismantle, "{:?}", s.change);
         }
+    }
+
+    /// A contact stated a quarter through the demo round's grow step, or with no round, with the
+    /// live clock long past the round.
+    fn seen_building(plan: &Plan, id: i64, round: bool) -> (crate::uplink::Contact, Step, f64) {
+        let i = plan.steps().iter().position(|s| s.change == Change::Grow).unwrap();
+        let step = plan.steps()[i];
+        let stated_s = plan.round().start_s + step.begins_s + 0.25 * step.duration_s;
+        let under = lc_world::seen::Underway {
+            step: i,
+            part: step.part,
+            change: step.change,
+            after: step.after,
+            fraction: 0.25,
+            duration_s: step.duration_s,
+            reversing: false,
+        };
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(id),
+            name: format!("craft {id}"),
+            length_m: 500.0,
+            at_ly: [0.0; 3],
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            drive_w: 0.0,
+            emitted_t: (stated_s * 1.0e6) as i64,
+            arrive_t: (stated_s * 1.0e6) as i64 + 3_600_000_000,
+            form: (&plan.at(stated_s).form).into(),
+            building: round.then(|| under.into()),
+            glow: None,
+            glare: None,
+        };
+        (crate::uplink::Contact::seen(presence, None), step, stated_s)
+    }
+
+    fn app(plan: &Plan, contacts: Vec<crate::uplink::Contact>) -> App {
+        use lc_world::sky::AuthoredStars;
+        let mut session = crate::session::Session::new(&AuthoredStars::sample(), 3);
+        session.set_coordinate_time_us(((plan.round().start_s + 10.0 * plan.duration_s()) * 1.0e6) as i64);
+        let mut uplink = crate::uplink::Uplink::default();
+        uplink.contacts = contacts;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::app::Game(session))
+            .insert_resource(crate::app::Ui(crate::ui::UiState::default()))
+            .init_resource::<crate::hull::Eye>()
+            .insert_resource(crate::parts::OwnForm::new(&Form::starting(), &B).unwrap())
+            .insert_resource(uplink)
+            .init_resource::<Assets<DroneMaterial>>()
+            .init_resource::<Assets<Mesh>>()
+            .add_systems(Update, (update_drones, draw_craft_drones));
+        app
+    }
+
+    fn craft_swarms(app: &mut App) -> Vec<(ShipId, Entity, DroneUniform)> {
+        let world = app.world_mut();
+        let found: Vec<_> =
+            world.query::<(&CraftSwarm, &ChildOf)>().iter(world).map(|(s, c)| (s.craft, c.parent(), s.material.clone())).collect();
+        let materials = world.resource::<Assets<DroneMaterial>>();
+        let mut found: Vec<_> = found.into_iter().map(|(c, p, m)| (c, p, materials.get(&m).unwrap().uniforms.clone())).collect();
+        found.sort_by_key(|(c, ..)| c.0);
+        found
+    }
+
+    /// Another craft with a round gets drones of its own, under its own root, working the frontier
+    /// of the step its light shows; one with no round gets none; and the player's are untouched.
+    #[test]
+    fn another_crafts_drones_work_the_step_its_light_shows() {
+        let plan = plan();
+        let (mut nine, step, stated_s) = seen_building(&plan, 9, true);
+        let (ten, ..) = seen_building(&plan, 10, true);
+        let (eleven, ..) = seen_building(&plan, 11, false);
+        nine.emitted_s = stated_s + 0.25 * step.duration_s;
+        let mut app = app(&plan, vec![nine, ten, eleven]);
+        let world = app.world_mut();
+        let roots: Vec<Entity> = [9, 10, 11].map(|id| world.spawn(ShipHull::bare(Some(ShipId(id)), Entity::PLACEHOLDER)).id()).into();
+        app.update();
+
+        let swarms = craft_swarms(&mut app);
+        let placed: Vec<_> = swarms.iter().map(|(c, p, _)| (*c, *p)).collect();
+        assert_eq!(placed, vec![(ShipId(9), roots[0]), (ShipId(10), roots[1])]);
+        let expected = |fraction: f64| {
+            let frame = at(&plan, &step, fraction);
+            traffic(&frame.pieces, frame.working.as_ref().map(|w| (w, step.duration_s)))
+        };
+        let close = |u: &DroneUniform, t: &Traffic| {
+            assert!(t.working > 0.5 && (u.working - t.working as f32).abs() < 1e-3, "{} working, {} expected", u.working, t.working);
+            assert_eq!(u.target_count as usize, t.targets.len());
+            let off = t.targets.iter().zip(&u.targets).map(|(a, b)| a.as_vec3().distance(b.truncate())).fold(0.0, f32::max);
+            assert!(off < 0.5, "targets {off} m from the step at its light's fraction");
+        };
+        close(&swarms[0].2, &expected(0.5));
+        assert_ne!(swarms[0].2.seed, swarms[1].2.seed);
+        assert!(swarms.iter().all(|(.., u)| u.seed != SEED));
+
+        let world = app.world_mut();
+        let own: Vec<_> = world.query::<(&Swarm, Option<&ChildOf>)>().iter(world).map(|(s, c)| (s.material.clone(), c.is_some())).collect();
+        assert_eq!(own.len(), 1, "one player's swarm");
+        assert!(!own[0].1, "the player's swarm is placed in the ship's frame, under no root");
+        let uniforms = world.resource::<Assets<DroneMaterial>>().get(&own[0].0).unwrap().uniforms.clone();
+        assert_eq!(uniforms, traffic(&starting(), None).uniform(0.0, SEED));
+
+        // More of the step reaches us, and its drones move on with it.
+        world.resource_mut::<crate::uplink::Uplink>().contacts[0].emitted_s = stated_s + 0.5 * step.duration_s;
+        app.update();
+        close(&craft_swarms(&mut app)[0].2, &expected(0.75));
+
+        // Its round no longer stated: its drones go.
+        app.world_mut().resource_mut::<crate::uplink::Uplink>().contacts[0].building = None;
+        app.update();
+        assert_eq!(craft_swarms(&mut app).iter().map(|(c, ..)| *c).collect::<Vec<_>>(), vec![ShipId(10)]);
+    }
+
+    #[test]
+    fn crafts_have_seeds_of_their_own() {
+        let seeds: std::collections::HashSet<u32> = (0..1000).map(|id| seed(ShipId(id))).collect();
+        assert_eq!(seeds.len(), 1000);
+        assert!(!seeds.contains(&SEED));
+    }
+
+    /// A craft too small on screen to show a drone draws none, and one close enough does.
+    #[test]
+    fn a_craft_too_small_on_screen_draws_no_drones() {
+        let root = GlobalTransform::from(Transform::from_scale(Vec3::splat(1.0e-3)));
+        let from = |km: f32| std::iter::once((1.0, 720.0, Vec3::new(km, 0.0, 0.0)));
+        assert!(craft_px(500.0, &root, from(2.0)) > MIN_CRAFT_PX);
+        assert!(craft_px(500.0, &root, from(20_000.0)) < MIN_CRAFT_PX);
+        assert_eq!(craft_px(500.0, &root, std::iter::empty()), f32::INFINITY);
+        assert_eq!((quads(785), quads(0), quads(1_000_000)), (1024, 1, MAX_DRONES));
     }
 
     #[test]
