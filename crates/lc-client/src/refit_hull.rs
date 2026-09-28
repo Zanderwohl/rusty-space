@@ -602,6 +602,7 @@ mod tests {
             .init_resource::<RealHulls>()
             .init_resource::<Unready>()
             .init_resource::<Showing>()
+            .init_resource::<crate::field::Envelopes>()
             .init_resource::<Assets<HullMaterial>>()
             .init_resource::<Assets<Mesh>>()
             .add_systems(Update, draw_refit);
