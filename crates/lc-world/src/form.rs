@@ -166,8 +166,6 @@ pub enum FormError {
     MissingParent { part: PartId, parent: PartId },
     /// Names the lowest id on the cycle, whichever part the walk started from.
     Cycle(PartId),
-    /// The envelope reaches past every padding the grid tries, so it has no extent to state.
-    EnvelopeOpen,
     /// An engine whose axis is not the nose axis.
     EngineOffAxis(PartId),
     /// Another part in an engine's clear cone.
@@ -197,7 +195,6 @@ impl std::fmt::Display for FormError {
             Self::Unplaced(id) => write!(f, "{id} has no parent"),
             Self::MissingParent { part, parent } => write!(f, "{part} hangs from {parent}, which does not exist"),
             Self::Cycle(id) => write!(f, "{id} is its own ancestor"),
-            Self::EnvelopeOpen => write!(f, "the envelope does not close"),
             Self::EngineOffAxis(id) => write!(f, "{id} is an engine not pointing fore or aft"),
             Self::EngineBlocked(id) => write!(f, "something is in the cone of {id}, an engine"),
             Self::BayBlocked(id) => write!(f, "something is in the mouth of {id}, a bay"),
@@ -550,7 +547,7 @@ impl From<FormError> for lc_proto::FormFault {
                 Self::MissingParent { part: part.into(), parent: parent.into() }
             }
             FormError::Cycle(id) => Self::Cycle(id.into()),
-            FormError::EnvelopeOpen | FormError::Extent => Self::Extent,
+            FormError::Extent => Self::Extent,
             FormError::EngineOffAxis(id) => Self::EngineOffAxis(id.into()),
             FormError::EngineBlocked(id) => Self::EngineBlocked(id.into()),
             FormError::BayBlocked(id) => Self::BayBlocked(id.into()),

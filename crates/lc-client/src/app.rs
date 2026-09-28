@@ -126,7 +126,7 @@ impl Plugin for ClientPlugin {
                 crate::form_preview::FormPreviewPlugin),
             (crate::bench::BenchPlugin, crate::haze::HazePlugin),
             // The beauty shots and the staged refit both photograph the ship.
-            (crate::beauty::BeautyPlugin, crate::ship_hull::ShipHullPlugin, crate::refit_hull::RefitHullPlugin),
+            (crate::beauty::BeautyPlugin, crate::ship_hull::ShipHullPlugin, crate::refit_hull::RefitHullPlugin, crate::field::FieldPlugin),
             // The menu's and the editor's widgets, so the browser build, which has no menu, has
             // them too.
             em_ui::MenuUiPlugin,
@@ -262,6 +262,9 @@ impl Plugin for ClientPlugin {
                     (crate::refit_hull::draw_refit, crate::ship_hull::draw_hulls, crate::parts::update_parts)
                         .chain()
                         .after(crate::hull_mesh::HullMeshSystems),
+                    // Under the hulls' roots, placed by then; before the exhaust, which is additive
+                    // and sorts against the field's walls.
+                    (crate::field::hold, crate::field::collapses, crate::field::draw_fields).chain(),
                     // And the exhaust after the hulls, whose roots the glows hang from.
                     crate::plume::draw_exhaust,
                 )

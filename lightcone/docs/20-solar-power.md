@@ -42,7 +42,7 @@ its grid along 162 directions, interpolated between them. The direction is the s
 own frame, in the attitude it holds. The table is cached with the form and measured again only when
 the form changes.
 
-For the starting form, 571 m long:
+For the starting form, 731 m long:
 
 | attitude to the star | area | relative to broadside |
 |---|---|---|
@@ -85,7 +85,7 @@ A game year is a real hour at the design rate, so every time below is also real 
 The columns are the starting form, 30 ME of storage and one slot of living space, and the same
 form two and ten times as long in every part but the Mind (`default*2` and `default*10`).
 
-| | 571 m (30 ME) | 1.14 km (240 ME) | 5.7 km (30 000 ME) |
+| | 731 m (30 ME) | 1.46 km (240 ME) | 7.3 km (30 000 ME) |
 |---|---|---|---|
 | 0.05 AU | full in 15 min | 30 min | 2.5 h |
 | **0.1 AU** | **1 h** | 2 h | 10 h |

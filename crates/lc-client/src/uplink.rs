@@ -269,6 +269,7 @@ pub struct Uplink {
     /// Every conversation this ship is in. See [`crate::chat`].
     pub chat: crate::chat::Chat,
     pub console: crate::console::Console,
+    pub incoming: crate::field::Incoming,
 }
 
 /// The rate a shard runs at, and what a server that says nothing is taken to mean.
@@ -649,20 +650,16 @@ fn fold(
                 };
                 ui.0.heard(from, notice, arrived_s);
             }
-            // Each end of a jump arrives at its own light delay.
+            // Each end of a jump arrives at its own light delay. A collapse is `crate::field`'s.
             // Not this ship's own: its console already said where it went.
             let me = uplink.joined().map(|joined| joined.ship_id);
-            for sighting in seen.iter().filter(|s| matches!(s.kind, lc_proto::kind::VANISH | lc_proto::kind::APPEAR | lc_proto::kind::COLLAPSE)) {
+            for sighting in seen.iter().filter(|s| matches!(s.kind, lc_proto::kind::VANISH | lc_proto::kind::APPEAR)) {
                 let from = ShipId(sighting.source_id);
                 if Some(from) == me {
                     continue;
                 }
                 let who = uplink.name_of(from);
-                let what = match sighting.kind {
-                    lc_proto::kind::VANISH => "vanished",
-                    lc_proto::kind::APPEAR => "appeared",
-                    _ => "collapsed",
-                };
+                let what = if sighting.kind == lc_proto::kind::VANISH { "vanished" } else { "appeared" };
                 ui.0.heard(from, format!("{who} {what}"), sighting.arrive_t as f64 * 1e-6);
             }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
@@ -914,8 +911,11 @@ fn fold(
         }
         // The welcome to the successor follows.
         Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed", at_t as f64 * 1e-6),
-        // Sent once E3 and S2 are built.
-        Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
+        Outbound::Illuminated { ship_id, beam, bearing, power_w, arrive_t, .. } => {
+            uplink.incoming.illuminated(ship_id, beam, bearing, power_w, arrive_t)
+        }
+        // Sent once S2 is built.
+        Outbound::Presets(_) => {}
     }
 }
 

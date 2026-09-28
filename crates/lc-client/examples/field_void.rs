@@ -1,8 +1,8 @@
 //! A field held at a temperature around a stand-in hull, in a void, for photographing
-//! `shaders/field.wgsl`.
+//! `shaders/field.wgsl`. Its uniforms are built by `lc_client::field`, as the game's are.
 //!
-//! The binary's own `--field-k` holds the *player's* field and arrives with R11 of
-//! `lightcone/docs/plans/forms-and-fields.md`; there is no player field before then.
+//! The binary's own `--field-k` holds the *player's* field in the game, round its real envelope:
+//! see AGENTS.md's flag table.
 //!
 //! ```text
 //! cargo run -p lc-client --example field_void -- --field-k 2400 --mode clear \
@@ -13,7 +13,7 @@
 //! |---|---|
 //! | `--field-k <kelvin>` | the field's temperature; 400 by default |
 //! | `--mode clear\|black` | the field's mode |
-//! | `--fill <fraction>` | heat over the limit; by default `(T / LIMIT_K)⁴`, heat going as `T⁴` |
+//! | `--fill <fraction>` | heat over the limit; by default `(T / T_limit)⁴`, heat going as `T⁴` |
 //! | `--spot <strength>` | a beam's hot spot from the upper left, as a multiple of the field's power |
 //! | `--switch <progress>` | a switch into `--mode` from the other, frozen at this progress |
 //! | `--collapse <seconds>` | the field collapsed this long ago, in real seconds |
@@ -35,17 +35,13 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use em_render::body_surface_material::{
     BodySurfaceMaterial, BodySurfaceMaterialPlugin, BodySurfaceUniform,
 };
-use em_render::field_material::{
-    BLACK, CLEAR, FieldMaterial, FieldMaterialPlugin, FieldUniform, RAMP, ramp_entry, ramp_kelvin,
-};
+use em_render::field_material::{FieldMaterial, FieldMaterialPlugin, FieldUniform, RAMP};
 use em_spectra::{BandMapping, PerBand, blackbody, presets};
+use lc_client::field::{FieldState, Lighting, Shell, fill_at, limit_k};
+use lc_world::field::Mode;
+use lc_world::fitting::Balance;
 
-/// The field's limit, where it collapses: 30-the-field.md's anchors.
-const LIMIT_K: f64 = 4600.0;
-/// 30-the-field.md's `clear_absorptivity`.
-const CLEAR_ABSORPTIVITY: f32 = 0.3;
-/// 30-the-field.md's `collapse_spike_k`.
-const SPIKE_K: f32 = 1.0e7;
+const BALANCE: Balance = Balance::DEFAULT;
 
 const SUN_RADIUS_M: f64 = 6.957e8;
 const SUN_K: f64 = 5772.0;
@@ -57,15 +53,11 @@ const STANDOFF_M: f32 = 22.0;
 /// Where the Mind sits, from the hull's center toward the bow, in hull lengths.
 const MIND_FORE: f32 = 0.2;
 const CAMERA_M: f32 = 210.0;
-/// How many times its own size the debris of a collapse spreads to.
-const DEBRIS_REACH: f32 = 4.0;
 /// From the ship toward the camera.
 const CAMERA_DIR: Vec3 = Vec3::new(0.62, 0.30, 0.72);
 /// A gray world straight behind the ship, so a Black field has something to hide against.
 const BACKDROP_M: f32 = 900.0;
 const BACKDROP_BEHIND_M: f32 = 6000.0;
-/// See `ApertureGlowUniform::exposure`.
-const OVERFLOW_GAIN: f32 = 0.5;
 /// `lc_client::app`'s window size, so a shot here compares with a shot there.
 const WINDOW: (u32, u32) = (1280, 720);
 
@@ -126,8 +118,8 @@ impl Args {
         }
     }
 
-    fn fill(&self) -> f32 {
-        self.fill.unwrap_or((self.kelvin / LIMIT_K).powi(4)) as f32
+    fn fill(&self) -> f64 {
+        self.fill.unwrap_or_else(|| fill_at(self.kelvin, &BALANCE))
     }
 }
 
@@ -156,9 +148,12 @@ struct Field;
 #[derive(Component)]
 struct Hull;
 
+#[derive(Resource)]
+struct Envelope(Shell);
+
 /// The scene's exposure and light, worked out once: nothing in it moves.
 #[derive(Resource)]
-struct Lighting {
+struct Scene {
     to_star: Vec3,
     /// A white Lambertian surface facing the star, display light.
     starlight: Vec3,
@@ -225,7 +220,7 @@ fn stage(
     let own = blackbody::per_band(lc_world::fitting::Balance::DEFAULT.field_idle_k);
     let white = args.mapping.apply_f64(&sunlit(1.0, args.au));
 
-    let absorbs = if args.black { 1.0 } else { CLEAR_ABSORPTIVITY as f64 };
+    let absorbs = if args.black { 1.0 } else { BALANCE.clear_absorptivity };
     let field_rgb = args.mapping.apply_f64(&blackbody::per_band(args.kelvin)).map(|c| c * absorbs);
     let lit_rgb = args.mapping.apply_f64(&hull_radiance);
     let own_rgb = args.mapping.apply_f64(&own);
@@ -243,10 +238,8 @@ fn stage(
     let reference = meter(&mut samples);
     let stops = 5.0;
 
-    let spectrum = std::array::from_fn(|i| {
-        ramp_entry(args.mapping.apply_f64(&blackbody::per_band(ramp_kelvin(i) as f64)))
-    });
-    let lighting = Lighting {
+    let spectrum = lc_client::field::spectrum(&args.mapping);
+    let lighting = Scene {
         to_star,
         starlight: Vec3::from_array(white.map(|c| c as f32)),
         reference,
@@ -290,7 +283,16 @@ fn stage(
     // The envelope is meshed in its own units so the collapse can round it about its center;
     // a scale in the transform would stretch the sphere back into an ellipsoid.
     let envelope_mesh = meshes.add(Sphere::new(1.0).mesh().uv(96, 48).scaled_by(envelope));
-    let uniforms = uniforms(&args, &lighting, 0.0);
+    let origin = Vec3::new(0.0, 0.0, HULL_M * MIND_FORE);
+    let shell = Shell {
+        mesh: envelope_mesh.clone(),
+        center: Vec3::ZERO,
+        radius: envelope.max_element(),
+        mind: origin,
+        reach: envelope.z + origin.z,
+        area_m2: 0.0,
+    };
+    let uniforms = uniforms(&args, &lighting, &shell, &Time::default());
     for layer in FieldMaterial::layers(uniforms, envelope.max_element()) {
         commands.spawn((
             Mesh3d(envelope_mesh.clone()),
@@ -300,6 +302,7 @@ fn stage(
         ));
     }
     commands.insert_resource(lighting);
+    commands.insert_resource(Envelope(shell));
 
     let standoff = if args.collapse.is_some() { 5.0 } else { 1.0 };
     commands.spawn((
@@ -342,51 +345,50 @@ fn flat(uniforms: BodySurfaceUniform, images: &mut Assets<Image>) -> BodySurface
     }
 }
 
-fn uniforms(args: &Args, lighting: &Lighting, clock_s: f32) -> FieldUniform {
-    let envelope = envelope_extents();
-    let origin = Vec3::new(0.0, 0.0, HULL_M * MIND_FORE);
-    let reach = envelope.z + origin.z;
-    let (mode, previous, progress) = match (args.black, args.switch) {
-        (black, Some(p)) => {
-            let new = if black { BLACK } else { CLEAR };
-            (new, BLACK - new, p)
-        }
-        (true, None) => (BLACK, BLACK, 1.0),
-        (false, None) => (CLEAR, CLEAR, 1.0),
+/// `time` is Bevy's, whose wrapped reading the shader sees as `globals.time`.
+fn uniforms(args: &Args, lighting: &Scene, shell: &Shell, time: &Time) -> FieldUniform {
+    let mode = if args.black { Mode::Black } else { Mode::Clear };
+    let state = FieldState {
+        kelvin: args.kelvin,
+        fill: args.fill(),
+        shade: if args.switch.is_some() { mode.other() } else { mode },
+        switch: args.switch.map(|p| (mode, p as f64)),
+    };
+    let light = Lighting {
+        to_star: lighting.to_star,
+        starlight: lighting.starlight,
+        exposure: Vec4::new(lighting.reference, lighting.stops, lc_client::plume::OVERFLOW_GAIN, 0.0),
+        spectrum: lighting.spectrum,
+        wrap_s: time.wrap_period().as_secs_f32(),
     };
     let mut hot_spots = [Vec4::ZERO; em_render::field_material::HOT_SPOTS];
     if args.spot > 0.0 {
         hot_spots[0] = Vec3::new(0.2, 0.5, 1.0).normalize().extend(args.spot);
     }
-    FieldUniform {
-        state: Vec4::new(args.kelvin as f32, args.fill(), CLEAR_ABSORPTIVITY, clock_s),
-        mode: Vec4::new(mode, previous, progress, reach),
-        origin: origin.extend(0.0),
-        to_star: lighting.to_star.extend(0.0),
-        starlight: lighting.starlight.extend(0.0),
-        exposure: Vec4::new(lighting.reference, lighting.stops, OVERFLOW_GAIN, 0.0),
-        hot_spots,
-        collapse: Vec4::new(args.collapse.unwrap_or(-1.0), 0.5, args.afterglow, DEBRIS_REACH),
-        collapse_k: Vec4::new(SPIKE_K, LIMIT_K as f32, envelope.max_element(), 0.0),
-        spectrum: lighting.spectrum,
-    }
+    // Frozen that long after it began: the start is set back from now every frame.
+    let collapse = match args.collapse {
+        Some(since) => Vec4::new(time.elapsed_secs_wrapped() - since, 0.5, args.afterglow, 4.0),
+        None => lc_client::field::STANDING,
+    };
+    lc_client::field::uniform(&state, shell, &BALANCE, &light, hot_spots, collapse)
 }
 
 fn shade(
     time: Res<Time>,
     args: Res<Args>,
-    lighting: Option<Res<Lighting>>,
+    lighting: Option<Res<Scene>>,
+    envelope: Option<Res<Envelope>>,
     fields: Query<&MeshMaterial3d<FieldMaterial>, With<Field>>,
     mut hulls: Query<&mut Visibility, With<Hull>>,
     mut materials: ResMut<Assets<FieldMaterial>>,
 ) {
-    let Some(lighting) = lighting else { return };
-    let mut next = uniforms(&args, &lighting, time.elapsed_secs());
+    let (Some(lighting), Some(envelope)) = (lighting, envelope) else { return };
+    let mut next = uniforms(&args, &lighting, &envelope.0, &time);
     if let Some(since) = args.collapse {
         // The game's meter follows the scene, so the afterglow is exposed for as it cools; the
         // flash is left to overflow. The cooling is the shader's own.
         let cooled = (since / args.afterglow).clamp(0.0, 1.0) as f64;
-        let kelvin = LIMIT_K * (1.0 - cooled).powf(0.6) + 300.0;
+        let kelvin = limit_k(&BALANCE) * (1.0 - cooled).powf(0.6) + 300.0;
         next.exposure.x = luminance(args.mapping.apply_f64(&blackbody::per_band(kelvin))) as f32;
     }
     for handle in &fields {

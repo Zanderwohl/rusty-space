@@ -137,7 +137,7 @@ pub const FIELD_ANCHOR_ME: f64 = 10.0;
 
 /// The starting form's envelope, m². Solved in `field`'s anchor tests, since the grid is not
 /// `const`, and pinned there.
-pub const STARTING_ENVELOPE_M2: f64 = 339248.9593564414;
+pub const STARTING_ENVELOPE_M2: f64 = 430505.9958869815;
 
 /// The starting form's shadow broadside, m²: what [`Balance::solar_gain`] is solved on. Pinned by
 /// `solar`'s anchor tests for the same reason.
