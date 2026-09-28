@@ -5,13 +5,13 @@ fails, the ship is gone and the whole system sees it happen.
 
 **Status: in the account.** The closed forms are `lc_world::field`, with their anchors derived in
 `Balance::DEFAULT`. A fitting settles `Q` beside stored energy (`lc_world::fitting::heat`), `Fitted`
-carries it and a checkpoint keeps it. Every field runs Black until the modes are built, and nothing
-collapses yet. A ship whose storage has run down to what its motive has committed pays only as much
-of the living drain as conversion brings in, and the rest makes no heat, so an empty ship far from
-a star cools below 400 K. A refit's transfers and a burn's spending are settled beside the account
-rather than inside it, so room a build opens in full storage is refilled from the next settlement,
-a game day at most, and until then what would have filled it is heat; and a return landing in room
-starlight has already filled can hold storage above capacity until then. H8 closes both. It replaces the fixed 400 K hull
+carries it and a checkpoint keeps it. Every field runs Black until the modes are built. A field that
+reaches `Q_max` collapses (`lc_server::field`); its spike does not yet reach neighbors. A ship
+whose storage has run down to what its motive has committed pays only as much of the living drain
+as conversion brings in, and the rest makes no heat, so an empty ship far from a star cools below
+400 K. A refit's transfers and a burn's spending are draws on storage inside the account, cut where
+each refit step begins and ends, so conversion refills what a build takes out as it goes, and the
+drain and the rating change where a step ends. It replaces the fixed 400 K hull
 (`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
 [20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
 Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
@@ -76,7 +76,8 @@ Constant over a segment unless marked as a burst. A burst jumps `Q` at the insta
 | the living drain | all of it |
 | the drive below ε = 1 | `1 − ε` of the exhaust power. Nothing at the default ε = 1 |
 | dismantling | the 5% a dismantling loses, spread over the step as the energy moves |
-| **vented storage** | **a burst**: what a refit round's dismantling returns and storage has no room for, at the end of the step that frees it ([29-ship-form.md](29-ship-form.md#refits)) |
+| a return arriving at full storage | all of it, as it arrives: room the round planned for that starlight filled first |
+| **vented storage** | **a burst**: what the round planned to vent for want of room, and what a shrinking store actually holds past its new capacity, at the end of the step ([29-ship-form.md](29-ship-form.md#refits)) |
 | **a collapse's spike** | **a burst**, on arrival: see below |
 
 ### Conversion
@@ -96,6 +97,12 @@ What arrives is converted to storage at up to the **conversion rating**, at
   however full it was, and conversion runs throughout.
 - A burst arrives faster than any rating, so **all of it is heat**. Empty storage stops sustained
   power, never a burst.
+
+- **A refit's transfers are draws on storage**, a build's cost out of it and a dismantling's return
+  into it, spread over each step. A return arriving at full storage is heat as it arrives, like
+  starlight: storage never holds more than its capacity. What the round planned to vent still
+  bursts at the end of its step, and a store that shrinks spills what it actually holds past its
+  new capacity, which starlight may have made more than the plan expected.
 
 Storage filling partway through a segment splits it. The fill time is linear in the segment's
 inputs, so the split is closed form too. Holding full storage full, rather than switching
@@ -261,6 +268,26 @@ How it looks from the next system, taking the spike as one second long:
 A war lights up its neighbors' skies **in order of their distance**, for years, each system
 seeing it replayed as the light passes.
 
+### As built
+
+- **The instant is solved, not stepped.** `Fitting::collapse_s` walks the account's stretches from
+  its settlement, fill and empty storage splits and refit steps included, and takes the closed form in
+  each. A vent that crosses `Q_max` crosses it at its step's end. The shard walks that across the
+  day-long starlight segments the account will be settled at and fires what falls due, once before
+  the tick advances anything and once after its orders. Nothing is stored for it: every change of
+  input settles the account first, so asking again is the re-solve, and a checkpoint restores it with
+  the account.
+- **The event** is `kind::COLLAPSE`, stamped at the instant and where the ship was, carrying a
+  `Released`. It goes through the journal like a burn. Its power is the spike taken as a second
+  long, until [Proximity](#proximity) gives the spike somewhere to land. The afterglow is not yet
+  light anything can see; H10 makes it so.
+- **The wreck** stays in the fleet with its worldline ended at the instant. A ship that could see
+  it goes on seeing it until the light of the end arrives, then stops, and the wreck is dropped once
+  that light has passed every craft. It is not checkpointed, and its row and what it knew are
+  deleted at the next one: the successor carries the account, and an account holds one row.
+- **The successor** is a new ship, with a new id, at the spawn point. A connected owner is sent
+  `Collapsed` and then welcomed to it as on signing in.
+
 ## Proximity
 
 Everything a field emits heats whatever is near, through the same intake as starlight. The
@@ -411,6 +438,9 @@ puts a countdown in the text.
 - **Closed form against stepping.** An account with a starlight segment, a vent burst and a
   storage-fills split, stepped finely, agrees with the closed form. Break the equation of state on
   purpose (a linear `T` instead of a fourth root) and check that the temperature tests fail.
+- **A round under starlight.** A refit whose steps end between settlements, settled at every tick
+  and in one leap, agrees on heat and storage, and never holds more than capacity. A return into
+  room starlight has filled ends as heat, joule for joule.
 - **Collapse is on time.** A scheduled collapse fires at the predicted instant, and a change of
   input before it moves it.
 - **Light delay.** A collapse is observed by a distant client no earlier than the light allows,
@@ -428,7 +458,11 @@ puts a countdown in the text.
 
 - **Death.** A new starting ship, knowing nothing, is the harshest reading. Whether the Mind, the
   data part's contents or a faction's relays survive the ship is a question for
-  [22-provenance.md](22-provenance.md).
+  [22-provenance.md](22-provenance.md). An owner signed out when it happens is told nothing and
+  finds the new ship on signing in; the transcript and knowledge went with the old one.
+- **A wreck across a restart.** A wreck is not checkpointed, so a shard that restarts while its
+  light is still in flight forgets it, and a ship that had not yet seen the end stops seeing the
+  wreck at the restart instead. The event and its deliveries are in the journal and survive.
 - **Air under the field.** Parks held by the field would cap its temperature well below 4 600 K.
   Whether that is a real rule or only a look is undecided. The two layers are drawn either way.
 - **Direction of intake.** Reciprocity says an aperture receives best along its own axis. The

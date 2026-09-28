@@ -239,8 +239,21 @@ impl Fitted {
 }
 
 /// A right-handed basis for the plane whose normal is `pole`.
+///
+/// Written out rather than `any_orthonormal_vector`, because a stated orbit's covariance is in
+/// this basis (`knowledge::record::Covariance`) and a library's choice of basis is free to
+/// change under an upgrade. The coordinate axis least along the pole, so the projection never
+/// degenerates.
 pub(super) fn basis(pole: DVec3) -> (DVec3, DVec3) {
-    let u = pole.any_orthonormal_vector();
+    let a = pole.abs();
+    let axis = if a.x <= a.y && a.x <= a.z {
+        DVec3::X
+    } else if a.y <= a.z {
+        DVec3::Y
+    } else {
+        DVec3::Z
+    };
+    let u = (axis - pole * pole.dot(axis)).normalize();
     (u, pole.cross(u))
 }
 
@@ -621,11 +634,44 @@ impl Fitted {
             },
             epoch_s: Some((self.epoch_s, spread.epoch_s)),
             pivot_s: pivot(looks),
-            phase_period_rho: spread.phase_period_rho,
+            covariance: spread.covariance,
             method: crate::knowledge::Method::Astrometric,
             stated_s,
             lineage: Vec::new(),
         }
+    }
+}
+
+impl Fitted {
+    /// A stated orbit back in this fit's terms, for reading its covariance: the inverse of
+    /// [`Fitted::stated`]. `None` without a full orientation, an epoch and a sane size.
+    pub(super) fn of(orbit: &crate::knowledge::Orbit) -> Option<Self> {
+        let crate::knowledge::Orientation::Known { pole, node, periapsis, .. } = orbit.orientation else {
+            return None;
+        };
+        let (epoch_s, _) = orbit.epoch_s?;
+        let semi_major_m = orbit.semi_major_au.0 * crate::navigation::AU;
+        let period_s = orbit.period_s.0;
+        if !sound(semi_major_m) || !sound(period_s) {
+            return None;
+        }
+        let node_dir = DVec3::new(node.cos(), node.sin(), 0.0);
+        let toward = node_dir * periapsis.cos() + pole.cross(node_dir) * periapsis.sin();
+        let (u, v) = basis(pole);
+        let n = std::f64::consts::TAU / period_s;
+        Some(Fitted {
+            semi_major_m,
+            eccentricity: orbit.eccentricity.map_or(0.0, |(e, _)| e),
+            period_s,
+            pole,
+            periapsis_rad: toward.dot(v).atan2(toward.dot(u)),
+            epoch_s,
+            mu: n * n * semi_major_m * semi_major_m * semi_major_m,
+            reach_m: f64::INFINITY,
+            assumed_circular: orbit.eccentricity.is_none(),
+            residual_rad: 0.0,
+            looks: 0,
+        })
     }
 }
 
@@ -893,7 +939,7 @@ fn fit_from(looks: &[Look], seed: Option<&Fitted>) -> Option<Fitted> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use super::settle::{PARABOLIC, spread};
     use std::f64::consts::PI;
@@ -930,7 +976,7 @@ mod tests {
                 eccentricity: self.eccentricity,
                 period_s: self.period_s(),
                 pole: self.pole.normalize(),
-                periapsis_rad: 1.8,
+                periapsis_rad: fixed_periapsis(self.pole.normalize(), 1.8),
                 epoch_s: 4.0e6,
                 mu: self.mu,
                 reach_m: f64::INFINITY,
@@ -943,6 +989,15 @@ mod tests {
         fn at(&self, t_s: f64) -> DVec3 {
             self.fitted().at(t_s)
         }
+    }
+
+    /// `angle` from the basis these fixtures were written against, as an angle in [`basis`], so
+    /// that changing the basis does not move every orbit the tests are about.
+    pub(in crate::knowledge) fn fixed_periapsis(pole: DVec3, angle: f64) -> f64 {
+        let u = pole.any_orthonormal_vector();
+        let toward = u * angle.cos() + pole.cross(u) * angle.sin();
+        let (u, v) = basis(pole);
+        toward.dot(v).atan2(toward.dot(u))
     }
 
     fn like(au: f64, eccentricity: f64) -> Truth {
@@ -1281,6 +1336,27 @@ mod tests {
         }
     }
 
+    /// **A stated orbit reads back as the fit it came from,** which the covariance depends on:
+    /// it is in the fit's own terms, so a reader that rebuilt the elements differently would
+    /// read every number as something else.
+    #[test]
+    fn a_stated_orbit_reads_back_as_its_fit() {
+        for (au, e, pole) in [
+            (1.0, 0.0167, DVec3::new(0.02, -0.03, 1.0)),
+            (2.5, 0.31, DVec3::new(0.4, 0.2, 1.0)),
+            (0.7, 0.2, DVec3::new(-0.9, 0.5, -0.1)),
+        ] {
+            let fitted = Truth { pole, ..like(au, e) }.fitted();
+            let seen = looks(&Truth { pole, ..like(au, e) }, 5.0, 12, fitted.period_s / 60.0, SIGMA);
+            let back = Fitted::of(&fitted.stated(crate::knowledge::Witness(1), None, &seen, 0.0)).expect("reads back");
+            assert!(back.pole.distance(fitted.pole) < 1.0e-15);
+            assert!(kepler::anomaly::wrap_pi(back.periapsis_rad - fitted.periapsis_rad).abs() < 1.0e-12);
+            for t in [0.0, 1.0e7, -3.0e7] {
+                assert!(back.at(t).distance(fitted.at(t)) < 1.0, "{} m apart", back.at(t).distance(fitted.at(t)));
+            }
+        }
+    }
+
     /// A fit states the phase's error at its pivot, and a reader grows it from there.
     #[test]
     fn a_fit_states_how_far_round_its_body_is() {
@@ -1396,12 +1472,11 @@ mod tests {
 
     /// **The phase's error carried to any time matches the scatter.** A body's place along its
     /// orbit, from a span before its pivot to ten spans after, against where it truly is: the
-    /// misses in their own sigma have an RMS of about one at the pivot and once the period's
-    /// drift dominates, and are never overconfident.
+    /// misses in their own sigma have an RMS of about one at every one of those times.
     ///
-    /// Within a span or so of a short arc the bar is conservative, up to ten times: there the
-    /// period's error is cancelled by the eccentricity's, which a phase and a period alone cannot
-    /// say. See `lightcone/docs/25-system-knowledge.md`.
+    /// Carried by the elements' whole covariance. Carried by each element's own sigma and the
+    /// phase's correlation with the period, the bar within a span of a short arc was ten times
+    /// too wide, because there the period's error is cancelled by the eccentricity's.
     #[test]
     fn the_phase_error_carried_forward_matches_the_scatter() {
         const SEEDS: u64 = 60;
@@ -1422,9 +1497,7 @@ mod tests {
             for (n, z) in spans.iter().zip(&z) {
                 let rms = (z.iter().map(|z| z * z).sum::<f64>() / z.len() as f64).sqrt();
                 assert!(rms < 1.5, "{name}, {n} spans on: overconfident, the misses are {rms} sigma");
-                if *n == 0.0 || *n >= 2.0 {
-                    assert!(rms > 0.7, "{name}, {n} spans on: the misses are only {rms} sigma");
-                }
+                assert!(rms > 0.7, "{name}, {n} spans on: the misses are only {rms} sigma");
             }
         }
     }
@@ -1819,7 +1892,7 @@ mod tests {
             orientation: crate::knowledge::Orientation::Unknown,
             epoch_s: None,
             pivot_s: None,
-            phase_period_rho: 0.0,
+            covariance: None,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 1.0e6,
             lineage: Vec::new(),
@@ -1947,7 +2020,7 @@ mod tests {
             orientation: crate::knowledge::Orientation::Unknown,
             epoch_s: None,
             pivot_s: None,
-            phase_period_rho: 0.0,
+            covariance: None,
             method: crate::knowledge::Method::Astrometric,
             stated_s: 0.0,
             lineage: Vec::new(),

@@ -19,6 +19,7 @@ pub mod chase;
 pub mod command;
 pub mod director;
 pub mod drive;
+pub mod field;
 pub(crate) mod fits;
 pub mod fitting;
 pub(crate) mod instruments;

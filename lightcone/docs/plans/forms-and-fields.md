@@ -92,6 +92,8 @@ graph LR
   H6["H6 Clear, Black and Auto"]
   H7["H7 What an observer sees"]
   H8["H8 A refit's transfers inside the account"]
+  H9["H9 A wreck outlives a restart"]
+  H10["H10 The afterglow"]
   E1["E1 Beam and courtesy math"]
   E2["E2 Exhaust from heat"]
   E3["E3 Emit"]
@@ -161,6 +163,9 @@ graph LR
   H3 --> H6
   H6 --> H7
   H3 --> H8
+  H4 --> H9
+  H4 --> H10
+  H7 --> H10
   K2 --> E1
   H3 --> E2
   E1 --> E3
@@ -221,6 +226,8 @@ graph LR
   F10 --> X1
   H7 --> X1
   H8 --> X1
+  H9 --> X1
+  H10 --> X1
   E4 --> X1
   R12 --> X1
   C3 --> X1
@@ -424,7 +431,7 @@ graph LR
 
 ### H4 · Collapse
 
-- status: active card "H4 · Collapse"
+- status: done #117
 - needs: H3
 - touches: `crates/lc-server/src/field.rs`, `crates/lc-world/src/field.rs`
 - read: 30 §Collapse
@@ -460,12 +467,30 @@ graph LR
 
 ### H8 · A refit's transfers inside the account
 
-- status: active card "H8 · A refit's transfers inside the account"
+- status: done #115
 - needs: H3
 - touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/craft.rs`
 - read: 30 §Conversion, 29 §Refits
 - deliver: a round's stores and draws, and a burn's spending, move storage's room inside `Fitting::flow`, so conversion refills what a build takes out as it goes and a return landing in room starlight has already filled is vented into `Q` instead of lifting storage past capacity; settlements cut at step ends, so the hull's drain and rating change where the step does.
 - done when: a round run under starlight never holds more than capacity, and settling it in one leap and at every tick agrees on heat and storage.
+
+### H9 · A wreck outlives a restart
+
+- status: todo
+- needs: H4
+- touches: `crates/lc-server/src/persist.rs`, `crates/lc-server/src/field.rs`
+- read: 30 §Collapse, §Open
+- deliver: a wreck whose light is still in flight is checkpointed with its end and comes back as a wreck, so a restart does not end anyone's view of it early; its row is deleted when it is swept rather than when it collapses, without its account colliding with its successor's.
+- done when: a shard restarted between a collapse and its light reaching a distant ship still shows that ship the wreck until the light arrives.
+
+### H10 · The afterglow
+
+- status: todo
+- needs: H4, H7
+- touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/instruments.rs`
+- read: 30 §Collapse, §What an observer sees
+- deliver: the `1 − collapse_spike_fraction` of a collapse's `E` leaves over `collapse_afterglow_s` as light from where the ship was, its temperature falling from the field's limit, reaching each observer at its retarded time; the spike's color is `collapse_spike_k`.
+- done when: a craft staring at a collapse's position records the afterglow on its curve from when the light arrives, for as long as 30 says, and one staring elsewhere does not.
 
 ## E: energy
 
@@ -778,7 +803,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
+- needs: F10, H7, H8, H9, H10, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.

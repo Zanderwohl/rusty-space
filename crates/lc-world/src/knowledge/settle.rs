@@ -13,7 +13,9 @@
 
 use std::f64::consts::{PI, TAU};
 
-use glam::DQuat;
+use glam::{DMat3, DQuat, DVec3};
+
+use super::record::Covariance;
 
 use super::arc::{self, Fitted, Look, basis};
 
@@ -45,6 +47,10 @@ const CONVERGED: f64 = 1.0e-10;
 /// Singular values below this fraction of the largest are rounding, and are floored there so a
 /// direction nothing constrains reads as enormous rather than infinite or NaN.
 const CONDITION: f64 = 1.0e-13;
+
+/// Standard deviations of chi-square that noise alone may add before the misfit is taken as the
+/// model's. Two, so a fit at the noise is inflated about one time in forty, and then barely.
+const NOISE_SPREAD: f64 = 2.0;
 
 /// The closest to parabolic an error bar may reach.
 ///
@@ -322,8 +328,8 @@ pub struct Spread {
     /// every element that moves it there, and not the epoch's error alone: at small
     /// eccentricity the periapsis is barely defined and the epoch trades against it.
     pub epoch_s: f64,
-    /// Correlation of that phase with the period, -1 to 1.
-    pub phase_period_rho: f64,
+    /// All of it, correlations included, which the bars above are the diagonal of.
+    pub covariance: Option<Covariance>,
 }
 
 impl Spread {
@@ -334,7 +340,7 @@ impl Spread {
             eccentricity: (PARABOLIC - fitted.eccentricity).max(0.0),
             pole_rad: PI,
             epoch_s: fitted.period_s * 0.5,
-            phase_period_rho: 0.0,
+            covariance: None,
         }
     }
 }
@@ -352,18 +358,7 @@ impl Spread {
 /// data stops constraining it: an eccentricity at parabolic, a pole half a turn from any other,
 /// and a phase of half a turn, which is anywhere.
 pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
-    let (Some(pivot_s), Some(here)) = (arc::pivot(looks), arc::terms(fitted, looks)) else {
-        return Spread::unmeasured(fitted);
-    };
-    // A circle assumed for want of arc is fitted with no eccentricity, but its bars must not be
-    // taken with none: the eccentricity is unknown, not zero, and held at zero the rest come out
-    // as if it were known. Jupiter's circle over two weeks stated its axis to 0.0009 AU when it
-    // was 0.24 AU out.
-    let about = About { fitted: Fitted { assumed_circular: false, ..*fitted }, pivot_s };
-    let linear = Linear::at(&about, looks, &here);
-    let freedom = here.len().saturating_sub(linear.free.len()).max(1) as f64;
-    let inflate = (squared(&here) / freedom).max(1.0);
-    let c = linear.covariance().map(|row| row.map(|x| x * inflate));
+    let Some((about, c)) = covariance(fitted, looks) else { return Spread::unmeasured(fitted) };
     let sigma = |x: f64| if x.is_finite() && x >= 0.0 { x.sqrt() } else { f64::INFINITY };
 
     let eccentricity = if fitted.assumed_circular {
@@ -383,19 +378,66 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
     });
     let along: f64 = (0..PARAMETERS).map(|i| (0..PARAMETERS).map(|j| g[i] * c[i][j] * g[j]).sum::<f64>()).sum();
     let (phase, period) = (sigma(along), sigma(c[PERIOD][PERIOD]));
-    // Only the mean longitude's covariance with the period drifts. What the eccentricity adds
-    // to the phase is periodic, and carried forward as a drift it made the bars worse than
-    // leaving the correlation out: Mars over one and a half orbits, a span before its pivot,
-    // went from 1.1 to 1.7 of its bar out.
-    let rho = c[LONGITUDE][PERIOD] / (phase * period);
     Spread {
         period_s: period * fitted.period_s,
         semi_major_m: sigma(c[AXIS][AXIS]) * fitted.semi_major_m,
         eccentricity: eccentricity.min((PARABOLIC - fitted.eccentricity).max(0.0)),
         pole_rad: sigma(worse).min(PI),
         epoch_s: (phase / TAU).min(0.5) * fitted.period_s,
-        phase_period_rho: if rho.is_finite() { rho.clamp(-1.0, 1.0) } else { 0.0 },
+        covariance: c.iter().flatten().all(|x| x.is_finite()).then(|| Covariance::of(&c)),
     }
+}
+
+/// The covariance of a fit's elements, scaled by the reduced chi-square where the fit misses by
+/// more than the errors allow, and the elements it is about.
+///
+/// A circle assumed for want of arc is fitted with no eccentricity, but its covariance must not
+/// be taken with none: the eccentricity is unknown, not zero, and held at zero the rest come out
+/// as if it were known. Jupiter's circle over two weeks stated its axis to 0.0009 AU when it
+/// was 0.24 AU out.
+fn covariance(fitted: &Fitted, looks: &[Look]) -> Option<(About, [[f64; PARAMETERS]; PARAMETERS])> {
+    let (pivot_s, here) = (arc::pivot(looks)?, arc::terms(fitted, looks)?);
+    let about = About { fitted: Fitted { assumed_circular: false, ..*fitted }, pivot_s };
+    let linear = Linear::at(&about, looks, &here);
+    let freedom = here.len().saturating_sub(linear.free.len()).max(1) as f64;
+    // A misfit past what the noise explains is the model's, not the noise's, and it does not
+    // average down over the looks the way noise does: it is smooth from one look to the next,
+    // so the elements are out by about what one look's misfit implies. So the unexplained
+    // chi-square scales the covariance whole, and the reduced chi-square only where the misfit
+    // is within the noise's own spread. A Kepler fit to an orbit whose node turns once in a
+    // hundred thousand years was eight of its bars out on the day it was fitted, and is one.
+    let chi2 = squared(&here);
+    let unexplained = chi2 - freedom - NOISE_SPREAD * (2.0 * freedom).sqrt();
+    let inflate = (chi2 / freedom).max(1.0 + unexplained.max(0.0));
+    Some((about, linear.covariance().map(|row| row.map(|x| x * inflate))))
+}
+
+/// The covariance of where `fitted` puts its body at `t`, meters squared, from its elements'
+/// covariance about `pivot_s`: every element's effect on the place, correlations included.
+///
+/// This is what carries a phase to any time. A per-element bar treats the elements as
+/// independent, and seen from a ship holding still they are anything but: the depth along the
+/// line of sight is poorly known, the axis, the eccentricity and the phase trade to keep the
+/// bearings, and taken apart their errors spread across the line of sight as well, a million
+/// times what the bearings allow.
+pub(super) fn place_covariance(fitted: &Fitted, pivot_s: f64, c: &Covariance, t: f64) -> Option<DMat3> {
+    let about = About { fitted: Fitted { assumed_circular: false, ..*fitted }, pivot_s };
+    let mut moves = [DVec3::ZERO; PARAMETERS];
+    for (j, moved) in moves.iter_mut().enumerate() {
+        let place = |sign: f64| {
+            let mut step = [0.0; PARAMETERS];
+            step[j] = sign * STEP;
+            Some(about.moved(&step)?.at(t))
+        };
+        *moved = (place(1.0)? - place(-1.0)?) / (2.0 * STEP);
+    }
+    let mut out = DMat3::ZERO;
+    for (i, a) in moves.iter().enumerate() {
+        for (j, b) in moves.iter().enumerate() {
+            out += DMat3::from_cols(*a * b.x, *a * b.y, *a * b.z) * c.get(i, j);
+        }
+    }
+    out.to_cols_array().iter().all(|x| x.is_finite()).then_some(out)
 }
 
 /// A circle assumed only because the three anchors could not shape a conic, released where the
@@ -418,7 +460,6 @@ const SHAPED: f64 = 0.02;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glam::DVec3;
 
     /// The decomposition has to reproduce the matrix it was handed, and orthogonal columns.
     #[test]

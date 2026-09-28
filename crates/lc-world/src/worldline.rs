@@ -71,6 +71,8 @@ pub struct Flight<'a> {
     /// The earliest coordinate second this can answer for. `-inf` when nothing has been
     /// forgotten, which is the case for a craft that has never changed what it was doing.
     known_from_s: f64,
+    /// Where it stops: `inf` unless the craft was destroyed.
+    until_s: f64,
 }
 
 impl<'a> Flight<'a> {
@@ -79,7 +81,7 @@ impl<'a> Flight<'a> {
     /// True only of a craft that has never changed its motive. Anything the world has run is
     /// built by [`crate::craft::Craft::worldline`], which carries the real history.
     pub fn new(state: &'a ShipState, system: Option<&'a LocalSystem>) -> Self {
-        Self { state, system, past: &[], known_from_s: f64::NEG_INFINITY }
+        Self { state, system, past: &[], known_from_s: f64::NEG_INFINITY, until_s: f64::INFINITY }
     }
 
     pub fn with_past(
@@ -88,7 +90,12 @@ impl<'a> Flight<'a> {
         past: &'a [Past],
         known_from_s: f64,
     ) -> Self {
-        Self { state, system, past, known_from_s }
+        Self { state, system, past, known_from_s, until_s: f64::INFINITY }
+    }
+
+    /// Stopping at `until_s`, coordinate seconds.
+    pub fn ending(self, until_s: f64) -> Self {
+        Self { until_s, ..self }
     }
 
     /// What the ship was doing at a coordinate microsecond.
@@ -128,15 +135,16 @@ impl Worldline for Flight<'_> {
         self.read(t).1
     }
 
-    /// Forward forever, and back as far as the craft still remembers.
+    /// Forward until the craft was destroyed, and back as far as it still remembers.
     ///
-    /// Every arm of a motive answers everywhere, so the forward end never runs out. The back
+    /// Every arm of a motive answers everywhere, so the forward end runs out only where the ship
+    /// did: past it no root is found, so its light stops arriving when the last of it has. The back
     /// end is where the history was pruned: before it this would have to extrapolate a motive
     /// the ship was not yet flying, and the solver's contract is that a root outside this range
     /// is no root at all. Which is the answer that is safe — an observer far enough away that
     /// the light it wants left before the shard remembers simply sees nothing.
     fn defined_over(&self) -> (f64, f64) {
-        (self.known_from_s * 1.0e6, f64::INFINITY)
+        (self.known_from_s * 1.0e6, self.until_s * 1.0e6)
     }
 
     fn breaks(&self) -> SmallVec<[f64; 2]> {

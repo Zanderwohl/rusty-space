@@ -81,6 +81,12 @@ impl Field {
         self.heat_max_j() / self.tau_s
     }
 
+    /// What a collapse releases as light: `Q_max` and everything stored, committed energy included.
+    /// The parts' own mass is not released.
+    pub fn released_j(&self, stored_j: f64) -> f64 {
+        self.heat_max_j() + stored_j.max(0.0)
+    }
+
     /// `Q(t) = P τ + (Q₀ − P τ) e^(−t/τ)`, over `dt_s` of constant net `power_w`.
     pub fn heat_after_j(&self, heat_j: f64, power_w: f64, dt_s: f64) -> f64 {
         debug_assert!(self.tau_s > 0.0 && self.tau_s.is_finite());
@@ -689,5 +695,117 @@ mod tests {
         let full_j = field.equilibrium_j(field.heat_full_w(&segment));
         let rise = field.segment_time_to_rise_s(&segment, low_j, 0.5 * (low_j + full_j)).unwrap();
         assert!(rise > fill_s);
+    }
+
+    fn starting(b: Balance, stored_j: f64) -> crate::fitting::Fitting {
+        use crate::fitting::{Account, Fitting};
+        let full = Fitting::full(Form::starting(), b, 0.0);
+        Fitting::from_account(&Account { stored_j, ..full.account() }, b)
+    }
+
+    /// The account's own settlement, sampled finely, first reaches `Q_max` where the walk says:
+    /// storage fills on the way, so the fill split is crossed first.
+    #[test]
+    fn a_ship_collapses_where_its_settled_heat_first_reaches_q_max() {
+        let b = Balance::DEFAULT;
+        let start = Start::new(&b);
+        let mut fitting = starting(b, start.caps.storage_j - 2.0 * me(&b));
+        fitting.set_starlight_w(start.starlight_w(0.03));
+        let heat_max_j = fitting.field().heat_max_j();
+        let collapse_s = fitting.collapse_s().expect("inside the rated load, it collapses");
+        let rest = crate::motion::ShipState::at(glam::DVec3::ZERO);
+        assert_eq!(fitting.stored_j_at(&rest, collapse_s), start.caps.storage_j, "premise: full first");
+        assert!(close(fitting.heat_j_at(collapse_s), heat_max_j, 1e-9));
+
+        let n = 100_000;
+        let dt_s = 1.5 * collapse_s / n as f64;
+        let first = (1..=n).find(|&k| fitting.heat_j_at(k as f64 * dt_s) >= heat_max_j).unwrap();
+        assert!((first - 1) as f64 * dt_s < collapse_s && collapse_s <= first as f64 * dt_s, "{collapse_s} at step {first}");
+    }
+
+    #[test]
+    fn a_ship_whose_equilibrium_is_short_of_q_max_never_collapses() {
+        let b = Balance::DEFAULT;
+        let start = Start::new(&b);
+        let mut fitting = starting(b, start.caps.storage_j);
+        fitting.set_starlight_w(start.starlight_w(0.1));
+        assert_eq!(fitting.collapse_s(), None);
+        fitting.set_starlight_w(start.starlight_w(RATED_LOAD_AU * (1.0 + 1e-6)));
+        assert_eq!(fitting.collapse_s(), None);
+    }
+
+    /// A vent jumps `Q`, so the crossing is the end of the step that frees it, to the second.
+    #[test]
+    fn a_vent_that_crosses_q_max_collapses_at_the_end_of_its_step() {
+        use crate::form::PartId;
+        use crate::refit::rounds::Round;
+        let begun = |b: Balance| {
+            let mut fitting = crate::fitting::Fitting::full(Form::starting(), b, 0.0);
+            fitting.drain(me(&b));
+            let mut shrunk = Form::starting();
+            shrunk.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 3.0 / 5.0;
+            let round = Round { from: Form::starting(), target: shrunk, stored_j: fitting.stored_j_at(&crate::motion::ShipState::at(glam::DVec3::ZERO), 0.0), start_s: 0.0 };
+            let plan = round.solve(&b).unwrap();
+            fitting.begin_refit(plan.clone());
+            (fitting, plan)
+        };
+        let (probe, plan) = begun(Balance::DEFAULT);
+        let [step] = plan.steps() else { panic!("{:?}", plan.steps()) };
+        assert!(step.vented_j > 0.0, "premise: it vents");
+        let end_s = step.ends_s();
+        let heat_max_j = probe.heat_j_at(end_s) - 0.5 * step.vented_j;
+        assert!(probe.heat_j_at(end_s * (1.0 - 1e-12)) < heat_max_j, "premise: only the vent crosses");
+
+        let b = Balance { field_capacity: heat_max_j / probe.field().area_m2, ..Balance::DEFAULT };
+        let (fitting, _) = begun(b);
+        assert!(close(fitting.field().heat_max_j(), heat_max_j, 1e-12));
+        assert_eq!(fitting.collapse_s(), Some(end_s));
+    }
+
+    /// A build held out of storage under starlight too weak for the drain: free storage runs out a
+    /// fifth of the way in and the drain starves, and the collapse is found where the settled heat
+    /// first reaches `Q_max`, after that.
+    #[test]
+    fn a_collapse_after_the_drain_starves_is_where_the_settled_heat_reaches_it() {
+        use crate::fitting::{Account, Fitting};
+        use crate::form::PartId;
+        use crate::refit::rounds::Round;
+        let mut target = Form::starting();
+        target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 5.0;
+        let begun = |b: Balance, stored_j: f64| {
+            let full = Fitting::full(Form::starting(), b, 0.0);
+            let mut fitting = Fitting::from_account(&Account { stored_j, heat_j: 0.0, ..full.account() }, b);
+            let drain_w = fitting.hull().capacities.drain_w;
+            fitting.set_starlight_w(0.5 * drain_w / b.conversion_efficiency);
+            let round = Round { from: Form::starting(), target: target.clone(), stored_j, start_s: 0.0 };
+            let plan = round.solve(&b).unwrap();
+            fitting.begin_refit(plan.clone());
+            (fitting, plan)
+        };
+        let b = Balance::DEFAULT;
+        let (trial, plan) = begun(b, 30.0 * me(&b));
+        let cost_j = -plan.steps().iter().map(|s| s.stored_j).sum::<f64>();
+        let duration_s = plan.duration_s();
+        let spare_j = 0.1 * trial.hull().capacities.drain_w * duration_s;
+        let (probe, _) = begun(b, cost_j + spare_j);
+        let heat_max_j = probe.heat_j_at(0.901_7 * duration_s);
+        assert!(probe.heat_j_at(0.2 * duration_s) < heat_max_j, "premise: still rising once starved");
+
+        let tight = Balance { field_capacity: heat_max_j / probe.field().area_m2, ..b };
+        let (fitting, _) = begun(tight, cost_j + spare_j);
+        let collapse_s = fitting.collapse_s().expect("it reaches the limit");
+        let n = 20_000;
+        let dt_s = duration_s / n as f64;
+        let first = (1..=n).find(|&k| fitting.heat_j_at(k as f64 * dt_s) >= heat_max_j).unwrap();
+        assert!((first - 1) as f64 * dt_s < collapse_s && collapse_s <= first as f64 * dt_s, "{collapse_s} at step {first}");
+        assert!(collapse_s > 0.5 * duration_s, "premise: in the starved stretch");
+    }
+
+    #[test]
+    fn a_field_already_past_q_max_collapses_at_once() {
+        let b = Balance::DEFAULT;
+        let fitting = starting(b, 0.0);
+        let hot = crate::fitting::Account { heat_j: 2.0 * fitting.field().heat_max_j(), since_s: 5.0, ..fitting.account() };
+        assert_eq!(crate::fitting::Fitting::from_account(&hot, b).collapse_s(), Some(5.0));
     }
 }

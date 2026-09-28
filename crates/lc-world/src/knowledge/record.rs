@@ -414,14 +414,54 @@ pub struct Orbit {
     /// A fit's is the weighted center of its looks; a periapsis passage can be half a period
     /// away. `None` reads as the epoch.
     pub pivot_s: Option<f64>,
-    /// Correlation of the phase at the pivot with the period, -1 to 1: positive when a longer
-    /// period goes with a body further round at the pivot. With it the phase's error can be
-    /// carried to any time, `knowledge::placed` says how; zero for anything not fitted.
-    pub phase_period_rho: f64,
+    /// A fit's whole covariance, the element sigmas above being its diagonal. `None` for
+    /// anything not fitted. With it `knowledge::placed` carries the error to any time with the
+    /// elements' correlations, which the sigmas alone cannot.
+    pub covariance: Option<Covariance>,
     pub method: Method,
     /// Coordinate seconds the witness stated it.
     pub stated_s: f64,
     pub lineage: Lineage,
+}
+
+/// The covariance of a fitted orbit's seven elements, about [`Orbit::pivot_s`].
+///
+/// In the terms the fit solves in, so nothing is converted on the way out and nothing can be
+/// converted wrong on the way back: log axis, `h = e cos w` and `k = e sin w`, the pole's tilt
+/// along each vector of the plane's basis, the mean longitude `w + M` at the pivot, and log
+/// period. `w` and the basis are `knowledge::arc::basis` of the stated pole, which is written out
+/// in full for this reason. The upper triangle, row by row.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Covariance(pub [f64; 28]);
+
+impl Covariance {
+    pub const ELEMENTS: usize = 7;
+
+    fn index(i: usize, j: usize) -> usize {
+        let (i, j) = (i.min(j), i.max(j));
+        i * Self::ELEMENTS - i * (i + 1) / 2 + j
+    }
+
+    pub fn of(matrix: &[[f64; 7]; 7]) -> Self {
+        let mut upper = [0.0; 28];
+        for (i, row) in matrix.iter().enumerate() {
+            for (j, x) in row.iter().enumerate().skip(i) {
+                upper[Self::index(i, j)] = *x;
+            }
+        }
+        Self(upper)
+    }
+
+    pub fn get(&self, i: usize, j: usize) -> f64 {
+        self.0.get(Self::index(i, j)).copied().unwrap_or(0.0)
+    }
+
+    /// The whole orbit scaled by a fraction with this sigma, as an error in its primary's
+    /// distance scales everything fitted about it.
+    pub fn scaled_by(mut self, fraction: f64) -> Self {
+        self.0[Self::index(0, 0)] += fraction * fraction;
+        self
+    }
 }
 
 impl Orbit {
@@ -454,7 +494,7 @@ impl Orbit {
             orientation,
             epoch_s,
             pivot_s: None,
-            phase_period_rho: 0.0,
+            covariance: None,
             method,
             stated_s,
             lineage: Lineage::new(),

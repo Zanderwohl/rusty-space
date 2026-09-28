@@ -649,13 +649,17 @@ fn fold(
             // Each end of a jump arrives at its own light delay.
             // Not this ship's own: its console already said where it went.
             let me = uplink.joined().map(|joined| joined.ship_id);
-            for sighting in seen.iter().filter(|s| matches!(s.kind, lc_proto::kind::VANISH | lc_proto::kind::APPEAR)) {
+            for sighting in seen.iter().filter(|s| matches!(s.kind, lc_proto::kind::VANISH | lc_proto::kind::APPEAR | lc_proto::kind::COLLAPSE)) {
                 let from = ShipId(sighting.source_id);
                 if Some(from) == me {
                     continue;
                 }
                 let who = uplink.name_of(from);
-                let what = if sighting.kind == lc_proto::kind::VANISH { "vanished" } else { "appeared" };
+                let what = match sighting.kind {
+                    lc_proto::kind::VANISH => "vanished",
+                    lc_proto::kind::APPEAR => "appeared",
+                    _ => "collapsed",
+                };
                 ui.0.heard(from, format!("{who} {what}"), sighting.arrive_t as f64 * 1e-6);
             }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
@@ -903,8 +907,10 @@ fn fold(
                 ui.0.notify(format!("{count} messages in the log"), at);
             }
         }
-        // Sent once H4, E3 and S2 are built.
-        Outbound::Collapsed { .. } | Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
+        // The welcome to the successor follows.
+        Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed", at_t as f64 * 1e-6),
+        // Sent once E3 and S2 are built.
+        Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
     }
 }
 
