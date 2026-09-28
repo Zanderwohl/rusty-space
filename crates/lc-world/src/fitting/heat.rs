@@ -742,6 +742,7 @@ mod tests {
         let (fitting, committed_j) = hot(b, 20.0 * me(&b), 0.0, &motion);
         let end_s = cruise.duration_s();
         assert_eq!(fitting.heat_j_at(&motion, end_s), 0.0);
+        assert_eq!(fitting.flow(Some(&motion), end_s).waste_j, 0.0, "no waste at ε = 1");
         let cost_j = -fitting.flow(Some(&motion), end_s).income_j;
         let want_j = crate::cost::energy_j(fitting.settled_mass_kg(), crate::cost::planned_rapidity(&motion), 1.0);
         assert!(close(cost_j, want_j, 1e-12) && close(committed_j, want_j, 1e-15), "{cost_j} {want_j}");
@@ -818,6 +819,130 @@ mod tests {
         assert_eq!(burning.collapse_s(&motion, boost_end_s), None);
         assert!(burning.heat_j_at(&motion, boost_end_s) < heat_j);
         assert!(burning.heat_j_at(&rest(), boost_end_s) > heat_max_j);
+    }
+
+    /// A drive at ε = 0.8.
+    fn wasteful(b: Balance) -> Balance {
+        Balance { drive_efficiency: 0.8, ..b }
+    }
+
+    /// With radiation off: heat pays only the beam, the waste stays as heat, and storage pays the
+    /// rest of what the rocket law prices. Re-emitted, the waste would make storage pay the beam
+    /// less it, which is what ε = 1 costs.
+    #[test]
+    fn a_burn_below_one_keeps_its_waste_and_costs_the_rocket_laws_price() {
+        let b = wasteful(quiet());
+        let (motion, cruise) = hop();
+        let end_s = cruise.duration_s();
+        let stored_j = 20.0 * me(&b);
+        let (_, cost_j) = hot(b, stored_j, 0.0, &motion);
+        for share in [0.0, 0.3, 1.5] {
+            let (fitting, committed_j) = hot(b, stored_j, share * cost_j, &motion);
+            let beam_j = b.drive_efficiency * committed_j;
+            let mass_kg = fitting.settled_mass_kg();
+            let flow = fitting.flow(Some(&motion), end_s);
+            let waste_j = (1.0 - b.drive_efficiency) * committed_j;
+            assert!(close(flow.waste_j, waste_j, 1e-9), "{share}: {} {waste_j}", flow.waste_j);
+            let from_heat_j = fitting.heat_j.min(beam_j);
+            let heat_end_j = fitting.heat_j - from_heat_j + waste_j;
+            assert!((flow.heat_j - heat_end_j).abs() <= 1e-9 * committed_j, "{share}: {} {heat_end_j}", flow.heat_j);
+            let paid_j = -flow.income_j;
+            let want_j = committed_j - from_heat_j;
+            assert!((paid_j - want_j).abs() <= 1e-9 * committed_j, "{share}: {paid_j} {want_j}");
+            assert!(fitting.committed_j_at(&motion, end_s) <= 1e-9 * committed_j, "{share}: all of it released");
+            // The rocket law, and the waste still aboard.
+            let lighter_kg = mass_kg * (-crate::cost::planned_rapidity(&motion) / b.drive_efficiency).exp();
+            let mass_end_kg = fitting.mass_kg_at(&motion, end_s);
+            assert!(close(mass_end_kg, lighter_kg + waste_j / crate::fitting::C2, 1e-12), "{share}: {mass_end_kg} {lighter_kg}");
+        }
+        let (cold, committed_j) = hot(b, stored_j, 0.0, &motion);
+        let (at_one, one_j) = hot(Balance { drive_efficiency: 1.0, ..b }, stored_j, 0.0, &motion);
+        let ratio = cold.flow(Some(&motion), end_s).income_j / at_one.flow(Some(&motion), end_s).income_j;
+        assert!(close(ratio, committed_j / one_j, 1e-9) && ratio > 1.2, "ε costs while lit: {ratio}");
+    }
+
+    /// An emission is not the rocket law, so ε takes nothing from it.
+    #[test]
+    fn an_emit_makes_no_waste() {
+        let b = wasteful(quiet());
+        let mut fitting = hot(b, 20.0 * me(&b), 0.0, &rest()).0;
+        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e18 });
+        let flow = fitting.flow(Some(&rest()), 200.0);
+        assert_eq!((flow.heat_j, flow.waste_j), (0.0, 0.0));
+        assert!(close(-flow.income_j, 1.0e20, 1e-12), "{}", flow.income_j);
+    }
+
+    /// Drawable heat floors in the boost while waste keeps rising, and both relax through the
+    /// coast; one leap and every tick agree.
+    #[test]
+    fn a_wasteful_burn_settled_every_tick_agrees_with_one_leap() {
+        let b = wasteful(Balance::DEFAULT);
+        let (motion, cruise) = hop();
+        let end_s = cruise.duration_s();
+        let [_, line_s, boost_end_s, brake_s, _] = cruise.phase_changes_s();
+        let (_, cost_j) = hot(b, 20.0 * me(&b), 0.0, &motion);
+        let (mut leap, _) = hot(b, 20.0 * me(&b), 0.1 * cost_j, &motion);
+        leap.set_starlight_w(starlight_w(&b, 1.0));
+        let floor_s = 0.5 * (line_s + boost_end_s);
+        let at_floor = leap.flow(Some(&motion), floor_s);
+        assert_eq!(at_floor.heat_j, at_floor.waste_j, "premise: drawable heat at the floor partway through the boost");
+        assert!(at_floor.waste_j > 0.0);
+        let coast_s = 0.5 * (boost_end_s + brake_s);
+        let (boosted, coasted) = (leap.flow(Some(&motion), boost_end_s), leap.flow(Some(&motion), coast_s));
+        let relaxed_j = leap.field().heat_after_j(boosted.waste_j, 0.0, coast_s - boost_end_s);
+        assert!(close(coasted.waste_j, relaxed_j, 1e-12), "waste radiates through the coast: {} {relaxed_j}", coasted.waste_j);
+
+        let mut ticks = leap.clone();
+        let n = 997;
+        for k in 1..=n {
+            ticks.settle(&motion, end_s * f64::from(k) / f64::from(n));
+        }
+        let (mass_kg, stored_j, heat_j) = (leap.settled_mass_kg(), leap.stored_j, leap.heat_j);
+        let read = leap.flow(Some(&motion), end_s);
+        leap.settle(&motion, end_s);
+        assert_eq!((leap.heat_j, leap.waste_j), (read.heat_j, read.waste_j), "a read agrees with a settlement");
+        assert!(leap.waste_j > 0.0 && leap.heat_j > leap.waste_j, "premise: waste left, and the brake did not floor");
+        let moved_j = heat_j + leap.heat_j + (leap.stored_j - stored_j).abs();
+        let repriced_j = 2.0 * cost_j * moved_j / (mass_kg * crate::fitting::C2);
+        assert!((ticks.stored_j - leap.stored_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.stored_j, leap.stored_j);
+        assert!((ticks.heat_j - leap.heat_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.heat_j, leap.heat_j);
+        assert!((ticks.waste_j - leap.waste_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.waste_j, leap.waste_j);
+    }
+
+    /// Carrying waste near its limit, a ship at rest or burning at ε = 1 cools; at ε = 0.4 the
+    /// burn's waste outruns the rated load and brings a collapse on partway through the boost.
+    #[test]
+    fn a_wasteful_burn_brings_on_a_collapse() {
+        use crate::flight::{Cruise, Drive};
+        let cruise = Cruise::plan(DVec3::ZERO, DVec3::X * 1.0e-3, 0.0, Drive::DEFAULT);
+        let boost_end_s = cruise.phase_changes_s()[2];
+        let mut motion = rest();
+        motion.begin_crossing(cruise, None);
+        let ship = |efficiency: f64| {
+            let b = Balance { drive_efficiency: efficiency, ..Balance::DEFAULT };
+            let full = Fitting::full(Form::starting(), b, 0.0);
+            let max_j = full.field().heat_max_j();
+            let account = Account { heat_j: 0.9 * max_j, waste_j: 0.9 * max_j, ..full.account() };
+            let mut fitting = Fitting::from_account(&account, b);
+            fitting.commit(&motion, 0.0);
+            fitting
+        };
+        let wasteful = ship(0.4);
+        let max_j = wasteful.field().heat_max_j();
+        assert!(wasteful.waste_w(&motion, 0.0, boost_end_s) > wasteful.field().rated_load_w(), "premise");
+        assert_eq!(wasteful.collapse_s(&rest(), boost_end_s), None);
+        assert_eq!(ship(1.0).collapse_s(&motion, boost_end_s), None);
+        assert!(ship(1.0).heat_j_at(&motion, boost_end_s) < 0.9 * max_j);
+
+        let at_s = wasteful.collapse_s(&motion, boost_end_s).expect("the waste brings it on");
+        assert!(at_s > 0.0 && at_s < boost_end_s, "{at_s} {boost_end_s}");
+        // Drawable heat stays at the floor, so `Q` is the waste alone, rising at the boost's average.
+        let field = wasteful.field();
+        let limit_j = field.equilibrium_j(wasteful.waste_w(&motion, 0.0, boost_end_s));
+        let want_s = field.tau_s * ((limit_j - 0.9 * max_j) / (limit_j - max_j)).ln();
+        assert!(close(at_s, want_s, 1e-9), "{at_s} {want_s}");
+        // Read up to it, the average is over less of a throttling burn.
+        assert!(close(wasteful.heat_j_at(&motion, at_s), max_j, 0.02));
     }
 
     #[test]
