@@ -15,10 +15,13 @@ ASSETS="${1:-crates/lc-client/assets}"
 modules=$(grep -rho 'em_render::[a-z_]*' crates/lc-client/src | sed 's/em_render:://' | sort -u)
 wanted=$(
   for m in $modules; do
-    [ -f "crates/em-render/src/$m.rs" ] && grep -ho 'shaders/[a-z_]*\.wgsl' "crates/em-render/src/$m.rs"
+    [ -f "crates/em-render/src/$m.rs" ] && grep -ho '"shaders/[a-z_]*\.wgsl' "crates/em-render/src/$m.rs"
   done
-  grep -rho 'shaders/[a-z_]*\.wgsl' crates/lc-client/src 2>/dev/null || true
+  grep -rho '"shaders/[a-z_]*\.wgsl' crates/lc-client/src 2>/dev/null || true
 )
+# Anchored on the opening quote, as an asset path is written: a test naming a retired file by its
+# repository path (`assets/shaders/...`) is not a material asking for it.
+wanted=$(printf '%s\n' "$wanted" | tr -d '"')
 wanted=$(printf '%s\n' "$wanted" | sort -u | grep . || true)
 
 missing=0
