@@ -23,6 +23,7 @@ use crate::refit::rounds::{Plan, Round};
 mod heat;
 mod mode;
 
+pub use heat::Lit;
 pub use mode::{Posture, Setting, Switch, Switching, Thresholds};
 
 pub const C2: f64 = C_M_S * C_M_S;
@@ -414,6 +415,8 @@ pub struct Fitting {
     lit_w: f64,
     refit: Option<Plan>,
     posture: Posture,
+    /// Emissions with no net thrust, in time order. Only those not over by `since_s` are kept.
+    lit: Vec<Lit>,
 }
 
 /// A fitting as it is saved and sent: the settled terms, and the refit's recipe.
@@ -428,6 +431,7 @@ pub struct Account {
     pub starlight_w: f64,
     pub refit: Option<Round>,
     pub posture: Posture,
+    pub lit: Vec<Lit>,
 }
 
 impl Fitting {
@@ -453,6 +457,7 @@ impl Fitting {
             lit_w: 0.0,
             refit: None,
             posture: Posture::BLACK,
+            lit: Vec::new(),
         }
     }
 
@@ -467,6 +472,7 @@ impl Fitting {
             starlight_w: self.starlight_w,
             refit: self.refit.as_ref().map(|plan| plan.round().clone()),
             posture: self.posture,
+            lit: self.lit.clone(),
         }
     }
 
@@ -498,6 +504,7 @@ impl Fitting {
             heat_j: account.heat_j,
             starlight_w: account.starlight_w,
             posture: account.posture,
+            lit: account.lit.clone(),
             ..full
         }
     }
@@ -577,7 +584,13 @@ impl Fitting {
 
     /// Energy committed to the motive and not yet spent, at a coordinate time.
     pub fn committed_j_at(&self, motion: &ShipState, now_s: f64) -> f64 {
-        (self.committed_j - self.burn_spent_j(motion, now_s)).max(0.0)
+        (self.committed_j - self.spent_j(motion, now_s)).max(0.0)
+    }
+
+    /// What the ship has emitted since the settlement, joules: the drive's exhaust and whatever
+    /// else is lit.
+    fn spent_j(&self, motion: &ShipState, now_s: f64) -> f64 {
+        self.burn_spent_j(motion, now_s) + self.lit_between_j(self.since_s, now_s)
     }
 
     fn burn_spent_j(&self, motion: &ShipState, now_s: f64) -> f64 {
@@ -651,6 +664,7 @@ impl Fitting {
         self.heat_j = flow.heat_j;
         self.rapidity_since = cost::lit_rapidity(motion, now_s);
         self.since_s = now_s;
+        self.lit.retain(|lit| lit.until_s > now_s);
     }
 
     /// Take up a new motive, committing what its plan will spend. Settle with the old one first.
@@ -660,12 +674,32 @@ impl Fitting {
     pub fn commit(&mut self, motion: &ShipState, now_s: f64) -> f64 {
         self.rapidity_since = cost::lit_rapidity(motion, now_s);
         let remaining = cost::planned_rapidity(motion) - self.rapidity_since;
-        self.committed_j = if remaining > 0.0 {
+        let lit_j = self.lit_between_j(self.since_s, f64::INFINITY);
+        self.committed_j = lit_j + if remaining > 0.0 {
             cost::energy_j(self.settled_mass_kg(), remaining, self.balance.drive_efficiency)
         } else {
             0.0
         };
         self.committed_j
+    }
+
+    /// Light an emission with no net thrust, committing all it will draw. Settle first.
+    pub fn light(&mut self, lit: Lit) {
+        self.committed_j += lit.power_w * (lit.until_s - lit.from_s.max(self.since_s)).max(0.0);
+        self.lit.push(lit);
+        self.lit.sort_by(|a, b| a.from_s.total_cmp(&b.from_s));
+    }
+
+    /// Put out everything lit, from the settlement on, and release what it had still to draw.
+    /// Settle first.
+    pub fn darken(&mut self) {
+        let unflown_j = self.lit_between_j(self.since_s, f64::INFINITY);
+        self.committed_j = (self.committed_j - unflown_j).max(0.0);
+        self.lit.clear();
+    }
+
+    pub fn lit(&self) -> &[Lit] {
+        &self.lit
     }
 
     /// Spend a change of rapidity at once, as a burn does. Settle first.
@@ -862,6 +896,9 @@ impl Fitting {
             starlight_w: f.starlight_w,
             refit: f.refit.as_ref().map(Into::into),
             posture: field.map_or(Posture::BLACK, Posture::from),
+            lit: field.map_or_else(Vec::new, |field| {
+                field.lit.iter().map(|l| Lit { from_s: l.from_s, until_s: l.until_s, power_w: l.power_w }).collect()
+            }),
         };
         let mut fitting = Fitting::from_account(&account, f.balance.into());
         fitting.heat_j = field.map_or_else(|| heat::idle_j(&fitting.hull, &fitting.balance), |field| field.heat_j);
@@ -879,7 +916,8 @@ impl From<&Fitting> for lc_proto::Field {
     fn from(f: &Fitting) -> Self {
         let p = &f.posture;
         let switch = p.switch.map(|s| lc_proto::Switch { to: s.to.into(), done_s: s.done_s });
-        Self { heat_j: f.heat_j, since_s: f.since_s, mode: p.setting.into(), shade: p.shade.into(), switch }
+        let lit = f.lit.iter().map(|l| lc_proto::Lit { from_s: l.from_s, until_s: l.until_s, power_w: l.power_w }).collect();
+        Self { heat_j: f.heat_j, since_s: f.since_s, mode: p.setting.into(), shade: p.shade.into(), switch, lit }
     }
 }
 

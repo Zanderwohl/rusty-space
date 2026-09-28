@@ -476,14 +476,16 @@ mod tests {
         assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { .. })), "{said:?}");
     }
 
-    /// Each order the wire has before the shard can do it is refused as such, and does nothing.
+    /// An emit aimed everywhere is no emit, and is refused without touching the account. Both
+    /// approaches are built and reach the sighting check.
     #[tokio::test]
-    async fn an_order_not_built_yet_is_refused_as_not_built() {
+    async fn an_emit_aimed_everywhere_is_refused_and_both_approaches_are_built() {
         use lc_proto::{Aim, Apertures, Approach, Closeness};
         let (mut server, mut wire, from, ship) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
         let before = server.ship(ship).unwrap().fitting().cloned();
-        let unbuilt = [
+        wire.client_says(
+            from,
             act(Order::Emit {
                 aim: Aim::Omni,
                 apertures: Apertures::Aft,
@@ -492,17 +494,10 @@ mod tests {
                 spread_rad: 0.01,
                 duration_s: 60.0,
             }),
-        ];
-        for message in unbuilt {
-            wire.client_says(from, message.clone());
-            server.tick(&mut wire).await.unwrap();
-            let said = replies(&mut wire);
-            assert!(
-                said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::NotBuilt, .. })),
-                "{message:?}: {said:?}"
-            );
-            assert!(!said.iter().any(|m| matches!(m, Outbound::Accepted { .. })), "{message:?}: {said:?}");
-        }
+        );
+        server.tick(&mut wire).await.unwrap();
+        let said = replies(&mut wire);
+        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::Impossible, .. })), "{said:?}");
         assert_eq!(server.ship(ship).unwrap().fitting().cloned(), before);
         assert!(server.pursuits.is_empty());
 

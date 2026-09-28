@@ -249,7 +249,7 @@ mod tests {
         };
         let done_s = at_t as f64 * 1.0e-6 + DAY_S;
         let fitted = said.iter().rev().find_map(|m| match m {
-            Outbound::Fitted { field: Some(field), .. } => Some(*field),
+            Outbound::Fitted { field: Some(field), .. } => Some(field.clone()),
             _ => None,
         });
         assert_eq!(fitted.map(|f| (f.mode, f.shade, f.switch)), Some((FieldMode::Black, Shade::Clear, Some(lc_proto::Switch { to: Shade::Black, done_s }))));

@@ -98,6 +98,11 @@ pub enum Recipe {
         from_ly: DVec3,
         since_t: f64,
     },
+    /// Its turn is carried rather than re-timed, so a restore cannot light it at another instant.
+    Boosting {
+        boost: crate::emit::Boost,
+        clock_base_s: f64,
+    },
 }
 
 impl Snapshot {
@@ -182,6 +187,7 @@ impl Snapshot {
             Recipe::Drifting { from_ly, since_t } => {
                 state.resume_drifting(from_ly, since_t);
             }
+            Recipe::Boosting { boost, clock_base_s } => state.resume_boosting(boost, clock_base_s),
         }
         state
     }
@@ -287,6 +293,17 @@ impl From<&Snapshot> for lc_proto::Motion {
                 Recipe::Drifting { from_ly, since_t } => lc_proto::Motive::Drifting {
                     from_ly: from_ly.to_array(),
                     since_t: *since_t,
+                },
+                Recipe::Boosting { boost, clock_base_s } => lc_proto::Motive::Boosting {
+                    from_ly: boost.from_ly.to_array(),
+                    beta0: boost.beta0.to_array(),
+                    start_s: boost.start_s,
+                    thrust: boost.thrust.to_array(),
+                    nose: boost.nose.to_array(),
+                    accel_g: boost.accel_g,
+                    lit_s: boost.lit_s,
+                    turn_s: boost.turn_s(),
+                    clock_base_s: *clock_base_s,
                 },
             },
         }
@@ -427,6 +444,21 @@ impl From<&lc_proto::Motion> for Snapshot {
                     from_ly: DVec3::from_array(*from_ly),
                     since_t: *since_t,
                 },
+                lc_proto::Motive::Boosting { from_ly, beta0, start_s, thrust, nose, accel_g, lit_s, turn_s, clock_base_s } => {
+                    Recipe::Boosting {
+                        boost: crate::emit::Boost::resume(
+                            DVec3::from_array(*from_ly),
+                            DVec3::from_array(*beta0),
+                            *start_s,
+                            DVec3::from_array(*thrust),
+                            DVec3::from_array(*nose),
+                            *accel_g,
+                            *lit_s,
+                            *turn_s,
+                        ),
+                        clock_base_s: *clock_base_s,
+                    }
+                }
             },
         }
     }

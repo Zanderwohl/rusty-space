@@ -237,6 +237,19 @@ pub enum Motive {
         target: ShipId,
         clock_base_s: f64,
     },
+    /// Pushed along `thrust` at a constant proper acceleration by an emission, after turning the
+    /// nose to `nose`, for `lit_s` coordinate seconds. Drifting after. Appended last.
+    Boosting {
+        from_ly: [f64; 3],
+        beta0: [f64; 3],
+        start_s: f64,
+        thrust: [f64; 3],
+        nose: [f64; 3],
+        accel_g: f64,
+        lit_s: f64,
+        turn_s: f64,
+        clock_base_s: f64,
+    },
 }
 
 /// How close a craft hangs about once it has matched with its quarry. Mirrors
@@ -420,37 +433,7 @@ pub struct Intent {
     pub issued_at_client_t: i64,
 }
 
-/// Event kinds, as [`Sighting::kind`] carries them. Named here because both ends read them.
-pub mod kind {
-    pub const TRANSMIT: i16 = 1;
-    /// An order that lights the drive, stamped when it was given.
-    pub const BURN: i16 = 2;
-    pub const CUT: i16 = 3;
-    /// The drive lit, went out or changed power, stamped when it did. The payload is a
-    /// [`super::DriveChange`] as JSON.
-    pub const DRIVE: i16 = 4;
-    /// Somebody said something. The payload is a [`super::Spoken`] as JSON, **redacted per
-    /// receiver**: a sealed message reaches an eavesdropper as [`super::Body::Unreadable`].
-    pub const MESSAGE: i16 = 5;
-    /// Somebody sent what they have learned. The payload is a [`super::Reported`] as JSON,
-    /// **redacted per receiver** exactly as a message is: a sealed report reaches an
-    /// eavesdropper as the fact that a report went out, with nothing in it.
-    pub const REPORT: i16 = 7;
-    /// Somebody put their public key on the air. The payload is a [`super::Spoken`] too, with
-    /// [`super::Body::Key`] — it lands in the same conversation, because that is where a player
-    /// looks for it. Receiving one is what puts the source in the receiver's keyring.
-    pub const KEY: i16 = 6;
-    /// A teleport's departure, stamped where the craft was.
-    pub const VANISH: i16 = 8;
-    /// Its arrival, at the same coordinate time. Each end is seen at its own light delay.
-    pub const APPEAR: i16 = 9;
-    /// A field reached `Q_max` and the ship is gone, stamped when and where. The payload is a
-    /// [`super::Released`] as JSON.
-    pub const COLLAPSE: i16 = 10;
-    /// A field switch completed, stamped when and where: what it absorbs and reflects changed then.
-    /// The payload is a [`super::ShadeChange`] as JSON.
-    pub const SHADE: i16 = 11;
-}
+pub mod kind;
 
 /// What a craft's drive became at a [`kind::DRIVE`] event.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -537,7 +520,7 @@ pub struct Presence {
     pub building: Option<Building>,
     /// `None` until H7.
     pub glow: Option<Glow>,
-    /// Only for an observer inside the craft's beam. `None` until E3.
+    /// Only for an observer inside one of the craft's beams whose light is arriving.
     pub glare: Option<Glare>,
 }
 
@@ -863,7 +846,7 @@ pub enum Outbound {
     /// No end time: an emitter can stop early, and when it meant to stop is its own business
     /// until the light of stopping arrives. `beam` is the emit's event id, so two beams on one
     /// bearing stay apart. `bearing` is a unit vector toward the source, in world axes.
-    Illuminated { ship_id: ShipId, beam: i64, bearing: [f64; 3], wavelength_m: f64, power_w: f64, arrive_t: i64 },
+    Illuminated { ship_id: ShipId, beam: i64, bearing: [f64; 3], spectrum: Spectrum, power_w: f64, arrive_t: i64 },
     /// The account's presets, whole. Sent after `Welcome` and after each change.
     Presets(Vec<Preset>),
 }
@@ -985,7 +968,7 @@ pub mod form;
 mod knowing;
 mod radio;
 
-pub use field::{Apertures, Field, FieldMode, Glare, Glow, Shade, Switch};
+pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lit, Shade, Spectrum, Switch};
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
@@ -1126,7 +1109,7 @@ mod tests {
                         reversing: true,
                     }),
                     glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear }),
-                    glare: Some(Glare { wavelength_m: 1.0e-6, received_w: 3.5e12 }),
+                    glare: Some(Glare { spectrum: Spectrum::Line { wavelength_m: 1.0e-6 }, flux_w_m2: 3.5e12 }),
                 },
                 1_000_000,
             )
@@ -1349,7 +1332,7 @@ mod tests {
             ship_id: ShipId(42),
             beam: 9,
             bearing: [0.0, 0.6, 0.8],
-            wavelength_m: 1.0e-6,
+            spectrum: Spectrum::Line { wavelength_m: 1.0e-6 },
             power_w: 2.5e17,
             arrive_t: 1_000_000,
         }
@@ -1434,6 +1417,7 @@ mod tests {
                 mode: FieldMode::Auto { clear_above: 0.5, black_below: 0.3, refill_below: 0.95 },
                 shade: Shade::Black,
                 switch: Some(Switch { to: Shade::Clear, done_s: 1.0864e6 }),
+                lit: vec![Lit { from_s: 1.0e6, until_s: 1.0036e6, power_w: 2.2e20 }],
             }),
         }
     }
@@ -1724,6 +1708,7 @@ mod tests {
                     mode: FieldMode::Clear,
                     shade: Shade::Clear,
                     switch: None,
+                    lit: Vec::new(),
                 }),
             },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NotBuilt },

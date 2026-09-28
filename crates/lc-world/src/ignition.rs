@@ -93,6 +93,7 @@ fn phase_changes_s(state: &ShipState) -> Vec<f64> {
             .iter()
             .map(|tau| plan.quarry.since_t + plan.quarry.world_elapsed(*tau))
             .collect(),
+        Motive::Boosting(boost) => vec![boost.lights_s(), boost.out_s()],
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => Vec::new(),
     }
 }

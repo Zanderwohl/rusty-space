@@ -2,7 +2,9 @@
 
 Engines, radios, weapons and power lines are one thing: energy sent in a chosen direction.
 
-**Status: designed, not built.** This is the Kzinti Lesson (Niven): a reaction drive is a weapon
+**Status: partly built.** Emitting on purpose is built, with one path from any emission to
+whatever it lands on ([As built](#as-built)); a drive's exhaust is not yet one of its emissions
+(E4 of [the plan](plans/forms-and-fields.md)). This is the Kzinti Lesson (Niven): a reaction drive is a weapon
 in exact proportion to how good a drive it is. Here the drive is a photon rocket
 ([19-ship-fitting.md](19-ship-fitting.md)), so the lesson is literal. What a ship sends out is
 light, and light lands on someone. [30-the-field.md](30-the-field.md) is where the energy comes
@@ -220,6 +222,43 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   station, falling or drifting.
 - It is refused during a refit, as every order that lights the drive is.
 
+### As built
+
+- **One path, whatever lit it.** An emission is an event of `kind::EMIT` where it lights, and
+  another where it goes out, each carrying what it sends in its payload: where it left, its axis
+  and half-angle, its spectrum and its power. Each fans out along its cone through the machinery
+  every event uses, and each delivery to another craft is a landing at its arrival. The event of
+  going out is also delivered to every craft holding the beam, wherever it has got to, so nobody
+  is left lit. A drive's exhaust will be lit through the same registry (E4); nothing about beams is
+  written that a drive or a spike would duplicate.
+- **A landing takes its share from where the receiver is when the light lands**: the cone is
+  tested there, so a target that maneuvered after the beam left is missed, and the share is
+  `P · min(1, A_shadow / (Ω d²))` onto its shadow toward the emitter. It is held as intake, beside
+  the neighbors' glow, until the light of going out lands, and the receiver's owner is told with
+  `Illuminated` at each. Three simplifications, which are E7: a craft that flies into a beam after
+  its first light passed is not fed; the share is not restated as the receiver moves along it; and
+  a burn's power is stated at its start and not again as the ship lightens.
+- **`power_w` is what each end sends.** A balanced emit sends it along the aim from the fore
+  engines and against it from the aft ones, and draws twice it. Each end's rating is its engines'
+  together, and the diffraction floor is `λ / 2D` for its widest face; a balanced emit's two beams
+  share one spread, never under either end's floor. A spread asked for below the floor is widened to it, and the acceptance says the spread
+  that was lit. Wavelengths outside 1 nm to 3 cm, and an aim at everywhere, are refused.
+- **Committed when accepted**, as a plan is: what it will emit, against storage, refused
+  `NoEnergy` when free storage cannot cover it, and drawn heat first as it goes. Heat's share
+  leaves the commitment without leaving storage, and putting it out early releases the rest.
+- **As a burn it is `Motive::Boosting`**: the nose comes about with nothing lit, then a straight
+  line at constant proper acceleration `P / (m c)` from the mass at the order, gravity ignored while
+  lit, then ballistic. Anything lit, burn or balanced, refuses flight orders and refits while it runs, and a
+  balanced emit drops a standing intercept, whose re-plans would light the drive. **A balanced emit does not
+  turn the hull**: its apertures are taken to point along the aim. A second emit while one is lit
+  is refused `UnderWay`, `CutDrive` puts out whatever is lit, and a collapse puts out the wreck's.
+- **`Glare`** is the flux at the observer, W/m², and the spectrum: one line for a beam, a
+  blackbody for a drive's face. Summed over the source's beams landing on it, in the brightest's
+  spectrum.
+- **A restart** brings back what each craft has lit and the beams landing on each now, with the
+  craft's checkpoint, and every landing still in flight, from the journal's deliveries of events
+  the restored clock has reached, whatever lit them.
+
 ### Spread, and why it is a choice
 
 The diffraction limit is only a floor. Against something that moves, a beam narrower than your
@@ -345,6 +384,8 @@ is a separate aperture, not an engine, because a dish that talks should not also
 power is `SIGNAL_POWER_W`, a megawatt. Its recoil is nothing. It is charged from storage: a year of
 transmitting is about 2 × 10⁻¹² ME.
 
+Built: a transmission is charged its power for `TRANSMISSION_S`, a second, from storage.
+
 `lc_world::signal`'s `Beam` and `Transmitter` are the geometry for all of it. What `Order::Emit`
 adds to radio is power large enough to matter and no message.
 
@@ -382,8 +423,8 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
   power when the light of the beam stopping arrives. It carries no end time: an emitter may stop
   early, and until that light lands the receiver cannot know. Each carries the emit's event id,
   so two beams from one bearing stay apart.
-- `Presence` of an emitter seen from inside its cone carries its brightness in that band, as a
-  `Glare`.
+- `Presence` of an emitter seen from inside its cone carries its flux there and its spectrum, as a
+  `Glare`. `Illuminated` carries the spectrum too, since a drive's is a blackbody's.
 
 ## Client
 
