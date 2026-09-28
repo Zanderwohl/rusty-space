@@ -798,7 +798,6 @@ mod tests {
         assert!((gap - standoff).abs() < 0.05 * standoff, "{gap:.0} m off a {standoff:.0} m station at Io");
     }
 
-
     /// Headless, the cascade falls in line order: the first when it vents, and each after it when
     /// the last one's spike reaches it. Each spike is lethal to the next ship and not to the one
     /// after, so every death is its neighbor's doing, and the player watching survives all five.
