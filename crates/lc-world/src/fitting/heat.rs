@@ -45,20 +45,10 @@ impl Fitting {
         let field = self.field();
         let now_s = now_s.max(self.since_s);
         let mut heat_w = 0.0;
-        // Walked a second past `now_s`, so the stretch holding it is always offered.
-        self.walk(Some(motion), now_s + 1.0, |from_s, part, heat_j, dt_s| {
-            if from_s + dt_s <= now_s {
-                return false;
-            }
-            let mut end_s = from_s;
-            for stretch in field.stretches(part, heat_j, dt_s) {
-                heat_w = stretch.heat_w;
-                end_s += stretch.dt_s;
-                if end_s > now_s {
-                    break;
-                }
-            }
-            true
+        // A second past `now_s`, so the last stretch offered is the one in force from it.
+        self.walk(Some(motion), now_s + 1.0, |_, part, heat_j, dt_s| {
+            heat_w = field.stretches(part, heat_j, dt_s).last().map_or(0.0, |s| s.heat_w);
+            false
         });
         heat_w
     }
