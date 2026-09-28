@@ -304,9 +304,16 @@ mod tests {
 
     #[test]
     fn the_local_round_is_the_one_the_shard_would_plan() {
-        let mut s = warm(3.0 * B.module_energy_j());
+        let idle_j = heat_now(&docked());
+        the_shard_plans_and_heats_it(3.0, 3.0 * B.module_energy_j());
+        the_shard_plans_and_heats_it(0.0, 1.2 * idle_j);
+    }
+
+    /// From a ship holding `heat_j` with `room_me` of room, which with none vents.
+    fn the_shard_plans_and_heats_it(room_me: f64, heat_j: f64) {
+        let mut s = warm(heat_j);
         let now = s.coordinate_time_s();
-        s.ship.drain(3.0 * B.module_energy_j(), now);
+        s.ship.drain(room_me * B.module_energy_j(), now);
         let draft = rebuilt();
         let local = Start::of(&s).unwrap().solve(&draft.form).expect("it plans");
 
@@ -320,7 +327,7 @@ mod tests {
         assert_eq!(preview.duration_s, Some(planned.duration_s()));
         let heat = preview.heat.unwrap();
         assert_eq!(Some(heat), Heat::ahead(shard.fitting().unwrap(), now), "the shard's account heats as the preview does");
-        assert!(heat.step.is_some(), "premise: something it does raises the heat");
+        assert!(room_me > 0.0 || heat.step.is_some(), "premise: the vent raises the heat");
     }
 
     /// While a round runs, the next begins from its target with what it will leave.
@@ -334,8 +341,8 @@ mod tests {
         assert_eq!(start.from, target);
         let plan = s.ship.fitting().unwrap().refit().unwrap();
         let end = now + plan.duration_s();
-        let left = plan.at(end).stored_j;
-        assert!((start.stored_j - left).abs() < 1e-6 * left, "{} {left}", start.stored_j);
+        let left = s.ship.fitting().unwrap().stored_j_at(&s.ship.motion, end);
+        assert!((start.stored_j - left).abs() < 1e-12 * left, "{} {left}", start.stored_j);
         assert_eq!(start.start_s, end);
     }
 
@@ -408,7 +415,7 @@ mod tests {
     #[test]
     fn a_warm_ship_is_asked_about_a_vent_an_idle_one_survives() {
         let idle = docked();
-        let draft = shrunk(0.7);
+        let draft = shrunk(0.9);
         let cool = Preview::of(&idle, &with(draft.clone()), None).unwrap().heat.unwrap();
         assert!(cool.step.is_some() && !cool.collapses() && !collapses(&idle, &draft), "premise: the idle ship survives it {cool:?}");
 
