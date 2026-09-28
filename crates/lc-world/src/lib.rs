@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod afterglow;
 pub mod ahead;
 pub mod airless;
 pub mod attitude;

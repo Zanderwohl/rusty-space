@@ -77,7 +77,8 @@ impl Sighting {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Sample {
     pub observed_s: f64,
-    /// Signed fractional change against the bare star: positive is a deficit.
+    /// Signed fractional change against the bare star: positive is a deficit. A place or a craft
+    /// has no bare star, and its sample is the flux, W/m².
     pub deficit: f64,
     pub sigma: f64,
 }
