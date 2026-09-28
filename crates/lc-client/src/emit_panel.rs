@@ -31,7 +31,7 @@ use crate::uplink::Contact;
 
 /// What the window sends. The order takes 1 nm to 3 cm, but wavelength buys only a tighter floor
 /// and costs nothing (31 §Open), so it is not offered until it is a trade.
-pub const WAVELENGTH_M: f64 = 1.0e-6;
+pub const WAVELENGTH_M: f64 = lc_world::emit::WAVELENGTH_M;
 const SPREAD_MAX_RAD: f64 = std::f64::consts::FRAC_PI_2;
 const POWER_MIN_W: f64 = 1.0e6;
 const DURATION_S: (f64, f64) = (1.0, 3.0e7);

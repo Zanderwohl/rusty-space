@@ -127,7 +127,8 @@ impl Plugin for ClientPlugin {
                 crate::presets_panel::PresetsPanelPlugin),
             (crate::bench::BenchPlugin, crate::haze::HazePlugin),
             // The beauty shots and the staged refit both photograph the ship.
-            (crate::beauty::BeautyPlugin, crate::ship_hull::ShipHullPlugin, crate::refit_hull::RefitHullPlugin, crate::field::FieldPlugin),
+            (crate::beauty::BeautyPlugin, crate::ship_hull::ShipHullPlugin, crate::refit_hull::RefitHullPlugin, crate::field::FieldPlugin,
+                crate::distant::DistantPlugin),
             // The menu's and the editor's widgets, so the browser build, which has no menu, has
             // them too.
             em_ui::MenuUiPlugin,
@@ -252,6 +253,8 @@ impl Plugin for ClientPlugin {
                     update_sky,
                     update_bodies,
                     crate::dev::dress_worn,
+                    // Which craft are points, before anything meters or draws them.
+                    crate::distant::resolve,
                     // After the bodies, because it meters them; before the surfaces, because
                     // they are shaded against what it places.
                     crate::resolved::sample_scene,
@@ -275,7 +278,7 @@ impl Plugin for ClientPlugin {
                         .after(crate::hull_mesh::HullMeshSystems),
                     // Under the hulls' roots, placed by then; before the exhaust, which is additive
                     // and sorts against the field's walls.
-                    (crate::field::hold, crate::field::collapses, crate::field::draw_fields).chain(),
+                    (crate::field::hold, crate::field::collapses, crate::field::draw_fields, crate::distant::draw_points, crate::dev::hide_own_ship).chain(),
                     // And the exhaust after the hulls, whose roots the glows hang from.
                     crate::plume::draw_exhaust,
                 )

@@ -128,7 +128,7 @@ dropped, not finished, and storage keeps what it holds only up to its new capaci
 ([31-directed-energy.md](31-directed-energy.md#emitting-on-purpose)) from the ship's nose, through
 the order's own checks: `aft` beams out of the stern and burns along the nose, `fore` out of the
 bow and burns against it, and `both` beams both ways and holds. Each end sends `rating` of the
-lesser chosen end's rating, at 1 µm and 0.01 rad. It is how a lit face is photographed.
+lesser chosen end's rating, at 551 nm, the middle of V, and 0.01 rad. It is how a lit face is photographed.
 
 ## Teleport
 

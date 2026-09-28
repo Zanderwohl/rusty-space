@@ -327,6 +327,10 @@ How it looks from the next system, taking the spike as one second long:
 | 5 km, full | 31 000 ME | 1 100 L☉ | −6.9, brighter than Venus |
 | 50 km, full | 3 × 10⁷ ME | 10⁶ L☉ | −14, about the full Moon |
 
+These are bolometric. A blackbody at `collapse_spike_k` puts almost nothing in any band an eye has,
+so the eye is shown the spike's flux flat across its bands instead, which keeps these magnitudes in
+every one of them: a deliberate cheat, for the eye only ([32](32-ship-rendering.md#in-the-game)).
+
 A war lights up its neighbors' skies **in order of their distance**, for years, each system
 seeing it replayed as the light passes.
 
@@ -508,8 +512,9 @@ shows its thresholds. What a player can infer from it:
   textures, which average 0.35, are scaled to it. The field's heat is drawn on its envelope
   ([32](32-ship-rendering.md#in-the-game)), and on the hull only for a craft with no form, which has
   no envelope. A star's spectrum cache serves its per-band radiance. A Black field hides the lit
-  windows too. Nothing yet draws a distant ship as a point: the metering sums the terms
-  (`hull::Sent`), and R18's point starts from that sum.
+  windows too. A ship too far to resolve is a point, and that point is those terms summed
+  (`hull::Sent`), each over the area it is drawn on near to
+  ([32](32-ship-rendering.md#the-exhaust-cone), From a distance).
 - **Instruments:** the photometry and the detection test are in `lc-world`. A stare can point at a
   place or a craft as well as a star, and records the flux arriving in the one resolution element
   it is aimed at, band by band: every craft's light by this photometry, and every wreck's spike and

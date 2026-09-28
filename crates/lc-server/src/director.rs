@@ -20,7 +20,7 @@ use glam::DVec3;
 use lc_proto::{ClientId, Outbound, Refusal, ShipId};
 use lc_world::craft::{Craft, CraftId};
 use lc_world::field::Burst;
-use lc_world::fitting::{Account, Balance, Fitting};
+use lc_world::fitting::{Account, Balance, Fitting, Posture, Setting};
 use lc_world::motion::{self, Change, Motive};
 use lc_world::navigation::{Course, Waypoint};
 use lc_world::scenario::{Act, Formed, Member, Scenario, Slot, Start};
@@ -225,6 +225,12 @@ impl<J: Journal> Server<J> {
                 Some(Change::SetCourse { course, drive: craft.turning(craft.motion.drive) })
             }
             Act::Cut => Some(Change::CutDrive),
+            Act::Cross { bearing, ly } => {
+                let Some(craft) = self.fleet.get(id) else { return };
+                let from = craft.position_at(at_t as f64) / lc_world::motion::LIGHT_US_PER_LY;
+                let to_ly = from + DVec3::from(*bearing).normalize_or(DVec3::X) * *ly;
+                Some(Change::Cross { to_ly, drive: craft.turning(craft.motion.drive) })
+            }
             Act::Chase(on) | Act::ChaseDirect(on) => {
                 let Some(quarry) = director.craft_in(*on) else { return };
                 let approach = match act {
@@ -282,7 +288,15 @@ fn formed_fitting(formed: Formed, balance: &Balance, now_s: f64) -> Option<Fitti
     let form = lc_world::form::presets::named("default", formed.scale)?;
     let full = Fitting::full(form, *balance, now_s);
     let heat_j = formed.heat * full.field().heat_max_j();
-    Some(Fitting::from_account(&Account { heat_j, ..full.account() }, *balance))
+    let mut account = Account { heat_j, ..full.account() };
+    if let Some(shade) = formed.shade {
+        let setting = match shade {
+            lc_world::field::Mode::Clear => Setting::Clear,
+            lc_world::field::Mode::Black => Setting::Black,
+        };
+        account.posture = Posture { setting, shade, switch: None };
+    }
+    Some(Fitting::from_account(&account, *balance))
 }
 
 /// Put one craft where its scene says it starts.
@@ -857,6 +871,56 @@ mod tests {
         }
         let kestrel = server.fleet.get(pov).unwrap();
         assert!(kestrel.ended_s().is_none() && kestrel.fitting().is_some(), "the player died watching");
+    }
+
+    /// `distant`, headless: Lantern burns first with the player just outside its cone and then with
+    /// the cone on it, whose glare the player is handed once the light has come the light-year, and
+    /// Beacon collapses.
+    #[tokio::test]
+    async fn the_distant_burn_turns_its_cone_onto_the_player() {
+        use lc_world::scenario::{BASE_ID, DISTANT};
+        let Some(star) = sol() else { return };
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.directing(true);
+        let pov = CraftId(1);
+        let mut kestrel = Craft::at(pov, Kind::Ship, star.position_ly + DVec3::X * 5.0 * lc_world::system::UNIT_M / M_PER_LY);
+        server.fit_new(&mut kestrel);
+        server.admit(ClientId(1), kestrel, 0.0);
+        server.load_world(World::new(vec![star]));
+        server.stage(&DISTANT).expect("the scene stages");
+        let mut wire = Loopback::new();
+        server.tick(&mut wire).await.unwrap();
+        let started_s = server.director.as_ref().and_then(|d| d.started_t).expect("staged") as f64 * 1.0e-6;
+        let (lantern, beacon) = (CraftId(BASE_ID), CraftId(BASE_ID + 1));
+        let year_s = lc_world::flight::JULIAN_YEAR_S;
+        let b = Balance::DEFAULT;
+
+        // Off the player's line, degrees, while the drive is lit.
+        let off_deg = |server: &Server<Memory>| {
+            let now_s = server.now_t() as f64 * 1.0e-6;
+            let craft = server.fleet.get(lantern).unwrap();
+            let drive = lc_world::emit::exhaust(craft, &b, now_s).into_iter().find(|j| j.jet == lc_world::emit::Jet::Drive)?;
+            let to_pov = server.fleet.get(pov).unwrap().position_at(server.now_t() as f64) - craft.position_at(server.now_t() as f64);
+            Some(drive.axis.angle_between(to_pov).to_degrees())
+        };
+        let mut glared = None;
+        let (mut first, mut second) = (Vec::new(), Vec::new());
+        while server.now_t() as f64 * 1.0e-6 < started_s + 1.5 * year_s && glared.is_none() {
+            server.tick(&mut wire).await.unwrap();
+            let since = server.now_t() as f64 * 1.0e-6 - started_s;
+            if let Some(off) = off_deg(&server) {
+                if since < 0.1 * year_s { first.push(off) } else { second.push(off) }
+            }
+            glared = server.emissions.glare(pov, ShipId(lantern.0));
+        }
+        let spread = b.drive_spread_rad.to_degrees();
+        assert!(!first.is_empty() && first.iter().all(|off| *off > spread && *off < 20.0), "the first burn: {first:?}");
+        assert!(!second.is_empty() && second.iter().any(|off| *off < 0.5 * spread), "the second burn: {second:?}");
+        let glare = glared.expect("the player was never handed the glare");
+        assert!(matches!(glare.spectrum, lc_proto::Spectrum::Blackbody { .. }), "{glare:?}");
+        let arrived = server.now_t() as f64 * 1.0e-6 - started_s;
+        assert!(arrived > year_s, "handed at {arrived} s, before the light could come a light-year");
+        assert!(server.fleet.get(beacon).is_none_or(|c| c.ended_s().is_some()), "Beacon never collapsed");
     }
 
     /// **The Kzinti lesson, headless.** Braking at the player by the Direct approach puts the brake's

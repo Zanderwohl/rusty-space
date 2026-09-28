@@ -157,7 +157,7 @@ pub fn sample_scene(
     eye: Res<crate::hull::Eye>,
     uplink: Res<crate::uplink::Uplink>,
     own_form: Res<crate::parts::OwnForm>,
-    (wrecks, time): (Res<crate::field::Wrecks>, Res<Time>),
+    (wrecks, time, distant): (Res<crate::field::Wrecks>, Res<Time>, Res<crate::distant::Distant>),
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut last: Local<Option<(usize, f32)>>,
 ) {
@@ -202,8 +202,9 @@ pub fn sample_scene(
     // The length the boom was counted in, so the disc and the standoff agree.
     let own_length_m = own_form.length_m().unwrap_or(game.ship.length_m);
     let look = ui.look.forward();
+    // A craft drawn as a point is metered as one, by what the point sends.
     let hulls = std::iter::once((own_length_m, eye.boom_m, game.0.ship.motion.position_ly, None))
-        .chain(uplink.contacts.iter().map(|c| {
+        .chain(uplink.contacts.iter().filter(|c| !distant.is_point(Some(c.ship_id))).map(|c| {
             (c.length_m, c.position_ly.distance(observer) * M_PER_LY, c.position_ly, Some(c.ship_id))
         }));
     for (length_m, distance_m, at_ly, craft) in hulls {
@@ -217,7 +218,9 @@ pub fn sample_scene(
 
     let balance = game.0.ship.fitting().map_or(lc_world::fitting::Balance::DEFAULT, |f| *f.balance());
     let limit_k = crate::field::limit_k(&balance);
-    for (at_ly, kelvin, radius_m) in wrecks.metered(now, time.elapsed_secs(), balance.collapse_afterglow_s, limit_k) {
+    scene.points.extend(distant.metered.iter().copied());
+    let debris = |id| distant.is_debris(id);
+    for (at_ly, kelvin, radius_m) in wrecks.metered(now, time.elapsed_secs(), balance.collapse_afterglow_s, limit_k, debris) {
         scene.discs.push(Disc {
             radiance: crate::session::spectrum_at(kelvin),
             solid_angle_sr: crate::hull::solid_angle_sr(2.0 * radius_m, at_ly.distance(observer) * M_PER_LY),

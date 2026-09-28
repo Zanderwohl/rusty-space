@@ -18,13 +18,13 @@ use std::sync::Mutex;
 use bevy::prelude::*;
 use glam::DVec3;
 use lc_proto::{
-    Body, ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Presence, Refusal, ShipId,
+    Body, ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId,
     Sighting,
 };
 
-use lc_world::sighted::Reckoning;
 use lc_world::system::LocalSystem;
 
+pub use crate::contact::{Contact, DriveAt};
 use crate::link::{Link, Status};
 
 /// What a ship with no account behind it is called.
@@ -76,44 +76,6 @@ pub struct Joined {
     pub name: String,
 }
 
-/// Another craft, as this ship currently sees it.
-///
-/// Everything here is **retarded**. The position is where the light arriving now left from, so
-/// a contact under way is drawn behind where it actually is, and the faster it is going the
-/// further behind. That is the game rather than a lag.
-///
-/// Reckoned forward between statements rather than held still — see [`lc_world::sighted`] for
-/// why, and for what that gets wrong. [`Contact::reckon`] runs once a frame, after the clock.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Contact {
-    pub ship_id: ShipId,
-    pub name: String,
-    pub length_m: f64,
-    /// Light-years from the world origin, where the light left.
-    pub position_ly: DVec3,
-    pub beta: DVec3,
-    /// Unit vector the nose pointed along, as last stated.
-    pub facing: DVec3,
-    /// What its main drive was sending aft, `F c`, watts, as last stated. Zero when coasting.
-    pub drive_w: f64,
-    /// What its emits were sending out of each end, watts, as last stated.
-    pub emit: lc_world::emit::Ends,
-    /// Coordinate seconds the light left.
-    pub emitted_s: f64,
-    /// Its form and the refit step it had under way, as the statement's light left it, with when
-    /// that was, coordinate seconds.
-    pub form: lc_proto::Form,
-    pub building: Option<(f64, lc_proto::Building)>,
-    /// Its field, as the statement's light left it.
-    pub glow: lc_proto::Glow,
-    reckoning: Reckoning,
-    /// What the statement said the drive was doing, at the statement's own instant.
-    stated_power_w: f64,
-}
-
-/// A drive event, as a contact's plume reads it: coordinate seconds, and the power from then.
-pub type DriveAt = (f64, f64);
-
 /// Drive events remembered per craft. Only the latest before the instant drawn matters, and
 /// the instant drawn is never more than a tick or two behind the newest.
 const REMEMBERED_DRIVES: usize = 16;
@@ -121,63 +83,6 @@ const REMEMBERED_DRIVES: usize = 16;
 /// Ships whose drives are remembered. One out of sight keeps its history for when it comes
 /// back, until a busy shard pushes the count past this.
 const REMEMBERED_DRIVERS: usize = 1024;
-
-impl Contact {
-    /// A contact from a statement. `system` is the one this ship is in, which a contact inside
-    /// it is reckoned along a conic about.
-    pub fn seen(presence: Presence, system: Option<&LocalSystem>) -> Self {
-        let position_ly = DVec3::from_array(presence.at_ly);
-        let beta = DVec3::from_array(presence.beta);
-        let emitted_s = presence.emitted_t as f64 * 1.0e-6;
-        let sighting = lc_world::pursuit::Sighting {
-            target: lc_world::motion::ShipId(presence.ship_id.0),
-            position_ly,
-            beta,
-            length_m: presence.length_m,
-            emitted_s,
-        };
-        Self {
-            ship_id: presence.ship_id,
-            name: presence.name,
-            length_m: presence.length_m,
-            position_ly,
-            beta,
-            facing: DVec3::from_array(presence.facing).normalize_or_zero(),
-            drive_w: presence.drive_w,
-            emit: lc_world::emit::Ends { fore_w: presence.emit_fore_w, aft_w: presence.emit_aft_w },
-            emitted_s,
-            form: presence.form,
-            building: presence.building.map(|b| (emitted_s, b)),
-            glow: presence.glow.unwrap_or_else(|| lc_world::glow::Glow::unfitted(&lc_world::fitting::Balance::DEFAULT).into()),
-            reckoning: Reckoning::new(system, sighting),
-            stated_power_w: presence.drive_w,
-        }
-    }
-
-    /// Bring the contact up to what `observer_ly` sees at `now_s`. `drives` is this craft's
-    /// drive events, oldest first.
-    pub fn reckon(
-        &mut self,
-        system: Option<&LocalSystem>,
-        observer_ly: DVec3,
-        now_s: f64,
-        drives: &[DriveAt],
-    ) {
-        let seen = self.reckoning.appearance_at(system, observer_ly, now_s);
-        self.position_ly = seen.position_ly;
-        self.beta = seen.beta;
-        self.emitted_s = seen.emitted_s;
-        // The latest word on the drive at the instant drawn, statement or event. The statement
-        // stands when nothing has been said since, including when this clock is behind it.
-        let stated_s = self.reckoning.seen.emitted_s;
-        self.drive_w = drives
-            .iter()
-            .rev()
-            .find(|(at_s, _)| *at_s <= seen.emitted_s)
-            .filter(|(at_s, _)| *at_s > stated_s || seen.emitted_s < stated_s)
-            .map_or(self.stated_power_w, |(_, power_w)| *power_w);
-    }
-}
 
 /// Reckon every contact against this frame's clock and ship.
 pub fn reckon_contacts(game: Res<crate::app::Game>, mut uplink: ResMut<Uplink>) {

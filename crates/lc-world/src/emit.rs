@@ -23,6 +23,10 @@ use crate::form::capacity::Aperture;
 use crate::motion::{self, Motive};
 use crate::signal::cone_solid_angle_sr;
 
+/// What every emit is sent at until wavelength is a choice worth offering: the middle of V, the one
+/// band every default mapping shows, so an observer inside a beam sees it. 31 §Emitting on purpose.
+pub const WAVELENGTH_M: f64 = 551e-9;
+
 /// What `engine_m3` of engine can send, watts: its exhaust, its deliberate emission and its
 /// conversion into storage are all bounded by this.
 pub fn rating_w(balance: &Balance, engine_m3: f64) -> f64 {
