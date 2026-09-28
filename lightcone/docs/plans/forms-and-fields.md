@@ -720,7 +720,7 @@ graph LR
 
 ### R17 · A burn's power on the wire as `F c`
 
-- status: active card "R17 · A burn's power on the wire as `F c`"
+- status: done #133
 - needs: R12
 - touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-world/src/flight.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`, `crates/lc-server/src/drive.rs`, `crates/lc-server/src/emit.rs`, `crates/lc-server/src/emit/drives.rs`, `crates/lc-server/src/emit/tests/drives.rs`, `crates/lc-server/src/persist.rs`, `crates/lc-world/src/emit.rs`, `crates/lc-world/src/ignition.rs`, `crates/lc-world/src/courtesy.rs`, `crates/lc-world/src/resume.rs`, `crates/lc-client/src/construction.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/ship_hull.rs`, `lightcone/docs/19-ship-fitting.md`, `lightcone/docs/31-directed-energy.md`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/r17-*.jpg`
 - read: 31 §The drive is the radiator, 32 §The exhaust cone
