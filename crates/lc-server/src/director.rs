@@ -19,9 +19,11 @@ use std::sync::Arc;
 use glam::DVec3;
 use lc_proto::{ClientId, Outbound, Refusal, ShipId};
 use lc_world::craft::{Craft, CraftId};
+use lc_world::field::Burst;
+use lc_world::fitting::{Account, Balance, Fitting};
 use lc_world::motion::{self, Change, Motive};
 use lc_world::navigation::{Course, Waypoint};
-use lc_world::scenario::{Act, Member, Scenario, Slot, Start};
+use lc_world::scenario::{Act, Formed, Member, Scenario, Slot, Start};
 use lc_world::system::{LocalSystem, M_PER_LY};
 
 use crate::journal::Journal;
@@ -180,6 +182,10 @@ impl<J: Journal> Server<J> {
             // and waiting for `resync_systems` would leave the craft a tick with nothing to do.
             craft.enter(Some(system.clone()), now_s);
             place(&mut craft, &system, member, shoulder.as_ref(), now_s);
+            // After placing, so its first starlight segment is priced where it is.
+            if let Some(formed) = member.form {
+                craft.fit(formed_fitting(formed, &self.balance, now_s));
+            }
             self.fleet.insert(craft);
         }
 
@@ -201,6 +207,15 @@ impl<J: Journal> Server<J> {
     ) {
         let at_t = self.now_t();
         let now_s = at_t as f64 * 1.0e-6;
+        if let Act::Vent(me) = act {
+            let Some(craft) = self.fleet.get_mut(id) else { return };
+            let stored_j = craft.fitting().map_or(0.0, |f| f.stored_j_at(&craft.motion, now_s));
+            let vented_j = (me * self.balance.module_energy_j()).min(stored_j);
+            craft.drain(vented_j, now_s);
+            craft.burst(Burst::Vent(vented_j), now_s);
+            self.tell_fitted(wire, id);
+            return;
+        }
         let change = match act {
             Act::Fly(spelling) => {
                 let Some(course) = Course::parse(spelling) else { return };
@@ -243,6 +258,7 @@ impl<J: Journal> Server<J> {
                 self.pursuits.remove(&id);
                 None
             }
+            Act::Vent(_) => None,
         };
         if let Some(change) = change {
             let event = motion::Event { ship: motion::ShipId(id.0), at_t: now_s, change };
@@ -257,6 +273,14 @@ impl<J: Journal> Server<J> {
         self.tell_flying(wire, id);
     }
 
+}
+
+/// The starting form at `formed`'s scale, full, its field holding `formed`'s heat.
+fn formed_fitting(formed: Formed, balance: &Balance, now_s: f64) -> Option<Fitting> {
+    let form = lc_world::form::presets::named("default", formed.scale)?;
+    let full = Fitting::full(form, *balance, now_s);
+    let heat_j = formed.heat * full.field().heat_max_j();
+    Some(Fitting::from_account(&Account { heat_j, ..full.account() }, *balance))
 }
 
 /// Put one craft where its scene says it starts.

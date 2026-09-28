@@ -601,4 +601,157 @@ mod tests {
         let [event] = collapse_events(&restarted)[..] else { panic!("no collapse after the restart") };
         assert_eq!((event.t, event.source), (to_us(predicted_s), DYING));
     }
+
+    /// Light-microseconds in a meter.
+    const US_PER_M: f64 = 1.0 / LIGHT_MICROSECOND_M;
+
+    /// A full starting ship at its limit at the origin, which collapses a microsecond into the first
+    /// tick, and starting ships `at` light-microseconds off, each holding `heat` of `Q_max`, or idle
+    /// for `None`. No star, so nothing else heats anybody.
+    fn neighbors(at: &[(DVec3, Option<f64>)]) -> Server<Memory> {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut dying = still(DYING, DVec3::ZERO);
+        server.fit_new(&mut dying);
+        heat_to(&mut dying, 1.0);
+        server.fleet.insert(dying);
+        for (k, (place, heat)) in at.iter().enumerate() {
+            let mut craft = still(ShipId(2 + k as i64), *place);
+            server.fit_new(&mut craft);
+            if let Some(heat) = heat {
+                heat_to(&mut craft, *heat);
+            }
+            server.fleet.insert(craft);
+        }
+        server
+    }
+
+    fn heat_to(craft: &mut Craft, of_max: f64) {
+        let fitting = craft.fitting().unwrap().clone();
+        let heat_j = of_max * fitting.field().heat_max_j();
+        craft.fit(Some(Fitting::from_account(&Account { heat_j, ..fitting.account() }, *fitting.balance())));
+    }
+
+    /// Of `DYING`'s spike, where a starting ship holding `heat` of `Q_max` would be killed along
+    /// `toward`, light-microseconds.
+    fn lethal_us(server: &Server<Memory>, heat: f64, toward: DVec3) -> f64 {
+        let dying = server.ship(DYING).unwrap().fitting().unwrap();
+        let spike_j = dying.balance().collapse_spike_fraction * dying.field().released_j(dying.hull().capacities.storage_j);
+        let mut probe = still(ShipId(99), toward);
+        server.fit_new(&mut probe);
+        heat_to(&mut probe, heat);
+        let fitting = probe.fitting().unwrap();
+        let headroom_j = fitting.field().heat_max_j() - fitting.heat_j_at(0.0);
+        let shadow_m2 = probe.shadow_toward_m2(-toward, 0.0);
+        lc_world::field::lethal_radius_m(fitting.absorptivity(), spike_j, shadow_m2, headroom_j) * US_PER_M
+    }
+
+    fn died_at(server: &Server<Memory>, ship: ShipId) -> Option<i64> {
+        collapse_events(server).iter().find(|e| e.source == ship).map(|e| e.t)
+    }
+
+    /// Hot enough that the lethal radius is a dozen kilometers rather than a hundred meters.
+    const HOT: f64 = 1.0 - 1.0e-4;
+
+    /// Just inside the radius 30 gives, a spike kills; just outside, it does not.
+    #[tokio::test]
+    async fn a_spike_kills_inside_the_lethal_radius_and_not_outside_it() {
+        let r_us = lethal_us(&neighbors(&[]), HOT, DVec3::Y);
+        assert!(r_us * LIGHT_MICROSECOND_M > 5_000.0, "premise: hot widens it, to {} m", r_us * LIGHT_MICROSECOND_M);
+        for (of_radius, dies) in [(0.99, true), (1.01, false)] {
+            let mut server = neighbors(&[(DVec3::Y * of_radius * r_us, Some(HOT))]);
+            server.tick(&mut Loopback::new()).await.unwrap();
+            assert!(died_at(&server, DYING).is_some(), "premise: it collapsed");
+            assert_eq!(died_at(&server, ShipId(2)).is_some(), dies, "at {of_radius} of the lethal radius");
+        }
+    }
+
+    /// B, inside A's radius, dies when A's light reaches it; C, outside A's but inside B's, when B's
+    /// reaches it. Each death is one light-time after the last.
+    #[tokio::test]
+    async fn a_cascade_spreads_at_the_speed_of_light() {
+        let r_us = lethal_us(&neighbors(&[]), HOT, DVec3::Y);
+        let (b, c) = (DVec3::Y * 0.6 * r_us, DVec3::Y * 1.2 * r_us);
+        let mut server = neighbors(&[(b, Some(HOT)), (c, Some(HOT))]);
+        server.tick(&mut Loopback::new()).await.unwrap();
+        let a_t = died_at(&server, DYING).expect("A collapsed");
+        let b_t = died_at(&server, ShipId(2)).expect("B died");
+        let c_t = died_at(&server, ShipId(3)).expect("C died");
+        assert_eq!(b_t, (a_t as f64 + b.length()).ceil() as i64);
+        assert_eq!(c_t, (b_t as f64 + (c - b).length()).ceil() as i64);
+        assert!(c_t - b_t > 10, "premise: light-times long enough to tell apart, {}", c_t - b_t);
+
+        let mut alone = neighbors(&[(c, Some(HOT))]);
+        alone.tick(&mut Loopback::new()).await.unwrap();
+        assert_eq!(died_at(&alone, ShipId(2)), None, "C is outside A's radius, so B is what killed it");
+    }
+
+    /// Storage empty or full, a spike is all heat, `α` of what arrives on the shadow toward it.
+    #[tokio::test]
+    async fn a_spike_is_all_heat_whatever_storage_has_room_for() {
+        let apart_us = 3.0 * lethal_us(&neighbors(&[]), 0.0, DVec3::Y);
+        let mut server = neighbors(&[(DVec3::Y * apart_us, None), (-DVec3::Y * apart_us, None)]);
+        server.fleet.get_mut(CraftId(3)).unwrap().drain(f64::INFINITY, 0.0);
+        let before: Vec<Craft> = [2, 3].map(|id| server.fleet.get(CraftId(id)).unwrap().clone()).into();
+        server.tick(&mut Loopback::new()).await.unwrap();
+        let at_t = died_at(&server, DYING).unwrap();
+        let from = before[0].position_at(0.0) - DVec3::Y * apart_us;
+        let dying = neighbors(&[]);
+        let dying = dying.ship(DYING).unwrap().fitting().unwrap();
+        let spike_j = dying.balance().collapse_spike_fraction * dying.field().released_j(dying.hull().capacities.storage_j);
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        for (k, mut quiet) in before.into_iter().enumerate() {
+            let craft = server.fleet.get(quiet.id).unwrap();
+            let arrive_t = (at_t as f64 + apart_us).ceil() as i64;
+            let absorbed_j = craft.fitting().unwrap().absorptivity() * received_j(craft, from, spike_j, arrive_t);
+            // The dying ship's glow, which the tick began with.
+            quiet.light(craft.fitting().unwrap().lit_w(), 0.0);
+            quiet.settle(now_s);
+            let stored_j = |c: &Craft| c.fitting().unwrap().stored_j_at(&c.motion, now_s);
+            assert_eq!(stored_j(craft), stored_j(&quiet), "{k}: a burst converted into storage");
+            let tau_s = quiet.fitting().unwrap().field().tau_s;
+            let rose_j = craft.fitting().unwrap().heat_j_at(now_s) - quiet.fitting().unwrap().heat_j_at(now_s);
+            let want_j = absorbed_j * (-(now_s - arrive_t as f64 * 1.0e-6) / tau_s).exp();
+            assert!((rose_j - want_j).abs() < 1.0e-9 * want_j, "{k}: rose {rose_j}, the spike {want_j}");
+            assert!(want_j > 0.01 * craft.fitting().unwrap().field().heat_max_j(), "premise: a real burst");
+        }
+    }
+
+    /// `Q/τ` of a neighbor's field, onto the shadow toward it, over `4π d²`: all heat into a full
+    /// ship, and none of it without the neighbor.
+    #[tokio::test]
+    async fn a_neighbors_glow_is_intake() {
+        let d_us = 2_000.0 * US_PER_M;
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut source = still(DYING, DVec3::ZERO);
+        server.fit_new(&mut source);
+        heat_to(&mut source, 0.5);
+        server.fleet.insert(source);
+        let mut receiver = still(WATCHING, DVec3::Y * d_us);
+        server.fit_new(&mut receiver);
+        let lone = receiver.clone();
+        server.fleet.insert(receiver);
+        let mut wire = Loopback::new();
+        server.tick(&mut wire).await.unwrap();
+        server.tick(&mut wire).await.unwrap();
+        let lit_t = server.now_t() - crate::server::TICK_US;
+
+        let source = server.ship(DYING).unwrap().fitting().unwrap();
+        let receiver = server.ship(WATCHING).unwrap();
+        let shadow_m2 = receiver.shadow_toward_m2(-DVec3::Y, lit_t as f64 * 1.0e-6);
+        let d_m = d_us * LIGHT_MICROSECOND_M;
+        let want_w = source.heat_j_at(lit_t as f64 * 1.0e-6) / source.field().tau_s * shadow_m2 / (4.0 * std::f64::consts::PI * d_m * d_m);
+        let lit_w = receiver.fitting().unwrap().lit_w();
+        assert!((lit_w - want_w).abs() < 1.0e-9 * want_w, "{lit_w} {want_w}");
+
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let mut lone = lone;
+        lone.settle(now_s);
+        let held_j = |craft: &Craft| {
+            let fitting = craft.fitting().unwrap();
+            fitting.heat_j_at(now_s) + fitting.stored_j_at(&craft.motion, now_s)
+        };
+        let rose_j = held_j(receiver) - held_j(&lone);
+        let lit_j = receiver.fitting().unwrap().absorptivity() * lit_w * 2.0 * crate::server::TICK_US as f64 * 1.0e-6;
+        assert!((rose_j - lit_j).abs() < 1.0e-3 * lit_j, "rose {rose_j}, lit {lit_j}");
+    }
 }

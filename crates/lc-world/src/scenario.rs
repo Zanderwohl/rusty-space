@@ -85,6 +85,19 @@ pub struct Member {
     /// the same five g — and `length_m` reaches only the slew rate and the mass.
     pub accel_g: f64,
     pub start: Start,
+    /// A form and a field to go with it. Without one it flies on its kind's drive, has no field,
+    /// and nothing it goes near can burn it. The player's own is the session's, whatever this says.
+    pub form: Option<Formed>,
+}
+
+/// A cast member built as the starting form scaled, with its field already holding heat.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Formed {
+    /// Every part but the Mind this many times longer, as `--form default*k` sizes it. The member's
+    /// `length_m` is the extent that comes out.
+    pub scale: f64,
+    /// Of `Q_max`, the heat its field holds as the scene opens.
+    pub heat: f64,
 }
 
 /// Something that happens to one craft, at one offset into the scene.
@@ -117,6 +130,9 @@ pub enum Act {
     /// Cut the drive. Not a stop: whatever the ship was doing at the time, it keeps doing
     /// ballistically.
     Cut,
+    /// Let this many module-energies of storage go into the field at once, as a round vents what it
+    /// has no room for.
+    Vent(f64),
 }
 
 /// A scene: who is in it, where they start, and what they do.
@@ -147,7 +163,7 @@ pub struct Scenario {
 
 impl Scenario {
     /// Every scene there is.
-    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA];
+    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA, CASCADE];
 
     /// The one whose name starts with `prefix`, if exactly one does.
     ///
@@ -200,6 +216,7 @@ pub const TRAFFIC: Scenario = Scenario {
         length_m: 500.0,
         accel_g: 5.0,
         start: Start::AsFound,
+        form: None,
     },
     cast: &[
         Member {
@@ -208,6 +225,7 @@ pub const TRAFFIC: Scenario = Scenario {
             length_m: 500.0,
             accel_g: 5.0,
             start: Start::Beside { lengths: 16.0, bearing: [1.0, 0.28, 0.0] },
+            form: None,
         },
         Member {
             name: "Harrier",
@@ -215,6 +233,7 @@ pub const TRAFFIC: Scenario = Scenario {
             length_m: 2_200.0,
             accel_g: 5.0,
             start: Start::Beside { lengths: 16.0, bearing: [1.0, 0.0, 0.28] },
+            form: None,
         },
         Member {
             name: "Bittern",
@@ -222,6 +241,7 @@ pub const TRAFFIC: Scenario = Scenario {
             length_m: 10_600.0,
             accel_g: 5.0,
             start: Start::Beside { lengths: 16.0, bearing: [1.0, -0.28, 0.0] },
+            form: None,
         },
         Member {
             name: "Albatross",
@@ -229,6 +249,7 @@ pub const TRAFFIC: Scenario = Scenario {
             length_m: 50_000.0,
             accel_g: 5.0,
             start: Start::Beside { lengths: 16.0, bearing: [1.0, 0.0, -0.28] },
+            form: None,
         },
     ],
     beats: &[],
@@ -251,6 +272,7 @@ pub const MEETING: Scenario = Scenario {
         length_m: 500.0,
         accel_g: 5.0,
         start: Start::Holding("orbit:Jupiter:low"),
+        form: None,
     },
     cast: &[Member {
         name: "Anvil",
@@ -258,6 +280,7 @@ pub const MEETING: Scenario = Scenario {
         length_m: 5_000.0,
         accel_g: 5.0,
         start: Start::Alongside { of: Slot::Pov, lengths: 12.0 },
+        form: None,
     }],
     // Nothing happens, and that is the scene. Two ships holding the same orbit a fixed arc
     // apart, with a planet filling the window behind them: what a chase *ends* at, without the
@@ -283,6 +306,7 @@ pub const APPROACH: Scenario = Scenario {
         length_m: 500.0,
         accel_g: 5.0,
         start: Start::Holding("polar:Saturn:low"),
+        form: None,
     },
     cast: &[Member {
         name: "Anvil",
@@ -293,6 +317,7 @@ pub const APPROACH: Scenario = Scenario {
         // a hundred thousand kilometers at five g is a sixth of an orbit, which converges.
         accel_g: 5.0,
         start: Start::Holding("polar:Saturn:high"),
+        form: None,
     }],
     beats: &[Beat {
         after_s: 0.0,
@@ -343,6 +368,7 @@ pub const CLOSING: Scenario = Scenario {
         length_m: 500.0,
         accel_g: 5.0,
         start: Start::Holding("orbit:Jupiter:low"),
+        form: None,
     },
     cast: &[Member {
         name: "Anvil",
@@ -350,6 +376,7 @@ pub const CLOSING: Scenario = Scenario {
         length_m: 5_000.0,
         accel_g: 5.0,
         start: Start::Holding("orbit:Jupiter:high"),
+        form: None,
     }],
     beats: &[Beat { after_s: 0.0, actor: Slot::Pov, act: Act::Chase(Slot::Cast(0)) }],
 };
@@ -379,6 +406,7 @@ pub const CHASE: Scenario = Scenario {
         length_m: 500.0,
         accel_g: 10.0,
         start: Start::Holding("orbit:Jupiter:high"),
+        form: None,
     },
     cast: &[Member {
         name: "Quarry",
@@ -386,6 +414,7 @@ pub const CHASE: Scenario = Scenario {
         length_m: 500.0,
         accel_g: 5.0,
         start: Start::Beside { lengths: 40.0, bearing: [1.0, 0.1, 0.0] },
+        form: None,
     }],
     beats: &[
         Beat { after_s: 0.0, actor: Slot::Cast(0), act: Act::Fly("belt:2") },
@@ -409,10 +438,58 @@ pub const CORONA: Scenario = Scenario {
         length_m: 500.0,
         accel_g: 5.0,
         start: Start::Holding("orbit:Sol:distant"),
+        form: None,
     },
     cast: &[],
     beats: &[],
 };
+
+/// Five hot ships in a line, and the first one vents. Each spike kills the next one, one light-time
+/// after the last. See 30 §Proximity.
+///
+/// Hot because idle ships would have to overlap: a starting ship's spike kills an idle one inside
+/// 190 m, less than its own length. At ten times the size and 1.3% short of `Q_max`, each spike is
+/// lethal out to between one and two spacings, so every death is its neighbor's and not the lead's.
+/// The player watches from off to one side and behind, idle, far outside all of it, which puts each
+/// death's light further from the camera than the last.
+pub const CASCADE: Scenario = Scenario {
+    name: "cascade",
+    blurb: "Five ships running hot, four lengths apart. The first vents.",
+    star: "Sol",
+    // Four coordinate microseconds a tick, so the 76 µs between two deaths is about a second of
+    // watching.
+    rate: 1.0e-8,
+    watch: Slot::Pov,
+    pov: Member {
+        name: "Kestrel",
+        kind: Kind::Ship,
+        length_m: 500.0,
+        accel_g: 5.0,
+        start: Start::AsFound,
+        form: None,
+    },
+    cast: &[
+        domino("Aster", [4.0, 8.0, 0.0], 8.944_271_909_999_16),
+        domino("Bramble", [8.0, 8.0, 0.0], 11.313_708_498_984_761),
+        domino("Cinder", [12.0, 8.0, 0.0], 14.422_205_101_855_956),
+        domino("Drift", [16.0, 8.0, 0.0], 17.888_543_819_998_32),
+        domino("Ember", [20.0, 8.0, 0.0], 21.540_659_228_538_015),
+    ],
+    // Once every hull's light has reached the player, a quarter of a millisecond on.
+    beats: &[Beat { after_s: 5.0e-4, actor: Slot::Cast(0), act: Act::Vent(100.0) }],
+};
+
+/// [`CASCADE`]'s line, at `lengths` of its own along `bearing`: `lengths` is `bearing`'s length.
+const fn domino(name: &'static str, bearing: [f64; 3], lengths: f64) -> Member {
+    Member {
+        name,
+        kind: Kind::Ship,
+        length_m: 5_705.865,
+        accel_g: 5.0,
+        start: Start::Beside { lengths, bearing },
+        form: Some(Formed { scale: 10.0, heat: 0.987 }),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -593,6 +670,26 @@ mod tests {
                     scene.name,
                     scene.star,
                 );
+            }
+        }
+    }
+
+    /// A formed member is placed at the length its form comes out at, and only a craft with a field
+    /// can vent into one.
+    #[test]
+    fn a_formed_member_is_as_long_as_its_form() {
+        use crate::fitting::{Balance, Fitting};
+        for scene in Scenario::ALL {
+            for member in scene.cast {
+                let Some(formed) = member.form else { continue };
+                let form = crate::form::presets::named("default", formed.scale).expect("the starting form");
+                let extent_m = Fitting::full(form, Balance::DEFAULT, 0.0).hull().extent_m;
+                assert!((extent_m - member.length_m).abs() < 0.01, "{}: {} is {extent_m} m", scene.name, member.name);
+                assert!((0.0..1.0).contains(&formed.heat), "{}: {} starts collapsed", scene.name, member.name);
+            }
+            for beat in scene.beats.iter().filter(|b| matches!(b.act, Act::Vent(_))) {
+                let formed = matches!(beat.actor, Slot::Cast(_)) && scene.member(beat.actor).is_some_and(|m| m.form.is_some());
+                assert!(formed, "{}: a vent by {:?}, who has no field of the scene's making", scene.name, beat.actor);
             }
         }
     }
