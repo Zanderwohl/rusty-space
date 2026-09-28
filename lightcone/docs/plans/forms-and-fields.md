@@ -465,7 +465,7 @@ graph LR
 
 ### H7 · What an observer sees
 
-- status: todo
+- status: active card "H7 · What an observer sees"
 - needs: H6
 - touches: `crates/lc-world/src/craft.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-server/src/`
 - read: 30 §What an observer sees
@@ -521,7 +521,7 @@ graph LR
 
 ### E3 · Emit
 
-- status: todo
+- status: active card "E3 · Emit"
 - needs: E1, E2, S1, H5
 - touches: `crates/lc-world/src/emit.rs`, `crates/lc-world/src/fitting/heat.rs` (an emit's power in `Fitting::emitted_w`, E2's heat-first draw), `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`, `crates/lc-server/src/field.rs` (H5's landings), `crates/lc-server/src/persist.rs`
 - read: 31 §Emitting on purpose, §Three uses, §Radio
