@@ -127,8 +127,7 @@ pub struct Session {
     pub telescope: Instrument,
     pub mapping: BandMapping,
     pub tone: ToneMap,
-    /// `--field-k`: the player's field as drawn, metered and shown on the bar, whatever the
-    /// account says.
+    /// `--field-k`: the player's field as drawn, metered and on the bar, whatever the account says.
     pub held_field: Option<crate::field::Held>,
     /// Which band the telescope's curve is read in. Every band the sensor has is recorded
     /// whatever this says; it decides what is *shown*.
