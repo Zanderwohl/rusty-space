@@ -494,7 +494,9 @@ impl<J: Journal> Server<J> {
         // After the intents, so an auto-ack switched off this tick answers nothing more.
         self.answer_owed(after_t, &mut events, &mut deliveries);
         self.announce_drives(after_t, &mut events, &mut deliveries);
+        self.light_drives(after_t, &mut events, &mut deliveries);
         self.keep_emissions(&mut events, &mut deliveries);
+        self.restate(after_t);
         self.keep_accounts(wire);
         // After every change of input this tick, each of which settled first.
         self.keep_field_modes(after_t, wire, &mut events, &mut deliveries);
@@ -824,7 +826,7 @@ impl<J: Journal> Server<J> {
                 // The order puts nothing out. The plume going dark is still seen, by anyone
                 // who could see it lit — `crate::drive` states it — and after that the ship is.
                 // Whatever it had lit goes out with it.
-                self.put_out(id, at, events, deliveries);
+                self.put_out(id, at, false, events, deliveries);
                 (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
             }
             Order::Intercept { ship_id, closeness, approach } => {
@@ -2447,7 +2449,8 @@ pub(crate) mod course_tests {
             panic!("a course is a crossing, not {:?}", craft.motion.motive)
         };
         assert!(cruise.duration_s() > 0.0, "a crossing that takes no time went nowhere");
-        assert_eq!(server.journal().events.len(), 1, "and it is one event");
+        let said = server.journal().events.iter().filter(|e| e.kind != crate::emit::KIND_EMIT).count();
+        assert_eq!(said, 1, "and it is one event, beside the drive's light");
     }
 
     /// Cutting the engine leaves the velocity it had. With no system to be on a conic about,
