@@ -1,14 +1,22 @@
-//! Collapse: a field that reaches `Q_max` destroys its ship. See `lightcone/docs/30-the-field.md`
-//! §Collapse.
+//! Collapse, and what a field does to its neighbors. See `lightcone/docs/30-the-field.md`
+//! §Collapse and §Proximity.
 //!
-//! Nothing is scheduled ahead or kept for it. The instant is a closed form of the account, which
-//! every change of input settles first and a checkpoint keeps, so solving it again each tick is the
-//! schedule, and a restart restores it with the account. What goes out is an ordinary event, and
-//! observers learn of it at their own light delay; the wreck stays in the fleet with its worldline
-//! ended, so its light already in flight goes on arriving until the last of it has passed.
+//! Nothing is scheduled ahead or kept for a collapse. The instant is a closed form of the account,
+//! which every change of input settles first and a checkpoint keeps, so solving it again each tick
+//! is the schedule, and a restart restores it with the account. What goes out is an ordinary event,
+//! and observers learn of it at their own light delay; the wreck stays in the fleet with its
+//! worldline ended, so its light already in flight goes on arriving until the last of it has passed.
+//!
+//! The spike rides the event's own fan-out: each delivery to a fitted craft is queued as a burst
+//! and lands at that delivery's arrival. Landing is a change of input like any other, so the
+//! receiver's collapse re-solves from it, and a cascade is nothing but collapses and landings taken
+//! in time order.
 
+use glam::DVec3;
 use lc_proto::{Outbound, ShipId};
+use lc_spacetime::LIGHT_MICROSECOND_M;
 use lc_world::craft::{Craft, CraftId};
+use lc_world::field::{Burst, received_fraction};
 
 use crate::journal::Journal;
 use crate::server::{KIND_COLLAPSE, Server};
@@ -17,6 +25,22 @@ use crate::world::{Event, Scheduled};
 
 /// 30 takes the spike as a second long.
 const SPIKE_S: f64 = 1.0;
+
+/// Of a receiver's rated load, glow below which a neighbor is not solved for: over a time constant
+/// it moves `Q` by this fraction of `Q_max`.
+const GLOW_FLOOR: f64 = 1.0e-9;
+
+/// Energy let go of at once, on its way to one craft's field.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Arrival {
+    observer: CraftId,
+    /// Coordinate microseconds, from the fan-out's delivery.
+    arrive_t: i64,
+    /// Where it was let go of, light-microseconds.
+    from: DVec3,
+    /// All of it, isotropic.
+    energy_j: f64,
+}
 
 /// When `craft`'s field reaches `Q_max` by `until_s`, if it does, walking the account through the
 /// day-long starlight segments it will be settled at.
@@ -40,8 +64,52 @@ pub fn collapse_by(craft: &Craft, until_s: f64) -> Option<f64> {
     }
 }
 
+/// Of `energy_j` let go of at `from`, what arrives at `craft`'s field meeting it at `arrive_t`: onto
+/// its shadow toward `from`, from where it is then.
+pub fn received_j(craft: &Craft, from: DVec3, energy_j: f64, arrive_t: i64) -> f64 {
+    let offset = craft.position_at(arrive_t as f64) - from;
+    let shadow_m2 = craft.shadow_toward_m2(-offset, arrive_t as f64 * 1.0e-6);
+    energy_j * received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)
+}
+
+/// Watts of `source`'s glow arriving at `receiver`, which is `here` at `at_t`: `Q/τ` of `source`'s
+/// field as its light left, isotropic.
+fn glow_w(source: &Craft, receiver: &Craft, here: DVec3, at_t: i64) -> f64 {
+    let (Some(from), Some(to)) = (source.fitting(), receiver.fitting()) else { return 0.0 };
+    let at_s = at_t as f64 * 1.0e-6;
+    let tau_s = from.field().tau_s;
+    let bound_w = from.heat_j_at(at_s) / tau_s * received_fraction(to.field().area_m2, source.position_at(at_t as f64).distance(here) * LIGHT_MICROSECOND_M);
+    if bound_w < GLOW_FLOOR * to.field().rated_load_w() {
+        return 0.0;
+    }
+    let Some(left_t) = lc_spacetime::retarded_times_at(at_t as f64, here, &source.worldline()).last().copied() else { return 0.0 };
+    let offset = here - source.position_at(left_t);
+    let shadow_m2 = receiver.shadow_toward_m2(-offset, at_s);
+    from.heat_j_at(left_t * 1.0e-6) / tau_s * received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)
+}
+
 impl<J: Journal> Server<J> {
-    /// Destroy every craft whose field has reached `Q_max` by now, at the instant it did.
+    /// Restate every field's glow from its neighbors, from `at_t`. Every account is settled no
+    /// further than that.
+    pub(crate) fn shine(&mut self, at_t: i64) {
+        let fields: Vec<&Craft> = self.fleet.iter().filter(|craft| craft.fitting().is_some()).collect();
+        let changed: Vec<(CraftId, f64)> = fields
+            .iter()
+            .filter_map(|receiver| {
+                let here = receiver.position_at(at_t as f64);
+                let watts: f64 = fields.iter().filter(|s| s.id != receiver.id).map(|source| glow_w(source, receiver, here, at_t)).sum();
+                (watts != receiver.fitting()?.lit_w()).then_some((receiver.id, watts))
+            })
+            .collect();
+        for (id, watts) in changed {
+            if let Some(craft) = self.fleet.get_mut(id) {
+                craft.light(watts, at_t as f64 * 1.0e-6);
+            }
+        }
+    }
+
+    /// Destroy every craft whose field has reached `Q_max` by now, at the instant it did, landing
+    /// every spike due by now on the way, in time order.
     pub(crate) fn collapse_fields(
         &mut self,
         after_t: i64,
@@ -50,14 +118,68 @@ impl<J: Journal> Server<J> {
         deliveries: &mut Vec<Scheduled>,
     ) {
         let now_s = self.now_t as f64 * 1.0e-6;
-        let due: Vec<(CraftId, f64)> =
-            self.fleet.iter().filter_map(|craft| Some((craft.id, collapse_by(craft, now_s)?))).collect();
-        for (id, at_s) in due {
-            // Up, so the field is at its limit by the stamp, and never into the tick before, where
-            // cursors already stand: only an input changed at a past instant asks for that.
-            let at_t = ((at_s * 1.0e6).ceil() as i64).max(after_t + 1).min(self.now_t);
-            self.collapse(id, at_t, wire, events, deliveries);
+        let mut due: Vec<(CraftId, i64)> =
+            self.fleet.iter().filter_map(|craft| Some((craft.id, self.stamp(collapse_by(craft, now_s)?, after_t)))).collect();
+        loop {
+            let collapsing = due.iter().enumerate().min_by_key(|(_, (_, at_t))| *at_t).map(|(k, &(id, at_t))| (k, id, at_t));
+            let landing = self
+                .arrivals
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.arrive_t <= self.now_t)
+                .min_by_key(|(_, a)| a.arrive_t)
+                .map(|(k, a)| (k, a.arrive_t));
+            match (collapsing, landing) {
+                (_, Some((k, arrive_t))) if collapsing.is_none_or(|(_, _, at_t)| arrive_t <= at_t) => {
+                    let arrival = self.arrivals.swap_remove(k);
+                    let id = arrival.observer;
+                    due.retain(|(craft, _)| *craft != id);
+                    if !self.land(arrival, wire, events, deliveries) {
+                        let next = self.fleet.get(id).and_then(|craft| collapse_by(craft, now_s));
+                        due.extend(next.map(|at_s| (id, self.stamp(at_s, after_t))));
+                    }
+                }
+                (Some((k, id, at_t)), _) => {
+                    due.swap_remove(k);
+                    self.collapse(id, at_t, wire, events, deliveries);
+                }
+                (None, _) => break,
+            }
         }
+    }
+
+    /// Up, so the field is at its limit by the stamp, and never into the tick before, where cursors
+    /// already stand: only an input changed at a past instant asks for that.
+    fn stamp(&self, at_s: f64, after_t: i64) -> i64 {
+        ((at_s * 1.0e6).ceil() as i64).max(after_t + 1).min(self.now_t)
+    }
+
+    /// Land a spike on its field, collapsing it there if that takes it to `Q_max`. Whether it did.
+    fn land(&mut self, arrival: Arrival, wire: &mut impl Transport, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) -> bool {
+        let at_s = arrival.arrive_t as f64 * 1.0e-6;
+        let Some(craft) = self.fleet.get_mut(arrival.observer) else { return false };
+        let arriving_j = received_j(craft, arrival.from, arrival.energy_j, arrival.arrive_t);
+        craft.burst(Burst::Arriving(arriving_j), at_s);
+        let Some(fitting) = craft.fitting() else { return false };
+        if fitting.heat_j_at(at_s) < fitting.field().heat_max_j() {
+            self.tell_fitted(wire, arrival.observer);
+            return false;
+        }
+        self.collapse(arrival.observer, arrival.arrive_t, wire, events, deliveries);
+        true
+    }
+
+    /// Of `energy_j` let go of at once by `event`'s source, queue what each fitted craft its light
+    /// reaches will take, as a burst at the arrival the fan-out scheduled for it. The isotropic case
+    /// of an emission.
+    fn irradiate(&mut self, event_id: i64, from: DVec3, energy_j: f64, deliveries: &[Scheduled]) {
+        let reached = deliveries.iter().filter(|d| d.event == event_id).filter(|d| {
+            self.fleet.get(CraftId(d.observer.0)).is_some_and(|craft| craft.fitting().is_some())
+        });
+        let arrivals: Vec<Arrival> = reached
+            .map(|d| Arrival { observer: CraftId(d.observer.0), arrive_t: d.arrive_t, from, energy_j })
+            .collect();
+        self.arrivals.extend(arrivals);
     }
 
     fn collapse(
@@ -73,11 +195,14 @@ impl<J: Journal> Server<J> {
         craft.settle(at_s);
         let Some(fitting) = craft.fitting() else { return };
         let released_j = fitting.field().released_j(fitting.stored_j_at(&craft.motion, at_s));
-        let spike_w = fitting.balance().collapse_spike_fraction * released_j / SPIKE_S;
+        let spike_j = fitting.balance().collapse_spike_fraction * released_j;
         let name = craft.name.clone();
+        let from = craft.position_at(at_t as f64);
         craft.end(at_s);
         let payload = serde_json::to_string(&lc_proto::Released { released_j }).unwrap_or_else(|_| "{}".into());
-        self.emit(id, KIND_COLLAPSE, spike_w, payload, at_t, events, deliveries);
+        if let Some(event_id) = self.emit(id, KIND_COLLAPSE, spike_j / SPIKE_S, payload, at_t, events, deliveries) {
+            self.irradiate(event_id, from, spike_j, deliveries);
+        }
 
         self.pursuits.remove(&id);
         self.refitting.remove(&id);

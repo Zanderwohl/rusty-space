@@ -252,6 +252,22 @@ impl Burst {
     }
 }
 
+/// Of what a source radiates isotropically, the fraction a shadow of `shadow_m2` at `distance_m`
+/// takes: `A / (4π d²)`. Capped at all of it, which is where a coincident source would put more.
+pub fn received_fraction(shadow_m2: f64, distance_m: f64) -> f64 {
+    let sphere_m2 = 4.0 * std::f64::consts::PI * distance_m * distance_m;
+    if sphere_m2 <= shadow_m2 {
+        return 1.0;
+    }
+    shadow_m2 / sphere_m2
+}
+
+/// Inside this distance a spike of `spike_j` takes a field with `headroom_j` left to collapse:
+/// `√(α E A / (4π H))`. Infinite for no headroom. See 30 §Proximity.
+pub fn lethal_radius_m(absorptivity: f64, spike_j: f64, shadow_m2: f64, headroom_j: f64) -> f64 {
+    (absorptivity * spike_j * shadow_m2 / (4.0 * std::f64::consts::PI * headroom_j.max(0.0))).sqrt()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settled {
     pub heat_j: f64,

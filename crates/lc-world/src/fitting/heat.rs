@@ -3,7 +3,7 @@
 //! account.
 
 use super::{Balance, Fitting, Hull};
-use crate::field::{Field, Mode, Segment};
+use crate::field::{Burst, Field, Mode, Segment};
 use crate::form::capacity::Capacities;
 use crate::motion::ShipState;
 use crate::refit::rounds::{Phase, Plan, Step};
@@ -41,6 +41,26 @@ impl Fitting {
         self.field().temperature_k(self.heat_j_at(now_s))
     }
 
+    /// Of what arrives at the field, the fraction absorbed.
+    pub fn absorptivity(&self) -> f64 {
+        MODE.absorptivity(self.balance.clear_absorptivity)
+    }
+
+    /// Watts arriving from other craft: a neighbor's glow.
+    pub fn lit_w(&self) -> f64 {
+        self.lit_w
+    }
+
+    /// Settle first.
+    pub fn set_lit_w(&mut self, watts: f64) {
+        self.lit_w = watts.max(0.0);
+    }
+
+    /// All of it heat, whatever room storage has. Settle first.
+    pub fn take_burst(&mut self, burst: Burst) {
+        self.heat_j += burst.heat_j(self.absorptivity());
+    }
+
     /// Watts starlight stores while storage has room: capped at the engines' rating.
     pub fn solar_w(&self) -> f64 {
         self.intake(&self.hull.capacities, 0.0, 0.0, 0.0).stored_w()
@@ -49,8 +69,8 @@ impl Fitting {
     /// `draw_w` is what leaves storage besides the drain, and goes negative for a return into it.
     fn intake(&self, caps: &Capacities, losing_w: f64, room_j: f64, draw_w: f64) -> Segment {
         Segment {
-            arriving_w: self.starlight_w,
-            absorptivity: MODE.absorptivity(self.balance.clear_absorptivity),
+            arriving_w: self.starlight_w + self.lit_w,
+            absorptivity: self.absorptivity(),
             internal_w: caps.drain_w + losing_w,
             rating_w: caps.aperture_w,
             efficiency: self.balance.conversion_efficiency,

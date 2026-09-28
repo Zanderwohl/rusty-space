@@ -409,6 +409,8 @@ pub struct Fitting {
     heat_j: f64,
     /// Watts arriving at the field from `since_s` until the next segment. See [`crate::solar`].
     starlight_w: f64,
+    /// Watts arriving at the field from other craft. Restated by the authority, and not saved.
+    lit_w: f64,
     refit: Option<Plan>,
 }
 
@@ -445,6 +447,7 @@ impl Fitting {
             committed_j: 0.0,
             heat_j: heat::idle_j(&hull, &balance),
             starlight_w: 0.0,
+            lit_w: 0.0,
             refit: None,
         }
     }

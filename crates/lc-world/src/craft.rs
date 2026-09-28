@@ -672,6 +672,30 @@ impl Craft {
         }
     }
 
+    pub fn burst(&mut self, burst: crate::field::Burst, now_s: f64) {
+        self.settle(now_s);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.take_burst(burst);
+        }
+    }
+
+    /// Watts arriving from other craft, from `now_s` on.
+    pub fn light(&mut self, watts: f64, now_s: f64) {
+        self.settle(now_s);
+        if let Some(fitting) = &mut self.fitting {
+            fitting.set_lit_w(watts);
+        }
+    }
+
+    /// Its shadow toward a source along `to_source`, m², in the attitude it holds at `t`. Zero with
+    /// no fitting.
+    ///
+    /// Read off the shadow table at the roll the hull presents to its star, the only roll it holds.
+    pub fn shadow_toward_m2(&self, to_source: DVec3, t: f64) -> f64 {
+        let (Some(fitting), Some(nose)) = (&self.fitting, self.facing_at(t)) else { return 0.0 };
+        solar::shadow_m2(fitting.geometry(), nose.dot(to_source.normalize_or_zero()))
+    }
+
     /// Begin a round toward `target`, when it plans. The caller refuses it under way and for a craft
     /// with no fitting, whose `NoDrones` names no real part, and checks the placement rules first:
     /// they need a grid, and [`crate::form::rules::check`] hands it back.
