@@ -237,10 +237,10 @@ is. All three assume a Black field, since Black is the mode that collects.
 | **The starting ship's field holds 10 ME** from empty to collapse. The starting ship is [29-ship-form.md](29-ship-form.md)'s starting form | `field_capacity`, the capacity per unit envelope area |
 | **A full starting ship broadside at 0.05 AU from a Sun-like star is exactly at its rated load**: it would reach collapse only in the limit | `τ` |
 
-One number needs the starting form's grid ([29-ship-form.md](29-ship-form.md)): its envelope,
-3.39 × 10⁵ m², pinned as `STARTING_ENVELOPE_M2` by a test that re-solves it to a part in a
+One number needs the starting form ([29-ship-form.md](29-ship-form.md)): its envelope, an
+ellipsoid of semi-axes 374, 122 and 126 m, 4.31 × 10⁵ m², pinned as `STARTING_ENVELOPE_M2` by a test that re-solves it to a part in a
 million. The rest are derived in `Balance::DEFAULT`. `q_idle` is not a setting: it is the
-starting drain times `τ` over that envelope, 2.40 × 10¹⁶ J/m², so turning `field_capacity` does
+starting drain times `τ` over that envelope, 1.89 × 10¹⁶ J/m², so turning `field_capacity` does
 not move the idle anchor. The anchors hold for the default geometry: a shard that changes the
 starting envelope, through `envelope_margin` say, moves them with it.
 
@@ -259,7 +259,7 @@ power that would bring a field to `Q_max`, is `Q_max / τ`.
 | | value |
 |---|---|
 | `τ` | 1.84 × 10⁶ s: 21 game days, 3.5 real minutes |
-| `field_capacity` | 4.12 × 10²⁰ J/m² |
+| `field_capacity` | 3.24 × 10²⁰ J/m² |
 | rated load, starting ship | 7.6 × 10¹⁹ W |
 | field at collapse | 4 577 K, peaking at 630 nm |
 
@@ -494,11 +494,11 @@ shows its thresholds. What a player can infer from it:
   light still in flight carries the failing field's temperature. The history is not checkpointed: a
   wreck restored after a restart is stated as the starting field at rest until its light has passed.
 - **The client draws and meters a ship by it.** A hull's reflectance is `1 − α`; a real hull's
-  textures, which average 0.35, are scaled to it. The field's heat is an even glow over the hull in
-  the hull shader, and a star's spectrum cache serves its per-band radiance. A Black field hides the
-  lit windows too. The field's own envelope is still undrawn, so for now the hull carries both terms;
-  R11 moves the heat onto the envelope. Nothing yet draws a distant ship as a point: the metering
-  sums the terms (`hull::Sent`), and R18's point starts from that sum.
+  textures, which average 0.35, are scaled to it. The field's heat is drawn on its envelope
+  ([32](32-ship-rendering.md#in-the-game)), and on the hull only for a craft with no form, which has
+  no envelope. A star's spectrum cache serves its per-band radiance. A Black field hides the lit
+  windows too. Nothing yet draws a distant ship as a point: the metering sums the terms
+  (`hull::Sent`), and R18's point starts from that sum.
 - **Instruments:** the photometry and the detection test are in `lc-world`; no duty yet points a
   telescope at a craft. H10's stare at a position is the first.
 
@@ -513,7 +513,7 @@ shows its thresholds. What a player can infer from it:
 | setting | first guess | meaning |
 |---|---|---|
 | `field_idle_k` | 400 | the anchor temperature |
-| `field_capacity` | *anchored*: 10 ME on the starting envelope, 4.12 × 10²⁰ | heat per m² of envelope at collapse |
+| `field_capacity` | *anchored*: 10 ME on the starting envelope, 3.24 × 10²⁰ | heat per m² of envelope at collapse |
 | `field_tau_s` | *anchored*: 1.84 × 10⁶ | the time constant |
 | `conversion_efficiency` | 0.7 | of what is converted, the fraction stored |
 | `clear_absorptivity` | 0.3 | what a Clear field absorbs. Black absorbs everything |

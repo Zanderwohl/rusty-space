@@ -384,7 +384,7 @@ example and 150 km in the client, whose unit is an AU, and turned every mote int
 
 ## The field
 
-The envelope from [29-ship-form.md](29-ship-form.md), meshed coarsely, drawn as **two layers**
+The envelope from [29-ship-form.md](29-ship-form.md), an ellipsoid, drawn as **two layers**
 whatever is decided about air:
 
 - **Inner: clear.** A fresnel rim, faint, with the ship plainly visible through it. If air is ever
@@ -434,6 +434,37 @@ drawn by the photometry: a new point in the sky, as bright as [30-the-field.md](
 says.
 
 ![A collapse: the flash, then the debris at 40, 180 and 270 s of a 300 s afterglow](../images/field-collapse.png)
+
+### In the game
+
+`lc_client::field` draws every craft with a form so, under the root its hull hangs from, and every
+collapse whose light has arrived.
+
+- **One mesh per design.** The envelope is fitted from the form's parts without the grid
+  (`form::grid::Envelope`), and a UV sphere scaled to it is the mesh, made again only when a craft's
+  stated form changes. The switch sweeps from the Mind.
+- **Your field is the account's** (`Fitted`): the bar's temperature and fill, the shade, and a switch
+  with its progress. **Anyone else's is `Presence.glow`**, as its light left it: temperature and
+  shade, the fill worked back as `(T/T_limit)⁴`, and no switch, which an observer learns of only once
+  it is done.
+- **The heat is the envelope's, not the hull's.** Once a craft's envelope is drawn its hull carries
+  only what it reflects and its windows (`hull::lit`'s `enveloped`), so the heat is drawn once. The
+  metering is unchanged: `hull::Sent` sums the thermal term once whoever draws it. Nothing draws a
+  distant ship as a point yet; R18's point takes over from the envelope where the hull stops being
+  meshed, and must not draw the heat while the envelope does.
+- **The bar is the envelope's color.** It reads the ramp the shader interpolates
+  (`field::color_linear`), not the exact blackbody, which some mappings put a few percent off the
+  ramp between its entries. A test holds the two together in every mapping.
+- **Hot spots** are the beams on your ship from `Outbound::Illuminated`, by beam, each restatement
+  replacing the last and zero power removing it, as the power landing over what the field radiates,
+  drawn no stronger than twenty times it. Nothing tells an observer about beams on anyone else.
+- **A collapse is drawn from its `kind::COLLAPSE` sighting**, at the place and in the shape its craft
+  was last seen, and the console names it as its presence did. It starts on the frame the sighting
+  is taken, which is when its hull leaves the contacts: the shard sends it once its light has arrived
+  by the shard's clock, and this client's may be behind. Its cooling runs from its arrival in
+  coordinate time, its flash for half a real second. **The spike lands on each neighbor** as a hot
+  spot toward the wreck when the light of it, off that neighbor, reaches this ship:
+  `arrive + (|w − n| + |n − o| − |w − o|) / c`, from what the client knows of where each was.
 
 ## Beams and plumes
 
@@ -567,7 +598,7 @@ photographed:
 | `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point, or `--refit-from <fraction>` to run it from there. With `--form default*k` every part is `k` times larger |
 | `--demo-cam-at <x:y:z:m>` | orbit a point of the ship's frame from `m` meters, past the boom's stops. Aimed with `--demo-cam`; how the truss's pitch is photographed on a GSV |
 | `--demo collapse` | a ship collapsing beside two others, one close enough to follow it |
-| `--field-k <kelvin>` | the player's field held at a temperature, for the shader |
+| `--field-k <kelvin>` | the player's field held at a temperature, as drawn, metered and on the bar. `--field-mode clear\|black` holds its shade, `--field-switch <progress>` a switch into it, and `--field-beam <watts>` a beam from beside the camera |
 
 Until the player has a field, the shader is photographed in a void: `cargo run -p lc-client
 --example field_void -- --field-k <kelvin> --mode clear|black`, around a stand-in hull, with its
