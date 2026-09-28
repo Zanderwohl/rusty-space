@@ -135,7 +135,7 @@ pub fn act(action: Action, ui: &mut UiState, session: &Session) -> Vec<Effect> {
             match applied(&chosen, how, draft, session) {
                 Ok((form, named)) => {
                     let edit = Ok(draft.replace(form));
-                    return crate::form_history::edit(&mut ui.form, session, edit, Some(named)).map(Effect::Notify).into_iter().collect();
+                    return crate::form_history::edit(&mut ui.form, edit, Some(named)).map(Effect::Notify).into_iter().collect();
                 }
                 Err(why) => Err(why),
             }

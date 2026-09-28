@@ -61,8 +61,6 @@ pub enum Refused {
     NoSuchPart(PartId),
     Mind,
     Fault(FormError),
-    /// It would leave the draft further short of what storage can pay.
-    Unpaid,
 }
 
 impl std::fmt::Display for Refused {
@@ -71,7 +69,6 @@ impl std::fmt::Display for Refused {
             Self::NoSuchPart(id) => write!(f, "there is no {id}"),
             Self::Mind => write!(f, "the Mind cannot be changed"),
             Self::Fault(e) => e.fmt(f),
-            Self::Unpaid => write!(f, "storage cannot pay for it"),
         }
     }
 }

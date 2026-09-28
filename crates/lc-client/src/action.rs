@@ -515,7 +515,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::ShowHistory(on) => ui.form.show_history = on,
     Action::Fold(panel) => ui.form.folded.toggle(panel),
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
-    Action::EditForm(edit) => effects.extend(crate::form_history::edit(&mut ui.form, session, edit, None).map(Effect::Notify)),
+    Action::EditForm(edit) => effects.extend(crate::form_history::edit(&mut ui.form, edit, None).map(Effect::Notify)),
     Action::Undo | Action::Redo | Action::GoToEdit(_) => effects.extend(crate::form_history::step(&mut ui.form, &action).map(Effect::Notify)),
     Action::ChoosePreset(_)
     | Action::SavePreset(_)
@@ -1168,21 +1168,17 @@ mod tests {
         draft(ui).resize(part.id, part.volume_m3 * by).unwrap()
     }
 
+    /// Over budget on the way, so a later edit can bring it back under.
     #[test]
-    fn an_edit_storage_cannot_pay_for_is_refused_and_a_whole_draft_is_not() {
+    fn an_edit_storage_cannot_pay_for_is_still_made() {
         let (mut ui, mut s) = fitted();
         let now = s.coordinate_time_s();
         let full = s.ship.fitting().unwrap().capacity_j_at(now);
         s.ship.drain(full, now);
         let grow = resized(&ui, lc_world::form::Kind::Engine, 2.0);
-        let effects = apply(Action::EditForm(Ok(grow)), &mut ui, &mut s);
-        assert_eq!(effects, vec![Effect::Notify("refused: storage cannot pay for it".into())]);
-        assert_eq!(draft(&ui).form, draft(&ui).ship, "and nothing changed");
-        let mut bigger = draft(&ui).form.clone();
-        bigger.parts.iter_mut().find(|p| p.kind == lc_world::form::Kind::Engine).unwrap().volume_m3 *= 2.0;
-        let whole = draft(&ui).replace(bigger.clone());
-        assert!(apply(Action::EditForm(Ok(whole)), &mut ui, &mut s).is_empty());
-        assert_eq!(draft(&ui).form, bigger, "a preset or a reset is the player's to choose");
+        assert!(apply(Action::EditForm(Ok(grow)), &mut ui, &mut s).is_empty());
+        assert_ne!(draft(&ui).form, draft(&ui).ship);
+        assert!(matches!(crate::preview::Start::of(&s).unwrap().short_j(&draft(&ui).form), Some(short) if short > 0.0));
     }
 
     #[test]
