@@ -205,7 +205,9 @@ graph LR
   R15 --> R16
   R12 --> R17
   R12 --> R18
+  R17 --> R18
   H7 --> R18
+  E4 --> R18
   R1 --> C1
   C1 --> C2
   F5 --> C2
@@ -518,7 +520,7 @@ graph LR
 - needs: E1, E2, S1
 - touches: `crates/lc-world/src/emit.rs`, `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`
 - read: 31 §Emitting on purpose, §Three uses, §Radio
-- deliver: `Order::Emit`, balanced and as a burn; fan-out to every worldline in the cone; delivery at the retarded time as intake; `Outbound::Illuminated`; `Presence` carries `Glare` to observers inside the cone; radio charged.
+- deliver: one emission, whatever lit it: a source, apertures, power, spectrum, spread, aim and the interval it is lit, with one fan-out to every worldline in the cone that delivers it at the retarded time as intake with `Outbound::Illuminated`, and as `Glare` on `Presence` to observers inside the cone. `Order::Emit`, balanced and as a burn, is the first thing that lights one; radio charged. E4 lights drives through the same path and adds none of its own.
 - done when: a second craft in the cone is fed and a third just outside is not, a balanced emit leaves the worldline alone, and an aimed beam misses a target that maneuvered after it left.
 
 ### E4 · Exhaust heats neighbors
@@ -527,8 +529,8 @@ graph LR
 - needs: E3, H5
 - touches: `crates/lc-server/src/emit.rs`
 - read: 31 §Exhaust lands on whatever is behind
-- deliver: every lit drive as a continuous emission at `drive_spread_rad`, fanned out to craft within the cutoff, changing their intake at the retarded times of ignition and cutoff.
-- done when: a full ship inside the cooking distance behind a burn walks to collapse, and one beside the burn feels nothing.
+- deliver: every lit drive, and every thruster leg at `rcs_spread_rad`, lit as one of E3's emissions at `drive_spread_rad` between ignition and cutoff, in the face's spectrum. E3's fan-out then changes neighbors' intake and hands observers in the cone the drive's `Glare` at the retarded times of both; nothing here fans out on its own.
+- done when: a full ship inside the cooking distance behind a burn walks to collapse, one beside the burn feels nothing, and an observer in the cone a light-year off is handed a `Glare` whose flux is `emit::flux_w_m2`.
 
 ### E5 · Courteous maneuvering
 
@@ -699,12 +701,12 @@ graph LR
 ### R18 · A distant burn as a point
 
 - status: todo
-- needs: R12, H7
+- needs: R12, R17, H7, E4
 - touches: `crates/lc-client/src/plume.rs`, `crates/lc-client/src/starfield.rs`, `lightcone/docs/32-ship-rendering.md`
 - read: 32 §The exhaust cone (From a distance), 04 (stellar photometry), 07 §Other ships
-- deliver: a burning craft too small to resolve, drawn as a point in the observer's bands from its `Presence`. Its brightness goes by `cos θ` between the exhaust axis and the direction to the observer: the exhaust's top-hat flux inside the cone, the face's oblique glow outside. Doppler-shifted and aberrated as a star, through the starfield's exposure and glare. The meeting at the cone's edge settled and written into 32.
-- done when: a burn photographed from a light-year off is a point that brightens by orders of magnitude as its cone sweeps over the observer, and a test pins its flux inside the cone to `emit::flux_w_m2`.
-- note: after H7, so the burn adds to the craft's own point rather than drawing a second one beside it.
+- deliver: an emitting craft too small to resolve, drawn as a point in the observer's bands, whatever lit the emission: a drive, a heat dump or a beam. Inside the cone its light is the `Glare` E3's fan-out put on its `Presence`, not worked out again here; outside it, the lit apertures' oblique glow from the power `Presence` states (R17), falling off with the angle. Doppler-shifted and aberrated as a star, through the starfield's exposure and glare. The meeting at the cone's edge settled and written into 32.
+- done when: a burn photographed from a light-year off is a point that brightens by orders of magnitude as its cone sweeps over the observer, a beam aimed past the observer is not drawn at all, and a test pins the point's flux inside the cone to the `Glare` it was handed.
+- note: after H7, so the emission adds to the craft's own point rather than drawing a second one beside it; after E4, so a drive's light inside its cone arrives the way every beam's does, and there is one path from emission to eye.
 
 ## C: client
 

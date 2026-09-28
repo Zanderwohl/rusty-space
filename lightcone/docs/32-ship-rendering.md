@@ -509,7 +509,10 @@ direction from the emitter to the observer, `cos θ = a · u` says which source 
 
 - **Inside the cone**, `θ` within `drive_spread_rad`: the exhaust itself, the top-hat's
   `P / (Ω d²)` that `lc_world::emit::flux_w_m2` gives, in the face's blackbody spectrum through the
-  observer's bands. That is the blinding point, and it carries: the starting drive at its rating
+  observer's bands. The client does not work it out: a drive is an emission like any beam
+  ([31-directed-energy.md](31-directed-energy.md#exhaust-lands-on-whatever-is-behind)), and the one
+  fan-out hands every observer inside its cone a `Glare` on the emitter's `Presence`. So a beam, a
+  dump and a drive reach the eye by one path. That is the blinding point, and it carries: the starting drive at its rating
   lands 5 × 10⁻¹¹ W/m² a light-year away, a bolometric seventh magnitude, a telescope star in the next
   system.
 - **Outside it**, only the face, seen obliquely as the aperture glow draws it up close, falling off
