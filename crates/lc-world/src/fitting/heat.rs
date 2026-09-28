@@ -12,9 +12,6 @@ use crate::form::capacity::Capacities;
 use crate::motion::ShipState;
 use crate::refit::rounds::{Phase, Plan, Step};
 
-/// Until H6 builds the modes.
-pub const MODE: Mode = Mode::Black;
-
 /// Since the settlement: the heat reached, and storage's net change.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Flow {
@@ -44,14 +41,14 @@ impl Fitting {
 
     /// Watts starlight stores while storage has room: capped at the engines' rating.
     pub fn solar_w(&self) -> f64 {
-        self.intake(&self.hull.capacities, 0.0, 0.0, 0.0, 0.0).stored_w()
+        self.intake(&self.hull.capacities, self.shade_at(self.since_s), 0.0, 0.0, 0.0, 0.0).stored_w()
     }
 
     /// `draw_w` is what leaves storage besides the drain, and goes negative for a return into it.
-    fn intake(&self, caps: &Capacities, losing_w: f64, room_j: f64, draw_w: f64, emitted_w: f64) -> Segment {
+    fn intake(&self, caps: &Capacities, shade: Mode, losing_w: f64, room_j: f64, draw_w: f64, emitted_w: f64) -> Segment {
         Segment {
             arriving_w: self.starlight_w,
-            absorptivity: MODE.absorptivity(self.balance.clear_absorptivity),
+            absorptivity: shade.absorptivity(self.balance.clear_absorptivity),
             internal_w: caps.drain_w + losing_w,
             rating_w: caps.aperture_w,
             efficiency: self.balance.conversion_efficiency,
@@ -97,8 +94,8 @@ impl Fitting {
 
     /// [`Fitting::flow`] to `until_s`, first offering `stop` each stretch of constant inputs as its
     /// start, inputs, heat and length, and ending early where it says. A vent or spill lands between
-    /// stretches, so the next starts from it.
-    fn walk(&self, motion: Option<&ShipState>, until_s: f64, mut stop: impl FnMut(f64, &Segment, f64, f64) -> bool) -> Flow {
+    /// stretches, so the next starts from it. A switch completing is a cut, as a step's end is.
+    pub(super) fn walk(&self, motion: Option<&ShipState>, until_s: f64, mut stop: impl FnMut(f64, &Segment, f64, f64) -> bool) -> Flow {
         let field = self.field();
         let mut flow = Flow { heat_j: self.heat_j, income_j: 0.0 };
         if until_s <= self.since_s {
@@ -108,12 +105,13 @@ impl Fitting {
         let building_j = self.refit.as_ref().map_or(0.0, |plan| building_j(plan, self.since_s));
         let mut free_j = self.stored_j - self.committed_j - building_j;
         let mut at_s = self.since_s;
-        let edges = motion.map_or_else(Vec::new, |m| cost::lit_edges(m, self.since_s, until_s));
+        let mut edges = motion.map_or_else(Vec::new, |m| cost::lit_edges(m, self.since_s, until_s));
+        edges.extend(self.posture.switch.map(|s| s.done_s).filter(|&t| t > self.since_s && t < until_s));
         for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s, &edges) {
             let dt_s = piece.until_s - at_s;
             let emitted_w = motion.map_or(0.0, |m| self.emitted_w(m, at_s, piece.until_s));
             let room_j = caps.storage_j - (self.stored_j + flow.income_j);
-            let segment = self.intake(&caps, piece.losing_w, room_j, piece.moving_w, emitted_w);
+            let segment = self.intake(&caps, self.shade_at(at_s), piece.losing_w, room_j, piece.moving_w, emitted_w);
             let held_w = emitted_w + piece.moving_w.max(0.0);
             let (mut heat_j, mut storage_j) = (flow.heat_j, 0.0);
             let mut from_s = at_s;
@@ -338,7 +336,7 @@ mod tests {
         let end_s = 1.0e7;
         let room_j = leap.hull().capacities.storage_j - 20.0 * me(&b);
         assert!(close(leap.flow(None, end_s).income_j, room_j, 1e-12), "premise: it fills");
-        assert!(leap.intake(&leap.hull().capacities, 0.0, room_j, 0.0, 0.0).fill_s().unwrap() < 0.5 * end_s, "premise: it fills early");
+        assert!(leap.intake(&leap.hull().capacities, Mode::Black, 0.0, room_j, 0.0, 0.0).fill_s().unwrap() < 0.5 * end_s, "premise: it fills early");
         leap.settle(&rest(), end_s);
         for k in 1..=1000 {
             steps.settle(&rest(), end_s * f64::from(k) / 1000.0);
@@ -679,7 +677,7 @@ mod tests {
         leap.set_starlight_w(starlight_w(&b, 1.0));
         let heat_j = leap.heat_j;
         let floor_s = 0.5 * (line_s + boost_end_s);
-        let made_w = leap.field().heat_filling_w(&leap.intake(&leap.hull().capacities, 0.0, 1.0, 0.0, 0.0));
+        let made_w = leap.field().heat_filling_w(&leap.intake(&leap.hull().capacities, Mode::Black, 0.0, 1.0, 0.0, 0.0));
         assert!(made_w < leap.emitted_w(&motion, line_s, boost_end_s), "premise: the boost outruns the heat made");
         assert_eq!(leap.heat_j_at(&motion, floor_s), 0.0, "premise: at the floor partway through the boost");
         let coast_s = 0.5 * (boost_end_s + brake_s);

@@ -21,8 +21,9 @@ use crate::motion::ShipState;
 use crate::refit::rounds::{Plan, Round};
 
 mod heat;
+mod mode;
 
-pub use heat::MODE;
+pub use mode::{Posture, Setting, Switch, Switching, Thresholds};
 
 pub const C2: f64 = C_M_S * C_M_S;
 
@@ -410,6 +411,7 @@ pub struct Fitting {
     /// Watts arriving at the field from `since_s` until the next segment. See [`crate::solar`].
     starlight_w: f64,
     refit: Option<Plan>,
+    posture: Posture,
 }
 
 /// A fitting as it is saved and sent: the settled terms, and the refit's recipe.
@@ -423,6 +425,7 @@ pub struct Account {
     pub heat_j: f64,
     pub starlight_w: f64,
     pub refit: Option<Round>,
+    pub posture: Posture,
 }
 
 impl Fitting {
@@ -446,6 +449,7 @@ impl Fitting {
             heat_j: heat::idle_j(&hull, &balance),
             starlight_w: 0.0,
             refit: None,
+            posture: Posture::BLACK,
         }
     }
 
@@ -459,6 +463,7 @@ impl Fitting {
             heat_j: self.heat_j,
             starlight_w: self.starlight_w,
             refit: self.refit.as_ref().map(|plan| plan.round().clone()),
+            posture: self.posture,
         }
     }
 
@@ -489,6 +494,7 @@ impl Fitting {
             committed_j: account.committed_j,
             heat_j: account.heat_j,
             starlight_w: account.starlight_w,
+            posture: account.posture,
             ..full
         }
     }
@@ -852,6 +858,7 @@ impl Fitting {
             heat_j: 0.0,
             starlight_w: f.starlight_w,
             refit: f.refit.as_ref().map(Into::into),
+            posture: field.map_or(Posture::BLACK, Posture::from),
         };
         let mut fitting = Fitting::from_account(&account, f.balance.into());
         fitting.heat_j = field.map_or_else(|| heat::idle_j(&fitting.hull, &fitting.balance), |field| field.heat_j);
@@ -866,14 +873,10 @@ impl From<&lc_proto::Fitting> for Fitting {
 }
 
 impl From<&Fitting> for lc_proto::Field {
-    /// No switch until H6 builds the modes.
     fn from(f: &Fitting) -> Self {
-        use lc_proto::{FieldMode, Shade};
-        let (mode, shade) = match MODE {
-            crate::field::Mode::Clear => (FieldMode::Clear, Shade::Clear),
-            crate::field::Mode::Black => (FieldMode::Black, Shade::Black),
-        };
-        Self { heat_j: f.heat_j, since_s: f.since_s, mode, shade, switch: None }
+        let p = &f.posture;
+        let switch = p.switch.map(|s| lc_proto::Switch { to: s.to.into(), done_s: s.done_s });
+        Self { heat_j: f.heat_j, since_s: f.since_s, mode: p.setting.into(), shade: p.shade.into(), switch }
     }
 }
 

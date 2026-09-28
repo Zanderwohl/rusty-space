@@ -447,6 +447,9 @@ pub mod kind {
     /// A field reached `Q_max` and the ship is gone, stamped when and where. The payload is a
     /// [`super::Released`] as JSON.
     pub const COLLAPSE: i16 = 10;
+    /// A field switch completed, stamped when and where: what it absorbs and reflects changed then.
+    /// The payload is a [`super::ShadeChange`] as JSON.
+    pub const SHADE: i16 = 11;
 }
 
 /// What a craft's drive became at a [`kind::DRIVE`] event.
@@ -456,6 +459,12 @@ pub struct DriveChange {
     pub power_w: f64,
     /// Unit vector the nose pointed along.
     pub facing: [f64; 3],
+}
+
+/// What a field became at a [`kind::SHADE`] event.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShadeChange {
+    pub shade: Shade,
 }
 
 /// What a [`kind::COLLAPSE`] let go of.
