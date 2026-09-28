@@ -532,7 +532,7 @@ fn escape(ui: &mut egui::Ui, out: &mut MessageWriter<Requested>) {
 
 fn settings(ui: &mut egui::Ui, state: &Ui) {
     ui.label("Display");
-    ui.label(format!("tone window: {:.1} stops", state.0.exposure_offset.abs().max(2.5)));
+    ui.label(format!("tone window: {:.1} stops", state.0.exposure_offset.unwrap_or(0.0).abs().max(2.5)));
     ui.separator();
     ui.label("Settings apply immediately; there is no resume to apply them on.");
 }
