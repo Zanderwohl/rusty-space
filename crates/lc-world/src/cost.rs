@@ -1,4 +1,5 @@
-//! What flying costs: the drive as a rocket whose exhaust is stored energy.
+//! What flying costs: the drive as a rocket whose exhaust is the ship's energy. Plans are priced
+//! against storage; what heat pays instead is `fitting::heat`'s.
 //!
 //! `m' = m exp(−Δη/ε)`, where `Δη = ∫ α dτ` is rapidity the drive has put in, summed without
 //! regard to direction. Additive in `Δη`, so a burn cut into pieces costs what the whole does and
