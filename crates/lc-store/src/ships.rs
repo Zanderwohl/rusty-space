@@ -94,9 +94,17 @@ pub async fn ship_for_account(client: &Client, account: &str) -> Result<Option<S
     }))
 }
 
-/// Forget a craft. Nothing calls this yet; a ship that exists goes on existing.
-pub async fn delete_ship(client: &Client, ship_id: i64) -> Result<u64, Error> {
-    client.execute("DELETE FROM ships WHERE ship_id = $1", &[&ship_id]).await
+/// Forget destroyed craft, and everything they knew.
+///
+/// Before the checkpoint that writes their successors: an account is unique, and a successor
+/// carries its predecessor's.
+pub async fn forget(client: &impl GenericClient, ship_ids: &[i64]) -> Result<u64, Error> {
+    if ship_ids.is_empty() {
+        return Ok(0);
+    }
+    client.execute("DELETE FROM lc_knowledge WHERE ship_id = ANY($1)", &[&ship_ids]).await?;
+    client.execute("DELETE FROM lc_samples WHERE ship_id = ANY($1)", &[&ship_ids]).await?;
+    client.execute("DELETE FROM ships WHERE ship_id = ANY($1)", &[&ship_ids]).await
 }
 
 pub async fn save_shard(client: &impl GenericClient, shard_id: i64, shard: Shard) -> Result<(), Error> {
@@ -215,5 +223,21 @@ mod tests {
     async fn saving_nothing_is_not_an_error() {
         let Some(client) = store().await else { return };
         assert_eq!(save_ships(&client, &[]).await.unwrap(), 0);
+    }
+
+    /// A destroyed ship's account passes to its successor in the same write.
+    #[tokio::test]
+    async fn a_forgotten_ships_account_can_be_taken_again() {
+        let Some(mut client) = store().await else { return };
+        let band = 7_050_000;
+        clear(&client, band).await;
+        let account = format!("forget-{band}");
+        save_ships(&client, &[ship(band, Some(&account), "lost")]).await.unwrap();
+        let transaction = client.transaction().await.unwrap();
+        assert_eq!(forget(&transaction, &[band]).await.unwrap(), 1);
+        save_ships(&transaction, &[ship(band + 1, Some(&account), "next")]).await.unwrap();
+        transaction.commit().await.unwrap();
+        let found = ship_for_account(&client, &account).await.unwrap().unwrap();
+        assert_eq!(found.ship_id, band + 1);
     }
 }

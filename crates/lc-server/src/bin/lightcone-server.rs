@@ -363,6 +363,7 @@ struct Taken {
     remembered: lc_server::archive::Remembered,
     marks: Vec<(String, lc_proto::Bookmark)>,
     presets: Vec<lc_server::presets::Change>,
+    destroyed: Vec<i64>,
 }
 
 fn take(server: &mut Server<Store>) -> Taken {
@@ -371,6 +372,7 @@ fn take(server: &mut Server<Store>) -> Taken {
         remembered: server.take_knowledge(),
         marks: server.library.take_dirty(),
         presets: server.presets.take_dirty(),
+        destroyed: server.take_destroyed(),
     }
 }
 
@@ -378,6 +380,7 @@ fn give_back(server: &mut Server<Store>, taken: Taken) {
     server.untake_knowledge(taken.remembered);
     server.library.redirty(&taken.marks);
     server.presets.redirty(&taken.presets);
+    server.untake_destroyed(taken.destroyed);
 }
 
 /// A checkpoint write's outcome, with the connection and what was being written handed back.
@@ -403,6 +406,7 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
     // written and their deletions not, say — would be reloaded as something that never was.
     let written = async {
         let transaction = client.transaction().await?;
+        lc_store::ships::forget(&transaction, &taken.destroyed).await?;
         lc_store::ships::save_ships(&transaction, &taken.checkpoint.ships).await?;
         // The partitions the samples land in exist, because the journal keeps them ready ahead of
         // the clock every tick and nothing is learned in the future.

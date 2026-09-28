@@ -26,7 +26,9 @@ impl<J: Journal> Server<J> {
             .fleet
             .iter()
             .flat_map(|craft| {
-                lc_world::ignition::transitions(craft, after_s, now_s)
+                // A wreck's plan goes on past its end, and nothing of it happened.
+                let until_s = craft.ended_s().map_or(now_s, |end_s| end_s.min(now_s));
+                lc_world::ignition::transitions(craft, after_s, until_s)
                     .into_iter()
                     .map(move |transition| (craft.id, transition))
             })

@@ -202,6 +202,8 @@ pub struct Craft {
     /// The forms it has had, oldest first, so an observer is shown the one its light left with.
     /// See [`Craft::seen_at`]. Not saved, as `past` is not.
     seen: History,
+    /// When it was destroyed. See [`Craft::end`].
+    ended_s: Option<f64>,
 }
 
 impl Craft {
@@ -226,6 +228,7 @@ impl Craft {
             known_from_s: f64::NEG_INFINITY,
             fitting: None,
             seen: History::default(),
+            ended_s: None,
         }
     }
 
@@ -334,7 +337,19 @@ impl Craft {
 
     /// The craft as something a light-delay solve can evaluate.
     pub fn worldline(&self) -> Flight<'_> {
-        Flight::with_past(&self.motion, self.system.as_deref(), &self.past, self.known_from_s)
+        let flight = Flight::with_past(&self.motion, self.system.as_deref(), &self.past, self.known_from_s);
+        flight.ending(self.ended_s.unwrap_or(f64::INFINITY))
+    }
+
+    /// Destroyed at `at_s`: its worldline stops there and its fitting goes. What it did before
+    /// goes on arriving at observers until the last of that light has passed them.
+    pub fn end(&mut self, at_s: f64) {
+        self.ended_s = Some(at_s);
+        self.fitting = None;
+    }
+
+    pub fn ended_s(&self) -> Option<f64> {
+        self.ended_s
     }
 
     /// How fast it can turn, radians a second: from its form's moments if it has one, and from
@@ -476,6 +491,14 @@ impl Craft {
         }
         self.note_form(since);
         self.begin_solar_segment(since);
+    }
+
+    /// Put back the power of the starlight segment in force, as saved: [`Craft::fit`] and
+    /// [`Craft::enter`] sample it afresh from the settlement, which may be partway through it.
+    pub fn set_starlight_w(&mut self, watts: f64) {
+        if let Some(fitting) = &mut self.fitting {
+            fitting.set_starlight_w(watts);
+        }
     }
 
     /// The form and length its light left with at `t`, coordinate seconds. `None` for a craft

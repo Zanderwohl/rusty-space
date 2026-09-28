@@ -69,22 +69,53 @@ impl Fitting {
     /// storage carry across cuts, so where settlements fall changes nothing. The burn's commitment
     /// and the builds still to run are held out of free storage, so the drain starves first.
     pub(super) fn flow(&self, motion: Option<&ShipState>, now_s: f64) -> Flow {
+        self.walk(motion, now_s, |_, _, _, _| false)
+    }
+
+    /// When `Q` first reaches `Q_max` from the settlement on, if the inputs in force hold and the
+    /// round runs as planned. A vent that crosses it does so at the end of its step. Reads no burn,
+    /// as [`Fitting::heat_j_at`] does.
+    pub fn collapse_s(&self) -> Option<f64> {
+        let field = self.field();
+        let max_j = field.heat_max_j();
+        let mut found = None;
+        self.walk(None, f64::INFINITY, |from_s, segment, heat_j, dt_s| {
+            found = field.segment_time_to_rise_s(segment, heat_j, max_j).filter(|&t| t <= dt_s).map(|t| from_s + t);
+            found.is_some()
+        });
+        found
+    }
+
+    /// [`Fitting::flow`] to `until_s`, first offering `stop` each stretch of constant inputs as its
+    /// start, inputs, heat and length, and ending early where it says. A vent or spill lands between
+    /// stretches, so the next starts from it.
+    fn walk(&self, motion: Option<&ShipState>, until_s: f64, mut stop: impl FnMut(f64, &Segment, f64, f64) -> bool) -> Flow {
         let field = self.field();
         let mut flow = Flow { heat_j: self.heat_j, income_j: 0.0 };
-        if now_s <= self.since_s {
+        if until_s <= self.since_s {
             return flow;
         }
         let mut caps = self.capacities_at(self.since_s);
         let building_j = self.refit.as_ref().map_or(0.0, |plan| building_j(plan, self.since_s));
         let mut free_j = self.stored_j - self.committed_j - building_j;
         let mut at_s = self.since_s;
-        for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, now_s) {
+        for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s) {
             let dt_s = piece.until_s - at_s;
             let burn_w = motion.map_or(0.0, |m| (self.burn_spent_j(m, piece.until_s) - self.burn_spent_j(m, at_s)) / dt_s);
             let room_j = caps.storage_j - (self.stored_j + flow.income_j);
             let segment = self.intake(&caps, piece.losing_w, room_j, piece.moving_w + burn_w);
             let held_w = burn_w + piece.moving_w.max(0.0);
-            let (heat_j, storage_j) = settle(&field, &segment, caps.drain_w, held_w, flow.heat_j, free_j, dt_s);
+            let (mut heat_j, mut storage_j) = (flow.heat_j, 0.0);
+            let mut from_s = at_s;
+            for (part, part_s) in split(segment, caps.drain_w, held_w, free_j, dt_s) {
+                if stop(from_s, &part, heat_j, part_s) {
+                    return flow;
+                }
+                let settled = field.settle(&part, heat_j, part_s);
+                heat_j = settled.heat_j;
+                storage_j += settled.storage_j;
+                from_s += part_s;
+            }
             flow.income_j += storage_j;
             free_j += storage_j + held_w * dt_s;
             caps = self.capacities_at(piece.until_s);
@@ -98,20 +129,17 @@ impl Fitting {
     }
 }
 
-/// [`Field::settle`], split where free storage runs out. After that the drain gets only what comes
-/// in, and its unpaid part makes no heat. `held_w`, paid from what is held back, is never cut.
-fn settle(field: &Field, segment: &Segment, drain_w: f64, held_w: f64, heat_j: f64, free_j: f64, dt_s: f64) -> (f64, f64) {
+/// A segment over `dt_s`, split where free storage runs out. After that the drain gets only what
+/// comes in, and its unpaid part makes no heat. `held_w`, paid from what is held back, is never cut.
+fn split(segment: Segment, drain_w: f64, held_w: f64, free_j: f64, dt_s: f64) -> impl Iterator<Item = (Segment, f64)> {
     let short_w = segment.draw_w - held_w - segment.stored_w();
     let empty_s = if short_w > 0.0 { free_j.max(0.0) / short_w } else { f64::INFINITY };
     if empty_s >= dt_s {
-        let settled = field.settle(segment, heat_j, dt_s);
-        return (settled.heat_j, settled.storage_j);
+        return [Some((segment, dt_s)), None].into_iter().flatten();
     }
-    let draining = field.settle(segment, heat_j, empty_s);
     let unpaid_w = short_w.min(drain_w);
-    let starved = Segment { draw_w: segment.draw_w - unpaid_w, internal_w: segment.internal_w - unpaid_w, ..*segment };
-    let rest = field.settle(&starved, draining.heat_j, dt_s - empty_s);
-    (rest.heat_j, draining.storage_j + rest.storage_j)
+    let starved = Segment { draw_w: segment.draw_w - unpaid_w, internal_w: segment.internal_w - unpaid_w, ..segment };
+    [Some((segment, empty_s)), Some((starved, dt_s - empty_s))].into_iter().flatten()
 }
 
 /// A stretch of constant refit inputs, ending at `until_s`.
