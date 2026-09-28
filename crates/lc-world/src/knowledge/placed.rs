@@ -44,6 +44,10 @@ pub struct PlaceError {
     pub outward: DVec3,
     /// The orbit's pole, unit.
     pub pole: DVec3,
+    /// Covariance of the place from every source, AU², the phase linearized. Not the sum of
+    /// the two above where the orbit states its elements' covariance: that carries their
+    /// correlations, which split into across and along are lost.
+    pub place_au2: DMat3,
 }
 
 impl PlaceError {
@@ -56,7 +60,13 @@ impl PlaceError {
     /// One sigma in `direction` from every source, the phase linearized: a range's error.
     pub fn toward_au(&self, direction: DVec3) -> f64 {
         let d = direction.normalize_or_zero();
-        self.sigma_au(d).hypot(self.pace_au.dot(d) * self.along_rad.min(PI))
+        d.dot(self.whole_au2() * d).max(0.0).sqrt()
+    }
+
+    /// [`Self::place_au2`] where the phase is still an arc, and the phase at half a turn where it
+    /// is anywhere: linearized past that, the along bar grows without bound.
+    pub fn whole_au2(&self) -> DMat3 {
+        if self.anywhere_on_orbit() { self.across_au2 + outer(self.pace_au * PI) } else { self.place_au2 }
     }
 
     pub fn outward_au(&self) -> f64 {
@@ -84,9 +94,8 @@ impl PlaceError {
 
     /// Every direction in quadrature, for a reader that wants one number.
     pub fn total_au(&self) -> f64 {
-        let c = self.across_au2;
-        let along = self.along_au();
-        (c.x_axis.x + c.y_axis.y + c.z_axis.z + along * along).max(0.0).sqrt()
+        let c = self.whole_au2();
+        (c.x_axis.x + c.y_axis.y + c.z_axis.z).max(0.0).sqrt()
     }
 }
 
@@ -233,28 +242,45 @@ pub(super) fn placed_at(orbit: &Orbit, now_s: f64) -> Placed {
     // `M = tau (t - epoch) / P`, so the period's error carries `tau |t - epoch| sigma_P / P^2`
     // of anomaly with it. Doc 25: the sigma is grown by how long since it was last seen.
     //
-    // It grows from the pivot, where the epoch's error is stated, carrying the two's
-    // covariance: `M = M0 - n' dt dP / P`, so `var M = var M0 - 2 dt rho sM0 sn + dt^2 sn^2`
-    // with `sn` the drift a second. A fit's phase and period are correlated wherever its
-    // looks are lopsided about the pivot, and the correlation is what makes that true
-    // at any time and not only one.
+    // It grows from the pivot, where the epoch's error is stated, and the two add in
+    // quadrature there. A fit states its elements' covariance, which is carried below instead.
     let (period_s, period_sigma) = orbit.period_s;
     let pivot_s = orbit.pivot_s.unwrap_or(path.epoch_s);
-    let dt = now_s - pivot_s;
-    let rate = TAU * period_sigma / (period_s * period_s);
+    let drift = TAU * (now_s - pivot_s).abs() * period_sigma / (period_s * period_s);
     let at_pivot = TAU * orbit.epoch_s.map_or(0.0, |(_, sigma)| sigma) / period_s;
-    let rho = orbit.phase_period_rho.clamp(-1.0, 1.0);
-    let along = at_pivot * at_pivot - 2.0 * dt * rho * at_pivot * rate + dt * dt * rate * rate;
+    let across_au2 = outer(outward * axis_au) + outer(per_e * sigma_e) + outer(path.pole * normal_au);
+    let along_rad = drift.hypot(at_pivot).min(PI);
+    let error = PlaceError {
+        across_au2,
+        along_rad,
+        pace_au,
+        outward,
+        pole: path.pole,
+        place_au2: across_au2 + outer(pace_au * along_rad),
+    };
+    Placed::Known { offset_au, error: stated(orbit, now_s).map_or(error, |place| split(error, place)) }
+}
 
-    Placed::Known {
-        offset_au,
-        error: PlaceError {
-            across_au2: outer(outward * axis_au) + outer(per_e * sigma_e) + outer(path.pole * normal_au),
-            along_rad: along.max(0.0).sqrt().min(PI),
-            pace_au,
-            outward,
-            pole: path.pole,
-        },
+/// The covariance of the place an orbit's stated element covariance gives at `now_s`, AU².
+fn stated(orbit: &Orbit, now_s: f64) -> Option<DMat3> {
+    let covariance = orbit.covariance.as_ref()?;
+    let fitted = super::arc::Fitted::of(orbit)?;
+    let pivot_s = orbit.pivot_s?;
+    let au = crate::navigation::AU;
+    Some(super::settle::place_covariance(&fitted, pivot_s, covariance, now_s)? / (au * au))
+}
+
+/// `place` taken apart into along the path, as a phase, and across it.
+fn split(error: PlaceError, place: DMat3) -> PlaceError {
+    let pace = error.pace_au.length();
+    let along = error.pace_au.normalize_or_zero();
+    let along_au2 = along.dot(place * along).max(0.0);
+    let across = DMat3::IDENTITY - outer(along);
+    PlaceError {
+        across_au2: across * place * across,
+        along_rad: if pace > 0.0 { (along_au2.sqrt() / pace).min(PI) } else { PI },
+        place_au2: place,
+        ..error
     }
 }
 
@@ -265,10 +291,10 @@ pub(super) fn added(primary: Placed, own: Placed) -> Placed {
             // Rigidly, not as phase: a planet's error can be larger than its moon's whole orbit,
             // and folded into the moon's phase that read as a moon that could be anywhere
             // round a planet it is known to be beside.
-            let carried = a.across_au2 + outer(a.pace_au * a.along_rad.min(PI));
+            let carried = a.whole_au2();
             Placed::Known {
                 offset_au: up + here,
-                error: PlaceError { across_au2: b.across_au2 + carried, ..b },
+                error: PlaceError { across_au2: b.across_au2 + carried, place_au2: b.place_au2 + carried, ..b },
             }
         }
         // A shell about a primary whose own place is known is still a shell, just a wider one:
@@ -313,7 +339,7 @@ mod tests {
             orientation: Orientation::Known { pole: DVec3::Z, sigma_rad: sigma_pole, node: 0.0, periapsis: 0.0 },
             epoch_s: Some((0.0, 0.0)),
             pivot_s: None,
-            phase_period_rho: 0.0,
+            covariance: None,
             method: Method::Astrometric,
             stated_s: 0.0,
             lineage: Lineage::new(),
@@ -362,24 +388,6 @@ mod tests {
         let (_, later) = error(&o, pivot + 2.0 * PERIOD_S);
         let drift = TAU * 2.0 * 0.01;
         assert!((later.along_rad - drift.hypot(TAU * 1.0e-3)).abs() < 1.0e-9, "{}", later.along_rad);
-    }
-
-    /// A phase correlated with the period is known best somewhere other than the pivot, and
-    /// the covariance puts it there: `sM0^2 (1 - rho^2)` at `dt = rho sM0 / sn`, either side
-    /// by the sign of the correlation.
-    #[test]
-    fn a_correlated_phase_is_best_known_off_the_pivot() {
-        let sigma_epoch = PERIOD_S * 1.0e-3;
-        for rho in [0.8, -0.8] {
-            let o = Orbit { epoch_s: Some((0.0, sigma_epoch)), phase_period_rho: rho, ..orbit(None, 1.0e-4) };
-            let (phase, rate) = (TAU * 1.0e-3, TAU * 0.01 / PERIOD_S);
-            let best = rho * phase / rate;
-            let (_, there) = error(&o, best);
-            let want = phase * (1.0 - rho * rho).sqrt();
-            assert!((there.along_rad - want).abs() < 1.0e-12, "{} against {want}", there.along_rad);
-            assert!(error(&o, 0.0).1.along_rad > there.along_rad, "no better at the pivot");
-            assert!(error(&o, 2.0 * best).1.along_rad > there.along_rad);
-        }
     }
 
     /// The period's error is an angle along the orbit, and it grows with time either way.

@@ -22,6 +22,7 @@ pub mod body;
 pub mod called;
 pub mod conclusion;
 pub mod follow_up;
+pub mod innovation;
 pub mod formats;
 pub mod moments;
 pub mod mass;
@@ -386,6 +387,10 @@ pub struct Knowledge {
     /// forever and every other body in the system is never fitted at all. Not compared, not
     /// saved and not reported, because an attempt is not something a craft knows.
     tried: BTreeMap<Subject, primary::Attempt>,
+    /// Bodies a look has landed past `innovation::SURPRISING` from their orbit since they were
+    /// last put to the fit queue. Scheduling, like `tried`, and not saved: after a restart the
+    /// next look tests the orbit again.
+    surprised: std::collections::BTreeSet<Subject>,
     /// See [`room`].
     capacity_bytes: f64,
     occupied_bytes: f64,
@@ -402,6 +407,7 @@ impl Knowledge {
     pub fn new(owner: Witness) -> Self {
         Self {
             tried: BTreeMap::new(),
+            surprised: Default::default(),
             owner,
             files: tracked::Tracked::new(BTreeMap::new()),
             beliefs: tracked::Tracked::new(BTreeMap::new()),
@@ -772,6 +778,9 @@ impl Knowledge {
     }
 
     fn file_sighting(&mut self, subject: Subject, sighting: Sighting) {
+        if self.surprised_by(subject, &sighting).is_some_and(|sigma| sigma > innovation::SURPRISING) {
+            self.surprised.insert(subject);
+        }
         let witness = sighting.witness;
         let owner = self.owner;
         let assigned = match subject {
@@ -848,7 +857,7 @@ mod tests {
             orientation: Orientation::Unknown,
             epoch_s: None,
             pivot_s: None,
-            phase_period_rho: 0.0,
+            covariance: None,
             method: Method::Transit,
             stated_s,
             lineage: Lineage::new(),

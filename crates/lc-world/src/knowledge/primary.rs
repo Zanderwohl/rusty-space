@@ -115,6 +115,9 @@ impl crate::knowledge::Knowledge {
     ///
     /// **Except for new ranges**, which make a fit a solution rather than a search: a body with
     /// more of them than when last tried goes back in, ahead of the rest.
+    ///
+    /// **Or a surprise**: a look far from where the orbit said, which says the orbit is wrong
+    /// however long its arc has been. See `knowledge::innovation`.
     pub fn unfitted(&self, star: StarId) -> Option<Subject> {
         let mine = |subject: Subject| -> Option<(bool, f64)> {
             let file = self.file(subject)?;
@@ -130,7 +133,7 @@ impl crate::knowledge::Knowledge {
                 .map(|o| o.stated_s)
                 .fold(f64::MIN, f64::max);
             let tried = self.tried.get(&subject);
-            let fresh = newly_ranged(ranged(file.sightings()), tried);
+            let fresh = newly_ranged(ranged(file.sightings()), tried) || self.surprised.contains(&subject);
             if !fresh && tried.is_some_and(|t| span < t.span_s * REFIT_GROWTH) {
                 return None;
             }
@@ -325,6 +328,10 @@ impl crate::knowledge::Knowledge {
         let (last, filed_taken_s) =
             (held.and_then(|t| t.last.clone()), held.map_or(f64::NEG_INFINITY, |t| t.filed_taken_s));
         self.tried.insert(subject, Attempt { at_s: now_s, span_s, ranged, filed_taken_s, last: last.clone() });
+        // A surprise is spent on this attempt. The contradicted orbit is still carried: it is the
+        // best start there is, and a refit that cannot agree with the new look falls back to the
+        // search. Dropping it had Mercury's search, from nothing, settle on Earth as its primary.
+        self.surprised.remove(&subject);
         Some(FitJob { subject, owner: self.owner, frames, warm: last, taken_s: now_s })
     }
 
@@ -449,6 +456,8 @@ impl FitJob {
         let mut orbit = fitted.stated(self.owner, about, &looks, self.taken_s);
         let (au, sigma_au) = orbit.semi_major_au;
         orbit.semi_major_au = (au, sigma_au.hypot(au * depth));
+        // A depth error scales the whole orbit, which the axis is the log of.
+        orbit.covariance = orbit.covariance.map(|c| c.scaled_by(depth));
         Some(Solved { subject: self.subject, about, fitted, orbit, taken_s: self.taken_s, offered })
     }
 }
