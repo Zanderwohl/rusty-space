@@ -460,20 +460,28 @@ impl Wreck {
     /// [`FieldUniform::collapse`] now, once its light has arrived: the flash in real seconds from
     /// the frame it is first drawn, the cooling in coordinate seconds from its arrival.
     fn collapse(&mut self, now_s: f64, real_s: f32, afterglow_s: f64) -> Option<Vec4> {
-        let since_s = now_s + self.ahead_s - self.arrive_s;
-        if since_s < 0.0 {
+        if now_s + self.ahead_s < self.arrive_s {
             return None;
         }
         let since_real = real_s - *self.shown_at.get_or_insert(real_s);
-        let cooled = since_s / afterglow_s.max(f64::MIN_POSITIVE);
+        let cooled = self.cooled(now_s, real_s, afterglow_s);
         // The shader runs both off one clock, so the afterglow is stated as the real seconds that
-        // put its cooling where the coordinate clock has it.
+        // put its cooling where [`Wreck::cooled`] has it.
         let afterglow_real = if cooled > 0.0 { since_real / cooled as f32 } else { f32::MAX };
         Some(Vec4::new(since_real, FLASH_S, afterglow_real.max(since_real), DEBRIS_REACH))
     }
 
+    /// How far through the afterglow, by the coordinate clock or as it plays at the design rate,
+    /// whichever is further: a clock slowed for watching would otherwise hold the debris still.
+    fn cooled(&self, now_s: f64, real_s: f32, afterglow_s: f64) -> f64 {
+        let afterglow_s = afterglow_s.max(f64::MIN_POSITIVE);
+        let by_clock = (now_s + self.ahead_s - self.arrive_s) / afterglow_s;
+        let by_design = self.shown_at.map_or(0.0, |at| f64::from(real_s - at) * crate::session::TIME_RATE / afterglow_s);
+        by_clock.max(by_design)
+    }
+
     fn over(&self, now_s: f64, real_s: f32, afterglow_s: f64) -> bool {
-        now_s + self.ahead_s - self.arrive_s > afterglow_s && self.shown_at.is_some_and(|at| real_s - at > FLASH_S)
+        self.cooled(now_s, real_s, afterglow_s) > 1.0 && self.shown_at.is_some_and(|at| real_s - at > FLASH_S)
     }
 
     /// Coordinate seconds the spike's light, off a craft at `at_ly`, reaches an observer at
@@ -1011,6 +1019,22 @@ mod tests {
         let later = wreck.collapse(20.0 + 0.1 * afterglow_s, 3.25, afterglow_s).unwrap();
         assert!((later.x - 0.25).abs() < 1e-6);
         assert!((later.x / later.z - 0.1).abs() < 1e-3, "cooling at {} of the afterglow", later.x / later.z);
+    }
+
+    /// On a clock slowed almost to a stop the debris still spreads and cools, as fast as it would
+    /// at the design rate.
+    #[test]
+    fn a_slow_clock_does_not_hold_the_debris_still() {
+        let mut wrecks = Wrecks::default();
+        wrecks.last.insert(ShipId(5), last("Aster"));
+        let mut world = collapsing(vec![sighting(1, 5, 10_000_000, 20_000_000)], wrecks, 20.0);
+        let mut wreck = world.resource_mut::<Wrecks>().fell.remove(0);
+        let afterglow_s = B.collapse_afterglow_s;
+        let design_s = (afterglow_s / crate::session::TIME_RATE) as f32;
+        wreck.collapse(20.0, 1.0, afterglow_s).unwrap();
+        let half = wreck.collapse(20.0 + 1e-6, 1.0 + 0.5 * design_s, afterglow_s).unwrap();
+        assert!((half.x / half.z - 0.5).abs() < 1e-3, "{} of the afterglow", half.x / half.z);
+        assert!(wreck.over(20.0 + 1e-6, 1.0 + 1.01 * design_s, afterglow_s));
     }
 
     /// Taken while this client's clock is behind the shard's, a collapse is drawn at once, where

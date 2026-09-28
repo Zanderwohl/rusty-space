@@ -334,8 +334,12 @@ impl Craft {
     }
 
     /// Destroyed at `at_s`: its worldline stops there and its fitting goes. What it did before
-    /// goes on arriving at observers until the last of that light has passed them.
+    /// goes on arriving at observers until the last of that light has passed them, so the nose is
+    /// held where it was: without a fitting it would fall back to the attitude of the last order.
     pub fn end(&mut self, at_s: f64) {
+        if let Some(facing) = self.facing_at(at_s) {
+            self.motion.attitude = facing;
+        }
         self.ended_s = Some(at_s);
         self.fitting = None;
     }
@@ -1331,6 +1335,17 @@ mod tests {
 
     /// An idle fitted ship leans its nose to the angle that turns its form's broadside to the star,
     /// and after a flight it swings back at its hull's own rate rather than snapping, collecting
+    /// A wreck is seen facing as it ended, not along its last order's attitude.
+    #[test]
+    fn a_wreck_keeps_the_facing_it_ended_with() {
+        let Some(system) = sol() else { return };
+        let mut craft = near_the_sun(&system, 0.1, None);
+        let before = craft.facing_at(100.0).unwrap();
+        assert!(before.dot(craft.motion.attitude) < 0.99, "premise: broadside is not the attitude, {before}");
+        craft.end(100.0);
+        assert!(craft.facing_at(50.0).unwrap().dot(before) > 1.0 - 1e-12);
+    }
+
     /// what its attitude presents as it goes.
     #[test]
     fn an_idle_ship_turns_broadside_to_its_star() {
