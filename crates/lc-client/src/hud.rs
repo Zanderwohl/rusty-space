@@ -186,7 +186,7 @@ pub struct Field {
     pub blackbody: [f32; 3],
     /// How far from [`PULSE_FILL`] to the limit, `[0, 1]`.
     pub stress: f32,
-    /// `3 240 K ↑ 1.20 ME/yr — collapse in 4:10`.
+    /// `3 240 K +1.20 ME/yr — collapse in 4:10`. No arrows: the default fonts have none.
     pub text: String,
     /// `collapse in 4:10`, whenever one is scheduled.
     pub countdown: Option<String>,
@@ -263,6 +263,26 @@ pub fn drop_marker(field: &Field, marker: Marker, fraction: f64) -> Option<Actio
     let Setting::Auto(t) = field.setting else { return None };
     let moved = marker.moved(t, fraction);
     (moved != t).then(|| Action::SetField(Setting::Auto(moved).into()))
+}
+
+/// How long a dropped marker waits for the shard's answer before going back, real seconds.
+const AWAITING_S: f64 = 5.0;
+
+/// Thresholds a drop has ordered and the account does not yet hold, drawn in its place so the
+/// marker does not jump back while the order is in flight.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dropped {
+    pub thresholds: Thresholds,
+    /// Real seconds.
+    pub at_s: f64,
+}
+
+impl Dropped {
+    /// Still shown at `now_s`: until the account agrees, the field leaves Auto, or the answer is
+    /// overdue, which is how a refusal puts the marker back.
+    pub fn holds(&self, field: &Field, now_s: f64) -> bool {
+        matches!(field.setting, Setting::Auto(t) if t != self.thresholds) && now_s - self.at_s < AWAITING_S
+    }
 }
 
 /// The ship's collapse, if one is due within [`COUNTDOWN_HORIZON_S`], solved as the shard solves it.
@@ -531,10 +551,7 @@ fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field>
     let net_w = heat_w - heat_j / field.tau_s;
     let flow = match net_w {
         w if w.abs() < STEADY * field.rated_load_w() => "steady".to_string(),
-        w => {
-            let arrow = if w > 0.0 { '↑' } else { '↓' };
-            format!("{arrow} {}", crate::refit_panel::me_per_year(w.abs(), module_j).trim_start_matches('+'))
-        }
+        w => crate::refit_panel::me_per_year(w, module_j),
     };
     let due = collapse_s.map(|at_s| format!("collapse in {}", countdown(at_s - now, rate)));
     let mut text = format!("{} K {flow}", grouped(kelvin));
@@ -544,7 +561,7 @@ fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field>
     let posture = fitting.posture();
     let switch = posture.switching_at(now);
     let shade = match (switch, posture.setting) {
-        (Some(s), _) => Some(format!("→ {}", shade_name(s.to))),
+        (Some(s), _) => Some(format!("» {}", shade_name(s.to))),
         (None, Setting::Auto(_)) => Some(shade_name(posture.shade_at(now)).to_string()),
         (None, _) => None,
     };
@@ -808,7 +825,7 @@ mod tests {
         let [r, g, b] = field.color(BLUE);
         assert_eq!([r, g, b], field.blackbody, "all blackbody");
         assert!(r > 0.999 && g < 0.9 && b < g, "orange at {} K: {r} {g} {b}", field.kelvin);
-        assert!(field.text.starts_with(&format!("{} K ↓ ", grouped(field.kelvin))), "{}", field.text);
+        assert!(field.text.starts_with(&format!("{} K -", grouped(field.kelvin))), "{}", field.text);
     }
 
     #[test]
@@ -855,7 +872,7 @@ mod tests {
         let later_s = s.coordinate_time_s() + 40.0 * b.field_tau_s;
         let settled = fitting.heat_j_at(&s.ship.motion, later_s) / fitting.field().heat_max_j();
         assert!((f64::from(field.heading) - settled).abs() < 1.0e-6, "{} {settled}", field.heading);
-        assert!(field.heading > field.fraction && field.text.contains('↑'), "heating");
+        assert!(field.heading > field.fraction && field.text.contains(" K +"), "heating");
 
         let (ui, s) = heated(0.1, 3.0 * rated_w(), lc_world::fitting::Posture::BLACK);
         assert_eq!(field_of(&s, &ui).heading, 1.0);
@@ -902,7 +919,7 @@ mod tests {
         let done_s = s.coordinate_time_s() + 0.5 * b.field_switch_s;
         let (ui, s) = heated(0.1, 0.0, Posture { switch: Some(Switch { to: Mode::Black, done_s }), ..auto });
         let field = field_of(&s, &ui);
-        assert_eq!((field.shade.as_deref(), field.switching), (Some("→ BLACK"), true));
+        assert_eq!((field.shade.as_deref(), field.switching), (Some("» BLACK"), true));
 
         let (ui, s) = heated(0.1, 0.0, Posture::BLACK);
         let field = field_of(&s, &ui);
@@ -952,6 +969,22 @@ mod tests {
         assert_eq!(top.clear_above, 0.98, "held off collapse");
         let floor = Marker::ClearAbove.moved(at(0.5, 0.07), 0.0);
         assert_eq!(floor.clear_above, 0.09, "on a hundredth");
+    }
+
+    #[test]
+    fn a_dropped_marker_holds_until_the_account_agrees() {
+        use lc_world::fitting::{Balance, Posture};
+        let b = Balance::DEFAULT;
+        let (_, s) = heated(0.1, 0.0, Posture::new_ship(&b));
+        let ui = UiState::default();
+        let field = field_of(&s, &ui);
+        let dropped = Dropped { thresholds: Marker::ClearAbove.moved(Thresholds::of(&b), 0.62), at_s: 10.0 };
+        assert!(dropped.holds(&field, 10.0 + 0.9 * AWAITING_S), "in flight");
+        assert!(!dropped.holds(&field, 10.0 + AWAITING_S), "overdue: refused, or lost");
+        let agreed = Field { setting: Setting::Auto(dropped.thresholds), ..field.clone() };
+        assert!(!dropped.holds(&agreed, 10.5), "accepted");
+        let black = Field { setting: Setting::Black, ..field };
+        assert!(!dropped.holds(&black, 10.5), "no markers outside Auto");
     }
 
     /// One `Collapse` across frames: settling along the account's own path is not a change, and a

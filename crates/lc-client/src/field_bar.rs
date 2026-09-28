@@ -42,7 +42,12 @@ pub fn draw(ui: &mut egui::Ui, field: &hud::Field, text: Option<&str>, out: &mut
     let tick = x_of(f64::from(field.heading)).min(rect.right() - 1.0);
     painter.line_segment([egui::pos2(tick, rect.top()), egui::pos2(tick, rect.bottom())], egui::Stroke::new(2.0, ink));
 
-    if let Setting::Auto(thresholds) = field.setting {
+    if let Setting::Auto(held) = field.setting {
+        let now_s = ui.input(|i| i.time);
+        let pending = bar.id.with("dropped");
+        let dropped = ui.data(|d| d.get_temp::<hud::Dropped>(pending)).filter(|d| d.holds(field, now_s));
+        let thresholds = dropped.map_or(held, |d| d.thresholds);
+        let shown_field = hud::Field { setting: Setting::Auto(thresholds), ..field.clone() };
         for marker in [Marker::ClearAbove, Marker::BlackBelow] {
             let at = marker.of(&thresholds);
             let hit = egui::Rect::from_center_size(egui::pos2(x_of(at), rect.center().y), egui::vec2(10.0, rect.height()));
@@ -54,8 +59,14 @@ pub fn draw(ui: &mut egui::Ui, field: &hud::Field, text: Option<&str>, out: &mut
             };
             notch(&painter, marker, x_of(shown), rect, ink);
             if grip.drag_stopped()
-                && let Some(action) = grip.interact_pointer_pos().and_then(|pos| hud::drop_marker(field, marker, dropped_at(pos)))
+                && let Some(action) = grip.interact_pointer_pos().and_then(|pos| hud::drop_marker(&shown_field, marker, dropped_at(pos)))
             {
+                // A switch under way refuses it before it is sent, so there is nothing to wait for.
+                if let (false, Action::SetField(mode)) = (field.switching, &action)
+                    && let Setting::Auto(ordered) = Setting::from(*mode)
+                {
+                    ui.data_mut(|d| d.insert_temp(pending, hud::Dropped { thresholds: ordered, at_s: now_s }));
+                }
                 ask(out, action);
             }
             grip.on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
