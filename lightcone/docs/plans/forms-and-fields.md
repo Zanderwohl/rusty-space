@@ -518,7 +518,7 @@ graph LR
 
 - status: todo
 - needs: E1, E2, S1
-- touches: `crates/lc-world/src/emit.rs`, `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`
+- touches: `crates/lc-world/src/emit.rs`, `crates/lc-world/src/fitting/heat.rs` (an emit's power in `Fitting::emitted_w`, E2's heat-first draw), `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`
 - read: 31 §Emitting on purpose, §Three uses, §Radio
 - deliver: one emission, whatever lit it: a source, apertures, power, spectrum, spread, aim and the interval it is lit, with one fan-out to every worldline in the cone that delivers it at the retarded time as intake with `Outbound::Illuminated`, and as `Glare` on `Presence` to observers inside the cone. `Order::Emit`, balanced and as a burn, is the first thing that lights one; radio charged. E4 lights drives through the same path and adds none of its own.
 - done when: a second craft in the cone is fed and a third just outside is not, a balanced emit leaves the worldline alone, and an aimed beam misses a target that maneuvered after it left.
