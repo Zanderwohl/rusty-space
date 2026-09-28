@@ -716,7 +716,7 @@ graph LR
 
 ### R17 · A burn's power on the wire as `F c`
 
-- status: todo
+- status: active card "R17 · A burn's power on the wire as `F c`"
 - needs: R12
 - touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-world/src/flight.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`
 - read: 31 §The drive is the radiator, 32 §The exhaust cone
