@@ -213,7 +213,7 @@ pub struct Server<J: Journal> {
     pub(crate) reserved: HashMap<CraftId, lc_world::fitting::Reservation>,
     /// Console lines waiting for the tick.
     pub(crate) commands: std::collections::VecDeque<crate::command::Queued>,
-    /// Craft destroyed since the last checkpoint took them, whose rows it is to delete.
+    /// Wrecks swept since the last checkpoint took them, whose rows it is to delete.
     pub(crate) destroyed: Vec<i64>,
     /// Spikes in flight to the fields they will land on. See [`crate::field`].
     pub(crate) arrivals: Vec<crate::field::Arrival>,

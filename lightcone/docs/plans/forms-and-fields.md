@@ -444,7 +444,7 @@ graph LR
 
 - status: active card "H5 · Proximity"
 - needs: H4
-- touches: `crates/lc-server/src/field.rs`
+- touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/server.rs` (the arrivals, and `emit` returns its id), `crates/lc-world/src/field.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/craft.rs` (glow and bursts into the account), `crates/lc-world/src/scenario.rs`, `crates/lc-server/src/director.rs`, `crates/lc-server/src/command/mod.rs` (the cascade scene), `lightcone/docs/30-the-field.md`, `lightcone/images/h5-*.jpg`, `AGENTS.md`
 - read: 30 §Proximity
 - deliver: a neighbor's glow as intake; a collapse's spike delivered to each neighbor at its retarded time as a burst; cascades.
 - done when: a ship inside the lethal radius dies, one outside it survives, and the second death in a cascade comes later by the light time between them.
@@ -478,7 +478,7 @@ graph LR
 
 ### H9 · A wreck outlives a restart
 
-- status: active card "H9 · A wreck outlives a restart"
+- status: done #120
 - needs: H4
 - touches: `crates/lc-server/src/persist.rs`, `crates/lc-server/src/field.rs`
 - read: 30 §Collapse, §Open
@@ -493,6 +493,15 @@ graph LR
 - read: 30 §Collapse, §What an observer sees
 - deliver: the `1 − collapse_spike_fraction` of a collapse's `E` leaves over `collapse_afterglow_s` as light from where the ship was, its temperature falling from the field's limit, reaching each observer at its retarded time; the spike's color is `collapse_spike_k`.
 - done when: a craft staring at a collapse's position records the afterglow on its curve from when the light arrives, for as long as 30 says, and one staring elsewhere does not.
+
+### H11 · A spike in flight outlives a restart
+
+- status: todo
+- needs: H5, H9
+- touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/persist.rs`
+- read: 30 §Proximity (As built), §Open
+- deliver: the spikes still on their way when a checkpoint is taken come back with it, from the checkpoint or rebuilt from the collapse events' deliveries in the journal, so a restart between a collapse and its spike's arrival still lands the spike.
+- done when: a shard restarted between a collapse and a neighbor inside its lethal radius being reached still kills that neighbor at its arrival.
 
 ## E: energy
 
@@ -708,6 +717,15 @@ graph LR
 - done when: a burn photographed from a light-year off is a point that brightens by orders of magnitude as its cone sweeps over the observer, a beam aimed past the observer is not drawn at all, and a test pins the point's flux inside the cone to the `Glare` it was handed.
 - note: after H7, so the emission adds to the craft's own point rather than drawing a second one beside it; after E4, so a drive's light inside its cone arrives the way every beam's does, and there is one path from emission to eye.
 
+### R19 · A collapse in the game
+
+- status: todo
+- needs: R6, R11, H5
+- touches: `crates/lc-client/src/field.rs`, `crates/lc-client/src/uplink.rs`
+- read: 32 §The field, 30 §Collapse
+- deliver: R6's collapse flash and debris drawn where a craft collapsed, from the `kind::COLLAPSE` sighting as its light arrives, in place of a hull that only disappears; the console names the ship as its presence did, rather than by id.
+- done when: `--demo cascade` photographed partway shows the flash on the ship whose end's light is arriving, and nothing on the ones whose light has not.
+
 ## C: client
 
 ### C1 · Editor view
@@ -805,7 +823,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, H9, H10, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
+- needs: F10, H7, H8, H9, H10, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18, H11, R19
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
