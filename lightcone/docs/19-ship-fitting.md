@@ -297,8 +297,8 @@ loadout and full storage.
 
 A ship loaded from an old row is 3.8 times heavier than it was, so its acceleration ceiling is
 unchanged — that is how `engine_thrust_n` was chosen — but its plume, which reads mass, gets
-brighter. The plume keeps the exhaust-power formula for now; passing it `mass_kg_at(t)` is one line
-when the visuals should follow.
+brighter. A burn's light is `F c` at `mass_kg_at(t)`, `Drive::exhaust_w`, with no exhaust speed:
+the rocket law above has none, and the drive keeps none (R17).
 
 ## Client
 

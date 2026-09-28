@@ -75,7 +75,7 @@ impl Drive {
     /// the face and cone are drawn from it. Below ε = 1 the rocket law spends more, and the rest
     /// is waste heat that stays aboard (30 §Conversion).
     pub fn exhaust_w(mass_kg: f64, accel_g: f64) -> f64 {
-        mass_kg * accel_g * G0 * C_M_S
+        mass_kg * (accel_g * G0) * C_M_S
     }
 
     /// The proper acceleration, in g, at which sending `power_w` aft pushes `mass_kg`.
