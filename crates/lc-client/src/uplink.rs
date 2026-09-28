@@ -908,7 +908,7 @@ fn fold(
             }
         }
         // The welcome to the successor follows.
-        Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed".into(), at_t as f64 * 1e-6),
+        Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed", at_t as f64 * 1e-6),
         // Sent once E3 and S2 are built.
         Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
     }

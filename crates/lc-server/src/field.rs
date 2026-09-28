@@ -89,7 +89,8 @@ impl<J: Journal> Server<J> {
         self.destroyed.push(id.0);
 
         let account = self.by_account.iter().find(|(_, ship)| ship.0 == id.0).map(|(account, _)| account.clone());
-        let owner = self.owners.remove(&id);
+        // Connected, or nobody could ever reach a ship given to it.
+        let owner = self.owners.remove(&id).filter(|from| self.clients.get(from).is_some_and(|state| state.ship.0 == id.0));
         if account.is_none() && owner.is_none() {
             return;
         }
@@ -370,6 +371,21 @@ mod tests {
         let saved: Vec<i64> = server.checkpoint().ships.iter().map(|s| s.ship_id).collect();
         assert!(!saved.contains(&DYING.0) && saved.contains(&successor.0), "{saved:?}");
         assert_eq!(server.take_destroyed(), vec![DYING.0]);
+    }
+
+    /// A ship with no account whose pilot has gone leaves nobody to give another to.
+    #[tokio::test]
+    async fn an_unowned_ship_with_no_account_has_no_successor() {
+        let Some((mut server, mut wire)) = scene() else { return };
+        server.disconnected(OWNER);
+        for _ in 0..500 {
+            server.tick(&mut wire).await.unwrap();
+            if !collapse_events(&server).is_empty() {
+                break;
+            }
+        }
+        assert_eq!(collapse_events(&server).len(), 1);
+        assert!(server.ship(ShipId(3)).is_none());
     }
 
     /// Nothing but the account comes back from a checkpoint, and it collapses on time from it.
