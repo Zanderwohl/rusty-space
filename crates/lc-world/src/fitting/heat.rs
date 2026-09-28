@@ -41,8 +41,8 @@ pub(super) struct Part {
 }
 
 impl Part {
-    /// Of `Q`, whole. Waste relaxes on the same `τ` as the rest, so each sum is still one
-    /// exponential.
+    /// The stretches of all of `Q`, the waste added to each: it relaxes on the same `τ`, so each
+    /// sum is still one exponential.
     pub fn stretches(&self, field: &Field, dt_s: f64) -> Vec<Stretch> {
         let mut waste_j = self.waste_j;
         let mut stretches = field.stretches(&self.segment, self.drawable_j, dt_s);
@@ -82,8 +82,8 @@ impl Fitting {
         let now_s = now_s.max(self.since_s);
         let mut heat_w = 0.0;
         // A second past `now_s`, so the last stretch offered is the one in force from it.
-        self.walk(Some(motion), now_s + 1.0, |_, part, heat_j, dt_s| {
-            heat_w = field.stretches(part, heat_j, dt_s).last().map_or(0.0, |s| s.heat_w);
+        self.walk(Some(motion), now_s + 1.0, |_, part, dt_s| {
+            heat_w = part.stretches(&field, dt_s).last().map_or(0.0, |s| s.heat_w);
             false
         });
         heat_w
@@ -129,7 +129,7 @@ impl Fitting {
         (beam * self.burn_between_j(motion, from_s, until_s) + self.lit_between_j(from_s, until_s)) / (until_s - from_s)
     }
 
-    /// Averaged over `[from_s, until_s]`: what the drive spends and does not emit. None at ε ≥ 1,
+    /// Averaged over `[from_s, until_s]`: what the drive spends and does not emit. Zero at ε ≥ 1,
     /// where the exhaust is all that is spent.
     fn waste_w(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
         let waste = (1.0 - self.balance.drive_efficiency).max(0.0);
@@ -945,6 +945,23 @@ mod tests {
         assert!((ticks.stored_j - leap.stored_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.stored_j, leap.stored_j);
         assert!((ticks.heat_j - leap.heat_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.heat_j, leap.heat_j);
         assert!((ticks.waste_j - leap.waste_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.waste_j, leap.waste_j);
+    }
+
+    /// At the floor mid-boost, the power in force is the waste alone: the field bar's heading.
+    #[test]
+    fn a_wasteful_burn_heads_where_its_waste_does() {
+        let b = wasteful(Balance::DEFAULT);
+        let (motion, cruise) = hop();
+        let [_, line_s, boost_end_s, _, _] = cruise.phase_changes_s();
+        let (_, cost_j) = hot(b, 20.0 * me(&b), 0.0, &motion);
+        let (fitting, _) = hot(b, 20.0 * me(&b), 0.1 * cost_j, &motion);
+        let floor_s = 0.5 * (line_s + boost_end_s);
+        let at_floor = fitting.flow(Some(&motion), floor_s);
+        assert_eq!(at_floor.heat_j, at_floor.waste_j, "premise: at the floor");
+        let heat_w = fitting.heat_w_at(&motion, floor_s);
+        // Averaged as the walk to a second past it averages.
+        let waste_w = fitting.waste_w(&motion, line_s, floor_s + 1.0);
+        assert!(heat_w > 0.0 && close(heat_w, waste_w, 1e-9), "{heat_w} {waste_w}");
     }
 
     /// Carrying waste near its limit, a ship at rest or burning at ε = 1 cools; at ε = 0.4 the
