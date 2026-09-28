@@ -110,7 +110,7 @@ impl Term {
     /// W/m² in each band.
     pub fn flux(&self) -> PerBand<f64> {
         match *self {
-            Term::Blackbody { kelvin, sr } => crate::session::spectrum_at(kelvin).map(|_, x| f64::from(x) * sr),
+            Term::Blackbody { kelvin, sr } => crate::session::spectrum_at(kelvin).map(|_, x| f64::from(*x) * sr),
             Term::Line { wavelength_m, flux_w_m2 } => PerBand::new(std::array::from_fn(|i| {
                 let (lo, hi) = Band::ALL[i].limits_m();
                 if (lo..=hi).contains(&wavelength_m) { flux_w_m2 } else { 0.0 }
@@ -351,11 +351,11 @@ impl Flares {
         self.flares.drain(..excess);
     }
 
-    /// Drop every flare that is out and has been shown.
-    fn sweep(&mut self, now_s: f64, real_s: f32) {
+    /// Drop every flare that is out and has been shown, or will not be: its craft is not a point.
+    fn sweep(&mut self, now_s: f64, real_s: f32, drawn: impl Fn(ShipId) -> bool) {
         self.flares.retain(|f| {
             let open = f.out_s.is_none_or(|out_s| now_s + f.ahead_s < out_s);
-            open || f.shown.is_none_or(|at| real_s - at < FLARE_S)
+            open || (drawn(f.source) && f.shown.is_none_or(|at| real_s - at < FLARE_S))
         });
     }
 
@@ -496,9 +496,9 @@ pub fn draw_points(
             points.push(collapse(&far, distance_m, &balance, wrap_s));
         }
     }
-    flares.sweep(now_s, real_s);
+    flares.sweep(now_s, real_s, |id| distant.is_point(Some(id)));
 
-    distant.metered = points.iter().map(|p| p.flux().map(|_, x| x as f32)).collect();
+    distant.metered = points.iter().map(|p| p.flux().map(|_, x| *x as f32)).collect();
     let Some(sky) = sky else { return };
     let origin = sky.origin_ly;
     if distant.uploaded.as_ref().is_some_and(|(o, drawn)| *o == origin && same(drawn, &points, eye.at_ly)) {
@@ -584,4 +584,296 @@ pub fn build_mesh(points: &[Point], origin_ly: DVec3) -> Mesh {
     mesh.insert_attribute(ATTRIBUTE_EVENT_LIGHT, events);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+#[cfg(test)]
+mod tests {
+    use lc_world::afterglow::Afterglow;
+    use lc_world::form::capacity::apertures;
+    use lc_world::form::presets::{Builtin, turned_fore};
+
+    use super::*;
+    use crate::session::Session;
+
+    const B: Balance = Balance::DEFAULT;
+    const LY_M: f64 = M_PER_LY;
+
+    fn session() -> Session {
+        Session::new(&lc_world::sky::AuthoredStars::sample(), 3)
+    }
+
+    fn assert_near(got: PerBand<f64>, want: PerBand<f64>, tolerance: f64, what: &str) {
+        for band in Band::ALL {
+            let (g, w) = (got[band], want[band]);
+            assert!((g - w).abs() <= tolerance * w.abs().max(1e-300), "{what}: {band:?} {g:e} against {w:e}");
+        }
+    }
+
+    /// A blackbody's share of all its flux in each band, from `em_spectra` rather than the table
+    /// the point reads.
+    fn share(kelvin: f64) -> PerBand<f64> {
+        let total = blackbody::SIGMA * kelvin.powi(4) / std::f64::consts::PI;
+        PerBand::new(std::array::from_fn(|i| blackbody::band_radiance(Band::ALL[i], kelvin) / total))
+    }
+
+    fn dark() -> Seen {
+        let zero = PerBand::splat(0.0);
+        Seen { sent: Sent { reflected: zero, thermal: zero, windows: zero }, star_k: None, field_k: 400.0, lamp_k: 2700.0, disc_sr: 0.0, envelope_sr: 0.0 }
+    }
+
+    /// The two-ended plate in render axes, nose along `fore`, and its faces lit by `ends`.
+    fn plate(fore: DVec3, ends: Ends) -> Vec<Face> {
+        let faces = apertures(&turned_fore(Builtin::Plate.form(), 1), &B).unwrap();
+        lit_faces(ends, Some(&faces), Some(crate::hull::frame(fore, None, 0.0)))
+    }
+
+    /// **Inside the cone the point is the glare it was handed**, all of it in its spectrum, and not
+    /// the face as well: the face seen straight down the beam is that same light.
+    #[test]
+    fn inside_the_cone_the_point_is_the_glare_it_was_handed() {
+        let kelvin = 5.3e5;
+        let glare = Glare { spectrum: Spectrum::Blackbody { temperature_k: kelvin }, flux_w_m2: 5.0e-11 };
+        // The observer astern, looking into the lit aft faces.
+        let faces = plate(DVec3::X, Ends::default().with_drive(1.0e20));
+        let toward = sim_to_render(-DVec3::X);
+        assert!(emission(None, &faces, toward, LY_M) != Term::Dark, "premise: the faces face the observer");
+        let point = craft(DVec3::X, &dark(), emission(Some(&glare), &faces, toward, LY_M), 1.0);
+        assert_near(point.flux(), share(kelvin).map(|_, s| s * glare.flux_w_m2), 5e-3, "in the cone");
+
+        let line = Glare { spectrum: Spectrum::Line { wavelength_m: 551e-9 }, flux_w_m2: 3.0e-12 };
+        let point = craft(DVec3::X, &dark(), emission(Some(&line), &faces, toward, LY_M), 1.0);
+        let mut want = PerBand::splat(0.0);
+        want[Band::V] = line.flux_w_m2;
+        assert_eq!(point.flux(), want, "a beam's line lands in its band alone");
+    }
+
+    /// **A beam aimed past the observer is not drawn.** Its glare never arrives, so what is left is
+    /// the craft and the faces it has lit, and seen from behind a beam out of the bow, nothing of
+    /// the faces either.
+    #[test]
+    fn a_beam_aimed_past_the_observer_is_not_drawn() {
+        let fore = plate(DVec3::X, Ends { fore_w: 2.0e19, aft_w: 0.0 });
+        assert_eq!(emission(None, &fore, sim_to_render(-DVec3::X), LY_M), Term::Dark, "astern of a beam out of the bow");
+        let abeam = emission(None, &fore, sim_to_render(DVec3::new(1.0, 1.0, 0.0)), LY_M);
+        assert!(matches!(abeam, Term::Blackbody { .. }), "the bow's faces seen obliquely: {abeam:?}");
+        let unlit = craft(DVec3::X, &dark(), Term::Dark, 1.0);
+        assert_eq!(craft(DVec3::X, &dark(), emission(None, &fore, sim_to_render(-DVec3::X), LY_M), 1.0), unlit);
+    }
+
+    /// Outside the cone a face is seen at `cos θ`, a flat face's radiance over its projected area,
+    /// so the burn brightens by orders of magnitude as its cone reaches the observer.
+    #[test]
+    fn a_burn_brightens_by_orders_of_magnitude_as_its_cone_arrives() {
+        let power_w = 1.0e20;
+        let faces = plate(DVec3::X, Ends::default().with_drive(power_w));
+        let edge = B.drive_spread_rad * 1.01;
+        let outside = sim_to_render(DVec3::new(-edge.cos(), edge.sin(), 0.0));
+        let face = emission(None, &faces, outside, LY_M);
+        let bolometric = |t: Term| match t {
+            Term::Blackbody { kelvin, sr } => blackbody::SIGMA * kelvin.powi(4) / std::f64::consts::PI * sr,
+            _ => 0.0,
+        };
+        let seen = bolometric(face);
+        let lit_w: f64 = faces.iter().filter(|f| f.kelvin > 0.0).map(|f| blackbody::SIGMA * f.kelvin.powi(4) * f.area_m2).sum();
+        assert!((lit_w / power_w - 1.0).abs() < 1e-6, "premise: the faces radiate all of it");
+        let want = power_w * edge.cos() / (std::f64::consts::PI * LY_M * LY_M);
+        assert!((seen / want - 1.0).abs() < 1e-3, "{seen:e} against {want:e}");
+        let inside = lc_world::emit::flux_w_m2(power_w, B.drive_spread_rad, LY_M);
+        assert!(inside > 100.0 * seen, "{inside:e} inside, {seen:e} just outside");
+    }
+
+    /// **An unlit craft is what it sends summed**: `Sent`'s reflected light and windows over the
+    /// hull's disc, and its heat over a quarter of its envelope.
+    #[test]
+    fn an_unlit_craft_is_the_sum_of_what_it_sends() {
+        let session = session();
+        let au_ly = lc_world::navigation::AU / M_PER_LY;
+        let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
+        let glow = lc_proto::Glow { temperature_k: 900.0, shade: lc_proto::Shade::Clear, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2 };
+        let at = DVec3::X * au_ly;
+        let toward = DVec3::new(-1.0, 0.3, 0.0);
+        let sent = crate::hull::radiance_at(&session, star, at, toward, glow);
+        let (disc_sr, envelope_sr) = (3.0e-16, 2.0e-16);
+        let lamp_k = crate::ship_hull::lamp_of("living").unwrap().1;
+        let seen = Seen { sent, star_k: Some(5772.0), field_k: 900.0, lamp_k, disc_sr, envelope_sr };
+        let point = craft(at, &seen, Term::Dark, 1.0);
+        let want = PerBand::new(std::array::from_fn(|i| {
+            let b = Band::ALL[i];
+            f64::from(sent.reflected[b] + sent.windows[b]) * disc_sr + f64::from(sent.thermal[b]) * envelope_sr
+        }));
+        assert!(want.as_array().iter().all(|x| *x > 0.0), "premise: every term lit");
+        assert_near(point.flux(), want, 1e-5, "unlit");
+    }
+
+    fn far(since_s: f32) -> crate::field::Far {
+        crate::field::Far { at_ly: DVec3::ZERO, released_j: 1.4e26, clock: Vec3::new(10.0, 0.5, 300.0), since_s }
+    }
+
+    /// **A collapse flashes at `collapse_spike_k` as its light arrives and fades on H10's curve.**
+    #[test]
+    fn a_collapse_flashes_and_then_fades_as_the_afterglow_does() {
+        let d = LY_M;
+        let point = |t| collapse(&far(t), d, &B, 3600.0);
+        let (event, _) = point(0.0).event.unwrap();
+        let Term::Blackbody { kelvin, .. } = event.flash else { panic!("no flash") };
+        assert_eq!(kelvin, B.collapse_spike_k, "the spike's color");
+
+        let afterglow = Afterglow::of(DVec3::ZERO, 0.0, 1.4e26, &B);
+        let spike_w = afterglow.spike_j / crate::field::SPIKE_S;
+        let flash = share(B.collapse_spike_k).map(|_, s| s * spike_w / (4.0 * std::f64::consts::PI * d * d));
+        let at_first = lc_world::glow::thermal(&afterglow.glow_at(0.0).unwrap(), d);
+        assert_near(point(0.1).flux(), flash.map(|b, x| x + at_first[b]), 1e-2, "the flash");
+
+        for fraction in [0.3, 0.6, 0.9] {
+            let t = 300.0 * fraction as f32;
+            let glow = afterglow.glow_at(fraction * afterglow.duration_s).unwrap();
+            assert_near(point(t).flux(), lc_world::glow::thermal(&glow, d), 1e-2, &format!("{fraction} through"));
+        }
+        assert_eq!(point(300.0).flux(), PerBand::splat(0.0), "over");
+    }
+
+    fn sighting(event_id: i64, kind: i16, emitted_t: i64, arrive_t: i64, payload: String) -> lc_proto::Sighting {
+        lc_proto::Sighting { event_id, source_id: 4, arrive_t, emitted_t, direction: [1.0, 0.0, 0.0], strength: 1.0, kind, payload }
+    }
+
+    fn drive(power_w: f64) -> String {
+        serde_json::to_string(&lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0] }).unwrap()
+    }
+
+    /// **A burn seen only in its DRIVE sightings still shows**, though it lit and went out between
+    /// two presences that both said the drive was dark: for [`FLARE_S`] of real time from the frame
+    /// it is first drawn.
+    #[test]
+    fn a_burn_seen_only_in_its_sightings_still_shows() {
+        let mut flares = Flares::default();
+        let seen = vec![
+            sighting(2, lc_proto::kind::DRIVE, 5_000_000, 12_000_000, drive(0.0)),
+            sighting(1, lc_proto::kind::DRIVE, 3_000_000, 10_000_000, drive(4.0e19)),
+        ];
+        flares.take(&seen, 20.0);
+        flares.take(&seen, 20.0);
+        let source = ShipId(4);
+        assert_eq!(flares.drive_w(source, 20.0, 100.0), Some(4.0e19), "the burn between the presences");
+        assert_eq!(flares.drive_w(source, 20.0, 100.0 + 0.9 * FLARE_S), Some(4.0e19));
+        let faces = plate(DVec3::X, Ends::default().with_drive(flares.drive_w(source, 20.0, 100.1).unwrap()));
+        assert!(emission(None, &faces, sim_to_render(-DVec3::X), LY_M) != Term::Dark, "drawn");
+        assert_eq!(flares.drive_w(source, 20.0, 100.0 + 1.1 * FLARE_S), None, "held past its flare");
+        flares.sweep(20.0, 100.0 + 1.1 * FLARE_S, |_| true);
+        assert!(flares.flares.is_empty());
+
+        // Still burning: shown for as long as it is lit.
+        let mut flares = Flares::default();
+        flares.take(&[sighting(3, lc_proto::kind::DRIVE, 3_000_000, 10_000_000, drive(1.0e19))], 20.0);
+        assert_eq!(flares.drive_w(source, 20.0, 0.0), Some(1.0e19));
+        assert_eq!(flares.drive_w(source, 20.0, 1.0e3), Some(1.0e19));
+    }
+
+    /// An emission seen only in its EMIT sightings is a glare at the flux its cone carries over the
+    /// distance its light came, as the shard's landing has it; a presence's brighter glare wins.
+    #[test]
+    fn an_emission_seen_only_in_its_sightings_is_a_glare() {
+        let payload = |power_w: f64| {
+            let spectrum = serde_json::to_value(Spectrum::Blackbody { temperature_k: 5.0e5 }).unwrap();
+            serde_json::json!({ "emission": { "beam": 9, "from": [0.0, 0.0, 0.0], "axis": [1.0, 0.0, 0.0], "half_angle_rad": 0.08, "spectrum": spectrum, "power_w": power_w, "burst_j": 0.0 } }).to_string()
+        };
+        let year_us = (lc_world::flight::JULIAN_YEAR_S * 1.0e6) as i64;
+        let seen = vec![
+            sighting(1, lc_proto::kind::EMIT, 0, year_us, payload(1.0e20)),
+            sighting(2, lc_proto::kind::EMIT, 1_000_000, year_us + 1_000_000, payload(0.0)),
+        ];
+        let mut flares = Flares::default();
+        flares.take(&seen, year_us as f64 * 1e-6 + 5.0);
+        let now = year_us as f64 * 1e-6 + 5.0;
+        let glare = flares.glare(ShipId(4), None, now, 1.0).expect("the emission");
+        let want = lc_world::emit::flux_w_m2(1.0e20, 0.08, lc_world::flight::JULIAN_YEAR_S * lc_world::flight::C_M_S);
+        assert!((glare.flux_w_m2 / want - 1.0).abs() < 1e-9, "{} {want}", glare.flux_w_m2);
+        let brighter = Glare { flux_w_m2: 2.0 * want, ..glare };
+        assert_eq!(flares.glare(ShipId(4), Some(brighter), now, 1.0), Some(brighter));
+        assert_eq!(flares.glare(ShipId(4), None, now, 1.0 + 1.1 * FLARE_S), None, "gone out");
+    }
+
+    fn contact(id: i64, at_ly: DVec3) -> Contact {
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(id),
+            name: format!("ship {id}"),
+            length_m: 500.0,
+            at_ly: at_ly.to_array(),
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            drive_w: 0.0,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
+            emitted_t: 0,
+            arrive_t: 0,
+            form: lc_proto::Form::default(),
+            building: None,
+            glow: None,
+            glare: None,
+        };
+        Contact::seen(presence, None)
+    }
+
+    /// **No craft is both an envelope and a point**, either side of the crossover, and the craft the
+    /// camera is behind is never a point however far it is.
+    #[test]
+    fn no_craft_is_both_an_envelope_and_a_point() {
+        let rad_per_px = 7.67e-4;
+        let crossover_m = 250.0 / (RESOLVE_PX * rad_per_px) as f64;
+        let contacts: Vec<Contact> = [0.5, 0.99, 1.01, 2.0, 1.0e9]
+            .iter()
+            .enumerate()
+            .map(|(i, k)| contact(i as i64 + 1, DVec3::X * k * crossover_m / M_PER_LY))
+            .collect();
+        let mut eye = Eye::default();
+        let mut distant = Distant::default();
+        distant.decide(&contacts, &eye, std::iter::empty(), rad_per_px);
+        let points: Vec<bool> = contacts.iter().map(|c| distant.is_point(Some(c.ship_id))).collect();
+        assert_eq!(points, [false, false, true, true, true]);
+        for c in &contacts {
+            let craft = Some(c.ship_id);
+            assert_ne!(crate::field::draws_envelope(&distant, craft), distant.is_point(craft), "{:?}", c.ship_id);
+        }
+        assert!(!distant.is_point(None), "the player's own");
+        eye.anchored = Some(ShipId(5));
+        distant.decide(&contacts, &eye, std::iter::empty(), rad_per_px);
+        assert!(!distant.is_point(Some(ShipId(5))), "the craft the camera is behind");
+    }
+
+    /// A wreck is debris only where its full spread would be resolved; one of unknown shape is a point.
+    #[test]
+    fn a_wreck_is_debris_only_where_it_would_be_resolved() {
+        let rad_per_px = 7.67e-4;
+        let mut distant = Distant::default();
+        let near = DVec3::X * 1.0e4 / M_PER_LY;
+        let wrecks = [(1, near, 300.0), (2, DVec3::X, 300.0), (3, near, 0.0)];
+        distant.decide(&[], &Eye::default(), wrecks.into_iter(), rad_per_px);
+        assert_eq!([1, 2, 3].map(|id| distant.is_debris(id)), [true, false, false]);
+    }
+
+    /// Head on at `β`, the textbook `√((1 + β) / (1 − β))`, and its inverse going away.
+    #[test]
+    fn a_source_is_doppler_shifted_by_its_own_motion() {
+        let beta: f64 = 0.3;
+        let want = ((1.0 + beta) / (1.0 - beta)).sqrt();
+        assert!((doppler_of_source(DVec3::X * beta, DVec3::X) / want - 1.0).abs() < 1e-12);
+        assert!((doppler_of_source(-DVec3::X * beta, DVec3::X) * want - 1.0).abs() < 1e-12);
+        let hot = Term::Blackbody { kelvin: 1000.0, sr: 1.0 }.seen_at(want);
+        assert_eq!(hot, Term::Blackbody { kelvin: 1000.0 * want, sr: 1.0 });
+    }
+
+    /// The shader's band limits are `em_spectra`'s, where a line is sorted into its band.
+    #[test]
+    fn the_shaders_bands_are_em_spectras() {
+        let wgsl = include_str!("../assets/shaders/craft_points.wgsl");
+        let read = |name: &str| -> Vec<f64> {
+            let line = wgsl.lines().find(|l| l.starts_with(&format!("const {name}"))).unwrap();
+            let inner = &line[line.rfind('(').unwrap() + 1..line.rfind(')').unwrap()];
+            inner.split(',').map(|x| x.trim().parse().unwrap()).collect()
+        };
+        let (lo, hi) = (read("BAND_LO"), read("BAND_HI"));
+        for (i, band) in Band::ALL.iter().enumerate() {
+            let (l, h) = band.limits_m();
+            assert!((lo[i] / l - 1.0).abs() < 1e-4 && (hi[i] / h - 1.0).abs() < 1e-4, "{band:?}: {} {} against {l} {h}", lo[i], hi[i]);
+        }
+    }
 }

@@ -18,7 +18,7 @@ use std::sync::Mutex;
 use bevy::prelude::*;
 use glam::DVec3;
 use lc_proto::{
-    Body, ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Presence, Refusal, ShipId,
+    Body, ClientId, Inbound, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId,
     Sighting,
 };
 

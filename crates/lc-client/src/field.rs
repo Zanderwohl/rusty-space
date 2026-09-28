@@ -562,7 +562,7 @@ impl Wrecks {
     }
 
     /// Every wreck drawn as a point whose light has arrived, at `real_s`.
-    pub fn far(&self, real_s: f32, rate: f64, afterglow_s: f64, debris: impl Fn(i64) -> bool) -> impl Iterator<Item = Far> + '_ {
+    pub fn far<'a>(&'a self, real_s: f32, rate: f64, afterglow_s: f64, debris: impl Fn(i64) -> bool + 'a) -> impl Iterator<Item = Far> + 'a {
         let fade_s = (afterglow_s / rate.max(crate::session::TIME_RATE)) as f32;
         self.fell.iter().filter(move |w| !debris(w.event_id)).filter_map(move |w| {
             let (real, wrapped) = w.shown_at?;
