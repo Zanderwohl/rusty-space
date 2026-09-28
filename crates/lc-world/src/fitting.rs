@@ -1006,7 +1006,7 @@ mod tests {
         let motion = ShipState::at(DVec3::ZERO);
         let fitting = full();
         let mass = fitting.mass_kg_at(&motion, 0.0);
-        let expected = fitting.hull().dry_kg + (30.0 * Balance::DEFAULT.module_energy_j() + fitting.heat_j_at(0.0)) / C2;
+        let expected = fitting.hull().dry_kg + (30.0 * Balance::DEFAULT.module_energy_j() + fitting.heat_j_at(&ShipState::at(glam::DVec3::ZERO), 0.0)) / C2;
         assert!((mass / expected - 1.0).abs() < 1.0e-12, "{mass} vs {expected}");
         assert!((fitting.hull().dry_kg / STARTING_DRY_KG - 1.0).abs() < 1.0e-9);
     }

@@ -60,10 +60,17 @@ exhaust comes from field heat first, and from storage only for what heat cannot 
 - **Heat is mass**, as stored energy is. `mass_kg_at` counts `Q / c²`, and the rocket law is
   unchanged. Only the source of the exhaust changes.
 - **The commitment is unchanged.** A plan commits against storage when accepted.
-  Whatever heat supplies instead is refunded at settlement, through the same refund path that
-  `CutDrive` uses. A plan's cost can only come out lower than it said.
-- The field's account gains a constant sink while lit: `dQ/dt = P_in − Q/τ − P_exhaust`, floored
-  at zero. It is still closed form, with one more split where `Q` reaches the floor.
+  Whatever heat supplies instead is refunded through the same path that `CutDrive` uses: the
+  commitment runs down by the whole exhaust, whatever pays it, so heat's share leaves the commitment
+  without ever leaving storage, as the part a cut does not fly does. A plan's cost can only come out
+  lower than it said.
+- The field's account gains a sink while lit: `dQ/dt = P_in − Q/τ − P_exhaust`, floored at zero.
+  It is still closed form, with one more split where `Q` reaches the floor
+  ([30-the-field.md](30-the-field.md#conversion)). `P_exhaust` is taken as its average between the
+  instants the drive lights or goes out and the account's settlements; within a burn it changes
+  only as the rocket law throttles a lightening ship.
+- **Anything a ship lights draws the same way.** The account's sink is what the ship emits, not
+  the drive's exhaust in particular, so an emission joins it and is paid heat first.
 
 ### Exhaust lands on whatever is behind
 
@@ -402,7 +409,7 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `emit.rs`: the aperture rating, received fraction, lead uncertainty, the emit as a boost segment. `courtesy.rs`: the cooking flux, the courtesy radius, the abeam station and ingress point | `signal.rs` generalizes to any wavelength and aperture. `cost.rs` draws exhaust from heat first. `fitting.rs` counts heat in mass. Rated acceleration counts aft engines only |
+| `lc-world` | `emit.rs`: the aperture rating, received fraction, lead uncertainty, the emit as a boost segment. `courtesy.rs`: the cooking flux, the courtesy radius, the abeam station and ingress point | `signal.rs` generalizes to any wavelength and aperture. `field.rs` and `fitting/heat.rs` draw what a ship emits from heat first, and `cost.rs` says where a drive lights and goes out. `fitting.rs` counts heat in mass. Rated acceleration counts aft engines only |
 | `lc-proto` | `Order::Emit`, `Outbound::Illuminated`, the refusals | `Presence` |
 | `lc-server` | `emit.rs`, beside `radio.rs`: fan-out to every worldline in the cone, delivery at the retarded time, heat into the receiver's account | `radio.rs` charges transmissions |
 | `lc-client` | `emit_panel.rs` | map overlays, plume, HUD |

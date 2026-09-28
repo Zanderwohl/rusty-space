@@ -12,6 +12,7 @@ use lc_world::flight::{C_M_S, G0};
 use lc_world::form::capacity::{Capacities, aft_aperture_w, dry_mass_kg};
 use lc_world::form::grid::FormGrid;
 use lc_world::form::{Form, FormError};
+use lc_world::motion::ShipState;
 use lc_world::refit::rounds::{Plan, Refusal, Round};
 use lc_world::solar;
 
@@ -87,16 +88,16 @@ pub struct Heat {
 impl Heat {
     /// The round under way, from `from_s` on. Steps run in series and vents land at step ends, so
     /// the peak is at one of those or at `from_s`.
-    pub fn ahead(fitting: &Fitting, from_s: f64) -> Option<Heat> {
+    pub fn ahead(fitting: &Fitting, motion: &ShipState, from_s: f64) -> Option<Heat> {
         let plan = fitting.refit()?;
-        let base_j = fitting.heat_j_at(from_s);
+        let base_j = fitting.heat_j_at(motion, from_s);
         let (mut peak_j, mut step) = (base_j, None);
         for (i, s) in plan.steps().iter().enumerate() {
             let end_s = plan.round().start_s + s.ends_s();
             if end_s <= from_s {
                 continue;
             }
-            let heat_j = fitting.heat_j_at(end_s);
+            let heat_j = fitting.heat_j_at(motion, end_s);
             if heat_j > peak_j {
                 (peak_j, step) = (heat_j, Some(i));
             }
@@ -121,6 +122,7 @@ impl Heat {
 /// cuts it.
 struct Settled {
     fitting: Fitting,
+    motion: ShipState,
     start: Start,
 }
 
@@ -133,13 +135,13 @@ impl Settled {
         let fitting = ship.fitting()?.clone();
         let stored_j = fitting.stored_j_at(&ship.motion, start_s);
         let start = Start { from: fitting.form().clone(), stored_j, start_s, balance: *fitting.balance() };
-        Some(Settled { fitting, start })
+        Some(Settled { fitting, motion: ship.motion, start })
     }
 
     fn heat(&self, plan: &Plan) -> Option<Heat> {
         let mut fitting = self.fitting.clone();
         fitting.begin_refit(plan.clone());
-        Heat::ahead(&fitting, self.start.start_s)
+        Heat::ahead(&fitting, &self.motion, self.start.start_s)
     }
 }
 
@@ -276,7 +278,7 @@ mod tests {
     }
 
     fn heat_now(s: &Session) -> f64 {
-        s.ship.fitting().unwrap().heat_j_at(s.coordinate_time_s())
+        s.ship.fitting().unwrap().heat_j_at(&s.ship.motion, s.coordinate_time_s())
     }
 
     /// Storage shrunk to `k` of itself, spilling what a full store no longer fits.
@@ -330,7 +332,7 @@ mod tests {
         assert_eq!(preview.budget, Ok(Budget::of(planned, &B)));
         assert_eq!(preview.duration_s, Some(planned.duration_s()));
         let heat = preview.heat.unwrap();
-        assert_eq!(Some(heat), Heat::ahead(shard.fitting().unwrap(), now), "the shard's account heats as the preview does");
+        assert_eq!(Some(heat), Heat::ahead(shard.fitting().unwrap(), &shard.motion, now), "the shard's account heats as the preview does");
         assert!(room_me > 0.0 || heat.step.is_some(), "premise: the vent raises the heat");
     }
 
@@ -359,7 +361,7 @@ mod tests {
         s.ship.begin_refit(target.clone(), now).unwrap();
         let running = s.ship.fitting().unwrap();
         let end = now + running.refit().unwrap().duration_s();
-        let left_j = running.heat_j_at(end);
+        let left_j = running.heat_j_at(&s.ship.motion, end);
         let envelope_m2 = FormGrid::new(&target, &B).unwrap().envelope_area_m2();
         assert_ne!(envelope_m2, running.geometry().envelope_area_m2, "premise: the round changes the envelope");
 
