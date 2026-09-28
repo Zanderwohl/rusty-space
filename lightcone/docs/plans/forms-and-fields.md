@@ -532,7 +532,7 @@ graph LR
 
 ### E4 · Exhaust heats neighbors
 
-- status: todo
+- status: active card "E4 · Exhaust heats neighbors"
 - needs: E3, H5
 - touches: `crates/lc-server/src/emit.rs`
 - read: 31 §Exhaust lands on whatever is behind, §What arrives and its As built
@@ -800,7 +800,7 @@ graph LR
 
 ### C8 · Emit window
 
-- status: todo
+- status: active card "C8 · Emit window"
 - needs: E3
 - touches: `crates/lc-client/src/emit_panel.rs`, `crates/lc-client/src/map.rs`
 - read: 31 §Client
