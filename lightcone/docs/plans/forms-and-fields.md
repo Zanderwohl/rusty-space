@@ -662,7 +662,7 @@ graph LR
 
 ### R11 · The field in the game
 
-- status: todo
+- status: active card "R11 · The field in the game"
 - needs: R6, F6, H7, H5
 - touches: `crates/lc-client/src/field.rs`, `crates/lc-client/src/uplink.rs`
 - read: 32 §The field, 30 §What an observer sees, §Collapse
