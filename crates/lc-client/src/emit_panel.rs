@@ -568,6 +568,16 @@ fn band(spectrum: Spectrum) -> String {
     }
 }
 
+/// [`span_m`], down past a meter: a spot at the floor is millimeters across at a few hundred km.
+fn fine_m(m: f64) -> String {
+    match m {
+        m if m <= 0.0 => "0 m".to_string(),
+        m if m < 1.0e-3 => format!("{:.1} µm", m * 1.0e6),
+        m if m < 1.0 => format!("{:.1} mm", m * 1.0e3),
+        m => span_m(m),
+    }
+}
+
 fn watts(w: f64) -> String {
     format!("{w:.2e} W")
 }
@@ -764,9 +774,9 @@ fn show_preview(ui: &mut egui::Ui, seen: &Preview, receiver: Option<&Receiver>, 
             spot(ui, &at, receiver);
             ui.vertical(|ui| {
                 ui.label(format!("at {}", span_m(at.distance_m)));
-                ui.label(format!("spot {} across", span_m(2.0 * at.spot_m)));
+                ui.label(format!("spot {} across", fine_m(2.0 * at.spot_m)));
                 let lead = match at.lead_m {
-                    Some(m) => format!("lead ±{}", span_m(m)),
+                    Some(m) => format!("lead ±{}", fine_m(m)),
                     None => "lead unknown".to_string(),
                 };
                 match at.lead_m.is_some_and(|m| m > at.spot_m) {
@@ -1285,5 +1295,13 @@ mod tests {
         assert!(matches!(at.with_room, Some(Fate::Reaches(share)) if share < 1.0), "{:?}", at.with_room);
         let brief = landing(&starting, 1.1e20, 1.0e-9, 86_400.0);
         assert!(matches!(brief.if_full, Some(Fate::Reaches(share)) if share < 1.0), "a day is not enough: {:?}", brief.if_full);
+    }
+
+    #[test]
+    fn a_spot_under_a_meter_is_not_zero() {
+        assert_eq!(fine_m(157.0e3 * 2.0 * 2.86e-9), "898.0 µm");
+        assert_eq!(fine_m(0.45), "450.0 mm");
+        assert_eq!(fine_m(4.0e-5), "40.0 µm");
+        assert_eq!(fine_m(1.5e3), span_m(1.5e3));
     }
 }
