@@ -325,14 +325,14 @@ pub fn press(
     }
 }
 
-/// [`Effect::Copy`].
-pub fn copy(clipboard: Option<&mut bevy_egui::EguiClipboard>, text: &str) -> Option<String> {
+/// [`Effect::Copy`], and what to tell the player.
+pub fn copy(clipboard: Option<&mut bevy_egui::EguiClipboard>, text: &str) -> String {
     match clipboard {
         Some(clipboard) => {
             clipboard.set_text(text);
-            None
+            "copied to clipboard".into()
         }
-        None => Some("there is no clipboard here".into()),
+        None => "there is no clipboard here".into(),
     }
 }
 

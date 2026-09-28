@@ -692,10 +692,9 @@ pub(crate) fn dispatch(
                     });
                 }
                 Effect::Copy(text) => {
-                    if let Some(text) = crate::presets_panel::copy(clipboard.as_deref_mut(), &text) {
-                        let at = game.coordinate_time_s();
-                        ui.notify(text, at);
-                    }
+                    let said = crate::presets_panel::copy(clipboard.as_deref_mut(), &text);
+                    let at = game.coordinate_time_s();
+                    ui.notify(said, at);
                 }
                 Effect::SignIn
                 | Effect::CancelSignIn
