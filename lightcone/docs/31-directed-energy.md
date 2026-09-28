@@ -536,8 +536,8 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
   and the window will need to tell that glow from the stand-in.
 - **The aim** at the reticle is sent as a bearing along the view's axis. A row of the incoming list
   aims back along it.
-- **Put out** is `CutDrive`, which puts out whatever is lit. Whether anything is lit is read from the
-  ship's own account and motive, so it survives a reconnect.
+- **Put out** is cutting the drive, the button or `X`: `CutDrive` puts out whatever is lit. Whether
+  anything is lit is read from the ship's own account and motive, so it survives a reconnect.
 - **On the map** a beam's cone is drawn from where it lit, as far as its light has got, through the
   drive cones' machinery, without the cooking ring. A one-ended emit lights when its burn's nose has
   come about and goes out with the burn. A beam landing here is a line back along its bearing, past

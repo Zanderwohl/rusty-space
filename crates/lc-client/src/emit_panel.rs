@@ -482,6 +482,12 @@ fn sighting_of(presence: &lc_proto::Presence) -> Sighting {
     }
 }
 
+/// [`Beams::fold`] for the ship `uplink` flies.
+pub fn fold(uplink: &mut crate::uplink::Uplink, message: &Outbound, here_ly: DVec3) {
+    let me = uplink.joined().map(|j| j.ship_id);
+    uplink.beams.fold(message, me, here_ly, &uplink.contacts);
+}
+
 /// Which beam a map line is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OnMap {
@@ -696,7 +702,7 @@ pub(crate) fn emit(
         };
     });
     if is_lit(&session.ship, now_s) && ui.button("Put out").clicked() {
-        ask(out, Action::PutOut);
+        ask(out, Action::AbortFlight);
     }
 
     ui.separator();

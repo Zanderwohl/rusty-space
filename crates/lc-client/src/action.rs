@@ -173,8 +173,6 @@ pub enum Action {
     /// keeps whatever velocity it has.
     BreakOff,
     Emit(crate::emit_panel::Emission),
-    /// Put out whatever this ship has lit.
-    PutOut,
     /// Clear, Black or Auto with its thresholds. The shard refuses it while a switch runs.
     SetField(lc_proto::FieldMode),
 
@@ -579,7 +577,8 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::AbortFlight => {
             if session.remote {
-                if session.cruise().is_some() || session.station().is_some() {
+                let lit = crate::emit_panel::is_lit(&session.ship, session.coordinate_time_s());
+                if session.cruise().is_some() || session.station().is_some() || lit {
                     effects.push(Effect::Send(lc_proto::Order::CutDrive));
                     effects.push(Effect::Notify("cut sent".into()));
                 }
@@ -616,16 +615,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Send(lc_proto::Order::BreakOff));
             }
         }
-        Action::Emit(emission) => {
-            if session.remote {
-                effects.push(Effect::Send(emission.order()));
-            }
-        }
-        Action::PutOut => {
-            if session.remote {
-                effects.push(Effect::Send(lc_proto::Order::CutDrive));
-            }
-        }
+        Action::Emit(emission) => effects.extend(session.remote.then(|| Effect::Send(emission.order()))),
         Action::SetField(mode) => {
             let now = session.coordinate_time_s();
             let switching = session.ship.fitting().is_some_and(|f| f.posture().switching_at(now).is_some());

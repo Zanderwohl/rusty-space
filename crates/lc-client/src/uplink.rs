@@ -510,8 +510,7 @@ fn fold(
     ui: &mut crate::app::Ui,
     message: Outbound,
 ) {
-    let me = uplink.joined().map(|j| j.ship_id);
-    uplink.beams.fold(&message, me, game.0.ship.motion.position_ly, &uplink.contacts);
+    crate::emit_panel::fold(uplink, &message, game.0.ship.motion.position_ly);
     match message {
         Outbound::Welcome {
             client_id,
