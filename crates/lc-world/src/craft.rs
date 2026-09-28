@@ -24,6 +24,8 @@ use crate::seen::{History, Refitting, Seen, running};
 use crate::solar;
 use crate::system::LocalSystem;
 
+mod field;
+
 /// A craft, by the identifier whoever owns it uses. Opaque here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CraftId(pub i64);
@@ -663,23 +665,6 @@ impl Craft {
         if let Some(fitting) = &mut self.fitting {
             fitting.grant(joules);
         }
-    }
-
-    /// The player's field order. Nothing for a craft with no fitting.
-    pub fn set_field(&mut self, setting: crate::fitting::Setting, now_s: f64) -> Result<(), crate::fitting::Switching> {
-        self.settle(now_s);
-        self.fitting.as_mut().map_or(Ok(()), |fitting| fitting.set_setting(setting))
-    }
-
-    pub fn begin_switch(&mut self, to: crate::field::Mode, now_s: f64) -> Result<(), crate::fitting::Switching> {
-        self.settle(now_s);
-        self.fitting.as_mut().map_or(Ok(()), |fitting| fitting.begin_switch(to))
-    }
-
-    /// A switch done by `now_s`, taken out of the account. See [`Fitting::take_flip`].
-    pub fn take_flip(&mut self, now_s: f64) -> Option<crate::fitting::Switch> {
-        self.settle(now_s);
-        self.fitting.as_mut()?.take_flip()
     }
 
     pub fn drain(&mut self, joules: f64, now_s: f64) {
