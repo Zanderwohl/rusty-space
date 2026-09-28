@@ -459,10 +459,11 @@ pub fn draw_points(
     flares.take(&uplink.seen, now_s);
 
     let shown = |craft: Option<ShipId>| if distant.is_point(craft) { Visibility::Hidden } else { Visibility::Inherited };
-    for (hull, _, mut visibility) in &mut roots {
+    // Never the player's own, which is not a point and whose showing `--first-person` decides.
+    for (hull, _, mut visibility) in roots.iter_mut().filter(|(h, ..)| h.craft().is_some()) {
         visibility.set_if_neq(shown(hull.craft()));
     }
-    for (hull, mut visibility) in &mut ovoids {
+    for (hull, mut visibility) in ovoids.iter_mut().filter(|(h, _)| h.0.is_some()) {
         visibility.set_if_neq(shown(hull.0));
     }
 

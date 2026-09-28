@@ -267,7 +267,7 @@ pub fn place_eye(
     let (near, far) = measured.unwrap_or((ui.boom_lengths, ui.boom_lengths));
     let (anchored, at_ly, length_m) = anchor(&ui, &game, &uplink, &own_form);
     ui.boom_lengths = ui.boom_lengths.clamp(near, far);
-    let boom_m = ui.boom_lengths * length_m;
+    let boom_m = if dev.first_person { 0.0 } else { ui.boom_lengths * length_m };
     eye.boom_m = boom_m;
     eye.anchored = anchored;
     eye.at_ly = at_ly - ui.look.forward() * (boom_m / M_PER_LY);

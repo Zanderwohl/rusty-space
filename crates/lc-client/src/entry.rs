@@ -226,6 +226,7 @@ pub fn parse(args: &[String]) -> Entry {
             }
         }),
         camera_in_ship: flag("--demo-cam-ship"),
+        first_person: flag("--first-person"),
         camera_at: after("--demo-cam-at").and_then(|spec| {
             let fields: Vec<f64> = spec.split(':').map(|f| f.parse::<f64>()).collect::<Result<_, _>>().ok()?;
             match fields[..] {

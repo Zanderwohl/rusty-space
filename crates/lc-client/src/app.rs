@@ -274,7 +274,7 @@ impl Plugin for ClientPlugin {
                         .after(crate::hull_mesh::HullMeshSystems),
                     // Under the hulls' roots, placed by then; before the exhaust, which is additive
                     // and sorts against the field's walls.
-                    (crate::field::hold, crate::field::collapses, crate::field::draw_fields, crate::distant::draw_points).chain(),
+                    (crate::field::hold, crate::field::collapses, crate::field::draw_fields, crate::distant::draw_points, crate::dev::hide_own_ship).chain(),
                     // And the exhaust after the hulls, whose roots the glows hang from.
                     crate::plume::draw_exhaust,
                 )

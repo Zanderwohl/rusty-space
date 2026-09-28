@@ -42,6 +42,9 @@ pub struct DevEntry {
     /// x its nose and z its up, rather than the world's. What a face on a ship whose attitude the
     /// run decides is framed by.
     pub camera_in_ship: bool,
+    /// `--first-person`: the eye on the ship itself, with no boom, and the ship's own hull, field
+    /// and faces not drawn. What the sky looks like from aboard, for a shot about the sky.
+    pub first_person: bool,
     /// A boom the pin eases toward once nothing is waiting to be drawn, a sixtieth of the way a
     /// frame: a burst across a remesh. `--demo-cam yaw:pitch:booms:to`.
     pub dolly_to: Option<f64>,
@@ -644,6 +647,27 @@ fn numbered(path: &str, index: u32) -> String {
     match path.rsplit_once('.') {
         Some((stem, extension)) => format!("{stem}.{index}.{extension}"),
         None => format!("{path}.{index}"),
+    }
+}
+
+/// `--first-person`: after everything that shows the player's own ship, hide it.
+pub(crate) fn hide_own_ship(
+    dev: Res<DevEntry>,
+    mut roots: Query<(&crate::ship_hull::ShipHull, &mut Visibility), Without<crate::hull::Hull>>,
+    mut ovoids: Query<(&crate::hull::Hull, &mut Visibility), Without<crate::ship_hull::ShipHull>>,
+    mut parts: Query<&mut Visibility, (With<crate::parts::FormRoot>, Without<crate::hull::Hull>, Without<crate::ship_hull::ShipHull>)>,
+) {
+    if !dev.first_person {
+        return;
+    }
+    for (_, mut visibility) in roots.iter_mut().filter(|(h, _)| h.craft().is_none()) {
+        visibility.set_if_neq(Visibility::Hidden);
+    }
+    for (_, mut visibility) in ovoids.iter_mut().filter(|(h, _)| h.0.is_none()) {
+        visibility.set_if_neq(Visibility::Hidden);
+    }
+    for mut visibility in &mut parts {
+        visibility.set_if_neq(Visibility::Hidden);
     }
 }
 
