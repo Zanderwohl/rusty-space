@@ -594,6 +594,7 @@ mod tests {
         let first = welcomed(wire.take(OWNER)).expect("welcomed");
         let mut dying = still(first, near);
         server.fit_new(&mut dying);
+        hold_black(&mut dying);
         server.fleet.remove(CraftId(first.0));
         server.fleet.insert(dying);
         // Clear of the identifiers the shard hands out.
@@ -640,6 +641,7 @@ mod tests {
         for (k, id) in wrecks.iter().enumerate() {
             let mut craft = still(*id, star + (near - star) * (1.0 + 0.01 * (k + 1) as f64));
             server.fit_new(&mut craft);
+            hold_black(&mut craft);
             server.fleet.insert(craft);
         }
         server.next_ship = 20;
