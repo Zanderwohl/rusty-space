@@ -59,6 +59,9 @@ pub struct Saved {
     pub instruments: Option<SavedInstruments>,
     /// Who it answers automatically, and what has yet to land on it.
     pub radio: Radio,
+    /// When it was destroyed, for a wreck whose light is still in flight. A wreck's row carries no
+    /// account: that belongs to its successor.
+    pub ended_s: Option<f64>,
 }
 
 /// A craft's standing radio orders, which outlive the pilot's connection and the process.
@@ -87,8 +90,8 @@ pub struct SavedInstruments {
 ///
 /// 10 is a ship kept as its form. Every older row held a loadout, which no ship is any more, so
 /// none is read: there are no players, and a row refused names its format rather than coming
-/// back as some other ship.
-pub const SAVE_FORMAT: i32 = 11;
+/// back as some other ship. 12 adds a wreck's end.
+pub const SAVE_FORMAT: i32 = 12;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -122,21 +125,36 @@ pub fn save(
     radio: Radio,
     saved_t: i64,
 ) -> Ship {
+    // A wreck as it was at its end, and read back there: its motive goes on changing after it, a
+    // crossing arriving say, and extrapolated back from that it would die somewhere else.
+    let (motion, saved_t) = match craft.ended_s() {
+        Some(end_s) => {
+            use lc_spacetime::Worldline;
+            let end_t = end_s * 1.0e6;
+            let line = craft.worldline();
+            let mut motion = craft.motion_at(end_s).clone();
+            motion.position_ly = line.position_at(end_t) / lc_world::motion::LIGHT_US_PER_LY;
+            motion.beta = line.velocity_at(end_t);
+            (motion, end_t.round() as i64)
+        }
+        None => (craft.motion.clone(), saved_t),
+    };
     let saved = Saved {
         kind: kind_code(craft.kind),
         name: craft.name.clone(),
         noise_floor: craft.noise_floor,
         length_m: craft.length_m,
-        motion: (&craft.motion.snapshot()).into(),
+        motion: (&motion.snapshot()).into(),
         pursuit,
         fitting: craft.fitting().map(Into::into),
         field: craft.fitting().map(Into::into),
         instruments,
         radio,
+        ended_s: craft.ended_s(),
     };
     Ship {
         ship_id: craft.id.0,
-        account: account.map(Into::into),
+        account: account.filter(|_| craft.ended_s().is_none()).map(Into::into),
         saved_t,
         state: lc_proto::encode(&saved),
         format: SAVE_FORMAT,
@@ -169,6 +187,9 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     craft.fit(fitting);
     if let Some(watts) = starlight_w {
         craft.set_starlight_w(watts);
+    }
+    if let Some(end_s) = saved.ended_s {
+        craft.end(end_s);
     }
     Ok(craft)
 }
@@ -218,8 +239,6 @@ impl<J: Journal> Server<J> {
             ships: self
                 .fleet
                 .iter()
-                // A wreck is kept only while its light is in flight, and its row is deleted.
-                .filter(|craft| craft.ended_s().is_none())
                 .map(|craft| {
                     let account = account_of.get(&ShipId(craft.id.0)).copied();
                     let pursuit = self.pursuits.get(&craft.id).map(|p| lc_proto::Pursuit {
@@ -282,6 +301,12 @@ impl<J: Journal> Server<J> {
                         craft.set_starlight_w(watts);
                     }
                     catch_up(&mut craft, row.saved_t, checkpoint.now_t);
+                    // Nobody's, and nothing to resume: it is there for its light and the sweep.
+                    if craft.ended_s().is_some() {
+                        self.next_ship = self.next_ship.max(craft.id.0 + 1);
+                        self.fleet.insert(craft);
+                        continue;
+                    }
                     // Its owner is told of each step from here, as before the restart.
                     let refit = craft.fitting().and_then(|f| f.refit()).filter(|plan| !plan.is_done(now_s));
                     let refitting = refit.is_some();
@@ -461,7 +486,7 @@ mod tests {
         let mut row = save(&a_craft(), None, None, None, Radio::default(), 0);
         row.format = SAVE_FORMAT - 1;
         let why = load(&row, None).expect_err("it should refuse");
-        assert!(why.contains("format 10"), "{why}");
+        assert!(why.contains(&format!("format {}", SAVE_FORMAT - 1)), "{why}");
     }
 
     /// A pursuit is written down with the craft, so a ship hanging about with another is still
@@ -532,6 +557,41 @@ mod tests {
         let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), 0), None).expect("it reads");
         assert_eq!(back.fitting().unwrap().heat_j_at(&back.motion, 0.0), 3.0 * b.module_energy_j());
         assert_eq!(back.fitting(), craft.fitting());
+    }
+
+    /// A wreck comes back as a wreck, ended where it was, and its row claims no account even when
+    /// handed one.
+    #[test]
+    fn a_wreck_comes_back_ended_and_owning_nothing() {
+        let mut craft = a_craft();
+        craft.end(12.5);
+        let row = save(&craft, Some("acct-1"), None, None, Radio::default(), 20_000_000);
+        assert_eq!(row.account, None);
+        assert_eq!(load(&row, None).expect("it reads").ended_s(), Some(12.5));
+        assert_eq!(load(&save(&a_craft(), None, None, None, Radio::default(), 0), None).unwrap().ended_s(), None);
+    }
+
+    /// Its crossing arrived after it was destroyed and before the save: it comes back where it
+    /// died, not where the arrival would put it.
+    #[test]
+    fn a_wreck_is_read_back_where_it_ended() {
+        use lc_spacetime::Worldline;
+        use lc_world::flight::{Cruise, Drive};
+        let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        let cruise = Cruise::plan_from(DVec3::ZERO, DVec3::ZERO, DVec3::X * 1.0e-6, craft.motion.attitude, 0.0, Drive::DEFAULT);
+        let arrive_s = cruise.start_s + cruise.duration_s();
+        craft.motion.resume_crossing(cruise, None, 0.0);
+        craft.advance(1.5 * arrive_s, 1.5 * arrive_s);
+        assert!(!matches!(craft.motion.motive, Motive::Crossing(_)), "premise: it arrived");
+        let end_s = 0.5 * arrive_s;
+        craft.end(end_s);
+        let end_t = end_s * 1.0e6;
+        let died = craft.position_at(end_t);
+
+        let row = save(&craft, None, None, None, Radio::default(), (2.0 * arrive_s * 1.0e6) as i64);
+        let back = load(&row, None).expect("it reads");
+        assert!(back.position_at(end_t).distance(died) < 1.0e-3, "{} {died}", back.position_at(end_t));
+        assert!(back.worldline().velocity_at(end_t).distance(craft.worldline().velocity_at(end_t)) < 1.0e-12);
     }
 
     /// A row that cannot be read is an error and never a fresh ship at the origin.

@@ -293,8 +293,10 @@ seeing it replayed as the light passes.
   light anything can see; H10 makes it so.
 - **The wreck** stays in the fleet with its worldline ended at the instant. A ship that could see
   it goes on seeing it until the light of the end arrives, then stops, and the wreck is dropped once
-  that light has passed every craft. It is not checkpointed, and its row and what it knew are
-  deleted at the next one: the successor carries the account, and an account holds one row.
+  that light has passed every craft. A checkpoint keeps it with its end and no account, since the
+  successor carries the account and an account holds one row; a restart brings it back as a wreck,
+  nobody's, with nothing to resume, and so ends nobody's view of it early. Its row and what it knew
+  are deleted at the checkpoint after the sweep.
 - **The successor** is a new ship, with a new id, at the spawn point. A connected owner is sent
   `Collapsed` and then welcomed to it as on signing in.
 
@@ -470,9 +472,6 @@ puts a countdown in the text.
   data part's contents or a faction's relays survive the ship is a question for
   [22-provenance.md](22-provenance.md). An owner signed out when it happens is told nothing and
   finds the new ship on signing in; the transcript and knowledge went with the old one.
-- **A wreck across a restart.** A wreck is not checkpointed, so a shard that restarts while its
-  light is still in flight forgets it, and a ship that had not yet seen the end stops seeing the
-  wreck at the restart instead. The event and its deliveries are in the journal and survive.
 - **Air under the field.** Parks held by the field would cap its temperature well below 4 600 K.
   Whether that is a real rule or only a look is undecided. The two layers are drawn either way.
 - **Direction of intake.** Reciprocity says an aperture receives best along its own axis. The
