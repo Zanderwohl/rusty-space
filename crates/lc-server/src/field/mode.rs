@@ -6,11 +6,10 @@
 //! exactly one event, stamped when and where it completed and seen by everyone at light delay.
 
 use lc_proto::{FieldMode, Refusal, ShadeChange};
-use lc_world::craft::{Craft, CraftId};
-use lc_world::field::Mode;
+use lc_world::craft::CraftId;
 use lc_world::fitting::Setting;
 
-use super::collapse_by;
+use super::{auto_by, collapse_by};
 use crate::journal::Journal;
 use crate::server::Server;
 use crate::transport::Transport;
@@ -18,32 +17,10 @@ use crate::world::{Event, Scheduled};
 
 /// Set Black and kept there, as tests of anything but the modes want.
 #[cfg(test)]
-pub(crate) fn hold_black(craft: &mut Craft) {
+pub(crate) fn hold_black(craft: &mut lc_world::craft::Craft) {
     let Some(mut fitting) = craft.fitting().cloned() else { return };
     fitting.set_posture(lc_world::fitting::Posture::BLACK);
     craft.fit(Some(fitting));
-}
-
-/// When `craft`'s field in Auto next begins a switch by `until_s`, and toward which shade, walking
-/// the day-long starlight segments as [`collapse_by`] does.
-pub fn auto_by(craft: &Craft, until_s: f64) -> Option<(f64, Mode)> {
-    let mut ahead: Option<Craft> = None;
-    loop {
-        let fitting = ahead.as_ref().unwrap_or(craft).fitting()?;
-        let since_s = fitting.since_s();
-        let segment_end_s = lc_world::solar::segment_end(since_s);
-        if let Some(due) = fitting.auto_s(&ahead.as_ref().unwrap_or(craft).motion, segment_end_s.min(until_s)) {
-            return Some(due);
-        }
-        if segment_end_s >= until_s {
-            return None;
-        }
-        let next = ahead.get_or_insert_with(|| craft.clone());
-        next.settle(segment_end_s);
-        if next.fitting().is_none_or(|f| f.since_s() <= since_s) {
-            return None;
-        }
-    }
 }
 
 impl<J: Journal> Server<J> {
@@ -173,6 +150,7 @@ impl<J: Journal> Server<J> {
 mod tests {
     use glam::DVec3;
     use lc_proto::{ClientId, Inbound, Intent, Order, Outbound, Shade, ShipId, Sighting};
+    use lc_world::craft::Craft;
     use lc_world::fitting::{Account, Fitting, Posture, Switch};
     use lc_world::motion::LIGHT_US_PER_LY;
 

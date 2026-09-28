@@ -91,9 +91,10 @@ pub fn hud(
     mut foot: ResMut<HudFoot>,
     mut out: MessageWriter<Requested>,
     mut fixed_width: Local<Option<f32>>,
+    mut collapse: Local<hud::Collapse>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
-    let lines = hud::lines(&game.0, &ui_state.0);
+    let lines = hud::lines(&game.0, &ui_state.0, &mut collapse);
 
     let mut root = viewport_ui(ctx);
     let toggles = hud::toggles(&ui_state.0);
@@ -125,7 +126,7 @@ pub fn hud(
             if let Some(energy) = &lines.energy {
                 ui.separator();
                 ui.label("ENERGY");
-                let bar = ui.add(egui::ProgressBar::new(energy.fraction).desired_width(80.0));
+                let bar = ui.add(egui::ProgressBar::new(energy.fraction).desired_width(crate::field_bar::WIDTH));
                 match lines.energy_amount(fit) {
                     Some(amount) => {
                         ui.label(amount);
@@ -133,6 +134,12 @@ pub fn hud(
                     None => {
                         bar.on_hover_text(&energy.amount);
                     }
+                }
+            }
+            if let Some(field) = &lines.field {
+                ui.separator();
+                for action in crate::field_bar::draw(ui, field, lines.field_text(fit)) {
+                    ask(&mut out, action);
                 }
             }
             if let Some(warning) = lines.warning(fit) {
@@ -264,11 +271,12 @@ fn wording_width(
         ui.fonts_mut(|f| f.layout_no_wrap(text, font, egui::Color32::PLACEHOLDER).size().x)
     };
     let body = |text: Option<String>| text.map_or(0.0, |t| width(t, egui::TextStyle::Body));
-    // The energy numbers are a whole item that comes and goes, so their spacing goes with them;
+    // The numbers beside each bar are a whole item that comes and goes, so their spacing goes with them;
     // left in the fixed part, the bar would flip between two fits a frame apart.
-    let amount = lines
-        .energy_amount(fit)
-        .map_or(0.0, |a| width(a.to_string(), egui::TextStyle::Body) + ui.spacing().item_spacing.x);
+    let beside = |text: Option<&str>| {
+        text.map_or(0.0, |a| width(a.to_string(), egui::TextStyle::Body) + ui.spacing().item_spacing.x)
+    };
+    let amount = beside(lines.energy_amount(fit)) + beside(lines.field_text(fit));
     width(lines.band(fit), egui::TextStyle::Body)
         + width(lines.exposure(fit), egui::TextStyle::Body)
         + amount

@@ -100,6 +100,17 @@ impl BandMapping {
         })
     }
 
+    /// [`apply`](Self::apply) in `f64`, for radiance below `f32`'s range: a visible band at
+    /// 400 K is.
+    pub fn apply_f64(&self, radiance: &PerBand<f64>) -> [f64; 3] {
+        std::array::from_fn(|c| {
+            self.available
+                .iter()
+                .map(|b| f64::from(self.matrix[c][b.index()]) * radiance[b])
+                .sum()
+        })
+    }
+
     /// Glow contribution: the dynamic range the three channels cannot carry.
     pub fn bloom(&self, radiance: &PerBand<f32>) -> f32 {
         match self.bloom_band {
