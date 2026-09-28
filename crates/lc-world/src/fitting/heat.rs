@@ -8,9 +8,6 @@ use crate::form::capacity::Capacities;
 use crate::motion::ShipState;
 use crate::refit::rounds::{Phase, Plan, Step};
 
-/// Until H6 builds the modes.
-pub const MODE: Mode = Mode::Black;
-
 /// Since the settlement: the heat reached, and storage's net change.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Flow {
@@ -43,14 +40,14 @@ impl Fitting {
 
     /// Watts starlight stores while storage has room: capped at the engines' rating.
     pub fn solar_w(&self) -> f64 {
-        self.intake(&self.hull.capacities, 0.0, 0.0, 0.0).stored_w()
+        self.intake(&self.hull.capacities, self.shade_at(self.since_s), 0.0, 0.0, 0.0).stored_w()
     }
 
     /// `draw_w` is what leaves storage besides the drain, and goes negative for a return into it.
-    fn intake(&self, caps: &Capacities, losing_w: f64, room_j: f64, draw_w: f64) -> Segment {
+    fn intake(&self, caps: &Capacities, shade: Mode, losing_w: f64, room_j: f64, draw_w: f64) -> Segment {
         Segment {
             arriving_w: self.starlight_w,
-            absorptivity: MODE.absorptivity(self.balance.clear_absorptivity),
+            absorptivity: shade.absorptivity(self.balance.clear_absorptivity),
             internal_w: caps.drain_w + losing_w,
             rating_w: caps.aperture_w,
             efficiency: self.balance.conversion_efficiency,
@@ -88,8 +85,8 @@ impl Fitting {
 
     /// [`Fitting::flow`] to `until_s`, first offering `stop` each stretch of constant inputs as its
     /// start, inputs, heat and length, and ending early where it says. A vent or spill lands between
-    /// stretches, so the next starts from it.
-    fn walk(&self, motion: Option<&ShipState>, until_s: f64, mut stop: impl FnMut(f64, &Segment, f64, f64) -> bool) -> Flow {
+    /// stretches, so the next starts from it. A switch completing is a cut, as a step's end is.
+    pub(super) fn walk(&self, motion: Option<&ShipState>, until_s: f64, mut stop: impl FnMut(f64, &Segment, f64, f64) -> bool) -> Flow {
         let field = self.field();
         let mut flow = Flow { heat_j: self.heat_j, income_j: 0.0 };
         if until_s <= self.since_s {
@@ -99,11 +96,12 @@ impl Fitting {
         let building_j = self.refit.as_ref().map_or(0.0, |plan| building_j(plan, self.since_s));
         let mut free_j = self.stored_j - self.committed_j - building_j;
         let mut at_s = self.since_s;
-        for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s) {
+        let switch_s = self.posture.switch.map(|s| s.done_s);
+        for piece in cut_at(pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s), self.since_s, switch_s) {
             let dt_s = piece.until_s - at_s;
             let burn_w = motion.map_or(0.0, |m| (self.burn_spent_j(m, piece.until_s) - self.burn_spent_j(m, at_s)) / dt_s);
             let room_j = caps.storage_j - (self.stored_j + flow.income_j);
-            let segment = self.intake(&caps, piece.losing_w, room_j, piece.moving_w + burn_w);
+            let segment = self.intake(&caps, self.shade_at(at_s), piece.losing_w, room_j, piece.moving_w + burn_w);
             let held_w = burn_w + piece.moving_w.max(0.0);
             let (mut heat_j, mut storage_j) = (flow.heat_j, 0.0);
             let mut from_s = at_s;
@@ -138,11 +136,17 @@ fn split(segment: Segment, drain_w: f64, held_w: f64, free_j: f64, dt_s: f64) ->
         return [Some((segment, dt_s)), None].into_iter().flatten();
     }
     let unpaid_w = short_w.min(drain_w);
-    let starved = Segment { draw_w: segment.draw_w - unpaid_w, internal_w: segment.internal_w - unpaid_w, ..segment };
+    let starved = Segment {
+        draw_w: segment.draw_w - unpaid_w,
+        internal_w: segment.internal_w - unpaid_w,
+        room_j: segment.room_j + (segment.draw_w - segment.stored_w()) * empty_s,
+        ..segment
+    };
     [Some((segment, empty_s)), Some((starved, dt_s - empty_s))].into_iter().flatten()
 }
 
 /// A stretch of constant refit inputs, ending at `until_s`.
+#[derive(Clone, Copy)]
 struct Piece {
     until_s: f64,
     /// To the field.
@@ -186,6 +190,18 @@ fn pieces(plan: Option<&Plan>, balance: &Balance, since_s: f64, now_s: f64) -> V
             }
         })
         .collect()
+}
+
+/// `pieces` with the one running across `at_s` split there, both halves at its rates.
+fn cut_at(mut pieces: Vec<Piece>, since_s: f64, at_s: Option<f64>) -> Vec<Piece> {
+    let Some(at_s) = at_s.filter(|&t| t > since_s) else { return pieces };
+    if let Some(i) = pieces.iter().position(|p| p.until_s > at_s) {
+        let first = Piece { until_s: at_s, vent_j: 0.0, ..pieces[i] };
+        if i == 0 || pieces[i - 1].until_s < at_s {
+            pieces.insert(i, first);
+        }
+    }
+    pieces
 }
 
 fn losing_w(step: &Step, balance: &Balance) -> f64 {
@@ -313,7 +329,7 @@ mod tests {
         let end_s = 1.0e7;
         let room_j = leap.hull().capacities.storage_j - 20.0 * me(&b);
         assert!(close(leap.flow(None, end_s).income_j, room_j, 1e-12), "premise: it fills");
-        assert!(leap.intake(&leap.hull().capacities, 0.0, room_j, 0.0).fill_s().unwrap() < 0.5 * end_s, "premise: it fills early");
+        assert!(leap.intake(&leap.hull().capacities, Mode::Black, 0.0, room_j, 0.0).fill_s().unwrap() < 0.5 * end_s, "premise: it fills early");
         leap.settle(&rest(), end_s);
         for k in 1..=1000 {
             steps.settle(&rest(), end_s * f64::from(k) / 1000.0);

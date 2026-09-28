@@ -665,6 +665,23 @@ impl Craft {
         }
     }
 
+    /// The player's field order. Nothing for a craft with no fitting.
+    pub fn set_field(&mut self, setting: crate::fitting::Setting, now_s: f64) -> Result<(), crate::fitting::Switching> {
+        self.settle(now_s);
+        self.fitting.as_mut().map_or(Ok(()), |fitting| fitting.set_setting(setting))
+    }
+
+    pub fn begin_switch(&mut self, to: crate::field::Mode, now_s: f64) -> Result<(), crate::fitting::Switching> {
+        self.settle(now_s);
+        self.fitting.as_mut().map_or(Ok(()), |fitting| fitting.begin_switch(to))
+    }
+
+    /// A switch done by `now_s`, taken out of the account. See [`Fitting::take_flip`].
+    pub fn take_flip(&mut self, now_s: f64) -> Option<crate::fitting::Switch> {
+        self.settle(now_s);
+        self.fitting.as_mut()?.take_flip()
+    }
+
     pub fn drain(&mut self, joules: f64, now_s: f64) {
         self.settle(now_s);
         if let Some(fitting) = &mut self.fitting {
