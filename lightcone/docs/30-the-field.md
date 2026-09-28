@@ -408,6 +408,10 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
   its shadow toward the source, and `α` of that goes into `Q`. This is the isotropic case of the
   one emission path of [31](31-directed-energy.md#as-built): the spike rides the collapse event,
   whose payload carries it, and lands through the same landing as a beam.
+- **A neighbor's exhaust is one of those emissions too**: lit at ignition, said again as the burning
+  ship lightens or turns, and taken again by each receiver as it moves through the cone
+  ([31](31-directed-energy.md#as-built)). It is intake like a beam's, held between the instants it
+  is taken, and a full ship held inside the cooking distance walks to collapse on it.
 - **A cascade is time order and nothing else.** Each tick takes due collapses and due landings
   together, earliest first. A landing settles its receiver to the arrival and re-solves its
   collapse, and a collapse queues its own spike's landings, which may fall in the same tick.

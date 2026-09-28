@@ -532,9 +532,9 @@ graph LR
 
 ### E4 · Exhaust heats neighbors
 
-- status: active card "E4 · Exhaust heats neighbors"
+- status: done #132
 - needs: E3, H5
-- touches: `crates/lc-server/src/emit.rs`
+- touches: `crates/lc-server/src/emit.rs`, `crates/lc-server/src/emit/drives.rs`, `crates/lc-server/src/emit/restate.rs`, `crates/lc-server/src/emit/tests.rs`, `crates/lc-server/src/emit/tests/drives.rs`, `crates/lc-server/src/server.rs` (the tick; a cut stated by the motion), `crates/lc-server/src/field.rs` (a collapse puts out drives), `crates/lc-server/src/persist.rs`, `crates/lc-server/src/director.rs` (kzinti, headless), `crates/lc-world/src/emit.rs` (`exhaust`), `crates/lc-world/src/escort.rs`, `crates/lc-world/src/motion.rs`, `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`
 - read: 31 §Exhaust lands on whatever is behind, §What arrives and its As built
 - deliver: every lit drive, and every thruster leg at `rcs_spread_rad`, lit as one of E3's emissions at `drive_spread_rad` between ignition and cutoff, in the face's spectrum. E3's fan-out then changes neighbors' intake and hands observers in the cone the drive's `Glare` at the retarded times of both; nothing here fans out on its own. Every emission, beam or drive, is restated as it goes, which a drive needs more than any beam since both ends of it are usually moving: a craft that flies into a cone whose light is already passing is fed and told `Illuminated` from when it enters, one that leaves stops, the share follows the receiver's distance and shadow, and a burn's power is stated again as the ship lightens, at the rocket law's throttle. (Folded in from E7, which E3 added.)
 - done when: a full ship inside the cooking distance behind a burn walks to collapse, one beside the burn feels nothing, an observer in the cone a light-year off is handed a `Glare` whose flux is `emit::flux_w_m2`, a craft flying across a lit beam is fed only while inside it from its light's arrival there, and a receiver behind a burning emitter is told the falling power at the retarded times it falls.
