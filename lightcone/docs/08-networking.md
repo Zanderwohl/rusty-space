@@ -112,7 +112,7 @@ and a system whose traffic is all elsewhere look the same from inside.
 
 ### Drive transitions
 
-A plume is not an appearance a tick can sample. The flip in the middle of every crossing is a
+A lit drive is not an appearance a tick can sample. The flip in the middle of every crossing is a
 minute of coasting, and a tick is 438 coordinate seconds at the design rate, so a `Presence`
 once a tick missed it almost every time. So **the drive lighting, going out or changing power
 is an event** (`kind::DRIVE`, payload `DriveChange`), stamped at the instant it happened.
@@ -124,11 +124,14 @@ lit and there is then nothing to withdraw. Stamped inside the tick just finished
 cursor still has them in range when they are released at light delay like anything else. That
 costs up to a tick of delivery; it never costs the transition.
 
-A cut carries the power it cut, not zero: a plume going dark is exactly as visible as the plume
+A cut carries the power it cut, not zero: a drive going dark is exactly as visible as its light
 was. The order to cut is still silent, and so is the ship afterwards.
 
-The client draws a contact's plume from whichever is later at the instant its light left: the
-last drive event, or the last statement.
+The client draws a contact's burn — its open faces glowing, and its cone — from whichever is later
+at the instant its light left: the last drive event, or the last statement
+([32-ship-rendering.md](32-ship-rendering.md#the-exhaust-cone)). What the exhaust does to whoever
+it lands on is a separate path, the emission every lit drive is
+([31-directed-energy.md](31-directed-energy.md#emitting-on-purpose)).
 
 ### Intercept: a standing order
 
@@ -183,7 +186,7 @@ and a pursuer plainly leaving the system drew its drive reversing twenty times a
 gained either: measured, it held two million kilometers off for the whole chase, spending the
 second half of every plan shedding the speed the first half built.
 
-So a quarry whose plume was lit at the sighting is escorted (`Motive::Escort`,
+So a quarry whose drive was lit at the sighting is escorted (`Motive::Escort`,
 `lc_world::escort`). Its acceleration is read from two sightings as the change in `γβ` over the
 world time between them, which is exact under constant thrust at any speed — the obvious
 version, coordinate acceleration scaled by `γ³`, is a few parts in a hundred thousand high at a
@@ -191,7 +194,7 @@ hundredth of `c` and put the modeled quarry forty kilometers wrong in ten ticks.
 planned in the frame that accelerates with the quarry, where it holds still and the pursuer's
 spare thrust is its drive less the quarry's. Back in the world the two add: full thrust to catch
 up, easing through the relative brake, and exactly the quarry's acceleration once alongside —
-five g, three, then four, for a five-g pursuer on a four-g quarry, and never a reversed plume.
+five g, three, then four, for a five-g pursuer on a four-g quarry, and never a reversed drive.
 Across a whole Oort chase the drive reverses eleven times, where it reversed eighteen thousand.
 
 **A quarry that out-pulls the pursuer is followed, not given up.** Hanging about with a ship
@@ -203,7 +206,7 @@ starts, stops or turns round by more than a quarter of the pursuer's drive is an
 rather than after the wait. Refusing used to cut the drive and leave the pursuer ballistic the
 moment its companion lit up.
 
-Only a *lit* quarry, because a pursuer can see a plume. A quarry holding an orbit accelerates too,
+Only a *lit* quarry, because a pursuer can see a lit drive. A quarry holding an orbit accelerates too,
 by gravity, and so does the pursuer; escorting it would chase where the planet takes it while
 ignoring what the planet does to the ship chasing — it is reckoned along its conic instead, see
 below. An escort that sees its quarry cut the drive where there is no conic to reckon along
