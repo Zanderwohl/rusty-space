@@ -86,7 +86,6 @@ impl<J: Journal> Server<J> {
         self.auto_ack.remove(&id);
         self.owed.remove(&id);
         self.answered.remove(&id);
-        self.destroyed.push(id.0);
 
         let account = self.by_account.iter().find(|(_, ship)| ship.0 == id.0).map(|(account, _)| account.clone());
         // Connected, or nobody could ever reach a ship given to it.
@@ -120,11 +119,12 @@ impl<J: Journal> Server<J> {
             });
             if passed {
                 self.fleet.remove(id);
+                self.destroyed.push(id.0);
             }
         }
     }
 
-    /// Craft destroyed since this was last called, whose saved rows are to be deleted.
+    /// Wrecks swept since this was last called, whose saved rows are to be deleted.
     pub fn take_destroyed(&mut self) -> Vec<i64> {
         std::mem::take(&mut self.destroyed)
     }

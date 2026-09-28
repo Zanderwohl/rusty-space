@@ -149,8 +149,9 @@ impl<J: Journal> Server<J> {
             }
         }
         for (id, (files, logs)) in by_craft {
-            // The store holds every craft ever saved; this shard only has the ones it adopted.
-            if self.fleet.get(id).is_none() {
+            // The store holds every craft ever saved; this shard only has the ones it adopted. What
+            // a wreck knew went with it, and its rows go at the sweep.
+            if self.fleet.get(id).is_none_or(|craft| craft.ended_s().is_some()) {
                 continue;
             }
             let knowledge = Knowledge::restore(witness(id), files, logs);

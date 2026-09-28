@@ -45,6 +45,19 @@ pub async fn save_ships(client: &impl GenericClient, ships: &[Ship]) -> Result<u
     let saved: Vec<i64> = ships.iter().map(|s| s.saved_t).collect();
     let states: Vec<&[u8]> = ships.iter().map(|s| s.state.as_slice()).collect();
     let formats: Vec<i32> = ships.iter().map(|s| s.format).collect();
+    // An account passing from one row to another in this write, as a destroyed ship's does to its
+    // successor while the wreck is still saved, is released first: the unique check is per row, so
+    // it would fail whenever the successor came first.
+    client
+        .execute(
+            "UPDATE ships SET account = NULL
+             FROM unnest($1::bigint[], $2::text[]) AS written (ship_id, account)
+             WHERE ships.ship_id = written.ship_id
+               AND ships.account IS NOT NULL
+               AND ships.account IS DISTINCT FROM written.account",
+            &[&ids, &accounts],
+        )
+        .await?;
     client
         .execute(
             "INSERT INTO ships (ship_id, account, saved_t, state, format)
@@ -95,9 +108,6 @@ pub async fn ship_for_account(client: &Client, account: &str) -> Result<Option<S
 }
 
 /// Forget destroyed craft, and everything they knew.
-///
-/// Before the checkpoint that writes their successors: an account is unique, and a successor
-/// carries its predecessor's.
 pub async fn forget(client: &impl GenericClient, ship_ids: &[i64]) -> Result<u64, Error> {
     if ship_ids.is_empty() {
         return Ok(0);
