@@ -22,8 +22,25 @@ lc-world = { path = "../lc-world", default-features = false }
 # register separately and the development CDN is plain HTTP — a browser could not load a book
 # over that from an HTTPS page anyway (mixed content), but a desktop client rehearsing against
 # `rocinante:3101` is exactly what it is for. See lightcone/docs/14-hosting.md.
-bevy = { version = "0.19.1", features = ["http", "https"] }
-bevy_egui = "0.42.0"
+#
+# Bevy's defaults are off and every feature is named: this list is what the browser downloads,
+# and a default that nothing uses is megabytes of it. A feature missing here fails to compile
+# or, for asset loaders, fails at load. See AGENTS.md, "Bevy features", before adding one.
+bevy = { version = "0.19.1", default-features = false, features = [
+    "std", "async_executor", "bevy_asset", "bevy_log", "bevy_state",
+    "bevy_winit", "bevy_clipboard", "default_font",
+    "bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_post_process",
+    "bevy_ui", "bevy_ui_render", "bevy_input_focus",
+    # `Tonemapping::TonyMcMapface` reads its LUT from a zstd KTX2 embedded in the binary.
+    "tonemapping_luts", "ktx2", "zstd_rust",
+    # Screenshots, and nothing else: no asset this client loads is a PNG through Bevy.
+    "png",
+    "http", "https",
+] }
+# `open_url` and `picking` are off: no hyperlinks, and nothing here uses Bevy's picking.
+bevy_egui = { version = "0.42.0", default-features = false, features = [
+    "render", "default_fonts", "manage_clipboard",
+] }
 bevy_mesh = "0.19"
 glam = { version = "0.32", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
@@ -45,6 +62,8 @@ texture-graph-gpu = { git = "https://github.com/Zanderwohl/texture-graph.git", r
 # The desktop sign-in: a loopback listener, the system browser, and somewhere to keep the
 # device grant. None of it exists in a browser, where the page already has a session.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The desktop's share of Bevy's platform defaults. A browser has one thread and no X server.
+bevy = { version = "0.19.1", default-features = false, features = ["multi_threaded", "x11", "wayland"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 # Where a device grant lands when there is no keychain. Per-platform, because the XDG layout is
 # the right answer on one of the three platforms this runs on.
@@ -69,7 +88,7 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 # WebGPU. Bevy's wasm default is WebGL2, which this renderer does not target.
-bevy = { version = "0.19.1", features = ["webgpu"] }
+bevy = { version = "0.19.1", default-features = false, features = ["webgpu"] }
 web-sys = { version = "0.3", features = [
     "Window", "Location", "UrlSearchParams", "Document", "Element", "HtmlCanvasElement",
     "WebSocket", "MessageEvent", "CloseEvent", "Event", "BinaryType", "Navigator", "Clipboard",
