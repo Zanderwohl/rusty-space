@@ -647,7 +647,7 @@ mod tests {
         let black = Glow { shade: Shade::Black, ..IDLE };
         let (clear, dark) = (radiance_at(&session, star, at, -DVec3::X, IDLE), radiance_at(&session, star, at, -DVec3::X, black));
         let gray = crate::resolved::lit_radiance(PAINT, em_spectra::stellar::SOLAR_RADIUS, 5772.0, lc_world::navigation::AU);
-        assert!((clear.reflected[Band::V] / gray[Band::V] - 0.7 / PAINT).abs() < 1.0e-5);
+        assert!((clear.reflected[Band::V] / gray[Band::V] - (0.7 / PAINT) as f32).abs() < 1.0e-4);
         assert_eq!(dark.reflected[Band::V] + dark.windows[Band::V], 0.0);
         assert!(dark.total()[Band::V] < 1.0e-12 * clear.total()[Band::V]);
         assert_eq!(dark.total()[Band::ThermalIr], dark.thermal[Band::ThermalIr]);

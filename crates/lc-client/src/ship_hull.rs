@@ -616,11 +616,12 @@ mod tests {
         assert_eq!(near.emitted[living], opened.emitted[living], "the lights followed the exposure");
         assert!(near.exposure != opened.exposure);
 
-        // Of white: `reflected` is scaled from the textures' mean to Clear's `1 − α`.
-        let share = luma(near.emitted[living]) / (luma(near.reflected) * (PAINT / 0.7) as f32);
+        // `reflected` is scaled from the textures' mean to Clear's `1 − α`.
+        let white = |u: &HullUniform| luma(u.reflected) * (PAINT / 0.7) as f32;
+        let share = luma(near.emitted[living]) / white(&near);
         assert!((0.0075 / 1.5..0.0075 * 1.5).contains(&share), "{share} of white in full sun");
         let far = at(&session, 10.0);
-        let gained = (luma(far.emitted[living]) / luma(far.reflected)) / share;
+        let gained = (luma(far.emitted[living]) / white(&far)) / share;
         assert!((gained - 100.0).abs() < 1.0, "{gained}");
     }
 
