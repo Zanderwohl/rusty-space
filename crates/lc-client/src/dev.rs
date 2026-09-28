@@ -482,7 +482,7 @@ pub(crate) fn emit_at_selected(
         aim: lc_proto::Aim::Ship(id),
         apertures: lc_proto::Apertures::Aft,
         power_w: 1.0e18,
-        wavelength_m: 1.0e-6,
+        wavelength_m: crate::emit_panel::WAVELENGTH_M,
         spread_rad: 0.1,
         // Longer than any shot, at any scene's rate.
         duration_s: 1.0e7,

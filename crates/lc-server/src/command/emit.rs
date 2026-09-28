@@ -9,7 +9,6 @@ use crate::journal::Journal;
 use crate::server::Server;
 use crate::transport::Transport;
 
-const WAVELENGTH_M: f64 = 1.0e-6;
 const SPREAD_RAD: f64 = 0.01;
 
 impl<J: Journal> Server<J> {
@@ -38,7 +37,7 @@ impl<J: Journal> Server<J> {
             aim: Aim::Bearing(axis.to_array()),
             apertures,
             power_w: rating * rated_w,
-            wavelength_m: WAVELENGTH_M,
+            wavelength_m: lc_world::emit::WAVELENGTH_M,
             spread_rad: SPREAD_RAD,
             duration_s: minutes * 60.0,
             lead: Lead::Coasting,
