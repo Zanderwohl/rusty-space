@@ -113,6 +113,9 @@ pub struct DevEntry {
     pub draft: Option<String>,
     /// Undo this many of the staged draft's edits, so a shot has a history with its cursor back.
     pub undo: u32,
+    /// `--preset <builtin>:<layout|design>`: choose a built-in preset in the editor's panel and
+    /// apply it to the draft, after any staged edits.
+    pub preset: Option<(lc_world::form::presets::Builtin, crate::presets_panel::How)>,
     /// Stage `--demo refit` on the player's ship, its clock frozen by `--refit-at` or looping.
     pub refit: Option<crate::construction::Clock>,
     /// `--field-k`, `--field-mode`, `--field-switch`: the player's field held, as drawn and on the bar.

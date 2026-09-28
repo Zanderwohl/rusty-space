@@ -145,6 +145,18 @@ pub fn act(action: Action, ui: &mut UiState, session: &Session) -> Vec<Effect> {
     vec![said.unwrap_or_else(Effect::Notify)]
 }
 
+/// `--preset`'s spelling: a built-in's name, any case, a colon, and `layout` or `design`.
+pub fn staged(spec: &str) -> Option<(Builtin, How)> {
+    let (name, how) = spec.split_once(':')?;
+    let builtin = Builtin::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(name))?;
+    let how = match how {
+        "layout" => How::Layout,
+        "design" => How::Design,
+        _ => return None,
+    };
+    Some((builtin, how))
+}
+
 /// A panel button.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub enum Press {

@@ -523,6 +523,11 @@ fn start_draft(
     for _ in 0..dev.undo {
         out.write(Requested(Action::Undo));
     }
+    if let Some((builtin, how)) = dev.preset {
+        let chosen = crate::presets_panel::Chosen::Builtin(builtin);
+        out.write(Requested(Action::ChoosePreset(Some(chosen.clone()))));
+        out.write(Requested(Action::ApplyPreset(chosen, how)));
+    }
 }
 
 

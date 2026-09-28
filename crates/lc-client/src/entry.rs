@@ -260,6 +260,7 @@ pub fn parse(args: &[String]) -> Entry {
         form: after("--form"),
         draft: after("--draft"),
         undo: value(args, "--undo").unwrap_or(0),
+        preset: after("--preset").and_then(|spec| crate::presets_panel::staged(&spec)),
         pull: value(args, "--pull"),
         // Only the player's own ship, and no round on the wire yet, so no shard: see
         // `construction`. `--refit-at` on its own asks for the same scene.

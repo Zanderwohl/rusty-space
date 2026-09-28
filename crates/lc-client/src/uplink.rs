@@ -2128,6 +2128,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_shards_list_of_presets_is_the_sessions() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let preset = lc_proto::Preset { name: "Long".into(), form: (&lc_world::form::Form::starting()).into() };
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Presets(vec![preset.clone()]));
+        assert_eq!(game.0.presets, vec![preset]);
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Presets(Vec::new()));
+        assert!(game.0.presets.is_empty());
+    }
+
     /// A refusal while Apply awaits its answer is filed against the target sent, naming the part,
     /// and an acceptance clears the way for the next, and the editor's history.
     #[test]

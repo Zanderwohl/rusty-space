@@ -482,8 +482,11 @@ A layout's other rules:
   not facts about the world, so they are not knowledge and do not travel at the speed of light. They
   are kept in `lc-store`, so a player sees the same list on the desktop and in a browser, which has
   nowhere good to keep files.
-- **They can be shared as text.** Export copies the preset as a RON string and Import reads one from
-  the clipboard. Sharing designs between players then needs no server feature and nothing to moderate.
+- **They can be shared as text.** Export copies the preset, its name and its form with part ids, as a
+  RON string, and Import reads one from the clipboard and keeps it on the account under that name,
+  as a save would. Sharing designs between players then needs no server feature and nothing to
+  moderate. A built-in exports like any other. In a browser, Import asks for the clipboard on the
+  button's press, and if the page is refused it takes the last text pasted into it.
 - An imported or stale preset is only a draft: the server validates the target when it is applied,
   as it validates any other.
 - Limits, so a store row stays small: `MAX_PARTS` parts to a form, `MAX_PRESETS` presets to an
@@ -497,6 +500,19 @@ A layout's other rules:
   so a player moving from the desktop to a browser gets the current list with the welcome. It keeps the lists in memory, checkpointed
   beside the bookmarks, and reads them at every boot, including a shard starting a new world. A row holds the form in
   postcard, the wire's encoding, so its shape is pinned by `lc-proto`'s goldens.
+
+**The presets panel** sits in the editor's left column, between the palette and the history. It lists
+the built-ins and then the account's own, a field and **save** for naming the draft, and for the chosen
+row **as layout**, **as design**, **export**, and **delete** for one of the account's own: a built-in
+cannot be deleted. The client checks each limit with the shard's own `may_keep`, in
+`lc_world::form::presets`, so an over-limit save or import is refused by name before it is sent. An
+application is named in the history ("applied Spindle as a layout"), and while that entry is the one
+at the cursor the panel names what the layout left out, "given nothing: 11 storage" and "no part for:
+bay", under its heading, folded or not. Without a shard the built-ins still apply; saving has nowhere
+to go. `--preset spindle:layout` chooses and applies a built-in for a shot, and `--form default+bay`
+gives the ship a kind no built-in has.
+
+![Spindle applied as a layout to a ship with a bay](../images/editor-presets.png)
 
 ## The editor
 
