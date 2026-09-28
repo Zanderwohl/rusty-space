@@ -442,7 +442,7 @@ graph LR
 
 ### H5 · Proximity
 
-- status: active card "H5 · Proximity"
+- status: done #123
 - needs: H4
 - touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/server.rs` (the arrivals, and `emit` returns its id), `crates/lc-world/src/field.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/craft.rs` (glow and bursts into the account), `crates/lc-world/src/scenario.rs`, `crates/lc-server/src/director.rs`, `crates/lc-server/src/command/mod.rs` (the cascade scene), `lightcone/docs/30-the-field.md`, `lightcone/images/h5-*.jpg`, `AGENTS.md`
 - read: 30 §Proximity
