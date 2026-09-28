@@ -94,9 +94,9 @@ pub struct SavedInstruments {
 ///
 /// 10 is a ship kept as its form. Every older row held a loadout, which no ship is any more, so
 /// none is read: there are no players, and a row refused names its format rather than coming
-/// back as some other ship. 12 adds a wreck's end, and 13 the craft's light and a field's lit
-/// emissions.
-pub const SAVE_FORMAT: i32 = 13;
+/// back as some other ship. 12 adds a wreck's end, 13 the craft's light and a field's lit
+/// emissions, and 14 the drive's waste heat.
+pub const SAVE_FORMAT: i32 = 14;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
