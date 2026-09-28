@@ -15,6 +15,10 @@ use crate::server::{KIND_COLLAPSE, Server};
 use crate::transport::Transport;
 use crate::world::{Event, Scheduled};
 
+mod mode;
+
+pub use mode::auto_by;
+
 /// 30 takes the spike as a second long.
 const SPIKE_S: f64 = 1.0;
 

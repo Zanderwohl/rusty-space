@@ -110,7 +110,9 @@ impl<J: Journal> Server<J> {
     /// What a new player's ship is given.
     pub(crate) fn fit_new(&self, craft: &mut Craft) {
         let now_s = self.now_t as f64 * 1.0e-6;
-        craft.fit(Some(Fitting::full(lc_world::form::Form::starting(), self.balance, now_s)));
+        let mut fitting = Fitting::full(lc_world::form::Form::starting(), self.balance, now_s);
+        fitting.set_posture(lc_world::fitting::Posture::new_ship(&self.balance));
+        craft.fit(Some(fitting));
     }
 
     /// Begin a round toward `target`. Flying and refitting exclude each other, and one round runs
