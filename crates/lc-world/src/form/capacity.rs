@@ -71,16 +71,43 @@ pub struct Aperture {
     /// Unit, along the exhaust.
     pub out: DVec3,
     pub radius_m: f64,
-    /// Of the drive's rating, which is how the drive's power divides between its faces.
+    /// Of its end's rating, which is how what that end sends divides between its faces. Zero for
+    /// a face firing across the nose, which is neither end.
     pub share: f64,
+}
+
+impl Aperture {
+    pub fn fore(&self) -> bool {
+        self.out.x > 0.0
+    }
+
+    pub fn aft(&self) -> bool {
+        self.out.x < 0.0
+    }
+
+    pub fn area_m2(&self) -> f64 {
+        std::f64::consts::PI * self.radius_m * self.radius_m
+    }
+}
+
+/// Every copy of every engine, in the order `Form::place` gives them, which is the order
+/// `sdf::Sdf::pieces` holds the engines in. `None` for a form that does not place.
+pub fn apertures(form: &Form, balance: &Balance) -> Option<Vec<Aperture>> {
+    let faces = faces_w(form, balance)?;
+    let end_w = |fore: bool| faces.iter().filter(|(a, _)| if fore { a.fore() } else { a.aft() }).map(|(_, w)| w).sum::<f64>();
+    let (fore_w, aft_w) = (end_w(true), end_w(false));
+    let share = |a: &Aperture, w: f64| match (a.fore(), a.aft()) {
+        (true, _) => w / fore_w,
+        (_, true) => w / aft_w,
+        _ => 0.0,
+    };
+    Some(faces.iter().map(|(a, w)| Aperture { share: share(a, *w), ..*a }).collect())
 }
 
 /// Every copy of every engine firing aft, as [`aft_aperture_w`] counts them. `None` for a form
 /// that does not place.
 pub fn aft_apertures(form: &Form, balance: &Balance) -> Option<Vec<Aperture>> {
-    let faces = aft_faces_w(form, balance)?;
-    let total: f64 = faces.iter().map(|(_, w)| w).sum();
-    Some(faces.into_iter().map(|(aperture, w)| Aperture { share: w / total, ..aperture }).collect())
+    Some(apertures(form, balance)?.into_iter().filter(Aperture::aft).collect())
 }
 
 fn aft_faces_w(form: &Form, balance: &Balance) -> Option<Vec<(Aperture, f64)>> {
