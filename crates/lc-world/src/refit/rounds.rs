@@ -462,19 +462,22 @@ impl Plan {
         parts
     }
 
+    /// A step's end is compared as `start_s + ends_s()`, the instant the account cuts at, so the two
+    /// agree on which side of it a settlement falls.
     pub fn at(&self, now_s: f64) -> Progress {
-        let since = now_s - self.round.start_s;
+        let start_s = self.round.start_s;
+        let since = now_s - start_s;
         let mut parts = self.start();
         let mut progress =
             Progress { form: Form::default(), stored_j: self.round.stored_j, in_hand_kg: 0.0, current: None, finished: 0 };
         for (i, step) in self.steps.iter().enumerate() {
-            if since >= step.ends_s() {
+            if now_s >= start_s + step.ends_s() {
                 apply(&mut parts, step.part, step.after);
                 progress.stored_j += step.stored_j - step.spilled_j;
                 progress.finished += 1;
                 continue;
             }
-            if since > step.begins_s {
+            if now_s > start_s + step.begins_s {
                 let fraction = (since - step.begins_s) / step.duration_s;
                 progress.stored_j += step.stored_j * fraction;
                 progress.current = Some((i, fraction));

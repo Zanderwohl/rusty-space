@@ -460,7 +460,7 @@ graph LR
 
 ### H8 · A refit's transfers inside the account
 
-- status: active card "H8 · A refit's transfers inside the account"
+- status: done #115
 - needs: H3
 - touches: `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/craft.rs`
 - read: 30 §Conversion, 29 §Refits

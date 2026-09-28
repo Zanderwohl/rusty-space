@@ -371,6 +371,10 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
 - **A store that shrinks while fuller than its new capacity spills the excess** as part of its own
   step's vent. The ledger is the round's own: drain and income are the ship's, and are not in the
   energy check.
+- **The ship's account runs the plan's transfers as they happen**, beside its drain and income
+  ([30-the-field.md](30-the-field.md#conversion)). A return that finds storage already filled by
+  starlight is heat as it arrives, and a spill is what storage actually holds past the new
+  capacity at the step's end, not what the plan expected.
 - **A round is refused if the dismantle phase would leave no drone standing**, whether the drones
   are removed, replaced by new parts or reshaped, since the build phase would begin with none.
 - The Mind's stored shape and volume may change freely, since nothing reads them.
