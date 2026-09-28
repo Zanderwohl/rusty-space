@@ -114,28 +114,36 @@ pub struct Exhaust {
 /// carrying the quarry's acceleration, and the thrusters the closing.
 pub fn exhaust(craft: &Craft, balance: &Balance, now_s: f64) -> Vec<Exhaust> {
     let state = craft.motion_at(now_s);
-    let mass_kg = craft.mass_kg_at(now_s);
-    let jet = |jet: Jet, push_g: DVec3| {
-        let half_angle_rad = if jet == Jet::Drive { balance.drive_spread_rad } else { balance.rcs_spread_rad };
-        let power_w = thrust_power_w(mass_kg, push_g.length() * G0);
-        (power_w > 0.0).then(|| Exhaust { jet, axis: -push_g.normalize(), power_w, half_angle_rad })
-    };
-    match &state.motive {
+    let pushes_g = match &state.motive {
         Motive::Boosting(_) => Vec::new(),
         Motive::Escort(plan) => {
             let (keeping, closing) = plan.pushes_g(now_s);
             if crate::courtesy::on_thrusters(balance, &plan.cruise.drive) {
-                [jet(Jet::Drive, keeping), jet(Jet::Thrusters, closing)].into_iter().flatten().collect()
+                vec![(Jet::Drive, keeping), (Jet::Thrusters, closing)]
             } else {
-                jet(Jet::Drive, keeping + closing).into_iter().collect()
+                vec![(Jet::Drive, keeping + closing)]
             }
         }
         _ => {
             let g = motion::thrust_g(state, now_s);
-            let kind = if g <= balance.rcs_accel_g { Jet::Thrusters } else { Jet::Drive };
-            jet(kind, motion::thrust_at(state, now_s) * g).into_iter().collect()
+            let jet = if g <= balance.rcs_accel_g { Jet::Thrusters } else { Jet::Drive };
+            vec![(jet, motion::thrust_at(state, now_s) * g)]
         }
+    };
+    let pushes_g: Vec<(Jet, DVec3)> = pushes_g.into_iter().filter(|(_, g)| g.length() > 0.0).collect();
+    if pushes_g.is_empty() {
+        return Vec::new();
     }
+    let mass_kg = craft.mass_kg_at(now_s);
+    pushes_g
+        .into_iter()
+        .map(|(jet, push_g)| Exhaust {
+            jet,
+            axis: -push_g.normalize(),
+            power_w: thrust_power_w(mass_kg, push_g.length() * G0),
+            half_angle_rad: if jet == Jet::Drive { balance.drive_spread_rad } else { balance.rcs_spread_rad },
+        })
+        .collect()
 }
 
 /// The open faces a craft's exhaust leaves through, m²: its aft engines', or an unfitted hull's
@@ -452,5 +460,32 @@ mod tests {
         assert_eq!(received_fraction(half, shadow, 0.999 * edge), 1.0);
         let past = received_fraction(half, shadow, 2.0 * edge);
         assert!((past - 0.25).abs() < 1.0e-12, "{past}");
+    }
+
+    /// A crossing's drive sends `F c` at the mass the ship has as it burns, along the exhaust, at
+    /// `drive_spread_rad`, and nothing while it coasts or flips. The same crossing at no more than
+    /// `rcs_accel_g` is on the thrusters, at `rcs_spread_rad`.
+    #[test]
+    fn a_lit_drive_sends_f_c_along_its_exhaust() {
+        use crate::craft::{Craft, CraftId, Kind};
+        use crate::flight::{Drive, STANDOFF_LY};
+        use crate::motion::{Change, Event, ShipId};
+        let b = Balance::DEFAULT;
+        for (accel_g, jet, spread) in [(5.0, Jet::Drive, b.drive_spread_rad), (b.rcs_accel_g, Jet::Thrusters, b.rcs_spread_rad)] {
+            let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+            craft.fit(Some(Fitting::full(Form::starting(), b, 0.0)));
+            let drive = Drive { accel_g, ..craft.turning(craft.kind.drive()) };
+            let to_ly = DVec3::X * (STANDOFF_LY + 1.0e-6);
+            craft.apply(&Event { ship: ShipId(1), at_t: 0.0, change: Change::Cross { to_ly, drive } }).unwrap();
+            let crate::motion::Motive::Crossing(cruise) = &craft.motion.motive else { panic!() };
+            let [lit, _, flip, brake, _] = cruise.phase_changes_s();
+            let burning_s = 0.5 * (lit + flip);
+            let [out] = exhaust(&craft, &b, burning_s)[..] else { panic!("one jet") };
+            assert_eq!((out.jet, out.half_angle_rad), (jet, spread));
+            assert!(out.axis.angle_between(-DVec3::X) < 1.0e-9, "{}", out.axis);
+            let want_w = thrust_power_w(craft.mass_kg_at(burning_s), accel_g * G0);
+            assert!((out.power_w / want_w - 1.0).abs() < 1.0e-12, "{} {want_w}", out.power_w);
+            assert!(exhaust(&craft, &b, 0.5 * (flip + brake)).is_empty(), "lit through the flip");
+        }
     }
 }

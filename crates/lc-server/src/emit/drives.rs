@@ -18,7 +18,7 @@ use crate::server::Server;
 use crate::world::{Event, Scheduled};
 
 /// A lit drive's power is said again once it has moved this fraction from what was last said.
-pub(crate) const POWER_STEP: f64 = 0.01;
+const POWER_STEP: f64 = 0.01;
 /// And its axis once it has turned this fraction of its half-angle.
 const AXIS_STEP: f64 = 0.1;
 /// Coordinate microseconds between the instants a lit drive is looked at for a drift, on a grid

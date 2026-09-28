@@ -315,7 +315,8 @@ impl<J: Journal> Server<J> {
                 vec![lighting(axis, to_us(boost.lights_s()).max(at), to_us(boost.out_s()))]
             }
         };
-        self.emissions.emitting.insert(id, lit);
+        // Beside a drive whose cut this tick is not stated yet.
+        self.emissions.emitting.entry(id).or_default().extend(lit);
         Ok(Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s })
     }
 

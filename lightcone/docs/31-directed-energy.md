@@ -225,13 +225,12 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
 
 ### As built
 
-- **One path, whatever lit it.** An emission is an event of `kind::EMIT` where it lights, and
-  another where it goes out, each carrying what it sends in its payload: where it left, its axis
-  and half-angle, its spectrum and its power. Each fans out along its cone through the machinery
-  every event uses, and each delivery to another craft is a landing at its arrival. The event of
-  going out is also delivered to every craft holding the beam, wherever it has got to, so nobody
-  is left lit. A drive's exhaust will be lit through the same registry (E4); nothing about beams is
-  written that a drive or a spike would duplicate.
+- **One path, whatever lit it.** An emission is an event of `kind::EMIT` where it lights, one each
+  time it is said again, and one where it goes out, each carrying what it sends in its payload:
+  where it left, its axis and half-angle, its spectrum and its power. Each fans out along its cone
+  through the machinery every event uses, and each delivery to another craft is a landing at its
+  arrival. Every event after the first is also delivered to every craft holding the beam, wherever
+  it has got to, so nobody is left lit.
 - **Every lit drive is one of those emissions** (`lc-server`'s `emit::drives`), and nothing about
   a drive fans out, lands or glares on its own. `lc_world::emit::exhaust` says what each drive sends
   at an instant: `F c`, at the mass the ship has then, along the exhaust. A leg at no more than
@@ -270,7 +269,7 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   the neighbors' glow, until the next instant it is taken again. The receiver's owner is told with
   `Illuminated` whenever what arrives changes.
 - **A drive's emission is what leaves it**, `F c`. What the emitter's account draws for a burn is
-  the rocket law's whole cost, which is `F c / ε`; the difference is [E6](plans/forms-and-fields.md)'s.
+  the rocket law's whole cost, `F c / ε` in the ship's own time; the difference is [E6](plans/forms-and-fields.md)'s.
 - **`power_w` is what each end sends.** A balanced emit sends it along the aim from the fore
   engines and against it from the aft ones, and draws twice it. Each end's rating is its engines'
   together, and the diffraction floor is `λ / 2D` for its widest face; a balanced emit's two beams
