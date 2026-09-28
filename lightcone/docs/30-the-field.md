@@ -131,10 +131,11 @@ mass and collapse read all of `Q`. Waste is saved with the account. An emission 
 law, so it makes none.
 
 At ε = 0.8 and 5 g, the starting ship spends 1.34 × 10²⁰ W and keeps 2.7 × 10¹⁹ W of it, 0.35 of
-its rated load. Its waste tends to 3.5 ME, about 3 500 K, and a boost as long as a full ship can
-buy leaves it at 2.6 ME. The exhaust still takes all the starlight's heat, so the sun-diving
+its rated load. At the starting mass its waste would tend to 3.5 ME, about 3 500 K, but the
+throttle takes the power down as the ship lightens: a boost as long as a full ship can buy ends
+at about 1.9 ME. The exhaust still takes all the starlight's heat, so the sun-diving
 limit moves in while burning, and a ship arrives carrying what it made, which radiates on `τ`.
-A burn brings a collapse on once `(1 − ε)/ε` of the beam passes the rated load: below ε = 0.59
+A burn can bring a collapse on once `(1 − ε)/ε` of the beam passes the rated load: below ε = 0.59
 for the starting ship at 5 g.
 
 ## Clear and Black
@@ -329,9 +330,12 @@ seeing it replayed as the light passes.
   its settlement, fill and empty storage splits, the exhaust's floor and refit steps included, and
   takes the closed form in each. It reads the burn: at ε ≥ 1 exhaust only ever lowers `Q`, so a burn
   puts a collapse off, and a solve that ignored it would destroy a ship its drive was saving. Below
-  ε = 1 the drive's waste rises however hard the exhaust draws, and can bring one on; the solve adds
-  it to each stretch, which is exact because it relaxes on the same `τ`. A vent that crosses `Q_max` crosses it at its step's end. The shard walks that across the
-  day-long starlight segments the account will be settled at and fires what falls due, once before
+  ε = 1 the drive's waste rises however hard the exhaust draws, and can bring one on. The solve
+  adds it to each stretch, which is exact because it relaxes on the same `τ`, but only against the
+  burn's power averaged over the piece, as 31 takes the exhaust. A read up to the solved instant
+  averages less of the throttle, and lands within a few percent of `Q_max` rather than on it; each
+  settlement narrows that. A vent that crosses `Q_max` crosses it at its step's end. The shard
+  walks that across the day-long starlight segments the account will be settled at and fires what falls due, once before
   the tick advances anything and once after its orders. Nothing is stored for it: every change of
   input settles the account first, so asking again is the re-solve, and a checkpoint restores it with
   the account.
