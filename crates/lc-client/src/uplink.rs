@@ -781,8 +781,10 @@ fn fold(
                     ui.0.form.applying = crate::ledger::Applying::Idle;
                     Some("refit begun".into())
                 }
-                // Refused as not built until H6 and E3.
-                Order::FieldMode { .. } | Order::Emit { .. } => None,
+                // What a mode order does to the account arrives straight after, as `Fitted`.
+                Order::FieldMode { .. } => None,
+                // Refused as not built until E3.
+                Order::Emit { .. } => None,
                 Order::CancelRefit => Some("refit stopped where it was".into()),
                 // Recorded against the identifier the server minted, which is the only thing
                 // an acknowledgment will ever name it by. Not shown in the events box: that

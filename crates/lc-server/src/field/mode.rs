@@ -130,6 +130,31 @@ impl<J: Journal> Server<J> {
         let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
         craft.set_field(setting, at_s).map_err(|_| Refusal::Switching)
     }
+
+    /// The console's `field`, through the order's own checks.
+    pub(crate) fn field_command(
+        &mut self,
+        id: CraftId,
+        mode: &str,
+        wire: &mut impl Transport,
+        events: &mut Vec<Event>,
+        deliveries: &mut Vec<Scheduled>,
+    ) -> Result<String, String> {
+        let balance = self.balance();
+        let mode = match mode {
+            "clear" => FieldMode::Clear,
+            "black" => FieldMode::Black,
+            _ => Setting::Auto(lc_world::fitting::Thresholds::of(&balance)).into(),
+        };
+        self.order_field_mode(id, mode, self.now_t(), events, deliveries).map_err(|why| format!("refused: {why:?}"))?;
+        self.tell_fitted(wire, id);
+        let craft = self.fleet.get(id).ok_or("no such ship")?;
+        let posture = craft.fitting().ok_or("no field")?.posture();
+        Ok(match posture.switch {
+            Some(switch) => format!("{}: {:?}, {:?} in {:.1} days", craft.designation(), mode, switch.to, (switch.done_s - self.now_t() as f64 * 1.0e-6) / 86_400.0),
+            None => format!("{}: {:?}, {:?}", craft.designation(), mode, posture.shade),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -381,5 +406,25 @@ mod tests {
             restarted.tick(&mut wire).await.unwrap();
         }
         assert_eq!(flips(&restarted), vec![(to_us(done_s), Shade::Black)]);
+    }
+
+    #[tokio::test]
+    async fn the_console_orders_it_as_the_wire_does() {
+        let Some((mut server, mut wire)) = apart() else { return };
+        server.directing(true);
+        let mut answers = Vec::new();
+        for (seq, line) in [(1, "field black"), (2, "field clear")] {
+            wire.client_says(OWNER, Inbound::Command { seq, line: line.into() });
+            server.tick(&mut wire).await.unwrap();
+            answers.extend(wire.take(OWNER).into_iter().filter_map(|m| match m {
+                Outbound::Answered { ok, text, .. } => Some((ok, text)),
+                _ => None,
+            }));
+        }
+        let [(true, began), (false, refused)] = &answers[..] else { panic!("{answers:?}") };
+        assert!(began.contains("Black in 1.0 days"), "{began}");
+        assert!(refused.contains("Switching"), "{refused}");
+        let switch = server.ship(SHIP).unwrap().fitting().unwrap().posture().switch;
+        assert_eq!(switch.map(|s| s.to), Some(lc_world::field::Mode::Black));
     }
 }

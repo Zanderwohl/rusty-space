@@ -39,6 +39,7 @@ pub enum Verb {
     RefitMagic,
     RefitFinish,
     Stage,
+    Field,
 }
 
 pub struct ArgSpec {
