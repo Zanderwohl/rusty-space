@@ -451,7 +451,7 @@ graph LR
 
 ### H6 · Clear, Black and Auto
 
-- status: active card "H6 · Clear, Black and Auto"
+- status: done #122
 - needs: H3
 - touches: `crates/lc-world/src/field.rs`, `crates/lc-server/src/field.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/fitting/mode.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-world/src/craft/field.rs`, `crates/lc-server/src/field/mode.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/fitting.rs`, `crates/lc-server/src/command/mod.rs`, `crates/lc-server/src/command/spec.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-client/src/uplink.rs`, `lightcone/docs/30-the-field.md`
 - read: 30 §Clear and Black, §Auto
