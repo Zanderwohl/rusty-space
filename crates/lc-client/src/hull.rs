@@ -315,7 +315,11 @@ pub(crate) fn glow_of(session: &Session, uplink: &Uplink, craft: Option<ShipId>)
 }
 
 pub(crate) fn own_glow(session: &Session) -> Glow {
-    session.ship.glow_at(session.coordinate_time_s()).map_or_else(|| own_glow_unfitted(session), Into::into)
+    let glow = session.ship.glow_at(session.coordinate_time_s()).map_or_else(|| own_glow_unfitted(session), Into::into);
+    match session.held_field {
+        Some(held) => held.glow(glow),
+        None => glow,
+    }
 }
 
 fn own_glow_unfitted(session: &Session) -> Glow {
@@ -388,8 +392,18 @@ pub(crate) fn lamp(session: &Session, cd_m2: f64, k: f64) -> Vec3 {
 }
 
 /// A hull at `at_ly` painted `paint`, wearing `glow`, lit by [`lighting`]'s `star`.
-pub(crate) fn lit(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, paint: Vec4, glow: Glow) -> BodySurfaceUniform {
-    let own = emitted(session, glow);
+///
+/// `enveloped` once [`crate::field`] draws the field round it: the envelope then carries the
+/// field's heat, and the hull only what it reflects.
+pub(crate) fn lit(
+    session: &Session,
+    star: Option<(DVec3, f64, f64)>,
+    at_ly: DVec3,
+    paint: Vec4,
+    glow: Glow,
+    enveloped: bool,
+) -> BodySurfaceUniform {
+    let own = if enveloped { Vec3::ZERO } else { emitted(session, glow) };
     match star {
         Some((star_ly, radius, teff)) => {
             let distance = star_ly.distance(at_ly) * M_PER_LY;
@@ -499,7 +513,7 @@ pub fn update_hulls(
     };
     let want = hulled(drawn(&game.0, &uplink, &eye, look), formed);
     let star = lighting(&game.0);
-    let shade = |id: Option<ShipId>, at: &Placed| lit(&game.0, star, at.at_ly, GRAY, glow_of(&game.0, &uplink, id));
+    let shade = |id: Option<ShipId>, at: &Placed| lit(&game.0, star, at.at_ly, GRAY, glow_of(&game.0, &uplink, id), false);
     let place = |at: &Placed| Transform {
         translation: sim_to_render(at.offset_m / UNIT_M).as_vec3(),
         rotation: attitude(at.facing, star.map(|(star_ly, _, _)| star_ly - at.at_ly)),

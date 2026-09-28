@@ -73,6 +73,7 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--error-bars` | draw the map's error bars, which are off by default |
 | `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto. A pin: `--map` on its own holds the ship, so a hand on the mouse cannot pan a shot two runs are meant to agree about |
 | `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `kzinti` (the approach, Direct), `closing`, `chase`, `corona`, `cascade` (five hot ships, and the first vents). Brings its own shard |
+| `--field-k <kelvin>` | hold the player's field at a temperature, as drawn, metered and on the bar. `--field-mode clear\|black` holds its shade, `--field-switch <progress>` a switch into that shade frozen partway, and `--field-beam <watts>` a beam on it from beside the camera |
 | `--console <line>` | type a line at the console once the shard has welcomed the client, with the console open. With `--local` the shard is directing, so every command is available. Give it again for more lines, run in order: `--console "refit-magic plate fore:1" --console "emit both"` |
 | `--demo-cam <yaw:pitch:booms[:to]>` | pin the camera for the run, so two shots of a scene are the same shot. With `to`, the boom eases toward it once nothing is waiting to be drawn: `--frames 1 --burst 150` with `40:1.5` photographs every remesh of a hull on the way in |
 | `--watch-from <id>` | put the camera behind another craft, by its ship id: how two clients on one shard photograph each other |

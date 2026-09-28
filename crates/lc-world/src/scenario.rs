@@ -448,15 +448,15 @@ pub const CORONA: Scenario = Scenario {
 /// after the last. See 30 §Proximity.
 ///
 /// Hot because idle ships would have to overlap: a starting ship's spike kills an idle one inside
-/// 150 m. At ten times the size and 2% short of `Q_max`, a neighbor's spike is 1.6 times what a
-/// ship can take and every spike from further back together well under it, so each death is its
-/// neighbor's. The player watches from behind and to one side, idle and far outside all of it,
+/// 150 m. At ten times the size and 1.4% short of `Q_max`, a neighbor's spike is 1.44 times what a
+/// ship can take and every spike from further back together at most 0.61 of it, so each death is
+/// its neighbor's. The player watches from behind and to one side, idle and far outside all of it,
 /// which puts each death's light further from the camera than the last.
 pub const CASCADE: Scenario = Scenario {
     name: "cascade",
     blurb: "Five ships running hot, four lengths apart. The first vents.",
     star: "Sol",
-    // Four coordinate microseconds a tick, so the 76 µs between two deaths is about a second of
+    // Four coordinate microseconds a tick, so the 97 µs between two deaths is about a second of
     // watching.
     rate: 1.0e-8,
     watch: Slot::Pov,
@@ -484,10 +484,10 @@ const fn domino(name: &'static str, bearing: [f64; 3], lengths: f64) -> Member {
     Member {
         name,
         kind: Kind::Ship,
-        length_m: 5_705.865,
+        length_m: 7_307.269,
         accel_g: 5.0,
         start: Start::Beside { lengths, bearing },
-        form: Some(Formed { scale: 10.0, heat: 0.979 }),
+        form: Some(Formed { scale: 10.0, heat: 0.986 }),
     }
 }
 

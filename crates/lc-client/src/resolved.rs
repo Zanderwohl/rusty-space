@@ -157,6 +157,7 @@ pub fn sample_scene(
     eye: Res<crate::hull::Eye>,
     uplink: Res<crate::uplink::Uplink>,
     own_form: Res<crate::parts::OwnForm>,
+    (wrecks, time): (Res<crate::field::Wrecks>, Res<Time>),
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut last: Local<Option<(usize, f32)>>,
 ) {
@@ -211,6 +212,15 @@ pub fn sample_scene(
         scene.discs.push(Disc {
             radiance: crate::hull::radiance_at(&game.0, hull_star, at_ly, to_eye, glow).total(),
             solid_angle_sr: crate::hull::solid_angle_sr(length_m, distance_m),
+        });
+    }
+
+    let balance = game.0.ship.fitting().map_or(lc_world::fitting::Balance::DEFAULT, |f| *f.balance());
+    let limit_k = crate::field::limit_k(&balance);
+    for (at_ly, kelvin, radius_m) in wrecks.metered(now, time.elapsed_secs(), balance.collapse_afterglow_s, limit_k) {
+        scene.discs.push(Disc {
+            radiance: crate::session::spectrum_at(kelvin),
+            solid_angle_sr: crate::hull::solid_angle_sr(2.0 * radius_m, at_ly.distance(observer) * M_PER_LY),
         });
     }
 

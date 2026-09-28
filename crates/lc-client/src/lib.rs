@@ -31,6 +31,7 @@ pub mod drones;
 pub mod entry;
 pub mod envelope;
 pub mod faces;
+pub mod field;
 pub mod field_bar;
 pub mod form_apply;
 pub mod form_carry;
