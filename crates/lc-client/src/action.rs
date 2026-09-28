@@ -7,7 +7,7 @@
 
 use em_spectra::{Band, presets};
 use lc_world::knowledge::Subject;
-use lc_world::knowledge::survey::{Duty, Sweep};
+use lc_world::knowledge::survey::{Duty, Gaze, Sweep};
 use lc_world::sky::StarId;
 
 use crate::navigation::{Course, Target};
@@ -368,13 +368,18 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             ui.selected_craft = None;
             session.describe(id);
         }
-        Action::StareSelected => match ui.selected {
-            Some(id) => {
+        // A craft picked out is the later pick: choosing a star clears it.
+        Action::StareSelected => match (ui.selected_craft, ui.selected) {
+            (Some(craft), _) => {
+                set_duty(ui, session, Duty::Stare(Gaze::Craft(craft.0)), &mut effects);
+                effects.push(Effect::Notify(format!("staring at ship {}", craft.0)));
+            }
+            (None, Some(id)) => {
                 let name = session.name_of(id);
-                set_duty(ui, session, Duty::Stare(id), &mut effects);
+                set_duty(ui, session, Duty::stare(id), &mut effects);
                 effects.push(Effect::Notify(format!("staring at {name}")));
             }
-            None => effects.push(Effect::Notify("nothing selected to stare at".into())),
+            (None, None) => effects.push(Effect::Notify("nothing selected to stare at".into())),
         },
         Action::SelectNearest => match nearest_interstellar(session) {
             Some(id) => apply_to(ui, session, Action::SelectTarget(Some(id)), &mut effects),
@@ -866,7 +871,7 @@ fn set_duty(ui: &UiState, session: &mut Session, duty: Duty, effects: &mut Vec<E
     }
     session.observatory.integration_s = ui.integration_s.max(1.0);
     match duty {
-        Duty::Stare(id) => session.point_at(Some(id)),
+        Duty::Stare(Gaze::Star(id)) => session.point_at(Some(id)),
         duty => session.take_up(duty),
     }
 }
@@ -1395,7 +1400,7 @@ mod tests {
 
         let effects = apply(Action::StareSelected, &mut ui, &mut s);
         assert_eq!(s.pointing, Some(id));
-        assert!(matches!(s.observatory.duty, Duty::Stare(on) if on == id));
+        assert!(matches!(s.observatory.duty, Duty::Stare(Gaze::Star(on)) if on == id));
         assert!(matches!(effects.as_slice(), [Effect::Notify(_)]));
     }
 
