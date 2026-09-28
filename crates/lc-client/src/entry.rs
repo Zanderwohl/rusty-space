@@ -69,7 +69,7 @@ pub fn parse(args: &[String]) -> Entry {
     // A scene says where to stand, so there is nothing to pass in. The identifiers are the
     // scene's own, which is why this needs no shard to have answered first.
     if let Some(scene) = after("--demo").as_deref().and_then(scenario::Scenario::named) {
-        if let Some(watch) = crate::action::watching(scene) {
+        if let Some(watch) = crate::demos::watching(scene) {
             let crate::ui::CameraPerspective::Pov(ship_id) = watch;
             actions.push(Action::WatchFrom(Some(ship_id)));
         }
@@ -251,6 +251,7 @@ pub fn parse(args: &[String]) -> Entry {
         phase_deg: value(args, "--phase"),
         station: after("--station"),
         charted: flag("--charted"),
+        survey: flag("--survey"),
         beauty_kind: after("--beauty-kind"),
         beauty_dir: after("--beauty-dir"),
         beauty_period_s: value(args, "--beauty-period"),

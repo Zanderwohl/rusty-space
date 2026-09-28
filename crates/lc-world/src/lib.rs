@@ -42,6 +42,7 @@ pub mod motion;
 pub mod navigation;
 pub mod observation;
 pub mod occluder;
+pub mod parking;
 pub mod population;
 pub mod pursuit;
 pub mod refit;

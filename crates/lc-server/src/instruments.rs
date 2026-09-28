@@ -894,6 +894,81 @@ mod tests {
         assert!(knowledge.unfitted(star).is_some(), "the fitter has work and is being offered it");
     }
 
+    /// **A parking orbit waits on the star.** Refused while the craft knows nothing of its sun,
+    /// flown once a survey has measured it, to where starlight meets the engines' rating; and
+    /// flown again when the orbit held is off what the craft would choose by more than the
+    /// deadband, which is what a star misjudged looks like from its orbit.
+    #[tokio::test]
+    async fn a_craft_parks_by_its_sun_once_it_has_measured_it() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = server(&broker);
+        let mut wire = Loopback::new();
+        let (ship, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        let id = CraftId(ship.0);
+        let refused = |said: &[Outbound]| said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::Uncharacterized, .. }));
+
+        wire.client_says(ClientId(1), act(ship, Order::Park));
+        server.tick(&mut wire).await.unwrap();
+        assert!(refused(&wire.take(ClientId(1))), "parked by a star it has not looked at");
+        assert!(!server.parks.contains_key(&id));
+
+        let star = sky()[0].id;
+        let duty = lc_proto::Duty::Survey { star: star.get(), started_s: 0.0 };
+        wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty, integration_s: 1.0e4 }));
+        for _ in 0..40 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        wire.take(ClientId(1));
+        wire.client_says(ClientId(1), act(ship, Order::Park));
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(ClientId(1));
+        assert!(!refused(&said), "{said:?}");
+        let held = server.parks[&id].radius_m.expect("flown");
+
+        let craft = server.fleet.get(id).unwrap();
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let luminosity_w = craft.system.as_deref().unwrap().star_luminosity_w();
+        let truth = lc_world::parking::of(craft.fitting().unwrap(), now_s, luminosity_w).unwrap().distance_m;
+        assert!((held / truth - 1.0).abs() < 0.01, "parked at {held} m, the star says {truth} m");
+
+        // An orbit well off where it belongs, as a misjudged star would leave one: the next check
+        // flies it back.
+        server.parks.get_mut(&id).unwrap().radius_m = Some(0.8 * held);
+        let day_ticks = (lc_world::solar::SOLAR_STEP_S * 1.0e6 / server.tick_us() as f64).ceil() as usize + 1;
+        for _ in 0..day_ticks {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let again = server.parks[&id].radius_m.unwrap();
+        assert!((again / truth - 1.0).abs() < 0.01, "not flown back: {again} against {truth}");
+        let Some(lc_world::navigation::Waypoint::Orbit(orbit)) = server.fleet.get(id).unwrap().motion.bound_for() else {
+            panic!("flying to an orbit: {:?}", server.fleet.get(id).unwrap().motion.motive);
+        };
+        assert!((orbit.radius_m / truth - 1.0).abs() < 0.01);
+
+        // A restart keeps it, and the first check flies it afresh: there is no orbit to compare.
+        let knew = server.take_knowledge();
+        let checkpoint = server.checkpoint();
+        let mut server = self::server(&broker);
+        assert!(server.adopt(checkpoint).is_empty());
+        assert!(server.adopt_knowledge(&knew.files, &knew.samples).is_empty());
+        assert_eq!(server.parks[&id].radius_m, None, "restored with nothing flown");
+        server.tick(&mut wire).await.unwrap();
+        let flown = server.parks[&id].radius_m.expect("flown on the first check");
+        assert!((flown / truth - 1.0).abs() < 0.01, "{flown} against {truth}");
+        let (again, _) = sign_in(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j2")).await;
+        assert_eq!(again, ship, "premise: the same ship back");
+
+        // Any other flight order ends it.
+        for ender in [Order::CutDrive, Order::BreakOff] {
+            wire.client_says(ClientId(1), act(ship, Order::Park));
+            server.tick(&mut wire).await.unwrap();
+            assert!(server.parks.contains_key(&id), "premise: parked again before {ender:?}");
+            wire.client_says(ClientId(1), act(ship, ender.clone()));
+            server.tick(&mut wire).await.unwrap();
+            assert!(!server.parks.contains_key(&id), "{ender:?} left it standing");
+        }
+    }
+
     #[tokio::test]
     async fn a_craft_names_only_what_it_knows() {
         let broker = Broker::new([1u8; 32]);

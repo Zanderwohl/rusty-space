@@ -407,27 +407,31 @@ impl Knowledge {
                     .iter()
                     .filter(|o| o.about == Some(body))
                     .max_by(|a, b| a.stated_s.total_cmp(&b.stated_s))?;
-                let (au, sigma_au) = orbit.semi_major_au;
-                let (period_s, sigma_s) = orbit.period_s;
-                if !(au > 0.0 && period_s > 0.0) {
-                    return None;
-                }
-                let a_m = au * crate::navigation::AU;
-                let n = std::f64::consts::TAU / period_s;
-                let mu = n * n * a_m * a_m * a_m;
-                // Cubed in the axis and squared in the period, so the errors come in at those
-                // weights: a percent on the axis is three on the mass.
-                let fraction =
-                    3.0 * (sigma_au / au).abs() + 2.0 * (sigma_s / period_s).abs();
-                let kg = mu / GRAVITY;
-                Some((kg, kg * fraction))
+                mass_of(orbit)
             })
             .min_by(|a, b| (a.1 / a.0).total_cmp(&(b.1 / b.0)))
     }
 }
 
 /// Newton's constant, for turning a measured `mu` into a mass anyone can read.
-const GRAVITY: f64 = 6.674_30e-11;
+pub const GRAVITY: f64 = 6.674_30e-11;
+
+/// What an orbit weighs its primary at, kg, and one sigma: `n²a³` over `G`.
+pub(super) fn mass_of(orbit: &Orbit) -> Option<(f64, f64)> {
+    let (au, sigma_au) = orbit.semi_major_au;
+    let (period_s, sigma_s) = orbit.period_s;
+    if !(au > 0.0 && period_s > 0.0) {
+        return None;
+    }
+    let a_m = au * crate::navigation::AU;
+    let n = std::f64::consts::TAU / period_s;
+    let mu = n * n * a_m * a_m * a_m;
+    // Cubed in the axis and squared in the period, so the errors come in at those weights: a
+    // percent on the axis is three on the mass.
+    let fraction = 3.0 * (sigma_au / au).abs() + 2.0 * (sigma_s / period_s).abs();
+    let kg = mu / GRAVITY;
+    Some((kg, kg * fraction))
+}
 
 /// A radius, from the sighting with the best-known one: an angular diameter and a range from
 /// the same look, so neither has to be carried across time while the body moves.
@@ -435,7 +439,7 @@ const GRAVITY: f64 = 6.674_30e-11;
 /// The tightest rather than the newest. A close pass measures a radius once and to a part in
 /// thousands; later looks from across the system measure it far worse or not at all, and taking
 /// the newest would throw the good one away.
-fn measured_radius(file: &crate::knowledge::File) -> Option<(f64, f64)> {
+pub(super) fn measured_radius(file: &crate::knowledge::File) -> Option<(f64, f64)> {
     file.sightings()
         .iter()
         .filter_map(|seen| {

@@ -88,7 +88,7 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--demo refit` / `--refit-at <f>` / `--refit-from <f>` | a staged refit on the player's ship, frozen at a fraction of its round or running from one. With `--form default*k`, `k` times larger. The shot waits for its meshes |
 | `--beauty` / `--beauty-kind <kind>` | turn on the beauty shots, and hold them on one kind of subject (`whole`, `horizon`, `nadir`, `approach`, `destination`, `survey`, `rings`, `ringside`, `neighbor`, `star`, `field`). The first is taken a second in, so `--frames 240` photographs it |
 | `--beauty-dir <dir>` / `--beauty-period <s>` | save every beauty shot into `dir` as it is taken, numbered and named by kind, and take one every `s` seconds instead of ten. One run is then the whole series; `--shot` still ends it |
-| `--stare` / `--sweep` | set the telescope to stare at the nearest star, or to sweep the sky ahead |
+| `--stare` / `--sweep` / `--survey` | set the telescope to stare at the nearest star, to sweep the sky ahead, or to survey the system it is in, which is what characterizes its star |
 | `--rate <n>` | clock multiplier; `0` freezes it, which makes frames comparable. Offline only — a shard states its own. **The default is the design rate**, so a run without this flag is as slow as the game. A frozen clock also freezes the telescope, which records a sample only once an integration's worth of time has passed, so `--rate 0 --panel telescope` photographs an empty curve — correctly |
 
 `--turn`, `--pitch` and `--zoom` are applied **last**, after anything that aims — `--fly` ends

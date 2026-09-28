@@ -415,6 +415,13 @@ pub enum Order {
     /// half-angle, at least the diffraction floor; `lead` is how an aim at a craft predicts it.
     /// See `lightcone/docs/31-directed-energy.md`.
     Emit { aim: Aim, apertures: Apertures, power_w: f64, wavelength_m: f64, spread_rad: f64, duration_s: f64, lead: Lead },
+    /// Hold a parking orbit about the system's star: as close as fills storage at the engines'
+    /// rating without the field passing Auto's switch to Clear. A **standing** order like
+    /// [`Order::Intercept`]: the authority flies a correction whenever what the craft measures of
+    /// its star moves the orbit, the collectors' own reading once it is there. Refused as
+    /// [`Refusal::Uncharacterized`] until the craft knows its star well enough. See
+    /// `lightcone/docs/20-solar-power.md` §Parking.
+    Park,
 }
 
 /// A client's request. Never authoritative about anything.
@@ -849,6 +856,8 @@ pub enum Outbound {
     Illuminated { ship_id: ShipId, beam: i64, bearing: [f64; 3], spectrum: Spectrum, power_w: f64, arrive_t: i64 },
     /// The account's presets, whole. Sent after `Welcome` and after each change.
     Presets(Vec<Preset>),
+    /// The standing [`Order::Park`] a ship has, stated on sign-in, as [`Outbound::Pursuing`] is.
+    Parked { ship_id: ShipId },
 }
 
 /// The longest command line a shard will read, in bytes.
@@ -907,6 +916,8 @@ pub enum Refusal {
     TooManyPresets,
     /// A preset's name is empty or longer than `form::PRESET_NAME_LIMIT` bytes.
     PresetName,
+    /// The craft does not yet know its star well enough to park by it.
+    Uncharacterized,
 }
 
 /// Everything a client says.

@@ -94,6 +94,7 @@ impl Act {
             | Order::CancelRefit
             | Order::FieldMode { .. }
             | Order::Emit { .. }
+            | Order::Park
             // What the telescope does and what the crew call things are the ship's business.
             | Order::SetDuty { .. }
             | Order::NameIt { .. }

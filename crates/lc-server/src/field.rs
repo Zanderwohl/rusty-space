@@ -195,6 +195,7 @@ impl<J: Journal> Server<J> {
         }
 
         self.pursuits.remove(&id);
+        self.parks.remove(&id);
         self.refitting.remove(&id);
         self.reserved.remove(&id);
         self.instruments.aboard.remove(&id);
@@ -791,8 +792,11 @@ mod tests {
         let knew = server.take_knowledge();
         let knew_of = |id: i64| knew.files.iter().any(|f| f.ship_id == id) || knew.samples.iter().any(|r| r.ship_id == id);
         assert!(knew_of(DYING.0), "premise: it knew something");
+        // A parking orbit dies with the ship, or the wreck would save as parked and be flown.
+        server.parks.insert(CraftId(DYING.0), crate::park::Park::default());
         let at_t = until_collapse(&mut server, &mut wire).await.at_t;
         server.tick(&mut wire).await.unwrap();
+        assert!(!server.parks.contains_key(&CraftId(DYING.0)), "a wreck still parked");
         let arrives_t = at_t + APART_US as i64;
         assert!(server.now_t() < arrives_t - 4 * 3_600_000_000, "premise: its light is still well short of the watcher");
         assert!(server.take_destroyed().is_empty());
@@ -800,6 +804,7 @@ mod tests {
         let row = server.checkpoint().ships.into_iter().find(|s| s.ship_id == DYING.0).expect("the wreck is saved");
         assert_eq!(row.account, None);
         assert_eq!(crate::persist::decode(&row).unwrap().ended_s, Some(at_t as f64 * 1.0e-6));
+        assert!(!crate::persist::decode(&row).unwrap().parked);
 
         let mut restarted = restart(&server);
         drop(server);

@@ -186,6 +186,8 @@ pub enum Action {
     /// Give up a standing intercept, with no further corrections: the drive is cut and the ship
     /// keeps whatever velocity it has.
     BreakOff,
+    /// Hold a parking orbit, standing on a shard; offline, where nothing stands, flown once.
+    Park(Course),
     Emit(crate::emit_panel::Emission),
     /// Clear, Black or Auto with its thresholds. The shard refuses it while a switch runs.
     SetField(lc_proto::FieldMode),
@@ -273,15 +275,6 @@ pub enum Effect {
     /// Save a preset to the account, or delete it with no form.
     Keep { name: String, form: Option<lc_proto::Form> },
     Copy(String),
-}
-
-/// Where a scene says to stand, as the interface's own state.
-///
-/// `None` for a scene watched from the player's ship, which is what the camera has always done
-/// and is what every scene but one asks for.
-pub fn watching(scene: &lc_world::scenario::Scenario) -> Option<crate::ui::CameraPerspective> {
-    let id = lc_world::scenario::Scenario::craft_for(scene.watch)?;
-    Some(crate::ui::CameraPerspective::Pov(lc_proto::ShipId(id)))
 }
 
 /// Stops of exposure per keypress.
@@ -640,6 +633,8 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Send(lc_proto::Order::BreakOff));
             }
         }
+        Action::Park(_) if session.remote => effects.push(Effect::Send(lc_proto::Order::Park)),
+        Action::Park(course) => effects.extend(session.set_course(&course).map(|label| Effect::Notify(format!("course: {label}")))),
         Action::Emit(emission) => effects.extend(session.remote.then(|| Effect::Send(emission.order()))),
         Action::SetField(mode) => {
             let now = session.coordinate_time_s();
@@ -798,7 +793,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             // about. Set here rather than waiting for the shard to answer: the perspective is
             // the interface's own state and there is nothing to ask anybody.
             if let Some(scene) = lc_world::scenario::Scenario::named(&name) {
-                ui.perspective = watching(scene);
+                ui.perspective = crate::demos::watching(scene);
             }
             effects.push(Effect::Stage(name));
         }

@@ -69,3 +69,13 @@ fn watch_from(
         ui.label("Nobody else in sight.");
     }
 }
+
+/// Where a scene says to stand, as the interface's own state.
+///
+/// `None` for a scene watched from the player's ship, which is what the camera has always done
+/// and is what every scene but one asks for.
+pub fn watching(scene: &lc_world::scenario::Scenario) -> Option<crate::ui::CameraPerspective> {
+    let id = lc_world::scenario::Scenario::craft_for(scene.watch)?;
+    Some(crate::ui::CameraPerspective::Pov(lc_proto::ShipId(id)))
+}
+
