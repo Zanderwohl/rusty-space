@@ -618,3 +618,5 @@ async fn nothing_lights_the_drive_while_a_balanced_emit_runs() {
     assert_eq!(craft.fitting().unwrap().lit(), before.fitting().unwrap().lit());
     assert!(server.pursuits.is_empty());
 }
+
+mod drives;
