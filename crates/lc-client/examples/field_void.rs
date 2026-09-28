@@ -38,7 +38,7 @@ use em_render::body_surface_material::{
 use em_render::field_material::{
     BLACK, CLEAR, FieldMaterial, FieldMaterialPlugin, FieldUniform, RAMP, ramp_entry, ramp_kelvin,
 };
-use em_spectra::{Band, BandMapping, PerBand, blackbody, presets};
+use em_spectra::{BandMapping, PerBand, blackbody, presets};
 
 /// The field's limit, where it collapses: 30-the-field.md's anchors.
 const LIMIT_K: f64 = 4600.0;
