@@ -44,3 +44,30 @@ impl Craft {
         self.lits.retain(|lit: &Lit| lit.until_s > lit.from_s && lit.until_s >= since - HISTORY_S);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use glam::DVec3;
+
+    use crate::craft::{Craft, CraftId, Kind};
+    use crate::emit::{Ends, emit_w};
+    use crate::fitting::{Balance, Fitting, Lit};
+    use crate::form::presets::{Builtin, turned_fore};
+
+    /// Put out early, a balanced emit is still lit for light that left before, and is nothing
+    /// after; nothing lit is nothing.
+    #[test]
+    fn a_balanced_emit_is_remembered_once_it_is_out() {
+        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+        craft.fit(Some(Fitting::full(turned_fore(Builtin::Plate.form(), 1), Balance::DEFAULT, 0.0)));
+        assert_eq!(emit_w(&craft, 10.0), Ends::default());
+        craft.adjust(100.0, |f| f.light(Lit { from_s: 100.0, until_s: 1000.0, power_w: 2.0e18 }));
+        let both = Ends { fore_w: 1.0e18, aft_w: 1.0e18 };
+        assert_eq!(emit_w(&craft, 500.0), both);
+        craft.adjust(400.0, |f| f.darken());
+        assert!(craft.fitting().unwrap().lit().is_empty(), "premise: the fitting forgot it");
+        assert_eq!(emit_w(&craft, 300.0), both, "as its light left");
+        assert_eq!(emit_w(&craft, 500.0), Ends::default(), "put out at 400");
+        assert_eq!(emit_w(&craft, 50.0), Ends::default(), "before it lit");
+    }
+}
