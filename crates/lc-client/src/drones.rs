@@ -937,7 +937,7 @@ mod tests {
             world.query::<(&CraftSwarm, &Visibility)>().iter(world).map(|(_, v)| *v).collect::<Vec<_>>()
         };
         app.update();
-        assert!(visibility(&mut app).is_empty(), "spawned for a craft under a pixel");
+        assert!(visibility(&mut app).is_empty(), "spawned for a craft too small on screen");
         for (km, seen) in [(2.0, Visibility::Inherited), (20_000.0, Visibility::Hidden), (2.0, Visibility::Inherited)] {
             *app.world_mut().get_mut::<GlobalTransform>(root).unwrap() = at(km);
             app.update();
