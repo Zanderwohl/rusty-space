@@ -347,7 +347,7 @@ seeing it replayed as the light passes.
   where the ship was, as a blackbody of fixed area whose luminosity falls linearly to nothing over
   `collapse_afterglow_s`. So its temperature falls from the field's limit, about 4 600 K, as
   `T_limit (1 − τ/D)^¼`, and its area is `2 E_a / (σ T_limit⁴ D)`: about 3 × 10⁻¹⁵ m² per joule of
-  `E`, a sphere a few hundred meters across for a starting ship. `afterglow::temperature_k` is the
+  `E`: for a starting ship with empty storage, 1.4 × 10²⁶ J, a sphere 370 km across. `afterglow::temperature_k` is the
   cooling law on its own, for anything that draws one. The spike is a blackbody at
   `collapse_spike_k` in photometry too: its fluence lands in the one exposure it falls in.
 - **The afterglow is light and nothing else.** A neighbor's field holds at most about 6% of the
