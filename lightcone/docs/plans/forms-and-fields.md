@@ -451,7 +451,7 @@ graph LR
 
 ### H6 · Clear, Black and Auto
 
-- status: todo
+- status: active card "H6 · Clear, Black and Auto"
 - needs: H3
 - touches: `crates/lc-world/src/field.rs`, `crates/lc-server/src/field.rs`
 - read: 30 §Clear and Black, §Auto
@@ -478,7 +478,7 @@ graph LR
 
 ### H9 · A wreck outlives a restart
 
-- status: todo
+- status: active card "H9 · A wreck outlives a restart"
 - needs: H4
 - touches: `crates/lc-server/src/persist.rs`, `crates/lc-server/src/field.rs`
 - read: 30 §Collapse, §Open
