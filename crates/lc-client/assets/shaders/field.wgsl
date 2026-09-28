@@ -47,6 +47,7 @@ const RAMP: i32 = #{RAMP};
 const RAMP_MIN_K: f32 = f32(#{RAMP_MIN_K});
 const RAMP_MAX_K: f32 = f32(#{RAMP_MAX_K});
 const CLEAR_VEIL: f32 = f32(#{CLEAR_VEIL_PERCENT}) / 100.0;
+const DEBRIS_SPREAD: f32 = f32(#{DEBRIS_SPREAD});
 const TAU: f32 = 6.2831853;
 
 // The fill past which the field goes uneven; 30-the-field.md's 80%.
@@ -130,8 +131,10 @@ fn collapse_phase() -> vec3<f32> {
     }
     let flash_s = max(material.collapse.y, 1e-3);
     let cooled = clamp(since / max(material.collapse.z, 1e-3), 0.0, 1.0);
-    // Fast at first and coasting: debris is thrown, then only drifts.
-    let grow = 1.0 + (material.collapse.w - 1.0) * (1.0 - pow(1.0 - cooled, 3.0));
+    // Fast at first and coasting: debris is thrown, then only drifts. Mirrored by
+    // `field_material::debris_spread`.
+    let spread = 1.0 - pow(1.0 - clamp(DEBRIS_SPREAD * cooled, 0.0, 1.0), 3.0);
+    let grow = 1.0 + (material.collapse.w - 1.0) * spread;
     // Over in `flash_s` and not merely fading: a spike of ten million kelvin is so far over any
     // exposure that an exponential tail stays white for tens of flash lengths.
     let flash = pow(max(1.0 - since / flash_s, 0.0), 2.0);

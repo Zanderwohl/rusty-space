@@ -429,7 +429,8 @@ At 4 600 K it is the brightest thing in the frame, and uneven.
 ![A beam's hot spot, and a switch from Clear to Black half swept from the Mind](../images/field-beams-and-switch.png)
 
 **Collapse** is a white flash and a sphere of hot debris expanding and cooling through the colors
-of the afterglow over `collapse_afterglow_s`. Nearby fields brighten when the spike lands on them,
+of the afterglow over `collapse_afterglow_s`, reaching its full size in the first half of it
+(`DEBRIS_SPREAD`) and fading over the whole. Nearby fields brighten when the spike lands on them,
 each at its own retarded time, so a cascade is seen spreading at c. From a distance, a collapse is
 drawn by the photometry: a new point in the sky, as bright as [30-the-field.md](30-the-field.md)
 says.

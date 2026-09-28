@@ -77,6 +77,16 @@ pub fn ramp_at(spectrum: &[Vec4; RAMP], kelvin: f32) -> Vec3 {
 /// Clear field; its own glow is left physical. Black takes out all of it.
 pub const CLEAR_VEIL_PERCENT: u32 = 50;
 
+/// How many times faster than it cools the debris of a collapse spreads: it reaches its full size
+/// this fraction of the way through the afterglow, and cools and thins over all of it.
+pub const DEBRIS_SPREAD: u32 = 2;
+
+/// How far out the debris has got, `[0, 1]`, `cooled` of the way through the afterglow: fast at
+/// first and coasting, as thrown debris does. `field.wgsl` evaluates the same.
+pub fn debris_spread(cooled: f32) -> f32 {
+    1.0 - (1.0 - (DEBRIS_SPREAD as f32 * cooled).clamp(0.0, 1.0)).powi(3)
+}
+
 /// `field.wgsl`'s wall alpha: how much of what is behind it a wall absorbing `absorbs`, `black`
 /// of the way to Black, takes out seen at `mu`, the cosine off its normal. Its emissivity, a thin
 /// shell's path growing as `1 / mu`, veiled for Clear by [`CLEAR_VEIL_PERCENT`].
@@ -230,6 +240,7 @@ impl Material for FieldMaterial {
             ShaderDefVal::UInt("RAMP_MIN_K".into(), RAMP_MIN_K),
             ShaderDefVal::UInt("RAMP_MAX_K".into(), RAMP_MAX_K),
             ShaderDefVal::UInt("CLEAR_VEIL_PERCENT".into(), CLEAR_VEIL_PERCENT),
+            ShaderDefVal::UInt("DEBRIS_SPREAD".into(), DEBRIS_SPREAD),
         ];
         descriptor.vertex.shader_defs.extend(defs.iter().cloned());
         if let Some(fragment) = descriptor.fragment.as_mut() {
@@ -250,6 +261,15 @@ impl Plugin for FieldMaterialPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The debris is at its full size by `1 / DEBRIS_SPREAD` of the afterglow, and not before.
+    #[test]
+    fn the_debris_spreads_ahead_of_its_cooling() {
+        let full = 1.0 / DEBRIS_SPREAD as f32;
+        assert_eq!(debris_spread(full), 1.0);
+        assert!(debris_spread(0.9 * full) < 1.0);
+        assert!(debris_spread(0.5 * full) > 0.8, "thrown fast at first: {}", debris_spread(0.5 * full));
+    }
 
     #[test]
     fn the_ramp_spans_its_ends() {

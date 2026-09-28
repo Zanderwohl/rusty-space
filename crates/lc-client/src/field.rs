@@ -530,7 +530,7 @@ impl Wrecks {
             .filter(|w| w.shown_at.is_some() && w.radius_m > 0.0)
             .map(|w| {
                 let cooled = w.cooled(now_s, real_s, afterglow_s).clamp(0.0, 1.0);
-                let grow = 1.0 + f64::from(DEBRIS_REACH - 1.0) * (1.0 - (1.0 - cooled).powi(3));
+                let grow = 1.0 + f64::from((DEBRIS_REACH - 1.0) * em_render::field_material::debris_spread(cooled as f32));
                 let cover = (1.0 - cooled).sqrt();
                 let kelvin = limit_k * (1.0 - cooled).powf(0.6) + 300.0;
                 (w.at_ly, kelvin, w.radius_m * grow * cover.sqrt())
