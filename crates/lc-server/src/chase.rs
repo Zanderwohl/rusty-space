@@ -457,23 +457,29 @@ mod tests {
         server.admit(owner, hot, 0.0);
         server.admit(watcher, still(ShipId(2), DVec3::ZERO), 0.0);
         server.tick(&mut wire).await.unwrap();
-        let t_s = server.now_t() as f64 * 1.0e-6;
+        let vent_t = server.now_t();
+        let t_s = vent_t as f64 * 1.0e-6;
         let craft = server.fleet.get_mut(CraftId(1)).unwrap();
         let vent_j = 0.9 * craft.fitting().unwrap().field().heat_max_j();
         craft.adjust(t_s, |fitting| fitting.take_burst(Burst::Vent(vent_j)));
         let dying_k = craft.glow_at(t_s).unwrap().temperature_k;
-        craft.end(t_s + 1.0);
-        let ended_t = server.now_t() + 1_000_000;
+        let end_s = t_s + 20_000.0;
+        craft.settle(end_s);
+        craft.end(end_s);
 
+        // Between the vent's light landing and the end's, every statement shows the dying field.
+        let (from_t, until_t) = (vent_t + APART_US as i64, (end_s * 1.0e6) as i64 + APART_US as i64);
         let mut hot_seen = 0;
-        for _ in 0..200 {
+        while server.now_t() < until_t {
             server.tick(&mut wire).await.unwrap();
+            if server.now_t() <= from_t {
+                wire.take(watcher);
+                continue;
+            }
             for glow in glows(&wire.take(watcher), ShipId(1)) {
                 assert!(glow.temperature_k > 0.9 * dying_k, "shown {glow:?}, died at {dying_k} K");
+                assert_eq!(glow.shade, Shade::Clear, "the shade it died in");
                 hot_seen += 1;
-            }
-            if server.now_t() > ended_t + APART_US as i64 + 2_000_000_000 {
-                break;
             }
         }
         assert!(hot_seen > 0, "premise: its light before the end arrived");

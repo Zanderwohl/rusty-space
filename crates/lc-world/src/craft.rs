@@ -465,7 +465,6 @@ impl Craft {
         self.fitting = fitting;
         self.sync_length();
         self.glows.clear();
-        self.note_glow();
         let Some(fitting) = &self.fitting else {
             self.seen.clear();
             return;
