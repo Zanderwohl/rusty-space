@@ -22,15 +22,16 @@ use lc_world::signal::Transmitter;
 
 use crate::action::Action;
 use crate::app::{Game, Ui};
+use crate::field::Incoming;
 use crate::input::Requested;
 use crate::panels::{ask, duration, span_m};
 use crate::plume::Drawn;
 use crate::system::M_PER_LY;
-use crate::field::Incoming;
 use crate::uplink::Contact;
 
-/// What the server lights: 1 nm to the comms dish's 3 cm.
-pub const WAVELENGTH_M: (f64, f64) = (1.0e-9, 0.03);
+/// What the window sends. The order takes 1 nm to 3 cm, but wavelength buys only a tighter floor
+/// and costs nothing (31 §Open), so it is not offered until it is a trade.
+pub const WAVELENGTH_M: f64 = 1.0e-6;
 const SPREAD_MAX_RAD: f64 = std::f64::consts::FRAC_PI_2;
 const POWER_MIN_W: f64 = 1.0e6;
 const DURATION_S: (f64, f64) = (1.0, 3.0e7);
@@ -66,7 +67,7 @@ impl Default for Draft {
             aimed: Aimed::Reticle,
             apertures: Apertures::Both,
             power_w: 1.0e18,
-            wavelength_m: 1.0e-6,
+            wavelength_m: WAVELENGTH_M,
             spread_rad: 0.0,
             duration_s: 600.0,
             lead: Lead::Coasting,
@@ -660,13 +661,6 @@ pub(crate) fn emit(
         ui.label("power");
         let top_w = rating_w.max(POWER_MIN_W * 10.0);
         ui.add(egui::Slider::new(&mut draft.power_w, POWER_MIN_W..=top_w).logarithmic(true).custom_formatter(|w, _| watts(w)));
-        ui.end_row();
-        ui.label("wavelength");
-        ui.add(
-            egui::Slider::new(&mut draft.wavelength_m, WAVELENGTH_M.0..=WAVELENGTH_M.1)
-                .logarithmic(true)
-                .custom_formatter(|m, _| wavelength(m)),
-        );
         ui.end_row();
         ui.label("spread");
         let lit = preview(draft, &session.ship, now_s, None);

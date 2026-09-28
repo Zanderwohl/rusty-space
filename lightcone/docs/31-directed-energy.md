@@ -521,6 +521,9 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
   counted from the light it was last seen by, so a stale sighting shows a wider circle than a fresh
   one at the same range. A craft that drops out of sight stays the aim, and the window will not send
   at it.
+- **Wavelength is not offered.** The window sends 1 µm. The order still takes 1 nm to 3 cm, and
+  the server and the preview still honor it, but until wavelength costs something
+  ([Open](#open)) a choice of it is only ever "the shortest", so it is held back.
 - **The lead** is chosen beside the aim, coasting or burning, with what the target was last seen
   doing: burning at some g, measured from its last two statements while its plume was lit, or
   coasting. The window, the map and the server aim along one solve, `lc_world::emit::lead`.
