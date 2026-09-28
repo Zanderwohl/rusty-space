@@ -63,7 +63,7 @@ impl Hud {
         self.energy.as_ref().filter(|_| fit < Fit::Bare).map(|e| e.amount.as_str())
     }
 
-    /// The words beside the field bar. At [`Fit::Bare`] only a countdown, which is never dropped.
+    /// At [`Fit::Bare`], only a countdown.
     pub fn field_text(&self, fit: Fit) -> Option<&str> {
         let field = self.field.as_ref()?;
         if fit < Fit::Bare { Some(&field.text) } else { field.countdown.as_deref() }
@@ -165,15 +165,13 @@ const GLOW_BLEND_K: f64 = 200.0;
 /// Of the rated load, net heat flow too small to call a direction.
 const STEADY: f64 = 1.0e-9;
 
-/// Of `Q_max`, past which the bar pulses, as the field shader's glow goes uneven.
+/// Of `Q_max`, past which the bar pulses, as the field shader flickers.
 pub const PULSE_FILL: f64 = 0.8;
 
-/// How far ahead a collapse is counted down to, coordinate seconds: ninety days, a quarter of an
-/// hour at the design rate.
+/// Coordinate seconds: a quarter of an hour at the design rate.
 const COUNTDOWN_HORIZON_S: f64 = 90.0 * 86_400.0;
 
-/// The field readout: a bar of heat over its limit, and the words beside it. See
-/// `lightcone/docs/30-the-field.md` §The field bar.
+/// See `lightcone/docs/30-the-field.md` §The field bar.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Field {
     /// `Q / Q_max`, `[0, 1]`.
@@ -181,35 +179,30 @@ pub struct Field {
     /// Where heat is heading, `P_in τ / Q_max`, pinned at 1 past the limit.
     pub heading: f32,
     pub kelvin: f64,
-    /// The blackbody at [`Field::kelvin`] through the band mapping in force, at full brightness:
-    /// sRGB. The field shader gives the ship the same.
+    /// sRGB, at full brightness, through the band mapping in force, as the field shader colors the ship.
     pub blackbody: [f32; 3],
     /// How far from [`PULSE_FILL`] to the limit, `[0, 1]`.
     pub stress: f32,
     /// `3 240 K +1.20 ME/yr — collapse in 4:10`. No arrows: the default fonts have none.
     pub text: String,
-    /// `collapse in 4:10`, whenever one is scheduled.
     pub countdown: Option<String>,
     pub setting: Setting,
     /// What the Auto button asks for: the thresholds in force, or the balance's.
     pub auto: Thresholds,
-    /// What the field is doing that the lit button does not say: in Auto, the shade it is in, and
-    /// in any setting a switch under way.
+    /// In Auto the shade, and in any setting a switch under way: what the lit button does not say.
     pub shade: Option<String>,
-    /// A switch is under way, so the shard refuses another.
+    /// The shard refuses another switch meanwhile.
     pub switching: bool,
 }
 
 impl Field {
-    /// `blue` below the Draper point, the blackbody from [`GLOW_BLEND_K`] past it, and a blend
-    /// between: sRGB.
+    /// sRGB in and out.
     pub fn color(&self, blue: [f32; 3]) -> [f32; 3] {
         let glow = ((self.kelvin - DRAPER_K) / GLOW_BLEND_K).clamp(0.0, 1.0) as f32;
         std::array::from_fn(|c| (1.0 - glow) * blue[c] + glow * self.blackbody[c])
     }
 
-    /// Of full brightness, at `t_s` real seconds: one below [`PULSE_FILL`], and pulsing past it,
-    /// deeper and faster toward the limit.
+    /// Of full brightness, at `t_s` real seconds.
     pub fn brightness(&self, t_s: f64) -> f32 {
         if self.stress <= 0.0 {
             return 1.0;
@@ -220,7 +213,7 @@ impl Field {
     }
 }
 
-/// One of Auto's two markers on the field bar.
+/// Auto's thresholds, as markers on the field bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Marker {
     ClearAbove,
@@ -238,8 +231,7 @@ impl Marker {
         }
     }
 
-    /// `t` with this marker dragged to `fraction` of `Q_max`, to a hundredth, held short of the
-    /// other marker and the ends so both gaps stay open. Unchanged where there is no room.
+    /// To a hundredth, leaving both gaps open. Unchanged where there is no room.
     pub fn moved(self, t: Thresholds, fraction: f64) -> Thresholds {
         let (lo, hi) = match self {
             Marker::ClearAbove => (t.black_below + MARKER_GAP, 1.0 - MARKER_GAP),
@@ -257,8 +249,7 @@ impl Marker {
     }
 }
 
-/// What dropping `marker` at `fraction` of the bar asks for: `None` outside Auto, or where it
-/// lands on the threshold it had.
+/// `None` outside Auto, or where the drop changes nothing.
 pub fn drop_marker(field: &Field, marker: Marker, fraction: f64) -> Option<Action> {
     let Setting::Auto(t) = field.setting else { return None };
     let moved = marker.moved(t, fraction);
@@ -268,8 +259,8 @@ pub fn drop_marker(field: &Field, marker: Marker, fraction: f64) -> Option<Actio
 /// How long a dropped marker waits for the shard's answer before going back, real seconds.
 const AWAITING_S: f64 = 5.0;
 
-/// Thresholds a drop has ordered and the account does not yet hold, drawn in its place so the
-/// marker does not jump back while the order is in flight.
+/// Ordered and not yet in the account: drawn instead, so the marker does not jump back while the
+/// order is in flight.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dropped {
     pub thresholds: Thresholds,
@@ -278,18 +269,15 @@ pub struct Dropped {
 }
 
 impl Dropped {
-    /// Still shown at `now_s`: until the account agrees, the field leaves Auto, or the answer is
-    /// overdue, which is how a refusal puts the marker back.
+    /// A refusal shows as an overdue answer, which puts the marker back.
     pub fn holds(&self, field: &Field, now_s: f64) -> bool {
         matches!(field.setting, Setting::Auto(t) if t != self.thresholds) && now_s - self.at_s < AWAITING_S
     }
 }
 
-/// The ship's collapse, if one is due within [`COUNTDOWN_HORIZON_S`], solved as the shard solves it.
-///
-/// That walks a clone of the craft through the day-long starlight segments, so it is solved again
-/// only when something outside the account changes it, or the clock enters another segment.
-/// Settling along the account's own path, as a refit does every frame, changes nothing.
+/// [`lc_world::ahead::collapse_by`], which clones the craft and settles it a day at a time, so it is
+/// solved again only when the account is restated or the clock enters another segment. A refit
+/// settling every frame is neither.
 #[derive(Default)]
 pub struct Collapse {
     key: Option<Key>,
@@ -297,8 +285,7 @@ pub struct Collapse {
     solves: u32,
 }
 
-/// What a `Fitted`, an order or a neighbor restates, with heat and storage read at the segment's
-/// end so a settlement along the way does not move them.
+/// Heat and storage are read at the segment's end, where settling along the way does not move them.
 #[derive(Clone, Debug)]
 struct Key {
     segment_end_s: f64,
@@ -536,8 +523,7 @@ fn energy(session: &Session) -> Option<Energy> {
     Some(Energy { fraction, amount: line })
 }
 
-/// `collapse_s` is when the ship's field collapses, if one is scheduled; `rate` the clock's
-/// multiplier, for a countdown in real time.
+/// `rate` is the clock multiplier, for a countdown in real time.
 fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field> {
     let now = session.coordinate_time_s();
     let ship = &session.ship;
@@ -591,8 +577,7 @@ fn shade_name(mode: Mode) -> &'static str {
     }
 }
 
-/// A blackbody through `mapping`, its brightest channel at one: sRGB. Black where the mapping
-/// sees none of it.
+/// sRGB, brightest channel at one. Black where the mapping sees none of it.
 fn glow(mapping: &em_spectra::BandMapping, kelvin: f64) -> [f32; 3] {
     let linear = mapping.apply_f64(&blackbody::per_band(kelvin));
     let peak = linear.into_iter().fold(0.0, f64::max);
@@ -617,8 +602,7 @@ fn grouped(value: f64) -> String {
     out
 }
 
-/// `left_s` coordinate seconds as the real time they take at `rate`: `4:10`, or `1:04:10`. On a
-/// stopped clock, in days of coordinate time.
+/// `4:10` of real time, or days on a stopped clock.
 fn countdown(left_s: f64, rate: f64) -> String {
     let left_s = left_s.max(0.0);
     if rate <= 0.0 {
@@ -843,7 +827,6 @@ mod tests {
         }
     }
 
-    /// The first dip's time, or `None` for a bar that never dims.
     fn first_dip_s(field: &Field) -> Option<f64> {
         let samples: Vec<f32> = (0..2_000).map(|i| field.brightness(f64::from(i) * 1.0e-3)).collect();
         let dips = samples.windows(3).position(|w| w[1] < 1.0 && w[1] <= w[0] && w[1] <= w[2])?;
@@ -987,8 +970,7 @@ mod tests {
         assert!(!dropped.holds(&black, 10.5), "no markers outside Auto");
     }
 
-    /// One `Collapse` across frames: settling along the account's own path is not a change, and a
-    /// restated account is.
+    /// Settling along the account's own path is not a change; a restated account is.
     #[test]
     fn the_countdown_is_solved_again_only_when_the_account_changes() {
         use lc_world::fitting::{Account, Balance, Posture};

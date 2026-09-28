@@ -15,7 +15,7 @@ pub const WIDTH: f32 = 80.0;
 /// readout comes or goes: a dropped marker's thresholds would be lost with it.
 const ID: &str = "field bar";
 
-/// Draws the bar and returns what was asked of it.
+/// Returns what was asked of it.
 pub fn draw(ui: &mut egui::Ui, field: &hud::Field, text: Option<&str>) -> Vec<Action> {
     let mut asked = Vec::new();
     let auto = matches!(field.setting, Setting::Auto(_));
@@ -56,8 +56,7 @@ pub fn draw(ui: &mut egui::Ui, field: &hud::Field, text: Option<&str>) -> Vec<Ac
             let hit = egui::Rect::from_center_size(egui::pos2(x_of(at), rect.center().y), egui::vec2(10.0, rect.height()));
             let grip = ui.interact(hit, egui::Id::new(ID).with(marker as u8), egui::Sense::drag());
             let dropped_at = |pos: egui::Pos2| f64::from((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-            // Drawn where the pointer is on the release frame too: `dragged` is already false there,
-            // and the old threshold would show for a frame before the held one takes over.
+            // `dragged` is false on the release frame, which drew the old threshold for a frame.
             let pointer = grip.interact_pointer_pos().filter(|_| grip.dragged() || grip.drag_stopped());
             let shown = pointer.map_or(at, |pos| marker.of(&marker.moved(thresholds, dropped_at(pos))));
             notch(&painter, marker, x_of(shown), rect, ink);
@@ -145,8 +144,7 @@ mod tests {
         Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Default::default() }
     }
 
-    /// The notch goes where it is dropped and stays there on every frame after, the release frame
-    /// included, until the shard's answer is overdue.
+    /// Breaks if any frame from the release on draws the old threshold before the answer is overdue.
     #[test]
     fn a_dropped_marker_never_shows_its_old_place_while_in_flight() {
         let ctx = egui::Context::default();
