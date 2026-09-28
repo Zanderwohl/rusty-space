@@ -239,12 +239,20 @@ impl Marker {
     }
 
     /// `t` with this marker dragged to `fraction` of `Q_max`, to a hundredth, held short of the
-    /// other marker and the ends so both gaps stay open.
+    /// other marker and the ends so both gaps stay open. Unchanged where there is no room.
     pub fn moved(self, t: Thresholds, fraction: f64) -> Thresholds {
-        let at = (fraction * 100.0).round() / 100.0;
+        let (lo, hi) = match self {
+            Marker::ClearAbove => (t.black_below + MARKER_GAP, 1.0 - MARKER_GAP),
+            Marker::BlackBelow => (MARKER_GAP, t.clear_above - MARKER_GAP),
+        };
+        if lo > hi {
+            return t;
+        }
+        // Rounded after the clamp: at most half a hundredth off a bound, so a gap stays open.
+        let at = (fraction.clamp(lo, hi) * 100.0).round() / 100.0;
         match self {
-            Marker::ClearAbove => Thresholds { clear_above: at.clamp(t.black_below + MARKER_GAP, 1.0), ..t },
-            Marker::BlackBelow => Thresholds { black_below: at.clamp(MARKER_GAP, t.clear_above - MARKER_GAP), ..t },
+            Marker::ClearAbove => Thresholds { clear_above: at, ..t },
+            Marker::BlackBelow => Thresholds { black_below: at, ..t },
         }
     }
 }
@@ -260,21 +268,67 @@ pub fn drop_marker(field: &Field, marker: Marker, fraction: f64) -> Option<Actio
 /// The ship's collapse, if one is due within [`COUNTDOWN_HORIZON_S`], solved as the shard solves it.
 ///
 /// That walks a clone of the craft through the day-long starlight segments, so it is solved again
-/// only when the account, the motive or the segment the clock is in changes.
+/// only when something outside the account changes it, or the clock enters another segment.
+/// Settling along the account's own path, as a refit does every frame, changes nothing.
 #[derive(Default)]
 pub struct Collapse {
-    key: Option<(Fitting, Motive, f64)>,
+    key: Option<Key>,
     at_s: Option<f64>,
+    solves: u32,
+}
+
+/// What a `Fitted`, an order or a neighbor restates, with heat and storage read at the segment's
+/// end so a settlement along the way does not move them.
+#[derive(Clone, Debug)]
+struct Key {
+    segment_end_s: f64,
+    motive: Motive,
+    form: lc_world::form::Form,
+    posture: lc_world::fitting::Posture,
+    refit: Option<lc_world::refit::rounds::Plan>,
+    lit_w: f64,
+    heat_j: f64,
+    stored_j: f64,
+}
+
+/// Leap and steps agree to about a part in a billion; a restated account differs by far more.
+const SAME_ACCOUNT: f64 = 1.0e-6;
+
+impl Key {
+    fn of(ship: &Craft, fitting: &Fitting, segment_end_s: f64) -> Key {
+        Key {
+            segment_end_s,
+            motive: ship.motion.motive.clone(),
+            form: fitting.form().clone(),
+            posture: *fitting.posture(),
+            refit: fitting.refit().cloned(),
+            lit_w: fitting.lit_w(),
+            heat_j: fitting.heat_j_at(&ship.motion, segment_end_s),
+            stored_j: fitting.stored_j_at(&ship.motion, segment_end_s),
+        }
+    }
+
+    fn holds(&self, ship: &Craft, fitting: &Fitting, segment_end_s: f64) -> bool {
+        let near = |a: f64, b: f64| (a - b).abs() <= SAME_ACCOUNT * a.abs().max(b.abs());
+        self.segment_end_s == segment_end_s
+            && self.motive == ship.motion.motive
+            && &self.form == fitting.form()
+            && &self.posture == fitting.posture()
+            && self.refit.as_ref() == fitting.refit()
+            && self.lit_w == fitting.lit_w()
+            && near(self.heat_j, fitting.heat_j_at(&ship.motion, segment_end_s))
+            && near(self.stored_j, fitting.stored_j_at(&ship.motion, segment_end_s))
+    }
 }
 
 impl Collapse {
     pub fn of(&mut self, ship: &Craft, now_s: f64) -> Option<f64> {
         let fitting = ship.fitting()?;
         let segment_end_s = lc_world::solar::segment_end(now_s);
-        let key = (fitting.clone(), ship.motion.motive.clone(), segment_end_s);
-        if self.key.as_ref() != Some(&key) {
+        if !self.key.as_ref().is_some_and(|key| key.holds(ship, fitting, segment_end_s)) {
             self.at_s = lc_world::ahead::collapse_by(ship, segment_end_s + COUNTDOWN_HORIZON_S);
-            self.key = Some(key);
+            self.key = Some(Key::of(ship, fitting, segment_end_s));
+            self.solves += 1;
         }
         self.at_s
     }
@@ -736,8 +790,7 @@ mod tests {
     fn a_cold_ship_is_the_palette_blue() {
         let (ui, s) = fixture();
         assert!(lines(&s, &ui, &mut Collapse::default()).field.is_none(), "an unfitted ship has no field bar");
-        let (ui, s) = heated(0.0, 0.0, lc_world::fitting::Posture::BLACK);
-        let mut s = s;
+        let (ui, mut s) = fixture();
         let b = lc_world::fitting::Balance::DEFAULT;
         s.ship.fit(Some(Fitting::full(lc_world::form::Form::starting(), b, s.coordinate_time_s())));
         let field = field_of(&s, &ui);
@@ -746,7 +799,7 @@ mod tests {
         assert_eq!(field.brightness(0.37), 1.0);
     }
 
-    /// 30's table: the starting ship full at 0.1 AU, about 3 240 K, is orange.
+    /// The starting ship at 0.3 of `Q_max`, about 3 400 K, is orange.
     #[test]
     fn a_hot_ship_is_the_blackbody_past_the_draper_point() {
         let (ui, s) = heated(0.3, 0.0, lc_world::fitting::Posture::BLACK);
@@ -884,6 +937,46 @@ mod tests {
         s.remote = true;
         let refused = apply(Action::SetField(lc_proto::FieldMode::Black), &mut ui, &mut s);
         assert_eq!(refused, vec![crate::action::Effect::Notify("the field is already switching".into())]);
+    }
+
+    #[test]
+    fn a_marker_with_no_room_stays_put_and_never_reaches_collapse() {
+        let at = |clear_above, black_below| Thresholds { clear_above, black_below, refill_below: 0.95 };
+        let tight = at(0.03, 0.01);
+        assert!(tight.is_valid(), "premise: the shard takes it");
+        assert_eq!(Marker::BlackBelow.moved(tight, 0.5), tight);
+        let high = at(0.99, 0.985);
+        assert!(high.is_valid());
+        assert_eq!(Marker::ClearAbove.moved(high, 0.2), high);
+        let top = Marker::ClearAbove.moved(at(0.5, 0.3), 1.0);
+        assert_eq!(top.clear_above, 0.98, "held off collapse");
+        let floor = Marker::ClearAbove.moved(at(0.5, 0.07), 0.0);
+        assert_eq!(floor.clear_above, 0.09, "on a hundredth");
+    }
+
+    /// One `Collapse` across frames: settling along the account's own path is not a change, and a
+    /// restated account is.
+    #[test]
+    fn the_countdown_is_solved_again_only_when_the_account_changes() {
+        use lc_world::fitting::{Account, Balance, Posture};
+        let (_, mut s) = heated(0.3, 0.0, Posture::BLACK);
+        let now = s.coordinate_time_s();
+        let mut collapse = Collapse::default();
+        assert_eq!(collapse.of(&s.ship, now), None);
+        for k in 1..=5 {
+            let t = now + f64::from(k) * 100.0;
+            s.ship.settle(t);
+            assert_eq!(collapse.of(&s.ship, t), None);
+        }
+        assert_eq!(collapse.solves, 1, "settling is not a change");
+
+        let t = now + 600.0;
+        let fitting = s.ship.fitting().unwrap();
+        let hot = Account { heat_j: 0.99 * fitting.field().heat_max_j(), starlight_w: 50.0 * rated_w(), ..fitting.account() };
+        s.ship.fit(Some(Fitting::from_account(&hot, Balance::DEFAULT)));
+        s.ship.set_starlight_w(50.0 * rated_w());
+        assert!(collapse.of(&s.ship, t).is_some(), "a restated account counts down");
+        assert_eq!(collapse.solves, 2);
     }
 
     #[test]

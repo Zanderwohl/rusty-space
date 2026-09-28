@@ -126,7 +126,7 @@ pub fn hud(
             if let Some(energy) = &lines.energy {
                 ui.separator();
                 ui.label("ENERGY");
-                let bar = ui.add(egui::ProgressBar::new(energy.fraction).desired_width(80.0));
+                let bar = ui.add(egui::ProgressBar::new(energy.fraction).desired_width(crate::field_bar::WIDTH));
                 match lines.energy_amount(fit) {
                     Some(amount) => {
                         ui.label(amount);
