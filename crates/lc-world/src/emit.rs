@@ -13,6 +13,7 @@ use glam::DVec3;
 
 use crate::boost::gamma_of;
 use crate::escort::Burning;
+use crate::pursuit::Sighting;
 use crate::fitting::Balance;
 use crate::flight::{Aim, C_M_S, G0, JULIAN_YEAR_S};
 use crate::signal::cone_solid_angle_sr;
@@ -78,6 +79,57 @@ pub fn lead_uncertainty_m(accel_m_s2: f64, blind_s: f64) -> f64 {
     let x = a * blind_s / C_M_S;
     a * blind_s * blind_s / ((1.0 + x * x).sqrt() + 1.0)
 }
+
+/// Where a beam sent at `send_s` from `from_ly` meets a craft last `seen`, taking it to hold the
+/// proper acceleration `accel`, light-seconds per second squared, from that sighting on. Zero is
+/// coasting, [`crate::signal::aim_at`]'s straight line.
+///
+/// The advanced-time solve, `t − send_s = |x(t) − from|`, by bisection: its left side gains on
+/// its right at `c − v` or faster, so the root is single. `None` for a target that outruns light
+/// to the end of the bracket.
+pub fn lead(from_ly: DVec3, send_s: f64, seen: &Sighting, accel: DVec3) -> Option<Led> {
+    let burning = Burning { position_ly: seen.position_ly, beta: seen.beta, accel, since_t: seen.emitted_s };
+    let at = |t: f64| match accel == DVec3::ZERO {
+        true => seen.reckoned_at(t),
+        false => burning.at(t).0,
+    };
+    let behind = |t: f64| (t - send_s) - (at(t) - from_ly).length() * JULIAN_YEAR_S;
+    let mut span = ((at(send_s) - from_ly).length() * JULIAN_YEAR_S).max(1.0);
+    let mut hi = send_s + span;
+    for _ in 0..LEAD_DOUBLINGS {
+        if behind(hi) >= 0.0 {
+            break;
+        }
+        span *= 2.0;
+        hi = send_s + span;
+    }
+    if behind(hi) < 0.0 {
+        return None;
+    }
+    let mut lo = send_s;
+    for _ in 0..LEAD_STEPS {
+        let mid = 0.5 * (lo + hi);
+        if behind(mid) < 0.0 { lo = mid } else { hi = mid }
+    }
+    let arrive_s = 0.5 * (lo + hi);
+    let at_ly = at(arrive_s);
+    Some(Led { axis: (at_ly - from_ly).try_normalize()?, arrive_s, at_ly })
+}
+
+/// Where [`lead`] puts a target when the beam arrives.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Led {
+    /// Unit, world axes.
+    pub axis: DVec3,
+    /// Coordinate seconds.
+    pub arrive_s: f64,
+    pub at_ly: DVec3,
+}
+
+/// Fixed, as the escort's inversions are, so every machine lands on the same bits.
+const LEAD_STEPS: usize = 96;
+/// Thirty doublings of the light-time to the sighting: a target receding at all but `c`.
+const LEAD_DOUBLINGS: usize = 30;
 
 /// How long a target is unwatched when the freshest sighting of it is aimed at: its light's
 /// flight here plus the beam's flight back, seconds.
@@ -230,6 +282,39 @@ mod tests {
 
     const AU_M: f64 = 1.495_978_707e11;
     const LY_M: f64 = C_M_S * JULIAN_YEAR_S;
+
+    fn seen(at_ls: DVec3, beta: DVec3, emitted_s: f64) -> Sighting {
+        Sighting { target: crate::motion::ShipId(7), position_ly: at_ls / JULIAN_YEAR_S, beta, length_m: 500.0, emitted_s }
+    }
+
+    /// Coasting, the lead is radio's: the same advanced-time solve in its own units.
+    #[test]
+    fn a_coasting_lead_is_signals() {
+        let sighting = seen(DVec3::new(400.0, 300.0, 20.0), DVec3::new(-1.0e-3, 4.0e-3, 0.0), 90.0);
+        let led = lead(DVec3::ZERO, 100.0, &sighting, DVec3::ZERO).unwrap();
+        let us = |ly: DVec3| ly * JULIAN_YEAR_S * 1.0e6;
+        let radio = crate::signal::aim_at(DVec3::ZERO, 100.0e6, us(sighting.position_ly), sighting.beta, 90.0e6).unwrap();
+        assert!(led.axis.distance(radio) < 1.0e-9, "{} against {radio}", led.axis);
+        let flight_s = led.at_ly.length() * JULIAN_YEAR_S;
+        assert!((led.arrive_s - 100.0 - flight_s).abs() < 1.0e-6, "the light takes {flight_s} s");
+    }
+
+    /// Held burning, a target is where its burn has carried it by the beam's arrival: `½ a T²`
+    /// further along than coasting, `T` from the light it was seen by.
+    #[test]
+    fn a_burning_lead_follows_the_burn() {
+        let sighting = seen(DVec3::new(10.0, 0.0, 0.0), DVec3::ZERO, 90.0);
+        let accel = DVec3::Y * 5.0 * G0 / C_M_S;
+        let coasting = lead(DVec3::ZERO, 100.0, &sighting, DVec3::ZERO).unwrap();
+        let burning = lead(DVec3::ZERO, 100.0, &sighting, accel).unwrap();
+        let t = burning.arrive_s - sighting.emitted_s;
+        let off_m = (burning.at_ly - coasting.at_ly).length() * LY_M;
+        let half_a_t2 = 0.5 * 5.0 * G0 * t * t;
+        assert!((off_m / half_a_t2 - 1.0).abs() < 1.0e-3, "{off_m} against {half_a_t2}");
+        assert!(burning.axis.y > 0.0, "led along the burn");
+        let flight_s = burning.at_ly.length() * JULIAN_YEAR_S;
+        assert!((burning.arrive_s - 100.0 - flight_s).abs() < 1.0e-6);
+    }
 
     #[test]
     fn the_starting_drive_section_is_rated_at_its_five_g() {
