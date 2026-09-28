@@ -806,8 +806,13 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
         }
         Motive::Boosting(boost) => {
             state.clock_s = state.crossing_clock_base_s + boost.proper_s(now_s);
+            // Ballistic from here, as a cut drive leaves a ship.
             if boost.has_ended(now_s) {
-                state.motive = Motive::Drifting { from_ly: state.position_ly, since_t: now_s };
+                let velocity = state.beta * crate::flight::C_M_S;
+                state.motive = match system.and_then(|s| Coast::from_state(s, state.position_ly, velocity, now_s)) {
+                    Some(arc) => Motive::Falling(arc),
+                    None => Motive::Drifting { from_ly: state.position_ly, since_t: now_s },
+                };
             }
         }
         Motive::Falling(_) if system.is_none() => {

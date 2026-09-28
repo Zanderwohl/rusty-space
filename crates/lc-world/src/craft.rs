@@ -750,6 +750,17 @@ impl Craft {
         });
     }
 
+    /// Pushed by an emission from `now_s`, committing what it will spend.
+    pub fn boost(&mut self, boost: crate::emit::Boost, now_s: f64) {
+        self.remembering(now_s, |craft| {
+            let (at, beta) = motion::state_at(&craft.motion, craft.system.as_deref(), now_s)
+                .unwrap_or((craft.motion.position_ly, craft.motion.beta));
+            craft.motion.position_ly = at;
+            craft.motion.beta = beta;
+            craft.motion.begin_boosting(boost);
+        });
+    }
+
     /// Holding `waypoint` in `system`, without flying there. The stretch before is marked as
     /// ending in a jump; see [`lc_spacetime::Worldline::breaks`]. `None`, with nothing
     /// changed, when the waypoint cannot be placed.
