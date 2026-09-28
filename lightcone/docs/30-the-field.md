@@ -523,9 +523,10 @@ A second bar in the top header, beside the energy bar and built the same way: `H
 - **The text beside it**: temperature, net heat flow, and **a countdown whenever a collapse is
   scheduled** — `3 240 K +1.2 ME/yr — collapse in 4:10`. That is the one number a player must never
   have to compute.
-- **Three buttons at the bar's left: Black, Clear and Auto.** The chosen one is lit. In Auto, the mode
-  the field is actually in shows as a small `CLEAR` or `BLACK` beside it, and a switch under way reads
-  `» BLACK`.
+- **Three buttons at the bar's left: Black, Clear and Auto.** The chosen one is lit, and the shade the
+  field is actually in has its button underlined, which in Auto says what the thermostat chose. A
+  switch under way reads `» BLACK` beside them, the underline staying on the old shade until it is
+  done.
 - **In Auto, two markers on the bar** show the thresholds. Dragging one sends a new order.
 - **Color is never the only signal.** The countdown and the numbers say everything the hue does, for
   a player who cannot tell red from orange.
@@ -552,7 +553,8 @@ puts a countdown in the text.
 - **A dropped marker stays where it was dropped** while the order is in flight, until the account
   agrees. Five seconds without that, which is how a refusal reads, puts it back.
 - **A switch under way reads `» BLACK` in any setting**, not only Auto: a day is long enough to
-  wonder whether the order took.
+  wonder whether the order took. The shade is an underline rather than a word, which saves the
+  header a word it has no room for.
 - **A marker lands on a hundredth**, held two hundredths from the other marker and from either end,
   so both gaps stay open and Clear never waits for collapse itself. With no room, a drag moves
   nothing. `auto_refill_below` is storage, not heat, and is not on the bar; it travels

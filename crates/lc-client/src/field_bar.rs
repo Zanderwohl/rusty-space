@@ -3,6 +3,7 @@
 
 use bevy_egui::egui;
 use lc_proto::FieldMode;
+use lc_world::field::Mode;
 use lc_world::fitting::Setting;
 
 use crate::action::Action;
@@ -19,18 +20,21 @@ const ID: &str = "field bar";
 pub fn draw(ui: &mut egui::Ui, field: &hud::Field, text: Option<&str>) -> Vec<Action> {
     let mut asked = Vec::new();
     let auto = matches!(field.setting, Setting::Auto(_));
+    // Lit is what was chosen; underlined is what the field is in, which in Auto is the thermostat's.
     let buttons = [
-        ("Black", FieldMode::Black, field.setting == Setting::Black),
-        ("Clear", FieldMode::Clear, field.setting == Setting::Clear),
-        ("Auto", Setting::Auto(field.auto).into(), auto),
+        ("Black", FieldMode::Black, field.setting == Setting::Black, field.shade == Mode::Black),
+        ("Clear", FieldMode::Clear, field.setting == Setting::Clear, field.shade == Mode::Clear),
+        ("Auto", Setting::Auto(field.auto).into(), auto, false),
     ];
-    for (label, mode, on) in buttons {
-        if ui.selectable_label(on, label).clicked() && !on {
+    for (label, mode, on, underlined) in buttons {
+        let text = egui::RichText::new(label);
+        let text = if underlined { text.underline() } else { text };
+        if ui.selectable_label(on, text).clicked() && !on {
             asked.push(Action::SetField(mode));
         }
     }
-    if let Some(shade) = &field.shade {
-        ui.small(shade);
+    if let Some(switch) = &field.switch {
+        ui.small(switch);
     }
 
     let blue = ui.visuals().selection.bg_fill;
@@ -64,7 +68,7 @@ pub fn draw(ui: &mut egui::Ui, field: &hud::Field, text: Option<&str>) -> Vec<Ac
                 && let Some(action) = pointer.and_then(|pos| hud::drop_marker(&shown_field, marker, dropped_at(pos)))
             {
                 // A switch under way refuses it before it is sent, so there is nothing to wait for.
-                if let (false, Action::SetField(mode)) = (field.switching, &action)
+                if let (false, Action::SetField(mode)) = (field.switch.is_some(), &action)
                     && let Setting::Auto(ordered) = Setting::from(*mode)
                 {
                     ui.data_mut(|d| d.insert_temp(pending, hud::Dropped { thresholds: ordered, at_s: now_s }));
@@ -114,8 +118,8 @@ mod tests {
             countdown: None,
             setting: Setting::Auto(Thresholds::of(&Balance::DEFAULT)),
             auto: Thresholds::of(&Balance::DEFAULT),
-            shade: Some("CLEAR".into()),
-            switching: false,
+            shade: Mode::Clear,
+            switch: None,
         }
     }
 

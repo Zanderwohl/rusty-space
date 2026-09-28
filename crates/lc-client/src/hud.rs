@@ -189,10 +189,10 @@ pub struct Field {
     pub setting: Setting,
     /// What the Auto button asks for: the thresholds in force, or the balance's.
     pub auto: Thresholds,
-    /// In Auto the shade, and in any setting a switch under way: what the lit button does not say.
-    pub shade: Option<String>,
-    /// The shard refuses another switch meanwhile.
-    pub switching: bool,
+    /// What the field is in, which its button underlines: in Auto, the thermostat's choice.
+    pub shade: Mode,
+    /// `» BLACK` while a switch is under way, which the shard refuses another during.
+    pub switch: Option<String>,
 }
 
 impl Field {
@@ -546,11 +546,6 @@ fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field>
     }
     let posture = fitting.posture();
     let switch = posture.switching_at(now);
-    let shade = match (switch, posture.setting) {
-        (Some(s), _) => Some(format!("» {}", shade_name(s.to))),
-        (None, Setting::Auto(_)) => Some(shade_name(posture.shade_at(now)).to_string()),
-        (None, _) => None,
-    };
     let fraction = (heat_j / max_j).clamp(0.0, 1.0);
     Some(Field {
         fraction: fraction as f32,
@@ -565,8 +560,8 @@ fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field>
             Setting::Auto(t) => t,
             _ => Thresholds::of(fitting.balance()),
         },
-        shade,
-        switching: switch.is_some(),
+        shade: posture.shade_at(now),
+        switch: switch.map(|s| format!("» {}", shade_name(s.to))),
     })
 }
 
@@ -896,17 +891,17 @@ mod tests {
         let auto = Posture::new_ship(&b);
         let (ui, s) = heated(0.1, 0.0, auto);
         let field = field_of(&s, &ui);
-        assert_eq!((field.shade.as_deref(), field.switching), (Some("CLEAR"), false));
+        assert_eq!((field.shade, field.switch), (Mode::Clear, None));
         assert_eq!(field.setting, Setting::Auto(Thresholds::of(&b)));
 
         let done_s = s.coordinate_time_s() + 0.5 * b.field_switch_s;
         let (ui, s) = heated(0.1, 0.0, Posture { switch: Some(Switch { to: Mode::Black, done_s }), ..auto });
         let field = field_of(&s, &ui);
-        assert_eq!((field.shade.as_deref(), field.switching), (Some("» BLACK"), true));
+        assert_eq!((field.shade, field.switch.as_deref()), (Mode::Clear, Some("» BLACK")), "Clear until done");
 
         let (ui, s) = heated(0.1, 0.0, Posture::BLACK);
         let field = field_of(&s, &ui);
-        assert_eq!((field.shade, field.auto), (None, Thresholds::of(&b)), "the lit button says it");
+        assert_eq!((field.shade, field.switch, field.auto), (Mode::Black, None, Thresholds::of(&b)));
     }
 
     #[test]
