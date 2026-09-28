@@ -521,3 +521,28 @@ async fn a_beam_landing_across_a_restart_stays_on_until_its_end_arrives() {
     assert_eq!(told, vec![(lit.beam, 0.0, (out_t as f64 + at.length()).ceil() as i64)]);
     assert_eq!(lit_w(&restarted, 2), 0.0);
 }
+
+/// Cutting the drive puts out whatever is lit, well before its end: the receiver is told when the
+/// light of the cut arrives, and the draw stops there.
+#[tokio::test]
+async fn cutting_the_drive_puts_a_beam_out_early() {
+    let at = DVec3::X * LIGHT_SECOND_US;
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
+    server.admit(ClientId(2), ship(2, at, Form::starting()), 0.0);
+    let mut wire = Loopback::new();
+    wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Both, 1.0e17, 1.0e-9, 0.0, 10.0 * HOUR_S));
+    server.tick(&mut wire).await.unwrap();
+    server.tick(&mut wire).await.unwrap();
+    assert!(lit_w(&server, 2) > 0.0, "premise: landed");
+    wire.client_says(EMITTING, Inbound::Act(Intent { ship_id: EMITTER, order: Order::CutDrive, issued_at_client_t: i64::MAX }));
+    server.tick(&mut wire).await.unwrap();
+    let cut_t = server.now_t();
+    server.tick(&mut wire).await.unwrap();
+    let told = illuminated(&wire.take(ClientId(2)));
+    assert!(matches!(told[..], [(_, on, _), (_, 0.0, off)] if on > 0.0 && off == (cut_t as f64 + at.length()).ceil() as i64), "{told:?}");
+    assert_eq!(lit_w(&server, 2), 0.0);
+    let craft = server.ship(EMITTER).unwrap();
+    assert!(craft.fitting().unwrap().lit().is_empty() && !server.emissions.is_emitting(CraftId(1)));
+    assert_eq!(craft.fitting().unwrap().committed_j_at(&craft.motion, now_s(&server)), 0.0);
+}

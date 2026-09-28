@@ -279,9 +279,10 @@ impl<J: Journal> Server<J> {
     /// what is already on its way.
     pub(crate) fn put_out(&mut self, id: CraftId, at: i64, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
         let Some(lit) = self.emissions.emitting.get_mut(&id) else { return };
+        // A burn still coming about never lit.
+        lit.retain(|lighting| lighting.beam.is_some() || lighting.lights_t < at);
         for lighting in lit.iter_mut() {
             lighting.out_t = lighting.out_t.min(at);
-            lighting.lights_t = lighting.lights_t.min(lighting.out_t);
         }
         if let Some(craft) = self.fleet.get_mut(id) {
             craft.adjust(at as f64 * 1.0e-6, |fitting| fitting.darken());

@@ -23,6 +23,7 @@ use crate::navigation::Waypoint;
 use crate::seen::{History, Refitting, Seen, running};
 use crate::solar;
 use crate::system::LocalSystem;
+mod emit;
 mod field;
 
 /// A craft, by the identifier whoever owns it uses. Opaque here.
@@ -747,17 +748,6 @@ impl Craft {
             craft.motion.beta = beta;
             craft.motion.set_adrift(now_s);
             craft.solve_patch(now_s);
-        });
-    }
-
-    /// Pushed by an emission from `now_s`, committing what it will spend.
-    pub fn boost(&mut self, boost: crate::emit::Boost, now_s: f64) {
-        self.remembering(now_s, |craft| {
-            let (at, beta) = motion::state_at(&craft.motion, craft.system.as_deref(), now_s)
-                .unwrap_or((craft.motion.position_ly, craft.motion.beta));
-            craft.motion.position_ly = at;
-            craft.motion.beta = beta;
-            craft.motion.begin_boosting(boost);
         });
     }
 

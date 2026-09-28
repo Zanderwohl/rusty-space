@@ -100,6 +100,7 @@ graph LR
   E4["E4 Exhaust heats neighbors"]
   E5["E5 Courteous maneuvering"]
   E6["E6 The drive's own heat"]
+  E7["E7 A beam restated as it goes"]
   R1["R1 Placeholder parts"]
   R2["R2 Mesher, in a void"]
   R3["R3 Hull material, in a void"]
@@ -178,6 +179,7 @@ graph LR
   E1 --> E5
   K3 --> E5
   E2 --> E6
+  E3 --> E7
   F2 --> R1
   F5 --> R1
   F3 --> R2
@@ -236,6 +238,7 @@ graph LR
   H10 --> X1
   E4 --> X1
   E6 --> X1
+  E7 --> X1
   R12 --> X1
   C3 --> X1
   C4 --> X1
@@ -523,7 +526,7 @@ graph LR
 
 - status: active card "E3 · Emit"
 - needs: E1, E2, S1, H5
-- touches: `crates/lc-world/src/emit.rs`, `crates/lc-world/src/fitting/heat.rs` (an emit's power in `Fitting::emitted_w`, E2's heat-first draw), `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`, `crates/lc-server/src/field.rs` (H5's landings), `crates/lc-server/src/persist.rs`
+- touches: `crates/lc-world/src/emit.rs`, `crates/lc-world/src/fitting/heat.rs` (an emit's power in `Fitting::emitted_w`, E2's heat-first draw), `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`, `crates/lc-server/src/field.rs` (H5's landings), `crates/lc-server/src/persist.rs`, `crates/lc-server/src/emit/tests.rs`, `crates/lc-server/src/server.rs` (the order, the tick, one fan-out, radio charged), `crates/lc-server/src/chase.rs` (glare on `Presence`), `crates/lc-server/src/lib.rs`, `crates/lc-server/src/systems.rs`, `crates/lc-server/src/fitting.rs`, `crates/lc-server/src/field/mode.rs`, `crates/lc-server/src/bin/lightcone-server.rs`, `crates/lc-server/tests/checkpoint.rs`, `crates/lc-world/src/motion.rs`, `crates/lc-world/src/cost.rs`, `crates/lc-world/src/ignition.rs`, `crates/lc-world/src/resume.rs`, `crates/lc-world/src/craft.rs` (the emit as a boost), `crates/lc-world/src/fitting.rs` (a lit emission's commitment), `crates/lc-world/src/form/capacity.rs` (each end's rating and face), `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/field.rs`, `crates/lc-proto/src/golden.rs` (`Spectrum`, `Glare`'s flux, `Field::lit`, `Motive::Boosting`, `kind::EMIT`), `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`
 - read: 31 §Emitting on purpose, §Three uses, §Radio
 - deliver: one emission, whatever lit it: a source, apertures, power, spectrum, spread, aim and the interval it is lit, with one fan-out to every worldline in the cone that delivers it at the retarded time as intake with `Outbound::Illuminated`, and as `Glare` on `Presence` to observers inside the cone. `Order::Emit`, balanced and as a burn, is the first thing that lights one; radio charged. E4 lights drives through the same path and adds none of its own. H5's spike is the isotropic case: its landings become this path's, not a second queue beside it. Landings still in flight come back after a restart, rebuilt from the journal's deliveries, whatever lit them.
 - done when: a second craft in the cone is fed and a third just outside is not, a balanced emit leaves the worldline alone, an aimed beam misses a target that maneuvered after it left, and a shard restarted while a beam and a collapse's spike are both in flight still lands each at its arrival, the spike killing a neighbor inside its lethal radius.
@@ -554,6 +557,15 @@ graph LR
 - read: 30 §The inputs, 31 §The drive is the radiator
 - deliver: the `1 − ε` of a burn that 30's inputs make heat, which nothing reads yet. Since E2 the exhaust draws on heat first, and at the floor that heat would go straight back out as exhaust, so a drive below ε = 1 would cost what one at ε = 1 does while lit. Either that is the design and 30 says so, or the drive's waste heat bypasses the sink.
 - done when: a burn at ε = 0.8 heats the field and costs storage what 30 says, one leap and every tick agreeing.
+
+### E7 · A beam restated as it goes
+
+- status: todo
+- needs: E3
+- touches: `crates/lc-server/src/emit.rs`
+- read: 31 §What arrives, §Protocol, and its As built
+- deliver: E3 takes a receiver's share when a beam's first light lands and holds it until the light of its going out does. Restate it: a craft that flies into a beam whose light is already passing is fed from when it enters and told `Illuminated`, one that leaves stops, and the share follows the receiver's distance and shadow; and a burn's power, stated at its start, is stated again as the ship lightens, at the rocket law's throttle.
+- done when: a craft flying across a lit beam is fed only while inside it, from its light's arrival there, and a receiver behind a burning emitter is told the falling power at the retarded times it falls.
 
 ## R: rendering
 
@@ -819,7 +831,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
+- needs: F10, H7, H8, H9, H10, E4, E6, E7, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
