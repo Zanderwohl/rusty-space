@@ -47,17 +47,6 @@ pub struct Drive {
     pub accel_g: f64,
     /// Speed cap as a fraction of `c`, strictly below 1.
     pub max_beta: f64,
-    /// How fast it throws its reaction mass, meters a second.
-    ///
-    /// Nothing about a *trajectory* depends on this — a crossing is planned from the
-    /// acceleration alone and would be the same at any exhaust speed. What it decides is the
-    /// price: the jet power of a given thrust is `½ F v`, so a drive that throws mass slowly
-    /// must throw a great deal of it, and one that throws it fast lights up the sky. See
-    /// [`Drive::jet_power_w`].
-    ///
-    /// Five per cent of `c` for the default, which is a torch rather than anything anyone has
-    /// built.
-    pub exhaust_v_m_s: f64,
     /// How fast the hull can swing its nose, radians a second. See [`crate::attitude`].
     ///
     /// A property of the ship rather than of this struct's namesake, and a *plan* parameter:
@@ -72,7 +61,6 @@ impl Drive {
     pub const DEFAULT: Self = Self {
         accel_g: 5.0,
         max_beta: 0.999,
-        exhaust_v_m_s: 0.05 * C_M_S,
         slew_rate_rad_s: crate::attitude::RATE_RAD_S,
     };
 
@@ -81,18 +69,18 @@ impl Drive {
         crate::attitude::flip_time_s(self.slew_rate_rad_s)
     }
 
-    /// What the drive puts into its exhaust to push `mass_kg` at `accel_g`, watts.
+    /// What a photon drive sends aft to push `mass_kg` at `accel_g`, watts: thrust times `c`.
     ///
-    /// `½ F v` with `F = m a`, which is exact for a rocket: the thrust is the momentum carried
-    /// off per second and the power is the kinetic energy in it. Everything visible about a
-    /// burn comes from this one number — how long the plume is, how hot, and how far away
-    /// somebody can see it happen.
-    ///
-    /// It is a large number. Two million tonnes at five gravities with a torch for an engine is
-    /// a few times ten to the seventeenth watts, which is a fair fraction of what a small star
-    /// puts out, and that is the honest answer for a ship that crosses between them.
-    pub fn jet_power_w(&self, mass_kg: f64, accel_g: f64) -> f64 {
-        0.5 * mass_kg * accel_g * G0 * self.exhaust_v_m_s
+    /// The one number for a burn's light: the emission path lights it, `Presence` states it, and
+    /// the face and cone are drawn from it. Below ε = 1 the rocket law spends more, and the rest
+    /// is waste heat that stays aboard (30 §Conversion).
+    pub fn exhaust_w(mass_kg: f64, accel_g: f64) -> f64 {
+        mass_kg * accel_g * G0 * C_M_S
+    }
+
+    /// The proper acceleration, in g, at which sending `power_w` aft pushes `mass_kg`.
+    pub fn accel_g_at(mass_kg: f64, power_w: f64) -> f64 {
+        power_w / (mass_kg * C_M_S * G0)
     }
 
     /// Proper acceleration as an inverse time, which is what it is when `c = 1`.

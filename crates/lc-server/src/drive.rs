@@ -22,14 +22,17 @@ impl<J: Journal> Server<J> {
         deliveries: &mut Vec<Scheduled>,
     ) {
         let (after_s, now_s) = (after_t as f64 * 1.0e-6, self.now_t() as f64 * 1.0e-6);
+        let balance = &self.balance;
         let found: Vec<(CraftId, lc_world::ignition::Transition)> = self
             .fleet
             .iter()
             .flat_map(|craft| {
                 // A wreck's plan goes on past its end, and nothing of it happened.
                 let until_s = craft.ended_s().map_or(now_s, |end_s| end_s.min(now_s));
-                lc_world::ignition::transitions(craft, after_s, until_s)
+                lc_world::ignition::transitions(craft, balance, after_s, until_s)
                     .into_iter()
+                    // Only the main drive is stated; the rest are E4's instants to look at.
+                    .filter(|transition| transition.power_w != transition.was_w)
                     .map(move |transition| (craft.id, transition))
             })
             .collect();

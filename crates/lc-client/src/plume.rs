@@ -22,7 +22,6 @@ use lc_proto::ShipId;
 use lc_world::courtesy::{cooking_distance_m, cooking_flux_w_m2, drive_courtesy_radius_m};
 use lc_world::emit::aperture_temperature_k;
 use lc_world::fitting::Balance;
-use lc_world::flight::{C_M_S, Drive};
 use lc_world::form::Form;
 use lc_world::form::capacity::{Aperture, aft_apertures};
 
@@ -49,15 +48,6 @@ pub const OVERFLOW_GAIN: f32 = 0.5;
 const FACE_STANDOFF: f64 = 0.05;
 
 const LUMA: DVec3 = DVec3::new(0.2126, 0.7152, 0.0722);
-
-/// `F c`, watts, from the `½ F v` that `Drive` and the wire state for the same thrust.
-/// R17 retires it.
-pub fn exhaust_w(jet_power_w: f64, exhaust_v_m_s: f64) -> f64 {
-    if jet_power_w <= 0.0 || exhaust_v_m_s <= 0.0 {
-        return 0.0;
-    }
-    2.0 * jet_power_w * C_M_S / exhaust_v_m_s
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Lit {
@@ -191,20 +181,19 @@ fn about_eye(origin: DVec3, axis: DVec3, scale: f64) -> (Transform, DVec3) {
     (transform, rotation.inverse() * -origin / scale)
 }
 
-fn lits(session: &Session, uplink: &crate::uplink::Uplink) -> Vec<Lit> {
+fn lits(session: &Session, uplink: &crate::uplink::Uplink, balance: &Balance) -> Vec<Lit> {
     let now = session.coordinate_time_s();
     let ship = &session.ship;
     let own = Lit {
         craft: None,
-        power_w: exhaust_w(ship.jet_power_w(now), ship.motion.drive.exhaust_v_m_s),
+        power_w: lc_world::emit::drive_w(ship, balance, now),
         at_ly: ship.motion.position_ly,
         facing: ship.facing_at(now).unwrap_or(DVec3::X),
         length_m: ship.length_m,
     };
-    // A contact's exhaust speed is not stated, and every craft with a drive worth drawing is a ship.
     let contacts = uplink.contacts.iter().map(|c| Lit {
         craft: Some(c.ship_id),
-        power_w: exhaust_w(c.jet_power_w, Drive::DEFAULT.exhaust_v_m_s),
+        power_w: c.drive_w,
         at_ly: c.position_ly,
         facing: c.facing,
         length_m: c.length_m,
@@ -255,7 +244,7 @@ pub fn draw_exhaust(
     let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
     let look = ui.look.forward();
     let here = session.ship.motion.position_ly;
-    let lit = lits(session, &uplink);
+    let lit = lits(session, &uplink, &balance);
     let tone = &session.tone;
     let exhausts = &mut *exhausts;
     exhausts.cones.clear();
@@ -408,6 +397,25 @@ mod tests {
         Lit { craft, power_w, at_ly: at_m / M_PER_LY, facing: DVec3::X, length_m: 500.0 }
     }
 
+    /// Ship 1 in a plate, a thousand kilometers off `here_ly` along +x, stating `drive_w`.
+    fn presence(here_ly: DVec3, drive_w: f64) -> lc_proto::Presence {
+        lc_proto::Presence {
+            ship_id: ShipId(1),
+            name: "ship 1".into(),
+            length_m: 500.0,
+            at_ly: (here_ly + DVec3::X * 1.0e6 / M_PER_LY).to_array(),
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            drive_w,
+            emitted_t: 0,
+            arrive_t: 3_600_000_000,
+            form: (&Builtin::Plate.form()).into(),
+            building: None,
+            glow: None,
+            glare: None,
+        }
+    }
+
     /// Own, inside the radius and selected get a cone; nothing else, and nothing coasting.
     #[test]
     fn which_burns_have_a_cone() {
@@ -461,15 +469,36 @@ mod tests {
         assert!((k / 5.3e5 - 1.0).abs() < 0.01, "{k} K");
     }
 
-    /// What pushes a photon drive is `F c`, from the reaction drive's `½ F v` of the same thrust.
+    /// Another ship is drawn at exactly the power it stated: its cone's reach and its face's
+    /// temperature follow from that one number.
     #[test]
-    fn the_exhaust_carries_thrust_times_c() {
-        let drive = Drive::DEFAULT;
-        let (mass, g) = (2.0e9, 5.0);
-        let photon = lc_world::emit::thrust_power_w(mass, g * lc_world::flight::G0);
-        let from = exhaust_w(drive.jet_power_w(mass, g), drive.exhaust_v_m_s);
-        assert!((from / photon - 1.0).abs() < 1.0e-12, "{from} against {photon}");
-        assert_eq!(exhaust_w(0.0, drive.exhaust_v_m_s), 0.0);
+    fn another_ship_is_drawn_from_the_power_it_stated() {
+        let session = Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
+        let here = session.ship.motion.position_ly;
+        let face = aft_apertures(&Form::starting(), &B).unwrap()[0];
+        let area = std::f64::consts::PI * face.radius_m * face.radius_m;
+        for stated in [3.0e17, 1.1e20, 4.4e21] {
+            let mut uplink = crate::uplink::Uplink::default();
+            uplink.contacts = vec![crate::uplink::Contact::seen(presence(here, stated), None)];
+            let [drawn] = lits(&session, &uplink, &B)[..] else { panic!("one burn, not {:?}", lits(&session, &uplink, &B)) };
+            assert_eq!(drawn.power_w, stated);
+            assert_eq!(cone_m(&drawn, here, drawn.craft, &B), Some(drive_courtesy_radius_m(&B, stated)));
+            assert_eq!(face_k(drawn.power_w, &face), aperture_temperature_k(stated, area));
+        }
+    }
+
+    /// Nothing between the wire and another ship's face and cone knows an exhaust speed.
+    #[test]
+    fn no_exhaust_speed_is_assumed() {
+        let speed = ["exhaust", "_v"].concat();
+        for (file, text) in [
+            ("plume.rs", include_str!("plume.rs")),
+            ("uplink.rs", include_str!("uplink.rs")),
+            ("lc-proto", include_str!("../../lc-proto/src/lib.rs")),
+            ("flight.rs", include_str!("../../lc-world/src/flight.rs")),
+        ] {
+            assert!(!text.contains(&speed), "{file} speaks of an exhaust speed");
+        }
     }
 
     /// The exhaust leaves the stern: a cone drawn forward is a ship pushing itself backwards.
@@ -503,24 +532,8 @@ mod tests {
         let session = Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
         let here = session.ship.motion.position_ly;
         let craft = Some(ShipId(1));
-        let plate = Builtin::Plate.form();
-        let presence = lc_proto::Presence {
-            ship_id: ShipId(1),
-            name: "ship 1".into(),
-            length_m: 500.0,
-            at_ly: (here + DVec3::X * 1.0e6 / M_PER_LY).to_array(),
-            beta: [0.0; 3],
-            facing: [1.0, 0.0, 0.0],
-            jet_power_w: 1.0e17,
-            emitted_t: 0,
-            arrive_t: 3_600_000_000,
-            form: (&plate).into(),
-            building: None,
-            glow: None,
-            glare: None,
-        };
         let mut uplink = crate::uplink::Uplink::default();
-        uplink.contacts = vec![crate::uplink::Contact::seen(presence, None)];
+        uplink.contacts = vec![crate::uplink::Contact::seen(presence(here, 1.0e17), None)];
         let mut real = RealHulls::default();
         real.set(craft, 1, 1);
 
@@ -540,7 +553,7 @@ mod tests {
             .spawn((ShipHull::bare(craft, mesh), Transform::from_scale(Vec3::splat((1.0 / UNIT_M) as f32))))
             .id();
 
-        let mut run = |world: &mut World| {
+        let run = |world: &mut World| {
             world.run_system_once(draw_exhaust).unwrap();
             let glows: Vec<Entity> = world.query::<(&Glow, &ChildOf)>().iter(world).map(|(_, c)| c.parent()).collect();
             let cones = world.query::<&Cone>().iter(world).count();
@@ -555,7 +568,7 @@ mod tests {
         let (glows, cones, drawn) = run(&mut world);
         assert_eq!((glows.len(), cones, drawn), (2, 1, 1), "selected");
 
-        world.resource_mut::<crate::uplink::Uplink>().contacts[0].jet_power_w = 0.0;
+        world.resource_mut::<crate::uplink::Uplink>().contacts[0].drive_w = 0.0;
         let (glows, cones, drawn) = run(&mut world);
         assert_eq!((glows.len(), cones, drawn), (0, 0, 0), "the drive went out");
     }

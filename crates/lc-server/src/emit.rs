@@ -29,7 +29,7 @@ use lc_world::craft::CraftId;
 use lc_world::emit::{Boost, Jet};
 use lc_world::field::Burst;
 use lc_world::fitting::Lit;
-use lc_world::flight::{C_M_S, G0};
+use lc_world::flight::Drive;
 use lc_world::signal::{Beam, Transmitter};
 use serde::{Deserialize, Serialize};
 
@@ -300,7 +300,7 @@ impl<J: Journal> Server<J> {
             Apertures::Fore | Apertures::Aft => {
                 let (from_ly, beta0) = lc_world::motion::state_at(&craft.motion, craft.system.as_deref(), at_s)
                     .unwrap_or((craft.motion.position_ly, craft.motion.beta));
-                let accel_g = power_w / (craft.mass_kg_at(at_s) * C_M_S * G0);
+                let accel_g = Drive::accel_g_at(craft.mass_kg_at(at_s), power_w);
                 let nose = if apertures == Apertures::Fore { axis } else { -axis };
                 let attitude0 = craft.facing_at(at_s).unwrap_or(nose);
                 let boost = Boost::plan(from_ly, beta0, at_s, -axis, nose, accel_g, duration_s, attitude0, craft.slew_rate_rad_s());
