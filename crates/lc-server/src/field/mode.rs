@@ -17,7 +17,7 @@ use crate::world::{Event, Scheduled};
 
 /// Set Black and kept there, as tests of anything but the modes want.
 #[cfg(test)]
-pub(crate) fn hold_black(craft: &mut Craft) {
+pub(crate) fn hold_black(craft: &mut lc_world::craft::Craft) {
     let Some(mut fitting) = craft.fitting().cloned() else { return };
     fitting.set_posture(lc_world::fitting::Posture::BLACK);
     craft.fit(Some(fitting));
@@ -150,6 +150,7 @@ impl<J: Journal> Server<J> {
 mod tests {
     use glam::DVec3;
     use lc_proto::{ClientId, Inbound, Intent, Order, Outbound, Shade, ShipId, Sighting};
+    use lc_world::craft::Craft;
     use lc_world::fitting::{Account, Fitting, Posture, Switch};
     use lc_world::motion::LIGHT_US_PER_LY;
 
