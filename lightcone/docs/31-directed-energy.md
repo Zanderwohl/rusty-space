@@ -2,9 +2,9 @@
 
 Engines, radios, weapons and power lines are one thing: energy sent in a chosen direction.
 
-**Status: partly built.** Emitting on purpose is built, with one path from any emission to
-whatever it lands on ([As built](#as-built)); a drive's exhaust is not yet one of its emissions
-(E4 of [the plan](plans/forms-and-fields.md)). This is the Kzinti Lesson (Niven): a reaction drive is a weapon
+**Status: partly built.** Emitting on purpose and a drive's exhaust are built, as one path from any
+emission to whatever it lands on, restated as both ends move ([As built](#as-built)). The client's
+emit window is not. This is the Kzinti Lesson (Niven): a reaction drive is a weapon
 in exact proportion to how good a drive it is. Here the drive is a photon rocket
 ([19-ship-fitting.md](19-ship-fitting.md)), so the lesson is literal. What a ship sends out is
 light, and light lands on someone. [30-the-field.md](30-the-field.md) is where the energy comes
@@ -59,8 +59,13 @@ exhaust comes from field heat first, and from storage only for what heat cannot 
 
 - A ship under way sheds heat as it goes. Flying cools. At 5 g the starting ship's exhaust is
   1.1 × 10²⁰ W, which empties a full field (10 ME) in about fifteen game days.
+- **Except for the drive's own waste.** Below ε = 1 the drive makes heat the exhaust cannot draw,
+  or it would re-emit its waste and fly as if ε were 1
+  ([30-the-field.md](30-the-field.md#conversion)). A drive that wasteful warms as it flies, and a
+  large one can burn itself to collapse.
 - **Heat is mass**, as stored energy is. `mass_kg_at` counts `Q / c²`, and the rocket law is
-  unchanged. Only the source of the exhaust changes.
+  unchanged. Only the source of the exhaust changes. Waste is still aboard until it radiates, so a
+  ship below ε = 1 ends a burn heavier than the rocket law by it.
 - **The commitment is unchanged.** A plan commits against storage when accepted.
   Whatever heat supplies instead is refunded through the same path that `CutDrive` uses: the
   commitment runs down by the whole exhaust, whatever pays it, so heat's share leaves the commitment
@@ -72,7 +77,8 @@ exhaust comes from field heat first, and from storage only for what heat cannot 
   instants the drive lights or goes out and the account's settlements; within a burn it changes
   only as the rocket law throttles a lightening ship.
 - **Anything a ship lights draws the same way.** The account's sink is what the ship emits, not
-  the drive's exhaust in particular, so an emission joins it and is paid heat first.
+  the drive's exhaust in particular, so an emission joins it and is paid heat first. ε is the
+  rocket law's, so an emission makes no waste.
 
 ### Exhaust lands on whatever is behind
 
@@ -103,9 +109,10 @@ What follows:
 - **Empty storage helps here too.** Exhaust arrives as sustained power, so a receiver with room
   converts it up to its rating, and being behind an ally's drive can refuel you.
 - **Delivery** is the fan-out below, with the burn as a continuous emission between ignition and
-  cutoff. A receiver's heat input changes at the retarded times of those two events. Candidate
-  receivers are only those within the distance where the flux falls to a millionth of the cooking
-  flux, a thousand times the cooking distance.
+  cutoff, said again as it lightens or turns. A receiver's heat input changes at the retarded times
+  of those events, and as it moves through the cone. Candidate receivers are only those within the
+  distance where the flux falls to a millionth of the cooking flux, a thousand times the cooking
+  distance.
 - **The drawn cone is `drive_spread_rad`**, so what a player sees is the cone that hurts
   ([32-ship-rendering.md](32-ship-rendering.md#the-exhaust-cone)).
 - **A leg on station-keeping thrusters** (below) is a cruise at no more than `rcs_accel_g`, and
@@ -224,20 +231,53 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
 
 ### As built
 
-- **One path, whatever lit it.** An emission is an event of `kind::EMIT` where it lights, and
-  another where it goes out, each carrying what it sends in its payload: where it left, its axis
-  and half-angle, its spectrum and its power. Each fans out along its cone through the machinery
-  every event uses, and each delivery to another craft is a landing at its arrival. The event of
-  going out is also delivered to every craft holding the beam, wherever it has got to, so nobody
-  is left lit. A drive's exhaust will be lit through the same registry (E4); nothing about beams is
-  written that a drive or a spike would duplicate.
-- **A landing takes its share from where the receiver is when the light lands**: the cone is
-  tested there, so a target that maneuvered after the beam left is missed, and the share is
+- **One path, whatever lit it.** An emission is an event of `kind::EMIT` where it lights, one each
+  time it is said again, and one where it goes out, each carrying what it sends in its payload:
+  where it left, its axis and half-angle, its spectrum and its power. Each fans out along its cone
+  through the machinery every event uses, and each delivery to another craft is a landing at its
+  arrival. Every event after the first is also delivered to every craft holding the beam, wherever
+  it has got to, so nobody is left lit.
+- **Every lit drive is one of those emissions** (`lc-server`'s `emit::drives`), and nothing about
+  a drive fans out, lands or glares on its own. `lc_world::emit::exhaust` says what each drive sends
+  at an instant: `F c`, at the mass the ship has then, along the exhaust. A leg at no more than
+  `rcs_accel_g` is on the thrusters at `rcs_spread_rad`, anything harder is the main drive at
+  `drive_spread_rad`, and an escort's thruster leg is both: the main drive carrying the quarry's
+  acceleration, and the thrusters the closing. The spectrum is a blackbody at the temperature of
+  the aft faces radiating it; the thrusters have no face of their own and are given the same one,
+  and an unfitted hull's is its cross-section. An emit flown as a burn is its own emission, and is
+  not also a drive.
+- **Said again as it goes.** A lit drive is lit at ignition and put out at cutoff, each an event of
+  its beam, and said again at the first microsecond its power has moved 1% from what was last said,
+  as the rocket law throttles a lightening ship, or its axis has turned a tenth of its half-angle.
+  An emit flown as a burn is said again as it lightens alike. The instants are found after the
+  fact over the tick just finished, from the plan's own transitions and a look every sixty
+  coordinate seconds, so they are the flight's and not the tick's. A cut is the change of motion,
+  stated at the order's instant; a collapse puts out the wreck's drives with everything else.
+- **A receiver's share is taken again as it moves**, at every instant it changes: when the light of
+  a statement meets it, when it crosses the cone's edge, and at the first microsecond its share has
+  moved 1% from what it last took, as its distance and shadow change. A craft that flies into a cone
+  whose light is already passing is fed and told `Illuminated` from when it enters, and one that
+  leaves stops. Each instant is a landing like any other, settled in time order with collapses. The
+  looks between them are spaced at half the time the speed between the two needs to reach a step or
+  the edge, and a change is bisected to its microsecond, so one leap and many ticks settle the same
+  instants, unless one pair needs more than a hundred thousand looks in a tick, when the rest waits
+  for the next and the shard warns. A receiver's turn is not in that spacing; it is caught at the
+  next look.
+- **Where the light left** is the emitter's worldline at the retarded instant, while the emitter can
+  still say, and otherwise where the statement said. Each statement is kept with its emitter, in
+  its checkpoint, until the next one's light has gone past the reach.
+- **Only candidates are followed** between statements: receivers within a beam's reach, where its
+  flux falls to a millionth of the cooking flux. Beyond it a receiver takes its share, is told, and
+  is handed the `Glare`, only as each statement's light lands, from where it is then, so a craft
+  that flies into a far beam is fed from the next statement's light. A drive a light-year off
+  glares at its observers this way.
+- **A landing takes its share from where the receiver is when the light lands**: the cone is tested
+  there, so a target that maneuvered after the beam left is missed, and the share is
   `P · min(1, A_shadow / (Ω d²))` onto its shadow toward the emitter. It is held as intake, beside
-  the neighbors' glow, until the light of going out lands, and the receiver's owner is told with
-  `Illuminated` at each. Three simplifications, which are E7: a craft that flies into a beam after
-  its first light passed is not fed; the share is not restated as the receiver moves along it; and
-  a burn's power is stated at its start and not again as the ship lightens.
+  the neighbors' glow, until the next instant it is taken again. The receiver's owner is told with
+  `Illuminated` whenever what arrives changes.
+- **A drive's emission is what leaves it**, `F c`. The rest of the rocket law's cost, `1 − ε` of
+  it, is the drive's waste, which stays aboard as heat (above) and lands on nobody.
 - **`power_w` is what each end sends.** A balanced emit sends it along the aim from the fore
   engines and against it from the aft ones, and draws twice it. Each end's rating is its engines'
   together, and the diffraction floor is `λ / 2D` for its widest face; a balanced emit's two beams
@@ -252,12 +292,14 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   balanced emit drops a standing intercept, whose re-plans would light the drive. **A balanced emit does not
   turn the hull**: its apertures are taken to point along the aim. A second emit while one is lit
   is refused `UnderWay`, `CutDrive` puts out whatever is lit, and a collapse puts out the wreck's.
+  A drive's own light excludes nothing an order would not already refuse under way.
 - **`Glare`** is the flux at the observer, W/m², and the spectrum: one line for a beam, a
   blackbody for a drive's face. Summed over the source's beams landing on it, in the brightest's
   spectrum.
-- **A restart** brings back what each craft has lit and the beams landing on each now, with the
-  craft's checkpoint, and every landing still in flight, from the journal's deliveries of events
-  the restored clock has reached, whatever lit them.
+- **A restart** brings back what each craft has lit, what it has said of it and the beams landing on
+  each now, with the craft's checkpoint, and every landing still in flight, from the journal's
+  deliveries of events the restored clock has reached, whatever lit them. A lit drive goes on being
+  said as the same beam.
 
 ### Spread, and why it is a choice
 

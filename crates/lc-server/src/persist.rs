@@ -94,9 +94,10 @@ pub struct SavedInstruments {
 ///
 /// 10 is a ship kept as its form. Every older row held a loadout, which no ship is any more, so
 /// none is read: there are no players, and a row refused names its format rather than coming
-/// back as some other ship. 12 adds a wreck's end, and 13 the craft's light and a field's lit
-/// emissions.
-pub const SAVE_FORMAT: i32 = 13;
+/// back as some other ship. 12 adds a wreck's end, 13 the craft's light and a field's lit
+/// emissions, 14 the drive's waste heat, and 15 what a craft's beams have said and which of its
+/// lightings are drives.
+pub const SAVE_FORMAT: i32 = 15;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -563,9 +564,10 @@ mod tests {
         let b = Balance::DEFAULT;
         let full = Fitting::full(lc_world::form::Form::starting(), b, 0.0);
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::from_account(&Account { heat_j: 3.0 * b.module_energy_j(), ..full.account() }, b)));
+        craft.fit(Some(Fitting::from_account(&Account { heat_j: 3.0 * b.module_energy_j(), waste_j: b.module_energy_j(), ..full.account() }, b)));
         let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), Light::default(), 0), None).expect("it reads");
         assert_eq!(back.fitting().unwrap().heat_j_at(&back.motion, 0.0), 3.0 * b.module_energy_j());
+        assert_eq!(back.fitting().unwrap().account().waste_j, b.module_energy_j());
         assert_eq!(back.fitting(), craft.fitting());
     }
 

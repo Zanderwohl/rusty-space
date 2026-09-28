@@ -1414,6 +1414,7 @@ mod tests {
             },
             field: Some(Field {
                 heat_j: 5.0e23,
+                waste_j: 1.0e23,
                 since_s: 1.0e6,
                 mode: FieldMode::Auto { clear_above: 0.5, black_below: 0.3, refill_below: 0.95 },
                 shade: Shade::Black,
@@ -1705,6 +1706,7 @@ mod tests {
                 },
                 field: Some(Field {
                     heat_j: 0.0,
+                    waste_j: 0.0,
                     since_s: 0.0,
                     mode: FieldMode::Clear,
                     shade: Shade::Clear,

@@ -494,7 +494,7 @@ graph LR
 
 ### H10 · The afterglow
 
-- status: todo
+- status: active card "H10 · The afterglow"
 - needs: H4, H7
 - touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/instruments.rs`, `crates/lc-proto/src/lib.rs` (`Duty::Stare`), `crates/lc-world/src/knowledge/survey.rs` (`Duty`)
 - read: 30 §Collapse, §What an observer sees
@@ -532,9 +532,9 @@ graph LR
 
 ### E4 · Exhaust heats neighbors
 
-- status: active card "E4 · Exhaust heats neighbors"
+- status: done #132
 - needs: E3, H5
-- touches: `crates/lc-server/src/emit.rs`
+- touches: `crates/lc-server/src/emit.rs`, `crates/lc-server/src/emit/drives.rs`, `crates/lc-server/src/emit/restate.rs`, `crates/lc-server/src/emit/tests.rs`, `crates/lc-server/src/emit/tests/drives.rs`, `crates/lc-server/src/server.rs` (the tick; a cut stated by the motion), `crates/lc-server/src/field.rs` (a collapse puts out drives), `crates/lc-server/src/persist.rs`, `crates/lc-server/src/director.rs` (kzinti, headless), `crates/lc-world/src/emit.rs` (`exhaust`), `crates/lc-world/src/escort.rs`, `crates/lc-world/src/motion.rs`, `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`
 - read: 31 §Exhaust lands on whatever is behind, §What arrives and its As built
 - deliver: every lit drive, and every thruster leg at `rcs_spread_rad`, lit as one of E3's emissions at `drive_spread_rad` between ignition and cutoff, in the face's spectrum. E3's fan-out then changes neighbors' intake and hands observers in the cone the drive's `Glare` at the retarded times of both; nothing here fans out on its own. Every emission, beam or drive, is restated as it goes, which a drive needs more than any beam since both ends of it are usually moving: a craft that flies into a cone whose light is already passing is fed and told `Illuminated` from when it enters, one that leaves stops, the share follows the receiver's distance and shadow, and a burn's power is stated again as the ship lightens, at the rocket law's throttle. (Folded in from E7, which E3 added.)
 - done when: a full ship inside the cooking distance behind a burn walks to collapse, one beside the burn feels nothing, an observer in the cone a light-year off is handed a `Glare` whose flux is `emit::flux_w_m2`, a craft flying across a lit beam is fed only while inside it from its light's arrival there, and a receiver behind a burning emitter is told the falling power at the retarded times it falls.
@@ -550,9 +550,9 @@ graph LR
 
 ### E6 · The drive's own heat
 
-- status: active card "E6 · The drive's own heat"
+- status: done #130
 - needs: E2
-- touches: `crates/lc-world/src/fitting/heat.rs`
+- touches: `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/fitting.rs` (waste in the account), `crates/lc-world/src/fitting/mode.rs` (Auto reads all of `Q`), `crates/lc-world/src/field.rs`, `crates/lc-proto/src/field.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs` (`Field::waste_j`), `crates/lc-server/src/persist.rs` (`SAVE_FORMAT` 14), `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`, `lightcone/docs/19-ship-fitting.md`
 - read: 30 §The inputs, 31 §The drive is the radiator
 - deliver: the `1 − ε` of a burn that 30's inputs make heat, which nothing reads yet. Since E2 the exhaust draws on heat first, and at the floor that heat would go straight back out as exhaust, so a drive below ε = 1 would cost what one at ε = 1 does while lit. Either that is the design and 30 says so, or the drive's waste heat bypasses the sink.
 - done when: a burn at ε = 0.8 heats the field and costs storage what 30 says, one leap and every tick agreeing.
@@ -716,7 +716,7 @@ graph LR
 
 ### R17 · A burn's power on the wire as `F c`
 
-- status: todo
+- status: active card "R17 · A burn's power on the wire as `F c`"
 - needs: R12
 - touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-world/src/flight.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`
 - read: 31 §The drive is the radiator, 32 §The exhaust cone

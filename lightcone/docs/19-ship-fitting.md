@@ -85,7 +85,9 @@ no loadout it is `density × volume`, as it is now.
 
 **m_after = m_before · exp(−Δη / ε)**
 
-and the energy spent is `(m_before − m_after) · c²`.
+and the energy spent is `(m_before − m_after) · c²`. That is what a burn is priced and spent at.
+Below ε = 1 only `ε` of it leaves as exhaust, and the rest stays aboard as heat until it radiates,
+so the ship is heavier than this by that much ([30-the-field.md](30-the-field.md#conversion)).
 
 - **Δη = ∫ α dτ** — proper acceleration integrated over the ship's own clock, for as long as
   anything is lit. Rapidity, summed without regard to direction.

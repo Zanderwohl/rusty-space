@@ -409,6 +409,8 @@ pub struct Fitting {
     committed_j: f64,
     /// `Q`, the field's heat at `since_s`. See [`crate::field`].
     heat_j: f64,
+    /// Of `heat_j`, the drive's own waste below ε = 1, which exhaust cannot draw.
+    waste_j: f64,
     /// Watts arriving at the field from `since_s` until the next segment. See [`crate::solar`].
     starlight_w: f64,
     /// Watts arriving at the field from other craft. Restated by the authority, and not saved.
@@ -428,6 +430,7 @@ pub struct Account {
     pub rapidity_since: f64,
     pub committed_j: f64,
     pub heat_j: f64,
+    pub waste_j: f64,
     pub starlight_w: f64,
     pub refit: Option<Round>,
     pub posture: Posture,
@@ -453,6 +456,7 @@ impl Fitting {
             rapidity_since: 0.0,
             committed_j: 0.0,
             heat_j: heat::idle_j(&hull, &balance),
+            waste_j: 0.0,
             starlight_w: 0.0,
             lit_w: 0.0,
             refit: None,
@@ -469,6 +473,7 @@ impl Fitting {
             rapidity_since: self.rapidity_since,
             committed_j: self.committed_j,
             heat_j: self.heat_j,
+            waste_j: self.waste_j,
             starlight_w: self.starlight_w,
             refit: self.refit.as_ref().map(|plan| plan.round().clone()),
             posture: self.posture,
@@ -502,6 +507,7 @@ impl Fitting {
             rapidity_since: account.rapidity_since,
             committed_j: account.committed_j,
             heat_j: account.heat_j,
+            waste_j: account.waste_j.clamp(0.0, account.heat_j.max(0.0)),
             starlight_w: account.starlight_w,
             posture: account.posture,
             lit: account.lit.clone(),
@@ -662,6 +668,7 @@ impl Fitting {
         }
         self.stored_j = stored;
         self.heat_j = flow.heat_j;
+        self.waste_j = flow.waste_j;
         self.rapidity_since = cost::lit_rapidity(motion, now_s);
         self.since_s = now_s;
         self.lit.retain(|lit| lit.until_s > now_s);
@@ -893,6 +900,7 @@ impl Fitting {
             rapidity_since: f.rapidity_since,
             committed_j: f.committed_j,
             heat_j: 0.0,
+            waste_j: 0.0,
             starlight_w: f.starlight_w,
             refit: f.refit.as_ref().map(Into::into),
             posture: field.map_or(Posture::BLACK, Posture::from),
@@ -902,6 +910,7 @@ impl Fitting {
         };
         let mut fitting = Fitting::from_account(&account, f.balance.into());
         fitting.heat_j = field.map_or_else(|| heat::idle_j(&fitting.hull, &fitting.balance), |field| field.heat_j);
+        fitting.waste_j = field.map_or(0.0, |field| field.waste_j.clamp(0.0, fitting.heat_j.max(0.0)));
         fitting
     }
 }
@@ -917,7 +926,7 @@ impl From<&Fitting> for lc_proto::Field {
         let p = &f.posture;
         let switch = p.switch.map(|s| lc_proto::Switch { to: s.to.into(), done_s: s.done_s });
         let lit = f.lit.iter().map(|l| lc_proto::Lit { from_s: l.from_s, until_s: l.until_s, power_w: l.power_w }).collect();
-        Self { heat_j: f.heat_j, since_s: f.since_s, mode: p.setting.into(), shade: p.shade.into(), switch, lit }
+        Self { heat_j: f.heat_j, waste_j: f.waste_j, since_s: f.since_s, mode: p.setting.into(), shade: p.shade.into(), switch, lit }
     }
 }
 

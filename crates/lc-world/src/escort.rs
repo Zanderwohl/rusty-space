@@ -206,8 +206,11 @@ impl Escort {
     /// The pursuer's proper acceleration in the quarry's rest frame, light-seconds per second
     /// squared: the quarry's, plus whatever the approach is doing about the gap.
     fn push_at_tau(&self, tau: f64) -> DVec3 {
-        let closing = self.cruise.thrust_at(tau) * (self.cruise.drive.accel_g * G0 / C_M_S);
-        self.quarry.accel + closing
+        self.quarry.accel + self.closing_at_tau(tau)
+    }
+
+    fn closing_at_tau(&self, tau: f64) -> DVec3 {
+        self.cruise.thrust_at(tau) * (self.cruise.drive.accel_g * G0 / C_M_S)
     }
 
     /// Which way the drive points at a world time, in world axes. Zero only where nothing is
@@ -226,6 +229,19 @@ impl Escort {
     /// quarry burns at the quarry's acceleration, and the plume says so.
     pub fn thrust_g(&self, now_s: f64) -> f64 {
         self.push_at_tau(self.quarry.tau_at(now_s)).length() * C_M_S / G0
+    }
+
+    /// The quarry's acceleration and the closing, each in world axes and g: what the main drive
+    /// carries and what the approach adds.
+    pub fn pushes_g(&self, now_s: f64) -> (DVec3, DVec3) {
+        let tau = self.quarry.tau_at(now_s);
+        let (_, quarry_beta) = self.quarry.at_tau(tau);
+        let closing = self.closing_at_tau(tau);
+        let world = |push: DVec3| {
+            let g = push.length() * C_M_S / G0;
+            boost::velocity_from_frame(push.normalize_or_zero(), quarry_beta).normalize_or_zero() * g
+        };
+        (world(self.quarry.accel), world(closing))
     }
 
     /// What the nose is being asked to do. Along the thrust when anything is lit, and along
