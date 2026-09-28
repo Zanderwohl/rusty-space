@@ -61,7 +61,7 @@ choice of form.
 
 | symbol | meaning | value |
 |---|---|---|
-| `η` | collector efficiency | 0.7 |
+| `η` | `conversion_efficiency` | 0.7 |
 | `G` | balance gain | 1.79 × 10⁹, set by the anchor below |
 | `L★` | the system primary's luminosity | the Sun: 3.83 × 10²⁶ W, which is 1361 W/m² at 1 AU |
 | `d` | distance from the primary | |

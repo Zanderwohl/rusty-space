@@ -47,7 +47,7 @@ cross-reference except where a shared crate is the subject.
 | [16-identity.md](docs/16-identity.md) | accounts as a broker neither product owns, and how a socket proves who it is |
 | [17-reconciliation.md](docs/17-reconciliation.md) | the four ways a client can differ from the server, and which of them is a mechanic |
 | [18-ui-style.md](docs/18-ui-style.md) | which toolkit a surface belongs to, and what it may do to the one behind it |
-| [19-ship-fitting.md](docs/19-ship-fitting.md) | modules, energy as mass, the drive as a rocket, and refits |
+| [19-ship-fitting.md](docs/19-ship-fitting.md) | the energy account: energy as mass, the drive as a rocket, and what a plan commits |
 | [20-solar-power.md](docs/20-solar-power.md) | hulls collect starlight: the shadow-area integral, the anchor, and segments of constant income |
 | [21-library.md](docs/21-library.md) | the shelf of public-domain books, and the ereader window that costs the player nothing |
 | [22-provenance.md](docs/22-provenance.md) | what a craft knows and how it came to know it: records, lineage, parallax, and the blind spots in a sky |
@@ -60,22 +60,46 @@ cross-reference except where a shared crate is the subject.
 | [29-ship-form.md](docs/29-ship-form.md) | a ship as parts whose volumes are its capacities, the Mind at the root, refits as rounds paid for in energy, the voxel grid the server reasons with, and the editor as a third view |
 | [30-the-field.md](docs/30-the-field.md) | the field as collector, radiator and shield: heat that goes as `T⁴`, the anchors, collapse, and what dies beside a ship that fails |
 | [31-directed-energy.md](docs/31-directed-energy.md) | engines, radios, weapons and power lines as one order: apertures, exhaust from heat, spread against lead, and the star's gain |
-| [32-ship-rendering.md](docs/32-ship-rendering.md) | the hull from a distance field, construction as a function of time, stateless drones, the field shader, and the order of work across 29–32 |
+| [32-ship-rendering.md](docs/32-ship-rendering.md) | the hull from a distance field, construction as a function of time, stateless drones, the field shader, and the exhaust cone |
 | [33-ring-habitats.md](docs/33-ring-habitats.md) | Orbitals and the Ringworld: one shape on two hosts, the solar-system demo, levels of detail at astronomical scale, and light delay across a spinning ring |
 
 ## Status
 
 Phases 1a through 9 of [12-buildout.md](docs/12-buildout.md) are built — `crates/lc-*` is some
-59 000 lines of Rust. `lc-spacetime` and `lc-world` are engine-free and tested, `lc-store` holds
-the schema and the light-cone cursor, `lc-proto` is at wire version 27, `lc-server` is
+136 000 lines of Rust. `lc-spacetime` and `lc-world` are engine-free and tested, `lc-store` holds
+the schema and the light-cone cursor, `lc-proto` is at wire version 36, `lc-server` is
 authoritative, and `lc-client` runs native and in a browser. What is left of phase 9 is delivery
 rather than the build: [14-hosting.md](docs/14-hosting.md) W4.
 
-Phase 10 — the game — has not started. There are no resources, no deposits, no construction and
-no replication; survey regimes and proper time are library code nothing calls yet. Much of what
-exists instead was never in the plan — ship fitting, solar income, radio, the scenarios,
-accounts, the library — which is why [12-buildout.md](docs/12-buildout.md) is the order of work
-and not a record of it. It carries no completion markers; the code is the only status.
+**Ships have forms, fields and directed energy**, the build of
+[plans/forms-and-fields.md](docs/plans/forms-and-fields.md):
+
+- **A ship is its parts** ([29](docs/29-ship-form.md)). Each part's volume is its capacity, and a
+  refit is a round of dismantling, moving and building paid for in energy, planned the same way on
+  the shard and the client. The editor is a third mode of the main view, on `H`, with handles, a
+  live budget and Apply; the ledger on `R` follows the round. Every craft is drawn as its hull,
+  meshed from the form's distance field in materials by kind, and a round is drawn going up as
+  truss, plating and drones, on anyone's ship, as its light shows it ([32](docs/32-ship-rendering.md)).
+- **Every ship has a field** ([30](docs/30-the-field.md)): an ellipsoid enclosing its parts that
+  collects starlight, holds the heat of everything the ship wastes, and radiates it. It runs Clear,
+  Black or Auto. A field that fills collapses, destroying the ship in a flash that heats its
+  neighbors at light speed and an afterglow a stare can catch. Observers see a ship by its field's
+  reflected light and heat, and a Black field hides the design. The header's field bar counts down
+  to a collapse.
+- **Energy moves only as light** ([31](docs/31-directed-energy.md)). A drive's exhaust, a beam, a
+  heat dump and an attack are one emission, fanned out to every craft in its cone and restated as
+  both ends move. A burn draws on the field's heat before storage, cooks whatever is behind it, and
+  is drawn as its white-hot open faces and a cone out to where it is courteous. Approaches are
+  courteous by default, finishing on station-keeping thrusters.
+
+Still open from that build: undo and redo in the editor, the presets panel, the emit window, the
+engine grid lit on the open face, and a distant burn drawn as a point.
+
+Phase 10 — the game — has not started. There are no resources, no deposits and no replication;
+survey regimes and proper time are library code nothing calls yet. Much of what exists instead
+was never in the plan — ship forms, the field, solar income, radio, the scenarios, accounts, the
+library — which is why [12-buildout.md](docs/12-buildout.md) is the order of work and not a record
+of it. It carries no completion markers; the code is the only status.
 
 Every number in these documents is a first estimate until a phase has measured it; where a
 number drives a decision, the derivation is shown so it can be rechecked.

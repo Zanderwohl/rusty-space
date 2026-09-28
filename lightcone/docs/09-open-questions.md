@@ -169,8 +169,11 @@ These change what the game is, not what the code must do first.
 - **What stops a von Neumann fleet from consuming the world?** Energy and mass conservation
   first; a hard object cap as a backstop. An expansion 40 ly out cannot be recalled in under
   40 in-game years, which is the interesting part, but it has to terminate.
-- **Is there combat, and does it matter?** Interception falls out of the physics. Whether it
-  is a loop the game supports deliberately is separate.
+- **Is there combat, and does it matter?** Interception and attack fall out of the physics: an
+  attack is an emission aimed at someone who did not agree to it, through the path every drive
+  and beam takes ([31-directed-energy.md](31-directed-energy.md#attacking)), and a field is hurt
+  only by what it absorbs ([30-the-field.md](30-the-field.md)). Whether it is a loop the game
+  supports deliberately is separate.
 - **What does a new player do in their first hour?** One hour is one in-game year: enough to
   establish a presence in one system and see a signal leave it, not enough to reach another
   star. The onboarding has to work inside that budget.
