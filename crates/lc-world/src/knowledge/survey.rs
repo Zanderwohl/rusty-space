@@ -572,12 +572,53 @@ impl Plan {
 /// So a long gap costs a bounded amount.
 pub const PASSES_PER_CALL: usize = 8;
 
+/// What a stare points at.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gaze {
+    Star(StarId),
+    /// Light-microseconds in the shard's frame.
+    Place([i64; 3]),
+    /// Followed by its light, never by where it is now.
+    Craft(i64),
+}
+
+impl Gaze {
+    /// What a stare's samples are filed under.
+    pub fn subject(self) -> Subject {
+        match self {
+            Self::Star(star) => Subject::Star(star),
+            Self::Place(at) => Subject::Place(at),
+            Self::Craft(id) => Subject::Craft(id),
+        }
+    }
+}
+
+impl From<Gaze> for lc_proto::Gaze {
+    fn from(gaze: Gaze) -> Self {
+        match gaze {
+            Gaze::Star(star) => Self::Star(star.get()),
+            Gaze::Place(at) => Self::Place(at),
+            Gaze::Craft(id) => Self::Craft(id),
+        }
+    }
+}
+
+impl From<lc_proto::Gaze> for Gaze {
+    fn from(gaze: lc_proto::Gaze) -> Self {
+        match gaze {
+            lc_proto::Gaze::Star(star) => Self::Star(StarId::from_raw(star)),
+            lc_proto::Gaze::Place(at) => Self::Place(at),
+            lc_proto::Gaze::Craft(id) => Self::Craft(id),
+        }
+    }
+}
+
 /// What a telescope is committed to; one thing at a time.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub enum Duty {
     #[default]
     Idle,
-    Stare(StarId),
+    Stare(Gaze),
     Sweep(Sweep),
     /// Each target in turn, for `dwell_s` apiece: a light curve with gaps, which the period
     /// finders in `05-observation.md` are written to survive.
@@ -602,7 +643,7 @@ impl From<&Duty> for lc_proto::Duty {
     fn from(duty: &Duty) -> Self {
         match duty {
             Duty::Idle => Self::Idle,
-            Duty::Stare(star) => Self::Stare { star: star.get() },
+            Duty::Stare(gaze) => Self::Stare { at: (*gaze).into() },
             Duty::Sweep(sweep) => Self::Sweep {
                 center: sweep.center.to_array(),
                 radius_rad: sweep.radius_rad,
@@ -625,7 +666,7 @@ impl From<&lc_proto::Duty> for Duty {
     fn from(duty: &lc_proto::Duty) -> Self {
         match duty {
             lc_proto::Duty::Idle => Self::Idle,
-            lc_proto::Duty::Stare { star } => Self::Stare(StarId::from_raw(*star)),
+            lc_proto::Duty::Stare { at } => Self::Stare((*at).into()),
             lc_proto::Duty::Sweep { center, radius_rad, dwell_s, started_s } => {
                 Self::Sweep(Sweep::region(DVec3::from_array(*center), *radius_rad, *started_s).with_dwell(*dwell_s))
             }
@@ -642,9 +683,14 @@ impl From<&lc_proto::Duty> for Duty {
 }
 
 impl Duty {
+    pub fn stare(star: StarId) -> Self {
+        Self::Stare(Gaze::Star(star))
+    }
+
+    /// The star a stare or a watch is on at `now_s`.
     pub fn target_at(&self, now_s: f64) -> Option<StarId> {
         match self {
-            Self::Stare(id) => Some(*id),
+            Self::Stare(Gaze::Star(id)) => Some(*id),
             Self::Watch { targets, .. } => targets
                 .get(self.slot_at(now_s)? as usize % targets.len())
                 .copied(),
@@ -1155,7 +1201,7 @@ mod tests {
         assert_eq!(duty.target_at(350.0), Some(ids[0]), "and round again");
         assert_ne!(duty.slot_at(50.0), duty.slot_at(150.0));
         assert_eq!(Duty::Idle.target_at(0.0), None);
-        assert_eq!(Duty::Stare(ids[0]).target_at(1e9), Some(ids[0]));
+        assert_eq!(Duty::stare(ids[0]).target_at(1e9), Some(ids[0]));
     }
 
     /// Turns are read from the clock and not from a cursor, so two sides that ticked

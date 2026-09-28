@@ -287,6 +287,11 @@ pub const SURVEYING: &[u8] = &[
     16, 4, 11, 0, 0, 0, 0, 0, 0, 20, 64, 0, 0, 0, 0, 0, 64, 159, 64,
 ];
 
+/// `Outbound::Observing { Stare { at: Place([1, -2, 3]) }, integration 2000 }`
+pub const STARING: &[u8] = &[
+    16, 1, 1, 2, 3, 6, 0, 0, 0, 0, 0, 64, 159, 64,
+];
+
 /// `Outbound::Learned { report: "{}" }`
 pub const LEARNED: &[u8] = &[
     15, 2, 123, 125,

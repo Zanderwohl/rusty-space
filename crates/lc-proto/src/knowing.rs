@@ -52,12 +52,28 @@ impl Duty {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Duty {
     Idle,
-    Stare { star: u64 },
+    Stare { at: Gaze },
     Sweep { center: [f64; 3], radius_rad: f64, dwell_s: f64, started_s: f64 },
     Watch { stars: Vec<u64>, dwell_s: f64, started_s: f64 },
     /// Every body of one star's system in turn, brightest first. The bodies are not named
     /// because the craft does not know them yet: finding them is what the duty is for.
     Survey { star: u64, started_s: f64 },
+}
+
+impl Duty {
+    pub fn stare(star: u64) -> Self {
+        Self::Stare { at: Gaze::Star(star) }
+    }
+}
+
+/// What a stare points at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Gaze {
+    Star(u64),
+    /// A point in the shard's frame, light-microseconds: where something was.
+    Place([i64; 3]),
+    /// Followed by its light, never by where it is now.
+    Craft(i64),
 }
 
 /// Something a craft knows about.
@@ -67,4 +83,6 @@ pub enum Subject {
     Body { star: u64, body: u64 },
     Population { star: u64, index: u32 },
     Craft(i64),
+    /// A point a stare was aimed at, light-microseconds. Appended last.
+    Place([i64; 3]),
 }
