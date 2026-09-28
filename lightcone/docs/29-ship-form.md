@@ -798,8 +798,10 @@ entry records what changed, before and after, on the parts it touched:
   **start** row, so a short window cuts off the oldest; entries past the cursor are dimmed.
 - Stepping writes an entry straight onto the draft, past the check that storage can pay a new
   edit: every state it returns to is one the player had. An edit that changed nothing is not
-  recorded. A whole-draft entry is "reset to the ship" when it lands on the ship and "replaced the
-  draft" otherwise; a preset applied is `Action::EditForm` with `Draft::replace`, like a reset.
+  recorded. A preset applied is `Action::ApplyPreset`, which records `Draft::replace` under the
+  preset's own label ("applied Plate as a layout") and keeps what a layout left out as the entry's
+  note. Any other whole-draft entry is "reset to the ship" when it lands on the ship and "replaced
+  the draft" otherwise.
 - **It is temporary.** It lives in `Ui` beside the draft, survives leaving the view and coming back,
   and is cleared when the shard accepts a round, because the ship is then the new starting point.
   It is not saved and not sent. It holds `MAX_HISTORY` entries and drops the oldest.

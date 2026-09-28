@@ -205,6 +205,7 @@ fn lay_out(
     game: Res<crate::app::Game>,
     assets: Res<AssetServer>,
     panels: Query<(Entity, &Built)>,
+    names: Query<&EditableText, With<NameField>>,
     columns: Query<Entity, With<crate::form_panel::LeftColumn>>,
 ) {
     let form = &ui.form;
@@ -225,6 +226,8 @@ fn lay_out(
         }
     }
     let (Some(column), false) = (column, current) else { return };
+    // A rebuild, such as choosing a row, keeps what was typed.
+    let typed = names.iter().next().map(|e| e.value().to_string()).unwrap_or_default();
     let mut menu = MenuUi::new(&mut commands, MenuTheme::VFD).font(assets.load(crate::faces::UI_FILE));
     let panel = menu.strip(column);
     let node = Node {
@@ -243,7 +246,7 @@ fn lay_out(
     if open {
         let row = menu.row(panel);
         menu.insert(row, Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() });
-        menu.text_field(row, "", lc_proto::form::PRESET_NAME_LIMIT, NameField);
+        menu.text_field(row, &typed, lc_proto::form::PRESET_NAME_LIMIT, NameField);
         menu.small_button(row, "save", Press::Save);
         for row in rows {
             let here = chosen.as_ref() == Some(&row);
