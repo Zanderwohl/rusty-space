@@ -4,8 +4,8 @@ Every hull is covered in collectors, so a ship earns energy from starlight when 
 near a star.
 
 **Status: built.** `lc_world::solar` reads the form's shadow table and the flux; `Craft` walks the
-segments and turns an idle ship's broadside to its star. Since the field's account
-([30-the-field.md](30-the-field.md)), `solar::intake_w` is what *arrives*, `G · L★ / (4π d²) · A(ŝ)`,
+segments and turns an idle ship's broadside to its star. `solar::intake_w` is what *arrives* at
+the field ([30-the-field.md](30-the-field.md)), `G · L★ / (4π d²) · A(ŝ)`,
 and `η` and the engines' rating are applied where it is converted: the `P` below is what storage
 takes in while it has room and the rating is not reached. The first half of this doc is the
 mechanic and the numbers behind it. The second half is how it fits into the energy account in
@@ -23,12 +23,12 @@ wait is what makes collectors worth building.
   and collects nothing.
 - **Inverse square.** Income goes as `1/d²` from the star, so the place to refuel is close in.
   Getting there costs energy, and that trade is the game.
-- **Size cuts both ways.** Collecting area goes as the square of hull length, while slots, mass,
+- **Size cuts both ways.** Collecting area goes as the square of hull length, while volume, mass,
   storage and living drain go as the cube. A bigger ship collects more in total and less per
-  module, and has to be closer in to break even.
-- **Heat is not modeled yet.** Nothing stops a ship from skimming the photosphere. A heat limit
-  will reshape sun-diving later, and until then the effective refueling point is about 0.1 AU,
-  because that is what the anchor below is set against.
+  cubic meter, and has to be closer in to break even.
+- **Heat bounds how close.** What arrives and is not stored is heat in the field, and a field
+  that fills collapses ([30-the-field.md](30-the-field.md)). A full starting ship broadside is at
+  its rated load at 0.05 AU, and a filling one can go closer.
 
 ### Collecting area is the hull's shadow
 
@@ -50,9 +50,6 @@ For the starting form, 731 m long:
 | averaged over every orientation | 6.14 × 10⁴ m² | 0.79 |
 | side-on, star along the beam | 5.50 × 10⁴ m² | 0.71 |
 | nose-on, star along the nose | 2.63 × 10⁴ m² | 0.34 |
-
-The ovoid this replaces, `π √((bc sₓ)² + (ac s_y)² + (ab s_z)²)` for a 500 m hull, put
-1.18 × 10⁵ m² broadside. The starting form is longer and much slimmer than that ovoid.
 
 **Shape now pays.** A plate collects half as much again as a spindle of the same volume
 (1.27 × 10⁵ m² against 8.5 × 10⁴ m²), so the choice between filling fast and turning fast is a
@@ -82,7 +79,7 @@ the star's own luminosity — and chooses the scale.
 
 A game year is a real hour at the design rate, so every time below is also real time.
 
-The columns are the starting form, 30 ME of storage and one slot of living space, and the same
+The columns are the starting form, 30 ME of storage and a slot's volume of living space, and the same
 form two and ten times as long in every part but the Mind (`default*2` and `default*10`).
 
 | | 731 m (30 ME) | 1.46 km (240 ME) | 7.3 km (30 000 ME) |
@@ -97,12 +94,9 @@ form two and ten times as long in every part but the Mind (`default*2` and `defa
 | Jupiter, 5.2 AU | 3 years, +0.001 ME/yr | losing 0.04 ME/yr | losing |
 | **break-even** | **5.5 AU** | **3.9 AU** | **1.7 AU** |
 
-Against the tables the ovoid gave, the first column's rows to Mercury did not move: the anchor fixes
-what the starting ship collects, whatever its shadow. From Venus out they moved, break-even most,
-because the ovoid's tables assumed two slots of living space and the starting form has one. The
-larger hulls are now the starting form scaled, 5% living space rather than the old 10%, collecting
-on its shadow scaled by the square: each breaks even further out, and fills in about the same time
-close in, where the drain is nothing against the income.
+The larger hulls are the starting form scaled, so 5% of each is living space and its shadow goes
+as the square of its length: each fills in about the same time close in, where the drain is
+nothing against the income, and breaks even closer to the star.
 
 A 1 AU hop at 5 g costs the starting ship about 0.85 ME and takes 1.3 game days. Earning it
 back takes 26 minutes at Mercury, 1.5 hours at Venus, 3 hours at Earth and 7 hours at Mars. A
@@ -123,17 +117,14 @@ What it does to play:
 
 ### Where it lives
 
-| crate | change |
+| crate | what |
 |---|---|
-| `lc-world` | new `solar.rs`: the silhouette, the flux, and the power a craft collects over a segment of time. `fitting.rs`: `Balance` gains `solar_efficiency` and `solar_gain`; `Fitting` gains the settled `solar_w` and folds it into stored energy. `craft.rs`: settling works out the next segment's power. |
-| `lc-proto` | `Balance` and `Fitting` gain their fields. `PROTOCOL_VERSION` 20 → 21, goldens regenerated. |
-| `lc-server` | `persist.rs`: `SAVE_FORMAT` 4 → 5, with a format 4 reader. `Fitting` is written through the proto type and postcard is positional, so the new field shifts every byte after it. |
-| `lc-client` | the refit panel and HUD show collection; nothing else changes, because the client folds the same account |
+| `lc-world` | `solar.rs`: the shadow toward the star, the flux, and what arrives over a segment of time. `fitting.rs`: `Balance` carries `conversion_efficiency` and `solar_gain`; `Fitting` holds the settled segment's intake and folds it into the account. `craft.rs`: settling works out the next segment's power |
+| `lc-proto` | `Balance` and `Fitting` carry their fields |
+| `lc-server` | a checkpoint keeps the settled segment with the account |
+| `lc-client` | the ledger and the HUD show collection; the client folds the same account |
 
-The geometry and flux live in their own module, so `fitting.rs` stays under the cap at 568 lines
-of code.
-
-### What is already there
+### What it reads
 
 - **Luminosity.** `LocalSystem::star_luminosity_w()` is the primary's, from the catalog's radius
   and temperature. Sol comes out within a percent of 3.828 × 10²⁶ W, which a test in `star.rs`
@@ -152,7 +143,7 @@ from the origin, which is nothing against a distance of 0.05 AU.
 ### Balance
 
 ```rust
-pub conversion_efficiency: f64,   // η, 0.7; was solar_efficiency, see 30-the-field.md
+pub conversion_efficiency: f64,   // η, 0.7; see 30-the-field.md
 pub solar_gain: f64,         // G, derived in DEFAULT from the anchor
 ```
 
@@ -178,22 +169,18 @@ two readings. Instead:
   **midpoint**. Midpoint rather than start makes the error second order: a segment's worth of
   a changing distance averages out to first order.
 - **Segments end on a fixed grid** of coordinate time, `SOLAR_STEP_S` = one game day (86 400 s,
-  about 2.4 real seconds at the design rate), and at every change of motive, loadout or grant.
+  about 2.4 real seconds at the design rate), at every change of motive or grant, and where a
+  refit step begins or ends.
   Those are the moments the account already settles.
 - The grid is **absolute**: boundaries sit at multiples of `SOLAR_STEP_S` since the world origin,
   not at offsets from when a ship arrived. Server and client therefore cut the same segments
   from the same state without being told.
 
-At settlement `Fitting` records `solar_w` for the segment that begins. `stored_j_at` gains a term
-for it, with the clamps the drain already has:
-
-- **Net power** is `solar_w − drain_w`.
-- **When net is positive** it fills toward capacity and stops there. The excess is lost, as a
-  real collector with nowhere to put it would lose it.
-- **When net is negative** it drains free energy only, down to zero, as the drain does now.
-
-Within one day-long segment, clamping the total rather than the path is exact whenever the clamp
-is not reached, and off by at most one segment's income when it is.
+At settlement `Fitting` records what arrives for the segment that begins. The field's account
+takes it from there ([30-the-field.md](30-the-field.md#conversion)): it is converted into storage at
+`conversion_efficiency`, up to the engines' rating and while storage has room, and the rest is
+heat. Storage filling partway through a segment splits it in closed form, so nothing is clamped
+after the fact.
 
 ### Settling across boundaries
 
@@ -201,8 +188,8 @@ Settling a day at a time has a side effect on burns: the rest of a burn is re-pr
 ship's mass after each day's drain, so a plan spends slightly less than it committed, and the
 difference is refunded when it ends.
 
-`Craft::advance` already settles every frame while a refit runs. It now also settles at each
-grid boundary it passes, in order, and computes the next segment's power as it goes:
+`Craft::advance` settles at each grid boundary it passes, in order, and computes the next
+segment's power as it goes:
 
 ```
 while next boundary ≤ now:
@@ -236,7 +223,7 @@ and a slab pitched nose-up whose beam beats its height would lose a quarter of i
 it. Roll about the nose changes no thrust, so every hull does it, under way or
 not. With it, where the star lies in the ship's frame is fixed by one angle, the nose's to the star,
 and `solar::toward_star` is that direction. With no star, or one along the nose where the roll
-toward it is undetermined, it falls back to ecliptic north as it did before. The ovoid, whose
+toward it is undetermined, it falls back to ecliptic north. A craft with no form is an ovoid, whose
 broadside is its height axis, rolls by nothing further.
 
 Rolling was not optional. The height axis used to be ecliptic north with the nose taken out, and a
@@ -271,10 +258,11 @@ storage, in which case the excess is lost, the same rule as any full ship.
 
 - **HUD:** net income beside the energy bar while collecting — `+4.20 ME/yr` — and nothing
   while under way. A new ship on the local shard starts 5 AU out and reads `+0.002 ME/yr`: that far
-  from the Sun it collects barely more than its one living module drains.
-- **Refit panel:** `solar` and `net` rows in both tables. The top table shows the segment in
-  force. After shows what the draft's hull would collect holding still where the ship is now, so
-  growing a hull or adding living space shows its effect on break-even before it is built.
+  from the Sun it collects barely more than its living part drains.
+- **The ledger:** `solar` and `net` rows, for the segment in force.
+- **The editor's preview:** the starlight the draft would collect holding still where the ship is
+  now, so a change of shape or of living space shows its effect on break-even before it is built
+  ([29-ship-form.md](29-ship-form.md#what-else-it-shows)).
 
 ### Tests
 
@@ -293,21 +281,16 @@ storage, in which case the excess is lost, the same rule as any full ship.
 - **Rules:**
   - Nothing is collected under way.
   - Nothing is collected between systems.
-  - Collection stops at capacity.
-  - A negative net stops at zero.
+  - Storage stops at capacity, and what arrives past it is heat.
 - **Determinism.** A ship holding an eccentric orbit, stepped at a frame's rate and at a tick's
   rate, ends with the same stored energy. That mirrors the existing
   `the_ship_clock_does_not_depend_on_how_finely_time_is_stepped`.
 - **Break it on purpose.** Sample at the segment's start instead of its midpoint and check that
   the eccentric-orbit comparison against a fine numerical integral gets measurably worse. A test
   that passes either way is not testing the midpoint.
-- **Persistence.** A save in format 4 loads with no settled solar, and the next settlement starts
-  collecting.
 
 ## Open
 
-- **Heat.** The mechanic's missing counter-pressure. Closer is always better until it exists.
-  Designed in [30-the-field.md](30-the-field.md), where collection becomes the field's intake.
 - **Multiple stars.** Only the primary is counted. A binary's companion contributes nothing.
 - **Eclipses.** A planet between ship and star does not shade it. A ship in low orbit is in shadow
   for up to half of each orbit, which is a real effect and a small one against a segment a day
