@@ -29,7 +29,7 @@ use em_render::field_material::{
 use em_render::render_space::sim_to_render;
 use em_spectra::{BandMapping, blackbody};
 use glam::DVec3;
-use lc_proto::{Glow, ShipId};
+use lc_proto::{Glow, ShipId, Spectrum};
 use lc_world::field::Mode;
 use lc_world::fitting::Balance;
 use lc_world::form::grid::Envelope;
@@ -133,7 +133,7 @@ impl Held {
     }
 
     pub(crate) fn glow(self, glow: Glow) -> Glow {
-        Glow { temperature_k: self.kelvin, shade: self.shade.map_or(glow.shade, Into::into) }
+        Glow { temperature_k: self.kelvin, shade: self.shade.map_or(glow.shade, Into::into), ..glow }
     }
 }
 
@@ -267,13 +267,14 @@ pub struct Beam {
     pub bearing: DVec3,
     /// Before the field's absorptivity.
     pub power_w: f64,
+    pub spectrum: Spectrum,
     /// Coordinate seconds this power arrived.
     pub since_s: f64,
 }
 
 impl Incoming {
     /// A statement about `ship`, which starts the list over when it is a new ship.
-    pub fn illuminated(&mut self, ship: ShipId, beam: i64, bearing: [f64; 3], power_w: f64, arrive_t: i64) {
+    pub fn illuminated(&mut self, ship: ShipId, beam: i64, bearing: [f64; 3], spectrum: Spectrum, power_w: f64, arrive_t: i64) {
         if self.ship != Some(ship) {
             self.beams.clear();
             self.ship = Some(ship);
@@ -283,7 +284,7 @@ impl Incoming {
             return;
         }
         if power_w > 0.0 {
-            self.beams.insert(beam, Beam { bearing: DVec3::from_array(bearing), power_w, since_s });
+            self.beams.insert(beam, Beam { bearing: DVec3::from_array(bearing).normalize_or_zero(), power_w, spectrum, since_s });
         } else {
             self.beams.remove(&beam);
         }
@@ -291,6 +292,16 @@ impl Incoming {
 
     pub fn beams(&self) -> impl Iterator<Item = &Beam> {
         self.beams.values()
+    }
+
+    /// By the emit's event id, which tells two beams on one bearing apart.
+    pub fn by_id(&self) -> impl Iterator<Item = (i64, &Beam)> {
+        self.beams.iter().map(|(id, beam)| (*id, beam))
+    }
+
+    /// W landing now, before absorptivity.
+    pub fn landing_w(&self) -> f64 {
+        self.beams().map(|b| b.power_w).sum()
     }
 
     fn spots(&self, absorbs: f64, kelvin: f64, area_m2: f64) -> impl Iterator<Item = Vec4> + '_ {
@@ -786,7 +797,7 @@ pub fn hold(
         // From the camera's side of the ship and above it, so the spot faces the lens.
         let look = ui.look.forward();
         let bearing = (look.cross(DVec3::Z).normalize_or_zero() * 0.6 - look).normalize_or_zero();
-        uplink.incoming.illuminated(ship, -1, bearing.to_array(), watts, 0);
+        uplink.incoming.illuminated(ship, -1, bearing.to_array(), Spectrum::Line { wavelength_m: 1.0e-6 }, watts, 0);
     }
 }
 
@@ -906,22 +917,23 @@ mod tests {
     /// and zero power takes it off.
     #[test]
     fn a_beam_restated_is_one_spot_and_zero_power_removes_it() {
+        const LINE: Spectrum = Spectrum::Line { wavelength_m: 1.0e-6 };
         let mut incoming = Incoming::default();
         let (ship, bearing) = (ShipId(7), [0.0, 0.6, 0.8]);
-        incoming.illuminated(ship, 9, bearing, 1.0e17, 1_000_000);
-        incoming.illuminated(ship, 9, bearing, 2.0e17, 2_000_000);
-        incoming.illuminated(ship, 9, bearing, 5.0e17, 1_500_000);
+        incoming.illuminated(ship, 9, bearing, LINE, 1.0e17, 1_000_000);
+        incoming.illuminated(ship, 9, bearing, LINE, 2.0e17, 2_000_000);
+        incoming.illuminated(ship, 9, bearing, LINE, 5.0e17, 1_500_000);
         let powers: Vec<f64> = incoming.beams().map(|b| b.power_w).collect();
         assert_eq!(powers, [2.0e17]);
         let spots = strongest(incoming.spots(1.0, 2_000.0, 1.0e4));
         assert!(spots[0].w > 0.0 && spots[1].w == 0.0);
 
-        incoming.illuminated(ship, 9, bearing, 0.0, 3_000_000);
+        incoming.illuminated(ship, 9, bearing, LINE, 0.0, 3_000_000);
         assert_eq!(incoming.beams().count(), 0);
         assert!(strongest(incoming.spots(1.0, 2_000.0, 1.0e4)).iter().all(|s| s.w == 0.0));
 
-        incoming.illuminated(ship, 4, bearing, 1.0e17, 4_000_000);
-        incoming.illuminated(ShipId(8), 5, bearing, 1.0e17, 5_000_000);
+        incoming.illuminated(ship, 4, bearing, LINE, 1.0e17, 4_000_000);
+        incoming.illuminated(ShipId(8), 5, bearing, LINE, 1.0e17, 5_000_000);
         assert_eq!(incoming.beams().count(), 1, "the successor starts with no beams");
     }
 
@@ -972,8 +984,8 @@ mod tests {
         let s = heated(0.9, Posture::BLACK);
         let hot = crate::hull::own_glow(&s);
         assert!(hot.temperature_k > 4_000.0, "premise: {}", hot.temperature_k);
-        let bare = crate::ship_hull::finished(&s, None, DVec3::ZERO, hot, false);
-        let wrapped = crate::ship_hull::finished(&s, None, DVec3::ZERO, hot, true);
+        let bare = crate::ship_hull::finished(&s, None, DVec3::ZERO, hot, false, None);
+        let wrapped = crate::ship_hull::finished(&s, None, DVec3::ZERO, hot, true, None);
         assert!(bare.glow.truncate().max_element() > 0.0);
         assert_eq!(wrapped.glow, Vec4::ZERO);
         assert_eq!(bare.reflected, wrapped.reflected, "only the heat moves");

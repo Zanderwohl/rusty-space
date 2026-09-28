@@ -96,6 +96,8 @@ pub struct Contact {
     pub facing: DVec3,
     /// What its main drive was sending aft, `F c`, watts, as last stated. Zero when coasting.
     pub drive_w: f64,
+    /// What its emits were sending out of each end, watts, as last stated.
+    pub emit: lc_world::emit::Ends,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
     /// Its form and the refit step it had under way, as the statement's light left it, with when
@@ -142,6 +144,7 @@ impl Contact {
             beta,
             facing: DVec3::from_array(presence.facing).normalize_or_zero(),
             drive_w: presence.drive_w,
+            emit: lc_world::emit::Ends { fore_w: presence.emit_fore_w, aft_w: presence.emit_aft_w },
             emitted_s,
             form: presence.form,
             building: presence.building.map(|b| (emitted_s, b)),
@@ -270,6 +273,7 @@ pub struct Uplink {
     pub chat: crate::chat::Chat,
     pub console: crate::console::Console,
     pub incoming: crate::field::Incoming,
+    pub beams: crate::emit_panel::Beams,
 }
 
 /// The rate a shard runs at, and what a server that says nothing is taken to mean.
@@ -509,6 +513,7 @@ fn fold(
     ui: &mut crate::app::Ui,
     message: Outbound,
 ) {
+    crate::emit_panel::fold(uplink, &message, game.0.ship.motion.position_ly);
     match message {
         Outbound::Welcome {
             client_id,
@@ -783,7 +788,7 @@ fn fold(
                 }
                 // What a mode order does to the account arrives straight after, as `Fitted`.
                 Order::FieldMode { .. } => None,
-                // Refused as not built until E3.
+                // Folded by `Beams::fold`.
                 Order::Emit { .. } => None,
                 Order::CancelRefit => Some("refit stopped where it was".into()),
                 // Recorded against the identifier the server minted, which is the only thing
@@ -911,8 +916,8 @@ fn fold(
         }
         // The welcome to the successor follows.
         Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed", at_t as f64 * 1e-6),
-        Outbound::Illuminated { ship_id, beam, bearing, power_w, arrive_t, .. } => {
-            uplink.incoming.illuminated(ship_id, beam, bearing, power_w, arrive_t)
+        Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t } => {
+            uplink.incoming.illuminated(ship_id, beam, bearing, spectrum, power_w, arrive_t)
         }
         // Sent once S2 is built.
         Outbound::Presets(_) => {}
@@ -1371,6 +1376,8 @@ mod tests {
             beta: [0.0, 0.1, 0.0],
             facing: [0.0, 0.0, 2.0],
             drive_w: 4.2e17,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
             emitted_t: 500_000,
             arrive_t: 1_000_000,
             form: lc_proto::Form::default(),
@@ -1435,6 +1442,8 @@ mod tests {
                     .to_array(),
                 facing: [1.0, 0.0, 0.0],
                 drive_w: 0.0,
+                emit_fore_w: 0.0,
+                emit_aft_w: 0.0,
                 emitted_t: (emitted_s * 1e6) as i64,
                 arrive_t: (emitted_s * 1e6) as i64,
                 form: lc_proto::Form::default(),
@@ -1803,6 +1812,8 @@ mod tests {
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
             drive_w: burning,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),
@@ -1847,6 +1858,64 @@ mod tests {
         assert_eq!(power_at(&mut uplink, 410.0), 0.0, "an older event outranked a newer statement");
     }
 
+    /// 31 §Client: the map draws this ship's beams and those landing on it, and nothing else. Another
+    /// craft's emission, seen or accepted for someone else, is a beam this ship does not know of.
+    #[test]
+    fn only_beams_this_ship_sent_or_is_in_are_drawn() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let drawn = |uplink: &Uplink| crate::emit_panel::on_map(&uplink.beams, &uplink.incoming, DVec3::ZERO, None, 1.0, 1.0e9).len();
+        let emit = |ship_id, event_id| Outbound::Accepted {
+            ship_id,
+            event_id,
+            at_t: 0,
+            order: Order::Emit {
+                aim: lc_proto::Aim::Bearing([1.0, 0.0, 0.0]),
+                apertures: lc_proto::Apertures::Aft,
+                power_w: 1.0e18,
+                wavelength_m: 1.0e-6,
+                spread_rad: 1.0e-3,
+                duration_s: 60.0,
+                lead: lc_proto::Lead::Coasting,
+            },
+        };
+        let elsewhere = Sighting {
+            event_id: 30,
+            source_id: 2,
+            arrive_t: 500_000,
+            emitted_t: 0,
+            direction: [1.0, 0.0, 0.0],
+            strength: 1.0,
+            kind: lc_proto::kind::EMIT,
+            payload: "{}".into(),
+        };
+        let elsewhere = Outbound::Sightings(vec![Cleared::<Sighting>::clear(elsewhere, 500_000, 0.0).unwrap()]);
+        fold(&mut uplink, &mut game, &mut ui, elsewhere);
+        fold(&mut uplink, &mut game, &mut ui, emit(ShipId(2), 31));
+        assert_eq!(drawn(&uplink), 0, "a beam somebody else lit");
+
+        fold(&mut uplink, &mut game, &mut ui, emit(ShipId(7), 32));
+        assert_eq!(drawn(&uplink), 1, "this ship's own");
+        let lit = |power_w| Outbound::Illuminated {
+            ship_id: ShipId(7),
+            beam: 40,
+            bearing: [0.0, 1.0, 0.0],
+            spectrum: lc_proto::Spectrum::Line { wavelength_m: 1.0e-6 },
+            power_w,
+            arrive_t: 500_000,
+        };
+        fold(&mut uplink, &mut game, &mut ui, lit(1.0e17));
+        assert_eq!(drawn(&uplink), 2, "one landing here");
+        fold(&mut uplink, &mut game, &mut ui, lit(0.0));
+        assert_eq!(drawn(&uplink), 1, "its light went out");
+        fold(&mut uplink, &mut game, &mut ui, accepted_cut());
+        assert_eq!(drawn(&uplink), 0, "put out");
+    }
+
+    fn accepted_cut() -> Outbound {
+        Outbound::Accepted { ship_id: ShipId(7), event_id: 50, at_t: 500_000, order: Order::CutDrive }
+    }
+
     /// Past [`REMEMBERED_DRIVERS`], only the contacts in sight keep their drive histories.
     #[test]
     fn drive_histories_are_bounded_by_the_ships_in_sight() {
@@ -1860,6 +1929,8 @@ mod tests {
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
             drive_w: 0.0,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),

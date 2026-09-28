@@ -228,6 +228,7 @@ pub fn parse(args: &[String]) -> Entry {
                 _ => None,
             }
         }),
+        camera_in_ship: flag("--demo-cam-ship"),
         camera_at: after("--demo-cam-at").and_then(|spec| {
             let fields: Vec<f64> = spec.split(':').map(|f| f.parse::<f64>()).collect::<Result<_, _>>().ok()?;
             match fields[..] {
@@ -282,8 +283,9 @@ pub fn parse(args: &[String]) -> Entry {
         // rather than by a page, so it needs its own way in to be photographed.
         open_password_form: flag("--password"),
         say: after("--say"),
-        console: after("--console"),
+        console: args.windows(2).filter(|w| w[0] == "--console").map(|w| w[1].clone()).collect(),
         apply: flag("--apply"),
+        emit: flag("--emit"),
         cancel_at: value(args, "--cancel-at"),
         actions,
     };

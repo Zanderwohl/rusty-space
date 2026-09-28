@@ -6,7 +6,7 @@ tick and answers the connection that sent it. The client knows nothing about any
 is `lc_server::command` and `lc_client::console`.
 
 Status: **built** — `help`, `teleport`, `where`, `who-is`, `energize`, `drain`, `chart`,
-`refit`, `refit-finish`, `refit-magic`, `stage`.
+`refit`, `refit-finish`, `refit-magic`, `emit`, `stage`.
 
 ## Why text on the wire
 
@@ -62,7 +62,7 @@ reason `ability::allows` opens development there: the population is whoever ran 
 `energize` and `stage` sit at the levels the old `Inbound::Grant` and `Inbound::Stage` are allowed
 at, and a test holds the two tables to each other.
 
-`teleport`, `energize`, `drain`, `refit`, `refit-finish` and `refit-magic` act on the asker's own ship from
+`teleport`, `energize`, `drain`, `refit`, `refit-finish`, `refit-magic` and `emit` act on the asker's own ship from
 debug (3).
 Their `ship:` argument, which names any ship, starts at admin (2), so admins and superadmins act
 on anyone's.
@@ -116,10 +116,19 @@ charged, and a ship that is not refitting is an error.
 
 ## Refit-magic
 
-`refit-magic <form> [scale] [ship:<id>]` makes a ship that form at once and spends nothing, the form
-named as `refit` names it. The placement rules are kept, and a form that breaks one is refused
+`refit-magic <form> [scale] [fore:<n>] [ship:<id>]` makes a ship that form at once and spends nothing, the form
+named as `refit` names it. `fore:` turns that many of its engines to fire fore, mirroring each
+along the nose, which is how the plate becomes a ship that can emit balanced; `refit` takes it too. The placement rules are kept, and a form that breaks one is refused
 naming the part: energy and the drones a real refit needs are not asked for. A refit under way is
 dropped, not finished, and storage keeps what it holds only up to its new capacity.
+
+## Emit
+
+`emit <fore|aft|both> [rating:0.5] [minutes:60] [ship:<id>]` gives the emit order
+([31-directed-energy.md](31-directed-energy.md#emitting-on-purpose)) from the ship's nose, through
+the order's own checks: `aft` beams out of the stern and burns along the nose, `fore` out of the
+bow and burns against it, and `both` beams both ways and holds. Each end sends `rating` of the
+lesser chosen end's rating, at 1 µm and 0.01 rad. It is how a lit face is photographed.
 
 ## Teleport
 

@@ -412,8 +412,9 @@ pub enum Order {
     /// Put light out on purpose: to dump heat, feed an ally, or attack.
     ///
     /// `power_w` is at the start and at most the apertures' rating; `spread_rad` is the
-    /// half-angle, at least the diffraction floor. See `lightcone/docs/31-directed-energy.md`.
-    Emit { aim: Aim, apertures: Apertures, power_w: f64, wavelength_m: f64, spread_rad: f64, duration_s: f64 },
+    /// half-angle, at least the diffraction floor; `lead` is how an aim at a craft predicts it.
+    /// See `lightcone/docs/31-directed-energy.md`.
+    Emit { aim: Aim, apertures: Apertures, power_w: f64, wavelength_m: f64, spread_rad: f64, duration_s: f64, lead: Lead },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -501,6 +502,11 @@ pub struct Presence {
     /// Sent rather than derived because a receiver knows neither the craft's mass nor its
     /// acceleration. It is what a burn plainly shows: the face's temperature and the cone's reach.
     pub drive_w: f64,
+    /// What its emits were sending out of its fore and its aft faces then, watts: an emit flown as
+    /// a burn from the end it was ordered from, a balanced one its `power_w` from each, half what it draws. Not the drive,
+    /// which is [`Presence::drive_w`] and leaves aft beside these.
+    pub emit_fore_w: f64,
+    pub emit_aft_w: f64,
     /// Coordinate microseconds the light left. Always earlier than [`Presence::arrive_t`].
     pub emitted_t: i64,
     /// Coordinate microseconds it arrives. Never later than the server's `t` when it is sent.
@@ -962,7 +968,7 @@ pub mod form;
 mod knowing;
 mod radio;
 
-pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lit, Shade, Spectrum, Switch};
+pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lead, Lit, Shade, Spectrum, Switch};
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
@@ -1089,6 +1095,8 @@ mod tests {
                     beta: [0.0, 0.001, 0.0],
                     facing: [0.0, 1.0, 0.0],
                     drive_w: 1.1e20,
+                    emit_fore_w: 3.0e18,
+                    emit_aft_w: 3.0e18,
                     emitted_t: 500_000,
                     arrive_t: 1_000_000,
                     form: two_parts(),
@@ -1101,7 +1109,7 @@ mod tests {
                         duration_s: 86_400.0,
                         reversing: true,
                     }),
-                    glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear }),
+                    glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear, envelope_m2: 1.3e6 }),
                     glare: Some(Glare { spectrum: Spectrum::Line { wavelength_m: 1.0e-6 }, flux_w_m2: 3.5e12 }),
                 },
                 1_000_000,
@@ -1308,6 +1316,7 @@ mod tests {
                 wavelength_m: 1.0e-9,
                 spread_rad: 1.0e-5,
                 duration_s: 3_600.0,
+                lead: Lead::Burning,
             },
             issued_at_client_t: 1_000_000,
         })
@@ -1834,6 +1843,7 @@ mod tests {
                     wavelength_m: 0.03,
                     spread_rad: 0.5,
                     duration_s: 0.0,
+                    lead: Lead::Coasting,
                 },
                 issued_at_client_t: 0,
             }),
@@ -1870,6 +1880,8 @@ mod tests {
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
             drive_w: 0.0,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
             emitted_t: arrive_t - 1_000,
             arrive_t,
             form: Form::default(),

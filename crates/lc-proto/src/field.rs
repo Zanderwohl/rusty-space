@@ -53,6 +53,8 @@ pub struct Lit {
 pub struct Glow {
     pub temperature_k: f64,
     pub shade: Shade,
+    /// The field's envelope, m²: its size, which is as plain as its color.
+    pub envelope_m2: f64,
 }
 
 /// What light an emission is made of: a beam's one wavelength, or a drive face's blackbody.
@@ -67,6 +69,15 @@ pub enum Spectrum {
 pub struct Glare {
     pub spectrum: Spectrum,
     pub flux_w_m2: f64,
+}
+
+/// What an emit at a craft assumes it does until the beam lands: holds its course, or holds the
+/// burn it was seen in. See `lightcone/docs/31-directed-energy.md` §Spread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Lead {
+    #[default]
+    Coasting,
+    Burning,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

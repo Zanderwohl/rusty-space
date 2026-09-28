@@ -195,7 +195,7 @@ pub fn frame(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Quat {
 /// Nose, port and dorsal directions in simulation axes, or `None` with no nose. The roll turns
 /// the ship about its nose so that the direction it carries dorsal onto, not dorsal itself, faces
 /// the star: `lc_world::solar::toward_star` in the ship's frame.
-fn ship_axes(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Option<[DVec3; 3]> {
+pub(crate) fn ship_axes(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Option<[DVec3; 3]> {
     let fore = fore_sim.normalize_or_zero();
     if fore == DVec3::ZERO {
         return None;
@@ -631,7 +631,7 @@ mod tests {
         Session::new(&lc_world::sky::AuthoredStars::sample(), 3)
     }
 
-    const IDLE: Glow = Glow { temperature_k: 400.0, shade: Shade::Clear };
+    const IDLE: Glow = Glow { temperature_k: 400.0, shade: Shade::Clear, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2 };
 
     /// A night side is metered for its lights, a day side for its starlight.
     #[test]
@@ -671,7 +671,7 @@ mod tests {
     /// The thermal term follows the field, not a fixed hull: past the Draper point it reaches V.
     #[test]
     fn a_hot_field_is_seen_in_v() {
-        let v = |k| radiance_at(&session(), None, DVec3::ZERO, DVec3::ZERO, Glow { temperature_k: k, shade: Shade::Black }).thermal[em_spectra::Band::V];
+        let v = |k| radiance_at(&session(), None, DVec3::ZERO, DVec3::ZERO, Glow { temperature_k: k, shade: Shade::Black, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2 }).thermal[em_spectra::Band::V];
         assert!(v(2400.0) > 1.0e10 * v(400.0));
         assert!(v(4600.0) > 1.0e2 * v(2400.0));
     }

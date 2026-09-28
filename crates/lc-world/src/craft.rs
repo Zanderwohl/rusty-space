@@ -189,6 +189,8 @@ pub struct Craft {
     seen: History,
     /// Its field at each settlement, so an observer is shown the one its light left with.
     glows: Glows,
+    /// Its balanced emits, oldest first, kept as `glows` is. See [`Craft::balanced_w_at`].
+    lits: Vec<crate::fitting::Lit>,
     /// When it was destroyed. See [`Craft::end`].
     ended_s: Option<f64>,
 }
@@ -216,6 +218,7 @@ impl Craft {
             fitting: None,
             seen: History::default(),
             glows: Glows::default(),
+            lits: Vec::new(),
             ended_s: None,
         }
     }
@@ -454,6 +457,8 @@ impl Craft {
         self.fitting = fitting;
         self.sync_length();
         self.glows.clear();
+        self.lits.clear();
+        self.note_lit();
         let Some(fitting) = &self.fitting else {
             self.seen.clear();
             return;

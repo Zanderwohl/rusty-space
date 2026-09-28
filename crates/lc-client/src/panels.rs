@@ -423,6 +423,7 @@ pub struct Remembered {
     body_draft: String,
     aimed: crate::radio_panel::Aimed,
     seal: bool,
+    emit: crate::emit_panel::Draft,
 }
 
 pub fn open_panels(
@@ -447,6 +448,7 @@ pub fn open_panels(
         body_draft,
         aimed,
         seal,
+        emit,
     } = &mut *held_over;
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let panels = ui_state.open_panels().to_vec();
@@ -496,6 +498,7 @@ pub fn open_panels(
             Panel::Reader | Panel::Console => unreachable!("drawn by their own modules"),
             Panel::Refit => crate::refit_panel::refit(ui, &ui_state.0, &game, &mut out),
             Panel::DevActions => crate::refit_panel::dev_actions(ui, &game, &mut out),
+            Panel::Emit => crate::emit_panel::emit(ui, &ui_state, &game, &uplink, emit, &mut out),
             Panel::Chat => crate::radio_panel::chat(
                 ui,
                 &ui_state,

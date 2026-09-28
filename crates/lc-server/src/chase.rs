@@ -118,7 +118,7 @@ pub const BURN_CHANGE_FRACTION: f64 = 0.25;
 
 /// The quarry's proper acceleration, when it was thrusting at the sighting and two sightings can
 /// measure it.
-fn burn_of(fleet: &Fleet, seen: &pursuit::Sighting, previous: Option<&pursuit::Sighting>) -> Option<glam::DVec3> {
+pub(crate) fn burn_of(fleet: &Fleet, seen: &pursuit::Sighting, previous: Option<&pursuit::Sighting>) -> Option<glam::DVec3> {
     let s = seen.emitted_s;
     let lit = fleet
         .get(CraftId(seen.target.0))
@@ -209,6 +209,7 @@ pub fn contacts(
                 continue;
             };
             let then = craft.seen_at(sighted.emitted_s);
+            let emit = lc_world::emit::emit_w(craft, sighted.emitted_s);
             let presence = Presence {
                 ship_id: ShipId(craft.id.0),
                 name: craft.designation(),
@@ -225,6 +226,8 @@ pub fn contacts(
                 // At the moment the light left, not now. A burn that has since stopped is
                 // still burning as far as this observer is concerned.
                 drive_w: lc_world::emit::drive_w(craft, balance, sighted.emitted_s),
+                emit_fore_w: emit.fore_w,
+                emit_aft_w: emit.aft_w,
                 emitted_t: (sighted.emitted_s * 1.0e6) as i64,
                 // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by
                 // construction, so this is the light landing at this instant.
@@ -497,6 +500,10 @@ mod tests {
         server.fleet.get_mut(CraftId(1)).unwrap().fit(None);
         server.tick(&mut wire).await.unwrap();
         let [.., glow] = glows(&wire.take(ClientId(2)), ShipId(1))[..] else { panic!("no glow") };
-        assert_eq!(glow, lc_proto::Glow { temperature_k: Balance::DEFAULT.field_idle_k, shade: Shade::Clear });
+        assert_eq!(glow, lc_proto::Glow {
+            temperature_k: Balance::DEFAULT.field_idle_k,
+            shade: Shade::Clear,
+            envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2,
+        });
     }
 }

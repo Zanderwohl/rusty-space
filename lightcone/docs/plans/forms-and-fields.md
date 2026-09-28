@@ -685,9 +685,9 @@ graph LR
 
 ### R13 · The engine grid on the open face
 
-- status: active card "R13 · The engine grid on the open face"
+- status: done #137
 - needs: R10, R12, R17, E3
-- touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/src/hull.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`, `lightcone/docs/32-ship-rendering.md`
+- touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/assets/textures/hull/engine_flank.tgraph`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/hull_mesh.rs`, `crates/lc-client/src/lit_faces.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/procedural.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/examples/hull_void.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-world/src/emit.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-world/src/craft/emit.rs`, `crates/lc-world/src/craft/field.rs`, `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/form/presets.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/emit/drives.rs`, `crates/lc-server/src/emit/tests.rs`, `crates/lc-server/src/command/`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`, `lightcone/docs/27-console.md`, `lightcone/docs/31-directed-energy.md`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/r13-*.jpg`, `AGENTS.md`
 - read: 32 §Materials by kind, §Beams and plumes, §The exhaust cone; 31 §Emitting on purpose's As built
 - deliver: every open face an emission leaves through lit at its share of that emission's power, whatever lit it: a drive aft at `F c`, an emit fore, aft or both. The engine kind's emitter grid lit only on those faces, from a per-vertex share the mesher reads off the part (R3 lights it over the whole region, which is right in a void and wrong on a ship), with R12's aperture glow over it. The player's own faces from what it has lit; another craft's from what its `Presence` states of each end, beside the main drive's `drive_w`. No cone for an emit: its spread is its own, and its light inside it is `Glare`. (Folded in from R19, which R17 added.)
 - done when: a burning ship photographs with the grid glowing on its open face and dark on the engine's flanks; an emit flown as a burn from the aft faces and a balanced emit photograph with the faces they leave through glowing, on your own ship and on another's; and a test pins another craft's face temperature to the emission its `Presence` stated.
@@ -730,12 +730,12 @@ graph LR
 
 ### R18 · A distant burn as a point
 
-- status: todo
+- status: active card "R18 · A distant burn as a point"
 - needs: R12, R17, H7, E4
-- touches: `crates/lc-client/src/plume.rs`, `crates/lc-client/src/starfield.rs`, `lightcone/docs/32-ship-rendering.md`
-- read: 32 §The exhaust cone (From a distance), 04 (stellar photometry), 07 §Other ships
-- deliver: an emitting craft too small to resolve, drawn as a point in the observer's bands, whatever lit the emission: a drive, a heat dump or a beam. Inside the cone its light is the `Glare` E3's fan-out put on its `Presence`, not worked out again here; outside it, the lit apertures' oblique glow from the power `Presence` states (R17), falling off with the angle. Doppler-shifted and aberrated as a star, through the starfield's exposure and glare. H7 drew no point for a craft, lit or not: this draws every unresolved craft's, from `hull::Sent`'s terms (reflected, thermal, windows), and the glare is one more term of the same sum. The meeting at the cone's edge settled and written into 32.
-- done when: a burn photographed from a light-year off is a point that brightens by orders of magnitude as its cone sweeps over the observer, a beam aimed past the observer is not drawn at all, and a test pins the point's flux inside the cone to the `Glare` it was handed.
+- touches: `crates/lc-client/src/plume.rs`, `crates/lc-client/src/starfield.rs`, `crates/lc-client/src/field.rs` (the collapse sighting), `lightcone/docs/32-ship-rendering.md`
+- read: 32 §The exhaust cone (From a distance), §The field (collapse), 30 §Collapse, 04 (stellar photometry), 07 §Other ships
+- deliver: an emitting craft too small to resolve, drawn as a point in the observer's bands, whatever lit the emission: a drive, a heat dump or a beam. Inside the cone its light is the `Glare` E3's fan-out put on its `Presence`, not worked out again here; outside it, the lit apertures' oblique glow from the power `Presence` states (R17), falling off with the angle. Doppler-shifted and aberrated as a star, through the starfield's exposure and glare. H7 drew no point for a craft, lit or not: this draws every unresolved craft's, from `hull::Sent`'s terms (reflected, thermal, windows), and the glare is one more term of the same sum. The meeting at the cone's edge settled and written into 32. A collapse too far to resolve is the same kind of point: from its `kind::COLLAPSE` sighting as its light arrives, the spike's flash at `collapse_spike_k` and then H10's afterglow (`lc_world::afterglow`) cooling over `collapse_afterglow_s`, a new star where the ship was. Burns are read from their `kind::DRIVE` and `kind::EMIT` sightings as well as `Presence`, so a burn that lit and went out between two presences still shows.
+- done when: a burn photographed from a light-year off is a point that brightens by orders of magnitude as its cone sweeps over the observer, a beam aimed past the observer is not drawn at all, a collapse a light-year off flashes when its light arrives and fades on H10's curve, and tests pin the point's flux inside the cone to the `Glare` it was handed and a collapse's to the afterglow's.
 - note: after H7, so the emission adds to the craft's own point rather than drawing a second one beside it; after E4, so a drive's light inside its cone arrives the way every beam's does, and there is one path from emission to eye.
 
 ### R19 · Faces lit by an emit
@@ -814,9 +814,9 @@ graph LR
 
 ### C8 · Emit window
 
-- status: active card "C8 · Emit window"
+- status: done #131
 - needs: E3
-- touches: `crates/lc-client/src/emit_panel.rs`, `crates/lc-client/src/map.rs`
+- touches: `crates/lc-client/src/emit_panel.rs`, `crates/lc-client/src/map_cone.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/panels.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/input.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/field.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/field.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-world/src/emit.rs`, `crates/lc-world/src/field.rs`, `crates/lc-world/src/glow.rs`, `crates/lc-server/src/emit.rs`, `crates/lc-server/src/emit/tests.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/ability.rs`, `crates/lc-server/src/fitting.rs`, `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`, `AGENTS.md`
 - read: 31 §Client
 - deliver: the emit window on `E` with its preview of spread, spot, lead uncertainty, fraction arriving, recoil and source; the incoming list; beams on the map.
 - done when: the preview is a pure function tested without a window.

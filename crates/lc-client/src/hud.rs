@@ -372,6 +372,7 @@ pub fn toggles(ui: &UiState) -> Vec<Toggle> {
         ("Ship", Action::ToggleView(ViewMode::Form), ui.view == ViewMode::Form, None),
         panel("Refit", Panel::Refit),
         panel("Comms", Panel::Chat),
+        panel("Emit", Panel::Emit),
         panel("Bookshelf", Panel::Reader),
         ("Slideshow", Action::ToggleBeautyShots, ui.beauty_shots, Some("SH")),
     ]
@@ -700,6 +701,8 @@ mod tests {
                 beta: [0.0; 3],
                 facing: [1.0, 0.0, 0.0],
                 drive_w: 0.0,
+                emit_fore_w: 0.0,
+                emit_aft_w: 0.0,
                 emitted_t: 0,
                 arrive_t: 0,
                 form: lc_proto::Form::default(),

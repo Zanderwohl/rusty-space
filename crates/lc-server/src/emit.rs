@@ -23,13 +23,14 @@
 use std::collections::HashMap;
 
 use glam::DVec3;
-use lc_proto::{Aim, Apertures, Glare, Order, Outbound, Refusal, ShipId, Spectrum};
+use lc_proto::{Aim, Apertures, Glare, Lead, Order, Outbound, Refusal, ShipId, Spectrum};
 use lc_spacetime::LIGHT_MICROSECOND_M;
 use lc_world::craft::CraftId;
 use lc_world::emit::{Boost, Jet};
 use lc_world::field::Burst;
 use lc_world::fitting::Lit;
 use lc_world::flight::Drive;
+use lc_world::motion::LIGHT_US_PER_LY;
 use lc_world::signal::{Beam, Transmitter};
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +50,9 @@ const SAME: f64 = 1.0e-4;
 
 /// The shortest wavelength an emit may ask for, and the longest: 31's 1 nm and the dish's 3 cm.
 const WAVELENGTH_M: (f64, f64) = (1.0e-9, 0.03);
+
+/// Between the two sightings a burn is measured from. A steady burn reads the same over any.
+const LEAD_BASELINE_US: i64 = 1_000_000;
 
 /// What an emitting event carries to every craft it reaches, in its payload under `emission`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -236,7 +240,7 @@ impl<J: Journal> Server<J> {
     /// Validate an [`Order::Emit`] and light it, as a burn when it has net thrust. What was lit:
     /// the spread never under the diffraction floor.
     pub(crate) fn order_emit(&mut self, id: CraftId, order: &Order, at: i64) -> Result<Order, Refusal> {
-        let Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s } = *order else {
+        let Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s, lead } = *order else {
             return Err(Refusal::Impossible);
         };
         let finite = [power_w, wavelength_m, spread_rad, duration_s].iter().all(|x| x.is_finite());
@@ -270,7 +274,10 @@ impl<J: Journal> Server<J> {
         if matches!(aim, Aim::Omni) {
             return Err(Refusal::Impossible);
         }
-        let axis = self.beam_for(id, &aim, at)?.axis;
+        let axis = match (aim, lead) {
+            (Aim::Ship(target), Lead::Burning) => self.lead_along_burn(id, target, at)?,
+            _ => self.beam_for(id, &aim, at)?.axis,
+        };
         // One spread for both ends of a balanced emit, never under either end's floor.
         let spread_rad = ends.iter().map(|end| Transmitter::new(wavelength_m, end.diameter_m).spread_rad(spread_rad)).fold(0.0, f64::max);
         let spectrum = Spectrum::Line { wavelength_m };
@@ -317,7 +324,18 @@ impl<J: Journal> Server<J> {
         };
         // Beside a drive whose cut this tick is not stated yet.
         self.emissions.emitting.entry(id).or_default().extend(lit);
-        Ok(Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s })
+        Ok(Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s, lead })
+    }
+
+    /// Where to point at `target` to meet it holding the burn `id` saw it in: its proper acceleration
+    /// measured from two of `id`'s sightings [`LEAD_BASELINE_US`] apart, as an escort measures its
+    /// quarry's, and coasting when its plume was dark or it has not been watched that long.
+    fn lead_along_burn(&self, id: CraftId, target: ShipId, at: i64) -> Result<DVec3, Refusal> {
+        let seen = crate::chase::sighting(&self.fleet, id, target, at).ok_or(Refusal::NotInSight)?;
+        let previous = crate::chase::sighting(&self.fleet, id, target, at - LEAD_BASELINE_US);
+        let accel = crate::chase::burn_of(&self.fleet, &seen, previous.as_ref()).unwrap_or(DVec3::ZERO);
+        let from_ly = self.fleet.get(id).ok_or(Refusal::NotYours)?.position_at(at as f64) / LIGHT_US_PER_LY;
+        lc_world::emit::lead(from_ly, at as f64 * 1.0e-6, &seen, accel).map(|led| led.axis).ok_or(Refusal::Impossible)
     }
 
     /// Put out what `id` has lit, at `at`, its drives too when `drives`: its draw stops, and the

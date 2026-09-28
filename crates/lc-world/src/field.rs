@@ -71,6 +71,14 @@ impl Field {
         self.idle_k * (heat_j / idle_j).sqrt().sqrt()
     }
 
+    /// The heat at which the field is at `temperature_k`: [`Field::temperature_k`] turned round.
+    pub fn heat_j_at(&self, temperature_k: f64) -> f64 {
+        if temperature_k <= 0.0 || self.idle_k <= 0.0 {
+            return 0.0;
+        }
+        self.idle_j_m2 * self.area_m2 * (temperature_k / self.idle_k).powi(4)
+    }
+
     /// Where heat tends under a constant net `power_w`: `P τ`.
     pub fn equilibrium_j(&self, power_w: f64) -> f64 {
         power_w * self.tau_s
@@ -533,6 +541,16 @@ mod tests {
 
     fn test_field() -> Field {
         Field { area_m2: AREA_M2, capacity_j_m2: 1.0e21, tau_s: 1.84e6, idle_k: 400.0, idle_j_m2: 2.0e16 }
+    }
+
+    #[test]
+    fn heat_is_read_back_from_temperature() {
+        let field = test_field();
+        for heat_j in [1.0e20, 3.3e22, 9.9e23] {
+            let back = field.heat_j_at(field.temperature_k(heat_j));
+            assert!((back / heat_j - 1.0).abs() < 1.0e-12, "{back} against {heat_j}");
+        }
+        assert_eq!(field.heat_j_at(0.0), 0.0);
     }
 
     #[test]
