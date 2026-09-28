@@ -34,7 +34,6 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::WindowResolution;
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::hull_material::{HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
-use em_render::plume_material::PlumeMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use lc_client::hull_mesh::{
@@ -182,7 +181,6 @@ fn main() {
         .init_asset::<PopulationMaterial>()
         .init_asset::<BodySurfaceMaterial>()
         .init_asset::<RelativisticStarfieldMaterial>()
-        .init_asset::<PlumeMaterial>()
         .add_plugins((ProceduralTexturesPlugin, HullMaterialPlugin, HullMeshPlugin))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Scene {

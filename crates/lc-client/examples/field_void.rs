@@ -64,7 +64,7 @@ const CAMERA_DIR: Vec3 = Vec3::new(0.62, 0.30, 0.72);
 /// A gray world straight behind the ship, so a Black field has something to hide against.
 const BACKDROP_M: f32 = 900.0;
 const BACKDROP_BEHIND_M: f32 = 6000.0;
-/// See `PlumeUniform::exposure`; a field fills more of the frame than a plume, and blooms less.
+/// See `ApertureGlowUniform::exposure`.
 const OVERFLOW_GAIN: f32 = 0.5;
 /// `lc_client::app`'s window size, so a shot here compares with a shot there.
 const WINDOW: (u32, u32) = (1280, 720);

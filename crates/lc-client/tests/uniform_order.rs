@@ -72,20 +72,17 @@ fn the_body_surface_uniform_is_declared_in_one_order() {
     );
 }
 
-/// The plume's uniform grew a second color and a churn, appended to both — but it is six vectors
-/// the shader reads positionally, and a march that takes the soot for the exposure draws nothing
-/// at all.
+/// Both of an exhaust's uniforms, read positionally by shaders the game now draws every burn with.
 #[test]
-fn the_plume_uniform_is_declared_in_one_order() {
-    let shader = include_str!("../assets/shaders/plume.wgsl");
-    let host = include_str!("../../em-render/src/plume_material.rs");
-
-    let in_shader = fields(shader, "struct PlumeUniform {");
-    let in_host = fields(host, "pub struct PlumeUniform {");
-
-    assert!(in_shader.len() >= 6, "the parse found almost nothing: {in_shader:?}");
-    assert_eq!(
-        in_shader, in_host,
-        "the shader and the host disagree about the uniform's layout",
-    );
+fn the_exhaust_uniforms_are_declared_in_one_order() {
+    let host = include_str!("../../em-render/src/exhaust_cone_material.rs");
+    for (shader, name, least) in [
+        (include_str!("../assets/shaders/exhaust_cone.wgsl"), "ExhaustConeUniform", 4),
+        (include_str!("../assets/shaders/aperture_glow.wgsl"), "ApertureGlowUniform", 5),
+    ] {
+        let in_shader = fields(shader, &format!("struct {name} {{"));
+        let in_host = fields(host, &format!("pub struct {name} {{"));
+        assert!(in_shader.len() >= least, "the parse found almost nothing: {in_shader:?}");
+        assert_eq!(in_shader, in_host, "the shader and the host disagree about {name}'s layout");
+    }
 }

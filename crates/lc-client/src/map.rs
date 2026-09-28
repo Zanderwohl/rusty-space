@@ -140,7 +140,7 @@ impl Plugin for MapPlugin {
             // whenever the ship was under way.
             .add_systems(
                 Update,
-                (pace, survey, resize, place, crate::map_scene::lay, switch_camera)
+                (pace, survey, resize, place, crate::map_scene::lay, crate::map_cone::lay_cones, switch_camera)
                     .chain()
                     .in_set(Stage::Scene)
                     .after(crate::app::Placed),

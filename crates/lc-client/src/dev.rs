@@ -116,6 +116,8 @@ pub struct DevEntry {
     pub after_frames: u32,
     /// How many consecutive frames to photograph. More than one for diagnosing a flicker.
     pub burst: u32,
+    /// Frames between a burst's photographs, for a moment whose frame cannot be known in advance.
+    pub burst_every: u32,
     /// Frames to time after [`DevEntry::after_frames`] of warm-up. See `bench`.
     pub bench: Option<u32>,
     /// A menu page to open on arrival. The only way to photograph one that draws over the
@@ -593,19 +595,20 @@ pub(crate) fn photograph(
         return;
     }
     *frames += 1;
-    let burst = dev.burst.max(1);
-    if (dev.after_frames..dev.after_frames + burst).contains(&*frames) {
+    let (burst, every) = (dev.burst.max(1), dev.burst_every.max(1));
+    let into = frames.wrapping_sub(dev.after_frames);
+    if *frames >= dev.after_frames && into % every == 0 && into / every < burst {
         // Consecutive frames of one run, which is the only way to see a flicker: two runs
         // stopped at frame n and frame n+1 have accumulated different wall time and are not
         // consecutive at all.
-        let index = *frames - dev.after_frames;
+        let index = into / every;
         let at = if burst > 1 { numbered(path, index) } else { path.clone() };
         commands
             .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
             .observe(bevy::render::view::screenshot::save_to_disk(at));
     }
     // The capture is asynchronous; quitting on the same frame loses the file.
-    if *frames > dev.after_frames + burst + 30 {
+    if *frames > dev.after_frames + (burst - 1) * every + 30 {
         exit.write(AppExit::Success);
     }
 }

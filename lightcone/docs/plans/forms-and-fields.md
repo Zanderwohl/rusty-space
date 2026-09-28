@@ -115,6 +115,8 @@ graph LR
   R14["R14 Refits in the game"]
   R15["R15 Construction on the real hull in the game"]
   R16["R16 Drones at work on another craft"]
+  R17["R17 A burn's power on the wire as `F c`"]
+  R18["R18 A distant burn as a point"]
   C1["C1 Editor view"]
   C2["C2 Editing the draft"]
   C3["C3 Undo and redo"]
@@ -201,6 +203,9 @@ graph LR
   R14 --> R15
   R9 --> R16
   R15 --> R16
+  R12 --> R17
+  R12 --> R18
+  H7 --> R18
   R1 --> C1
   C1 --> C2
   F5 --> C2
@@ -240,6 +245,8 @@ graph LR
   R14 --> X1
   R15 --> X1
   R16 --> X1
+  R17 --> X1
+  R18 --> X1
 ```
 <!-- /graph -->
 
@@ -637,9 +644,9 @@ graph LR
 
 ### R12 · The cone in the game
 
-- status: active card "R12 · The cone in the game"
+- status: done #119
 - needs: R7, F9
-- touches: `crates/lc-client/src/plume.rs`
+- touches: `crates/lc-client/src/plume.rs`, `crates/lc-client/src/map_cone.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/map_scene.rs`, `crates/lc-client/src/pick.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/procedural.rs`, `crates/lc-client/examples/`, `crates/em-render/src/plume_material.rs` (retired), `crates/lc-world/src/form/capacity.rs`, `crates/lc-world/src/motion.rs` (E5: a leg states its own drive), `crates/lc-world/src/consort.rs`, `crates/lc-world/src/scenario.rs`, `crates/lc-server/src/director.rs`, `crates/lc-server/src/command/mod.rs` (the kzinti scene), `lightcone/images/r12-*.jpg`, `lightcone/docs/07-rendering.md`, `lightcone/docs/18-ui-style.md`, `lightcone/docs/32-ship-rendering.md`, `AGENTS.md`
 - read: 32 §The exhaust cone
 - deliver: the aperture glow on each engine part's open face; the cone for your own burns, for any burn whose courtesy radius you are in, and for a selected ship; the map's lines.
 - done when: a burning ship photographs with its cone, and the old gas plume is gone.
@@ -679,6 +686,25 @@ graph LR
 - read: 32 §Drones, §Rounds in the game
 - deliver: another craft's drones drawn at its round from the step its `Presence` states, as `refit_hull` draws its hull, placed under that craft's root; today only the player's `Refit` has drones.
 - done when: a client watching another's applied round photographs its drones working the frontier.
+
+### R17 · A burn's power on the wire as `F c`
+
+- status: todo
+- needs: R12
+- touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-world/src/flight.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`
+- read: 31 §The drive is the radiator, 32 §The exhaust cone
+- deliver: `Presence` states what a burn sends aft as a photon drive's `F c` rather than a reaction drive's `½ F v`, and `Drive` gives it; `plume::exhaust_w` and its guess at another ship's exhaust speed go.
+- done when: another ship's cone and face are drawn from the power it stated, with no exhaust speed assumed.
+
+### R18 · A distant burn as a point
+
+- status: todo
+- needs: R12, H7
+- touches: `crates/lc-client/src/plume.rs`, `crates/lc-client/src/starfield.rs`, `lightcone/docs/32-ship-rendering.md`
+- read: 32 §The exhaust cone (From a distance), 04 (stellar photometry), 07 §Other ships
+- deliver: a burning craft too small to resolve, drawn as a point in the observer's bands from its `Presence`. Its brightness goes by `cos θ` between the exhaust axis and the direction to the observer: the exhaust's top-hat flux inside the cone, the face's oblique glow outside. Doppler-shifted and aberrated as a star, through the starfield's exposure and glare. The meeting at the cone's edge settled and written into 32.
+- done when: a burn photographed from a light-year off is a point that brightens by orders of magnitude as its cone sweeps over the observer, and a test pins its flux inside the cone to `emit::flux_w_m2`.
+- note: after H7, so the burn adds to the craft's own point rather than drawing a second one beside it.
 
 ## C: client
 
@@ -777,7 +803,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, H9, H10, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16
+- needs: F10, H7, H8, H9, H10, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.

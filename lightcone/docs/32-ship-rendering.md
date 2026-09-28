@@ -13,7 +13,7 @@ is what beams do.
   A drive section, a habitat and a bay are recognizable from outside.
 - **From the Culture: a smooth field with the ship inside it.** Not the surface clutter of a Star
   Destroyer. Light does most of the work: lit living areas on the night side, the field's glow,
-  the plume.
+  the drive's open face.
 
 The construction look is Cities: Skylines and SimCity 4: a skeleton goes up, is closed in, is
 fitted out, and the scaffolding comes down. It is mechanical on purpose. The one time the ship
@@ -392,7 +392,7 @@ whatever is decided about air:
   atmosphere, and a park's sky is the same problem in a smaller volume.
 - **Outer: the radiator.** Its color is a blackbody at the field's temperature through
   `em_spectra::blackbody`, and its brightness is **physical**: σT⁴ over its area, through the same
-  exposure as the stars. The hull's plume already works this way ([`plume.rs`](../../crates/lc-client/src/plume.rs)):
+  exposure as the stars. A drive's open face works this way ([`plume.rs`](../../crates/lc-client/src/plume.rs)):
   the color is a consequence, not a setting. At 400 K the outer layer is invisible in the visible
   bands. At 2 400 K on a dive it glows red-orange. At 4 600 K it is the brightest thing on screen.
 
@@ -445,15 +445,11 @@ says.
 ### The exhaust cone
 
 A photon drive's exhaust has no gas in it. Seen from the side, it is invisible; seen from inside, it
-is a blinding point. `plume.wgsl` draws a reaction drive: a glowing column of fuel-rich gas 1.5 hull
-lengths long, with soot lanes, heated by the jet power `½ F v`. None of that exists here. And the
-cone that matters is thousands of times longer than any hull: 21 km of courtesy radius behind a
-starting ship, 21 000 km behind a GSV.
-
-The current shader is not the cost problem it might look like. It is one draw per burning ship: a
-proxy cone, with each covered pixel marching 24 samples back along its ray. Cost goes with the pixels
-covered and not with the length. What does not survive a longer cone is its content, so it is
-replaced by two things:
+is a blinding point. The game used to draw a reaction drive: a glowing column of fuel-rich gas 1.5
+hull lengths long, with soot lanes, heated by the jet power `½ F v`, marched 24 samples a pixel. None
+of that exists here, and R12 retired it. The cone that matters is thousands of times longer than any
+hull: 21 km of courtesy radius behind a starting ship, 21 000 km behind a GSV. It is drawn as two
+things:
 
 - **The aperture.** The engine's open face glows as a blackbody at the flux leaving it, `F c` over the
   aperture's area, not `½ F v`. It is white-hot at any real thrust, and it is what a burning ship looks
@@ -463,8 +459,8 @@ replaced by two things:
   to the courtesy radius, shaded by how much heat lands at each distance. Heat falls as `1/d²` along
   the axis, so the shading is **closed form per pixel**: take the point where the view ray passes
   closest to the axis, and read the flux there. There is no march and no loop, one draw per cone,
-  and the fragment works in the proxy's own coordinates from the surface back, as `plume.wgsl` does,
-  so `f32` holds at 21 000 km.
+  and the fragment works in the proxy's own coordinates from the surface back, so `f32` holds at
+  21 000 km.
 
   "Closest" is measured as an **angle from the apex**, not as a distance from the axis line. From
   beside the two are the same point. From behind the ship, the nearest point to the line can fall
@@ -475,20 +471,54 @@ replaced by two things:
   candidates wins.
 
 The cone is drawn for your own ship whenever it burns, for any ship whose courtesy radius you are
-inside, and for a selected ship. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s
-palette, and is brightest where it would cook. The map draws the same cone as lines.
+inside, and for a selected ship. Clicking a ship in either view selects it, and `--focus craft:<id>`
+does so for a photograph. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s palette,
+and is brightest where it would cook. The map draws the same cone as lines: eight generators, the
+rim at the courtesy radius, and a ring at the cooking distance.
 
 The hazard color is 18's red-orange. The material takes both of its colors as uniforms, so it
 stays free of either product's palette. The aperture glow is a second material in
-`exhaust_cone_material` rather than a reshaped `plume_material`, so the game's reaction-drive plume
-is untouched until the switch to photon drives replaces it. The starting drive's face, all of
-1.1 × 10²⁰ W through 100 m, is `lc_world::emit::aperture_temperature_k`: 7.0 × 10⁵ K.
+`exhaust_cone_material`. A drive's face is `lc_world::emit::aperture_temperature_k`: all of
+1.1 × 10²⁰ W through a face 100 m across is 7.0 × 10⁵ K, and through the starting form's bell,
+whose open face is 176 m across, 5.3 × 10⁵ K.
+
+**In the game** ([`plume.rs`](../../crates/lc-client/src/plume.rs)) every aft-firing engine face,
+from `lc_world::form::capacity::aft_apertures`, glows under its craft's hull root, at its share of
+the drive's power by engine volume, as the rating divides. The cone's apex is the faces'
+power-weighted middle, or a formless craft's stern. The power is `F c`, worked from the `½ F v`
+that `Drive` and `Presence` still state, and another craft's from the default drive's exhaust speed,
+which the wire does not carry. Another craft is drawn where its light shows it, and whether you are
+inside its radius is measured to that place.
+
+![your own burn from beside: the bell's face white-hot, the cone running aft](../images/r12-own-beside.jpg)
+![from behind, just off the axis](../images/r12-own-behind.jpg)
+![a selected ship's cone, 2 000 km out and past its courtesy radius](../images/r12-selected.jpg)
+![the same cone on the map](../images/r12-map.jpg)
+![`--demo kzinti`: a Direct approach burning toward you from outside its radius draws no cone](../images/r12-kzinti-outside.jpg)
+![and its brake, with you inside its radius and its cone](../images/r12-kzinti-inside.jpg)
 
 Photograph it in a void with `cargo run -p lc-client --example cone_void -- --view
 beside|behind|inside --length <m>`. Its flags are listed in the example's module doc.
 
 An observer inside someone's cone gets the blinding point, from the photometry, as for a beam
 ([31-directed-energy.md](31-directed-energy.md)).
+
+**From a distance** a burn is a point in the sky, not a cone and a face. Its light is what the
+`Presence` it left in says: power, facing, place and velocity. With `a` the exhaust axis and `u` the
+direction from the emitter to the observer, `cos θ = a · u` says which source the observer sees:
+
+- **Inside the cone**, `θ` within `drive_spread_rad`: the exhaust itself, the top-hat's
+  `P / (Ω d²)` that `lc_world::emit::flux_w_m2` gives, in the face's blackbody spectrum through the
+  observer's bands. That is the blinding point, and it carries: the starting drive at its rating
+  lands 5 × 10⁻¹¹ W/m² a light-year away, a bolometric seventh magnitude, a telescope star in the next
+  system.
+- **Outside it**, only the face, seen obliquely as the aperture glow draws it up close, falling off
+  with the angle.
+
+So a burn in the next system is a moving star that brightens by orders of magnitude as its cone
+sweeps over you, Doppler-shifted and aberrated at the craft's velocity as a star is. How the two
+sources meet at the cone's edge is still to settle, because `aperture_temperature_k` has the face
+radiate all of `P` while the cone also carries all of it. R18 settles it and records the answer here.
 - God view may draw every beam's cone, as a debug overlay, like the causality lines of
   [07-rendering.md](07-rendering.md).
 
@@ -546,8 +576,8 @@ own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the examp
 
 | crate | new | changed |
 |---|---|---|
-| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` (the cone, and the aperture glow beside it) | `plume_material` retires once `plume.rs` stops drawing the reaction drive |
-| `lc-client` | `hull_mesh.rs` (finishes, painting, caching) over `surface_nets.rs` (any field), `ship_hull.rs` (every craft's steady hull), `truss.rs`, `refit_hull.rs` (the construction overlay), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws only a craft with no form. `plume.rs` draws the aperture glow at `F c` and the cone |
+| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` (the cone, and the aperture glow beside it) | `plume_material` retired in R12 |
+| `lc-client` | `hull_mesh.rs` (finishes, painting, caching) over `surface_nets.rs` (any field), `ship_hull.rs` (every craft's steady hull), `truss.rs`, `refit_hull.rs` (the construction overlay), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws only a craft with no form. `plume.rs` draws the aperture glow at `F c` and the cone, and `map_cone.rs` the cone's lines |
 | `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl`, `exhaust_cone.wgsl`, `aperture_glow.wgsl` | |
 
 Materials go in `em-render` because nothing in them is specific to Lightcone. A hull with regions

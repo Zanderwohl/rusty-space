@@ -57,7 +57,7 @@ fn erf(x: f32) -> f32 {
     return sign(x) * (1.0 - poly * exp(-a * a));
 }
 
-/// The tone map of `plume.wgsl`, which is `crate::tonemap`'s, with the overflow per channel.
+/// `crate::tonemap`'s tone map, with the overflow per channel. See 07 §The exhaust.
 fn expose(linear: vec3<f32>) -> vec3<f32> {
     let reference = material.exposure.x;
     let stops = material.exposure.y;

@@ -160,7 +160,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 }
 
 /// The tone map of lc-client's `tonemap.rs`, with the overflow carried per channel past the
-/// window as `plume.wgsl` carries it, so a field too bright for the exposure blooms and keeps
+/// window as `aperture_glow.wgsl` carries it, so a field too bright for the exposure blooms and keeps
 /// its structure instead of becoming one flat shape.
 fn exposed(linear: vec3<f32>) -> vec3<f32> {
     let reference = material.exposure.x;

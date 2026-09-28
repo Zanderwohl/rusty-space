@@ -158,6 +158,8 @@ pub enum Action {
     /// Pick something out of the local system's inventory. Clears whatever course was armed
     /// for the last one.
     FocusTarget(Option<Target>),
+    /// Pick out another craft. Picking anything else puts it down.
+    SelectCraft(Option<lc_proto::ShipId>),
     /// Arm one of the focused target's courses, without flying it.
     ChooseCourse(Option<Course>),
     /// Go somewhere in the local system, and hold there once arrived. What Go sends.
@@ -361,6 +363,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         // not end a week-long sweep. Staring is `StareSelected`.
         Action::SelectTarget(id) => {
             ui.selected = id;
+            ui.selected_craft = None;
             session.describe(id);
         }
         Action::StareSelected => match ui.selected {
@@ -583,7 +586,9 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::FocusTarget(target) => {
             ui.course = None;
             ui.focus = target;
+            ui.selected_craft = None;
         }
+        Action::SelectCraft(craft) => ui.selected_craft = craft,
         Action::ChooseCourse(course) => ui.course = course,
         // Both of these only exist against a server. An intercept is a *standing* order and
         // what makes it stand is the authority re-solving it against sightings; a client
@@ -2024,4 +2029,20 @@ mod tests {
         assert_eq!(ui.perspective, None);
     }
 
+    /// A craft stays selected beside an armed course until something else is picked.
+    #[test]
+    fn a_craft_stays_selected_until_something_else_is() {
+        let mut ui = UiState::default();
+        let mut s = Session::new(&AuthoredStars::sample(), 3);
+        let craft = Some(lc_proto::ShipId(7));
+        apply(Action::FocusTarget(Some(crate::navigation::Target::Band(0))), &mut ui, &mut s);
+        apply(Action::SelectCraft(craft), &mut ui, &mut s);
+        assert_eq!(ui.selected_craft, craft);
+        assert!(ui.focus.is_some(), "a craft is not a course");
+        apply(Action::FocusTarget(Some(crate::navigation::Target::Band(1))), &mut ui, &mut s);
+        assert_eq!(ui.selected_craft, None);
+        apply(Action::SelectCraft(craft), &mut ui, &mut s);
+        apply(Action::SelectTarget(None), &mut ui, &mut s);
+        assert_eq!(ui.selected_craft, None);
+    }
 }

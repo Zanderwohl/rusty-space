@@ -112,7 +112,7 @@ impl Plugin for ClientPlugin {
             EguiPlugin::default(),
             RelativisticStarfieldMaterialPlugin,
             PopulationMaterialPlugin,
-            em_render::plume_material::PlumeMaterialPlugin,
+            em_render::exhaust_cone_material::ExhaustConeMaterialPlugin,
             BodySurfaceMaterialPlugin,
             em_render::body_material::BodyWireframeMaterialPlugin,
             em_render::atmosphere_material::AtmosphereMaterialPlugin,
@@ -157,7 +157,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<crate::hull::Eye>()
             .init_resource::<crate::hull::Hulls>()
             .init_resource::<crate::parts::OwnForm>()
-            .init_resource::<crate::plume::Plumes>()
+            .init_resource::<crate::plume::Exhausts>()
             .init_resource::<crate::resolved::Resolved>()
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .init_resource::<panels::HudFoot>()
@@ -262,8 +262,8 @@ impl Plugin for ClientPlugin {
                     (crate::refit_hull::draw_refit, crate::ship_hull::draw_hulls, crate::parts::update_parts)
                         .chain()
                         .after(crate::hull_mesh::HullMeshSystems),
-                    // And the exhaust after the ship, so it is placed against the same frame.
-                    crate::plume::update_plumes,
+                    // And the exhaust after the hulls, whose roots the glows hang from.
+                    crate::plume::draw_exhaust,
                 )
                     .chain()
                     .in_set(Stage::Scene)
@@ -413,7 +413,7 @@ fn leave_scene(
             With<crate::hull::Hull>,
             With<crate::ship_hull::ShipHull>,
             With<crate::parts::FormRoot>,
-            With<crate::plume::Plume>,
+            With<crate::plume::Cone>,
         )>,
     >,
     mut envelopes: ResMut<crate::envelope::Envelopes>,
@@ -750,7 +750,7 @@ mod tests {
         world.spawn(crate::envelope::EnvelopeMesh(0));
         world.spawn(crate::envelope::RingMesh { body: 0, radius: 1.0 });
         world.spawn(crate::hull::Hull(None));
-        world.spawn(crate::plume::Plume(None));
+        world.spawn(crate::plume::Cone(None));
         let mesh = world.spawn(Name::new("a hull's mesh")).id();
         let hull = world.spawn(crate::ship_hull::ShipHull::bare(Some(lc_proto::ShipId(1)), mesh)).id();
         world.entity_mut(mesh).insert(ChildOf(hull));
@@ -768,7 +768,7 @@ mod tests {
         assert_eq!(world.query::<&crate::resolved::ResolvedBody>().iter(world).count(), 0);
         assert_eq!(world.query::<&crate::envelope::RingMesh>().iter(world).count(), 0);
         assert_eq!(world.query::<&crate::envelope::EnvelopeMesh>().iter(world).count(), 0);
-        assert_eq!(world.query::<&crate::plume::Plume>().iter(world).count(), 0);
+        assert_eq!(world.query::<&crate::plume::Cone>().iter(world).count(), 0);
         assert_eq!(world.resource::<crate::envelope::Envelopes>().star, None, "they would not respawn");
     }
 

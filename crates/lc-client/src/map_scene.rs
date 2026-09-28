@@ -62,7 +62,7 @@ pub(crate) const SPREAD_CAP_PX: f32 = 8.0;
 /// line weight: 0.6 for grid, 1.0 for an equator. With no tone map in front of it the whole
 /// range has to land inside the display, so 0.45 and 1.2 put a grid line at 0.77 and an
 /// equator at 0.99.
-const LINE_COLOR_SCALE: f32 = 0.45;
+pub(crate) const LINE_COLOR_SCALE: f32 = 0.45;
 const LINE_EMISSION: f32 = 1.2;
 
 /// Divisions of a decade ring. Enough that the largest one does not read as a polygon.
@@ -338,7 +338,7 @@ pub(crate) fn ring_transform(frame: &MapFrame, radius: f32) -> Transform {
     }
 }
 
-fn line_material(color: Color, max_fraction: f32, width_px: f32, color_scale: f32)
+pub(crate) fn line_material(color: Color, max_fraction: f32, width_px: f32, color_scale: f32)
     -> MapLineMaterial {
     let rgba = color.to_linear();
     MapLineMaterial {

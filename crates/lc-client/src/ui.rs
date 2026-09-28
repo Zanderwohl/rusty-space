@@ -356,10 +356,10 @@ pub struct Notification {
     pub from: Option<lc_proto::ShipId>,
 }
 
-/// How many notifications are kept. Older ones fall off rather than accumulating.
 /// `18-ui-style.md` §Hazard: anything that will hurt. Lightcone's, so not in `em_ui::vfd`.
 pub const HAZARD: bevy::color::Color = bevy::color::Color::srgb(1.0, 0.30, 0.10);
 
+/// How many notifications are kept. Older ones fall off rather than accumulating.
 pub const NOTIFICATION_LIMIT: usize = 6;
 
 /// Clock multipliers a development build offers, and what each one means to watch.
@@ -463,6 +463,8 @@ pub struct UiState {
     /// Open panels, most recently opened last. Order is what "back" walks.
     open: Vec<Panel>,
     pub selected: Option<StarId>,
+    /// Another craft picked out, which draws its exhaust's cone wherever it is.
+    pub selected_craft: Option<lc_proto::ShipId>,
     /// What is picked out of the local system's inventory, and which of its courses is armed.
     ///
     /// Here rather than in the panel because picking a body out of the sky will set the same
@@ -565,6 +567,7 @@ impl Default for UiState {
             menu_page: MenuPage::Root,
             open: Vec::new(),
             selected: None,
+            selected_craft: None,
             focus: None,
             course: None,
             look: Look::default(),

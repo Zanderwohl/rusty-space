@@ -55,12 +55,13 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 |---|---|
 | `--shot <path> --frames <n>` | photograph and quit |
 | `--burst <n>` | photograph `n` **consecutive** frames — the only way to see a flicker |
+| `--burst-every <k>` | space a burst's photographs `k` frames apart: one window that catches a moment whose frame cannot be known in advance, such as a staged scene's burn |
 | `--bench <n>` | time `n` frames after `--frames` of warm-up and quit: frame time, main-world CPU, render passes. See `src/bench.rs` |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
 | `--charted` | seed what the ship knows from truth. **A ship knows nothing on creation, so it photographs nothing**: without this every body shot is a ship staring at an empty panel and `--focus` names a body the panel does not list. The charting office kept as a dev tool |
 | `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
 | `--panel <name>` / `--tune` | open a panel. `--panel map` is the exception: the map is a mode of the main view, so this is a pin holding it there |
-| `--focus <body>` / `--focus band:<n>` | what is **selected**, as a click on either view would leave it. Everything else that aims is a camera, so this is the only way to photograph a reticle. `--station` sets the focus itself and stands aside when this is given |
+| `--focus <body>` / `--focus band:<n>` / `--focus craft:<id>` | what is **selected**, as a click on either view would leave it; a selected craft draws its exhaust cone. Everything else that aims is a camera, so this is the only way to photograph a reticle. `--station` sets the focus itself and stands aside when this is given |
 | `--book <id>` | open a book from `crates/lc-client/assets/books/<id>.epub`; `--chapter <n>` and `--pages <n>` move within it |
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
@@ -71,7 +72,7 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--map-plane <system\|galactic>` | which plane the map lays its rings in. `ecliptic` is the old spelling of `system` and still works. A system's plane is a belief, so the option is refused until one is solved — see `lightcone/docs/25-system-knowledge.md` |
 | `--error-bars` | draw the map's error bars, which are off by default |
 | `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto. A pin: `--map` on its own holds the ship, so a hand on the mouse cannot pan a shot two runs are meant to agree about |
-| `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`, `corona`. Brings its own shard |
+| `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `kzinti` (the approach, Direct), `closing`, `chase`, `corona`. Brings its own shard |
 | `--console <line>` | type a line at the console once the shard has welcomed the client, with the console open. With `--local` the shard is directing, so every command is available |
 | `--demo-cam <yaw:pitch:booms[:to]>` | pin the camera for the run, so two shots of a scene are the same shot. With `to`, the boom eases toward it once nothing is waiting to be drawn: `--frames 1 --burst 150` with `40:1.5` photographs every remesh of a hull on the way in |
 | `--watch-from <id>` | put the camera behind another craft, by its ship id: how two clients on one shard photograph each other |

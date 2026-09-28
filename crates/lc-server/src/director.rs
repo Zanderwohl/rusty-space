@@ -208,12 +208,16 @@ impl<J: Journal> Server<J> {
                 Some(Change::SetCourse { course, drive: craft.turning(craft.motion.drive) })
             }
             Act::Cut => Some(Change::CutDrive),
-            Act::Chase(on) => {
+            Act::Chase(on) | Act::ChaseDirect(on) => {
                 let Some(quarry) = director.craft_in(*on) else { return };
+                let approach = match act {
+                    Act::ChaseDirect(_) => lc_proto::Approach::Direct,
+                    _ => lc_proto::Approach::default(),
+                };
                 let pursuit = crate::chase::Pursuit {
                     quarry: ShipId(quarry.0),
                     closeness: lc_world::pursuit::Closeness::Company,
-                    approach: lc_proto::Approach::default(),
+                    approach,
                     // Never planned, so the guidance loop takes it this tick and solves the
                     // first approach itself. A second solve here would be a second
                     // implementation of the only standing order there is.

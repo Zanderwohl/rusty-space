@@ -131,11 +131,13 @@ pub fn parse(args: &[String]) -> Entry {
     // What is selected, as a click on either view would leave it. Everything else that aims is
     // a camera, so this is the only way to photograph a reticle.
     if let Some(name) = after("--focus") {
-        let target = match name.strip_prefix("band:").and_then(|n| n.parse::<usize>().ok()) {
-            Some(index) => crate::navigation::Target::Band(index),
-            None => crate::navigation::Target::Body(name),
-        };
-        actions.push(Action::FocusTarget(Some(target)));
+        let band = name.strip_prefix("band:").and_then(|n| n.parse::<usize>().ok());
+        let craft = name.strip_prefix("craft:").and_then(|n| n.parse::<i64>().ok());
+        actions.push(match (band, craft) {
+            (Some(index), _) => Action::FocusTarget(Some(crate::navigation::Target::Band(index))),
+            (_, Some(id)) => Action::SelectCraft(Some(lc_proto::ShipId(id))),
+            _ => Action::FocusTarget(Some(crate::navigation::Target::Body(name))),
+        });
     }
 
 
@@ -263,6 +265,7 @@ pub fn parse(args: &[String]) -> Entry {
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),
         burst: value(args, "--burst").unwrap_or(1),
+        burst_every: value(args, "--burst-every").unwrap_or(1),
         bench: value(args, "--bench"),
         menu_page,
         // The password form is the one egui surface in the menu, and it is opened by a button
