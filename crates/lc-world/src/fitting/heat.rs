@@ -29,8 +29,11 @@ impl Fitting {
         Field::of(self.geometry.envelope_area_m2, &self.balance)
     }
 
-    /// Read with no burn. Under way the field takes in no starlight, and with none a burn's draw
-    /// moves no heat: storage cannot fill, and the burn is paid from its commitment.
+    /// Read with no burn. That is exact because [`Craft::starlight_w_at`] gives no starlight under
+    /// way, and with none a burn's draw moves no heat: storage cannot fill, and the burn is paid
+    /// from its commitment.
+    ///
+    /// [`Craft::starlight_w_at`]: crate::craft::Craft::starlight_w_at
     pub fn heat_j_at(&self, now_s: f64) -> f64 {
         self.flow(None, now_s).heat_j
     }
@@ -57,34 +60,40 @@ impl Fitting {
         }
     }
 
+    /// What storage will hold once the round under way is finished, if nothing else moves it: what
+    /// the editor budgets the next round from.
+    pub fn stored_after_refit_j(&self, motion: &ShipState, now_s: f64) -> f64 {
+        let stored_j = self.stored_j_at(motion, now_s);
+        self.refit.as_ref().map_or(stored_j, |plan| skip(plan, now_s, stored_j, &self.balance).0)
+    }
+
     /// Cut where refit steps begin and end, so the drain, the rating, a step's transfer and its loss
     /// are constant over each piece, and vents and spills land at the cut. Room and free storage
     /// carry across cuts, so where settlements fall changes nothing.
     ///
-    /// `motion` is the motive in force, whose burn draws on storage; `None` reads no burn.
+    /// `motion` is the motive in force, whose burn draws on storage; `None` reads no burn. What the
+    /// burn has committed and what the round's builds have still to take are held out of free
+    /// storage, so the drain starves before either is short.
     pub(super) fn flow(&self, motion: Option<&ShipState>, now_s: f64) -> Flow {
         let field = self.field();
         let mut flow = Flow { heat_j: self.heat_j, income_j: 0.0 };
         if now_s <= self.since_s {
             return flow;
         }
-        let capacities_at = |t: f64| match &self.refit {
-            Some(plan) => Capacities::of(&plan.at(t).form, &self.balance),
-            None => self.hull.capacities,
-        };
-        let mut caps = capacities_at(self.since_s);
-        let mut free_j = self.stored_j - self.committed_j;
+        let mut caps = self.capacities_at(self.since_s);
+        let building_j = self.refit.as_ref().map_or(0.0, |plan| building_j(plan, self.since_s));
+        let mut free_j = self.stored_j - self.committed_j - building_j;
         let mut at_s = self.since_s;
         for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, now_s) {
             let dt_s = piece.until_s - at_s;
             let burn_w = motion.map_or(0.0, |m| (self.burn_spent_j(m, piece.until_s) - self.burn_spent_j(m, at_s)) / dt_s);
             let room_j = caps.storage_j - (self.stored_j + flow.income_j);
             let segment = self.intake(&caps, piece.losing_w, room_j, piece.moving_w + burn_w);
-            let (heat_j, storage_j) = settle(&field, &segment, caps.drain_w, burn_w, flow.heat_j, free_j, dt_s);
+            let held_w = burn_w + piece.moving_w.max(0.0);
+            let (heat_j, storage_j) = settle(&field, &segment, caps.drain_w, held_w, flow.heat_j, free_j, dt_s);
             flow.income_j += storage_j;
-            // The burn is paid out of its commitment, so what is free does not see it.
-            free_j += storage_j + burn_w * dt_s;
-            caps = capacities_at(piece.until_s);
+            free_j += storage_j + held_w * dt_s;
+            caps = self.capacities_at(piece.until_s);
             let spilled_j = (self.stored_j + flow.income_j - caps.storage_j).max(0.0);
             flow.income_j -= spilled_j;
             free_j -= spilled_j;
@@ -95,11 +104,11 @@ impl Fitting {
     }
 }
 
-/// [`Field::settle`], split where storage runs down to what is committed. From there the drain takes
-/// only what conversion leaves it, and what it cannot pay makes no heat. A burn is paid from its
-/// commitment and a build before the drain, so neither is cut.
-fn settle(field: &Field, segment: &Segment, drain_w: f64, burn_w: f64, heat_j: f64, free_j: f64, dt_s: f64) -> (f64, f64) {
-    let short_w = segment.draw_w - burn_w - segment.stored_w();
+/// [`Field::settle`], split where free storage runs out. From there the drain takes only what
+/// conversion and any return bring in, and what it cannot pay makes no heat. `held_w` is the part of
+/// the draw paid from what is held out of free storage, which is never cut.
+fn settle(field: &Field, segment: &Segment, drain_w: f64, held_w: f64, heat_j: f64, free_j: f64, dt_s: f64) -> (f64, f64) {
+    let short_w = segment.draw_w - held_w - segment.stored_w();
     let empty_s = if short_w > 0.0 { free_j.max(0.0) / short_w } else { f64::INFINITY };
     if empty_s >= dt_s {
         let settled = field.settle(segment, heat_j, dt_s);
@@ -165,6 +174,25 @@ fn losing_w(step: &Step, balance: &Balance) -> f64 {
     }
 }
 
+/// Of a step, the fraction still to run at `t`.
+fn left(plan: &Plan, step: &Step, t: f64) -> f64 {
+    if step.duration_s > 0.0 {
+        1.0 - ((t - plan.round().start_s - step.begins_s) / step.duration_s).clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+/// What the builds still to run at `t` will take from storage, joules.
+fn building_j(plan: &Plan, t: f64) -> f64 {
+    let start_s = plan.round().start_s;
+    plan.steps()
+        .iter()
+        .filter(|s| s.stored_j < 0.0 && start_s + s.ends_s() > t)
+        .map(|s| -s.stored_j * left(plan, s, t))
+        .sum()
+}
+
 /// Finishing `plan` at once at `since_s` with `stored_j` in storage: the rest of every unfinished
 /// step's transfer, loss and vent, in order, spilling what each step's end leaves no room for.
 /// `(stored_j, heat_j)` after, the heat being what it adds.
@@ -172,7 +200,7 @@ pub(super) fn skip(plan: &Plan, since_s: f64, stored_j: f64, balance: &Balance) 
     let start_s = plan.round().start_s;
     let (mut stored_j, mut heat_j) = (stored_j, 0.0);
     for s in plan.steps().iter().filter(|s| start_s + s.ends_s() > since_s) {
-        let left = if s.duration_s > 0.0 { 1.0 - ((since_s - start_s - s.begins_s) / s.duration_s).clamp(0.0, 1.0) } else { 1.0 };
+        let left = left(plan, s, since_s);
         stored_j += s.stored_j * left;
         heat_j += losing_w(s, balance) * s.duration_s * left + s.vented_j - s.spilled_j;
         let capacity_j = Capacities::of(&plan.at(start_s + s.ends_s()).form, balance).storage_j;
@@ -414,13 +442,55 @@ mod tests {
             assert!(ticks.stored_j <= ticks.hull().capacities.storage_j * (1.0 + 1e-14), "{t}: over capacity");
         }
         assert!(plan.steps().iter().all(|s| (s.ends_s() * f64::from(n) / end_s).fract() > 1e-6), "premise: ends between ticks");
+        // Settled exactly on every step end as well, which must count each vent and spill once.
+        let mut exact = leap.clone();
+        for step in plan.steps() {
+            exact.settle(&rest(), plan.round().start_s + step.ends_s());
+            exact.settle(&rest(), plan.round().start_s + step.ends_s());
+        }
+        exact.settle(&rest(), end_s);
         let (heat_j, stored_j) = (leap.heat_j_at(end_s), leap.stored_j_at(&rest(), end_s));
         leap.settle(&rest(), end_s);
         assert_eq!((leap.heat_j, leap.stored_j), (heat_j, stored_j), "a read agrees with a settlement");
         assert_eq!(ticks.form(), &target);
         assert!(close(ticks.heat_j, leap.heat_j, 1e-9), "{} {}", ticks.heat_j, leap.heat_j);
         assert!(close(ticks.stored_j, leap.stored_j, 1e-9), "{} {}", ticks.stored_j, leap.stored_j);
+        assert!(close(exact.heat_j, leap.heat_j, 1e-9), "{} {}", exact.heat_j, leap.heat_j);
+        assert!(close(exact.stored_j, leap.stored_j, 1e-9), "{} {}", exact.stored_j, leap.stored_j);
         assert_eq!(leap.stored_j, leap.hull().capacities.storage_j, "premise: refilled by the end");
+    }
+
+    /// A build planned to within a little of what is stored, under starlight too weak to pay the
+    /// drain: the drain eats the little and then starves, and the build is never short.
+    #[test]
+    fn the_drain_cannot_eat_what_a_build_will_take() {
+        let b = Balance::DEFAULT;
+        let mut target = Form::starting();
+        target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 5.0;
+        let trial = begin(&mut starting(b, 30.0 * me(&b)), target.clone());
+        let cost_j = -trial.steps().iter().map(|s| s.stored_j).sum::<f64>();
+        let duration_s = trial.duration_s();
+        let drain_w = Capacities::of(&Form::starting(), &b).drain_w;
+        let spare_j = 0.1 * drain_w * duration_s;
+        let mut leap = starting(b, cost_j + spare_j);
+        leap.set_starlight_w(0.5 * drain_w / b.conversion_efficiency);
+        assert!(close(leap.solar_w(), 0.5 * drain_w, 1e-12), "premise: under the rating");
+        begin(&mut leap, target);
+        let end_s = 1.5 * duration_s;
+
+        for k in 0..=300 {
+            let t = end_s * f64::from(k) / 300.0;
+            let held_j = leap.stored_j + leap.flow(None, t).income_j;
+            assert!(held_j >= -1e-9 * cost_j, "{t}: {held_j}");
+        }
+        let mut ticks = leap.clone();
+        for k in 1..=997 {
+            ticks.settle(&rest(), end_s * f64::from(k) / 997.0);
+        }
+        leap.settle(&rest(), end_s);
+        assert!(leap.stored_j.abs() <= 1e-9 * cost_j, "the build took the rest: {}", leap.stored_j);
+        assert!((ticks.stored_j - leap.stored_j).abs() <= 1e-9 * cost_j, "{} {}", ticks.stored_j, leap.stored_j);
+        assert!(close(ticks.heat_j, leap.heat_j, 1e-9), "{} {}", ticks.heat_j, leap.heat_j);
     }
 
     /// Settled only at the round's start, the account still takes the finished form's drain and

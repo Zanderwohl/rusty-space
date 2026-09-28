@@ -478,7 +478,7 @@ impl Plan {
                 continue;
             }
             if now_s > start_s + step.begins_s {
-                let fraction = (since - step.begins_s) / step.duration_s;
+                let fraction = ((since - step.begins_s) / step.duration_s).clamp(0.0, 1.0);
                 progress.stored_j += step.stored_j * fraction;
                 progress.current = Some((i, fraction));
                 progress.in_hand_kg = fraction

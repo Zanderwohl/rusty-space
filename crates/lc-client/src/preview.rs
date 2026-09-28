@@ -36,18 +36,11 @@ impl Start {
     pub fn of(session: &Session) -> Option<Start> {
         let fitting = session.ship.fitting()?;
         let now = session.coordinate_time_s();
-        let stored_j = fitting.stored_j_at(&session.ship.motion, now);
-        let start = Start { from: fitting.form().clone(), stored_j, start_s: now, balance: *fitting.balance() };
         // The draft is edited against a running round's target (`ledger::base`), so the next round
         // begins there, with what this one has still to take or return.
-        Some(match fitting.refit() {
-            Some(plan) => {
-                let end = plan.round().start_s + plan.duration_s();
-                let left_j = plan.at(end).stored_j - plan.at(now.max(plan.round().start_s)).stored_j;
-                Start { from: plan.target().clone(), stored_j: (stored_j + left_j).max(0.0), ..start }
-            }
-            None => start,
-        })
+        let from = fitting.refit().map_or_else(|| fitting.form().clone(), |plan| plan.target().clone());
+        let stored_j = fitting.stored_after_refit_j(&session.ship.motion, now);
+        Some(Start { from, stored_j, start_s: now, balance: *fitting.balance() })
     }
 
     pub fn round(&self, target: &Form) -> Round {

@@ -332,7 +332,8 @@ in three phases, strictly in order:
 1. **Dismantle.** Every part that shrinks, disappears or is being reshaped gives up what it loses.
    Drones go last. Each return is 95% of the mass-energy removed and lands in storage **if there is
    room**, where "room" means capacity left after this phase's own storage losses. **What does not fit
-   is vented into the field as heat**, a burst at the end of the step that frees it.
+   is vented into the field as heat**, a burst at the end of the step that frees it. A return that
+   finds the room already filled by starlight is heat as it arrives instead ([30](30-the-field.md#the-inputs)).
 2. **Move.** Parts whose placement changed slide to their new place, root first. Free in energy.
 3. **Build.** Every part that grows, is new or is being reshaped is built, drones first. Each takes its
    added mass-energy, structure included, from storage.
@@ -375,6 +376,8 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
   ([30-the-field.md](30-the-field.md#conversion)). A return that finds storage already filled by
   starlight is heat as it arrives, and a spill is what storage actually holds past the new
   capacity at the step's end, not what the plan expected.
+  What the builds still have to take is held out of free storage, as a burn's commitment is, so
+  the drain runs out before a build does.
 - **A round is refused if the dismantle phase would leave no drone standing**, whether the drones
   are removed, replaced by new parts or reshaped, since the build phase would begin with none.
 - The Mind's stored shape and volume may change freely, since nothing reads them.
