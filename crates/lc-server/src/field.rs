@@ -378,8 +378,8 @@ mod tests {
         assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { ship_id, .. } if *ship_id == successor)), "{said:?}");
 
         let saved: Vec<i64> = server.checkpoint().ships.iter().map(|s| s.ship_id).collect();
-        assert!(!saved.contains(&DYING.0) && saved.contains(&successor.0), "{saved:?}");
-        assert_eq!(server.take_destroyed(), vec![DYING.0]);
+        assert!(saved.contains(&DYING.0) && saved.contains(&successor.0), "{saved:?}");
+        assert!(server.take_destroyed().is_empty(), "its row went at the collapse, not the sweep");
     }
 
     /// An owner signed out when it happens finds the new ship on signing in again.
@@ -475,5 +475,211 @@ mod tests {
         }
         let [event] = collapse_events(&restarted)[..] else { panic!("no collapse after the restart") };
         assert_eq!((event.t, event.source), (to_us(predicted_s), DYING));
+    }
+
+    /// The shard as it comes back from a checkpoint of `server`, on the same world and rate.
+    fn restart(server: &Server<Memory>) -> Server<Memory> {
+        let checkpoint = server.checkpoint();
+        let mut restarted = Server::new(Memory::default(), 0, 2);
+        restarted.load_world(World::new(vec![a_star().unwrap()]));
+        restarted.set_rate(60.0);
+        assert!(restarted.adopt(checkpoint).is_empty());
+        restarted
+    }
+
+    /// Nothing about a restored wreck is anyone's, nothing is resumed for it, and it has no field
+    /// to collapse again.
+    fn assert_inert(server: &Server<Memory>, id: CraftId) {
+        let wreck = server.fleet.get(id).expect("the wreck came back");
+        assert!(wreck.ended_s().is_some() && wreck.fitting().is_none());
+        assert!(!server.owners.contains_key(&id) && !server.by_account.values().any(|ship| ship.0 == id.0));
+        assert!(!server.pursuits.contains_key(&id) && !server.refitting.contains_key(&id) && !server.reserved.contains_key(&id));
+        assert!(!server.instruments.aboard.contains_key(&id));
+        assert!(!server.auto_ack.contains_key(&id) && !server.owed.contains_key(&id));
+    }
+
+    /// Restarted after the collapse and before its light reaches a ship three light-days off, the
+    /// shard goes on showing that ship the wreck until the light arrives, and deletes its row then.
+    #[tokio::test]
+    async fn a_wreck_outlives_a_restart_until_its_light_arrives() {
+        let Some((mut server, mut wire)) = scene() else { return };
+        let star = a_star().unwrap().id.get();
+        wire.client_says(OWNER, act(DYING, Order::SetDuty { duty: lc_proto::Duty::Stare { star }, integration_s: 1.0e4 }));
+        for _ in 0..5 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let knew = server.take_knowledge();
+        let knew_of = |id: i64| knew.files.iter().any(|f| f.ship_id == id) || knew.samples.iter().any(|r| r.ship_id == id);
+        assert!(knew_of(DYING.0), "premise: it knew something");
+        let at_t = until_collapse(&mut server, &mut wire).await.at_t;
+        server.tick(&mut wire).await.unwrap();
+        let arrives_t = at_t + APART_US as i64;
+        assert!(server.now_t() < arrives_t - 4 * 3_600_000_000, "premise: its light is still well short of the watcher");
+        assert!(server.take_destroyed().is_empty());
+
+        let row = server.checkpoint().ships.into_iter().find(|s| s.ship_id == DYING.0).expect("the wreck is saved");
+        assert_eq!(row.account, None);
+        assert_eq!(crate::persist::decode(&row).unwrap().ended_s, Some(at_t as f64 * 1.0e-6));
+
+        let mut restarted = restart(&server);
+        drop(server);
+        assert!(restarted.adopt_knowledge(&knew.files, &knew.samples).is_empty());
+        assert_inert(&restarted, CraftId(DYING.0));
+        let watching = restarted.ship(WATCHING).unwrap().clone();
+        restarted.admit(WATCHER, watching, 0.0);
+        let mut wire = Loopback::new();
+        let (mut seen_until_t, mut swept_t, mut last_t) = (i64::MIN, None, restarted.now_t());
+        let mut tick_us = 0;
+        wire.client_says(WATCHER, act(DYING, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
+        for _ in 0..100 {
+            restarted.tick(&mut wire).await.unwrap();
+            tick_us = restarted.now_t() - last_t;
+            last_t = restarted.now_t();
+            for message in wire.take(WATCHER) {
+                match message {
+                    Outbound::Present(list) if list.iter().any(|p| p.get().ship_id == DYING) => seen_until_t = restarted.now_t(),
+                    Outbound::Accepted { ship_id, .. } if ship_id == DYING => panic!("the wreck took an order"),
+                    _ => {}
+                }
+            }
+            if swept_t.is_none() && restarted.take_destroyed() == vec![DYING.0] {
+                swept_t = Some(restarted.now_t());
+            }
+            if restarted.now_t() > arrives_t + 2 * tick_us {
+                break;
+            }
+        }
+        assert!(seen_until_t + tick_us >= arrives_t, "the restart ended its view early: {seen_until_t} {arrives_t}");
+        assert!(seen_until_t < arrives_t + tick_us, "still seen after its light had passed");
+        let swept_t = swept_t.expect("the wreck was never swept");
+        assert!(swept_t >= arrives_t && swept_t < arrives_t + tick_us, "{swept_t} {arrives_t}");
+        assert!(restarted.ship(DYING).is_none());
+        assert!(collapse_events(&restarted).is_empty(), "it collapsed again");
+    }
+
+    /// Signed out through the collapse and a restart, the owner signs in to the successor; the
+    /// wreck's row claims no account, and ordering it is refused.
+    #[tokio::test]
+    async fn after_a_restart_the_owner_still_flies_the_successor() {
+        use crate::testing::Broker;
+        let Some(near) = near_the_star() else { return };
+        let broker = Broker::new([1u8; 32]);
+        let shard = || {
+            let mut server = Server::new(Memory::default(), 0, 1);
+            let mut trusted = crate::ticket::Trusted::new("shard-1");
+            assert_eq!(trusted.learn(&broker.jwks()), 1);
+            server.trust(trusted);
+            server.load_world(World::new(vec![a_star().unwrap()]));
+            server.set_rate(60.0);
+            server
+        };
+        let hello = |jti: &str| Inbound::Hello { protocol: lc_proto::PROTOCOL_VERSION, ticket: broker.mint("acct-1", "shard-1", 60, jti) };
+        let welcomed = |said: Vec<Outbound>| {
+            said.into_iter().find_map(|m| match m {
+                Outbound::Welcome { ship_id, .. } => Some(ship_id),
+                _ => None,
+            })
+        };
+        let mut server = shard();
+        let mut wire = Loopback::new();
+        wire.client_says(OWNER, hello("j1"));
+        server.tick(&mut wire).await.unwrap();
+        let first = welcomed(wire.take(OWNER)).expect("welcomed");
+        let mut dying = still(first, near);
+        server.fit_new(&mut dying);
+        server.fleet.remove(CraftId(first.0));
+        server.fleet.insert(dying);
+        // Clear of the identifiers the shard hands out.
+        server.fleet.insert(still(ShipId(50), near + DVec3::Y * APART_US));
+        server.disconnected(OWNER);
+        for _ in 0..500 {
+            server.tick(&mut wire).await.unwrap();
+            if !collapse_events(&server).is_empty() {
+                break;
+            }
+        }
+        let successor = server.by_account["acct-1"];
+        assert_ne!(successor, first, "premise: it collapsed");
+
+        let rows = server.checkpoint().ships;
+        let wreck = rows.iter().find(|s| s.ship_id == first.0).expect("the wreck is saved");
+        assert_eq!(wreck.account, None);
+        assert_eq!(rows.iter().find(|s| s.ship_id == successor.0).unwrap().account.as_deref(), Some("acct-1"));
+
+        let mut restarted = shard();
+        assert!(restarted.adopt(server.checkpoint()).is_empty());
+        drop(server);
+        assert_eq!(restarted.by_account["acct-1"], successor);
+        assert_inert(&restarted, CraftId(first.0));
+        let again = ClientId(3);
+        wire.client_says(again, hello("j2"));
+        restarted.tick(&mut wire).await.unwrap();
+        assert_eq!(welcomed(wire.take(again)), Some(successor));
+        wire.client_says(again, act(first, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
+        restarted.tick(&mut wire).await.unwrap();
+        let said = wire.take(again);
+        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { ship_id, reason: Refusal::NotYours } if *ship_id == first)), "{said:?}");
+    }
+
+    /// Four ships collapse hours apart; every wreck comes back from one restart, and each is swept
+    /// on the tick its own light passes the watcher.
+    #[tokio::test]
+    async fn a_cascade_of_wrecks_restores_and_sweeps_one_by_one() {
+        let Some((mut server, mut wire)) = scene() else { return };
+        server.disconnected(OWNER);
+        let near = near_the_star().unwrap();
+        let star = a_star().unwrap().position_ly * LIGHT_US_PER_LY;
+        let wrecks: Vec<ShipId> = (0..3).map(|k| ShipId(10 + k)).collect();
+        for (k, id) in wrecks.iter().enumerate() {
+            let mut craft = still(*id, star + (near - star) * (1.0 + 0.01 * (k + 1) as f64));
+            server.fit_new(&mut craft);
+            server.fleet.insert(craft);
+        }
+        server.next_ship = 20;
+        let wrecks: Vec<ShipId> = std::iter::once(DYING).chain(wrecks).collect();
+        for _ in 0..500 {
+            server.tick(&mut wire).await.unwrap();
+            if wrecks.iter().all(|id| server.ship(*id).is_some_and(|c| c.ended_s().is_some())) {
+                break;
+            }
+        }
+        let watcher = server.ship(WATCHING).unwrap().position_at(0.0);
+        let arrives: Vec<i64> = wrecks
+            .iter()
+            .map(|id| {
+                let wreck = server.ship(*id).expect("premise: none swept before the restart");
+                let end_t = wreck.ended_s().expect("premise: all collapsed") * 1.0e6;
+                (end_t + wreck.position_at(end_t).distance(watcher)).ceil() as i64
+            })
+            .collect();
+        let mut distinct = arrives.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), wrecks.len(), "premise: they collapse apart");
+        assert!(server.take_destroyed().is_empty());
+
+        let mut restarted = restart(&server);
+        drop(server);
+        for id in &wrecks {
+            assert_inert(&restarted, CraftId(id.0));
+        }
+        let mut wire = Loopback::new();
+        let mut swept: Vec<(i64, i64)> = Vec::new();
+        let mut last_t = restarted.now_t();
+        for _ in 0..100 {
+            restarted.tick(&mut wire).await.unwrap();
+            let (from_t, now_t) = (last_t, restarted.now_t());
+            last_t = now_t;
+            for id in restarted.take_destroyed() {
+                let k = wrecks.iter().position(|w| w.0 == id).expect("only wrecks are swept");
+                assert!(arrives[k] > from_t && arrives[k] <= now_t, "{id} swept at {now_t}, its light arrives {}", arrives[k]);
+                swept.push((id, now_t));
+            }
+            if swept.len() == wrecks.len() {
+                break;
+            }
+        }
+        assert_eq!(swept.len(), wrecks.len(), "{swept:?}");
+        assert!(collapse_events(&restarted).is_empty(), "a wreck collapsed again");
     }
 }
