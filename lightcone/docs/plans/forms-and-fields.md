@@ -507,7 +507,7 @@ graph LR
 
 ### E2 · Exhaust from heat
 
-- status: active card "E2 · Exhaust from heat"
+- status: done #121
 - needs: H3
 - touches: `crates/lc-world/src/cost.rs`, `crates/lc-world/src/field.rs`, `crates/lc-world/src/fitting/heat.rs`
 - read: 31 §The drive is the radiator
