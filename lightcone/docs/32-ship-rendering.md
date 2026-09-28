@@ -509,8 +509,8 @@ collapse whose light has arrived.
   its flux flat, the same in every band: its energy is kept, and it is white in every mapping. The
   photometry an instrument reads (`lc_world::afterglow`) is still the blackbody.
 - **How it looks a light-year off**, a ship ten times the starting size, 4 × 10²⁹ J: the flash is
-  V −10 for its half second, a new star brighter than the full Moon, as white as the brightest in
-  the frame at the automatic exposure. The afterglow starts near V 8, below the automatic
+  V −10 for its half second, a new star brighter than any planet and about a tenth of the full
+  Moon, as white as the brightest in the frame at the automatic exposure. The afterglow starts near V 8, below the automatic
   exposure's reach; opened ten stops, it is an orange point that reddens and fades over its month,
   five seconds at a year a minute. The point is drawn in the lit bodies' style, which caps a
   point's size at a few pixels, so even V −10 is a very bright star rather than a burst: a beauty
@@ -634,7 +634,9 @@ direction from the emitter to the observer, `cos θ = a · u` says which source 
   `P / (Ω d²)` that `lc_world::emit::flux_w_m2` gives, in the face's blackbody spectrum through the
   observer's bands. The client does not work it out: a drive is an emission like any beam
   ([31-directed-energy.md](31-directed-energy.md#exhaust-lands-on-whatever-is-behind)), and the one
-  fan-out hands every observer inside its cone a `Glare` on the emitter's `Presence`. So a beam, a
+  fan-out hands every observer inside its cone a `Glare` on the emitter's `Presence`. Its `EMIT`
+  sightings carry the same emission, and between two presences the client reads the glare from
+  them at the same `flux_w_m2`, so a burn that came and went between them still shows. So a beam, a
   dump and a drive reach the eye by one path. That is the blinding point, and it carries: the starting drive at its rating
   lands 5 × 10⁻¹¹ W/m² a light-year away, a bolometric seventh magnitude, a telescope star in the next
   system.
@@ -650,7 +652,7 @@ the resolved picture summed, so stepping back from a burn never changes its brig
 glare is the whole of the point and the face is dropped: the face seen straight down the beam *is*
 that light, and adding it would count it twice. The two are never summed, and neither is a second
 budget: the account and the heat landing on anything are the cone's alone. So the edge is a step,
-by `π cos α / Ω`, about 130 for the drive's 5° (seven stops), and that step is the flare. Faces at
+by `π / (Ω cos α)`, about 130 for the drive's 5° (seven stops), and that step is the flare. Faces at
 several temperatures are drawn as one blackbody carrying their sum; seen from the front, `cos θ`
 is negative and a face sends nothing, so a beam out of the bow seen from astern is not drawn at all.
 
@@ -666,18 +668,23 @@ is negative and a face sends nothing, so a beam out of the bow seen from astern 
   aberration, as it does for a star.
 - **One mesh for all of them**, a fourth pass of the starfield sharing its uniforms. It is written
   only when a point moves or changes by a part in a thousand, not every frame; its uniforms carry no
-  clock, so the material is written only when the exposure or the view is.
+  clock, so the material is written only when the exposure or the view is. It is baked about an
+  origin of its own, moved to the eye once the eye has come a ten-thousandth of the nearest point's
+  distance from it: the sky's moves only every light-year, and in `f32` a point a few hundred
+  kilometers off would land anywhere in the frame.
+- **A flash is not metered**, as a wreck's debris's is not: it overflows rather than stopping the
+  sky down for half a second.
 - **Burns are read from their sightings too.** A `kind::DRIVE` or `kind::EMIT` sighting starts a
   flare that is shown until its going out arrives, and for half a real second at least. So a burn
   that lit and went out between two presences is still seen. Inside a beam, the glare is the
   presence's or the sightings', whichever is brighter.
 
-**How bright, in V, a light-year off**, from `--demo distant`:
+**How bright, in V**, from `--demo distant`:
 
 | | V |
 |---|---|
-| the starting ship's drive, inside its cone | about 20 |
-| a ship ten times its size at 2 g, inside its cone | 13 |
+| the starting ship's drive, inside its cone, a light-year off | about 20 |
+| a ship ten times its size at 2 g, inside its cone, a light-year off | 13 |
 | the same, 10° outside it | 18 |
 | a Clear ship at rest, sunlit, 10⁵ km off | 5 |
 

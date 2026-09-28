@@ -225,8 +225,10 @@ pub struct Pass {
     pub sent: RelativisticStarfieldUniform,
 }
 
-/// The pass [`crate::distant`] draws points in.
+/// The pass [`crate::distant`] draws points in, baked about an origin of its own: see
+/// [`crate::distant::origin_for`].
 pub struct CraftPass {
+    pub origin_ly: DVec3,
     pub mesh: Handle<Mesh>,
     pub material: Handle<CraftPointMaterial>,
     pub sent: RelativisticStarfieldUniform,
@@ -566,7 +568,7 @@ pub fn spawn_sky(
     let mesh = meshes.add(crate::distant::build_mesh(&[], origin_ly));
     let material = crafts.add(CraftPointMaterial { uniforms: sent.clone(), band_lut: lut });
     commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()), NoFrustumCulling, SkyMesh));
-    let crafts = CraftPass { mesh, material, sent };
+    let crafts = CraftPass { origin_ly, mesh, material, sent };
     commands.insert_resource(Starfield { origin_ly, distant, local, bodies, crafts });
 }
 
@@ -669,7 +671,7 @@ pub fn update_sky(
         drawn_rad_per_px,
         drawn_exposure: sky_exposure(),
         corona_flow_phase: 0.0,
-        ..uniforms(&session.0, eye.at_ly, origin, lut_scale(), rad_per_px, style_for(&ui.0, Which::Bodies))
+        ..uniforms(&session.0, eye.at_ly, sky.crafts.origin_ly, lut_scale(), rad_per_px, style_for(&ui.0, Which::Bodies))
     };
     if next != sky.crafts.sent
         && let Some(mut material) = crafts.get_mut(&sky.crafts.material)

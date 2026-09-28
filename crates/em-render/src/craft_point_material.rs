@@ -3,9 +3,10 @@
 //! a star is.
 //!
 //! A star is one blackbody of fixed size. One of these is up to [`TERMS`] terms, each a blackbody
-//! at a temperature over a solid angle or a line at a wavelength carrying a flux, plus an optional
-//! **event**: a flash of one blackbody for a while, then a second fading as luminosity falling
-//! linearly to nothing, closed form in `globals.time` so nothing is rewritten while it plays.
+//! at a temperature over a solid angle, a line at a wavelength carrying a flux, or a flux the same
+//! in every band, plus an optional **event**: a flash of one term for a while, then a blackbody
+//! fading as luminosity falling linearly to nothing, closed form in `globals.time` so nothing is
+//! rewritten while it plays.
 //!
 //! The host supplies `shaders/craft_points.wgsl` and the starfield's band table.
 
@@ -38,8 +39,7 @@ pub const ATTRIBUTE_EVENT_CLOCK: MeshVertexAttribute =
     MeshVertexAttribute::new("CraftEventClock", 0x4352_4146_0003, VertexFormat::Float32x4);
 
 /// The event's light: `(flash kelvin, flash sr, fade's first kelvin, fade's sr)`, the flash a term
-/// as above. The fade's area is
-/// fixed, so its temperature goes as `(1 - t / fade)^¼`.
+/// as above. The fade's area is fixed, so its temperature goes as `(1 - t / fade)^¼`.
 pub const ATTRIBUTE_EVENT_LIGHT: MeshVertexAttribute =
     MeshVertexAttribute::new("CraftEventLight", 0x4352_4146_0004, VertexFormat::Float32x4);
 

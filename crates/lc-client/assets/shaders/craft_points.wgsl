@@ -19,7 +19,7 @@
 
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 const BANDS: u32 = 7u;
-/// distant::FLAT: a term the same in every band.
+/// At or below this, a term is the same in every band. distant::FLAT writes -3e38, well past it.
 const FLAT: f32 = -1.0e38;
 /// em_spectra's band limits, meters. A test holds these to it.
 const BAND_LO: array<f32, 7> = array<f32, 7>(3.98e-7, 5.07e-7, 5.89e-7, 7.315e-7, 1.995e-6, 7.5e-6, 0.21099);

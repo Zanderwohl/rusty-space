@@ -23,7 +23,8 @@ use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use em_render::craft_point_material::{
-    ATTRIBUTE_EVENT_CLOCK, ATTRIBUTE_EVENT_LIGHT, ATTRIBUTE_TERMS_A, ATTRIBUTE_TERMS_B, CraftPointMaterialPlugin, TERMS,
+    ATTRIBUTE_EVENT_CLOCK, ATTRIBUTE_EVENT_LIGHT, ATTRIBUTE_TERMS_A, ATTRIBUTE_TERMS_B, CraftPointMaterial, CraftPointMaterialPlugin,
+    TERMS,
 };
 use em_render::relativistic_starfield_material::ATTRIBUTE_STAR_CORNER;
 use em_render::render_space::sim_to_render;
@@ -179,11 +180,22 @@ impl Point {
     /// W/m² in each band now, before the observer's own Doppler shift, which the shader applies.
     pub fn flux(&self) -> PerBand<f64> {
         let event = self.event.map_or([Term::Dark; 2], |(e, t)| e.at(t));
-        self.terms.iter().chain(&event).fold(PerBand::splat(0.0), |sum, term| {
-            let f = term.flux();
-            sum.map(|band, x| x + f[band])
-        })
+        sum(self.terms.iter().chain(&event))
     }
+
+    /// What the exposure is metered on: all but a flash, which is left to overflow as a wreck's
+    /// debris leaves its own, rather than stopping the sky down for half a second.
+    pub fn metered(&self) -> PerBand<f64> {
+        let fade = self.event.map_or(Term::Dark, |(e, t)| e.at(t)[1]);
+        sum(self.terms.iter().chain(std::iter::once(&fade)))
+    }
+}
+
+fn sum<'a>(terms: impl Iterator<Item = &'a Term>) -> PerBand<f64> {
+    terms.fold(PerBand::splat(0.0), |sum, term| {
+        let f = term.flux();
+        sum.map(|band, x| x + f[band])
+    })
 }
 
 /// Whether something `length_m` long at `distance_m` is too small to draw as a shape.
@@ -471,9 +483,9 @@ pub fn resolve(
 #[allow(clippy::too_many_arguments)]
 pub fn draw_points(
     (game, uplink, eye, ui, time): (Res<crate::app::Game>, Res<crate::uplink::Uplink>, Res<Eye>, Res<crate::app::Ui>, Res<Time>),
-    (faces, wrecks, sky): (Res<LitFaces>, Res<Wrecks>, Option<Res<crate::starfield::Starfield>>),
+    (faces, wrecks, sky): (Res<LitFaces>, Res<Wrecks>, Option<ResMut<crate::starfield::Starfield>>),
     (mut flares, mut distant): (ResMut<Flares>, ResMut<Distant>),
-    mut meshes: ResMut<Assets<Mesh>>,
+    (mut meshes, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<CraftPointMaterial>>),
     mut roots: Query<(&ShipHull, &Transform, &mut Visibility), Without<Hull>>,
     mut ovoids: Query<(&Hull, &mut Visibility), Without<ShipHull>>,
 ) {
@@ -522,16 +534,33 @@ pub fn draw_points(
     }
     flares.sweep(now_s, real_s, |id| distant.is_point(Some(id)));
 
-    distant.metered = points.iter().map(|p| p.flux().map(|_, x| *x as f32)).collect();
-    let Some(sky) = sky else { return };
-    let origin = sky.origin_ly;
+    distant.metered = points.iter().map(|p| p.metered().map(|_, x| *x as f32)).collect();
+    let Some(mut sky) = sky else { return };
+    let origin = origin_for(sky.crafts.origin_ly, eye.at_ly, &points);
     if distant.uploaded.as_ref().is_some_and(|(o, drawn)| *o == origin && same(drawn, &points, eye.at_ly)) {
         return;
     }
     if let Some(mut mesh) = meshes.get_mut(&sky.crafts.mesh) {
         *mesh = build_mesh(&points, origin);
     }
+    // Moved with the mesh, so the frame it is rebaked on is not drawn against the old origin.
+    if origin != sky.crafts.origin_ly {
+        sky.crafts.origin_ly = origin;
+        sky.crafts.sent.ship_offset_ly = sim_to_render(eye.at_ly - origin).as_vec3().extend(0.0);
+        if let Some(mut material) = materials.get_mut(&sky.crafts.material) {
+            material.uniforms = sky.crafts.sent.clone();
+        }
+    }
     distant.uploaded = Some((origin, points));
+}
+
+/// Where the points are baked about: `origin`, until the eye has come a ten-thousandth of the
+/// nearest point's distance from it, and then the eye. The mesh and the eye's offset are `f32`, so
+/// this keeps a point's direction to a part in 10⁷. The sky's own origin moves only every
+/// light-year, which would put a point a few hundred kilometers off anywhere in the frame.
+pub fn origin_for(origin: DVec3, eye: DVec3, points: &[Point]) -> DVec3 {
+    let nearest = points.iter().map(|p| p.at_ly.distance(eye)).fold(f64::INFINITY, f64::min);
+    if eye.distance(origin) > 1e-4 * nearest { eye } else { origin }
 }
 
 /// A craft's faces in render axes, lit by `ends`.
@@ -747,6 +776,7 @@ mod tests {
         assert_eq!(event.flash.flux(), flash, "flat, and all of the spike");
         let at_first = lc_world::glow::thermal(&afterglow.glow_at(0.0).unwrap(), d);
         assert_near(point(0.1).flux(), flash.map(|b, x| x + at_first[b]), 1e-2, "the flash");
+        assert_near(point(0.1).metered(), at_first, 1e-2, "the flash is not metered");
 
         for fraction in [0.3, 0.6, 0.9] {
             let t = 300.0 * fraction as f32;
@@ -886,6 +916,27 @@ mod tests {
         let wrecks = [(1, near, 300.0), (2, DVec3::X, 300.0), (3, near, 0.0)];
         distant.decide(&[], &Eye::default(), wrecks.into_iter(), rad_per_px);
         assert_eq!([1, 2, 3].map(|id| distant.is_debris(id)), [true, false, false]);
+    }
+
+    /// A point two hundred kilometers off keeps its direction with the eye a thousandth of a
+    /// light-year from where the sky was baked, as the shader works it: `f32` position less `f32`
+    /// offset.
+    #[test]
+    fn a_near_point_keeps_its_place_as_the_ship_moves() {
+        let eye = DVec3::new(1e-3, 2e-4, -5e-4);
+        let at = eye + DVec3::new(2e5, 1.5e5, -1e5) / M_PER_LY;
+        let point = Point { at_ly: at, terms: [Term::Dark; TERMS], event: None };
+        let drawn = |origin: DVec3| {
+            let mesh = build_mesh(&[point], origin);
+            let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!() };
+            let offset = sim_to_render(eye - origin).as_vec3();
+            (Vec3::from_array(p[0]) - offset).as_dvec3().normalize()
+        };
+        let truth = sim_to_render(at - eye).normalize();
+        let origin = origin_for(DVec3::ZERO, eye, &[point]);
+        assert!(drawn(origin).angle_between(truth) < 1e-4, "{} rad off", drawn(origin).angle_between(truth));
+        assert!(drawn(DVec3::ZERO).angle_between(truth) > 1e-2, "premise: the sky's origin loses it");
+        assert_eq!(origin_for(origin, eye + DVec3::X / M_PER_LY, &[point]), origin, "rebaked for a meter");
     }
 
     /// Head on at `β`, the textbook `√((1 + β) / (1 − β))`, and its inverse going away.
