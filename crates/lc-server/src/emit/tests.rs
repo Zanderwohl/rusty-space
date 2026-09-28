@@ -1,5 +1,5 @@
 use glam::DVec3;
-use lc_proto::{Aim, Apertures, ClientId, Inbound, Intent, Order, Outbound, Refusal, ShipId, Spectrum};
+use lc_proto::{Aim, Apertures, ClientId, Inbound, Intent, Lead, Order, Outbound, Refusal, ShipId, Spectrum};
 use lc_spacetime::LIGHT_MICROSECOND_M;
 use lc_world::craft::{Craft, CraftId};
 use lc_world::fitting::{Account, Balance, Fitting, Posture, Setting};
@@ -45,7 +45,11 @@ fn account(craft: &mut Craft, change: impl FnOnce(&mut Account)) {
 }
 
 fn emit(aim: Aim, apertures: Apertures, power_w: f64, wavelength_m: f64, spread_rad: f64, duration_s: f64) -> Inbound {
-    let order = Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s };
+    leading(aim, apertures, power_w, wavelength_m, spread_rad, duration_s, Lead::Coasting)
+}
+
+fn leading(aim: Aim, apertures: Apertures, power_w: f64, wavelength_m: f64, spread_rad: f64, duration_s: f64, lead: Lead) -> Inbound {
+    let order = Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s, lead };
     Inbound::Act(Intent { ship_id: EMITTER, order, issued_at_client_t: i64::MAX })
 }
 
@@ -181,6 +185,34 @@ async fn an_aimed_beam_misses_a_target_that_maneuvered_after_it_left() {
         let told = illuminated(&wire.take(ClientId(2)));
         assert_eq!(told.is_empty(), maneuvers, "maneuvered {maneuvers}: {told:?}");
         assert_eq!(lit_w(&server, 2) > 0.0, !maneuvers);
+    }
+}
+
+/// A light-minute off and burning at 5 g across the line of sight, a target is hit by a beam led
+/// along its burn and missed by one led as though it coasted, by `½ a (2d/c)²`, about 350 km,
+/// against a spot a few kilometers across.
+#[tokio::test]
+async fn a_beam_led_along_a_steady_burn_lands_and_one_led_coasting_misses() {
+    const LIGHT_MINUTE_US: f64 = 60.0e6;
+    for lead in [Lead::Burning, Lead::Coasting] {
+        let target = DVec3::X * LIGHT_MINUTE_US;
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
+        let mut burning = ship(2, target, Form::starting());
+        let from_ly = target / LIGHT_US_PER_LY;
+        let boost = lc_world::emit::Boost::plan(from_ly, DVec3::ZERO, 0.0, DVec3::Y, DVec3::Y, 5.0, 1.0e6, DVec3::Y, 0.05);
+        assert_eq!(boost.turn_s(), 0.0, "premise: lit from the start");
+        burning.boost(boost, 0.0);
+        server.admit(ClientId(2), burning, 0.0);
+        let mut wire = Loopback::new();
+        until(&mut server, &mut wire, 1.5 * LIGHT_MINUTE_US).await;
+        wire.client_says(EMITTING, leading(Aim::Ship(ShipId(2)), Apertures::Both, 1.0e17, 1.0e-9, 3.0e-8, HOUR_S, lead));
+        server.tick(&mut wire).await.unwrap();
+        assert!(wire.take(EMITTING).iter().any(|m| matches!(m, Outbound::Accepted { .. })), "{lead:?}");
+        let lit_t = emissions_of(&server, EMITTER)[0].0;
+        until(&mut server, &mut wire, lit_t as f64 + 1.2 * LIGHT_MINUTE_US).await;
+        let told = illuminated(&wire.take(ClientId(2)));
+        assert_eq!(!told.is_empty(), lead == Lead::Burning, "{lead:?}: {told:?}");
     }
 }
 
@@ -564,7 +596,7 @@ async fn a_beam_in_flight_comes_back_through_the_store() {
     server.admit(EMITTING, ship(EMITTER_ID, DVec3::new(0.4, 0.0, 0.0), two_ended()), 0.0);
     server.fleet.insert(ship(TARGET_ID, target_at, Form::starting()));
     let mut wire = Loopback::new();
-    let order = Order::Emit { aim: along(DVec3::X), apertures: Apertures::Both, power_w: 1.0e17, wavelength_m: 1.0e-9, spread_rad: 1.0e-3, duration_s: 3.0 * HOUR_S };
+    let order = Order::Emit { aim: along(DVec3::X), apertures: Apertures::Both, power_w: 1.0e17, wavelength_m: 1.0e-9, spread_rad: 1.0e-3, duration_s: 3.0 * HOUR_S, lead: Lead::Coasting };
     wire.client_says(EMITTING, Inbound::Act(Intent { ship_id: ShipId(EMITTER_ID), order, issued_at_client_t: i64::MAX }));
     server.tick(&mut wire).await.unwrap();
     assert!(wire.take(EMITTING).iter().any(|m| matches!(m, Outbound::Accepted { .. })));
