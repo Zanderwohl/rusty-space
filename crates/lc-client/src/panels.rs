@@ -138,7 +138,9 @@ pub fn hud(
             }
             if let Some(field) = &lines.field {
                 ui.separator();
-                crate::field_bar::draw(ui, field, lines.field_text(fit), &mut out);
+                for action in crate::field_bar::draw(ui, field, lines.field_text(fit)) {
+                    ask(&mut out, action);
+                }
             }
             if let Some(warning) = lines.warning(fit) {
                 ui.separator();
