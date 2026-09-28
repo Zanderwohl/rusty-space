@@ -685,7 +685,7 @@ graph LR
 
 ### R13 · The engine grid on the open face
 
-- status: active card "R13 · The engine grid on the open face"
+- status: done #137
 - needs: R10, R12, R17, E3
 - touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/src/hull.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`, `lightcone/docs/32-ship-rendering.md`
 - read: 32 §Materials by kind, §Beams and plumes, §The exhaust cone; 31 §Emitting on purpose's As built
