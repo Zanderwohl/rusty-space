@@ -217,6 +217,7 @@ impl Plugin for ClientPlugin {
                     crate::dev::open_the_radio.run_if(in_state(AppState::InGame)),
                     crate::dev::type_at_the_console.run_if(in_state(AppState::InGame)),
                     crate::dev::apply_and_cancel.run_if(in_state(AppState::InGame)),
+                    crate::dev::emit_at_selected.run_if(in_state(AppState::InGame)),
                     // After the framing, because a pin overrules everything including that.
                     crate::dev::pin_camera.run_if(in_state(AppState::InGame)),
                     crate::dev::pin_view.run_if(in_state(AppState::InGame)),

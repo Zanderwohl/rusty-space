@@ -50,6 +50,9 @@ pub struct Draft {
     /// Asked for; the floor wins below it.
     pub spread_rad: f64,
     pub duration_s: f64,
+    /// The selection last taken as the aim, so a new one re-aims and the window's own choice
+    /// otherwise stands.
+    pub followed: Option<ShipId>,
 }
 
 impl Default for Draft {
@@ -61,6 +64,7 @@ impl Default for Draft {
             wavelength_m: 1.0e-6,
             spread_rad: 0.0,
             duration_s: 600.0,
+            followed: None,
         }
     }
 }
@@ -400,6 +404,13 @@ pub(crate) fn emit(
         ui.weak("no fitting");
         return;
     };
+    if let Some(id) = state.0.selected_craft
+        && draft.followed != Some(id)
+        && uplink.contacts.iter().any(|c| c.ship_id == id)
+    {
+        draft.followed = Some(id);
+        draft.aimed = Aimed::Craft(id);
+    }
     if let Aimed::Craft(id) = draft.aimed
         && !uplink.contacts.iter().any(|c| c.ship_id == id)
     {
@@ -656,7 +667,7 @@ mod tests {
     }
 
     fn draft(apertures: Apertures, power_w: f64) -> Draft {
-        Draft { aimed: Aimed::Reticle, apertures, power_w, wavelength_m: 1.0e-6, spread_rad: 0.0, duration_s: 10.0 }
+        Draft { apertures, power_w, spread_rad: 0.0, duration_s: 10.0, ..Draft::default() }
     }
 
     fn receiver(distance_m: f64) -> Receiver {

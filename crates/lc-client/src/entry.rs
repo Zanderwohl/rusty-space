@@ -274,6 +274,7 @@ pub fn parse(args: &[String]) -> Entry {
         say: after("--say"),
         console: after("--console"),
         apply: flag("--apply"),
+        emit: flag("--emit"),
         cancel_at: value(args, "--cancel-at"),
         actions,
     };
