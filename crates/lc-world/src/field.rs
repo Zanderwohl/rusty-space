@@ -763,6 +763,10 @@ mod tests {
         assert!(rise > fill_s);
     }
 
+    fn still() -> crate::motion::ShipState {
+        crate::motion::ShipState::at(glam::DVec3::ZERO)
+    }
+
     fn starting(b: Balance, stored_j: f64) -> crate::fitting::Fitting {
         use crate::fitting::{Account, Fitting};
         let full = Fitting::full(Form::starting(), b, 0.0);
@@ -778,14 +782,14 @@ mod tests {
         let mut fitting = starting(b, start.caps.storage_j - 2.0 * me(&b));
         fitting.set_starlight_w(start.starlight_w(0.03));
         let heat_max_j = fitting.field().heat_max_j();
-        let collapse_s = fitting.collapse_s().expect("inside the rated load, it collapses");
+        let collapse_s = fitting.collapse_s(&still(), f64::INFINITY).expect("inside the rated load, it collapses");
         let rest = crate::motion::ShipState::at(glam::DVec3::ZERO);
         assert_eq!(fitting.stored_j_at(&rest, collapse_s), start.caps.storage_j, "premise: full first");
-        assert!(close(fitting.heat_j_at(collapse_s), heat_max_j, 1e-9));
+        assert!(close(fitting.heat_j_at(&still(), collapse_s), heat_max_j, 1e-9));
 
         let n = 100_000;
         let dt_s = 1.5 * collapse_s / n as f64;
-        let first = (1..=n).find(|&k| fitting.heat_j_at(k as f64 * dt_s) >= heat_max_j).unwrap();
+        let first = (1..=n).find(|&k| fitting.heat_j_at(&still(), k as f64 * dt_s) >= heat_max_j).unwrap();
         assert!((first - 1) as f64 * dt_s < collapse_s && collapse_s <= first as f64 * dt_s, "{collapse_s} at step {first}");
     }
 
@@ -795,9 +799,9 @@ mod tests {
         let start = Start::new(&b);
         let mut fitting = starting(b, start.caps.storage_j);
         fitting.set_starlight_w(start.starlight_w(0.1));
-        assert_eq!(fitting.collapse_s(), None);
+        assert_eq!(fitting.collapse_s(&still(), f64::INFINITY), None);
         fitting.set_starlight_w(start.starlight_w(RATED_LOAD_AU * (1.0 + 1e-6)));
-        assert_eq!(fitting.collapse_s(), None);
+        assert_eq!(fitting.collapse_s(&still(), f64::INFINITY), None);
     }
 
     /// A vent jumps `Q`, so the crossing is the end of the step that frees it, to the second.
@@ -819,13 +823,13 @@ mod tests {
         let [step] = plan.steps() else { panic!("{:?}", plan.steps()) };
         assert!(step.vented_j > 0.0, "premise: it vents");
         let end_s = step.ends_s();
-        let heat_max_j = probe.heat_j_at(end_s) - 0.5 * step.vented_j;
-        assert!(probe.heat_j_at(end_s * (1.0 - 1e-12)) < heat_max_j, "premise: only the vent crosses");
+        let heat_max_j = probe.heat_j_at(&still(), end_s) - 0.5 * step.vented_j;
+        assert!(probe.heat_j_at(&still(), end_s * (1.0 - 1e-12)) < heat_max_j, "premise: only the vent crosses");
 
         let b = Balance { field_capacity: heat_max_j / probe.field().area_m2, ..Balance::DEFAULT };
         let (fitting, _) = begun(b);
         assert!(close(fitting.field().heat_max_j(), heat_max_j, 1e-12));
-        assert_eq!(fitting.collapse_s(), Some(end_s));
+        assert_eq!(fitting.collapse_s(&still(), f64::INFINITY), Some(end_s));
     }
 
     /// A build held out of storage under starlight too weak for the drain: free storage runs out a
@@ -854,16 +858,18 @@ mod tests {
         let duration_s = plan.duration_s();
         let spare_j = 0.1 * trial.hull().capacities.drain_w * duration_s;
         let (probe, _) = begun(b, cost_j + spare_j);
-        let heat_max_j = probe.heat_j_at(0.901_7 * duration_s);
-        assert!(probe.heat_j_at(0.2 * duration_s) < heat_max_j, "premise: still rising once starved");
+        let heat_max_j = probe.heat_j_at(&still(), 0.901_7 * duration_s);
+        assert!(probe.heat_j_at(&still(), 0.2 * duration_s) < heat_max_j, "premise: still rising once starved");
 
         let tight = Balance { field_capacity: heat_max_j / probe.field().area_m2, ..b };
         let (fitting, _) = begun(tight, cost_j + spare_j);
-        let collapse_s = fitting.collapse_s().expect("it reaches the limit");
+        let collapse_s = fitting.collapse_s(&still(), f64::INFINITY).expect("it reaches the limit");
         let n = 20_000;
         let dt_s = duration_s / n as f64;
-        let first = (1..=n).find(|&k| fitting.heat_j_at(k as f64 * dt_s) >= heat_max_j).unwrap();
-        assert!((first - 1) as f64 * dt_s < collapse_s && collapse_s <= first as f64 * dt_s, "{collapse_s} at step {first}");
+        let first = (1..=n).find(|&k| fitting.heat_j_at(&still(), k as f64 * dt_s) >= heat_max_j).unwrap();
+        // The limit is the heat at a sample instant, so the solve may land a rounding past it.
+        let sampled_s = first as f64 * dt_s * (1.0 + 1e-12);
+        assert!((first - 1) as f64 * dt_s < collapse_s && collapse_s <= sampled_s, "{collapse_s} at step {first}");
         assert!(collapse_s > 0.5 * duration_s, "premise: in the starved stretch");
     }
 
@@ -872,6 +878,6 @@ mod tests {
         let b = Balance::DEFAULT;
         let fitting = starting(b, 0.0);
         let hot = crate::fitting::Account { heat_j: 2.0 * fitting.field().heat_max_j(), since_s: 5.0, ..fitting.account() };
-        assert_eq!(crate::fitting::Fitting::from_account(&hot, b).collapse_s(), Some(5.0));
+        assert_eq!(crate::fitting::Fitting::from_account(&hot, b).collapse_s(&still(), f64::INFINITY), Some(5.0));
     }
 }
