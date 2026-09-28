@@ -72,7 +72,7 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--map-plane <system\|galactic>` | which plane the map lays its rings in. `ecliptic` is the old spelling of `system` and still works. A system's plane is a belief, so the option is refused until one is solved — see `lightcone/docs/25-system-knowledge.md` |
 | `--error-bars` | draw the map's error bars, which are off by default |
 | `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto. A pin: `--map` on its own holds the ship, so a hand on the mouse cannot pan a shot two runs are meant to agree about |
-| `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `closing`, `chase`, `corona`. Brings its own shard |
+| `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `kzinti` (the approach, Direct), `closing`, `chase`, `corona`. Brings its own shard |
 | `--console <line>` | type a line at the console once the shard has welcomed the client, with the console open. With `--local` the shard is directing, so every command is available |
 | `--demo-cam <yaw:pitch:booms[:to]>` | pin the camera for the run, so two shots of a scene are the same shot. With `to`, the boom eases toward it once nothing is waiting to be drawn: `--frames 1 --burst 150` with `40:1.5` photographs every remesh of a hull on the way in |
 | `--watch-from <id>` | put the camera behind another craft, by its ship id: how two clients on one shard photograph each other |

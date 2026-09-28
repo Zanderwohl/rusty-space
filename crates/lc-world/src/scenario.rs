@@ -111,6 +111,9 @@ pub enum Act {
     /// planet. The standoff it settles at is worked out from both hulls, so a five-kilometer
     /// ship stands further off than a five-hundred-meter one and the picture is the same.
     Chase(Slot),
+    /// [`Act::Chase`] by the Direct approach: burn, flip and brake onto the station, cone and all.
+    /// See 31 §Two ways to approach.
+    ChaseDirect(Slot),
     BreakOff,
     /// Cut the drive. Not a stop: whatever the ship was doing at the time, it keeps doing
     /// ballistically.
@@ -145,7 +148,7 @@ pub struct Scenario {
 
 impl Scenario {
     /// Every scene there is.
-    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, CLOSING, CHASE, CORONA];
+    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA];
 
     /// The one whose name starts with `prefix`, if exactly one does.
     ///
@@ -299,6 +302,19 @@ pub const APPROACH: Scenario = Scenario {
     }],
 };
 
+/// [`APPROACH`] by the Direct approach, which brakes onto the station with its cone on whoever is
+/// there: the one way to stand inside another ship's courtesy radius while it burns.
+pub const KZINTI: Scenario = Scenario {
+    name: "kzinti",
+    blurb: "You hold a polar orbit of Saturn. Something much larger closes on you, and brakes at you.",
+    beats: &[Beat {
+        after_s: 0.0,
+        actor: Slot::Cast(0),
+        act: Act::ChaseDirect(Slot::Pov),
+    }],
+    ..APPROACH
+};
+
 /// The other way round: a small ship closing on a large one.
 ///
 /// The reciprocal of [`APPROACH`], and not the same picture at all. Being approached is a hull
@@ -437,7 +453,7 @@ mod tests {
     fn every_beat_is_about_somebody_who_is_there() {
         for scene in Scenario::ALL {
             let slots = scene.beats.iter().flat_map(|beat| match beat.act {
-                Act::Chase(on) => vec![beat.actor, on],
+                Act::Chase(on) | Act::ChaseDirect(on) => vec![beat.actor, on],
                 _ => vec![beat.actor],
             });
             for slot in slots {
