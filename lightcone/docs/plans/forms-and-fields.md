@@ -740,7 +740,7 @@ graph LR
 
 ### C10 · Preview from the ship's heat
 
-- status: active card "C10 · Preview from the ship's heat"
+- status: done #116
 - needs: H3, C4
 - touches: `crates/lc-client/src/preview.rs`, `crates/lc-client/src/refit_panel.rs`
 - read: 29 §The budget; 30 §The heat account
