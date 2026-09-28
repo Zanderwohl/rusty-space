@@ -505,20 +505,11 @@ shows its thresholds. What a player can infer from it:
   light still in flight carries the failing field's temperature. The history is not checkpointed: a
   wreck restored after a restart is stated as the starting field at rest until its light has passed.
 - **The client draws and meters a ship by it.** A hull's reflectance is `1 − α`; a real hull's
-<<<<<<< HEAD
   textures, which average 0.35, are scaled to it. The field's heat is drawn on its envelope
   ([32](32-ship-rendering.md#in-the-game)), and on the hull only for a craft with no form, which has
   no envelope. A star's spectrum cache serves its per-band radiance. A Black field hides the lit
   windows too. Nothing yet draws a distant ship as a point: the metering sums the terms
   (`hull::Sent`), and R18's point starts from that sum.
-- **Instruments:** the photometry and the detection test are in `lc-world`; no duty yet points a
-  telescope at a craft. H10's stare at a position is the first.
-=======
-  textures, which average 0.35, are scaled to it. The field's heat is an even glow over the hull in
-  the hull shader, and a star's spectrum cache serves its per-band radiance. A Black field hides the
-  lit windows too. The field's own envelope is still undrawn, so for now the hull carries both terms;
-  R11 moves the heat onto the envelope. Nothing yet draws a distant ship as a point: the metering
-  sums the terms (`hull::Sent`), and R18's point starts from that sum.
 - **Instruments:** the photometry and the detection test are in `lc-world`. A stare can point at a
   place or a craft as well as a star, and records the flux arriving in the one resolution element
   it is aimed at, band by band: every craft's light by this photometry, and every wreck's spike and
@@ -528,7 +519,6 @@ shows its thresholds. What a player can infer from it:
   dim star, seen from 3 light-days, it is measured to the calibration floor for all thirty days. A craft is followed
   by its light, never where it is now, and once its light stops, at where it ended. See
   [24-standing-instruments.md](24-standing-instruments.md#as-built-a-stare-at-a-place-or-a-craft).
->>>>>>> origin/master
 
 ![Clear ships round a Black one, in V: the Black one is a hole in the stars](../images/h7-v.jpg)
 ![The same, at ten microns: all five at 400 K, and the Black one as plain as the rest](../images/h7-10um.jpg)
