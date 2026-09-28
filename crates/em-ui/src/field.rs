@@ -1,7 +1,8 @@
-//! A text field for a number, over Bevy's own [`EditableText`], which does the editing.
+//! Text fields over Bevy's own [`EditableText`], which does the editing.
 //!
-//! Enter or leaving the field commits it, as a [`Committed`] naming the field for the caller to
-//! read its own marker off; Escape puts back what it showed.
+//! A number field commits on Enter or on leaving it, as a [`Committed`] naming the field for the
+//! caller to read its own marker off; Escape puts back what it showed. A [`TextField`] is read
+//! whenever its caller likes, and says [`Entered`] on Enter.
 
 use bevy::ecs::system::SystemParam;
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -19,6 +20,16 @@ pub struct NumberField {
 pub struct Committed {
     pub field: Entity,
     pub value: f64,
+}
+
+/// Free text, such as a name.
+#[derive(Component, Default)]
+pub struct TextField;
+
+#[derive(Message, Clone, Debug, PartialEq)]
+pub struct Entered {
+    pub field: Entity,
+    pub text: String,
 }
 
 pub fn numeric(c: char) -> bool {
@@ -58,7 +69,9 @@ pub struct FieldPlugin;
 impl Plugin for FieldPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Committed>()
+            .add_message::<Entered>()
             .add_observer(on_key)
+            .add_observer(on_text_key)
             .add_observer(on_focus_lost)
             .add_systems(PreUpdate, blur_on_press_elsewhere.after(bevy::ui::UiSystems::Focus));
     }
@@ -98,6 +111,20 @@ fn on_key(
     }
 }
 
+fn on_text_key(
+    key: On<FocusedInput<KeyboardInput>>,
+    fields: Query<&EditableText, With<TextField>>,
+    mut focus: ResMut<InputFocus>,
+    mut out: MessageWriter<Entered>,
+) {
+    let field = key.focused_entity;
+    let Ok(editable) = fields.get(field) else { return };
+    if key.input.state.is_pressed() && key.input.logical_key == Key::Enter {
+        out.write(Entered { field, text: editable.value().to_string() });
+        focus.clear();
+    }
+}
+
 fn on_focus_lost(lost: On<FocusLost>, fields: Query<(&NumberField, &EditableText)>, mut out: MessageWriter<Committed>) {
     if let Ok((number, editable)) = fields.get(lost.entity)
         && let Some(value) = committed(number, editable)
@@ -110,7 +137,7 @@ fn on_focus_lost(lost: On<FocusLost>, fields: Query<(&NumberField, &EditableText
 fn blur_on_press_elsewhere(
     buttons: Res<ButtonInput<MouseButton>>,
     focus: Option<ResMut<InputFocus>>,
-    fields: Query<&Interaction, With<NumberField>>,
+    fields: Query<&Interaction, Or<(With<NumberField>, With<TextField>)>>,
 ) {
     let Some(mut focus) = focus else { return };
     if !buttons.get_just_pressed().any(|_| true) {
@@ -206,6 +233,28 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<InputFocus>().get(), None);
         assert_eq!(commits(&app), vec![Committed { field, value: 3.0 }]);
+    }
+
+    #[test]
+    fn enter_in_a_text_field_says_what_it_holds() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::input::InputPlugin,
+            bevy::input_focus::InputFocusPlugin,
+            bevy::input_focus::InputDispatchPlugin,
+            FieldPlugin,
+        ));
+        app.world_mut().spawn((bevy::window::Window::default(), bevy::window::PrimaryWindow));
+        let field = app.world_mut().spawn((TextField, EditableText::new("Long ship"), Interaction::None)).id();
+        app.world_mut().resource_mut::<InputFocus>().set(field, bevy::input_focus::FocusCause::Pressed);
+        app.update();
+        press(&mut app, Key::Enter);
+        let messages = app.world().resource::<Messages<Entered>>();
+        let said: Vec<Entered> = messages.get_cursor().read(messages).cloned().collect();
+        assert_eq!(said, vec![Entered { field, text: "Long ship".into() }]);
+        assert_eq!(app.world().resource::<InputFocus>().get(), None);
+        assert!(commits(&app).is_empty(), "not a number field");
     }
 
     #[derive(Resource, Default)]

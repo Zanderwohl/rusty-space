@@ -123,6 +123,8 @@ pub struct Session {
     pub analyzing: usize,
     /// As the shard last said.
     pub doing: Doing,
+    /// The account's own, as the shard last sent them.
+    pub presets: Vec<lc_proto::Preset>,
     pub observer: Coord,
     pub telescope: Instrument,
     pub mapping: BandMapping,
@@ -198,6 +200,7 @@ impl Session {
             labels: Default::default(),
             analyzing: 0,
             doing: Doing::default(),
+            presets: Vec::new(),
             stars,
             observer: Coord::ORIGIN,
             telescope: SHIP_SENSOR,

@@ -919,8 +919,7 @@ fn fold(
         Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t } => {
             uplink.incoming.illuminated(ship_id, beam, bearing, spectrum, power_w, arrive_t)
         }
-        // Sent once S2 is built.
-        Outbound::Presets(_) => {}
+        Outbound::Presets(list) => game.0.presets = list,
     }
 }
 
@@ -2147,7 +2146,7 @@ mod tests {
         let mut draft = crate::draft::Draft::new(target.clone());
         let twist = draft.twist(lc_world::form::PartId(4), 0.3).unwrap();
         draft.apply(&twist, &lc_world::fitting::Balance::DEFAULT).unwrap();
-        ui.0.form.history.record(&twist, &draft.ship);
+        ui.0.form.history.record(&twist, &draft.ship, None);
         let order = Order::Refit { target: (&target).into() };
         fold(&mut uplink, &mut game, &mut ui, Outbound::Accepted { ship_id: ShipId(7), event_id: 1, at_t: 2_000_000, order });
         assert_eq!(ui.0.form.applying, Applying::Idle);

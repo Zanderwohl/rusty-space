@@ -160,13 +160,15 @@ pub fn parse(args: &[String]) -> Entry {
     if let Some(id) = value::<u16>(args, "--select") {
         actions.push(Action::SelectPart(Some(lc_world::form::PartId(id))));
     }
-    // The editor's side panels to fold, by heading: `parts`, `detail`, `preview`, comma-separated.
+    // The editor's side panels to fold, by heading: `parts`, `detail`, `preview`, `presets`,
+    // comma-separated.
     for name in after("--fold").iter().flat_map(|names| names.split(',')) {
         use crate::form_view::Fold;
         match name {
             "parts" => actions.push(Action::Fold(Fold::Parts)),
             "detail" => actions.push(Action::Fold(Fold::Detail)),
             "preview" => actions.push(Action::Fold(Fold::Preview)),
+            "presets" => actions.push(Action::Fold(Fold::Presets)),
             _ => {}
         }
     }

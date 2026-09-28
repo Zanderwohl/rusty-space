@@ -339,6 +339,22 @@ impl Form {
     }
 }
 
+/// Whether an account keeping `kept` may save `form` as `name`: the size limits, both ends, and
+/// nothing else about the form. A name already kept is replaced, so it is never one too many.
+pub fn may_keep<'a>(name: &str, form: &lc_proto::Form, mut kept: impl ExactSizeIterator<Item = &'a str>) -> Result<(), lc_proto::Refusal> {
+    use lc_proto::form::{MAX_PRESETS, PRESET_NAME_LIMIT};
+    if name.is_empty() || name.len() > PRESET_NAME_LIMIT {
+        return Err(lc_proto::Refusal::PresetName);
+    }
+    if form.parts.len() > super::MAX_PARTS {
+        return Err(lc_proto::Refusal::Form(lc_proto::FormFault::TooManyParts { found: form.parts.len() as u32 }));
+    }
+    if kept.len() >= MAX_PRESETS && !kept.any(|k| k == name) {
+        return Err(lc_proto::Refusal::TooManyPresets);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

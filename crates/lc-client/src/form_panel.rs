@@ -75,7 +75,7 @@ pub struct FieldOf(pub Field);
 
 /// What a panel was built for.
 #[derive(Component, PartialEq)]
-struct Built(Vec<String>);
+pub(crate) struct Built(Vec<String>);
 
 pub struct FormPanelPlugin;
 
@@ -107,7 +107,7 @@ fn tree_lines(draft: &Draft, marks: &std::collections::BTreeMap<PartId, Mark>) -
         .collect()
 }
 
-fn lay_out(
+pub(crate) fn lay_out(
     mut commands: Commands,
     ui: Res<Ui>,
     shown: Res<crate::form_view::Shown>,
@@ -182,7 +182,7 @@ pub(crate) struct RightColumn;
 pub(crate) struct LeftColumn;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
-enum Side {
+pub(crate) enum Side {
     Palette,
     Tree,
     Fields,
