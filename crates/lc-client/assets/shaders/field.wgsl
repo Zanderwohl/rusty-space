@@ -95,7 +95,8 @@ fn fbm(p: vec3<f32>) -> f32 {
         + 0.15 * value_noise(p * 4.1 + 41.0);
 }
 
-/// A blackbody at `kelvin` through the host's bands, linear display light.
+/// A blackbody at `kelvin` through the host's bands, linear display light. Mirrored by
+/// `field_material::ramp_at`.
 ///
 /// Interpolated in `1/T` between ramp entries rather than in `T`: on the Wien side the log of
 /// the radiance is linear in `1/T`, and that side is where a field lives. Past the top it is
@@ -284,6 +285,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) facing: bool) -> @location(
         let absorbs = mix(clamp(material.state.z, 0.0, 1.0), 1.0, black);
         // Kirchhoff: emissivity is absorptivity, and a thin shell's grows toward one along a
         // grazing path. The same number is how much of what is behind the wall it takes out.
+        // Mirrored by `field_material::wall_opacity`.
         let emissivity = 1.0 - pow(1.0 - absorbs, 1.0 / mu);
         let power = unevenness(outward, in.local);
         linear = blackbody(kelvin * pow(power, 0.25)) * emissivity;

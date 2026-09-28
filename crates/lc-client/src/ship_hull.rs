@@ -148,9 +148,15 @@ fn take_texels(mut palette: ResMut<Palette>, mut images: ResMut<Assets<Image>>) 
     ));
 }
 
-/// A finished hull at `at_ly` wearing `glow`, lit by `star`.
-pub(crate) fn finished(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, glow: lc_proto::Glow) -> HullUniform {
-    let base = lit(session, star, at_ly, Vec4::ONE, glow);
+/// A finished hull at `at_ly` wearing `glow`, lit by `star`. See [`lit`] for `enveloped`.
+pub(crate) fn finished(
+    session: &Session,
+    star: Option<(DVec3, f64, f64)>,
+    at_ly: DVec3,
+    glow: lc_proto::Glow,
+    enveloped: bool,
+) -> HullUniform {
+    let base = lit(session, star, at_ly, Vec4::ONE, glow, enveloped);
     let mut emitted = [Vec4::ZERO; REGIONS];
     for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS).filter(|_| windows_show(glow)) {
         if let Some((cd_m2, k)) = lamp_of(kind) {
@@ -327,7 +333,12 @@ pub fn draw_hulls(
     mut commands: Commands,
     (game, ui, uplink, eye): (Res<crate::app::Game>, Res<crate::app::Ui>, Res<crate::uplink::Uplink>, Res<Eye>),
     own: Res<crate::parts::OwnForm>,
-    (palette, showing, surfaces): (Res<Palette>, Res<crate::refit_hull::Showing>, Res<crate::surfaces::Surfaces>),
+    (palette, showing, surfaces, envelopes): (
+        Res<Palette>,
+        Res<crate::refit_hull::Showing>,
+        Res<crate::surfaces::Surfaces>,
+        Res<crate::field::Envelopes>,
+    ),
     mut stated: Local<Stated>,
     mut rolls: ResMut<Rolls>,
     mut real: ResMut<RealHulls>,
@@ -359,7 +370,8 @@ pub fn draw_hulls(
     }
     for want in &wanted {
         let glow = glow_of(session, &uplink, want.craft);
-        let uniforms = finished(session, star, want.at_ly, glow);
+        let enveloped = envelopes.drawn(want.craft);
+        let uniforms = finished(session, star, want.at_ly, glow, enveloped);
         let Some((root, mut hull, mut transform)) = hulls.iter_mut().find(|(_, h, _)| h.craft == want.craft) else {
             spawn(&mut commands, want);
             unready.0 = true;
@@ -428,7 +440,7 @@ pub fn draw_hulls(
             Some((hash, parts)) if wants_placeholders && hash == want.form.hash => {
                 for child in children.get(parts).into_iter().flatten() {
                     let Ok((Placeholder(paint), material)) = placeholders.get(*child) else { continue };
-                    let next = lit(session, star, want.at_ly, *paint, glow);
+                    let next = lit(session, star, want.at_ly, *paint, glow, enveloped);
                     if let Some(mut asset) = flat.get_mut(&material.0)
                         && asset.uniforms != next
                     {
@@ -440,7 +452,7 @@ pub fn draw_hulls(
                 if let Some((_, old)) = hull.placeholders.take() {
                     commands.entity(old).despawn();
                 }
-                let paint = |kind| lit(session, star, want.at_ly, crate::parts::paint(kind), glow);
+                let paint = |kind| lit(session, star, want.at_ly, crate::parts::paint(kind), glow, enveloped);
                 let parts = spawn_placeholders(&mut commands, &want.form.form, want.balance, &mut meshes, &mut flat, &surfaces, paint);
                 commands.entity(parts).insert(ChildOf(root));
                 hull.placeholders = Some((want.form.hash, parts));
@@ -607,7 +619,7 @@ mod tests {
         let au_ly = lc_world::navigation::AU / crate::system::M_PER_LY;
         let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
         let clear = lc_proto::Glow { temperature_k: 400.0, shade: lc_proto::Shade::Clear };
-        let at = |session: &Session, au: f64| finished(session, star, DVec3::X * au * au_ly, clear);
+        let at = |session: &Session, au: f64| finished(session, star, DVec3::X * au * au_ly, clear, false);
         let luma = |v: Vec4| v.truncate().dot(crate::tonemap::LUMA);
 
         let near = at(&session, 1.0);

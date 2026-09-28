@@ -56,6 +56,28 @@ pub fn ramp_entry(linear: [f64; 3]) -> Vec4 {
     Vec4::new(log(linear[0]), log(linear[1]), log(linear[2]), 0.0)
 }
 
+/// `field.wgsl`'s `blackbody`: the color [`FieldUniform::spectrum`] gives `kelvin`, linear
+/// display light. For a host to check what it hands over against what it shows elsewhere.
+pub fn ramp_at(spectrum: &[Vec4; RAMP], kelvin: f32) -> Vec3 {
+    let (lo, hi) = (RAMP_MIN_K as f32, RAMP_MAX_K as f32);
+    if kelvin <= lo {
+        return Vec3::ZERO;
+    }
+    let span = (hi / lo).ln();
+    let at = ((kelvin / lo).ln() / span * (RAMP - 1) as f32).clamp(0.0, (RAMP - 1) as f32);
+    let i = (at.floor() as usize).min(RAMP - 2);
+    let (k0, k1) = (ramp_kelvin(i), ramp_kelvin(i + 1));
+    let t = ((1.0 / k0 - 1.0 / kelvin.min(hi)) / (1.0 / k0 - 1.0 / k1)).clamp(0.0, 1.0);
+    let log = spectrum[i].truncate().lerp(spectrum[i + 1].truncate(), t);
+    Vec3::new(log.x.exp2(), log.y.exp2(), log.z.exp2()) * (kelvin / hi).max(1.0)
+}
+
+/// `field.wgsl`'s wall: its emissivity, which is also its alpha, for a wall absorbing
+/// `absorbs` seen at `mu`, the cosine off its normal. A thin shell's path grows as `1 / mu`.
+pub fn wall_opacity(absorbs: f32, mu: f32) -> f32 {
+    1.0 - (1.0 - absorbs.clamp(0.0, 1.0)).powf(1.0 / mu.clamp(0.15, 1.0))
+}
+
 #[derive(Clone, Debug, PartialEq, ShaderType)]
 pub struct FieldUniform {
     /// `(kelvin, fill, clear_absorptivity, clock_s)`.

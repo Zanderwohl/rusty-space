@@ -3,7 +3,7 @@
 //! The game is about looking at the past, so how stale the picture is belongs on screen at
 //! all times rather than in a panel a player can close.
 
-use em_spectra::{blackbody, presets};
+use em_spectra::presets;
 use lc_world::craft::Craft;
 use lc_world::field::Mode;
 use lc_world::fitting::{Fitting, Setting, Thresholds};
@@ -532,7 +532,8 @@ fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field>
     let max_j = field.heat_max_j();
     let heat_j = fitting.heat_j_at(&ship.motion, now);
     let heat_w = fitting.heat_w_at(&ship.motion, now);
-    let kelvin = field.temperature_k(heat_j);
+    let held = session.held_field.map(|h| (h.kelvin, crate::field::fill_at(h.kelvin, fitting.balance())));
+    let (kelvin, fraction) = held.unwrap_or((field.temperature_k(heat_j), heat_j / max_j));
     let module_j = fitting.balance().module_energy_j();
     let net_w = heat_w - heat_j / field.tau_s;
     let flow = match net_w {
@@ -546,7 +547,7 @@ fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field>
     }
     let posture = fitting.posture();
     let switch = posture.switching_at(now);
-    let fraction = (heat_j / max_j).clamp(0.0, 1.0);
+    let fraction = fraction.clamp(0.0, 1.0);
     Some(Field {
         fraction: fraction as f32,
         heading: (field.equilibrium_j(heat_w) / max_j).clamp(0.0, 1.0) as f32,
@@ -573,8 +574,8 @@ fn shade_name(mode: Mode) -> &'static str {
 }
 
 /// sRGB, brightest channel at one. Black where the mapping sees none of it.
-fn glow(mapping: &em_spectra::BandMapping, kelvin: f64) -> [f32; 3] {
-    let linear = mapping.apply_f64(&blackbody::per_band(kelvin));
+pub(crate) fn glow(mapping: &em_spectra::BandMapping, kelvin: f64) -> [f32; 3] {
+    let linear = crate::field::blackbody_linear(mapping, kelvin);
     let peak = linear.into_iter().fold(0.0, f64::max);
     if !(peak > 0.0 && peak.is_finite()) {
         return [0.0; 3];
