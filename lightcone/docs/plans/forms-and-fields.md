@@ -467,7 +467,7 @@ graph LR
 
 - status: active card "H7 · What an observer sees"
 - needs: H6
-- touches: `crates/lc-world/src/craft.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-server/src/`
+- touches: `crates/lc-world/src/craft.rs`, `crates/lc-world/src/craft/field.rs`, `crates/lc-world/src/glow.rs`, `crates/lc-world/src/seen.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/em-render/src/hull_material.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/field.rs`
 - read: 30 §What an observer sees
 - deliver: `HULL_K` retired; a ship's light is reflected (`1 − α`) plus thermal at its field's temperature over the envelope; `Presence` carries temperature and mode; instruments see it.
 - done when: a Black ship vanishes in V and not at ten microns, and a hot field's color moves through the bands as 30's table says.
@@ -496,7 +496,7 @@ graph LR
 - needs: H4, H7
 - touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/instruments.rs`
 - read: 30 §Collapse, §What an observer sees
-- deliver: the `1 − collapse_spike_fraction` of a collapse's `E` leaves over `collapse_afterglow_s` as light from where the ship was, its temperature falling from the field's limit, reaching each observer at its retarded time; the spike's color is `collapse_spike_k`.
+- deliver: the `1 − collapse_spike_fraction` of a collapse's `E` leaves over `collapse_afterglow_s` as light from where the ship was, its temperature falling from the field's limit, reaching each observer at its retarded time; the spike's color is `collapse_spike_k`. A stare that can point at a position or a craft rather than only a star, recording what H7's `lc_world::glow` says reaches it: no duty looks at a craft yet.
 - done when: a craft staring at a collapse's position records the afterglow on its curve from when the light arrives, for as long as 30 says, and one staring elsewhere does not.
 
 ## E: energy
@@ -718,7 +718,7 @@ graph LR
 - needs: R12, R17, H7, E4
 - touches: `crates/lc-client/src/plume.rs`, `crates/lc-client/src/starfield.rs`, `lightcone/docs/32-ship-rendering.md`
 - read: 32 §The exhaust cone (From a distance), 04 (stellar photometry), 07 §Other ships
-- deliver: an emitting craft too small to resolve, drawn as a point in the observer's bands, whatever lit the emission: a drive, a heat dump or a beam. Inside the cone its light is the `Glare` E3's fan-out put on its `Presence`, not worked out again here; outside it, the lit apertures' oblique glow from the power `Presence` states (R17), falling off with the angle. Doppler-shifted and aberrated as a star, through the starfield's exposure and glare. The meeting at the cone's edge settled and written into 32.
+- deliver: an emitting craft too small to resolve, drawn as a point in the observer's bands, whatever lit the emission: a drive, a heat dump or a beam. Inside the cone its light is the `Glare` E3's fan-out put on its `Presence`, not worked out again here; outside it, the lit apertures' oblique glow from the power `Presence` states (R17), falling off with the angle. Doppler-shifted and aberrated as a star, through the starfield's exposure and glare. H7 drew no point for a craft, lit or not: this draws every unresolved craft's, from `hull::Sent`'s terms (reflected, thermal, windows), and the glare is one more term of the same sum. The meeting at the cone's edge settled and written into 32.
 - done when: a burn photographed from a light-year off is a point that brightens by orders of magnitude as its cone sweeps over the observer, a beam aimed past the observer is not drawn at all, and a test pins the point's flux inside the cone to the `Glare` it was handed.
 - note: after H7, so the emission adds to the craft's own point rather than drawing a second one beside it; after E4, so a drive's light inside its cone arrives the way every beam's does, and there is one path from emission to eye.
 

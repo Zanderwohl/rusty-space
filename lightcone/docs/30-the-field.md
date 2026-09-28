@@ -12,8 +12,9 @@ whose storage has run down to what its motive has committed pays only as much of
 as conversion brings in, and the rest makes no heat, so an empty ship far from a star cools below
 400 K. A refit's transfers and a burn's spending are draws on storage inside the account, cut where
 each refit step begins and ends, so conversion refills what a build takes out as it goes, and the
-drain and the rating change where a step ends. It replaces the fixed 400 K hull
-(`lc_world::craft::HULL_K`) with a heat account. It turns the hull collectors of
+drain and the rating change where a step ends. An observer sees a ship by its field
+(`lc_world::glow`): `1 − α` of the starlight and σT⁴A of its own heat, as its light left it; the fixed
+400 K hull, `HULL_K`, is gone. It turns the hull collectors of
 [20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
 Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
 glows as it fills, and collapses when it is full. Where the energy it sheds goes is
@@ -435,6 +436,36 @@ shows its thresholds. What a player can infer from it:
   whether they are converting. Whether attacking them feeds them is on the screen.
 - **What they have been doing.** A hot field far from any star has recently been beamed, vented,
   or been beside something that died.
+
+### As built
+
+- **`lc_world::glow`** is the photometry: per band at the observer, `Light { reflected, thermal }`.
+  Reflected is `1 − α` of the star's band radiance diluted to the ship, over the shadow toward the
+  observer, times the lit share `(1 + cos φ) / 2`, as a Lambertian face. Thermal is the band radiance
+  at `T` over a quarter of the envelope, the mean projected area of a convex body, so it integrates
+  to σT⁴A over every direction and wavelength. Neither carries `solar_gain`. The band brightest for
+  its width moves through 30's table: ten microns at 400 K, K at 1 000, I at 2 400 and R at 4 600.
+  `glow::snr` is what an instrument makes of a band's flux against its own glow.
+- **The field as its light left it.** A craft keeps its field at each settlement, the way it keeps
+  its forms (`lc_world::seen::Glows`): heat, envelope, shade and any switch under way. Between
+  samples heat is read off the line joining them, and a sample is dropped while that line passes
+  within a part in ten thousand of it and of every sample dropped before it, so a field at rest is
+  one sample. A burst is kept as a step. `Craft::glow_at` reads it; a new fitting is the field for
+  all time before it. H5's glow between neighbors reads the same history.
+- **`Presence.glow`** is filled from it at the emission time, so a vent two light-hours off is news
+  two hours later. A craft with no fitting is stated as the starting field at rest: 400 K, Clear.
+- **The client draws and meters a ship by it.** A hull's reflectance is `1 − α`; a real hull's
+  textures, which average 0.35, are scaled to it. The field's heat is an even glow over the hull in
+  the hull shader, and a star's spectrum cache serves its per-band radiance. A Black field hides the
+  lit windows too. The field's own envelope is still undrawn, so for now the hull carries both terms;
+  R11 moves the heat onto the envelope. Nothing yet draws a distant ship as a point: the metering
+  sums the terms (`hull::Sent`), and R18's point starts from that sum.
+- **Instruments:** the photometry and the detection test are in `lc-world`; no duty yet points a
+  telescope at a craft. H10's stare at a position is the first.
+
+![Clear ships round a Black one, in V: the Black one is a hole in the stars](../images/h7-v.jpg)
+![The same, at ten microns: all five at 400 K, and the Black one as plain as the rest](../images/h7-10um.jpg)
+![`--demo cascade` in V: five fields near 4 600 K, pale orange by their own light](../images/h7-hot.jpg)
 
 ## Balance
 
