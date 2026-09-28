@@ -458,13 +458,13 @@ mod tests {
         }
     }
 
-    /// 32's figure: the starting drive at its rating.
+    /// 32's figure: the starting drive at its rating, through its bell's 88 m face.
     #[test]
-    fn the_starting_face_is_seven_hundred_thousand_kelvin() {
+    fn the_starting_face_is_five_hundred_thousand_kelvin() {
         let start = Form::starting();
         let face = aft_apertures(&start, &B).unwrap()[0];
         let k = face_k(aft_aperture_w(&start, &B).unwrap(), &face);
-        assert!((k / 7.0e5 - 1.0).abs() < 0.03, "{k} K");
+        assert!((k / 5.3e5 - 1.0).abs() < 0.01, "{k} K");
     }
 
     /// What pushes a photon drive is `F c`, from the reaction drive's `½ F v` of the same thrust.
