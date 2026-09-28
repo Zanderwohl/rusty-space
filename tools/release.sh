@@ -14,8 +14,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SITE=${LC_SITE:-http://localhost:3100}
-CDN=${LC_CDN:-http://rocinante.local:3101}
+SITE=${LC_SITE:-https://dev.lightconefrontier.com}
+CDN=${LC_CDN:-https://cdn.dev.lightconefrontier.com}
 TOKEN=${RELEASE_TOKEN:-}
 
 [ -n "$TOKEN" ] || { echo "RELEASE_TOKEN is not set" >&2; exit 1; }

@@ -533,7 +533,7 @@ wrong. Builds now carry `.gz` as well as `.br`, which brings the dev download to
 more importantly, means the compression path is exercised somewhere other than production.
 
 **WebGPU needs a secure context, and so the page cannot be served over plain HTTP.** Loading
-the loader from `http://rocinante.local:3101/` shows the WebGPU refusal, correctly: `navigator.gpu`
+the loader from `http://cdn.dev.lightconefrontier.com:3101/` shows the WebGPU refusal, correctly: `navigator.gpu`
 does not exist there. It works from `http://127.0.0.1:3200/` because localhost counts as
 secure. So the arrangement that works today is **shell on localhost, build on the CDN**, which
 is also the cross-origin case worth testing.
@@ -807,7 +807,7 @@ development CDN above. Today it is reached through an SSH tunnel, which makes bo
 and the CDN `localhost` and keeps them different origins, so CORS is still exercised:
 
 ```bash
-ssh -N -L 3100:localhost:3100 -L 3101:localhost:3101 zandy@rocinante.local
+ssh -N -L 3100:localhost:3100 -L 3101:localhost:3101 zandy@dev.lightconefrontier.com
 ```
 
 The loader checks `isSecureContext` **separately from** `navigator.gpu`. They fail together,
