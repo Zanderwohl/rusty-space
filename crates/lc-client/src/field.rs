@@ -449,6 +449,8 @@ pub struct Wreck {
     rotation: Quat,
     hash: u64,
     kelvin: f64,
+    /// The envelope's longest semi-axis, meters, once its shell is known.
+    radius_m: f64,
     spike_w: f64,
     /// Real seconds it was first drawn.
     shown_at: Option<f32>,
@@ -517,6 +519,26 @@ pub struct Wrecks {
     taken: HashSet<i64>,
 }
 
+impl Wrecks {
+    /// Each wreck's debris for the exposure, as `(where, kelvin, radius_m)`: a disc of what it
+    /// covers at the temperature it has cooled to, as the shader draws it. Not the flash, which is
+    /// left to overflow. Without these the meter opens up once the last hull has gone, and the
+    /// debris burns white.
+    pub fn metered(&self, now_s: f64, real_s: f32, afterglow_s: f64, limit_k: f64) -> Vec<(DVec3, f64, f64)> {
+        self.fell
+            .iter()
+            .filter(|w| w.shown_at.is_some() && w.radius_m > 0.0)
+            .map(|w| {
+                let cooled = w.cooled(now_s, real_s, afterglow_s).clamp(0.0, 1.0);
+                let grow = 1.0 + f64::from(DEBRIS_REACH - 1.0) * (1.0 - (1.0 - cooled).powi(3));
+                let cover = (1.0 - cooled).sqrt();
+                let kelvin = limit_k * (1.0 - cooled).powf(0.6) + 300.0;
+                (w.at_ly, kelvin, w.radius_m * grow * cover.sqrt())
+            })
+            .collect()
+    }
+}
+
 /// Take each `kind::COLLAPSE` sighting as it lands: a line naming the ship as it was seen, and its
 /// wreck to draw.
 pub fn collapses(
@@ -548,6 +570,7 @@ pub fn collapses(
             rotation: last.rotation,
             hash: last.hash,
             kelvin: last.kelvin,
+            radius_m: 0.0,
             spike_w: balance.collapse_spike_fraction * released_j / SPIKE_S,
             shown_at: None,
             landed: HashMap::new(),
@@ -667,6 +690,7 @@ pub fn draw_fields(
     for wreck in &mut fell {
         let Some(shell) = shells.get(wreck.hash) else { continue };
         let Some(collapse) = wreck.collapse(now, real_s, afterglow_s) else { continue };
+        wreck.radius_m = f64::from(shell.radius);
         kept.insert(wreck.event_id);
         let placed = Transform {
             translation: sim_to_render(eye.offset_m(wreck.at_ly, Some(wreck.craft), look) / UNIT_M).as_vec3(),
@@ -1019,6 +1043,23 @@ mod tests {
         let later = wreck.collapse(20.0 + 0.1 * afterglow_s, 3.25, afterglow_s).unwrap();
         assert!((later.x - 0.25).abs() < 1e-6);
         assert!((later.x / later.z - 0.1).abs() < 1e-3, "cooling at {} of the afterglow", later.x / later.z);
+    }
+
+    /// The exposure meters a wreck's debris once it is drawn, hot at first and cooler later, so
+    /// the meter does not open up on it when the last hull goes.
+    #[test]
+    fn the_debris_is_metered() {
+        let mut wrecks = Wrecks::default();
+        wrecks.last.insert(ShipId(5), last("Aster"));
+        let mut world = collapsing(vec![sighting(1, 5, 10_000_000, 20_000_000)], wrecks, 20.0);
+        let mut wrecks = world.resource_mut::<Wrecks>();
+        let afterglow_s = B.collapse_afterglow_s;
+        assert!(wrecks.metered(20.0, 1.0, afterglow_s, 4_600.0).is_empty(), "metered before it is drawn");
+        wrecks.fell[0].collapse(20.0, 1.0, afterglow_s).unwrap();
+        wrecks.fell[0].radius_m = 300.0;
+        let [(_, hot, _)] = wrecks.metered(20.0, 1.0, afterglow_s, 4_600.0)[..] else { panic!("not metered") };
+        let [(_, cooler, _)] = wrecks.metered(20.0 + 0.5 * afterglow_s, 2.0, afterglow_s, 4_600.0)[..] else { panic!() };
+        assert!(hot > 4_800.0 && cooler < hot, "{hot} then {cooler}");
     }
 
     /// On a clock slowed almost to a stop the debris still spreads and cools, as fast as it would
