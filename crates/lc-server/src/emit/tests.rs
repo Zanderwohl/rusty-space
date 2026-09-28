@@ -21,12 +21,7 @@ const HOUR_S: f64 = 3_600.0;
 
 /// The plate with one of its pair turned to fire fore: rated alike at both ends.
 fn two_ended() -> Form {
-    use lc_world::form::{Mount, PartId, Placement};
-    let mut form = lc_world::form::presets::Builtin::Plate.form();
-    let engine = form.parts.iter_mut().find(|p| p.id == PartId(3)).unwrap();
-    let Some(Placement { mount: Mount::Attached { anchor, .. }, .. }) = engine.placement.as_mut() else { panic!() };
-    anchor.x = -anchor.x;
-    form
+    lc_world::form::presets::turned_fore(lc_world::form::presets::Builtin::Plate.form(), 1)
 }
 
 /// Full, Black and at rest `at` light-microseconds.
@@ -649,6 +644,69 @@ async fn nothing_lights_the_drive_while_a_balanced_emit_runs() {
     assert_eq!(craft.motion.motive, before.motion.motive);
     assert_eq!(craft.fitting().unwrap().lit(), before.fitting().unwrap().lit());
     assert!(server.pursuits.is_empty());
+}
+
+/// What `observer` was told of the emitter each tick: `(arrive_t, emitted_t, fore, aft, drive)`.
+async fn watch(server: &mut Server<Memory>, wire: &mut Loopback, observer: ClientId, until_t: f64) -> Vec<(i64, i64, f64, f64, f64)> {
+    let mut seen = Vec::new();
+    while (server.now_t() as f64) < until_t {
+        server.tick(wire).await.unwrap();
+        for message in wire.take(observer) {
+            if let Outbound::Present(list) = message {
+                let of = list.iter().map(|p| p.get()).filter(|p| p.ship_id == EMITTER);
+                seen.extend(of.map(|p| (p.arrive_t, p.emitted_t, p.emit_fore_w, p.emit_aft_w, p.drive_w)));
+            }
+        }
+    }
+    seen
+}
+
+/// A light-hour off, a balanced emit is stated at both ends from when its light arrives until the
+/// light of its going out does, long after the emitter has put it out.
+#[tokio::test]
+async fn a_balanced_emit_is_stated_at_both_ends_as_its_light_left() {
+    let (power_w, duration_s) = (1.0e17, 3.0 * HOUR_S);
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
+    server.admit(ClientId(2), ship(2, DVec3::Y * LIGHT_HOUR_US, Form::starting()), 0.0);
+    let mut wire = Loopback::new();
+    wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Both, power_w, 1.0e-6, 0.01, duration_s));
+    server.tick(&mut wire).await.unwrap();
+    assert!(wire.take(EMITTING).iter().any(|m| matches!(m, Outbound::Accepted { .. })));
+    let (lit_t, _) = emissions_of(&server, EMITTER)[0];
+    let out_t = lit_t + (duration_s * 1.0e6) as i64;
+
+    let seen = watch(&mut server, &mut wire, ClientId(2), out_t as f64 + 2.0 * LIGHT_HOUR_US).await;
+    let lit = |t: i64| lit_t <= t && t < out_t;
+    for &(_, emitted_t, fore, aft, drive) in &seen {
+        let want = if lit(emitted_t) { power_w } else { 0.0 };
+        assert_eq!((fore, aft, drive), (want, want, 0.0), "left at {emitted_t}");
+    }
+    assert!(seen.iter().any(|s| !lit(s.1)) && seen.iter().any(|s| lit(s.1)), "premise: seen dark and lit");
+    assert!(seen.iter().any(|s| lit(s.1) && s.0 > out_t), "premise: seen lit after it went out");
+}
+
+/// An emit flown as a burn from the bow is stated at the bow alone, at the rocket law's throttle,
+/// and is not the drive.
+#[tokio::test]
+async fn a_burn_emit_is_stated_at_the_end_it_leaves() {
+    let (power_w, duration_s) = (1.0e17, 3.0 * HOUR_S);
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
+    server.admit(ClientId(2), ship(2, DVec3::Y * LIGHT_SECOND_US, Form::starting()), 0.0);
+    let mut wire = Loopback::new();
+    wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Fore, power_w, 1.0e-6, 0.01, duration_s));
+    server.tick(&mut wire).await.unwrap();
+    assert!(wire.take(EMITTING).iter().any(|m| matches!(m, Outbound::Accepted { .. })));
+
+    let seen = watch(&mut server, &mut wire, ClientId(2), 12.0 * HOUR_S * 1.0e6).await;
+    let lit: Vec<_> = seen.iter().filter(|s| s.2 > 0.0).collect();
+    assert!(!lit.is_empty(), "premise: seen lit");
+    for &&(_, emitted_t, fore, aft, drive) in &lit {
+        assert!((fore / power_w - 1.0).abs() < 0.01, "{fore} W at {emitted_t}");
+        assert_eq!((aft, drive), (0.0, 0.0));
+    }
+    assert!(seen.last().is_some_and(|s| s.2 == 0.0), "it went out");
 }
 
 mod drives;

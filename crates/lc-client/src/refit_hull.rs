@@ -164,7 +164,7 @@ fn uniforms(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, gl
     let work = crate::hull::lamp(session, WORK_LUX / std::f64::consts::PI, WORK_K);
     HullUniform {
         girder: GIRDER_ALBEDO.extend(work.dot(crate::tonemap::LUMA)),
-        ..crate::ship_hull::finished(session, star, at_ly, glow, enveloped)
+        ..crate::ship_hull::finished(session, star, at_ly, glow, enveloped, None)
     }
 }
 
@@ -579,6 +579,8 @@ mod tests {
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
             drive_w: 0.0,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
             emitted_t: (stated_s * 1.0e6) as i64,
             arrive_t: (stated_s * 1.0e6) as i64 + 3_600_000_000,
             form: (&plan.at(stated_s).form).into(),

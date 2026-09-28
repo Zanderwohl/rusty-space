@@ -1,15 +1,15 @@
-//! A photon drive's burn: each aft engine's open face glowing at the flux leaving it, and the
-//! exhaust's cone out to the courtesy radius. 32 §The exhaust cone.
+//! Light leaving a craft's open faces: each lit face glowing at the flux leaving it, whatever lit
+//! it, and a burn's cone out to the courtesy radius. 32 §The exhaust cone.
 //!
-//! The glow is light, drawn on every burning craft with a form, under its hull's root so it moves
-//! with the hull. The cone is an indicator, drawn for the player's own burn, for a burn whose
+//! The glow is light, drawn on every lit face of every craft with a form, from
+//! [`crate::lit_faces`], under its hull's root so it moves with the hull. The cone is the main
+//! drive's alone: an emit's spread is its own, and reaches an observer inside it as `Glare`. It is
+//! an indicator, drawn for the player's own burn, for a burn whose
 //! courtesy radius the player is inside, and for a selected ship; [`Exhausts`] hands the same cones
 //! to the map. Another craft is drawn as its light shows it, from what its `Presence` stated.
 //!
 //! Each proxy is told where the eye is in its own space, worked out in `f64`: a render unit is an
 //! AU, and a cone is thousands of hull lengths.
-
-use std::collections::HashMap;
 
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
@@ -20,14 +20,12 @@ use em_render::render_space::{render_to_sim, sim_to_render};
 use glam::{DQuat, DVec3};
 use lc_proto::ShipId;
 use lc_world::courtesy::{cooking_distance_m, cooking_flux_w_m2, drive_courtesy_radius_m};
-use lc_world::emit::aperture_temperature_k;
 use lc_world::fitting::Balance;
-use lc_world::form::Form;
-use lc_world::form::capacity::{Aperture, aft_apertures};
 
 use crate::hull::Eye;
+use crate::lit_faces::{LitFaces, radiance};
 use crate::session::Session;
-use crate::ship_hull::{RealHulls, ShipHull};
+use crate::ship_hull::ShipHull;
 use crate::system::{M_PER_LY, UNIT_M};
 
 /// The cone's brightness in the hazard color where it would cook, and at the courtesy radius.
@@ -70,10 +68,6 @@ pub fn cone_m(lit: &Lit, here_ly: DVec3, selected: Option<ShipId>, balance: &Bal
     let inside = lit.at_ly.distance(here_ly) * M_PER_LY <= radius_m;
     let chosen = lit.craft.is_some() && lit.craft == selected;
     (lit.craft.is_none() || inside || chosen).then_some(radius_m)
-}
-
-pub fn face_k(power_w: f64, aperture: &Aperture) -> f64 {
-    aperture_temperature_k(power_w * aperture.share, std::f64::consts::PI * aperture.radius_m.powi(2))
 }
 
 /// `eye_local` is the caller's to set.
@@ -120,8 +114,6 @@ pub struct Drawn {
 #[derive(Resource, Default)]
 pub struct Exhausts {
     pub cones: Vec<Drawn>,
-    /// Each craft's faces, by the hash of the form they were worked out from.
-    apertures: HashMap<Option<ShipId>, (u64, Vec<Aperture>)>,
     /// By the half-angle's bits.
     cone_proxy: Option<(u64, Handle<Mesh>)>,
     glow_proxy: Option<Handle<Mesh>>,
@@ -130,7 +122,7 @@ pub struct Exhausts {
 #[derive(Component)]
 pub struct Cone(pub Option<ShipId>);
 
-/// One aft face's glow, under its craft's [`ShipHull`], by its place in [`aft_apertures`].
+/// One lit face's glow, under its craft's [`ShipHull`], by its place in its [`crate::lit_faces::Lit`].
 #[derive(Component)]
 pub struct Glow {
     craft: Option<ShipId>,
@@ -205,31 +197,12 @@ fn lits(session: &Session, uplink: &crate::uplink::Uplink, balance: &Balance) ->
         .collect()
 }
 
-fn faces<'a>(
-    cache: &'a mut HashMap<Option<ShipId>, (u64, Vec<Aperture>)>,
-    craft: Option<ShipId>,
-    stated: Option<u64>,
-    form: impl FnOnce() -> Option<(Form, Balance)>,
-) -> Option<&'a [Aperture]> {
-    let hash = stated?;
-    if cache.get(&craft).is_none_or(|(held, _)| *held != hash) {
-        let (form, balance) = form()?;
-        cache.insert(craft, (hash, aft_apertures(&form, &balance).unwrap_or_default()));
-    }
-    cache.get(&craft).map(|(_, faces)| faces.as_slice())
-}
-
-/// What a blackbody at `kelvin` looks like through this observer's bands, on the exposure's scale.
-fn shine(session: &Session, kelvin: f64) -> DVec3 {
-    Vec3::from_array(session.mapping.apply(&crate::session::spectrum_at(kelvin))).as_dvec3()
-}
-
 /// After the hulls, whose roots the glows hang from.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn draw_exhaust(
     mut commands: Commands,
     (game, ui, uplink, eye): (Res<crate::app::Game>, Res<crate::app::Ui>, Res<crate::uplink::Uplink>, Res<Eye>),
-    (own, real): (Res<crate::parts::OwnForm>, Res<RealHulls>),
+    faces: Res<LitFaces>,
     mut exhausts: ResMut<Exhausts>,
     mut meshes: ResMut<Assets<Mesh>>,
     (mut cone_materials, mut glow_materials): (ResMut<Assets<ExhaustConeMaterial>>, ResMut<Assets<ApertureGlowMaterial>>),
@@ -248,51 +221,39 @@ pub fn draw_exhaust(
     let tone = &session.tone;
     let exhausts = &mut *exhausts;
     exhausts.cones.clear();
-    exhausts.apertures.retain(|craft, _| real.stated(*craft).is_some());
+    let root_of = |craft: Option<ShipId>| roots.iter().find(|(_, hull, _)| hull.craft() == craft).map(|(e, _, t)| (e, Root::of(t)));
 
     let mut want_glows = Vec::new();
+    for (craft, lit) in faces.iter() {
+        let Some((entity, root)) = root_of(craft) else { continue };
+        let eye_ship = root.eye();
+        for (index, face) in lit.faces.iter().enumerate().filter(|(_, f)| f.power_w > 0.0) {
+            let face_at = face.aperture;
+            let rotation = DQuat::from_rotation_arc(DVec3::Y, face_at.out);
+            let center = face_at.center + face_at.out * face_at.radius_m * FACE_STANDOFF;
+            let transform = Transform {
+                translation: center.as_vec3(),
+                rotation: rotation.as_quat(),
+                scale: Vec3::splat(face_at.radius_m as f32),
+            };
+            let eye_local = rotation.inverse() * (eye_ship - center) / face_at.radius_m;
+            let mut uniforms =
+                aperture_uniform(radiance(session, face.temperature_k), tone.surface_reference as f64, tone.surface_stops);
+            uniforms.eye_local = eye_local.as_vec3().extend(0.0);
+            want_glows.push((craft, index, entity, transform, uniforms));
+        }
+    }
+
     let mut want_cones = Vec::new();
     for burn in &lit {
-        let root = roots.iter().find(|(_, hull, _)| hull.craft() == burn.craft).map(|(e, _, t)| (e, Root::of(t)));
-        let form = || match burn.craft {
-            None => own.form().map(|f| (f.clone(), own.balance())),
-            Some(id) => uplink
-                .contacts
-                .iter()
-                .find(|c| c.ship_id == id)
-                .filter(|c| !c.form.parts.is_empty())
-                .map(|c| (Form::from(&c.form), balance)),
-        };
-        let apertures = root
-            .and_then(|_| faces(&mut exhausts.apertures, burn.craft, real.stated(burn.craft), form))
-            .unwrap_or_default();
-
-        if let Some((entity, root)) = root {
-            let eye_ship = root.eye();
-            for (index, face) in apertures.iter().enumerate() {
-                let rotation = DQuat::from_rotation_arc(DVec3::Y, face.out);
-                let center = face.center + face.out * face.radius_m * FACE_STANDOFF;
-                let transform = Transform {
-                    translation: center.as_vec3(),
-                    rotation: rotation.as_quat(),
-                    scale: Vec3::splat(face.radius_m as f32),
-                };
-                let eye_local = rotation.inverse() * (eye_ship - center) / face.radius_m;
-                let mut uniforms = aperture_uniform(
-                    shine(session, face_k(burn.power_w, face)),
-                    tone.surface_reference as f64,
-                    tone.surface_stops,
-                );
-                uniforms.eye_local = eye_local.as_vec3().extend(0.0);
-                want_glows.push((burn.craft, index, entity, transform, uniforms));
-            }
-        }
-
+        let root = root_of(burn.craft);
         let Some(length_m) = cone_m(burn, here, ui.selected_craft, &balance) else { continue };
-        // From the faces' power-weighted middle, or the stern of a craft drawn with none.
+        let aft_faces: Vec<_> =
+            faces.of(burn.craft).map(|lit| lit.faces.iter().map(|f| f.aperture).filter(|a| a.aft()).collect()).unwrap_or_default();
+        // From the aft faces' power-weighted middle, or the stern of a craft drawn with none.
         let (apex, aft, apex_from_center_m) = match root {
-            Some((_, root)) if !apertures.is_empty() => {
-                let middle: DVec3 = apertures.iter().map(|a| a.center * a.share).sum();
+            Some((_, root)) if !aft_faces.is_empty() => {
+                let middle: DVec3 = aft_faces.iter().map(|a| a.center * a.share).sum();
                 (root.to_render(middle), root.aft(), render_to_sim(root.rotation * middle))
             }
             _ => {
@@ -386,10 +347,14 @@ pub fn draw_exhaust(
 
 #[cfg(test)]
 mod tests {
-    use lc_world::form::capacity::aft_aperture_w;
-    use lc_world::form::presets::Builtin;
+    use bevy::ecs::system::RunSystemOnce;
+    use lc_world::emit::{Ends, aperture_temperature_k};
+    use lc_world::form::Form;
+    use lc_world::form::capacity::apertures;
+    use lc_world::form::presets::{Builtin, turned_fore};
 
     use super::*;
+    use crate::ship_hull::RealHulls;
 
     const B: Balance = Balance::DEFAULT;
 
@@ -397,8 +362,8 @@ mod tests {
         Lit { craft, power_w, at_ly: at_m / M_PER_LY, facing: DVec3::X, length_m: 500.0 }
     }
 
-    /// Ship 1 in a plate, a thousand kilometers off `here_ly` along +x, stating `drive_w`.
-    fn presence(here_ly: DVec3, drive_w: f64) -> lc_proto::Presence {
+    /// Ship 1 in `form`, a thousand kilometers off `here_ly` along +x, stating `drive_w` and `emit`.
+    fn presence(here_ly: DVec3, form: &Form, drive_w: f64, emit: Ends) -> lc_proto::Presence {
         lc_proto::Presence {
             ship_id: ShipId(1),
             name: "ship 1".into(),
@@ -407,9 +372,11 @@ mod tests {
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
             drive_w,
+            emit_fore_w: emit.fore_w,
+            emit_aft_w: emit.aft_w,
             emitted_t: 0,
             arrive_t: 3_600_000_000,
-            form: (&Builtin::Plate.form()).into(),
+            form: form.into(),
             building: None,
             glow: None,
             glare: None,
@@ -443,32 +410,6 @@ mod tests {
         assert!((at(4.4e20) / at(1.1e20) - 2.0).abs() < 1.0e-9);
     }
 
-    /// Each face radiates its share of the drive's power through its own area.
-    #[test]
-    fn a_face_glows_at_its_share_of_the_drive() {
-        let power = 3.0e19;
-        let start = aft_apertures(&Form::starting(), &B).unwrap();
-        let face = start[0];
-        let area = std::f64::consts::PI * face.radius_m * face.radius_m;
-        assert_eq!(face_k(power, &face), aperture_temperature_k(power, area));
-
-        let plate = aft_apertures(&Builtin::Plate.form(), &B).unwrap();
-        assert_eq!(plate.len(), 2);
-        for face in &plate {
-            let area = std::f64::consts::PI * face.radius_m * face.radius_m;
-            assert_eq!(face_k(power, face), aperture_temperature_k(power / 2.0, area));
-        }
-    }
-
-    /// 32's figure: the starting drive at its rating, through its bell's face, 176 m across.
-    #[test]
-    fn the_starting_face_is_five_hundred_thousand_kelvin() {
-        let start = Form::starting();
-        let face = aft_apertures(&start, &B).unwrap()[0];
-        let k = face_k(aft_aperture_w(&start, &B).unwrap(), &face);
-        assert!((k / 5.3e5 - 1.0).abs() < 0.01, "{k} K");
-    }
-
     /// The exhaust leaves the stern: a cone drawn forward is a ship pushing itself backwards.
     #[test]
     fn the_cone_points_away_from_the_nose() {
@@ -492,13 +433,14 @@ mod tests {
         assert!(root.to_render(root.eye()).length() < 1.0e-18);
     }
 
-    /// A world with ship 1 burning at `drive_w` as another ship, and its hull's root.
-    fn scene(drive_w: f64) -> (World, Entity) {
+    /// A world with ship 1 as another ship in `form`, stating `drive_w` and `emit`, and its hull's
+    /// root.
+    fn scene_of(form: &Form, drive_w: f64, emit: Ends) -> (World, Entity) {
         let session = Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
         let here = session.ship.motion.position_ly;
         let craft = Some(ShipId(1));
         let mut uplink = crate::uplink::Uplink::default();
-        uplink.contacts = vec![crate::uplink::Contact::seen(presence(here, drive_w), None)];
+        uplink.contacts = vec![crate::uplink::Contact::seen(presence(here, form, drive_w, emit), None)];
         let mut real = RealHulls::default();
         real.set(craft, 1, 1);
 
@@ -510,6 +452,7 @@ mod tests {
         world.insert_resource(crate::parts::OwnForm::default());
         world.insert_resource(real);
         world.init_resource::<Exhausts>();
+        world.init_resource::<LitFaces>();
         world.init_resource::<Assets<Mesh>>();
         world.init_resource::<Assets<ExhaustConeMaterial>>();
         world.init_resource::<Assets<ApertureGlowMaterial>>();
@@ -520,49 +463,96 @@ mod tests {
         (world, root)
     }
 
+    /// A plate burning at `drive_w`.
+    fn scene(drive_w: f64) -> (World, Entity) {
+        scene_of(&Builtin::Plate.form(), drive_w, Ends::default())
+    }
+
+    fn draw(world: &mut World) {
+        world.run_system_once(crate::lit_faces::light_faces).unwrap();
+        world.run_system_once(draw_exhaust).unwrap();
+    }
+
+    /// Each glow drawn, by its face, with the face color it was handed.
+    fn glows(world: &mut World) -> Vec<(usize, Vec4)> {
+        let handles: Vec<(usize, Handle<ApertureGlowMaterial>)> =
+            world.query::<(&Glow, &MeshMaterial3d<ApertureGlowMaterial>)>().iter(world).map(|(g, m)| (g.face, m.0.clone())).collect();
+        let materials = world.resource::<Assets<ApertureGlowMaterial>>();
+        let mut drawn: Vec<(usize, Vec4)> = handles.iter().map(|(face, m)| (*face, materials.get(m).unwrap().uniforms.face)).collect();
+        drawn.sort_by_key(|(face, _)| *face);
+        drawn
+    }
+
+    /// What a face at `kelvin` is drawn as.
+    fn face_color(world: &World, kelvin: f64) -> Vec4 {
+        let session = &world.resource::<crate::app::Game>().0;
+        aperture_uniform(radiance(session, kelvin), session.tone.surface_reference as f64, session.tone.surface_stops).face
+    }
+
     /// Another ship's cone and faces are drawn from the power it stated and nothing else.
     #[test]
     fn another_ship_is_drawn_from_the_power_it_stated() {
-        use bevy::ecs::system::RunSystemOnce;
-
-        let faces = aft_apertures(&Builtin::Plate.form(), &B).unwrap();
+        let faces = apertures(&Builtin::Plate.form(), &B).unwrap();
         for stated in [3.0e17, 1.1e20, 4.4e21] {
             let (mut world, _) = scene(stated);
             world.resource_mut::<crate::app::Ui>().0.selected_craft = Some(ShipId(1));
-            world.run_system_once(draw_exhaust).unwrap();
+            draw(&mut world);
 
             let [cone] = world.resource::<Exhausts>().cones[..] else { panic!("one cone") };
             assert_eq!(cone.length_m, drive_courtesy_radius_m(&B, stated));
             assert_eq!(cone.cooking_m, cooking_distance_m(&B, stated, B.drive_spread_rad, 1.0));
 
-            let session = &world.resource::<crate::app::Game>().0;
-            let want: Vec<Vec4> = faces
-                .iter()
-                .map(|face| {
-                    let reference = session.tone.surface_reference as f64;
-                    aperture_uniform(shine(session, face_k(stated, face)), reference, session.tone.surface_stops).face
-                })
-                .collect();
-            let handles: Vec<(usize, Handle<ApertureGlowMaterial>)> =
-                world.query::<(&Glow, &MeshMaterial3d<ApertureGlowMaterial>)>().iter(&world).map(|(g, m)| (g.face, m.0.clone())).collect();
-            let materials = world.resource::<Assets<ApertureGlowMaterial>>();
-            let drawn: Vec<(usize, Vec4)> = handles.iter().map(|(face, m)| (*face, materials.get(m).unwrap().uniforms.face)).collect();
-            assert_eq!(drawn.len(), faces.len());
+            let drawn = glows(&mut world);
+            assert_eq!(drawn.len(), faces.len(), "both of the plate's faces fire aft");
             for (face, uniform) in drawn {
-                assert_eq!(uniform, want[face], "face {face} at {stated} W");
+                let a = faces[face];
+                let want = face_color(&world, aperture_temperature_k(stated * a.share, a.area_m2()));
+                assert_eq!(uniform, want, "face {face} at {stated} W");
             }
+        }
+    }
+
+    /// Another craft's emit lights the faces it leaves through at the temperature its `Presence`
+    /// stated of each end, and draws no cone however it is selected.
+    #[test]
+    fn another_ships_faces_are_as_hot_as_its_stated_emit() {
+        let form = turned_fore(Builtin::Plate.form(), 1);
+        let faces = apertures(&form, &B).unwrap();
+        let fore = faces.iter().position(|a| a.fore()).unwrap();
+        let aft = faces.iter().position(|a| a.aft()).unwrap();
+        for (emit, lit) in [
+            (Ends { fore_w: 0.0, aft_w: 2.0e19 }, vec![aft]),
+            (Ends { fore_w: 5.0e18, aft_w: 0.0 }, vec![fore]),
+            (Ends { fore_w: 3.0e19, aft_w: 3.0e19 }, vec![fore, aft]),
+        ] {
+            let (mut world, _) = scene_of(&form, 0.0, emit);
+            world.resource_mut::<crate::app::Ui>().0.selected_craft = Some(ShipId(1));
+            draw(&mut world);
+
+            let temperature = |a: &lc_world::form::capacity::Aperture| {
+                let end_w = if a.fore() { emit.fore_w } else { emit.aft_w };
+                aperture_temperature_k(end_w * a.share, a.area_m2())
+            };
+            let stated = world.resource::<LitFaces>().of(Some(ShipId(1))).unwrap().clone();
+            for (face, a) in stated.faces.iter().zip(&faces) {
+                assert_eq!(face.temperature_k, temperature(a), "{emit:?}");
+            }
+            let drawn = glows(&mut world);
+            assert_eq!(drawn.iter().map(|(face, _)| *face).collect::<Vec<_>>(), lit, "{emit:?} lit the wrong ends");
+            for (face, uniform) in drawn {
+                assert_eq!(uniform, face_color(&world, temperature(&faces[face])));
+            }
+            assert!(world.resource::<Exhausts>().cones.is_empty(), "an emit has no cone");
         }
     }
 
     /// Glows under the hull, a cone only once selected, and neither once the drive is out.
     #[test]
     fn a_burn_is_glowed_and_coned_under_its_own_hull() {
-        use bevy::ecs::system::RunSystemOnce;
-
         let craft = Some(ShipId(1));
         let (mut world, root) = scene(1.0e17);
         let run = |world: &mut World| {
-            world.run_system_once(draw_exhaust).unwrap();
+            draw(world);
             let glows: Vec<Entity> = world.query::<(&Glow, &ChildOf)>().iter(world).map(|(_, c)| c.parent()).collect();
             let cones = world.query::<&Cone>().iter(world).count();
             (glows, cones, world.resource::<Exhausts>().cones.len())

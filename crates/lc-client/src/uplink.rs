@@ -96,6 +96,8 @@ pub struct Contact {
     pub facing: DVec3,
     /// What its main drive was sending aft, `F c`, watts, as last stated. Zero when coasting.
     pub drive_w: f64,
+    /// What its emits were sending out of each end, watts, as last stated.
+    pub emit: lc_world::emit::Ends,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
     /// Its form and the refit step it had under way, as the statement's light left it, with when
@@ -142,6 +144,7 @@ impl Contact {
             beta,
             facing: DVec3::from_array(presence.facing).normalize_or_zero(),
             drive_w: presence.drive_w,
+            emit: lc_world::emit::Ends { fore_w: presence.emit_fore_w, aft_w: presence.emit_aft_w },
             emitted_s,
             form: presence.form,
             building: presence.building.map(|b| (emitted_s, b)),
@@ -1373,6 +1376,8 @@ mod tests {
             beta: [0.0, 0.1, 0.0],
             facing: [0.0, 0.0, 2.0],
             drive_w: 4.2e17,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
             emitted_t: 500_000,
             arrive_t: 1_000_000,
             form: lc_proto::Form::default(),
@@ -1437,6 +1442,8 @@ mod tests {
                     .to_array(),
                 facing: [1.0, 0.0, 0.0],
                 drive_w: 0.0,
+                emit_fore_w: 0.0,
+                emit_aft_w: 0.0,
                 emitted_t: (emitted_s * 1e6) as i64,
                 arrive_t: (emitted_s * 1e6) as i64,
                 form: lc_proto::Form::default(),
@@ -1805,6 +1812,8 @@ mod tests {
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
             drive_w: burning,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),
@@ -1920,6 +1929,8 @@ mod tests {
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
             drive_w: 0.0,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),

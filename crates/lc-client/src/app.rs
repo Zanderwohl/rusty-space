@@ -158,6 +158,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<crate::hull::Hulls>()
             .init_resource::<crate::parts::OwnForm>()
             .init_resource::<crate::plume::Exhausts>()
+            .init_resource::<crate::lit_faces::LitFaces>()
             .init_resource::<crate::resolved::Resolved>()
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())
             .init_resource::<panels::HudFoot>()
@@ -259,7 +260,13 @@ impl Plugin for ClientPlugin {
                     // and those before the placeholders, so the frame a mesh is first shown is the
                     // frame the placeholders go.
                     // After the meshes land, so a new form's roll is taken the frame its mesh is shown.
-                    (crate::refit_hull::draw_refit, crate::ship_hull::draw_hulls, crate::parts::update_parts)
+                    // The faces first, which the hulls' grids and the exhaust's glows are lit by.
+                    (
+                        crate::lit_faces::light_faces,
+                        crate::refit_hull::draw_refit,
+                        crate::ship_hull::draw_hulls,
+                        crate::parts::update_parts,
+                    )
                         .chain()
                         .after(crate::hull_mesh::HullMeshSystems),
                     // Under the hulls' roots, placed by then; before the exhaust, which is additive

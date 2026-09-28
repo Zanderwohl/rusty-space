@@ -9,8 +9,6 @@ use lc_proto::Spectrum;
 use lc_world::craft::{Craft, CraftId};
 use lc_world::emit::{Exhaust, Jet, aperture_temperature_k, exhaust, exhaust_face_m2};
 use lc_world::fitting::Balance;
-use lc_world::flight::Drive;
-use lc_world::motion::Motive;
 
 use super::Lighting;
 use crate::journal::Journal;
@@ -36,13 +34,7 @@ struct Wanted {
 
 fn wanted(craft: &Craft, balance: &Balance, t: i64) -> Wanted {
     let s = t as f64 * 1.0e-6;
-    let boost_w = match &craft.motion_at(s).motive {
-        Motive::Boosting(boost) if boost.thrust_at(s) != DVec3::ZERO => {
-            Some(Drive::exhaust_w(craft.mass_kg_at(s), boost.accel_g))
-        }
-        _ => None,
-    };
-    Wanted { jets: exhaust(craft, balance, s), boost_w }
+    Wanted { jets: exhaust(craft, balance, s), boost_w: lc_world::emit::boost_w(craft, s).map(|(w, _)| w) }
 }
 
 fn stepped(was_w: f64, now_w: f64) -> bool {

@@ -6,6 +6,7 @@
 //! goes to the connection that sent it. See `lightcone/docs/27-console.md`.
 
 mod chart;
+mod emit;
 mod fitting;
 mod parse;
 mod spec;
@@ -231,6 +232,42 @@ pub const COMMANDS: &[Spec] = &[
         ],
     },
     Spec {
+        name: "emit",
+        verb: Verb::Emit,
+        level: Level::DEBUG,
+        summary: "light a ship's engines as the order does: aft burns along the nose, fore against it, both holds",
+        args: &[
+            ArgSpec {
+                name: "ends",
+                kind: Kind::Word(&["fore", "aft", "both"]),
+                need: Need::Required,
+                level: Level::DEBUG,
+                help: "which engines it leaves through",
+            },
+            ArgSpec {
+                name: "rating",
+                kind: Kind::Number(&[Limit { level: Level::DEBUG, min: 0.0, max: 1.0 }]),
+                need: Need::Default("0.5"),
+                level: Level::DEBUG,
+                help: "each end's power, as a share of the lesser end's rating",
+            },
+            ArgSpec {
+                name: "minutes",
+                kind: Kind::Number(&[Limit { level: Level::DEBUG, min: 0.0, max: 1.0e6 }]),
+                need: Need::Default("60"),
+                level: Level::DEBUG,
+                help: "how long, coordinate minutes",
+            },
+            ArgSpec {
+                name: "ship",
+                kind: Kind::Id,
+                need: Need::Optional,
+                level: Level::ADMIN,
+                help: "the ship; default your own",
+            },
+        ],
+    },
+    Spec {
         name: "stage",
         verb: Verb::Stage,
         level: Level::DEBUG,
@@ -260,6 +297,13 @@ const FORM_ARGS: &[ArgSpec] = &[
         need: Need::Optional,
         level: Level::DEBUG,
         help: "every part but the Mind this many times longer; default 1",
+    },
+    ArgSpec {
+        name: "fore",
+        kind: Kind::Count(16),
+        need: Need::Optional,
+        level: Level::DEBUG,
+        help: "how many of its engines to turn to fire fore; default none",
     },
     ArgSpec {
         name: "ship",
@@ -355,6 +399,12 @@ impl<J: Journal> Server<J> {
                 let ship = self.ship_named(command.from, &args)?;
                 self.field_command(ship, args.word("mode").unwrap_or_default(), wire, events, deliveries)
             }
+            Verb::Emit => {
+                let ship = self.ship_named(command.from, &args)?;
+                let ends = args.word("ends").unwrap_or_default();
+                let (rating, minutes) = (args.number("rating").unwrap_or(0.5), args.number("minutes").unwrap_or(60.0));
+                self.emit_command(ship, ends, rating, minutes, wire)
+            }
             Verb::Stage => {
                 let name = args.word("scene").unwrap_or_default();
                 let scene = lc_world::scenario::Scenario::named(name).ok_or_else(|| format!("no scene {name}"))?;
@@ -383,7 +433,8 @@ impl<J: Journal> Server<J> {
 
 fn form_named(args: &Bound) -> Result<lc_world::form::Form, String> {
     let name = args.word("form").unwrap_or_default();
-    lc_world::form::presets::named(name, args.number("scale").unwrap_or(1.0)).ok_or_else(|| format!("no form {name}"))
+    let form = lc_world::form::presets::named(name, args.number("scale").unwrap_or(1.0)).ok_or_else(|| format!("no form {name}"))?;
+    Ok(lc_world::form::presets::turned_fore(form, args.count("fore").unwrap_or(0) as usize))
 }
 
 /// The same answer for a command that does not exist and one the asker may not run.

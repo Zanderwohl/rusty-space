@@ -40,6 +40,7 @@ pub enum Verb {
     RefitFinish,
     Stage,
     Field,
+    Emit,
 }
 
 pub struct ArgSpec {
