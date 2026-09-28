@@ -467,7 +467,7 @@ graph LR
 
 - status: done #125
 - needs: H6
-- touches: `crates/lc-world/src/craft.rs`, `crates/lc-world/src/craft/field.rs`, `crates/lc-world/src/glow.rs`, `crates/lc-world/src/seen.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/em-render/src/hull_material.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/field.rs`
+- touches: `crates/lc-world/src/{craft.rs,craft/field.rs,glow.rs,seen.rs}`, `crates/lc-server/src/{chase.rs,field.rs,server.rs}`, `crates/lc-proto/src/lib.rs` (a doc line), `crates/lc-client/src/{hull.rs,ship_hull.rs,refit_hull.rs,parts.rs,resolved.rs,uplink.rs}`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/examples/{field_void,cone_void}.rs`, `crates/em-render/src/hull_material.rs`, `lightcone/docs/30-the-field.md`
 - read: 30 §What an observer sees
 - deliver: `HULL_K` retired; a ship's light is reflected (`1 − α`) plus thermal at its field's temperature over the envelope; `Presence` carries temperature and mode; instruments see it.
 - done when: a Black ship vanishes in V and not at ten microns, and a hot field's color moves through the bands as 30's table says.
@@ -494,7 +494,7 @@ graph LR
 
 - status: todo
 - needs: H4, H7
-- touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/instruments.rs`
+- touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/instruments.rs`, `crates/lc-proto/src/lib.rs` (`Duty::Stare`), `crates/lc-world/src/knowledge/survey.rs` (`Duty`)
 - read: 30 §Collapse, §What an observer sees
 - deliver: the `1 − collapse_spike_fraction` of a collapse's `E` leaves over `collapse_afterglow_s` as light from where the ship was, its temperature falling from the field's limit, reaching each observer at its retarded time; the spike's color is `collapse_spike_k`. A stare that can point at a position or a craft rather than only a star, recording what H7's `lc_world::glow` says reaches it: no duty looks at a craft yet.
 - done when: a craft staring at a collapse's position records the afterglow on its curve from when the light arrives, for as long as 30 says, and one staring elsewhere does not.
@@ -655,7 +655,7 @@ graph LR
 - needs: R6, F6, H7, H5
 - touches: `crates/lc-client/src/field.rs`, `crates/lc-client/src/uplink.rs`
 - read: 32 §The field, 30 §What an observer sees, §Collapse
-- deliver: the envelope meshed from F6's grid, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and hot spots from `Illuminated` once E3 exists; `--field-k` in the binary (32 §Photographing it), holding the player's field at a temperature; R6's collapse flash and debris where a craft collapsed, from the `kind::COLLAPSE` sighting as its light arrives, in place of a hull that only disappears, and the console naming the ship as its presence did rather than by id.
+- deliver: the envelope meshed from F6's grid, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and the field's heat taken off the hull (`HullUniform.glow`, `hull::lit`'s emitted term) once the envelope draws it, so it is not counted twice; and hot spots from `Illuminated` once E3 exists; `--field-k` in the binary (32 §Photographing it), holding the player's field at a temperature; R6's collapse flash and debris where a craft collapsed, from the `kind::COLLAPSE` sighting as its light arrives, in place of a hull that only disappears, and the console naming the ship as its presence did rather than by id.
 - done when: a diving ship glows the color the field bar shows, and `--demo cascade` photographed partway shows the flash on the ship whose end's light is arriving and nothing on the ones whose light has not.
 
 ### R12 · The cone in the game

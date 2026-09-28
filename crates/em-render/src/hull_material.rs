@@ -83,8 +83,8 @@ pub fn insert_region_weights(mesh: &mut Mesh, weights: &[[[u8; 4]; 4]]) {
 pub struct HullUniform {
     /// World direction to the star; `w` is the light on the unlit side, as a fraction.
     pub to_star: Vec4,
-    /// Starlight a surface of albedo one facing the star sends, as linear display light before the
-    /// tone map.
+    /// Starlight facing the star, as linear display light before the tone map, scaled so a texel of
+    /// the textures' mean albedo sends what the craft's field reflects.
     pub reflected: Vec4,
     /// What glows evenly over the whole hull, in [`Self::reflected`]'s units: a field's own heat.
     pub glow: Vec4,

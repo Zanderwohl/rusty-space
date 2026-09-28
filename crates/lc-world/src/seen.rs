@@ -335,6 +335,21 @@ mod tests {
         }
     }
 
+    /// Once the front has been forgotten, a moment before the oldest kept is not answered with a
+    /// later field.
+    #[test]
+    fn a_forgotten_past_is_not_answered() {
+        let mut glows = Glows::default();
+        glows.push(at(0.0, 1.0));
+        assert!(glows.at(-5.0).is_some(), "before anything was forgotten, the oldest stands for all time");
+        for k in 1..=HISTORY_GLOWS + 10 {
+            let shade = if k % 2 == 0 { Mode::Clear } else { Mode::Black };
+            glows.push(Glowed { shade, ..at(k as f64, 1.0) });
+        }
+        assert_eq!(glows.at(1.0), None);
+        assert!(glows.at((HISTORY_GLOWS + 5) as f64).is_some());
+    }
+
     #[test]
     fn a_switch_turns_the_shade_at_its_done_time_between_samples() {
         let mut glows = Glows::default();

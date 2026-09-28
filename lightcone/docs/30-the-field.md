@@ -454,6 +454,9 @@ shows its thresholds. What a player can infer from it:
   all time before it. H5's glow between neighbors reads the same history.
 - **`Presence.glow`** is filled from it at the emission time, so a vent two light-hours off is news
   two hours later. A craft with no fitting is stated as the starting field at rest: 400 K, Clear.
+- **A wreck is seen in the field it ended in.** Its fitting is gone, but its history is not, so its
+  light still in flight carries the failing field's temperature. The history is not checkpointed: a
+  wreck restored after a restart is stated as the starting field at rest until its light has passed.
 - **The client draws and meters a ship by it.** A hull's reflectance is `1 − α`; a real hull's
   textures, which average 0.35, are scaled to it. The field's heat is an even glow over the hull in
   the hull shader, and a star's spectrum cache serves its per-band radiance. A Black field hides the
