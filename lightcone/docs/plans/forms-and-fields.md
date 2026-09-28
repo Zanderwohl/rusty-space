@@ -509,7 +509,7 @@ graph LR
 
 - status: active card "E2 · Exhaust from heat"
 - needs: H3
-- touches: `crates/lc-world/src/cost.rs`, `crates/lc-world/src/field.rs`
+- touches: `crates/lc-world/src/cost.rs`, `crates/lc-world/src/field.rs`, `crates/lc-world/src/fitting/heat.rs`
 - read: 31 §The drive is the radiator
 - deliver: while lit, exhaust draws on `Q` first; the account's sink with its floor; what heat supplies refunded from the commitment.
 - done when: a burn from a hot ship ends colder, lighter and where the plan said, and costs storage only what heat could not supply.
@@ -540,6 +540,15 @@ graph LR
 - read: 31 §Maneuvering near others, 08 §Intercept
 - deliver: station-keeping legs as a `Cruise` at `rcs_accel_g`; abeam stations; ingress points at the courtesy radius; flotilla azimuths; `approach` on `Intercept`, Courteous by default. Needs no heat: it keeps to the courtesy limit whether or not anything yet burns from it.
 - done when: a courteous approach and escort never exceed the courtesy flux on the quarry at any instant, a direct one does, and three followers of one leader take three azimuths with none in another's cone.
+
+### E6 · The drive's own heat
+
+- status: todo
+- needs: E2
+- touches: `crates/lc-world/src/fitting/heat.rs`
+- read: 30 §The inputs, 31 §The drive is the radiator
+- deliver: the `1 − ε` of a burn that 30's inputs make heat, which nothing reads yet. Since E2 the exhaust draws on heat first, and at the floor that heat would go straight back out as exhaust, so a drive below ε = 1 would cost what one at ε = 1 does while lit. Either that is the design and 30 says so, or the drive's waste heat bypasses the sink.
+- done when: a burn at ε = 0.8 heats the field and costs storage what 30 says, one leap and every tick agreeing.
 
 ## R: rendering
 
@@ -805,7 +814,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, H9, H10, E4, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
+- needs: F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.

@@ -189,9 +189,9 @@ impl Field {
     /// leaves the floor. At most three stretches: filling, then full or at the floor, then the
     /// other.
     ///
-    /// At the floor all the heat made is emitted as it is made, so storage pays the emission less
-    /// that, and the drain's heat pays its own way.
-    pub fn stretches(&self, segment: &Segment, heat_j: f64, dt_s: f64) -> Vec<Stretch> {
+    /// At the floor all the heat made goes out with the emission as it is made, so storage pays the
+    /// emission less that.
+    pub(crate) fn stretches(&self, segment: &Segment, heat_j: f64, dt_s: f64) -> Vec<Stretch> {
         let emitted_w = segment.emitted_w.max(0.0);
         let filling_w = segment.stored_w() - segment.draw_w;
         let floor_w = self.heat_filling_w(segment) + filling_w - emitted_w;
@@ -207,8 +207,10 @@ impl Field {
                 (false, false) => (made_w - emitted_w, filling_w, emitted_w),
             };
             let fills_s = if !full && storage_w > 0.0 { room_j / storage_w } else { f64::INFINITY };
-            let floors_s = if at_floor { None } else { self.time_to_fall_s(heat_j, 0.0, heat_w).filter(|_| heat_w < 0.0) };
-            let floors_s = floors_s.unwrap_or(f64::INFINITY);
+            let floors_s = match heat_w < 0.0 && !at_floor {
+                true => self.time_to_fall_s(heat_j, 0.0, heat_w).unwrap_or(f64::INFINITY),
+                false => f64::INFINITY,
+            };
             // A third stretch is never left: full and rising, or at the floor and draining.
             let len_s = if stretches.len() == 2 { dt_s - at_s } else { (dt_s - at_s).min(fills_s).min(floors_s) };
             stretches.push(Stretch { dt_s: len_s, heat_j, heat_w, storage_w, from_heat_w, full: full && !at_floor });
@@ -225,7 +227,7 @@ impl Field {
 
 /// Part of a segment over which heat's power and storage's rate are both constant.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Stretch {
+pub(crate) struct Stretch {
     pub dt_s: f64,
     /// At the stretch's start.
     pub heat_j: f64,
@@ -640,9 +642,8 @@ mod tests {
                 if self.stored_j >= self.capacity_j {
                     into_storage = into_storage.min(s.draw_w);
                 }
-                let p = absorbed - into_storage + s.internal_w;
+                let p = absorbed - into_storage + s.internal_w - s.emitted_w;
                 let q = self.heat_j;
-                let p = p - s.emitted_w;
                 let k1 = rate(q, p);
                 let k2 = rate(q + 0.5 * h * k1, p);
                 let k3 = rate(q + 0.5 * h * k2, p);
