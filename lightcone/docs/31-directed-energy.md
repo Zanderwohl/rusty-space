@@ -59,8 +59,13 @@ exhaust comes from field heat first, and from storage only for what heat cannot 
 
 - A ship under way sheds heat as it goes. Flying cools. At 5 g the starting ship's exhaust is
   1.1 × 10²⁰ W, which empties a full field (10 ME) in about fifteen game days.
+- **Except for the drive's own waste.** Below ε = 1 the drive makes heat the exhaust cannot draw,
+  or it would re-emit its waste and fly as if ε were 1
+  ([30-the-field.md](30-the-field.md#conversion)). A drive that wasteful warms as it flies, and a
+  large one can burn itself to collapse.
 - **Heat is mass**, as stored energy is. `mass_kg_at` counts `Q / c²`, and the rocket law is
-  unchanged. Only the source of the exhaust changes.
+  unchanged. Only the source of the exhaust changes. Waste is still aboard until it radiates, so a
+  ship below ε = 1 ends a burn heavier than the rocket law by it.
 - **The commitment is unchanged.** A plan commits against storage when accepted.
   Whatever heat supplies instead is refunded through the same path that `CutDrive` uses: the
   commitment runs down by the whole exhaust, whatever pays it, so heat's share leaves the commitment
@@ -72,7 +77,8 @@ exhaust comes from field heat first, and from storage only for what heat cannot 
   instants the drive lights or goes out and the account's settlements; within a burn it changes
   only as the rocket law throttles a lightening ship.
 - **Anything a ship lights draws the same way.** The account's sink is what the ship emits, not
-  the drive's exhaust in particular, so an emission joins it and is paid heat first.
+  the drive's exhaust in particular, so an emission joins it and is paid heat first. ε is the
+  rocket law's, so an emission makes no waste.
 
 ### Exhaust lands on whatever is behind
 

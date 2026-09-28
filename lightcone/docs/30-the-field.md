@@ -76,7 +76,7 @@ Constant over a segment unless marked as a burst. A burst jumps `Q` at the insta
 | starlight, beams, a neighbor's glow | what arrives, less what is converted to storage |
 | conversion loss | `1 − conversion_efficiency` of what is converted |
 | the living drain | all of it |
-| the drive below ε = 1 | `1 − ε` of the exhaust power. Nothing at the default ε = 1 |
+| the drive below ε = 1 | `1 − ε` of what the rocket law spends, which the exhaust cannot draw (below). Nothing at the default ε = 1 |
 | dismantling | the 5% a dismantling loses, spread over the step as the energy moves |
 | a return arriving at full storage | all of it, as it arrives: room the round planned for that starlight filled first |
 | **vented storage** | **a burst**: what the round planned to vent for want of room, and what a shrinking store actually holds past its new capacity, at the end of the step ([29-ship-form.md](29-ship-form.md#refits)) |
@@ -117,6 +117,26 @@ it is made**, conversion's loss and the drain's heat included, so storage pays t
 that, and the drain costs nothing there. Within a segment, the floor ends only where storage fills
 there and the heat made outruns the exhaust. A segment is at most three stretches: filling, then
 full or at the floor, then the other.
+
+**The drive's own waste is the exception.** Below ε = 1 the rocket law spends `P`, but only `εP`
+leaves as exhaust; the other `1 − ε` is heat. If the exhaust could draw that heat, a ship at the
+floor would send its waste straight back out, storage would pay `εP` less nothing, and the drive
+would fly as if ε were 1: at 5 g the starting ship's beam is 1.07 × 10²⁰ W however inefficient
+its drive. So the account holds the waste apart. `Q` is **drawable heat**, which is everything
+above, plus **waste**, whose one input is `(1 − ε)P` and which radiates on the same `τ`. The
+exhaust draws only the first. Both are linear on one time constant, so their sum is still one
+exponential over each stretch, and the stretches are still the drawable heat's. Storage pays the
+whole of `P` less what drawable heat supplies, which is what the plan committed, and temperature,
+mass and collapse read all of `Q`. Waste is saved with the account. An emission is not the rocket
+law, so it makes none.
+
+At ε = 0.8 and 5 g, the starting ship spends 1.34 × 10²⁰ W and keeps 2.7 × 10¹⁹ W of it, 0.35 of
+its rated load. At the starting mass its waste would tend to 3.5 ME, about 3 500 K, but the
+throttle takes the power down as the ship lightens: a boost as long as a full ship can buy ends
+at about 1.9 ME. The exhaust still takes all the starlight's heat, so the sun-diving
+limit moves in while burning, and a ship arrives carrying what it made, which radiates on `τ`.
+A burn can bring a collapse on once `(1 − ε)/ε` of the beam passes the rated load: below ε = 0.59
+for the starting ship at 5 g.
 
 ## Clear and Black
 
@@ -271,7 +291,9 @@ Starlight and beams scale with shadow, the same as the field, and a full ship sh
 absorbs whatever its drain, so the sun-diving limit does not move with size at all. What moves is
 how brightly a ship glows at rest: a GSV at 1 500 K is visible in the near infrared to anyone
 looking, and it cannot go dark. The survival pressure will arrive with anything that makes heat in
-proportion to volume. The drive below ε = 1 already would.
+proportion to volume. The drive below ε = 1 already does: its waste goes as the beam, as volume. A
+5 km ship at ε = 0.8 and 5 g makes 3.5 times its rated load, collapses after about seven game days
+of burning, and can hold about 1.4 g indefinitely.
 
 ## Collapse
 
@@ -306,10 +328,14 @@ seeing it replayed as the light passes.
 
 - **The instant is solved, not stepped.** `Fitting::collapse_s` walks the account's stretches from
   its settlement, fill and empty storage splits, the exhaust's floor and refit steps included, and
-  takes the closed form in each. It reads the burn: exhaust only ever lowers `Q`, so a burn can put a
-  collapse off and never bring one on, and a solve that ignored it would destroy a ship its drive
-  was saving. A vent that crosses `Q_max` crosses it at its step's end. The shard walks that across the
-  day-long starlight segments the account will be settled at and fires what falls due, once before
+  takes the closed form in each. It reads the burn: at ε ≥ 1 exhaust only ever lowers `Q`, so a burn
+  puts a collapse off, and a solve that ignored it would destroy a ship its drive was saving. Below
+  ε = 1 the drive's waste rises however hard the exhaust draws, and can bring one on. The solve
+  adds it to each stretch, which is exact because it relaxes on the same `τ`, but only against the
+  burn's power averaged over the piece, as 31 takes the exhaust. A read up to the solved instant
+  averages less of the throttle, and lands within a few percent of `Q_max` rather than on it; each
+  settlement narrows that. A vent that crosses `Q_max` crosses it at its step's end. The shard
+  walks that across the day-long starlight segments the account will be settled at and fires what falls due, once before
   the tick advances anything and once after its orders. Nothing is stored for it: every change of
   input settles the account first, so asking again is the re-solve, and a checkpoint restores it with
   the account.
