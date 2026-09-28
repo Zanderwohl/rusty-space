@@ -11,10 +11,14 @@
 
 use glam::DVec3;
 
+use serde::{Deserialize, Serialize};
+
 use crate::boost::gamma_of;
+use crate::craft::{BEAM_PER_LENGTH, Craft};
 use crate::escort::Burning;
 use crate::fitting::Balance;
 use crate::flight::{Aim, C_M_S, G0, JULIAN_YEAR_S};
+use crate::motion::{self, Motive};
 use crate::signal::cone_solid_angle_sr;
 
 /// What `engine_m3` of engine can send, watts: its exhaust, its deliberate emission and its
@@ -83,6 +87,65 @@ pub fn lead_uncertainty_m(accel_m_s2: f64, blind_s: f64) -> f64 {
 /// flight here plus the beam's flight back, seconds.
 pub fn blind_s(distance_m: f64) -> f64 {
     2.0 * distance_m / C_M_S
+}
+
+/// Which of a ship's two drives a jet leaves: the main drive, or the station-keeping thrusters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Jet {
+    Drive,
+    Thrusters,
+}
+
+/// A lit drive as an emission, at one instant.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Exhaust {
+    pub jet: Jet,
+    /// Unit, along the exhaust, world axes.
+    pub axis: DVec3,
+    /// `F c`, W.
+    pub power_w: f64,
+    pub half_angle_rad: f64,
+}
+
+/// What `craft`'s drives send out at `now_s`, at the mass it has then: the rocket law's throttle.
+///
+/// Nothing for an emit flown as a burn, which is its own emission. A leg at no more than
+/// `rcs_accel_g` is on the thrusters, and an escort's thruster leg is two jets: the main drive
+/// carrying the quarry's acceleration, and the thrusters the closing.
+pub fn exhaust(craft: &Craft, balance: &Balance, now_s: f64) -> Vec<Exhaust> {
+    let state = craft.motion_at(now_s);
+    let mass_kg = craft.mass_kg_at(now_s);
+    let jet = |jet: Jet, push_g: DVec3| {
+        let half_angle_rad = if jet == Jet::Drive { balance.drive_spread_rad } else { balance.rcs_spread_rad };
+        let power_w = thrust_power_w(mass_kg, push_g.length() * G0);
+        (power_w > 0.0).then(|| Exhaust { jet, axis: -push_g.normalize(), power_w, half_angle_rad })
+    };
+    match &state.motive {
+        Motive::Boosting(_) => Vec::new(),
+        Motive::Escort(plan) => {
+            let (keeping, closing) = plan.pushes_g(now_s);
+            if crate::courtesy::on_thrusters(balance, &plan.cruise.drive) {
+                [jet(Jet::Drive, keeping), jet(Jet::Thrusters, closing)].into_iter().flatten().collect()
+            } else {
+                jet(Jet::Drive, keeping + closing).into_iter().collect()
+            }
+        }
+        _ => {
+            let g = motion::thrust_g(state, now_s);
+            let kind = if g <= balance.rcs_accel_g { Jet::Thrusters } else { Jet::Drive };
+            jet(kind, motion::thrust_at(state, now_s) * g).into_iter().collect()
+        }
+    }
+}
+
+/// The open faces a craft's exhaust leaves through, m²: its aft engines', or an unfitted hull's
+/// cross-section.
+pub fn exhaust_face_m2(craft: &Craft) -> f64 {
+    let faces = craft.fitting().and_then(|f| crate::form::capacity::aft_apertures(f.form(), f.balance()));
+    match faces {
+        Some(faces) if !faces.is_empty() => faces.iter().map(|a| std::f64::consts::PI * a.radius_m * a.radius_m).sum(),
+        _ => std::f64::consts::PI * (0.5 * BEAM_PER_LENGTH * craft.length_m).powi(2),
+    }
 }
 
 /// An emission with net thrust, flown: the nose comes about to `nose` with nothing lit, then the
