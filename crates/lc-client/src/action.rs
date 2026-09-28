@@ -503,7 +503,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::ShowHistory(on) => ui.form.show_history = on,
     Action::Fold(panel) => ui.form.folded.toggle(panel),
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
-    Action::EditForm(edit) => edit_form(ui, session, edit, &mut effects),
+    Action::EditForm(edit) => effects.extend(crate::form_history::edit(&mut ui.form, session, edit).map(Effect::Notify)),
     Action::Undo | Action::Redo | Action::GoToEdit(_) => effects.extend(crate::form_history::step(&mut ui.form, &action).map(Effect::Notify)),
     Action::ApplyDraft => apply_draft(ui, session, false, &mut effects),
     Action::ApplyPastCollapse(apply) => {
@@ -816,27 +816,6 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::CancelRefit => effects.push(Effect::Send(lc_proto::Order::CancelRefit)),
     }
     effects
-}
-
-/// Only a settled edit's refusal is said: a drag refused partway is still being made.
-fn edit_form(ui: &mut UiState, session: &Session, edit: Result<crate::draft::Edit, crate::draft::Refused>, effects: &mut Vec<Effect>) {
-    let start = crate::preview::Start::of(session);
-    let applied = match (&edit, ui.form.draft.as_mut()) {
-        (Ok(edit), Some(draft)) if start.as_ref().is_some_and(|s| !s.allows(draft, edit)) => Err(crate::draft::Refused::Unpaid),
-        (Ok(edit), Some(draft)) => draft.apply(edit, &lc_world::fitting::Balance::DEFAULT).map(|()| edit),
-        (Ok(_), None) => return effects.push(Effect::Notify("there is no draft to edit".into())),
-        (Err(refused), _) => Err(*refused),
-    };
-    match applied {
-        Ok(edit) => {
-            if edit.what == crate::draft::What::Add && edit.settled {
-                ui.form.selected = Some(edit.part);
-            }
-            ui.form.took(edit);
-        }
-        Err(_) if edit.as_ref().is_ok_and(|e| !e.settled) => {}
-        Err(refused) => effects.push(Effect::Notify(format!("refused: {refused}"))),
-    }
 }
 
 /// The refusal, if one comes, is the shard's, and [`crate::uplink`] files it against this target.

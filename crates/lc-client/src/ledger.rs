@@ -229,6 +229,15 @@ pub fn gate(draft: &Draft, applying: &Applying, ship: Situation) -> Result<(), B
     }
 }
 
+impl crate::form_view::FormView {
+    /// The shard took the round Apply sent: the ship is the new starting point, so the history
+    /// goes too.
+    pub fn accepted(&mut self) {
+        self.applying = Applying::Idle;
+        self.history.clear();
+    }
+}
+
 /// What the draft is edited against: the target of a round the shard is running, since that is
 /// what the ship becomes, and otherwise the form the ship has settled into, partway after a cancel.
 pub fn base(fitting: &lc_world::fitting::Fitting) -> &Form {

@@ -116,19 +116,28 @@ pub fn label(edit: &Edit, ship: &Form) -> String {
     }
 }
 
-impl FormView {
-    /// Record an edit the draft has taken, and let go of a selected part it took away.
-    pub fn took(&mut self, edit: &Edit) {
-        if let Some(draft) = &self.draft {
-            self.history.record(edit, &draft.ship);
+/// [`Action::EditForm`]: the edit written to the draft and recorded, or what to tell the player
+/// if it was refused. Only a settled edit's refusal is said: a drag refused partway is still
+/// being made.
+pub fn edit(form: &mut FormView, session: &crate::session::Session, edit: Result<Edit, Refused>) -> Option<String> {
+    let start = crate::preview::Start::of(session);
+    let applied = match (&edit, form.draft.as_mut()) {
+        (Ok(edit), Some(draft)) if start.as_ref().is_some_and(|s| !s.allows(draft, edit)) => Err(Refused::Unpaid),
+        (Ok(edit), Some(draft)) => draft.apply(edit, &Balance::DEFAULT).map(|()| (edit, &draft.ship)),
+        (Ok(_), None) => return Some("there is no draft to edit".into()),
+        (Err(refused), _) => Err(*refused),
+    };
+    match applied {
+        Ok((edit, ship)) => {
+            form.history.record(edit, ship);
+            if edit.what == What::Add && edit.settled {
+                form.selected = Some(edit.part);
+            }
+            form.forget_gone();
+            None
         }
-        self.forget_gone();
-    }
-
-    /// The shard took the round Apply sent: the ship is the new starting point.
-    pub fn accepted(&mut self) {
-        self.applying = crate::ledger::Applying::Idle;
-        self.history.clear();
+        Err(_) if edit.as_ref().is_ok_and(|e| !e.settled) => None,
+        Err(refused) => Some(format!("refused: {refused}")),
     }
 }
 
