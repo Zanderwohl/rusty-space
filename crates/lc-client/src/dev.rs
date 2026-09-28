@@ -38,6 +38,10 @@ pub struct DevEntry {
     /// anything: it is written every frame, so the frame the shutter opens on is the one that
     /// was asked for.
     pub camera: Option<(f64, f64, f64)>,
+    /// `--demo-cam-ship`: the pin's yaw and pitch in the frame of the ship the camera is behind,
+    /// x its nose and z its up, rather than the world's. What a face on a ship whose attitude the
+    /// run decides is framed by.
+    pub camera_in_ship: bool,
     /// A boom the pin eases toward once nothing is waiting to be drawn, a sixtieth of the way a
     /// frame: a burst across a remesh. `--demo-cam yaw:pitch:booms:to`.
     pub dolly_to: Option<f64>,
@@ -135,8 +139,9 @@ pub struct DevEntry {
     /// shard, so an action run on entering the sky has nobody to talk to yet — this is polled,
     /// like `--at` and the framing, until there is somebody in the contact list.
     pub say: Option<String>,
-    /// Sent once the shard has welcomed this client. The only way to photograph an answer.
-    pub console: Option<String>,
+    /// Sent once the shard has welcomed this client, in order, one a `--console`. The only way to
+    /// photograph an answer.
+    pub console: Vec<String>,
     /// Press the editor's Apply once the shard has welcomed this client and Apply is open.
     pub apply: bool,
     /// Pull the selected part's size handle out to this many times its length once the shard has
@@ -446,13 +451,14 @@ pub(crate) fn type_at_the_console(
     mut out: MessageWriter<Requested>,
     mut done: Local<bool>,
 ) {
-    let Some(line) = dev.console.as_ref() else { return };
-    if *done || uplink.joined().is_none() {
+    if dev.console.is_empty() || *done || uplink.joined().is_none() {
         return;
     }
     *done = true;
     out.write(Requested(Action::OpenPanel(crate::ui::Panel::Console)));
-    out.write(Requested(Action::RunCommand(line.clone())));
+    for line in &dev.console {
+        out.write(Requested(Action::RunCommand(line.clone())));
+    }
 }
 
 /// `--apply` and `--cancel-at`. Once the round is under way the view is pinned to the world,
@@ -494,12 +500,20 @@ pub(crate) fn apply_and_cancel(
 pub(crate) fn pin_camera(
     dev: Res<DevEntry>,
     mut ui: ResMut<Ui>,
+    (game, uplink): (Res<crate::app::Game>, Res<crate::uplink::Uplink>),
     unready: Option<Res<crate::refit_hull::Unready>>,
     mut dolly: Local<Option<f64>>,
 ) {
     let Some((yaw_deg, pitch_deg, booms)) = dev.camera else { return };
     ui.look.yaw = yaw_deg.to_radians();
     ui.look.pitch = pitch_deg.to_radians();
+    if dev.camera_in_ship
+        && let Some(axes) = watched_axes(&game.0, &uplink, &ui)
+    {
+        let local = ui.look.forward();
+        let world = axes[0] * local.x + axes[1] * local.y + axes[2] * local.z;
+        ui.look = crate::ui::Look::aimed_at(world).unwrap_or(ui.look);
+    }
     let at = dolly.get_or_insert(booms);
     if let Some(to) = dev.dolly_to
         && !unready.is_some_and(|u| u.0)
@@ -507,6 +521,25 @@ pub(crate) fn pin_camera(
         *at *= (to / *at).powf(1.0 / 60.0);
     }
     ui.boom_lengths = *at;
+}
+
+/// The nose, beam and up of the ship the camera is behind, in simulation axes. Another craft's
+/// roll is taken as none, which only turns the view about its nose.
+fn watched_axes(session: &crate::session::Session, uplink: &crate::uplink::Uplink, ui: &Ui) -> Option<[DVec3; 3]> {
+    let now = session.coordinate_time_s();
+    let star = crate::hull::lighting(session).map(|(star_ly, _, _)| star_ly);
+    let watched = match ui.perspective {
+        Some(crate::ui::CameraPerspective::Pov(id)) if id.0 != session.ship.id.0 => uplink.contacts.iter().find(|c| c.ship_id == id),
+        _ => None,
+    };
+    match watched {
+        Some(c) => crate::hull::ship_axes(c.facing, star.map(|s| s - c.position_ly), 0.0),
+        None => {
+            let fore = session.ship.facing_at(now).unwrap_or(DVec3::X);
+            let to_star = star.map(|s| s - session.ship.motion.position_ly);
+            crate::hull::ship_axes(fore, to_star, crate::hull::own_roll_rad(session))
+        }
+    }
 }
 
 /// What `--map-focus` asked for, before there is a system to resolve a star against.

@@ -124,6 +124,19 @@ pub fn named(name: &str, scale: f64) -> Option<Form> {
     Some(form)
 }
 
+/// `form` with its first `count` attached engines moved to the mirror of their anchors along the
+/// nose, which turns an engine on the stern's face to fire fore. The plate with one turned is
+/// rated alike at both ends. For a ship that can emit balanced, at the console and in tests.
+pub fn turned_fore(mut form: Form, count: usize) -> Form {
+    let engines = form.parts.iter_mut().filter(|p| p.kind == Kind::Engine);
+    for part in engines.take(count) {
+        if let Some(Placement { mount: Mount::Attached { anchor, .. }, .. }) = part.placement.as_mut() {
+            anchor.x = -anchor.x;
+        }
+    }
+    form
+}
+
 impl Builtin {
     pub const ALL: [Builtin; 3] = [Builtin::Plate, Builtin::Spindle, Builtin::Cluster];
 

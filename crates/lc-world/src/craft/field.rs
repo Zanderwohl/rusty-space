@@ -80,6 +80,7 @@ impl Craft {
             shade: posture.shade,
             switch: posture.switch,
         });
+        self.note_lit();
     }
 }
 

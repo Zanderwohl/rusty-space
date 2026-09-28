@@ -27,6 +27,8 @@ struct Vertex {
     @location(5) regions_3: vec4<f32>,
     // em_render::hull_material::ATTRIBUTE_HULL_SEAM: signed meters across to the seam, and along it.
     @location(6) seam: vec2<f32>,
+    // em_render::hull_material::ATTRIBUTE_HULL_FACE: (share, face / 255, 0, 0).
+    @location(7) face: vec4<f32>,
 #endif
 }
 
@@ -43,10 +45,13 @@ struct VertexOutput {
     @location(5) regions_2: vec4<f32>,
     @location(6) regions_3: vec4<f32>,
     @location(7) seam: vec2<f32>,
+    @location(8) face_share: f32,
+    @location(9) @interpolate(flat) face: u32,
 #endif
 }
 
 const REGIONS: u32 = 16u;
+const FACES: u32 = 16u;
 
 struct HullUniform {
     /// World direction to the star; `w` is the light on the unlit side.
@@ -74,6 +79,9 @@ struct HullUniform {
     /// One bit a region.
     bolted: u32,
     emitted: array<vec4<f32>, REGIONS>,
+    /// `(region, flank, on, 0)`.
+    open: vec4<u32>,
+    faces: array<vec4<f32>, FACES>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: HullUniform;
@@ -104,6 +112,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.regions_2 = vertex.regions_2;
     out.regions_3 = vertex.regions_3;
     out.seam = vertex.seam;
+    out.face_share = vertex.face.x;
+    out.face = u32(round(vertex.face.y * 255.0));
 #endif
     return out;
 }
@@ -306,12 +316,34 @@ fn bolt_cover(seam: vec2<f32>) -> f32 {
     return mix(sharp, mean, smoothstep(r, 3.0 * r, w));
 }
 
+/// The layer a region is drawn with here: an open-faced region's flank off its faces. Chosen
+/// rather than blended, so the tile is sampled once; the switch falls on the face's rim, which is
+/// a crease in the hull anyway.
+fn layer_of(region: u32, share: f32) -> u32 {
+    let open = material.open;
+    return select(region, open.y, open.z != 0u && region == open.x && share < 0.5);
+}
+
+/// What a fully lit texel of `layer` sends, drawn for `region`.
+fn light_of(region: u32, layer: u32, in: VertexOutput) -> vec3<f32> {
+    let open = material.open;
+    if (layer != region || open.z == 0u || region != open.x) {
+        return material.emitted[layer].rgb;
+    }
+    if (in.face >= FACES) {
+        return vec3<f32>(0.0);
+    }
+    return material.faces[in.face].rgb * clamp(in.face_share, 0.0, 1.0);
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let pair = heaviest(in);
     let w = planes(in.ship_normal);
-    let near = triplanar(in.ship_position, w, pair.first);
-    let far = triplanar(in.ship_position, w, pair.second);
+    let near_layer = layer_of(pair.first, in.face_share);
+    let far_layer = layer_of(pair.second, in.face_share);
+    let near = triplanar(in.ship_position, w, near_layer);
+    let far = triplanar(in.ship_position, w, far_layer);
     // Before any discard: these take derivatives.
     let bolt = bolt_cover(in.seam);
     let pixel = pixel_m(in.ship_position);
@@ -324,8 +356,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         albedo = mix(albedo, vec3<f32>(material.bolts.w), bolt);
     }
     var emitted = mix(
-        near.lit * material.emitted[pair.first].rgb,
-        far.lit * material.emitted[pair.second].rgb,
+        near.lit * light_of(pair.first, near_layer, in),
+        far.lit * light_of(pair.second, far_layer, in),
         t,
     );
     if (material.reveal.w >= ALL_PLATED) {

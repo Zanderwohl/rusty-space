@@ -195,7 +195,7 @@ pub fn frame(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Quat {
 /// Nose, port and dorsal directions in simulation axes, or `None` with no nose. The roll turns
 /// the ship about its nose so that the direction it carries dorsal onto, not dorsal itself, faces
 /// the star: `lc_world::solar::toward_star` in the ship's frame.
-fn ship_axes(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Option<[DVec3; 3]> {
+pub(crate) fn ship_axes(fore_sim: DVec3, to_star: Option<DVec3>, roll_rad: f64) -> Option<[DVec3; 3]> {
     let fore = fore_sim.normalize_or_zero();
     if fore == DVec3::ZERO {
         return None;

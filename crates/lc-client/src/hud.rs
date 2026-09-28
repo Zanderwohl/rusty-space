@@ -700,6 +700,8 @@ mod tests {
                 beta: [0.0; 3],
                 facing: [1.0, 0.0, 0.0],
                 drive_w: 0.0,
+                emit_fore_w: 0.0,
+                emit_aft_w: 0.0,
                 emitted_t: 0,
                 arrive_t: 0,
                 form: lc_proto::Form::default(),

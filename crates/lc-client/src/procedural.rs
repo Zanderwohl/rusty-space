@@ -889,6 +889,6 @@ mod tests {
             }
             seen += 1;
         }
-        assert_eq!(seen, 8, "one graph a kind");
+        assert_eq!(seen, crate::hull_mesh::REGION_GRAPHS.len(), "one graph a palette layer");
     }
 }

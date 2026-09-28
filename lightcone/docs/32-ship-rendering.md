@@ -116,12 +116,29 @@ into the caller's palette of graphs; which kind is which is Lightcone's. A graph
 albedo, and a layer named `lights` beside it is the lit share of each texel, which the caller
 scales by a power per region.
 
+**Which face is open is the form's, not the distance field's.** As the spar's seams are, it is
+handed per vertex: the mesher reads each engine's open face off the part (`capacity::apertures`,
+the frustum's wide end or the cylinder's end) and writes how much of the vertex lies on it and
+which face it is, a byte each. A vertex is on a face when it is on that engine's own surface, in
+the face's plane, inside its rim, and turned along the exhaust both as the engine's primitive is
+and as the hull is. The first keeps a fillet onto a neighbor off the face, the second a neighbor's
+surface passing within a cell of it. Each is eased over a cell, and the rim's inside its edge,
+because the vertex on the rim is the corner and belongs to the flank as much as the face. A vertex
+off every face names the nearest, so a triangle at a rim names one face at all three corners and
+the index can be read flat. The material then draws one region, the engine's, as itself only on
+open faces, lit there by a color per face rather than per region, and as another layer, the
+flank's, everywhere else. The switch is chosen, not blended, so the tile is sampled once; it falls
+on the rim, which is a crease anyway. `em_render::hull_material::HullUniform::open` and `faces`.
+The uniform holds 16 faces. A form with more engine copies than that draws the grid on the first 16
+in placement order and machinery on the rest, which still take their aperture glow when lit; the
+client warns when it meshes one.
+
 | kind | look |
 |---|---|
 | storage | dark and smooth, faint seams. The mass of the ship |
 | drone | hangar doors in rows, docks lit when drones are home |
 | living | window bands. Lit on the night side, where they are the brightest thing on the hull |
-| engine | an emitter grid on the open face, glowing with exhaust power. As built the grid is lit over the whole region, which is right in a void; which face is open is the form's, and R13 limits it there |
+| engine | an emitter grid on the open face, glowing at whatever leaves through it, and greebled machinery on its flanks: housings, louvered recesses, fittings and pipe runs, unlit. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
 | data | fine dense panels |
 | mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
 | spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over. The mesher classes each seam whole, from the two primitives' gradients along it, as a ring about the spar's axis or a line along it, and measures it as meters around at the seam's mean radius or meters along. A boom's end and a rib's edge are both in meters, and a seam that climbs spreads its heads only by the cosine of its climb. Chosen per vertex, the heads shear where the choice changes |
@@ -134,7 +151,8 @@ As built (R15, `lc_client::ship_hull::lamp_of`, `lc_client::hull::lamp`): each k
 luminance and a color temperature, a blackbody scaled in V against white in full sun at 1 AU
 (40 000 cd/m²) and put through the band mapping as starlight is. A lit window is 300 cd/m² at
 3000 K, as are drone docks and a bay's decks at their own temperatures; the Mind's light is 90;
-the engine's grid is 2400 until R13 lights it at the exhaust's power. The girders' work lights are
+the engine's grid has no lamp of its own: it is lit at the blackbody of what leaves each face
+(below), and the flanks are unlit. The girders' work lights are
 a floodlit yard's 2000 lux. Two things had to change for a night side to show them:
 
 - **A real hull's night fill is 0.3% of its starlight**, not the ovoid's 10%, which outshone a
@@ -494,7 +512,9 @@ collapse whose light has arrived.
 - **A beam is invisible**, because vacuum scatters nothing. The one exception is an observer inside
   the cone, who sees the emitter as a blinding point in the beam's band. The map draws your own
   beams and the bearings of beams landing on you ([31-directed-energy.md](31-directed-energy.md)).
-- A **fore** emission lights the bow's apertures as a drive lights the stern's.
+- A **fore** emission lights the bow's apertures as a drive lights the stern's. A face glows at
+  what leaves through it, whatever lit it, so a drive, an emit from either end and a balanced emit
+  from both are drawn by one path.
 
 ### The exhaust cone
 
@@ -536,21 +556,39 @@ stays free of either product's palette. The aperture glow is a second material i
 1.1 × 10²⁰ W through a face 100 m across is 7.0 × 10⁵ K, and through the starting form's bell,
 whose open face is 176 m across, 5.3 × 10⁵ K.
 
-**In the game** ([`plume.rs`](../../crates/lc-client/src/plume.rs)) every aft-firing engine face,
-from `lc_world::form::capacity::aft_apertures`, glows under its craft's hull root, at its share of
-the drive's power by engine volume, as the rating divides. The cone's apex is the faces'
-power-weighted middle, or a formless craft's stern. The power is `F c`: your own from
-`lc_world::emit::drive_w`, and another craft's as its `Presence` states it, which is that same
-number at the instant its light left. No exhaust speed is assumed for anyone; a photon drive has
-none but `c`. Another craft is drawn where its light shows it, and whether you are inside its
-radius is measured to that place.
+**In the game** every open face an emission leaves through glows, whatever lit it
+([`lit_faces.rs`](../../crates/lc-client/src/lit_faces.rs)). What leaves each end is
+`lc_world::emit::Ends`: the main drive's `F c` aft, and an emit's power from the ends it lit, an
+emit flown as a burn from the end it was ordered from and a balanced one from both. Each face takes
+its share of its end by engine volume, as the rating divides, and its temperature is
+`aperture_temperature_k` of that share through its own area. Your own are
+`lc_world::emit::faces_w` now. Another craft's are what its `Presence` states as its light left:
+`drive_w`, and `emit_fore_w` and `emit_aft_w` beside it, which `lc_world::emit::emit_w` gives at the
+retarded instant. A balanced emit is remembered by its craft once it is out, as its field is, so
+light that left while it was lit still shows it lit. No exhaust speed is assumed for anyone; a
+photon drive has none but `c`.
 
-`Presence` states the main drive alone, because the cone is the main drive's, at
-`drive_spread_rad`. The thrusters spread wider and draw no cone. An emit flown as a burn is its
-own emission at its own spread, and reaches an observer inside it as `Glare`. Its face should glow
-all the same, since the face's temperature depends only on what leaves through it, and so should
-the bow's when a fore emission lights it. Neither does yet: a face lit by an emit waits on R19,
-which states each end's emission on the wire.
+The faces are worked out once a frame, before the hulls: the engine's grid is lit on each face at
+its color ([Materials by kind](#materials-by-kind)), and the aperture glow
+([`plume.rs`](../../crates/lc-client/src/plume.rs)) sits over each lit face under its craft's hull
+root. R18's point for a craft too far to resolve is to read the same faces and temperatures
+rather than work them out again.
+
+The cone is the main drive's alone, at `drive_spread_rad`, so it is drawn from `drive_w` and its
+apex is the aft faces' power-weighted middle, or a formless craft's stern. The thrusters spread
+wider and draw no cone. An emit draws none either: its spread is its own, and its light inside it
+reaches an observer as `Glare`. Another craft is drawn where its light shows it, and whether you
+are inside its radius is measured to that place.
+
+`emit <fore|aft|both>` at the console ([27-console.md](27-console.md#emit)) lights them for a
+photograph, and `refit-magic plate fore:1` makes a ship with engines at both ends.
+
+![coasting in sunlight: the bell's open face is the emitter grid, its flanks the machinery](../images/r13-grid-and-flank.jpg)
+![`--demo closing`, your own drive: the face white-hot under its glow, the flanks unlit](../images/r13-drive.jpg)
+![an emit flown as a burn from the aft face, your own and another's seen by ship 1](../images/r13-own-aft.jpg)
+![](../images/r13-other-aft.jpg)
+![a balanced emit from the plate turned two-ended, both ends lit, your own and another's](../images/r13-own-balanced.jpg)
+![](../images/r13-other-balanced.jpg)
 
 ![your own burn from beside: the bell's face white-hot, the cone running aft](../images/r12-own-beside.jpg)
 ![from behind, just off the axis](../images/r12-own-behind.jpg)

@@ -18,6 +18,7 @@ use crate::craft::{BEAM_PER_LENGTH, Craft};
 use crate::escort::Burning;
 use crate::fitting::Balance;
 use crate::flight::{Aim, C_M_S, Drive, G0, JULIAN_YEAR_S};
+use crate::form::capacity::Aperture;
 use crate::motion::{self, Motive};
 use crate::signal::cone_solid_angle_sr;
 
@@ -145,6 +146,66 @@ pub fn exhaust(craft: &Craft, balance: &Balance, now_s: f64) -> Vec<Exhaust> {
 /// `Presence` states, and what a face and a cone are drawn from. Zero on the thrusters alone.
 pub fn drive_w(craft: &Craft, balance: &Balance, now_s: f64) -> f64 {
     exhaust(craft, balance, now_s).iter().filter(|j| j.jet == Jet::Drive).map(|j| j.power_w).sum()
+}
+
+/// What an emit flown as a burn sends at `now_s`, W, at the rocket law's throttle, and whether it
+/// leaves the fore faces. `None` while it is not lit.
+pub fn boost_w(craft: &Craft, now_s: f64) -> Option<(f64, bool)> {
+    match &craft.motion_at(now_s).motive {
+        Motive::Boosting(boost) if boost.thrust_at(now_s) != DVec3::ZERO => {
+            // Recoil is against the beam, so a beam out of the bow pushes the ship backward.
+            Some((Drive::exhaust_w(craft.mass_kg_at(now_s), boost.accel_g), boost.thrust.dot(boost.nose) < 0.0))
+        }
+        _ => None,
+    }
+}
+
+/// What leaves each end's open faces, W.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Ends {
+    pub fore_w: f64,
+    pub aft_w: f64,
+}
+
+impl Ends {
+    /// With the main drive's `F c` leaving aft beside it.
+    pub fn with_drive(self, drive_w: f64) -> Self {
+        Ends { aft_w: self.aft_w + drive_w, ..self }
+    }
+
+    /// What leaves through one face: its share of its end's.
+    pub fn through(&self, aperture: &Aperture) -> f64 {
+        let end_w = if aperture.fore() { self.fore_w } else if aperture.aft() { self.aft_w } else { 0.0 };
+        end_w * aperture.share
+    }
+
+    /// That face's temperature, K.
+    pub fn face_k(&self, aperture: &Aperture) -> f64 {
+        aperture_temperature_k(self.through(aperture), aperture.area_m2())
+    }
+
+    pub fn is_dark(&self) -> bool {
+        self.fore_w <= 0.0 && self.aft_w <= 0.0
+    }
+}
+
+/// What `craft`'s emits send out of each end at `now_s`: an emit flown as a burn from the end it
+/// was ordered from, and a balanced one its `power_w` from each, half what it draws. The drive is not in it. What `Presence`
+/// states beside `drive_w`.
+pub fn emit_w(craft: &Craft, now_s: f64) -> Ends {
+    let balanced = 0.5 * craft.balanced_w_at(now_s);
+    let mut ends = Ends { fore_w: balanced, aft_w: balanced };
+    match boost_w(craft, now_s) {
+        Some((w, true)) => ends.fore_w += w,
+        Some((w, false)) => ends.aft_w += w,
+        None => {}
+    }
+    ends
+}
+
+/// Everything leaving `craft`'s open faces at `now_s`: its emits, and its main drive aft.
+pub fn faces_w(craft: &Craft, balance: &Balance, now_s: f64) -> Ends {
+    emit_w(craft, now_s).with_drive(drive_w(craft, balance, now_s))
 }
 
 /// The open faces a craft's exhaust leaves through, m²: its aft engines', or an unfitted hull's

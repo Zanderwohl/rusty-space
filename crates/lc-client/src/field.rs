@@ -972,8 +972,8 @@ mod tests {
         let s = heated(0.9, Posture::BLACK);
         let hot = crate::hull::own_glow(&s);
         assert!(hot.temperature_k > 4_000.0, "premise: {}", hot.temperature_k);
-        let bare = crate::ship_hull::finished(&s, None, DVec3::ZERO, hot, false);
-        let wrapped = crate::ship_hull::finished(&s, None, DVec3::ZERO, hot, true);
+        let bare = crate::ship_hull::finished(&s, None, DVec3::ZERO, hot, false, None);
+        let wrapped = crate::ship_hull::finished(&s, None, DVec3::ZERO, hot, true, None);
         assert!(bare.glow.truncate().max_element() > 0.0);
         assert_eq!(wrapped.glow, Vec4::ZERO);
         assert_eq!(bare.reflected, wrapped.reflected, "only the heat moves");
