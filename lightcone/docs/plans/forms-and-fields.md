@@ -782,7 +782,7 @@ graph LR
 
 - status: active card "C7 · Field bar"
 - needs: H6
-- touches: `crates/lc-client/src/hud.rs`, `crates/lc-client/src/panels.rs`, `crates/lc-client/src/field_bar.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/examples/field_void.rs`, `crates/lc-world/src/ahead.rs`, `crates/lc-world/src/lib.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-server/src/field.rs`, `crates/lc-server/src/field/mode.rs`, `crates/em-spectra/src/blackbody.rs`, `crates/em-spectra/src/mapping.rs`, `lightcone/docs/30-the-field.md`
+- touches: `crates/lc-client/src/hud.rs`, `crates/lc-client/src/panels.rs`, `crates/lc-client/src/field_bar.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/examples/field_void.rs`, `crates/lc-world/src/ahead.rs`, `crates/lc-world/src/lib.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-server/src/field.rs`, `crates/lc-server/src/field/mode.rs`, `crates/em-spectra/src/blackbody.rs`, `crates/em-spectra/src/mapping.rs`, `lightcone/docs/30-the-field.md`
 - read: 30 §The field bar
 - deliver: `Hud::field`; the bar beside energy; blue to blackbody color from the Draper point; the pulse; the equilibrium tick; the countdown; the Black, Clear and Auto buttons with Auto's threshold markers.
 - done when: `Field` is tested as a pure function, and a scheduled collapse puts its countdown in the text.

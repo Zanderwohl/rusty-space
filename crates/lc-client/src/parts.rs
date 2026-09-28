@@ -140,7 +140,10 @@ pub fn fit_fixture(dev: Res<crate::dev::DevEntry>, mut game: ResMut<crate::app::
     let Some(form) = dev.form.as_deref().and_then(fixture) else { return };
     if lc_world::form::rules::check(&form, &Balance::DEFAULT).is_ok() {
         let now = game.0.coordinate_time_s();
-        game.0.ship.fit(Some(lc_world::fitting::Fitting::full(form, Balance::DEFAULT, now)));
+        // In Auto and Clear, as a shard starts a new ship.
+        let mut fitting = lc_world::fitting::Fitting::full(form, Balance::DEFAULT, now);
+        fitting.set_posture(lc_world::fitting::Posture::new_ship(&Balance::DEFAULT));
+        game.0.ship.fit(Some(fitting));
     }
 }
 
