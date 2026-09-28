@@ -111,7 +111,7 @@ pub struct DevEntry {
     pub refit: Option<crate::construction::Clock>,
     /// `--field-k`, `--field-mode`, `--field-switch`: the player's field held, as drawn and on the bar.
     pub field: Option<crate::field::Held>,
-    /// `--field-beam <watts>`: a beam on the player's field from the ecliptic's north, as if stated.
+    /// `--field-beam <watts>`: a beam on the player's field from beside the camera, as if stated.
     pub field_beam_w: Option<f64>,
     /// `--rate` was given, so a scene leaves the clock alone.
     pub rate_given: bool,
