@@ -858,4 +858,56 @@ mod tests {
         let kestrel = server.fleet.get(pov).unwrap();
         assert!(kestrel.ended_s().is_none() && kestrel.fitting().is_some(), "the player died watching");
     }
+
+    /// **The Kzinti lesson, headless.** Braking at the player by the Direct approach puts the brake's
+    /// cone on it: its field is exactly what it would have been untouched until that light arrives,
+    /// and hotter once it has. The same two ships by the courteous approach never put more than the
+    /// courtesy flux on it, which the Direct one does, so the courteous check is not passing on
+    /// nothing.
+    #[tokio::test]
+    async fn braking_at_the_player_heats_it_and_a_courteous_approach_does_not_cook_it() {
+        use lc_world::scenario::{APPROACH, BASE_ID, KZINTI};
+        let courtesy = lc_world::courtesy::courtesy_flux_w_m2(&Balance::DEFAULT);
+        let mut peaks = Vec::new();
+        for scene in [&KZINTI, &APPROACH] {
+            let Some(star) = sol() else { return };
+            let mut server = Server::new(Memory::default(), 0, 1);
+            server.directing(true);
+            let pov = CraftId(1);
+            let mut kestrel = Craft::at(pov, Kind::Ship, star.position_ly);
+            server.fit_new(&mut kestrel);
+            server.admit(ClientId(1), kestrel, 0.0);
+            server.load_world(World::new(vec![star]));
+            server.stage(scene).expect("the scene stages");
+            let mut wire = Loopback::new();
+            server.tick(&mut wire).await.unwrap();
+            let mut twin = server.fleet.get(pov).unwrap().clone();
+            let heat_max_j = twin.fitting().unwrap().field().heat_max_j();
+            let heat = |craft: &Craft, now_s: f64| craft.fitting().unwrap().heat_j_at(&craft.motion, now_s);
+            let (mut peak, mut lit_at, mut gained) = (0.0f64, None, 0.0);
+            for _ in 0..400 {
+                server.tick(&mut wire).await.unwrap();
+                wire.take(ClientId(1));
+                let (now_t, now_s) = (server.now_t(), server.now_t() as f64 * 1.0e-6);
+                let flux: f64 = server.emissions.lit_by.get(&pov).map_or(0.0, |beams| {
+                    beams.iter().filter(|b| b.source == ShipId(BASE_ID)).map(|b| b.flux_w_m2).sum()
+                });
+                peak = peak.max(flux);
+                if flux > 0.0 {
+                    lit_at.get_or_insert(now_t);
+                }
+                twin.settle(now_s);
+                gained = heat(server.fleet.get(pov).unwrap(), now_s) - heat(&twin, now_s);
+                if lit_at.is_none() {
+                    assert!(gained.abs() < 1.0e-12 * heat_max_j, "heated by {gained} J before any light arrived");
+                }
+            }
+            if scene.name == "kzinti" {
+                assert!(lit_at.is_some() && gained > 0.0, "the brake never heated the player: {gained} J");
+            }
+            peaks.push(peak);
+        }
+        assert!(peaks[0] > courtesy, "premise: braking at the player is discourteous, {} of {courtesy}", peaks[0]);
+        assert!(peaks[1] <= courtesy, "the courteous approach put {} W/m² on the player, over {courtesy}", peaks[1]);
+    }
 }

@@ -291,6 +291,7 @@ async fn a_burn_in_flight_across_a_restart_still_lands() {
     server.fleet.insert(ship(2, at, Form::starting()));
     let mut wire = Loopback::new();
     while drive_said(&server, ShipId(1)).is_empty() {
+        assert!(server.now_t() < 1_000, "premise: the drive lit");
         server.tick(&mut wire).await.unwrap();
     }
     let (lit_t, lit) = drive_said(&server, ShipId(1))[0];
