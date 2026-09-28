@@ -310,15 +310,19 @@ impl Burst {
     }
 }
 
+/// The most of what surrounds it a receiver takes, from one source or all of them together: the
+/// half a receiver in contact faces.
+pub const CONTACT_FRACTION: f64 = 0.5;
+
 /// Of what a source radiates isotropically, the fraction a shadow of `shadow_m2` at `distance_m`
-/// takes: `A / (4π d²)`. At most the half a receiver in contact faces, where the inverse square
-/// would give more, or infinity for ships stacked at one point.
+/// takes: `A / (4π d²)`. At most [`CONTACT_FRACTION`], where the inverse square would give more, or
+/// infinity for ships stacked at one point.
 pub fn received_fraction(shadow_m2: f64, distance_m: f64) -> f64 {
-    let sphere_m2 = 4.0 * std::f64::consts::PI * distance_m * distance_m;
-    if sphere_m2 <= 2.0 * shadow_m2 {
-        return 0.5;
+    if shadow_m2 <= 0.0 {
+        return 0.0;
     }
-    shadow_m2 / sphere_m2
+    let sphere_m2 = 4.0 * std::f64::consts::PI * distance_m * distance_m;
+    (shadow_m2 / sphere_m2).min(CONTACT_FRACTION)
 }
 
 /// Inside this distance a spike of `spike_j` takes a field with `headroom_j` left to collapse:

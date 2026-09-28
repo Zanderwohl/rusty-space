@@ -16,7 +16,7 @@ use glam::DVec3;
 use lc_proto::{Outbound, ShipId};
 use lc_spacetime::LIGHT_MICROSECOND_M;
 use lc_world::craft::{Craft, CraftId};
-use lc_world::field::{Burst, received_fraction};
+use lc_world::field::{Burst, CONTACT_FRACTION, received_fraction};
 
 use crate::journal::Journal;
 use crate::server::{KIND_COLLAPSE, Server};
@@ -79,33 +79,61 @@ pub fn received_j(craft: &Craft, from: DVec3, energy_j: f64, arrive_t: i64) -> f
     energy_j * received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)
 }
 
-/// Watts of `source`'s glow arriving at `receiver`, which is `here` at `at_t`: `Q/τ` of `source`'s
-/// field as its light left, isotropic.
-fn glow_w(source: &Craft, receiver: &Craft, here: DVec3, at_t: i64) -> f64 {
-    let (Some(from), Some(to)) = (source.fitting(), receiver.fitting()) else { return 0.0 };
+/// A fitted craft as a source of glow at one instant, read once for every receiver.
+struct Glowing<'a> {
+    craft: &'a Craft,
+    /// Light-microseconds.
+    at: DVec3,
+    /// `Q/τ` of its field, W.
+    emitted_w: f64,
+}
+
+/// `receiver`, which is `here` at `at_t`, and each source's glow reaching it: the watts `Q/τ` of
+/// its field puts out as its light left, and the fraction of them the receiver takes.
+fn glow_on(receiver: &Craft, here: DVec3, sources: &[Glowing], at_t: i64) -> Vec<(f64, f64)> {
+    let Some(to) = receiver.fitting() else { return Vec::new() };
     let at_s = at_t as f64 * 1.0e-6;
-    let tau_s = from.field().tau_s;
-    let bound_w = from.heat_j_at(&source.motion, at_s) / tau_s * received_fraction(to.field().area_m2, source.position_at(at_t as f64).distance(here) * LIGHT_MICROSECOND_M);
-    if bound_w < GLOW_FLOOR * to.field().rated_load_w() {
-        return 0.0;
-    }
-    let Some(left_t) = lc_spacetime::retarded_times_at(at_t as f64, here, &source.worldline()).last().copied() else { return 0.0 };
-    let offset = here - source.position_at(left_t);
-    let shadow_m2 = shadow_toward_m2(receiver, -offset, at_s);
-    from.heat_j_at(&source.motion, left_t * 1.0e-6) / tau_s * received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)
+    let floor_w = GLOW_FLOOR * to.field().rated_load_w();
+    let bound_m2 = to.field().area_m2;
+    sources
+        .iter()
+        .filter(|source| source.craft.id != receiver.id)
+        .filter(|source| source.emitted_w * received_fraction(bound_m2, source.at.distance(here) * LIGHT_MICROSECOND_M) >= floor_w)
+        .filter_map(|source| {
+            let from = source.craft.fitting()?;
+            let left_t = lc_spacetime::retarded_times_at(at_t as f64, here, &source.craft.worldline()).last().copied()?;
+            let offset = here - source.craft.position_at(left_t);
+            let emitted_w = from.heat_j_at(&source.craft.motion, left_t * 1.0e-6) / from.field().tau_s;
+            let shadow_m2 = shadow_toward_m2(receiver, -offset, at_s);
+            Some((emitted_w, received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)))
+        })
+        .collect()
 }
 
 impl<J: Journal> Server<J> {
     /// Restate every field's glow from its neighbors, from `at_t`. Every account is settled no
     /// further than that.
     pub(crate) fn shine(&mut self, at_t: i64) {
-        let fields: Vec<&Craft> = self.fleet.iter().filter(|craft| craft.fitting().is_some()).collect();
-        let changed: Vec<(CraftId, f64)> = fields
+        let at_s = at_t as f64 * 1.0e-6;
+        let sources: Vec<Glowing> = self
+            .fleet
+            .iter()
+            .filter_map(|craft| {
+                let fitting = craft.fitting()?;
+                let emitted_w = fitting.heat_j_at(&craft.motion, at_s) / fitting.field().tau_s;
+                Some(Glowing { craft, at: craft.position_at(at_t as f64), emitted_w })
+            })
+            .collect();
+        let changed: Vec<(CraftId, f64)> = sources
             .iter()
             .filter_map(|receiver| {
-                let here = receiver.position_at(at_t as f64);
-                let watts: f64 = fields.iter().filter(|s| s.id != receiver.id).map(|source| glow_w(source, receiver, here, at_t)).sum();
-                (watts != receiver.fitting()?.lit_w()).then_some((receiver.id, watts))
+                let glow = glow_on(receiver.craft, receiver.at, &sources, at_t);
+                // A receiver surrounded takes no more than one in contact: summed per source, ships
+                // stacked at the spawn point would heat each other without bound.
+                let taken: f64 = glow.iter().map(|(_, fraction)| fraction).sum();
+                let scale = if taken > CONTACT_FRACTION { CONTACT_FRACTION / taken } else { 1.0 };
+                let watts: f64 = glow.iter().map(|(emitted_w, fraction)| emitted_w * fraction * scale).sum();
+                (watts != receiver.craft.fitting()?.lit_w()).then_some((receiver.craft.id, watts))
             })
             .collect();
         for (id, watts) in changed {
@@ -965,5 +993,35 @@ mod tests {
         }
         assert_eq!(swept.len(), wrecks.len(), "{swept:?}");
         assert!(collapse_events(&restarted).is_empty(), "a wreck collapsed again");
+    }
+
+    /// Six ships stacked at one point, as the spawn point stacks them, together take no more than
+    /// one in contact. Conversion stores what pays the drain, so each settles where the heat it keeps
+    /// of that half, `1 − η`, is what it lacks: summed per source, storage would fill and they
+    /// would heat each other without bound.
+    #[tokio::test]
+    async fn ships_stacked_at_one_point_heat_each_other_only_so_far() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.set_rate(1_000.0);
+        for k in 0..6 {
+            let mut craft = still(ShipId(k + 1), DVec3::ZERO);
+            server.fit_new(&mut craft);
+            server.fleet.insert(craft);
+        }
+        let idle_j = server.balance().field_tau_s * server.ship(ShipId(1)).unwrap().fitting().unwrap().hull().capacities.drain_w;
+        let mut wire = Loopback::new();
+        let ten_tau_s = 10.0 * server.balance().field_tau_s;
+        while (server.now_t() as f64) * 1.0e-6 < ten_tau_s {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(collapse_events(&server).is_empty(), "the stack collapsed");
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        for k in 0..6 {
+            let craft = server.ship(ShipId(k + 1)).unwrap();
+            let heat_j = craft.fitting().unwrap().heat_j_at(&craft.motion, now_s);
+            let kept = CONTACT_FRACTION * (1.0 - server.balance().conversion_efficiency);
+            let want_j = idle_j / (1.0 - kept);
+            assert!((heat_j - want_j).abs() < 1.0e-3 * want_j, "ship {}: {} of idle", k + 1, heat_j / idle_j);
+        }
     }
 }
