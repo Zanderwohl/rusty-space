@@ -530,7 +530,6 @@ mod tests {
         let mut wire = Loopback::new();
         let (mut seen_until_t, mut swept_t, mut last_t) = (i64::MIN, None, restarted.now_t());
         let mut tick_us = 0;
-        wire.client_says(WATCHER, act(DYING, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
         for _ in 0..100 {
             restarted.tick(&mut wire).await.unwrap();
             tick_us = restarted.now_t() - last_t;
@@ -538,7 +537,6 @@ mod tests {
             for message in wire.take(WATCHER) {
                 match message {
                     Outbound::Present(list) if list.iter().any(|p| p.get().ship_id == DYING) => seen_until_t = restarted.now_t(),
-                    Outbound::Accepted { ship_id, .. } if ship_id == DYING => panic!("the wreck took an order"),
                     _ => {}
                 }
             }

@@ -125,12 +125,26 @@ pub fn save(
     radio: Radio,
     saved_t: i64,
 ) -> Ship {
+    // A wreck as it was at its end, and read back there: its motive goes on changing after it, a
+    // crossing arriving say, and extrapolated back from that it would die somewhere else.
+    let (motion, saved_t) = match craft.ended_s() {
+        Some(end_s) => {
+            use lc_spacetime::Worldline;
+            let end_t = end_s * 1.0e6;
+            let line = craft.worldline();
+            let mut motion = craft.motion_at(end_s).clone();
+            motion.position_ly = line.position_at(end_t) / lc_world::motion::LIGHT_US_PER_LY;
+            motion.beta = line.velocity_at(end_t);
+            (motion, end_t.round() as i64)
+        }
+        None => (craft.motion.clone(), saved_t),
+    };
     let saved = Saved {
         kind: kind_code(craft.kind),
         name: craft.name.clone(),
         noise_floor: craft.noise_floor,
         length_m: craft.length_m,
-        motion: (&craft.motion.snapshot()).into(),
+        motion: (&motion.snapshot()).into(),
         pursuit,
         fitting: craft.fitting().map(Into::into),
         field: craft.fitting().map(Into::into),
@@ -555,6 +569,29 @@ mod tests {
         assert_eq!(row.account, None);
         assert_eq!(load(&row, None).expect("it reads").ended_s(), Some(12.5));
         assert_eq!(load(&save(&a_craft(), None, None, None, Radio::default(), 0), None).unwrap().ended_s(), None);
+    }
+
+    /// Its crossing arrived after it was destroyed and before the save: it comes back where it
+    /// died, not where the arrival would put it.
+    #[test]
+    fn a_wreck_is_read_back_where_it_ended() {
+        use lc_spacetime::Worldline;
+        use lc_world::flight::{Cruise, Drive};
+        let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        let cruise = Cruise::plan_from(DVec3::ZERO, DVec3::ZERO, DVec3::X * 1.0e-6, craft.motion.attitude, 0.0, Drive::DEFAULT);
+        let arrive_s = cruise.start_s + cruise.duration_s();
+        craft.motion.resume_crossing(cruise, None, 0.0);
+        craft.advance(1.5 * arrive_s, 1.5 * arrive_s);
+        assert!(!matches!(craft.motion.motive, Motive::Crossing(_)), "premise: it arrived");
+        let end_s = 0.5 * arrive_s;
+        craft.end(end_s);
+        let end_t = end_s * 1.0e6;
+        let died = craft.position_at(end_t);
+
+        let row = save(&craft, None, None, None, Radio::default(), (2.0 * arrive_s * 1.0e6) as i64);
+        let back = load(&row, None).expect("it reads");
+        assert!(back.position_at(end_t).distance(died) < 1.0e-3, "{} {died}", back.position_at(end_t));
+        assert!(back.worldline().velocity_at(end_t).distance(craft.worldline().velocity_at(end_t)) < 1.0e-12);
     }
 
     /// A row that cannot be read is an error and never a fresh ship at the origin.

@@ -32,10 +32,11 @@ pub struct Shard {
     pub next_ship: i64,
 }
 
-/// Write every craft, replacing what is there.
+/// Write every craft, replacing what is there. **Inside a transaction**: the accounts it releases
+/// first would otherwise stay released if the upsert failed.
 ///
-/// One statement whatever the count, and an upsert rather than a delete and re-insert: a
-/// checkpoint that briefly has no ships in it is a checkpoint a crash can land inside.
+/// An upsert rather than a delete and re-insert: a checkpoint that briefly has no ships in it is a
+/// checkpoint a crash can land inside.
 pub async fn save_ships(client: &impl GenericClient, ships: &[Ship]) -> Result<u64, Error> {
     if ships.is_empty() {
         return Ok(0);
@@ -107,7 +108,7 @@ pub async fn ship_for_account(client: &Client, account: &str) -> Result<Option<S
     }))
 }
 
-/// Forget destroyed craft, and everything they knew.
+/// Forget swept wrecks, and everything they knew.
 pub async fn forget(client: &impl GenericClient, ship_ids: &[i64]) -> Result<u64, Error> {
     if ship_ids.is_empty() {
         return Ok(0);
