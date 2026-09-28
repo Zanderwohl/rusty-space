@@ -488,7 +488,8 @@ pub struct CraftSwarm {
 /// pixels, would be wider than the craft.
 const MIN_CRAFT_PX: f32 = 24.0;
 
-/// So no two crafts' swarms, nor one and the player's, move in step. Bijective on the id's low bits.
+/// So no two crafts' swarms move in step. Bijective on the id's low 32 bits; one id in 2³² shares
+/// the player's [`SEED`].
 fn seed(craft: ShipId) -> u32 {
     (craft.0 as u32).wrapping_mul(0x9e37_79b9) ^ 0x2545_f491
 }
@@ -597,9 +598,9 @@ impl Plugin for DronesPlugin {
 mod tests {
     use super::*;
     use crate::construction::{Frame, demo_round};
+    use crate::ship_hull::ShipHull;
     use lc_world::fitting::Balance;
     use lc_world::form::Form;
-    use crate::ship_hull::ShipHull;
     use lc_world::refit::rounds::{Change, Step};
 
     const B: Balance = Balance::DEFAULT;
@@ -910,6 +911,42 @@ mod tests {
         assert!(craft_px(500.0, &root, from(2.0)) > MIN_CRAFT_PX);
         assert!(craft_px(500.0, &root, from(20_000.0)) < MIN_CRAFT_PX);
         assert_eq!(craft_px(500.0, &root, std::iter::empty()), f32::INFINITY);
+    }
+
+    /// In the game: none spawned while the craft is too small, then shown, hidden and shown again
+    /// as its root comes near, goes far and comes back.
+    #[test]
+    fn a_crafts_swarm_follows_its_size_on_screen() {
+        use bevy::camera::Viewport;
+        let plan = plan();
+        let (contact, ..) = seen_building(&plan, 9, true);
+        let mut app = app(&plan, vec![contact]);
+        let world = app.world_mut();
+        let viewport = Viewport { physical_size: UVec2::new(1280, 720), ..default() };
+        world.spawn((
+            Camera { viewport: Some(viewport), ..default() },
+            Projection::Perspective(PerspectiveProjection { fov: 1.0, ..default() }),
+            GlobalTransform::IDENTITY,
+            crate::app::SkyCamera,
+        ));
+        // The root scales meters to kilometers, as the sky's unit would.
+        let at = |km: f32| GlobalTransform::from(Transform::from_xyz(km, 0.0, 0.0).with_scale(Vec3::splat(1.0e-3)));
+        let root = world.spawn((ShipHull::bare(Some(ShipId(9)), Entity::PLACEHOLDER), at(20_000.0))).id();
+        let visibility = |app: &mut App| {
+            let world = app.world_mut();
+            world.query::<(&CraftSwarm, &Visibility)>().iter(world).map(|(_, v)| *v).collect::<Vec<_>>()
+        };
+        app.update();
+        assert!(visibility(&mut app).is_empty(), "spawned for a craft under a pixel");
+        for (km, seen) in [(2.0, Visibility::Inherited), (20_000.0, Visibility::Hidden), (2.0, Visibility::Inherited)] {
+            *app.world_mut().get_mut::<GlobalTransform>(root).unwrap() = at(km);
+            app.update();
+            assert_eq!(visibility(&mut app), vec![seen], "at {km} km");
+        }
+    }
+
+    #[test]
+    fn a_swarms_mesh_is_its_population_to_a_power_of_two() {
         assert_eq!((quads(785), quads(0), quads(1_000_000)), (1024, 1, MAX_DRONES));
     }
 
