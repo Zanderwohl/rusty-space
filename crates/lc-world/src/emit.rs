@@ -327,6 +327,59 @@ mod tests {
         assert_eq!(distance_at_flux_m(0.0, 0.1, 1.0), 0.0);
     }
 
+    /// Coming about with nothing lit, then pushed along its thrust to `tanh(α τ)`, then drifting
+    /// at that: continuous at both edges, and the rapidity is the proper acceleration times the
+    /// proper time lit.
+    #[test]
+    fn a_boost_turns_then_pushes_along_its_thrust_and_drifts_after() {
+        let thrust = DVec3::new(0.6, -0.8, 0.0);
+        let beta0 = DVec3::new(0.0, 0.0, 1.0e-3);
+        let boost = Boost::plan(DVec3::ZERO, beta0, 100.0, thrust, -thrust, 5.0, 3_600.0, DVec3::X, 0.01);
+        assert!(boost.turn_s() > 0.0 && boost.lights_s() == 100.0 + boost.turn_s());
+        assert_eq!(boost.thrust_at(boost.lights_s() - 1.0e-3), DVec3::ZERO);
+        assert_eq!(boost.thrust_at(boost.lights_s()), thrust);
+        assert_eq!(boost.thrust_at(boost.out_s()), DVec3::ZERO);
+        for edge in [boost.lights_s(), boost.out_s()] {
+            let (before, after) = (boost.state_at(edge - 1.0e-6).0, boost.state_at(edge + 1.0e-6).0);
+            assert!((before - after).length() * JULIAN_YEAR_S < 1.0e-5, "a jump at {edge}");
+        }
+        let (_, end) = boost.state_at(boost.out_s());
+        let (_, later) = boost.state_at(boost.out_s() + 1.0e4);
+        assert_eq!(end, later, "still pushed after it went out");
+        let gained = crate::boost::velocity_to_frame(end, beta0);
+        assert!((gained.normalize() - thrust).length() < 1.0e-9, "{gained}");
+        assert!((gained.length().atanh() - boost.planned_rapidity()).abs() < 1.0e-9 * boost.planned_rapidity());
+        let alpha = 5.0 * G0 / C_M_S;
+        assert!((boost.planned_rapidity() / alpha - boost.proper_s(boost.out_s()) + boost.turn_s() / gamma_of(beta0)).abs() < 1.0e-6);
+    }
+
+    /// Through the wire's recipe and back, it lights and goes out at the same instants and is in
+    /// the same place.
+    #[test]
+    fn a_boost_comes_back_from_its_recipe_unchanged() {
+        let mut state = crate::motion::ShipState::at(DVec3::new(1.0e-6, 0.0, 0.0));
+        state.begin_boosting(Boost::plan(state.position_ly, DVec3::ZERO, 10.0, DVec3::Y, -DVec3::Y, 0.5, 600.0, DVec3::X, 0.01));
+        let wire = lc_proto::Motion::from(&state.snapshot());
+        let back = crate::resume::Snapshot::from(&wire).restore(None, 10.0);
+        assert_eq!(back.motive, state.motive);
+    }
+
+    /// A lit emission commits all it will draw, spends it as it goes, and putting it out early
+    /// releases the rest.
+    #[test]
+    fn a_lit_emission_is_committed_and_released_when_put_out() {
+        use crate::fitting::Lit;
+        let motion = crate::motion::ShipState::at(DVec3::ZERO);
+        let mut fitting = Fitting::full(Form::starting(), Balance::DEFAULT, 0.0);
+        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e19 });
+        assert_eq!(fitting.committed_j_at(&motion, 0.0), 1.0e21);
+        assert!((fitting.committed_j_at(&motion, 40.0) - 6.0e20).abs() < 1.0e6);
+        fitting.settle(&motion, 40.0);
+        fitting.darken();
+        assert_eq!(fitting.committed_j_at(&motion, 40.0), 0.0);
+        assert!(fitting.lit().is_empty());
+    }
+
     /// A receiver whose shadow covers the spot takes everything; past that it takes its share.
     #[test]
     fn the_fraction_saturates_where_the_spot_shrinks_to_the_shadow() {

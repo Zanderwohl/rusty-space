@@ -396,7 +396,7 @@ impl<J: Journal> Server<J> {
     ) -> bool {
         let Landing { observer, arrive_t, source, emitted } = landing;
         let at_s = arrive_t as f64 * 1.0e-6;
-        let Some(craft) = self.fleet.get(observer) else { return false };
+        let Some(craft) = self.fleet.get(observer).filter(|craft| craft.ended_s().is_none()) else { return false };
         let from = DVec3::from_array(emitted.from);
         let offset = craft.position_at(arrive_t as f64) - from;
         let distance_m = offset.length() * LIGHT_MICROSECOND_M;
