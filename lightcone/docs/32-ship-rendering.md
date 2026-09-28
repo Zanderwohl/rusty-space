@@ -460,8 +460,7 @@ At 4 600 K it is the brightest thing in the frame, and uneven.
 of the afterglow over `collapse_afterglow_s`, reaching its full size in the first half of it
 (`DEBRIS_SPREAD`) and fading over the whole. Nearby fields brighten when the spike lands on them,
 each at its own retarded time, so a cascade is seen spreading at c. From a distance, a collapse is
-drawn by the photometry: a new point in the sky, as bright as [30-the-field.md](30-the-field.md)
-says.
+a new point in the sky: the spike's flash, then the afterglow cooling (below).
 
 ![A collapse: the flash, then the debris at 40, 180 and 270 s of a 300 s afterglow](../images/field-collapse.png)
 
@@ -479,9 +478,9 @@ collapse whose light has arrived.
   it is done.
 - **The heat is the envelope's, not the hull's.** Once a craft's envelope is drawn its hull carries
   only what it reflects and its windows (`hull::lit`'s `enveloped`), so the heat is drawn once. The
-  metering is unchanged: `hull::Sent` sums the thermal term once whoever draws it. Nothing draws a
-  distant ship as a point yet; R18's point takes over from the envelope where the hull stops being
-  meshed, and must not draw the heat while the envelope does.
+  metering is unchanged: `hull::Sent` sums the thermal term once whoever draws it. A craft too far
+  to resolve has no envelope drawn: its point carries the heat instead
+  ([The exhaust cone](#the-exhaust-cone), From a distance).
 - **The bar is the envelope's color.** It reads the ramp the shader interpolates
   (`field::color_linear`), not the exact blackbody, which some mappings put a few percent off the
   ramp between its entries. A test holds the two together in every mapping.
@@ -498,6 +497,30 @@ collapse whose light has arrived.
   its last order's attitude. **The spike lands on each neighbor** as a hot
   spot toward the wreck when the light of it, off that neighbor, reaches this ship:
   `arrive + (|w − n| + |n − o| − |w − o|) / c`, from what the client knows of where each was.
+- **A collapse too far to resolve is a point** where its debris at full spread would be under two
+  pixels, and so is one of a craft this ship never saw, placed where the sighting's direction and
+  its light's delay put it. The flash is the spike taken as a second long, for half a real second;
+  then H10's afterglow, `T_limit (1 − τ/D)^¼` over a fixed area, both closed form in `globals.time`
+  from the frame the light arrived, so nothing is written while it plays. The afterglow plays over
+  its game duration at the clock's rate, a multiple of the design rate (R11 had floored it against
+  the coordinate seconds a real second is, and so played it at the design rate at every speed).
+- **The spike cheats.** At `collapse_spike_k`, 10⁷ K, a blackbody puts a millionth of itself in any
+  band an eye has, and the most violent thing in the game would be a faint star. So the eye is shown
+  its flux flat, the same in every band: its energy is kept, and it is white in every mapping. The
+  photometry an instrument reads (`lc_world::afterglow`) is still the blackbody.
+- **How it looks a light-year off**, a ship ten times the starting size, 4 × 10²⁹ J: the flash is
+  V −10 for its half second, a new star brighter than the full Moon, as white as the brightest in
+  the frame at the automatic exposure. The afterglow starts near V 8, below the automatic
+  exposure's reach; opened ten stops, it is an orange point that reddens and fades over its month,
+  five seconds at a year a minute. The point is drawn in the lit bodies' style, which caps a
+  point's size at a few pixels, so even V −10 is a very bright star rather than a burst: a beauty
+  shot of one would want a glare of its own.
+
+![before: Beacon, a light-year off, at the automatic exposure](../images/r18-before-auto.jpg)
+![its collapse arrives: the flash, at the automatic exposure](../images/r18-collapse-flash-auto.jpg)
+![the flash with the exposure opened ten stops](../images/r18-collapse-flash.jpg)
+![the afterglow a second in, orange](../images/r18-collapse-afterglow-early.jpg)
+![and three seconds in, reddening](../images/r18-collapse-afterglow-late.jpg)
 
 ![The player's field at 400, 2 400 and 4 600 K, Clear left and Black right: Black hides the design](../images/r11-temperatures.jpg)
 
@@ -571,8 +594,8 @@ photon drive has none but `c`.
 The faces are worked out once a frame, before the hulls: the engine's grid is lit on each face at
 its color ([Materials by kind](#materials-by-kind)), and the aperture glow
 ([`plume.rs`](../../crates/lc-client/src/plume.rs)) sits over each lit face under its craft's hull
-root. R18's point for a craft too far to resolve is to read the same faces and temperatures
-rather than work them out again.
+root. A craft too far to resolve reads the same faces and temperatures for its point rather than
+work them out again.
 
 The cone is the main drive's alone, at `drive_spread_rad`, so it is drawn from `drive_w` and its
 apex is the aft faces' power-weighted middle, or a formless craft's stern. The thrusters spread
@@ -619,9 +642,55 @@ direction from the emitter to the observer, `cos θ = a · u` says which source 
   with the angle.
 
 So a burn in the next system is a moving star that brightens by orders of magnitude as its cone
-sweeps over you, Doppler-shifted and aberrated at the craft's velocity as a star is. How the two
-sources meet at the cone's edge is still to settle, because `aperture_temperature_k` has the face
-radiate all of `P` while the cone also carries all of it. R18 settles it and records the answer here.
+sweeps over you, Doppler-shifted and aberrated at the craft's velocity as a star is.
+
+**The meeting at the cone's edge, settled.** Outside, the face is what the aperture glow draws near
+to: a flat face of radiance `B(T)` over its area, seen at `cos θ`, so `P cos θ / (π d²)`. That is
+the resolved picture summed, so stepping back from a burn never changes its brightness. Inside, the
+glare is the whole of the point and the face is dropped: the face seen straight down the beam *is*
+that light, and adding it would count it twice. The two are never summed, and neither is a second
+budget: the account and the heat landing on anything are the cone's alone. So the edge is a step,
+by `π cos α / Ω`, about 130 for the drive's 5° (seven stops), and that step is the flare. Faces at
+several temperatures are drawn as one blackbody carrying their sum; seen from the front, `cos θ`
+is negative and a face sends nothing, so a beam out of the bow seen from astern is not drawn at all.
+
+**As built** ([`distant.rs`](../../crates/lc-client/src/distant.rs)):
+
+- **Where a hull stops and a point starts** is the bodies' crossover: a craft whose half-length is
+  under two pixels is a point and nothing else. Its hull root is hidden, and with it the envelope
+  and the aperture glows, and it is metered as a point. So its heat is drawn once, by the envelope
+  or by the point, never both. The craft the camera is behind is never a point.
+- **Every unresolved craft gets one**, lit or not: `hull::Sent`'s reflected light and windows over
+  the hull's disc, its heat over a quarter of its envelope, and one term for whatever it has lit.
+  All four are seen at the source's own Doppler factor. The shader adds the observer's, and the
+  aberration, as it does for a star.
+- **One mesh for all of them**, a fourth pass of the starfield sharing its uniforms. It is written
+  only when a point moves or changes by a part in a thousand, not every frame; its uniforms carry no
+  clock, so the material is written only when the exposure or the view is.
+- **Burns are read from their sightings too.** A `kind::DRIVE` or `kind::EMIT` sighting starts a
+  flare that is shown until its going out arrives, and for half a real second at least. So a burn
+  that lit and went out between two presences is still seen. Inside a beam, the glare is the
+  presence's or the sightings', whichever is brighter.
+
+**How bright, in V, a light-year off**, from `--demo distant`:
+
+| | V |
+|---|---|
+| the starting ship's drive, inside its cone | about 20 |
+| a ship ten times its size at 2 g, inside its cone | 13 |
+| the same, 10° outside it | 18 |
+| a Clear ship at rest, sunlit, 10⁵ km off | 5 |
+
+A drive's face at 7 × 10⁵ K puts about a millionth of its light in V, so a burn a light-year off is
+a telescope star, as 31 says, and not one the eye's exposure shows. `--exposure 10` opens the
+exposure ten stops, a long one, and the in-cone burn appears as a blue point inside its marker.
+
+![a burn a light-year off, 10° outside its cone: its face obliquely, too faint to show](../images/r18-burn-outside.jpg)
+![the same ship turned away from you, its cone on you, a hundred times brighter: a blue point in Lantern's ring, `--exposure 10`](../images/r18-burn-inside.jpg)
+![a Clear ship at rest a hundred thousand kilometers off, sunlit: Tern, at the automatic exposure](../images/r18-unlit-auto.jpg)
+
+Photograph it with `--demo distant --first-person --exposure 10` and the catalog. The scene runs a
+year a minute, so the light of what it stages arrives about a minute in, and `--burst` catches it.
 - God view may draw every beam's cone, as a debug overlay, like the causality lines of
   [07-rendering.md](07-rendering.md).
 
