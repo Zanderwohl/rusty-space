@@ -656,8 +656,8 @@ Always on screen, and updated with every handle:
 - **peak in storage** at the end of the dismantle phase, against capacity, and **what would be vented**,
   with its effect on the field
 
-A part that cannot be paid for cannot be placed, and a handle stops at the size the budget allows.
-Venting is shown in the field's own terms, as the peak temperature it would reach. It is allowed, but
+The budget stops no edit: a draft may pass through designs storage cannot pay for on the way to one
+it can, and Apply is what refuses. Venting is shown in the field's own terms, as the peak temperature it would reach. It is allowed, but
 Apply asks once more when the vent would collapse the field.
 
 - **The round is solved locally from the shard's inputs.** `preview::Start` is what
@@ -681,17 +681,11 @@ Apply asks once more when the vent would collapse the field.
   While a round runs, the next one begins where it ends: in its target's form and envelope, with
   the heat and storage it leaves. The ledger reads the running round's peak still ahead off the
   account as it stands.
-- **What the budget stops.** No edit may leave the draft further short than its gesture began, except
-  one that replaces the whole draft (a preset, or the ship). Measured from the gesture's start, a
-  handle held at its limit can still come back. A size or axis handle pulled past the limit stops on
-  the last snapped step storage pays for, found by bisecting the pull; a carried part that storage
-  cannot pay for where it would hang floats at the pointer instead, since a part is sized against its
-  parent; and anything else is refused with "storage cannot pay for it". `Start::allows` is the rule.
 - **Apply's second question** is an `em_ui` modal (`MenuUi::confirm`) naming the vent, the peak and
   the temperature at which the field fails: **Apply anyway**, in the hazard color, or **Back**.
 - `--draft vent` shrinks the storage to a third, which spills a full store past collapse, and
   `--pull <k>` pulls the selected part's size handle out `k` times its length once the shard has
-  stated the ship, so both the question and a handle at its limit can be photographed.
+  stated the ship, so both the question and a draft storage cannot pay for can be photographed.
 
 ### Handles
 

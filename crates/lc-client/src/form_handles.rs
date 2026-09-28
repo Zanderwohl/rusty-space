@@ -330,24 +330,12 @@ impl Held {
     }
 
     pub fn edit(&self, lens: &Lens, at: Vec2, keys: Modifiers, balance: &Balance) -> Result<Edit, Refused> {
-        self.edit_within(lens, at, keys, balance, |_| true)
-    }
-
-    /// As [`Held::edit`], with a size or an axis stopping where `allows` says the budget runs out:
-    /// at the furthest snapped pull toward the pointer it allows, or where the drag began.
-    pub fn edit_within(&self, lens: &Lens, at: Vec2, keys: Modifiers, balance: &Balance, allows: impl Fn(&Edit) -> bool) -> Result<Edit, Refused> {
         let fine = keys.fine;
         let placement = self.part.placement.ok_or(Refused::Mind)?;
         let now = Self::measure(self.grip, &self.handles, lens, at).ok_or(Refused::NoSuchPart(self.part.id))?;
         let pulled = (now / self.start).max(LEAST_PULL);
         let edit = |what, after| Edit { what, part: self.part.id, before: vec![self.part], after: vec![after], settled: false };
         if let Some((what, after)) = self.resized(pulled, keys, balance) {
-            let wanted = edit(what, after);
-            if allows(&wanted) {
-                return Ok(wanted);
-            }
-            let fits = |p: f64| self.resized(p, keys, balance).is_some_and(|(what, after)| allows(&edit(what, after)));
-            let (what, after) = self.resized(furthest_allowed(pulled, &fits), keys, balance).filter(|(what, after)| allows(&edit(*what, *after))).unwrap_or((what, self.part));
             return Ok(edit(what, after));
         }
         let (what, after) = match self.grip {
@@ -392,17 +380,6 @@ impl Held {
             Grip::Twist | Grip::Standoff => None,
         }
     }
-}
-
-/// Of a pull from where the drag began toward `pulled`, the furthest `fits`. The part is snapped,
-/// so what fits is a step in the pull; this finds where the step it cannot pay for begins.
-fn furthest_allowed(pulled: f64, fits: impl Fn(f64) -> bool) -> f64 {
-    let (mut near, mut far) = (1.0, pulled);
-    for _ in 0..24 {
-        let mid = 0.5 * (near + far);
-        if fits(mid) { near = mid } else { far = mid }
-    }
-    near
 }
 
 /// Between `from`, which touches, and `to`, which does not, the furthest snapped standoff that
@@ -487,7 +464,6 @@ pub fn drag_handles(
     shown: Res<Shown>,
     surface: Res<FormSurface>,
     carried: Res<crate::form_carry::Carried>,
-    game: Res<crate::app::Game>,
     mut grabbed: ResMut<Grabbed>,
     mut out: MessageWriter<Requested>,
 ) {
@@ -516,12 +492,7 @@ pub fn drag_handles(
     }
     let Some(at) = cursor.filter(|at| at != seen) else { return };
     *seen = at;
-    let (start, draft) = (crate::preview::Start::of(&game.0), ui.form.draft.as_ref());
-    let allows = |edit: &Edit| match (&start, draft) {
-        (Some(start), Some(draft)) => start.allows(draft, edit),
-        _ => true,
-    };
-    match held.edit_within(&lens, at, Modifiers::of(&keys), &Balance::DEFAULT, allows) {
+    match held.edit(&lens, at, Modifiers::of(&keys), &Balance::DEFAULT) {
         Ok(edit) if last.as_ref() != Some(&edit) => {
             *last = Some(edit.clone());
             out.write(Requested(Action::EditForm(Ok(edit))));
@@ -543,16 +514,14 @@ fn pull_on_arrival(
     mut out: MessageWriter<Requested>,
 ) {
     let (Some(factor), false, true) = (dev.pull, *done, game.0.remote) else { return };
-    let (Some(lens), Some(sdf), Some(draft), Some(start)) = (lens(&ui, &shown, &surface), shown.sdf(), ui.form.draft.as_ref(), crate::preview::Start::of(&game.0)) else {
-        return;
-    };
+    let (Some(lens), Some(sdf)) = (lens(&ui, &shown, &surface), shown.sdf()) else { return };
     let Some((part, piece, handles)) = selected_handles(&ui, sdf, &lens) else { return };
     let Some((from, to)) = handles.line(Grip::Size) else { return };
     let at = |p: DVec3| lens.project(p).map(|(at, _)| at);
     let (Some(taken), Some(let_go)) = (at(to), at(from + (to - from) * factor)) else { return };
     let Some(held) = Held::new(Grip::Size, part, handles, piece, &lens, taken) else { return };
     *done = true;
-    if let Ok(edit) = held.edit_within(&lens, let_go, Modifiers::default(), &start.balance, |e| start.allows(draft, e)) {
+    if let Ok(edit) = held.edit(&lens, let_go, Modifiers::default(), &Balance::DEFAULT) {
         out.write(Requested(Action::EditForm(Ok(Edit { settled: true, ..edit }))));
     }
 }
@@ -842,37 +811,6 @@ mod tests {
         let shrunk = held.edit(&lens, px(&lens, from + (to - from) * 0.5), Modifiers::default(), &B).unwrap();
         assert!(shrunk.after[0].volume_m3 < part.volume_m3);
         assert!(!edit.settled, "a drag is settled on release");
-    }
-
-    /// Storage for twice the volume, and a pull for eight times it: the part stops on the last
-    /// step storage pays for, and the next step up is one it does not.
-    #[test]
-    fn a_size_held_past_the_budget_stops_at_the_limit() {
-        let (draft, sdf, lens) = scene();
-        let (part, piece, h) = handles(&draft, &sdf, &lens, 3);
-        let doubled = draft.resize(part.id, 2.0 * part.volume_m3).unwrap();
-        let mut target = draft.clone();
-        target.apply(&doubled, &B).unwrap();
-        let broke = crate::preview::Start { from: Form::starting(), stored_j: 0.0, start_s: 0.0, balance: B };
-        let start = crate::preview::Start { stored_j: broke.short_j(&target.form).unwrap(), ..broke.clone() };
-        let allows = |e: &Edit| start.allows(&draft, e);
-
-        let (from, to) = h.line(Grip::Size).unwrap();
-        let held = Held::new(Grip::Size, part, h, &piece, &lens, px(&lens, to)).unwrap();
-        let at = px(&lens, from + (to - from) * 2.0);
-        let free = held.edit(&lens, at, Modifiers::default(), &B).unwrap().after[0].volume_m3;
-        let edit = held.edit_within(&lens, at, Modifiers::default(), &B, allows).unwrap();
-        let stopped = edit.after[0].volume_m3;
-        assert!(allows(&edit) && stopped > part.volume_m3 && stopped < free, "{} < {stopped} < {free}", part.volume_m3);
-        let next = snap::volume(stopped * 1.26, B.min_part_m3, false);
-        assert!(next > stopped && !allows(&draft.resize(part.id, next).unwrap()), "the next step up is not paid for");
-
-        let home = px(&lens, to);
-        let snapped = snap::volume(part.volume_m3, B.min_part_m3, false);
-        assert_eq!(held.edit_within(&lens, home, Modifiers::default(), &B, allows).unwrap().after[0].volume_m3, snapped, "back where it began");
-        let penniless = |e: &Edit| broke.allows(&draft, e);
-        let stuck = held.edit_within(&lens, at, Modifiers::default(), &B, penniless).unwrap();
-        assert_eq!(stuck.after, vec![part], "with nothing stored it does not grow at all");
     }
 
     #[test]

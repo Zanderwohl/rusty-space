@@ -137,10 +137,8 @@ pub fn label(edit: &Edit, ship: &Form) -> String {
 /// [`Action::EditForm`]: the edit written to the draft and recorded, or what to tell the player
 /// if it was refused. Only a settled edit's refusal is said: a drag refused partway is still
 /// being made.
-pub fn edit(form: &mut FormView, session: &crate::session::Session, edit: Result<Edit, Refused>, named: Option<Named>) -> Option<String> {
-    let start = crate::preview::Start::of(session);
+pub fn edit(form: &mut FormView, edit: Result<Edit, Refused>, named: Option<Named>) -> Option<String> {
     let applied = match (&edit, form.draft.as_mut()) {
-        (Ok(edit), Some(draft)) if start.as_ref().is_some_and(|s| !s.allows(draft, edit)) => Err(Refused::Unpaid),
         (Ok(edit), Some(draft)) => draft.apply(edit, &Balance::DEFAULT).map(|()| (edit, &draft.ship)),
         (Ok(_), None) => return Some("there is no draft to edit".into()),
         (Err(refused), _) => Err(*refused),

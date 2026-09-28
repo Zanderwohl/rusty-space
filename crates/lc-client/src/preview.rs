@@ -16,7 +16,7 @@ use lc_world::motion::ShipState;
 use lc_world::refit::rounds::{Plan, Refusal, Round};
 use lc_world::solar;
 
-use crate::draft::{Draft, Edit, What};
+use crate::draft::Draft;
 use crate::ledger::Budget;
 use crate::session::Session;
 use crate::ui::UiState;
@@ -51,25 +51,6 @@ impl Start {
             Ok(_) => Some(0.0),
             Err(Refusal::Energy { short_j }) => Some(short_j),
             Err(_) => None,
-        }
-    }
-
-    /// Whether `edit` leaves the draft no further short than its gesture began. Measured from the
-    /// gesture's start, so a drag at its limit can still come back. A whole new draft (a preset,
-    /// the ship) is exempt, and a refusal that is not the budget's is left to Apply.
-    pub fn allows(&self, draft: &Draft, edit: &Edit) -> bool {
-        if edit.what == What::Whole {
-            return true;
-        }
-        let with = |edit: &Edit| {
-            let mut d = draft.clone();
-            d.apply(edit, &self.balance).map(|()| d.form)
-        };
-        let Ok(after) = with(edit) else { return true };
-        let began = with(&edit.inverse()).unwrap_or_else(|_| draft.form.clone());
-        match (self.short_j(&began), self.short_j(&after)) {
-            (Some(was), Some(now)) => now <= was,
-            _ => true,
         }
     }
 }
@@ -386,25 +367,6 @@ mod tests {
         let Err(Refusal::Energy { short_j }) = preview.budget else { panic!("{:?}", preview.budget) };
         assert!(short_j > 0.0);
         assert!(preview.heat.is_none() && preview.duration_s.is_none());
-    }
-
-    #[test]
-    fn a_growth_past_what_storage_pays_is_not_allowed_and_shrinking_back_is() {
-        let mut s = docked();
-        let now = s.coordinate_time_s();
-        let full = s.ship.fitting().unwrap().capacity_j_at(now);
-        s.ship.drain(full - 0.2 * B.module_energy_j(), now);
-        let start = Start::of(&s).unwrap();
-        let d = Draft::new(Form::starting());
-        let data = *d.part(part(&d.form, Kind::Data)).unwrap();
-        assert!(start.allows(&d, &d.resize(data.id, data.volume_m3 * 1.1).unwrap()));
-        let huge = d.resize(data.id, data.volume_m3 * 20.0).unwrap();
-        assert!(!start.allows(&d, &huge));
-        // Already too big, as a reset leaves a draft when storage has run down: smaller is fine.
-        let mut big = d.clone();
-        big.apply(&huge, &B).unwrap();
-        let back = big.resize(data.id, data.volume_m3 * 10.0).unwrap();
-        assert!(start.allows(&big, &Edit { before: vec![*big.part(data.id).unwrap()], ..back }));
     }
 
     /// 30's anchor: one 5 ME vent into an idle starting field takes it to about 3 850 K.
