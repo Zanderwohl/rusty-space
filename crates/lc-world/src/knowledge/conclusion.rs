@@ -352,7 +352,9 @@ impl Knowledge {
                 let digested = file.digests.iter().find(|d| d.observer == owner).map_or(0, |d| d.samples as usize);
                 let next = (read + READ_EVERY).max((read as f64 * (1.0 + READ_GROWTH)) as usize);
                 // A full craft reads whatever it holds: reading is how it makes room.
-                ((full || self.analyzing.contains(subject)) && held > 0) || held + digested >= next
+                // A flux from a place or a craft has no search to grow, so only room or an order
+                // reads it: read on count, a long stare would lose its curve partway.
+                ((full || self.analyzing.contains(subject)) && held > 0) || (subject.star().is_some() && held + digested >= next)
             })
             .map(move |subject| (*subject, owner))
     }
@@ -362,6 +364,14 @@ impl Knowledge {
     pub fn read_log(&mut self, subject: Subject, observer: Witness, prior: &Prior, now_s: f64) -> Option<Conclusion> {
         self.unread.remove(&subject);
         let analyzing = self.analyzing.remove(&subject);
+        if subject.star().is_none() {
+            let file = self.files.get(&subject)?;
+            let through_s = file.series.iter().filter(|s| s.witness == observer).filter_map(|s| s.last()).map(|s| s.observed_s).reduce(f64::max)?;
+            if (analyzing || self.is_full()) && !file.retained {
+                self.consume(subject, observer, through_s, None);
+            }
+            return None;
+        }
         let belief = self.belief(subject);
         let light_age_s = belief.and_then(|b| b.light_age_s());
         let host = belief.and_then(|b| prior.host_like(b.band, b.luminosity_w()?));
@@ -494,14 +504,15 @@ impl Knowledge {
                 completeness,
                 planet,
             };
-            self.consume(subject, observer, last, digest);
+            self.consume(subject, observer, last, Some(digest));
             conclusion.discarded_s = Some(last);
         }
         self.concluded(subject, conclusion.clone());
         Some(conclusion)
     }
 
-    fn consume(&mut self, subject: Subject, observer: Witness, through_s: f64, digest: Digest) {
+    /// With no digest, what was consumed leaves nothing behind.
+    fn consume(&mut self, subject: Subject, observer: Witness, through_s: f64, digest: Option<Digest>) {
         let Some(file) = self.files.edit().get_mut(&subject) else { return };
         for series in file.series.iter_mut().filter(|s| s.witness == observer) {
             series.consume_through(through_s);
@@ -509,9 +520,10 @@ impl Knowledge {
         }
         self.unsaved
             .retain(|l| !(l.subject == subject && l.witness == observer && l.sample.observed_s <= through_s));
-        match file.digests.iter_mut().find(|d| d.observer == observer) {
-            Some(held) => *held = digest,
-            None => file.digests.push(digest),
+        match (file.digests.iter_mut().find(|d| d.observer == observer), digest) {
+            (Some(held), Some(digest)) => *held = digest,
+            (None, Some(digest)) => file.digests.push(digest),
+            (_, None) => {}
         }
         self.changed.insert(subject);
     }

@@ -122,7 +122,7 @@ impl Default for Mark {
 impl Mark {
     /// Everything learned at or before `at_s`.
     pub fn through(at_s: f64) -> Self {
-        Self { at_s, after: Some(Subject::Craft(i64::MAX)) }
+        Self { at_s, after: Some(Subject::Place([i64::MAX; 3])) }
     }
 
     fn key(&self) -> (At, Option<Subject>) {
