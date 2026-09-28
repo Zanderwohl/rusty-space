@@ -532,9 +532,9 @@ graph LR
 
 ### E4 · Exhaust heats neighbors
 
-- status: active card "E4 · Exhaust heats neighbors"
+- status: done #132
 - needs: E3, H5
-- touches: `crates/lc-server/src/emit.rs`
+- touches: `crates/lc-server/src/emit.rs`, `crates/lc-server/src/emit/drives.rs`, `crates/lc-server/src/emit/restate.rs`, `crates/lc-server/src/emit/tests.rs`, `crates/lc-server/src/emit/tests/drives.rs`, `crates/lc-server/src/server.rs` (the tick; a cut stated by the motion), `crates/lc-server/src/field.rs` (a collapse puts out drives), `crates/lc-server/src/persist.rs`, `crates/lc-server/src/director.rs` (kzinti, headless), `crates/lc-world/src/emit.rs` (`exhaust`), `crates/lc-world/src/escort.rs`, `crates/lc-world/src/motion.rs`, `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`
 - read: 31 §Exhaust lands on whatever is behind, §What arrives and its As built
 - deliver: every lit drive, and every thruster leg at `rcs_spread_rad`, lit as one of E3's emissions at `drive_spread_rad` between ignition and cutoff, in the face's spectrum. E3's fan-out then changes neighbors' intake and hands observers in the cone the drive's `Glare` at the retarded times of both; nothing here fans out on its own. Every emission, beam or drive, is restated as it goes, which a drive needs more than any beam since both ends of it are usually moving: a craft that flies into a cone whose light is already passing is fed and told `Illuminated` from when it enters, one that leaves stops, the share follows the receiver's distance and shadow, and a burn's power is stated again as the ship lightens, at the rocket law's throttle. (Folded in from E7, which E3 added.)
 - done when: a full ship inside the cooking distance behind a burn walks to collapse, one beside the burn feels nothing, an observer in the cone a light-year off is handed a `Glare` whose flux is `emit::flux_w_m2`, a craft flying across a lit beam is fed only while inside it from its light's arrival there, and a receiver behind a burning emitter is told the falling power at the retarded times it falls.
@@ -664,10 +664,10 @@ graph LR
 
 - status: active card "R11 · The field in the game"
 - needs: R6, F6, H7, H5
-- touches: `crates/lc-client/src/field.rs`, `crates/lc-client/src/uplink.rs`
-- read: 32 §The field, 30 §What an observer sees, §Collapse
-- deliver: the envelope meshed from F6's grid, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and the field's heat taken off the hull (`HullUniform.glow`, `hull::lit`'s emitted term) once the envelope draws it, so it is not counted twice; and hot spots from `Illuminated` once E3 exists; `--field-k` in the binary (32 §Photographing it), holding the player's field at a temperature; R6's collapse flash and debris where a craft collapsed, from the `kind::COLLAPSE` sighting as its light arrives, in place of a hull that only disappears, and the console naming the ship as its presence did rather than by id.
-- done when: a diving ship glows the color the field bar shows, and `--demo cascade` photographed partway shows the flash on the ship whose end's light is arriving and nothing on the ones whose light has not.
+- touches: `crates/lc-client/src/field.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-world/src/form/grid.rs`, `crates/lc-world/src/form/sdf.rs`, `crates/lc-world/src/fitting.rs` (`STARTING_ENVELOPE_M2`), `crates/lc-world/src/field.rs` (the anchor test), `crates/lc-client/src/preview.rs` (its pin), `lightcone/docs/29-ship-form.md`, `lightcone/docs/30-the-field.md`
+- read: 32 §The field, 30 §What the field is, §The anchors, §What an observer sees, §Collapse, 29 §What the server computes
+- deliver: the envelope an ovoid around the ship, not a skin that follows its outline: the smallest ellipsoid on the ship's axes (nose, beam, up) containing every part, grown by `envelope_margin`, in place of F6's union offset blended between its two nearest parts, with its area and volume in closed form, the extent read from it, `STARTING_ENVELOPE_M2` and the anchors re-solved on it, and 29 and 30 saying so with their tables recomputed; that envelope meshed, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and the field's heat taken off the hull (`HullUniform.glow`, `hull::lit`'s emitted term) once the envelope draws it, so it is not counted twice; and hot spots from `Illuminated` once E3 exists; `--field-k` in the binary (32 §Photographing it), holding the player's field at a temperature; R6's collapse flash and debris where a craft collapsed, from the `kind::COLLAPSE` sighting as its light arrives, in place of a hull that only disappears, and the console naming the ship as its presence did rather than by id.
+- done when: the starting form's field is an ellipsoid that contains every part with the margin and meets it on each axis, the three anchors hold to a part in a million on it, a diving ship glows the color the field bar shows, and `--demo cascade` photographed partway shows the flash on the ship whose end's light is arriving and nothing on the ones whose light has not.
 
 ### R12 · The cone in the game
 
@@ -716,7 +716,7 @@ graph LR
 
 ### R17 · A burn's power on the wire as `F c`
 
-- status: todo
+- status: active card "R17 · A burn's power on the wire as `F c`"
 - needs: R12
 - touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-world/src/flight.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`
 - read: 31 §The drive is the radiator, 32 §The exhaust cone

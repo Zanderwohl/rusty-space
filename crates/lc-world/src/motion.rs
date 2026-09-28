@@ -705,6 +705,19 @@ pub fn thrust_g(state: &ShipState, now_s: f64) -> f64 {
     if lit { accel_g } else { 0.0 }
 }
 
+/// Which way the thrust points at a coordinate time, world axes: unit, or zero where nothing is lit.
+pub fn thrust_at(state: &ShipState, now_s: f64) -> DVec3 {
+    match &state.motive {
+        Motive::Crossing(cruise) => cruise.thrust_at(now_s),
+        Motive::Transfer(transfer) => transfer.thrust_at(now_s),
+        Motive::Rendezvous(plan) => plan.thrust_at(now_s),
+        Motive::Consort(plan) => plan.thrust_at(now_s),
+        Motive::Escort(plan) => plan.thrust_at(now_s),
+        Motive::Boosting(boost) => boost.thrust_at(now_s),
+        Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => DVec3::ZERO,
+    }
+}
+
 /// Move a ship to a coordinate time.
 ///
 /// Read at the new time rather than integrated from the old one, in every branch — that is

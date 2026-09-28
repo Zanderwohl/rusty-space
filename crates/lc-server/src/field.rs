@@ -174,7 +174,7 @@ impl<J: Journal> Server<J> {
         deliveries: &mut Vec<Scheduled>,
     ) {
         let at_s = at_t as f64 * 1.0e-6;
-        self.put_out(id, at_t, events, deliveries);
+        self.put_out(id, at_t, true, events, deliveries);
         let Some(craft) = self.fleet.get_mut(id) else { return };
         craft.settle(at_s);
         let Some(fitting) = craft.fitting() else { return };

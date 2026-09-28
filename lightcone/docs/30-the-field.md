@@ -23,9 +23,14 @@ glows as it fills, and collapses when it is full. Where the energy it sheds goes
 ## What the field is
 
 - **Its shape is always derived from the hull.** It is the envelope of
-  [29-ship-form.md](29-ship-form.md): the hull's distance field offset by a margin and smoothed,
-  so it covers everything and follows the ship loosely. A player shapes the hull and gets the
-  field that covers it. A large or sprawling hull pays for its field automatically.
+  [29-ship-form.md](29-ship-form.md): the smallest ellipsoid on the ship's axes that contains
+  every part, grown by a margin. A player shapes the hull and gets the field that covers it. A
+  large or sprawling hull pays for its field automatically.
+- **An ellipsoid, so a Black field hides the design.** It never follows the hull's outline, so
+  from outside a Black ship is an ovoid of a given size and nothing more: where its engines point,
+  how much is storage or bay, and what it can do are all behind the field. An unfriendly or hostile
+  ship is a mystery until it goes Clear, burns, or is looked at in the infrared, where the field's
+  own heat still gives away how full it is but not how it is built.
 - **Everything that reaches the ship reaches the field first:** starlight, beams, the glow of a
   neighbor, a collapse. It absorbs a fraction set by its mode, Clear or Black, and reflects the
   rest. What it absorbs and can pass into storage it passes, and the rest stays as heat.
@@ -162,7 +167,8 @@ In this model a field is hurt only by what it absorbs, so **neither mode is simp
   defense.
 - **Sun-diving:** Black to fill. Clear once storage is nearly full, to stay close longer: a full Clear
   ship reaches its rated load at about 0.027 AU instead of 0.05.
-- **Hiding:** Black in visible light. Nothing hides a ship in the infrared.
+- **Hiding:** Black in visible light, which hides both the ship and its design behind the ovoid.
+  Nothing hides a ship in the infrared, though what shows there is the field's heat, not the hull.
 - **Flying near others:** Clear. It forgives other people's exhaust.
 
 **Switching takes `field_switch_s`**, one game day, about 200 ticks or ten real seconds. The new
@@ -420,6 +426,10 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
   its shadow toward the source, and `α` of that goes into `Q`. This is the isotropic case of the
   one emission path of [31](31-directed-energy.md#as-built): the spike rides the collapse event,
   whose payload carries it, and lands through the same landing as a beam.
+- **A neighbor's exhaust is one of those emissions too**: lit at ignition, said again as the burning
+  ship lightens or turns, and taken again by each receiver as it moves through the cone
+  ([31](31-directed-energy.md#as-built)). It is intake like a beam's, held between the instants it
+  is taken, and a full ship held inside the cooking distance walks to collapse on it.
 - **A cascade is time order and nothing else.** Each tick takes due collapses and due landings
   together, earliest first. A landing settles its receiver to the arrival and re-solves its
   collapse, and a collapse queues its own spike's landings, which may fall in the same tick.
