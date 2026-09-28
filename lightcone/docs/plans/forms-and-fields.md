@@ -82,6 +82,7 @@ graph LR
   F9["F9 The switch from loadout to form"]
   F10["F10 Solar from the shadow"]
   F11["F11 Mirrored parts count every copy"]
+  F12["F12 The envelope is an enclosing ellipsoid"]
   S1["S1 Refits with forms, end to end"]
   S2["S2 Presets"]
   H1["H1 The field's account"]
@@ -149,6 +150,7 @@ graph LR
   F9 --> F10
   F2 --> F11
   F4 --> F11
+  F6 --> F12
   K3 --> S1
   F7 --> S1
   F9 --> S1
@@ -231,6 +233,7 @@ graph LR
   E5 --> C9
   H3 --> C10
   C4 --> C10
+  F12 --> X1
   F10 --> X1
   H7 --> X1
   H8 --> X1
@@ -389,6 +392,15 @@ graph LR
 - deliver: `volume_m3` is per copy. `Form::copies`, valid or not; capacities, dry mass and the areal density's solve count every copy; `Transfer::of` takes a count of copies. 29 prices a mirror as a build or dismantle of the copy, not a move. F8's planner adopts it.
 - done when: a mirrored subtree holds, weighs and costs what the same parts built out by hand do.
 
+
+### F12 · The envelope is an enclosing ellipsoid
+
+- status: todo
+- needs: F6
+- touches: `crates/lc-world/src/form/grid.rs`, `crates/lc-world/src/form/sdf.rs`, `crates/lc-world/src/fitting.rs` (`STARTING_ENVELOPE_M2`), `crates/lc-world/src/field.rs` (the anchor test), `crates/lc-client/src/preview.rs` (its pin), `lightcone/docs/29-ship-form.md`, `lightcone/docs/30-the-field.md`
+- read: 29 §What the server computes, 30 §What the field is, §The anchors
+- deliver: the envelope is the smallest ellipsoid on the ship's axes (nose, beam, up) that contains every part, grown by `envelope_margin`, replacing the union's offset distance blended between its two nearest parts: the field is an ovoid around the ship, not a skin that follows its outline. Its area and volume in closed form, its distance field for anything that meshes or samples it, the extent read from it, `STARTING_ENVELOPE_M2` and the anchors re-solved, and 29 and 30 saying so with their tables recomputed.
+- done when: the starting form's envelope is an ellipsoid that contains every part with the margin to spare and touches the hull's extreme on each axis at the margin, the three anchors hold to a part in a million on it, and a Cluster pays for the ellipsoid around all its bodies rather than a skin around each.
 ## S: server
 
 ### S1 · Refits with forms, end to end
@@ -830,7 +842,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
+- needs: F12, F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
