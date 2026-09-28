@@ -3,7 +3,9 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void. Construction is drawn on the placeholders in the game, and truss and plating on the meshed hull under `--demo refit`; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
+**Status: built**, but for two things. The engine's emitter grid is lit over its whole region
+rather than on the faces an emission leaves through (§Materials by kind), and a distant ship is not
+drawn as a point (§The exhaust cone). [29-ship-form.md](29-ship-form.md) is what is drawn,
 [30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
@@ -36,7 +38,7 @@ drawn is the surface the server reasons about.
   or *blocky* (occupied cells drawn as cubes, for anyone who wants a brutalist ship). It changes
   extraction, not the shape, so it touches nothing the server computes.
 
-As built (`lc_client::hull_mesh`): one cell per four pixels along the ship's longest side, as a
+`lc_client::hull_mesh` meshes at one cell per four pixels along the ship's longest side, as a
 power of two from 16 to 256, held until the ideal is more than three quarters of a doubling away.
 Before extraction the grid is cleaned of every lattice square whose corners alternate in sign by
 turning one outside corner inside, so each cell face carries at most one segment of surface; a
@@ -56,11 +58,11 @@ until the new one lands. `cargo run -p lc-client --example mesh_void` photograph
 
 ![Consecutive frames across a remesh from 32 to 128 cells: the old mesh stays up until the new one lands](../images/mesh-remesh.jpg)
 
-### In the game
+### The hull in the game
 
-As built (`lc_client::ship_hull`, R10): every craft with a form is drawn this way, the player's
-from `Fitted` and everyone else's from the form its `Presence` stated, as its light left it. Only
-a craft stated with no form is still the ovoid. Meshes are shared between craft of one design at
+`lc_client::ship_hull` draws every craft with a form this way, the player's from `Fitted` and
+everyone else's from the form its `Presence` stated, as its light left it. A craft stated with no
+form is the ovoid of [07-rendering.md](07-rendering.md#ships-and-the-camera-that-looks-at-one). Meshes are shared between craft of one design at
 one band, and a hull measures its band from its own pixels on screen, so a distant ship is 16 cells
 and a close one up to 256.
 
@@ -71,7 +73,7 @@ and a close one up to 256.
   worked out on the async pool. A new form's roll is taken as its mesh lands, so the old shape
   never turns to the new one's roll.
 - **A refit is drawn over it.** `refit_hull` stands a craft's hull aside once a step's meshes are
-  up, the player's and anyone else's alike (R15). When the round is over, its last meshes stay until
+  up, the player's and anyone else's alike. When the round is over, its last meshes stay until
   the real hull is the form the round left, so the craft never flashes back to placeholders or to an
   earlier shape.
 - **Memory.** A vertex is 48 bytes and 24 of indices, held in the main world and on the GPU. The
@@ -81,7 +83,7 @@ and a close one up to 256.
 
 ![Two clients on one shard, each photographing the other: A rebuilt as Cluster, seen by B](../images/real-hull-b-sees-a.jpg)
 ![And B in the starting form, seen by A](../images/real-hull-a-sees-b.jpg)
-![Cluster by Saturn, which was placeholders between refits until R10](../images/real-hull-cluster.jpg)
+![Cluster by Saturn](../images/real-hull-cluster.jpg)
 ![Consecutive frames across remeshes in the game, 16 to 32, 32 to 64 and 64 to 128 cells: a burst with the camera dollying in](../images/real-hull-remesh.jpg)
 
 ### Details are sized in meters
@@ -95,7 +97,7 @@ At a distance where detail would be smaller than a pixel, it fades into a textur
 it, to stop the shimmer. A distance-field mesh has no UV coordinates, so materials are mapped
 **triplanar**, from world position in the ship's frame.
 
-As built (`em_render::hull_material`): each kind's graph is baked as one repeating tile of 64 m,
+In `em_render::hull_material` each kind's graph is baked as one repeating tile of 64 m,
 and the fade is the tile's mip chain, built on the CPU in linear light, so a window too small to
 see becomes its own average — a lit window's power spread over the pixel, not lost from it.
 `cargo run -p lc-client --example hull_void` photographs it on a sphere of any size.
@@ -121,21 +123,21 @@ scales by a power per region.
 | storage | dark and smooth, faint seams. The mass of the ship |
 | drone | hangar doors in rows, docks lit when drones are home |
 | living | window bands. Lit on the night side, where they are the brightest thing on the hull |
-| engine | an emitter grid on the open face, glowing with exhaust power. As built the grid is lit over the whole region, which is right in a void; which face is open is the form's, and R13 limits it there |
+| engine | an emitter grid on the open face, glowing with exhaust power. The grid is lit over the whole engine region for now, which is right in a void and wrong on a ship: which face is open is the form's |
 | data | fine dense panels |
 | mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
-| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over. The mesher classes each seam whole, from the two primitives' gradients along it, as a ring about the spar's axis or a line along it, and measures it as meters around at the seam's mean radius or meters along. A boom's end and a rib's edge are both in meters, and a seam that climbs spreads its heads only by the cosine of its climb. Chosen per vertex, the heads shear where the choice changes |
+| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. The mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over. The mesher classes each seam whole, from the two primitives' gradients along it, as a ring about the spar's axis or a line along it, and measures it as meters around at the seam's mean radius or meters along. A boom's end and a rib's edge are both in meters, and a seam that climbs spreads its heads only by the cosine of its climb. Chosen per vertex, the heads shear where the choice changes |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
 else, so they show on a night side and vanish in sunlight as they should.
 
-As built (R15, `lc_client::ship_hull::lamp_of`, `lc_client::hull::lamp`): each kind's lights are a
+Each kind's lights (`lc_client::ship_hull::lamp_of`, `lc_client::hull::lamp`) are a
 luminance and a color temperature, a blackbody scaled in V against white in full sun at 1 AU
 (40 000 cd/m²) and put through the band mapping as starlight is. A lit window is 300 cd/m² at
 3000 K, as are drone docks and a bay's decks at their own temperatures; the Mind's light is 90;
-the engine's grid is 2400 until R13 lights it at the exhaust's power. The girders' work lights are
-a floodlit yard's 2000 lux. Two things had to change for a night side to show them:
+the engine's grid is 2400, not yet the exhaust's power. The girders' work lights are
+a floodlit yard's 2000 lux. Two choices let a night side show them:
 
 - **A real hull's night fill is 0.3% of its starlight**, not the ovoid's 10%, which outshone a
   window on the hull's paint anywhere inside about 2 AU. Its own lights give its night side a shape instead.
@@ -195,7 +197,7 @@ with drone traffic streaming to it: a shipyard that is also the ship.
 - **Dismantle** runs a build's phases in reverse, from the far edge in: scaffold goes up, the
   fitting-out comes out, the plating comes off, which shows the truss, and then the truss is taken
   down. Point by point that is the build played backward; what is not a rewind is the drone traffic,
-  which carries loads home (R9).
+  which carries loads home.
 - **Move** slides the subtree from its old anchor to its new one along a smooth path over the
   step. No construction, and drones swarm the joint.
 - **Rebuild** is a dismantle of the whole part to nothing in the round's first phase, and a build of
@@ -205,7 +207,7 @@ with drone traffic streaming to it: a shipyard that is also the ship.
   ([29-ship-form.md](29-ship-form.md#cancel)), so the backward run is only the picture. A dismantling
   that storage could not pay back finishes at once, in the picture as in the ledger.
 
-As built (`lc_client::construction`): `Frame::at` takes the plan and the round's clock and reads
+`lc_client::construction`'s `Frame::at` takes the plan and the round's clock and reads
 `Plan::at` for what is finished and what is under way, so no timing is derived twice. A form partway
 through a round need not place, since a part may hang from one taken apart or not built yet; such a
 parent stands in from the start's form while dismantling and from the target's once moving and
@@ -217,13 +219,12 @@ way across the sliver from the joint; each point spends 30%, 15%, 15% and 10% of
 phases, and the rest is the front's travel, so the far edge finishes as the step does.
 
 On the placeholders the working part is solid at its volume at `t`. They draw a round only for the
-moment before its first step's meshes land. Until R15 a cage of tubes at the sliver's outer size stood
-for the truss there; it retired once every craft's round was drawn on the meshes.
+moment before its first step's meshes land.
 
-As built for truss and plating (`lc_client::refit_hull`, `lc_client::truss`): **while a craft has
-a round, the whole craft is drawn on the mesher and the hull material**, and the placeholders
-stand aside once the first step's meshes are shown. Plating is a mask on R3's material and means
-nothing on a Bevy primitive, so construction could not wait for R10. A
+Truss and plating (`lc_client::refit_hull`, `lc_client::truss`): **while a craft has a round, the
+whole craft is drawn on the mesher and the hull material**, and the placeholders stand aside once
+the first step's meshes are shown, since plating is a mask on the hull material and means nothing
+on a Bevy primitive. A
 step is meshed once, as it starts: the ship it leaves alone (`Frame::standing`, placed as a form, or as
 its bare copies where it hangs from a part not built yet), each copy it works on at its larger size,
 and each copy's truss. Within the step only uniforms and poses move: what hangs from a part being
@@ -251,7 +252,7 @@ so a fillet it has with the resized part is missing until the step is done.
   and plating, girders and what is behind them are drawn as their shares of the pixel, counting the
   three layers a line of sight crosses; a band of scaffolding kilometers wide is then a band of
   that color. The girders are safety yellow with their own work lights, so it reads as construction.
-- **Plating** is R3's reveal mask with the joint as its origin, a panel a lattice cell. **Fitting-out**
+- **Plating** is the hull material's reveal mask with the joint as its origin, a panel a lattice cell. **Fitting-out**
   fades the kind's material in over bare plating and lights its emitters. **Scaffold down** takes the
   outside girders away. A dismantle is the same uniforms with the fraction run backward, so it goes in
   reverse. Where nothing is up yet the working surface is discarded, and the ship it grows from shows.
@@ -269,12 +270,11 @@ Cluster preset would be the obvious target, and the planner refuses it from the 
 ![0.1: the data core being taken apart](../images/refit-10.jpg)
 ![0.2: further through the dismantle](../images/refit-20.jpg)
 ![0.3: the deck sliding aft](../images/refit-30.jpg)
-![0.5: the hull partway grown, on the placeholders and their cage before R8](../images/refit-50.jpg)
 ![0.9: the mirrored pods being built](../images/refit-90.jpg)
 
 ### Rounds in the game
 
-As built (`lc_client::construction`, R14): the game draws the player's round exactly as the demo does,
+`lc_client::construction` draws the player's round in the game exactly as the demo does,
 from a `Refit` on the coordinate clock rather than a frozen or looping one. `follow` takes each
 statement of the round in `Fitted`, a pure function of what was stated: a new recipe starts a `Refit`, the same one stated
 again changes nothing, and **a round that stops being stated before it is done was canceled** at the
@@ -297,17 +297,17 @@ frame the placeholders come back, and nothing is left over.
   end it draws the step finished until the next statement says what came next, at most a tick
   later. Knowing one step, it stands in a missing parent from only the step's two ends, so a part
   hanging from one the round has not built yet is not drawn. `refit_hull` draws that frame over the
-  craft's real hull as it draws the player's (R15), under the craft's own root, so it is placed and
-  rolled as its hull is. Its drones (R16) are drawn from the same frame, under the same root, on a
+  craft's real hull as it draws the player's, under the craft's own root, so it is placed and
+  rolled as its hull is. Its drones are drawn from the same frame, under the same root, on a
   clock that is the time its light left, counted from when its swarm was spawned.
 - The player's drones are placed in the ship's frame directly rather than under the placeholders' root,
-  which is gone while the hull meshes draw; under `--demo refit` since R8 they had not been drawn at
-  all. Their clock is the round's, from its start, in the game as in the demo.
+  which is gone while the hull meshes draw. Their clock is the round's, from its start, in the game
+  as in the demo.
 
 ![One client watching another's applied round, and closer: its drones at the frontier of the growing hull](../images/drones-other-craft.jpg)
 
 `--apply` pins the view back to the world once the round is under way, so a real refit can be
-photographed where it is drawn. From R15 it draws another craft's round too, light-delayed:
+photographed where it is drawn. Another craft's round is drawn too, light-delayed:
 
 ![Applied in the game and `--demo refit`, both from their night sides by Venus](../images/refit-game-and-demo.jpg)
 ![One client watching another's applied round: its hull growing in its truss](../images/refit-other-craft.jpg)
@@ -334,7 +334,7 @@ to keep in step, and no dependency such as `bevy_hanabi` to check against Bevy 0
 - **At a distance:** the swarm fades into a soft haze over the frontier before individual motes
   would fall below a pixel.
 
-As built (`em_render::drone_material`, `drones.wgsl`): the quads are one mesh, each carrying its
+In `em_render::drone_material` and `drones.wgsl` the quads are one mesh, each carrying its
 drone's index in a vertex, since Bevy's shared vertex buffers offset `vertex_index`. Docks and
 targets are fixed arrays in the material's uniform, which the host fills. A hash of the index picks
 each drone's role against two fractions, working and patrolling, so raising either adds drones
@@ -342,14 +342,14 @@ without reshuffling the rest. A working drone takes a new target every trip, swi
 docked. Haze is a mote's light spread over a disc about the spacing between drones, and never
 narrower than a few pixels, because a quad under a pixel lands on no pixel center and sparkles. The
 light is conserved, so the haze has the swarm's true brightness per pixel, as the hull does, and a
-sparse swarm makes a faint haze. The player's clock is seconds since the refit round began (R4's
-`t`), or since the view was spawned when idle. Another craft's is the time its light left, counted
+sparse swarm makes a faint haze. The player's clock is seconds since the refit round began (the
+construction's `t`), or since the view was spawned when idle. Another craft's is the time its light left, counted
 from when its swarm was spawned, so its traffic does not restart with the round: the client never
 learns when that began. The host takes that difference in `f64` and only then narrows
 it to the shader's `f32`, which resolves a clock since J2000 only to seconds.
 `crates/lc-client/examples/drones_void.rs` photographs it.
 
-What the material is told (`lc_client::drones`) is a pure function of R4's `Frame`: the player's
+What the material is told (`lc_client::drones`) is a pure function of the construction's `Frame`: the player's
 from its `Refit`, another craft's from `refit_hull::buildings`, the step its light shows. Each other
 craft has a swarm of its own, seeded by its id so no two move in step, and none while it has no round.
 Its mesh is the population rounded up to a power of two, shared by crafts of a size, rather than the
@@ -390,7 +390,7 @@ example and 150 km in the client, whose unit is an AU, and turned every mote int
 ![0.9: the mirrored pods being built](../images/drones-build.jpg)
 ![the starting form idle: a thin patrol and nothing else](../images/drones-idle.jpg)
 ![a GSV-sized form idle, its motes capped](../images/drones-gsv-idle.jpg)
-![`--demo refit` at 0.5 with its drones, which it had not drawn from R8 to R14](../images/refit-demo-drones.jpg)
+![`--demo refit` at 0.5 with its drones](../images/refit-demo-drones.jpg)
 
 ## The field
 
@@ -447,7 +447,7 @@ says.
 
 ![A collapse: the flash, then the debris at 40, 180 and 270 s of a 300 s afterglow](../images/field-collapse.png)
 
-### In the game
+### The field in the game
 
 `lc_client::field` draws every craft with a form so, under the root its hull hangs from, and every
 collapse whose light has arrived.
@@ -499,14 +499,12 @@ collapse whose light has arrived.
 ### The exhaust cone
 
 A photon drive's exhaust has no gas in it. Seen from the side, it is invisible; seen from inside, it
-is a blinding point. The game used to draw a reaction drive: a glowing column of fuel-rich gas 1.5
-hull lengths long, with soot lanes, heated by the jet power `½ F v`, marched 24 samples a pixel. None
-of that exists here, and R12 retired it. The cone that matters is thousands of times longer than any
+is a blinding point. So nothing is drawn as a column of glowing gas. The cone that matters is thousands of times longer than any
 hull: 21 km of courtesy radius behind a starting ship, 21 000 km behind a GSV. It is drawn as two
 things:
 
 - **The aperture.** The engine's open face glows as a blackbody at the flux leaving it, `F c` over the
-  aperture's area, not `½ F v`. It is white-hot at any real thrust, and it is what a burning ship looks
+  aperture's area. It is white-hot at any real thrust, and it is what a burning ship looks
   like from the side. A short near-field glow off the face, a few aperture widths, keeps the direction
   of thrust readable at a glance.
 - **The cone**, drawn as an indicator rather than as light: a long, faint cone along the exhaust, out
@@ -549,8 +547,7 @@ radius is measured to that place.
 `drive_spread_rad`. The thrusters spread wider and draw no cone. An emit flown as a burn is its
 own emission at its own spread, and reaches an observer inside it as `Glare`. Its face should glow
 all the same, since the face's temperature depends only on what leaves through it, and so should
-the bow's when a fore emission lights it. Neither does yet: a face lit by an emit waits on R19,
-which states each end's emission on the wire.
+the bow's when a fore emission lights it. Neither does yet.
 
 ![your own burn from beside: the bell's face white-hot, the cone running aft](../images/r12-own-beside.jpg)
 ![from behind, just off the axis](../images/r12-own-behind.jpg)
@@ -583,27 +580,20 @@ direction from the emitter to the observer, `cos θ = a · u` says which source 
 So a burn in the next system is a moving star that brightens by orders of magnitude as its cone
 sweeps over you, Doppler-shifted and aberrated at the craft's velocity as a star is. How the two
 sources meet at the cone's edge is still to settle, because `aperture_temperature_k` has the face
-radiate all of `P` while the cone also carries all of it. R18 settles it and records the answer here.
+radiate all of `P` while the cone also carries all of it.
 - God view may draw every beam's cone, as a debug overlay, like the causality lines of
   [07-rendering.md](07-rendering.md).
 
-## Temporary assets
+## Placeholders
 
-Before the mesher, the construction pass or the field shader exist, everything above has a
-placeholder, so the rest can be built and a refit visibly changes the ship straight away. Since R10
-the hull's placeholders are drawn only until a craft's first mesh lands, and a refit's only until
-its first step's meshes do:
+A craft is drawn as placeholders until its first mesh lands, and a round until its first step's
+meshes do (`lc_client::parts`):
 
 - **Each part as a Bevy primitive mesh**, scaled to its solved size: `Sphere` scaled for an
   ellipsoid, `Capsule3d`, `Cuboid` for a slab and for the Mind, `Cylinder`, `Torus`,
-  `ConicalFrustum`. No blends, and a slab's corners square.
+  `ConicalFrustum`. No blends, a slab's corners square, and spars uncut.
 - **A flat color per kind.**
-- **Construction as scale plus wireframe:** the growing part drawn in `BodyWireframeMaterial`
-  during the truss phase, crossfading to solid.
-- **Drones as instanced motes** on straight lines.
-- **The field as a fresnel sphere** around the bounds, tinted by temperature once there is one.
-- **Spars uncut**: the plain primitive. Retired in the game with the placeholders; the mesher cuts
-  the saddles and straps.
+- **A round's working part solid** at its volume at `t`.
 
 Until the grid gives a form its extent, the orbit camera frames the smallest sphere about the Mind
 holding the corners of the form's bounds, so its stops and standoff follow the form's size as the
@@ -615,7 +605,7 @@ ovoid's follow its length.
 ![the plate preset](../images/parts-plate.jpg)
 ![the spindle preset](../images/parts-spindle.jpg)
 
-Every placeholder is replaced independently. None of them is on the server's side of anything.
+None of them is on the server's side of anything.
 
 ## Photographing it
 
@@ -628,10 +618,10 @@ photographed:
 | `--view form` | the editor ([29-ship-form.md](29-ship-form.md)) |
 | `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point, or `--refit-from <fraction>` to run it from there. With `--form default*k` every part is `k` times larger |
 | `--demo-cam-at <x:y:z:m>` | orbit a point of the ship's frame from `m` meters, past the boom's stops. Aimed with `--demo-cam`; how the truss's pitch is photographed on a GSV |
-| `--demo collapse` | a ship collapsing beside two others, one close enough to follow it |
+| `--demo cascade` | five hot ships, and the first vents: each collapse kills the next |
 | `--field-k <kelvin>` | the player's field held at a temperature, as drawn, metered and on the bar. `--field-mode clear\|black` holds its shade, `--field-switch <progress>` a switch into it, and `--field-beam <watts>` a beam from beside the camera |
 
-Until the player has a field, the shader is photographed in a void: `cargo run -p lc-client
+The shader alone is photographed in a void: `cargo run -p lc-client
 --example field_void -- --field-k <kelvin> --mode clear|black`, around a stand-in hull, with its
 own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the example's module doc.
 
@@ -641,35 +631,12 @@ own `--burst`, `--spot`, `--switch` and `--collapse`. Its flags are in the examp
 
 | crate | new | changed |
 |---|---|---|
-| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` (the cone, and the aperture glow beside it) | `plume_material` retired in R12 |
-| `lc-client` | `hull_mesh.rs` (finishes, painting, caching) over `surface_nets.rs` (any field), `ship_hull.rs` (every craft's steady hull), `truss.rs`, `refit_hull.rs` (the construction overlay), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws only a craft with no form. `plume.rs` draws the aperture glow at `F c` and the cone, and `map_cone.rs` the cone's lines |
+| `em-render` | `hull_material` (triplanar, kind regions, reveal mask, living lights), `field_material`, `drone_material`, `exhaust_cone_material` (the cone, and the aperture glow beside it) | |
+| `lc-client` | `hull_mesh.rs` (finishes, painting, caching) over `surface_nets.rs` (any field), `ship_hull.rs` (every craft's steady hull), `truss.rs`, `refit_hull.rs` (the construction overlay), `construction.rs` (the function of recipe and `t`), `drones.rs`, `field.rs` | `hull.rs` draws only a craft with no form. `parts.rs` draws the placeholders. `plume.rs` draws the aperture glow at `F c` and the cone, and `map_cone.rs` the cone's lines |
 | `lc-client/assets` | texture-graph graphs per kind. `field.wgsl`, `hull.wgsl`, `drones.wgsl`, `exhaust_cone.wgsl`, `aperture_glow.wgsl` | |
 
 Materials go in `em-render` because nothing in them is specific to Lightcone. A hull with regions
 and a reveal mask is as much Exotic Matters' as anyone's.
-
-## Order of work, across 29 to 32
-
-Each step leaves the game playable and adds one thing a player can see or feel.
-
-1. **The form replaces the loadout.** `lc_world::form`: parts, the Mind, densities, the starting
-   form. The planner plans rounds. `Form` on the wire and in saves. On the client, the placeholder
-   meshes, construction as scale and wireframe, and instanced drones. Until the editor exists, the
-   refit window is a list of parts with snapped size fields, and adds parts at default placements.
-   A refit visibly changes the ship.
-2. **The form has geometry, and an editor.** The grid, the shadow table, the envelope and moments.
-   Solar reads the shadow. Hull mass by area. The editor, as a third view, with the budget and
-   snapping.
-3. **The field.** The heat account, collapse and proximity. `HULL_K` retires. Photometry of fields.
-   The field shader, and the HUD's countdown.
-4. **Directed energy.** Exhaust from heat, `Order::Emit`, beams fanned out and delivered, reciprocity,
-   the gain moved onto stars, radio charged. The emit window.
-5. **The real hull.** Surface nets, the truss and plating passes, materials by kind, scale-true
-   detail. The placeholders go.
-6. **Later:** bays and what is built in them, air under the field, parks, Dyson swarms.
-
-Step 3 comes before 4 because heat has to exist before anything can dump it, and proximity heating
-from a collapse needs no beams.
 
 ## Open
 

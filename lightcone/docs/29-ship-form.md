@@ -2,10 +2,10 @@
 
 What a ship is made of, what shape it is, and what it costs to change either.
 
-**Status: partly built.** It replaces the loadout of [19-ship-fitting.md](19-ship-fitting.md):
-**a ship is its parts**, and each part's volume is how much of its kind the ship has. 19's energy,
-mass and drive rules stand. A craft's account is kept on its form (§What a craft reads), and the
-wire and saves carry the form (§Protocol and persistence).
+**Status: built**, but for the editor's undo and redo (§Undo and redo) and its presets panel
+(§Your own presets), whose shard side is built. **A ship is its parts**, and each part's volume is
+how much of its kind the ship has. [19-ship-fitting.md](19-ship-fitting.md) is the account kept on
+them: energy, mass and the drive.
 [30-the-field.md](30-the-field.md) and [31-directed-energy.md](31-directed-energy.md) are what the
 shape does in play, and [32-ship-rendering.md](32-ship-rendering.md) is how it is drawn.
 
@@ -37,8 +37,9 @@ machines might round differently. Each part alone is exact.
 
 ### Kinds
 
-Every kind but the Mind turns volume into a capacity at a density. Each density is 19's per-module
-value over its 392 699 m³ slot.
+Every kind but the Mind turns volume into a capacity at a density. Each density is what one slot of
+that kind held in 19's [reference ship](19-ship-fitting.md#the-reference-ship), over the slot's
+392 699 m³.
 
 | kind | per cubic meter | mass | notes |
 |---|---|---|---|
@@ -142,7 +143,7 @@ the tube therefore clears the surface by the parent's sag across the major radiu
 nowhere on a convex one. A negative `standoff` or a `blend` closes the gap. Seating the tube on the
 surface itself has no closed form for a general parent. Tilt pivots the child about its foot, so a tilted boom leans from where it is
 bolted on rather than sliding its base across the parent. Reach is also the unit of `standoff`,
-because it is the length the placement is already made of: F1's scale means a different dimension on
+because it is the length the placement is already made of: the solved scale means a different dimension on
 each primitive, and the extent along the normal would change under tilt.
 
 The Mind's frame is the ship's frame: its axis is the nose, `lc_world::motion::facing`. Space is
@@ -192,7 +193,7 @@ engine-free, and is **stated by the server in `Fitted`**, as `Balance` already i
 computes the same numbers for its preview and takes the server's when they arrive.
 
 **Capacities** are sums of volume × density per kind, with every copy of a mirrored part counted. They
-replace everything 19 read from the loadout.
+are everything the account reads of what a ship has.
 
 **The distance field** is `form::sdf::Sdf`, built once from a form and then evaluated at any point in
 the ship's frame, negative inside. Every primitive's distance is exact except the ellipsoid's, which
@@ -266,11 +267,10 @@ anchored on the same hull: the 500 m ovoid turns at π/60 rad/s. The starting fo
 that ovoid and turns by its length. The flip's axis is the slower of those across the nose, since
 a flip is about one of them and the nose never turns about itself.
 
-A process builds each form's grid once: every ship today is the starting form, so a shard fitting a
-hundred builds one. A step partway through a round, whose form may not place, keeps the last
+A process builds each form's grid once, so ships of one design share it: a shard with a hundred
+starting ships builds one. A step partway through a round, whose form may not place, keeps the last
 measured extent and gyration until it finishes. The starting form's extent is **731 m**, the
-envelope around 545 m of parts, where its
-twenty slots made 19's ship 500 m long.
+envelope around 545 m of parts, where the reference ship's twenty slots made a 500 m ovoid.
 
 **The shadow handles concave shapes.** A stack of plates shades
 itself and collects about what one plate would. A ship spread out collects more and turns more
@@ -284,7 +284,7 @@ reproduce that formula to within the grid's resolution.
 Each copy of a part carries structure at `hull_areal_density` per square meter of **its own surface**, from its
 primitive's closed-form area (Thomsen's approximation for an ellipsoid), again ignoring overlaps. Flattening buys
 shadow, radiating area and room on the surface, and pays for them in mass, so in acceleration.
-`hull_areal_density` is anchored so the starting form weighs what 19's starting ship does. The
+`hull_areal_density` is anchored so the starting form weighs what the reference ship does. The
 starting form and the built-in presets use no mirrors, so how a mirror is counted cannot move the
 anchor.
 
@@ -425,8 +425,8 @@ Flying and refitting still exclude each other, as in 19.
 - **drones**, a capsule under the keel: 7.85 × 10⁵ m³
 - **living**, a slab across the dorsal face, and **data**, a small capsule forward: 3.93 × 10⁵ m³ each
 
-Each volume is 19's module count of its kind times the 392 699 m³ slot, so the form holds exactly
-what 19's starting ship does. Placed, it is about 545 m long, 200 m across and 190 m deep:
+Each volume is the reference ship's slots of its kind times the 392 699 m³ slot, so the form holds
+exactly what the reference ship does. Placed, it is about 545 m long, 200 m across and 190 m deep:
 
 - the storage is 335 × 201 × 67 m;
 - the engine flares aft, 116 m wide where it meets the hull and 175 m at its open face, which is the
@@ -436,9 +436,9 @@ what 19's starting ship does. Placed, it is about 545 m long, 200 m across and 1
 - the living slab is 145 m across the beam, 96 m fore and aft and 29 m deep;
 - the data capsule, 124 m long, is sunk into the nose.
 
-`hull_areal_density` is 1 215 kg/m², so this form weighs 19's dry starting ship, 2.65 × 10⁹ kg: every
-module, the data module at half, and 19's frame over all twenty slots, the five empty ones included.
-Its one bell fires aft, so it pulls 5 g full and 13.8 g empty, as 19's ship did.
+`hull_areal_density` is 1 215 kg/m², so this form weighs the reference ship dry, 2.65 × 10⁹ kg: every
+slot, data at half, and the frame over all twenty, the five empty ones included. Its one bell fires
+aft, so it pulls 5 g full and 13.8 g empty.
 
 The anchors of 20 and 30 are derived from this form.
 
@@ -541,7 +541,7 @@ three phases, progress, and Cancel.
 - **The ledger reads the plan the shard's recipe solves to**, `Fitting::refit`, on the client's
   clock, never the draft: budget (`ledger::Budget`), each phase with its steps, progress through
   the round from `Plan::at`, and Cancel. With no round it says whether the draft differs, or what
-  was refused. `Budget::of` is the one computation, and the editor's live budget (C4) calls it on a
+  was refused. `Budget::of` is the one computation, and the editor's live budget calls it on a
   round solved from the draft.
 - **The vent is shown as the field's peak temperature**, and after which step it peaks, from
   `preview::Heat` (see §The budget). Apply asks a second question when the vent would collapse the
@@ -725,7 +725,7 @@ volume above the minimum.
 ### What else it shows
 
 - **The draft**, solid, each changed part tinted with its mark from [18-ui-style.md](18-ui-style.md):
-  build, dismantle, shrink, move or rebuild. The marks are F8's own diff, `refit::rounds::changes`. A
+  build, dismantle, shrink, move or rebuild. The marks are the planner's own diff, `refit::rounds::changes`. A
   shrink is a dismantle-phase step on a part that stays, so it is marked apart from a part removed.
 - **The ship as it is**, faint, wherever the draft differs from it, on **show current**: hovered to
   look, pressed to keep it on. Hidden otherwise. Nothing hangs from it either way.
@@ -787,8 +787,8 @@ photographs it, and `--form <preset>` stages a draft.
 
 ## Protocol and persistence
 
-- `Loadout` is removed from the wire and from saves. `Order::Refit { target: Form }`, refused under
-  way and while a round runs; `CancelRefit` runs §Cancel.
+- `Order::Refit { target: Form }`, refused under way and while a round runs; `CancelRefit` runs
+  §Cancel.
 - The account on the wire and in a save, `lc_proto::Fitting`, holds the settled form and the round
   under way as its recipe, `lc_proto::Round`: both forms, the stored energy it began with and when.
   Both ends solve the recipe to the same plan, so a round survives a restart and a client runs the
@@ -827,9 +827,8 @@ photographs it, and `--form <preset>` stages a draft.
 
 ## Balance
 
-`Balance` loses the per-module fields and `slot_volume_m3` (F9), and gains the fields below. 19's
-slot survives as `form::presets::SLOT_M3`, the volume a module-energy and the first guesses below
-are quoted per.
+The form's settings in `Balance`. 19's slot is `form::presets::SLOT_M3`, the volume a module-energy
+and the first guesses below are quoted per.
 
 | setting | first guess | meaning |
 |---|---|---|
@@ -856,8 +855,8 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the plan it was part of, and reads the step under way from them |
-| `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form and the refit step under way as its light left |
+| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the plan it was part of, and reads the step under way from them |
+| `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form and the refit step under way as its light left |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |
 | `lc-client` | `form_view.rs`, `form_panel.rs`, `snap.rs`, `form_history.rs`, `presets_panel.rs` | `ui.rs` gains the view mode. The refit window becomes the ledger |

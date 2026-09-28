@@ -91,7 +91,8 @@ Always on screen, never in a panel a player can close:
 |---|---|
 | coordinate time, and the ship's own | `T + 14.62 years` beside `T' + 12.08 years` |
 | distance to the selected target, which is the age of its light | `Proxima Centauri — 4.24 ly` |
-| stored energy, for a ship with modules | `ENERGY`, a bar, `23.4 / 30.0 ME` |
+| stored energy, for a ship with a fitting | `ENERGY`, a bar, `23.4 / 30.0 ME` |
+| the field's heat, beside it | `FIELD`, a bar in the color of its glow, `3 240 K +1.20 ME/yr — collapse in 4:10`; see [30-the-field.md](30-the-field.md#the-field-bar) |
 | what the band mapping is | `NATURAL` |
 
 If a player forgets they are looking at the past, the game has failed at the only thing it is
@@ -123,11 +124,12 @@ with.
 | communications | `C` | one conversation at a time, chosen from a list of everyone heard from and everyone in sight |
 | debug | `F3` | below |
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
-| refit | `R` | module counts and hull slots as sliders, what applying them would cost and take, and the refit under way. See [19-ship-fitting.md](19-ship-fitting.md) |
+| refit | `R` | the ledger: what the ship holds, and the round under way with Cancel. Refits are made in the ship editor. See [29-ship-form.md](29-ship-form.md#apply-and-the-ledger) |
 | dev actions | `F5` | energy for the ship. Development only; a shard refuses it |
 
-The map is not in that table. It is the **other mode of the main view** — see below — and `M`
-switches to it rather than opening anything.
+The map and the ship editor are not in that table. They are the **other modes of the main view**
+— see below and [29-ship-form.md](29-ship-form.md#the-editor) — and `M` and `H` switch to them
+rather than opening anything.
 
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.
@@ -655,7 +657,9 @@ rather than added and later removed.
 
 **A mode of play, not an accessory.** The main view under the readout is either the world seen
 through the ship's camera or the map, and `M` switches between them. Windows float over either
-one, so a curve or a conversation can be read with the map behind it.
+one, so a curve or a conversation can be read with the map behind it. The ship editor, on `H`, is
+a third mode that takes the whole view and has no corner square
+([29-ship-form.md](29-ship-form.md#the-editor)).
 
 **Whichever mode is not in force is the square in the bottom left**, and a click on the square
 swaps them. It is in the same place in both, which is what makes the click one control rather

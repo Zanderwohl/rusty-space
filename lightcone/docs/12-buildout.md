@@ -376,8 +376,8 @@ system has. The starting ship's data module took a living module's slot, so its 
 
 **Before:** 11c.
 
-**Deliver:** the data module and knowledge fullness — a `Loadout` count, `data_per_module`, and
-logs that stop recording when full. A processing pass that turns a subject's log into conclusions — hypotheses with
+**Deliver:** data and knowledge fullness — a craft's data capacity, which is now its data parts'
+([29-ship-form.md](29-ship-form.md#kinds)), and logs that stop recording when full. A processing pass that turns a subject's log into conclusions — hypotheses with
 probabilities, parameters and evidence — and keeps sufficient statistics while deleting the
 samples consumed. A per-subject "retain raw" flag. Conclusions travel in reports.
 

@@ -941,7 +941,6 @@ pub fn refused(reason: Refusal) -> String {
         // message like any other — which is to say, it takes as long as the light does.
         Refusal::NoKey => "no key for them yet; send yours and ask for theirs".into(),
         Refusal::NothingNew => "nothing new to report since the last one".into(),
-        Refusal::NotBuilt => "this shard cannot do that yet".into(),
         Refusal::Switching => "the field is already switching".into(),
         Refusal::NoAperture => "engines at one end only: emit fore or aft".into(),
         Refusal::OverRating => "more power than those apertures are rated for".into(),

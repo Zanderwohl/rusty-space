@@ -887,9 +887,6 @@ pub enum Refusal {
     /// A report was asked for and this craft has learned nothing since it last reported to that
     /// recipient. Appended last.
     NothingNew,
-    /// The shard does not do this yet. X1 of `lightcone/docs/plans/forms-and-fields.md` deletes
-    /// it, once every order that answers with it is built.
-    NotBuilt,
     /// A field switch is already running.
     Switching,
     /// Both apertures asked of a ship with engines at one end only.
@@ -1710,7 +1707,6 @@ mod tests {
                     lit: Vec::new(),
                 }),
             },
-            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NotBuilt },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Switching },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoAperture },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::OverRating },

@@ -376,7 +376,7 @@ pub const SAVE_PRESET: &[u8] = &[
 
 /// `Outbound::Refused { ship_id: 42, reason: Form(Malformed { part 3, tilt }) }`
 pub const REFUSED_FORM: &[u8] = &[
-    5, 84, 15, 4, 3, 8,
+    5, 84, 14, 4, 3, 8,
 ];
 
 /// `Inbound::DeletePreset { "Plate" }`

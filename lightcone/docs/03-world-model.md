@@ -232,7 +232,9 @@ round-trip latency to another system makes direct control impossible.
 |---|---|
 | worldline | piecewise analytic arcs, see [01-spacetime.md](01-spacetime.md) |
 | proper time | accumulated, drives onboard rates |
-| delta-v budget, thrust, mass | standard rocket parameters |
+| form | parts whose volumes are its capacities, see [29-ship-form.md](29-ship-form.md) |
+| stored energy, mass, thrust | a photon rocket whose exhaust is its stored energy, see [19-ship-fitting.md](19-ship-fitting.md) |
+| field | the heat it holds and its shade, see [30-the-field.md](30-the-field.md) |
 | orders | a program, not a queue of clicks |
 | known-world snapshot | what this ship has actually observed |
 
@@ -246,6 +248,12 @@ correct beliefs about a third system. The data model must permit that: there is 
 "current state of system X" that a client reads. There is only "what this observer has
 received about system X, and when".
 
+A ship is its **form**: a tree of parts, each one primitive of one kind, rooted at a Mind. How much
+of each kind the parts hold is what the ship can store, build, drain and push, and nothing else
+counts what a ship has. Changing the form is a **refit**, a round of dismantling, moving
+and building paid for in energy. Around every ship is its **field**, an ellipsoid enclosing the
+parts, which collects, radiates and shields, and destroys the ship when it overfills.
+
 ## Resources
 
 Sandbox extraction. Deposits are per-body, generated with the system, depleted by events.
@@ -254,9 +262,13 @@ output, and it is consumed by fabrication, propulsion and transmission. Transmis
 is drawn from the same budget as everything else, which is what makes broadcasting a real
 cost rather than a free action.
 
-Ship modules, stored energy and what propulsion and construction cost are in
-[19-ship-fitting.md](19-ship-fitting.md). A player's ship stores energy as mass and spends it as a
-rocket whose exhaust is that energy; nothing yet collects any.
+A player's ship stores energy as mass and spends it as a rocket whose exhaust is that energy
+([19-ship-fitting.md](19-ship-fitting.md)). Its field collects starlight into storage
+([20-solar-power.md](20-solar-power.md), [30-the-field.md](30-the-field.md)), and what it cannot
+store is heat. Energy moves between ships only as light: a drive's exhaust, a beam, a heat dump
+and an attack are one emission, aimed and spread differently
+([31-directed-energy.md](31-directed-energy.md)). Building and taking apart parts is the
+fabrication ([29-ship-form.md](29-ship-form.md#refits)).
 
 ## Von Neumann probes
 

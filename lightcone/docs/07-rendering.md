@@ -906,13 +906,12 @@ affordance; `--shot` does it.
 **Decided: third person, on an orbit camera.** A ship is the thing a player owns and the thing
 they are told about other people, and neither is visible from inside it.
 
-A hull is one ovoid at a size: five long by three across by one deep, from
-`lc_world::craft::BEAM_PER_LENGTH` and its neighbor, over a designed range of five hundred
-meters to fifty kilometers. It is drawn by the resolved-body material with the contrast set to
-zero, which turns the generated surface off and leaves a flat gray lit by the system's own star
-and metered into the same exposure as everything else. Shape is a constant rather than a field
-because nothing yet lets one craft differ from another in it; the *length* is on the wire, so
-ships varying in size costs no protocol version.
+A craft with a form is drawn as its hull, meshed from the form's distance field in the hull
+material, inside its field's envelope: [32-ship-rendering.md](32-ship-rendering.md). A craft with
+no form, as a scene stages, is one ovoid at a size: five long by three across by one deep, from
+`lc_world::craft::BEAM_PER_LENGTH` and its neighbor, over a designed range of five hundred meters
+to fifty kilometers, drawn by the resolved-body material with the contrast set to zero. Either is
+lit by the system's own star and metered into the same exposure as everything else.
 
 **The nose follows the drive, not the velocity.** `lc_world::motion::facing` reads what the
 current motive is *aiming* at — see `lc_world::attitude` — which is the thrust where there is
@@ -922,8 +921,9 @@ flip and burn, so for its whole second half the ship points back the way it came
 traveling forward at a large fraction of `c`.
 
 **The turn is not instant, and it is not free.** A hull swings its nose at
-`attitude::rate_rad_s`, which goes as `1/L` — a five-hundred-meter ship flips in a minute and a
-fifty-kilometer one takes nearly two hours. So `flight::Cruise` holds the drive out between the
+`attitude::rate_rad_s`, which goes as one over the form's radius of gyration
+([29-ship-form.md](29-ship-form.md#what-a-craft-reads)) — the starting ship flips in about a minute
+and one a hundred times its size in nearly two hours. So `flight::Cruise` holds the drive out between the
 boost and the brake for at least `Drive::flip_s`, and the ship covers that ground at its peak
 speed. It also comes about *before* it lights anything: a crossing begins with a `Phase::Turn`
 in which the ship drifts at whatever it had, facing round to its first burn. A ship told to go
@@ -995,8 +995,7 @@ course to a ship — and a selected craft draws its exhaust cone wherever it is.
 
 A photon drive's exhaust has no gas in it, so a burn is drawn as its open faces glowing and, for
 the burns that matter to you, the cone it cooks: [32-ship-rendering.md](32-ship-rendering.md)
-§The exhaust cone. Until R12 the game drew a reaction drive instead, a marched column of sooty gas
-heated by `½ F v`; that shader, its churn and the reasoning that belonged only to it are gone.
+§The exhaust cone.
 
 What carried over is the face's light. Its temperature is **forced**: all of the drive's `F c`
 leaves through the face, and a blackbody of that area radiating it has exactly one temperature,

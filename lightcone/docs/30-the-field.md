@@ -1,24 +1,19 @@
 # The field
 
-Every ship is wrapped in a field. It is the collector, the radiator and the shield, and when it
+Every ship sits inside a field. It is the collector, the radiator and the shield, and when it
 fails, the ship is gone and the whole system sees it happen.
 
-**Status: in the account.** The closed forms are `lc_world::field`, with their anchors derived in
-`Balance::DEFAULT`. A fitting settles `Q` beside stored energy (`lc_world::fitting::heat`), `Fitted`
-carries it and a checkpoint keeps it. A field is Clear, Black or Auto, and a new ship starts in Auto
-(`lc_world::fitting::mode`, `lc_server::field`); a completed switch is an event. A field that
-reaches `Q_max` collapses (`lc_server::field`); its spike does not yet reach neighbors. A ship
-whose storage has run down to what its motive has committed pays only as much of the living drain
-as conversion brings in, and the rest makes no heat, so an empty ship far from a star cools below
-400 K. A refit's transfers and a burn's spending are draws on storage inside the account, cut where
-each refit step begins and ends, so conversion refills what a build takes out as it goes, and the
-drain and the rating change where a step ends. An observer sees a ship by its field
-(`lc_world::glow`): `1 − α` of the starlight and σT⁴A of its own heat, as its light left it; the fixed
-400 K hull, `HULL_K`, is gone. It turns the hull collectors of
-[20-solar-power.md](20-solar-power.md) into the field receiving starlight. The field is part
-Culture and part the Langston Field of *The Mote in God's Eye*: a skin that absorbs what hits it,
-glows as it fills, and collapses when it is full. Where the energy it sheds goes is
-[31-directed-energy.md](31-directed-energy.md).
+**Status: built.** The closed forms are `lc_world::field`, with their anchors derived in
+`Balance::DEFAULT`; the account is `lc_world::fitting::heat`, settled beside stored energy; modes,
+collapse and proximity are `lc_server::field`; what an observer sees is `lc_world::glow` and
+`lc_world::afterglow`; and the client draws the field and its bar (`lc_client::{field, field_bar}`).
+One thing here is not built: the flight panel does not yet show a dive's equilibrium temperature
+(§Elsewhere).
+
+The field turns the hull collectors of [20-solar-power.md](20-solar-power.md) into the field
+receiving starlight. It is part Culture and part the Langston Field of *The Mote in God's Eye*: a
+skin that absorbs what hits it, glows as it fills, and collapses when it is full. Where the energy
+it sheds goes is [31-directed-energy.md](31-directed-energy.md).
 
 ## What the field is
 
@@ -202,7 +197,7 @@ at every change of input. A burst that jumps past a threshold starts the switch 
 still takes `field_switch_s`, so Auto is posture too, not a reflex: it cannot answer a beam in time,
 only the heat the beam leaves behind.
 
-### As built
+### How modes are kept
 
 - **The mode, the shade and any switch are in the account**, saved and sent with it as `Field`. The
   new absorptivity applies from the switch's `done_s` in every read, however the account is settled.
@@ -233,7 +228,7 @@ is. All three assume a Black field, since Black is the mode that collects.
 
 | anchor | sets |
 |---|---|
-| **The starting ship, idle and far from any star, sits at 400 K.** Its living drain alone holds it there, so `HULL_K`'s value is derived rather than set | `q_idle` |
+| **The starting ship, idle and far from any star, sits at 400 K.** Its living drain alone holds it there, so a hull's resting temperature is derived rather than set | `q_idle` |
 | **The starting ship's field holds 10 ME** from empty to collapse. The starting ship is [29-ship-form.md](29-ship-form.md)'s starting form | `field_capacity`, the capacity per unit envelope area |
 | **A full starting ship broadside at 0.05 AU from a Sun-like star is exactly at its rated load**: it would reach collapse only in the limit | `τ` |
 
@@ -248,9 +243,7 @@ The starlight in the third anchor falls on the shadow table's broadside, with th
 [20-solar-power.md](20-solar-power.md)'s anchor gives on that broadside, and the gain now sits on
 the star's output. Since that
 anchor fixes what the starting ship collects, the broadside cancels: `τ` is the same whichever
-shadow it is worked on, and agrees with the old ovoid's collection. The gain has to be solved on the same
-broadside the starlight falls on: the old gain on the new, smaller broadside would give
-2.79 × 10⁶ s and a field failing at 4 126 K.
+shadow it is worked on, as long as the gain is solved on the same broadside the starlight falls on.
 
 Capacity per unit area is the same for every ship, so **every field fails at the same
 temperature**. Here that is about 4 600 K, a yellow-white glow. The rated load, the sustained
@@ -330,7 +323,7 @@ How it looks from the next system, taking the spike as one second long:
 A war lights up its neighbors' skies **in order of their distance**, for years, each system
 seeing it replayed as the light passes.
 
-### As built
+### How a collapse is solved
 
 - **The instant is solved, not stepped.** `Fitting::collapse_s` walks the account's stretches from
   its settlement, fill and empty storage splits, the exhaust's floor and refit steps included, and
@@ -348,7 +341,7 @@ seeing it replayed as the light passes.
 - **The event** is `kind::COLLAPSE`, stamped at the instant and where the ship was, carrying a
   `Released`. It goes through the journal like a burn. Its power is the spike taken as a second
   long, which is what an instrument's inverse square reads; the spike's energy lands on neighbors
-  as [Proximity](#as-built-1) says.
+  as [Proximity](#how-proximity-is-delivered) says.
 - **The afterglow** (`lc_world::afterglow`) is the other `1 − collapse_spike_fraction` of `E`, from
   where the ship was, as a blackbody of fixed area whose luminosity falls linearly to nothing over
   `collapse_afterglow_s`. So its temperature falls from the field's limit, about 4 600 K, as
@@ -399,8 +392,7 @@ per unit area, which is how hot it already is.
 | ×100, 57 km | 130 km | 290 km |
 
 The ships are the starting form and it ten and a hundred times over, and the victim is broadside to
-the spike. The radii were 190 m, 5.4 km and 170 km before [F10](plans/forms-and-fields.md) gave
-the starting form its own shadow, which is smaller than the old ovoid's.
+the spike.
 
 A Clear victim's radius is √0.3 of these, a little over half. So at the defaults, **ships in
 company are safe and ships in contact are not**. Docked ships, tight
@@ -417,17 +409,17 @@ visible for as long as it takes light to cross it.
 Delivery is the existing light-delay machinery. A collapse's spike reaches each neighbor at the
 retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade spreads at c.
 
-### As built
+### How proximity is delivered
 
 - **The spike rides the collapse event's fan-out.** Every delivery the event is scheduled to a
   fitted craft is queued as a burst at that delivery's arrival, carrying the spike's energy and
   where it left. On landing it takes `A_shadow / (4π d²)` from where the receiver is then, onto
   its shadow toward the source, and `α` of that goes into `Q`. This is the isotropic case of the
-  one emission path of [31](31-directed-energy.md#as-built): the spike rides the collapse event,
+  one emission path of [31](31-directed-energy.md#one-path-for-every-emission): the spike rides the collapse event,
   whose payload carries it, and lands through the same landing as a beam.
 - **A neighbor's exhaust is one of those emissions too**: lit at ignition, said again as the burning
   ship lightens or turns, and taken again by each receiver as it moves through the cone
-  ([31](31-directed-energy.md#as-built)). It is intake like a beam's, held between the instants it
+  ([31](31-directed-energy.md#one-path-for-every-emission)). It is intake like a beam's, held between the instants it
   is taken, and a full ship held inside the cooking distance walks to collapse on it.
 - **A cascade is time order and nothing else.** Each tick takes due collapses and due landings
   together, earliest first. A landing settles its receiver to the arrival and re-solves its
@@ -447,8 +439,8 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
 - **A shadow toward a neighbor** is read off the shadow table at the roll the hull presents to its
   star, the only roll a hull holds.
 - **`--demo cascade`** is five hot ships ten times the starting size, 23 km apart. The first vents
-  and each spike kills the next. Nothing draws a collapse yet: a wreck disappears when the light of
-  its end arrives, and the console says it collapsed.
+  and each spike kills the next. Each collapse is drawn as its light arrives, a flash and cooling
+  debris ([32-ship-rendering.md](32-ship-rendering.md#the-field-in-the-game)), and the console says it collapsed.
 
   ![`--demo cascade`: five ships running hot](../images/h5-cascade-before.jpg)
   ![and partway through: the first two are gone, and the light of the third's end has not yet arrived](../images/h5-cascade-partway.jpg)
@@ -457,10 +449,10 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
 
 ## What an observer sees
 
-`HULL_K` retires. A ship's appearance in each band has two terms:
+A ship's appearance in each band has two terms:
 
 - **Reflected**: `1 − α` of the starlight × shadow toward the observer, with the phase angle. A
-  Clear ship reflects 70%, twice what today's gray hull does. A Black ship reflects nothing.
+  Clear ship reflects 70%. A Black ship reflects nothing.
 - **Thermal**: a blackbody at the field's temperature over the envelope's area. Physical flux,
   σT⁴A, with no gain. This is the second face of the field, exactly as starlight has one: `Q / τ`
   is energy moving at game scale, and σT⁴A is what an instrument sees.
@@ -484,7 +476,7 @@ shows its thresholds. What a player can infer from it:
 - **What they have been doing.** A hot field far from any star has recently been beamed, vented,
   or been beside something that died.
 
-### As built
+### How it is measured
 
 - **`lc_world::glow`** is the photometry: per band at the observer, `Light { reflected, thermal }`.
   Reflected is `1 − α` of the star's band radiance diluted to the ship, over the shadow toward the
@@ -498,7 +490,7 @@ shows its thresholds. What a player can infer from it:
   samples heat is read off the line joining them, and a sample is dropped while that line passes
   within a part in ten thousand of it and of every sample dropped before it, so a field at rest is
   one sample. A burst is kept as a step. `Craft::glow_at` reads it; a new fitting is the field for
-  all time before it. H5's glow between neighbors reads the same history.
+  all time before it. The glow between neighbors reads the same history.
 - **`Presence.glow`** is filled from it at the emission time, so a vent two light-hours off is news
   two hours later. A craft with no fitting is stated as the starting field at rest: 400 K, Clear.
 - **A wreck is seen in the field it ended in.** Its fitting is gone, but its history is not, so its
@@ -506,7 +498,7 @@ shows its thresholds. What a player can infer from it:
   wreck restored after a restart is stated as the starting field at rest until its light has passed.
 - **The client draws and meters a ship by it.** A hull's reflectance is `1 − α`; a real hull's
   textures, which average 0.35, are scaled to it. The field's heat is drawn on its envelope
-  ([32](32-ship-rendering.md#in-the-game)), and on the hull only for a craft with no form, which has
+  ([32](32-ship-rendering.md#the-field-in-the-game)), and on the hull only for a craft with no form, which has
   no envelope. A star's spectrum cache serves its per-band radiance. A Black field hides the lit
   windows too. Nothing yet draws a distant ship as a point: the metering sums the terms
   (`hull::Sent`), and R18's point starts from that sum.
@@ -591,7 +583,7 @@ so it follows the physics rather than a table. `Field` is a pure function of `Se
 is, and is tested the same way: a hot ship's bar is past the Draper point, and a scheduled collapse
 puts a countdown in the text.
 
-#### As built
+#### Details
 
 - **The blue is the energy bar's fill**, egui's selection color, so a cold field bar and the energy
   bar are one pair. `field_bar.rs` reads it and `hud::Field::color` takes it.
@@ -621,11 +613,12 @@ puts a countdown in the text.
 
 ### Elsewhere
 
-- **Refit panel:** what the plan does to the field: the peak temperature it reaches, and at which
-  step. A plan that crosses `Q_max` shows it in red and
-  asks once more before Apply. **It is not refused.** A player may choose to die.
-- **Flight:** a dive shows the equilibrium temperature at the destination, full and filling,
-  before it is flown.
+- **The editor and the ledger:** what a round does to the field: the peak temperature it reaches,
+  and after which step ([29-ship-form.md](29-ship-form.md#the-budget)). A round that crosses `Q_max`
+  shows it in the hazard color and asks once more before Apply. **It is not refused.** A player
+  may choose to die.
+- **Flight:** a dive should show the equilibrium temperature at the destination, full and filling,
+  before it is flown. Not built.
 
 ## Tests
 
