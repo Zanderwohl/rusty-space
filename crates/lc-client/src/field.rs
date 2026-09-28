@@ -6,14 +6,15 @@
 //! which nothing tells an observer about until it is done. Once a craft's envelope is up it carries
 //! the field's heat, and the hull only what it reflects ([`Envelopes`]). Metering is unchanged:
 //! [`crate::hull::Sent`] counts the thermal term once whether the envelope or the hull draws it.
-//! Nothing draws a distant ship as a point yet; when R18 does, that point takes over from the
-//! envelope where the hull stops being meshed, and neither may draw the heat while the other does.
+//! A craft too far to resolve is a point instead ([`crate::distant`]), and has no envelope drawn.
 //!
 //! The envelope is the ellipsoid the shard measures the field's area on, fitted from the form's
 //! parts without the grid and meshed once per design, only when a craft's stated form changes.
 //!
 //! A collapse is drawn from its `kind::COLLAPSE` sighting as that arrives, at the last place the
-//! wreck was seen and in its last shape, never from the shard's time. The spike brightens each
+//! wreck was seen and in its last shape, never from the shard's time: as debris where that would be
+//! resolved, otherwise as a point, and where the wreck was never seen, as a point where the
+//! sighting's direction and delay put it. The spike brightens each
 //! neighbor as a hot spot toward the wreck when its light, bounced off that neighbor, reaches
 //! this ship: `arrive + (|w−n| + |n−o| − |w−o|) / c` from what the client knows.
 
@@ -48,7 +49,7 @@ const DEBRIS_REACH: f32 = 4.0;
 /// Real seconds a spike landing on a neighbor stays on its envelope.
 const SPIKE_SHOWN_S: f32 = 1.0;
 /// A collapse's power is its spike taken as this long, seconds: 30 §Collapse, As built.
-const SPIKE_S: f64 = 1.0;
+pub(crate) const SPIKE_S: f64 = 1.0;
 /// The most a hot spot is drawn as, in multiples of the field's own power; a beam's first moments
 /// on a cold field are millions of times it and would overflow the ramp into white.
 const MAX_SPOT: f32 = 20.0;
@@ -459,10 +460,12 @@ pub struct Wreck {
     ahead_s: f64,
     at_ly: DVec3,
     rotation: Quat,
-    hash: u64,
+    /// Its last shape, `None` for a wreck never seen, which can only be a point.
+    hash: Option<u64>,
     kelvin: f64,
     /// The envelope's longest semi-axis, meters, once its shell is known.
     radius_m: f64,
+    released_j: f64,
     spike_w: f64,
     /// Real seconds it was first drawn, unwrapped and as `globals.time` reads.
     shown_at: Option<(f32, f32)>,
@@ -535,10 +538,10 @@ impl Wrecks {
     /// covers at the temperature it has cooled to, as the shader draws it. Not the flash, which is
     /// left to overflow. Without these the meter opens up once the last hull has gone, and the
     /// debris burns white.
-    pub fn metered(&self, now_s: f64, real_s: f32, afterglow_s: f64, limit_k: f64) -> Vec<(DVec3, f64, f64)> {
+    pub fn metered(&self, now_s: f64, real_s: f32, afterglow_s: f64, limit_k: f64, debris: impl Fn(i64) -> bool) -> Vec<(DVec3, f64, f64)> {
         self.fell
             .iter()
-            .filter(|w| w.shown_at.is_some() && w.radius_m > 0.0)
+            .filter(|w| w.shown_at.is_some() && w.radius_m > 0.0 && debris(w.event_id))
             .map(|w| {
                 let cooled = w.cooled(now_s, real_s, afterglow_s).clamp(0.0, 1.0);
                 let grow = 1.0 + f64::from((DEBRIS_REACH - 1.0) * em_render::field_material::debris_spread(cooled as f32));
@@ -548,6 +551,43 @@ impl Wrecks {
             })
             .collect()
     }
+
+    /// Each wreck's debris at its full spread, meters, as `(event, where, reach)`: zero until its
+    /// shape is known, and for one never seen.
+    pub fn reach<'a>(&'a self, shells: &'a Shells) -> impl Iterator<Item = (i64, DVec3, f64)> + 'a {
+        self.fell.iter().map(|w| {
+            let radius = w.hash.and_then(|h| shells.get(h)).map_or(0.0, |s| f64::from(s.radius));
+            (w.event_id, w.at_ly, radius * f64::from(DEBRIS_REACH))
+        })
+    }
+
+    /// Every wreck drawn as a point whose light has arrived, at `real_s`.
+    pub fn far(&self, real_s: f32, rate: f64, afterglow_s: f64, debris: impl Fn(i64) -> bool) -> impl Iterator<Item = Far> + '_ {
+        let fade_s = (afterglow_s / rate.max(crate::session::TIME_RATE)) as f32;
+        self.fell.iter().filter(move |w| !debris(w.event_id)).filter_map(move |w| {
+            let (real, wrapped) = w.shown_at?;
+            Some(Far { at_ly: w.at_ly, released_j: w.released_j, clock: Vec3::new(wrapped, FLASH_S, fade_s), since_s: real_s - real })
+        })
+    }
+
+    /// A collapse sighted from `observer_ly` of a craft never seen: where its direction and its
+    /// light's delay put it.
+    fn unseen_at(sighting: &lc_proto::Sighting, observer_ly: DVec3) -> DVec3 {
+        let delay_s = (sighting.arrive_t - sighting.emitted_t) as f64 * 1e-6;
+        observer_ly + DVec3::from_array(sighting.direction).normalize_or_zero() * delay_s / lc_world::flight::JULIAN_YEAR_S
+    }
+}
+
+/// A collapse drawn as a point: [`crate::distant::collapse`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Far {
+    pub at_ly: DVec3,
+    pub released_j: f64,
+    /// `(start, flash, fade)`: wrapped real seconds as `globals.time` reads them, and the flash's
+    /// and the afterglow's real durations at this clock's rate, as the debris plays them.
+    pub clock: Vec3,
+    /// Real seconds since it was first drawn.
+    pub since_s: f32,
 }
 
 /// Take each `kind::COLLAPSE` sighting as it lands: a line naming the ship as it was seen, and its
@@ -570,18 +610,19 @@ pub fn collapses(
         let name = last.map_or_else(|| uplink.name_of(from), |l| l.name.clone());
         let arrive_s = sighting.arrive_t as f64 * 1e-6;
         ui.0.heard(from, format!("{name} collapsed"), arrive_s);
-        let Some(last) = last else { continue };
         let released_j = serde_json::from_str::<lc_proto::Released>(&sighting.payload).map_or(0.0, |r| r.released_j);
+        let observer_ly = game.0.ship.motion.position_ly;
         wrecks.fell.push(Wreck {
             event_id: sighting.event_id,
             craft: from,
             arrive_s,
             ahead_s: (arrive_s - game.0.coordinate_time_s()).max(0.0),
-            at_ly: last.at_ly,
-            rotation: last.rotation,
-            hash: last.hash,
-            kelvin: last.kelvin,
+            at_ly: last.map_or_else(|| Wrecks::unseen_at(sighting, observer_ly), |l| l.at_ly),
+            rotation: last.map_or(Quat::IDENTITY, |l| l.rotation),
+            hash: last.map(|l| l.hash),
+            kelvin: last.map_or(limit_k(&balance), |l| l.kelvin),
             radius_m: 0.0,
+            released_j,
             spike_w: balance.collapse_spike_fraction * released_j / SPIKE_S,
             shown_at: None,
             landed: HashMap::new(),
@@ -608,7 +649,7 @@ pub fn draw_fields(
     mut commands: Commands,
     (game, uplink, eye, ui, time): (Res<crate::app::Game>, Res<crate::uplink::Uplink>, Res<Eye>, Res<crate::app::Ui>, Res<Time>),
     (own, real): (Res<crate::parts::OwnForm>, Res<RealHulls>),
-    (mut shells, mut envelopes, mut wrecks): (ResMut<Shells>, ResMut<Envelopes>, ResMut<Wrecks>),
+    (mut shells, mut envelopes, mut wrecks, distant): (ResMut<Shells>, ResMut<Envelopes>, ResMut<Wrecks>, Res<crate::distant::Distant>),
     (mut meshes, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<FieldMaterial>>),
     hulls: Query<(Entity, &ShipHull, &Transform)>,
     mut nodes: Query<(Entity, &mut FieldNode, &mut Transform, &ChildOf), (Without<ShipHull>, Without<WreckRoot>)>,
@@ -644,12 +685,15 @@ pub fn draw_fields(
             let last = Last { name: c.name.clone(), at_ly, rotation: transform.rotation, hash, kelvin: state.kelvin };
             wrecks.last.insert(c.ship_id, last);
         }
+        if !draws_envelope(&distant, craft) {
+            continue;
+        }
         drawn.push(Drawn { craft, root, hash, at_ly, state });
     }
     if wrecks.last.len() > LAST_KEPT {
         wrecks.last.retain(|id, _| uplink.contacts.iter().any(|c| c.ship_id == *id));
     }
-    let wanted: HashSet<u64> = drawn.iter().map(|d| d.hash).chain(wrecks.fell.iter().map(|w| w.hash)).collect();
+    let wanted: HashSet<u64> = drawn.iter().map(|d| d.hash).chain(wrecks.fell.iter().filter_map(|w| w.hash)).collect();
     shells.land(&mut meshes, &wanted);
 
     envelopes.drawn.clear();
@@ -700,9 +744,13 @@ pub fn draw_fields(
     let mut fell = std::mem::take(&mut wrecks.fell);
     fell.retain(|w| !w.over(now, real_s, afterglow_s));
     for wreck in &mut fell {
-        let Some(shell) = shells.get(wreck.hash) else { continue };
+        // Stamped whether it is drawn as debris or as a point, which reads the stamp.
         let Some(collapse) = wreck.collapse(now, (real_s, wrapped_s), ui.time_rate, afterglow_s) else { continue };
+        let Some((hash, shell)) = wreck.hash.and_then(|h| Some((h, shells.get(h)?))) else { continue };
         wreck.radius_m = f64::from(shell.radius);
+        if !distant.is_debris(wreck.event_id) {
+            continue;
+        }
         kept.insert(wreck.event_id);
         let placed = Transform {
             translation: sim_to_render(eye.offset_m(wreck.at_ly, Some(wreck.craft), look) / UNIT_M).as_vec3(),
@@ -722,7 +770,7 @@ pub fn draw_fields(
             }
             None => {
                 let root = commands.spawn((placed, Visibility::default(), WreckRoot(wreck.event_id))).id();
-                let node = spawn_node(&mut commands, &mut materials, Some(wreck.craft), wreck.hash, shell, next);
+                let node = spawn_node(&mut commands, &mut materials, Some(wreck.craft), hash, shell, next);
                 commands.entity(node).insert(ChildOf(root));
             }
         }
@@ -733,6 +781,11 @@ pub fn draw_fields(
             commands.entity(root).despawn();
         }
     }
+}
+
+/// Whether a craft's field is drawn round it: not when it is a point, which carries its heat.
+pub fn draws_envelope(distant: &crate::distant::Distant, craft: Option<ShipId>) -> bool {
+    !distant.is_point(craft)
 }
 
 fn restate(
@@ -1083,11 +1136,11 @@ mod tests {
         let mut world = collapsing(vec![sighting(1, 5, 10_000_000, 20_000_000)], wrecks, 20.0);
         let mut wrecks = world.resource_mut::<Wrecks>();
         let afterglow_s = B.collapse_afterglow_s;
-        assert!(wrecks.metered(20.0, 1.0, afterglow_s, 4_600.0).is_empty(), "metered before it is drawn");
+        assert!(wrecks.metered(20.0, 1.0, afterglow_s, 4_600.0, |_| true).is_empty(), "metered before it is drawn");
         wrecks.fell[0].collapse(20.0, (1.0, 1.0), 0.0, afterglow_s).unwrap();
         wrecks.fell[0].radius_m = 300.0;
-        let [(_, hot, _)] = wrecks.metered(20.0, 1.0, afterglow_s, 4_600.0)[..] else { panic!("not metered") };
-        let [(_, cooler, _)] = wrecks.metered(20.0 + 0.5 * afterglow_s, 2.0, afterglow_s, 4_600.0)[..] else { panic!() };
+        let [(_, hot, _)] = wrecks.metered(20.0, 1.0, afterglow_s, 4_600.0, |_| true)[..] else { panic!("not metered") };
+        let [(_, cooler, _)] = wrecks.metered(20.0 + 0.5 * afterglow_s, 2.0, afterglow_s, 4_600.0, |_| true)[..] else { panic!() };
         assert!(hot > 4_800.0 && cooler < hot, "{hot} then {cooler}");
     }
 

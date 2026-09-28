@@ -3,8 +3,8 @@
 //!
 //! The player's own from what its craft has lit now, and another craft's from what its `Presence`
 //! stated of each end beside `drive_w`, as the light left it. Worked out once a frame, before the
-//! hulls, whose emitter grid it lights, and the exhaust, whose aperture glow it places. R18's
-//! distant point is to read them too.
+//! hulls, whose emitter grid it lights, and the exhaust, whose aperture glow it places.
+//! [`crate::distant`] reads a point's faces from the same apertures.
 
 use std::collections::HashMap;
 
@@ -60,6 +60,11 @@ impl LitFaces {
         self.lit.get(&craft)
     }
 
+    /// Every face `craft`'s form has, lit or dark.
+    pub fn apertures(&self, craft: Option<ShipId>) -> Option<&[Aperture]> {
+        self.apertures.get(&craft).map(|(_, a)| a.as_slice())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (Option<ShipId>, &Lit)> {
         self.lit.iter().map(|(craft, lit)| (*craft, lit))
     }
@@ -101,9 +106,6 @@ pub fn light_faces(
     faces.lit.clear();
     faces.apertures.retain(|craft, _| real.stated(*craft).is_some());
     for (craft, ends) in crafts {
-        if ends.is_dark() {
-            continue;
-        }
         // Last frame's hash, since the hulls run after this: a lit craft's new form is a frame late.
         let Some(hash) = real.stated(craft) else { continue };
         let form = || match craft {
@@ -119,7 +121,7 @@ pub fn light_faces(
             let Some((form, balance)) = form() else { continue };
             faces.apertures.insert(craft, (hash, apertures(&form, &balance).unwrap_or_default()));
         }
-        let Some((_, apertures)) = faces.apertures.get(&craft) else { continue };
+        let Some((_, apertures)) = faces.apertures.get(&craft).filter(|_| !ends.is_dark()) else { continue };
         faces.lit.insert(craft, Lit::of(ends, apertures));
     }
 }

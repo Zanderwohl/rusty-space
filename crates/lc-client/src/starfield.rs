@@ -2,6 +2,9 @@
 //!
 //! The material and the shader live in `em-render`. This is the half that cannot be shared —
 //! building the mesh, generating the band table, and keeping the uniforms current.
+//!
+//! A fourth pass holds the craft and collapses too far to resolve, in the lit bodies' style and
+//! this pass's exposure: its mesh is [`crate::distant`]'s, which moves and changes as they do.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
@@ -9,6 +12,7 @@ use bevy::prelude::*;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_mesh::{Indices, PrimitiveTopology};
+use em_render::craft_point_material::CraftPointMaterial;
 use em_render::relativistic_starfield_material::{
     ATTRIBUTE_STAR_CORNER, ATTRIBUTE_STAR_PARAMS, ATTRIBUTE_STAR_WARM, BANDS,
     RelativisticStarfieldMaterial, RelativisticStarfieldUniform,
@@ -221,6 +225,13 @@ pub struct Pass {
     pub sent: RelativisticStarfieldUniform,
 }
 
+/// The pass [`crate::distant`] draws points in.
+pub struct CraftPass {
+    pub mesh: Handle<Mesh>,
+    pub material: Handle<CraftPointMaterial>,
+    pub sent: RelativisticStarfieldUniform,
+}
+
 /// Where the current meshes were baked, and what is drawing them.
 #[derive(Resource)]
 pub struct Starfield {
@@ -228,6 +239,7 @@ pub struct Starfield {
     pub distant: Pass,
     pub local: Pass,
     pub bodies: Pass,
+    pub crafts: CraftPass,
 }
 
 impl Starfield {
@@ -500,7 +512,7 @@ pub fn spawn_sky(
     session: Res<crate::app::Game>,
     ui: Res<crate::app::Ui>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
+    (mut materials, mut crafts): (ResMut<Assets<RelativisticStarfieldMaterial>>, ResMut<Assets<CraftPointMaterial>>),
     mut images: ResMut<Assets<Image>>,
     corona: Res<crate::procedural::Corona>,
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
@@ -546,7 +558,16 @@ pub fn spawn_sky(
     let distant = pass(&distant_stars, Which::Distant);
     let local = pass(&local_stars, Which::Local);
     let bodies = pass(&[], Which::Bodies);
-    commands.insert_resource(Starfield { origin_ly, distant, local, bodies });
+    let sent = RelativisticStarfieldUniform {
+        drawn_rad_per_px,
+        drawn_exposure: sky_exposure(),
+        ..uniforms(&session.0, origin_ly, origin_ly, lut_scale(), rad_per_px, style_for(&ui.0, Which::Bodies))
+    };
+    let mesh = meshes.add(crate::distant::build_mesh(&[], origin_ly));
+    let material = crafts.add(CraftPointMaterial { uniforms: sent.clone(), band_lut: lut });
+    commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()), NoFrustumCulling, SkyMesh));
+    let crafts = CraftPass { mesh, material, sent };
+    commands.insert_resource(Starfield { origin_ly, distant, local, bodies, crafts });
 }
 
 /// This frame's view of the local system.
@@ -603,7 +624,7 @@ pub fn update_sky(
     eye: Res<crate::hull::Eye>,
     mut sky: ResMut<Starfield>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<RelativisticStarfieldMaterial>>,
+    (mut materials, mut crafts): (ResMut<Assets<RelativisticStarfieldMaterial>>, ResMut<Assets<CraftPointMaterial>>),
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
 ) {
     // Membership as well as distance: crossing into a system moves a star from one pass to the
@@ -641,6 +662,20 @@ pub fn update_sky(
             material.uniforms = next.clone();
             pass.sent = next;
         }
+    }
+    // Without the corona's drift, which a point has no corona to show and which would otherwise
+    // rewrite the material on every frame the clock runs.
+    let next = RelativisticStarfieldUniform {
+        drawn_rad_per_px,
+        drawn_exposure: sky_exposure(),
+        corona_flow_phase: 0.0,
+        ..uniforms(&session.0, eye.at_ly, origin, lut_scale(), rad_per_px, style_for(&ui.0, Which::Bodies))
+    };
+    if next != sky.crafts.sent
+        && let Some(mut material) = crafts.get_mut(&sky.crafts.material)
+    {
+        material.uniforms = next.clone();
+        sky.crafts.sent = next;
     }
 }
 
