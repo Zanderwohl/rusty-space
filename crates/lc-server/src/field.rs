@@ -50,7 +50,7 @@ pub fn collapse_by(craft: &Craft, until_s: f64) -> Option<f64> {
         let fitting = ahead.as_ref().unwrap_or(craft).fitting()?;
         let since_s = fitting.since_s();
         let segment_end_s = lc_world::solar::segment_end(since_s);
-        if let Some(at_s) = fitting.collapse_s().filter(|&t| t <= segment_end_s.min(until_s)) {
+        if let Some(at_s) = fitting.collapse_s(&ahead.as_ref().unwrap_or(craft).motion, segment_end_s.min(until_s)) {
             return Some(at_s);
         }
         if segment_end_s >= until_s {
@@ -85,14 +85,14 @@ fn glow_w(source: &Craft, receiver: &Craft, here: DVec3, at_t: i64) -> f64 {
     let (Some(from), Some(to)) = (source.fitting(), receiver.fitting()) else { return 0.0 };
     let at_s = at_t as f64 * 1.0e-6;
     let tau_s = from.field().tau_s;
-    let bound_w = from.heat_j_at(at_s) / tau_s * received_fraction(to.field().area_m2, source.position_at(at_t as f64).distance(here) * LIGHT_MICROSECOND_M);
+    let bound_w = from.heat_j_at(&source.motion, at_s) / tau_s * received_fraction(to.field().area_m2, source.position_at(at_t as f64).distance(here) * LIGHT_MICROSECOND_M);
     if bound_w < GLOW_FLOOR * to.field().rated_load_w() {
         return 0.0;
     }
     let Some(left_t) = lc_spacetime::retarded_times_at(at_t as f64, here, &source.worldline()).last().copied() else { return 0.0 };
     let offset = here - source.position_at(left_t);
     let shadow_m2 = shadow_toward_m2(receiver, -offset, at_s);
-    from.heat_j_at(left_t * 1.0e-6) / tau_s * received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)
+    from.heat_j_at(&source.motion, left_t * 1.0e-6) / tau_s * received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)
 }
 
 impl<J: Journal> Server<J> {
@@ -168,7 +168,7 @@ impl<J: Journal> Server<J> {
         let arriving_j = received_j(craft, arrival.from, arrival.energy_j, arrival.arrive_t);
         craft.adjust(at_s, |fitting| fitting.take_burst(Burst::Arriving(arriving_j)));
         let Some(fitting) = craft.fitting() else { return false };
-        if fitting.heat_j_at(at_s) < fitting.field().heat_max_j() {
+        if fitting.heat_j_at(&craft.motion, at_s) < fitting.field().heat_max_j() {
             self.tell_fitted(wire, arrival.observer);
             return false;
         }
@@ -387,7 +387,7 @@ mod tests {
         then.settle(at_s);
         let fitting = then.fitting().unwrap();
         let heat_max_j = fitting.field().heat_max_j();
-        assert!((fitting.heat_j_at(at_s) - heat_max_j).abs() < 1.0e-6 * heat_max_j, "not at the limit");
+        assert!((fitting.heat_j_at(&then.motion, at_s) - heat_max_j).abs() < 1.0e-6 * heat_max_j, "not at the limit");
         let stored_j = fitting.stored_j_at(&then.motion, at_s);
         assert!(stored_j > committed_j, "premise: storage holds the commitment");
         assert!((collapsed.released_j - (heat_max_j + stored_j)).abs() < 1.0e-12 * collapsed.released_j);
@@ -433,8 +433,8 @@ mod tests {
         let [step] = plan.steps() else { panic!("{:?}", plan.steps()) };
         assert!(step.vented_j > 0.0, "premise: it vents");
         let end_s = plan.round().start_s + step.ends_s();
-        let heat_max_j = fitting.heat_j_at(end_s) - 0.5 * step.vented_j;
-        assert!(fitting.heat_j_at(end_s - 1.0e-3) < heat_max_j, "premise: only the vent crosses");
+        let heat_max_j = fitting.heat_j_at(&server.ship(DYING).unwrap().motion, end_s) - 0.5 * step.vented_j;
+        assert!(fitting.heat_j_at(&server.ship(DYING).unwrap().motion, end_s - 1.0e-3) < heat_max_j, "premise: only the vent crosses");
         let area_m2 = fitting.field().area_m2;
         server.set_balance(Balance { field_capacity: heat_max_j / area_m2, ..Balance::DEFAULT });
 
@@ -647,7 +647,7 @@ mod tests {
         server.fit_new(&mut probe);
         heat_to(&mut probe, heat);
         let fitting = probe.fitting().unwrap();
-        let headroom_j = fitting.field().heat_max_j() - fitting.heat_j_at(0.0);
+        let headroom_j = fitting.field().heat_max_j() - fitting.heat_j_at(&probe.motion, 0.0);
         let shadow_m2 = shadow_toward_m2(&probe, -toward, 0.0);
         lc_world::field::lethal_radius_m(fitting.absorptivity(), spike_j, shadow_m2, headroom_j) * US_PER_M
     }
@@ -717,7 +717,7 @@ mod tests {
             let stored_j = |c: &Craft| c.fitting().unwrap().stored_j_at(&c.motion, now_s);
             assert_eq!(stored_j(craft), stored_j(&quiet), "{k}: a burst converted into storage");
             let tau_s = quiet.fitting().unwrap().field().tau_s;
-            let rose_j = craft.fitting().unwrap().heat_j_at(now_s) - quiet.fitting().unwrap().heat_j_at(now_s);
+            let rose_j = craft.fitting().unwrap().heat_j_at(&craft.motion, now_s) - quiet.fitting().unwrap().heat_j_at(&quiet.motion, now_s);
             let want_j = absorbed_j * (-(now_s - arrive_t as f64 * 1.0e-6) / tau_s).exp();
             assert!((rose_j - want_j).abs() < 1.0e-9 * want_j, "{k}: rose {rose_j}, the spike {want_j}");
             assert!(want_j > 0.01 * craft.fitting().unwrap().field().heat_max_j(), "premise: a real burst");
@@ -747,7 +747,7 @@ mod tests {
         let receiver = server.ship(WATCHING).unwrap();
         let shadow_m2 = shadow_toward_m2(receiver, -DVec3::Y, lit_t as f64 * 1.0e-6);
         let d_m = d_us * LIGHT_MICROSECOND_M;
-        let want_w = source.heat_j_at(lit_t as f64 * 1.0e-6) / source.field().tau_s * shadow_m2 / (4.0 * std::f64::consts::PI * d_m * d_m);
+        let want_w = source.heat_j_at(&server.ship(DYING).unwrap().motion, lit_t as f64 * 1.0e-6) / source.field().tau_s * shadow_m2 / (4.0 * std::f64::consts::PI * d_m * d_m);
         let lit_w = receiver.fitting().unwrap().lit_w();
         assert!((lit_w - want_w).abs() < 1.0e-9 * want_w, "{lit_w} {want_w}");
 
@@ -756,7 +756,7 @@ mod tests {
         lone.settle(now_s);
         let held_j = |craft: &Craft| {
             let fitting = craft.fitting().unwrap();
-            fitting.heat_j_at(now_s) + fitting.stored_j_at(&craft.motion, now_s)
+            fitting.heat_j_at(&craft.motion, now_s) + fitting.stored_j_at(&craft.motion, now_s)
         };
         let rose_j = held_j(receiver) - held_j(&lone);
         let lit_j = receiver.fitting().unwrap().absorptivity() * lit_w * 2.0 * crate::server::TICK_US as f64 * 1.0e-6;

@@ -824,7 +824,7 @@ mod tests {
         for (k, victim) in line.iter().enumerate().skip(1) {
             let victim = server.fleet.get(*victim).unwrap();
             let fitting = victim.fitting().unwrap();
-            let headroom_j = fitting.field().heat_max_j() - fitting.heat_j_at(now_s);
+            let headroom_j = fitting.field().heat_max_j() - fitting.heat_j_at(&victim.motion, now_s);
             let dose_j = |killer: &CraftId| {
                 let killer = server.fleet.get(*killer).unwrap();
                 let dying = killer.fitting().unwrap();

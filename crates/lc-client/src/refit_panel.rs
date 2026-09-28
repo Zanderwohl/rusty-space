@@ -120,7 +120,7 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     ui.separator();
 
     match fitting.refit().filter(|_| ship.is_refitting(now)) {
-        Some(running) => round(ui, running, fitting, now, out),
+        Some(running) => round(ui, running, fitting, &ship.motion, now, out),
         None => idle(ui, &state.form, fitting.balance()),
     }
 }
@@ -150,7 +150,14 @@ fn hazard() -> egui::Color32 {
     crate::map_panel::color_of(crate::ui::HAZARD)
 }
 
-fn round(ui: &mut egui::Ui, plan: &Plan, fitting: &lc_world::fitting::Fitting, now: f64, out: &mut MessageWriter<Requested>) {
+fn round(
+    ui: &mut egui::Ui,
+    plan: &Plan,
+    fitting: &lc_world::fitting::Fitting,
+    motion: &lc_world::motion::ShipState,
+    now: f64,
+    out: &mut MessageWriter<Requested>,
+) {
     use crate::ledger::{Budget, StepState, phase_name, phases, span, standing};
     let balance = fitting.balance();
     let module_j = balance.module_energy_j();
@@ -172,7 +179,7 @@ fn round(ui: &mut egui::Ui, plan: &Plan, fitting: &lc_world::fitting::Fitting, n
         if budget.vented_j > 0.0 {
             // Past the last vent there is no peak ahead, only what went.
             let vented = me(budget.vented_j, module_j);
-            let text = match crate::preview::Heat::ahead(fitting, now).and_then(|heat| Some((heat.peak_k, heat.step?))) {
+            let text = match crate::preview::Heat::ahead(fitting, motion, now).and_then(|heat| Some((heat.peak_k, heat.step?))) {
                 Some((peak_k, i)) => format!("{vented}: field to {peak_k:.0} K, after {}", crate::ledger::step_name(&plan.steps()[i])),
                 None => vented,
             };

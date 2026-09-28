@@ -136,27 +136,33 @@ impl Field {
         segment.absorbed_w() - segment.draw_w + segment.internal_w
     }
 
-    /// Settles `dt_s` of `segment` from `heat_j`, splitting it where storage fills.
+    /// Settles `dt_s` of `segment` from `heat_j`, splitting it where storage fills and where heat
+    /// reaches the floor.
     pub fn settle(&self, segment: &Segment, heat_j: f64, dt_s: f64) -> Settled {
-        let fill = segment.fill_s().filter(|&t| t < dt_s);
-        let before_s = fill.unwrap_or(dt_s);
-        let mut heat = self.heat_after_j(heat_j, self.heat_filling_w(segment), before_s);
-        if fill.is_some() {
-            heat = self.heat_after_j(heat, self.heat_full_w(segment), dt_s - before_s);
+        let mut settled = Settled { heat_j, storage_j: 0.0, filled_s: None, from_heat_j: 0.0 };
+        let mut at_s = 0.0;
+        for stretch in self.stretches(segment, heat_j, dt_s) {
+            if stretch.full {
+                settled.filled_s.get_or_insert(at_s);
+            }
+            settled.heat_j = self.heat_after_j(stretch.heat_j, stretch.heat_w, stretch.dt_s);
+            settled.storage_j += stretch.storage_w * stretch.dt_s;
+            settled.from_heat_j += stretch.from_heat_w * stretch.dt_s;
+            at_s += stretch.dt_s;
         }
-        let storage_j = (segment.stored_w() - segment.draw_w) * before_s;
-        Settled { heat_j: heat, storage_j, filled_s: fill }
+        settled
     }
 
-    /// When heat first reaches `threshold_j` from below under `segment` left running, fill split
-    /// included. What a collapse is scheduled from.
+    /// When heat first reaches `threshold_j` from below under `segment` left running, fill and
+    /// floor split included. What a collapse is scheduled from.
     pub fn segment_time_to_rise_s(&self, segment: &Segment, heat_j: f64, threshold_j: f64) -> Option<f64> {
         self.segment_time_to(segment, heat_j, |field, heat, power| {
             field.time_to_rise_s(heat, threshold_j, power)
         })
     }
 
-    /// When heat first falls to `threshold_j` under `segment` left running, fill split included.
+    /// When heat first falls to `threshold_j` under `segment` left running, fill and floor split
+    /// included.
     pub fn segment_time_to_fall_s(&self, segment: &Segment, heat_j: f64, threshold_j: f64) -> Option<f64> {
         self.segment_time_to(segment, heat_j, |field, heat, power| {
             field.time_to_fall_s(heat, threshold_j, power)
@@ -169,16 +175,65 @@ impl Field {
         heat_j: f64,
         time_to: impl Fn(&Self, f64, f64) -> Option<f64>,
     ) -> Option<f64> {
-        let filling = self.heat_filling_w(segment);
-        let Some(fill_s) = segment.fill_s() else {
-            return time_to(self, heat_j, filling);
-        };
-        if let Some(t) = time_to(self, heat_j, filling).filter(|&t| t <= fill_s) {
-            return Some(t);
+        let mut at_s = 0.0;
+        for stretch in self.stretches(segment, heat_j, f64::INFINITY) {
+            if let Some(t) = time_to(self, stretch.heat_j, stretch.heat_w).filter(|&t| t <= stretch.dt_s) {
+                return Some(at_s + t);
+            }
+            at_s += stretch.dt_s;
         }
-        let at_fill = self.heat_after_j(heat_j, filling, fill_s);
-        time_to(self, at_fill, self.heat_full_w(segment)).map(|t| fill_s + t)
+        None
     }
+
+    /// Cut where storage fills and where heat reaches or leaves the floor. At the floor the heat
+    /// made goes out with the emission as it is made, so storage pays the emission less that.
+    pub(crate) fn stretches(&self, segment: &Segment, heat_j: f64, dt_s: f64) -> Vec<Stretch> {
+        let emitted_w = segment.emitted_w.max(0.0);
+        let filling_w = segment.stored_w() - segment.draw_w;
+        let floor_w = self.heat_filling_w(segment) + filling_w - emitted_w;
+        let (mut heat_j, mut room_j, mut at_s) = (heat_j.max(0.0), segment.room_j, 0.0);
+        let mut stretches = Vec::with_capacity(3);
+        while at_s < dt_s {
+            let full = filling_w > 0.0 && room_j <= 0.0;
+            let made_w = if full { self.heat_full_w(segment) } else { self.heat_filling_w(segment) };
+            let at_floor = emitted_w > 0.0 && heat_j <= 0.0 && made_w <= emitted_w;
+            let (heat_w, storage_w, from_heat_w) = match (at_floor, full) {
+                (true, _) => (0.0, floor_w, made_w.max(0.0)),
+                (false, true) => (made_w - emitted_w, 0.0, emitted_w),
+                (false, false) => (made_w - emitted_w, filling_w, emitted_w),
+            };
+            let fills_s = if !full && storage_w > 0.0 { room_j / storage_w } else { f64::INFINITY };
+            let floors_s = match heat_w < 0.0 && !at_floor {
+                true => self.time_to_fall_s(heat_j, 0.0, heat_w).unwrap_or(f64::INFINITY),
+                false => f64::INFINITY,
+            };
+            // A third stretch is never left: full and rising, or at the floor and draining.
+            let len_s = if stretches.len() == 2 { dt_s - at_s } else { (dt_s - at_s).min(fills_s).min(floors_s) };
+            stretches.push(Stretch { dt_s: len_s, heat_j, heat_w, storage_w, from_heat_w, full: full && !at_floor });
+            at_s += len_s;
+            if at_s >= dt_s {
+                break;
+            }
+            heat_j = if len_s == floors_s { 0.0 } else { self.heat_after_j(heat_j, heat_w, len_s) };
+            room_j = if len_s == fills_s { 0.0 } else { room_j - storage_w * len_s };
+        }
+        stretches
+    }
+}
+
+/// Part of a segment over which heat's power and storage's rate are both constant.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Stretch {
+    pub dt_s: f64,
+    /// At the stretch's start.
+    pub heat_j: f64,
+    /// Net, the emission included. Zero at the floor.
+    pub heat_w: f64,
+    /// Net, the emission included.
+    pub storage_w: f64,
+    /// Of [`Segment::emitted_w`], what heat supplies.
+    pub from_heat_w: f64,
+    pub full: bool,
 }
 
 /// Constant inputs to the field, as far as the next change of any of them.
@@ -200,6 +255,9 @@ pub struct Segment {
     /// Drawn out of storage meanwhile: it delays filling, and once full it is all conversion stores.
     /// Heat from the same draw is the caller's to put in `internal_w`.
     pub draw_w: f64,
+    /// A drive's exhaust or anything else the ship lights, drawn from heat while the field holds any
+    /// and from storage for the rest.
+    pub emitted_w: f64,
 }
 
 impl Segment {
@@ -272,11 +330,13 @@ pub fn lethal_radius_m(absorptivity: f64, spike_j: f64, shadow_m2: f64, headroom
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settled {
     pub heat_j: f64,
-    /// Net change in storage: conversion less the draw. Negative when the draw outruns conversion,
-    /// and emptying storage is the caller's to handle.
+    /// Net change in storage: conversion less the draw and its part of the emission. Negative when
+    /// the draw outruns conversion, and emptying storage is the caller's to handle.
     pub storage_j: f64,
     /// When storage filled, if it did within the step.
     pub filled_s: Option<f64>,
+    /// Of what was emitted, what heat supplied.
+    pub from_heat_j: f64,
 }
 
 #[cfg(test)]
@@ -323,6 +383,7 @@ mod tests {
                 efficiency: b.conversion_efficiency,
                 room_j,
                 draw_w: self.caps.drain_w,
+                emitted_w: 0.0,
             }
         }
     }
@@ -564,6 +625,7 @@ mod tests {
             efficiency: 0.7,
             room_j: 1.0e40,
             draw_w: 0.0,
+            emitted_w: 0.0,
         };
         let dt_s = 1.0;
         let sustained = field.settle(&beam, 0.0, dt_s).heat_j;
@@ -571,8 +633,9 @@ mod tests {
         assert!(close(sustained, 0.3 * burst, 1e-6), "{sustained} {burst}");
     }
 
-    /// An independent stepper: RK4 on `dQ/dt = P − Q/τ`, with storage tracked on its own and never
-    /// let past capacity. Storage at capacity takes in only what the draw takes out.
+    /// An independent stepper: RK4 on `dQ/dt = P − X − Q/τ`, with storage tracked on its own and
+    /// never let past capacity. Storage at capacity takes in only what the draw takes out, and heat
+    /// the emission would take below zero is taken from storage instead.
     struct Stepper {
         heat_j: f64,
         stored_j: f64,
@@ -591,14 +654,15 @@ mod tests {
                 if self.stored_j >= self.capacity_j {
                     into_storage = into_storage.min(s.draw_w);
                 }
-                let p = absorbed - into_storage + s.internal_w;
+                let p = absorbed - into_storage + s.internal_w - s.emitted_w;
                 let q = self.heat_j;
                 let k1 = rate(q, p);
                 let k2 = rate(q + 0.5 * h * k1, p);
                 let k3 = rate(q + 0.5 * h * k2, p);
                 let k4 = rate(q + h * k3, p);
                 self.heat_j = q + h / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
-                self.stored_j += (into_storage - s.draw_w) * h;
+                self.stored_j += (into_storage - s.draw_w) * h + self.heat_j.min(0.0);
+                self.heat_j = self.heat_j.max(0.0);
                 self.t_s += h;
                 if self.stored_j >= self.capacity_j {
                     self.stored_j = self.capacity_j;
@@ -665,8 +729,50 @@ mod tests {
         assert!(close(stored_j + settled.storage_j, rest.stored_j, 1e-9), "{} {}", stored_j + settled.storage_j, rest.stored_j);
     }
 
+    /// Each path through the floor, against the stepper.
+    #[test]
+    fn the_floor_split_agrees_with_stepping() {
+        let b = Balance::DEFAULT;
+        let start = Start::new(&b);
+        let field = start.field;
+        let me = me(&b);
+        let open = start.segment(&b, 0.1, 100.0 * me);
+        let (made_w, filling_w) = (field.heat_filling_w(&open), open.stored_w() - open.draw_w);
+        let cases = [
+            ("drains", Segment { emitted_w: 3.0 * made_w, ..open }, [false, false]),
+            ("fills at the floor", Segment { emitted_w: made_w + 0.5 * filling_w, room_j: 0.2 * me, ..open }, [false, true]),
+            ("from full", Segment { emitted_w: 2.0 * field.heat_full_w(&open), room_j: 0.0, ..open }, [true, false]),
+        ];
+        for (case, segment, [starts_full, ends_full]) in cases {
+            let heat_j = 0.05 * me;
+            let floor_s = field.segment_time_to_fall_s(&segment, heat_j, 0.0).unwrap();
+            let dt_s = 4.0 * floor_s + if ends_full { 2.0 * segment.room_j / (made_w + filling_w - segment.emitted_w) } else { 0.0 };
+            let stretches = field.stretches(&segment, heat_j, dt_s);
+            assert_eq!(stretches.len(), if ends_full { 3 } else { 2 }, "{case}: premise {stretches:?}");
+            assert_eq!((stretches[0].full, stretches[2.min(stretches.len() - 1)].full), (starts_full, ends_full), "{case}: premise");
+            assert_eq!(floor_s, stretches[0].dt_s, "{case}");
+
+            let capacity_j = 200.0 * me;
+            let stored_j = capacity_j - segment.room_j;
+            let mut stepper = Stepper { heat_j, stored_j, capacity_j, t_s: 0.0, filled_at_s: None };
+            let steps = 400_000;
+            let stepped_floor_s = stepper.run(&field, &segment, dt_s, steps, |q| q <= 0.0).unwrap();
+            let h = dt_s / steps as f64;
+            assert!((stepped_floor_s - floor_s).abs() <= 2.0 * h, "{case}: {stepped_floor_s} {floor_s}");
+            stepper.run(&field, &segment, dt_s - stepped_floor_s, (dt_s - stepped_floor_s).div_euclid(h) as usize, |_| false);
+            let settled = field.settle(&segment, heat_j, dt_s);
+            let tol_j = 1e-5 * (heat_j + segment.emitted_w * dt_s);
+            assert!((settled.heat_j - stepper.heat_j).abs() <= tol_j, "{case}: {} {}", settled.heat_j, stepper.heat_j);
+            let storage_j = stepper.stored_j - stored_j;
+            assert!((settled.storage_j - storage_j).abs() <= tol_j, "{case}: {} {storage_j}", settled.storage_j);
+            let spent_j = segment.emitted_w * dt_s;
+            assert!(settled.from_heat_j > heat_j && settled.from_heat_j < spent_j, "{case}: {}", settled.from_heat_j);
+        }
+    }
+
     /// Settling `2T` in one leap and as two `T`s agree, filling or full, with the draw under
-    /// conversion and over it: the answer may not depend on where the caller cuts.
+    /// conversion and over it, and emitting enough to reach the floor in the first `T`: the answer
+    /// may not depend on where the caller cuts.
     #[test]
     fn where_segments_are_cut_does_not_matter() {
         let b = Balance::DEFAULT;
@@ -676,13 +782,19 @@ mod tests {
         let t_s = 3.0e6;
         let heat_j = 2.0 * me;
         for room_j in [0.0, 0.5 * me, 100.0 * me] {
-            for draw_w in [start.caps.drain_w, 3.0 * start.starlight_w(0.1)] {
-                let segment = Segment { room_j, draw_w, ..start.segment(&b, 0.1, 0.0) };
+            for (draw_w, emitted_w) in [
+                (start.caps.drain_w, 0.0),
+                (3.0 * start.starlight_w(0.1), 0.0),
+                (start.caps.drain_w, 2.0 * heat_j / t_s + start.starlight_w(0.1)),
+                (start.caps.drain_w, 0.5 * heat_j / t_s + 3.0 * start.starlight_w(0.1)),
+            ] {
+                let segment = Segment { room_j, draw_w, emitted_w, ..start.segment(&b, 0.1, 0.0) };
                 let leap = field.settle(&segment, heat_j, 2.0 * t_s);
                 let half = field.settle(&segment, heat_j, t_s);
+                assert!(emitted_w == 0.0 || half.heat_j == 0.0, "premise: at the floor by the cut");
                 let rest = Segment { room_j: room_j - half.storage_j, ..segment };
                 let halves = field.settle(&rest, half.heat_j, t_s);
-                let case = format!("room {room_j:e}, draw {draw_w:e}");
+                let case = format!("room {room_j:e}, draw {draw_w:e}, emitted {emitted_w:e}");
                 assert!(close(leap.heat_j, halves.heat_j, 1e-12), "{case}: {} {}", leap.heat_j, halves.heat_j);
                 let storage_j = half.storage_j + halves.storage_j;
                 assert!((leap.storage_j - storage_j).abs() <= 1e-12 * me, "{case}: {} {storage_j}", leap.storage_j);
@@ -702,6 +814,7 @@ mod tests {
             efficiency: 0.9,
             room_j: 1.0e25,
             draw_w: 0.0,
+            emitted_w: 0.0,
         };
         let heat_j = 2.0e25;
         let fill_s = segment.fill_s().unwrap();
@@ -712,6 +825,10 @@ mod tests {
         let full_j = field.equilibrium_j(field.heat_full_w(&segment));
         let rise = field.segment_time_to_rise_s(&segment, low_j, 0.5 * (low_j + full_j)).unwrap();
         assert!(rise > fill_s);
+    }
+
+    fn still() -> crate::motion::ShipState {
+        crate::motion::ShipState::at(glam::DVec3::ZERO)
     }
 
     fn starting(b: Balance, stored_j: f64) -> crate::fitting::Fitting {
@@ -729,14 +846,14 @@ mod tests {
         let mut fitting = starting(b, start.caps.storage_j - 2.0 * me(&b));
         fitting.set_starlight_w(start.starlight_w(0.03));
         let heat_max_j = fitting.field().heat_max_j();
-        let collapse_s = fitting.collapse_s().expect("inside the rated load, it collapses");
+        let collapse_s = fitting.collapse_s(&still(), f64::INFINITY).expect("inside the rated load, it collapses");
         let rest = crate::motion::ShipState::at(glam::DVec3::ZERO);
         assert_eq!(fitting.stored_j_at(&rest, collapse_s), start.caps.storage_j, "premise: full first");
-        assert!(close(fitting.heat_j_at(collapse_s), heat_max_j, 1e-9));
+        assert!(close(fitting.heat_j_at(&still(), collapse_s), heat_max_j, 1e-9));
 
         let n = 100_000;
         let dt_s = 1.5 * collapse_s / n as f64;
-        let first = (1..=n).find(|&k| fitting.heat_j_at(k as f64 * dt_s) >= heat_max_j).unwrap();
+        let first = (1..=n).find(|&k| fitting.heat_j_at(&still(), k as f64 * dt_s) >= heat_max_j).unwrap();
         assert!((first - 1) as f64 * dt_s < collapse_s && collapse_s <= first as f64 * dt_s, "{collapse_s} at step {first}");
     }
 
@@ -746,9 +863,9 @@ mod tests {
         let start = Start::new(&b);
         let mut fitting = starting(b, start.caps.storage_j);
         fitting.set_starlight_w(start.starlight_w(0.1));
-        assert_eq!(fitting.collapse_s(), None);
+        assert_eq!(fitting.collapse_s(&still(), f64::INFINITY), None);
         fitting.set_starlight_w(start.starlight_w(RATED_LOAD_AU * (1.0 + 1e-6)));
-        assert_eq!(fitting.collapse_s(), None);
+        assert_eq!(fitting.collapse_s(&still(), f64::INFINITY), None);
     }
 
     /// A vent jumps `Q`, so the crossing is the end of the step that frees it, to the second.
@@ -770,13 +887,13 @@ mod tests {
         let [step] = plan.steps() else { panic!("{:?}", plan.steps()) };
         assert!(step.vented_j > 0.0, "premise: it vents");
         let end_s = step.ends_s();
-        let heat_max_j = probe.heat_j_at(end_s) - 0.5 * step.vented_j;
-        assert!(probe.heat_j_at(end_s * (1.0 - 1e-12)) < heat_max_j, "premise: only the vent crosses");
+        let heat_max_j = probe.heat_j_at(&still(), end_s) - 0.5 * step.vented_j;
+        assert!(probe.heat_j_at(&still(), end_s * (1.0 - 1e-12)) < heat_max_j, "premise: only the vent crosses");
 
         let b = Balance { field_capacity: heat_max_j / probe.field().area_m2, ..Balance::DEFAULT };
         let (fitting, _) = begun(b);
         assert!(close(fitting.field().heat_max_j(), heat_max_j, 1e-12));
-        assert_eq!(fitting.collapse_s(), Some(end_s));
+        assert_eq!(fitting.collapse_s(&still(), f64::INFINITY), Some(end_s));
     }
 
     /// A build held out of storage under starlight too weak for the drain: free storage runs out a
@@ -805,16 +922,18 @@ mod tests {
         let duration_s = plan.duration_s();
         let spare_j = 0.1 * trial.hull().capacities.drain_w * duration_s;
         let (probe, _) = begun(b, cost_j + spare_j);
-        let heat_max_j = probe.heat_j_at(0.901_7 * duration_s);
-        assert!(probe.heat_j_at(0.2 * duration_s) < heat_max_j, "premise: still rising once starved");
+        let heat_max_j = probe.heat_j_at(&still(), 0.901_7 * duration_s);
+        assert!(probe.heat_j_at(&still(), 0.2 * duration_s) < heat_max_j, "premise: still rising once starved");
 
         let tight = Balance { field_capacity: heat_max_j / probe.field().area_m2, ..b };
         let (fitting, _) = begun(tight, cost_j + spare_j);
-        let collapse_s = fitting.collapse_s().expect("it reaches the limit");
+        let collapse_s = fitting.collapse_s(&still(), f64::INFINITY).expect("it reaches the limit");
         let n = 20_000;
         let dt_s = duration_s / n as f64;
-        let first = (1..=n).find(|&k| fitting.heat_j_at(k as f64 * dt_s) >= heat_max_j).unwrap();
-        assert!((first - 1) as f64 * dt_s < collapse_s && collapse_s <= first as f64 * dt_s, "{collapse_s} at step {first}");
+        let first = (1..=n).find(|&k| fitting.heat_j_at(&still(), k as f64 * dt_s) >= heat_max_j).unwrap();
+        // The limit is the heat at a sample instant, so the solve may land a rounding past it.
+        let sampled_s = first as f64 * dt_s * (1.0 + 1e-12);
+        assert!((first - 1) as f64 * dt_s < collapse_s && collapse_s <= sampled_s, "{collapse_s} at step {first}");
         assert!(collapse_s > 0.5 * duration_s, "premise: in the starved stretch");
     }
 
@@ -823,7 +942,7 @@ mod tests {
         let b = Balance::DEFAULT;
         let fitting = starting(b, 0.0);
         let hot = crate::fitting::Account { heat_j: 2.0 * fitting.field().heat_max_j(), since_s: 5.0, ..fitting.account() };
-        assert_eq!(crate::fitting::Fitting::from_account(&hot, b).collapse_s(), Some(5.0));
+        assert_eq!(crate::fitting::Fitting::from_account(&hot, b).collapse_s(&still(), f64::INFINITY), Some(5.0));
     }
 
     /// 30's lethal radii: a full starting ship, and one ten and a hundred times its size, collapsing
