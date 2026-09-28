@@ -146,7 +146,7 @@ pub fn read_keys(
 
 /// A row of the panel: the cursor put where this many entries are done.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
-struct GoTo(usize);
+pub struct GoTo(usize);
 
 /// What the panel was built for.
 #[derive(Component, PartialEq)]
@@ -340,7 +340,7 @@ mod tests {
         states.push(draft(&ui).form.clone());
         edit(&mut ui, &mut s, |d| d.mirror(by_kind(d, Kind::Living), true));
         states.push(draft(&ui).form.clone());
-        for to in [1, 4, 0, 5, 2] {
+        for to in [1, 4, 0, 3, 2] {
             apply(Action::GoToEdit(to), &mut ui, &mut s);
             assert_eq!(ui.form.history.cursor(), to);
             assert_eq!(draft(&ui).form, states[to], "at {to}");
@@ -356,7 +356,7 @@ mod tests {
         }
         let history = &ui.form.history;
         assert_eq!((history.entries().len(), history.cursor()), (MAX_HISTORY, MAX_HISTORY));
-        let first = &history.entries()[0].edit;
+        let first = history.entries()[0].edit.clone();
         assert!((first.after[0].placement.unwrap().twist - 0.006).abs() < 1e-12, "the first five went");
         apply(Action::GoToEdit(0), &mut ui, &mut s);
         assert!((draft(&ui).part(first.part).unwrap().placement.unwrap().twist - 0.005).abs() < 1e-12);
