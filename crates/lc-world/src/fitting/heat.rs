@@ -3,11 +3,13 @@
 //! account.
 //!
 //! What the ship emits is drawn from heat first (`31-directed-energy.md` §The drive is the
-//! radiator), and the commitment runs down by all of it whatever pays.
+//! radiator), and the commitment runs down by all of it whatever pays. A drive below ε = 1 spends
+//! `1 − ε` of what the rocket law prices as waste heat, held apart in `Q` so the exhaust cannot
+//! draw it: re-emitted, it would fly the drive as if ε were 1.
 
 use super::{Balance, Fitting, Hull};
 use crate::cost;
-use crate::field::{Burst, Field, Mode, Segment};
+use crate::field::{Burst, Field, Mode, Segment, Stretch};
 use crate::form::capacity::Capacities;
 use crate::motion::ShipState;
 use crate::refit::rounds::{Phase, Plan, Step};
@@ -21,11 +23,36 @@ pub struct Lit {
     pub power_w: f64,
 }
 
-/// Since the settlement: the heat reached, and storage's net change.
+/// Since the settlement: the heat reached, the drive's waste within it, and storage's net change.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Flow {
     pub heat_j: f64,
+    pub waste_j: f64,
     pub income_j: f64,
+}
+
+/// A stretch of constant inputs as [`Fitting::walk`] offers it, with `Q` split into what the
+/// segment's emission can draw and the drive's waste, which rises at `waste_w`.
+pub(super) struct Part {
+    pub segment: Segment,
+    pub drawable_j: f64,
+    pub waste_j: f64,
+    pub waste_w: f64,
+}
+
+impl Part {
+    /// Of `Q`, whole. Waste relaxes on the same `τ` as the rest, so each sum is still one
+    /// exponential.
+    pub fn stretches(&self, field: &Field, dt_s: f64) -> Vec<Stretch> {
+        let mut waste_j = self.waste_j;
+        let mut stretches = field.stretches(&self.segment, self.drawable_j, dt_s);
+        for s in &mut stretches {
+            s.heat_j += waste_j;
+            s.heat_w += self.waste_w;
+            waste_j = field.heat_after_j(waste_j, self.waste_w, s.dt_s);
+        }
+        stretches
+    }
 }
 
 /// Far from any star, with storage paying the drain.
@@ -84,8 +111,19 @@ impl Fitting {
 
     /// Averaged over `[from_s, until_s]`: the drive's exhaust and whatever else is lit.
     fn emitted_w(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
-        let burn_j = self.burn_spent_j(motion, until_s) - self.burn_spent_j(motion, from_s);
-        (burn_j + self.lit_between_j(from_s, until_s)) / (until_s - from_s)
+        let beam = self.balance.drive_efficiency.min(1.0);
+        (beam * self.burn_between_j(motion, from_s, until_s) + self.lit_between_j(from_s, until_s)) / (until_s - from_s)
+    }
+
+    /// Averaged over `[from_s, until_s]`: what the drive spends and does not emit. None at ε ≥ 1,
+    /// where the exhaust is all that is spent.
+    fn waste_w(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
+        let waste = (1.0 - self.balance.drive_efficiency).max(0.0);
+        waste * self.burn_between_j(motion, from_s, until_s) / (until_s - from_s)
+    }
+
+    fn burn_between_j(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
+        self.burn_spent_j(motion, until_s) - self.burn_spent_j(motion, from_s)
     }
 
     /// What the emissions with no net thrust put out over `[from_s, until_s]`, joules.
@@ -104,12 +142,12 @@ impl Fitting {
     /// changes nothing. The burn's commitment and the builds still to run are held out of free
     /// storage, so the drain starves first.
     pub(super) fn flow(&self, motion: Option<&ShipState>, now_s: f64) -> Flow {
-        self.walk(motion, now_s, |_, _, _, _| false)
+        self.walk(motion, now_s, |_, _, _| false)
     }
 
     /// When `Q` first reaches `Q_max` from the settlement to `until_s`, if the inputs in force hold
-    /// and the round runs as planned. A vent that crosses it does so at the end of its step. A burn
-    /// only ever lowers `Q`, so it can only put a collapse off.
+    /// and the round runs as planned. A vent that crosses it does so at the end of its step. The
+    /// burn is read: its exhaust puts a collapse off, and below ε = 1 its waste can bring one on.
     pub fn collapse_s(&self, motion: &ShipState, until_s: f64) -> Option<f64> {
         let field = self.field();
         let max_j = field.heat_max_j();
@@ -118,19 +156,26 @@ impl Fitting {
             return Some(self.since_s);
         }
         let mut found = None;
-        self.walk(Some(motion), until_s, |from_s, segment, heat_j, dt_s| {
-            found = field.segment_time_to_rise_s(segment, heat_j, max_j).filter(|&t| t <= dt_s).map(|t| from_s + t);
+        self.walk(Some(motion), until_s, |from_s, part, dt_s| {
+            let mut at_s = 0.0;
+            for s in part.stretches(&field, f64::INFINITY) {
+                if let Some(t) = field.time_to_rise_s(s.heat_j, max_j, s.heat_w).filter(|&t| t <= s.dt_s) {
+                    found = Some(at_s + t).filter(|&t| t <= dt_s).map(|t| from_s + t);
+                    break;
+                }
+                at_s += s.dt_s;
+            }
             found.is_some()
         });
         found
     }
 
     /// [`Fitting::flow`] to `until_s`, first offering `stop` each stretch of constant inputs as its
-    /// start, inputs, heat and length, and ending early where it says. A vent or spill lands between
+    /// start, inputs and length, and ending early where it says. A vent or spill lands between
     /// stretches, so the next starts from it. A switch completing is a cut, as a step's end is.
-    pub(super) fn walk(&self, motion: Option<&ShipState>, until_s: f64, mut stop: impl FnMut(f64, &Segment, f64, f64) -> bool) -> Flow {
+    pub(super) fn walk(&self, motion: Option<&ShipState>, until_s: f64, mut stop: impl FnMut(f64, &Part, f64) -> bool) -> Flow {
         let field = self.field();
-        let mut flow = Flow { heat_j: self.heat_j, income_j: 0.0 };
+        let mut flow = Flow { heat_j: self.heat_j, waste_j: self.waste_j, income_j: 0.0 };
         if until_s <= self.since_s {
             return flow;
         }
@@ -144,18 +189,21 @@ impl Fitting {
         for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s, &edges) {
             let dt_s = piece.until_s - at_s;
             let emitted_w = motion.map_or(0.0, |m| self.emitted_w(m, at_s, piece.until_s));
+            let waste_w = motion.map_or(0.0, |m| self.waste_w(m, at_s, piece.until_s));
             let room_j = caps.storage_j - (self.stored_j + flow.income_j);
-            let segment = self.intake(&caps, self.shade_at(at_s), piece.losing_w, room_j, piece.moving_w, emitted_w);
-            let held_w = emitted_w + piece.moving_w.max(0.0);
-            let (mut heat_j, mut storage_j) = (flow.heat_j, 0.0);
+            // Waste is drawn from storage like the drain, but its heat is kept out of the segment's.
+            let segment = self.intake(&caps, self.shade_at(at_s), piece.losing_w, room_j, piece.moving_w + waste_w, emitted_w);
+            let held_w = emitted_w + waste_w + piece.moving_w.max(0.0);
+            let (mut heat_j, mut waste_j, mut storage_j) = (flow.heat_j - flow.waste_j, flow.waste_j, 0.0);
             let mut from_s = at_s;
-            for (part, part_s) in split(&field, segment, heat_j, caps.drain_w, held_w, free_j, dt_s) {
-                let part = Segment { room_j: room_j - storage_j, ..part };
-                if stop(from_s, &part, heat_j, part_s) {
+            for (segment, part_s) in split(&field, segment, heat_j, caps.drain_w, held_w, free_j, dt_s) {
+                let part = Part { segment: Segment { room_j: room_j - storage_j, ..segment }, drawable_j: heat_j, waste_j, waste_w };
+                if stop(from_s, &part, part_s) {
                     return flow;
                 }
-                let settled = field.settle(&part, heat_j, part_s);
+                let settled = field.settle(&part.segment, heat_j, part_s);
                 heat_j = settled.heat_j;
+                waste_j = field.heat_after_j(waste_j, waste_w, part_s);
                 storage_j += settled.storage_j;
                 from_s += part_s;
             }
@@ -165,7 +213,8 @@ impl Fitting {
             let spilled_j = (self.stored_j + flow.income_j - caps.storage_j).max(0.0);
             flow.income_j -= spilled_j;
             free_j -= spilled_j;
-            flow.heat_j = heat_j + piece.vent_j + spilled_j;
+            flow.waste_j = waste_j;
+            flow.heat_j = heat_j + waste_j + piece.vent_j + spilled_j;
             at_s = piece.until_s;
         }
         flow

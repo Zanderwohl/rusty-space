@@ -5,8 +5,9 @@
 //! is where the flip becomes an event. Until then every read applies it from `done_s` itself, so
 //! where the account is settled never changes what it absorbed.
 
+use super::heat::Part;
 use super::{Balance, Fitting};
-use crate::field::{Field, Mode, Segment, Stretch};
+use crate::field::{Field, Mode, Stretch};
 use crate::motion::ShipState;
 
 /// What the player chose.
@@ -166,11 +167,11 @@ impl Fitting {
         let max_j = field.heat_max_j();
         let shade = self.posture.shade;
         let mut found = None;
-        self.walk(Some(motion), until_s, |from_s, part, heat_j, dt_s| {
+        self.walk(Some(motion), until_s, |from_s, part, dt_s| {
             let capacity_j = self.capacities_at(from_s).storage_j;
             let due = match shade {
-                Mode::Black => clear_due(&field, part, heat_j, thresholds.clear_above * max_j, capacity_j),
-                Mode::Clear => black_due(&field, part, heat_j, thresholds.black_below * max_j, thresholds.refill_below * capacity_j, capacity_j),
+                Mode::Black => clear_due(&field, part, thresholds.clear_above * max_j, capacity_j),
+                Mode::Clear => black_due(&field, part, thresholds.black_below * max_j, thresholds.refill_below * capacity_j, capacity_j),
             };
             found = due.filter(|&t| t <= dt_s).map(|t| from_s + t);
             found.is_some()
@@ -179,10 +180,10 @@ impl Fitting {
     }
 }
 
-/// Each of `part`'s stretches, with when it starts and the room storage has then.
-fn stretches(field: &Field, part: &Segment, heat_j: f64) -> impl Iterator<Item = (f64, f64, Stretch)> {
-    let (mut at_s, mut room_j) = (0.0, part.room_j);
-    field.stretches(part, heat_j, f64::INFINITY).into_iter().map(move |s| {
+/// Each of `part`'s stretches of `Q`, with when it starts and the room storage has then.
+fn stretches(field: &Field, part: &Part) -> impl Iterator<Item = (f64, f64, Stretch)> {
+    let (mut at_s, mut room_j) = (0.0, part.segment.room_j);
+    part.stretches(field, f64::INFINITY).into_iter().map(move |s| {
         let start = (at_s, room_j, s);
         at_s += s.dt_s;
         room_j -= s.storage_w * s.dt_s;
@@ -191,8 +192,8 @@ fn stretches(field: &Field, part: &Segment, heat_j: f64) -> impl Iterator<Item =
 }
 
 /// Heat rises to `above_j`, or storage fills.
-fn clear_due(field: &Field, part: &Segment, heat_j: f64, above_j: f64, capacity_j: f64) -> Option<f64> {
-    for (at_s, room_j, s) in stretches(field, part, heat_j) {
+fn clear_due(field: &Field, part: &Part, above_j: f64, capacity_j: f64) -> Option<f64> {
+    for (at_s, room_j, s) in stretches(field, part) {
         if room_j <= FULL * capacity_j {
             return Some(at_s);
         }
@@ -207,8 +208,8 @@ fn clear_due(field: &Field, part: &Segment, heat_j: f64, above_j: f64, capacity_
 
 /// Heat at or under `below_j` while storage is under `refill_j`. Over a stretch both move
 /// monotonically, so each condition holds over one interval touching an end.
-fn black_due(field: &Field, part: &Segment, heat_j: f64, below_j: f64, refill_j: f64, capacity_j: f64) -> Option<f64> {
-    for (at_s, room_j, s) in stretches(field, part, heat_j) {
+fn black_due(field: &Field, part: &Part, below_j: f64, refill_j: f64, capacity_j: f64) -> Option<f64> {
+    for (at_s, room_j, s) in stretches(field, part) {
         let heat = if s.heat_j <= below_j {
             Holds::Until(field.time_to_rise_s(s.heat_j, below_j, s.heat_w).unwrap_or(f64::INFINITY))
         } else {
