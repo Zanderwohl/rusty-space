@@ -1201,10 +1201,20 @@ mod tests {
         assert!(others.0 * 4 < others.1, "{} of {} bodies about the star followed", others.0, others.1);
     }
 
-    /// Every body of Sol fitted as a shard would, printed against the truth. A ship parked
-    /// `SOL_FITS_AU` out (default 5) surveys for `SOL_FITS_TICKS` ticks (default 3000, fifteen
-    /// days). `SOL_FITS_FRAMES` adds, per moon, fits from scratch about the star, the believed
-    /// planet and the true planet.
+    /// Every body of Sol fitted as a shard would, printed against the truth, for
+    /// `SOL_FITS_TICKS` ticks (default 3000, fifteen days). `SOL_FITS_FRAMES` adds, per moon,
+    /// fits from scratch about the star, the believed planet and the true planet.
+    ///
+    /// **The ship moves, as ships do.** `SOL_FITS_PARK` is a planet to orbit (default `Earth`),
+    /// `sun:<au>` for a circle about the star, or `still:<au>` for a point held that far out
+    /// along +X. Held still, nothing pins a body's depth but its own curvature, and an orbit
+    /// seen edge-on cannot be told from its mirror: Luna was fitted on the wrong side of Earth.
+    /// No ship holds still.
+    ///
+    /// Each place is scored as a reader would use it: from the believed star, against the
+    /// orbit's error and the star's together. Measured from the true star instead, the star's
+    /// own error read as the orbit's, three thousand kilometers against a bar of a hundred
+    /// meters.
     ///
     /// A diagnostic, not a check, and minutes of work: run it optimized, e.g.
     /// `CARGO_PROFILE_DEV_OPT_LEVEL=3 cargo test -p lc-world --lib sol_fits_against_truth --
@@ -1217,7 +1227,6 @@ mod tests {
         let Some((mut sky, system)) = sol() else { panic!("the HYG catalog is not in assets/") };
         let setting = |key: &str, default: f64| std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
         let ticks = setting("SOL_FITS_TICKS", 3000.0) as usize;
-        let from = system.star_position_ly() + DVec3::X * setting("SOL_FITS_AU", 5.0) * AU_M / M_PER_LY;
         let mut k = Knowledge::new(Witness(1));
         let mut o = Observatory::default();
         o.take_up(Duty::Survey { star: system.star, started_s: 0.0 }, 0.0);
@@ -1225,6 +1234,30 @@ mod tests {
         let sim = system.sim();
         let name = |i| sim.info(i).name.clone().unwrap_or_else(|| sim.name(i).to_string());
         let named: HashMap<BodyId, _> = sim.indices().map(|i| (BodyId::of(system.star, &name(i)), i)).collect();
+        let park = std::env::var("SOL_FITS_PARK").unwrap_or_else(|_| "Earth".to_string());
+        let g = 6.674_30e-11;
+        let circle = |radius_m: f64, mu: f64, t: f64| {
+            let turn = t * (mu / radius_m.powi(3)).sqrt();
+            DVec3::new(turn.cos(), turn.sin(), 0.0) * radius_m
+        };
+        let star_mu = g * sim.mass(system.primary());
+        let ship = |t: f64| -> DVec3 {
+            let star_at = system.star_position_at(t).unwrap_or(system.star_position_ly());
+            let out = |spec: &str| spec.parse::<f64>().ok().map(|au| au * AU_M);
+            let offset_m = match park.split_once(':') {
+                Some(("still", au)) => DVec3::X * out(au).expect("still:<au>"),
+                Some(("sun", au)) => circle(out(au).expect("sun:<au>"), star_mu, t),
+                _ => {
+                    let i = sim.indices().find(|&i| name(i) == park).expect("SOL_FITS_PARK names no body");
+                    let (Some((at, _)), Some((sun, _))) = (system.body_state_at(i, t), system.body_state_at(system.primary(), t)) else {
+                        panic!("{park} has no state at {t}")
+                    };
+                    let radius_m = 20.0 * sim.appearance(i).radius();
+                    at - sun + circle(radius_m, g * sim.mass(i), t)
+                }
+            };
+            star_at + offset_m / M_PER_LY
+        };
         let started = std::time::Instant::now();
         let mut t = 0.0;
         for tick in 0..ticks {
@@ -1232,7 +1265,7 @@ mod tests {
                 eprintln!("tick {tick}, {:?}", started.elapsed());
             }
             t += TICK_S;
-            o.tick(&mut sky, Some(&system), &mut k, at(from), t);
+            o.tick(&mut sky, Some(&system), &mut k, at(ship(t)), t);
             let Some(star_ly) = k.belief(Subject::Star(system.star)).and_then(|b| b.distance.position_ly()) else {
                 continue;
             };
@@ -1244,14 +1277,29 @@ mod tests {
         eprintln!("{ticks} ticks, {:.1} days, {:?}", t / 86_400.0, started.elapsed());
 
         let relative = |i, at_s| Some(system.body_state_at(i, at_s)?.0 - system.body_state_at(system.primary(), at_s)?.0);
+        let star_true = system.star_position_at(t).unwrap_or(system.star_position_ly());
+        // The star as believed, and its error: a parallax fixes it along the line of sight from
+        // where the ship is now, and far better across it.
+        let (star_off_m, star_m2) = match k.belief(Subject::Star(system.star)).map(|b| b.distance) {
+            Some(crate::knowledge::Distance::Measured { position_ly, sigma_ly }) => {
+                let depth = (position_ly - ship(t)).normalize_or_zero() * sigma_ly * M_PER_LY;
+                ((position_ly - star_true) * M_PER_LY, glam::DMat3::from_cols(depth * depth.x, depth * depth.y, depth * depth.z))
+            }
+            _ => (DVec3::splat(f64::NAN), glam::DMat3::ZERO),
+        };
         let mut rows = Vec::new();
         for belief in k.bodies_of(system.star, t) {
             let (Some(&i), Some((a, sigma_a))) = (named.get(&belief.body), belief.semi_major_au) else { continue };
             let parent = sim.parent(i).map(name).unwrap_or_default();
             let about = belief.about.and_then(|b| named.get(&b)).map_or("Sun".to_string(), |&p| name(p));
-            let (miss, sigma) = match (belief.position_now, relative(i, t)) {
-                (Placed::Known { offset_au, error }, Some(truth)) => ((offset_au - truth / AU_M).length(), error.total_au()),
-                _ => (f64::NAN, f64::NAN),
+            let (miss, sigma, out) = match (belief.position_now, relative(i, t)) {
+                (Placed::Known { offset_au, error }, Some(truth)) => {
+                    let miss = star_off_m + offset_au * AU_M - truth;
+                    let c = error.whole_au2() * (AU_M * AU_M) + star_m2;
+                    let out = miss.dot(c.inverse() * miss).max(0.0).sqrt();
+                    (miss.length() / AU_M, (c.x_axis.x + c.y_axis.y + c.z_axis.z).max(0.0).sqrt() / AU_M, out)
+                }
+                _ => (f64::NAN, f64::NAN, f64::NAN),
             };
             // The osculating axis about the true parent, by vis-viva.
             let truth_a = sim.parent(i).and_then(|p| {
@@ -1261,7 +1309,7 @@ mod tests {
             });
             let truth_a = truth_a.unwrap_or(f64::NAN);
             rows.push(format!(
-                "{:>14} goes round {parent:>8}, fitted about {about:>10}: a {a:.6e} +/- {sigma_a:.1e} AU, truly {truth_a:.6e} ({:.1} sigma), placed {miss:.2e} AU out +/- {sigma:.2e}",
+                "{:>14} goes round {parent:>8}, fitted about {about:>10}: a {a:.6e} +/- {sigma_a:.1e} AU, truly {truth_a:.6e} ({:.1} sigma), placed {miss:.2e} AU out +/- {sigma:.2e} ({out:.1} sigma)",
                 name(i),
                 (a - truth_a) / sigma_a
             ));

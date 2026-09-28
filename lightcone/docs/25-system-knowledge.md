@@ -642,6 +642,15 @@ look can.
   unexplained chi-square, past two of noise's own standard deviations, now scales the covariance
   whole, and that fit is one bar out. Jupiter's two-week circle, 223 times the noise, is wider
   for it, and so is every moon fitted in its frame.
+- **And every fit carries its star's error.** An orbit about a point that is not quite where
+  it was believed is a different orbit, and the star's parallax leaves it about 3,800 km out
+  along the line of sight from 5 AU. A fit about the star is settled again with its looks
+  moved one sigma of that each way, and half the difference goes into its covariance
+  (`settle::origin_covariance`). A moon's frame carries its planet's error, star and all,
+  already. Measured on Sol from a ship parked at Earth over 150 days (2026-09-28): bodies about
+  the Sun went from a median of 2.6 sigma out to 1.3, and from ten past 3.7 sigma to six;
+  Vesta 8.3 to 0.7, Pallas 7.6 to 1.2, Mars 5.5 to 2.6. The moons, 31 of 82 past 3.7 sigma, are
+  unchanged: that is their primaries, not their bars.
 - `arc::basis` is written out rather than `any_orthonormal_vector`, since a stated covariance is
   in it and a library's basis may change under an upgrade.
 - Measured on Sol from 5 AU over fifteen days (2026-09-27): Jupiter 0.4 sigma out on its axis,

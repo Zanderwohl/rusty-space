@@ -780,7 +780,7 @@ graph LR
 
 ### C7 · Field bar
 
-- status: todo
+- status: active card "C7 · Field bar"
 - needs: H6
 - touches: `crates/lc-client/src/hud.rs`, `crates/lc-client/src/panels.rs`
 - read: 30 §The field bar
