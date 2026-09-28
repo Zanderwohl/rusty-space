@@ -459,13 +459,14 @@ impl Craft {
     /// Give it a form and an account, or take them away. Its length follows its form from here on.
     ///
     /// A craft first fitted mid-round, as one loaded is, has been seen in the round's forms back
-    /// to its start and in the form it began from before that, all at the length it has now.
+    /// to its start and in the form it began from before that, all at the length it has now. Its field
+    /// has always been the one it is given.
     pub fn fit(&mut self, fitting: Option<Fitting>) {
         self.fitting = fitting;
         self.sync_length();
+        self.glows.clear();
         let Some(fitting) = &self.fitting else {
             self.seen.clear();
-            self.glows.clear();
             return;
         };
         let since = fitting.since_s();
