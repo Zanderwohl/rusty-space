@@ -32,7 +32,7 @@ pub fn auto_by(craft: &Craft, until_s: f64) -> Option<(f64, Mode)> {
         let fitting = ahead.as_ref().unwrap_or(craft).fitting()?;
         let since_s = fitting.since_s();
         let segment_end_s = lc_world::solar::segment_end(since_s);
-        if let Some(due) = fitting.auto_s().filter(|&(t, _)| t <= segment_end_s.min(until_s)) {
+        if let Some(due) = fitting.auto_s(&ahead.as_ref().unwrap_or(craft).motion, segment_end_s.min(until_s)) {
             return Some(due);
         }
         if segment_end_s >= until_s {

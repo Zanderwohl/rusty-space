@@ -32,7 +32,7 @@ pub fn collapse_by(craft: &Craft, until_s: f64) -> Option<f64> {
         let fitting = ahead.as_ref().unwrap_or(craft).fitting()?;
         let since_s = fitting.since_s();
         let segment_end_s = lc_world::solar::segment_end(since_s);
-        if let Some(at_s) = fitting.collapse_s().filter(|&t| t <= segment_end_s.min(until_s)) {
+        if let Some(at_s) = fitting.collapse_s(&ahead.as_ref().unwrap_or(craft).motion, segment_end_s.min(until_s)) {
             return Some(at_s);
         }
         if segment_end_s >= until_s {
@@ -262,7 +262,7 @@ mod tests {
         then.settle(at_s);
         let fitting = then.fitting().unwrap();
         let heat_max_j = fitting.field().heat_max_j();
-        assert!((fitting.heat_j_at(at_s) - heat_max_j).abs() < 1.0e-6 * heat_max_j, "not at the limit");
+        assert!((fitting.heat_j_at(&then.motion, at_s) - heat_max_j).abs() < 1.0e-6 * heat_max_j, "not at the limit");
         let stored_j = fitting.stored_j_at(&then.motion, at_s);
         assert!(stored_j > committed_j, "premise: storage holds the commitment");
         assert!((collapsed.released_j - (heat_max_j + stored_j)).abs() < 1.0e-12 * collapsed.released_j);
@@ -309,8 +309,8 @@ mod tests {
         let [step] = plan.steps() else { panic!("{:?}", plan.steps()) };
         assert!(step.vented_j > 0.0, "premise: it vents");
         let end_s = plan.round().start_s + step.ends_s();
-        let heat_max_j = fitting.heat_j_at(end_s) - 0.5 * step.vented_j;
-        assert!(fitting.heat_j_at(end_s - 1.0e-3) < heat_max_j, "premise: only the vent crosses");
+        let heat_max_j = fitting.heat_j_at(&server.ship(DYING).unwrap().motion, end_s) - 0.5 * step.vented_j;
+        assert!(fitting.heat_j_at(&server.ship(DYING).unwrap().motion, end_s - 1.0e-3) < heat_max_j, "premise: only the vent crosses");
         let area_m2 = fitting.field().area_m2;
         server.set_balance(Balance { field_capacity: heat_max_j / area_m2, ..Balance::DEFAULT });
 

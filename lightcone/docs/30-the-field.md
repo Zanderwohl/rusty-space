@@ -109,6 +109,14 @@ Storage filling partway through a segment splits it. The fill time is linear in 
 inputs, so the split is closed form too. Holding full storage full, rather than switching
 conversion off, is what makes a settlement independent of where its segments are cut.
 
+While the drive is lit, exhaust draws on `Q` before storage
+([31-directed-energy.md](31-directed-energy.md#the-drive-is-the-radiator)), and heat reaching zero
+splits a segment as well. **At the floor, all the heat the ship makes goes out with the exhaust as
+it is made**, conversion's loss and the drain's heat included, so storage pays the exhaust less
+that, and the drain costs nothing there. Within a segment, the floor ends only where storage fills
+there and the heat made outruns the exhaust. A segment is at most three stretches: filling, then
+full or at the floor, then the other.
+
 ## Clear and Black
 
 A field runs in one of two modes, and the player chooses.
@@ -296,8 +304,10 @@ seeing it replayed as the light passes.
 ### As built
 
 - **The instant is solved, not stepped.** `Fitting::collapse_s` walks the account's stretches from
-  its settlement, fill and empty storage splits and refit steps included, and takes the closed form in
-  each. A vent that crosses `Q_max` crosses it at its step's end. The shard walks that across the
+  its settlement, fill and empty storage splits, the exhaust's floor and refit steps included, and
+  takes the closed form in each. It reads the burn: exhaust only ever lowers `Q`, so a burn can put a
+  collapse off and never bring one on, and a solve that ignored it would destroy a ship its drive
+  was saving. A vent that crosses `Q_max` crosses it at its step's end. The shard walks that across the
   day-long starlight segments the account will be settled at and fires what falls due, once before
   the tick advances anything and once after its orders. Nothing is stored for it: every change of
   input settles the account first, so asking again is the re-solve, and a checkpoint restores it with

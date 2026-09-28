@@ -1187,14 +1187,17 @@ mod tests {
 
         // Flown to the end: what was quoted, plus the drain, has gone — a little less, because
         // the account settles every game day and the drain has made the ship lighter for the rest
-        // of the burn. That remainder is the drain's mass times the burn's own fraction.
+        // of the burn, and because heat paid first.
+        let heat = craft.fitting().unwrap().account().heat_j;
         craft.advance(end + 1.0, end + 1.0);
         assert!(!craft.motion.is_under_way(), "{:?}", craft.motion.motive);
         let drain = craft.fitting().unwrap().hull().capacities.drain_w * (end + 1.0);
         let stored = craft.fitting().unwrap().stored_j_at(&craft.motion, end + 1.0);
         let expected = free - quoted - drain;
-        assert!(stored >= expected * (1.0 - 1.0e-12), "{stored} vs {expected}");
-        assert!(stored - expected <= drain * quoted / (mass * crate::fitting::C2), "{stored} vs {expected}");
+        // The field radiates a little before the burn draws it down.
+        assert!(stored >= expected * (1.0 - 1.0e-12) + heat * (1.0 - 1.0e-6), "{stored} vs {expected}");
+        let from_heat = heat + drain;
+        assert!(stored - expected <= drain * quoted / (mass * crate::fitting::C2) + from_heat, "{stored} vs {expected}");
         assert!(craft.mass_kg_at(end + 1.0) < mass);
         // Lighter, so its engines pull harder.
         assert!(craft.rated_drive(end + 1.0).accel_g > 5.0);

@@ -6,7 +6,8 @@
 //! where the account is settled never changes what it absorbed.
 
 use super::{Balance, Fitting};
-use crate::field::{Field, Mode, Segment};
+use crate::field::{Field, Mode, Segment, Stretch};
+use crate::motion::ShipState;
 
 /// What the player chose.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -154,10 +155,9 @@ impl Fitting {
         Some(switch)
     }
 
-    /// When Auto next begins a switch, and toward which shade, if the inputs in force hold and the
-    /// round runs as planned. `None` outside Auto and while a switch is kept. Reads no burn, as
-    /// [`Fitting::heat_j_at`] does.
-    pub fn auto_s(&self) -> Option<(f64, Mode)> {
+    /// When Auto next begins a switch by `until_s`, and toward which shade, if the inputs in force
+    /// hold and the round runs as planned. `None` outside Auto and while a switch is kept.
+    pub fn auto_s(&self, motion: &ShipState, until_s: f64) -> Option<(f64, Mode)> {
         let Setting::Auto(thresholds) = self.posture.setting else { return None };
         if self.posture.switch.is_some() {
             return None;
@@ -166,7 +166,7 @@ impl Fitting {
         let max_j = field.heat_max_j();
         let shade = self.posture.shade;
         let mut found = None;
-        self.walk(None, f64::INFINITY, |from_s, part, heat_j, dt_s| {
+        self.walk(Some(motion), until_s, |from_s, part, heat_j, dt_s| {
             let capacity_j = self.capacities_at(from_s).storage_j;
             let due = match shade {
                 Mode::Black => clear_due(&field, part, heat_j, thresholds.clear_above * max_j, capacity_j),
@@ -179,41 +179,60 @@ impl Fitting {
     }
 }
 
-/// Heat rises to `above_j`, or storage fills.
-fn clear_due(field: &Field, part: &Segment, heat_j: f64, above_j: f64, capacity_j: f64) -> Option<f64> {
-    if part.room_j <= FULL * capacity_j {
-        return Some(0.0);
-    }
-    let heat = field.segment_time_to_rise_s(part, heat_j, above_j);
-    [heat, part.fill_s()].into_iter().flatten().reduce(f64::min)
+/// Each of `part`'s stretches, with when it starts and the room storage has then.
+fn stretches(field: &Field, part: &Segment, heat_j: f64) -> impl Iterator<Item = (f64, f64, Stretch)> {
+    let (mut at_s, mut room_j) = (0.0, part.room_j);
+    field.stretches(part, heat_j, f64::INFINITY).into_iter().map(move |s| {
+        let start = (at_s, room_j, s);
+        at_s += s.dt_s;
+        room_j -= s.storage_w * s.dt_s;
+        start
+    })
 }
 
-/// Heat at or under `below_j` while storage is under `refill_j`. Once storage fills it is not, so
-/// only the stretch before the fill is searched, and over it both heat and storage are monotonic:
-/// each condition holds over one interval touching an end.
+/// Heat rises to `above_j`, or storage fills.
+fn clear_due(field: &Field, part: &Segment, heat_j: f64, above_j: f64, capacity_j: f64) -> Option<f64> {
+    for (at_s, room_j, s) in stretches(field, part, heat_j) {
+        if room_j <= FULL * capacity_j {
+            return Some(at_s);
+        }
+        let heat = field.time_to_rise_s(s.heat_j, above_j, s.heat_w);
+        let fill = (s.storage_w > 0.0).then(|| room_j / s.storage_w);
+        if let Some(t) = [heat, fill].into_iter().flatten().reduce(f64::min).filter(|&t| t <= s.dt_s) {
+            return Some(at_s + t);
+        }
+    }
+    None
+}
+
+/// Heat at or under `below_j` while storage is under `refill_j`. Over a stretch both move
+/// monotonically, so each condition holds over one interval touching an end.
 fn black_due(field: &Field, part: &Segment, heat_j: f64, below_j: f64, refill_j: f64, capacity_j: f64) -> Option<f64> {
-    let power_w = field.heat_filling_w(part);
-    let heat = if heat_j <= below_j {
-        Holds::Until(field.time_to_rise_s(heat_j, below_j, power_w).unwrap_or(f64::INFINITY))
-    } else {
-        field.time_to_fall_s(heat_j, below_j, power_w).map_or(Holds::Never, Holds::From)
-    };
-    let level_j = capacity_j - part.room_j.max(0.0);
-    let net_w = part.stored_w() - part.draw_w;
-    let storage = if level_j < refill_j {
-        Holds::Until(if net_w > 0.0 { (refill_j - level_j) / net_w } else { f64::INFINITY })
-    } else if net_w < 0.0 {
-        Holds::From((level_j - refill_j) / -net_w)
-    } else {
-        Holds::Never
-    };
-    let due = match (heat, storage) {
-        (Holds::Never, _) | (_, Holds::Never) => None,
-        (Holds::Until(_), Holds::Until(_)) => Some(0.0),
-        (Holds::Until(end), Holds::From(start)) | (Holds::From(start), Holds::Until(end)) => (start <= end).then_some(start),
-        (Holds::From(a), Holds::From(b)) => Some(a.max(b)),
-    };
-    due.filter(|&t| part.fill_s().is_none_or(|fill_s| t < fill_s))
+    for (at_s, room_j, s) in stretches(field, part, heat_j) {
+        let heat = if s.heat_j <= below_j {
+            Holds::Until(field.time_to_rise_s(s.heat_j, below_j, s.heat_w).unwrap_or(f64::INFINITY))
+        } else {
+            field.time_to_fall_s(s.heat_j, below_j, s.heat_w).map_or(Holds::Never, Holds::From)
+        };
+        let level_j = capacity_j - room_j.max(0.0);
+        let storage = if level_j < refill_j {
+            Holds::Until(if s.storage_w > 0.0 { (refill_j - level_j) / s.storage_w } else { f64::INFINITY })
+        } else if s.storage_w < 0.0 {
+            Holds::From((level_j - refill_j) / -s.storage_w)
+        } else {
+            Holds::Never
+        };
+        let due = match (heat, storage) {
+            (Holds::Never, _) | (_, Holds::Never) => None,
+            (Holds::Until(_), Holds::Until(_)) => Some(0.0),
+            (Holds::Until(end), Holds::From(start)) | (Holds::From(start), Holds::Until(end)) => (start <= end).then_some(start),
+            (Holds::From(a), Holds::From(b)) => Some(a.max(b)),
+        };
+        if let Some(t) = due.filter(|&t| t <= s.dt_s) {
+            return Some(at_s + t);
+        }
+    }
+    None
 }
 
 /// Where a condition holds from the start of a stretch.
@@ -325,7 +344,7 @@ mod tests {
                 assert_eq!(f.take_flip(), Some(switch));
                 continue;
             }
-            match f.auto_s() {
+            match f.auto_s(&rest(), until_s) {
                 Some((at_s, to)) if at_s <= until_s => {
                     f.settle(&rest(), at_s);
                     f.begin_switch(to).unwrap();
@@ -348,17 +367,17 @@ mod tests {
         let done_s = b.field_switch_s;
         assert_eq!(clear.posture.switch, Some(Switch { to: Mode::Clear, done_s }));
         for t in [0.25 * done_s, 0.999_999 * done_s, done_s] {
-            assert_eq!(clear.heat_j_at(t), black.heat_j_at(t), "{t}");
+            assert_eq!(clear.heat_j_at(&rest(), t), black.heat_j_at(&rest(), t), "{t}");
             assert_eq!(clear.stored_j_at(&rest(), t), black.stored_j_at(&rest(), t), "{t}");
         }
         let later_s = 3.0 * done_s;
-        assert!(clear.heat_j_at(later_s) < 0.99 * black.heat_j_at(later_s), "Clear absorbs less once done");
+        assert!(clear.heat_j_at(&rest(), later_s) < 0.99 * black.heat_j_at(&rest(), later_s), "Clear absorbs less once done");
 
         let mut ticks = clear.clone();
         for k in 1..=997 {
             ticks.settle(&rest(), later_s * f64::from(k) / 997.0);
         }
-        assert!(close(ticks.heat_j, clear.heat_j_at(later_s), 1e-9), "{} {}", ticks.heat_j, clear.heat_j_at(later_s));
+        assert!(close(ticks.heat_j, clear.heat_j_at(&rest(), later_s), 1e-9), "{} {}", ticks.heat_j, clear.heat_j_at(&rest(), later_s));
         assert!(close(ticks.stored_j, clear.stored_j_at(&rest(), later_s), 1e-9));
         assert_eq!(ticks.shade_at(later_s), Mode::Clear);
         assert_eq!(ticks.take_flip(), Some(Switch { to: Mode::Clear, done_s }), "kept until taken");
@@ -396,7 +415,7 @@ mod tests {
         for (shade, fraction) in [(Mode::Clear, b.clear_absorptivity), (Mode::Black, 1.0)] {
             let mut f = ship(b, capacity_j, Some(0.0), Posture { setting: Setting::Black, shade, switch: None });
             f.set_starlight_w(arriving_w);
-            assert!(close(f.heat_j_at(dt_s), fraction * arriving_w * dt_s, 1e-9), "{shade:?} {}", f.heat_j_at(dt_s));
+            assert!(close(f.heat_j_at(&rest(), dt_s), fraction * arriving_w * dt_s, 1e-9), "{shade:?} {}", f.heat_j_at(&rest(), dt_s));
             assert_eq!(Burst::Arriving(spike_j).heat_j(f.absorptivity_at(dt_s)), fraction * spike_j);
         }
         assert_eq!(b.clear_absorptivity, 0.3);
@@ -410,15 +429,15 @@ mod tests {
         f.set_starlight_w(starlight_w(&b, 0.1));
         let caps = f.hull().capacities;
         let fill_s = caps.storage_j / (f.solar_w() - caps.drain_w);
-        let (at_s, to) = f.auto_s().expect("it fills");
+        let (at_s, to) = f.auto_s(&rest(), f64::INFINITY).expect("it fills");
         assert!(close(at_s, fill_s, 1e-9) && to == Mode::Clear, "{at_s} {fill_s} {to:?}");
-        assert!(f.heat_j_at(at_s) < 0.5 * f.field().heat_max_j(), "premise: storage, not heat");
+        assert!(f.heat_j_at(&rest(), at_s) < 0.5 * f.field().heat_max_j(), "premise: storage, not heat");
 
         let year_s = crate::flight::JULIAN_YEAR_S;
         let begun = run(&mut f, 2.0 * year_s);
         assert_eq!(begun.iter().map(|&(t, to, _)| (t, to)).collect::<Vec<_>>(), vec![(at_s, Mode::Clear)]);
         assert_eq!(f.stored_j, caps.storage_j);
-        let k = f.temperature_k_at(2.0 * year_s);
+        let k = f.temperature_k_at(&rest(), 2.0 * year_s);
         assert!((k - 2_400.0).abs() < 100.0, "{k}");
     }
 
@@ -429,10 +448,10 @@ mod tests {
         let half_j = 0.5 * Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j;
         let mut f = ship(b, half_j, Some(0.45 * max_j), auto(&b, Mode::Black));
         f.settle(&rest(), 1.0e5);
-        assert_eq!(f.auto_s(), None, "premise: cooling, far from any star");
+        assert_eq!(f.auto_s(&rest(), f64::INFINITY), None, "premise: cooling, far from any star");
         let spike_j = 0.1 * max_j;
         let hit = Fitting::from_account(&Account { heat_j: f.heat_j + Burst::Arriving(spike_j).heat_j(f.absorptivity_at(f.since_s)), ..f.account() }, b);
-        assert_eq!(hit.auto_s(), Some((1.0e5, Mode::Clear)));
+        assert_eq!(hit.auto_s(&rest(), f64::INFINITY), Some((1.0e5, Mode::Clear)));
     }
 
     /// Starlight that heats Black past `clear_above` and lets Clear cool under `black_below`, with
