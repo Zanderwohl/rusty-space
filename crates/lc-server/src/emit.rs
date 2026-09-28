@@ -495,3 +495,6 @@ pub(crate) fn burst(from: DVec3, burst_j: f64, temperature_k: f64) -> Emitted {
         burst_j,
     }
 }
+
+#[cfg(test)]
+mod tests;
