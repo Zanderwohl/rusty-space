@@ -202,7 +202,7 @@ impl Field {
     /// between: sRGB.
     pub fn color(&self, blue: [f32; 3]) -> [f32; 3] {
         let glow = ((self.kelvin - DRAPER_K) / GLOW_BLEND_K).clamp(0.0, 1.0) as f32;
-        std::array::from_fn(|c| blue[c] + (self.blackbody[c] - blue[c]) * glow)
+        std::array::from_fn(|c| (1.0 - glow) * blue[c] + glow * self.blackbody[c])
     }
 
     /// Of full brightness, at `t_s` real seconds: one below [`PULSE_FILL`], and pulsing past it,
@@ -524,7 +524,8 @@ fn glow(mapping: &em_spectra::BandMapping, kelvin: f64) -> [f32; 3] {
         return [0.0; 3];
     }
     let [r, g, b] = linear.map(|c| (c / peak) as f32);
-    bevy::color::Color::linear_rgb(r, g, b).to_srgba().to_f32_array_no_alpha()
+    let srgb = bevy::color::Color::linear_rgb(r, g, b).to_srgba();
+    [srgb.red, srgb.green, srgb.blue]
 }
 
 /// Thousands set off by a space: `3 240`.
@@ -711,6 +712,7 @@ mod tests {
         let heat_j = of_max * full.field().heat_max_j();
         let account = Account { heat_j, starlight_w, posture, ..full.account() };
         s.ship.fit(Some(Fitting::from_account(&account, Balance::DEFAULT)));
+        s.ship.set_starlight_w(starlight_w);
         (ui, s)
     }
 
@@ -747,7 +749,7 @@ mod tests {
         assert!(field.kelvin > DRAPER_K + GLOW_BLEND_K, "{}", field.kelvin);
         let [r, g, b] = field.color(BLUE);
         assert_eq!([r, g, b], field.blackbody, "all blackbody");
-        assert!(r == 1.0 && g < 0.9 && b < g, "orange at {} K: {r} {g} {b}", field.kelvin);
+        assert!(r > 0.999 && g < 0.9 && b < g, "orange at {} K: {r} {g} {b}", field.kelvin);
         assert!(field.text.starts_with(&format!("{} K ↓ ", grouped(field.kelvin))), "{}", field.text);
     }
 

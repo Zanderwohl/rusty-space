@@ -6,8 +6,7 @@
 //! exactly one event, stamped when and where it completed and seen by everyone at light delay.
 
 use lc_proto::{FieldMode, Refusal, ShadeChange};
-use lc_world::craft::{Craft, CraftId};
-use lc_world::field::Mode;
+use lc_world::craft::CraftId;
 use lc_world::fitting::Setting;
 
 use super::{auto_by, collapse_by};
