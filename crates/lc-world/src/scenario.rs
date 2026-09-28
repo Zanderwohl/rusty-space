@@ -127,6 +127,9 @@ pub enum Act {
     /// [`Act::Chase`] by the Direct approach. See 31 §Two ways to approach.
     ChaseDirect(Slot),
     BreakOff,
+    /// Cross toward a point `ly` light-years along `bearing` from where the actor is, on its
+    /// drive: the one burn a scene can aim anywhere, since every course is about the system.
+    Cross { bearing: [f64; 3], ly: f64 },
     /// Cut the drive. Not a stop: whatever the ship was doing at the time, it keeps doing
     /// ballistically.
     Cut,
@@ -163,7 +166,7 @@ pub struct Scenario {
 
 impl Scenario {
     /// Every scene there is.
-    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA, CASCADE];
+    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA, CASCADE, DISTANT];
 
     /// The one whose name starts with `prefix`, if exactly one does.
     ///
@@ -478,6 +481,64 @@ pub const CASCADE: Scenario = Scenario {
     // Once every hull's light has reached the player, a quarter of a millisecond on.
     beats: &[Beat { after_s: 5.0e-4, actor: Slot::Cast(0), act: Act::Vent(100.0) }],
 };
+
+/// A burn, a collapse and an idle ship, none of them resolved: R18's points. See 32 §The exhaust
+/// cone, From a distance.
+///
+/// Lantern, a light-year off, crosses 10° off the line to you, so you are just outside its cone and
+/// see its face obliquely; then straight away from you, so its cone is on you. Beacon, a light-year
+/// off the other side, vents into collapse. Tern sits a hundred thousand kilometers off, lit by the
+/// Sun. All three are north of the ecliptic, so the Sun is a quarter-turn out of frame.
+pub const DISTANT: Scenario = Scenario {
+    name: "distant",
+    blurb: "A burn and a collapse a light-year off, and a ship too far to see as more than a point.",
+    star: "Sol",
+    // A year a minute, so a light-year's delay is a minute of watching.
+    rate: 60.0,
+    watch: Slot::Pov,
+    pov: Member {
+        name: "Kestrel",
+        kind: Kind::Ship,
+        length_m: 500.0,
+        accel_g: 5.0,
+        start: Start::AsFound,
+        form: None,
+    },
+    cast: &[
+        Member {
+            name: "Lantern",
+            kind: Kind::Ship,
+            length_m: 7307.269,
+            accel_g: 2.0,
+            start: Start::Beside { lengths: 1.294701e+12, bearing: [0.104528, 0.0, 0.994522] },
+            form: Some(Formed { scale: 10.0, heat: 0.0 }),
+        },
+        Member {
+            name: "Beacon",
+            kind: Kind::Ship,
+            length_m: 7307.269,
+            accel_g: 5.0,
+            start: Start::Beside { lengths: 1.294701e+12, bearing: [-0.104528, 0.0, 0.994522] },
+            form: Some(Formed { scale: 10.0, heat: 0.986 }),
+        },
+        Member {
+            name: "Tern",
+            kind: Kind::Ship,
+            length_m: 730.7269,
+            accel_g: 5.0,
+            start: Start::Beside { lengths: 1.368500e+05, bearing: [0.0, 0.07, 1.0] },
+            form: Some(Formed { scale: 1.0, heat: 0.0 }),
+        },
+    ],
+    beats: &[
+        Beat { after_s: 0.0, actor: Slot::Cast(0), act: Act::Cross { bearing: [0.275637, 0.0, 0.961262], ly: 3.0 } },
+        // Before its field cools: a light-year from the Sun it would, and the vent would not be enough.
+        Beat { after_s: 1.0, actor: Slot::Cast(1), act: Act::Vent(100.0) },
+        Beat { after_s: 0.1 * YEAR_S, actor: Slot::Cast(0), act: Act::Cross { bearing: [0.104528, 0.0, 0.994522], ly: 3.0 } },
+    ],
+};
+
+const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
 
 /// [`CASCADE`]'s line, at `lengths` of its own along `bearing`: `lengths` is `bearing`'s length.
 const fn domino(name: &'static str, bearing: [f64; 3], lengths: f64) -> Member {
