@@ -548,6 +548,35 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
     }
 }
 
+impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
+    /// A [`TextField`](crate::field::TextField) the width of its parent, holding at most
+    /// `max_characters`.
+    pub fn text_field<A: Component>(&mut self, parent: Entity, text: &str, max_characters: usize, marker: A) -> Entity {
+        let theme = self.theme;
+        let font = self.font.clone();
+        let mut editable = bevy::text::EditableText::new(text);
+        editable.max_characters = Some(max_characters);
+        let field = self
+            .commands
+            .spawn((
+                Node { flex_grow: 1.0, padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), border: UiRect::all(Val::Px(1.0)), ..default() },
+                editable,
+                bevy::text::TextCursorStyle { color: theme.text, ..default() },
+                TextLayout::no_wrap(),
+                TextFont { font: font.map(FontSource::Handle).unwrap_or_default(), font_size: FontSize::Px(FIELD_TEXT), ..default() },
+                TextColor(theme.text),
+                BackgroundColor(theme.field_bg),
+                BorderColor::all(theme.border),
+                Interaction::default(),
+                crate::field::TextField,
+                marker,
+            ))
+            .id();
+        self.commands.entity(parent).add_child(field);
+        field
+    }
+}
+
 const TREE_INDENT: f32 = 12.0;
 const SQUARE: f32 = 24.0;
 const HEADING_TEXT: f32 = 15.0;

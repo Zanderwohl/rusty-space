@@ -96,10 +96,21 @@ impl OwnForm {
 
 /// A preset by `--form`'s spelling: a builtin's name, or `default` for the starting form. A
 /// suffix `*k` makes every part but the Mind `k` times larger at the same proportions, which is
-/// how a hull tens of kilometers long is photographed before anything can build one.
+/// how a hull tens of kilometers long is photographed before anything can build one. A suffix
+/// `+bay` hangs a bay off the storage, a kind no builtin has a part for.
 pub fn fixture(spec: &str) -> Option<Form> {
+    let (spec, bay) = spec.strip_suffix("+bay").map_or((spec, false), |spec| (spec, true));
     let name = spec.split_once('*').map_or(spec, |(name, _)| name);
-    lc_world::form::presets::named(name, fixture_scale(spec)?)
+    let form = lc_world::form::presets::named(name, fixture_scale(spec)?)?;
+    if !bay {
+        return Some(form);
+    }
+    let draft = crate::draft::Draft::new(form);
+    let storage = draft.form.parts.iter().find(|p| p.kind == lc_world::form::Kind::Storage)?.id;
+    let edit = draft.add(storage, lc_world::form::Kind::Bay, crate::draft::PRIMITIVES[3], DVec3::NEG_Y, &Balance::DEFAULT).ok()?;
+    let mut draft = draft;
+    draft.apply(&edit, &Balance::DEFAULT).ok()?;
+    Some(draft.form)
 }
 
 /// The `k` of a `--form` spelling's `*k`, one without it, and `None` for a `k` that is no scale.

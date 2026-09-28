@@ -123,7 +123,8 @@ impl Plugin for ClientPlugin {
             // The two modes beside the world, paired: a tuple of plugins stops at fifteen.
             (crate::map::MapPlugin, crate::form_view::FormViewPlugin,
                 crate::form_handles::FormHandlesPlugin, crate::form_panel::FormPanelPlugin, crate::form_apply::FormApplyPlugin,
-                crate::form_preview::FormPreviewPlugin, crate::form_history::FormHistoryPlugin),
+                crate::form_preview::FormPreviewPlugin, crate::form_history::FormHistoryPlugin,
+                crate::presets_panel::PresetsPanelPlugin),
             (crate::bench::BenchPlugin, crate::haze::HazePlugin),
             // The beauty shots and the staged refit both photograph the ship.
             (crate::beauty::BeautyPlugin, crate::ship_hull::ShipHullPlugin, crate::refit_hull::RefitHullPlugin, crate::field::FieldPlugin),
@@ -203,6 +204,7 @@ impl Plugin for ClientPlugin {
                             // does not also drop it there.
                             crate::form_panel::press,
                             crate::form_history::press,
+                            crate::presets_panel::press,
                             crate::form_view::read_slide_keys,
                             crate::form_handles::delete_key,
                             crate::form_history::read_keys,
@@ -599,7 +601,9 @@ fn enter_game(
     // a page twice: dropping them here would lose everything learned before the sky loaded.
     let knowledge = std::mem::replace(&mut game.0.knowledge, Knowledge::new(Witness(0)));
     let observatory = game.0.observatory.clone();
+    let presets = std::mem::take(&mut game.0.presets);
     game.0 = Session::new(provider, SKY_LIMIT);
+    game.0.presets = presets;
     // The session was just replaced, and with it everything the server had said about where
     // and when this ship is. Put it back, or the client flies locally from the origin while
     // the interface still says LINKED. See `uplink::Placement`.
@@ -620,7 +624,7 @@ fn enter_game(
 }
 
 /// Carry every request through the one dispatcher.
-fn dispatch(
+pub(crate) fn dispatch(
     mut requests: MessageReader<Requested>,
     mut ui: ResMut<Ui>,
     mut game: ResMut<Game>,
@@ -628,6 +632,7 @@ fn dispatch(
     time: Res<Time>,
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
+    mut clipboard: Option<ResMut<bevy_egui::EguiClipboard>>,
 ) {
     let pending: Vec<Action> = requests.read().map(|r| r.0.clone()).collect();
     for action in pending {
@@ -680,6 +685,17 @@ fn dispatch(
                 // Handled in `signin_ui`, which has the socket, the browser and the vault.
                 // Nothing here, rather than nothing anywhere: in a browser the page that
                 // launched the game already has a session and these never fire.
+                Effect::Keep { name, form } => {
+                    uplink.say(match form {
+                        Some(form) => lc_proto::Inbound::SavePreset { name, form },
+                        None => lc_proto::Inbound::DeletePreset { name },
+                    });
+                }
+                Effect::Copy(text) => {
+                    let said = crate::presets_panel::copy(clipboard.as_deref_mut(), &text);
+                    let at = game.coordinate_time_s();
+                    ui.notify(said, at);
+                }
                 Effect::SignIn
                 | Effect::CancelSignIn
                 | Effect::SignInWithPassword { .. }

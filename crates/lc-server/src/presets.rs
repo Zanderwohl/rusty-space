@@ -6,9 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use lc_proto::form::{MAX_PRESETS, PRESET_NAME_LIMIT};
-use lc_proto::{ClientId, Form, FormFault, Outbound, Preset, Refusal};
-use lc_world::form::MAX_PARTS;
+use lc_proto::{ClientId, Form, Outbound, Preset, Refusal};
 
 use crate::journal::Journal;
 use crate::server::Server;
@@ -38,16 +36,8 @@ impl Presets {
 
     /// Keep a form under a name, replacing whatever the account had under it.
     pub fn save(&mut self, account: &str, name: String, form: Form) -> Result<(), Refusal> {
-        if name.is_empty() || name.len() > PRESET_NAME_LIMIT {
-            return Err(Refusal::PresetName);
-        }
-        if form.parts.len() > MAX_PARTS {
-            return Err(Refusal::Form(FormFault::TooManyParts { found: form.parts.len() as u32 }));
-        }
         let kept = self.kept.entry(account.to_owned()).or_default();
-        if kept.len() >= MAX_PRESETS && !kept.contains_key(&name) {
-            return Err(Refusal::TooManyPresets);
-        }
+        lc_world::form::presets::may_keep(&name, &form, kept.keys().map(String::as_str))?;
         self.dirty.insert((account.to_owned(), name.clone()));
         kept.insert(name, form);
         Ok(())
@@ -144,7 +134,8 @@ pub fn rows(changes: &[Change]) -> (Vec<lc_store::presets::Preset>, Vec<(String,
 
 #[cfg(test)]
 mod tests {
-    use lc_proto::form::{Kind, Part, PartId, Primitive};
+    use lc_proto::form::{Kind, Part, PartId, Primitive, MAX_PRESETS, PRESET_NAME_LIMIT};
+    use lc_proto::FormFault;
     use lc_proto::{ClientId, Inbound, Outbound, PROTOCOL_VERSION};
 
     use super::*;
@@ -153,6 +144,7 @@ mod tests {
     use crate::testing::Broker;
     use crate::ticket::Trusted;
     use crate::transport::Loopback;
+    use lc_world::form::MAX_PARTS;
 
     const SHARD: &str = "shard-1";
 

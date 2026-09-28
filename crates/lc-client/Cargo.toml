@@ -35,6 +35,8 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif"] }
 # The catalog, which the asset loader parses.
 toml = "0.8"
+# A preset on the clipboard. The version Bevy's scenes already bring.
+ron = "0.12"
 # Procedural textures: authored as graphs, baked on the GPU at load. Core without `std-fs`, since
 # graphs arrive through the asset server. A git pin until texture-graph is on crates.io.
 texture-graph-core = { git = "https://github.com/Zanderwohl/texture-graph.git", rev = "12498d1", default-features = false }
@@ -70,8 +72,10 @@ wasm-bindgen = "0.2"
 bevy = { version = "0.19.1", features = ["webgpu"] }
 web-sys = { version = "0.3", features = [
     "Window", "Location", "UrlSearchParams", "Document", "Element", "HtmlCanvasElement",
-    "WebSocket", "MessageEvent", "CloseEvent", "Event", "BinaryType",
+    "WebSocket", "MessageEvent", "CloseEvent", "Event", "BinaryType", "Navigator", "Clipboard",
 ] }
+# The clipboard's read is a promise. Already in the tree through bevy_egui.
+wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 # `WebSocket` and `Closure` are `!Send`, and a Bevy resource must be `Send`. This target has
 # one thread, so the check it makes on every access can never fail. See `src/link.rs`.

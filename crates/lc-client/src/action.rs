@@ -55,6 +55,15 @@ pub enum Action {
     Redo,
     GoToEdit(usize),
     ShowHistory(bool),
+    /// The presets panel's row, or none.
+    ChoosePreset(Option<crate::presets_panel::Chosen>),
+    /// Keep the draft as the account's preset by this name, replacing one kept under it.
+    SavePreset(String),
+    DeletePreset(crate::presets_panel::Chosen),
+    ApplyPreset(crate::presets_panel::Chosen, crate::presets_panel::How),
+    ExportPreset(crate::presets_panel::Chosen),
+    /// Keep a preset as [`Action::ExportPreset`] wrote it.
+    ImportPreset(String),
     /// Send the draft to the shard as the ship's target, first asking again when its round would
     /// collapse the field.
     ApplyDraft,
@@ -261,6 +270,9 @@ pub enum Effect {
     /// Ask for energy, for the reason [`Effect::Stage`] is not an order.
     Grant(f64),
     Command(String),
+    /// Save a preset to the account, or delete it with no form.
+    Keep { name: String, form: Option<lc_proto::Form> },
+    Copy(String),
 }
 
 /// Where a scene says to stand, as the interface's own state.
@@ -503,8 +515,14 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::ShowHistory(on) => ui.form.show_history = on,
     Action::Fold(panel) => ui.form.folded.toggle(panel),
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
-    Action::EditForm(edit) => effects.extend(crate::form_history::edit(&mut ui.form, session, edit).map(Effect::Notify)),
+    Action::EditForm(edit) => effects.extend(crate::form_history::edit(&mut ui.form, session, edit, None).map(Effect::Notify)),
     Action::Undo | Action::Redo | Action::GoToEdit(_) => effects.extend(crate::form_history::step(&mut ui.form, &action).map(Effect::Notify)),
+    Action::ChoosePreset(_)
+    | Action::SavePreset(_)
+    | Action::DeletePreset(_)
+    | Action::ApplyPreset(..)
+    | Action::ExportPreset(_)
+    | Action::ImportPreset(_) => effects.extend(crate::presets_panel::act(action, ui, session)),
     Action::ApplyDraft => apply_draft(ui, session, false, &mut effects),
     Action::ApplyPastCollapse(apply) => {
         let asked = ui.form.asking.take();

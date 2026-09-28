@@ -13,7 +13,7 @@ pub mod theme;
 pub mod widgets;
 
 pub use theme::{MenuTheme, vfd};
-pub use field::{Committed, NumberField, Typing};
+pub use field::{Committed, Entered, NumberField, TextField, Typing};
 pub use pointer::Controls;
 pub use widgets::{Edge, MenuButton, MenuUi, Reached};
 
