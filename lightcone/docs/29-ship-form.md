@@ -656,7 +656,8 @@ Apply asks once more when the vent would collapse the field.
   ([30-the-field.md](30-the-field.md#the-heat-account)), with the round begun on it as the shard
   would begin it: the field starts at the `Q` the ship holds, a dismantling heats it by the 5% it
   loses spread over the step, and each vent lands as a burst at its step's end, which is where the
-  heat peaks. Between them it goes where the account's own inputs take it — starlight less what is
+  heat peaks. A return that finds storage already filled by starlight is heat as it arrives, so it
+  too peaks by the step's end. Between them it goes where the account's own inputs take it — starlight less what is
   converted, and the drain — so a warm ship still cooling is asked about a vent an idle one survives.
   While a round runs, the next one begins where it ends: in its target's form and envelope, with
   the heat and storage it leaves. The ledger reads the running round's peak still ahead off the
