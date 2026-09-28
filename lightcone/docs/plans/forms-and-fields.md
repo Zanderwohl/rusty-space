@@ -494,7 +494,7 @@ graph LR
 
 ### H10 · The afterglow
 
-- status: active card "H10 · The afterglow"
+- status: done #134
 - needs: H4, H7
 - touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/instruments.rs`, `crates/lc-proto/src/lib.rs` (`Duty::Stare`), `crates/lc-world/src/knowledge/survey.rs` (`Duty`), `crates/lc-world/src/afterglow.rs`, `crates/lc-world/src/glow.rs`, `crates/lc-world/src/lib.rs`, `crates/lc-world/src/craft/field.rs`, `crates/lc-world/src/knowledge/observatory.rs`, `crates/lc-world/src/knowledge/subject.rs`, `crates/lc-world/src/knowledge/conclusion.rs`, `crates/lc-world/src/knowledge/record.rs`, `crates/lc-world/src/knowledge/report.rs`, `crates/lc-proto/src/knowing.rs`, `crates/lc-proto/src/golden.rs` (`Gaze`, `Subject::Place`, `STARING`), `crates/lc-server/src/field/afterglow.rs`, `crates/lc-server/src/persist.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/archive.rs`, `crates/lc-server/tests/checkpoint.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/session.rs`, `crates/lc-client/src/telescope_panel.rs`, `crates/lc-client/tests/seam.rs`, `lightcone/docs/30-the-field.md`, `lightcone/docs/24-standing-instruments.md`
 - read: 30 §Collapse, §What an observer sees
