@@ -796,9 +796,9 @@ graph LR
 
 ### C6 · Presets panel
 
-- status: active card "C6 · Presets panel"
+- status: done #140
 - needs: C2, S2
-- touches: `crates/lc-client/src/presets_panel.rs`
+- touches: `crates/lc-client/src/presets_panel.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/form_history.rs`, `crates/lc-client/src/form_panel.rs`, `crates/lc-client/src/form_view.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/session.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/Cargo.toml`, `crates/em-ui/src/field.rs`, `crates/em-ui/src/lib.rs`, `crates/em-ui/src/widgets.rs`, `crates/lc-world/src/form/presets.rs`, `crates/lc-server/src/presets.rs`, `lightcone/docs/29-ship-form.md`, `lightcone/images/editor-presets.png`, `AGENTS.md`
 - read: 29 §Your own presets
 - deliver: save the draft by name, apply as layout or design, delete, export to and import from the clipboard as RON.
 - done when: an exported preset imported on another account applies to the same draft.
