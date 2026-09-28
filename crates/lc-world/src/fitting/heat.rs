@@ -1,8 +1,14 @@
 //! The field's side of the account: `Q`, settled with everything that moves storage, because the two
 //! share where storage fills and where it runs dry. See `lightcone/docs/30-the-field.md` §The heat
 //! account.
+//!
+//! What the ship emits is drawn from heat first and storage for the rest
+//! (`31-directed-energy.md` §The drive is the radiator). The commitment runs down by the whole of
+//! it whatever pays, so heat's share leaves the commitment without leaving storage: it is released
+//! as a cut releases what was not flown.
 
 use super::{Balance, Fitting, Hull};
+use crate::cost;
 use crate::field::{Field, Mode, Segment};
 use crate::form::capacity::Capacities;
 use crate::motion::ShipState;
@@ -29,25 +35,22 @@ impl Fitting {
         Field::of(self.geometry.envelope_area_m2, &self.balance)
     }
 
-    /// Reads no burn. Exact because [`Craft::starlight_w_at`] gives none under way, and without
-    /// starlight a burn moves no heat.
-    ///
-    /// [`Craft::starlight_w_at`]: crate::craft::Craft::starlight_w_at
-    pub fn heat_j_at(&self, now_s: f64) -> f64 {
-        self.flow(None, now_s).heat_j
+    /// `motion` must be the motive in force since the settlement, as for [`Fitting::settle`].
+    pub fn heat_j_at(&self, motion: &ShipState, now_s: f64) -> f64 {
+        self.flow(Some(motion), now_s).heat_j
     }
 
-    pub fn temperature_k_at(&self, now_s: f64) -> f64 {
-        self.field().temperature_k(self.heat_j_at(now_s))
+    pub fn temperature_k_at(&self, motion: &ShipState, now_s: f64) -> f64 {
+        self.field().temperature_k(self.heat_j_at(motion, now_s))
     }
 
     /// Watts starlight stores while storage has room: capped at the engines' rating.
     pub fn solar_w(&self) -> f64 {
-        self.intake(&self.hull.capacities, 0.0, 0.0, 0.0).stored_w()
+        self.intake(&self.hull.capacities, 0.0, 0.0, 0.0, 0.0).stored_w()
     }
 
     /// `draw_w` is what leaves storage besides the drain, and goes negative for a return into it.
-    fn intake(&self, caps: &Capacities, losing_w: f64, room_j: f64, draw_w: f64) -> Segment {
+    fn intake(&self, caps: &Capacities, losing_w: f64, room_j: f64, draw_w: f64, emitted_w: f64) -> Segment {
         Segment {
             arriving_w: self.starlight_w,
             absorptivity: MODE.absorptivity(self.balance.clear_absorptivity),
@@ -56,7 +59,14 @@ impl Fitting {
             efficiency: self.balance.conversion_efficiency,
             room_j,
             draw_w: caps.drain_w + draw_w,
+            emitted_w,
         }
+    }
+
+    /// Watts emitted on average over `[from_s, until_s]`, which the account draws from heat before
+    /// storage: the drive's exhaust. Whatever else a ship lights joins it here.
+    fn emitted_w(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
+        (self.burn_spent_j(motion, until_s) - self.burn_spent_j(motion, from_s)) / (until_s - from_s)
     }
 
     /// Once the round under way is finished, if nothing else moves storage.
@@ -65,21 +75,22 @@ impl Fitting {
         self.refit.as_ref().map_or(stored_j, |plan| skip(plan, now_s, stored_j, &self.balance).0)
     }
 
-    /// Cut where refit steps begin and end, so every input is constant over a piece. Room and free
-    /// storage carry across cuts, so where settlements fall changes nothing. The burn's commitment
-    /// and the builds still to run are held out of free storage, so the drain starves first.
+    /// Cut where refit steps begin and end and where the drive lights or goes out, so every input is
+    /// constant over a piece. Room and free storage carry across cuts, so where settlements fall
+    /// changes nothing. The burn's commitment and the builds still to run are held out of free
+    /// storage, so the drain starves first.
     pub(super) fn flow(&self, motion: Option<&ShipState>, now_s: f64) -> Flow {
         self.walk(motion, now_s, |_, _, _, _| false)
     }
 
-    /// When `Q` first reaches `Q_max` from the settlement on, if the inputs in force hold and the
-    /// round runs as planned. A vent that crosses it does so at the end of its step. Reads no burn,
-    /// as [`Fitting::heat_j_at`] does.
-    pub fn collapse_s(&self) -> Option<f64> {
+    /// When `Q` first reaches `Q_max` from the settlement to `until_s`, if the inputs in force hold
+    /// and the round runs as planned. A vent that crosses it does so at the end of its step. A burn
+    /// only ever lowers `Q`, so it can only put a collapse off.
+    pub fn collapse_s(&self, motion: &ShipState, until_s: f64) -> Option<f64> {
         let field = self.field();
         let max_j = field.heat_max_j();
         let mut found = None;
-        self.walk(None, f64::INFINITY, |from_s, segment, heat_j, dt_s| {
+        self.walk(Some(motion), until_s, |from_s, segment, heat_j, dt_s| {
             found = field.segment_time_to_rise_s(segment, heat_j, max_j).filter(|&t| t <= dt_s).map(|t| from_s + t);
             found.is_some()
         });
@@ -99,15 +110,17 @@ impl Fitting {
         let building_j = self.refit.as_ref().map_or(0.0, |plan| building_j(plan, self.since_s));
         let mut free_j = self.stored_j - self.committed_j - building_j;
         let mut at_s = self.since_s;
-        for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s) {
+        let edges = motion.map_or_else(Vec::new, |m| cost::lit_edges(m, self.since_s, until_s));
+        for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s, &edges) {
             let dt_s = piece.until_s - at_s;
-            let burn_w = motion.map_or(0.0, |m| (self.burn_spent_j(m, piece.until_s) - self.burn_spent_j(m, at_s)) / dt_s);
+            let emitted_w = motion.map_or(0.0, |m| self.emitted_w(m, at_s, piece.until_s));
             let room_j = caps.storage_j - (self.stored_j + flow.income_j);
-            let segment = self.intake(&caps, piece.losing_w, room_j, piece.moving_w + burn_w);
-            let held_w = burn_w + piece.moving_w.max(0.0);
+            let segment = self.intake(&caps, piece.losing_w, room_j, piece.moving_w, emitted_w);
+            let held_w = emitted_w + piece.moving_w.max(0.0);
             let (mut heat_j, mut storage_j) = (flow.heat_j, 0.0);
             let mut from_s = at_s;
-            for (part, part_s) in split(segment, caps.drain_w, held_w, free_j, dt_s) {
+            for (part, part_s) in split(&field, segment, heat_j, caps.drain_w, held_w, free_j, dt_s) {
+                let part = Segment { room_j: room_j - storage_j, ..part };
                 if stop(from_s, &part, heat_j, part_s) {
                     return flow;
                 }
@@ -129,17 +142,32 @@ impl Fitting {
     }
 }
 
-/// A segment over `dt_s`, split where free storage runs out. After that the drain gets only what
-/// comes in, and its unpaid part makes no heat. `held_w`, paid from what is held back, is never cut.
-fn split(segment: Segment, drain_w: f64, held_w: f64, free_j: f64, dt_s: f64) -> impl Iterator<Item = (Segment, f64)> {
-    let short_w = segment.draw_w - held_w - segment.stored_w();
-    let empty_s = if short_w > 0.0 { free_j.max(0.0) / short_w } else { f64::INFINITY };
-    if empty_s >= dt_s {
-        return [Some((segment, dt_s)), None].into_iter().flatten();
+/// A segment over `dt_s` from `heat_j`, split where free storage runs out. After that the drain
+/// gets only what comes in, and its unpaid part makes no heat. `held_w`, paid from what is held
+/// back, is never cut.
+fn split(
+    field: &Field,
+    segment: Segment,
+    heat_j: f64,
+    drain_w: f64,
+    held_w: f64,
+    free_j: f64,
+    dt_s: f64,
+) -> impl Iterator<Item = (Segment, f64)> {
+    let (mut free_j, mut at_s) = (free_j, 0.0);
+    for stretch in field.stretches(&segment, heat_j, dt_s) {
+        let short_w = -(stretch.storage_w + held_w);
+        let empty_s = if short_w > 0.0 { free_j.max(0.0) / short_w } else { f64::INFINITY };
+        if empty_s < stretch.dt_s {
+            let unpaid_w = short_w.min(drain_w);
+            let starved = Segment { draw_w: segment.draw_w - unpaid_w, internal_w: segment.internal_w - unpaid_w, ..segment };
+            let empty_s = at_s + empty_s;
+            return [Some((segment, empty_s)), Some((starved, dt_s - empty_s))].into_iter().flatten();
+        }
+        free_j -= short_w * stretch.dt_s;
+        at_s += stretch.dt_s;
     }
-    let unpaid_w = short_w.min(drain_w);
-    let starved = Segment { draw_w: segment.draw_w - unpaid_w, internal_w: segment.internal_w - unpaid_w, ..segment };
-    [Some((segment, empty_s)), Some((starved, dt_s - empty_s))].into_iter().flatten()
+    [Some((segment, dt_s)), None].into_iter().flatten()
 }
 
 /// A stretch of constant refit inputs, ending at `until_s`.
@@ -154,14 +182,14 @@ struct Piece {
     vent_j: f64,
 }
 
-fn pieces(plan: Option<&Plan>, balance: &Balance, since_s: f64, now_s: f64) -> Vec<Piece> {
-    let Some(plan) = plan else { return vec![Piece { until_s: now_s, losing_w: 0.0, moving_w: 0.0, vent_j: 0.0 }] };
-    let start_s = plan.round().start_s;
-    let mut cuts: Vec<f64> = plan
-        .steps()
+/// `edges` are further cuts, inside `(since_s, now_s)`.
+fn pieces(plan: Option<&Plan>, balance: &Balance, since_s: f64, now_s: f64, edges: &[f64]) -> Vec<Piece> {
+    let (steps, start_s) = plan.map_or((&[][..], 0.0), |plan| (plan.steps(), plan.round().start_s));
+    let mut cuts: Vec<f64> = steps
         .iter()
         .flat_map(|s| [start_s + s.begins_s, start_s + s.ends_s()])
         .filter(|&t| t > since_s && t < now_s)
+        .chain(edges.iter().copied())
         .chain([now_s])
         .collect();
     cuts.sort_by(f64::total_cmp);
@@ -170,9 +198,8 @@ fn pieces(plan: Option<&Plan>, balance: &Balance, since_s: f64, now_s: f64) -> V
     cuts.into_iter()
         .map(|until_s| {
             let middle_s = 0.5 * (from_s + until_s);
-            let under_way = plan.steps().iter().find(|s| start_s + s.begins_s < middle_s && middle_s < start_s + s.ends_s());
-            let vent_j = plan
-                .steps()
+            let under_way = steps.iter().find(|s| start_s + s.begins_s < middle_s && middle_s < start_s + s.ends_s());
+            let vent_j = steps
                 .iter()
                 .filter(|s| start_s + s.ends_s() == until_s)
                 .map(|s| s.vented_j - s.spilled_j)

@@ -136,27 +136,33 @@ impl Field {
         segment.absorbed_w() - segment.draw_w + segment.internal_w
     }
 
-    /// Settles `dt_s` of `segment` from `heat_j`, splitting it where storage fills.
+    /// Settles `dt_s` of `segment` from `heat_j`, splitting it where storage fills and where heat
+    /// reaches the floor.
     pub fn settle(&self, segment: &Segment, heat_j: f64, dt_s: f64) -> Settled {
-        let fill = segment.fill_s().filter(|&t| t < dt_s);
-        let before_s = fill.unwrap_or(dt_s);
-        let mut heat = self.heat_after_j(heat_j, self.heat_filling_w(segment), before_s);
-        if fill.is_some() {
-            heat = self.heat_after_j(heat, self.heat_full_w(segment), dt_s - before_s);
+        let mut settled = Settled { heat_j, storage_j: 0.0, filled_s: None, from_heat_j: 0.0 };
+        let mut at_s = 0.0;
+        for stretch in self.stretches(segment, heat_j, dt_s) {
+            if stretch.full {
+                settled.filled_s.get_or_insert(at_s);
+            }
+            settled.heat_j = self.heat_after_j(stretch.heat_j, stretch.heat_w, stretch.dt_s);
+            settled.storage_j += stretch.storage_w * stretch.dt_s;
+            settled.from_heat_j += stretch.from_heat_w * stretch.dt_s;
+            at_s += stretch.dt_s;
         }
-        let storage_j = (segment.stored_w() - segment.draw_w) * before_s;
-        Settled { heat_j: heat, storage_j, filled_s: fill }
+        settled
     }
 
-    /// When heat first reaches `threshold_j` from below under `segment` left running, fill split
-    /// included. What a collapse is scheduled from.
+    /// When heat first reaches `threshold_j` from below under `segment` left running, fill and
+    /// floor split included. What a collapse is scheduled from.
     pub fn segment_time_to_rise_s(&self, segment: &Segment, heat_j: f64, threshold_j: f64) -> Option<f64> {
         self.segment_time_to(segment, heat_j, |field, heat, power| {
             field.time_to_rise_s(heat, threshold_j, power)
         })
     }
 
-    /// When heat first falls to `threshold_j` under `segment` left running, fill split included.
+    /// When heat first falls to `threshold_j` under `segment` left running, fill and floor split
+    /// included.
     pub fn segment_time_to_fall_s(&self, segment: &Segment, heat_j: f64, threshold_j: f64) -> Option<f64> {
         self.segment_time_to(segment, heat_j, |field, heat, power| {
             field.time_to_fall_s(heat, threshold_j, power)
@@ -169,16 +175,68 @@ impl Field {
         heat_j: f64,
         time_to: impl Fn(&Self, f64, f64) -> Option<f64>,
     ) -> Option<f64> {
-        let filling = self.heat_filling_w(segment);
-        let Some(fill_s) = segment.fill_s() else {
-            return time_to(self, heat_j, filling);
-        };
-        if let Some(t) = time_to(self, heat_j, filling).filter(|&t| t <= fill_s) {
-            return Some(t);
+        let mut at_s = 0.0;
+        for stretch in self.stretches(segment, heat_j, f64::INFINITY) {
+            if let Some(t) = time_to(self, stretch.heat_j, stretch.heat_w).filter(|&t| t <= stretch.dt_s) {
+                return Some(at_s + t);
+            }
+            at_s += stretch.dt_s;
         }
-        let at_fill = self.heat_after_j(heat_j, filling, fill_s);
-        time_to(self, at_fill, self.heat_full_w(segment)).map(|t| fill_s + t)
+        None
     }
+
+    /// `segment` over `dt_s` from `heat_j`, cut where storage fills and where heat reaches or
+    /// leaves the floor. At most three stretches: filling, then full or at the floor, then the
+    /// other.
+    ///
+    /// At the floor all the heat made is emitted as it is made, so storage pays the emission less
+    /// that, and the drain's heat pays its own way.
+    pub fn stretches(&self, segment: &Segment, heat_j: f64, dt_s: f64) -> Vec<Stretch> {
+        let emitted_w = segment.emitted_w.max(0.0);
+        let filling_w = segment.stored_w() - segment.draw_w;
+        let floor_w = self.heat_filling_w(segment) + filling_w - emitted_w;
+        let (mut heat_j, mut room_j, mut at_s) = (heat_j.max(0.0), segment.room_j, 0.0);
+        let mut stretches = Vec::with_capacity(3);
+        while at_s < dt_s {
+            let full = filling_w > 0.0 && room_j <= 0.0;
+            let made_w = if full { self.heat_full_w(segment) } else { self.heat_filling_w(segment) };
+            let at_floor = emitted_w > 0.0 && heat_j <= 0.0 && made_w <= emitted_w;
+            let (heat_w, storage_w, from_heat_w) = match (at_floor, full) {
+                (true, _) => (0.0, floor_w, made_w.max(0.0)),
+                (false, true) => (made_w - emitted_w, 0.0, emitted_w),
+                (false, false) => (made_w - emitted_w, filling_w, emitted_w),
+            };
+            let fills_s = if !full && storage_w > 0.0 { room_j / storage_w } else { f64::INFINITY };
+            let floors_s = if at_floor { None } else { self.time_to_fall_s(heat_j, 0.0, heat_w).filter(|_| heat_w < 0.0) };
+            let floors_s = floors_s.unwrap_or(f64::INFINITY);
+            // A third stretch is never left: full and rising, or at the floor and draining.
+            let len_s = if stretches.len() == 2 { dt_s - at_s } else { (dt_s - at_s).min(fills_s).min(floors_s) };
+            stretches.push(Stretch { dt_s: len_s, heat_j, heat_w, storage_w, from_heat_w, full: full && !at_floor });
+            at_s += len_s;
+            if at_s >= dt_s {
+                break;
+            }
+            heat_j = if len_s == floors_s { 0.0 } else { self.heat_after_j(heat_j, heat_w, len_s) };
+            room_j = if len_s == fills_s { 0.0 } else { room_j - storage_w * len_s };
+        }
+        stretches
+    }
+}
+
+/// Part of a segment over which heat's power and storage's rate are both constant.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stretch {
+    pub dt_s: f64,
+    /// At the stretch's start.
+    pub heat_j: f64,
+    /// Net into heat, the emission's draw included. Zero at the floor, where heat is too.
+    pub heat_w: f64,
+    /// Net into storage, the emission's draw included.
+    pub storage_w: f64,
+    /// Of [`Segment::emitted_w`], what heat supplies.
+    pub from_heat_w: f64,
+    /// Storage is held full.
+    pub full: bool,
 }
 
 /// Constant inputs to the field, as far as the next change of any of them.
@@ -200,6 +258,9 @@ pub struct Segment {
     /// Drawn out of storage meanwhile: it delays filling, and once full it is all conversion stores.
     /// Heat from the same draw is the caller's to put in `internal_w`.
     pub draw_w: f64,
+    /// Emitted: a drive's exhaust, or anything else the ship lights. Drawn from heat while the
+    /// field holds any and from storage for the rest, with `Q` floored at zero.
+    pub emitted_w: f64,
 }
 
 impl Segment {
@@ -255,11 +316,13 @@ impl Burst {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settled {
     pub heat_j: f64,
-    /// Net change in storage: conversion less the draw. Negative when the draw outruns conversion,
-    /// and emptying storage is the caller's to handle.
+    /// Net change in storage: conversion less the draw and its part of the emission. Negative when
+    /// the draw outruns conversion, and emptying storage is the caller's to handle.
     pub storage_j: f64,
     /// When storage filled, if it did within the step.
     pub filled_s: Option<f64>,
+    /// Of what was emitted, what heat supplied. Storage's part is in `storage_j`.
+    pub from_heat_j: f64,
 }
 
 #[cfg(test)]
@@ -306,6 +369,7 @@ mod tests {
                 efficiency: b.conversion_efficiency,
                 room_j,
                 draw_w: self.caps.drain_w,
+                emitted_w: 0.0,
             }
         }
     }
@@ -547,6 +611,7 @@ mod tests {
             efficiency: 0.7,
             room_j: 1.0e40,
             draw_w: 0.0,
+            emitted_w: 0.0,
         };
         let dt_s = 1.0;
         let sustained = field.settle(&beam, 0.0, dt_s).heat_j;
@@ -685,6 +750,7 @@ mod tests {
             efficiency: 0.9,
             room_j: 1.0e25,
             draw_w: 0.0,
+            emitted_w: 0.0,
         };
         let heat_j = 2.0e25;
         let fill_s = segment.fill_s().unwrap();

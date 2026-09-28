@@ -69,6 +69,34 @@ pub fn planned_rapidity(state: &ShipState) -> f64 {
     }
 }
 
+/// Coordinate instants in `(after_s, until_s)`, in order, where the drive may light or go out. Between
+/// two of them the power it burns is steady, but for the throttling-down the rocket law asks of a
+/// ship growing lighter.
+pub fn lit_edges(state: &ShipState, after_s: f64, until_s: f64) -> Vec<f64> {
+    let on_clock = |cruise: &crate::flight::Cruise| {
+        let mut edges = cruise.phase_changes_s().to_vec();
+        edges.push(cruise.start_s);
+        edges
+    };
+    let mut edges = match &state.motive {
+        Motive::Crossing(cruise) => on_clock(cruise),
+        Motive::Transfer(transfer) => on_clock(&transfer.cruise),
+        Motive::Consort(plan) => on_clock(&plan.cruise),
+        Motive::Rendezvous(plan) => {
+            on_clock(&plan.cruise).into_iter().map(|frame_s| plan.since_t + plan.world_elapsed(frame_s)).collect()
+        }
+        Motive::Escort(plan) => on_clock(&plan.cruise)
+            .into_iter()
+            .map(|tau| plan.quarry.since_t + plan.quarry.world_elapsed(tau))
+            .collect(),
+        Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => Vec::new(),
+    };
+    edges.retain(|&t| t > after_s && t < until_s);
+    edges.sort_by(f64::total_cmp);
+    edges.dedup();
+    edges
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
