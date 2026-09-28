@@ -62,13 +62,11 @@ pub fn draw(ui: &mut egui::Ui, field: &hud::Field, text: Option<&str>, out: &mut
         }
     }
 
-    match text {
-        Some(text) => {
-            ui.label(text);
-        }
-        None => {
-            bar.on_hover_text(&field.text);
-        }
+    if let Some(text) = text {
+        ui.label(text);
+    }
+    if text != Some(field.text.as_str()) {
+        bar.on_hover_text(&field.text);
     }
 }
 

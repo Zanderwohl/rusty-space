@@ -63,9 +63,10 @@ impl Hud {
         self.energy.as_ref().filter(|_| fit < Fit::Bare).map(|e| e.amount.as_str())
     }
 
-    /// The words beside the field bar, or `None` where the bar is shown alone.
+    /// The words beside the field bar. At [`Fit::Bare`] only a countdown, which is never dropped.
     pub fn field_text(&self, fit: Fit) -> Option<&str> {
-        self.field.as_ref().filter(|_| fit < Fit::Bare).map(|f| f.text.as_str())
+        let field = self.field.as_ref()?;
+        if fit < Fit::Bare { Some(&field.text) } else { field.countdown.as_deref() }
     }
 
     pub fn warning(&self, fit: Fit) -> Option<String> {
@@ -187,6 +188,8 @@ pub struct Field {
     pub stress: f32,
     /// `3 240 K ↑ 1.20 ME/yr — collapse in 4:10`.
     pub text: String,
+    /// `collapse in 4:10`, whenever one is scheduled.
+    pub countdown: Option<String>,
     pub setting: Setting,
     /// What the Auto button asks for: the thresholds in force, or the balance's.
     pub auto: Thresholds,
@@ -479,9 +482,10 @@ fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field>
             format!("{arrow} {}", crate::refit_panel::me_per_year(w.abs(), module_j).trim_start_matches('+'))
         }
     };
+    let due = collapse_s.map(|at_s| format!("collapse in {}", countdown(at_s - now, rate)));
     let mut text = format!("{} K {flow}", grouped(kelvin));
-    if let Some(at_s) = collapse_s {
-        text += &format!(" — collapse in {}", countdown(at_s - now, rate));
+    if let Some(due) = &due {
+        text += &format!(" — {due}");
     }
     let posture = fitting.posture();
     let switch = posture.switching_at(now);
@@ -498,6 +502,7 @@ fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field>
         blackbody: glow(&session.mapping, kelvin),
         stress: ((fraction - PULSE_FILL) / (1.0 - PULSE_FILL)).clamp(0.0, 1.0) as f32,
         text,
+        countdown: due,
         setting: posture.setting,
         auto: match posture.setting {
             Setting::Auto(t) => t,
@@ -821,9 +826,12 @@ mod tests {
             let want = format!(" — collapse in {}:{:02}", real / 60, real % 60);
             let text = field_of(&s, &ui).text;
             assert!(text.ends_with(&want), "{text} wants {want}");
+            let hud = lines(&s, &ui, &mut Collapse::default());
+            assert_eq!(hud.field_text(Fit::Bare), Some(&want[" — ".len()..]), "never dropped");
         }
         let (ui, s) = heated(0.3, 0.0, lc_world::fitting::Posture::BLACK);
         assert!(!field_of(&s, &ui).text.contains("collapse"));
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).field_text(Fit::Bare), None);
         assert_eq!(countdown(3_725.0 * crate::session::TIME_RATE, 1.0), "1:02:05");
         assert_eq!(countdown(86_400.0 * 2.5, 0.0), "2.5 days");
     }
