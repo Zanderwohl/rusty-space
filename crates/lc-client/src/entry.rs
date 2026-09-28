@@ -281,6 +281,7 @@ pub fn parse(args: &[String]) -> Entry {
         say: after("--say"),
         console: args.windows(2).filter(|w| w[0] == "--console").map(|w| w[1].clone()).collect(),
         apply: flag("--apply"),
+        emit: flag("--emit"),
         cancel_at: value(args, "--cancel-at"),
         actions,
     };

@@ -262,6 +262,7 @@ mod tests {
                 wavelength_m: 1.0e-9,
                 spread_rad: 1.0e-3,
                 duration_s: 1.0,
+                lead: lc_proto::Lead::Coasting,
             },
         ];
         for order in &commands {

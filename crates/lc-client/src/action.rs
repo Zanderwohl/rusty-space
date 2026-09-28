@@ -172,6 +172,7 @@ pub enum Action {
     /// Give up a standing intercept, with no further corrections: the drive is cut and the ship
     /// keeps whatever velocity it has.
     BreakOff,
+    Emit(crate::emit_panel::Emission),
     /// Clear, Black or Auto with its thresholds. The shard refuses it while a switch runs.
     SetField(lc_proto::FieldMode),
 
@@ -576,7 +577,8 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::AbortFlight => {
             if session.remote {
-                if session.cruise().is_some() || session.station().is_some() {
+                let lit = crate::emit_panel::is_lit(&session.ship, session.coordinate_time_s());
+                if session.cruise().is_some() || session.station().is_some() || lit {
                     effects.push(Effect::Send(lc_proto::Order::CutDrive));
                     effects.push(Effect::Notify("cut sent".into()));
                 }
@@ -613,6 +615,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Send(lc_proto::Order::BreakOff));
             }
         }
+        Action::Emit(emission) => effects.extend(session.remote.then(|| Effect::Send(emission.order()))),
         Action::SetField(mode) => {
             let now = session.coordinate_time_s();
             let switching = session.ship.fitting().is_some_and(|f| f.posture().switching_at(now).is_some());

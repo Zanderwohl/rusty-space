@@ -335,6 +335,17 @@ over the area it covers.
 Against a target that **shares its course**, the uncertainty is the course's own precision, and a
 tight beam hits at any range. Communication is what makes long-range power beaming work.
 
+**Leading is a guess the emitter chooses.** An emit at a craft is aimed where the beam will meet
+it, predicted from the sighting in one of two ways, and `Order::Emit` says which (`lead`):
+
+- **Coasting**: holding the velocity it was seen with, as radio aims.
+- **Burning**: holding the burn it was seen in, at the proper acceleration two sightings measure,
+  as an escort measures its quarry's, and coasting when its plume was dark.
+
+The table above is what either guess can miss by if the target changes what it is doing. A target
+that keeps up a steady burn is hit by the second and missed by the first by the same `½ a (2d/c)²`,
+so the choice is a read of the target: whether it will go on doing what it was seen doing.
+
 ### What arrives
 
 The spot at distance `d` is the cap the cone cuts from a sphere of that radius, of area `Ω d²`, where
@@ -464,7 +475,7 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 
 ## Protocol
 
-- `Order::Emit` as above.
+- `Order::Emit` as above, with `lead: Coasting | Burning` ([Spread](#spread-and-why-it-is-a-choice)).
 - `Order::Intercept` gains `approach: Courteous | Direct`. `Pursuit`, as stated to the client, carries
   it. `Order::Transmit` keeps its message fields and is charged.
 - `Refusal::NoAperture` (both apertures asked of a ship with engines at one end only),
@@ -478,6 +489,8 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
   so two beams from one bearing stay apart.
 - `Presence` of an emitter seen from inside its cone carries its flux there and its spectrum, as a
   `Glare`. `Illuminated` carries the spectrum too, since a drive's is a blackbody's.
+- `Glow` carries the field's envelope beside its temperature and shade: its size is as plain as its
+  color, and with the two a field's heat and its limit are known.
 
 ## Client
 
@@ -498,6 +511,46 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
   beam you are not in and did not send is not drawn, because you do not know about it.
 - **The plume** brightens under a dump. A fore emission lights the bow. How that is drawn is in
   [32-ship-rendering.md](32-ship-rendering.md).
+
+### As built
+
+- **The preview is `emit_panel::preview`**, a pure function of the draft, the ship and what is known
+  of the receiver. Spread and floor are the server's: each chosen end's `Transmitter`, never under
+  either floor. Heat's share is the ship's own account run with and without the emission: exactly
+  as the server draws a balanced emit, and for a one-ended one at its starting power from the order,
+  where the server lights it after the turn and lets its power fall with the ship's mass.
+- **What is known of a receiver** is what its light carries. Its rating and the acceleration the
+  lead uncertainty assumes come from the form it was seen with: the engines' `aperture_w`, and its
+  aft rating over its dry mass, the most it could do. Its shade comes from its glow, for a craft
+  seen with a form. Its room is never known, and the window says so. The shadow is broadside, the
+  most it can present, which is the one [What arrives](#what-arrives) is worked for. The lead is
+  counted from the light it was last seen by, so a stale sighting shows a wider circle than a fresh
+  one at the same range. A craft that drops out of sight stays the aim, and the window will not send
+  at it.
+- **Wavelength is not offered.** The window sends 1 µm. The order still takes 1 nm to 3 cm, and
+  the server and the preview still honor it, but until wavelength costs something
+  ([Open](#open)) a choice of it is only ever "the shortest", so it is held back.
+- **The lead** is chosen beside the aim, coasting or burning, with what the target was last seen
+  doing: burning at some g, measured from its last two statements while its plume was lit, or
+  coasting. The window, the map and the server aim along one solve, `lc_world::emit::lead`.
+- **The warning** is what it would absorb past its rating, taking an unknown shade as Black.
+- **What it does to the receiver's field** is said twice, since its storage is never known: if full,
+  when all of it is heat, and with room, when it converts up to its rating first. Each is "collapses
+  in" a time within the beam's duration, or how near collapse the field is when the beam ends. The
+  field is its glow's: `Q_max` from its envelope, and its heat from its temperature there. Whatever
+  held it at that temperature is taken to go on, `Q/τ` of it, which is exact for a field at rest
+  and holds for one running steady. It is read only for a craft seen with a form, because a craft
+  with none is sent a stand-in glow. Once a Black field hides its design
+  ([30](30-the-field.md#what-the-field-is)), its size and heat still show while its form does not,
+  and the window will need to tell that glow from the stand-in.
+- **The aim** at the reticle is sent as a bearing along the view's axis. A row of the incoming list
+  aims back along it.
+- **Put out** is cutting the drive, the button or `X`: `CutDrive` puts out whatever is lit. Whether
+  anything is lit is read from the ship's own account and motive, so it survives a reconnect.
+- **On the map** a beam's cone is drawn from where it lit, as far as its light has got, through the
+  drive cones' machinery, without the cooking ring. A one-ended emit lights when its burn's nose has
+  come about and goes out with the burn. A beam landing here is a line back along its bearing, past
+  the edge of the view, since how far away its source is is not known.
 
 ## Where it goes
 

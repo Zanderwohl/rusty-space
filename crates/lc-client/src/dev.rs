@@ -144,6 +144,9 @@ pub struct DevEntry {
     pub console: Vec<String>,
     /// Press the editor's Apply once the shard has welcomed this client and Apply is open.
     pub apply: bool,
+    /// Open the emit window, and light an aft emit at the selected craft once it is in sight.
+    /// The only way to photograph a beam on the map.
+    pub emit: bool,
     /// Pull the selected part's size handle out to this many times its length once the shard has
     /// stated the ship, stopping where the budget does. The only way to photograph that stop.
     pub pull: Option<f64>,
@@ -459,6 +462,32 @@ pub(crate) fn type_at_the_console(
     for line in &dev.console {
         out.write(Requested(Action::RunCommand(line.clone())));
     }
+}
+
+/// `--emit`: a beam a tenth of a radian wide, so its cone reads on the map.
+pub(crate) fn emit_at_selected(
+    dev: Res<DevEntry>,
+    ui: Res<Ui>,
+    uplink: Res<crate::uplink::Uplink>,
+    mut out: MessageWriter<Requested>,
+    mut done: Local<bool>,
+) {
+    if !dev.emit || *done || uplink.joined().is_none() {
+        return;
+    }
+    let Some(id) = ui.selected_craft.filter(|id| uplink.contacts.iter().any(|c| c.ship_id == *id)) else { return };
+    *done = true;
+    out.write(Requested(Action::OpenPanel(crate::ui::Panel::Emit)));
+    out.write(Requested(Action::Emit(crate::emit_panel::Emission {
+        aim: lc_proto::Aim::Ship(id),
+        apertures: lc_proto::Apertures::Aft,
+        power_w: 1.0e18,
+        wavelength_m: 1.0e-6,
+        spread_rad: 0.1,
+        // Longer than any shot, at any scene's rate.
+        duration_s: 1.0e7,
+        lead: lc_proto::Lead::Coasting,
+    })));
 }
 
 /// `--apply` and `--cancel-at`. Once the round is under way the view is pinned to the world,

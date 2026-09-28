@@ -118,7 +118,7 @@ pub const BURN_CHANGE_FRACTION: f64 = 0.25;
 
 /// The quarry's proper acceleration, when it was thrusting at the sighting and two sightings can
 /// measure it.
-fn burn_of(fleet: &Fleet, seen: &pursuit::Sighting, previous: Option<&pursuit::Sighting>) -> Option<glam::DVec3> {
+pub(crate) fn burn_of(fleet: &Fleet, seen: &pursuit::Sighting, previous: Option<&pursuit::Sighting>) -> Option<glam::DVec3> {
     let s = seen.emitted_s;
     let lit = fleet
         .get(CraftId(seen.target.0))
@@ -500,6 +500,10 @@ mod tests {
         server.fleet.get_mut(CraftId(1)).unwrap().fit(None);
         server.tick(&mut wire).await.unwrap();
         let [.., glow] = glows(&wire.take(ClientId(2)), ShipId(1))[..] else { panic!("no glow") };
-        assert_eq!(glow, lc_proto::Glow { temperature_k: Balance::DEFAULT.field_idle_k, shade: Shade::Clear });
+        assert_eq!(glow, lc_proto::Glow {
+            temperature_k: Balance::DEFAULT.field_idle_k,
+            shade: Shade::Clear,
+            envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2,
+        });
     }
 }

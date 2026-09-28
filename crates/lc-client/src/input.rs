@@ -29,6 +29,7 @@ pub fn bindings() -> Vec<(KeyCode, Action)> {
         (KeyCode::F5, Action::TogglePanel(Panel::DevActions)),
         // `R` is the refit window's. `C` for comms, which is what this is.
         (KeyCode::KeyC, Action::TogglePanel(Panel::Chat)),
+        (KeyCode::KeyE, Action::TogglePanel(Panel::Emit)),
         // Opens and never closes: once the field has the keyboard, a slash is a slash.
         (KeyCode::Slash, Action::OpenPanel(Panel::Console)),
         (KeyCode::KeyM, Action::ToggleView(crate::ui::ViewMode::Map)),

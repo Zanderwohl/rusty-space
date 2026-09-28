@@ -493,6 +493,7 @@ mod tests {
                 wavelength_m: 1.0e-6,
                 spread_rad: 0.01,
                 duration_s: 60.0,
+                lead: lc_proto::Lead::Coasting,
             }),
         );
         server.tick(&mut wire).await.unwrap();

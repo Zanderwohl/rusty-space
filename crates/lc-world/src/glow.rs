@@ -27,7 +27,7 @@ impl Glow {
 
 impl From<Glow> for lc_proto::Glow {
     fn from(g: Glow) -> Self {
-        lc_proto::Glow { temperature_k: g.temperature_k, shade: g.shade.into() }
+        lc_proto::Glow { temperature_k: g.temperature_k, shade: g.shade.into(), envelope_m2: g.envelope_m2 }
     }
 }
 

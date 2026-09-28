@@ -372,6 +372,7 @@ pub fn toggles(ui: &UiState) -> Vec<Toggle> {
         ("Ship", Action::ToggleView(ViewMode::Form), ui.view == ViewMode::Form, None),
         panel("Refit", Panel::Refit),
         panel("Comms", Panel::Chat),
+        panel("Emit", Panel::Emit),
         panel("Bookshelf", Panel::Reader),
         ("Slideshow", Action::ToggleBeautyShots, ui.beauty_shots, Some("SH")),
     ]

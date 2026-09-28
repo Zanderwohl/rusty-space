@@ -412,8 +412,9 @@ pub enum Order {
     /// Put light out on purpose: to dump heat, feed an ally, or attack.
     ///
     /// `power_w` is at the start and at most the apertures' rating; `spread_rad` is the
-    /// half-angle, at least the diffraction floor. See `lightcone/docs/31-directed-energy.md`.
-    Emit { aim: Aim, apertures: Apertures, power_w: f64, wavelength_m: f64, spread_rad: f64, duration_s: f64 },
+    /// half-angle, at least the diffraction floor; `lead` is how an aim at a craft predicts it.
+    /// See `lightcone/docs/31-directed-energy.md`.
+    Emit { aim: Aim, apertures: Apertures, power_w: f64, wavelength_m: f64, spread_rad: f64, duration_s: f64, lead: Lead },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -967,7 +968,7 @@ pub mod form;
 mod knowing;
 mod radio;
 
-pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lit, Shade, Spectrum, Switch};
+pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lead, Lit, Shade, Spectrum, Switch};
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
@@ -1108,7 +1109,7 @@ mod tests {
                         duration_s: 86_400.0,
                         reversing: true,
                     }),
-                    glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear }),
+                    glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear, envelope_m2: 1.3e6 }),
                     glare: Some(Glare { spectrum: Spectrum::Line { wavelength_m: 1.0e-6 }, flux_w_m2: 3.5e12 }),
                 },
                 1_000_000,
@@ -1315,6 +1316,7 @@ mod tests {
                 wavelength_m: 1.0e-9,
                 spread_rad: 1.0e-5,
                 duration_s: 3_600.0,
+                lead: Lead::Burning,
             },
             issued_at_client_t: 1_000_000,
         })
@@ -1841,6 +1843,7 @@ mod tests {
                     wavelength_m: 0.03,
                     spread_rad: 0.5,
                     duration_s: 0.0,
+                    lead: Lead::Coasting,
                 },
                 issued_at_client_t: 0,
             }),
