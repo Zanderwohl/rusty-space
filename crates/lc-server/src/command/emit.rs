@@ -1,7 +1,7 @@
 //! `emit`: light a ship's engines through the order's own checks, so what the console lights the
 //! wire could have. 31 §Emitting on purpose.
 
-use lc_proto::{Aim, Apertures, Order};
+use lc_proto::{Aim, Apertures, Lead, Order};
 use lc_world::craft::CraftId;
 use lc_world::form::capacity::ends;
 
@@ -41,6 +41,7 @@ impl<J: Journal> Server<J> {
             wavelength_m: WAVELENGTH_M,
             spread_rad: SPREAD_RAD,
             duration_s: minutes * 60.0,
+            lead: Lead::Coasting,
         };
         self.order_emit(id, &order, now_t).map_err(|why| format!("refused: {why:?}"))?;
         self.tell_flying(wire, id);
