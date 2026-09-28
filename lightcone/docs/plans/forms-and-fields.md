@@ -203,6 +203,8 @@ graph LR
   F9 --> R12
   R10 --> R13
   R12 --> R13
+  R17 --> R13
+  E3 --> R13
   R4 --> R14
   S1 --> R14
   R8 --> R15
@@ -259,7 +261,6 @@ graph LR
   R16 --> X1
   R17 --> X1
   R18 --> X1
-  R19 --> X1
 ```
 <!-- /graph -->
 
@@ -685,11 +686,11 @@ graph LR
 ### R13 · The engine grid on the open face
 
 - status: active card "R13 · The engine grid on the open face"
-- needs: R10, R12
-- touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/src/hull.rs`
-- read: 32 §Materials by kind, §The exhaust cone
-- deliver: the engine kind's emitter grid lit only on each engine part's open face, from a per-vertex share the mesher reads off the part, at the exhaust's power. R3 lights it over the whole region, which is right in a void and wrong on a ship; R12's aperture glow sits over it.
-- done when: a burning ship photographs with the grid glowing on its open face and dark on the engine's flanks.
+- needs: R10, R12, R17, E3
+- touches: `crates/em-render/src/hull_material.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/src/hull.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`, `lightcone/docs/32-ship-rendering.md`
+- read: 32 §Materials by kind, §Beams and plumes, §The exhaust cone; 31 §Emitting on purpose's As built
+- deliver: every open face an emission leaves through lit at its share of that emission's power, whatever lit it: a drive aft at `F c`, an emit fore, aft or both. The engine kind's emitter grid lit only on those faces, from a per-vertex share the mesher reads off the part (R3 lights it over the whole region, which is right in a void and wrong on a ship), with R12's aperture glow over it. The player's own faces from what it has lit; another craft's from what its `Presence` states of each end, beside the main drive's `drive_w`. No cone for an emit: its spread is its own, and its light inside it is `Glare`. (Folded in from R19, which R17 added.)
+- done when: a burning ship photographs with the grid glowing on its open face and dark on the engine's flanks; an emit flown as a burn from the aft faces and a balanced emit photograph with the faces they leave through glowing, on your own ship and on another's; and a test pins another craft's face temperature to the emission its `Presence` stated.
 
 ### R14 · Refits in the game
 
@@ -739,7 +740,7 @@ graph LR
 
 ### R19 · Faces lit by an emit
 
-- status: todo
+- status: dropped folded into R13: a drive and an emit light an open face the same way
 - needs: R17, E3
 - touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`, `lightcone/docs/32-ship-rendering.md`
 - read: 32 §Beams and plumes, §The exhaust cone; 31 §Emitting on purpose's As built
@@ -843,7 +844,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18, R19
+- needs: F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.
