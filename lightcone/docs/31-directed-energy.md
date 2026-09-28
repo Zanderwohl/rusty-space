@@ -2,9 +2,12 @@
 
 Engines, radios, weapons and power lines are one thing: energy sent in a chosen direction.
 
-**Status: partly built.** Emitting on purpose and a drive's exhaust are built, as one path from any
-emission to whatever it lands on, restated as both ends move ([As built](#as-built)). The client's
-emit window is not. This is the Kzinti Lesson (Niven): a reaction drive is a weapon
+**Status: built**, but for the client's emit window, its incoming list, the map's beams and faces
+lit by an emit (§Client). A drive's exhaust, a beam, a heat dump and an
+attack are **one mechanism**: an emission from a ship's apertures, aimed and spread as asked, fanned
+out to whatever its cone reaches and restated as both ends move
+([One path for every emission](#one-path-for-every-emission)). They differ only in their aim,
+their spread and whether their recoil flies the ship. This is the Kzinti Lesson (Niven): a reaction drive is a weapon
 in exact proportion to how good a drive it is. Here the drive is a photon rocket
 ([19-ship-fitting.md](19-ship-fitting.md)), so the lesson is literal. What a ship sends out is
 light, and light lands on someone. [30-the-field.md](30-the-field.md) is where the energy comes
@@ -229,7 +232,7 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   station, falling or drifting.
 - It is refused during a refit, as every order that lights the drive is.
 
-### As built
+### One path for every emission
 
 - **One path, whatever lit it.** An emission is an event of `kind::EMIT` where it lights, one each
   time it is said again, and one where it goes out, each carrying what it sends in its payload:
@@ -459,7 +462,7 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 ## Protocol
 
 - `Order::Emit` as above.
-- `Order::Intercept` gains `approach: Courteous | Direct`. `Pursuit`, as stated to the client, carries
+- `Order::Intercept` carries `approach: Courteous | Direct`. `Pursuit`, as stated to the client, carries
   it. `Order::Transmit` keeps its message fields and is charged.
 - `Refusal::NoAperture` (both apertures asked of a ship with engines at one end only),
   `Refusal::OverRating`, and the existing `UnderWay` and `Refitting`.
@@ -479,7 +482,7 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
   stands off is one that switches to **direct** or back to **courteous**, and either re-sends the
   order, so a chase is chosen as a pair. The HUD line that says who is being followed says which
   pair, as the server states it.
-- **Emit window**, on `E`, with the same toolkit and rules as the other windows. Aim at a known
+- **Emit window**, on `E`, with the same toolkit and rules as the other windows. Not built yet. Aim at a known
   craft, at the reticle, or along a bearing. Before sending, it shows:
   - the diffraction floor, the chosen spread, and the spot at the target
   - the **lead uncertainty**, from how old your knowledge of the target is and what it can
@@ -490,8 +493,10 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
   it is doing to your field.
 - **Map**: your own beams as cones, and received beams as bearing lines from where they came. A
   beam you are not in and did not send is not drawn, because you do not know about it.
-- **The plume** brightens under a dump. A fore emission lights the bow. How that is drawn is in
-  [32-ship-rendering.md](32-ship-rendering.md).
+- **The open faces** an emission leaves through glow at its share of its power: aft under a drive or
+  a dump, the bow under a fore emission. How that is drawn is in
+  [32-ship-rendering.md](32-ship-rendering.md#beams-and-plumes). A drive's faces are lit; an emit's
+  are not yet.
 
 ## Where it goes
 
