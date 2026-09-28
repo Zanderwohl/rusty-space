@@ -2029,8 +2029,7 @@ mod tests {
         assert_eq!(ui.perspective, None);
     }
 
-    /// A craft is picked out beside whatever course is armed, and put down by picking anything
-    /// else.
+    /// A craft stays selected beside an armed course until something else is picked.
     #[test]
     fn a_craft_stays_selected_until_something_else_is() {
         let mut ui = UiState::default();

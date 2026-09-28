@@ -21,11 +21,10 @@ use crate::system::M_PER_LY;
 const GENERATORS: usize = 8;
 const RIM_SEGMENTS: usize = 64;
 
-/// A craft's cone on the map.
 #[derive(Component)]
 pub struct MapCone(Option<ShipId>);
 
-/// What the cones are drawn with. A mesh per shape, which a balance fixes.
+/// One mesh per shape, which a balance fixes.
 #[derive(Default)]
 pub(crate) struct Held {
     material: Option<Handle<MapLineMaterial>>,

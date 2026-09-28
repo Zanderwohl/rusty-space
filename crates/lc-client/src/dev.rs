@@ -116,8 +116,7 @@ pub struct DevEntry {
     pub after_frames: u32,
     /// How many consecutive frames to photograph. More than one for diagnosing a flicker.
     pub burst: u32,
-    /// Frames between a burst's photographs; one is consecutive. A run that has to catch a
-    /// moment whose frame cannot be known in advance is one window instead of many.
+    /// Frames between a burst's photographs, for a moment whose frame cannot be known in advance.
     pub burst_every: u32,
     /// Frames to time after [`DevEntry::after_frames`] of warm-up. See `bench`.
     pub bench: Option<u32>,

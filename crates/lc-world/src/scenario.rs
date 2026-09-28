@@ -111,8 +111,7 @@ pub enum Act {
     /// planet. The standoff it settles at is worked out from both hulls, so a five-kilometer
     /// ship stands further off than a five-hundred-meter one and the picture is the same.
     Chase(Slot),
-    /// [`Act::Chase`] by the Direct approach: burn, flip and brake onto the station, cone and all.
-    /// See 31 §Two ways to approach.
+    /// [`Act::Chase`] by the Direct approach. See 31 §Two ways to approach.
     ChaseDirect(Slot),
     BreakOff,
     /// Cut the drive. Not a stop: whatever the ship was doing at the time, it keeps doing
@@ -302,8 +301,8 @@ pub const APPROACH: Scenario = Scenario {
     }],
 };
 
-/// [`APPROACH`] by the Direct approach, which brakes onto the station with its cone on whoever is
-/// there: the one way to stand inside another ship's courtesy radius while it burns.
+/// [`APPROACH`] by the Direct approach: the one way to be inside another's courtesy radius
+/// while it burns.
 pub const KZINTI: Scenario = Scenario {
     name: "kzinti",
     blurb: "You hold a polar orbit of Saturn. Something much larger closes on you, and brakes at you.",

@@ -50,9 +50,8 @@ const FACE_STANDOFF: f64 = 0.05;
 
 const LUMA: DVec3 = DVec3::new(0.2126, 0.7152, 0.0722);
 
-/// `F c`, watts: what a photon drive of the thrust a reaction drive states as `½ F v` sends aft.
-///
-/// `Drive` and the wire still state `½ F v`; courtesy and emission are photon drives.
+/// `F c`, watts, from the `½ F v` that `Drive` and the wire state for the same thrust.
+/// R17 retires it.
 pub fn exhaust_w(jet_power_w: f64, exhaust_v_m_s: f64) -> f64 {
     if jet_power_w <= 0.0 || exhaust_v_m_s <= 0.0 {
         return 0.0;
@@ -60,7 +59,6 @@ pub fn exhaust_w(jet_power_w: f64, exhaust_v_m_s: f64) -> f64 {
     2.0 * jet_power_w * C_M_S / exhaust_v_m_s
 }
 
-/// A craft with its drive lit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Lit {
     /// `None` for the player's own.
@@ -73,8 +71,7 @@ pub struct Lit {
     pub length_m: f64,
 }
 
-/// The cone's length, which is the drive's courtesy radius, when `lit`'s cone is drawn for an
-/// observer at `here_ly` with `selected` picked out.
+/// The cone's length, the courtesy radius, if it is drawn for an observer at `here_ly`.
 pub fn cone_m(lit: &Lit, here_ly: DVec3, selected: Option<ShipId>, balance: &Balance) -> Option<f64> {
     if lit.power_w <= 0.0 {
         return None;
@@ -85,12 +82,11 @@ pub fn cone_m(lit: &Lit, here_ly: DVec3, selected: Option<ShipId>, balance: &Bal
     (lit.craft.is_none() || inside || chosen).then_some(radius_m)
 }
 
-/// An open face's temperature, kelvin: its share of `power_w` through its area.
 pub fn face_k(power_w: f64, aperture: &Aperture) -> f64 {
     aperture_temperature_k(power_w * aperture.share, std::f64::consts::PI * aperture.radius_m.powi(2))
 }
 
-/// A cone for a drive of `power_w`, `length_m` long, in the hazard color. The eye is the caller's.
+/// `eye_local` is the caller's to set.
 pub fn cone_uniform(power_w: f64, balance: &Balance, length_m: f64) -> ExhaustConeUniform {
     let hazard = LinearRgba::from(crate::ui::HAZARD).to_vec3();
     ExhaustConeUniform {
@@ -106,8 +102,7 @@ pub fn cone_uniform(power_w: f64, balance: &Balance, length_m: f64) -> ExhaustCo
     }
 }
 
-/// A face radiating `face`, band-mapped linear RGB on the exposure's scale, under a tone map of
-/// `reference` and `stops`. The eye is the caller's.
+/// `face` is band-mapped linear RGB on the exposure's scale. `eye_local` is the caller's to set.
 pub fn aperture_uniform(face: DVec3, reference: f64, stops: f32) -> ApertureGlowUniform {
     let luminance = face.dot(LUMA);
     let glow = if luminance > 0.0 { face * (reference * GLOW_STOPS.exp2() / luminance) } else { DVec3::ZERO };
@@ -120,7 +115,6 @@ pub fn aperture_uniform(face: DVec3, reference: f64, stops: f32) -> ApertureGlow
     }
 }
 
-/// One cone drawn this frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Drawn {
     pub craft: Option<ShipId>,
@@ -133,7 +127,6 @@ pub struct Drawn {
     pub cooking_m: f64,
 }
 
-/// The cones drawn this frame, and what drawing them keeps.
 #[derive(Resource, Default)]
 pub struct Exhausts {
     pub cones: Vec<Drawn>,
@@ -144,7 +137,6 @@ pub struct Exhausts {
     glow_proxy: Option<Handle<Mesh>>,
 }
 
-/// A craft's exhaust cone.
 #[derive(Component)]
 pub struct Cone(pub Option<ShipId>);
 
@@ -224,7 +216,6 @@ fn lits(session: &Session, uplink: &crate::uplink::Uplink) -> Vec<Lit> {
         .collect()
 }
 
-/// `craft`'s aft faces, from the form it is stated in, worked out again only when that changes.
 fn faces<'a>(
     cache: &'a mut HashMap<Option<ShipId>, (u64, Vec<Aperture>)>,
     craft: Option<ShipId>,
@@ -244,8 +235,7 @@ fn shine(session: &Session, kelvin: f64) -> DVec3 {
     Vec3::from_array(session.mapping.apply(&crate::session::spectrum_at(kelvin))).as_dvec3()
 }
 
-/// Glow every burning craft's aft faces, and draw the cones [`cone_m`] asks for. After the hulls,
-/// whose roots the glows hang from.
+/// After the hulls, whose roots the glows hang from.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn draw_exhaust(
     mut commands: Commands,
@@ -418,8 +408,7 @@ mod tests {
         Lit { craft, power_w, at_ly: at_m / M_PER_LY, facing: DVec3::X, length_m: 500.0 }
     }
 
-    /// Your own burn, a burn whose courtesy radius you are in, and a selected ship's; nobody
-    /// else's, and nothing that is not burning.
+    /// Own, inside the radius and selected get a cone; nothing else, and nothing coasting.
     #[test]
     fn which_burns_have_a_cone() {
         let power = 1.1e20;
@@ -506,8 +495,7 @@ mod tests {
         assert!(root.to_render(root.eye()).length() < 1.0e-18);
     }
 
-    /// The system end to end: a burning contact's faces glow under its hull, its cone is drawn
-    /// only once it is selected, and both go when its drive goes out.
+    /// Glows under the hull, a cone only once selected, and neither once the drive is out.
     #[test]
     fn a_burn_is_glowed_and_coned_under_its_own_hull() {
         use bevy::ecs::system::RunSystemOnce;

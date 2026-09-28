@@ -666,9 +666,7 @@ fn aim_at(state: &ShipState, now_s: f64) -> Option<crate::flight::Aim> {
 /// station is held by thrust, but the thrust is whatever cancels the local gravity — milligravities
 /// against the whole-g burns everything else here is about, and a plume nobody would see.
 pub fn thrust_g(state: &ShipState, now_s: f64) -> f64 {
-    // A plan's own drive, not the craft's rating: a courteous leg flown on station-keeping
-    // thrusters is a hundredth of a g, and stated at the rating it read as the main drive
-    // flaming the quarry it was keeping clear of.
+    // The plan's own drive, not the rating: a courteous leg on station-keeping thrusters is 0.01 g.
     let (lit, accel_g) = match &state.motive {
         Motive::Crossing(cruise) => (cruise.thrust_at(now_s) != DVec3::ZERO, cruise.drive.accel_g),
         Motive::Transfer(transfer) => (transfer.thrust_at(now_s) != DVec3::ZERO, state.drive.accel_g),
