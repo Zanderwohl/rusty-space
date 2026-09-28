@@ -185,12 +185,8 @@ impl Field {
         None
     }
 
-    /// `segment` over `dt_s` from `heat_j`, cut where storage fills and where heat reaches or
-    /// leaves the floor. At most three stretches: filling, then full or at the floor, then the
-    /// other.
-    ///
-    /// At the floor all the heat made goes out with the emission as it is made, so storage pays the
-    /// emission less that.
+    /// Cut where storage fills and where heat reaches or leaves the floor. At the floor the heat
+    /// made goes out with the emission as it is made, so storage pays the emission less that.
     pub(crate) fn stretches(&self, segment: &Segment, heat_j: f64, dt_s: f64) -> Vec<Stretch> {
         let emitted_w = segment.emitted_w.max(0.0);
         let filling_w = segment.stored_w() - segment.draw_w;
@@ -231,13 +227,12 @@ pub(crate) struct Stretch {
     pub dt_s: f64,
     /// At the stretch's start.
     pub heat_j: f64,
-    /// Net into heat, the emission's draw included. Zero at the floor, where heat is too.
+    /// Net, the emission included. Zero at the floor.
     pub heat_w: f64,
-    /// Net into storage, the emission's draw included.
+    /// Net, the emission included.
     pub storage_w: f64,
     /// Of [`Segment::emitted_w`], what heat supplies.
     pub from_heat_w: f64,
-    /// Storage is held full.
     pub full: bool,
 }
 
@@ -260,8 +255,8 @@ pub struct Segment {
     /// Drawn out of storage meanwhile: it delays filling, and once full it is all conversion stores.
     /// Heat from the same draw is the caller's to put in `internal_w`.
     pub draw_w: f64,
-    /// Emitted: a drive's exhaust, or anything else the ship lights. Drawn from heat while the
-    /// field holds any and from storage for the rest, with `Q` floored at zero.
+    /// A drive's exhaust or anything else the ship lights, drawn from heat while the field holds any
+    /// and from storage for the rest.
     pub emitted_w: f64,
 }
 
@@ -323,7 +318,7 @@ pub struct Settled {
     pub storage_j: f64,
     /// When storage filled, if it did within the step.
     pub filled_s: Option<f64>,
-    /// Of what was emitted, what heat supplied. Storage's part is in `storage_j`.
+    /// Of what was emitted, what heat supplied.
     pub from_heat_j: f64,
 }
 
@@ -717,8 +712,7 @@ mod tests {
         assert!(close(stored_j + settled.storage_j, rest.stored_j, 1e-9), "{} {}", stored_j + settled.storage_j, rest.stored_j);
     }
 
-    /// Emitting from a hot field: heat reaches the floor while storage fills and then drains
-    /// storage; reaches it, fills there and rises again; and reaches it from full.
+    /// Each path through the floor, against the stepper.
     #[test]
     fn the_floor_split_agrees_with_stepping() {
         let b = Balance::DEFAULT;

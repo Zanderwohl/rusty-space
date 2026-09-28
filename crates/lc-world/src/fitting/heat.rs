@@ -61,8 +61,8 @@ impl Fitting {
         }
     }
 
-    /// Watts emitted on average over `[from_s, until_s]`, which the account draws from heat before
-    /// storage: the drive's exhaust. Whatever else a ship lights joins it here.
+    /// Averaged over `[from_s, until_s]`: the drive's exhaust. Whatever else a ship lights joins it
+    /// here.
     fn emitted_w(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
         (self.burn_spent_j(motion, until_s) - self.burn_spent_j(motion, from_s)) / (until_s - from_s)
     }
@@ -562,8 +562,7 @@ mod tests {
         assert!(close(fitting.heat_j_at(&rest(), end_s + dt_s), want_j, 1e-9), "{} {want_j}", fitting.heat_j_at(&rest(), end_s + dt_s));
     }
 
-    /// Full under starlight, a burn holds heat at the floor: once heat is spent, all that is
-    /// absorbed pays the exhaust, conversion's loss included.
+    /// Once heat is spent, all that is absorbed pays the exhaust, conversion's loss included.
     #[test]
     fn a_burn_is_paid_from_heat_then_storage_as_it_goes() {
         use crate::flight::{Cruise, Drive};
@@ -588,7 +587,7 @@ mod tests {
         }
         assert_eq!(leap.heat_j_at(&motion, end_s), 0.0);
         let stored_j = leap.stored_j_at(&motion, end_s);
-        // Radiated only while heat lasted, which was until the drive had drawn it all.
+        // Radiation stops once the drive has drawn heat to the floor.
         let radiated_j = heat_j * (heat_j / (exhaust_w - absorbed_w)) / b.field_tau_s;
         let want_j = capacity_j - committed_j + heat_j + absorbed_w * end_s;
         assert!(stored_j <= want_j && stored_j >= want_j - radiated_j - 1e-12 * capacity_j, "{stored_j} {want_j} {radiated_j}");
@@ -602,12 +601,12 @@ mod tests {
         assert_eq!(ticks.heat_j, leap.heat_j);
     }
 
-    /// No radiation, drain or starlight: what leaves the ship is its exhaust and nothing else.
+    /// Only the exhaust leaves.
     fn quiet() -> Balance {
         Balance { living_density_w: 0.0, field_tau_s: 1.0e40, ..Balance::DEFAULT }
     }
 
-    /// Across a million kilometers at a hundredth of a g, coasting between the burns.
+    /// Coasts between the burns.
     fn hop() -> (ShipState, crate::flight::Cruise) {
         use crate::flight::{Cruise, Drive};
         let drive = Drive { accel_g: 0.01, max_beta: 3.0e-6, ..Drive::DEFAULT };
@@ -617,7 +616,7 @@ mod tests {
         (motion, cruise)
     }
 
-    /// A ship holding `heat_j` and `stored_j`, committed to `motion`. Returns the commitment.
+    /// Returns the commitment.
     fn hot(b: Balance, stored_j: f64, heat_j: f64, motion: &ShipState) -> (Fitting, f64) {
         let full = Fitting::full(Form::starting(), b, 0.0);
         let mut fitting = Fitting::from_account(&Account { stored_j, heat_j, ..full.account() }, b);
@@ -625,8 +624,7 @@ mod tests {
         (fitting, committed_j)
     }
 
-    /// Heat pays first and storage the rest, while the commitment runs down by all of it. Heat
-    /// that covers the whole burn leaves storage untouched.
+    /// Heat pays first and storage the rest, while the commitment runs down by all of it.
     #[test]
     fn a_hot_burn_pays_storage_only_what_heat_could_not() {
         let b = quiet();
@@ -668,9 +666,8 @@ mod tests {
         assert!(close(cost_j, want_j, 1e-12) && close(committed_j, want_j, 1e-15), "{cost_j} {want_j}");
     }
 
-    /// Under starlight, radiating and draining: heat reaches the floor in the boost, climbs back in
-    /// the coast and is drawn down again by the brake. Settled at every tick or in one leap, it
-    /// comes to the same, and mid-coast shows the drive was not lit there.
+    /// Heat floors in the boost, recovers in the coast and is drawn again in the brake; one leap
+    /// and every tick agree.
     #[test]
     fn a_hot_burn_settled_every_tick_agrees_with_one_leap() {
         let b = Balance::DEFAULT;
@@ -712,8 +709,8 @@ mod tests {
         assert!((ticks.heat_j - leap.heat_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.heat_j, leap.heat_j);
     }
 
-    /// Past its rated load, a ship at rest collapses partway through what would have been the
-    /// boost. Burning, the drive holds its heat under `Q_max`, and the solve reads the burn.
+    /// Past its rated load, a ship at rest collapses partway through the boost; burning, it does
+    /// not.
     #[test]
     fn a_burn_puts_off_a_collapse() {
         use crate::flight::{Cruise, Drive};

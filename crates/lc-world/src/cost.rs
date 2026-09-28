@@ -1,5 +1,5 @@
-//! What flying costs: the drive as a rocket whose exhaust is the ship's energy. Plans are priced
-//! against storage; what heat pays instead is `fitting::heat`'s.
+//! What flying costs: the drive as a rocket, priced against storage. `fitting::heat` draws the
+//! exhaust from heat first.
 //!
 //! `m' = m exp(−Δη/ε)`, where `Δη = ∫ α dτ` is rapidity the drive has put in, summed without
 //! regard to direction. Additive in `Δη`, so a burn cut into pieces costs what the whole does and
@@ -70,9 +70,7 @@ pub fn planned_rapidity(state: &ShipState) -> f64 {
     }
 }
 
-/// Coordinate instants in `(after_s, until_s)`, in order, where the drive may light or go out. Between
-/// two of them the power it burns is steady, but for the throttling-down the rocket law asks of a
-/// ship growing lighter.
+/// Coordinate instants in `(after_s, until_s)`, in order, where the drive may light or go out.
 pub fn lit_edges(state: &ShipState, after_s: f64, until_s: f64) -> Vec<f64> {
     let on_clock = |cruise: &crate::flight::Cruise| {
         let mut edges = cruise.phase_changes_s().to_vec();
@@ -110,8 +108,7 @@ mod tests {
         hull.dry_kg + hull.capacities.storage_j / C2
     }
 
-    /// Lit or dark at either end of every stretch between edges, a second in from each: an edge
-    /// misplaced by the frame's clock is hundreds of seconds out.
+    /// An edge on the wrong clock is hundreds of seconds out, so a second in from each end is enough.
     fn edges_bound_what_is_lit(state: &ShipState, until_s: f64) {
         let edges = lit_edges(state, 0.0, until_s);
         assert!(edges.len() >= 3, "premise: a boost, a coast and a brake: {edges:?}");

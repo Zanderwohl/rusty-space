@@ -48,9 +48,8 @@ fn stored_j(craft: &Craft, t: f64) -> f64 {
     craft.fitting().unwrap().stored_j_at(&craft.motion, t)
 }
 
-/// A hot ship and a twin holding the same energy all in storage weigh the same, are quoted the
-/// same and fly the same. The hot one pays storage the quote less its heat, and ends as light as
-/// the twin: heat is mass, and the rocket law does not ask where the exhaust came from.
+/// A twin holding the same energy all in storage is quoted and flies the same, and ends as light:
+/// heat is mass. The hot one pays storage the quote less its heat.
 #[test]
 fn a_hot_crossing_arrives_colder_lighter_and_where_the_plan_said() {
     let capacity_j = capacity_j();
@@ -85,8 +84,8 @@ fn a_hot_crossing_arrives_colder_lighter_and_where_the_plan_said() {
     assert!((hot.mass_kg_at(t) - lighter_kg).abs() <= 1.0e-9 * (mass_kg - lighter_kg), "{} {lighter_kg}", hot.mass_kg_at(t));
 }
 
-/// What heat pays leaves the commitment as the burn goes without leaving storage, and a cut
-/// releases the rest: nothing is ever handed back to storage, because heat's share never left.
+/// Heat's share leaves the commitment as the burn goes, and a cut releases the rest. Storage is
+/// never credited.
 #[test]
 fn cutting_a_hot_burn_releases_what_heat_paid_as_a_cut_does() {
     let stored_0 = 0.5 * capacity_j();
