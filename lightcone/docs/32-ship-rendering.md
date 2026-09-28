@@ -495,6 +495,23 @@ beside|behind|inside --length <m>`. Its flags are listed in the example's module
 
 An observer inside someone's cone gets the blinding point, from the photometry, as for a beam
 ([31-directed-energy.md](31-directed-energy.md)).
+
+**From a distance** a burn is a point in the sky, not a cone and a face. Its light is what the
+`Presence` it left in says: power, facing, place and velocity. With `a` the exhaust axis and `u` the
+direction from the emitter to the observer, `cos θ = a · u` says which source the observer sees:
+
+- **Inside the cone**, `θ` within `drive_spread_rad`: the exhaust itself, the top-hat's
+  `P / (Ω d²)` that `lc_world::emit::flux_w_m2` gives, in the face's blackbody spectrum through the
+  observer's bands. That is the blinding point, and it carries: the starting drive at its rating
+  lands 5 × 10⁻¹¹ W/m² a light-year away, a bolometric seventh magnitude, a telescope star in the next
+  system.
+- **Outside it**, only the face, seen obliquely as the aperture glow draws it up close, falling off
+  with the angle.
+
+So a burn in the next system is a moving star that brightens by orders of magnitude as its cone
+sweeps over you, Doppler-shifted and aberrated at the craft's velocity as a star is. How the two
+sources meet at the cone's edge is still to settle, because `aperture_temperature_k` has the face
+radiate all of `P` while the cone also carries all of it. R18 settles it and records the answer here.
 - God view may draw every beam's cone, as a debug overlay, like the causality lines of
   [07-rendering.md](07-rendering.md).
 
