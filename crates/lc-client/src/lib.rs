@@ -68,6 +68,7 @@ pub mod parts;
 pub mod pick;
 pub mod plume;
 pub mod plot;
+pub mod presets_panel;
 pub mod preview;
 pub mod procedural;
 pub mod radio_panel;

@@ -27,6 +27,15 @@ pub const MAX_HISTORY: usize = 200;
 pub struct Entry {
     pub edit: Edit,
     pub label: String,
+    /// What the edit left out, for the presets panel to name while this is the entry at the cursor.
+    pub note: Option<String>,
+}
+
+/// What an edit says in the history in place of its own [`label`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Named {
+    pub label: String,
+    pub note: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -51,16 +60,25 @@ impl History {
     }
 
     /// An edit that changed nothing is not recorded, nor one still being made.
-    pub fn record(&mut self, edit: &Edit, ship: &Form) {
+    pub fn record(&mut self, edit: &Edit, ship: &Form, named: Option<Named>) {
         if !edit.settled || sorted(&edit.before) == sorted(&edit.after) {
             return;
         }
         self.entries.truncate(self.cursor);
-        self.entries.push_back(Entry { edit: edit.clone(), label: label(edit, ship) });
+        let (label, note) = match named {
+            Some(Named { label, note }) => (label, note),
+            None => (label(edit, ship), None),
+        };
+        self.entries.push_back(Entry { edit: edit.clone(), label, note });
         if self.entries.len() > MAX_HISTORY {
             self.entries.pop_front();
         }
         self.cursor = self.entries.len();
+    }
+
+    /// The entry the draft is at, the last one done.
+    pub fn current(&self) -> Option<&Entry> {
+        self.cursor.checked_sub(1).map(|i| &self.entries[i])
     }
 
     /// Undo or redo one entry at a time until `to` are done, stopping at the first the draft
@@ -119,7 +137,7 @@ pub fn label(edit: &Edit, ship: &Form) -> String {
 /// [`Action::EditForm`]: the edit written to the draft and recorded, or what to tell the player
 /// if it was refused. Only a settled edit's refusal is said: a drag refused partway is still
 /// being made.
-pub fn edit(form: &mut FormView, session: &crate::session::Session, edit: Result<Edit, Refused>) -> Option<String> {
+pub fn edit(form: &mut FormView, session: &crate::session::Session, edit: Result<Edit, Refused>, named: Option<Named>) -> Option<String> {
     let start = crate::preview::Start::of(session);
     let applied = match (&edit, form.draft.as_mut()) {
         (Ok(edit), Some(draft)) if start.as_ref().is_some_and(|s| !s.allows(draft, edit)) => Err(Refused::Unpaid),
@@ -129,7 +147,7 @@ pub fn edit(form: &mut FormView, session: &crate::session::Session, edit: Result
     };
     match applied {
         Ok((edit, ship)) => {
-            form.history.record(edit, ship);
+            form.history.record(edit, ship, named);
             if edit.what == What::Add && edit.settled {
                 form.selected = Some(edit.part);
             }
@@ -190,7 +208,7 @@ pub struct GoTo(usize);
 
 /// What the panel was built for.
 #[derive(Component, PartialEq)]
-struct Built(Vec<String>, usize);
+pub(crate) struct Built(Vec<String>, usize);
 
 /// Newest first, over the start, so what a short window cuts off is the oldest.
 fn rows(form: &FormView) -> Vec<(String, Reached, usize)> {
@@ -221,7 +239,7 @@ impl Plugin for FormHistoryPlugin {
 }
 
 /// Last in the left column, under the palette, which is put first whenever it is rebuilt.
-fn lay_out(
+pub(crate) fn lay_out(
     mut commands: Commands,
     ui: Res<Ui>,
     assets: Res<AssetServer>,

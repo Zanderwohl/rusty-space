@@ -110,6 +110,8 @@ pub struct FormView {
     pub asking: Option<lc_world::form::Form>,
     /// Side panels folded down to their headings, to make room for the others.
     pub folded: Folded,
+    /// The presets panel's chosen row.
+    pub preset: Option<crate::presets_panel::Chosen>,
 }
 
 impl FormView {
@@ -128,6 +130,7 @@ pub enum Fold {
     Parts,
     Detail,
     Preview,
+    Presets,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -135,6 +138,7 @@ pub struct Folded {
     pub parts: bool,
     pub detail: bool,
     pub preview: bool,
+    pub presets: bool,
 }
 
 impl Folded {
@@ -143,6 +147,7 @@ impl Folded {
             Fold::Parts => self.parts,
             Fold::Detail => self.detail,
             Fold::Preview => self.preview,
+            Fold::Presets => self.presets,
         }
     }
 
@@ -151,6 +156,7 @@ impl Folded {
             Fold::Parts => &mut self.parts,
             Fold::Detail => &mut self.detail,
             Fold::Preview => &mut self.preview,
+            Fold::Presets => &mut self.presets,
         };
         *flag = !*flag;
     }
@@ -516,6 +522,11 @@ fn start_draft(
     }
     for _ in 0..dev.undo {
         out.write(Requested(Action::Undo));
+    }
+    if let Some((builtin, how)) = dev.preset {
+        let chosen = crate::presets_panel::Chosen::Builtin(builtin);
+        out.write(Requested(Action::ChoosePreset(Some(chosen.clone()))));
+        out.write(Requested(Action::ApplyPreset(chosen, how)));
     }
 }
 
