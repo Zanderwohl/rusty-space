@@ -50,6 +50,25 @@ pub const ATTRIBUTE_HULL_SEAM: MeshVertexAttribute =
 pub const ATTRIBUTE_HULL_GIRDER: MeshVertexAttribute =
     MeshVertexAttribute::new("HullGirder", 0x4855_4C4C_0000_0006, VertexFormat::Float32x4);
 
+/// `(share, face, 0, 0)`: how much of the vertex lies on an open face, and that face's index into
+/// [`HullUniform::faces`], [`NO_FACE`] for none. A vertex off every face names the nearest, so a
+/// triangle at a face's rim names one face at all three corners. The index is read flat.
+pub const ATTRIBUTE_HULL_FACE: MeshVertexAttribute =
+    MeshVertexAttribute::new("HullFace", 0x4855_4C4C_0000_0007, VertexFormat::Unorm8x4);
+
+/// Open faces a hull may light. Must match `FACES` in `hull.wgsl`.
+pub const FACES: usize = 16;
+
+pub const NO_FACE: u8 = u8::MAX;
+
+/// [`ATTRIBUTE_HULL_FACE`] for a vertex `share` on face `face`. A face past [`FACES`] is none.
+pub fn face_attribute(share: f32, face: Option<usize>) -> [u8; 4] {
+    match face.filter(|&f| f < FACES) {
+        Some(f) => [(share.clamp(0.0, 1.0) * 255.0).round() as u8, f as u8, 0, 0],
+        None => [0, NO_FACE, 0, 0],
+    }
+}
+
 /// Regions a palette may hold. Must match `REGIONS` in `hull.wgsl`.
 pub const REGIONS: usize = 16;
 
@@ -120,6 +139,12 @@ pub struct HullUniform {
     /// Per region, what a fully lit texel of its lights sends, in [`Self::reflected`]'s units.
     /// A real, small power: it shows on a night side and is lost against a lit one.
     pub emitted: [Vec4; REGIONS],
+    /// `(region, flank, on, 0)`: with `on` 1, `region` is drawn as itself only on open faces, lit
+    /// there by [`Self::faces`] rather than by [`Self::emitted`], and as the layer `flank`
+    /// everywhere else. With it 0 `region` is itself everywhere, as in a void.
+    pub open: UVec4,
+    /// Per open face, what a fully lit texel of it sends, in [`Self::reflected`]'s units.
+    pub faces: [Vec4; FACES],
 }
 
 impl Default for HullUniform {
@@ -139,6 +164,8 @@ impl Default for HullUniform {
             bolts: Vec4::new(1.5, 0.25, 0.8, 0.45),
             bolted: 0,
             emitted: [Vec4::ZERO; REGIONS],
+            open: UVec4::ZERO,
+            faces: [Vec4::ZERO; FACES],
         }
     }
 }
@@ -196,6 +223,7 @@ impl Material for HullMaterial {
             ATTRIBUTE_HULL_REGIONS[2].at_shader_location(4),
             ATTRIBUTE_HULL_REGIONS[3].at_shader_location(5),
             ATTRIBUTE_HULL_SEAM.at_shader_location(6),
+            ATTRIBUTE_HULL_FACE.at_shader_location(7),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
@@ -328,6 +356,13 @@ impl Plugin for HullMaterialPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_face_past_the_uniform_is_no_face() {
+        assert_eq!(face_attribute(1.0, Some(3)), [255, 3, 0, 0]);
+        assert_eq!(face_attribute(0.5, Some(FACES)), [0, NO_FACE, 0, 0]);
+        assert_eq!(face_attribute(0.5, None), [0, NO_FACE, 0, 0]);
+    }
 
     #[test]
     fn a_fillets_weights_land_on_its_two_regions() {

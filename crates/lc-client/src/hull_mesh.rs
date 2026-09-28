@@ -16,10 +16,11 @@ use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
-use bevy_mesh::{Indices, PrimitiveTopology};
-use em_render::hull_material::{ATTRIBUTE_HULL_SEAM, insert_region_weights, region_weights};
+use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use em_render::hull_material::{ATTRIBUTE_HULL_FACE, ATTRIBUTE_HULL_SEAM, face_attribute, insert_region_weights, region_weights};
 use glam::DVec3;
 use lc_world::fitting::Balance;
+use lc_world::form::capacity::{Aperture, apertures};
 use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
@@ -90,6 +91,8 @@ pub struct HullBuffers {
     pub regions: Vec<[[u8; 4]; 4]>,
     /// [`ATTRIBUTE_HULL_SEAM`]'s `(across, along)`.
     pub seams: Vec<[f32; 2]>,
+    /// [`ATTRIBUTE_HULL_FACE`]'s, indexing [`apertures`].
+    pub faces: Vec<[u8; 4]>,
     pub indices: Vec<u32>,
     /// Meters between samples.
     pub step: f64,
@@ -102,6 +105,7 @@ impl HullBuffers {
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
         insert_region_weights(&mut mesh, &self.regions);
         mesh.insert_attribute(ATTRIBUTE_HULL_SEAM, self.seams);
+        mesh.insert_attribute(ATTRIBUTE_HULL_FACE, VertexAttributeValues::Unorm8x4(self.faces));
         mesh.insert_indices(Indices::U32(self.indices));
         mesh
     }
@@ -240,6 +244,7 @@ impl Fnv {
 #[derive(Clone, Copy, Debug)]
 struct Painted {
     regions: [[u8; 4]; 4],
+    face: [u8; 4],
     across: f32,
     along: f64,
     /// The spar whose seam `along` is measured about, the vertex's angle about its axis, and
@@ -314,6 +319,8 @@ struct Paint<'a> {
     /// Per piece, meters: the largest fillet at any of its joints.
     fillet: Vec<f64>,
     spars: Vec<usize>,
+    /// Each engine's piece and its open face, in [`apertures`]' order.
+    faces: Vec<(usize, Aperture)>,
     step: f64,
 }
 
@@ -341,6 +348,7 @@ impl<'a> Paint<'a> {
             region: pieces.iter().map(|p| region(p.kind)).collect(),
             fillet: pieces.iter().map(|p| by_part.get(&p.part).copied().unwrap_or(0.0)).collect(),
             spars: (0..pieces.len()).filter(|&i| matches!(pieces[i].kind, Kind::Spar(_))).collect(),
+            faces: engine_faces(pieces, form, balance),
             step,
         }
     }
@@ -349,10 +357,11 @@ impl<'a> Paint<'a> {
         distances.clear();
         distances.extend((0..self.region.len()).map(|i| self.sdf.piece_distance(i, p)));
         let regions = self.regions(distances);
+        let face = self.open_face(p, distances);
         let Some((spar, (neighbor, off))) =
             self.spars.iter().filter_map(|&s| Some((s, self.sdf.seam(s, p)?))).min_by(|a, b| a.1.1.total_cmp(&b.1.1))
         else {
-            return Painted { regions, across: SEAM_FAR as f32, along: 0.0, about: None, seam: None };
+            return Painted { regions, face, across: SEAM_FAR as f32, along: 0.0, about: None, seam: None };
         };
         let on_spar = distances[spar] <= distances[neighbor];
         let (mine, theirs) = if on_spar { (spar, neighbor) } else { (neighbor, spar) };
@@ -374,7 +383,48 @@ impl<'a> Paint<'a> {
             .filter(|_| rho > 0.0)
             .map(|t| (t.dot(DVec3::new(0.0, -local.z, local.y) / rho).abs(), t.x.abs()));
         let seam = SeamAt { spar, neighbor, theta, rho, x: local.x, runs };
-        Painted { regions, across: across as f32, along: 0.0, about: None, seam: Some(seam) }
+        Painted { regions, face, across: across as f32, along: 0.0, about: None, seam: Some(seam) }
+    }
+
+    /// The open face `p` lies most on, and how much. Off every face, the nearest face's center
+    /// names one at no share.
+    fn open_face(&self, p: DVec3, distances: &[f64]) -> [u8; 4] {
+        let mut on: Option<(f64, usize)> = None;
+        let mut nearest: Option<(f64, usize)> = None;
+        for (face, (piece, aperture)) in self.faces.iter().enumerate() {
+            let center_m = p.distance(aperture.center);
+            if nearest.is_none_or(|(d, _)| center_m < d) {
+                nearest = Some((center_m, face));
+            }
+            let share = self.face_share(*piece, aperture, p, distances[*piece]);
+            if share > 0.0 && on.is_none_or(|(s, _)| share > s) {
+                on = Some((share, face));
+            }
+        }
+        match (on, nearest) {
+            (Some((share, face)), _) => face_attribute(share as f32, Some(face)),
+            (None, nearest) => face_attribute(0.0, nearest.map(|(_, face)| face)),
+        }
+    }
+
+    /// On the piece's own surface, in the face's plane, inside its rim, and turned along the
+    /// exhaust, each eased over a cell. The primitive's own gradient rather than the field's, so a
+    /// fillet onto a neighbor does not count as the face.
+    fn face_share(&self, piece: usize, aperture: &Aperture, p: DVec3, distance: f64) -> f64 {
+        let step = self.step;
+        let off = p - aperture.center;
+        let along = off.dot(aperture.out);
+        let radial = (off - aperture.out * along).length();
+        let h = 1e-3 * step;
+        let grad = DVec3::from_array(
+            [0, 1, 2].map(|a| self.sdf.primitive(piece, p + AXES[a] * h) - self.sdf.primitive(piece, p - AXES[a] * h)),
+        )
+        .normalize_or_zero();
+        let turned = smoothstep(0.5, 0.9, grad.dot(aperture.out));
+        let on = 1.0 - smoothstep(step, 2.0 * step, distance.abs());
+        let plane = 1.0 - smoothstep(step, 2.0 * step, along.abs());
+        let rim = 1.0 - smoothstep(aperture.radius_m, aperture.radius_m + step, radial);
+        turned * on * plane * rim
     }
 
     /// The nearest region and the next, blended across the fillet between them, or across a
@@ -382,6 +432,20 @@ impl<'a> Paint<'a> {
     fn regions(&self, distances: &[f64]) -> [[u8; 4]; 4] {
         blended(distances, &self.region, &self.fillet, self.step)
     }
+}
+
+/// Each engine piece with its face. `Sdf::new` and [`apertures`] both walk `Form::place`, so the
+/// engines come in one order.
+fn engine_faces(pieces: &[Piece], form: &Form, balance: &Balance) -> Vec<(usize, Aperture)> {
+    let engines: Vec<usize> = (0..pieces.len()).filter(|&i| pieces[i].kind == Kind::Engine).collect();
+    let faces = apertures(form, balance).unwrap_or_default();
+    debug_assert_eq!(engines.len(), faces.len(), "an engine piece without its face");
+    engines.into_iter().zip(faces).collect()
+}
+
+fn smoothstep(lo: f64, hi: f64, x: f64) -> f64 {
+    let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// The nearest region to a point and the next, from each piece's distance, `fillet` meters wide
@@ -458,7 +522,7 @@ pub fn mesh_pieces(pieces: &[Piece], cells: u32, finish: Finish) -> HullBuffers 
         .map(|&p| {
             union.each(p, &mut scratch);
             let regions = blended(&scratch, &region, &fillet, grid.step);
-            Painted { regions, across: SEAM_FAR as f32, along: 0.0, about: None, seam: None }
+            Painted { regions, face: face_attribute(0.0, None), across: SEAM_FAR as f32, along: 0.0, about: None, seam: None }
         })
         .collect();
     let normals = (finish == Finish::Smooth).then(|| gradients(&union, &surface, grid.step));
@@ -491,6 +555,7 @@ fn buffers(surface: &Surface, painted: &[Painted], normals: Option<&[DVec3]>, st
                 out.normals.push(normals.map_or(flat, |n| n[v as usize]).as_vec3().to_array());
                 out.regions.push(paint.regions);
                 out.seams.push([paint.across, along as f32]);
+                out.faces.push(paint.face);
                 out.positions.len() as u32 - 1
             };
             let index = match normals {

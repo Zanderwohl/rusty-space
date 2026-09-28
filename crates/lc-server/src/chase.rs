@@ -209,6 +209,7 @@ pub fn contacts(
                 continue;
             };
             let then = craft.seen_at(sighted.emitted_s);
+            let emit = lc_world::emit::emit_w(craft, sighted.emitted_s);
             let presence = Presence {
                 ship_id: ShipId(craft.id.0),
                 name: craft.designation(),
@@ -225,6 +226,8 @@ pub fn contacts(
                 // At the moment the light left, not now. A burn that has since stopped is
                 // still burning as far as this observer is concerned.
                 drive_w: lc_world::emit::drive_w(craft, balance, sighted.emitted_s),
+                emit_fore_w: emit.fore_w,
+                emit_aft_w: emit.aft_w,
                 emitted_t: (sighted.emitted_s * 1.0e6) as i64,
                 // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by
                 // construction, so this is the light landing at this instant.

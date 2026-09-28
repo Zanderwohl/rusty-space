@@ -501,6 +501,11 @@ pub struct Presence {
     /// Sent rather than derived because a receiver knows neither the craft's mass nor its
     /// acceleration. It is what a burn plainly shows: the face's temperature and the cone's reach.
     pub drive_w: f64,
+    /// What its emits were sending out of its fore and its aft faces then, watts: an emit flown as
+    /// a burn from the end it was ordered from, a balanced one half from each. Not the drive,
+    /// which is [`Presence::drive_w`] and leaves aft beside these.
+    pub emit_fore_w: f64,
+    pub emit_aft_w: f64,
     /// Coordinate microseconds the light left. Always earlier than [`Presence::arrive_t`].
     pub emitted_t: i64,
     /// Coordinate microseconds it arrives. Never later than the server's `t` when it is sent.
@@ -1089,6 +1094,8 @@ mod tests {
                     beta: [0.0, 0.001, 0.0],
                     facing: [0.0, 1.0, 0.0],
                     drive_w: 1.1e20,
+                    emit_fore_w: 3.0e18,
+                    emit_aft_w: 3.0e18,
                     emitted_t: 500_000,
                     arrive_t: 1_000_000,
                     form: two_parts(),
@@ -1863,6 +1870,8 @@ mod tests {
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
             drive_w: 0.0,
+            emit_fore_w: 0.0,
+            emit_aft_w: 0.0,
             emitted_t: arrive_t - 1_000,
             arrive_t,
             form: Form::default(),

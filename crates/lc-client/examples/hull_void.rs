@@ -31,8 +31,8 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::WindowResolution;
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::hull_material::{
-    ATTRIBUTE_HULL_SEAM, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile,
-    insert_region_weights, region_weights, tile_array,
+    ATTRIBUTE_HULL_FACE, ATTRIBUTE_HULL_SEAM, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile,
+    face_attribute, insert_region_weights, region_weights, tile_array,
 };
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
@@ -392,8 +392,10 @@ fn sphere(radius: f32, center: usize) -> Mesh {
             (region_weights(nearest, second, share), seam)
         })
         .unzip();
+    let faces = vec![face_attribute(0.0, None); regions.len()];
     insert_region_weights(&mut mesh, &regions);
     mesh.insert_attribute(ATTRIBUTE_HULL_SEAM, seams);
+    mesh.insert_attribute(ATTRIBUTE_HULL_FACE, bevy_mesh::VertexAttributeValues::Unorm8x4(faces));
     mesh
 }
 
