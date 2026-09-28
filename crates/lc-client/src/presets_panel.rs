@@ -346,3 +346,253 @@ fn take_paste(pasted: Res<Pasted>, mut clipboard: Option<ResMut<bevy_egui::EguiC
     let text = text.or_else(|| clipboard.as_mut().and_then(|c| c.get_text())).unwrap_or_default();
     out.write(Requested(Action::ImportPreset(text)));
 }
+
+#[cfg(test)]
+mod tests {
+    use glam::DVec3;
+    use lc_proto::Refusal;
+    use lc_proto::form::{MAX_PRESETS, PRESET_NAME_LIMIT};
+    use lc_server::presets::Presets;
+    use lc_world::form::{MAX_PARTS, Part};
+
+    use super::*;
+    use crate::action::apply;
+    use crate::draft::{Draft, PRIMITIVES};
+
+    const B: Balance = Balance::DEFAULT;
+
+    struct Player {
+        account: &'static str,
+        ui: UiState,
+        session: Session,
+    }
+
+    impl Player {
+        fn new(account: &'static str, ship: Form) -> Self {
+            let mut session = Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
+            session.remote = true;
+            let mut ui = UiState::default();
+            apply(Action::StartDraft(ship), &mut ui, &mut session);
+            Player { account, ui, session }
+        }
+
+        fn draft(&self) -> &Draft {
+            self.ui.form.draft.as_ref().unwrap()
+        }
+
+        /// The action's effects, with each [`Effect::Keep`] carried to the shard and its list back.
+        fn does(&mut self, action: Action, shard: &mut Presets) -> Vec<Effect> {
+            let effects = apply(action, &mut self.ui, &mut self.session);
+            for effect in &effects {
+                if let Effect::Keep { name, form } = effect {
+                    match form {
+                        Some(form) => shard.save(self.account, name.clone(), form.clone()).expect("the shard keeps it"),
+                        None => assert!(shard.delete(self.account, name)),
+                    }
+                    self.session.presets = shard.for_account(self.account);
+                }
+            }
+            effects
+        }
+
+        fn edit(&mut self, make: impl Fn(&Draft) -> Result<crate::draft::Edit, crate::draft::Refused>) {
+            let edit = make(self.draft());
+            apply(Action::EditForm(edit), &mut self.ui, &mut self.session);
+        }
+    }
+
+    fn id_of(form: &Form, kind: Kind) -> PartId {
+        form.parts.iter().find(|p| p.kind == kind).unwrap().id
+    }
+
+    /// The starting ship with more engine than storage, so a layout of it is not any preset's
+    /// own volumes.
+    fn odd_ship() -> Form {
+        let mut ship = Form::starting();
+        for part in ship.parts.iter_mut().filter(|p| p.placement.is_some()) {
+            part.volume_m3 *= if part.kind == Kind::Engine { 3.0 } else { 2.0 };
+        }
+        ship
+    }
+
+    /// A draft worth sharing: reshaped, resized, and a bay added, so ids are not in a fresh order.
+    fn designed(player: &mut Player) {
+        player.edit(|d| d.twist(id_of(&d.form, Kind::Living), 0.3));
+        player.edit(|d| d.resize(id_of(&d.form, Kind::Engine), d.part(id_of(&d.form, Kind::Engine)).unwrap().volume_m3 * 0.75));
+        player.edit(|d| d.add(id_of(&d.form, Kind::Storage), Kind::Bay, PRIMITIVES[3], DVec3::NEG_Y, &B));
+        player.edit(|d| d.remove(id_of(&d.form, Kind::Data)));
+    }
+
+    fn said(effects: &[Effect]) -> Vec<&str> {
+        effects.iter().filter_map(|e| if let Effect::Notify(m) = e { Some(m.as_str()) } else { None }).collect()
+    }
+
+    fn refusal(reason: Refusal) -> String {
+        format!("refused: {}", crate::uplink::refused(reason))
+    }
+
+    /// The done-when.
+    #[test]
+    fn an_exported_preset_imported_on_another_account_applies_to_the_same_draft() {
+        let mut shard = Presets::default();
+        let mut alice = Player::new("acct-a", Form::starting());
+        designed(&mut alice);
+        let saved = alice.draft().form.clone();
+        alice.does(Action::SavePreset("Long".into()), &mut shard);
+        assert_eq!(alice.session.presets.len(), 1);
+        let long = Chosen::Own("Long".into());
+        let copied = alice.does(Action::ExportPreset(long.clone()), &mut shard);
+        let [Effect::Copy(text)] = copied.as_slice() else { panic!("{copied:?}") };
+
+        let mut bob = Player::new("acct-b", odd_ship());
+        assert!(shard.for_account("acct-b").is_empty());
+        bob.does(Action::ImportPreset(format!("\n  {text}\n")), &mut shard);
+        assert_eq!(bob.session.presets, alice.session.presets, "the same name and form, ids and all");
+
+        let mut carol = Player::new("acct-a", odd_ship());
+        carol.session.presets = shard.for_account("acct-a");
+        for how in [How::Layout, How::Design] {
+            carol.does(Action::ApplyPreset(long.clone(), how), &mut shard);
+            bob.does(Action::ApplyPreset(long.clone(), how), &mut shard);
+            assert_eq!(bob.draft().form, carol.draft().form, "{how:?}");
+        }
+        assert_eq!(bob.draft().form, saved, "as a design it is the draft that was saved");
+    }
+
+    #[test]
+    fn applying_is_one_entry_named_for_the_preset_and_undo_restores_the_draft() {
+        let mut shard = Presets::default();
+        let mut player = Player::new("acct-a", odd_ship());
+        designed(&mut player);
+        let before = player.draft().form.clone();
+        let done = player.ui.form.history.entries().len();
+        player.does(Action::ApplyPreset(Chosen::Builtin(Builtin::Plate), How::Layout), &mut shard);
+        let history = &player.ui.form.history;
+        assert_eq!(history.entries().len(), done + 1);
+        assert_eq!(history.current().unwrap().label, "applied Plate as a layout");
+        assert_ne!(player.draft().form, before);
+        player.does(Action::Undo, &mut shard);
+        assert_eq!(player.draft().form, before);
+        player.does(Action::Redo, &mut shard);
+        player.does(Action::ApplyPreset(Chosen::Builtin(Builtin::Spindle), How::Design), &mut shard);
+        assert_eq!(player.ui.form.history.current().unwrap().label, "applied Spindle as a design");
+    }
+
+    #[test]
+    fn a_layout_and_a_design_are_as_layout_and_as_design() {
+        let mut shard = Presets::default();
+        let mut player = Player::new("acct-a", odd_ship());
+        let min = B.min_part_m3;
+        for b in Builtin::ALL {
+            let chosen = Chosen::Builtin(b);
+            player.does(Action::ApplyPreset(chosen.clone(), How::Layout), &mut shard);
+            assert_eq!(player.draft().form, b.form().as_layout(&odd_ship(), min).unwrap().form, "{b:?}");
+            player.does(Action::ApplyPreset(chosen, How::Design), &mut shard);
+            assert_eq!(player.draft().form, b.form().as_design(min).unwrap(), "{b:?}");
+        }
+        assert_ne!(Builtin::Plate.form().as_layout(&odd_ship(), min).unwrap().form, Builtin::Plate.form());
+    }
+
+    /// No storage, and a bay the spindle has no part for.
+    #[test]
+    fn a_layout_names_the_parts_it_gave_nothing_and_the_kinds_it_had_no_part_for() {
+        let mut ship = Form::starting();
+        ship.parts.retain(|p| p.kind != Kind::Storage);
+        for placement in ship.parts.iter_mut().filter_map(|p| p.placement.as_mut()) {
+            placement.parent = PartId(0);
+        }
+        let mut shard = Presets::default();
+        let mut player = Player::new("acct-a", ship);
+        player.does(Action::ApplyPreset(Chosen::Builtin(Builtin::Cluster), How::Layout), &mut shard);
+        let note = player.ui.form.history.current().unwrap().note.clone();
+        assert_eq!(note.as_deref(), Some("given nothing: 1 storage, 11 storage"));
+
+        player.edit(|d| d.add(id_of(&d.form, Kind::Engine), Kind::Bay, PRIMITIVES[3], DVec3::Y, &B));
+        let bay = player.draft().form.clone();
+        player.ui.form.draft = Some(Draft::new(bay));
+        player.does(Action::ApplyPreset(Chosen::Builtin(Builtin::Spindle), How::Layout), &mut shard);
+        let note = player.ui.form.history.current().unwrap().note.clone();
+        assert_eq!(note.as_deref(), Some("given nothing: 1 storage; no part for: bay"));
+        player.does(Action::Undo, &mut shard);
+        assert_eq!(player.ui.form.history.current().and_then(|e| e.note.clone()), None, "the note is the entry's");
+    }
+
+    #[test]
+    fn saving_under_a_kept_name_replaces_it() {
+        let mut shard = Presets::default();
+        let mut player = Player::new("acct-a", Form::starting());
+        player.does(Action::SavePreset("Mine".into()), &mut shard);
+        designed(&mut player);
+        player.does(Action::SavePreset("Mine".into()), &mut shard);
+        let kept = &player.session.presets;
+        assert_eq!(kept.len(), 1);
+        assert_eq!(Form::from(&kept[0].form), player.draft().form);
+    }
+
+    fn full(player: &mut Player) {
+        let form = lc_proto::Form::from(&Form::starting());
+        player.session.presets = (0..MAX_PRESETS).map(|k| lc_proto::Preset { name: format!("p{k}"), form: form.clone() }).collect();
+    }
+
+    #[test]
+    fn each_limit_is_refused_by_name_on_save_and_on_import() {
+        let mut shard = Presets::default();
+        let mut player = Player::new("acct-a", Form::starting());
+        let export = |name: &str, form: &Form| ron::to_string(&lc_proto::Preset { name: name.into(), form: form.into() }).unwrap();
+        let starting = Form::starting();
+        let mut huge = starting.clone();
+        let spare = *huge.parts.last().unwrap();
+        huge.parts.extend((0..MAX_PARTS as u16).map(|k| Part { id: PartId(1000 + k), ..spare }));
+
+        let long = "x".repeat(PRESET_NAME_LIMIT + 1);
+        for (name, form, why) in [
+            ("", &starting, Refusal::PresetName),
+            (long.as_str(), &starting, Refusal::PresetName),
+            ("Huge", &huge, Refusal::Form(lc_proto::FormFault::TooManyParts { found: huge.parts.len() as u32 })),
+        ] {
+            let effects = player.does(Action::ImportPreset(export(name, form)), &mut shard);
+            assert_eq!(said(&effects), [refusal(why)], "import {name:?}");
+            player.ui.form.draft.as_mut().unwrap().form = form.clone();
+            let effects = player.does(Action::SavePreset(name.into()), &mut shard);
+            assert_eq!(said(&effects), [refusal(why)], "save {name:?}");
+        }
+        player.ui.form.draft = Some(Draft::new(starting.clone()));
+
+        full(&mut player);
+        for action in [Action::SavePreset("new".into()), Action::ImportPreset(export("new", &starting))] {
+            assert_eq!(said(&player.does(action, &mut shard)), [refusal(Refusal::TooManyPresets)]);
+        }
+        let effects = apply(Action::SavePreset("p3".into()), &mut player.ui, &mut player.session);
+        assert!(matches!(effects.as_slice(), [Effect::Keep { .. }]), "a full list still replaces: {effects:?}");
+
+        let effects = player.does(Action::ImportPreset("not a preset".into()), &mut shard);
+        assert!(said(&effects)[0].starts_with("refused: not a preset"), "{effects:?}");
+        assert!(shard.for_account("acct-a").is_empty(), "nothing refused reached the shard");
+    }
+
+    #[test]
+    fn a_built_in_cannot_be_deleted_and_an_own_one_can() {
+        let mut shard = Presets::default();
+        let mut player = Player::new("acct-a", Form::starting());
+        let effects = player.does(Action::DeletePreset(Chosen::Builtin(Builtin::Plate)), &mut shard);
+        assert_eq!(said(&effects), ["Plate is built in"]);
+        player.does(Action::SavePreset("Plate".into()), &mut shard);
+        player.does(Action::DeletePreset(Chosen::Own("Plate".into())), &mut shard);
+        assert!(player.session.presets.is_empty());
+
+        player.ui.form.preset = Some(Chosen::Builtin(Builtin::Plate));
+        assert_eq!(action_of(&Press::Delete, &player.ui), Some(Action::DeletePreset(Chosen::Builtin(Builtin::Plate))));
+        assert!(rows(&player.session).starts_with(&Builtin::ALL.map(Chosen::Builtin)), "every built-in is listed");
+    }
+
+    #[test]
+    fn with_no_server_there_is_nowhere_to_keep_one() {
+        let mut shard = Presets::default();
+        let mut player = Player::new("acct-a", Form::starting());
+        player.session.remote = false;
+        let effects = player.does(Action::SavePreset("Mine".into()), &mut shard);
+        assert_eq!(said(&effects), ["no server, so nowhere to keep presets"]);
+        player.does(Action::ApplyPreset(Chosen::Builtin(Builtin::Cluster), How::Layout), &mut shard);
+        assert_eq!(player.ui.form.history.current().unwrap().label, "applied Cluster as a layout", "a built-in needs no server");
+    }
+}
