@@ -769,7 +769,7 @@ graph LR
 
 ### C3 · Undo and redo
 
-- status: todo
+- status: active card "C3 · Undo and redo"
 - needs: C2
 - touches: `crates/lc-client/src/form_history.rs`
 - read: 29 §Undo and redo
@@ -843,7 +843,7 @@ graph LR
 
 ### X1 · Docs brought current
 
-- status: todo
+- status: active card "X1 · Docs brought current"
 - needs: F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
