@@ -440,7 +440,7 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
   star, the only roll a hull holds.
 - **`--demo cascade`** is five hot ships ten times the starting size, 23 km apart. The first vents
   and each spike kills the next. Each collapse is drawn as its light arrives, a flash and cooling
-  debris ([32-ship-rendering.md](32-ship-rendering.md#in-the-game-1)), and the console says it collapsed.
+  debris ([32-ship-rendering.md](32-ship-rendering.md#the-field-in-the-game)), and the console says it collapsed.
 
   ![`--demo cascade`: five ships running hot](../images/h5-cascade-before.jpg)
   ![and partway through: the first two are gone, and the light of the third's end has not yet arrived](../images/h5-cascade-partway.jpg)
@@ -498,7 +498,7 @@ shows its thresholds. What a player can infer from it:
   wreck restored after a restart is stated as the starting field at rest until its light has passed.
 - **The client draws and meters a ship by it.** A hull's reflectance is `1 − α`; a real hull's
   textures, which average 0.35, are scaled to it. The field's heat is drawn on its envelope
-  ([32](32-ship-rendering.md#in-the-game)), and on the hull only for a craft with no form, which has
+  ([32](32-ship-rendering.md#the-field-in-the-game)), and on the hull only for a craft with no form, which has
   no envelope. A star's spectrum cache serves its per-band radiance. A Black field hides the lit
   windows too. Nothing yet draws a distant ship as a point: the metering sums the terms
   (`hull::Sent`), and R18's point starts from that sum.

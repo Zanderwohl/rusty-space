@@ -1,7 +1,7 @@
 //! A craft's form drawn as placeholder parts: one Bevy primitive per copy of each part, at its
 //! solved size and pose, flat colored by kind.
 //!
-//! 32 §Temporary assets. No blends, spars uncut and a slab's corners square. Drawn only until the
+//! 32 §Placeholders. No blends, spars uncut and a slab's corners square. Drawn only until the
 //! real hull ([`crate::ship_hull`]) has a mesh up, and for a refit until its meshes are, each
 //! working copy solid at its size then. The pieces sit in the ship's frame (x nose, y port, z up)
 //! in meters under one root, which is the only thing placed each frame. Other craft's are
