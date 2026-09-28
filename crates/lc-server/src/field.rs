@@ -18,6 +18,8 @@ use crate::world::{Event, Scheduled};
 mod mode;
 
 pub use mode::auto_by;
+#[cfg(test)]
+pub(crate) use mode::hold_black;
 
 /// 30 takes the spike as a second long.
 const SPIKE_S: f64 = 1.0;
@@ -171,6 +173,7 @@ mod tests {
         server.set_rate(60.0);
         let mut dying = still(DYING, near);
         server.fit_new(&mut dying);
+        hold_black(&mut dying);
         server.admit(OWNER, dying, 0.0);
         server.admit(WATCHER, still(WATCHING, near + DVec3::Y * APART_US), 0.0);
         server.next_ship = 3;
@@ -291,6 +294,7 @@ mod tests {
         server.set_rate(60.0);
         let mut craft = still(DYING, DVec3::ZERO);
         server.fit_new(&mut craft);
+        hold_black(&mut craft);
         craft.drain(server.balance().module_energy_j(), 0.0);
         server.admit(OWNER, craft, 0.0);
         server.next_ship = 2;
@@ -412,6 +416,7 @@ mod tests {
         let first = welcomed(wire.take(OWNER)).expect("welcomed");
         let mut dying = still(first, near);
         server.fit_new(&mut dying);
+        hold_black(&mut dying);
         server.fleet.remove(CraftId(first.0));
         server.fleet.insert(dying);
         server.disconnected(OWNER);

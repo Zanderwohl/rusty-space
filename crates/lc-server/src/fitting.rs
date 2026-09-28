@@ -283,7 +283,8 @@ mod tests {
         assert_eq!(*ship_id, ship);
         assert_eq!(field.heat_j, 7.0e24);
         assert_eq!(field.since_s, fitting.since_s);
-        assert_eq!(field.shade, lc_proto::Shade::Black);
+        assert!(matches!(field.mode, lc_proto::FieldMode::Auto { .. }), "a new ship is in Auto");
+        assert_eq!(field.shade, lc_proto::Shade::Clear, "which keeps a full store Clear");
     }
 
     #[tokio::test]
@@ -338,6 +339,7 @@ mod tests {
     #[tokio::test]
     async fn a_refit_runs_as_a_round_and_says_each_step() {
         let (mut server, mut wire, from, ship) = fitted_server(false);
+        crate::field::hold_black(server.fleet.get_mut(CraftId(ship.0)).unwrap());
         // Hours a tick, where a step takes days.
         server.set_rate(60.0);
         server.tick(&mut wire).await.unwrap();
@@ -477,12 +479,11 @@ mod tests {
     /// Each order the wire has before the shard can do it is refused as such, and does nothing.
     #[tokio::test]
     async fn an_order_not_built_yet_is_refused_as_not_built() {
-        use lc_proto::{Aim, Apertures, Approach, Closeness, FieldMode};
+        use lc_proto::{Aim, Apertures, Approach, Closeness};
         let (mut server, mut wire, from, ship) = fitted_server(false);
         server.tick(&mut wire).await.unwrap();
         let before = server.ship(ship).unwrap().fitting().cloned();
         let unbuilt = [
-            act(Order::FieldMode { mode: FieldMode::Clear }),
             act(Order::Emit {
                 aim: Aim::Omni,
                 apertures: Apertures::Aft,

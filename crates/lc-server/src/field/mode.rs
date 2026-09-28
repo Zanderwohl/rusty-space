@@ -16,6 +16,14 @@ use crate::server::Server;
 use crate::transport::Transport;
 use crate::world::{Event, Scheduled};
 
+/// Set Black and kept there, as tests of anything but the modes want.
+#[cfg(test)]
+pub(crate) fn hold_black(craft: &mut Craft) {
+    let Some(mut fitting) = craft.fitting().cloned() else { return };
+    fitting.set_posture(lc_world::fitting::Posture::BLACK);
+    craft.fit(Some(fitting));
+}
+
 /// When `craft`'s field in Auto next begins a switch by `until_s`, and toward which shade, walking
 /// the day-long starlight segments as [`collapse_by`] does.
 pub fn auto_by(craft: &Craft, until_s: f64) -> Option<(f64, Mode)> {
