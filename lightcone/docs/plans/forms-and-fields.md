@@ -119,6 +119,7 @@ graph LR
   R16["R16 Drones at work on another craft"]
   R17["R17 A burn's power on the wire as `F c`"]
   R18["R18 A distant burn as a point"]
+  R19["R19 Faces lit by an emit"]
   C1["C1 Editor view"]
   C2["C2 Editing the draft"]
   C3["C3 Undo and redo"]
@@ -214,6 +215,8 @@ graph LR
   R17 --> R18
   H7 --> R18
   E4 --> R18
+  R17 --> R19
+  E3 --> R19
   R1 --> C1
   C1 --> C2
   F5 --> C2
@@ -256,6 +259,7 @@ graph LR
   R16 --> X1
   R17 --> X1
   R18 --> X1
+  R19 --> X1
 ```
 <!-- /graph -->
 
@@ -718,7 +722,7 @@ graph LR
 
 - status: active card "R17 · A burn's power on the wire as `F c`"
 - needs: R12
-- touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-world/src/flight.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`
+- touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/server.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-world/src/flight.rs`, `crates/lc-world/src/craft.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`, `crates/lc-server/src/drive.rs`, `crates/lc-server/src/emit.rs`, `crates/lc-server/src/emit/drives.rs`, `crates/lc-server/src/emit/tests/drives.rs`, `crates/lc-server/src/persist.rs`, `crates/lc-world/src/emit.rs`, `crates/lc-world/src/ignition.rs`, `crates/lc-world/src/courtesy.rs`, `crates/lc-world/src/resume.rs`, `crates/lc-client/src/construction.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/ship_hull.rs`, `lightcone/docs/19-ship-fitting.md`, `lightcone/docs/31-directed-energy.md`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/r17-*.jpg`
 - read: 31 §The drive is the radiator, 32 §The exhaust cone
 - deliver: `Presence` states what a burn sends aft as a photon drive's `F c` rather than a reaction drive's `½ F v`, and `Drive` gives it; `plume::exhaust_w` and its guess at another ship's exhaust speed go.
 - done when: another ship's cone and face are drawn from the power it stated, with no exhaust speed assumed.
@@ -732,6 +736,15 @@ graph LR
 - deliver: an emitting craft too small to resolve, drawn as a point in the observer's bands, whatever lit the emission: a drive, a heat dump or a beam. Inside the cone its light is the `Glare` E3's fan-out put on its `Presence`, not worked out again here; outside it, the lit apertures' oblique glow from the power `Presence` states (R17), falling off with the angle. Doppler-shifted and aberrated as a star, through the starfield's exposure and glare. H7 drew no point for a craft, lit or not: this draws every unresolved craft's, from `hull::Sent`'s terms (reflected, thermal, windows), and the glare is one more term of the same sum. The meeting at the cone's edge settled and written into 32.
 - done when: a burn photographed from a light-year off is a point that brightens by orders of magnitude as its cone sweeps over the observer, a beam aimed past the observer is not drawn at all, and a test pins the point's flux inside the cone to the `Glare` it was handed.
 - note: after H7, so the emission adds to the craft's own point rather than drawing a second one beside it; after E4, so a drive's light inside its cone arrives the way every beam's does, and there is one path from emission to eye.
+
+### R19 · Faces lit by an emit
+
+- status: todo
+- needs: R17, E3
+- touches: `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/plume.rs`, `lightcone/docs/32-ship-rendering.md`
+- read: 32 §Beams and plumes, §The exhaust cone; 31 §Emitting on purpose's As built
+- deliver: every face an emission leaves through glows at its share of that emission's power, fore or aft, as a drive's aft faces glow at `F c`: the player's own from what it has lit, and another craft's from what its `Presence` states of each end, beside the main drive's `drive_w`. No cone for an emit: its spread is its own, and its light inside it is `Glare`.
+- done when: an emit flown as a burn from the aft faces, and a balanced emit, photograph with the faces they leave through glowing, on your own ship and on another's, and a test pins another craft's face temperature to the emission its `Presence` stated.
 
 ## C: client
 
@@ -830,7 +843,7 @@ graph LR
 ### X1 · Docs brought current
 
 - status: todo
-- needs: F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18
+- needs: F10, H7, H8, H9, H10, E4, E6, R12, C3, C4, C6, C7, C8, C9, C10, R8, R9, R10, R11, R13, R14, R15, R16, R17, R18, R19
 - touches: `lightcone/docs/`, `lightcone/README.md`, `crates/lc-proto/src/lib.rs`
 - read: all four design docs
 - deliver: 03, 13 and 19 updated for what was built; 29 to 31 marked built, with what departed from the plan said where it did; the README's status; `Refusal::NotBuilt` deleted.

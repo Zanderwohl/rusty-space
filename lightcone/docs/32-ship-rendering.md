@@ -488,9 +488,15 @@ the drive's power by engine volume, as the rating divides. The cone's apex is th
 power-weighted middle, or a formless craft's stern. The power is `F c`: your own from
 `lc_world::emit::drive_w`, and another craft's as its `Presence` states it, which is that same
 number at the instant its light left. No exhaust speed is assumed for anyone; a photon drive has
-none but `c`. `Presence` states the main drive alone, the jet this cone and face are, so a leg on the
-thrusters alone, or an emit flown as a burn, draws neither. Another craft is drawn where its light shows it, and whether you are
-inside its radius is measured to that place.
+none but `c`. Another craft is drawn where its light shows it, and whether you are inside its
+radius is measured to that place.
+
+`Presence` states the main drive alone, because the cone is the main drive's, at
+`drive_spread_rad`. The thrusters spread wider and draw no cone. An emit flown as a burn is its
+own emission at its own spread, and reaches an observer inside it as `Glare`. Its face should glow
+all the same, since the face's temperature depends only on what leaves through it, and so should
+the bow's when a fore emission lights it. Neither does yet: a face lit by an emit waits on R19,
+which states each end's emission on the wire.
 
 ![your own burn from beside: the bell's face white-hot, the cone running aft](../images/r12-own-beside.jpg)
 ![from behind, just off the axis](../images/r12-own-behind.jpg)
