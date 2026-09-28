@@ -46,6 +46,7 @@ pub mod input;
 pub mod ledger;
 pub mod library;
 pub mod link;
+pub mod lit_faces;
 pub mod map;
 pub mod map_cone;
 pub mod map_panel;

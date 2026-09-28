@@ -26,7 +26,7 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use em_render::body_surface_material::BodySurfaceMaterial;
-use em_render::hull_material::{HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
+use em_render::hull_material::{FACES, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
 use em_render::render_space::sim_to_render;
 use glam::DVec3;
 use lc_proto::ShipId;
@@ -35,7 +35,7 @@ use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, Kind, SparMode};
 
 use crate::hull::{Eye, PAINT, frame, glow_of, lighting, lit, windows_show};
-use crate::hull_mesh::{Finish, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
+use crate::hull_mesh::{ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
 use crate::procedural::{Bakes, Shape, Target, placeholder};
 use crate::session::Session;
 use crate::system::UNIT_M;
@@ -48,12 +48,12 @@ const TILE_TEXELS: u32 = 512;
 const ROLLS_KEPT: usize = 64;
 
 /// A fully lit texel of each kind's lights: luminance, cd/m², and color temperature, kelvin. A lit
-/// window is 300 against 40 000 for white in full sun at 1 AU. The engine's is a stand-in until R13.
+/// window is 300 against 40 000 for white in full sun at 1 AU. The engine's grid is lit by what
+/// leaves its open faces instead: see [`crate::lit_faces`].
 pub(crate) fn lamp_of(kind: &str) -> Option<(f64, f64)> {
     match kind {
         "drone" => Some((300.0, 5000.0)),
         "living" => Some((300.0, 3000.0)),
-        "engine" => Some((2400.0, 9000.0)),
         "mind" => Some((90.0, 9000.0)),
         "bay" => Some((300.0, 4000.0)),
         _ => None,
@@ -148,14 +148,25 @@ fn take_texels(mut palette: ResMut<Palette>, mut images: ResMut<Assets<Image>>) 
     ));
 }
 
-/// A finished hull at `at_ly` wearing `glow`, lit by `star`.
-pub(crate) fn finished(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, glow: lc_proto::Glow) -> HullUniform {
+/// A finished hull at `at_ly` wearing `glow`, lit by `star`, its open faces by `faces`.
+pub(crate) fn finished(
+    session: &Session,
+    star: Option<(DVec3, f64, f64)>,
+    at_ly: DVec3,
+    glow: lc_proto::Glow,
+    faces: Option<&crate::lit_faces::Lit>,
+) -> HullUniform {
     let base = lit(session, star, at_ly, Vec4::ONE, glow);
     let mut emitted = [Vec4::ZERO; REGIONS];
     for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS).filter(|_| windows_show(glow)) {
         if let Some((cd_m2, k)) = lamp_of(kind) {
             *slot = crate::hull::lamp(session, cd_m2, k).extend(0.0);
         }
+    }
+    // Light leaves through the field whatever its shade, so a Black ship's faces still glow.
+    let mut lit_faces = [Vec4::ZERO; FACES];
+    for (slot, face) in lit_faces.iter_mut().zip(faces.map_or(&[][..], |lit| &lit.faces)) {
+        *slot = crate::lit_faces::radiance(session, face.temperature_k).as_vec3().extend(0.0);
     }
     HullUniform {
         to_star: base.to_star.truncate().extend(crate::hull::HULL_NIGHT),
@@ -165,6 +176,8 @@ pub(crate) fn finished(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly
         detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
         bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
         emitted,
+        open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
+        faces: lit_faces,
         ..default()
     }
 }
@@ -328,6 +341,7 @@ pub fn draw_hulls(
     (game, ui, uplink, eye): (Res<crate::app::Game>, Res<crate::app::Ui>, Res<crate::uplink::Uplink>, Res<Eye>),
     own: Res<crate::parts::OwnForm>,
     (palette, showing, surfaces): (Res<Palette>, Res<crate::refit_hull::Showing>, Res<crate::surfaces::Surfaces>),
+    faces: Res<crate::lit_faces::LitFaces>,
     mut stated: Local<Stated>,
     mut rolls: ResMut<Rolls>,
     mut real: ResMut<RealHulls>,
@@ -359,7 +373,7 @@ pub fn draw_hulls(
     }
     for want in &wanted {
         let glow = glow_of(session, &uplink, want.craft);
-        let uniforms = finished(session, star, want.at_ly, glow);
+        let uniforms = finished(session, star, want.at_ly, glow, faces.of(want.craft));
         let Some((root, mut hull, mut transform)) = hulls.iter_mut().find(|(_, h, _)| h.craft == want.craft) else {
             spawn(&mut commands, want);
             unready.0 = true;
@@ -609,7 +623,7 @@ mod tests {
         let au_ly = lc_world::navigation::AU / crate::system::M_PER_LY;
         let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
         let clear = lc_proto::Glow { temperature_k: 400.0, shade: lc_proto::Shade::Clear };
-        let at = |session: &Session, au: f64| finished(session, star, DVec3::X * au * au_ly, clear);
+        let at = |session: &Session, au: f64| finished(session, star, DVec3::X * au * au_ly, clear, None);
         let luma = |v: Vec4| v.truncate().dot(crate::tonemap::LUMA);
 
         let near = at(&session, 1.0);

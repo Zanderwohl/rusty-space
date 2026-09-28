@@ -27,8 +27,12 @@ use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Prim
 
 use crate::surface_nets::{AXES, Field, Grid, Surface, gradients, nets};
 
-/// The palette's order: region `i` is drawn with `textures/hull/{REGION_GRAPHS[i]}.tgraph`.
-pub const REGION_GRAPHS: [&str; 8] = ["storage", "drone", "living", "engine", "data", "mind", "spar", "bay"];
+/// The palette's order: layer `i` is drawn with `textures/hull/{REGION_GRAPHS[i]}.tgraph`. Each
+/// kind's region is its own layer, and the engine is drawn with [`ENGINE_FLANK`] off its open
+/// faces.
+pub const REGION_GRAPHS: [&str; 9] = ["storage", "drone", "living", "engine", "data", "mind", "spar", "bay", "engine_flank"];
+
+pub const ENGINE_FLANK: u32 = 8;
 
 pub fn region(kind: Kind) -> u32 {
     match kind {
@@ -408,23 +412,30 @@ impl<'a> Paint<'a> {
     }
 
     /// On the piece's own surface, in the face's plane, inside its rim, and turned along the
-    /// exhaust, each eased over a cell. The primitive's own gradient rather than the field's, so a
-    /// fillet onto a neighbor does not count as the face.
+    /// exhaust, each eased over a cell. Turned both as the piece is and as the hull is: the piece's
+    /// own gradient keeps a fillet onto a neighbor off the face, and the hull's keeps off a
+    /// neighbor's surface that passes within a cell of the face.
     fn face_share(&self, piece: usize, aperture: &Aperture, p: DVec3, distance: f64) -> f64 {
         let step = self.step;
         let off = p - aperture.center;
         let along = off.dot(aperture.out);
         let radial = (off - aperture.out * along).length();
-        let h = 1e-3 * step;
-        let grad = DVec3::from_array(
-            [0, 1, 2].map(|a| self.sdf.primitive(piece, p + AXES[a] * h) - self.sdf.primitive(piece, p - AXES[a] * h)),
-        )
-        .normalize_or_zero();
-        let turned = smoothstep(0.5, 0.9, grad.dot(aperture.out));
         let on = 1.0 - smoothstep(step, 2.0 * step, distance.abs());
         let plane = 1.0 - smoothstep(step, 2.0 * step, along.abs());
-        let rim = 1.0 - smoothstep(aperture.radius_m, aperture.radius_m + step, radial);
-        turned * on * plane * rim
+        // Inside the rim, whose vertex is the corner and belongs to the flank as much as the face.
+        let rim = 1.0 - smoothstep(aperture.radius_m - 1.5 * step, aperture.radius_m - 0.5 * step, radial);
+        let near = on * plane * rim;
+        if near <= 0.0 {
+            return 0.0;
+        }
+        let h = 1e-3 * step;
+        let gradient = |f: &mut dyn FnMut(DVec3) -> f64| {
+            DVec3::from_array([0, 1, 2].map(|a| f(p + AXES[a] * h) - f(p - AXES[a] * h))).normalize_or_zero()
+        };
+        let own = gradient(&mut |q| self.sdf.primitive(piece, q));
+        let hull = gradient(&mut |q| self.sdf.distance(q));
+        let turned = |g: DVec3| smoothstep(0.5, 0.9, g.dot(aperture.out));
+        near * turned(own) * turned(hull)
     }
 
     /// The nearest region and the next, blended across the fillet between them, or across a
@@ -988,6 +999,32 @@ mod tests {
             assert!(step > 3.0 * depth, "{step} against {depth}");
             let (chi, pieces) = check_closed(&s, "coarse strap");
             assert_eq!(chi, 2 * pieces);
+        }
+    }
+
+    /// The bell's wide end is lit whole, and nothing turned away from it: not its flanks, not
+    /// another part.
+    #[test]
+    fn the_open_face_is_the_engines_wide_end_and_nothing_else() {
+        for form in [Form::starting(), Builtin::Plate.form()] {
+            let b = mesh_form(&form, &B, 96, Finish::Smooth).unwrap();
+            let faces = apertures(&form, &B).unwrap();
+            let (mut on, mut away) = (0, 0);
+            for ((p, n), face) in b.positions.iter().zip(&b.normals).zip(&b.faces) {
+                let (p, n) = (Vec3::from_array(*p).as_dvec3(), Vec3::from_array(*n).as_dvec3());
+                let a = faces[face[1] as usize];
+                let off = p - a.center;
+                let along = off.dot(a.out);
+                if along.abs() < 0.5 * b.step && (off - a.out * along).length() < a.radius_m - 2.0 * b.step {
+                    assert_eq!(face[0], 255, "{p} is on the face and not lit whole");
+                    on += 1;
+                }
+                if n.dot(a.out) < 0.3 {
+                    assert_eq!(face[0], 0, "{p} faces {n} and is lit");
+                    away += 1;
+                }
+            }
+            assert!(on > 20 && away > 200, "{on} on the face, {away} turned away");
         }
     }
 

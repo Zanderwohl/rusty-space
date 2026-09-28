@@ -41,7 +41,7 @@ use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape, Target, plac
 use lc_client::tonemap::ToneMap;
 
 /// The palette in the order the mesher numbers regions.
-const KINDS: [&str; 8] = REGION_GRAPHS;
+const KINDS: [&str; REGION_GRAPHS.len()] = REGION_GRAPHS;
 
 /// What every graph's unit square spans. The graphs are written to it.
 const TILE_M: f32 = 64.0;

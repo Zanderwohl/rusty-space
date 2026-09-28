@@ -164,7 +164,7 @@ fn uniforms(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, gl
     let work = crate::hull::lamp(session, WORK_LUX / std::f64::consts::PI, WORK_K);
     HullUniform {
         girder: GIRDER_ALBEDO.extend(work.dot(crate::tonemap::LUMA)),
-        ..crate::ship_hull::finished(session, star, at_ly, glow)
+        ..crate::ship_hull::finished(session, star, at_ly, glow, None)
     }
 }
 
