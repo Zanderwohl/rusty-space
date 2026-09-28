@@ -552,7 +552,7 @@ graph LR
 
 - status: active card "E6 · The drive's own heat"
 - needs: E2
-- touches: `crates/lc-world/src/fitting/heat.rs`
+- touches: `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/fitting.rs` (waste in the account), `crates/lc-world/src/fitting/mode.rs` (Auto reads all of `Q`), `crates/lc-world/src/field.rs`, `crates/lc-proto/src/field.rs`, `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/golden.rs` (`Field::waste_j`), `crates/lc-server/src/persist.rs` (`SAVE_FORMAT` 14), `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`
 - read: 30 §The inputs, 31 §The drive is the radiator
 - deliver: the `1 − ε` of a burn that 30's inputs make heat, which nothing reads yet. Since E2 the exhaust draws on heat first, and at the floor that heat would go straight back out as exhaust, so a drive below ε = 1 would cost what one at ε = 1 does while lit. Either that is the design and 30 says so, or the drive's waste heat bypasses the sink.
 - done when: a burn at ε = 0.8 heats the field and costs storage what 30 says, one leap and every tick agreeing.
