@@ -712,9 +712,9 @@ graph LR
 
 ### R16 · Drones at work on another craft
 
-- status: active card "R16 · Drones at work on another craft"
+- status: done #136
 - needs: R9, R15
-- touches: `crates/lc-client/src/drones.rs`
+- touches: `crates/lc-client/src/drones.rs`, `lightcone/docs/32-ship-rendering.md`, `lightcone/images/drones-other-craft.jpg`
 - read: 32 §Drones, §Rounds in the game
 - deliver: another craft's drones drawn at its round from the step its `Presence` states, as `refit_hull` draws its hull, placed under that craft's root; today only the player's `Refit` has drones.
 - done when: a client watching another's applied round photographs its drones working the frontier.
