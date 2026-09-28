@@ -98,6 +98,8 @@ pub struct Formed {
     pub scale: f64,
     /// Of `Q_max`, the heat its field holds as the scene opens.
     pub heat: f64,
+    /// Held in this shade rather than left on Auto, which turns a cool field Black to warm it.
+    pub shade: Option<crate::field::Mode>,
 }
 
 /// Something that happens to one craft, at one offset into the scene.
@@ -487,8 +489,8 @@ pub const CASCADE: Scenario = Scenario {
 ///
 /// Lantern, a light-year off, crosses 10° off the line to you, so you are just outside its cone and
 /// see its face obliquely; then straight away from you, so its cone is on you. Beacon, a light-year
-/// off the other side, vents into collapse. Tern sits a hundred thousand kilometers off, lit by the
-/// Sun. All three are north of the ecliptic, so the Sun is a quarter-turn out of frame.
+/// off the other side, vents into collapse. Tern sits a hundred thousand kilometers off, Clear and
+/// at rest, lit by the Sun. All three are north of the ecliptic, so the Sun is a quarter-turn out of frame.
 pub const DISTANT: Scenario = Scenario {
     name: "distant",
     blurb: "A burn and a collapse a light-year off, and a ship too far to see as more than a point.",
@@ -511,7 +513,7 @@ pub const DISTANT: Scenario = Scenario {
             length_m: 7307.269,
             accel_g: 2.0,
             start: Start::Beside { lengths: 1.294701e+12, bearing: [0.104528, 0.0, 0.994522] },
-            form: Some(Formed { scale: 10.0, heat: 0.0 }),
+            form: Some(Formed { scale: 10.0, heat: IDLE, shade: None }),
         },
         Member {
             name: "Beacon",
@@ -519,7 +521,7 @@ pub const DISTANT: Scenario = Scenario {
             length_m: 7307.269,
             accel_g: 5.0,
             start: Start::Beside { lengths: 1.294701e+12, bearing: [-0.104528, 0.0, 0.994522] },
-            form: Some(Formed { scale: 10.0, heat: 0.986 }),
+            form: Some(Formed { scale: 10.0, heat: 0.986, shade: None }),
         },
         Member {
             name: "Tern",
@@ -527,7 +529,7 @@ pub const DISTANT: Scenario = Scenario {
             length_m: 730.7269,
             accel_g: 5.0,
             start: Start::Beside { lengths: 1.368500e+05, bearing: [0.0, 0.07, 1.0] },
-            form: Some(Formed { scale: 1.0, heat: 0.0 }),
+            form: Some(Formed { scale: 1.0, heat: IDLE, shade: Some(crate::field::Mode::Clear) }),
         },
     ],
     beats: &[
@@ -539,6 +541,8 @@ pub const DISTANT: Scenario = Scenario {
 };
 
 const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
+/// Of `Q_max`, a field at rest: 400 K against the 4 600 K it fails at, heat going as `T⁴`.
+const IDLE: f64 = 5.7e-5;
 
 /// [`CASCADE`]'s line, at `lengths` of its own along `bearing`: `lengths` is `bearing`'s length.
 const fn domino(name: &'static str, bearing: [f64; 3], lengths: f64) -> Member {
@@ -548,7 +552,7 @@ const fn domino(name: &'static str, bearing: [f64; 3], lengths: f64) -> Member {
         length_m: 7_307.269,
         accel_g: 5.0,
         start: Start::Beside { lengths, bearing },
-        form: Some(Formed { scale: 10.0, heat: 0.986 }),
+        form: Some(Formed { scale: 10.0, heat: 0.986, shade: None }),
     }
 }
 

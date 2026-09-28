@@ -20,7 +20,7 @@ use glam::DVec3;
 use lc_proto::{ClientId, Outbound, Refusal, ShipId};
 use lc_world::craft::{Craft, CraftId};
 use lc_world::field::Burst;
-use lc_world::fitting::{Account, Balance, Fitting};
+use lc_world::fitting::{Account, Balance, Fitting, Posture, Setting};
 use lc_world::motion::{self, Change, Motive};
 use lc_world::navigation::{Course, Waypoint};
 use lc_world::scenario::{Act, Formed, Member, Scenario, Slot, Start};
@@ -288,7 +288,15 @@ fn formed_fitting(formed: Formed, balance: &Balance, now_s: f64) -> Option<Fitti
     let form = lc_world::form::presets::named("default", formed.scale)?;
     let full = Fitting::full(form, *balance, now_s);
     let heat_j = formed.heat * full.field().heat_max_j();
-    Some(Fitting::from_account(&Account { heat_j, ..full.account() }, *balance))
+    let mut account = Account { heat_j, ..full.account() };
+    if let Some(shade) = formed.shade {
+        let setting = match shade {
+            lc_world::field::Mode::Clear => Setting::Clear,
+            lc_world::field::Mode::Black => Setting::Black,
+        };
+        account.posture = Posture { setting, shade, switch: None };
+    }
+    Some(Fitting::from_account(&account, *balance))
 }
 
 /// Put one craft where its scene says it starts.
