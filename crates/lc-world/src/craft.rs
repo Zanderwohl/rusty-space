@@ -1399,9 +1399,10 @@ mod tests {
     }
 
     /// A fitted craft is as long as its form's extent, not the 500 m its twenty slots made it, and
-    /// turns at its moments' rate. Both are measured again when a round finishes.
+    /// turns at its moments' rate. Both are measured again when a round finishes. The extent is the
+    /// envelope's, and a wider hull can have a shorter one.
     #[test]
-    fn a_refit_that_grows_the_hull_lengthens_it() {
+    fn a_refit_that_grows_the_hull_measures_it_again() {
         use crate::form::grid::FormGrid;
         use crate::form::{Form, PartId};
         let b = crate::fitting::Balance::DEFAULT;
@@ -1409,7 +1410,7 @@ mod tests {
         let extent = |form: &Form| FormGrid::new(form, &b).unwrap().extent_m();
         let start = Form::starting();
         assert_eq!(craft.length_m, extent(&start));
-        assert!((craft.length_m - 570.6).abs() < 0.1, "{}", craft.length_m);
+        assert!((craft.length_m - 730.7).abs() < 0.1, "{}", craft.length_m);
 
         let mut target = start.clone();
         target.parts.iter_mut().find(|p| p.id == PartId(1)).unwrap().volume_m3 *= 1.1;
@@ -1421,7 +1422,7 @@ mod tests {
         assert!(!craft.is_refitting(year));
         assert_eq!(craft.fitting().unwrap().form(), &target);
         assert_eq!(craft.length_m, extent(&target));
-        assert!(craft.length_m > length && craft.slew_rate_rad_s() < slew);
+        assert!(craft.length_m != length && craft.slew_rate_rad_s() < slew);
     }
 
     /// A far observer is shown the form the craft had when its light left, step by step, however

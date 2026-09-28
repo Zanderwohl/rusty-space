@@ -106,19 +106,6 @@ impl Grid {
         grid
     }
 
-    /// Samples already taken, `x` fastest, then `y`, then `z`, `origin` the first one's
-    /// position. Every sample on the lattice's faces must be outside.
-    pub(crate) fn from_samples(origin: DVec3, step: f64, n: [usize; 3], samples: &[f64]) -> Grid {
-        debug_assert_eq!(samples.len(), n[0] * n[1] * n[2]);
-        let blocks = n.map(|n| n.div_ceil(BLOCK));
-        let near = (0..blocks[2])
-            .flat_map(|z| (0..blocks[1]).flat_map(move |y| (0..blocks[0]).map(move |x| [x, y, z])))
-            .collect();
-        let mut grid = Grid { origin, step, n, values: samples.iter().map(|&d| narrow(d)).collect(), near };
-        grid.clean();
-        grid
-    }
-
     pub(crate) fn index(&self, i: [usize; 3]) -> usize {
         i[0] + self.n[0] * (i[1] + self.n[1] * i[2])
     }

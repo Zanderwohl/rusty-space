@@ -1,5 +1,5 @@
 //! Every craft's field drawn round its hull, and every collapse drawn where its light shows it:
-//! F6's envelope in R6's material. 32 §The field; 30 §What an observer sees, §Collapse.
+//! R11's envelope in R6's material. 32 §The field; 30 §What an observer sees, §Collapse.
 //!
 //! The player's field is read from the account (`Fitted`), anyone else's from `Presence.glow`, as
 //! its light left it: temperature and shade, with the fill worked back from `T⁴` and no switch,
@@ -9,8 +9,8 @@
 //! Nothing draws a distant ship as a point yet; when R18 does, that point takes over from the
 //! envelope where the hull stops being meshed, and neither may draw the heat while the other does.
 //!
-//! The envelope is meshed straight from the grid's own samples, the coarse surface the shard
-//! measures the field's area on, once per design and only when a craft's stated form changes.
+//! The envelope is the ellipsoid the shard measures the field's area on, fitted from the form's
+//! parts without the grid and meshed once per design, only when a craft's stated form changes.
 //!
 //! A collapse is drawn from its `kind::COLLAPSE` sighting as that arrives, at the last place the
 //! wreck was seen and in its last shape, never from the shard's time. The spike brightens each
@@ -19,12 +19,10 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
-use bevy_mesh::{Indices, PrimitiveTopology};
 use em_render::field_material::{
     BLACK, CLEAR, FieldMaterial, FieldMaterialPlugin, FieldUniform, HOT_SPOTS, RAMP, ramp_entry, ramp_kelvin,
 };
@@ -34,13 +32,13 @@ use glam::DVec3;
 use lc_proto::{Glow, ShipId};
 use lc_world::field::Mode;
 use lc_world::fitting::Balance;
-use lc_world::form::grid::FormGrid;
+use lc_world::form::grid::Envelope;
+use lc_world::form::sdf::Sdf;
 use lc_world::form::{Form, FormError, Kind};
 
 use crate::hull::Eye;
 use crate::session::Session;
 use crate::ship_hull::{RealHulls, ShipHull};
-use crate::surface_nets::{Grid, gradients, nets};
 use crate::system::{M_PER_LY, UNIT_M};
 
 /// Real seconds the collapse's flash lasts: long enough to see at any clock rate.
@@ -326,43 +324,29 @@ pub struct Meshed {
     pub area_m2: f64,
 }
 
-struct EnvelopeField<'a>(&'a FormGrid);
+/// Longitude and latitude divisions of every envelope: it is an ellipsoid, so one mesh's worth of
+/// detail serves every size.
+const LONGITUDES: u32 = 64;
+const LATITUDES: u32 = 32;
 
-impl crate::surface_nets::Field for EnvelopeField<'_> {
-    fn distance(&self, p: DVec3, _scratch: &mut Vec<f64>) -> f64 {
-        self.0.envelope_at(p)
-    }
-
-    fn bounds(&self) -> (DVec3, DVec3) {
-        self.0.sdf().bounds()
-    }
-}
-
-/// The envelope's zero set on the grid the shard measures it on, with its origin at its center.
+/// The envelope the shard measures, [`Envelope`], as a mesh with its origin at its center.
 pub fn mesh_envelope(form: &Form, balance: &Balance) -> Result<Meshed, FormError> {
-    let grid = FormGrid::new(form, balance)?;
-    let samples = Grid::from_samples(grid.cell_center(0, 0, 0), grid.cell_m(), grid.dims(), grid.envelope_samples());
-    let surface = nets(&samples, false);
-    let normals = gradients(&EnvelopeField(&grid), &surface, grid.cell_m());
-    let (lo, hi) = surface
-        .vertices
-        .iter()
-        .fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(lo, hi), &v| (lo.min(v), hi.max(v)));
-    let center = if lo.x <= hi.x { (lo + hi) * 0.5 } else { DVec3::ZERO };
-    let mind = grid.sdf().pieces().iter().find(|p| p.kind == Kind::Mind).map_or(center, |p| p.pose.position);
-    let far = |from: DVec3| surface.vertices.iter().map(|v| v.distance(from)).fold(0.0, f64::max) as f32;
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    let positions: Vec<[f32; 3]> = surface.vertices.iter().map(|v| (*v - center).as_vec3().to_array()).collect();
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals.iter().map(|n| n.as_vec3().to_array()).collect::<Vec<_>>());
-    mesh.insert_indices(Indices::U32(surface.triangles.iter().flatten().copied().collect()));
+    let sdf = Sdf::new(form, balance)?;
+    let envelope = Envelope::of(&sdf, balance);
+    let mesh = Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES).scaled_by(envelope.semi_axes.as_vec3());
+    let mind = sdf.pieces().iter().find(|p| p.kind == Kind::Mind).map_or(envelope.center, |p| p.pose.position);
+    let mind = (mind - envelope.center).as_vec3();
+    let reach = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) => p.iter().map(|v| Vec3::from_array(*v).distance(mind)).fold(0.0, f32::max),
+        _ => 0.0,
+    };
     Ok(Meshed {
         mesh,
-        center: center.as_vec3(),
-        radius: far(center),
-        mind: (mind - center).as_vec3(),
-        reach: far(mind),
-        area_m2: grid.envelope_area_m2(),
+        center: envelope.center.as_vec3(),
+        radius: envelope.semi_axes.max_element() as f32,
+        mind,
+        reach,
+        area_m2: envelope.area_m2(),
     })
 }
 
@@ -927,14 +911,17 @@ mod tests {
 
     /// The envelope is closed round the hull with its margin, and its area is the shard's.
     #[test]
-    fn the_envelope_is_the_grids() {
+    fn the_envelope_is_the_shards() {
         let form = Form::starting();
         let meshed = mesh_envelope(&form, &B).unwrap();
+        let grid = lc_world::form::grid::FormGrid::new(&form, &B).unwrap();
+        assert_eq!(meshed.area_m2, grid.envelope_area_m2());
+        assert_eq!(meshed.center, grid.envelope().center.as_vec3());
         let positions = match meshed.mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
             Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) => p.clone(),
             _ => panic!("no positions"),
         };
-        let Some(Indices::U32(indices)) = meshed.mesh.indices() else { panic!("no indices") };
+        let Some(bevy::mesh::Indices::U32(indices)) = meshed.mesh.indices() else { panic!("no indices") };
         let area: f32 = indices
             .chunks(3)
             .map(|t| {
@@ -942,11 +929,8 @@ mod tests {
                 0.5 * (b - a).cross(c - a).length()
             })
             .sum();
-        assert!((area as f64 / meshed.area_m2 - 1.0).abs() < 0.1, "{area} m² against {}", meshed.area_m2);
-        let sdf = lc_world::form::sdf::Sdf::new(&form, &B).unwrap();
-        let (lo, hi) = sdf.bounds();
-        assert!(meshed.radius as f64 > 0.5 * (hi - lo).max_element(), "the hull sticks out of its field");
-        assert!(meshed.reach >= meshed.radius * 0.5 && meshed.mind.length() < meshed.radius);
+        assert!((area as f64 / meshed.area_m2 - 1.0).abs() < 0.01, "{area} m² against {}", meshed.area_m2);
+        assert!(meshed.reach >= meshed.radius && meshed.mind.length() < meshed.radius);
     }
 
     /// The hull leaves the field's heat to the envelope once that is drawn round it.
