@@ -524,7 +524,7 @@ graph LR
 
 ### E3 · Emit
 
-- status: active card "E3 · Emit"
+- status: done #128
 - needs: E1, E2, S1, H5
 - touches: `crates/lc-world/src/emit.rs`, `crates/lc-world/src/fitting/heat.rs` (an emit's power in `Fitting::emitted_w`, E2's heat-first draw), `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`, `crates/lc-server/src/field.rs` (H5's landings), `crates/lc-server/src/persist.rs`, `crates/lc-server/src/emit/tests.rs`, `crates/lc-server/src/server.rs` (the order, the tick, one fan-out, radio charged), `crates/lc-server/src/chase.rs` (glare on `Presence`), `crates/lc-server/src/lib.rs`, `crates/lc-server/src/systems.rs`, `crates/lc-server/src/fitting.rs`, `crates/lc-server/src/field/mode.rs`, `crates/lc-server/src/bin/lightcone-server.rs`, `crates/lc-server/tests/checkpoint.rs`, `crates/lc-world/src/motion.rs`, `crates/lc-world/src/cost.rs`, `crates/lc-world/src/ignition.rs`, `crates/lc-world/src/resume.rs`, `crates/lc-world/src/craft.rs` (the emit as a boost), `crates/lc-world/src/fitting.rs` (a lit emission's commitment), `crates/lc-world/src/form/capacity.rs` (each end's rating and face), `crates/lc-proto/src/lib.rs`, `crates/lc-proto/src/field.rs`, `crates/lc-proto/src/golden.rs` (`Spectrum`, `Glare`'s flux, `Field::lit`, `Motive::Boosting`, `kind::EMIT`), `lightcone/docs/30-the-field.md`, `lightcone/docs/31-directed-energy.md`
 - read: 31 §Emitting on purpose, §Three uses, §Radio
