@@ -38,7 +38,7 @@ use em_render::body_surface_material::{
 use em_render::field_material::{
     BLACK, CLEAR, FieldMaterial, FieldMaterialPlugin, FieldUniform, RAMP, ramp_entry, ramp_kelvin,
 };
-use em_spectra::{Band, BandMapping, PerBand, blackbody, presets};
+use em_spectra::{BandMapping, PerBand, blackbody, presets};
 
 /// The field's limit, where it collapses: 30-the-field.md's anchors.
 const LIMIT_K: f64 = 4600.0;
@@ -167,25 +167,14 @@ struct Lighting {
     spectrum: [Vec4; RAMP],
 }
 
-fn mapped(mapping: &BandMapping, radiance: &PerBand<f64>) -> [f64; 3] {
-    // In `f64`: a visible band at 400 K is under `f32`'s smallest number.
-    std::array::from_fn(|c| {
-        Band::ALL.iter().map(|b| mapping.matrix[c][b.index()] as f64 * radiance[*b]).sum()
-    })
-}
-
 fn luminance(rgb: [f64; 3]) -> f64 {
     0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
-}
-
-fn planck(kelvin: f64) -> PerBand<f64> {
-    PerBand::new(std::array::from_fn(|i| blackbody::band_radiance(Band::ALL[i], kelvin)))
 }
 
 /// Sunlight on a surface of `albedo` facing it, per band.
 fn sunlit(albedo: f64, au: f64) -> PerBand<f64> {
     let dilution = albedo * (SUN_RADIUS_M / (au * AU_M)).powi(2);
-    planck(SUN_K).map(|_, v| v * dilution)
+    blackbody::per_band(SUN_K).map(|_, v| v * dilution)
 }
 
 /// `Session::expose_to_percentile(0.98)`, over the three things in the void.
@@ -233,13 +222,13 @@ fn stage(
     let to_star = Vec3::new(-0.55, 0.45, 0.70).normalize();
     let hull_radiance = sunlit(lc_client::hull::PAINT, args.au);
     // The stand-in's own glow at idle: the field drawn over it carries the heat under study.
-    let own = planck(lc_world::fitting::Balance::DEFAULT.field_idle_k);
-    let white = mapped(&args.mapping, &sunlit(1.0, args.au));
+    let own = blackbody::per_band(lc_world::fitting::Balance::DEFAULT.field_idle_k);
+    let white = args.mapping.apply_f64(&sunlit(1.0, args.au));
 
     let absorbs = if args.black { 1.0 } else { CLEAR_ABSORPTIVITY as f64 };
-    let field_rgb = mapped(&args.mapping, &planck(args.kelvin)).map(|c| c * absorbs);
-    let lit_rgb = mapped(&args.mapping, &hull_radiance);
-    let own_rgb = mapped(&args.mapping, &own);
+    let field_rgb = args.mapping.apply_f64(&blackbody::per_band(args.kelvin)).map(|c| c * absorbs);
+    let lit_rgb = args.mapping.apply_f64(&hull_radiance);
+    let own_rgb = args.mapping.apply_f64(&own);
     let hull_lum = luminance(std::array::from_fn(|c| lit_rgb[c] + own_rgb[c]));
 
     let sr = |radius: f32, distance: f32| {
@@ -255,7 +244,7 @@ fn stage(
     let stops = 5.0;
 
     let spectrum = std::array::from_fn(|i| {
-        ramp_entry(mapped(&args.mapping, &planck(ramp_kelvin(i) as f64)))
+        ramp_entry(args.mapping.apply_f64(&blackbody::per_band(ramp_kelvin(i) as f64)))
     });
     let lighting = Lighting {
         to_star,
@@ -398,7 +387,7 @@ fn shade(
         // flash is left to overflow. The cooling is the shader's own.
         let cooled = (since / args.afterglow).clamp(0.0, 1.0) as f64;
         let kelvin = LIMIT_K * (1.0 - cooled).powf(0.6) + 300.0;
-        next.exposure.x = luminance(mapped(&args.mapping, &planck(kelvin))) as f32;
+        next.exposure.x = luminance(args.mapping.apply_f64(&blackbody::per_band(kelvin))) as f32;
     }
     for handle in &fields {
         if let Some(mut material) = materials.get_mut(&handle.0) {
