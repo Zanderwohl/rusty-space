@@ -773,7 +773,7 @@ mod tests {
             for (draw_w, emitted_w) in [
                 (start.caps.drain_w, 0.0),
                 (3.0 * start.starlight_w(0.1), 0.0),
-                (start.caps.drain_w, 2.0 * heat_j / t_s),
+                (start.caps.drain_w, 2.0 * heat_j / t_s + start.starlight_w(0.1)),
                 (start.caps.drain_w, 0.5 * heat_j / t_s + 3.0 * start.starlight_w(0.1)),
             ] {
                 let segment = Segment { room_j, draw_w, emitted_w, ..start.segment(&b, 0.1, 0.0) };
