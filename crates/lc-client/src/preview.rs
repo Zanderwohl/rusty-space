@@ -53,12 +53,9 @@ impl Start {
         }
     }
 
-    /// Whether `edit` leaves the draft no further short than its gesture began: a part that cannot
-    /// be paid for cannot be placed, and a handle stops where storage runs out. Measured from the
-    /// gesture's start rather than the last frame, so a drag at its limit can still come back.
-    ///
-    /// A whole new draft (a preset, the ship) is not held to it, and a refusal that is not the
-    /// budget's is left to the edit and to Apply.
+    /// Whether `edit` leaves the draft no further short than its gesture began. Measured from the
+    /// gesture's start, so a drag at its limit can still come back. A whole new draft (a preset,
+    /// the ship) is exempt, and a refusal that is not the budget's is left to Apply.
     pub fn allows(&self, draft: &Draft, edit: &Edit) -> bool {
         if edit.what == What::Whole {
             return true;
@@ -76,7 +73,6 @@ impl Start {
     }
 }
 
-/// The field through a round: the heat it peaks at, and after which step.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Heat {
     pub peak_j: f64,
@@ -89,9 +85,8 @@ pub struct Heat {
 }
 
 impl Heat {
-    /// The round `fitting` has under way, from `from_s` on, as its account settles it: `None` with
-    /// no round. The steps run one after another and each vent lands at its step's end, so heat
-    /// peaks at one of them or where it starts.
+    /// The round under way, from `from_s` on. Steps run in series and vents land at step ends, so
+    /// the peak is at one of those or at `from_s`.
     pub fn ahead(fitting: &Fitting, from_s: f64) -> Option<Heat> {
         let plan = fitting.refit()?;
         let base_j = fitting.heat_j_at(from_s);
@@ -121,10 +116,9 @@ impl Heat {
     }
 }
 
-/// The ship's account settled to where the next round can begin, and when that is: now, or where
-/// the one running ends. The shard refuses a round while one runs, so the next begins in the form
-/// the running one leaves, with what it will have stored and the heat it will hold. Settled as the
-/// craft, so starlight is cut where the shard cuts it.
+/// The account settled to where the next round can begin: now, or where the running one ends,
+/// since the shard refuses a second. Settled as the craft, so starlight is cut where the shard
+/// cuts it.
 struct Settled {
     fitting: Fitting,
     start: Start,
@@ -176,7 +170,6 @@ impl Measured {
     }
 }
 
-/// The draft's geometry, its field, and what it would collect here.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shape {
     pub broadside_m2: f64,
@@ -185,9 +178,7 @@ pub struct Shape {
     pub rated_load_w: f64,
     /// Between the field's idle heat and collapse, joules: the most a burst can add.
     pub headroom_j: f64,
-    /// Starlight arriving at the ship's distance from its star now, held as an idle ship holds
-    /// itself to it, which is also how bright it is in reflected light. Zero under way, and between
-    /// systems.
+    /// At the ship's distance now, turned as an idle ship turns. Zero under way and between systems.
     pub starlight_w: f64,
 }
 

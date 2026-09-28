@@ -170,7 +170,7 @@ fn round(ui: &mut egui::Ui, plan: &Plan, fitting: &lc_world::fitting::Fitting, n
         row("spent", me(budget.spent_j, module_j));
         row("peak in storage", format!("{} of {}", me(budget.peak_j, module_j), me(budget.peak_capacity_j, module_j)));
         if budget.vented_j > 0.0 {
-            // The peak still ahead, from the heat the ship holds now; past its vents, only what went.
+            // Past the last vent there is no peak ahead, only what went.
             let vented = me(budget.vented_j, module_j);
             let text = match crate::preview::Heat::ahead(fitting, now).and_then(|heat| Some((heat.peak_k, heat.step?))) {
                 Some((peak_k, i)) => format!("{vented}: field to {peak_k:.0} K, after {}", crate::ledger::step_name(&plan.steps()[i])),
