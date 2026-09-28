@@ -465,7 +465,7 @@ graph LR
 
 ### H7 · What an observer sees
 
-- status: active card "H7 · What an observer sees"
+- status: done #125
 - needs: H6
 - touches: `crates/lc-world/src/craft.rs`, `crates/lc-world/src/craft/field.rs`, `crates/lc-world/src/glow.rs`, `crates/lc-world/src/seen.rs`, `crates/lc-client/src/hull.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/em-render/src/hull_material.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/field.rs`
 - read: 30 §What an observer sees
