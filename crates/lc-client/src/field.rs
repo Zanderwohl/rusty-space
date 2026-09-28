@@ -1112,6 +1112,36 @@ mod tests {
         assert!((cooled - 0.1).abs() < 1e-3, "cooling at {cooled} of the afterglow");
     }
 
+    /// A collapse drawn as a point is nothing before its light arrives, and from then plays from
+    /// the frame it is first drawn, as the debris does.
+    #[test]
+    fn a_far_collapse_is_nothing_before_its_light_arrives() {
+        let mut wrecks = Wrecks::default();
+        wrecks.last.insert(ShipId(5), last("Aster"));
+        let mut world = collapsing(vec![sighting(1, 5, 10_000_000, 20_000_000)], wrecks, 15.0);
+        let mut wrecks = world.resource_mut::<Wrecks>();
+        wrecks.fell[0].ahead_s = 0.0;
+        let afterglow_s = B.collapse_afterglow_s;
+        let far = |w: &Wrecks, real_s: f32| w.far(real_s, 0.0, afterglow_s, |_| false).collect::<Vec<_>>();
+        assert_eq!(wrecks.fell[0].collapse(19.9, (1.0, 1.0), 0.0, afterglow_s), None);
+        assert!(far(&wrecks, 1.0).is_empty(), "a point before its light is here");
+        wrecks.fell[0].collapse(20.0, (2.0, 2.0), 0.0, afterglow_s).unwrap();
+        let [point] = far(&wrecks, 2.5)[..] else { panic!("no point") };
+        assert_eq!((point.since_s, point.clock.x), (0.5, 2.0));
+        assert!(wrecks.far(2.5, 0.0, afterglow_s, |_| true).next().is_none(), "a point and debris both");
+    }
+
+    /// A collapse of a craft this ship never saw is a point where its direction and delay put it.
+    #[test]
+    fn a_collapse_never_seen_is_placed_by_its_light() {
+        let world = collapsing(vec![sighting(1, 5, 10_000_000, 20_000_000)], Wrecks::default(), 20.0);
+        let wreck = &world.resource::<Wrecks>().fell[0];
+        let ls = 1.0 / lc_world::flight::JULIAN_YEAR_S;
+        let observer = world.resource::<crate::app::Game>().0.ship.motion.position_ly;
+        assert!((wreck.at_ly - observer - DVec3::X * 10.0 * ls).length() < 1e-6 * ls, "{}", wreck.at_ly);
+        assert_eq!(wreck.hash, None);
+    }
+
     /// The shader is given the afterglow in real seconds at the clock's rate, never slower than the
     /// design rate's.
     #[test]
