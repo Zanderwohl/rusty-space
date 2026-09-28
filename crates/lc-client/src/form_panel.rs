@@ -112,7 +112,8 @@ fn lay_out(
     foot: Res<crate::panels::HudFoot>,
     assets: Res<AssetServer>,
     panels: Query<(Entity, &Built, &Side)>,
-    mut columns: Query<(Entity, &mut Node), With<RightColumn>>,
+    mut columns: Query<(Entity, &mut Node), (With<RightColumn>, Without<LeftColumn>)>,
+    mut lefts: Query<(Entity, &mut Node), (With<LeftColumn>, Without<RightColumn>)>,
 ) {
     let draft = ui.form.draft.as_ref().filter(|_| ui.view == ViewMode::Form);
     let top = foot.0 + GAP;
@@ -121,7 +122,7 @@ fn lay_out(
         for (entity, ..) in &panels {
             commands.entity(entity).despawn();
         }
-        for (entity, _) in &columns {
+        for (entity, _) in columns.iter().chain(&lefts) {
             commands.entity(entity).despawn();
         }
         return;
@@ -157,19 +158,10 @@ fn lay_out(
         }
         current[Side::Fields as usize] = false;
     }
-    let column = match columns.iter_mut().next() {
-        Some((entity, mut node)) => {
-            if node.top != Val::Px(top) {
-                node.top = Val::Px(top);
-            }
-            entity
-        }
-        None => commands
-            .spawn((Node { top: Val::Px(top), width: Val::Px(WIDTH), row_gap: Val::Px(GAP), ..column(Edge::Right) }, RightColumn))
-            .id(),
-    };
+    let left = keep_column(&mut commands, lefts.iter_mut().next(), Node { bottom: Val::Px(INSET), ..column_node(Edge::Left) }, top, LeftColumn);
+    let column = keep_column(&mut commands, columns.iter_mut().next(), column_node(Edge::Right), top, RightColumn);
     if !current[Side::Palette as usize] {
-        build_palette(&mut commands, ui.form.new_shape, Built(palette_key), top, font());
+        build_palette(&mut commands, left, ui.form.new_shape, Built(palette_key), font());
     }
     if !current[Side::Tree as usize] {
         build_tree(&mut commands, column, draft, shown.marks(), &ui.form, Built(tree_key), font());
@@ -183,19 +175,15 @@ fn lay_out(
 #[derive(Component)]
 pub(crate) struct RightColumn;
 
+/// The palette, and [`crate::form_history`]'s panel under it.
+#[derive(Component)]
+pub(crate) struct LeftColumn;
+
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Side {
     Palette,
     Tree,
     Fields,
-}
-
-fn root(ui: &mut MenuUi, side: Side, built: Built, place: Node) -> Entity {
-    let root = ui.docked((side, built), Edge::Left, INSET);
-    ui.insert(root, Node { width: Val::Px(WIDTH), ..place });
-    let panel = ui.strip(root);
-    ui.insert(panel, Node { align_items: AlignItems::Stretch, flex_grow: 1.0, ..panel_node() });
-    panel
 }
 
 fn stacked(ui: &mut MenuUi, column: Entity, side: Side, built: Built) -> Entity {
@@ -204,7 +192,19 @@ fn stacked(ui: &mut MenuUi, column: Entity, side: Side, built: Built) -> Entity 
     panel
 }
 
-fn column(edge: Edge) -> Node {
+fn keep_column(commands: &mut Commands, found: Option<(Entity, Mut<Node>)>, place: Node, top: f32, marker: impl Component) -> Entity {
+    match found {
+        Some((entity, mut node)) => {
+            if node.top != Val::Px(top) {
+                node.top = Val::Px(top);
+            }
+            entity
+        }
+        None => commands.spawn((Node { top: Val::Px(top), width: Val::Px(WIDTH), row_gap: Val::Px(GAP), ..place }, marker)).id(),
+    }
+}
+
+fn column_node(edge: Edge) -> Node {
     let mut node = Node { position_type: PositionType::Absolute, flex_direction: FlexDirection::Column, align_items: AlignItems::Stretch, ..default() };
     match edge {
         Edge::Left => node.left = Val::Px(INSET),
@@ -213,10 +213,10 @@ fn column(edge: Edge) -> Node {
     node
 }
 
-fn build_palette(commands: &mut Commands, new_shape: usize, built: Built, top: f32, font: Handle<Font>) {
+/// First in its column, over the history, whenever it is rebuilt.
+fn build_palette(commands: &mut Commands, column: Entity, new_shape: usize, built: Built, font: Handle<Font>) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
-    let place = Node { top: Val::Px(top), bottom: Val::Px(INSET), ..column(Edge::Left) };
-    let panel = root(&mut ui, Side::Palette, built, place);
+    let panel = stacked(&mut ui, column, Side::Palette, built);
     ui.insert(panel, (Interaction::None, crate::form_carry::DropZone));
     ui.inline(panel, "ADD A PART", 15.0, em_ui::vfd::TEXT);
     let shape = draft::PRIMITIVES[new_shape % draft::PRIMITIVES.len()];
@@ -226,6 +226,7 @@ fn build_palette(commands: &mut Commands, new_shape: usize, built: Built, top: f
     for kind in draft::KINDS {
         ui.tree_row(panel, 0, draft::kind_name(kind), false, Tap::Take(kind));
     }
+    commands.entity(column).insert_child(0, panel);
 }
 
 fn build_tree(
@@ -387,7 +388,7 @@ pub fn press(
     }
 }
 
-fn put_away(mut commands: Commands, panels: Query<Entity, Or<(With<Side>, With<RightColumn>)>>) {
+fn put_away(mut commands: Commands, panels: Query<Entity, Or<(With<Side>, With<RightColumn>, With<LeftColumn>)>>) {
     for entity in &panels {
         commands.entity(entity).despawn();
     }

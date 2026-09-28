@@ -50,6 +50,11 @@ pub enum Action {
     /// An edit to the draft as its handle or field built it, before and after, or why it could
     /// not be built. See [`crate::draft`].
     EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
+    /// Step the draft's history back one entry, or forward one. See [`crate::form_history`].
+    Undo,
+    Redo,
+    /// Undo or redo until this many of the history's entries are done.
+    GoToEdit(usize),
     /// Send the draft to the shard as the ship's target, first asking again when its round would
     /// collapse the field.
     ApplyDraft,
@@ -497,6 +502,9 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::Fold(panel) => ui.form.folded.toggle(panel),
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
     Action::EditForm(edit) => edit_form(ui, session, edit, &mut effects),
+    Action::Undo => go_to_edit(ui, ui.form.history.cursor().saturating_sub(1), &mut effects),
+    Action::Redo => go_to_edit(ui, ui.form.history.cursor() + 1, &mut effects),
+    Action::GoToEdit(to) => go_to_edit(ui, to, &mut effects),
     Action::ApplyDraft => apply_draft(ui, session, false, &mut effects),
     Action::ApplyPastCollapse(apply) => {
         let asked = ui.form.asking.take();
@@ -822,14 +830,29 @@ fn edit_form(ui: &mut UiState, session: &Session, edit: Result<crate::draft::Edi
             if edit.what == crate::draft::What::Add && edit.settled {
                 ui.form.selected = Some(edit.part);
             }
-            if let Some(draft) = &ui.form.draft
-                && ui.form.selected.is_some_and(|id| draft.part(id).is_none())
-            {
-                ui.form.selected = None;
+            if let Some(draft) = &ui.form.draft {
+                ui.form.history.record(edit, &draft.ship);
             }
+            forget_gone(ui);
         }
         Err(_) if edit.as_ref().is_ok_and(|e| !e.settled) => {}
         Err(refused) => effects.push(Effect::Notify(format!("refused: {refused}"))),
+    }
+}
+
+fn go_to_edit(ui: &mut UiState, to: usize, effects: &mut Vec<Effect>) {
+    let crate::form_view::FormView { draft: Some(draft), history, .. } = &mut ui.form else { return };
+    if let Err(refused) = history.go(to, draft) {
+        effects.push(Effect::Notify(format!("refused: {refused}")));
+    }
+    forget_gone(ui);
+}
+
+fn forget_gone(ui: &mut UiState) {
+    if let Some(draft) = &ui.form.draft
+        && ui.form.selected.is_some_and(|id| draft.part(id).is_none())
+    {
+        ui.form.selected = None;
     }
 }
 

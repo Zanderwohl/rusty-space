@@ -779,6 +779,8 @@ fn fold(
                 // What a refit does to the account arrives straight after, as `Fitted`.
                 Order::Refit { .. } => {
                     ui.0.form.applying = crate::ledger::Applying::Idle;
+                    // The ship is the new starting point.
+                    ui.0.form.history.clear();
                     Some("refit begun".into())
                 }
                 // What a mode order does to the account arrives straight after, as `Fitted`.
@@ -2059,7 +2061,7 @@ mod tests {
     }
 
     /// A refusal while Apply awaits its answer is filed against the target sent, naming the part,
-    /// and an acceptance clears the way for the next.
+    /// and an acceptance clears the way for the next, and the editor's history.
     #[test]
     fn a_refit_refused_is_told_to_the_apply_that_sent_it() {
         use crate::ledger::Applying;
@@ -2073,9 +2075,14 @@ mod tests {
         assert_eq!(ui.0.form.applying, Applying::Refused { target: target.clone(), why });
 
         ui.0.form.applying = Applying::Sent(target.clone());
+        let mut draft = crate::draft::Draft::new(target.clone());
+        let twist = draft.twist(lc_world::form::PartId(4), 0.3).unwrap();
+        draft.apply(&twist, &lc_world::fitting::Balance::DEFAULT).unwrap();
+        ui.0.form.history.record(&twist, &draft.ship);
         let order = Order::Refit { target: (&target).into() };
         fold(&mut uplink, &mut game, &mut ui, Outbound::Accepted { ship_id: ShipId(7), event_id: 1, at_t: 2_000_000, order });
         assert_eq!(ui.0.form.applying, Applying::Idle);
+        assert!(ui.0.form.history.entries().is_empty(), "an accepted round clears the history");
 
         fold(&mut uplink, &mut game, &mut ui, Outbound::Refused { ship_id: ShipId(7), reason: Refusal::NoKey });
         assert_eq!(ui.0.form.applying, Applying::Idle, "with nothing sent, a refusal is some other order's");

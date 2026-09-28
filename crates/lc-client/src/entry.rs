@@ -253,6 +253,7 @@ pub fn parse(args: &[String]) -> Entry {
         lift_deg: value(args, "--lift"),
         form: after("--form"),
         draft: after("--draft"),
+        undo: value(args, "--undo").unwrap_or(0),
         pull: value(args, "--pull"),
         // Only the player's own ship, and no round on the wire yet, so no shard: see
         // `construction`. `--refit-at` on its own asks for the same scene.

@@ -15,7 +15,7 @@ pub mod widgets;
 pub use theme::{MenuTheme, vfd};
 pub use field::{Committed, NumberField, Typing};
 pub use pointer::Controls;
-pub use widgets::{Edge, MenuButton, MenuUi};
+pub use widgets::{Edge, MenuButton, MenuUi, Reached};
 
 use bevy::prelude::*;
 

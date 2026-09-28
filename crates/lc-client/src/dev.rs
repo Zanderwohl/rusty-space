@@ -107,6 +107,8 @@ pub struct DevEntry {
     /// Start the editor's draft as this, by [`crate::draft::staged`]'s spelling, so a shot has
     /// marks on it.
     pub draft: Option<String>,
+    /// Undo this many of the staged draft's edits, so a shot has a history with its cursor back.
+    pub undo: u32,
     /// Stage `--demo refit` on the player's ship, its clock frozen by `--refit-at` or looping.
     pub refit: Option<crate::construction::Clock>,
     /// `--field-k`, `--field-mode`, `--field-switch`: the player's field held, as drawn and on the bar.
