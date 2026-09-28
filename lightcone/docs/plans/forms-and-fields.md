@@ -467,7 +467,7 @@ graph LR
 
 - status: done #125
 - needs: H6
-- touches: `crates/lc-world/src/{craft.rs,craft/field.rs,glow.rs,seen.rs}`, `crates/lc-server/src/{chase.rs,field.rs,server.rs}`, `crates/lc-proto/src/lib.rs` (a doc line), `crates/lc-client/src/{hull.rs,ship_hull.rs,refit_hull.rs,parts.rs,resolved.rs,uplink.rs}`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/examples/{field_void,cone_void}.rs`, `crates/em-render/src/hull_material.rs`, `lightcone/docs/30-the-field.md`
+- touches: `crates/lc-world/src/craft.rs`, `crates/lc-world/src/craft/field.rs`, `crates/lc-world/src/glow.rs`, `crates/lc-world/src/seen.rs`, `crates/lc-server/src/chase.rs`, `crates/lc-server/src/field.rs`, `crates/lc-server/src/server.rs`, `crates/lc-proto/src/lib.rs` (a doc line), `crates/lc-client/src/hull.rs`, `crates/lc-client/src/ship_hull.rs`, `crates/lc-client/src/refit_hull.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/src/resolved.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/assets/shaders/hull.wgsl`, `crates/lc-client/examples/field_void.rs`, `crates/lc-client/examples/cone_void.rs`, `crates/em-render/src/hull_material.rs`, `lightcone/docs/30-the-field.md`
 - read: 30 §What an observer sees
 - deliver: `HULL_K` retired; a ship's light is reflected (`1 − α`) plus thermal at its field's temperature over the envelope; `Presence` carries temperature and mode; instruments see it.
 - done when: a Black ship vanishes in V and not at ten microns, and a hot field's color moves through the bands as 30's table says.
