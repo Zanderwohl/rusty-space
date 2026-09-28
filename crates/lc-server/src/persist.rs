@@ -563,9 +563,10 @@ mod tests {
         let b = Balance::DEFAULT;
         let full = Fitting::full(lc_world::form::Form::starting(), b, 0.0);
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::from_account(&Account { heat_j: 3.0 * b.module_energy_j(), ..full.account() }, b)));
+        craft.fit(Some(Fitting::from_account(&Account { heat_j: 3.0 * b.module_energy_j(), waste_j: b.module_energy_j(), ..full.account() }, b)));
         let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), Light::default(), 0), None).expect("it reads");
         assert_eq!(back.fitting().unwrap().heat_j_at(&back.motion, 0.0), 3.0 * b.module_energy_j());
+        assert_eq!(back.fitting().unwrap().account().waste_j, b.module_energy_j());
         assert_eq!(back.fitting(), craft.fitting());
     }
 
