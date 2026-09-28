@@ -619,8 +619,9 @@ mod tests {
         assert!(close(sustained, 0.3 * burst, 1e-6), "{sustained} {burst}");
     }
 
-    /// An independent stepper: RK4 on `dQ/dt = P − Q/τ`, with storage tracked on its own and never
-    /// let past capacity. Storage at capacity takes in only what the draw takes out.
+    /// An independent stepper: RK4 on `dQ/dt = P − X − Q/τ`, with storage tracked on its own and
+    /// never let past capacity. Storage at capacity takes in only what the draw takes out, and heat
+    /// the emission would take below zero is taken from storage instead.
     struct Stepper {
         heat_j: f64,
         stored_j: f64,
@@ -641,12 +642,14 @@ mod tests {
                 }
                 let p = absorbed - into_storage + s.internal_w;
                 let q = self.heat_j;
+                let p = p - s.emitted_w;
                 let k1 = rate(q, p);
                 let k2 = rate(q + 0.5 * h * k1, p);
                 let k3 = rate(q + 0.5 * h * k2, p);
                 let k4 = rate(q + h * k3, p);
                 self.heat_j = q + h / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
-                self.stored_j += (into_storage - s.draw_w) * h;
+                self.stored_j += (into_storage - s.draw_w) * h + self.heat_j.min(0.0);
+                self.heat_j = self.heat_j.max(0.0);
                 self.t_s += h;
                 if self.stored_j >= self.capacity_j {
                     self.stored_j = self.capacity_j;
@@ -713,8 +716,51 @@ mod tests {
         assert!(close(stored_j + settled.storage_j, rest.stored_j, 1e-9), "{} {}", stored_j + settled.storage_j, rest.stored_j);
     }
 
+    /// Emitting from a hot field: heat reaches the floor while storage fills and then drains
+    /// storage; reaches it, fills there and rises again; and reaches it from full.
+    #[test]
+    fn the_floor_split_agrees_with_stepping() {
+        let b = Balance::DEFAULT;
+        let start = Start::new(&b);
+        let field = start.field;
+        let me = me(&b);
+        let open = start.segment(&b, 0.1, 100.0 * me);
+        let (made_w, filling_w) = (field.heat_filling_w(&open), open.stored_w() - open.draw_w);
+        let cases = [
+            ("drains", Segment { emitted_w: 3.0 * made_w, ..open }, [false, false]),
+            ("fills at the floor", Segment { emitted_w: made_w + 0.5 * filling_w, room_j: 0.2 * me, ..open }, [false, true]),
+            ("from full", Segment { emitted_w: 2.0 * field.heat_full_w(&open), room_j: 0.0, ..open }, [true, false]),
+        ];
+        for (case, segment, [starts_full, ends_full]) in cases {
+            let heat_j = 0.05 * me;
+            let floor_s = field.segment_time_to_fall_s(&segment, heat_j, 0.0).unwrap();
+            let dt_s = 4.0 * floor_s + if ends_full { 2.0 * segment.room_j / (made_w + filling_w - segment.emitted_w) } else { 0.0 };
+            let stretches = field.stretches(&segment, heat_j, dt_s);
+            assert_eq!(stretches.len(), if ends_full { 3 } else { 2 }, "{case}: premise {stretches:?}");
+            assert_eq!((stretches[0].full, stretches[2.min(stretches.len() - 1)].full), (starts_full, ends_full), "{case}: premise");
+            assert_eq!(floor_s, stretches[0].dt_s, "{case}");
+
+            let capacity_j = 200.0 * me;
+            let stored_j = capacity_j - segment.room_j;
+            let mut stepper = Stepper { heat_j, stored_j, capacity_j, t_s: 0.0, filled_at_s: None };
+            let steps = 400_000;
+            let stepped_floor_s = stepper.run(&field, &segment, dt_s, steps, |q| q <= 0.0).unwrap();
+            let h = dt_s / steps as f64;
+            assert!((stepped_floor_s - floor_s).abs() <= 2.0 * h, "{case}: {stepped_floor_s} {floor_s}");
+            stepper.run(&field, &segment, dt_s - stepped_floor_s, (dt_s - stepped_floor_s).div_euclid(h) as usize, |_| false);
+            let settled = field.settle(&segment, heat_j, dt_s);
+            let tol_j = 1e-5 * (heat_j + segment.emitted_w * dt_s);
+            assert!((settled.heat_j - stepper.heat_j).abs() <= tol_j, "{case}: {} {}", settled.heat_j, stepper.heat_j);
+            let storage_j = stepper.stored_j - stored_j;
+            assert!((settled.storage_j - storage_j).abs() <= tol_j, "{case}: {} {storage_j}", settled.storage_j);
+            let spent_j = segment.emitted_w * dt_s;
+            assert!(settled.from_heat_j > heat_j && settled.from_heat_j < spent_j, "{case}: {}", settled.from_heat_j);
+        }
+    }
+
     /// Settling `2T` in one leap and as two `T`s agree, filling or full, with the draw under
-    /// conversion and over it: the answer may not depend on where the caller cuts.
+    /// conversion and over it, and emitting enough to reach the floor in the first `T`: the answer
+    /// may not depend on where the caller cuts.
     #[test]
     fn where_segments_are_cut_does_not_matter() {
         let b = Balance::DEFAULT;
@@ -724,13 +770,19 @@ mod tests {
         let t_s = 3.0e6;
         let heat_j = 2.0 * me;
         for room_j in [0.0, 0.5 * me, 100.0 * me] {
-            for draw_w in [start.caps.drain_w, 3.0 * start.starlight_w(0.1)] {
-                let segment = Segment { room_j, draw_w, ..start.segment(&b, 0.1, 0.0) };
+            for (draw_w, emitted_w) in [
+                (start.caps.drain_w, 0.0),
+                (3.0 * start.starlight_w(0.1), 0.0),
+                (start.caps.drain_w, 2.0 * heat_j / t_s),
+                (start.caps.drain_w, 0.5 * heat_j / t_s + 3.0 * start.starlight_w(0.1)),
+            ] {
+                let segment = Segment { room_j, draw_w, emitted_w, ..start.segment(&b, 0.1, 0.0) };
                 let leap = field.settle(&segment, heat_j, 2.0 * t_s);
                 let half = field.settle(&segment, heat_j, t_s);
+                assert!(emitted_w == 0.0 || half.heat_j == 0.0, "premise: at the floor by the cut");
                 let rest = Segment { room_j: room_j - half.storage_j, ..segment };
                 let halves = field.settle(&rest, half.heat_j, t_s);
-                let case = format!("room {room_j:e}, draw {draw_w:e}");
+                let case = format!("room {room_j:e}, draw {draw_w:e}, emitted {emitted_w:e}");
                 assert!(close(leap.heat_j, halves.heat_j, 1e-12), "{case}: {} {}", leap.heat_j, halves.heat_j);
                 let storage_j = half.storage_j + halves.storage_j;
                 assert!((leap.storage_j - storage_j).abs() <= 1e-12 * me, "{case}: {} {storage_j}", leap.storage_j);
