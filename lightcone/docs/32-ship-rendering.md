@@ -490,6 +490,13 @@ that `Drive` and `Presence` still state, and another craft's from the default dr
 which the wire does not carry. Another craft is drawn where its light shows it, and whether you are
 inside its radius is measured to that place.
 
+![your own burn from beside: the bell's face white-hot, the cone running aft](../images/r12-own-beside.jpg)
+![from behind, just off the axis](../images/r12-own-behind.jpg)
+![a selected ship's cone, 2 000 km out and past its courtesy radius](../images/r12-selected.jpg)
+![the same cone on the map](../images/r12-map.jpg)
+![`--demo kzinti`: a Direct approach burning toward you from outside its radius draws no cone](../images/r12-kzinti-outside.jpg)
+![and its brake, with you inside its radius and its cone](../images/r12-kzinti-inside.jpg)
+
 Photograph it in a void with `cargo run -p lc-client --example cone_void -- --view
 beside|behind|inside --length <m>`. Its flags are listed in the example's module doc.
 
