@@ -191,12 +191,12 @@ pub struct Lighting {
     pub starlight: Vec3,
     pub exposure: Vec4,
     pub spectrum: [Vec4; RAMP],
-    /// Real seconds, for the shimmer and flicker.
-    pub clock_s: f32,
+    /// The period `globals.time` wraps at: `Time::wrap_period`.
+    pub wrap_s: f32,
 }
 
 impl Lighting {
-    fn at(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, spectrum: [Vec4; RAMP], clock_s: f32) -> Self {
+    fn at(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, spectrum: [Vec4; RAMP], wrap_s: f32) -> Self {
         let (to_star, starlight) = match star {
             Some((star_ly, radius, teff)) => {
                 let lit = crate::resolved::lit_radiance(1.0, radius, teff, star_ly.distance(at_ly) * M_PER_LY);
@@ -209,19 +209,20 @@ impl Lighting {
             starlight,
             exposure: Vec4::new(session.tone.surface_reference, session.tone.surface_stops, crate::plume::OVERFLOW_GAIN, 0.0),
             spectrum,
-            clock_s,
+            wrap_s,
         }
     }
 }
 
-/// One field's uniforms. `collapse` is [`FieldUniform::collapse`], `x` negative for a field standing.
+/// One field's uniforms. `collapse` is [`FieldUniform::collapse`], [`STANDING`] for a field that is.
+/// Nothing in them runs with the clock, so they change only when the field does.
 pub fn uniform(state: &FieldState, shell: &Shell, balance: &Balance, light: &Lighting, hot_spots: [Vec4; HOT_SPOTS], collapse: Vec4) -> FieldUniform {
     let (mode, previous, progress) = match state.switch {
         Some((to, p)) => (code(to), code(state.shade), p as f32),
         None => (code(state.shade), code(state.shade), 1.0),
     };
     FieldUniform {
-        state: Vec4::new(state.kelvin as f32, state.fill as f32, balance.clear_absorptivity as f32, light.clock_s),
+        state: Vec4::new(state.kelvin as f32, state.fill as f32, balance.clear_absorptivity as f32, 0.0),
         mode: Vec4::new(mode, previous, progress, shell.reach),
         origin: shell.mind.extend(0.0),
         to_star: light.to_star.extend(0.0),
@@ -229,12 +230,12 @@ pub fn uniform(state: &FieldState, shell: &Shell, balance: &Balance, light: &Lig
         exposure: light.exposure,
         hot_spots,
         collapse,
-        collapse_k: Vec4::new(balance.collapse_spike_k as f32, limit_k(balance) as f32, shell.radius, 0.0),
+        collapse_k: Vec4::new(balance.collapse_spike_k as f32, limit_k(balance) as f32, shell.radius, light.wrap_s),
         spectrum: light.spectrum,
     }
 }
 
-const STANDING: Vec4 = Vec4::new(-1.0, FLASH_S, 1.0, DEBRIS_REACH);
+pub const STANDING: Vec4 = Vec4::new(0.0, FLASH_S, 0.0, DEBRIS_REACH);
 
 /// The strongest [`HOT_SPOTS`] of `spots`.
 fn strongest(spots: impl IntoIterator<Item = Vec4>) -> [Vec4; HOT_SPOTS] {
@@ -452,25 +453,24 @@ pub struct Wreck {
     /// The envelope's longest semi-axis, meters, once its shell is known.
     radius_m: f64,
     spike_w: f64,
-    /// Real seconds it was first drawn.
-    shown_at: Option<f32>,
+    /// Real seconds it was first drawn, unwrapped and as `globals.time` reads.
+    shown_at: Option<(f32, f32)>,
     /// Real seconds its spike was first drawn on each neighbor.
     landed: HashMap<Option<ShipId>, f32>,
 }
 
 impl Wreck {
-    /// [`FieldUniform::collapse`] now, once its light has arrived: the flash in real seconds from
-    /// the frame it is first drawn, the cooling in coordinate seconds from its arrival.
-    fn collapse(&mut self, now_s: f64, real_s: f32, afterglow_s: f64) -> Option<Vec4> {
+    /// [`FieldUniform::collapse`], once its light has arrived: stamped on the frame it is first
+    /// drawn, `(real, wrapped)` being `Time`'s two readings, and the same every frame after while
+    /// the clock's `rate` holds. The afterglow is its game duration at that rate, played no slower
+    /// than at the design rate, as [`Wreck::cooled`] has it.
+    fn collapse(&mut self, now_s: f64, (real_s, wrapped_s): (f32, f32), rate: f64, afterglow_s: f64) -> Option<Vec4> {
         if now_s + self.ahead_s < self.arrive_s {
             return None;
         }
-        let since_real = real_s - *self.shown_at.get_or_insert(real_s);
-        let cooled = self.cooled(now_s, real_s, afterglow_s);
-        // The shader runs both off one clock, so the afterglow is stated as the real seconds that
-        // put its cooling where [`Wreck::cooled`] has it.
-        let afterglow_real = if cooled > 0.0 { since_real / cooled as f32 } else { f32::MAX };
-        Some(Vec4::new(since_real, FLASH_S, afterglow_real.max(since_real), DEBRIS_REACH))
+        let (_, start_s) = *self.shown_at.get_or_insert((real_s, wrapped_s));
+        let afterglow_real = afterglow_s / rate.max(crate::session::TIME_RATE);
+        Some(Vec4::new(start_s, FLASH_S, afterglow_real as f32, DEBRIS_REACH))
     }
 
     /// How far through the afterglow, by the coordinate clock or as it plays at the design rate,
@@ -478,12 +478,12 @@ impl Wreck {
     fn cooled(&self, now_s: f64, real_s: f32, afterglow_s: f64) -> f64 {
         let afterglow_s = afterglow_s.max(f64::MIN_POSITIVE);
         let by_clock = (now_s + self.ahead_s - self.arrive_s) / afterglow_s;
-        let by_design = self.shown_at.map_or(0.0, |at| f64::from(real_s - at) * crate::session::TIME_RATE / afterglow_s);
+        let by_design = self.shown_at.map_or(0.0, |(at, _)| f64::from(real_s - at) * crate::session::TIME_RATE / afterglow_s);
         by_clock.max(by_design)
     }
 
     fn over(&self, now_s: f64, real_s: f32, afterglow_s: f64) -> bool {
-        self.cooled(now_s, real_s, afterglow_s) > 1.0 && self.shown_at.is_some_and(|at| real_s - at > FLASH_S)
+        self.cooled(now_s, real_s, afterglow_s) > 1.0 && self.shown_at.is_some_and(|(at, _)| real_s - at > FLASH_S)
     }
 
     /// Coordinate seconds the spike's light, off a craft at `at_ly`, reaches an observer at
@@ -595,7 +595,7 @@ struct Drawn {
 #[allow(clippy::too_many_arguments)]
 pub fn draw_fields(
     mut commands: Commands,
-    (game, uplink, eye, ui, time): (Res<crate::app::Game>, Res<crate::uplink::Uplink>, Res<Eye>, Res<crate::app::Ui>, Res<Time<Real>>),
+    (game, uplink, eye, ui, time): (Res<crate::app::Game>, Res<crate::uplink::Uplink>, Res<Eye>, Res<crate::app::Ui>, Res<Time>),
     (own, real): (Res<crate::parts::OwnForm>, Res<RealHulls>),
     (mut shells, mut envelopes, mut wrecks): (ResMut<Shells>, ResMut<Envelopes>, ResMut<Wrecks>),
     (mut meshes, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<FieldMaterial>>),
@@ -606,7 +606,8 @@ pub fn draw_fields(
 ) {
     let session = &game.0;
     let now = session.coordinate_time_s();
-    let real_s = time.elapsed_secs();
+    // The clock the shader reads as `globals.time`, so a start stamped on it counts from there.
+    let (real_s, wrapped_s, wrap_s) = (time.elapsed_secs(), time.elapsed_secs_wrapped(), time.wrap_period().as_secs_f32());
     let spectrum = spectrum(&session.mapping);
     let star = crate::hull::lighting(session);
     let contact_balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
@@ -661,7 +662,7 @@ pub fn draw_fields(
         if d.craft.is_none() {
             spots.extend(uplink.incoming.spots(absorbs, d.state.kelvin, shell.area_m2));
         }
-        let light = Lighting::at(session, star, d.at_ly, spectrum, real_s);
+        let light = Lighting::at(session, star, d.at_ly, spectrum, wrap_s);
         let next = uniform(&d.state, shell, &balance, &light, strongest(spots), STANDING);
         match node {
             Some((_, mut node, mut transform, _)) => {
@@ -689,7 +690,7 @@ pub fn draw_fields(
     fell.retain(|w| !w.over(now, real_s, afterglow_s));
     for wreck in &mut fell {
         let Some(shell) = shells.get(wreck.hash) else { continue };
-        let Some(collapse) = wreck.collapse(now, real_s, afterglow_s) else { continue };
+        let Some(collapse) = wreck.collapse(now, (real_s, wrapped_s), ui.time_rate, afterglow_s) else { continue };
         wreck.radius_m = f64::from(shell.radius);
         kept.insert(wreck.event_id);
         let placed = Transform {
@@ -698,7 +699,7 @@ pub fn draw_fields(
             scale: Vec3::splat((1.0 / UNIT_M) as f32),
         };
         let state = FieldState { kelvin: wreck.kelvin, fill: 1.0, shade: Mode::Black, switch: None };
-        let light = Lighting::at(session, star, wreck.at_ly, spectrum, real_s);
+        let light = Lighting::at(session, star, wreck.at_ly, spectrum, wrap_s);
         let next = uniform(&state, shell, &contact_balance, &light, [Vec4::ZERO; HOT_SPOTS], collapse);
         match roots.iter_mut().find(|(_, r, _)| r.0 == wreck.event_id) {
             Some((root, _, mut transform)) => {
@@ -804,7 +805,7 @@ mod tests {
     }
 
     fn light(mapping: &BandMapping) -> Lighting {
-        Lighting { to_star: Vec3::X, starlight: Vec3::ONE, exposure: Vec4::new(1.0, 5.0, 0.5, 0.0), spectrum: spectrum(mapping), clock_s: 0.0 }
+        Lighting { to_star: Vec3::X, starlight: Vec3::ONE, exposure: Vec4::new(1.0, 5.0, 0.5, 0.0), spectrum: spectrum(mapping), wrap_s: 3600.0 }
     }
 
     /// The starting ship at `of_max` of `Q_max`, in `posture`.
@@ -1036,13 +1037,29 @@ mod tests {
         let mut world = collapsing(vec![sighting(1, 5, 10_000_000, 20_000_000)], wrecks, 20.0);
         let mut wreck = world.resource_mut::<Wrecks>().fell.remove(0);
         let afterglow_s = B.collapse_afterglow_s;
-        assert_eq!(wreck.collapse(10.0, 1.0, afterglow_s), None, "drawn at the shard's time");
-        assert_eq!(wreck.collapse(19.9, 2.0, afterglow_s), None, "drawn before its light is here");
-        let first = wreck.collapse(20.0, 3.0, afterglow_s).expect("its light is here");
-        assert_eq!(first.x, 0.0);
-        let later = wreck.collapse(20.0 + 0.1 * afterglow_s, 3.25, afterglow_s).unwrap();
-        assert!((later.x - 0.25).abs() < 1e-6);
-        assert!((later.x / later.z - 0.1).abs() < 1e-3, "cooling at {} of the afterglow", later.x / later.z);
+        assert_eq!(wreck.collapse(10.0, (1.0, 1.0), 0.0, afterglow_s), None, "drawn at the shard's time");
+        assert_eq!(wreck.collapse(19.9, (2.0, 2.0), 0.0, afterglow_s), None, "drawn before its light is here");
+        let first = wreck.collapse(20.0, (3.0, 3.0), 0.0, afterglow_s).expect("its light is here");
+        assert_eq!(first.x, 3.0, "stamped on the frame it is first drawn");
+        let later = wreck.collapse(20.0 + 0.1 * afterglow_s, (3.25, 3.25), 0.0, afterglow_s).unwrap();
+        assert_eq!(later, first, "written again while nothing about it changed");
+        let cooled = wreck.cooled(20.0 + 0.1 * afterglow_s, 3.25, afterglow_s);
+        assert!((cooled - 0.1).abs() < 1e-3, "cooling at {cooled} of the afterglow");
+    }
+
+    /// The shader is given the afterglow in real seconds at the clock's rate, never slower than the
+    /// design rate's.
+    #[test]
+    fn the_afterglow_plays_at_the_clocks_rate() {
+        let mut wrecks = Wrecks::default();
+        wrecks.last.insert(ShipId(5), last("Aster"));
+        let mut world = collapsing(vec![sighting(1, 5, 10_000_000, 20_000_000)], wrecks, 20.0);
+        let mut wreck = world.resource_mut::<Wrecks>().fell.remove(0);
+        let (afterglow_s, design) = (B.collapse_afterglow_s, crate::session::TIME_RATE);
+        let at = |wreck: &mut Wreck, rate: f64| wreck.collapse(20.0, (1.0, 1.0), rate, afterglow_s).unwrap().z;
+        assert!((at(&mut wreck, 0.0) as f64 - afterglow_s / design).abs() < 1e-3);
+        assert!((at(&mut wreck, 1.0e-8) as f64 - afterglow_s / design).abs() < 1e-3);
+        assert!((at(&mut wreck, 4.0 * design) as f64 - afterglow_s / (4.0 * design)).abs() < 1e-3);
     }
 
     /// The exposure meters a wreck's debris once it is drawn, hot at first and cooler later, so
@@ -1055,7 +1072,7 @@ mod tests {
         let mut wrecks = world.resource_mut::<Wrecks>();
         let afterglow_s = B.collapse_afterglow_s;
         assert!(wrecks.metered(20.0, 1.0, afterglow_s, 4_600.0).is_empty(), "metered before it is drawn");
-        wrecks.fell[0].collapse(20.0, 1.0, afterglow_s).unwrap();
+        wrecks.fell[0].collapse(20.0, (1.0, 1.0), 0.0, afterglow_s).unwrap();
         wrecks.fell[0].radius_m = 300.0;
         let [(_, hot, _)] = wrecks.metered(20.0, 1.0, afterglow_s, 4_600.0)[..] else { panic!("not metered") };
         let [(_, cooler, _)] = wrecks.metered(20.0 + 0.5 * afterglow_s, 2.0, afterglow_s, 4_600.0)[..] else { panic!() };
@@ -1072,9 +1089,10 @@ mod tests {
         let mut wreck = world.resource_mut::<Wrecks>().fell.remove(0);
         let afterglow_s = B.collapse_afterglow_s;
         let design_s = (afterglow_s / crate::session::TIME_RATE) as f32;
-        wreck.collapse(20.0, 1.0, afterglow_s).unwrap();
-        let half = wreck.collapse(20.0 + 1e-6, 1.0 + 0.5 * design_s, afterglow_s).unwrap();
-        assert!((half.x / half.z - 0.5).abs() < 1e-3, "{} of the afterglow", half.x / half.z);
+        let drawn = wreck.collapse(20.0, (1.0, 1.0), 1.0e-8, afterglow_s).unwrap();
+        assert!((drawn.z - design_s).abs() < 1e-3, "the shader plays it over {} s", drawn.z);
+        let half = wreck.cooled(20.0 + 1e-6, 1.0 + 0.5 * design_s, afterglow_s);
+        assert!((half - 0.5).abs() < 1e-3, "{half} of the afterglow");
         assert!(wreck.over(20.0 + 1e-6, 1.0 + 1.01 * design_s, afterglow_s));
     }
 
@@ -1086,7 +1104,7 @@ mod tests {
         wrecks.last.insert(ShipId(5), last("Aster"));
         let mut world = collapsing(vec![sighting(1, 5, 10_000_000, 20_000_000)], wrecks, 15.0);
         let mut wreck = world.resource_mut::<Wrecks>().fell.remove(0);
-        assert_eq!(wreck.collapse(15.0, 1.0, B.collapse_afterglow_s).map(|c| c.x), Some(0.0));
+        assert_eq!(wreck.collapse(15.0, (1.0, 1.0), 0.0, B.collapse_afterglow_s).map(|c| c.x), Some(1.0));
         let ls = 1.0 / lc_world::flight::JULIAN_YEAR_S;
         wreck.at_ly = DVec3::X * 10.0 * ls;
         let behind = wreck.at_ly * 2.0;

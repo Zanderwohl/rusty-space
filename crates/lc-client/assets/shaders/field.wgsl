@@ -8,7 +8,7 @@
 
 #import bevy_pbr::{
     mesh_functions,
-    mesh_view_bindings::view,
+    mesh_view_bindings::{globals, view},
     view_transformations::position_world_to_clip,
 }
 
@@ -120,9 +120,13 @@ fn blackbody(kelvin: f32) -> vec3<f32> {
 /// or `x` zero while the field stands. `flash` falls from one; `cooled` runs from zero to one
 /// over the afterglow.
 fn collapse_phase() -> vec3<f32> {
-    let since = material.collapse.x;
-    if (since < 0.0) {
+    if (material.collapse.z <= 0.0) {
         return vec3<f32>(0.0);
+    }
+    // `globals.time` wraps, and the start was stamped on it before it last did.
+    var since = globals.time - material.collapse.x;
+    if (since < 0.0) {
+        since = since + material.collapse_k.w;
     }
     let flash_s = max(material.collapse.y, 1e-3);
     let cooled = clamp(since / max(material.collapse.z, 1e-3), 0.0, 1.0);
@@ -215,7 +219,7 @@ fn unevenness(world_normal: vec3<f32>, local: vec3<f32>) -> f32 {
     // rates beating against each other so it stutters rather than pulsing.
     let stress = smoothstep(UNEVEN_FILL, 1.0, fill);
     if (stress > 0.0) {
-        let t = material.state.w;
+        let t = globals.time;
         let rate = mix(2.0, 14.0, stress * stress);
         let dir = normalize(local);
         let mottle = fbm(dir * 3.0 + vec3<f32>(0.0, 0.0, t * rate));
@@ -229,7 +233,7 @@ fn unevenness(world_normal: vec3<f32>, local: vec3<f32>) -> f32 {
 
 /// A soap film's reflectance at the display's three primaries, mean one, drifting with the clock.
 fn film(local: vec3<f32>, mu: f32) -> vec3<f32> {
-    let t = material.state.w;
+    let t = globals.time;
     let dir = normalize(local);
     let drift = fbm(dir * 1.6 + vec3<f32>(t * 0.05, t * 0.03, -t * 0.04));
     let thickness = mix(FILM_THIN_NM, FILM_THICK_NM, drift);

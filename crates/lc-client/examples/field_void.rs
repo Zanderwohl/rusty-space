@@ -292,7 +292,7 @@ fn stage(
         reach: envelope.z + origin.z,
         area_m2: 0.0,
     };
-    let uniforms = uniforms(&args, &lighting, &shell, 0.0);
+    let uniforms = uniforms(&args, &lighting, &shell, &Time::default());
     for layer in FieldMaterial::layers(uniforms, envelope.max_element()) {
         commands.spawn((
             Mesh3d(envelope_mesh.clone()),
@@ -345,7 +345,8 @@ fn flat(uniforms: BodySurfaceUniform, images: &mut Assets<Image>) -> BodySurface
     }
 }
 
-fn uniforms(args: &Args, lighting: &Scene, shell: &Shell, clock_s: f32) -> FieldUniform {
+/// `time` is Bevy's, whose wrapped reading the shader sees as `globals.time`.
+fn uniforms(args: &Args, lighting: &Scene, shell: &Shell, time: &Time) -> FieldUniform {
     let mode = if args.black { Mode::Black } else { Mode::Clear };
     let state = FieldState {
         kelvin: args.kelvin,
@@ -358,13 +359,17 @@ fn uniforms(args: &Args, lighting: &Scene, shell: &Shell, clock_s: f32) -> Field
         starlight: lighting.starlight,
         exposure: Vec4::new(lighting.reference, lighting.stops, lc_client::plume::OVERFLOW_GAIN, 0.0),
         spectrum: lighting.spectrum,
-        clock_s,
+        wrap_s: time.wrap_period().as_secs_f32(),
     };
     let mut hot_spots = [Vec4::ZERO; em_render::field_material::HOT_SPOTS];
     if args.spot > 0.0 {
         hot_spots[0] = Vec3::new(0.2, 0.5, 1.0).normalize().extend(args.spot);
     }
-    let collapse = Vec4::new(args.collapse.unwrap_or(-1.0), 0.5, args.afterglow, 4.0);
+    // Frozen that long after it began: the start is set back from now every frame.
+    let collapse = match args.collapse {
+        Some(since) => Vec4::new(time.elapsed_secs_wrapped() - since, 0.5, args.afterglow, 4.0),
+        None => lc_client::field::STANDING,
+    };
     lc_client::field::uniform(&state, shell, &BALANCE, &light, hot_spots, collapse)
 }
 
@@ -378,7 +383,7 @@ fn shade(
     mut materials: ResMut<Assets<FieldMaterial>>,
 ) {
     let (Some(lighting), Some(envelope)) = (lighting, envelope) else { return };
-    let mut next = uniforms(&args, &lighting, &envelope.0, time.elapsed_secs());
+    let mut next = uniforms(&args, &lighting, &envelope.0, &time);
     if let Some(since) = args.collapse {
         // The game's meter follows the scene, so the afterglow is exposed for as it cools; the
         // flash is left to overflow. The cooling is the shader's own.

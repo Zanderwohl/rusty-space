@@ -157,7 +157,7 @@ pub fn sample_scene(
     eye: Res<crate::hull::Eye>,
     uplink: Res<crate::uplink::Uplink>,
     own_form: Res<crate::parts::OwnForm>,
-    (wrecks, time): (Res<crate::field::Wrecks>, Res<Time<Real>>),
+    (wrecks, time): (Res<crate::field::Wrecks>, Res<Time>),
     camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut last: Local<Option<(usize, f32)>>,
 ) {

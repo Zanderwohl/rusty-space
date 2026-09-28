@@ -88,11 +88,12 @@ pub fn wall_opacity(absorbs: f32, black: f32, mu: f32) -> f32 {
 
 #[derive(Clone, Debug, PartialEq, ShaderType)]
 pub struct FieldUniform {
-    /// `(kelvin, fill, clear_absorptivity, clock_s)`.
+    /// `(kelvin, fill, clear_absorptivity, 0)`.
     ///
     /// `fill` is heat as a fraction of the limit, `[0, 1]`; hot spots spread and the surface
     /// flickers as it rises. Black absorbs everything and Clear this fraction; by Kirchhoff that
-    /// is also each mode's emissivity. `clock_s` is real seconds, for the shimmer and flicker.
+    /// is also each mode's emissivity. The shimmer and flicker run on Bevy's `globals.time`, so
+    /// a field whose state holds still needs no new uniforms.
     pub state: Vec4,
     /// `(mode, previous mode, switch progress, reach)`.
     ///
@@ -114,17 +115,19 @@ pub struct FieldUniform {
     /// Toward each beam, world, with `w` its strength: the extra power it lands on the envelope
     /// as a multiple of what the field radiates. Zero strength is no beam.
     pub hot_spots: [Vec4; HOT_SPOTS],
-    /// `(since_s, flash_s, afterglow_s, reach)`. `since_s` negative is a field still standing.
+    /// `(start_s, flash_s, afterglow_s, reach)`. `afterglow_s` zero is a field still standing.
     ///
-    /// **Real seconds**, like `clock_s`: a flash counted in game seconds is over before a frame
-    /// is drawn. The host converts the afterglow's game duration and picks a flash long enough
-    /// to see.
+    /// **Seconds of `globals.time`**, which wraps: `start_s` is that clock when the collapse was
+    /// first drawn, written once, and the shader counts from it. A flash counted in game seconds is
+    /// over before a frame is drawn, so the host converts the afterglow's game duration and picks
+    /// a flash long enough to see.
     ///
     /// The envelope turns into a sphere of debris that grows to `reach` times its size by the
     /// end of the afterglow, and is gone after it.
     pub collapse: Vec4,
-    /// `(spike_k, limit_k, radius, 0)`: the flash's color temperature, the one the afterglow
-    /// cools from, and the sphere the envelope rounds into first, mesh-local.
+    /// `(spike_k, limit_k, radius, wrap_s)`: the flash's color temperature, the one the afterglow
+    /// cools from, the sphere the envelope rounds into first, mesh-local, and the period
+    /// `globals.time` wraps at, `Time::wrap_period`.
     pub collapse_k: Vec4,
     /// A blackbody at each [`ramp_kelvin`], through the host's bands: see [`ramp_entry`].
     pub spectrum: [Vec4; RAMP],
@@ -264,7 +267,7 @@ mod tests {
             starlight: Vec4::ZERO,
             exposure: Vec4::ZERO,
             hot_spots: [Vec4::ZERO; HOT_SPOTS],
-            collapse: Vec4::NEG_ONE,
+            collapse: Vec4::ZERO,
             collapse_k: Vec4::ZERO,
             spectrum: [Vec4::ZERO; RAMP],
         };
