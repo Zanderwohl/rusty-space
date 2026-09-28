@@ -854,8 +854,10 @@ impl Craft {
     ///
     /// The patch is folded *before* the step rather than after, so it is always stamped with
     /// its own solved coordinate whatever step happened to run past it. That is what lets a
-    /// server at 438 seconds and a client at 61 reach the same arc.
+    /// server at 438 seconds and a client at 61 reach the same arc. A wreck is not flown: nothing
+    /// it did after its end would be seen.
     pub fn advance(&mut self, now_s: f64, elapsed_s: f64) {
+        if self.ended_s.is_some() { return; }
         // Before anything changes the motive: each segment passed is priced by the motive that
         // was flying it.
         self.collect_to(now_s);

@@ -478,7 +478,7 @@ graph LR
 
 ### H9 · A wreck outlives a restart
 
-- status: active card "H9 · A wreck outlives a restart"
+- status: done #120
 - needs: H4
 - touches: `crates/lc-server/src/persist.rs`, `crates/lc-server/src/field.rs`
 - read: 30 §Collapse, §Open
