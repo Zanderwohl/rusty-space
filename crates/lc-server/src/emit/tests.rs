@@ -86,7 +86,7 @@ fn emissions_of(server: &Server<Memory>, id: ShipId) -> Vec<(i64, Emitted)> {
     server.journal().events.iter().filter(|e| e.kind == KIND_EMIT && e.source == id).map(|e| (e.t, emitted(&e.payload).unwrap())).collect()
 }
 
-async fn until(server: &mut Server<Memory>, wire: &mut Loopback, t: f64) {
+async fn until<J: Journal>(server: &mut Server<J>, wire: &mut Loopback, t: f64) {
     while (server.now_t() as f64) < t {
         server.tick(wire).await.unwrap();
     }
@@ -545,4 +545,41 @@ async fn cutting_the_drive_puts_a_beam_out_early() {
     let craft = server.ship(EMITTER).unwrap();
     assert!(craft.fitting().unwrap().lit().is_empty() && !server.emissions.is_emitting(CraftId(1)));
     assert_eq!(craft.fitting().unwrap().committed_j_at(&craft.motion, now_s(&server)), 0.0);
+}
+
+/// Through the store a shard really comes back from: its position rounded to the grid, and no
+/// power stored, a beam in flight still lands where and when it would have.
+#[tokio::test]
+async fn a_beam_in_flight_comes_back_through_the_store() {
+    use crate::journal::Postgres;
+    const EMITTER_ID: i64 = 30_100;
+    const TARGET_ID: i64 = 30_101;
+    let Ok(journal) = Postgres::open().await else { return };
+    for (table, column) in [("deliveries", "observer_id"), ("events", "source_id")] {
+        let sql = format!("DELETE FROM {table} WHERE {column} IN ($1, $2)");
+        journal.client().execute(sql.as_str(), &[&EMITTER_ID, &TARGET_ID]).await.unwrap();
+    }
+    let target_at = DVec3::new(LIGHT_HOUR_US, 0.3, 0.7);
+    let mut server = Server::new(journal, 0, 11);
+    server.admit(EMITTING, ship(EMITTER_ID, DVec3::new(0.4, 0.0, 0.0), two_ended()), 0.0);
+    server.fleet.insert(ship(TARGET_ID, target_at, Form::starting()));
+    let mut wire = Loopback::new();
+    let order = Order::Emit { aim: along(DVec3::X), apertures: Apertures::Both, power_w: 1.0e17, wavelength_m: 1.0e-9, spread_rad: 1.0e-3, duration_s: 3.0 * HOUR_S };
+    wire.client_says(EMITTING, Inbound::Act(Intent { ship_id: ShipId(EMITTER_ID), order, issued_at_client_t: i64::MAX }));
+    server.tick(&mut wire).await.unwrap();
+    assert!(wire.take(EMITTING).iter().any(|m| matches!(m, Outbound::Accepted { .. })));
+    let checkpoint = server.checkpoint();
+    let lit_t = server.now_t();
+    let arrive_t = (lit_t as f64 + (target_at - DVec3::new(0.4, 0.0, 0.0)).length()).ceil() as i64;
+    drop(server);
+
+    let Ok(journal) = Postgres::open().await else { return };
+    let mut restarted = Server::new(journal, 0, 12);
+    assert!(restarted.adopt(checkpoint).is_empty());
+    restarted.resume_landings().await.unwrap();
+    let target = restarted.ship(ShipId(TARGET_ID)).unwrap().clone();
+    restarted.admit(ClientId(2), target, 0.0);
+    until(&mut restarted, &mut wire, arrive_t as f64 + 1.0).await;
+    let told = illuminated(&wire.take(ClientId(2)));
+    assert!(matches!(told[..], [(_, w, t)] if w > 0.0 && t == arrive_t), "{told:?}, due at {arrive_t}");
 }
