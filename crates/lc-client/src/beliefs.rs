@@ -180,7 +180,7 @@ mod tests {
                 },
                 epoch_s: Some((0.0, 0.0)),
                 pivot_s: None,
-                phase_period_rho: 0.0,
+                covariance: None,
                 method: Method::Transit,
                 stated_s: 0.0,
                 lineage: Vec::new(),

@@ -75,8 +75,9 @@ pub struct Orbit {
     pub epoch_s: Option<(f64, f64)>,
     /// Where the epoch's sigma holds and the period's drift grows from; `None` is the epoch.
     pub pivot_s: Option<f64>,
-    /// Correlation of that phase with the period, so the phase's error grows right from any time.
-    pub phase_period_rho: f64,
+    /// A fit's whole covariance, the sigmas above being its diagonal: see "A look that
+    /// disagrees with its orbit" below. `None` for anything not fitted.
+    pub covariance: Option<Covariance>,
     pub method: Method,                  // Transit, Astrometric, or Claim: stated by a craft that sent no raw data
     pub stated_s: f64,
     pub lineage: Lineage,
@@ -611,17 +612,49 @@ as the orbit's error does and sixteen looks are enough to interpolate between.
   and 2.1 sigma out, Metis, Adrastea, Amalthea and Thebe within 1.2, Mars, Mercury and Deimos
   within 3. Every Jovian moon now inherits Jupiter's 0.027 AU, so none is placed better than
   that. Dia and Chaldene are within 2.1 sigma, Themisto 3.5 and Pandia 4.8.
-- **Open: a fit well above the noise is biased, and its bars cannot say so.** S/2017 J7 is 20
-  sigma out on its axis, and 1566 Icarus, 99942 Apophis, 10 Hygiea and 2 Pallas 8 to 33.
-  Every one of them is held at 10 to 300 times the bearing noise, so the misfit is
-  systematic rather than noise, and inflating the covariance by the reduced chi-square widens
-  the bars without covering a bias over a few percent of an orbit. For a moon the cause is the
-  frame: Jupiter's depth error moves with time, and distorts the moon's orbit rather than
-  only scaling it. For the rest it is either what two bodies leave out, or a refit carried
-  forward: `STILL_AGREES` compares with the residual it replaces, so a slowly worsening fit
-  ratchets. Refusing a fit whose residual is far past the noise was tried once and rejected,
-  under the pattern search, because every good fit sat there too; at the noise floor that
-  objection is gone, and it is the likely next step.
+- **A fit well above the noise was biased, and its bars could not say so.** S/2017 J7 was 20
+  sigma out on its axis, and 1566 Icarus, 99942 Apophis, 10 Hygiea and 2 Pallas 8 to 123. Every
+  one was held at 10 to 300 times the bearing noise: a systematic misfit, which inflating by
+  the reduced chi-square treated as noise that averages down. ✅ Answered below by treating
+  such a misfit as the model's, and by the innovation test catching fits that go stale.
+
+**A look that disagrees with its orbit.** ✅ (2026-09-27, `knowledge::innovation`) A fit's
+covariance knows only the noise in the looks it was fitted to. The arena's elements precess,
+Luna's node by 19 degrees a year, and at a telescope good to 3e-10 radians even a node turning
+once in a hundred thousand years is seventy times the noise over a fifth of an orbit. A Kepler
+fit then agrees with the arc and leaves it later, and nothing in the fit can see that. Each new
+look can.
+
+- **Every sighting of a body is tested before it is filed** against where the held beliefs put
+  it: the miss across the line of sight, in the prediction's own error and the bearing's
+  together, a two-dimensional Mahalanobis distance. Past 5 sigma the body goes to the front of
+  the fit queue whatever its arc's growth. The held orbit is still carried as the refit's start:
+  dropping it had Mercury's search, from nothing, settle on Earth as its primary.
+- **The prediction's error is the whole covariance's.** Taken from each element's own sigma the
+  test never fired: 1,246 looks at 35 bodies on Sol, none past one sigma. It took `Orbit`
+  carrying its elements' whole covariance, which costs about 5% more Kepler solves.
+- **And the star's.** Every place is measured from where the star is believed to be, which the
+  survey re-measures as it goes. Its parallax from 5 AU fixes it to 3,800 km along the line of
+  sight, which left out made a right orbit of Mercury 15 to 930 sigma out on every look.
+- **A misfit past the noise is the model's.** It is smooth from look to look, so it does not
+  average down over the looks as noise does, and inflating by the reduced chi-square left a
+  Kepler fit to a precessing orbit eight of its bars out on the day it was fitted. The
+  unexplained chi-square, past two of noise's own standard deviations, now scales the covariance
+  whole, and that fit is one bar out. Jupiter's two-week circle, 223 times the noise, is wider
+  for it, and so is every moon fitted in its frame.
+- `arc::basis` is written out rather than `any_orthonormal_vector`, since a stated covariance is
+  in it and a library's basis may change under an upgrade.
+- Measured on Sol from 5 AU over fifteen days (2026-09-27): Jupiter 0.4 sigma out on its axis,
+  Io, Europa, Ganymede and Callisto within 2.3, the inner moons within 3.4, S/2017 J7 4.0 where
+  it was 20, and Icarus, Eros, Gaspra and Psyche within 1.5 where they were 5 to 33. Nearly
+  every body is placed within two of its bar.
+- **Open.** A precessing orbit's fit is right where it was fitted and diverges after, faster
+  than its bars grow: the innovation test catches it and a refit follows, but between the two
+  the bars are overconfident. A process-noise term, grown from how far past predictions missed,
+  is the fix. Mercury is placed 4.5 of its 700 m bars out and Pallas 7.6, and Ryugu's axis is
+  6.6 sigma out as it was. Not built: refitting a surprised body on its recent looks only, which
+  a perturbed orbit needs once its kept looks span years; and widening an orbit's bars when a
+  refit cannot improve on it.
 
 **Not oblateness.** The arena's bodies are spheres, so there is no figure to measure and none is
 invented. Same decision as rings for generated planets in phase 5, for the same reason.
@@ -774,7 +807,8 @@ had to be got right, and one that was not:
   the wrong place and nothing that complains, so the test puts the orbit through `placed_at` and
   checks it lands where the fit says, at eight points round three different orbits.
 - **The error bars are the marginal ones,** from the covariance `(J^T J)^-1` at the fit, scaled
-  by the reduced chi-square where the fit misses by more than the errors allow. Held fixed they
+  where the fit misses by more than the errors allow (see "A look that disagrees with its
+  orbit" for how). Held fixed they
   would come out eighty times too small, because the period and the axis trade against each
   other. They were walked, each element moved until the fit was a chi-square worse with the
   others re-settling, and the re-settling was the pattern search that stalled, so every walk was
@@ -785,10 +819,8 @@ had to be got right, and one that was not:
   a pole's at half a turn, a phase's at half a turn, which is anywhere.
 - **The phase is where the body is along its path,** from every element that moves it there and
   not the mean longitude's alone: at the pivot the eccentricity's error moves the body along too,
-  and leaving it out put Mars over one and a half orbits three of its bars out. The phase's
-  covariance with the period is carried on `Orbit` as `phase_period_rho`, only the mean
-  longitude's part of it: the eccentricity's contribution is periodic, and drifted with the
-  period it made the bar worse than leaving the correlation out.
+  and leaving it out put Mars over one and a half orbits three of its bars out. For a while
+  only the phase's correlation with the period was carried; the whole covariance is now.
 - **The same Jacobian can schedule looks.** It says how much each look shrinks each element's
   error, so a follow-up could be timed for when it shrinks the error that matters most, the
   along-orbit one usually, rather than on a fixed doubling. Not built; a cheap interim is to
@@ -1623,13 +1655,12 @@ knowledge. Today:
      has an arc from the start. The sigma is the phase's along the path at the **pivot**, the
      looks' weighted center, from the fit's covariance; the period's drift grows from there.
      It had grown from the periapsis passage, which can be half a period from the looks: six
-     years for Jupiter. ✅ With the covariance (2026-09-27) the two are carried with their
-     correlation, `var M = var M0 - 2 dt rho sM0 sn + dt^2 sn^2`, so the phase's error is right
-     from any reference time. Measured over sixty seeds, the misses along the path are about one
-     of their bar at the pivot and from two arcs' length on, and never more than 1.5. Within
-     about an arc of a *short* fit the bar is conservative, up to ten times: there the period's
-     error is cancelled by the eccentricity's, and a phase, a period and a correlation cannot
-     say so. Carrying the whole covariance on `Orbit` would; it has not been worth a format.
+     years for Jupiter. ✅ With the whole covariance on `Orbit` (2026-09-27) the place is
+     carried to any time with every element's correlations: measured over sixty seeds, the
+     misses along the path are 0.97 to 1.16 of their bar from a span before the pivot to ten
+     after. Carried by each element's own sigma and the phase-period correlation, the bar within
+     an arc of a short fit had been ten times too wide, the period's error cancelled there by
+     the eccentricity's.
    - ⬜ **Candidates are not drawn.** Their radius needs a period turned through a mass prior,
      and the client builds no `Prior` — adding one to draw faint rings is the wrong trade when
      the panel lists them already. The shard computes that radius at settle, so **sending it** is
@@ -1795,7 +1826,8 @@ game has no players — so each of these is a change in place, not a versioned a
 | 7 | `Course` carries a `Subject` rather than a body name; `Order::Cross` gains a knowledge gate |
 | 9 | `Order::SendReport` gains `about: Option<Subject>`, refused with `Impossible` when the craft does not `knows` that system. One new `Knowledge` method beside `report_upto`. **`REPORT_FORMAT` does not move**: `Report`, `Entry` and `Part` are unchanged, which is the point — and it must not move, because `Reported::format` is checked strictly on landing (`instruments.rs:215`), so a bump would make every report already in flight fail to land |
 | — | ✅ **`Orbit::epoch_s` grew a sigma and `Orbit` a `pivot_s`** (2026-09-27): `epoch_s` is `Option<(f64, f64)>` like every other element, a fit's sigma the phase at the pivot; a transit's is its duration over √12. `pivot_s` is where that holds and the period's drift grows from. `FILE_FORMAT` is 10 and `REPORT_FORMAT` is 9 |
-| — | ✅ **`Orbit` grew `phase_period_rho: f64`** (2026-09-27): the correlation of the phase at the pivot with the period, from the Gauss-Newton fit's covariance, so `knowledge::placed` grows the phase's error right from any time. Zero for a transit. `FILE_FORMAT` is 11 and `REPORT_FORMAT` is 10 |
+| — | ✅ **`Orbit` grew `phase_period_rho: f64`** (2026-09-27): the correlation of the phase at the pivot with the period. `FILE_FORMAT` was 11 and `REPORT_FORMAT` 10 |
+| — | ✅ **`Orbit::phase_period_rho` became `covariance: Option<Covariance>`** (2026-09-27): the fit's whole element covariance, 28 numbers, in the fit's own terms (log axis, `h`, `k`, the pole's two tilts, mean longitude at the pivot, log period) about `arc::basis` of the stated pole. `None` for a transit or a claim. `FILE_FORMAT` is 12 and `REPORT_FORMAT` is 11 |
 
 ## Decided
 
