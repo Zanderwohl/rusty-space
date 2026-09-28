@@ -540,7 +540,7 @@ impl Session {
     /// should be unable to point it at the thirteenth-nearest.
     pub fn point_at(&mut self, id: Option<StarId>) {
         let duty = match id {
-            Some(id) => Duty::Stare(id),
+            Some(id) => Duty::stare(id),
             None => Duty::Idle,
         };
         self.take_up(duty);

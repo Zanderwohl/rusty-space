@@ -7,9 +7,9 @@
 use glam::DVec3;
 use lc_proto::Spectrum;
 use lc_world::craft::{Craft, CraftId};
-use lc_world::emit::{Exhaust, Jet, aperture_temperature_k, exhaust, exhaust_face_m2, thrust_power_w};
+use lc_world::emit::{Exhaust, Jet, aperture_temperature_k, exhaust, exhaust_face_m2};
 use lc_world::fitting::Balance;
-use lc_world::flight::G0;
+use lc_world::flight::Drive;
 use lc_world::motion::Motive;
 
 use super::Lighting;
@@ -38,7 +38,7 @@ fn wanted(craft: &Craft, balance: &Balance, t: i64) -> Wanted {
     let s = t as f64 * 1.0e-6;
     let boost_w = match &craft.motion_at(s).motive {
         Motive::Boosting(boost) if boost.thrust_at(s) != DVec3::ZERO => {
-            Some(thrust_power_w(craft.mass_kg_at(s), boost.accel_g * G0))
+            Some(Drive::exhaust_w(craft.mass_kg_at(s), boost.accel_g))
         }
         _ => None,
     };
@@ -94,7 +94,7 @@ impl<J: Journal> Server<J> {
         let ids: Vec<CraftId> = self.fleet.iter().filter(|c| c.ended_s().is_none()).map(|c| c.id).collect();
         for id in ids {
             let Some(craft) = self.fleet.get(id) else { continue };
-            let mut marks: Vec<i64> = lc_world::ignition::transitions(craft, after_s, now_s)
+            let mut marks: Vec<i64> = lc_world::ignition::transitions(craft, &self.balance, after_s, now_s)
                 .iter()
                 .map(|t| ((t.at_s * 1.0e6).ceil() as i64).clamp(after_t + 1, now))
                 .collect();

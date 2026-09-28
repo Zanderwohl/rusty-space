@@ -582,7 +582,7 @@ mod tests {
             at_ly: [0.0; 3],
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
-            jet_power_w: 0.0,
+            drive_w: 0.0,
             emitted_t: 0,
             arrive_t: 3_600_000_000,
             form: form.into(),

@@ -81,11 +81,6 @@ pub struct Drive {
     pub accel_g: f64,
     /// Speed cap as a fraction of `c`.
     pub max_beta: f64,
-    /// How fast it throws its reaction mass, meters a second.
-    ///
-    /// On the wire because a client draws its own ship's plume, and what a burn looks like is
-    /// `½ F v` — the one number a trajectory does not depend on and an exhaust does.
-    pub exhaust_v_m_s: f64,
     /// How fast the hull can swing its nose, radians a second.
     ///
     /// On the wire because a crossing's coast is held open long enough for the flip, so two ends
@@ -438,7 +433,8 @@ pub mod kind;
 /// What a craft's drive became at a [`kind::DRIVE`] event.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DriveChange {
-    /// Watts into the exhaust from this instant. Zero is the drive going out.
+    /// What the main drive sends aft from this instant, watts, as [`Presence::drive_w`] says it.
+    /// Zero is the drive going out.
     pub power_w: f64,
     /// Unit vector the nose pointed along.
     pub facing: [f64; 3],
@@ -499,15 +495,12 @@ pub struct Presence {
     pub beta: [f64; 3],
     /// Unit vector the nose pointed along then.
     pub facing: [f64; 3],
-    /// What its drive was putting into its exhaust then, watts. Zero when it was coasting.
+    /// What its main drive was sending aft then, `F c`, watts: the power its drive's emission was
+    /// lit at. Zero when it was coasting, on its thrusters alone, or flying an emit as a burn.
     ///
-    /// Sent rather than derived, and it is worth saying why this is not the "second copy of an
-    /// answer" the rest of this file refuses. A receiver *cannot* work it out: the power of a
-    /// burn is the craft's mass times its acceleration times its exhaust speed, and a client
-    /// knows none of the three about somebody else's ship. What it is, is the one thing about a
-    /// burn that is plainly observable — a plume's brightness is exactly this — so a receiver
-    /// is being told what it can see rather than what it could have computed.
-    pub jet_power_w: f64,
+    /// Sent rather than derived because a receiver knows neither the craft's mass nor its
+    /// acceleration. It is what a burn plainly shows: the face's temperature and the cone's reach.
+    pub drive_w: f64,
     /// Coordinate microseconds the light left. Always earlier than [`Presence::arrive_t`].
     pub emitted_t: i64,
     /// Coordinate microseconds it arrives. Never later than the server's `t` when it is sent.
@@ -973,7 +966,7 @@ pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lit, Shade, Spectrum, 
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
-pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
+pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, Gaze, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
 
 pub use radio::{
     ACK_DEPTH, Aim, Body, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
@@ -1016,7 +1009,6 @@ mod tests {
                 drive: Drive {
                     accel_g: 5.0,
                     max_beta: 0.999,
-                    exhaust_v_m_s: 1.5e7,
                     slew_rate_rad_s: 0.05,
                 },
                 motive: Motive::Holding(Waypoint::Orbit {
@@ -1096,7 +1088,7 @@ mod tests {
                     at_ly: [4.2, 0.0, 0.0],
                     beta: [0.0, 0.001, 0.0],
                     facing: [0.0, 1.0, 0.0],
-                    jet_power_w: 7.2e17,
+                    drive_w: 1.1e20,
                     emitted_t: 500_000,
                     arrive_t: 1_000_000,
                     form: two_parts(),
@@ -1137,7 +1129,6 @@ mod tests {
                 drive: Drive {
                     accel_g: 5.0,
                     max_beta: 0.999,
-                    exhaust_v_m_s: 1.5e7,
                     slew_rate_rad_s: 0.05,
                 },
                 motive: Motive::Rendezvous {
@@ -1148,7 +1139,6 @@ mod tests {
                     drive: Drive {
                         accel_g: 5.0,
                         max_beta: 0.999,
-                        exhaust_v_m_s: 1.5e7,
                         slew_rate_rad_s: 0.05,
                     },
                     frame_from_ly: [4.2, 1.0e-9, 0.0],
@@ -1184,7 +1174,6 @@ mod tests {
                     drive: Drive {
                         accel_g: 5.0,
                         max_beta: 0.999,
-                        exhaust_v_m_s: 1.5e7,
                         slew_rate_rad_s: 0.05,
                     },
                     frame_from_ly: [4.2, 1.0e-9, 0.0],
@@ -1464,6 +1453,10 @@ mod tests {
         Outbound::Observing { duty: Duty::Survey { star: 11, started_s: 5.0 }, integration_s: 2.0e3 }
     }
 
+    fn staring() -> Outbound {
+        Outbound::Observing { duty: Duty::Stare { at: Gaze::Place([1, -2, 3]) }, integration_s: 2.0e3 }
+    }
+
     fn learned() -> Outbound {
         Outbound::Learned { report: b"{}".to_vec() }
     }
@@ -1572,6 +1565,7 @@ mod tests {
             ("Order::NameIt", encode(&name_it()), golden::NAME_IT),
             ("Outbound::Observing", encode(&observing()), golden::OBSERVING),
             ("Outbound::Observing (survey)", encode(&surveying()), golden::SURVEYING),
+            ("Outbound::Observing (stare at a place)", encode(&staring()), golden::STARING),
             ("Outbound::Learned", encode(&learned()), golden::LEARNED),
             ("Order::Refit", encode(&refit()), golden::REFIT),
             ("Order::FieldMode", encode(&field_mode()), golden::FIELD_MODE),
@@ -1681,7 +1675,9 @@ mod tests {
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NothingNew },
             Outbound::Learned { report: b"{}".to_vec() },
-            Outbound::Observing { duty: Duty::Stare { star: 3 }, integration_s: 1.0e4 },
+            Outbound::Observing { duty: Duty::stare(3), integration_s: 1.0e4 },
+            Outbound::Observing { duty: Duty::Stare { at: Gaze::Place([1, -2, 3]) }, integration_s: 1.0e4 },
+            Outbound::Observing { duty: Duty::Stare { at: Gaze::Craft(7) }, integration_s: 1.0e4 },
             Outbound::Observing { duty: Duty::Idle, integration_s: 0.0 },
             Outbound::AutoAcking { ship_id: ShipId(42), with: vec![ShipId(7), ShipId(9)] },
             Outbound::AutoAcking { ship_id: ShipId(42), with: Vec::new() },
@@ -1873,7 +1869,7 @@ mod tests {
             at_ly: [1.0, 0.0, 0.0],
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
-            jet_power_w: 0.0,
+            drive_w: 0.0,
             emitted_t: arrive_t - 1_000,
             arrive_t,
             form: Form::default(),

@@ -348,10 +348,21 @@ seeing it replayed as the light passes.
 - **The event** is `kind::COLLAPSE`, stamped at the instant and where the ship was, carrying a
   `Released`. It goes through the journal like a burn. Its power is the spike taken as a second
   long, which is what an instrument's inverse square reads; the spike's energy lands on neighbors
-  as [Proximity](#as-built-1) says. The afterglow is not yet light anything can see; H10 makes it so.
+  as [Proximity](#as-built-1) says.
+- **The afterglow** (`lc_world::afterglow`) is the other `1 − collapse_spike_fraction` of `E`, from
+  where the ship was, as a blackbody of fixed area whose luminosity falls linearly to nothing over
+  `collapse_afterglow_s`. So its temperature falls from the field's limit, about 4 600 K, as
+  `T_limit (1 − τ/D)^¼`, and its area is `2 E_a / (σ T_limit⁴ D)`, about 3 × 10⁻¹⁵ m² per joule of
+  `E`. A starting ship with empty storage releases 1.4 × 10²⁶ J, an area equal to a sphere 370 km
+  across. `afterglow::temperature_k` is the cooling law on its own, for anything that draws one. The spike is a blackbody at
+  `collapse_spike_k` in photometry too: its fluence lands in the one exposure it falls in.
+- **The afterglow is light and nothing else.** A neighbor's field holds at most about 6% of the
+  spike's dose there from it, about three weeks on, which moves the lethal radius out by 3%; a sustained
+  emission restated as its power fell would cost journal writes for that. It heats nobody.
 - **The wreck** stays in the fleet with its worldline ended at the instant. A ship that could see
-  it goes on seeing it until the light of the end arrives, then stops, and the wreck is dropped once
-  that light has passed every craft. A checkpoint keeps it with its end and no account, since the
+  it goes on seeing it until the light of the end arrives, then stops. The wreck is dropped once its
+  afterglow's last light has passed every craft. A checkpoint keeps it with its end, its afterglow
+  and no account, since the
   successor carries the account and an account holds one row; a restart brings it back as a wreck,
   nobody's, with nothing to resume, and so ends nobody's view of it early. Its row and what it knew
   are deleted at the checkpoint after the sweep.
@@ -494,6 +505,7 @@ shows its thresholds. What a player can infer from it:
   light still in flight carries the failing field's temperature. The history is not checkpointed: a
   wreck restored after a restart is stated as the starting field at rest until its light has passed.
 - **The client draws and meters a ship by it.** A hull's reflectance is `1 − α`; a real hull's
+<<<<<<< HEAD
   textures, which average 0.35, are scaled to it. The field's heat is drawn on its envelope
   ([32](32-ship-rendering.md#in-the-game)), and on the hull only for a craft with no form, which has
   no envelope. A star's spectrum cache serves its per-band radiance. A Black field hides the lit
@@ -501,6 +513,22 @@ shows its thresholds. What a player can infer from it:
   (`hull::Sent`), and R18's point starts from that sum.
 - **Instruments:** the photometry and the detection test are in `lc-world`; no duty yet points a
   telescope at a craft. H10's stare at a position is the first.
+=======
+  textures, which average 0.35, are scaled to it. The field's heat is an even glow over the hull in
+  the hull shader, and a star's spectrum cache serves its per-band radiance. A Black field hides the
+  lit windows too. The field's own envelope is still undrawn, so for now the hull carries both terms;
+  R11 moves the heat onto the envelope. Nothing yet draws a distant ship as a point: the metering
+  sums the terms (`hull::Sent`), and R18's point starts from that sum.
+- **Instruments:** the photometry and the detection test are in `lc-world`. A stare can point at a
+  place or a craft as well as a star, and records the flux arriving in the one resolution element
+  it is aimed at, band by band: every craft's light by this photometry, and every wreck's spike and
+  afterglow, each at its retarded time, with any catalog star in that element. It is measured
+  against the instrument's own glow and every other star's wings, the survey's glare, so an
+  afterglow is caught where it stands clear of its star's wings. Eight resolution elements from a
+  dim star, seen from 3 light-days, it is measured to the calibration floor for all thirty days. A craft is followed
+  by its light, never where it is now, and once its light stops, at where it ended. See
+  [24-standing-instruments.md](24-standing-instruments.md#as-built-a-stare-at-a-place-or-a-craft).
+>>>>>>> origin/master
 
 ![Clear ships round a Black one, in V: the Black one is a hole in the stars](../images/h7-v.jpg)
 ![The same, at ten microns: all five at 400 K, and the Black one as plain as the rest](../images/h7-10um.jpg)
@@ -624,6 +652,10 @@ puts a countdown in the text.
 - **Light delay.** A collapse is observed by a distant client no earlier than the light allows,
   and a neighbor's `Q` jumps no earlier. Break the retarded solve on purpose and watch the test
   fail, per [AGENTS.md](../../AGENTS.md).
+- **The afterglow.** It integrates to `(1 − collapse_spike_fraction) E`, starts at the field's limit
+  and cools, and the spike is `collapse_spike_k`. A craft staring at a collapse's place records it
+  from when its light arrives for `collapse_afterglow_s`, and one staring a tenth of a radian off
+  records nothing. Take the light delay out on purpose and watch that test fail.
 - **Burst versus rate.** A beam under the conversion rating with storage empty adds only its
   conversion loss. The same energy as a burst adds all of it.
 - **Modes.** A Clear field takes `clear_absorptivity` of a beam and a Black one all of it. A switch
