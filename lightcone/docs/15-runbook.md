@@ -40,7 +40,7 @@ Three, none of which belong in this repository or in a shell history.
 `release.sh` needs the token in your shell. Take it from the host without printing it:
 
 ```bash
-export RELEASE_TOKEN="$(ssh zandy@rocinante.local 'grep -m1 ^RELEASE_TOKEN= ~/.config/lightcone/web.env | cut -d= -f2-')"
+export RELEASE_TOKEN="$(ssh zandy@dev.lightconefrontier.com 'grep -m1 ^RELEASE_TOKEN= ~/.config/lightcone/web.env | cut -d= -f2-')"
 export LC_SITE=https://dev.lightconefrontier.com LC_CDN=https://cdn.dev.lightconefrontier.com
 ```
 
@@ -128,8 +128,9 @@ LC_CDN=https://cdn.lc.zanderlowry.com tools/release.sh register <build-id>
 that environment variable does **not** move builds already registered, which is the intended
 behavior and reliably surprising the first time.
 
-**Set `LC_CDN` when you register.** It defaults to the development CDN, so a build registered
-without it carries `http://rocinante.local:3101` no matter what the site is configured with.
+**Set `LC_CDN` when you register** anywhere but development. It defaults to the development CDN,
+so a build registered without it carries `https://cdn.dev.lightconefrontier.com` no matter what
+the site is configured with.
 Against an https site a browser then blocks the assets as mixed content, and what `/play`
 reports is *"the site is pointing at a build that is not on the CDN"* — naming a URL that is
 perfectly reachable by hand, which sends you looking at the CDN instead of at the row.
@@ -247,7 +248,7 @@ being changed or the certificate has expired. Both services become
 behavior is still exercised rather than accidentally bypassed.
 
 ```bash
-ssh -N -L 3100:localhost:3100 -L 3101:localhost:3101 zandy@rocinante.local
+ssh -N -L 3100:localhost:3100 -L 3101:localhost:3101 zandy@dev.lightconefrontier.com
 ```
 
 Then open `http://localhost:3100`. **The tunnel holds those local ports**, so a local
@@ -272,7 +273,7 @@ certificates. The cost is that every client machine has to trust the root.
     local_certs
 }
 
-rocinante.local:443 {
+dev.lightconefrontier.com:443 {
     reverse_proxy lightcone-web:3100
 }
 ```
@@ -352,7 +353,7 @@ NAMECHEAP_API_KEY=...
 docker --context rocinante build -t lightcone-proxy:latest tools/proxy
 
 # Over ssh, because --env-file is read by the CLI you invoke and that file is on rocinante.
-ssh zandy@rocinante.local '
+ssh zandy@dev.lightconefrontier.com '
 docker volume create lightcone-proxy-data
 docker rm -f lightcone-proxy
 docker run -d --name lightcone-proxy --restart unless-stopped \
@@ -475,12 +476,11 @@ readers of one schema is how a game migration starts breaking a marketing page.
 `postgres://lc_site@lightcone-db:5432/lc_site`. The published port is a development
 convenience for `psql` and nothing else.
 
-Connecting to it from a laptop has a trap worth knowing about. `rocinante.local` is mDNS, and
-mDNS answers with a **link-local IPv6 address first** (`fe80::…`), which needs a scope id that
-a connection string has nowhere to put. `psql` tries it, fails, and falls back to IPv4; sqlx
-does not, and reports `pool timed out while waiting for an open connection` — which reads like
-the database being slow or down rather than unreachable at that address. Use the IPv4 address
-for a laptop connection, or an SSH tunnel.
+Connect from a laptop by `dev.lightconefrontier.com`, which resolves to the host's IPv4 address,
+or through an SSH tunnel. Not by the host's mDNS name: mDNS answers with a **link-local IPv6
+address first** (`fe80::…`), which needs a scope id that a connection string has nowhere to put.
+`psql` falls back to IPv4; sqlx does not, and reports `pool timed out while waiting for an open
+connection`, which reads like the database being slow rather than unreachable at that address.
 
 Migrations run at startup, under a PostgreSQL advisory lock that sqlx takes for itself, so
 this stays correct with more than one replica.
@@ -504,7 +504,7 @@ Three containers beside the site, all on the `lightcone` network.
 
 ```bash
 # Secrets, generated on the host so they never pass through a laptop's shell history.
-ssh zandy@rocinante.local
+ssh zandy@dev.lightconefrontier.com
 cd ~/.config/lightcone && umask 077
 rand() { head -c 32 /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_'; }
 # identity.env      — DATABASE_URL, LC_IDENTITY_* (see config.rs for the full list)
@@ -548,7 +548,7 @@ only, and `0004` adds a check constraint that a hand-written `permission` outsid
 fail on:
 
 ```bash
-ssh zandy@rocinante.local '
+ssh zandy@dev.lightconefrontier.com '
   url=$(grep -m1 ^DATABASE_URL= ~/.config/lightcone/identity.env | cut -d= -f2-)
   docker run --rm --network lightcone -e PGURL="$url" postgres:17-bookworm \
     sh -c '"'"'pg_dump "$PGURL"'"'"' > ~/backups/lc_identity-$(date +%Y%m%d-%H%M%S).sql'
@@ -627,7 +627,7 @@ docker --context rocinante build -f auth/Dockerfile.admin -t lightcone-admin:<ta
 docker --context rocinante build -f crates/lc-server/Dockerfile -t lightcone-shard:<tag> .
 
 # Over ssh, because --env-file is read by the CLI you invoke and that file is on rocinante.
-ssh zandy@rocinante.local '
+ssh zandy@dev.lightconefrontier.com '
   docker rm -f lightcone-identity 2>/dev/null
   docker run -d --name lightcone-identity --restart unless-stopped --network lightcone \
       --env-file ~/.config/lightcone/identity.env lightcone-identity:<tag>
@@ -708,7 +708,7 @@ the certificates, and a restart it did not need is a restart that can go wrong:
 
 ```bash
 docker --context rocinante cp tools/proxy/Caddyfile lightcone-proxy:/etc/caddy/Caddyfile
-ssh zandy@rocinante.local \
+ssh zandy@dev.lightconefrontier.com \
   'docker exec lightcone-proxy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile'
 ```
 
@@ -720,7 +720,7 @@ is a proxy that stops answering for every name at once:
 
 ```bash
 docker --context rocinante cp tools/proxy/Caddyfile lightcone-proxy:/tmp/Caddyfile.candidate
-ssh zandy@rocinante.local 'docker exec -e LC_DOMAIN=dev.lightconefrontier.com lightcone-proxy \
+ssh zandy@dev.lightconefrontier.com 'docker exec -e LC_DOMAIN=dev.lightconefrontier.com lightcone-proxy \
   caddy validate --config /tmp/Caddyfile.candidate --adapter caddyfile'
 ```
 
