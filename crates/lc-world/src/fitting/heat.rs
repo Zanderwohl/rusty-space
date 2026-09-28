@@ -7,7 +7,7 @@
 
 use super::{Balance, Fitting, Hull};
 use crate::cost;
-use crate::field::{Field, Mode, Segment};
+use crate::field::{Burst, Field, Mode, Segment};
 use crate::form::capacity::Capacities;
 use crate::motion::ShipState;
 use crate::refit::rounds::{Phase, Plan, Step};
@@ -39,6 +39,21 @@ impl Fitting {
         self.field().temperature_k(self.heat_j_at(motion, now_s))
     }
 
+    /// Watts arriving from other craft: a neighbor's glow.
+    pub fn lit_w(&self) -> f64 {
+        self.lit_w
+    }
+
+    /// Settle first.
+    pub fn set_lit_w(&mut self, watts: f64) {
+        self.lit_w = watts.max(0.0);
+    }
+
+    /// All of it heat, whatever room storage has, absorbed in the shade the field is in. Settle first.
+    pub fn take_burst(&mut self, burst: Burst) {
+        self.heat_j += burst.heat_j(self.absorptivity_at(self.since_s));
+    }
+
     /// Watts starlight stores while storage has room: capped at the engines' rating.
     pub fn solar_w(&self) -> f64 {
         self.intake(&self.hull.capacities, self.shade_at(self.since_s), 0.0, 0.0, 0.0, 0.0).stored_w()
@@ -47,7 +62,7 @@ impl Fitting {
     /// `draw_w` is what leaves storage besides the drain, and goes negative for a return into it.
     fn intake(&self, caps: &Capacities, shade: Mode, losing_w: f64, room_j: f64, draw_w: f64, emitted_w: f64) -> Segment {
         Segment {
-            arriving_w: self.starlight_w,
+            arriving_w: self.starlight_w + self.lit_w,
             absorptivity: shade.absorptivity(self.balance.clear_absorptivity),
             internal_w: caps.drain_w + losing_w,
             rating_w: caps.aperture_w,
@@ -84,6 +99,10 @@ impl Fitting {
     pub fn collapse_s(&self, motion: &ShipState, until_s: f64) -> Option<f64> {
         let field = self.field();
         let max_j = field.heat_max_j();
+        // Already there, as a vent or a spike leaves it, even with nothing left to walk.
+        if self.heat_j >= max_j {
+            return Some(self.since_s);
+        }
         let mut found = None;
         self.walk(Some(motion), until_s, |from_s, segment, heat_j, dt_s| {
             found = field.segment_time_to_rise_s(segment, heat_j, max_j).filter(|&t| t <= dt_s).map(|t| from_s + t);

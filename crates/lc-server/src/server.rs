@@ -215,6 +215,8 @@ pub struct Server<J: Journal> {
     pub(crate) commands: std::collections::VecDeque<crate::command::Queued>,
     /// Wrecks swept since the last checkpoint took them, whose rows it is to delete.
     pub(crate) destroyed: Vec<i64>,
+    /// Spikes in flight to the fields they will land on. See [`crate::field`].
+    pub(crate) arrivals: Vec<crate::field::Arrival>,
 }
 
 impl<J: Journal> Server<J> {
@@ -260,6 +262,7 @@ impl<J: Journal> Server<J> {
             reserved: HashMap::new(),
             commands: std::collections::VecDeque::new(),
             destroyed: Vec::new(),
+            arrivals: Vec::new(),
         }
     }
 
@@ -440,6 +443,7 @@ impl<J: Journal> Server<J> {
         let after_t = self.now_t - self.tick_us();
         let mut events = Vec::new();
         let mut deliveries = Vec::new();
+        self.shine(after_t);
         // Before anything settles an account past the instant: advancing crosses starlight's day
         // boundaries, and a field over its limit at one cannot say when it got there.
         self.keep_field_modes(after_t, wire, &mut events, &mut deliveries);
@@ -1159,6 +1163,7 @@ impl<J: Journal> Server<J> {
     }
 
     /// Write an event for something a craft did, and schedule it to everyone who will see it.
+    /// Its id, unless none could be minted.
     pub(crate) fn emit(
         &mut self,
         id: CraftId,
@@ -1168,10 +1173,9 @@ impl<J: Journal> Server<J> {
         at: i64,
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
-    ) {
-        let Some(craft) = self.fleet.get(id) else { return };
-        let from = craft.position_at(at as f64);
-        self.emit_from(id, from, kind, power_w, payload, at, events, deliveries);
+    ) -> Option<i64> {
+        let from = self.fleet.get(id)?.position_at(at as f64);
+        self.emit_from(id, from, kind, power_w, payload, at, events, deliveries)
     }
 
     /// [`Server::emit`] from a stated position, light-microseconds: at a jump the worldline has
@@ -1187,8 +1191,8 @@ impl<J: Journal> Server<J> {
         at: i64,
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
-    ) {
-        let Some(event_id) = self.minter.mint(at) else { return };
+    ) -> Option<i64> {
+        let event_id = self.minter.mint(at)?;
         let event = Event {
             id: event_id.get(),
             source: ShipId(id.0),
@@ -1205,7 +1209,9 @@ impl<J: Journal> Server<J> {
                 deliveries.push(scheduled);
             }
         }
+        let id = event.id;
         events.push(event);
+        Some(id)
     }
 
     /// Release what has arrived. **The only place anything reaches a client.**

@@ -310,6 +310,27 @@ impl Burst {
     }
 }
 
+/// The most of what surrounds it a receiver takes, from one source or all of them together: the
+/// half a receiver in contact faces.
+pub const CONTACT_FRACTION: f64 = 0.5;
+
+/// Of what a source radiates isotropically, the fraction a shadow of `shadow_m2` at `distance_m`
+/// takes: `A / (4π d²)`. At most [`CONTACT_FRACTION`], where the inverse square would give more, or
+/// infinity for ships stacked at one point.
+pub fn received_fraction(shadow_m2: f64, distance_m: f64) -> f64 {
+    if shadow_m2 <= 0.0 {
+        return 0.0;
+    }
+    let sphere_m2 = 4.0 * std::f64::consts::PI * distance_m * distance_m;
+    (shadow_m2 / sphere_m2).min(CONTACT_FRACTION)
+}
+
+/// Inside this distance a spike of `spike_j` takes a field with `headroom_j` left to collapse:
+/// `√(α E A / (4π H))`. Infinite for no headroom. See 30 §Proximity.
+pub fn lethal_radius_m(absorptivity: f64, spike_j: f64, shadow_m2: f64, headroom_j: f64) -> f64 {
+    (absorptivity * spike_j * shadow_m2 / (4.0 * std::f64::consts::PI * headroom_j.max(0.0))).sqrt()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settled {
     pub heat_j: f64,
@@ -926,5 +947,23 @@ mod tests {
         let fitting = starting(b, 0.0);
         let hot = crate::fitting::Account { heat_j: 2.0 * fitting.field().heat_max_j(), since_s: 5.0, ..fitting.account() };
         assert_eq!(crate::fitting::Fitting::from_account(&hot, b).collapse_s(&still(), f64::INFINITY), Some(5.0));
+    }
+
+    /// 30's lethal radii: a full starting ship, and one ten and a hundred times its size, collapsing
+    /// beside an idle Black starting ship broadside to it.
+    #[test]
+    fn the_lethal_radii_are_thirtys() {
+        let b = Balance::DEFAULT;
+        let victim = Start::new(&b);
+        let headroom_j = victim.field.heat_max_j() - victim.caps.drain_w * b.field_tau_s;
+        for (scale, want_m) in [(1.0, 150.0), (10.0, 4_200.0), (100.0, 130_000.0)] {
+            let form = crate::form::presets::named("default", scale).unwrap();
+            let field = Field::of(FormGrid::new(&form, &b).unwrap().envelope_area_m2(), &b);
+            let spike_j = b.collapse_spike_fraction * field.released_j(Capacities::of(&form, &b).storage_j);
+            let r_m = lethal_radius_m(1.0, spike_j, victim.broadside_m2, headroom_j);
+            assert!(close(r_m, want_m, 0.02), "{scale} times: {r_m} m");
+            let clear_m = lethal_radius_m(b.clear_absorptivity, spike_j, victim.broadside_m2, headroom_j);
+            assert!(close(clear_m, b.clear_absorptivity.sqrt() * r_m, 1e-12));
+        }
     }
 }

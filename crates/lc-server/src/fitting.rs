@@ -728,9 +728,10 @@ mod tests {
             );
             assert!(wire.take(who).iter().any(|m| matches!(m, Outbound::Fitted { .. })));
         }
-        // A player, and a ticket from a broker that had no levels yet.
+        // A player, and a ticket from a broker that had no levels yet. Stacked at the spawn point,
+        // each still converts its neighbors' glow.
         for who in [player, old] {
-            assert_eq!(stored(&server, who), 0.0, "{who:?} was granted energy");
+            assert!(stored(&server, who) < 1.0e-6 * 1.0e26, "{who:?} was granted energy");
             assert!(wire.take(who).iter().any(|m| matches!(m, Outbound::Refused { .. })));
         }
     }

@@ -447,9 +447,9 @@ graph LR
 
 ### H5 · Proximity
 
-- status: active card "H5 · Proximity"
+- status: done #123
 - needs: H4
-- touches: `crates/lc-server/src/field.rs`
+- touches: `crates/lc-server/src/field.rs`, `crates/lc-server/src/server.rs` (the arrivals, and `emit` returns its id), `crates/lc-world/src/field.rs`, `crates/lc-world/src/fitting.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-world/src/craft.rs` (glow and bursts into the account), `crates/lc-world/src/scenario.rs`, `crates/lc-server/src/director.rs`, `crates/lc-server/src/command/mod.rs` (the cascade scene), `lightcone/docs/30-the-field.md`, `lightcone/images/h5-*.jpg`, `AGENTS.md`
 - read: 30 §Proximity
 - deliver: a neighbor's glow as intake; a collapse's spike delivered to each neighbor at its retarded time as a burst; cascades.
 - done when: a ship inside the lethal radius dies, one outside it survives, and the second death in a cascade comes later by the light time between them.

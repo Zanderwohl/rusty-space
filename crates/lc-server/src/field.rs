@@ -1,14 +1,22 @@
-//! Collapse: a field that reaches `Q_max` destroys its ship. See `lightcone/docs/30-the-field.md`
-//! §Collapse.
+//! Collapse, and what a field does to its neighbors. See `lightcone/docs/30-the-field.md`
+//! §Collapse and §Proximity.
 //!
-//! Nothing is scheduled ahead or kept for it. The instant is a closed form of the account, which
-//! every change of input settles first and a checkpoint keeps, so solving it again each tick is the
-//! schedule, and a restart restores it with the account. What goes out is an ordinary event, and
-//! observers learn of it at their own light delay; the wreck stays in the fleet with its worldline
-//! ended, so its light already in flight goes on arriving until the last of it has passed.
+//! Nothing is scheduled ahead or kept for a collapse. The instant is a closed form of the account,
+//! which every change of input settles first and a checkpoint keeps, so solving it again each tick
+//! is the schedule, and a restart restores it with the account. What goes out is an ordinary event,
+//! and observers learn of it at their own light delay; the wreck stays in the fleet with its
+//! worldline ended, so its light already in flight goes on arriving until the last of it has passed.
+//!
+//! The spike rides the event's own fan-out: each delivery to a fitted craft is queued as a burst
+//! and lands at that delivery's arrival. Landing is a change of input like any other, so the
+//! receiver's collapse re-solves from it, and a cascade is nothing but collapses and landings taken
+//! in time order.
 
+use glam::DVec3;
 use lc_proto::{Outbound, ShipId};
+use lc_spacetime::LIGHT_MICROSECOND_M;
 use lc_world::craft::{Craft, CraftId};
+use lc_world::field::{Burst, CONTACT_FRACTION, received_fraction};
 
 use crate::journal::Journal;
 use crate::server::{KIND_COLLAPSE, Server};
@@ -23,6 +31,22 @@ pub(crate) use mode::hold_black;
 
 /// 30 takes the spike as a second long.
 const SPIKE_S: f64 = 1.0;
+
+/// Of a receiver's rated load, glow below which a neighbor is not solved for: over a time constant
+/// it moves `Q` by this fraction of `Q_max`.
+const GLOW_FLOOR: f64 = 1.0e-9;
+
+/// Energy let go of at once, on its way to one craft's field.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Arrival {
+    observer: CraftId,
+    /// Coordinate microseconds, from the fan-out's delivery.
+    arrive_t: i64,
+    /// Where it was let go of, light-microseconds.
+    from: DVec3,
+    /// All of it, isotropic.
+    energy_j: f64,
+}
 
 /// When `craft`'s field reaches `Q_max` by `until_s`, if it does, walking the account through the
 /// day-long starlight segments it will be settled at.
@@ -46,8 +70,87 @@ pub fn collapse_by(craft: &Craft, until_s: f64) -> Option<f64> {
     }
 }
 
+/// `craft`'s shadow toward a source along `to_source`, m², in the attitude it holds at `t`: off the
+/// shadow table at the roll the hull presents to its star, the only roll it holds. Zero unfitted.
+pub fn shadow_toward_m2(craft: &Craft, to_source: DVec3, t: f64) -> f64 {
+    let (Some(fitting), Some(nose)) = (craft.fitting(), craft.facing_at(t)) else { return 0.0 };
+    lc_world::solar::shadow_m2(fitting.geometry(), nose.dot(to_source.normalize_or_zero()))
+}
+
+/// Of `energy_j` let go of at `from`, what arrives at `craft`'s field meeting it at `arrive_t`: onto
+/// its shadow toward `from`, from where it is then.
+pub fn received_j(craft: &Craft, from: DVec3, energy_j: f64, arrive_t: i64) -> f64 {
+    let offset = craft.position_at(arrive_t as f64) - from;
+    let shadow_m2 = shadow_toward_m2(craft, -offset, arrive_t as f64 * 1.0e-6);
+    energy_j * received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)
+}
+
+/// A fitted craft as a source of glow at one instant, read once for every receiver.
+struct Glowing<'a> {
+    craft: &'a Craft,
+    /// Light-microseconds.
+    at: DVec3,
+    /// `Q/τ` of its field, W.
+    emitted_w: f64,
+}
+
+/// `receiver`, which is `here` at `at_t`, and each source's glow reaching it: the watts `Q/τ` of
+/// its field puts out as its light left, and the fraction of them the receiver takes.
+fn glow_on(receiver: &Craft, here: DVec3, sources: &[Glowing], at_t: i64) -> Vec<(f64, f64)> {
+    let Some(to) = receiver.fitting() else { return Vec::new() };
+    let at_s = at_t as f64 * 1.0e-6;
+    let floor_w = GLOW_FLOOR * to.field().rated_load_w();
+    let bound_m2 = to.field().area_m2;
+    sources
+        .iter()
+        .filter(|source| source.craft.id != receiver.id)
+        .filter(|source| source.emitted_w * received_fraction(bound_m2, source.at.distance(here) * LIGHT_MICROSECOND_M) >= floor_w)
+        .filter_map(|source| {
+            let from = source.craft.fitting()?;
+            let left_t = lc_spacetime::retarded_times_at(at_t as f64, here, &source.craft.worldline()).last().copied()?;
+            let offset = here - source.craft.position_at(left_t);
+            let emitted_w = from.heat_j_at(&source.craft.motion, left_t * 1.0e-6) / from.field().tau_s;
+            let shadow_m2 = shadow_toward_m2(receiver, -offset, at_s);
+            Some((emitted_w, received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)))
+        })
+        .collect()
+}
+
 impl<J: Journal> Server<J> {
-    /// Destroy every craft whose field has reached `Q_max` by now, at the instant it did.
+    /// Restate every field's glow from its neighbors, from `at_t`. Every account is settled no
+    /// further than that.
+    pub(crate) fn shine(&mut self, at_t: i64) {
+        let at_s = at_t as f64 * 1.0e-6;
+        let sources: Vec<Glowing> = self
+            .fleet
+            .iter()
+            .filter_map(|craft| {
+                let fitting = craft.fitting()?;
+                let emitted_w = fitting.heat_j_at(&craft.motion, at_s) / fitting.field().tau_s;
+                Some(Glowing { craft, at: craft.position_at(at_t as f64), emitted_w })
+            })
+            .collect();
+        let changed: Vec<(CraftId, f64)> = sources
+            .iter()
+            .filter_map(|receiver| {
+                let glow = glow_on(receiver.craft, receiver.at, &sources, at_t);
+                // A receiver surrounded takes no more than one in contact: summed per source, ships
+                // stacked at the spawn point would heat each other without bound.
+                let taken: f64 = glow.iter().map(|(_, fraction)| fraction).sum();
+                let scale = if taken > CONTACT_FRACTION { CONTACT_FRACTION / taken } else { 1.0 };
+                let watts: f64 = glow.iter().map(|(emitted_w, fraction)| emitted_w * fraction * scale).sum();
+                (watts != receiver.craft.fitting()?.lit_w()).then_some((receiver.craft.id, watts))
+            })
+            .collect();
+        for (id, watts) in changed {
+            if let Some(craft) = self.fleet.get_mut(id) {
+                craft.adjust(at_t as f64 * 1.0e-6, |fitting| fitting.set_lit_w(watts));
+            }
+        }
+    }
+
+    /// Destroy every craft whose field has reached `Q_max` by now, at the instant it did, landing
+    /// every spike due by now on the way, in time order.
     pub(crate) fn collapse_fields(
         &mut self,
         after_t: i64,
@@ -56,14 +159,68 @@ impl<J: Journal> Server<J> {
         deliveries: &mut Vec<Scheduled>,
     ) {
         let now_s = self.now_t as f64 * 1.0e-6;
-        let due: Vec<(CraftId, f64)> =
-            self.fleet.iter().filter_map(|craft| Some((craft.id, collapse_by(craft, now_s)?))).collect();
-        for (id, at_s) in due {
-            // Up, so the field is at its limit by the stamp, and never into the tick before, where
-            // cursors already stand: only an input changed at a past instant asks for that.
-            let at_t = ((at_s * 1.0e6).ceil() as i64).max(after_t + 1).min(self.now_t);
-            self.collapse(id, at_t, wire, events, deliveries);
+        let mut due: Vec<(CraftId, i64)> =
+            self.fleet.iter().filter_map(|craft| Some((craft.id, self.stamp(collapse_by(craft, now_s)?, after_t)))).collect();
+        loop {
+            let collapsing = due.iter().enumerate().min_by_key(|(_, (_, at_t))| *at_t).map(|(k, &(id, at_t))| (k, id, at_t));
+            let landing = self
+                .arrivals
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.arrive_t <= self.now_t)
+                .min_by_key(|(_, a)| a.arrive_t)
+                .map(|(k, a)| (k, a.arrive_t));
+            match (collapsing, landing) {
+                (_, Some((k, arrive_t))) if collapsing.is_none_or(|(_, _, at_t)| arrive_t <= at_t) => {
+                    let arrival = self.arrivals.swap_remove(k);
+                    let id = arrival.observer;
+                    due.retain(|(craft, _)| *craft != id);
+                    if !self.land(arrival, wire, events, deliveries) {
+                        let next = self.fleet.get(id).and_then(|craft| collapse_by(craft, now_s));
+                        due.extend(next.map(|at_s| (id, self.stamp(at_s, after_t))));
+                    }
+                }
+                (Some((k, id, at_t)), _) => {
+                    due.swap_remove(k);
+                    self.collapse(id, at_t, wire, events, deliveries);
+                }
+                (None, _) => break,
+            }
         }
+    }
+
+    /// Up, so the field is at its limit by the stamp, and never into the tick before, where cursors
+    /// already stand: only an input changed at a past instant asks for that.
+    fn stamp(&self, at_s: f64, after_t: i64) -> i64 {
+        ((at_s * 1.0e6).ceil() as i64).max(after_t + 1).min(self.now_t)
+    }
+
+    /// Land a spike on its field, collapsing it there if that takes it to `Q_max`. Whether it did.
+    fn land(&mut self, arrival: Arrival, wire: &mut impl Transport, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) -> bool {
+        let at_s = arrival.arrive_t as f64 * 1.0e-6;
+        let Some(craft) = self.fleet.get_mut(arrival.observer) else { return false };
+        let arriving_j = received_j(craft, arrival.from, arrival.energy_j, arrival.arrive_t);
+        craft.adjust(at_s, |fitting| fitting.take_burst(Burst::Arriving(arriving_j)));
+        let Some(fitting) = craft.fitting() else { return false };
+        if fitting.heat_j_at(&craft.motion, at_s) < fitting.field().heat_max_j() {
+            self.tell_fitted(wire, arrival.observer);
+            return false;
+        }
+        self.collapse(arrival.observer, arrival.arrive_t, wire, events, deliveries);
+        true
+    }
+
+    /// Of `energy_j` let go of at once by `event`'s source, queue what each fitted craft its light
+    /// reaches will take, as a burst at the arrival the fan-out scheduled for it. The isotropic case
+    /// of an emission.
+    fn irradiate(&mut self, event_id: i64, from: DVec3, energy_j: f64, deliveries: &[Scheduled]) {
+        let reached = deliveries.iter().filter(|d| d.event == event_id).filter(|d| {
+            self.fleet.get(CraftId(d.observer.0)).is_some_and(|craft| craft.fitting().is_some())
+        });
+        let arrivals: Vec<Arrival> = reached
+            .map(|d| Arrival { observer: CraftId(d.observer.0), arrive_t: d.arrive_t, from, energy_j })
+            .collect();
+        self.arrivals.extend(arrivals);
     }
 
     fn collapse(
@@ -79,11 +236,14 @@ impl<J: Journal> Server<J> {
         craft.settle(at_s);
         let Some(fitting) = craft.fitting() else { return };
         let released_j = fitting.field().released_j(fitting.stored_j_at(&craft.motion, at_s));
-        let spike_w = fitting.balance().collapse_spike_fraction * released_j / SPIKE_S;
+        let spike_j = fitting.balance().collapse_spike_fraction * released_j;
         let name = craft.name.clone();
+        let from = craft.position_at(at_t as f64);
         craft.end(at_s);
         let payload = serde_json::to_string(&lc_proto::Released { released_j }).unwrap_or_else(|_| "{}".into());
-        self.emit(id, KIND_COLLAPSE, spike_w, payload, at_t, events, deliveries);
+        if let Some(event_id) = self.emit(id, KIND_COLLAPSE, spike_j / SPIKE_S, payload, at_t, events, deliveries) {
+            self.irradiate(event_id, from, spike_j, deliveries);
+        }
 
         self.pursuits.remove(&id);
         self.refitting.remove(&id);
@@ -486,6 +646,165 @@ mod tests {
         assert_eq!((event.t, event.source), (to_us(predicted_s), DYING));
     }
 
+    /// Light-microseconds in a meter.
+    const US_PER_M: f64 = 1.0 / LIGHT_MICROSECOND_M;
+
+    /// A full starting ship at its limit at the origin, which collapses a microsecond into the first
+    /// tick, and starting ships `at` light-microseconds off, each holding `heat` of `Q_max`, or idle
+    /// for `None`. No star, so nothing else heats anybody.
+    fn neighbors(at: &[(DVec3, Option<f64>)]) -> Server<Memory> {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut dying = still(DYING, DVec3::ZERO);
+        server.fit_new(&mut dying);
+        hold_black(&mut dying);
+        heat_to(&mut dying, 1.0);
+        server.fleet.insert(dying);
+        for (k, (place, heat)) in at.iter().enumerate() {
+            let mut craft = still(ShipId(2 + k as i64), *place);
+            server.fit_new(&mut craft);
+            hold_black(&mut craft);
+            if let Some(heat) = heat {
+                heat_to(&mut craft, *heat);
+            }
+            server.fleet.insert(craft);
+        }
+        server
+    }
+
+    fn heat_to(craft: &mut Craft, of_max: f64) {
+        let fitting = craft.fitting().unwrap().clone();
+        let heat_j = of_max * fitting.field().heat_max_j();
+        craft.fit(Some(Fitting::from_account(&Account { heat_j, ..fitting.account() }, *fitting.balance())));
+    }
+
+    /// Of `DYING`'s spike, where a starting ship holding `heat` of `Q_max` would be killed along
+    /// `toward`, light-microseconds.
+    fn lethal_us(server: &Server<Memory>, heat: f64, toward: DVec3) -> f64 {
+        let dying = server.ship(DYING).unwrap().fitting().unwrap();
+        let spike_j = dying.balance().collapse_spike_fraction * dying.field().released_j(dying.hull().capacities.storage_j);
+        let mut probe = still(ShipId(99), toward);
+        server.fit_new(&mut probe);
+        hold_black(&mut probe);
+        heat_to(&mut probe, heat);
+        let fitting = probe.fitting().unwrap();
+        let headroom_j = fitting.field().heat_max_j() - fitting.heat_j_at(&probe.motion, 0.0);
+        let shadow_m2 = shadow_toward_m2(&probe, -toward, 0.0);
+        lc_world::field::lethal_radius_m(fitting.absorptivity_at(0.0), spike_j, shadow_m2, headroom_j) * US_PER_M
+    }
+
+    fn died_at(server: &Server<Memory>, ship: ShipId) -> Option<i64> {
+        collapse_events(server).iter().find(|e| e.source == ship).map(|e| e.t)
+    }
+
+    /// Hot enough that the lethal radius is a dozen kilometers rather than a hundred meters.
+    const HOT: f64 = 1.0 - 1.0e-4;
+
+    /// Just inside the radius 30 gives, a spike kills; just outside, it does not.
+    #[tokio::test]
+    async fn a_spike_kills_inside_the_lethal_radius_and_not_outside_it() {
+        let r_us = lethal_us(&neighbors(&[]), HOT, DVec3::Y);
+        assert!(r_us * LIGHT_MICROSECOND_M > 5_000.0, "premise: hot widens it, to {} m", r_us * LIGHT_MICROSECOND_M);
+        for (of_radius, dies) in [(0.99, true), (1.01, false)] {
+            let mut server = neighbors(&[(DVec3::Y * of_radius * r_us, Some(HOT))]);
+            server.tick(&mut Loopback::new()).await.unwrap();
+            assert!(died_at(&server, DYING).is_some(), "premise: it collapsed");
+            assert_eq!(died_at(&server, ShipId(2)).is_some(), dies, "at {of_radius} of the lethal radius");
+        }
+    }
+
+    /// B, inside A's radius, dies when A's light reaches it; C, outside A's but inside B's, when B's
+    /// reaches it. Each death is one light-time after the last.
+    #[tokio::test]
+    async fn a_cascade_spreads_at_the_speed_of_light() {
+        let r_us = lethal_us(&neighbors(&[]), HOT, DVec3::Y);
+        let (b, c) = (DVec3::Y * 0.6 * r_us, DVec3::Y * 1.2 * r_us);
+        let mut server = neighbors(&[(b, Some(HOT)), (c, Some(HOT))]);
+        server.tick(&mut Loopback::new()).await.unwrap();
+        let a_t = died_at(&server, DYING).expect("A collapsed");
+        let b_t = died_at(&server, ShipId(2)).expect("B died");
+        let c_t = died_at(&server, ShipId(3)).expect("C died");
+        assert_eq!(b_t, (a_t as f64 + b.length()).ceil() as i64);
+        assert_eq!(c_t, (b_t as f64 + (c - b).length()).ceil() as i64);
+        assert!(c_t - b_t > 10, "premise: light-times long enough to tell apart, {}", c_t - b_t);
+
+        let mut alone = neighbors(&[(c, Some(HOT))]);
+        alone.tick(&mut Loopback::new()).await.unwrap();
+        assert_eq!(died_at(&alone, ShipId(2)), None, "C is outside A's radius, so B is what killed it");
+    }
+
+    /// Storage empty or full, a spike is all heat, `α` of what arrives on the shadow toward it.
+    #[tokio::test]
+    async fn a_spike_is_all_heat_whatever_storage_has_room_for() {
+        let apart_us = 3.0 * lethal_us(&neighbors(&[]), 0.0, DVec3::Y);
+        let mut server = neighbors(&[(DVec3::Y * apart_us, None), (-DVec3::Y * apart_us, None)]);
+        server.fleet.get_mut(CraftId(3)).unwrap().drain(f64::INFINITY, 0.0);
+        let before: Vec<Craft> = [2, 3].map(|id| server.fleet.get(CraftId(id)).unwrap().clone()).into();
+        server.tick(&mut Loopback::new()).await.unwrap();
+        let at_t = died_at(&server, DYING).unwrap();
+        let from = before[0].position_at(0.0) - DVec3::Y * apart_us;
+        let dying = neighbors(&[]);
+        let dying = dying.ship(DYING).unwrap().fitting().unwrap();
+        let spike_j = dying.balance().collapse_spike_fraction * dying.field().released_j(dying.hull().capacities.storage_j);
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        for (k, mut quiet) in before.into_iter().enumerate() {
+            let craft = server.fleet.get(quiet.id).unwrap();
+            let arrive_t = (at_t as f64 + apart_us).ceil() as i64;
+            let absorbed_j = craft.fitting().unwrap().absorptivity_at(arrive_t as f64 * 1.0e-6) * received_j(craft, from, spike_j, arrive_t);
+            // The dying ship's glow, which the tick began with.
+            let lit_w = craft.fitting().unwrap().lit_w();
+            quiet.adjust(0.0, |fitting| fitting.set_lit_w(lit_w));
+            quiet.settle(now_s);
+            let stored_j = |c: &Craft| c.fitting().unwrap().stored_j_at(&c.motion, now_s);
+            assert_eq!(stored_j(craft), stored_j(&quiet), "{k}: a burst converted into storage");
+            let tau_s = quiet.fitting().unwrap().field().tau_s;
+            let rose_j = craft.fitting().unwrap().heat_j_at(&craft.motion, now_s) - quiet.fitting().unwrap().heat_j_at(&quiet.motion, now_s);
+            let want_j = absorbed_j * (-(now_s - arrive_t as f64 * 1.0e-6) / tau_s).exp();
+            assert!((rose_j - want_j).abs() < 1.0e-9 * want_j, "{k}: rose {rose_j}, the spike {want_j}");
+            assert!(want_j > 0.01 * craft.fitting().unwrap().field().heat_max_j(), "premise: a real burst");
+        }
+    }
+
+    /// `Q/τ` of a neighbor's field, onto the shadow toward it, over `4π d²`: all heat into a full
+    /// ship, and none of it without the neighbor.
+    #[tokio::test]
+    async fn a_neighbors_glow_is_intake() {
+        let d_us = 2_000.0 * US_PER_M;
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut source = still(DYING, DVec3::ZERO);
+        server.fit_new(&mut source);
+        hold_black(&mut source);
+        heat_to(&mut source, 0.5);
+        server.fleet.insert(source);
+        let mut receiver = still(WATCHING, DVec3::Y * d_us);
+        server.fit_new(&mut receiver);
+        hold_black(&mut receiver);
+        let lone = receiver.clone();
+        server.fleet.insert(receiver);
+        let mut wire = Loopback::new();
+        server.tick(&mut wire).await.unwrap();
+        server.tick(&mut wire).await.unwrap();
+        let lit_t = server.now_t() - crate::server::TICK_US;
+
+        let source = server.ship(DYING).unwrap().fitting().unwrap();
+        let receiver = server.ship(WATCHING).unwrap();
+        let shadow_m2 = shadow_toward_m2(receiver, -DVec3::Y, lit_t as f64 * 1.0e-6);
+        let d_m = d_us * LIGHT_MICROSECOND_M;
+        let want_w = source.heat_j_at(&server.ship(DYING).unwrap().motion, lit_t as f64 * 1.0e-6) / source.field().tau_s * shadow_m2 / (4.0 * std::f64::consts::PI * d_m * d_m);
+        let lit_w = receiver.fitting().unwrap().lit_w();
+        assert!((lit_w - want_w).abs() < 1.0e-9 * want_w, "{lit_w} {want_w}");
+
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let mut lone = lone;
+        lone.settle(now_s);
+        let held_j = |craft: &Craft| {
+            let fitting = craft.fitting().unwrap();
+            fitting.heat_j_at(&craft.motion, now_s) + fitting.stored_j_at(&craft.motion, now_s)
+        };
+        let rose_j = held_j(receiver) - held_j(&lone);
+        let lit_j = receiver.fitting().unwrap().absorptivity_at(now_s) * lit_w * 2.0 * crate::server::TICK_US as f64 * 1.0e-6;
+        assert!((rose_j - lit_j).abs() < 1.0e-3 * lit_j, "rose {rose_j}, lit {lit_j}");
+    }
+
     /// The shard as it comes back from a checkpoint of `server`, on the same world and rate.
     fn restart(server: &Server<Memory>) -> Server<Memory> {
         let checkpoint = server.checkpoint();
@@ -690,5 +1009,36 @@ mod tests {
         }
         assert_eq!(swept.len(), wrecks.len(), "{swept:?}");
         assert!(collapse_events(&restarted).is_empty(), "a wreck collapsed again");
+    }
+
+    /// Six ships stacked at one point, as the spawn point stacks them, together take no more than
+    /// one in contact. Conversion stores what pays the drain, so each settles where the heat it keeps
+    /// of that half, `1 − η`, is what it lacks: summed per source, storage would fill and they
+    /// would heat each other without bound.
+    #[tokio::test]
+    async fn ships_stacked_at_one_point_heat_each_other_only_so_far() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.set_rate(1_000.0);
+        for k in 0..6 {
+            let mut craft = still(ShipId(k + 1), DVec3::ZERO);
+            server.fit_new(&mut craft);
+            hold_black(&mut craft);
+            server.fleet.insert(craft);
+        }
+        let idle_j = server.balance().field_tau_s * server.ship(ShipId(1)).unwrap().fitting().unwrap().hull().capacities.drain_w;
+        let mut wire = Loopback::new();
+        let ten_tau_s = 10.0 * server.balance().field_tau_s;
+        while (server.now_t() as f64) * 1.0e-6 < ten_tau_s {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(collapse_events(&server).is_empty(), "the stack collapsed");
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        for k in 0..6 {
+            let craft = server.ship(ShipId(k + 1)).unwrap();
+            let heat_j = craft.fitting().unwrap().heat_j_at(&craft.motion, now_s);
+            let kept = CONTACT_FRACTION * (1.0 - server.balance().conversion_efficiency);
+            let want_j = idle_j / (1.0 - kept);
+            assert!((heat_j - want_j).abs() < 1.0e-3 * want_j, "ship {}: {} of idle", k + 1, heat_j / idle_j);
+        }
     }
 }

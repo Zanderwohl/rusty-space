@@ -588,9 +588,7 @@ impl Craft {
         self.settle_fitting(None, from_s);
         let middle = 0.5 * (from_s + solar::segment_end(from_s));
         let watts = self.starlight_w_at(middle);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.set_starlight_w(watts);
-        }
+        self.set_starlight_w(watts);
     }
 
     /// Settle at every income boundary up to `now_s`, starting each new segment as it goes.
@@ -602,9 +600,7 @@ impl Craft {
             self.settle_fitting(None, boundary);
             let middle = boundary + 0.5 * step;
             let watts = self.starlight_w_at(middle);
-            if let Some(fitting) = &mut self.fitting {
-                fitting.set_starlight_w(watts);
-            }
+            self.set_starlight_w(watts);
             boundary += step;
         }
     }
@@ -658,19 +654,21 @@ impl Craft {
         Ok(account.commit(&trial, event.at_t))
     }
 
-    /// Add energy, as far as storage allows.
-    pub fn grant(&mut self, joules: f64, now_s: f64) {
+    /// Settle to `now_s`, then change the account there.
+    pub fn adjust(&mut self, now_s: f64, change: impl FnOnce(&mut Fitting)) {
         self.settle(now_s);
         if let Some(fitting) = &mut self.fitting {
-            fitting.grant(joules);
+            change(fitting);
         }
     }
 
+    /// Add energy, as far as storage allows.
+    pub fn grant(&mut self, joules: f64, now_s: f64) {
+        self.adjust(now_s, |fitting| fitting.grant(joules));
+    }
+
     pub fn drain(&mut self, joules: f64, now_s: f64) {
-        self.settle(now_s);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.drain(joules);
-        }
+        self.adjust(now_s, |fitting| fitting.drain(joules));
     }
 
     /// Begin a round toward `target`, when it plans. The caller refuses it under way and for a craft

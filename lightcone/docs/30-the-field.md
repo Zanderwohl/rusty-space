@@ -314,8 +314,8 @@ seeing it replayed as the light passes.
   the account.
 - **The event** is `kind::COLLAPSE`, stamped at the instant and where the ship was, carrying a
   `Released`. It goes through the journal like a burn. Its power is the spike taken as a second
-  long, until [Proximity](#proximity) gives the spike somewhere to land. The afterglow is not yet
-  light anything can see; H10 makes it so.
+  long, which is what an instrument's inverse square reads; the spike's energy lands on neighbors
+  as [Proximity](#as-built-1) says. The afterglow is not yet light anything can see; H10 makes it so.
 - **The wreck** stays in the fleet with its worldline ended at the instant. A ship that could see
   it goes on seeing it until the light of the end arrives, then stops, and the wreck is dropped once
   that light has passed every craft. A checkpoint keeps it with its end and no account, since the
@@ -339,7 +339,8 @@ receiver's shadow toward the source.
   [31-directed-energy.md](31-directed-energy.md#exhaust-lands-on-whatever-is-behind).
 - **Beams** are directed, and are [31-directed-energy.md](31-directed-energy.md).
 
-A spike is lethal to a ship with headroom `H` and absorptivity `α` inside
+A spike of `E`, `collapse_spike_fraction` of what the collapse releases, is lethal to a ship with
+headroom `H` and absorptivity `α` inside
 
 **r = √(α · E · A_shadow / (4π H))**
 
@@ -347,11 +348,15 @@ Shadow and headroom both go as the receiver's size squared, so **the lethal radi
 on the victim's size**. It depends only on the dying ship's energy and on the victim's headroom
 per unit area, which is how hot it already is.
 
-| collapsing ship | lethal radius, victim idle and Black | company standoff, 5 combined lengths, beside a 500 m ship |
+| collapsing ship, full | lethal radius, victim idle and Black | company standoff, 5 combined lengths, beside a starting ship |
 |---|---|---|
-| 500 m | 190 m | 5 km |
-| 5 km | 5.4 km | 27.5 km |
-| 50 km | 170 km | 250 km |
+| starting, 570 m | 150 m | 5.7 km |
+| ×10, 5.7 km | 4.2 km | 31 km |
+| ×100, 57 km | 130 km | 290 km |
+
+The ships are the starting form and it ten and a hundred times over, and the victim is broadside to
+the spike. The radii were 190 m, 5.4 km and 170 km before [F10](plans/forms-and-fields.md) gave
+the starting form its own shadow, which is smaller than the old ovoid's.
 
 A Clear victim's radius is √0.3 of these, a little over half. So at the defaults, **ships in
 company are safe and ships in contact are not**. Docked ships, tight
@@ -367,6 +372,40 @@ visible for as long as it takes light to cross it.
 
 Delivery is the existing light-delay machinery. A collapse's spike reaches each neighbor at the
 retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade spreads at c.
+
+### As built
+
+- **The spike rides the collapse event's fan-out.** Every delivery the event is scheduled to a
+  fitted craft is queued as a burst at that delivery's arrival, carrying the spike's energy and
+  where it left. On landing it takes `A_shadow / (4π d²)` from where the receiver is then, onto
+  its shadow toward the source, and `α` of that goes into `Q`. This is the isotropic case of the
+  one emission fan-out E3 builds for [31](31-directed-energy.md)'s beams and drives, which add a
+  beam's gain and cone and hand their arrivals to the same landing.
+- **A cascade is time order and nothing else.** Each tick takes due collapses and due landings
+  together, earliest first. A landing settles its receiver to the arrival and re-solves its
+  collapse, and a collapse queues its own spike's landings, which may fall in the same tick.
+  Nothing about a cascade is written anywhere. Arrivals are whole microseconds, rounded up as
+  every delivery is, so a long chain runs a little late: each hop can lose up to a microsecond,
+  and light from further back can overtake it.
+- **The glow is restated each tick.** `Q / τ` of every fitted neighbor, as its light left it, onto
+  the receiver's shadow toward it, is the receiver's intake from other craft beside its starlight.
+  Light that left before the neighbor's last settlement is read at that settlement.
+  A neighbor whose glow could not move `Q` by a billionth of `Q_max` over a time constant is not
+  solved for. It is not saved: a restart restates it on its first tick.
+- **A receiver takes at most half of what surrounds it,** the most one in contact faces: from one
+  source, and from all of them together. Ships stacked at the spawn point feed each other their glow
+  and convert it like starlight, and settle at an idle heat raised by a sixth. Capped per source
+  instead, a stack of three or more would heat itself until it collapsed.
+- **A shadow toward a neighbor** is read off the shadow table at the roll the hull presents to its
+  star, the only roll a hull holds.
+- **`--demo cascade`** is five hot ships ten times the starting size, 23 km apart. The first vents
+  and each spike kills the next. Nothing draws a collapse yet: a wreck disappears when the light of
+  its end arrives, and the console says it collapsed.
+
+  ![`--demo cascade`: five ships running hot](../images/h5-cascade-before.jpg)
+  ![and partway through: the first two are gone, and the light of the third's end has not yet arrived](../images/h5-cascade-partway.jpg)
+- **A spike in flight is not checkpointed.** A restart between a collapse and its spike's arrival
+  loses the spike, though the wreck comes back (see [Open](#open)).
 
 ## What an observer sees
 
@@ -500,6 +539,8 @@ puts a countdown in the text.
   data part's contents or a faction's relays survive the ship is a question for
   [22-provenance.md](22-provenance.md). An owner signed out when it happens is told nothing and
   finds the new ship on signing in; the transcript and knowledge went with the old one.
+- **A spike across a restart.** The spike's landings are held in memory. Its deliveries are in the
+  journal, and E3 rebuilds them from there with every other landing.
 - **Air under the field.** Parks held by the field would cap its temperature well below 4 600 K.
   Whether that is a real rule or only a look is undecided. The two layers are drawn either way.
 - **Direction of intake.** Reciprocity says an aperture receives best along its own axis. The
