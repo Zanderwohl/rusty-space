@@ -456,6 +456,17 @@ impl Covariance {
         self.0.get(Self::index(i, j)).copied().unwrap_or(0.0)
     }
 
+    /// This covariance and another, independent of it, together.
+    pub fn with(self, other: &[[f64; 7]; 7]) -> Self {
+        let mut out = self;
+        for (i, row) in other.iter().enumerate() {
+            for (j, x) in row.iter().enumerate().skip(i) {
+                out.0[Self::index(i, j)] += *x;
+            }
+        }
+        out
+    }
+
     /// The whole orbit scaled by a fraction with this sigma, as an error in its primary's
     /// distance scales everything fitted about it.
     pub fn scaled_by(mut self, fraction: f64) -> Self {

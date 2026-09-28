@@ -140,7 +140,7 @@ pub struct Server<J: Journal> {
     pub(crate) owners: HashMap<CraftId, ClientId>,
     pub(crate) clients: HashMap<ClientId, Connected>,
     pub(crate) journal: J,
-    minter: Minter,
+    pub(crate) minter: Minter,
     /// Written by this tick, and handed to the journal at the end of it.
     pending: Vec<Event>,
     /// What each connection is allowed to send. Kept per `ClientId` rather than per admitted
@@ -215,8 +215,8 @@ pub struct Server<J: Journal> {
     pub(crate) commands: std::collections::VecDeque<crate::command::Queued>,
     /// Wrecks swept since the last checkpoint took them, whose rows it is to delete.
     pub(crate) destroyed: Vec<i64>,
-    /// Spikes in flight to the fields they will land on. See [`crate::field`].
-    pub(crate) arrivals: Vec<crate::field::Arrival>,
+    /// What each craft has lit, what lands on each now, and what is on its way. See [`crate::emit`].
+    pub(crate) emissions: crate::emit::Emissions,
 }
 
 impl<J: Journal> Server<J> {
@@ -262,7 +262,7 @@ impl<J: Journal> Server<J> {
             reserved: HashMap::new(),
             commands: std::collections::VecDeque::new(),
             destroyed: Vec::new(),
-            arrivals: Vec::new(),
+            emissions: Default::default(),
         }
     }
 
@@ -494,6 +494,7 @@ impl<J: Journal> Server<J> {
         // After the intents, so an auto-ack switched off this tick answers nothing more.
         self.answer_owed(after_t, &mut events, &mut deliveries);
         self.announce_drives(after_t, &mut events, &mut deliveries);
+        self.keep_emissions(&mut events, &mut deliveries);
         self.keep_accounts(wire);
         // After every change of input this tick, each of which settled first.
         self.keep_field_modes(after_t, wire, &mut events, &mut deliveries);
@@ -567,7 +568,7 @@ impl<J: Journal> Server<J> {
                     Ok(applied) => {
                         // An intercept is a policy, so what it *did* — the first approach —
                         // is not something the client can work out from the order coming back.
-                        if matches!(applied.order, Order::Intercept { .. }) {
+                        if matches!(applied.order, Order::Intercept { .. } | Order::Emit { .. }) {
                             self.tell_flying(wire, CraftId(ship_id.0));
                         }
                         wire.send(from, Outbound::Accepted {
@@ -679,12 +680,22 @@ impl<J: Journal> Server<J> {
             let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
             return Ok(Applied { event_id, at_t: at, order: intent.order });
         }
+        if let Order::Emit { .. } = intent.order {
+            let order = self.order_emit(id, &intent.order, at)?;
+            let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
+            return Ok(Applied { event_id, at_t: at, order });
+        }
         let lights_the_drive = matches!(
             intent.order,
             Order::Burn { .. } | Order::SetCourse { .. } | Order::Cross { .. } | Order::Intercept { .. }
         );
         if lights_the_drive && self.fleet.get(id).is_some_and(|craft| craft.is_refitting(at_s)) {
             return Err(Refusal::Refitting);
+        }
+        // One rating bounds the drive and whatever is emitted, and a burn-emit is a plan: nothing
+        // else lights while anything is lit.
+        if (lights_the_drive || matches!(intent.order, Order::Refit { .. })) && self.emissions.is_emitting(id) {
+            return Err(Refusal::UnderWay);
         }
 
         // Set by the two arms that transmit something aimed. Everything else a ship does is
@@ -812,6 +823,8 @@ impl<J: Journal> Server<J> {
                     .map_err(refusal_for)?;
                 // The order puts nothing out. The plume going dark is still seen, by anyone
                 // who could see it lit — `crate::drive` states it — and after that the ship is.
+                // Whatever it had lit goes out with it.
+                self.put_out(id, at, events, deliveries);
                 (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
             }
             Order::Intercept { ship_id, closeness, approach } => {
@@ -879,15 +892,18 @@ impl<J: Journal> Server<J> {
                 // as the form any contact is drawn in; see `chase::contacts`.
                 (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::Refit { target: target.clone() })
             }
-            // E3 builds this.
-            Order::Emit { .. } => return Err(Refusal::NotBuilt),
             Order::CancelRefit => {
                 self.fleet.get_mut(id).ok_or(Refusal::NotYours)?.cancel_refit(at_s);
                 self.refitting.remove(&id);
                 (KIND_CUT, 0.0, "{\"refit\":false}".to_string(), Order::CancelRefit)
             }
             // Returned from above, before anything is put on the air.
-            Order::SetDuty { .. } | Order::NameIt { .. } | Order::RetainRaw { .. } | Order::Analyze | Order::FieldMode { .. } => {
+            Order::SetDuty { .. }
+            | Order::NameIt { .. }
+            | Order::RetainRaw { .. }
+            | Order::Analyze
+            | Order::FieldMode { .. }
+            | Order::Emit { .. } => {
                 return Err(Refusal::Impossible);
             }
             Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => {
@@ -949,6 +965,12 @@ impl<J: Journal> Server<J> {
             power_w,
             payload,
         };
+        // Charged from storage, not heat: a dish is not an engine (31 §Radio).
+        if transmitted || kind == KIND_TRANSMIT {
+            if let Some(craft) = self.fleet.get_mut(id) {
+                craft.drain(power_w * crate::radio::TRANSMISSION_S, at as f64 * 1.0e-6);
+            }
+        }
         let mut landings = Vec::new();
         for observer in self.fleet.iter() {
             // A transmitter does not receive its own transmission. True of a real radio, which
@@ -1192,26 +1214,9 @@ impl<J: Journal> Server<J> {
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
     ) -> Option<i64> {
-        let event_id = self.minter.mint(at)?;
-        let event = Event {
-            id: event_id.get(),
-            source: ShipId(id.0),
-            t: at,
-            at: from,
-            kind,
-            power_w,
-            payload,
-        };
-        for observer in self.fleet.iter() {
-            // Omnidirectional: everything that reaches here is a plume, a hull or an engine
-            // going out, and none of those are pointed at anybody.
-            if let Some(scheduled) = schedule(&event, &Beam::OMNI, observer) {
-                deliveries.push(scheduled);
-            }
-        }
-        let id = event.id;
-        events.push(event);
-        Some(id)
+        // Omnidirectional: everything that reaches here is a plume, a hull or an engine going
+        // out, and none of those are pointed at anybody.
+        self.fan_out(id, from, kind, power_w, |_| payload, at, &Beam::OMNI, &[], events, deliveries)
     }
 
     /// Release what has arrived. **The only place anything reaches a client.**
@@ -1222,7 +1227,9 @@ impl<J: Journal> Server<J> {
     /// there is not one.
     async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
-        let mut contacts = chase::contacts(&self.fleet, &self.clients, &self.balance, now);
+        let emissions = &self.emissions;
+        let mut contacts =
+            chase::contacts(&self.fleet, &self.clients, &self.balance, now, |observer, source| emissions.glare(observer, source));
         let ids: Vec<ClientId> = self.clients.keys().copied().collect();
 
         let mut reading: Vec<(ClientId, ShipId, i64)> = Vec::with_capacity(ids.len());

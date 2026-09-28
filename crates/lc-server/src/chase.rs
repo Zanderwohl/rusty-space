@@ -191,11 +191,13 @@ pub fn sighting(
 /// an hour ago, and the emission time is solved against the observer's own worldline rather
 /// than subtracted from a shared clock — which is what makes it right for an observer that is
 /// itself moving fast.
+/// `glare` is what an observer sees of a source from inside its beams.
 pub fn contacts(
     fleet: &Fleet,
     clients: &HashMap<ClientId, Connected>,
     balance: &Balance,
     now_t: i64,
+    glare: impl Fn(CraftId, ShipId) -> Option<lc_proto::Glare>,
 ) -> HashMap<ClientId, Vec<Cleared<Presence>>> {
     let mut out = HashMap::new();
     for (id, state) in clients {
@@ -231,7 +233,7 @@ pub fn contacts(
                 form: then.map(|then| (&*then.form).into()).unwrap_or_default(),
                 building: then.and_then(|then| then.underway(sighted.emitted_s)).map(Into::into),
                 glow: Some(craft.glow_at(sighted.emitted_s).unwrap_or_else(|| Glow::unfitted(balance)).into()),
-                glare: None,
+                glare: glare(observer.id, ShipId(craft.id.0)),
             };
             match Cleared::<Presence>::clear(presence, now_t) {
                 Ok(pass) => seen.push(pass),

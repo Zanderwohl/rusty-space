@@ -107,6 +107,31 @@ impl About {
         })
     }
 
+    /// Another fit's elements in this one's terms: its axis and period against this one's, its
+    /// eccentricity vector, its pole's tilt and its mean longitude at the pivot, each measured in
+    /// this fit's plane.
+    fn elements(&self, other: &Fitted) -> [f64; PARAMETERS] {
+        let f = &self.fitted;
+        let (u, v) = basis(f.pole);
+        let (ou, ov) = basis(other.pole);
+        let angle = |a: f64| {
+            let toward = ou * a.cos() + ov * a.sin();
+            toward.dot(v).atan2(toward.dot(u))
+        };
+        let periapsis = angle(other.periapsis_rad);
+        let n = TAU / other.period_s;
+        let longitude = angle(other.periapsis_rad + n * (self.pivot_s - other.epoch_s));
+        let mut out = [0.0; PARAMETERS];
+        out[AXIS] = (other.semi_major_m / f.semi_major_m).ln();
+        out[H] = other.eccentricity * periapsis.cos();
+        out[K] = other.eccentricity * periapsis.sin();
+        out[TILT_U] = (other.pole - f.pole).dot(u);
+        out[TILT_V] = (other.pole - f.pole).dot(v);
+        out[LONGITUDE] = longitude;
+        out[PERIOD] = (other.period_s / f.period_s).ln();
+        out
+    }
+
     /// Which parameters move: a circle assumed for want of arc has no `h` or `k`.
     fn free(&self) -> Vec<usize> {
         (0..PARAMETERS).filter(|&j| !(self.fitted.assumed_circular && (j == H || j == K))).collect()
@@ -411,6 +436,36 @@ fn covariance(fitted: &Fitted, looks: &[Look]) -> Option<(About, [[f64; PARAMETE
     let inflate = (chi2 / freedom).max(1.0 + unexplained.max(0.0));
     Some((about, linear.covariance().map(|row| row.map(|x| x * inflate))))
 }
+
+/// The covariance a fit's elements take on from an error in where its origin is: `shift` is one
+/// sigma of that error, meters, in the frame of `looks`.
+///
+/// **Every fit takes its star's position as known, and it is not.** The star is placed by
+/// parallax, well across the line of sight and poorly along it, and an orbit about a point that
+/// is not quite where it was believed is a different orbit. So the fit is settled again with the
+/// looks moved one sigma each way, and half the difference between the two is what one sigma of
+/// the star's error does to each element. Left out, a well fitted Mars was placed twice its bar
+/// out, and bars across Sol ran about two times too tight.
+pub(super) fn origin_covariance(fitted: &Fitted, looks: &[Look], shift: DVec3) -> Option<[[f64; PARAMETERS]; PARAMETERS]> {
+    let about = About { fitted: Fitted { assumed_circular: false, ..*fitted }, pivot_s: arc::pivot(looks)? };
+    let moved = |sign: f64| {
+        let shifted: Vec<Look> = looks.iter().map(|l| Look { from_m: l.from_m - shift * sign, ..*l }).collect();
+        about.elements(&settle(*fitted, &shifted, SETTLED))
+    };
+    let (plus, minus) = (moved(1.0), moved(-1.0));
+    let mut d = [0.0; PARAMETERS];
+    for (j, x) in d.iter_mut().enumerate() {
+        *x = if j == LONGITUDE {
+            em_foundations::kepler::anomaly::wrap_pi(plus[j] - minus[j])
+        } else {
+            plus[j] - minus[j]
+        } * 0.5;
+    }
+    d.iter().all(|x| x.is_finite()).then(|| d.map(|a| d.map(|b| a * b)))
+}
+
+/// Rounds a fit gets when it is settled again to see what moves it.
+const SETTLED: usize = 64;
 
 /// The covariance of where `fitted` puts its body at `t`, meters squared, from its elements'
 /// covariance about `pivot_s`: every element's effect on the place, correlations included.

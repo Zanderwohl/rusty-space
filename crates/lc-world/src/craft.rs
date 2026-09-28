@@ -23,6 +23,7 @@ use crate::navigation::Waypoint;
 use crate::seen::{Glows, History, Refitting, Seen, running};
 use crate::solar;
 use crate::system::LocalSystem;
+mod emit;
 mod field;
 
 /// A craft, by the identifier whoever owns it uses. Opaque here.

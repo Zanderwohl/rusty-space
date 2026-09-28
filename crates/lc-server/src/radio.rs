@@ -50,6 +50,9 @@ use crate::world::{Event, MICROS_PER_SECOND, Scheduled};
 /// the two is [`lc_world::signal::Beam::gain`] and does not depend on this number.
 pub const SIGNAL_POWER_W: f64 = 1.0e6;
 
+/// How long a transmission is on the air, for what it costs: its power for this long, from storage.
+pub const TRANSMISSION_S: f64 = 1.0;
+
 /// The conversation half of an order, before its event has an identifier.
 ///
 /// Held apart from the event because the two are written to different places for different
