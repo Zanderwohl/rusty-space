@@ -714,26 +714,34 @@ mod tests {
         assert!((ticks.heat_j - leap.heat_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.heat_j, leap.heat_j);
     }
 
-    /// A ship past its rated load at rest collapses; the same ship burning drains its heat and does
-    /// not, and the solve reads the burn.
+    /// Past its rated load, a ship at rest collapses partway through what would have been the
+    /// boost. Burning, the drive holds its heat under `Q_max`, and the solve reads the burn.
     #[test]
     fn a_burn_puts_off_a_collapse() {
+        use crate::flight::{Cruise, Drive};
         let b = Balance::DEFAULT;
-        let (motion, cruise) = hop();
-        let end_s = cruise.duration_s();
-        let (mut burning, _) = hot(b, 20.0 * me(&b), 9.0 * me(&b), &motion);
-        burning.set_starlight_w(3.0 * burning.field().rated_load_w());
-        let at_rest = burning.collapse_s(&rest(), end_s).expect("premise: at rest it collapses within the hop");
-        assert!(at_rest < 0.5 * end_s, "premise: {at_rest}");
-        assert_eq!(burning.collapse_s(&motion, at_rest), None);
-        let collapse_s = burning.collapse_s(&motion, end_s);
-        let heat_max_j = burning.field().heat_max_j();
-        if let Some(t) = collapse_s {
-            assert!(t > at_rest && close(burning.heat_j_at(&motion, t), heat_max_j, 1e-9), "{t}");
-        }
-        let n = 2000;
-        let first = (1..=n).map(|k| end_s * f64::from(k) / f64::from(n)).find(|&t| burning.heat_j_at(&motion, t) >= heat_max_j);
-        assert_eq!(first.is_some(), collapse_s.is_some(), "{first:?} {collapse_s:?}");
+        let cruise = Cruise::plan(DVec3::ZERO, DVec3::X * 1.0e-4, 0.0, Drive { accel_g: 2.0, ..Drive::DEFAULT });
+        let boost_end_s = cruise.phase_changes_s()[2];
+        let mut motion = rest();
+        motion.begin_crossing(cruise, None);
+        let (probe, _) = hot(b, 20.0 * me(&b), 0.0, &motion);
+        let (field, caps) = (probe.field(), probe.hull().capacities);
+        let (rated_w, heat_max_j) = (field.rated_load_w(), field.heat_max_j());
+        let made_w = 1.2 * rated_w;
+        let starlight_w = made_w + b.conversion_efficiency * caps.aperture_w - caps.drain_w;
+        assert!(starlight_w > caps.aperture_w, "premise: past the rating, so all the rest is heat");
+        // Reaching `Q_max` a quarter of the way through the boost.
+        let heat_j = field.equilibrium_j(made_w) - field.equilibrium_j(made_w - rated_w) * (0.25 * boost_end_s / field.tau_s).exp();
+        let (mut burning, _) = hot(b, 20.0 * me(&b), heat_j, &motion);
+        burning.set_starlight_w(starlight_w);
+        let exhaust_w = burning.emitted_w(&motion, 0.0, boost_end_s);
+        assert!(made_w - exhaust_w < rated_w, "premise: burning, it settles under the limit");
+
+        let at_rest = burning.collapse_s(&rest(), boost_end_s).expect("premise: at rest it collapses");
+        assert!(close(at_rest, 0.25 * boost_end_s, 1e-6), "premise: {at_rest}");
+        assert_eq!(burning.collapse_s(&motion, boost_end_s), None);
+        assert!(burning.heat_j_at(&motion, boost_end_s) < heat_j);
+        assert!(burning.heat_j_at(&rest(), boost_end_s) > heat_max_j);
     }
 
     #[test]
