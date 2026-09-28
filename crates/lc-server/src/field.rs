@@ -55,7 +55,7 @@ impl<J: Journal> Server<J> {
         for (id, at_s) in due {
             // Up, so the field is at its limit by the stamp, and never into the tick before, where
             // cursors already stand: only an input changed at a past instant asks for that.
-            let at_t = ((at_s * 1.0e6).ceil() as i64).clamp(after_t + 1, self.now_t);
+            let at_t = ((at_s * 1.0e6).ceil() as i64).max(after_t + 1).min(self.now_t);
             self.collapse(id, at_t, wire, events, deliveries);
         }
     }
@@ -161,12 +161,9 @@ mod tests {
     /// A full starting ship close enough to the sample star to collapse in a couple of weeks, and
     /// a second one three light-days off. Sixty times the design rate, a few ticks a day.
     fn scene() -> Option<(Server<Memory>, Loopback)> {
-        let star = a_star()?;
-        let sun_w = lc_world::solar::SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * lc_world::system::UNIT_M.powi(2);
-        let rated_au = RATED_LOAD_AU * (a_system()?.star_luminosity_w() / sun_w).sqrt();
-        let near = star.position_ly * LIGHT_US_PER_LY + DVec3::X * 0.6 * rated_au * AU_US;
+        let near = near_the_star()?;
         let mut server = Server::new(Memory::default(), 0, 1);
-        server.load_world(World::new(vec![star]));
+        server.load_world(World::new(vec![a_star()?]));
         server.set_rate(60.0);
         let mut dying = still(DYING, near);
         server.fit_new(&mut dying);
@@ -176,8 +173,22 @@ mod tests {
         Some((server, Loopback::new()))
     }
 
+    /// Light-microseconds, well inside the sample star's rated load.
+    fn near_the_star() -> Option<DVec3> {
+        let star = a_star()?;
+        let sun_w = lc_world::solar::SOLAR_CONSTANT_W_M2 * 4.0 * std::f64::consts::PI * lc_world::system::UNIT_M.powi(2);
+        let rated_au = RATED_LOAD_AU * (a_system()?.star_luminosity_w() / sun_w).sqrt();
+        Some(star.position_ly * LIGHT_US_PER_LY + DVec3::X * 0.6 * rated_au * AU_US)
+    }
+
     fn forecast(server: &Server<Memory>) -> Option<f64> {
         collapse_by(server.ship(DYING)?, server.now_t() as f64 * 1.0e-6 + 90.0 * DAY_S)
+    }
+
+    /// How far the dying ship is from its star, light-microseconds.
+    fn out_us(server: &Server<Memory>) -> f64 {
+        let craft = server.ship(DYING).unwrap();
+        (craft.motion.position_ly - craft.system.as_ref().unwrap().star_position_ly()).length() * LIGHT_US_PER_LY
     }
 
     fn to_us(s: f64) -> i64 {
@@ -258,10 +269,8 @@ mod tests {
         let Some((mut server, mut wire)) = scene() else { return };
         server.tick(&mut wire).await.unwrap();
         let first_s = forecast(&server).unwrap();
-        let craft = server.ship(DYING).unwrap();
-        let out_us = (craft.motion.position_ly - craft.system.as_ref().unwrap().star_position_ly()).length() * LIGHT_US_PER_LY;
         // A tenth of the way out again over the ten days or so it has.
-        let beta = 0.1 * out_us / (10.0 * DAY_S * 1.0e6);
+        let beta = 0.1 * out_us(&server) / (10.0 * DAY_S * 1.0e6);
         wire.client_says(OWNER, act(DYING, Order::Burn { beta: [beta, 0.0, 0.0] }));
         server.tick(&mut wire).await.unwrap();
         let moved_s = forecast(&server).expect("still close enough to collapse");
@@ -373,6 +382,51 @@ mod tests {
         assert_eq!(server.take_destroyed(), vec![DYING.0]);
     }
 
+    /// An owner signed out when it happens finds the new ship on signing in again.
+    #[tokio::test]
+    async fn a_signed_out_owner_signs_in_to_the_successor() {
+        use crate::testing::Broker;
+        let Some(near) = near_the_star() else { return };
+        let broker = Broker::new([1u8; 32]);
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut trusted = crate::ticket::Trusted::new("shard-1");
+        assert_eq!(trusted.learn(&broker.jwks()), 1);
+        server.trust(trusted);
+        server.load_world(World::new(vec![a_star().unwrap()]));
+        server.set_rate(60.0);
+        let mut wire = Loopback::new();
+        let hello = |jti: &str| Inbound::Hello { protocol: lc_proto::PROTOCOL_VERSION, ticket: broker.mint("acct-1", "shard-1", 60, jti) };
+        let welcomed = |said: Vec<Outbound>| {
+            said.into_iter().find_map(|m| match m {
+                Outbound::Welcome { ship_id, .. } => Some(ship_id),
+                _ => None,
+            })
+        };
+
+        wire.client_says(OWNER, hello("j1"));
+        server.tick(&mut wire).await.unwrap();
+        let first = welcomed(wire.take(OWNER)).expect("welcomed");
+        let mut dying = still(first, near);
+        server.fit_new(&mut dying);
+        server.fleet.remove(CraftId(first.0));
+        server.fleet.insert(dying);
+        server.disconnected(OWNER);
+        for _ in 0..500 {
+            server.tick(&mut wire).await.unwrap();
+            if !collapse_events(&server).is_empty() {
+                break;
+            }
+        }
+        assert_eq!(collapse_events(&server).len(), 1, "premise: it collapsed");
+
+        let again = ClientId(3);
+        wire.client_says(again, hello("j2"));
+        server.tick(&mut wire).await.unwrap();
+        let second = welcomed(wire.take(again)).expect("welcomed again");
+        assert_ne!(second, first);
+        assert!(server.ship(second).is_some_and(|craft| craft.ended_s().is_none() && craft.fitting().is_some()));
+    }
+
     /// A ship with no account whose pilot has gone leaves nobody to give another to.
     #[tokio::test]
     async fn an_unowned_ship_with_no_account_has_no_successor() {
@@ -393,7 +447,17 @@ mod tests {
     async fn a_collapse_survives_a_restart() {
         let Some((mut server, mut wire)) = scene() else { return };
         server.tick(&mut wire).await.unwrap();
+        // Drifting, so the starlight in a segment depends on where in it it is sampled.
+        let beta = 0.1 * out_us(&server) / (10.0 * DAY_S * 1.0e6);
+        wire.client_says(OWNER, act(DYING, Order::Burn { beta: [beta, 0.0, 0.0] }));
         server.tick(&mut wire).await.unwrap();
+        server.tick(&mut wire).await.unwrap();
+        // Settled partway through a starlight segment, as a refit or a grant leaves it: the segment
+        // was sampled from where it began, not from here.
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let craft = server.fleet.get_mut(CraftId(DYING.0)).unwrap();
+        craft.settle(now_s);
+        assert!(craft.fitting().unwrap().since_s() > lc_world::solar::segment_end(now_s) - DAY_S, "premise: mid-segment");
         let predicted_s = forecast(&server).unwrap();
         let checkpoint = server.checkpoint();
         drop(server);

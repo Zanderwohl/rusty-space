@@ -6,9 +6,10 @@ fails, the ship is gone and the whole system sees it happen.
 **Status: in the account.** The closed forms are `lc_world::field`, with their anchors derived in
 `Balance::DEFAULT`. A fitting settles `Q` beside stored energy (`lc_world::fitting::heat`), `Fitted`
 carries it and a checkpoint keeps it. Every field runs Black until the modes are built. A field that
-reaches `Q_max` collapses (`lc_server::field`); its spike does not yet reach neighbors. A ship whose storage has run down to what its motive has committed pays only as much
-of the living drain as conversion brings in, and the rest makes no heat, so an empty ship far from
-a star cools below 400 K. A refit's transfers and a burn's spending are settled beside the account
+reaches `Q_max` collapses (`lc_server::field`); its spike does not yet reach neighbors. A ship
+whose storage has run down to what its motive has committed pays only as much of the living drain
+as conversion brings in, and the rest makes no heat, so an empty ship far from a star cools below
+400 K. A refit's transfers and a burn's spending are settled beside the account
 rather than inside it, so room a build opens in full storage is refilled from the next settlement,
 a game day at most, and until then what would have filled it is heat; and a return landing in room
 starlight has already filled can hold storage above capacity until then. H8 closes both. It replaces the fixed 400 K hull
@@ -272,7 +273,8 @@ seeing it replayed as the light passes.
   the account.
 - **The event** is `kind::COLLAPSE`, stamped at the instant and where the ship was, carrying a
   `Released`. It goes through the journal like a burn. Its power is the spike taken as a second
-  long, until [Proximity](#proximity) gives the spike somewhere to land.
+  long, until [Proximity](#proximity) gives the spike somewhere to land. The afterglow is not yet
+  light anything can see; H10 makes it so.
 - **The wreck** stays in the fleet with its worldline ended at the instant. A ship that could see
   it goes on seeing it until the light of the end arrives, then stops, and the wreck is dropped once
   that light has passed every craft. It is not checkpointed, and its row and what it knew are

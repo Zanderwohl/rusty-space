@@ -164,7 +164,7 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     // a leak either way, because nothing after the save is involved. From here on the craft
     // records its stretches like any other, and `catch_up` fills the gap to now with real ones.
     craft.motion = snapshot.restore(system, row.saved_t as f64 * 1.0e-6);
-    craft.fit(saved.fitting.as_ref().map(|fitting| Fitting::from_wire(fitting, saved.field.as_ref())));
+    craft.restore(saved.fitting.as_ref().map(|fitting| Fitting::from_wire(fitting, saved.field.as_ref())));
     Ok(craft)
 }
 
@@ -267,13 +267,13 @@ impl<J: Journal> Server<J> {
                 Ok(mut craft) => {
                     if let Some(mut fitting) = craft.fitting().cloned() {
                         fitting.set_balance(self.balance);
-                        craft.fit(Some(fitting));
+                        craft.restore(Some(fitting));
                     }
                     // Entering starts a starlight segment, and the saved one is still in force:
                     // sampled again, a restart would move a collapse.
                     let fitting = craft.fitting().cloned();
                     craft.enter(system, row.saved_t as f64 * 1.0e-6);
-                    craft.fit(fitting);
+                    craft.restore(fitting);
                     catch_up(&mut craft, row.saved_t, checkpoint.now_t);
                     // Its owner is told of each step from here, as before the restart.
                     let refit = craft.fitting().and_then(|f| f.refit()).filter(|plan| !plan.is_done(now_s));
