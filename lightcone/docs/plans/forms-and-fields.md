@@ -796,7 +796,7 @@ graph LR
 
 ### C6 · Presets panel
 
-- status: todo
+- status: active card "C6 · Presets panel"
 - needs: C2, S2
 - touches: `crates/lc-client/src/presets_panel.rs`
 - read: 29 §Your own presets
