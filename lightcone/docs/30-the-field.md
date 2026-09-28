@@ -5,7 +5,8 @@ fails, the ship is gone and the whole system sees it happen.
 
 **Status: in the account.** The closed forms are `lc_world::field`, with their anchors derived in
 `Balance::DEFAULT`. A fitting settles `Q` beside stored energy (`lc_world::fitting::heat`), `Fitted`
-carries it and a checkpoint keeps it. Every field runs Black until the modes are built. A field that
+carries it and a checkpoint keeps it. A field is Clear, Black or Auto, and a new ship starts in Auto
+(`lc_world::fitting::mode`, `lc_server::field`); a completed switch is an event. A field that
 reaches `Q_max` collapses (`lc_server::field`); its spike does not yet reach neighbors. A ship
 whose storage has run down to what its motive has committed pays only as much of the living drain
 as conversion brings in, and the rest makes no heat, so an empty ship far from a star cools below
@@ -165,6 +166,30 @@ the next threshold is crossed and schedules the switch then, as it schedules a c
 at every change of input. A burst that jumps past a threshold starts the switch at once. The switch
 still takes `field_switch_s`, so Auto is posture too, not a reflex: it cannot answer a beam in time,
 only the heat the beam leaves behind.
+
+### As built
+
+- **The mode, the shade and any switch are in the account**, saved and sent with it as `Field`. The
+  new absorptivity applies from the switch's `done_s` in every read, however the account is settled.
+- **The flip is an event.** A completed switch stays in the account until the authority takes it
+  out, and that is the one place it becomes `kind::SHADE`, stamped at `done_s` where the ship was,
+  carrying a `ShadeChange`. Everyone else learns of it when its light arrives; what they then see
+  is [What an observer sees](#what-an-observer-sees). Its power is the starlight Clear reflects,
+  which is what appears or vanishes.
+- **Auto is solved, not stepped**, as a collapse is: `Fitting::auto_s` walks the account's stretches
+  for the first crossing, and the shard walks that across starlight segments, taking each switch as it
+  completes and beginning each one Auto calls for, in order, before it looks for a collapse. A
+  collapse that comes first stops it.
+- **Black's condition is only searched until storage fills**, since a full store is never under
+  `auto_refill_below`.
+- **Thresholds without both gaps are refused** as `Impossible`: `black_below` at or above
+  `clear_above`, or `auto_refill_below` at 1. A field with either gap closed switches back as soon as
+  a switch completes.
+- **Every mode order is refused `Switching` while a switch runs**, one that only moves Auto's
+  thresholds included.
+- **A new ship starts Clear**, the shade Auto keeps a full store in, rather than switching on its
+  first day.
+- The console's `field clear|black|auto` gives the same order.
 
 ## The anchors
 
@@ -384,7 +409,7 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 | crate | new | changed |
 |---|---|---|
 | `lc-world` | `field.rs`: the account, its closed forms, time to collapse, temperature, the lethal radius | `solar.rs` becomes intake: starlight onto the shadow, gained at the star. `fitting.rs` folds heat beside stored energy. `refit.rs` reports each step's heat, and whether the plan crosses `Q_max` |
-| `lc-proto` | `field.rs`. `Outbound::Collapsed { at_t, released_j, successor }`, to the owner only: observers learn of a collapse from its light. `Order::FieldMode { mode: Clear \| Black \| Auto { clear_above, black_below, refill_below } }`, `Refusal::Switching` | `Fitted` gains `field: Field`, with `Q` and its time, the mode, the `Shade` it is in, and any switch under way. `Presence` gains `glow: Glow`, the field's temperature and shade |
+| `lc-proto` | `field.rs`. `Outbound::Collapsed { at_t, released_j, successor }`, to the owner only: observers learn of a collapse from its light. `Order::FieldMode { mode: Clear \| Black \| Auto { clear_above, black_below, refill_below } }`, `Refusal::Switching`. `kind::SHADE`, a completed switch, carrying `ShadeChange` | `Fitted` gains `field: Field`, with `Q` and its time, the mode, the `Shade` it is in, and any switch under way. `Presence` gains `glow: Glow`, the field's temperature and shade |
 | `lc-server` | collapse scheduling and delivery, respawn | the tick settles heat. Refit and order acceptance warn |
 | `lc-client` | | `hud.rs` gains `Field`, `panels.rs` draws the bar. The refit panel, photometry. The field shader is [32-ship-rendering.md](32-ship-rendering.md) |
 
