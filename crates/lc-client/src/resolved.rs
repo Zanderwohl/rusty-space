@@ -207,8 +207,9 @@ pub fn sample_scene(
         }));
     for (length_m, distance_m, at_ly, craft) in hulls {
         let to_eye = -eye.offset_m(at_ly, craft, look);
+        let glow = crate::hull::glow_of(&game.0, &uplink, craft);
         scene.discs.push(Disc {
-            radiance: crate::hull::radiance_at(hull_star, at_ly, to_eye),
+            radiance: crate::hull::radiance_at(&game.0, hull_star, at_ly, to_eye, glow).total(),
             solid_angle_sr: crate::hull::solid_angle_sr(length_m, distance_m),
         });
     }

@@ -1230,7 +1230,8 @@ impl<J: Journal> Server<J> {
     async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
         let emissions = &self.emissions;
-        let mut contacts = chase::contacts(&self.fleet, &self.clients, now, |observer, source| emissions.glare(observer, source));
+        let mut contacts =
+            chase::contacts(&self.fleet, &self.clients, &self.balance, now, |observer, source| emissions.glare(observer, source));
         let ids: Vec<ClientId> = self.clients.keys().copied().collect();
 
         let mut reading: Vec<(ClientId, ShipId, i64)> = Vec::with_capacity(ids.len());

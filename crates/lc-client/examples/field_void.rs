@@ -231,8 +231,9 @@ fn stage(
     mut images: ResMut<Assets<Image>>,
 ) {
     let to_star = Vec3::new(-0.55, 0.45, 0.70).normalize();
-    let hull_radiance = sunlit(lc_client::hull::ALBEDO, args.au);
-    let own = planck(lc_world::craft::HULL_K);
+    let hull_radiance = sunlit(lc_client::hull::PAINT, args.au);
+    // The stand-in's own glow at idle: the field drawn over it carries the heat under study.
+    let own = planck(lc_world::fitting::Balance::DEFAULT.field_idle_k);
     let white = mapped(&args.mapping, &sunlit(1.0, args.au));
 
     let absorbs = if args.black { 1.0 } else { CLEAR_ABSORPTIVITY as f64 };
