@@ -172,6 +172,7 @@ graph LR
   E1 --> E3
   E2 --> E3
   S1 --> E3
+  H5 --> E3
   E3 --> E4
   H5 --> E4
   E1 --> E5
@@ -194,6 +195,7 @@ graph LR
   R6 --> R11
   F6 --> R11
   H7 --> R11
+  H5 --> R11
   R7 --> R12
   F9 --> R12
   R10 --> R13
@@ -520,11 +522,11 @@ graph LR
 ### E3 · Emit
 
 - status: todo
-- needs: E1, E2, S1
-- touches: `crates/lc-world/src/emit.rs`, `crates/lc-world/src/fitting/heat.rs` (an emit's power in `Fitting::emitted_w`, E2's heat-first draw), `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`
+- needs: E1, E2, S1, H5
+- touches: `crates/lc-world/src/emit.rs`, `crates/lc-world/src/fitting/heat.rs` (an emit's power in `Fitting::emitted_w`, E2's heat-first draw), `crates/lc-server/src/emit.rs`, `crates/lc-server/src/radio.rs`, `crates/lc-server/src/field.rs` (H5's landings), `crates/lc-server/src/persist.rs`
 - read: 31 §Emitting on purpose, §Three uses, §Radio
-- deliver: one emission, whatever lit it: a source, apertures, power, spectrum, spread, aim and the interval it is lit, with one fan-out to every worldline in the cone that delivers it at the retarded time as intake with `Outbound::Illuminated`, and as `Glare` on `Presence` to observers inside the cone. `Order::Emit`, balanced and as a burn, is the first thing that lights one; radio charged. E4 lights drives through the same path and adds none of its own.
-- done when: a second craft in the cone is fed and a third just outside is not, a balanced emit leaves the worldline alone, and an aimed beam misses a target that maneuvered after it left.
+- deliver: one emission, whatever lit it: a source, apertures, power, spectrum, spread, aim and the interval it is lit, with one fan-out to every worldline in the cone that delivers it at the retarded time as intake with `Outbound::Illuminated`, and as `Glare` on `Presence` to observers inside the cone. `Order::Emit`, balanced and as a burn, is the first thing that lights one; radio charged. E4 lights drives through the same path and adds none of its own. H5's spike is the isotropic case: its landings become this path's, not a second queue beside it. Landings still in flight come back after a restart, rebuilt from the journal's deliveries, whatever lit them.
+- done when: a second craft in the cone is fed and a third just outside is not, a balanced emit leaves the worldline alone, an aimed beam misses a target that maneuvered after it left, and a shard restarted while a beam and a collapse's spike are both in flight still lands each at its arrival, the spike killing a neighbor inside its lethal radius.
 
 ### E4 · Exhaust heats neighbors
 
@@ -650,11 +652,11 @@ graph LR
 ### R11 · The field in the game
 
 - status: todo
-- needs: R6, F6, H7
-- touches: `crates/lc-client/src/field.rs`
-- read: 32 §The field, 30 §What an observer sees
-- deliver: the envelope meshed from F6's grid, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and hot spots from `Illuminated` once E3 exists; `--field-k` in the binary (32 §Photographing it), holding the player's field at a temperature.
-- done when: a diving ship glows the color the field bar shows.
+- needs: R6, F6, H7, H5
+- touches: `crates/lc-client/src/field.rs`, `crates/lc-client/src/uplink.rs`
+- read: 32 §The field, 30 §What an observer sees, §Collapse
+- deliver: the envelope meshed from F6's grid, the shader fed by `Q`, mode and switch from `Fitted` and `Presence`, and hot spots from `Illuminated` once E3 exists; `--field-k` in the binary (32 §Photographing it), holding the player's field at a temperature; R6's collapse flash and debris where a craft collapsed, from the `kind::COLLAPSE` sighting as its light arrives, in place of a hull that only disappears, and the console naming the ship as its presence did rather than by id.
+- done when: a diving ship glows the color the field bar shows, and `--demo cascade` photographed partway shows the flash on the ship whose end's light is arriving and nothing on the ones whose light has not.
 
 ### R12 · The cone in the game
 
