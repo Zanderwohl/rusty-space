@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 36;
+pub const PROTOCOL_VERSION: u32 = 37;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -235,6 +235,19 @@ pub enum Motive {
         frame_beta: [f64; 3],
         since_t: f64,
         target: ShipId,
+        clock_base_s: f64,
+    },
+    /// Pushed along `thrust` at a constant proper acceleration by an emission, after turning the
+    /// nose to `nose`, for `lit_s` coordinate seconds. Drifting after. Appended last.
+    Boosting {
+        from_ly: [f64; 3],
+        beta0: [f64; 3],
+        start_s: f64,
+        thrust: [f64; 3],
+        nose: [f64; 3],
+        accel_g: f64,
+        lit_s: f64,
+        turn_s: f64,
         clock_base_s: f64,
     },
 }
@@ -450,6 +463,9 @@ pub mod kind {
     /// A field switch completed, stamped when and where: what it absorbs and reflects changed then.
     /// The payload is a [`super::ShadeChange`] as JSON.
     pub const SHADE: i16 = 11;
+    /// An emission lit, changed power or went out, stamped when and where. Its payload says
+    /// what it sends and along which cone; only craft inside that cone are delivered it.
+    pub const EMIT: i16 = 12;
 }
 
 /// What a craft's drive became at a [`kind::DRIVE`] event.
@@ -537,7 +553,7 @@ pub struct Presence {
     pub building: Option<Building>,
     /// `None` until H7.
     pub glow: Option<Glow>,
-    /// Only for an observer inside the craft's beam. `None` until E3.
+    /// Only for an observer inside one of the craft's beams whose light is arriving.
     pub glare: Option<Glare>,
 }
 
@@ -863,7 +879,7 @@ pub enum Outbound {
     /// No end time: an emitter can stop early, and when it meant to stop is its own business
     /// until the light of stopping arrives. `beam` is the emit's event id, so two beams on one
     /// bearing stay apart. `bearing` is a unit vector toward the source, in world axes.
-    Illuminated { ship_id: ShipId, beam: i64, bearing: [f64; 3], wavelength_m: f64, power_w: f64, arrive_t: i64 },
+    Illuminated { ship_id: ShipId, beam: i64, bearing: [f64; 3], spectrum: Spectrum, power_w: f64, arrive_t: i64 },
     /// The account's presets, whole. Sent after `Welcome` and after each change.
     Presets(Vec<Preset>),
 }
@@ -985,7 +1001,7 @@ pub mod form;
 mod knowing;
 mod radio;
 
-pub use field::{Apertures, Field, FieldMode, Glare, Glow, Shade, Switch};
+pub use field::{Apertures, Field, FieldMode, Glare, Glow, Shade, Spectrum, Switch};
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
@@ -1126,7 +1142,7 @@ mod tests {
                         reversing: true,
                     }),
                     glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear }),
-                    glare: Some(Glare { wavelength_m: 1.0e-6, received_w: 3.5e12 }),
+                    glare: Some(Glare { spectrum: Spectrum::Line { wavelength_m: 1.0e-6 }, flux_w_m2: 3.5e12 }),
                 },
                 1_000_000,
             )
@@ -1349,7 +1365,7 @@ mod tests {
             ship_id: ShipId(42),
             beam: 9,
             bearing: [0.0, 0.6, 0.8],
-            wavelength_m: 1.0e-6,
+            spectrum: Spectrum::Line { wavelength_m: 1.0e-6 },
             power_w: 2.5e17,
             arrive_t: 1_000_000,
         }

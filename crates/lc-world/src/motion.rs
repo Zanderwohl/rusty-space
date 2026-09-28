@@ -22,7 +22,7 @@ pub use crate::worldline::{Flight, Past};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShipId(pub i64);
 
-/// How a ship is moving. The eight are exclusive, and that exclusivity is the model.
+/// How a ship is moving. The nine are exclusive, and that exclusivity is the model.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Motive {
     /// Under thrust, on a planned crossing.
@@ -58,6 +58,8 @@ pub enum Motive {
     /// `beta * elapsed` each step is not the same number at two step sizes, and two sides that
     /// stepped differently would drift apart by the rounding.
     Drifting { from_ly: DVec3, since_t: f64 },
+    /// Pushed by an emission, then drifting. See [`crate::emit::Boost`].
+    Boosting(crate::emit::Boost),
 }
 
 /// Everything about a ship that moves.
@@ -111,7 +113,22 @@ impl ShipState {
                 | Motive::Rendezvous(_)
                 | Motive::Escort(_)
                 | Motive::Consort(_)
+                | Motive::Boosting(_)
         )
+    }
+
+    /// Be pushed by an emission from here, basing the crew's clock as a crossing does.
+    pub fn begin_boosting(&mut self, boost: crate::emit::Boost) {
+        self.crossing_clock_base_s = self.clock_s;
+        self.motive = Motive::Boosting(boost);
+        self.arrive_at = None;
+    }
+
+    /// Put one back part-way through, keeping the clock base it began with.
+    pub fn resume_boosting(&mut self, boost: crate::emit::Boost, clock_base_s: f64) {
+        self.motive = Motive::Boosting(boost);
+        self.arrive_at = None;
+        self.crossing_clock_base_s = clock_base_s;
     }
 
     /// Put a ship on an approach solved for it. The counterpart of [`Self::begin_crossing`],
@@ -291,6 +308,9 @@ impl ShipState {
                 Motive::Drifting { from_ly, since_t } => {
                     Recipe::Drifting { from_ly: *from_ly, since_t: *since_t }
                 }
+                Motive::Boosting(boost) => {
+                    Recipe::Boosting { boost: *boost, clock_base_s: self.crossing_clock_base_s }
+                }
             },
         }
     }
@@ -347,6 +367,7 @@ impl ShipState {
                 // The place it was flying to is gone even though the flight is not.
                 self.arrive_at = None;
             }
+            Motive::Boosting(_) => {}
             // An approach is defined against another craft and not against the system, so
             // leaving one takes nothing from it. Whether the quarry is still in sight is the
             // pursuit's business, not the system's.
@@ -602,6 +623,7 @@ pub fn state_at(
         Motive::Drifting { from_ly, since_t } => {
             Some((*from_ly + state.beta * (now_s - since_t) / JULIAN_YEAR_S, state.beta))
         }
+        Motive::Boosting(boost) => Some(boost.state_at(now_s)),
     }
 }
 
@@ -651,6 +673,7 @@ fn aim_at(state: &ShipState, now_s: f64) -> Option<crate::flight::Aim> {
         Motive::Rendezvous(plan) => Some(plan.aim_at(now_s)),
         Motive::Escort(plan) => Some(plan.aim_at(now_s)),
         Motive::Consort(plan) => Some(plan.aim_at(now_s)),
+        Motive::Boosting(boost) => Some(boost.aim_at()),
         // Nothing is asking. A station is held by thrust too small to turn for, and a conic
         // and a drift ask for nothing at all.
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => None,
@@ -676,6 +699,7 @@ pub fn thrust_g(state: &ShipState, now_s: f64) -> f64 {
         Motive::Consort(plan) => (plan.thrust_at(now_s) != DVec3::ZERO, plan.cruise.drive.accel_g),
         // Beside a burning quarry, what is lit is the quarry's acceleration.
         Motive::Escort(plan) => return plan.thrust_g(now_s),
+        Motive::Boosting(boost) => (boost.thrust_at(now_s) != DVec3::ZERO, boost.accel_g),
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => (false, 0.0),
     };
     if lit { accel_g } else { 0.0 }
@@ -778,6 +802,12 @@ pub fn advance(state: &mut ShipState, system: Option<&LocalSystem>, now_s: f64, 
                     Some(arc) => Motive::Falling(arc),
                     None => Motive::Drifting { from_ly: at, since_t: now_s },
                 };
+            }
+        }
+        Motive::Boosting(boost) => {
+            state.clock_s = state.crossing_clock_base_s + boost.proper_s(now_s);
+            if boost.has_ended(now_s) {
+                state.motive = Motive::Drifting { from_ly: state.position_ly, since_t: now_s };
             }
         }
         Motive::Falling(_) if system.is_none() => {

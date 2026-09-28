@@ -43,11 +43,18 @@ pub struct Glow {
     pub shade: Shade,
 }
 
-/// An emitter seen from inside its beam: what reaches the observer, in the beam's band.
+/// What light an emission is made of: a beam's one wavelength, or a drive face's blackbody.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Spectrum {
+    Line { wavelength_m: f64 },
+    Blackbody { temperature_k: f64 },
+}
+
+/// An emitter seen from inside its beam: its light's flux at the observer, W/m², in its spectrum.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Glare {
-    pub wavelength_m: f64,
-    pub received_w: f64,
+    pub spectrum: Spectrum,
+    pub flux_w_m2: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -9,8 +9,12 @@
 //! wherever the spot is no larger than the receiver's shadow, so no receiver ever takes more than
 //! was sent. Distances are meters and powers watts; the caller supplies both.
 
+use glam::DVec3;
+
+use crate::boost::gamma_of;
+use crate::escort::Burning;
 use crate::fitting::Balance;
-use crate::flight::C_M_S;
+use crate::flight::{Aim, C_M_S, G0, JULIAN_YEAR_S};
 use crate::signal::cone_solid_angle_sr;
 
 /// What `engine_m3` of engine can send, watts: its exhaust, its deliberate emission and its
@@ -79,6 +83,139 @@ pub fn lead_uncertainty_m(accel_m_s2: f64, blind_s: f64) -> f64 {
 /// flight here plus the beam's flight back, seconds.
 pub fn blind_s(distance_m: f64) -> f64 {
     2.0 * distance_m / C_M_S
+}
+
+/// An emission with net thrust, flown: the nose comes about to `nose` with nothing lit, then the
+/// ship is pushed along `thrust` at a constant proper acceleration for `lit_s` coordinate seconds,
+/// and drifts after. Recoil is `thrust`, against the beam, whichever end the beam leaves from.
+///
+/// The power at a constant acceleration falls as the ship lightens, exactly as the drive throttles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Boost {
+    pub from_ly: DVec3,
+    pub beta0: DVec3,
+    /// Coordinate seconds it was ordered, which is when the turn begins.
+    pub start_s: f64,
+    /// Unit, world axes.
+    pub thrust: DVec3,
+    /// Unit: where the nose points while lit.
+    pub nose: DVec3,
+    pub accel_g: f64,
+    pub lit_s: f64,
+    turn_s: f64,
+}
+
+impl Boost {
+    /// `attitude0` is where the nose was when ordered, and `slew_rate_rad_s` how fast it turns.
+    #[allow(clippy::too_many_arguments)]
+    pub fn plan(
+        from_ly: DVec3,
+        beta0: DVec3,
+        start_s: f64,
+        thrust: DVec3,
+        nose: DVec3,
+        accel_g: f64,
+        lit_s: f64,
+        attitude0: DVec3,
+        slew_rate_rad_s: f64,
+    ) -> Self {
+        let nose = nose.normalize_or(DVec3::X);
+        let turn_s = crate::attitude::turn_time_s(attitude0, nose, slew_rate_rad_s);
+        Self { from_ly, beta0, start_s, thrust: thrust.normalize_or(-nose), nose, accel_g, lit_s: lit_s.max(0.0), turn_s }
+    }
+
+    /// Exactly as planned, the turn included: what a recipe carries.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resume(
+        from_ly: DVec3,
+        beta0: DVec3,
+        start_s: f64,
+        thrust: DVec3,
+        nose: DVec3,
+        accel_g: f64,
+        lit_s: f64,
+        turn_s: f64,
+    ) -> Self {
+        Self { from_ly, beta0, start_s, thrust, nose, accel_g, lit_s, turn_s }
+    }
+
+    pub fn turn_s(&self) -> f64 {
+        self.turn_s
+    }
+
+    pub fn lights_s(&self) -> f64 {
+        self.start_s + self.turn_s
+    }
+
+    pub fn out_s(&self) -> f64 {
+        self.lights_s() + self.lit_s
+    }
+
+    /// Proper acceleration, light-seconds per second squared.
+    fn alpha(&self) -> f64 {
+        self.accel_g * G0 / C_M_S
+    }
+
+    fn burning(&self) -> Burning {
+        Burning {
+            position_ly: self.from_ly + self.beta0 * (self.turn_s / JULIAN_YEAR_S),
+            beta: self.beta0,
+            accel: self.thrust * self.alpha(),
+            since_t: self.lights_s(),
+        }
+    }
+
+    /// Where the ship is and how fast, at a coordinate time.
+    pub fn state_at(&self, now_s: f64) -> (DVec3, DVec3) {
+        if now_s < self.lights_s() {
+            let t = (now_s - self.start_s).max(0.0);
+            return (self.from_ly + self.beta0 * (t / JULIAN_YEAR_S), self.beta0);
+        }
+        let burning = self.burning();
+        let (at, beta) = burning.at(now_s.min(self.out_s()));
+        (at + beta * ((now_s - self.out_s()).max(0.0) / JULIAN_YEAR_S), beta)
+    }
+
+    /// Proper seconds since it was ordered.
+    pub fn proper_s(&self, now_s: f64) -> f64 {
+        let turned = (now_s - self.start_s).clamp(0.0, self.turn_s) / gamma_of(self.beta0);
+        if now_s <= self.lights_s() {
+            return turned;
+        }
+        let tau = self.lit_tau(now_s);
+        let after = (now_s - self.out_s()).max(0.0) / gamma_of(self.state_at(self.out_s()).1);
+        turned + tau + after
+    }
+
+    /// The ship's proper seconds lit by `now_s`.
+    fn lit_tau(&self, now_s: f64) -> f64 {
+        if now_s <= self.lights_s() {
+            return 0.0;
+        }
+        self.burning().tau_at(now_s.min(self.out_s()))
+    }
+
+    /// One order, given when it was: turn to `nose` and light.
+    pub fn aim_at(&self) -> Aim {
+        Aim { to: self.nose, from: None, since_s: self.start_s }
+    }
+
+    /// Zero where nothing is lit.
+    pub fn thrust_at(&self, now_s: f64) -> DVec3 {
+        if now_s >= self.lights_s() && now_s < self.out_s() { self.thrust } else { DVec3::ZERO }
+    }
+
+    pub fn lit_rapidity_at(&self, now_s: f64) -> f64 {
+        self.alpha() * self.lit_tau(now_s)
+    }
+
+    pub fn planned_rapidity(&self) -> f64 {
+        self.lit_rapidity_at(self.out_s())
+    }
+
+    pub fn has_ended(&self, now_s: f64) -> bool {
+        now_s >= self.out_s()
+    }
 }
 
 #[cfg(test)]

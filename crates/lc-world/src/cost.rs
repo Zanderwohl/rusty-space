@@ -53,6 +53,7 @@ pub fn lit_rapidity(state: &ShipState, now_s: f64) -> f64 {
             let keeping = plan.quarry.accel.length() * (tau - plan.cruise.start_s).max(0.0);
             plan.cruise.lit_rapidity_at(tau) + keeping
         }
+        Motive::Boosting(boost) => boost.lit_rapidity_at(now_s),
         // A station is held against milligravities; see `motion::thrust_g`.
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => 0.0,
     }
@@ -66,6 +67,7 @@ pub fn planned_rapidity(state: &ShipState) -> f64 {
         Motive::Consort(plan) => plan.cruise.planned_rapidity(),
         Motive::Rendezvous(plan) => plan.cruise.planned_rapidity(),
         Motive::Escort(plan) => plan.cruise.planned_rapidity(),
+        Motive::Boosting(boost) => boost.planned_rapidity(),
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => 0.0,
     }
 }
@@ -88,6 +90,7 @@ pub fn lit_edges(state: &ShipState, after_s: f64, until_s: f64) -> Vec<f64> {
             .into_iter()
             .map(|tau| plan.quarry.since_t + plan.quarry.world_elapsed(tau))
             .collect(),
+        Motive::Boosting(boost) => vec![boost.start_s, boost.lights_s(), boost.out_s()],
         Motive::Holding(_) | Motive::Falling(_) | Motive::Drifting { .. } => Vec::new(),
     };
     edges.retain(|&t| t > after_s && t < until_s);
