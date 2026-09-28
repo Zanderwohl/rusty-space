@@ -59,8 +59,13 @@ exhaust comes from field heat first, and from storage only for what heat cannot 
 
 - A ship under way sheds heat as it goes. Flying cools. At 5 g the starting ship's exhaust is
   1.1 × 10²⁰ W, which empties a full field (10 ME) in about fifteen game days.
+- **Except for the drive's own waste.** Below ε = 1 the drive makes heat the exhaust cannot draw,
+  or it would re-emit its waste and fly as if ε were 1
+  ([30-the-field.md](30-the-field.md#conversion)). A drive that wasteful warms as it flies, and a
+  large one can burn itself to collapse.
 - **Heat is mass**, as stored energy is. `mass_kg_at` counts `Q / c²`, and the rocket law is
-  unchanged. Only the source of the exhaust changes.
+  unchanged. Only the source of the exhaust changes. Waste is still aboard until it radiates, so a
+  ship below ε = 1 ends a burn heavier than the rocket law by it.
 - **The commitment is unchanged.** A plan commits against storage when accepted.
   Whatever heat supplies instead is refunded through the same path that `CutDrive` uses: the
   commitment runs down by the whole exhaust, whatever pays it, so heat's share leaves the commitment
@@ -72,7 +77,8 @@ exhaust comes from field heat first, and from storage only for what heat cannot 
   instants the drive lights or goes out and the account's settlements; within a burn it changes
   only as the rocket law throttles a lightening ship.
 - **Anything a ship lights draws the same way.** The account's sink is what the ship emits, not
-  the drive's exhaust in particular, so an emission joins it and is paid heat first.
+  the drive's exhaust in particular, so an emission joins it and is paid heat first. ε is the
+  rocket law's, so an emission makes no waste.
 
 ### Exhaust lands on whatever is behind
 
@@ -270,8 +276,8 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   `P · min(1, A_shadow / (Ω d²))` onto its shadow toward the emitter. It is held as intake, beside
   the neighbors' glow, until the next instant it is taken again. The receiver's owner is told with
   `Illuminated` whenever what arrives changes.
-- **A drive's emission is what leaves it**, `F c`. What the emitter's account draws for a burn is
-  the rocket law's whole cost, `F c / ε` in the ship's own time; the difference is [E6](plans/forms-and-fields.md)'s.
+- **A drive's emission is what leaves it**, `F c`. The rest of the rocket law's cost, `1 − ε` of
+  it, is the drive's waste, which stays aboard as heat (above) and lands on nobody.
 - **`power_w` is what each end sends.** A balanced emit sends it along the aim from the fore
   engines and against it from the aft ones, and draws twice it. Each end's rating is its engines'
   together, and the diffraction floor is `λ / 2D` for its widest face; a balanced emit's two beams
