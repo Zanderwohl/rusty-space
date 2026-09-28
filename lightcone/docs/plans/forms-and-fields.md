@@ -550,7 +550,7 @@ graph LR
 
 ### E6 · The drive's own heat
 
-- status: todo
+- status: active card "E6 · The drive's own heat"
 - needs: E2
 - touches: `crates/lc-world/src/fitting/heat.rs`
 - read: 30 §The inputs, 31 §The drive is the radiator
