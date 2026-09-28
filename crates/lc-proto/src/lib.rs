@@ -1001,7 +1001,7 @@ pub mod form;
 mod knowing;
 mod radio;
 
-pub use field::{Apertures, Field, FieldMode, Glare, Glow, Shade, Spectrum, Switch};
+pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lit, Shade, Spectrum, Switch};
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
@@ -1450,6 +1450,7 @@ mod tests {
                 mode: FieldMode::Auto { clear_above: 0.5, black_below: 0.3, refill_below: 0.95 },
                 shade: Shade::Black,
                 switch: Some(Switch { to: Shade::Clear, done_s: 1.0864e6 }),
+                lit: vec![Lit { from_s: 1.0e6, until_s: 1.0036e6, power_w: 2.2e20 }],
             }),
         }
     }
@@ -1740,6 +1741,7 @@ mod tests {
                     mode: FieldMode::Clear,
                     shade: Shade::Clear,
                     switch: None,
+                    lit: Vec::new(),
                 }),
             },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NotBuilt },

@@ -12,6 +12,15 @@ use crate::form::capacity::Capacities;
 use crate::motion::ShipState;
 use crate::refit::rounds::{Phase, Plan, Step};
 
+/// An emission with no net thrust: `power_w` from `from_s` until `until_s`, coordinate seconds.
+/// Drawn as the drive's exhaust is, and committed when lit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lit {
+    pub from_s: f64,
+    pub until_s: f64,
+    pub power_w: f64,
+}
+
 /// Since the settlement: the heat reached, and storage's net change.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Flow {
@@ -73,10 +82,15 @@ impl Fitting {
         }
     }
 
-    /// Averaged over `[from_s, until_s]`: the drive's exhaust. Whatever else a ship lights joins it
-    /// here.
+    /// Averaged over `[from_s, until_s]`: the drive's exhaust and whatever else is lit.
     fn emitted_w(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
-        (self.burn_spent_j(motion, until_s) - self.burn_spent_j(motion, from_s)) / (until_s - from_s)
+        let burn_j = self.burn_spent_j(motion, until_s) - self.burn_spent_j(motion, from_s);
+        (burn_j + self.lit_between_j(from_s, until_s)) / (until_s - from_s)
+    }
+
+    /// What the emissions with no net thrust put out over `[from_s, until_s]`, joules.
+    pub(super) fn lit_between_j(&self, from_s: f64, until_s: f64) -> f64 {
+        self.lit.iter().map(|lit| lit.power_w * (lit.until_s.min(until_s) - lit.from_s.max(from_s)).max(0.0)).sum()
     }
 
     /// Once the round under way is finished, if nothing else moves storage.
@@ -125,6 +139,7 @@ impl Fitting {
         let mut free_j = self.stored_j - self.committed_j - building_j;
         let mut at_s = self.since_s;
         let mut edges = motion.map_or_else(Vec::new, |m| cost::lit_edges(m, self.since_s, until_s));
+        edges.extend(self.lit.iter().flat_map(|lit| [lit.from_s, lit.until_s]).filter(|&t| t > self.since_s && t < until_s));
         edges.extend(self.posture.switch.map(|s| s.done_s).filter(|&t| t > self.since_s && t < until_s));
         for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s, &edges) {
             let dt_s = piece.until_s - at_s;

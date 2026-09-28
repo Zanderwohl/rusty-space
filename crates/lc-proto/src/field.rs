@@ -27,13 +27,23 @@ pub struct Switch {
 }
 
 /// A ship's own field, settled at `since_s` as the rest of its account is.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Field {
     pub heat_j: f64,
     pub since_s: f64,
     pub mode: FieldMode,
     pub shade: Shade,
     pub switch: Option<Switch>,
+    /// Emissions with no net thrust, drawn from heat first as the drive's exhaust is.
+    pub lit: Vec<Lit>,
+}
+
+/// An emission's draw: `power_w` from `from_s` until `until_s`, coordinate seconds.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Lit {
+    pub from_s: f64,
+    pub until_s: f64,
+    pub power_w: f64,
 }
 
 /// Another craft's field, as its light shows it.
