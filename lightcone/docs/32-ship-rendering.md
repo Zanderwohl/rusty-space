@@ -400,7 +400,8 @@ whatever is decided about air:
 alone has alpha and so is the only one that can hide anything. By Kirchhoff each mode's emissivity is
 its absorptivity, and a thin shell's grows toward one along a grazing path, so a Clear field is
 limb-brightened and a Black one glows evenly. The same number is how much of what is behind a wall it
-takes out: Clear shows the ship, Black hides it. The shader takes kelvin and fractions and a table of
+takes out: Clear shows the ship, Black hides it. Clear takes out only half of it
+(`CLEAR_VEIL_PERCENT`), its own glow left physical, so the ship reads plainly through a hot Clear field. The shader takes kelvin and fractions and a table of
 blackbody colors the host has already put through the observer's bands, so nothing in
 `em_render::field_material` knows a `Balance`.
 
@@ -461,8 +462,11 @@ collapse whose light has arrived.
 - **A collapse is drawn from its `kind::COLLAPSE` sighting**, at the place and in the shape its craft
   was last seen, and the console names it as its presence did. It starts on the frame the sighting
   is taken, which is when its hull leaves the contacts: the shard sends it once its light has arrived
-  by the shard's clock, and this client's may be behind. Its cooling runs from its arrival in
-  coordinate time, its flash for half a real second. **The spike lands on each neighbor** as a hot
+  by the shard's clock, and this client's may be behind. Its flash lasts half a real second, and its
+  debris spreads and cools from its arrival in coordinate time or as the afterglow plays at the
+  design rate, whichever is further on, so a clock slowed for watching does not hold it still. A
+  wreck's light still in flight shows it facing as it ended (`Craft::end` keeps the nose), not along
+  its last order's attitude. **The spike lands on each neighbor** as a hot
   spot toward the wreck when the light of it, off that neighbor, reaches this ship:
   `arrive + (|w − n| + |n − o| − |w − o|) / c`, from what the client knows of where each was.
 

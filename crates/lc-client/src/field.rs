@@ -857,9 +857,9 @@ mod tests {
             let state = FieldState { kelvin: 400.0, fill: 0.0, shade, switch: None };
             let u = uniform(&state, &shell(), &B, &light(&em_spectra::presets::natural()), [Vec4::ZERO; HOT_SPOTS], STANDING);
             let absorbs = u.state.z + (1.0 - u.state.z) * u.mode.x;
-            wall_opacity(absorbs, 1.0)
+            wall_opacity(absorbs, u.mode.x, 1.0)
         };
-        assert!(opacity(Mode::Clear) < 0.5, "{}", opacity(Mode::Clear));
+        assert!(opacity(Mode::Clear) < 0.2, "{}", opacity(Mode::Clear));
         assert_eq!(opacity(Mode::Black), 1.0);
     }
 

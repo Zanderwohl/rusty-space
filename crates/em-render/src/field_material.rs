@@ -72,10 +72,18 @@ pub fn ramp_at(spectrum: &[Vec4; RAMP], kelvin: f32) -> Vec3 {
     Vec3::new(log.x.exp2(), log.y.exp2(), log.z.exp2()) * (kelvin / hi).max(1.0)
 }
 
-/// `field.wgsl`'s wall: its emissivity, which is also its alpha, for a wall absorbing
-/// `absorbs` seen at `mu`, the cosine off its normal. A thin shell's path grows as `1 / mu`.
-pub fn wall_opacity(absorbs: f32, mu: f32) -> f32 {
-    1.0 - (1.0 - absorbs.clamp(0.0, 1.0)).powf(1.0 / mu.clamp(0.15, 1.0))
+/// How much of what a Clear wall's absorptivity would take out of the view behind it the shader
+/// does take out, in percent. Below Kirchhoff's hundred, so the ship reads plainly through a hot
+/// Clear field; its own glow is left physical. Black takes out all of it.
+pub const CLEAR_VEIL_PERCENT: u32 = 50;
+
+/// `field.wgsl`'s wall alpha: how much of what is behind it a wall absorbing `absorbs`, `black`
+/// of the way to Black, takes out seen at `mu`, the cosine off its normal. Its emissivity, a thin
+/// shell's path growing as `1 / mu`, veiled for Clear by [`CLEAR_VEIL_PERCENT`].
+pub fn wall_opacity(absorbs: f32, black: f32, mu: f32) -> f32 {
+    let emissivity = 1.0 - (1.0 - absorbs.clamp(0.0, 1.0)).powf(1.0 / mu.clamp(0.15, 1.0));
+    let veil = CLEAR_VEIL_PERCENT as f32 / 100.0;
+    emissivity * (veil + (1.0 - veil) * black.clamp(0.0, 1.0))
 }
 
 #[derive(Clone, Debug, PartialEq, ShaderType)]
@@ -218,6 +226,7 @@ impl Material for FieldMaterial {
             ShaderDefVal::UInt("RAMP".into(), RAMP as u32),
             ShaderDefVal::UInt("RAMP_MIN_K".into(), RAMP_MIN_K),
             ShaderDefVal::UInt("RAMP_MAX_K".into(), RAMP_MAX_K),
+            ShaderDefVal::UInt("CLEAR_VEIL_PERCENT".into(), CLEAR_VEIL_PERCENT),
         ];
         descriptor.vertex.shader_defs.extend(defs.iter().cloned());
         if let Some(fragment) = descriptor.fragment.as_mut() {

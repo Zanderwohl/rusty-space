@@ -46,6 +46,7 @@ const HOT_SPOTS: i32 = #{HOT_SPOTS};
 const RAMP: i32 = #{RAMP};
 const RAMP_MIN_K: f32 = f32(#{RAMP_MIN_K});
 const RAMP_MAX_K: f32 = f32(#{RAMP_MAX_K});
+const CLEAR_VEIL: f32 = f32(#{CLEAR_VEIL_PERCENT}) / 100.0;
 const TAU: f32 = 6.2831853;
 
 // The fill past which the field goes uneven; 30-the-field.md's 80%.
@@ -61,7 +62,7 @@ const FILM_THICK_NM: f32 = 700.0;
 const FILM_INDEX: f32 = 1.33;
 // A soap film's reflectance face-on, and how far its bands are allowed from white. Fully
 // saturated, the bands read as paint rather than as a sheen.
-const FILM_FACE_ON: f32 = 0.06;
+const FILM_FACE_ON: f32 = 0.02;
 const FILM_SATURATION: f32 = 0.4;
 
 fn hash3(p: vec3<f32>) -> f32 {
@@ -285,7 +286,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) facing: bool) -> @location(
         let absorbs = mix(clamp(material.state.z, 0.0, 1.0), 1.0, black);
         // Kirchhoff: emissivity is absorptivity, and a thin shell's grows toward one along a
         // grazing path. The same number is how much of what is behind the wall it takes out.
-        // Mirrored by `field_material::wall_opacity`.
         let emissivity = 1.0 - pow(1.0 - absorbs, 1.0 / mu);
         let power = unevenness(outward, in.local);
         linear = blackbody(kelvin * pow(power, 0.25)) * emissivity;
@@ -298,7 +298,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) facing: bool) -> @location(
         let reflects = (1.0 - absorbs) * glance * lit;
         let banded = mix(vec3<f32>(1.0), film(in.local, mu), FILM_SATURATION);
         linear = linear + material.starlight.rgb * banded * reflects;
-        opacity = emissivity;
+        // Mirrored by `field_material::wall_opacity`.
+        opacity = emissivity * mix(CLEAR_VEIL, 1.0, black);
     }
 
 #if FIELD_LAYER == 0
