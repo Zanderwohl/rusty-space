@@ -48,6 +48,9 @@ pub const RESOLVE_PX: f32 = crate::resolved::RESOLVE_PX;
 /// collapse's flash is.
 pub const FLARE_S: f32 = 0.5;
 
+/// What a flat term's kelvin is written as: no line is that long. `craft_points.wgsl` tests for it.
+const FLAT: f32 = -3.0e38;
+
 /// Flares remembered, lit or not yet shown.
 const FLARES_KEPT: usize = 256;
 
@@ -67,6 +70,8 @@ pub enum Term {
     /// Band flux is band radiance at `kelvin` times `sr`.
     Blackbody { kelvin: f64, sr: f64 },
     Line { wavelength_m: f64, flux_w_m2: f64 },
+    /// The same flux in every band, whatever the source's temperature.
+    Flat { per_band_w_m2: f64 },
 }
 
 impl Term {
@@ -103,6 +108,7 @@ impl Term {
         match self {
             Term::Blackbody { kelvin, sr } => Term::Blackbody { kelvin: kelvin * d, sr },
             Term::Line { wavelength_m, flux_w_m2 } => Term::Line { wavelength_m: wavelength_m / d, flux_w_m2: flux_w_m2 * d.powi(4) },
+            Term::Flat { per_band_w_m2 } => Term::Flat { per_band_w_m2: per_band_w_m2 * d.powi(4) },
             Term::Dark => Term::Dark,
         }
     }
@@ -115,15 +121,18 @@ impl Term {
                 let (lo, hi) = Band::ALL[i].limits_m();
                 if (lo..=hi).contains(&wavelength_m) { flux_w_m2 } else { 0.0 }
             })),
+            Term::Flat { per_band_w_m2 } => PerBand::splat(per_band_w_m2),
             Term::Dark => PerBand::splat(0.0),
         }
     }
 
-    /// `(kelvin, sr)`, a line as `(−meters, flux)`: `craft_points.wgsl`'s.
+    /// `(kelvin, sr)`, a line as `(−meters, flux)`, a flat term as `(`[`FLAT`]`, flux in each band)`:
+    /// `craft_points.wgsl`'s.
     fn encode(&self) -> [f32; 2] {
         match *self {
             Term::Blackbody { kelvin, sr } => [kelvin as f32, sr as f32],
             Term::Line { wavelength_m, flux_w_m2 } => [-wavelength_m as f32, flux_w_m2 as f32],
+            Term::Flat { per_band_w_m2 } => [FLAT, per_band_w_m2 as f32],
             Term::Dark => [0.0, 0.0],
         }
     }
@@ -244,7 +253,12 @@ pub fn craft(at_ly: DVec3, seen: &Seen, emission: Term, d: f64) -> Point {
 }
 
 /// A collapse `distance_m` off, from its `released_j` and when its light arrived: the spike taken
-/// as [`crate::field::SPIKE_S`] long at `collapse_spike_k`, then H10's afterglow.
+/// as [`crate::field::SPIKE_S`] long, then H10's afterglow.
+///
+/// **The spike cheats.** At `collapse_spike_k` it would put a millionth of itself in any band an
+/// eye has, and the most violent thing in the game would be a faint star. So its flux is drawn
+/// flat, the same in every band, which keeps its energy and shows it white in any mapping. The
+/// photometry an instrument reads is still the blackbody (`lc_world::afterglow`).
 pub fn collapse(far: &crate::field::Far, distance_m: f64, balance: &Balance, wrap_s: f32) -> Point {
     let afterglow = lc_world::afterglow::Afterglow::of(far.at_ly, 0.0, far.released_j, balance);
     let sphere_m2 = 4.0 * std::f64::consts::PI * distance_m * distance_m;
@@ -253,7 +267,7 @@ pub fn collapse(far: &crate::field::Far, distance_m: f64, balance: &Balance, wra
         flash_s: far.clock.y,
         fade_s: far.clock.z,
         wrap_s,
-        flash: Term::blackbody_flux(afterglow.spike_k, afterglow.spike_j / crate::field::SPIKE_S / sphere_m2),
+        flash: Term::Flat { per_band_w_m2: afterglow.spike_j / crate::field::SPIKE_S / sphere_m2 / Band::ALL.len() as f64 },
         fade: Term::Blackbody { kelvin: afterglow.limit_k, sr: 0.25 * afterglow.area_m2() / (distance_m * distance_m) },
     };
     Point { at_ly: far.at_ly, terms: [Term::Dark; TERMS], event: Some((event, far.since_s)) }
@@ -527,6 +541,7 @@ fn same(a: &[Point], b: &[Point], eye_ly: DVec3) -> bool {
     let term = |x: &Term, y: &Term| match (x, y) {
         (Term::Blackbody { kelvin: k, sr: s }, Term::Blackbody { kelvin: l, sr: t }) => close(*k, *l) && close(*s, *t),
         (Term::Line { wavelength_m: k, flux_w_m2: s }, Term::Line { wavelength_m: l, flux_w_m2: t }) => close(*k, *l) && close(*s, *t),
+        (Term::Flat { per_band_w_m2: s }, Term::Flat { per_band_w_m2: t }) => close(*s, *t),
         (x, y) => x == y,
     };
     a.len() == b.len()
@@ -710,18 +725,17 @@ mod tests {
         crate::field::Far { at_ly: DVec3::ZERO, released_j: 1.4e26, clock: Vec3::new(10.0, 0.5, 300.0), since_s }
     }
 
-    /// **A collapse flashes at `collapse_spike_k` as its light arrives and fades on H10's curve.**
+    /// **A collapse flashes as its light arrives and fades on H10's curve.** The flash carries the
+    /// whole spike, the same in every band.
     #[test]
     fn a_collapse_flashes_and_then_fades_as_the_afterglow_does() {
         let d = LY_M;
         let point = |t| collapse(&far(t), d, &B, 3600.0);
-        let (event, _) = point(0.0).event.unwrap();
-        let Term::Blackbody { kelvin, .. } = event.flash else { panic!("no flash") };
-        assert_eq!(kelvin, B.collapse_spike_k, "the spike's color");
-
         let afterglow = Afterglow::of(DVec3::ZERO, 0.0, 1.4e26, &B);
         let spike_w = afterglow.spike_j / crate::field::SPIKE_S;
-        let flash = share(B.collapse_spike_k).map(|_, s| s * spike_w / (4.0 * std::f64::consts::PI * d * d));
+        let flash = PerBand::splat(spike_w / (4.0 * std::f64::consts::PI * d * d) / Band::ALL.len() as f64);
+        let (event, _) = point(0.0).event.unwrap();
+        assert_eq!(event.flash.flux(), flash, "flat, and all of the spike");
         let at_first = lc_world::glow::thermal(&afterglow.glow_at(0.0).unwrap(), d);
         assert_near(point(0.1).flux(), flash.map(|b, x| x + at_first[b]), 1e-2, "the flash");
 

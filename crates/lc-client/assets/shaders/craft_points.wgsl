@@ -9,15 +9,18 @@
 // Per-vertex:
 //   POSITION : relative to the bake origin, light-years, render axes
 //   CORNER   : quad corner in [-1, 1]^2
-//   TERMS_A  : (kelvin, sr, kelvin, sr); a negative kelvin is a line at that many meters, flux in sr
+//   TERMS_A  : (kelvin, sr, kelvin, sr); a negative kelvin is a line at that many meters, flux in sr,
+//              and FLAT is the same flux in every band
 //   TERMS_B  : two more
 //   CLOCK    : (start, flash, fade, wrap), real seconds as globals.time reads them; start < 0: none
-//   EVENT    : (flash kelvin, flash sr, fade's first kelvin, fade's sr)
+//   EVENT    : (flash kelvin, flash sr, fade's first kelvin, fade's sr), the flash a term as above
 
 #import bevy_pbr::mesh_view_bindings::{view, globals}
 
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 const BANDS: u32 = 7u;
+/// distant::FLAT: a term the same in every band.
+const FLAT: f32 = -1.0e38;
 /// em_spectra's band limits, meters. A test holds these to it.
 const BAND_LO: array<f32, 7> = array<f32, 7>(3.98e-7, 5.07e-7, 5.89e-7, 7.315e-7, 1.995e-6, 7.5e-6, 0.21099);
 const BAND_HI: array<f32, 7> = array<f32, 7>(4.92e-7, 5.95e-7, 7.27e-7, 8.805e-7, 2.385e-6, 1.25e-5, 0.21114);
@@ -105,6 +108,9 @@ fn term(band: u32, kelvin: f32, sr: f32, d: f32) -> f32 {
     }
     if (kelvin > 0.0) {
         return band_radiance(band, max(kelvin * d, 1.0)) * sr;
+    }
+    if (kelvin <= FLAT) {
+        return sr * d * d * d * d;
     }
     let wavelength = -kelvin / d;
     if (wavelength >= BAND_LO[band] && wavelength <= BAND_HI[band]) {

@@ -78,6 +78,7 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--demo-cam <yaw:pitch:booms[:to]>` | pin the camera for the run, so two shots of a scene are the same shot. With `to`, the boom eases toward it once nothing is waiting to be drawn: `--frames 1 --burst 150` with `40:1.5` photographs every remesh of a hull on the way in |
 | `--watch-from <id>` | put the camera behind another craft, by its ship id: how two clients on one shard photograph each other |
 | `--demo-cam-ship` | read `--demo-cam`'s yaw and pitch in the frame of the ship the camera is behind, x its nose and z its up, so a face is framed whatever attitude the run gives it: `--demo-cam 25:-12:1.2 --demo-cam-ship` looks at the stern from behind and above |
+| `--exposure <stops>` | open the exposure this many stops past the automatic one, as the keys do, up to twelve: a long exposure, for a point too faint for the automatic one |
 | `--first-person` | put the eye on the ship itself with no boom, and draw none of the player's own hull, field or faces: a shot of the sky as seen from aboard, such as `--demo distant`'s points |
 | `--demo-cam-at <x:y:z:m>` | orbit a point of the ship's frame, meters, from `m` meters, past the boom's stops, which are the whole ship's. Aim with `--demo-cam` |
 | `--emit` | open the emit window, and once the `--focus craft:` selection is in sight light a real aft emit at it, a tenth of a radian wide so its cone reads on the map |

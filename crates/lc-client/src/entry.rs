@@ -150,6 +150,10 @@ pub fn parse(args: &[String]) -> Entry {
         true => crate::form_view::orbit_from(yaw, pitch),
         false => Action::Look { yaw, pitch },
     };
+    if let Some(stops) = value::<f32>(args, "--exposure") {
+        let step = if stops < 0.0 { Action::ExposureDown } else { Action::ExposureUp };
+        actions.extend(std::iter::repeat_n(step, (stops.abs() / crate::action::EXPOSURE_STEP).round() as usize));
+    }
     if let Some(degrees) = value::<f64>(args, "--turn") {
         actions.push(look(degrees.to_radians(), 0.0));
     }

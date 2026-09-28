@@ -650,12 +650,15 @@ fn numbered(path: &str, index: u32) -> String {
     }
 }
 
-/// `--first-person`: after everything that shows the player's own ship, hide it.
+/// `--first-person`: after everything that shows the player's own ship, hide it and its drones.
 pub(crate) fn hide_own_ship(
     dev: Res<DevEntry>,
     mut roots: Query<(&crate::ship_hull::ShipHull, &mut Visibility), Without<crate::hull::Hull>>,
     mut ovoids: Query<(&crate::hull::Hull, &mut Visibility), Without<crate::ship_hull::ShipHull>>,
-    mut parts: Query<&mut Visibility, (With<crate::parts::FormRoot>, Without<crate::hull::Hull>, Without<crate::ship_hull::ShipHull>)>,
+    mut parts: Query<
+        &mut Visibility,
+        (Or<(With<crate::parts::FormRoot>, With<crate::drones::Swarm>)>, Without<crate::hull::Hull>, Without<crate::ship_hull::ShipHull>),
+    >,
 ) {
     if !dev.first_person {
         return;

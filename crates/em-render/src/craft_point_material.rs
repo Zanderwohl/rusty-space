@@ -23,7 +23,8 @@ use crate::relativistic_starfield_material::{ATTRIBUTE_STAR_CORNER, Relativistic
 pub const TERMS: usize = 4;
 
 /// Terms 0 and 1, `(kelvin, sr, kelvin, sr)`. A blackbody's band flux is its band radiance times
-/// `sr`; a negative kelvin is a line at that many meters, whose `sr` is its flux, W/m².
+/// `sr`; a negative kelvin is a line at that many meters, whose `sr` is its flux, W/m²; and one at
+/// or below `-1e38` is the same flux, `sr`, in every band.
 pub const ATTRIBUTE_TERMS_A: MeshVertexAttribute =
     MeshVertexAttribute::new("CraftTermsA", 0x4352_4146_0001, VertexFormat::Float32x4);
 
@@ -36,7 +37,8 @@ pub const ATTRIBUTE_TERMS_B: MeshVertexAttribute =
 pub const ATTRIBUTE_EVENT_CLOCK: MeshVertexAttribute =
     MeshVertexAttribute::new("CraftEventClock", 0x4352_4146_0003, VertexFormat::Float32x4);
 
-/// The event's light: `(flash kelvin, flash sr, fade's first kelvin, fade's sr)`. The fade's area is
+/// The event's light: `(flash kelvin, flash sr, fade's first kelvin, fade's sr)`, the flash a term
+/// as above. The fade's area is
 /// fixed, so its temperature goes as `(1 - t / fade)^¼`.
 pub const ATTRIBUTE_EVENT_LIGHT: MeshVertexAttribute =
     MeshVertexAttribute::new("CraftEventLight", 0x4352_4146_0004, VertexFormat::Float32x4);
