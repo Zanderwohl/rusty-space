@@ -25,7 +25,7 @@ use crate::world::{Event, Scheduled};
 
 mod mode;
 
-pub use mode::auto_by;
+pub use lc_world::ahead::{auto_by, collapse_by};
 #[cfg(test)]
 pub(crate) use mode::hold_black;
 
@@ -46,28 +46,6 @@ pub(crate) struct Arrival {
     from: DVec3,
     /// All of it, isotropic.
     energy_j: f64,
-}
-
-/// When `craft`'s field reaches `Q_max` by `until_s`, if it does, walking the account through the
-/// day-long starlight segments it will be settled at.
-pub fn collapse_by(craft: &Craft, until_s: f64) -> Option<f64> {
-    let mut ahead: Option<Craft> = None;
-    loop {
-        let fitting = ahead.as_ref().unwrap_or(craft).fitting()?;
-        let since_s = fitting.since_s();
-        let segment_end_s = lc_world::solar::segment_end(since_s);
-        if let Some(at_s) = fitting.collapse_s(&ahead.as_ref().unwrap_or(craft).motion, segment_end_s.min(until_s)) {
-            return Some(at_s);
-        }
-        if segment_end_s >= until_s {
-            return None;
-        }
-        let next = ahead.get_or_insert_with(|| craft.clone());
-        next.settle(segment_end_s);
-        if next.fitting().is_none_or(|f| f.since_s() <= since_s) {
-            return None;
-        }
-    }
 }
 
 /// `craft`'s shadow toward a source along `to_source`, m², in the attitude it holds at `t`: off the

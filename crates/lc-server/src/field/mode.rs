@@ -10,7 +10,7 @@ use lc_world::craft::{Craft, CraftId};
 use lc_world::field::Mode;
 use lc_world::fitting::Setting;
 
-use super::collapse_by;
+use super::{auto_by, collapse_by};
 use crate::journal::Journal;
 use crate::server::Server;
 use crate::transport::Transport;
@@ -22,28 +22,6 @@ pub(crate) fn hold_black(craft: &mut Craft) {
     let Some(mut fitting) = craft.fitting().cloned() else { return };
     fitting.set_posture(lc_world::fitting::Posture::BLACK);
     craft.fit(Some(fitting));
-}
-
-/// When `craft`'s field in Auto next begins a switch by `until_s`, and toward which shade, walking
-/// the day-long starlight segments as [`collapse_by`] does.
-pub fn auto_by(craft: &Craft, until_s: f64) -> Option<(f64, Mode)> {
-    let mut ahead: Option<Craft> = None;
-    loop {
-        let fitting = ahead.as_ref().unwrap_or(craft).fitting()?;
-        let since_s = fitting.since_s();
-        let segment_end_s = lc_world::solar::segment_end(since_s);
-        if let Some(due) = fitting.auto_s(&ahead.as_ref().unwrap_or(craft).motion, segment_end_s.min(until_s)) {
-            return Some(due);
-        }
-        if segment_end_s >= until_s {
-            return None;
-        }
-        let next = ahead.get_or_insert_with(|| craft.clone());
-        next.settle(segment_end_s);
-        if next.fitting().is_none_or(|f| f.since_s() <= since_s) {
-            return None;
-        }
-    }
 }
 
 impl<J: Journal> Server<J> {

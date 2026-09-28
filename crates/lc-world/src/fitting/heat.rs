@@ -39,6 +39,30 @@ impl Fitting {
         self.field().temperature_k(self.heat_j_at(motion, now_s))
     }
 
+    /// `P_in` of `dQ/dt = P_in − Q/τ` at `now_s`, exhaust included: the inputs then in force, so
+    /// `P_in τ` is where heat is heading.
+    pub fn heat_w_at(&self, motion: &ShipState, now_s: f64) -> f64 {
+        let field = self.field();
+        let now_s = now_s.max(self.since_s);
+        let mut heat_w = 0.0;
+        // Walked a second past `now_s`, so the stretch holding it is always offered.
+        self.walk(Some(motion), now_s + 1.0, |from_s, part, heat_j, dt_s| {
+            if from_s + dt_s <= now_s {
+                return false;
+            }
+            let mut end_s = from_s;
+            for stretch in field.stretches(part, heat_j, dt_s) {
+                heat_w = stretch.heat_w;
+                end_s += stretch.dt_s;
+                if end_s > now_s {
+                    break;
+                }
+            }
+            true
+        });
+        heat_w
+    }
+
     /// Watts arriving from other craft: a neighbor's glow.
     pub fn lit_w(&self) -> f64 {
         self.lit_w
@@ -363,6 +387,30 @@ mod tests {
         assert!(close(steps.heat_j, leap.heat_j, 1e-9), "{} {}", steps.heat_j, leap.heat_j);
         assert!(close(steps.stored_j, leap.stored_j, 1e-12), "{} {}", steps.stored_j, leap.stored_j);
         assert_eq!(leap.stored_j, leap.hull().capacities.storage_j);
+    }
+
+    /// `P_in` is the rate heat moves at plus what it radiates, in the stretch holding the instant:
+    /// before storage fills and after.
+    #[test]
+    fn the_power_in_force_is_where_heat_is_heading() {
+        let b = Balance::DEFAULT;
+        let mut fitting = starting(b, 20.0 * me(&b));
+        fitting.set_starlight_w(starlight_w(&b, 0.05));
+        let room_j = fitting.hull().capacities.storage_j - 20.0 * me(&b);
+        let fill_s = fitting.intake(&fitting.hull().capacities, Mode::Black, 0.0, room_j, 0.0, 0.0).fill_s().unwrap();
+        let tau_s = b.field_tau_s;
+        let mut seen = Vec::new();
+        for t in [0.3 * fill_s, 1.5 * fill_s] {
+            let dt_s = 1.0e-4 * fill_s;
+            let rate_w = (fitting.heat_j_at(&rest(), t + dt_s) - fitting.heat_j_at(&rest(), t - dt_s)) / (2.0 * dt_s);
+            let heat_w = fitting.heat_w_at(&rest(), t);
+            let want_w = rate_w + fitting.heat_j_at(&rest(), t) / tau_s;
+            assert!(close(heat_w, want_w, 1e-5), "at {t}: {heat_w} {want_w}");
+            seen.push(heat_w);
+        }
+        assert!(seen[1] > 1.01 * seen[0], "premise: filling converts what full storage cannot: {seen:?}");
+        let later_s = fill_s + 40.0 * tau_s;
+        assert!(close(fitting.heat_w_at(&rest(), 1.5 * fill_s) * tau_s, fitting.heat_j_at(&rest(), later_s), 1e-9));
     }
 
     /// The drain storage cannot pay makes no heat.
