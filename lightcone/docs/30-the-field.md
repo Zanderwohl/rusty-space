@@ -379,8 +379,8 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
   fitted craft is queued as a burst at that delivery's arrival, carrying the spike's energy and
   where it left. On landing it takes `A_shadow / (4π d²)` from where the receiver is then, onto
   its shadow toward the source, and `α` of that goes into `Q`. This is the isotropic case of the
-  one emission fan-out E3 builds for [31](31-directed-energy.md)'s beams and drives, which add a
-  beam's gain and cone and hand their arrivals to the same landing.
+  one emission path of [31](31-directed-energy.md#as-built): the spike rides the collapse event,
+  whose payload carries it, and lands through the same landing as a beam.
 - **A cascade is time order and nothing else.** Each tick takes due collapses and due landings
   together, earliest first. A landing settles its receiver to the arrival and re-solves its
   collapse, and a collapse queues its own spike's landings, which may fall in the same tick.
@@ -404,8 +404,8 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
 
   ![`--demo cascade`: five ships running hot](../images/h5-cascade-before.jpg)
   ![and partway through: the first two are gone, and the light of the third's end has not yet arrived](../images/h5-cascade-partway.jpg)
-- **A spike in flight is not checkpointed.** A restart between a collapse and its spike's arrival
-  loses the spike, though the wreck comes back (see [Open](#open)).
+- **A spike in flight survives a restart.** The collapse event's deliveries are in the journal, and a
+  shard coming back lands every one its clock has not reached, as it does every emission's.
 
 ## What an observer sees
 
@@ -539,8 +539,6 @@ puts a countdown in the text.
   data part's contents or a faction's relays survive the ship is a question for
   [22-provenance.md](22-provenance.md). An owner signed out when it happens is told nothing and
   finds the new ship on signing in; the transcript and knowledge went with the old one.
-- **A spike across a restart.** The spike's landings are held in memory. Its deliveries are in the
-  journal, and E3 rebuilds them from there with every other landing.
 - **Air under the field.** Parks held by the field would cap its temperature well below 4 600 K.
   Whether that is a real rule or only a look is undecided. The two layers are drawn either way.
 - **Direction of intake.** Reciprocity says an aperture receives best along its own axis. The
