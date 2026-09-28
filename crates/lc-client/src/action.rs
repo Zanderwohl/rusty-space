@@ -50,6 +50,11 @@ pub enum Action {
     /// An edit to the draft as its handle or field built it, before and after, or why it could
     /// not be built. See [`crate::draft`].
     EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
+    /// Step the draft's history back one, forward one, or until this many entries are done.
+    Undo,
+    Redo,
+    GoToEdit(usize),
+    ShowHistory(bool),
     /// Send the draft to the shard as the ship's target, first asking again when its round would
     /// collapse the field.
     ApplyDraft,
@@ -358,7 +363,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::ExposureUp => adjust_exposure(ui, session, EXPOSURE_STEP),
         Action::ExposureDown => adjust_exposure(ui, session, -EXPOSURE_STEP),
         Action::ExposureAuto => {
-            ui.exposure_offset = 0.0;
+            ui.exposure_offset = None;
             session.auto_expose();
         }
 
@@ -495,9 +500,11 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::SelectPart(part) => ui.form.selected = part,
     Action::ShowCurrent(on) => ui.form.show_current = on,
     Action::ShowAdvanced(on) => ui.form.advanced = on,
+    Action::ShowHistory(on) => ui.form.show_history = on,
     Action::Fold(panel) => ui.form.folded.toggle(panel),
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
-    Action::EditForm(edit) => edit_form(ui, session, edit, &mut effects),
+    Action::EditForm(edit) => effects.extend(crate::form_history::edit(&mut ui.form, session, edit).map(Effect::Notify)),
+    Action::Undo | Action::Redo | Action::GoToEdit(_) => effects.extend(crate::form_history::step(&mut ui.form, &action).map(Effect::Notify)),
     Action::ApplyDraft => apply_draft(ui, session, false, &mut effects),
     Action::ApplyPastCollapse(apply) => {
         let asked = ui.form.asking.take();
@@ -811,31 +818,6 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     effects
 }
 
-/// Only a settled edit's refusal is said: a drag refused partway is still being made.
-fn edit_form(ui: &mut UiState, session: &Session, edit: Result<crate::draft::Edit, crate::draft::Refused>, effects: &mut Vec<Effect>) {
-    let start = crate::preview::Start::of(session);
-    let applied = match (&edit, ui.form.draft.as_mut()) {
-        (Ok(edit), Some(draft)) if start.as_ref().is_some_and(|s| !s.allows(draft, edit)) => Err(crate::draft::Refused::Unpaid),
-        (Ok(edit), Some(draft)) => draft.apply(edit, &lc_world::fitting::Balance::DEFAULT).map(|()| edit),
-        (Ok(_), None) => return effects.push(Effect::Notify("there is no draft to edit".into())),
-        (Err(refused), _) => Err(*refused),
-    };
-    match applied {
-        Ok(edit) => {
-            if edit.what == crate::draft::What::Add && edit.settled {
-                ui.form.selected = Some(edit.part);
-            }
-            if let Some(draft) = &ui.form.draft
-                && ui.form.selected.is_some_and(|id| draft.part(id).is_none())
-            {
-                ui.form.selected = None;
-            }
-        }
-        Err(_) if edit.as_ref().is_ok_and(|e| !e.settled) => {}
-        Err(refused) => effects.push(Effect::Notify(format!("refused: {refused}"))),
-    }
-}
-
 /// The refusal, if one comes, is the shard's, and [`crate::uplink`] files it against this target.
 /// A round that would collapse the field is allowed, since a player may choose to die, once asked
 /// twice.
@@ -980,7 +962,7 @@ fn set_preset(ui: &mut UiState, session: &mut Session, index: usize, effects: &m
 }
 
 fn adjust_exposure(ui: &mut UiState, session: &mut Session, stops: f32) {
-    ui.exposure_offset = (ui.exposure_offset + stops).clamp(-12.0, 12.0);
+    ui.exposure_offset = Some((ui.exposure_offset.unwrap_or(0.0) + stops).clamp(-12.0, 12.0));
     session.auto_expose();
     apply_exposure_offset(ui, session);
 }
@@ -995,7 +977,7 @@ pub fn refresh_exposure(ui: &UiState, session: &mut Session) {
 }
 
 fn apply_exposure_offset(ui: &UiState, session: &mut Session) {
-    session.tone = session.tone.exposed(ui.exposure_offset);
+    session.tone = session.tone.exposed(ui.exposure_offset.unwrap_or(0.0));
 }
 
 #[cfg(test)]
@@ -1349,10 +1331,12 @@ mod tests {
         let (mut ui, mut s) = fixture();
         let auto = s.tone.reference;
         apply(Action::ExposureUp, &mut ui, &mut s);
-        assert!((ui.exposure_offset - EXPOSURE_STEP).abs() < 1e-6);
+        assert_eq!(ui.exposure_offset, Some(EXPOSURE_STEP));
         assert!(s.tone.reference < auto, "opening up lowers the reference");
+        apply(Action::ExposureDown, &mut ui, &mut s);
+        assert_eq!(ui.exposure_offset, Some(0.0), "zero is manual, not automatic");
         apply(Action::ExposureAuto, &mut ui, &mut s);
-        assert_eq!(ui.exposure_offset, 0.0);
+        assert_eq!(ui.exposure_offset, None);
         assert!((s.tone.reference - auto).abs() < auto * 1e-6);
     }
 
@@ -1385,7 +1369,7 @@ mod tests {
         for _ in 0..200 {
             apply(Action::ExposureUp, &mut ui, &mut s);
         }
-        assert!(ui.exposure_offset <= 12.0);
+        assert_eq!(ui.exposure_offset, Some(12.0));
         assert!(s.tone.reference.is_finite() && s.tone.reference > 0.0);
     }
 

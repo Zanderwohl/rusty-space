@@ -737,9 +737,10 @@ volume above the minimum.
 - **The preview**, a pure function of `Session` and `Ui`: capacities, acceleration, broadside shadow,
   envelope area, slew rate, the field's rated load and headroom, brightness at the ship's current
   distance from its star, and the round's duration. It is `preview::Preview::of`, in a panel at the
-  right column under the selected part's detail; the left is the palette's alone. PARTS, the detail
-  and PREVIEW each fold to their heading on an arrow at its left, so a short window can keep what it
-  needs open (`--fold parts,detail,preview` for a shot). Choices the list leaves open:
+  right column under the selected part's detail; the left is the palette's and the history's.
+  PARTS, the detail and PREVIEW each fold to their heading on an arrow at its left, so a short
+  window can keep what it needs open (`--fold parts,detail,preview` for a shot). Choices the list
+  leaves open:
   - Its geometry comes from the draft's grid, which takes tens of milliseconds and much longer in a
     debug build, so it is measured off the frame each time the draft changes, and the grid's figures
     hold their last values until the new one arrives. It is passed to `Preview::of` beside the two.
@@ -774,13 +775,22 @@ entry records what changed, before and after, on the parts it touched:
   so undoing a removal puts back the same part in the same place with the same children.
 - **One gesture is one entry.** A drag records on release, not on every frame, and a typed field
   records when it is committed. The list reads as what the player did.
-- **The history is a panel**, listing entries by what they say ("resized storage core, 2.4 → 3.0 ×
-  10⁶ m³"). Clicking one moves the cursor there, undoing or redoing everything between.
+- **The history is a panel**, listing entries by what they say ("resized 1 storage, 2.4e6 to 3e6
+  m3", in the tree's names and the interface face's glyphs). Clicking one moves the cursor there,
+  undoing or redoing everything between. It sits under the palette on the left, hidden until the
+  square **H** on the palette's heading shows it (`--history` for a shot), newest first over a
+  **start** row, so a short window cuts off the oldest; entries past the cursor are dimmed.
+- Stepping writes an entry straight onto the draft, past the check that storage can pay a new
+  edit: every state it returns to is one the player had. An edit that changed nothing is not
+  recorded. A whole-draft entry is "reset to the ship" when it lands on the ship and "replaced the
+  draft" otherwise; a preset applied is `Action::EditForm` with `Draft::replace`, like a reset.
 - **It is temporary.** It lives in `Ui` beside the draft, survives leaving the view and coming back,
-  and is cleared when a round is applied, because the ship is then the new starting point. It is not
-  saved and not sent. It holds `MAX_HISTORY` entries and drops the oldest.
+  and is cleared when the shard accepts a round, because the ship is then the new starting point.
+  It is not saved and not sent. It holds `MAX_HISTORY` entries and drops the oldest.
 - `Cmd`/`Ctrl`+`Z` undoes, and `Shift` with it redoes. Both are `Action`s like any handle, so undo is
   tested without a window, as the preview is.
+
+![The history five edits in, two undone](../images/editor-history.png)
 
 Every handle emits an `Action` ([13-client-shell.md](13-client-shell.md)). `--view form --shot`
 photographs it, and `--form <preset>` stages a draft.

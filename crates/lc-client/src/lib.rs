@@ -39,6 +39,7 @@ pub mod field_bar;
 pub mod form_apply;
 pub mod form_carry;
 pub mod form_handles;
+pub mod form_history;
 pub mod form_panel;
 pub mod form_preview;
 pub mod form_view;

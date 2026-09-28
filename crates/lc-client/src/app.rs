@@ -123,7 +123,7 @@ impl Plugin for ClientPlugin {
             // The two modes beside the world, paired: a tuple of plugins stops at fifteen.
             (crate::map::MapPlugin, crate::form_view::FormViewPlugin,
                 crate::form_handles::FormHandlesPlugin, crate::form_panel::FormPanelPlugin, crate::form_apply::FormApplyPlugin,
-                crate::form_preview::FormPreviewPlugin),
+                crate::form_preview::FormPreviewPlugin, crate::form_history::FormHistoryPlugin),
             (crate::bench::BenchPlugin, crate::haze::HazePlugin),
             // The beauty shots and the staged refit both photograph the ship.
             (crate::beauty::BeautyPlugin, crate::ship_hull::ShipHullPlugin, crate::refit_hull::RefitHullPlugin, crate::field::FieldPlugin,
@@ -203,8 +203,10 @@ impl Plugin for ClientPlugin {
                             // After the carry, so the press that takes a part from the list
                             // does not also drop it there.
                             crate::form_panel::press,
+                            crate::form_history::press,
                             crate::form_view::read_slide_keys,
                             crate::form_handles::delete_key,
+                            crate::form_history::read_keys,
                         )
                             .chain()
                             .run_if(crate::form_view::editing),

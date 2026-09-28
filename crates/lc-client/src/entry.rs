@@ -174,6 +174,9 @@ pub fn parse(args: &[String]) -> Entry {
             _ => {}
         }
     }
+    if flag("--history") {
+        actions.push(Action::ShowHistory(true));
+    }
     // Stand-offs toward the nose; both ends are clamps, as the zoom's are.
     if let Some(standoffs) = value::<f64>(args, "--slide") {
         actions.push(Action::SlideForm(standoffs));
@@ -259,6 +262,7 @@ pub fn parse(args: &[String]) -> Entry {
         lift_deg: value(args, "--lift"),
         form: after("--form"),
         draft: after("--draft"),
+        undo: value(args, "--undo").unwrap_or(0),
         pull: value(args, "--pull"),
         // Only the player's own ship, and no round on the wire yet, so no shard: see
         // `construction`. `--refit-at` on its own asks for the same scene.
