@@ -479,8 +479,8 @@ rim at the courtesy radius, and a ring at the cooking distance.
 The hazard color is 18's red-orange. The material takes both of its colors as uniforms, so it
 stays free of either product's palette. The aperture glow is a second material in
 `exhaust_cone_material`. A drive's face is `lc_world::emit::aperture_temperature_k`: all of
-1.1 × 10²⁰ W through a 100 m face is 7.0 × 10⁵ K, and through the starting form's bell, whose open
-face is 88 m in radius, 5.3 × 10⁵ K.
+1.1 × 10²⁰ W through a face 100 m across is 7.0 × 10⁵ K, and through the starting form's bell,
+whose open face is 176 m across, 5.3 × 10⁵ K.
 
 **In the game** ([`plume.rs`](../../crates/lc-client/src/plume.rs)) every aft-firing engine face,
 from `lc_world::form::capacity::aft_apertures`, glows under its craft's hull root, at its share of

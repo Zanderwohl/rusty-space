@@ -78,8 +78,8 @@ pub struct FieldUniform {
     pub starlight: Vec4,
     /// `(surface_reference, stops, overflow, 0)`: the tone map, as the lit surfaces evaluate it.
     ///
-    /// `overflow` is what a stop past the top of the window is worth as HDR value, as for a
-    /// plume, so a field brighter than the window blooms rather than clipping flat.
+    /// `overflow` is what a stop past the top of the window is worth as HDR value, as for an
+    /// aperture's glow, so a field brighter than the window blooms rather than clipping flat.
     pub exposure: Vec4,
     /// Toward each beam, world, with `w` its strength: the extra power it lands on the envelope
     /// as a multiple of what the field radiates. Zero strength is no beam.

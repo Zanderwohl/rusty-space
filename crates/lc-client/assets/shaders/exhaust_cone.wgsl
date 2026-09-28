@@ -59,7 +59,7 @@ fn depth_sq(p: vec3<f32>, tan_half: f32) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Back from the fragment toward the eye, as in `plume.wgsl`: the fragment is order one in
+    // Back from the fragment toward the eye: the fragment is order one in
     // this space wherever the camera is, and the eye need not be.
     let eye = material.eye_local.xyz;
     let toward = in.local - eye;

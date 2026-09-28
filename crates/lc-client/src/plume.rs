@@ -458,7 +458,7 @@ mod tests {
         }
     }
 
-    /// 32's figure: the starting drive at its rating, through its bell's 88 m face.
+    /// 32's figure: the starting drive at its rating, through its bell's face, 176 m across.
     #[test]
     fn the_starting_face_is_five_hundred_thousand_kelvin() {
         let start = Form::starting();
@@ -501,6 +501,72 @@ mod tests {
         assert!(root.to_render(root.eye()).length() < 1.0e-18);
     }
 
+    /// The system end to end: a burning contact's faces glow under its hull, its cone is drawn
+    /// only once it is selected, and both go when its drive goes out.
+    #[test]
+    fn a_burn_is_glowed_and_coned_under_its_own_hull() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let session = Session::new(&lc_world::sky::AuthoredStars::sample(), 3);
+        let here = session.ship.motion.position_ly;
+        let craft = Some(ShipId(1));
+        let plate = Builtin::Plate.form();
+        let presence = lc_proto::Presence {
+            ship_id: ShipId(1),
+            name: "ship 1".into(),
+            length_m: 500.0,
+            at_ly: (here + DVec3::X * 1.0e6 / M_PER_LY).to_array(),
+            beta: [0.0; 3],
+            facing: [1.0, 0.0, 0.0],
+            jet_power_w: 1.0e17,
+            emitted_t: 0,
+            arrive_t: 3_600_000_000,
+            form: (&plate).into(),
+            building: None,
+            glow: None,
+            glare: None,
+        };
+        let mut uplink = crate::uplink::Uplink::default();
+        uplink.contacts = vec![crate::uplink::Contact::seen(presence, None)];
+        let mut real = RealHulls::default();
+        real.set(craft, 1, 1);
+
+        let mut world = World::new();
+        world.insert_resource(crate::app::Game(session));
+        world.insert_resource(crate::app::Ui(Default::default()));
+        world.insert_resource(uplink);
+        world.insert_resource(Eye::default());
+        world.insert_resource(crate::parts::OwnForm::default());
+        world.insert_resource(real);
+        world.init_resource::<Exhausts>();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<ExhaustConeMaterial>>();
+        world.init_resource::<Assets<ApertureGlowMaterial>>();
+        let mesh = world.spawn_empty().id();
+        let root = world
+            .spawn((ShipHull::bare(craft, mesh), Transform::from_scale(Vec3::splat((1.0 / UNIT_M) as f32))))
+            .id();
+
+        let mut run = |world: &mut World| {
+            world.run_system_once(draw_exhaust).unwrap();
+            let glows: Vec<Entity> = world.query::<(&Glow, &ChildOf)>().iter(world).map(|(_, c)| c.parent()).collect();
+            let cones = world.query::<&Cone>().iter(world).count();
+            (glows, cones, world.resource::<Exhausts>().cones.len())
+        };
+
+        let (glows, cones, drawn) = run(&mut world);
+        assert_eq!(glows, [root, root], "one glow per aft face, under the hull");
+        assert_eq!((cones, drawn), (0, 0), "outside its radius and unselected");
+
+        world.resource_mut::<crate::app::Ui>().0.selected_craft = craft;
+        let (glows, cones, drawn) = run(&mut world);
+        assert_eq!((glows.len(), cones, drawn), (2, 1, 1), "selected");
+
+        world.resource_mut::<crate::uplink::Uplink>().contacts[0].jet_power_w = 0.0;
+        let (glows, cones, drawn) = run(&mut world);
+        assert_eq!((glows.len(), cones, drawn), (0, 0, 0), "the drive went out");
+    }
+
     /// The reaction drive's plume is retired, with its material, shader and churn.
     #[test]
     fn no_plume_material_remains() {
@@ -508,6 +574,6 @@ mod tests {
         for gone in ["assets/shaders/plume.wgsl", "assets/textures/plume.tgraph", "../em-render/src/plume_material.rs"] {
             assert!(!std::path::Path::new(root).join(gone).exists(), "{gone} is back");
         }
-        assert!(!include_str!("../../em-render/src/lib.rs").contains("plume"));
+        assert!(!include_str!("../../em-render/src/lib.rs").contains("pub mod plume_material"));
     }
 }

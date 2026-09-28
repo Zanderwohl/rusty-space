@@ -85,7 +85,8 @@ pub(crate) fn lay_cones(
         })
         .clone();
     let mut mesh_of = |cone: &Drawn| {
-        let cooking = cone.cooking_m / cone.length_m;
+        // The same ratio at any power, but from two roots rounded apart, so held to six places.
+        let cooking = (cone.cooking_m / cone.length_m * 1.0e6).round() / 1.0e6;
         held.meshes
             .entry((cone.half_angle_rad.to_bits(), cooking.to_bits()))
             .or_insert_with(|| {

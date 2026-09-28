@@ -152,7 +152,7 @@ rendered background, not inside the menu, and matching the menu there would be m
 it cooks ([32-ship-rendering.md](32-ship-rendering.md#the-exhaust-cone)). It is a hue no craft or
 body is drawn in. Green is a body and amber is a craft, so the hazard has to be neither of them.
 It is Lightcone's and not the shared palette's, so it lives beside the game's code, not in
-`em_ui::vfd`. Until the cone is wired into the client, `examples/cone_void.rs` holds it.
+`em_ui::vfd`: `lc_client::ui::HAZARD`.
 
 
 ### Refit marks
