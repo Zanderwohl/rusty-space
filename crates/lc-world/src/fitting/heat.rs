@@ -29,9 +29,8 @@ impl Fitting {
         Field::of(self.geometry.envelope_area_m2, &self.balance)
     }
 
-    /// Read with no burn. That is exact because [`Craft::starlight_w_at`] gives no starlight under
-    /// way, and with none a burn's draw moves no heat: storage cannot fill, and the burn is paid
-    /// from its commitment.
+    /// Reads no burn. Exact because [`Craft::starlight_w_at`] gives none under way, and without
+    /// starlight a burn moves no heat.
     ///
     /// [`Craft::starlight_w_at`]: crate::craft::Craft::starlight_w_at
     pub fn heat_j_at(&self, now_s: f64) -> f64 {
@@ -60,20 +59,15 @@ impl Fitting {
         }
     }
 
-    /// What storage will hold once the round under way is finished, if nothing else moves it: what
-    /// the editor budgets the next round from.
+    /// Once the round under way is finished, if nothing else moves storage.
     pub fn stored_after_refit_j(&self, motion: &ShipState, now_s: f64) -> f64 {
         let stored_j = self.stored_j_at(motion, now_s);
         self.refit.as_ref().map_or(stored_j, |plan| skip(plan, now_s, stored_j, &self.balance).0)
     }
 
-    /// Cut where refit steps begin and end, so the drain, the rating, a step's transfer and its loss
-    /// are constant over each piece, and vents and spills land at the cut. Room and free storage
-    /// carry across cuts, so where settlements fall changes nothing.
-    ///
-    /// `motion` is the motive in force, whose burn draws on storage; `None` reads no burn. What the
-    /// burn has committed and what the round's builds have still to take are held out of free
-    /// storage, so the drain starves before either is short.
+    /// Cut where refit steps begin and end, so every input is constant over a piece. Room and free
+    /// storage carry across cuts, so where settlements fall changes nothing. The burn's commitment
+    /// and the builds still to run are held out of free storage, so the drain starves first.
     pub(super) fn flow(&self, motion: Option<&ShipState>, now_s: f64) -> Flow {
         let field = self.field();
         let mut flow = Flow { heat_j: self.heat_j, income_j: 0.0 };
@@ -104,9 +98,8 @@ impl Fitting {
     }
 }
 
-/// [`Field::settle`], split where free storage runs out. From there the drain takes only what
-/// conversion and any return bring in, and what it cannot pay makes no heat. `held_w` is the part of
-/// the draw paid from what is held out of free storage, which is never cut.
+/// [`Field::settle`], split where free storage runs out. After that the drain gets only what comes
+/// in, and its unpaid part makes no heat. `held_w`, paid from what is held back, is never cut.
 fn settle(field: &Field, segment: &Segment, drain_w: f64, held_w: f64, heat_j: f64, free_j: f64, dt_s: f64) -> (f64, f64) {
     let short_w = segment.draw_w - held_w - segment.stored_w();
     let empty_s = if short_w > 0.0 { free_j.max(0.0) / short_w } else { f64::INFINITY };
@@ -124,12 +117,12 @@ fn settle(field: &Field, segment: &Segment, drain_w: f64, held_w: f64, heat_j: f
 /// A stretch of constant refit inputs, ending at `until_s`.
 struct Piece {
     until_s: f64,
-    /// What the step under way loses to the field.
+    /// To the field.
     losing_w: f64,
-    /// What it takes from storage: a build's cost, or minus a dismantling's return.
+    /// Out of storage; negative for a return.
     moving_w: f64,
-    /// What the steps ending at `until_s` vent, less their planned spill, which the flow works out
-    /// from what storage actually holds.
+    /// Of the steps ending at `until_s`, less their planned spill: the flow spills what storage
+    /// actually holds.
     vent_j: f64,
 }
 
@@ -183,7 +176,7 @@ fn left(plan: &Plan, step: &Step, t: f64) -> f64 {
     }
 }
 
-/// What the builds still to run at `t` will take from storage, joules.
+/// Still to be taken by builds at `t`, joules.
 fn building_j(plan: &Plan, t: f64) -> f64 {
     let start_s = plan.round().start_s;
     plan.steps()
@@ -193,9 +186,8 @@ fn building_j(plan: &Plan, t: f64) -> f64 {
         .sum()
 }
 
-/// Finishing `plan` at once at `since_s` with `stored_j` in storage: the rest of every unfinished
-/// step's transfer, loss and vent, in order, spilling what each step's end leaves no room for.
-/// `(stored_j, heat_j)` after, the heat being what it adds.
+/// Finish `plan` at once from `since_s`, step by step, spilling at each step's end. Returns storage
+/// after and the heat added.
 pub(super) fn skip(plan: &Plan, since_s: f64, stored_j: f64, balance: &Balance) -> (f64, f64) {
     let start_s = plan.round().start_s;
     let (mut stored_j, mut heat_j) = (stored_j, 0.0);
@@ -378,8 +370,8 @@ mod tests {
         assert!(close(canceled.heat_j, 0.5 * loss_j, 1e-9), "{}", canceled.heat_j);
     }
 
-    /// With radiation and the drain off, a dismantling's return into a store starlight fills while
-    /// the step runs: storage stops at its capacity, and all of what it could not take is heat.
+    /// Radiation and drain off: a return into a store starlight is filling stops at capacity, and
+    /// the rest is heat.
     #[test]
     fn a_return_into_room_starlight_has_filled_is_heat() {
         let b = Balance { living_density_w: 0.0, field_tau_s: 1.0e40, ..Balance::DEFAULT };
@@ -420,8 +412,7 @@ mod tests {
         assert!(close(gained_j, arriving_w * 0.25 * end_s + step.gross_j, 1e-9), "finished: {gained_j}");
     }
 
-    /// Storage shrinks with the ship full, then the engine grows out of it, under starlight that
-    /// refills what the build takes. The ticks put every step end between two settlements.
+    /// A full store shrinks, then the engine grows, under starlight. Ticks fall between step ends.
     #[test]
     fn a_round_settled_at_every_tick_agrees_with_one_leap() {
         let b = Balance::DEFAULT;
@@ -460,8 +451,8 @@ mod tests {
         assert_eq!(leap.stored_j, leap.hull().capacities.storage_j, "premise: refilled by the end");
     }
 
-    /// A build planned to within a little of what is stored, under starlight too weak to pay the
-    /// drain: the drain eats the little and then starves, and the build is never short.
+    /// A build planned to within a little of storage, with starlight too weak for the drain: the
+    /// drain starves, and the build is never short.
     #[test]
     fn the_drain_cannot_eat_what_a_build_will_take() {
         let b = Balance::DEFAULT;
@@ -493,8 +484,7 @@ mod tests {
         assert!(close(ticks.heat_j, leap.heat_j, 1e-9), "{} {}", ticks.heat_j, leap.heat_j);
     }
 
-    /// Settled only at the round's start, the account still takes the finished form's drain and
-    /// rating from the instant its last step ends.
+    /// Settled only at the round's start, the new drain and rating still apply from the step end.
     #[test]
     fn the_drain_and_rating_change_at_the_step_end() {
         let b = Balance::DEFAULT;
@@ -519,8 +509,7 @@ mod tests {
         assert!(close(fitting.heat_j_at(end_s + dt_s), want_j, 1e-9), "{} {want_j}", fitting.heat_j_at(end_s + dt_s));
     }
 
-    /// Full under starlight, a burn opens room as it spends and conversion refills it; the drain is
-    /// still paid, and the burn comes out of its commitment.
+    /// Full under starlight, a burn opens room that conversion refills.
     #[test]
     fn a_burn_is_paid_from_storage_as_it_goes() {
         use crate::flight::{Cruise, Drive};
