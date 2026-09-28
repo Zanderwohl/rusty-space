@@ -172,6 +172,8 @@ pub enum Action {
     /// Give up a standing intercept, with no further corrections: the drive is cut and the ship
     /// keeps whatever velocity it has.
     BreakOff,
+    /// Clear, Black or Auto with its thresholds. The shard refuses it while a switch runs.
+    SetField(lc_proto::FieldMode),
 
     // --- appearance -------------------------------------------------------------------
     /// Replace a starfield pass's drawing parameters. Carries the whole style rather than one
@@ -604,6 +606,17 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::BreakOff => {
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::BreakOff));
+            }
+        }
+        Action::SetField(mode) => {
+            let now = session.coordinate_time_s();
+            let switching = session.ship.fitting().is_some_and(|f| f.posture().switching_at(now).is_some());
+            if switching {
+                effects.push(Effect::Notify(crate::uplink::refused(lc_proto::Refusal::Switching)));
+            } else if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::FieldMode { mode }));
+            } else {
+                effects.push(Effect::Notify("no shard to set the field at".into()));
             }
         }
 
