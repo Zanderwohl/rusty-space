@@ -281,7 +281,7 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   `Illuminated` whenever what arrives changes.
 - **A drive's emission is what leaves it**, `F c`. The rest of the rocket law's cost, `1 − ε` of
   it, is the drive's waste, which stays aboard as heat (above) and lands on nobody.
-- **`Presence` states the main drive's `F c`** (R17), `lc_world::emit::drive_w`: the `Jet::Drive`
+- **`Presence` states the main drive's `F c`**, `lc_world::emit::drive_w`: the `Jet::Drive`
   of the same `exhaust` the emission is lit from, at the instant the light left, and `Drive::exhaust_w`
   is the one formula both reach. Not the thrusters, whose wider spread no cone draws, and not an
   emit flown as a burn, which is its own emission and reaches an observer as `Glare`. The drive's

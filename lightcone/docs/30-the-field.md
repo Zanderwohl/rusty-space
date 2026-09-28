@@ -490,7 +490,7 @@ shows its thresholds. What a player can infer from it:
   samples heat is read off the line joining them, and a sample is dropped while that line passes
   within a part in ten thousand of it and of every sample dropped before it, so a field at rest is
   one sample. A burst is kept as a step. `Craft::glow_at` reads it; a new fitting is the field for
-  all time before it. H5's glow between neighbors reads the same history.
+  all time before it. The glow between neighbors reads the same history.
 - **`Presence.glow`** is filled from it at the emission time, so a vent two light-hours off is news
   two hours later. A craft with no fitting is stated as the starting field at rest: 400 K, Clear.
 - **A wreck is seen in the field it ended in.** Its fitting is gone, but its history is not, so its
