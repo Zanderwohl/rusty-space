@@ -211,8 +211,10 @@ impl<J: Journal> Server<J> {
             let Some(craft) = self.fleet.get_mut(id) else { return };
             let stored_j = craft.fitting().map_or(0.0, |f| f.stored_j_at(&craft.motion, now_s));
             let vented_j = (me * self.balance.module_energy_j()).min(stored_j);
-            craft.drain(vented_j, now_s);
-            craft.burst(Burst::Vent(vented_j), now_s);
+            craft.adjust(now_s, |fitting| {
+                fitting.drain(vented_j);
+                fitting.take_burst(Burst::Vent(vented_j));
+            });
             self.tell_fitted(wire, id);
             return;
         }

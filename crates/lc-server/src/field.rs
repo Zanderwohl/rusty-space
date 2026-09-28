@@ -64,11 +64,18 @@ pub fn collapse_by(craft: &Craft, until_s: f64) -> Option<f64> {
     }
 }
 
+/// `craft`'s shadow toward a source along `to_source`, m², in the attitude it holds at `t`: off the
+/// shadow table at the roll the hull presents to its star, the only roll it holds. Zero unfitted.
+pub fn shadow_toward_m2(craft: &Craft, to_source: DVec3, t: f64) -> f64 {
+    let (Some(fitting), Some(nose)) = (craft.fitting(), craft.facing_at(t)) else { return 0.0 };
+    lc_world::solar::shadow_m2(fitting.geometry(), nose.dot(to_source.normalize_or_zero()))
+}
+
 /// Of `energy_j` let go of at `from`, what arrives at `craft`'s field meeting it at `arrive_t`: onto
 /// its shadow toward `from`, from where it is then.
 pub fn received_j(craft: &Craft, from: DVec3, energy_j: f64, arrive_t: i64) -> f64 {
     let offset = craft.position_at(arrive_t as f64) - from;
-    let shadow_m2 = craft.shadow_toward_m2(-offset, arrive_t as f64 * 1.0e-6);
+    let shadow_m2 = shadow_toward_m2(craft, -offset, arrive_t as f64 * 1.0e-6);
     energy_j * received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)
 }
 
@@ -84,7 +91,7 @@ fn glow_w(source: &Craft, receiver: &Craft, here: DVec3, at_t: i64) -> f64 {
     }
     let Some(left_t) = lc_spacetime::retarded_times_at(at_t as f64, here, &source.worldline()).last().copied() else { return 0.0 };
     let offset = here - source.position_at(left_t);
-    let shadow_m2 = receiver.shadow_toward_m2(-offset, at_s);
+    let shadow_m2 = shadow_toward_m2(receiver, -offset, at_s);
     from.heat_j_at(left_t * 1.0e-6) / tau_s * received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)
 }
 
@@ -103,7 +110,7 @@ impl<J: Journal> Server<J> {
             .collect();
         for (id, watts) in changed {
             if let Some(craft) = self.fleet.get_mut(id) {
-                craft.light(watts, at_t as f64 * 1.0e-6);
+                craft.adjust(at_t as f64 * 1.0e-6, |fitting| fitting.set_lit_w(watts));
             }
         }
     }
@@ -159,7 +166,7 @@ impl<J: Journal> Server<J> {
         let at_s = arrival.arrive_t as f64 * 1.0e-6;
         let Some(craft) = self.fleet.get_mut(arrival.observer) else { return false };
         let arriving_j = received_j(craft, arrival.from, arrival.energy_j, arrival.arrive_t);
-        craft.burst(Burst::Arriving(arriving_j), at_s);
+        craft.adjust(at_s, |fitting| fitting.take_burst(Burst::Arriving(arriving_j)));
         let Some(fitting) = craft.fitting() else { return false };
         if fitting.heat_j_at(at_s) < fitting.field().heat_max_j() {
             self.tell_fitted(wire, arrival.observer);
@@ -641,7 +648,7 @@ mod tests {
         heat_to(&mut probe, heat);
         let fitting = probe.fitting().unwrap();
         let headroom_j = fitting.field().heat_max_j() - fitting.heat_j_at(0.0);
-        let shadow_m2 = probe.shadow_toward_m2(-toward, 0.0);
+        let shadow_m2 = shadow_toward_m2(&probe, -toward, 0.0);
         lc_world::field::lethal_radius_m(fitting.absorptivity(), spike_j, shadow_m2, headroom_j) * US_PER_M
     }
 
@@ -704,7 +711,8 @@ mod tests {
             let arrive_t = (at_t as f64 + apart_us).ceil() as i64;
             let absorbed_j = craft.fitting().unwrap().absorptivity() * received_j(craft, from, spike_j, arrive_t);
             // The dying ship's glow, which the tick began with.
-            quiet.light(craft.fitting().unwrap().lit_w(), 0.0);
+            let lit_w = craft.fitting().unwrap().lit_w();
+            quiet.adjust(0.0, |fitting| fitting.set_lit_w(lit_w));
             quiet.settle(now_s);
             let stored_j = |c: &Craft| c.fitting().unwrap().stored_j_at(&c.motion, now_s);
             assert_eq!(stored_j(craft), stored_j(&quiet), "{k}: a burst converted into storage");
@@ -737,7 +745,7 @@ mod tests {
 
         let source = server.ship(DYING).unwrap().fitting().unwrap();
         let receiver = server.ship(WATCHING).unwrap();
-        let shadow_m2 = receiver.shadow_toward_m2(-DVec3::Y, lit_t as f64 * 1.0e-6);
+        let shadow_m2 = shadow_toward_m2(receiver, -DVec3::Y, lit_t as f64 * 1.0e-6);
         let d_m = d_us * LIGHT_MICROSECOND_M;
         let want_w = source.heat_j_at(lit_t as f64 * 1.0e-6) / source.field().tau_s * shadow_m2 / (4.0 * std::f64::consts::PI * d_m * d_m);
         let lit_w = receiver.fitting().unwrap().lit_w();

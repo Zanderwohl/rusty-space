@@ -587,9 +587,7 @@ impl Craft {
         self.settle_fitting(None, from_s);
         let middle = 0.5 * (from_s + solar::segment_end(from_s));
         let watts = self.starlight_w_at(middle);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.set_starlight_w(watts);
-        }
+        self.set_starlight_w(watts);
     }
 
     /// Settle at every income boundary up to `now_s`, starting each new segment as it goes.
@@ -601,9 +599,7 @@ impl Craft {
             self.settle_fitting(None, boundary);
             let middle = boundary + 0.5 * step;
             let watts = self.starlight_w_at(middle);
-            if let Some(fitting) = &mut self.fitting {
-                fitting.set_starlight_w(watts);
-            }
+            self.set_starlight_w(watts);
             boundary += step;
         }
     }
@@ -657,43 +653,21 @@ impl Craft {
         Ok(account.commit(&trial, event.at_t))
     }
 
-    /// Add energy, as far as storage allows.
-    pub fn grant(&mut self, joules: f64, now_s: f64) {
+    /// Settle to `now_s`, then change the account there.
+    pub fn adjust(&mut self, now_s: f64, change: impl FnOnce(&mut Fitting)) {
         self.settle(now_s);
         if let Some(fitting) = &mut self.fitting {
-            fitting.grant(joules);
+            change(fitting);
         }
+    }
+
+    /// Add energy, as far as storage allows.
+    pub fn grant(&mut self, joules: f64, now_s: f64) {
+        self.adjust(now_s, |fitting| fitting.grant(joules));
     }
 
     pub fn drain(&mut self, joules: f64, now_s: f64) {
-        self.settle(now_s);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.drain(joules);
-        }
-    }
-
-    pub fn burst(&mut self, burst: crate::field::Burst, now_s: f64) {
-        self.settle(now_s);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.take_burst(burst);
-        }
-    }
-
-    /// Watts arriving from other craft, from `now_s` on.
-    pub fn light(&mut self, watts: f64, now_s: f64) {
-        self.settle(now_s);
-        if let Some(fitting) = &mut self.fitting {
-            fitting.set_lit_w(watts);
-        }
-    }
-
-    /// Its shadow toward a source along `to_source`, m², in the attitude it holds at `t`. Zero with
-    /// no fitting.
-    ///
-    /// Read off the shadow table at the roll the hull presents to its star, the only roll it holds.
-    pub fn shadow_toward_m2(&self, to_source: DVec3, t: f64) -> f64 {
-        let (Some(fitting), Some(nose)) = (&self.fitting, self.facing_at(t)) else { return 0.0 };
-        solar::shadow_m2(fitting.geometry(), nose.dot(to_source.normalize_or_zero()))
+        self.adjust(now_s, |fitting| fitting.drain(joules));
     }
 
     /// Begin a round toward `target`, when it plans. The caller refuses it under way and for a craft
