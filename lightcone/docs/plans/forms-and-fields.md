@@ -442,7 +442,7 @@ graph LR
 
 ### H5 · Proximity
 
-- status: todo
+- status: active card "H5 · Proximity"
 - needs: H4
 - touches: `crates/lc-server/src/field.rs`
 - read: 30 §Proximity
@@ -507,7 +507,7 @@ graph LR
 
 ### E2 · Exhaust from heat
 
-- status: todo
+- status: active card "E2 · Exhaust from heat"
 - needs: H3
 - touches: `crates/lc-world/src/cost.rs`, `crates/lc-world/src/field.rs`
 - read: 31 §The drive is the radiator
