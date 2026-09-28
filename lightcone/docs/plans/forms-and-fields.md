@@ -730,7 +730,7 @@ graph LR
 
 ### R18 · A distant burn as a point
 
-- status: todo
+- status: active card "R18 · A distant burn as a point"
 - needs: R12, R17, H7, E4
 - touches: `crates/lc-client/src/plume.rs`, `crates/lc-client/src/starfield.rs`, `lightcone/docs/32-ship-rendering.md`
 - read: 32 §The exhaust cone (From a distance), 04 (stellar photometry), 07 §Other ships
