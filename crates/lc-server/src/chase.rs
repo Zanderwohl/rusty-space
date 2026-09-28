@@ -445,6 +445,40 @@ mod tests {
         assert!(previous_t < arrives, "and on the tick it landed");
     }
 
+    /// A ship that has collapsed goes on being seen hot, in the field it failed in, for as long as
+    /// its light before the end is still arriving.
+    #[tokio::test]
+    async fn a_wrecks_light_in_flight_is_still_hot() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let (owner, watcher) = (ClientId(1), ClientId(2));
+        let mut hot = still(ShipId(1), DVec3::new(APART_US, 0.0, 0.0));
+        server.fit_new(&mut hot);
+        server.admit(owner, hot, 0.0);
+        server.admit(watcher, still(ShipId(2), DVec3::ZERO), 0.0);
+        server.tick(&mut wire).await.unwrap();
+        let t_s = server.now_t() as f64 * 1.0e-6;
+        let craft = server.fleet.get_mut(CraftId(1)).unwrap();
+        let vent_j = 0.9 * craft.fitting().unwrap().field().heat_max_j();
+        craft.adjust(t_s, |fitting| fitting.take_burst(Burst::Vent(vent_j)));
+        let dying_k = craft.glow_at(t_s).unwrap().temperature_k;
+        craft.end(t_s + 1.0);
+        let ended_t = server.now_t() + 1_000_000;
+
+        let mut hot_seen = 0;
+        for _ in 0..200 {
+            server.tick(&mut wire).await.unwrap();
+            for glow in glows(&wire.take(watcher), ShipId(1)) {
+                assert!(glow.temperature_k > 0.9 * dying_k, "shown {glow:?}, died at {dying_k} K");
+                hot_seen += 1;
+            }
+            if server.now_t() > ended_t + APART_US as i64 + 2_000_000_000 {
+                break;
+            }
+        }
+        assert!(hot_seen > 0, "premise: its light before the end arrived");
+    }
+
     #[tokio::test]
     async fn a_craft_with_no_field_is_shown_the_starting_one_at_rest() {
         let mut server = Server::new(Memory::default(), 0, 1);

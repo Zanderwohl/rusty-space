@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use crate::craft::HISTORY_S;
-use crate::field::Mode;
+use crate::field::{Field, Mode};
 use crate::fitting::{Fitting, Switch};
 use crate::form::{Form, Part, PartId};
 use crate::refit::rounds::{Change, Plan};
@@ -194,7 +194,8 @@ impl History {
 pub struct Glowed {
     pub at_s: f64,
     pub heat_j: f64,
-    pub envelope_m2: f64,
+    /// Kept so a wreck's light, with no fitting left to ask, still has a temperature.
+    pub field: Field,
     pub shade: Mode,
     /// Not yet taken: the shade is its `to` from its `done_s`.
     pub switch: Option<Switch>,
@@ -209,7 +210,7 @@ impl Glowed {
     }
 
     fn worn_alike(&self, other: &Glowed) -> bool {
-        self.envelope_m2 == other.envelope_m2 && self.shade == other.shade && self.switch == other.switch
+        self.field == other.field && self.shade == other.shade && self.switch == other.switch
     }
 }
 
@@ -220,17 +221,23 @@ pub struct Glows {
     kept: Vec<Glowed>,
     /// The slopes out of the second-last sample that still pass every sample dropped since it, J/s.
     window: Option<(f64, f64)>,
+    /// Whether the front was ever dropped. Until it is, the oldest is the field for all time before.
+    forgot: bool,
 }
 
 impl Glows {
     pub fn clear(&mut self) {
         self.kept.clear();
         self.window = None;
+        self.forgot = false;
     }
 
     /// Drops the last sample where the line from the one before it to `next` passes within
     /// [`GLOW_TOLERANCE`] of it and of every sample dropped before it.
     pub fn push(&mut self, next: Glowed) {
+        if self.kept.last() == Some(&next) {
+            return;
+        }
         while self.kept.last().is_some_and(|last| last.at_s > next.at_s) {
             self.kept.pop();
             self.window = None;
@@ -261,20 +268,23 @@ impl Glows {
         self.kept.push(next);
         let stale = self.kept.iter().skip(1).take_while(|g| g.at_s < horizon).count();
         let excess = self.kept.len().saturating_sub(HISTORY_GLOWS);
-        self.kept.drain(..stale.max(excess));
+        let dropped = stale.max(excess);
+        self.forgot |= dropped > 0;
+        self.kept.drain(..dropped);
     }
 
-    /// Heat, envelope and shade at `t`; before the oldest sample, the oldest's.
-    pub fn at(&self, t: f64) -> Option<(f64, f64, Mode)> {
+    /// Heat, field and shade at `t`. Before the oldest sample, the oldest's, unless older ones were
+    /// forgotten: then nothing, as a form too old to remember is.
+    pub fn at(&self, t: f64) -> Option<(f64, Field, Mode)> {
         let after = self.kept.partition_point(|g| g.at_s <= t);
         let Some(a) = after.checked_sub(1).map(|i| &self.kept[i]) else {
-            return self.kept.first().map(|g| (g.heat_j, g.envelope_m2, g.shade));
+            return self.kept.first().filter(|_| !self.forgot).map(|g| (g.heat_j, g.field, g.shade));
         };
         let heat_j = match self.kept.get(after) {
             Some(b) => a.heat_j + (b.heat_j - a.heat_j) * (t - a.at_s) / (b.at_s - a.at_s),
             None => a.heat_j,
         };
-        Some((heat_j, a.envelope_m2, a.shade_at(t)))
+        Some((heat_j, a.field, a.shade_at(t)))
     }
 }
 
@@ -283,7 +293,7 @@ mod tests {
     use super::*;
 
     fn at(at_s: f64, heat_j: f64) -> Glowed {
-        Glowed { at_s, heat_j, envelope_m2: 1.0, shade: Mode::Clear, switch: None }
+        Glowed { at_s, heat_j, field: Field::of(1.0, &crate::fitting::Balance::DEFAULT), shade: Mode::Clear, switch: None }
     }
 
     #[test]

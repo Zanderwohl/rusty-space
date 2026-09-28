@@ -32,36 +32,37 @@ impl Craft {
         flip
     }
 
-    /// Its field as its light left it at `t`, coordinate seconds. `None` with no fitting.
+    /// Its field as its light left it at `t`, coordinate seconds. A wreck answers from what it wore
+    /// until it ended; `None` for a craft that never had a fitting.
     pub fn glow_at(&self, t: f64) -> Option<Glow> {
-        let fitting = self.fitting.as_ref()?;
-        let (heat_j, envelope_m2, shade) = self.worn_at(t)?;
-        let temperature_k = Field::of(envelope_m2, fitting.balance()).temperature_k(heat_j);
-        Some(Glow { temperature_k, shade, envelope_m2 })
+        let (heat_j, field, shade) = self.worn_at(t)?;
+        Some(Glow { temperature_k: field.temperature_k(heat_j), shade, envelope_m2: field.area_m2 })
     }
 
-    /// Its field's heat as its light left it at `t`, J. `None` with no fitting.
+    /// Its field's heat as its light left it at `t`, J.
     pub fn heat_seen_j_at(&self, t: f64) -> Option<f64> {
         self.worn_at(t).map(|(heat_j, _, _)| heat_j)
     }
 
-    /// The live account from its settlement on; before it, what the settlements left.
-    fn worn_at(&self, t: f64) -> Option<(f64, f64, Mode)> {
-        let fitting = self.fitting.as_ref()?;
-        if t >= fitting.since_s() {
-            return Some((fitting.heat_j_at(&self.motion, t), fitting.geometry().envelope_area_m2, fitting.shade_at(t)));
+    /// The live account from its settlement on; before it, or once the craft has ended, what the
+    /// settlements left.
+    fn worn_at(&self, t: f64) -> Option<(f64, Field, Mode)> {
+        if let Some(fitting) = &self.fitting
+            && t >= fitting.since_s()
+        {
+            return Some((fitting.heat_j_at(&self.motion, t), fitting.field(), fitting.shade_at(t)));
         }
         self.glows.at(t)
     }
 
     /// After anything that settles the account or changes the field.
-    pub(super) fn note_glow(&mut self) {
+    pub(crate) fn note_glow(&mut self) {
         let Some(fitting) = &self.fitting else { return };
         let posture = fitting.posture();
         self.glows.push(Glowed {
             at_s: fitting.since_s(),
             heat_j: fitting.heat_j_at(&self.motion, fitting.since_s()),
-            envelope_m2: fitting.geometry().envelope_area_m2,
+            field: fitting.field(),
             shade: posture.shade,
             switch: posture.switch,
         });
@@ -101,6 +102,36 @@ mod tests {
         assert_eq!(craft.glow_at(done_s - 1.0).unwrap().shade, Mode::Black);
         assert_eq!(craft.glow_at(done_s).unwrap().shade, Mode::Clear);
         assert!(craft.heat_seen_j_at(999.0).unwrap() < craft.heat_seen_j_at(1000.0).unwrap());
+    }
+
+    /// A wreck has no fitting left, and its light still in flight still shows the field it died in.
+    #[test]
+    fn a_wreck_is_seen_in_the_field_it_ended_in() {
+        let mut craft = fitted();
+        let hot_j = 0.9 * craft.fitting().unwrap().field().heat_max_j();
+        craft.adjust(1000.0, |fitting| fitting.take_burst(Burst::Vent(hot_j)));
+        let alive = craft.glow_at(1500.0).unwrap();
+        craft.settle(2000.0);
+        craft.end(2000.0);
+        assert!(craft.fitting().is_none(), "premise: a wreck has no fitting");
+        let seen = craft.glow_at(1500.0).expect("its light still in flight");
+        assert!((seen.temperature_k / alive.temperature_k - 1.0).abs() < 1.0e-3, "{seen:?} against {alive:?}");
+        assert_eq!(seen.shade, Mode::Black);
+        assert!(seen.temperature_k > 3.0 * Balance::DEFAULT.field_idle_k);
+    }
+
+    /// A fit is the field for all time before it, and from it until the first settlement the history
+    /// runs from the fit's own heat, not from whatever the settlement found.
+    #[test]
+    fn a_fit_is_its_own_first_sample() {
+        let mut craft = fitted();
+        let at_fit = craft.glow_at(0.0).unwrap();
+        assert_eq!(craft.glow_at(-1.0e6), Some(at_fit), "before the fit, the fit's field");
+        let hot_j = 0.5 * craft.fitting().unwrap().field().heat_max_j();
+        craft.adjust(5000.0, |fitting| fitting.take_burst(Burst::Vent(hot_j)));
+        craft.settle(9000.0);
+        let before_vent = craft.glow_at(2500.0).unwrap();
+        assert!((before_vent.temperature_k / at_fit.temperature_k - 1.0).abs() < 1.0e-3, "{before_vent:?} against {at_fit:?}");
     }
 
     #[test]
