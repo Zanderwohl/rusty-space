@@ -483,7 +483,7 @@ impl Wreck {
             return None;
         }
         let (_, start_s) = *self.shown_at.get_or_insert((real_s, wrapped_s));
-        let afterglow_real = afterglow_s / rate.max(crate::session::TIME_RATE);
+        let afterglow_real = played_s(afterglow_s, rate);
         Some(Vec4::new(start_s, FLASH_S, afterglow_real as f32, DEBRIS_REACH))
     }
 
@@ -525,6 +525,12 @@ impl Wreck {
     }
 }
 
+/// Real seconds `game_s` of coordinate time plays over with the clock at `rate` times the design
+/// rate, and never slower than the design rate.
+fn played_s(game_s: f64, rate: f64) -> f64 {
+    game_s / (crate::session::TIME_RATE * rate.max(crate::ui::DESIGN_TIME_RATE))
+}
+
 /// Collapses whose light has arrived, and what the craft they end were last seen as.
 #[derive(Resource, Default)]
 pub struct Wrecks {
@@ -563,7 +569,7 @@ impl Wrecks {
 
     /// Every wreck drawn as a point whose light has arrived, at `real_s`.
     pub fn far<'a>(&'a self, real_s: f32, rate: f64, afterglow_s: f64, debris: impl Fn(i64) -> bool + 'a) -> impl Iterator<Item = Far> + 'a {
-        let fade_s = (afterglow_s / rate.max(crate::session::TIME_RATE)) as f32;
+        let fade_s = played_s(afterglow_s, rate) as f32;
         self.fell.iter().filter(move |w| !debris(w.event_id)).filter_map(move |w| {
             let (real, wrapped) = w.shown_at?;
             Some(Far { at_ly: w.at_ly, released_j: w.released_j, clock: Vec3::new(wrapped, FLASH_S, fade_s), since_s: real_s - real })
@@ -1154,7 +1160,7 @@ mod tests {
         let at = |wreck: &mut Wreck, rate: f64| wreck.collapse(20.0, (1.0, 1.0), rate, afterglow_s).unwrap().z;
         assert!((at(&mut wreck, 0.0) as f64 - afterglow_s / design).abs() < 1e-3);
         assert!((at(&mut wreck, 1.0e-8) as f64 - afterglow_s / design).abs() < 1e-3);
-        assert!((at(&mut wreck, 4.0 * design) as f64 - afterglow_s / (4.0 * design)).abs() < 1e-3);
+        assert!((at(&mut wreck, 60.0) as f64 - afterglow_s / (60.0 * design)).abs() < 1e-3, "at a year a minute");
     }
 
     /// The exposure meters a wreck's debris once it is drawn, hot at first and cooler later, so
