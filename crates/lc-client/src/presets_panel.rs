@@ -253,18 +253,19 @@ fn lay_out(
             let text = if here { format!("> {}", row.name()) } else { row.name().to_owned() };
             menu.tree_row(panel, 0, &text, here, Press::Choose(row));
         }
-        if let Some(chosen) = &chosen {
+        if chosen.is_some() {
             let row = menu.row(panel);
             menu.small_button(row, "as layout", Press::Apply(How::Layout));
             menu.small_button(row, "as design", Press::Apply(How::Design));
-            let row = menu.row(panel);
+        }
+        let row = menu.row(panel);
+        menu.small_button(row, "import", Press::Import);
+        if let Some(chosen) = &chosen {
             menu.small_button(row, "export", Press::Export);
             if matches!(chosen, Chosen::Own(_)) {
                 menu.small_button(row, "delete", Press::Delete);
             }
         }
-        let row = menu.row(panel);
-        menu.small_button(row, "import", Press::Import);
     }
     commands.entity(column).insert_child(1, panel);
 }
