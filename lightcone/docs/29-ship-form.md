@@ -37,8 +37,9 @@ machines might round differently. Each part alone is exact.
 
 ### Kinds
 
-Every kind but the Mind turns volume into a capacity at a density. Each density is 19's per-module
-value over its 392 699 m³ slot.
+Every kind but the Mind turns volume into a capacity at a density. Each density is what one slot of
+that kind held in 19's [reference ship](19-ship-fitting.md#the-reference-ship), over the slot's
+392 699 m³.
 
 | kind | per cubic meter | mass | notes |
 |---|---|---|---|
@@ -269,8 +270,7 @@ a flip is about one of them and the nose never turns about itself.
 A process builds each form's grid once, so ships of one design share it: a shard with a hundred
 starting ships builds one. A step partway through a round, whose form may not place, keeps the last
 measured extent and gyration until it finishes. The starting form's extent is **731 m**, the
-envelope around 545 m of parts, where its
-twenty slots made 19's ship 500 m long.
+envelope around 545 m of parts, where the reference ship's twenty slots made a 500 m ovoid.
 
 **The shadow handles concave shapes.** A stack of plates shades
 itself and collects about what one plate would. A ship spread out collects more and turns more
@@ -284,7 +284,7 @@ reproduce that formula to within the grid's resolution.
 Each copy of a part carries structure at `hull_areal_density` per square meter of **its own surface**, from its
 primitive's closed-form area (Thomsen's approximation for an ellipsoid), again ignoring overlaps. Flattening buys
 shadow, radiating area and room on the surface, and pays for them in mass, so in acceleration.
-`hull_areal_density` is anchored so the starting form weighs what 19's starting ship does. The
+`hull_areal_density` is anchored so the starting form weighs what the reference ship does. The
 starting form and the built-in presets use no mirrors, so how a mirror is counted cannot move the
 anchor.
 
@@ -425,8 +425,8 @@ Flying and refitting still exclude each other, as in 19.
 - **drones**, a capsule under the keel: 7.85 × 10⁵ m³
 - **living**, a slab across the dorsal face, and **data**, a small capsule forward: 3.93 × 10⁵ m³ each
 
-Each volume is 19's module count of its kind times the 392 699 m³ slot, so the form holds exactly
-what 19's starting ship does. Placed, it is about 545 m long, 200 m across and 190 m deep:
+Each volume is the reference ship's slots of its kind times the 392 699 m³ slot, so the form holds
+exactly what the reference ship does. Placed, it is about 545 m long, 200 m across and 190 m deep:
 
 - the storage is 335 × 201 × 67 m;
 - the engine flares aft, 116 m wide where it meets the hull and 175 m at its open face, which is the
@@ -436,9 +436,9 @@ what 19's starting ship does. Placed, it is about 545 m long, 200 m across and 1
 - the living slab is 145 m across the beam, 96 m fore and aft and 29 m deep;
 - the data capsule, 124 m long, is sunk into the nose.
 
-`hull_areal_density` is 1 215 kg/m², so this form weighs 19's dry starting ship, 2.65 × 10⁹ kg: every
-module, the data module at half, and 19's frame over all twenty slots, the five empty ones included.
-Its one bell fires aft, so it pulls 5 g full and 13.8 g empty, as 19's ship did.
+`hull_areal_density` is 1 215 kg/m², so this form weighs the reference ship dry, 2.65 × 10⁹ kg: every
+slot, data at half, and the frame over all twenty, the five empty ones included. Its one bell fires
+aft, so it pulls 5 g full and 13.8 g empty.
 
 The anchors of 20 and 30 are derived from this form.
 

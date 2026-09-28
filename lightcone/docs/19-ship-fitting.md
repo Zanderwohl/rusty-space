@@ -35,6 +35,16 @@ quoted per.
 A part costs its own mass-energy to build. Data weighs `data_mass_fraction` of module density, so
 it costs that fraction of an ME per slot of it.
 
+### The reference ship
+
+Every density and anchor is derived from one **reference ship**: twenty slots, of which 6 hold
+storage at 5 ME each, 5 engines at 1 g each of the ship full, 2 drones that each build a slot in a
+week, 1 living at 1 ME a century, and 1 data, with 5 empty, all in a frame of 50 kg/m³ over the
+twenty. A kind's density is what its slot held, over the slot's volume
+([29-ship-form.md](29-ship-form.md#kinds)), and the starting form holds exactly the reference ship's
+slots of each kind and weighs what it weighs dry (`fitting::STARTING_DRY_KG`), so every rating
+derived from it stands.
+
 ## Mass
 
 **Ship mass = the form's dry mass + stored energy / c² + heat / c².**
