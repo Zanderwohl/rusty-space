@@ -874,8 +874,9 @@ impl From<&lc_proto::Fitting> for Fitting {
 
 impl From<&Fitting> for lc_proto::Field {
     fn from(f: &Fitting) -> Self {
-        let (mode, shade, switch) = (&f.posture).into();
-        Self { heat_j: f.heat_j, since_s: f.since_s, mode, shade, switch }
+        let p = &f.posture;
+        let switch = p.switch.map(|s| lc_proto::Switch { to: s.to.into(), done_s: s.done_s });
+        Self { heat_j: f.heat_j, since_s: f.since_s, mode: p.setting.into(), shade: p.shade.into(), switch }
     }
 }
 

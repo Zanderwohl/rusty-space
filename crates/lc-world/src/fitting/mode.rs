@@ -64,6 +64,7 @@ impl Posture {
 
     /// A new ship's: Auto, in the shade Auto keeps a full store in.
     pub fn new_ship(balance: &Balance) -> Self {
+        debug_assert!(Thresholds::of(balance).is_valid(), "a balance's thresholds must leave both gaps open");
         Posture { setting: Setting::Auto(Thresholds::of(balance)), shade: Mode::Clear, switch: None }
     }
 
@@ -134,13 +135,13 @@ impl Fitting {
         Ok(())
     }
 
-    /// Toward `to`, done `field_switch_s` from the settlement. Settle first.
+    /// Toward `to`, done `field_switch_s` from the settlement. Settle first. Refused while any switch
+    /// is kept, done or not: overwriting one not yet taken would lose its flip.
     pub fn begin_switch(&mut self, to: Mode) -> Result<(), Switching> {
         let now_s = self.since_s;
-        if self.posture.switching_at(now_s).is_some() {
+        if self.posture.switch.is_some() {
             return Err(Switching);
         }
-        self.posture.shade = self.shade_at(now_s);
         self.posture.switch = Some(Switch { to, done_s: now_s + self.balance.field_switch_s });
         Ok(())
     }
@@ -266,13 +267,6 @@ impl From<lc_proto::FieldMode> for Setting {
     }
 }
 
-impl From<&Posture> for (lc_proto::FieldMode, lc_proto::Shade, Option<lc_proto::Switch>) {
-    fn from(p: &Posture) -> Self {
-        let switch = p.switch.map(|s| lc_proto::Switch { to: s.to.into(), done_s: s.done_s });
-        (p.setting.into(), p.shade.into(), switch)
-    }
-}
-
 impl From<&lc_proto::Field> for Posture {
     fn from(f: &lc_proto::Field) -> Self {
         Posture {
@@ -384,6 +378,9 @@ mod tests {
         f.settle(&rest(), 0.5 * b.field_switch_s);
         assert_eq!(f.set_setting(Setting::Black), Err(Switching));
         f.settle(&rest(), b.field_switch_s);
+        assert_eq!(f.set_setting(Setting::Black), Err(Switching), "done, but its flip not yet taken");
+        assert_eq!(f.begin_switch(Mode::Black), Err(Switching));
+        assert!(f.take_flip().is_some());
         assert_eq!(f.set_setting(Setting::Black), Ok(()));
         assert_eq!(f.posture.switch, Some(Switch { to: Mode::Black, done_s: 2.0 * b.field_switch_s }));
     }

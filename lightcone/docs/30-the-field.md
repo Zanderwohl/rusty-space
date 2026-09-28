@@ -368,6 +368,9 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
   σT⁴A, with no gain. This is the second face of the field, exactly as starlight has one: `Q / τ`
   is energy moving at game scale, and σT⁴A is what an instrument sees.
 
+The shade an observer sees is the last `kind::SHADE` whose light has reached it, never the owner's
+account now: a flip is news, and arrives at light delay like any other.
+
 | field | peak | seen in |
 |---|---|---|
 | 400 K, idle | 7.2 µm | the ten-micron band |

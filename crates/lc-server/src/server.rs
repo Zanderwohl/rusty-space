@@ -671,7 +671,7 @@ impl<J: Journal> Server<J> {
         }
         // A switch is not seen: its flip is, when it completes. See `crate::field`.
         if let Order::FieldMode { mode } = intent.order {
-            self.order_field_mode(id, mode, at, events, deliveries)?;
+            let at = self.order_field_mode(id, mode, at, events, deliveries)?;
             let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
             return Ok(Applied { event_id, at_t: at, order: intent.order });
         }

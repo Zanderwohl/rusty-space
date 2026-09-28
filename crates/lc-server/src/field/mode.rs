@@ -102,13 +102,14 @@ impl<J: Journal> Server<J> {
         // What changes is the starlight it reflects.
         let power_w = craft.starlight_w_at(done_s) * (1.0 - clear_absorptivity);
         let payload = serde_json::to_string(&ShadeChange { shade: switch.to.into() }).unwrap_or_else(|_| "{}".into());
+        // The clamp moves the stamp only on the order path, for a switch shorter than a tick.
         let at_t = ((done_s * 1.0e6).ceil() as i64).clamp(after_t + 1, self.now_t());
         self.emit(id, lc_proto::kind::SHADE, power_w, payload, at_t, events, deliveries);
         true
     }
 
-    /// `Order::FieldMode` at `at`. Refused while a switch runs, and for Auto thresholds without
-    /// both gaps open.
+    /// `Order::FieldMode` at `at`, or at the settlement if that is later, which is returned. Refused
+    /// while a switch runs, and for Auto thresholds without both gaps open.
     pub(crate) fn order_field_mode(
         &mut self,
         id: CraftId,
@@ -116,19 +117,23 @@ impl<J: Journal> Server<J> {
         at: i64,
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
-    ) -> Result<(), Refusal> {
+    ) -> Result<i64, Refusal> {
         let setting = Setting::from(mode);
         if let Setting::Auto(thresholds) = setting
             && !thresholds.is_valid()
         {
             return Err(Refusal::Impossible);
         }
-        self.fleet.get(id).ok_or(Refusal::NotYours)?.fitting().ok_or(Refusal::Impossible)?;
+        let since_s = self.fleet.get(id).ok_or(Refusal::NotYours)?.fitting().ok_or(Refusal::Impossible)?.since_s();
+        // An account cannot settle backward: a lagging order lands where it has been settled to,
+        // which may be past a flip already taken, and must be judged there.
+        let at = if since_s > at as f64 * 1.0e-6 { ((since_s * 1.0e6).ceil() as i64).min(self.now_t()) } else { at };
         let at_s = at as f64 * 1.0e-6;
         // Only when a switch is shorter than a tick: every other is taken before orders are read.
         self.flip(id, at_s, at - 1, events, deliveries);
         let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
-        craft.set_field(setting, at_s).map_err(|_| Refusal::Switching)
+        craft.set_field(setting, at_s).map_err(|_| Refusal::Switching)?;
+        Ok(at)
     }
 
     /// The console's `field`, through the order's own checks.
@@ -150,9 +155,16 @@ impl<J: Journal> Server<J> {
         self.tell_fitted(wire, id);
         let craft = self.fleet.get(id).ok_or("no such ship")?;
         let posture = craft.fitting().ok_or("no field")?.posture();
+        let set = match mode {
+            FieldMode::Clear => "Clear".to_string(),
+            FieldMode::Black => "Black".to_string(),
+            FieldMode::Auto { clear_above, black_below, refill_below } => {
+                format!("Auto (Clear above {clear_above}, Black below {black_below} under {refill_below} full)")
+            }
+        };
         Ok(match posture.switch {
-            Some(switch) => format!("{}: {:?}, {:?} in {:.1} days", craft.designation(), mode, switch.to, (switch.done_s - self.now_t() as f64 * 1.0e-6) / 86_400.0),
-            None => format!("{}: {:?}, {:?}", craft.designation(), mode, posture.shade),
+            Some(switch) => format!("{}: {set}, {:?} in {:.1} days", craft.designation(), switch.to, (switch.done_s - self.now_t() as f64 * 1.0e-6) / 86_400.0),
+            None => format!("{}: {set}, {:?}", craft.designation(), posture.shade),
         })
     }
 }
@@ -406,6 +418,37 @@ mod tests {
             restarted.tick(&mut wire).await.unwrap();
         }
         assert_eq!(flips(&restarted), vec![(to_us(done_s), Shade::Black)]);
+    }
+
+    /// An order stamped before a flip taken in the same tick is judged, and stamped, where the
+    /// account stands: after the flip.
+    #[tokio::test]
+    async fn a_lagging_order_lands_after_the_flip_its_tick_took() {
+        let Some((mut server, mut wire)) = apart() else { return };
+        server.tick(&mut wire).await.unwrap();
+        wire.client_says(OWNER, act(Order::FieldMode { mode: FieldMode::Black }));
+        server.tick(&mut wire).await.unwrap();
+        let _ = wire.take(OWNER);
+        let done_s = server.ship(SHIP).unwrap().fitting().unwrap().posture().switch.unwrap().done_s;
+        while server.now_t() + 3_600_000_000 < to_us(done_s) {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let _ = wire.take(OWNER);
+        assert!(server.ship(SHIP).unwrap().fitting().unwrap().posture().switch.is_some(), "premise: not yet taken");
+        wire.client_says(OWNER, Inbound::Act(Intent { ship_id: SHIP, order: Order::FieldMode { mode: FieldMode::Clear }, issued_at_client_t: 0 }));
+        server.tick(&mut wire).await.unwrap();
+        assert_eq!(flips(&server), vec![(to_us(done_s), Shade::Black)], "premise: the flip was taken this tick");
+        let said = wire.take(OWNER);
+        let Some(at_t) = said.iter().find_map(|m| match m {
+            Outbound::Accepted { at_t, .. } => Some(*at_t),
+            _ => None,
+        }) else {
+            panic!("{said:?}")
+        };
+        assert!(at_t >= to_us(done_s), "{at_t} before the flip at {}", to_us(done_s));
+        let switch = server.ship(SHIP).unwrap().fitting().unwrap().posture().switch.unwrap();
+        assert_eq!(switch.to, lc_world::field::Mode::Clear);
+        assert!((switch.done_s - (at_t as f64 * 1.0e-6 + DAY_S)).abs() < 1.0e-6, "{switch:?} {at_t}");
     }
 
     #[tokio::test]
