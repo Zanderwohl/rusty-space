@@ -23,8 +23,10 @@ use crate::server::{KIND_COLLAPSE, Server};
 use crate::transport::Transport;
 use crate::world::{Event, Scheduled};
 
+mod afterglow;
 mod mode;
 
+pub(crate) use afterglow::Seen;
 pub use lc_world::ahead::{auto_by, collapse_by};
 #[cfg(test)]
 pub(crate) use mode::hold_black;
@@ -182,6 +184,7 @@ impl<J: Journal> Server<J> {
         let name = craft.name.clone();
         let from = craft.position_at(at_t as f64);
         craft.end(at_s);
+        self.afterglows.insert(id, lc_world::afterglow::Afterglow::of(from, at_s, released_j, &balance));
         self.emissions.lit_by.remove(&id);
         let released = serde_json::to_value(lc_proto::Released { released_j }).unwrap_or_default();
         let payload = crate::emit::carrying(released, &crate::emit::burst(from, spike_j, balance.collapse_spike_k));
@@ -219,18 +222,20 @@ impl<J: Journal> Server<J> {
         self.welcome(from, successor, name, &account, wire);
     }
 
-    /// Drop each wreck once the light of its end has passed every craft there is.
+    /// Drop each wreck once the last of its light, its afterglow's, has passed every craft there is.
     pub(crate) fn sweep_wrecks(&mut self) {
         let now_t = self.now_t as f64;
         let ended: Vec<(CraftId, f64)> =
             self.fleet.iter().filter_map(|craft| Some((craft.id, craft.ended_s()? * 1.0e6))).collect();
         for (id, end_t) in ended {
             let Some(at) = self.fleet.get(id).map(|wreck| wreck.position_at(end_t)) else { continue };
+            let last_t = self.afterglows.get(&id).map_or(end_t, |afterglow| afterglow.ends_s() * 1.0e6);
             let passed = self.fleet.iter().filter(|craft| craft.ended_s().is_none()).all(|craft| {
-                lc_spacetime::arrival_time_at(end_t, at, &craft.worldline()).is_none_or(|t| t <= now_t)
+                lc_spacetime::arrival_time_at(last_t, at, &craft.worldline()).is_none_or(|t| t <= now_t)
             });
             if passed {
                 self.fleet.remove(id);
+                self.afterglows.remove(&id);
                 self.destroyed.push(id.0);
             }
         }
@@ -778,7 +783,7 @@ mod tests {
     async fn a_wreck_outlives_a_restart_until_its_light_arrives() {
         let Some((mut server, mut wire)) = scene() else { return };
         let star = a_star().unwrap().id.get();
-        wire.client_says(OWNER, act(DYING, Order::SetDuty { duty: lc_proto::Duty::Stare { star }, integration_s: 1.0e4 }));
+        wire.client_says(OWNER, act(DYING, Order::SetDuty { duty: lc_proto::Duty::stare(star), integration_s: 1.0e4 }));
         for _ in 0..5 {
             server.tick(&mut wire).await.unwrap();
         }

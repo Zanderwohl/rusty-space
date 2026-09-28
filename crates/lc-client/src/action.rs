@@ -1745,7 +1745,7 @@ mod tests {
         assert!(orders(&apply(Action::SelectTarget(Some(id)), &mut ui, &mut s)).is_empty(), "selecting orders nothing");
         let sent = orders(&apply(Action::StareSelected, &mut ui, &mut s));
         assert!(
-            matches!(sent.as_slice(), [lc_proto::Order::SetDuty { duty: lc_proto::Duty::Stare { star }, .. }] if *star == id.get()),
+            matches!(sent.as_slice(), [lc_proto::Order::SetDuty { duty: lc_proto::Duty::Stare { at: lc_proto::Gaze::Star(star) }, .. }] if *star == id.get()),
             "{sent:?}",
         );
         assert_eq!(s.observatory.duty, Duty::Idle, "and nothing is taken up until the shard says so");

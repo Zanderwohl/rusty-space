@@ -217,6 +217,8 @@ pub struct Server<J: Journal> {
     pub(crate) destroyed: Vec<i64>,
     /// What each craft has lit, what lands on each now, and what is on its way. See [`crate::emit`].
     pub(crate) emissions: crate::emit::Emissions,
+    /// Each wreck's collapse, for as long as it is kept. See [`crate::field`].
+    pub(crate) afterglows: HashMap<CraftId, lc_world::afterglow::Afterglow>,
 }
 
 impl<J: Journal> Server<J> {
@@ -263,6 +265,7 @@ impl<J: Journal> Server<J> {
             commands: std::collections::VecDeque::new(),
             destroyed: Vec::new(),
             emissions: Default::default(),
+            afterglows: HashMap::new(),
         }
     }
 
