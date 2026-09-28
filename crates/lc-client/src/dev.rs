@@ -476,6 +476,7 @@ pub(crate) fn emit_at_selected(
         spread_rad: 0.1,
         // Longer than any shot, at any scene's rate.
         duration_s: 1.0e7,
+        lead: lc_proto::Lead::Coasting,
     })));
 }
 

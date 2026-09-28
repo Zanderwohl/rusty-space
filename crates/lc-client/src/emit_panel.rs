@@ -4,17 +4,20 @@
 //! [`preview`] and [`Beams`] carry no engine, so what the window says is tested without one. The
 //! numbers are `lc_world`'s: the server lights the same spread from the same ends.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy_egui::egui;
 use glam::DVec3;
-use lc_proto::{Aim, Apertures, Order, Outbound, Refusal, ShipId, Shade, Spectrum};
+use lc_proto::{Aim, Apertures, Lead, Order, Outbound, Refusal, ShipId, Shade, Spectrum};
 use lc_world::craft::{BEAM_PER_LENGTH, Craft};
 use lc_world::emit::{Boost, lead_uncertainty_m, received_fraction};
-use lc_world::field::Segment;
+use lc_world::field::{Field, Segment};
 use lc_world::fitting::{Balance, Lit};
 use lc_world::flight::{C_M_S, G0};
 use lc_world::form::Form;
 use lc_world::form::capacity::{Capacities, End, aft_aperture_w, dry_mass_kg, ends};
+use lc_world::pursuit::Sighting;
 use lc_world::signal::Transmitter;
 
 use crate::action::Action;
@@ -50,6 +53,7 @@ pub struct Draft {
     /// Asked for; the floor wins below it.
     pub spread_rad: f64,
     pub duration_s: f64,
+    pub lead: Lead,
     /// The selection last taken as the aim, so a new one re-aims and the window's own choice
     /// otherwise stands.
     pub followed: Option<ShipId>,
@@ -64,6 +68,7 @@ impl Default for Draft {
             wavelength_m: 1.0e-6,
             spread_rad: 0.0,
             duration_s: 600.0,
+            lead: Lead::Coasting,
             followed: None,
         }
     }
@@ -72,9 +77,14 @@ impl Default for Draft {
 /// What this ship knows of the craft it aims at. `None` is unknown, and the window says so.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Receiver {
+    /// Unit: where the beam is sent, led as the draft says.
+    pub axis: DVec3,
+    /// To where the lead puts it when the beam lands.
     pub distance_m: f64,
     /// From the light it was last seen by leaving it to the beam landing on it, seconds.
     pub blind_s: f64,
+    /// Its proper acceleration as two statements measured it, m/s², while its plume was lit.
+    pub burn_m_s2: Option<f64>,
     /// The most it can accelerate at, m/s²: its aft rating over its dry mass.
     pub accel_m_s2: Option<f64>,
     /// Broadside to the beam, the most it can present.
@@ -83,12 +93,36 @@ pub struct Receiver {
     /// Its engines' conversion rating, W.
     pub rating_w: Option<f64>,
     pub absorptivity: Option<f64>,
+    /// Of what it converts, the share stored: the same for every craft.
+    pub efficiency: f64,
+    pub field: Option<Heated>,
+}
+
+/// A field as its glow shows it: its envelope and the heat its temperature means there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Heated {
+    pub field: Field,
+    pub heat_j: f64,
 }
 
 impl Receiver {
-    /// `contact` as seen from `here_ly` at `now_s`, its form and glow read with `balance`.
-    pub fn of(contact: &Contact, here_ly: DVec3, now_s: f64, balance: &Balance) -> Self {
-        let distance_m = contact.position_ly.distance(here_ly) * M_PER_LY;
+    /// `contact` as seen from `here_ly` at `now_s`, led by `lead` along what `beams` watched of
+    /// it, its form and glow read with `balance`.
+    pub fn of(contact: &Contact, beams: &Beams, lead: Lead, here_ly: DVec3, now_s: f64, balance: &Balance) -> Self {
+        let (sighting, burn) = beams.watched(contact);
+        let accel = match lead {
+            Lead::Burning => burn.unwrap_or(DVec3::ZERO),
+            Lead::Coasting => DVec3::ZERO,
+        };
+        let led = lc_world::emit::lead(here_ly, now_s, &sighting, accel);
+        let (axis, distance_m, blind_s) = match led {
+            Some(led) => (led.axis, led.at_ly.distance(here_ly) * M_PER_LY, led.arrive_s - sighting.emitted_s),
+            // Outrunning the beam, as far as the sighting says: aimed where it appears.
+            None => {
+                let d = contact.position_ly.distance(here_ly) * M_PER_LY;
+                ((contact.position_ly - here_ly).normalize_or(DVec3::X), d, (now_s - contact.emitted_s).max(0.0) + d / C_M_S)
+            }
+        };
         let form = Form::from(&contact.form);
         let formed = !form.parts.is_empty();
         let accel_m_s2 = formed
@@ -100,14 +134,22 @@ impl Receiver {
             Shade::Black => 1.0,
             Shade::Clear => balance.clear_absorptivity,
         });
+        let field = formed.then(|| {
+            let field = Field::of(contact.glow.envelope_m2, balance);
+            Heated { field, heat_j: field.heat_j_at(contact.glow.temperature_k) }
+        });
         Self {
+            axis,
             distance_m,
-            blind_s: (now_s - contact.emitted_s).max(0.0) + distance_m / C_M_S,
+            blind_s,
+            burn_m_s2: burn.map(|a| a.length() * C_M_S),
             accel_m_s2,
             shadow_m2: broadside_m2(contact.length_m),
             length_m: contact.length_m,
             rating_w,
             absorptivity,
+            efficiency: balance.conversion_efficiency,
+            field,
         }
     }
 }
@@ -150,6 +192,20 @@ pub struct Landing {
     /// Past its rating: what it takes in over what it converts. Absorptivity one when its shade
     /// is unknown, since a Black receiver takes all of it.
     pub past_rating_w: Option<f64>,
+    /// Its field under this beam and whatever held it at its glow, if storage is full, so it is
+    /// all heat.
+    pub if_full: Option<Fate>,
+    /// And if storage has room, so it converts up to its rating first.
+    pub with_room: Option<Fate>,
+}
+
+/// What a beam does to a field over its duration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fate {
+    /// Seconds from the beam's arrival.
+    Collapses(f64),
+    /// Of `Q_max`, at the beam's end.
+    Reaches(f64),
 }
 
 /// What `draft` would do, sent from `ship` at `now_s` toward `receiver`.
@@ -202,14 +258,16 @@ pub fn preview(draft: &Draft, ship: &Craft, now_s: f64, receiver: Option<&Receiv
         from_storage_j,
         recoil_m_s2,
         refusal,
-        at: receiver.map(|r| landing(r, draft.power_w, spread_rad)),
+        at: receiver.map(|r| landing(r, draft.power_w, spread_rad, draft.duration_s)),
     }
 }
 
-fn landing(receiver: &Receiver, power_w: f64, spread_rad: f64) -> Landing {
+fn landing(receiver: &Receiver, power_w: f64, spread_rad: f64, duration_s: f64) -> Landing {
     let fraction = received_fraction(spread_rad, receiver.shadow_m2, receiver.distance_m);
     let arriving_w = power_w * fraction;
     let absorbed_w = receiver.absorptivity.map(|a| a * arriving_w);
+    // An unknown shade taken as Black, which takes all of it.
+    let taken_w = absorbed_w.unwrap_or(arriving_w);
     Landing {
         distance_m: receiver.distance_m,
         spot_m: spread_rad.min(SPREAD_MAX_RAD).sin() * receiver.distance_m,
@@ -217,7 +275,21 @@ fn landing(receiver: &Receiver, power_w: f64, spread_rad: f64) -> Landing {
         fraction,
         arriving_w,
         absorbed_w,
-        past_rating_w: receiver.rating_w.map(|rating| absorbed_w.unwrap_or(arriving_w) - rating).filter(|&w| w > 0.0),
+        past_rating_w: receiver.rating_w.map(|rating| taken_w - rating).filter(|&w| w > 0.0),
+        if_full: receiver.field.map(|heated| fate(&heated, taken_w, duration_s)),
+        with_room: receiver.field.zip(receiver.rating_w).map(|(heated, rating_w)| {
+            fate(&heated, taken_w - taken_w.min(rating_w) * receiver.efficiency, duration_s)
+        }),
+    }
+}
+
+/// `heat_w` more on a field steady at its glow: whatever held it there, `Q/τ`, goes on.
+fn fate(heated: &Heated, heat_w: f64, duration_s: f64) -> Fate {
+    let (field, max_j) = (heated.field, heated.field.heat_max_j());
+    let power_w = heat_w + heated.heat_j / field.tau_s;
+    match field.time_to_rise_s(heated.heat_j, max_j, power_w).filter(|&t| t <= duration_s) {
+        Some(t) => Fate::Collapses(t),
+        None => Fate::Reaches(field.heat_after_j(heated.heat_j, power_w, duration_s) / max_j),
     }
 }
 
@@ -248,12 +320,13 @@ pub struct Emission {
     pub wavelength_m: f64,
     pub spread_rad: f64,
     pub duration_s: f64,
+    pub lead: Lead,
 }
 
 impl Emission {
     pub fn order(self) -> Order {
-        let Emission { aim, apertures, power_w, wavelength_m, spread_rad, duration_s } = self;
-        Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s }
+        let Emission { aim, apertures, power_w, wavelength_m, spread_rad, duration_s, lead } = self;
+        Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s, lead }
     }
 }
 
@@ -276,14 +349,6 @@ pub fn aimed_back(bearing: DVec3) -> Aimed {
     Aimed::Bearing { yaw_deg: look.yaw.to_degrees().rem_euclid(360.0), pitch_deg: look.pitch.to_degrees() }
 }
 
-/// The axis `aim` points along from `here_ly`, as this ship sees it.
-pub fn axis_of(aim: &Aim, here_ly: DVec3, contacts: &[Contact]) -> Option<DVec3> {
-    match aim {
-        Aim::Ship(id) => contacts.iter().find(|c| c.ship_id == *id).and_then(|c| (c.position_ly - here_ly).try_normalize()),
-        Aim::Bearing(b) => DVec3::from_array(*b).try_normalize(),
-        Aim::Omni | Aim::Star(_) => None,
-    }
-}
 
 /// A beam arriving here, as `Illuminated` last stated it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -316,6 +381,24 @@ pub struct Sent {
 pub struct Beams {
     pub incoming: Vec<Incoming>,
     pub sent: Vec<Sent>,
+    /// Every craft in sight by its last two statements, which is what a burn is measured from.
+    pub watched: HashMap<ShipId, Watch>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Watch {
+    pub latest: Sighting,
+    pub previous: Option<Sighting>,
+    /// Its plume, at the latest.
+    pub lit: bool,
+}
+
+impl Watch {
+    /// Its proper acceleration, light-seconds per second squared, as an escort measures its
+    /// quarry's: only while its plume is lit.
+    pub fn burn(&self) -> Option<DVec3> {
+        self.lit.then(|| self.previous.and_then(|p| lc_world::escort::acceleration_of(&p, &self.latest))).flatten()
+    }
 }
 
 impl Beams {
@@ -330,8 +413,52 @@ impl Beams {
             Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t } if me == Some(*ship_id) => {
                 self.illuminated(*beam, *bearing, *spectrum, *power_w, *arrive_t as f64 * 1.0e-6)
             }
+            Outbound::Present(seen) => {
+                let mut watched = HashMap::with_capacity(seen.len());
+                for presence in seen.iter().map(|c| c.get()) {
+                    let latest = sighting_of(presence);
+                    let watch = match self.watched.get(&presence.ship_id) {
+                        Some(held) if held.latest.emitted_s >= latest.emitted_s => *held,
+                        held => Watch { latest, previous: held.map(|h| h.latest), lit: presence.jet_power_w > 0.0 },
+                    };
+                    watched.insert(presence.ship_id, watch);
+                }
+                self.watched = watched;
+            }
             Outbound::Collapsed { .. } => *self = Beams::default(),
             _ => {}
+        }
+    }
+
+    /// Where `contact` was last stated to be, and the burn it was measured in.
+    pub fn watched(&self, contact: &Contact) -> (Sighting, Option<DVec3>) {
+        match self.watched.get(&contact.ship_id) {
+            Some(watch) => (watch.latest, watch.burn()),
+            None => (
+                Sighting {
+                    target: lc_world::motion::ShipId(contact.ship_id.0),
+                    position_ly: contact.position_ly,
+                    beta: contact.beta,
+                    length_m: contact.length_m,
+                    emitted_s: contact.emitted_s,
+                },
+                None,
+            ),
+        }
+    }
+
+    /// The axis `aim` is sent along from `here_ly` at `at_s`, led as `lead` says, as this ship sees
+    /// it.
+    pub fn axis(&self, aim: &Aim, lead: Lead, here_ly: DVec3, at_s: f64, contacts: &[Contact]) -> Option<DVec3> {
+        match aim {
+            Aim::Ship(id) => {
+                let contact = contacts.iter().find(|c| c.ship_id == *id)?;
+                let (sighting, burn) = self.watched(contact);
+                let accel = if lead == Lead::Burning { burn.unwrap_or(DVec3::ZERO) } else { DVec3::ZERO };
+                lc_world::emit::lead(here_ly, at_s, &sighting, accel).map(|led| led.axis)
+            }
+            Aim::Bearing(b) => DVec3::from_array(*b).try_normalize(),
+            Aim::Omni | Aim::Star(_) => None,
         }
     }
 
@@ -353,8 +480,8 @@ impl Beams {
 
     /// Fold this ship's accepted `Order::Emit`, aimed as this ship sees its target from `here_ly`.
     pub fn lit(&mut self, order: &Order, event_id: i64, at_s: f64, here_ly: DVec3, contacts: &[Contact]) {
-        let Order::Emit { aim, apertures, power_w, spread_rad, duration_s, .. } = *order else { return };
-        let Some(axis) = axis_of(&aim, here_ly, contacts) else { return };
+        let Order::Emit { aim, apertures, power_w, spread_rad, duration_s, lead, .. } = *order else { return };
+        let Some(axis) = self.axis(&aim, lead, here_ly, at_s, contacts) else { return };
         self.sent.retain(|s| s.until_s > at_s);
         self.sent.push(Sent {
             event_id,
@@ -378,6 +505,16 @@ impl Beams {
     /// W landing now, before absorptivity.
     pub fn landing_w(&self) -> f64 {
         self.incoming.iter().map(|i| i.power_w).sum()
+    }
+}
+
+fn sighting_of(presence: &lc_proto::Presence) -> Sighting {
+    Sighting {
+        target: lc_world::motion::ShipId(presence.ship_id.0),
+        position_ly: DVec3::from_array(presence.at_ly),
+        beta: DVec3::from_array(presence.beta),
+        length_m: presence.length_m,
+        emitted_s: presence.emitted_t as f64 * 1.0e-6,
     }
 }
 
@@ -512,9 +649,16 @@ pub(crate) fn emit(
         }
     });
     let receiver = match draft.aimed {
-        Aimed::Craft(id) => uplink.contacts.iter().find(|c| c.ship_id == id).map(|c| Receiver::of(c, here_ly, now_s, &balance)),
+        Aimed::Craft(id) => uplink
+            .contacts
+            .iter()
+            .find(|c| c.ship_id == id)
+            .map(|c| Receiver::of(c, &uplink.beams, draft.lead, here_ly, now_s, &balance)),
         _ => None,
     };
+    if matches!(draft.aimed, Aimed::Craft(_)) {
+        lead_row(ui, draft, receiver.as_ref());
+    }
     let rating_w = session
         .ship
         .fitting()
@@ -566,6 +710,7 @@ pub(crate) fn emit(
             wavelength_m: draft.wavelength_m,
             spread_rad: seen.spread_rad,
             duration_s: draft.duration_s,
+            lead: draft.lead,
         };
         let unseen = matches!(draft.aimed, Aimed::Craft(_)) && receiver.is_none();
         if ui.add_enabled(seen.refusal.is_none() && !unseen && session.remote, egui::Button::new("Emit")).clicked() {
@@ -663,6 +808,20 @@ fn show_preview(ui: &mut egui::Ui, seen: &Preview, receiver: Option<&Receiver>, 
                 if let Some(over) = at.past_rating_w {
                     ui.colored_label(hazard(), format!("{} past its rating", watts(over)));
                 }
+                match (at.if_full, at.with_room) {
+                    (None, _) => {
+                        ui.label("field unknown");
+                    }
+                    (Some(full), room) => {
+                        fate_line(ui, "if full", full);
+                        match room {
+                            Some(room) => fate_line(ui, "with room", room),
+                            None => {
+                                ui.label("with room: unknown");
+                            }
+                        }
+                    }
+                }
             });
         });
     }
@@ -682,6 +841,28 @@ fn show_preview(ui: &mut egui::Ui, seen: &Preview, receiver: Option<&Receiver>, 
         me(seen.from_heat_j),
         me(seen.from_storage_j),
     ));
+}
+
+fn fate_line(ui: &mut egui::Ui, case: &str, fate: Fate) {
+    match fate {
+        Fate::Collapses(s) => ui.colored_label(hazard(), format!("{case}: collapses in {}", duration(s))),
+        Fate::Reaches(share) => ui.label(format!("{case}: {:.0}% of collapse at the end", 100.0 * share)),
+    };
+}
+
+/// Coasting or burning, and what its light last said it was doing.
+fn lead_row(ui: &mut egui::Ui, draft: &mut Draft, receiver: Option<&Receiver>) {
+    ui.horizontal(|ui| {
+        for (label, lead) in [("coasting", Lead::Coasting), ("burning", Lead::Burning)] {
+            if ui.selectable_label(draft.lead == lead, label).clicked() {
+                draft.lead = lead;
+            }
+        }
+        match receiver.and_then(|r| r.burn_m_s2) {
+            Some(a) => ui.weak(format!("seen burning {:.2} g", a / G0)),
+            None => ui.weak("seen coasting"),
+        };
+    });
 }
 
 /// The spot, the lead uncertainty about it and the receiver's hull, to one scale.
@@ -783,6 +964,10 @@ mod tests {
 
     fn receiver(distance_m: f64) -> Receiver {
         Receiver {
+            axis: DVec3::X,
+            burn_m_s2: None,
+            efficiency: B.conversion_efficiency,
+            field: None,
             distance_m,
             blind_s: 2.0 * distance_m / C_M_S,
             accel_m_s2: Some(5.0 * G0),
@@ -852,21 +1037,24 @@ mod tests {
             arrive_t: 1_000_000,
             form: (&two_ended()).into(),
             building: None,
-            glow: Some(lc_proto::Glow { temperature_k: 300.0, shade: Shade::Clear }),
+            glow: Some(lc_proto::Glow { temperature_k: 300.0, shade: Shade::Clear, envelope_m2: 2.0e6 }),
             glare: None,
         };
         let contact = Contact::seen(presence.clone(), None);
-        let seen = Receiver::of(&contact, DVec3::ZERO, 1.0, &B);
+        let seen = Receiver::of(&contact, &Beams::default(), Lead::Coasting, DVec3::ZERO, 1.0, &B);
         assert!((seen.distance_m - at_m).abs() < 1.0e-3);
         assert!((seen.blind_s - 2.0).abs() < 1.0e-9, "{}", seen.blind_s);
         assert_eq!(seen.rating_w, Some(Capacities::of(&two_ended(), &B).aperture_w));
         assert_eq!(seen.absorptivity, Some(B.clear_absorptivity));
         let dry_kg = dry_mass_kg(&two_ended(), &B);
         assert_eq!(seen.accel_m_s2, Some(aft_aperture_w(&two_ended(), &B).unwrap() / (dry_kg * C_M_S)));
+        let field = Field::of(2.0e6, &B);
+        assert_eq!(seen.field, Some(Heated { field, heat_j: field.heat_j_at(300.0) }), "its field from its glow");
 
         let bare = Contact::seen(lc_proto::Presence { form: lc_proto::Form::default(), glow: None, ..presence }, None);
-        let seen = Receiver::of(&bare, DVec3::ZERO, 1.0, &B);
+        let seen = Receiver::of(&bare, &Beams::default(), Lead::Coasting, DVec3::ZERO, 1.0, &B);
         assert_eq!((seen.rating_w, seen.absorptivity, seen.accel_m_s2), (None, None, None));
+        assert_eq!(seen.field, None, "a formless craft's glow is a stand-in");
     }
 
     #[test]
@@ -1065,5 +1253,76 @@ mod tests {
         // A tenth is 0.041 of a decade: five hundredths at most, for a thousand spreads.
         assert!(drawn.len() <= 5, "{} meshes for a thousand spreads within 10%", drawn.len());
         assert!((drawn_spread(0.1) / 0.1 - 1.0).abs() < 0.012);
+    }
+
+    fn presence(emitted_s: f64, at_ls: DVec3, beta: DVec3, jet_power_w: f64) -> lc_proto::Presence {
+        lc_proto::Presence {
+            ship_id: ShipId(2),
+            name: "Vela".into(),
+            length_m: 500.0,
+            at_ly: (at_ls / lc_world::flight::JULIAN_YEAR_S).to_array(),
+            beta: beta.to_array(),
+            facing: [0.0, 1.0, 0.0],
+            jet_power_w,
+            emitted_t: (emitted_s * 1.0e6) as i64,
+            arrive_t: (emitted_s * 1.0e6) as i64,
+            form: lc_proto::Form::default(),
+            building: None,
+            glow: None,
+            glare: None,
+        }
+    }
+
+    fn present(p: lc_proto::Presence) -> Outbound {
+        let arrive_t = p.arrive_t;
+        Outbound::Present(vec![lc_proto::Cleared::<lc_proto::Presence>::clear(p, arrive_t).unwrap()])
+    }
+
+    /// Two statements of a lit plume measure its burn, and a burning lead meets the craft where the
+    /// burn carries it: `½ a T²` along from where coasting would, `T` from the light it was seen by.
+    #[test]
+    fn a_burning_lead_is_measured_from_two_statements() {
+        let a = 5.0 * G0;
+        let v = |t: f64| DVec3::Y * a * t / C_M_S;
+        let at = |t: f64| DVec3::new(60.0, 0.5 * a * t * t / C_M_S, 0.0);
+        let mut beams = Beams::default();
+        for t in [0.0, 1.0] {
+            beams.fold(&present(presence(t, at(t), v(t), 1.0e18)), Some(ShipId(7)), DVec3::ZERO, &[]);
+        }
+        let contact = Contact::seen(presence(1.0, at(1.0), v(1.0), 1.0e18), None);
+        let burning = Receiver::of(&contact, &beams, Lead::Burning, DVec3::ZERO, 61.0, &B);
+        let coasting = Receiver::of(&contact, &beams, Lead::Coasting, DVec3::ZERO, 61.0, &B);
+        assert!((burning.burn_m_s2.unwrap() / a - 1.0).abs() < 1.0e-6, "{:?}", burning.burn_m_s2);
+        assert_eq!(coasting.burn_m_s2, burning.burn_m_s2, "what was seen does not depend on the choice");
+        let apart_m = burning.axis.angle_between(coasting.axis) * burning.distance_m;
+        let half_a_t2 = 0.5 * a * burning.blind_s * burning.blind_s;
+        assert!((apart_m / half_a_t2 - 1.0).abs() < 1.0e-2, "{apart_m} against {half_a_t2}");
+
+        let mut dark = Beams::default();
+        for t in [0.0, 1.0] {
+            dark.fold(&present(presence(t, at(t), v(t), 0.0)), Some(ShipId(7)), DVec3::ZERO, &[]);
+        }
+        assert_eq!(Receiver::of(&contact, &dark, Lead::Burning, DVec3::ZERO, 61.0, &B).burn_m_s2, None, "no plume, no burn");
+    }
+
+    /// 31 §Attacking: 1.1 × 10²⁰ W on a Black starting ship collapses it in about 25 game days when
+    /// its storage is full, and never when it has room to convert it.
+    #[test]
+    fn the_fate_is_31s_attack_table() {
+        let field = Field::of(lc_world::fitting::STARTING_ENVELOPE_M2, &B);
+        let rating_w = Capacities::of(&Form::starting(), &B).aperture_w;
+        let starting = Receiver {
+            rating_w: Some(rating_w),
+            field: Some(Heated { field, heat_j: field.heat_j_at(B.field_idle_k) }),
+            shadow_m2: 1.0e12,
+            ..receiver(C_M_S)
+        };
+        let at = landing(&starting, 1.1e20, 1.0e-9, 1.0e8);
+        let Some(Fate::Collapses(s)) = at.if_full else { panic!("{:?}", at.if_full) };
+        let days = s / 86_400.0;
+        assert!((20.0..30.0).contains(&days), "{days} days");
+        assert!(matches!(at.with_room, Some(Fate::Reaches(share)) if share < 1.0), "{:?}", at.with_room);
+        let brief = landing(&starting, 1.1e20, 1.0e-9, 86_400.0);
+        assert!(matches!(brief.if_full, Some(Fate::Reaches(share)) if share < 1.0), "a day is not enough: {:?}", brief.if_full);
     }
 }

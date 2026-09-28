@@ -606,7 +606,7 @@ mod tests {
         let living = REGION_GRAPHS.iter().position(|k| *k == "living").unwrap();
         let au_ly = lc_world::navigation::AU / crate::system::M_PER_LY;
         let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
-        let clear = lc_proto::Glow { temperature_k: 400.0, shade: lc_proto::Shade::Clear };
+        let clear = lc_proto::Glow { temperature_k: 400.0, shade: lc_proto::Shade::Clear, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2 };
         let at = |session: &Session, au: f64| finished(session, star, DVec3::X * au * au_ly, clear);
         let luma = |v: Vec4| v.truncate().dot(crate::tonemap::LUMA);
 
