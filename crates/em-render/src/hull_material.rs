@@ -83,9 +83,11 @@ pub fn insert_region_weights(mesh: &mut Mesh, weights: &[[[u8; 4]; 4]]) {
 pub struct HullUniform {
     /// World direction to the star; `w` is the light on the unlit side, as a fraction.
     pub to_star: Vec4,
-    /// Starlight a white surface facing the star sends, as linear display light before the
-    /// tone map.
+    /// Starlight facing the star, as linear display light before the tone map, scaled so a texel of
+    /// the textures' mean albedo sends what the craft's field reflects.
     pub reflected: Vec4,
+    /// What glows evenly over the whole hull, in [`Self::reflected`]'s units: a field's own heat.
+    pub glow: Vec4,
     /// `(surface_reference, stops, 0, 0)`, evaluated per fragment as `body_surface.wgsl` does:
     /// lights and sunlight mix across the hull and the curve is logarithmic.
     pub exposure: Vec4,
@@ -125,6 +127,7 @@ impl Default for HullUniform {
         Self {
             to_star: Vec4::new(0.0, 0.0, 1.0, 0.0),
             reflected: Vec4::ONE,
+            glow: Vec4::ZERO,
             exposure: Vec4::new(1.0, 5.0, 0.0, 0.0),
             detail: Vec4::new(64.0, 0.0, 0.0, 0.0),
             reveal: Vec4::new(0.0, 0.0, 0.0, ALL_PLATED),

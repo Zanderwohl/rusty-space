@@ -75,7 +75,7 @@ fn glow_on(receiver: &Craft, here: DVec3, sources: &[Glowing], at_t: i64) -> Vec
             let from = source.craft.fitting()?;
             let left_t = lc_spacetime::retarded_times_at(at_t as f64, here, &source.craft.worldline()).last().copied()?;
             let offset = here - source.craft.position_at(left_t);
-            let emitted_w = from.heat_j_at(&source.craft.motion, left_t * 1.0e-6) / from.field().tau_s;
+            let emitted_w = source.craft.heat_seen_j_at(left_t * 1.0e-6)? / from.field().tau_s;
             let shadow_m2 = shadow_toward_m2(receiver, -offset, at_s);
             Some((emitted_w, received_fraction(shadow_m2, offset.length() * LIGHT_MICROSECOND_M)))
         })
