@@ -518,6 +518,10 @@ puts a countdown in the text.
   so both gaps stay open. `auto_refill_below` is storage, not heat, and is not on the bar; it travels
   with the order unchanged.
 - **A mode order during a switch is refused before it is sent**, with the shard's own words.
+- **The countdown is never dropped for width.** The narrowest header shows the bar alone, as it
+  does energy, but keeps `collapse in …` beside it.
+
+![The field bar: idle and Black; hot in Auto at 21 solar radii; and at 3, heading past the limit](../images/field-bar.png)
 
 ### Elsewhere
 
