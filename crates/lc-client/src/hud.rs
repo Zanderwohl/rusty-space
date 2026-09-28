@@ -805,10 +805,16 @@ mod tests {
 
     #[test]
     fn a_scheduled_collapse_counts_down_in_real_time() {
-        let (mut ui, s) = heated(0.99, 100.0 * rated_w(), lc_world::fitting::Posture::BLACK);
+        // Full and Black, starlight is all heat: `f` of the rated load heads for `f Q_max`, and
+        // reaches `Q_max` from 0.99 of it in `τ ln((f − 0.99) / (f − 1))`. Half a day out.
+        let tau_s = lc_world::fitting::Balance::DEFAULT.field_tau_s;
+        let (_, s) = fixture();
         let now = s.coordinate_time_s();
+        let e = (0.5 * (lc_world::solar::segment_end(now) - now) / tau_s).exp();
+        let (mut ui, s) = heated(0.99, (e - 0.99) / (e - 1.0) * rated_w(), lc_world::fitting::Posture::BLACK);
         let at_s = s.ship.fitting().unwrap().collapse_s(&s.ship.motion, f64::INFINITY).expect("premise: it collapses");
         assert!(at_s < lc_world::solar::segment_end(now), "premise: within the starlight segment");
+        assert!(at_s - now > 0.4 * (lc_world::solar::segment_end(now) - now), "premise: a countdown worth reading");
         for rate in [1.0, 0.05] {
             ui.time_rate = rate;
             let real = ((at_s - now) / (crate::session::TIME_RATE * rate)).ceil() as u64;
