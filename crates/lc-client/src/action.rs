@@ -1168,7 +1168,7 @@ mod tests {
         draft(ui).resize(part.id, part.volume_m3 * by).unwrap()
     }
 
-    /// The budget is Apply's to refuse: a draft passes through designs storage cannot pay for.
+    /// Over budget on the way, so a later edit can bring it back under.
     #[test]
     fn an_edit_storage_cannot_pay_for_is_still_made() {
         let (mut ui, mut s) = fitted();

@@ -657,8 +657,8 @@ Always on screen, and updated with every handle:
   with its effect on the field
 
 The budget stops no edit: a draft may pass through designs storage cannot pay for on the way to one
-it can, and Apply is what refuses. Venting is shown in the field's own terms, as the peak temperature it would reach. It is allowed, but
-Apply asks once more when the vent would collapse the field.
+it can, and Apply is what refuses. Venting is shown in the field's own terms, as the peak temperature
+it would reach. It is allowed, but Apply asks once more when the vent would collapse the field.
 
 - **The round is solved locally from the shard's inputs.** `preview::Start` is what
   `Craft::begin_refit` would take: the ship's form, what it stores now, and now. While a round runs

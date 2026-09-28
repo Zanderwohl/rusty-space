@@ -513,7 +513,8 @@ fn pull_on_arrival(
     mut done: Local<bool>,
     mut out: MessageWriter<Requested>,
 ) {
-    let (Some(factor), false, true) = (dev.pull, *done, game.0.remote) else { return };
+    let stated = crate::preview::Start::of(&game.0).is_some();
+    let (Some(factor), false, true, true) = (dev.pull, *done, game.0.remote, stated) else { return };
     let (Some(lens), Some(sdf)) = (lens(&ui, &shown, &surface), shown.sdf()) else { return };
     let Some((part, piece, handles)) = selected_handles(&ui, sdf, &lens) else { return };
     let Some((from, to)) = handles.line(Grip::Size) else { return };
