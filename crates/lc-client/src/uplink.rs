@@ -102,7 +102,8 @@ pub struct Contact {
     /// that was, coordinate seconds.
     pub form: lc_proto::Form,
     pub building: Option<(f64, lc_proto::Building)>,
-    pub glow: Option<lc_proto::Glow>,
+    /// Its field, as the statement's light left it.
+    pub glow: lc_proto::Glow,
     reckoning: Reckoning,
     /// What the statement said the drive was doing, at the statement's own instant.
     stated_power_w: f64,
@@ -144,7 +145,7 @@ impl Contact {
             emitted_s,
             form: presence.form,
             building: presence.building.map(|b| (emitted_s, b)),
-            glow: presence.glow,
+            glow: presence.glow.unwrap_or_else(|| lc_world::glow::Glow::unfitted(&lc_world::fitting::Balance::DEFAULT).into()),
             reckoning: Reckoning::new(system, sighting),
             stated_power_w: presence.jet_power_w,
         }

@@ -191,7 +191,7 @@ fn stage(
     mut images: ResMut<Assets<Image>>,
 ) {
     let mapping = presets::natural();
-    let sunlit = planck(SUN_K).map(|_, v| v * lc_client::hull::ALBEDO * (SUN_RADIUS_M / AU_M).powi(2));
+    let sunlit = planck(SUN_K).map(|_, v| v * lc_client::hull::PAINT * (SUN_RADIUS_M / AU_M).powi(2));
     let reference = luminance(mapped(&mapping, &sunlit));
     let face = mapped(&mapping, &planck(burn.face_k));
     info!("exposure {reference:.3e}, face {:.3e} ({:.1} stops over)", luminance(face), (luminance(face) / reference).log2());

@@ -282,6 +282,7 @@ pub fn update_parts(
     let session = &game.0;
     let at_ly = session.ship.motion.position_ly;
     let star = lighting(session);
+    let glow = crate::hull::own_glow(session);
     let placed = ship_frame(session, &eye, &ui);
     // The real hull, or a refit's meshes over it, once either is up.
     let formed = own.0.as_ref().filter(|_| !showing.drawing(None) && !real.drawn(None));
@@ -308,7 +309,7 @@ pub fn update_parts(
             let painted = Painted { color, part: piece.part, side: piece.side, mesh_scale, reach_m: full.shape.reach() };
             commands.spawn((
                 Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(materials.add(surfaces.flat.material(lit(session, star, at_ly, color)))),
+                MeshMaterial3d(materials.add(surfaces.flat.material(lit(session, star, at_ly, color, glow)))),
                 sized(piece, &painted),
                 // As for a hull: placed by hand at a scale where a mesh's bounds say nothing.
                 NoFrustumCulling,
@@ -332,7 +333,7 @@ pub fn update_parts(
             None => *visibility = Visibility::Hidden,
         }
         let Some(mut asset) = materials.get_mut(&material.0) else { continue };
-        let next = lit(session, star, at_ly, painted.color);
+        let next = lit(session, star, at_ly, painted.color, glow);
         if asset.uniforms != next {
             asset.uniforms = next;
         }

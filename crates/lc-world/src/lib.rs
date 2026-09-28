@@ -28,6 +28,7 @@ pub mod flicker;
 pub mod flight;
 pub mod form;
 pub mod giant;
+pub mod glow;
 pub mod ground;
 pub mod ignition;
 pub mod injection;

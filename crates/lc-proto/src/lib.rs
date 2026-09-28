@@ -518,7 +518,8 @@ pub struct Presence {
     pub form: Form,
     /// The refit step it had under way as its light left, running back after a cancel.
     pub building: Option<Building>,
-    /// `None` until H7.
+    /// Its field as its light left it. A shard always states one, the starting field at rest for a
+    /// craft with no fitting.
     pub glow: Option<Glow>,
     /// Only for an observer inside one of the craft's beams whose light is arriving.
     pub glare: Option<Glare>,

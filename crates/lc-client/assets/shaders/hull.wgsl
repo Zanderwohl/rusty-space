@@ -52,6 +52,8 @@ struct HullUniform {
     /// World direction to the star; `w` is the light on the unlit side.
     to_star: vec4<f32>,
     reflected: vec4<f32>,
+    /// Even over the hull, in reflected's units.
+    glow: vec4<f32>,
     /// `(surface_reference, stops, 0, 0)`.
     exposure: vec4<f32>,
     /// `(tile_m, 0, 0, 0)`.
@@ -121,7 +123,7 @@ fn shade(albedo: vec3<f32>, emitted: vec3<f32>, world_normal: vec3<f32>) -> vec4
     let to_star = normalize(material.to_star.xyz);
     let lambert = max(dot(normalize(world_normal), to_star), 0.0);
     let light = max(lambert, material.to_star.w);
-    let linear = material.reflected.rgb * albedo * light + emitted;
+    let linear = material.reflected.rgb * albedo * light + emitted + material.glow.rgb;
 
     let reference = material.exposure.x;
     let stops = material.exposure.y;

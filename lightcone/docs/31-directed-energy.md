@@ -454,7 +454,8 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
   splits exactly as the server will draw it.
 - **What is known of a receiver** is what its light carries. Its rating and the acceleration the
   lead uncertainty assumes come from the form it was seen with: the engines' `aperture_w`, and its
-  aft rating over its dry mass, the most it could do. Its shade comes from its glow. Its room is
+  aft rating over its dry mass, the most it could do. Its shade comes from its glow, for a craft
+  seen with a form. Its room is
   never known, and the window says so. The shadow is broadside, the most it can present, which is
   the one [What arrives](#what-arrives) is worked for. The lead is counted from the light it was last
   seen by, so a stale sighting shows a wider circle than a fresh one at the same range.

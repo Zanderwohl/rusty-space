@@ -1,10 +1,12 @@
-//! The forms a craft has had, so an observer is shown the one its light left with. See
-//! `lightcone/docs/29-ship-form.md` §Protocol and persistence.
+//! The forms a craft has had and the field it has worn, so an observer is shown the ones its light
+//! left with. See `lightcone/docs/29-ship-form.md` §Protocol and persistence and
+//! `lightcone/docs/30-the-field.md` §What an observer sees.
 
 use std::sync::Arc;
 
 use crate::craft::HISTORY_S;
-use crate::fitting::Fitting;
+use crate::field::{Field, Mode};
+use crate::fitting::{Fitting, Switch};
 use crate::form::{Form, Part, PartId};
 use crate::refit::rounds::{Change, Plan};
 
@@ -12,6 +14,13 @@ use crate::refit::rounds::{Change, Plan};
 /// a few rounds of a large form; past it, the oldest is forgotten, and an observer asking about
 /// then is told nothing rather than a later form.
 pub const HISTORY_FORMS: usize = 1024;
+
+/// How many samples of its field a craft keeps. A field at rest is one sample for as long as it
+/// rests; one changing is kept at about a sample every tenth of a time constant.
+pub const HISTORY_GLOWS: usize = 4096;
+
+/// Of its heat, how far a sample may sit off the line through its neighbors and still be dropped.
+const GLOW_TOLERANCE: f64 = 1.0e-4;
 
 /// A form a craft had, the length it measured and the refit it was in, from the coordinate second
 /// it took effect.
@@ -177,5 +186,177 @@ impl History {
         let stale = self.0.iter().skip(1).take_while(|s| s.from_s < horizon).count();
         let excess = self.0.len().saturating_sub(HISTORY_FORMS);
         self.0.drain(..stale.max(excess));
+    }
+}
+
+/// The field as a settlement left it, from `at_s`, coordinate seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Glowed {
+    pub at_s: f64,
+    pub heat_j: f64,
+    /// Kept so a wreck's light, with no fitting left to ask, still has a temperature.
+    pub field: Field,
+    pub shade: Mode,
+    /// Not yet taken: the shade is its `to` from its `done_s`.
+    pub switch: Option<Switch>,
+}
+
+impl Glowed {
+    fn shade_at(&self, t: f64) -> Mode {
+        match self.switch {
+            Some(switch) if switch.done_s <= t => switch.to,
+            _ => self.shade,
+        }
+    }
+
+    fn worn_alike(&self, other: &Glowed) -> bool {
+        self.field == other.field && self.shade == other.shade && self.switch == other.switch
+    }
+}
+
+/// Oldest first. Between samples heat is read off the line joining them, so at most two share an
+/// instant: before a burst and after it.
+#[derive(Clone, Debug, Default)]
+pub struct Glows {
+    kept: Vec<Glowed>,
+    /// The slopes out of the second-last sample that still pass every sample dropped since it, J/s.
+    window: Option<(f64, f64)>,
+    /// Whether the front was ever dropped. Until it is, the oldest is the field for all time before.
+    forgot: bool,
+}
+
+impl Glows {
+    pub fn clear(&mut self) {
+        self.kept.clear();
+        self.window = None;
+        self.forgot = false;
+    }
+
+    /// Drops the last sample where the line from the one before it to `next` passes within
+    /// [`GLOW_TOLERANCE`] of it and of every sample dropped before it.
+    pub fn push(&mut self, next: Glowed) {
+        if self.kept.last() == Some(&next) {
+            return;
+        }
+        while self.kept.last().is_some_and(|last| last.at_s > next.at_s) {
+            self.kept.pop();
+            self.window = None;
+        }
+        let mut window = None;
+        if let [.., a, b] = self.kept.as_slice() {
+            let dropped = if b.at_s == next.at_s {
+                a.at_s == b.at_s
+            } else if a.at_s < b.at_s && a.worn_alike(b) && b.worn_alike(&next) {
+                let off = GLOW_TOLERANCE * b.heat_j.abs().max(f64::MIN_POSITIVE);
+                let dt = b.at_s - a.at_s;
+                let (lo, hi) = self.window.unwrap_or((f64::NEG_INFINITY, f64::INFINITY));
+                let (lo, hi) = (lo.max((b.heat_j - off - a.heat_j) / dt), hi.min((b.heat_j + off - a.heat_j) / dt));
+                let slope = (next.heat_j - a.heat_j) / (next.at_s - a.at_s);
+                window = Some((lo, hi));
+                lo <= slope && slope <= hi
+            } else {
+                false
+            };
+            if dropped {
+                self.kept.pop();
+            } else {
+                window = None;
+            }
+        }
+        self.window = window;
+        let horizon = next.at_s - HISTORY_S;
+        self.kept.push(next);
+        let stale = self.kept.iter().skip(1).take_while(|g| g.at_s < horizon).count();
+        let excess = self.kept.len().saturating_sub(HISTORY_GLOWS);
+        let dropped = stale.max(excess);
+        self.forgot |= dropped > 0;
+        self.kept.drain(..dropped);
+    }
+
+    /// Heat, field and shade at `t`. Before the oldest sample, the oldest's, unless older ones were
+    /// forgotten: then nothing, as a form too old to remember is.
+    pub fn at(&self, t: f64) -> Option<(f64, Field, Mode)> {
+        let after = self.kept.partition_point(|g| g.at_s <= t);
+        let Some(a) = after.checked_sub(1).map(|i| &self.kept[i]) else {
+            return self.kept.first().filter(|_| !self.forgot).map(|g| (g.heat_j, g.field, g.shade));
+        };
+        let heat_j = match self.kept.get(after) {
+            Some(b) => a.heat_j + (b.heat_j - a.heat_j) * (t - a.at_s) / (b.at_s - a.at_s),
+            None => a.heat_j,
+        };
+        Some((heat_j, a.field, a.shade_at(t)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(at_s: f64, heat_j: f64) -> Glowed {
+        Glowed { at_s, heat_j, field: Field::of(1.0, &crate::fitting::Balance::DEFAULT), shade: Mode::Clear, switch: None }
+    }
+
+    #[test]
+    fn a_field_at_rest_is_one_line_however_often_it_settles() {
+        let mut glows = Glows::default();
+        for k in 0..1000 {
+            glows.push(at(f64::from(k), 5.0));
+        }
+        assert_eq!(glows.kept.len(), 2);
+        assert_eq!(glows.at(500.5).map(|g| g.0), Some(5.0));
+    }
+
+    /// A burst is a step, read on either side of its instant, and never smoothed into a ramp.
+    #[test]
+    fn a_burst_is_kept_as_a_step() {
+        let mut glows = Glows::default();
+        for (t, q) in [(0.0, 1.0), (10.0, 1.0), (10.0, 1.0), (10.0, 9.0), (20.0, 9.0), (30.0, 9.0)] {
+            glows.push(at(t, q));
+        }
+        assert_eq!(glows.at(9.999).map(|g| g.0), Some(1.0));
+        assert_eq!(glows.at(10.0).map(|g| g.0), Some(9.0));
+        assert_eq!(glows.at(25.0).map(|g| g.0), Some(9.0));
+    }
+
+    /// Settled every step of a curve, the kept samples still read it back to the tolerance.
+    #[test]
+    fn a_curve_is_kept_to_its_tolerance_in_far_fewer_samples() {
+        let tau = 1.0e4;
+        let q = |t: f64| 10.0 - 9.0 * (-t / tau).exp();
+        let mut glows = Glows::default();
+        for k in 0..=20_000 {
+            glows.push(at(f64::from(k), q(f64::from(k))));
+        }
+        assert!(glows.kept.len() < 2000, "{} kept", glows.kept.len());
+        for k in 0..2000 {
+            let t = f64::from(k) * 10.0 + 3.3;
+            let (read, _, _) = glows.at(t).unwrap();
+            assert!((read / q(t) - 1.0).abs() < 2.0 * GLOW_TOLERANCE, "at {t}: {read} for {}", q(t));
+        }
+    }
+
+    /// Once the front has been forgotten, a moment before the oldest kept is not answered with a
+    /// later field.
+    #[test]
+    fn a_forgotten_past_is_not_answered() {
+        let mut glows = Glows::default();
+        glows.push(at(0.0, 1.0));
+        assert!(glows.at(-5.0).is_some(), "before anything was forgotten, the oldest stands for all time");
+        for k in 1..=HISTORY_GLOWS + 10 {
+            let shade = if k % 2 == 0 { Mode::Clear } else { Mode::Black };
+            glows.push(Glowed { shade, ..at(k as f64, 1.0) });
+        }
+        assert_eq!(glows.at(1.0), None);
+        assert!(glows.at((HISTORY_GLOWS + 5) as f64).is_some());
+    }
+
+    #[test]
+    fn a_switch_turns_the_shade_at_its_done_time_between_samples() {
+        let mut glows = Glows::default();
+        let switch = Some(Switch { to: Mode::Black, done_s: 15.0 });
+        glows.push(Glowed { switch, ..at(10.0, 1.0) });
+        glows.push(Glowed { switch, ..at(20.0, 1.0) });
+        assert_eq!(glows.at(14.0).map(|g| g.2), Some(Mode::Clear));
+        assert_eq!(glows.at(16.0).map(|g| g.2), Some(Mode::Black));
     }
 }

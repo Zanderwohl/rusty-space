@@ -95,7 +95,8 @@ impl Receiver {
             .then(|| aft_aperture_w(&form, balance).map(|w| w / (dry_mass_kg(&form, balance) * C_M_S)))
             .flatten();
         let rating_w = formed.then(|| Capacities::of(&form, balance).aperture_w);
-        let absorptivity = contact.glow.map(|glow| match glow.shade {
+        // A craft seen without a form has H7's stand-in glow, which is no statement of its shade.
+        let absorptivity = formed.then(|| match contact.glow.shade {
             Shade::Black => 1.0,
             Shade::Clear => balance.clear_absorptivity,
         });
