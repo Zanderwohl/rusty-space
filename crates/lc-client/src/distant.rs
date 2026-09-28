@@ -32,6 +32,7 @@ use glam::DVec3;
 use lc_proto::{Glare, ShipId, Spectrum};
 use lc_world::emit::Ends;
 use lc_world::fitting::Balance;
+use lc_world::signal::Beam;
 
 use crate::field::{Shells, Wrecks};
 use crate::hull::{Eye, Hull, Sent};
@@ -306,6 +307,9 @@ impl Flare {
 #[derive(serde::Deserialize)]
 struct Emitted {
     beam: i64,
+    /// Where it left, light-microseconds.
+    from: [f64; 3],
+    axis: [f64; 3],
     half_angle_rad: f64,
     spectrum: Spectrum,
     power_w: f64,
@@ -326,9 +330,11 @@ pub struct Flares {
 }
 
 impl Flares {
-    /// Take each DRIVE and EMIT sighting once, oldest first. The flux inside an emission is
-    /// `lc_world::emit::flux_w_m2` over the distance its light came, as the shard's landing has it.
-    pub fn take(&mut self, seen: &[lc_proto::Sighting], now_s: f64) {
+    /// Take each DRIVE and EMIT sighting once, oldest first, seen from `here_ly`. The flux inside an
+    /// emission is `lc_world::emit::flux_w_m2` over the distance its light came, as the shard's
+    /// landing has it. A beam is restated to everyone it lit whichever way it turns, so one whose
+    /// cone no longer covers `here_ly` has gone out here, as the landing's cone test has it.
+    pub fn take(&mut self, seen: &[lc_proto::Sighting], here_ly: DVec3, now_s: f64) {
         let mut new: Vec<&lc_proto::Sighting> = seen
             .iter()
             .filter(|s| matches!(s.kind, lc_proto::kind::DRIVE | lc_proto::kind::EMIT))
@@ -348,7 +354,10 @@ impl Flares {
                     continue;
                 }
                 let distance_m = (sighting.arrive_t - sighting.emitted_t) as f64 * 1e-6 * lc_world::flight::C_M_S;
-                let flux_w_m2 = lc_world::emit::flux_w_m2(emission.power_w, emission.half_angle_rad, distance_m);
+                let offset = here_ly - DVec3::from_array(emission.from) / lc_world::motion::LIGHT_US_PER_LY;
+                let covers = Beam::along(DVec3::from_array(emission.axis), emission.half_angle_rad).covers(offset);
+                let power_w = if covers { emission.power_w } else { 0.0 };
+                let flux_w_m2 = lc_world::emit::flux_w_m2(power_w, emission.half_angle_rad, distance_m);
                 (Some(emission.beam), (flux_w_m2 > 0.0).then_some(Lit::Glare(Glare { spectrum: emission.spectrum, flux_w_m2 })))
             };
             for open in self.flares.iter_mut().filter(|f| f.source == source && f.beam == beam && f.out_s.is_none()) {
@@ -470,7 +479,7 @@ pub fn draw_points(
 ) {
     let session = &game.0;
     let (now_s, real_s) = (session.coordinate_time_s(), time.elapsed_secs());
-    flares.take(&uplink.seen, now_s);
+    flares.take(&uplink.seen, session.ship.motion.position_ly, now_s);
 
     let shown = |craft: Option<ShipId>| if distant.is_point(craft) { Visibility::Hidden } else { Visibility::Inherited };
     // Never the player's own, which is not a point and whose showing `--first-person` decides.
@@ -765,8 +774,8 @@ mod tests {
             sighting(2, lc_proto::kind::DRIVE, 5_000_000, 12_000_000, drive(0.0)),
             sighting(1, lc_proto::kind::DRIVE, 3_000_000, 10_000_000, drive(4.0e19)),
         ];
-        flares.take(&seen, 20.0);
-        flares.take(&seen, 20.0);
+        flares.take(&seen, DVec3::ZERO, 20.0);
+        flares.take(&seen, DVec3::ZERO, 20.0);
         let source = ShipId(4);
         assert_eq!(flares.drive_w(source, 20.0, 100.0), Some(4.0e19), "the burn between the presences");
         assert_eq!(flares.drive_w(source, 20.0, 100.0 + 0.9 * FLARE_S), Some(4.0e19));
@@ -778,7 +787,7 @@ mod tests {
 
         // Still burning: shown for as long as it is lit.
         let mut flares = Flares::default();
-        flares.take(&[sighting(3, lc_proto::kind::DRIVE, 3_000_000, 10_000_000, drive(1.0e19))], 20.0);
+        flares.take(&[sighting(3, lc_proto::kind::DRIVE, 3_000_000, 10_000_000, drive(1.0e19))], DVec3::ZERO, 20.0);
         assert_eq!(flares.drive_w(source, 20.0, 0.0), Some(1.0e19));
         assert_eq!(flares.drive_w(source, 20.0, 1.0e3), Some(1.0e19));
     }
@@ -787,17 +796,18 @@ mod tests {
     /// distance its light came, as the shard's landing has it; a presence's brighter glare wins.
     #[test]
     fn an_emission_seen_only_in_its_sightings_is_a_glare() {
-        let payload = |power_w: f64| {
+        let payload = |power_w: f64, axis: [f64; 3]| {
             let spectrum = serde_json::to_value(Spectrum::Blackbody { temperature_k: 5.0e5 }).unwrap();
-            serde_json::json!({ "emission": { "beam": 9, "from": [0.0, 0.0, 0.0], "axis": [1.0, 0.0, 0.0], "half_angle_rad": 0.08, "spectrum": spectrum, "power_w": power_w, "burst_j": 0.0 } }).to_string()
+            serde_json::json!({ "emission": { "beam": 9, "from": [0.0, 0.0, 0.0], "axis": axis, "half_angle_rad": 0.08, "spectrum": spectrum, "power_w": power_w, "burst_j": 0.0 } }).to_string()
         };
         let year_us = (lc_world::flight::JULIAN_YEAR_S * 1.0e6) as i64;
+        let here = DVec3::X;
         let seen = vec![
-            sighting(1, lc_proto::kind::EMIT, 0, year_us, payload(1.0e20)),
-            sighting(2, lc_proto::kind::EMIT, 1_000_000, year_us + 1_000_000, payload(0.0)),
+            sighting(1, lc_proto::kind::EMIT, 0, year_us, payload(1.0e20, [1.0, 0.0, 0.0])),
+            sighting(2, lc_proto::kind::EMIT, 1_000_000, year_us + 1_000_000, payload(0.0, [1.0, 0.0, 0.0])),
         ];
         let mut flares = Flares::default();
-        flares.take(&seen, year_us as f64 * 1e-6 + 5.0);
+        flares.take(&seen, here, year_us as f64 * 1e-6 + 5.0);
         let now = year_us as f64 * 1e-6 + 5.0;
         let glare = flares.glare(ShipId(4), None, now, 1.0).expect("the emission");
         let want = lc_world::emit::flux_w_m2(1.0e20, 0.08, lc_world::flight::JULIAN_YEAR_S * lc_world::flight::C_M_S);
@@ -805,6 +815,19 @@ mod tests {
         let brighter = Glare { flux_w_m2: 2.0 * want, ..glare };
         assert_eq!(flares.glare(ShipId(4), Some(brighter), now, 1.0), Some(brighter));
         assert_eq!(flares.glare(ShipId(4), None, now, 1.0 + 1.1 * FLARE_S), None, "gone out");
+
+        // A drive's cone swept past: restated lit, but pointing away, it is out here.
+        let mut flares = Flares::default();
+        let swept = vec![
+            sighting(3, lc_proto::kind::EMIT, 0, year_us, payload(1.0e20, [1.0, 0.0, 0.0])),
+            sighting(4, lc_proto::kind::EMIT, 1_000_000, year_us + 1_000_000, payload(1.0e20, [0.0, 1.0, 0.0])),
+        ];
+        flares.take(&swept, here, now);
+        assert!(flares.glare(ShipId(4), None, now, 1.0).is_some(), "shown for its flare");
+        assert_eq!(flares.glare(ShipId(4), None, now, 1.0 + 1.1 * FLARE_S), None, "its cone left and it stayed lit");
+        let mut flares = Flares::default();
+        flares.take(&swept[1..], here, now);
+        assert_eq!(flares.glare(ShipId(4), None, now, 1.0), None, "a beam aimed past is not drawn");
     }
 
     fn contact(id: i64, at_ly: DVec3) -> Contact {
