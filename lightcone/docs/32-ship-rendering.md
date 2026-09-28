@@ -466,6 +466,14 @@ collapse whose light has arrived.
   spot toward the wreck when the light of it, off that neighbor, reaches this ship:
   `arrive + (|w − n| + |n − o| − |w − o|) / c`, from what the client knows of where each was.
 
+![The player's field at 400, 2 400 and 4 600 K, Clear left and Black right: Black hides the design](../images/r11-temperatures.jpg)
+
+![A beam's hot spot from beside the camera, and a switch to Black half swept from the Mind](../images/r11-beam-and-switch.jpg)
+
+![`--demo cascade` partway: Aster's debris, Bramble's flash as its light arrives, and three ships whose ends have not](../images/r11-cascade.jpg)
+
+![Diving at 2 400 K: the field and the bar the same orange](../images/r11-dive.jpg)
+
 ## Beams and plumes
 
 - **A beam is invisible**, because vacuum scatters nothing. The one exception is an observer inside
