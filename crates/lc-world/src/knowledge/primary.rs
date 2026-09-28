@@ -332,7 +332,11 @@ impl crate::knowledge::Knowledge {
         // best start there is, and a refit that cannot agree with the new look falls back to the
         // search. Dropping it had Mercury's search, from nothing, settle on Earth as its primary.
         self.surprised.remove(&subject);
-        Some(FitJob { subject, owner: self.owner, frames, warm: last, taken_s: now_s })
+        let star_sigma_m = match self.belief(Subject::Star(star)).map(|b| b.distance) {
+            Some(super::Distance::Measured { sigma_ly, .. }) => sigma_ly * crate::system::M_PER_LY,
+            _ => 0.0,
+        };
+        Some(FitJob { subject, owner: self.owner, frames, warm: last, star_sigma_m, taken_s: now_s })
     }
 
     /// File what a [`FitJob`] found, as learned at `now_s`. `false` if the body has since been
@@ -403,6 +407,9 @@ pub struct FitJob {
     frames: Vec<Frame>,
     /// The last orbit fitted, to carry onto this arc before searching for a new one.
     warm: Option<Held>,
+    /// One sigma of the star's position along the line of sight to it, meters: see
+    /// `settle::origin_covariance`.
+    star_sigma_m: f64,
     taken_s: f64,
 }
 
@@ -458,6 +465,18 @@ impl FitJob {
         orbit.semi_major_au = (au, sigma_au.hypot(au * depth));
         // A depth error scales the whole orbit, which the axis is the log of.
         orbit.covariance = orbit.covariance.map(|c| c.scaled_by(depth));
+        // An orbit about the star is only as good as the star's place; a moon's frame carries
+        // its planet's, star and all, in `depth`.
+        let toward_star = -looks.iter().map(|l| l.from_m).sum::<DVec3>().normalize_or_zero();
+        if about.is_none() && arc::sound(self.star_sigma_m) {
+            if let Some(extra) = super::settle::origin_covariance(&fitted, &looks, toward_star * self.star_sigma_m) {
+                orbit.covariance = orbit.covariance.map(|c| c.with(&extra));
+                let (au, sigma) = orbit.semi_major_au;
+                orbit.semi_major_au = (au, sigma.hypot(au * extra[0][0].sqrt()));
+                let (period, sigma) = orbit.period_s;
+                orbit.period_s = (period, sigma.hypot(period * extra[6][6].sqrt()));
+            }
+        }
         Some(Solved { subject: self.subject, about, fitted, orbit, taken_s: self.taken_s, offered })
     }
 }
@@ -598,7 +617,7 @@ mod tests {
 
     fn job(frames: Vec<Frame>, warm: Option<Held>) -> FitJob {
         let star = StarId::synthesize("primary", 5);
-        FitJob { subject: Subject::Body { star, body: BodyId::of(star, "fitted") }, owner: Witness(1), frames, warm, taken_s: 0.0 }
+        FitJob { subject: Subject::Body { star, body: BodyId::of(star, "fitted") }, owner: Witness(1), frames, warm, star_sigma_m: 0.0, taken_s: 0.0 }
     }
 
     fn frame(about: Option<BodyId>, looks: Vec<Look>, longest_s: f64, widest_m: f64) -> Frame {
