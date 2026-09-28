@@ -439,6 +439,20 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
         row
     }
 
+    /// A [`MenuUi::chosen_button`] as tall as it is wide, for a glyph or a letter.
+    pub fn square_button<A: Component>(&mut self, parent: Entity, text: &str, chosen: bool, action: A) -> Entity {
+        let button = self.chosen_button(parent, text, chosen, action);
+        self.commands.entity(button).insert(Node {
+            width: Val::Px(SQUARE),
+            height: Val::Px(SQUARE),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        });
+        button
+    }
+
     /// A row of a list with a cursor, as [`MenuUi::tree_row`] at no depth: chosen at the cursor,
     /// and dimmed past it.
     pub fn cursor_row<A: Component>(&mut self, parent: Entity, text: &str, reached: Reached, action: A) -> Entity {
@@ -535,6 +549,7 @@ impl<'a, 'w, 's> MenuUi<'a, 'w, 's> {
 }
 
 const TREE_INDENT: f32 = 12.0;
+const SQUARE: f32 = 24.0;
 const HEADING_TEXT: f32 = 15.0;
 const FOLD_ARROW: f32 = 16.0;
 const FIELD_TEXT: f32 = 13.0;

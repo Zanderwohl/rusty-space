@@ -50,11 +50,11 @@ pub enum Action {
     /// An edit to the draft as its handle or field built it, before and after, or why it could
     /// not be built. See [`crate::draft`].
     EditForm(Result<crate::draft::Edit, crate::draft::Refused>),
-    /// Step the draft's history back one entry, or forward one. See [`crate::form_history`].
+    /// Step the draft's history back one, forward one, or until this many entries are done.
     Undo,
     Redo,
-    /// Undo or redo until this many of the history's entries are done.
     GoToEdit(usize),
+    ShowHistory(bool),
     /// Send the draft to the shard as the ship's target, first asking again when its round would
     /// collapse the field.
     ApplyDraft,
@@ -499,6 +499,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
     Action::SelectPart(part) => ui.form.selected = part,
     Action::ShowCurrent(on) => ui.form.show_current = on,
     Action::ShowAdvanced(on) => ui.form.advanced = on,
+    Action::ShowHistory(on) => ui.form.show_history = on,
     Action::Fold(panel) => ui.form.folded.toggle(panel),
     Action::SetNewShape(index) => ui.form.new_shape = index % crate::draft::PRIMITIVES.len(),
     Action::EditForm(edit) => edit_form(ui, session, edit, &mut effects),

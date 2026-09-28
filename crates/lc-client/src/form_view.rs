@@ -95,6 +95,8 @@ pub struct FormView {
     pub draft: Option<crate::draft::Draft>,
     /// Beside the draft, and as temporary: never saved or sent.
     pub history: crate::form_history::History,
+    /// Its panel, under the palette. Hidden until asked for.
+    pub show_history: bool,
     pub selected: Option<lc_world::form::PartId>,
     /// Which of [`crate::draft::PRIMITIVES`] a part taken from the list is made as.
     pub new_shape: usize,

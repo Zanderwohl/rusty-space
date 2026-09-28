@@ -170,6 +170,9 @@ pub fn parse(args: &[String]) -> Entry {
             _ => {}
         }
     }
+    if flag("--history") {
+        actions.push(Action::ShowHistory(true));
+    }
     // Stand-offs toward the nose; both ends are clamps, as the zoom's are.
     if let Some(standoffs) = value::<f64>(args, "--slide") {
         actions.push(Action::SlideForm(standoffs));

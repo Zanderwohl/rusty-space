@@ -219,7 +219,7 @@ fn lay_out(
     panels: Query<(Entity, &Built)>,
     columns: Query<Entity, With<crate::form_panel::LeftColumn>>,
 ) {
-    let column = columns.iter().next().filter(|_| ui.view == ViewMode::Form && ui.form.draft.is_some());
+    let column = columns.iter().next().filter(|_| ui.view == ViewMode::Form && ui.form.draft.is_some() && ui.form.show_history);
     let key = Built(ui.form.history.entries.iter().map(|e| e.label.clone()).collect(), ui.form.history.cursor);
     let mut current = false;
     for (panel, built) in &panels {

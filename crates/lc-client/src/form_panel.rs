@@ -41,6 +41,7 @@ pub enum Tap {
     ShowCurrent,
     Advanced,
     Fold(crate::form_view::Fold),
+    History,
 }
 
 /// `None` for [`Tap::Take`], which puts a part on the pointer instead.
@@ -61,6 +62,7 @@ pub fn action_of(tap: Tap, draft: &Draft, form: &crate::form_view::FormView) -> 
         Tap::ShowCurrent => Action::ShowCurrent(!form.show_current),
         Tap::Advanced => Action::ShowAdvanced(!form.advanced),
         Tap::Fold(panel) => Action::Fold(panel),
+        Tap::History => Action::ShowHistory(!form.show_history),
     })
 }
 
@@ -128,7 +130,7 @@ fn lay_out(
         return;
     };
 
-    let palette_key = vec![format!("{}", ui.form.new_shape)];
+    let palette_key = vec![format!("{} {}", ui.form.new_shape, ui.form.show_history)];
     let mut tree_key: Vec<String> = tree_lines(draft, shown.marks()).into_iter().map(|(depth, id, what)| format!("{depth}{id}{what}")).collect();
     tree_key.push(format!("{:?} {} {}", ui.form.selected, ui.form.show_current, ui.form.folded.parts));
     let fields_key = vec![format!("{:?}", ui.form.selected.and_then(|id| draft.part(id)).map(|p| {
@@ -161,7 +163,7 @@ fn lay_out(
     let left = keep_column(&mut commands, lefts.iter_mut().next(), Node { bottom: Val::Px(INSET), ..column_node(Edge::Left) }, top, LeftColumn);
     let column = keep_column(&mut commands, columns.iter_mut().next(), column_node(Edge::Right), top, RightColumn);
     if !current[Side::Palette as usize] {
-        build_palette(&mut commands, left, ui.form.new_shape, Built(palette_key), font());
+        build_palette(&mut commands, left, &ui.form, Built(palette_key), font());
     }
     if !current[Side::Tree as usize] {
         build_tree(&mut commands, column, draft, shown.marks(), &ui.form, Built(tree_key), font());
@@ -214,12 +216,15 @@ fn column_node(edge: Edge) -> Node {
 }
 
 /// First in its column, over the history, whenever it is rebuilt.
-fn build_palette(commands: &mut Commands, column: Entity, new_shape: usize, built: Built, font: Handle<Font>) {
+fn build_palette(commands: &mut Commands, column: Entity, form: &crate::form_view::FormView, built: Built, font: Handle<Font>) {
     let mut ui = MenuUi::new(commands, MenuTheme::VFD).font(font);
     let panel = stacked(&mut ui, column, Side::Palette, built);
     ui.insert(panel, (Interaction::None, crate::form_carry::DropZone));
-    ui.inline(panel, "ADD A PART", 15.0, em_ui::vfd::TEXT);
-    let shape = draft::PRIMITIVES[new_shape % draft::PRIMITIVES.len()];
+    let heading = ui.row(panel);
+    ui.insert(heading, Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, justify_content: JustifyContent::SpaceBetween, ..default() });
+    ui.inline(heading, "ADD A PART", 15.0, em_ui::vfd::TEXT);
+    ui.square_button(heading, "H", form.show_history, Tap::History);
+    let shape = draft::PRIMITIVES[form.new_shape % draft::PRIMITIVES.len()];
     let row = ui.row(panel);
     ui.inline(row, "shape", 13.0, em_ui::vfd::TEXT_DIM);
     ui.small_button(row, draft::primitive_name(&shape), Tap::NextShape);
@@ -423,6 +428,17 @@ mod tests {
         assert!(ui.form.folded.preview && !ui.form.folded.parts && !ui.form.folded.detail);
         crate::action::apply(fold, &mut ui, &mut s);
         assert_eq!(ui.form.folded, crate::form_view::Folded::default());
+    }
+
+    #[test]
+    fn the_history_is_hidden_until_its_button_shows_it() {
+        let d = Draft::new(Form::starting());
+        let (mut ui, mut s) = (crate::ui::UiState::default(), crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3));
+        assert!(!ui.form.show_history);
+        for shown in [true, false] {
+            crate::action::apply(action_of(Tap::History, &d, &ui.form).unwrap(), &mut ui, &mut s);
+            assert_eq!(ui.form.show_history, shown);
+        }
     }
 
     #[test]

@@ -776,7 +776,8 @@ entry records what changed, before and after, on the parts it touched:
   records when it is committed. The list reads as what the player did.
 - **The history is a panel**, listing entries by what they say ("resized 1 storage, 2.4e6 to 3e6
   m3", in the tree's names and the interface face's glyphs). Clicking one moves the cursor there,
-  undoing or redoing everything between. It sits under the palette on the left, newest first over
+  undoing or redoing everything between. It sits under the palette on the left, hidden until the square **H** on the palette's heading
+  shows it (`--history` for a shot), newest first over
   a **start** row, so a short window cuts off the oldest; entries past the cursor are dimmed.
 - Stepping writes an entry straight onto the draft, past the check that storage can pay a new
   edit: every state it returns to is one the player had. An edit that changed nothing is not
