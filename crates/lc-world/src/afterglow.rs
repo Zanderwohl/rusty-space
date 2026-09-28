@@ -28,7 +28,7 @@ pub fn limit_k(balance: &Balance) -> f64 {
 }
 
 /// `since_s` into an afterglow of `duration_s` from `limit_k`; `None` before it and once it is over.
-/// For anything that draws one, as R11's debris does.
+/// For anything that draws one.
 pub fn temperature_k(limit_k: f64, duration_s: f64, since_s: f64) -> Option<f64> {
     (0.0..duration_s).contains(&since_s).then(|| limit_k * (1.0 - since_s / duration_s).sqrt().sqrt())
 }
@@ -70,7 +70,7 @@ impl Afterglow {
         2.0 * self.energy_j / (blackbody::radiant_exitance(self.limit_k) * self.duration_s)
     }
 
-    /// Of a sphere of [`Afterglow::area_m2`].
+    /// Of the sphere whose area is [`Afterglow::area_m2`]: an equivalent, not the debris's size.
     pub fn radius_m(&self) -> f64 {
         (self.area_m2() / (4.0 * std::f64::consts::PI)).sqrt()
     }
@@ -177,8 +177,7 @@ mod tests {
         for band in Band::ALL {
             let want = fluence_j_m2 * std::f64::consts::PI * blackbody::band_radiance(band, B.collapse_spike_k)
                 / blackbody::radiant_exitance(B.collapse_spike_k);
-            // The afterglow's first second rides along; it is a millionth of the spike.
-            assert!((flux[band] / want - 1.0).abs() < 1.0e-3, "{band:?}");
+            assert!((flux[band] / want - 1.0).abs() < 1.0e-9, "{band:?}");
         }
         let at_the_limit = a.mean_flux(a.at_s + 1.0, a.at_s + 2.0, 1.0e9);
         assert!(flux[Band::V] / flux[Band::K] > 10.0 * at_the_limit[Band::V] / at_the_limit[Band::K], "not bluer than the afterglow");

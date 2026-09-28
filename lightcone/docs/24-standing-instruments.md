@@ -203,9 +203,10 @@ custody of. A shard that restarts resumes all of it.
 ### As built: a stare at a place or a craft
 
 `Duty::Stare` points at a `Gaze`: a star, a place in the shard's frame, or a craft. A place or a
-craft has no bare star to be a deficit against, so its log is the flux in each band, W/m², from
-everything within `survey::FIELD_RAD` of it: the shard's craft and the wrecks' afterglows, which
-the catalog does not hold (`observatory::Lights`). A craft is followed by its light and is refused
+craft has no bare star to be a deficit against, so its log is the flux in each band, W/m², in the
+one resolution element aimed at: the shard's craft and the wrecks' afterglows, which the catalog
+does not hold (`observatory::Lights`), and any star there. Every other star's wings are noise, as
+in a survey. A craft is followed by its light and is refused
 unless the craft ordering it can see it. Nothing searches such a log, so it is not read on count,
 which would lose a month's curve partway; it is kept until the craft is full or it is analyzed, and
 then consumed with nothing left behind. Nothing yet concludes anything from one.

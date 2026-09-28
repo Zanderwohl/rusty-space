@@ -137,9 +137,10 @@ pub trait Lights {
     /// then left from, never where it is now.
     fn sighted(&self, id: i64, here: DVec3, at_s: f64) -> Option<DVec3>;
 
-    /// Mean flux in each band, W/m², at `here` over an exposure from `from_s` to `to_s`, from
-    /// everything within `field_rad` of `toward`.
-    fn arriving(&self, here: DVec3, toward: DVec3, field_rad: f64, from_s: f64, to_s: f64) -> PerBand<f64>;
+    /// Flux in each band, W/m², at `here` from everything within that band's `field_rad` of
+    /// `toward`: a mean over the exposure from `from_s` to `to_s` for what a collapse leaves, and
+    /// a craft as its light arrives at `to_s`.
+    fn arriving(&self, here: DVec3, toward: DVec3, field_rad: &PerBand<f64>, from_s: f64, to_s: f64) -> PerBand<f64>;
 }
 
 pub struct Dark;
@@ -149,7 +150,7 @@ impl Lights for Dark {
         None
     }
 
-    fn arriving(&self, _: DVec3, _: DVec3, _: f64, _: f64, _: f64) -> PerBand<f64> {
+    fn arriving(&self, _: DVec3, _: DVec3, _: &PerBand<f64>, _: f64, _: f64) -> PerBand<f64> {
         PerBand::splat(0.0)
     }
 }
@@ -270,7 +271,7 @@ impl Observatory {
                         photometry(sky, knowledge, at, id, elapsed, now_s);
                         fix(sky, knowledge, at, id, elapsed, now_s);
                     } else {
-                        glow_photometry(lights, knowledge, at, gaze, self.sampled_s, now_s);
+                        glow_photometry(sky, lights, knowledge, at, gaze, self.sampled_s, now_s);
                     }
                     self.sampled_s = now_s;
                 }
@@ -472,10 +473,19 @@ pub fn photometry(
     }
 }
 
-/// A stare at a place or a craft: whatever arrives within [`survey::FIELD_RAD`] of it, over the
-/// stars behind, which are its background. A sample is the flux in W/m², not a deficit, and a
-/// craft whose light has stopped arriving is not sampled.
-pub fn glow_photometry(lights: &dyn Lights, knowledge: &mut Knowledge, at: Station, gaze: Gaze, from_s: f64, to_s: f64) {
+/// A stare at a place or a craft: whatever arrives in the one resolution element it is aimed at,
+/// a catalog star there included, against the instrument's own glow and every other star's wings.
+/// A sample is the flux in W/m², not a deficit, and a craft whose light has stopped arriving is not
+/// sampled.
+pub fn glow_photometry(
+    sky: &mut Sky,
+    lights: &dyn Lights,
+    knowledge: &mut Knowledge,
+    at: Station,
+    gaze: Gaze,
+    from_s: f64,
+    to_s: f64,
+) {
     let here = at.position_ly * crate::motion::LIGHT_US_PER_LY;
     let aim = match gaze {
         Gaze::Star(_) => return,
@@ -489,7 +499,9 @@ pub fn glow_photometry(lights: &dyn Lights, knowledge: &mut Knowledge, at: Stati
     if toward == DVec3::ZERO {
         return;
     }
-    let flux = lights.arriving(here, toward, survey::FIELD_RAD, from_s, to_s);
+    let optics = at.optics();
+    let resolution = PerBand::new(Band::ALL.map(|band| optics.resolution_rad(band)));
+    let arriving = lights.arriving(here, toward, &resolution, from_s, to_s);
     let (exposure_s, instrument) = (to_s - from_s, at.instrument);
     let (witness, subject) = (knowledge.owner, gaze.subject());
     for (k, band) in Band::ALL.into_iter().enumerate().filter(|(_, band)| instrument.sees(*band)) {
@@ -497,12 +509,21 @@ pub fn glow_photometry(lights: &dyn Lights, knowledge: &mut Knowledge, at: Stati
         if per_w_m2 <= 0.0 {
             continue;
         }
-        let counts = instrument.counts_from_flux(band, flux[band], exposure_s) + instrument.self_emission_counts(band, exposure_s);
+        let (mut flux, mut glare) = (arriving[band], 0.0);
+        for star in sky.sources(band, at.position_ly) {
+            let apart_rad = star.toward.angle_between(toward);
+            if apart_rad < resolution[band] {
+                flux += star.flux_w_m2;
+            } else {
+                glare += optics.halo_counts(band, optics.counts(band, star.flux_w_m2, exposure_s), apart_rad);
+            }
+        }
+        let counts = optics.counts(band, flux, exposure_s) + instrument.self_emission_counts(band, exposure_s) + glare;
         // At least a count, so an empty patch in a band the optics barely glow in is not a sample
         // with no error.
-        let sigma = (counts.max(1.0).sqrt() / per_w_m2).max(PHOTOMETRY_FLOOR * flux[band]);
+        let sigma = (counts.max(1.0).sqrt() / per_w_m2).max(PHOTOMETRY_FLOOR * flux);
         let noise = rng::gaussian(rng::hash(&[witness.0, subject.key(), to_s.to_bits(), k as u64]));
-        knowledge.measured(subject, witness, band, Sample { observed_s: to_s, deficit: flux[band] + sigma * noise, sigma });
+        knowledge.measured(subject, witness, band, Sample { observed_s: to_s, deficit: flux + sigma * noise, sigma });
     }
 }
 
@@ -1098,9 +1119,9 @@ mod tests {
             (id == 9).then_some(self.seen)
         }
 
-        fn arriving(&self, here: DVec3, toward: DVec3, field_rad: f64, _: f64, _: f64) -> PerBand<f64> {
-            let inside = (self.source - here).normalize().angle_between(toward) <= field_rad;
-            PerBand::splat(if inside { self.flux } else { 0.0 })
+        fn arriving(&self, here: DVec3, toward: DVec3, field_rad: &PerBand<f64>, _: f64, _: f64) -> PerBand<f64> {
+            let apart_rad = (self.source - here).normalize().angle_between(toward);
+            field_rad.map(|_, field| if apart_rad <= *field { self.flux } else { 0.0 })
         }
     }
 
@@ -1126,8 +1147,9 @@ mod tests {
     /// Filed under the place, as a flux, and a place a field's width away records only noise.
     #[test]
     fn a_stare_at_a_place_records_the_flux_arriving_from_there() {
-        let lights = Lit { source: DVec3::X * LY_US, flux: 1.0e-12, seen: DVec3::ZERO };
-        let place = Gaze::Place([LY_US as i64, 0, 0]);
+        let there = DVec3::new(1.0, -0.4, 0.3) * LY_US;
+        let lights = Lit { source: there, flux: 1.0e-12, seen: DVec3::ZERO };
+        let place = Gaze::Place([there.x as i64, there.y as i64, there.z as i64]);
         let k = stare(place, &lights);
         let v = k.own_series(place.subject(), Band::V).expect("a curve");
         assert_eq!(v.len(), 4);
@@ -1136,7 +1158,7 @@ mod tests {
             assert!(sample.sigma < 0.1e-12);
         }
 
-        let aside = Gaze::Place([LY_US as i64, (0.05 * LY_US) as i64, 0]);
+        let aside = Gaze::Place([there.x as i64, (there.y + 0.05 * LY_US) as i64, there.z as i64]);
         let k = stare(aside, &lights);
         for sample in k.own_series(aside.subject(), Band::V).unwrap().samples() {
             assert!(sample.deficit.abs() < 5.0 * sample.sigma, "{sample:?}");
@@ -1156,11 +1178,34 @@ mod tests {
         assert!(k.own_series(Subject::Craft(8), Band::V).is_none(), "a craft nobody sees is not sampled");
     }
 
+    /// The one resolution element aimed at: a star in it is measured with the light, and one
+    /// beside it glares. A light that stands clear of the dark is lost beside a star.
+    #[test]
+    fn a_stare_beside_a_star_is_measured_against_its_glare() {
+        let star = spread().stars()[0].position_ly * LY_US;
+        let resolution_rad = Optics::of(Instrument::SHIP).resolution_rad(Band::V);
+        let beside = star + star.any_orthogonal_vector().normalize() * star.length() * 3.0 * resolution_rad;
+        let clear = DVec3::new(-1.0, 0.3, 0.2) * LY_US;
+        let sampled = |place: DVec3, flux: f64| {
+            let gaze = Gaze::Place([place.x as i64, place.y as i64, place.z as i64]);
+            let k = stare(gaze, &Lit { source: place, flux, seen: DVec3::ZERO });
+            k.own_series(gaze.subject(), Band::V).unwrap().samples().to_vec()
+        };
+        let faint = 100.0 * sampled(clear, 0.0)[0].sigma;
+        assert!(sampled(clear, faint).iter().all(|s| s.deficit > 5.0 * s.sigma), "premise: it stands clear of the dark");
+        assert!(sampled(beside, faint).iter().all(|s| s.deficit < 5.0 * s.sigma), "found in its star's glare");
+
+        let on = sampled(star, 0.0);
+        let star_flux = spread().sources(Band::V, DVec3::ZERO)[0].flux_w_m2;
+        assert!(on.iter().all(|s| (s.deficit / star_flux - 1.0).abs() < 5.0 * s.sigma / star_flux), "{on:?}");
+    }
+
     /// A curve is kept whole until room or an order wants it back, and then gone with no digest.
     #[test]
     fn a_curve_of_a_place_is_consumed_only_when_asked() {
-        let place = Gaze::Place([LY_US as i64, 0, 0]);
-        let mut k = stare_for(place, &Lit { source: DVec3::X * LY_US, flux: 1.0e-12, seen: DVec3::ZERO }, 200);
+        let there = DVec3::new(1.0, -0.4, 0.3) * LY_US;
+        let place = Gaze::Place([there.x as i64, there.y as i64, there.z as i64]);
+        let mut k = stare_for(place, &Lit { source: there, flux: 1.0e-12, seen: DVec3::ZERO }, 200);
         assert!(k.next_due().is_none(), "read on count, and a month's stare loses its curve");
         k.analyze();
         let (subject, observer) = k.next_due().expect("analyzing reads it");

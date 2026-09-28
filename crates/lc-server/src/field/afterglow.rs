@@ -38,22 +38,30 @@ impl Lights for Seen<'_> {
         (end_t + at.distance(here) <= at_t).then_some(at)
     }
 
-    fn arriving(&self, here: DVec3, toward: DVec3, field_rad: f64, from_s: f64, to_s: f64) -> PerBand<f64> {
-        let inside = |at: DVec3| {
+    fn arriving(&self, here: DVec3, toward: DVec3, field_rad: &PerBand<f64>, from_s: f64, to_s: f64) -> PerBand<f64> {
+        let apart_rad = |at: DVec3| {
             let to = (at - here).normalize_or_zero();
-            to != DVec3::ZERO && to.angle_between(toward) <= field_rad
+            if to == DVec3::ZERO { f64::INFINITY } else { to.angle_between(toward) }
         };
         let mut flux = PerBand::splat(0.0);
-        let mut add = |each: PerBand<f64>| Band::ALL.into_iter().for_each(|band| flux[band] += each[band]);
-        for afterglow in self.afterglows.values().filter(|a| inside(a.position())) {
+        let mut add = |apart_rad: f64, each: PerBand<f64>| {
+            Band::ALL.into_iter().filter(|band| apart_rad <= field_rad[*band]).for_each(|band| flux[band] += each[band]);
+        };
+        let widest_rad = Band::ALL.into_iter().map(|band| field_rad[band]).fold(0.0, f64::max);
+        for afterglow in self.afterglows.values() {
+            let apart = apart_rad(afterglow.position());
+            if apart > widest_rad {
+                continue;
+            }
             let distance_us = afterglow.position().distance(here);
             let delay_s = distance_us * 1.0e-6;
-            add(afterglow.mean_flux(from_s - delay_s, to_s - delay_s, distance_us * LIGHT_MICROSECOND_M));
+            add(apart, afterglow.mean_flux(from_s - delay_s, to_s - delay_s, distance_us * LIGHT_MICROSECOND_M));
         }
         for craft in self.fleet.iter().filter(|craft| craft.id != self.observer) {
             let Some(&left_t) = retarded_times_at(to_s * 1.0e6, here, &craft.worldline()).last() else { continue };
             let at = craft.position_at(left_t);
-            if !inside(at) {
+            let apart = apart_rad(at);
+            if apart > widest_rad {
                 continue;
             }
             let left_s = left_t * 1.0e-6;
@@ -61,7 +69,7 @@ impl Lights for Seen<'_> {
             let to_observer = here - at;
             let shadow_m2 = shadow_toward_m2(craft, to_observer, left_s);
             let starlit = craft.starlit_at(left_s, to_observer);
-            add(glow::light(&glow, self.balance, shadow_m2, starlit, to_observer.length() * LIGHT_MICROSECOND_M).total());
+            add(apart, glow::light(&glow, self.balance, shadow_m2, starlit, to_observer.length() * LIGHT_MICROSECOND_M).total());
         }
         flux
     }
@@ -94,9 +102,10 @@ mod tests {
         knowledge.own_series(subject, band).map(|s| s.samples().to_vec()).unwrap_or_default()
     }
 
-    /// Staring from three light-days at where a ship collapses, a craft records nothing of it until
-    /// the light arrives and then the afterglow, sample by sample, for thirty days, then nothing. A
-    /// craft beside it staring a tenth of a radian off records none of it.
+    /// Staring from three light-days at where a ship collapses, eight resolution elements off its
+    /// star, a craft records nothing of it until the light arrives and then the afterglow, sample by
+    /// sample, for thirty days, then nothing. A craft beside it staring a tenth of a radian off
+    /// records none of it.
     #[tokio::test]
     async fn a_stare_at_a_collapse_records_its_afterglow_from_when_its_light_arrives() {
         let Some((mut server, mut wire)) = scene() else { return };
@@ -109,6 +118,11 @@ mod tests {
         for (ship, at) in [(WATCHING, there), (ASIDE, aside)] {
             server.act_on_knowledge(CraftId(ship.0), &stare(lc_proto::Gaze::Place(at), 1.0e4), 0.0).unwrap();
         }
+        let star_at = crate::server::course_tests::a_star().unwrap().position_ly * LIGHT_US_PER_LY;
+        let apart_rad = (star_at - watcher_at).angle_between(dying_at - watcher_at);
+        let optics = lc_world::knowledge::survey::Optics::of(server.ship(WATCHING).unwrap().sensor);
+        let resolution_rad = optics.resolution_rad(Band::V);
+        assert!(apart_rad > 3.0 * resolution_rad && apart_rad < lc_world::knowledge::survey::FIELD_RAD, "premise: its star glares on it");
         let at_t = until_collapse(&mut server, &mut wire).await.at_t;
         let afterglow = server.afterglows[&CraftId(DYING.0)];
         assert_eq!(afterglow.at_s, at_t as f64 * 1.0e-6);
