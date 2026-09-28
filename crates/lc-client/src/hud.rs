@@ -575,7 +575,7 @@ fn shade_name(mode: Mode) -> &'static str {
 
 /// sRGB, brightest channel at one. Black where the mapping sees none of it.
 pub(crate) fn glow(mapping: &em_spectra::BandMapping, kelvin: f64) -> [f32; 3] {
-    let linear = crate::field::blackbody_linear(mapping, kelvin);
+    let linear = crate::field::color_linear(mapping, kelvin);
     let peak = linear.into_iter().fold(0.0, f64::max);
     if !(peak > 0.0 && peak.is_finite()) {
         return [0.0; 3];
