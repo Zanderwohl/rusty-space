@@ -11,22 +11,21 @@
 
 use glam::DVec3;
 
+use serde::{Deserialize, Serialize};
+
 use crate::boost::gamma_of;
+use crate::craft::{BEAM_PER_LENGTH, Craft};
 use crate::escort::Burning;
 use crate::pursuit::Sighting;
 use crate::fitting::Balance;
-use crate::flight::{Aim, C_M_S, G0, JULIAN_YEAR_S};
+use crate::flight::{Aim, C_M_S, Drive, G0, JULIAN_YEAR_S};
+use crate::motion::{self, Motive};
 use crate::signal::cone_solid_angle_sr;
 
 /// What `engine_m3` of engine can send, watts: its exhaust, its deliberate emission and its
 /// conversion into storage are all bounded by this.
 pub fn rating_w(balance: &Balance, engine_m3: f64) -> f64 {
     balance.engine_density_w * engine_m3.max(0.0)
-}
-
-/// What a photon thruster puts out to push `mass_kg` at `accel_m_s2`, watts: thrust times `c`.
-pub fn thrust_power_w(mass_kg: f64, accel_m_s2: f64) -> f64 {
-    mass_kg * accel_m_s2 * C_M_S
 }
 
 /// The temperature of an aperture's open face, kelvin: a blackbody radiating all of `power_w`
@@ -135,6 +134,79 @@ const LEAD_DOUBLINGS: usize = 30;
 /// flight here plus the beam's flight back, seconds.
 pub fn blind_s(distance_m: f64) -> f64 {
     2.0 * distance_m / C_M_S
+}
+
+/// Which of a ship's two drives a jet leaves: the main drive, or the station-keeping thrusters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Jet {
+    Drive,
+    Thrusters,
+}
+
+/// A lit drive as an emission, at one instant.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Exhaust {
+    pub jet: Jet,
+    /// Unit, along the exhaust, world axes.
+    pub axis: DVec3,
+    /// `F c`, W.
+    pub power_w: f64,
+    pub half_angle_rad: f64,
+}
+
+/// What `craft`'s drives send out at `now_s`, at the mass it has then: the rocket law's throttle.
+///
+/// Nothing for an emit flown as a burn, which is its own emission. A leg at no more than
+/// `rcs_accel_g` is on the thrusters, and an escort's thruster leg is two jets: the main drive
+/// carrying the quarry's acceleration, and the thrusters the closing.
+pub fn exhaust(craft: &Craft, balance: &Balance, now_s: f64) -> Vec<Exhaust> {
+    let state = craft.motion_at(now_s);
+    let pushes_g = match &state.motive {
+        Motive::Boosting(_) => Vec::new(),
+        Motive::Escort(plan) => {
+            let (keeping, closing) = plan.pushes_g(now_s);
+            if crate::courtesy::on_thrusters(balance, &plan.cruise.drive) {
+                vec![(Jet::Drive, keeping), (Jet::Thrusters, closing)]
+            } else {
+                vec![(Jet::Drive, keeping + closing)]
+            }
+        }
+        _ => {
+            let g = motion::thrust_g(state, now_s);
+            let jet = if g <= balance.rcs_accel_g { Jet::Thrusters } else { Jet::Drive };
+            vec![(jet, motion::thrust_at(state, now_s) * g)]
+        }
+    };
+    let pushes_g: Vec<(Jet, DVec3)> = pushes_g.into_iter().filter(|(_, g)| g.length() > 0.0).collect();
+    if pushes_g.is_empty() {
+        return Vec::new();
+    }
+    let mass_kg = craft.mass_kg_at(now_s);
+    pushes_g
+        .into_iter()
+        .map(|(jet, push_g)| Exhaust {
+            jet,
+            axis: -push_g.normalize(),
+            power_w: Drive::exhaust_w(mass_kg, push_g.length()),
+            half_angle_rad: if jet == Jet::Drive { balance.drive_spread_rad } else { balance.rcs_spread_rad },
+        })
+        .collect()
+}
+
+/// What `craft`'s main drive sends aft at `now_s`, watts: its [`Jet::Drive`] from [`exhaust`]. What
+/// `Presence` states, and what a face and a cone are drawn from. Zero on the thrusters alone.
+pub fn drive_w(craft: &Craft, balance: &Balance, now_s: f64) -> f64 {
+    exhaust(craft, balance, now_s).iter().filter(|j| j.jet == Jet::Drive).map(|j| j.power_w).sum()
+}
+
+/// The open faces a craft's exhaust leaves through, m²: its aft engines', or an unfitted hull's
+/// cross-section.
+pub fn exhaust_face_m2(craft: &Craft) -> f64 {
+    let faces = craft.fitting().and_then(|f| crate::form::capacity::aft_apertures(f.form(), f.balance()));
+    match faces {
+        Some(faces) if !faces.is_empty() => faces.iter().map(|a| std::f64::consts::PI * a.radius_m * a.radius_m).sum(),
+        _ => std::f64::consts::PI * (0.5 * BEAM_PER_LENGTH * craft.length_m).powi(2),
+    }
 }
 
 /// An emission with net thrust, flown: the nose comes about to `nose` with nothing lit, then the
@@ -326,7 +398,7 @@ mod tests {
         // The anchor is dry mass and 30 ME, to 1e-9. The field's heat is not in it.
         let fitting = Fitting::full(Form::starting(), b, 0.0);
         let full_kg = fitting.hull().dry_kg + fitting.hull().capacities.storage_j / crate::fitting::C2;
-        let five_g = thrust_power_w(full_kg, 5.0 * G0);
+        let five_g = Drive::exhaust_w(full_kg, 5.0);
         assert!((rated - five_g).abs() / rated < 1.0e-9, "{rated} against {five_g}");
     }
 
@@ -474,5 +546,32 @@ mod tests {
         assert_eq!(received_fraction(half, shadow, 0.999 * edge), 1.0);
         let past = received_fraction(half, shadow, 2.0 * edge);
         assert!((past - 0.25).abs() < 1.0e-12, "{past}");
+    }
+
+    /// A crossing's drive sends `F c` at the mass the ship has as it burns, along the exhaust, at
+    /// `drive_spread_rad`, and nothing while it coasts or flips. The same crossing at no more than
+    /// `rcs_accel_g` is on the thrusters, at `rcs_spread_rad`.
+    #[test]
+    fn a_lit_drive_sends_f_c_along_its_exhaust() {
+        use crate::craft::{Craft, CraftId, Kind};
+        use crate::flight::{Drive, STANDOFF_LY};
+        use crate::motion::{Change, Event, ShipId};
+        let b = Balance::DEFAULT;
+        for (accel_g, jet, spread) in [(5.0, Jet::Drive, b.drive_spread_rad), (b.rcs_accel_g, Jet::Thrusters, b.rcs_spread_rad)] {
+            let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
+            craft.fit(Some(Fitting::full(Form::starting(), b, 0.0)));
+            let drive = Drive { accel_g, ..craft.turning(craft.kind.drive()) };
+            let to_ly = DVec3::X * (STANDOFF_LY + 1.0e-6);
+            craft.apply(&Event { ship: ShipId(1), at_t: 0.0, change: Change::Cross { to_ly, drive } }).unwrap();
+            let crate::motion::Motive::Crossing(cruise) = &craft.motion.motive else { panic!() };
+            let [lit, _, flip, brake, _] = cruise.phase_changes_s();
+            let burning_s = 0.5 * (lit + flip);
+            let [out] = exhaust(&craft, &b, burning_s)[..] else { panic!("one jet") };
+            assert_eq!((out.jet, out.half_angle_rad), (jet, spread));
+            assert!(out.axis.angle_between(-DVec3::X) < 1.0e-9, "{}", out.axis);
+            let want_w = Drive::exhaust_w(craft.mass_kg_at(burning_s), accel_g);
+            assert!((out.power_w / want_w - 1.0).abs() < 1.0e-12, "{} {want_w}", out.power_w);
+            assert!(exhaust(&craft, &b, 0.5 * (flip + brake)).is_empty(), "lit through the flip");
+        }
     }
 }

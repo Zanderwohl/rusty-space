@@ -261,6 +261,12 @@ pub fn parse(args: &[String]) -> Entry {
             (None, Some(f)) => Some(crate::construction::Clock::Looping(f)),
             (None, None) => (after("--demo").as_deref() == Some("refit")).then_some(crate::construction::Clock::Looping(0.0)),
         },
+        field: value::<f64>(args, "--field-k").map(|kelvin| crate::field::Held {
+            kelvin,
+            shade: after("--field-mode").as_deref().and_then(crate::field::mode_named),
+            switch: value(args, "--field-switch"),
+        }),
+        field_beam_w: value(args, "--field-beam"),
         rate_given: flag("--rate"),
         screenshot: after("--shot"),
         after_frames: value(args, "--frames").unwrap_or(120),

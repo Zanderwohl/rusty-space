@@ -92,14 +92,10 @@ impl Kind {
             Kind::Probe => {
                 crate::flight::Drive { accel_g: 30.0, ..crate::flight::Drive::DEFAULT }
             }
-            // Neither of these is going anywhere in a hurry once it is placed, and neither
-            // carries a torch to do it with — a station-keeping thruster throws mass at a
-            // few hundred kilometers a second, so a beacon correcting itself is a thing you
-            // would have to be close to see.
+            // Neither of these is going anywhere in a hurry once it is placed.
             Kind::Relay | Kind::Beacon => crate::flight::Drive {
                 accel_g: 1.0,
                 max_beta: 0.9,
-                exhaust_v_m_s: 0.002 * crate::flight::C_M_S,
                 ..crate::flight::Drive::DEFAULT
             },
         };
@@ -334,8 +330,12 @@ impl Craft {
     }
 
     /// Destroyed at `at_s`: its worldline stops there and its fitting goes. What it did before
-    /// goes on arriving at observers until the last of that light has passed them.
+    /// goes on arriving at observers until the last of that light has passed them, so the nose is
+    /// held where it was: without a fitting it would fall back to the attitude of the last order.
     pub fn end(&mut self, at_s: f64) {
+        if let Some(facing) = self.facing_at(at_s) {
+            self.motion.attitude = facing;
+        }
         self.ended_s = Some(at_s);
         self.fitting = None;
     }
@@ -399,18 +399,6 @@ impl Craft {
     /// follow the ship being talked about.
     pub fn mass_kg(&self) -> f64 {
         self.kind.density_kg_m3() * self.volume_m3()
-    }
-
-    /// What the drive is putting into its exhaust at a coordinate second, watts.
-    ///
-    /// Zero whenever nothing is lit, which is most of the time: a ship coasts far more than it
-    /// burns. Everything visible about a burn is this number — see [`crate::flight::Drive`].
-    pub fn jet_power_w(&self, now_s: f64) -> f64 {
-        let accel_g = motion::thrust_g(&self.motion, now_s);
-        if accel_g <= 0.0 {
-            return 0.0;
-        }
-        self.motion.drive.jet_power_w(self.mass_kg_at(now_s), accel_g)
     }
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
@@ -1331,6 +1319,17 @@ mod tests {
 
     /// An idle fitted ship leans its nose to the angle that turns its form's broadside to the star,
     /// and after a flight it swings back at its hull's own rate rather than snapping, collecting
+    /// A wreck is seen facing as it ended, not along its last order's attitude.
+    #[test]
+    fn a_wreck_keeps_the_facing_it_ended_with() {
+        let Some(system) = sol() else { return };
+        let mut craft = near_the_sun(&system, 0.1, None);
+        let before = craft.facing_at(100.0).unwrap();
+        assert!(before.dot(craft.motion.attitude) < 0.99, "premise: broadside is not the attitude, {before}");
+        craft.end(100.0);
+        assert!(craft.facing_at(50.0).unwrap().dot(before) > 1.0 - 1e-12);
+    }
+
     /// what its attitude presents as it goes.
     #[test]
     fn an_idle_ship_turns_broadside_to_its_star() {
@@ -1399,9 +1398,10 @@ mod tests {
     }
 
     /// A fitted craft is as long as its form's extent, not the 500 m its twenty slots made it, and
-    /// turns at its moments' rate. Both are measured again when a round finishes.
+    /// turns at its moments' rate. Both are measured again when a round finishes. The extent is the
+    /// envelope's, and a wider hull can have a shorter one.
     #[test]
-    fn a_refit_that_grows_the_hull_lengthens_it() {
+    fn a_refit_that_grows_the_hull_measures_it_again() {
         use crate::form::grid::FormGrid;
         use crate::form::{Form, PartId};
         let b = crate::fitting::Balance::DEFAULT;
@@ -1409,7 +1409,7 @@ mod tests {
         let extent = |form: &Form| FormGrid::new(form, &b).unwrap().extent_m();
         let start = Form::starting();
         assert_eq!(craft.length_m, extent(&start));
-        assert!((craft.length_m - 570.6).abs() < 0.1, "{}", craft.length_m);
+        assert!((craft.length_m - 730.7).abs() < 0.1, "{}", craft.length_m);
 
         let mut target = start.clone();
         target.parts.iter_mut().find(|p| p.id == PartId(1)).unwrap().volume_m3 *= 1.1;
@@ -1421,7 +1421,7 @@ mod tests {
         assert!(!craft.is_refitting(year));
         assert_eq!(craft.fitting().unwrap().form(), &target);
         assert_eq!(craft.length_m, extent(&target));
-        assert!(craft.length_m > length && craft.slew_rate_rad_s() < slew);
+        assert!(craft.length_m != length && craft.slew_rate_rad_s() < slew);
     }
 
     /// A far observer is shown the form the craft had when its light left, step by step, however
@@ -1684,53 +1684,4 @@ mod tests {
         assert!(at(Kind::Ship) > at(Kind::Relay));
         assert!(at(Kind::Relay) > at(Kind::Beacon));
     }
-
-    /// What a burn costs in light, and the shape of the dependence: everything about it scales
-    /// with what is being pushed and how hard.
-    #[test]
-    fn a_burn_radiates_with_the_mass_and_the_acceleration() {
-        use crate::flight::Drive;
-        let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
-        craft.length_m = 500.0;
-        let at = |accel_g: f64| craft.motion.drive.jet_power_w(craft.mass_kg(), accel_g);
-
-        // Linear in both, because the thrust is and the exhaust speed is fixed.
-        assert!((at(10.0) / at(5.0) - 2.0).abs() < 1.0e-9);
-        let mut bigger = craft.clone();
-        bigger.length_m = 1_000.0;
-        let ratio = bigger.motion.drive.jet_power_w(bigger.mass_kg(), 5.0) / at(5.0);
-        assert!((ratio - 8.0).abs() < 1.0e-9, "twice the ship is eight times the mass: {ratio}");
-
-        // And the number itself is the one worth having seen: a fair fraction of a star.
-        let full = at(Drive::DEFAULT.accel_g);
-        assert!(full > 1.0e17 && full < 1.0e19, "{full} W");
-    }
-
-    /// Nothing is lit unless something is thrusting, and a ballistic arc is not thrusting
-    /// however hard it is falling.
-    #[test]
-    fn a_coasting_ship_puts_nothing_out() {
-        let craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
-        assert_eq!(craft.jet_power_w(0.0), 0.0, "a drifting ship has its engine off");
-
-        let mut under_way = craft.clone();
-        under_way.motion.begin_crossing(
-            crate::flight::Cruise::plan(DVec3::ZERO, DVec3::X, 0.0, crate::flight::Drive::DEFAULT),
-            None,
-        );
-        assert!(under_way.jet_power_w(1.0) > 0.0, "a ship on a crossing is burning");
-    }
-
-    /// A station-keeping thruster is not a torch, so a beacon correcting itself is not the
-    /// same event as a ship getting under way.
-    #[test]
-    fn a_beacon_is_far_quieter_than_a_ship() {
-        let ship = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
-        let mut beacon = Craft::at(CraftId(2), Kind::Beacon, DVec3::ZERO);
-        // The same size, so only what it is for is different.
-        beacon.length_m = ship.length_m;
-        let power = |c: &Craft| c.motion.drive.jet_power_w(c.mass_kg(), c.motion.drive.accel_g);
-        assert!(power(&beacon) < power(&ship) / 100.0, "{} against {}", power(&beacon), power(&ship));
-    }
-
 }

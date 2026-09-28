@@ -224,7 +224,7 @@ mod tests {
         server.admit(ClientId(1), crate::world::still(SHIP, at), 0.0);
         let order = |duty| Inbound::Act(Intent { ship_id: SHIP, order: Order::SetDuty { duty, integration_s: 1.0e4 }, issued_at_client_t: i64::MAX });
         // Stare first, so there is a log to keep.
-        wire.client_says(ClientId(1), order(lc_proto::Duty::Stare { star: sky()[0].id.get() }));
+        wire.client_says(ClientId(1), order(lc_proto::Duty::stare(sky()[0].id.get())));
         for _ in 0..200 {
             server.tick(&mut wire).await.unwrap();
         }
@@ -332,7 +332,7 @@ mod tests {
         server.load_world(World::new(vec![target.clone()]));
         let mut wire = Loopback::new();
         server.admit(ClientId(1), crate::world::still(SHIP, DVec3::ZERO), 0.0);
-        let stare = Order::SetDuty { duty: lc_proto::Duty::Stare { star: target.id.get() }, integration_s: 1800.0 };
+        let stare = Order::SetDuty { duty: lc_proto::Duty::stare(target.id.get()), integration_s: 1800.0 };
         wire.client_says(ClientId(1), Inbound::Act(Intent { ship_id: SHIP, order: stare, issued_at_client_t: i64::MAX }));
 
         let mut written = Remembered::default();

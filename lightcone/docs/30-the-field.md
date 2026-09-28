@@ -23,9 +23,14 @@ glows as it fills, and collapses when it is full. Where the energy it sheds goes
 ## What the field is
 
 - **Its shape is always derived from the hull.** It is the envelope of
-  [29-ship-form.md](29-ship-form.md): the hull's distance field offset by a margin and smoothed,
-  so it covers everything and follows the ship loosely. A player shapes the hull and gets the
-  field that covers it. A large or sprawling hull pays for its field automatically.
+  [29-ship-form.md](29-ship-form.md): the smallest ellipsoid on the ship's axes that contains
+  every part, grown by a margin. A player shapes the hull and gets the field that covers it. A
+  large or sprawling hull pays for its field automatically.
+- **An ellipsoid, so a Black field hides the design.** It never follows the hull's outline, so
+  from outside a Black ship is an ovoid of a given size and nothing more: where its engines point,
+  how much is storage or bay, and what it can do are all behind the field. An unfriendly or hostile
+  ship is a mystery until it goes Clear, burns, or is looked at in the infrared, where the field's
+  own heat still gives away how full it is but not how it is built.
 - **Everything that reaches the ship reaches the field first:** starlight, beams, the glow of a
   neighbor, a collapse. It absorbs a fraction set by its mode, Clear or Black, and reflects the
   rest. What it absorbs and can pass into storage it passes, and the rest stays as heat.
@@ -76,7 +81,7 @@ Constant over a segment unless marked as a burst. A burst jumps `Q` at the insta
 | starlight, beams, a neighbor's glow | what arrives, less what is converted to storage |
 | conversion loss | `1 − conversion_efficiency` of what is converted |
 | the living drain | all of it |
-| the drive below ε = 1 | `1 − ε` of the exhaust power. Nothing at the default ε = 1 |
+| the drive below ε = 1 | `1 − ε` of what the rocket law spends, which the exhaust cannot draw (below). Nothing at the default ε = 1 |
 | dismantling | the 5% a dismantling loses, spread over the step as the energy moves |
 | a return arriving at full storage | all of it, as it arrives: room the round planned for that starlight filled first |
 | **vented storage** | **a burst**: what the round planned to vent for want of room, and what a shrinking store actually holds past its new capacity, at the end of the step ([29-ship-form.md](29-ship-form.md#refits)) |
@@ -118,6 +123,26 @@ that, and the drain costs nothing there. Within a segment, the floor ends only w
 there and the heat made outruns the exhaust. A segment is at most three stretches: filling, then
 full or at the floor, then the other.
 
+**The drive's own waste is the exception.** Below ε = 1 the rocket law spends `P`, but only `εP`
+leaves as exhaust; the other `1 − ε` is heat. If the exhaust could draw that heat, a ship at the
+floor would send its waste straight back out, storage would pay `εP` less nothing, and the drive
+would fly as if ε were 1: at 5 g the starting ship's beam is 1.07 × 10²⁰ W however inefficient
+its drive. So the account holds the waste apart. `Q` is **drawable heat**, which is everything
+above, plus **waste**, whose one input is `(1 − ε)P` and which radiates on the same `τ`. The
+exhaust draws only the first. Both are linear on one time constant, so their sum is still one
+exponential over each stretch, and the stretches are still the drawable heat's. Storage pays the
+whole of `P` less what drawable heat supplies, which is what the plan committed, and temperature,
+mass and collapse read all of `Q`. Waste is saved with the account. An emission is not the rocket
+law, so it makes none.
+
+At ε = 0.8 and 5 g, the starting ship spends 1.34 × 10²⁰ W and keeps 2.7 × 10¹⁹ W of it, 0.35 of
+its rated load. At the starting mass its waste would tend to 3.5 ME, about 3 500 K, but the
+throttle takes the power down as the ship lightens: a boost as long as a full ship can buy ends
+at about 1.9 ME. The exhaust still takes all the starlight's heat, so the sun-diving
+limit moves in while burning, and a ship arrives carrying what it made, which radiates on `τ`.
+A burn can bring a collapse on once `(1 − ε)/ε` of the beam passes the rated load: below ε = 0.59
+for the starting ship at 5 g.
+
 ## Clear and Black
 
 A field runs in one of two modes, and the player chooses.
@@ -142,7 +167,8 @@ In this model a field is hurt only by what it absorbs, so **neither mode is simp
   defense.
 - **Sun-diving:** Black to fill. Clear once storage is nearly full, to stay close longer: a full Clear
   ship reaches its rated load at about 0.027 AU instead of 0.05.
-- **Hiding:** Black in visible light. Nothing hides a ship in the infrared.
+- **Hiding:** Black in visible light, which hides both the ship and its design behind the ovoid.
+  Nothing hides a ship in the infrared, though what shows there is the field's heat, not the hull.
 - **Flying near others:** Clear. It forgives other people's exhaust.
 
 **Switching takes `field_switch_s`**, one game day, about 200 ticks or ten real seconds. The new
@@ -211,10 +237,10 @@ is. All three assume a Black field, since Black is the mode that collects.
 | **The starting ship's field holds 10 ME** from empty to collapse. The starting ship is [29-ship-form.md](29-ship-form.md)'s starting form | `field_capacity`, the capacity per unit envelope area |
 | **A full starting ship broadside at 0.05 AU from a Sun-like star is exactly at its rated load**: it would reach collapse only in the limit | `τ` |
 
-One number needs the starting form's grid ([29-ship-form.md](29-ship-form.md)): its envelope,
-3.39 × 10⁵ m², pinned as `STARTING_ENVELOPE_M2` by a test that re-solves it to a part in a
+One number needs the starting form ([29-ship-form.md](29-ship-form.md)): its envelope, an
+ellipsoid of semi-axes 374, 122 and 126 m, 4.31 × 10⁵ m², pinned as `STARTING_ENVELOPE_M2` by a test that re-solves it to a part in a
 million. The rest are derived in `Balance::DEFAULT`. `q_idle` is not a setting: it is the
-starting drain times `τ` over that envelope, 2.40 × 10¹⁶ J/m², so turning `field_capacity` does
+starting drain times `τ` over that envelope, 1.89 × 10¹⁶ J/m², so turning `field_capacity` does
 not move the idle anchor. The anchors hold for the default geometry: a shard that changes the
 starting envelope, through `envelope_margin` say, moves them with it.
 
@@ -233,7 +259,7 @@ power that would bring a field to `Q_max`, is `Q_max / τ`.
 | | value |
 |---|---|
 | `τ` | 1.84 × 10⁶ s: 21 game days, 3.5 real minutes |
-| `field_capacity` | 4.12 × 10²⁰ J/m² |
+| `field_capacity` | 3.24 × 10²⁰ J/m² |
 | rated load, starting ship | 7.6 × 10¹⁹ W |
 | field at collapse | 4 577 K, peaking at 630 nm |
 
@@ -271,7 +297,9 @@ Starlight and beams scale with shadow, the same as the field, and a full ship sh
 absorbs whatever its drain, so the sun-diving limit does not move with size at all. What moves is
 how brightly a ship glows at rest: a GSV at 1 500 K is visible in the near infrared to anyone
 looking, and it cannot go dark. The survival pressure will arrive with anything that makes heat in
-proportion to volume. The drive below ε = 1 already would.
+proportion to volume. The drive below ε = 1 already does: its waste goes as the beam, as volume. A
+5 km ship at ε = 0.8 and 5 g makes 3.5 times its rated load, collapses after about seven game days
+of burning, and can hold about 1.4 g indefinitely.
 
 ## Collapse
 
@@ -306,20 +334,35 @@ seeing it replayed as the light passes.
 
 - **The instant is solved, not stepped.** `Fitting::collapse_s` walks the account's stretches from
   its settlement, fill and empty storage splits, the exhaust's floor and refit steps included, and
-  takes the closed form in each. It reads the burn: exhaust only ever lowers `Q`, so a burn can put a
-  collapse off and never bring one on, and a solve that ignored it would destroy a ship its drive
-  was saving. A vent that crosses `Q_max` crosses it at its step's end. The shard walks that across the
-  day-long starlight segments the account will be settled at and fires what falls due, once before
+  takes the closed form in each. It reads the burn: at ε ≥ 1 exhaust only ever lowers `Q`, so a burn
+  puts a collapse off, and a solve that ignored it would destroy a ship its drive was saving. Below
+  ε = 1 the drive's waste rises however hard the exhaust draws, and can bring one on. The solve
+  adds it to each stretch, which is exact because it relaxes on the same `τ`, but only against the
+  burn's power averaged over the piece, as 31 takes the exhaust. A read up to the solved instant
+  averages less of the throttle, and lands within a few percent of `Q_max` rather than on it; each
+  settlement narrows that. A vent that crosses `Q_max` crosses it at its step's end. The shard
+  walks that across the day-long starlight segments the account will be settled at and fires what falls due, once before
   the tick advances anything and once after its orders. Nothing is stored for it: every change of
   input settles the account first, so asking again is the re-solve, and a checkpoint restores it with
   the account.
 - **The event** is `kind::COLLAPSE`, stamped at the instant and where the ship was, carrying a
   `Released`. It goes through the journal like a burn. Its power is the spike taken as a second
   long, which is what an instrument's inverse square reads; the spike's energy lands on neighbors
-  as [Proximity](#as-built-1) says. The afterglow is not yet light anything can see; H10 makes it so.
+  as [Proximity](#as-built-1) says.
+- **The afterglow** (`lc_world::afterglow`) is the other `1 − collapse_spike_fraction` of `E`, from
+  where the ship was, as a blackbody of fixed area whose luminosity falls linearly to nothing over
+  `collapse_afterglow_s`. So its temperature falls from the field's limit, about 4 600 K, as
+  `T_limit (1 − τ/D)^¼`, and its area is `2 E_a / (σ T_limit⁴ D)`, about 3 × 10⁻¹⁵ m² per joule of
+  `E`. A starting ship with empty storage releases 1.4 × 10²⁶ J, an area equal to a sphere 370 km
+  across. `afterglow::temperature_k` is the cooling law on its own, for anything that draws one. The spike is a blackbody at
+  `collapse_spike_k` in photometry too: its fluence lands in the one exposure it falls in.
+- **The afterglow is light and nothing else.** A neighbor's field holds at most about 6% of the
+  spike's dose there from it, about three weeks on, which moves the lethal radius out by 3%; a sustained
+  emission restated as its power fell would cost journal writes for that. It heats nobody.
 - **The wreck** stays in the fleet with its worldline ended at the instant. A ship that could see
-  it goes on seeing it until the light of the end arrives, then stops, and the wreck is dropped once
-  that light has passed every craft. A checkpoint keeps it with its end and no account, since the
+  it goes on seeing it until the light of the end arrives, then stops. The wreck is dropped once its
+  afterglow's last light has passed every craft. A checkpoint keeps it with its end, its afterglow
+  and no account, since the
   successor carries the account and an account holds one row; a restart brings it back as a wreck,
   nobody's, with nothing to resume, and so ends nobody's view of it early. Its row and what it knew
   are deleted at the checkpoint after the sweep.
@@ -382,6 +425,10 @@ retarded time on that neighbor's worldline and jumps its `Q` there, so a cascade
   its shadow toward the source, and `α` of that goes into `Q`. This is the isotropic case of the
   one emission path of [31](31-directed-energy.md#as-built): the spike rides the collapse event,
   whose payload carries it, and lands through the same landing as a beam.
+- **A neighbor's exhaust is one of those emissions too**: lit at ignition, said again as the burning
+  ship lightens or turns, and taken again by each receiver as it moves through the cone
+  ([31](31-directed-energy.md#as-built)). It is intake like a beam's, held between the instants it
+  is taken, and a full ship held inside the cooking distance walks to collapse on it.
 - **A cascade is time order and nothing else.** Each tick takes due collapses and due landings
   together, earliest first. A landing settles its receiver to the arrival and re-solves its
   collapse, and a collapse queues its own spike's landings, which may fall in the same tick.
@@ -458,13 +505,20 @@ shows its thresholds. What a player can infer from it:
   light still in flight carries the failing field's temperature. The history is not checkpointed: a
   wreck restored after a restart is stated as the starting field at rest until its light has passed.
 - **The client draws and meters a ship by it.** A hull's reflectance is `1 − α`; a real hull's
-  textures, which average 0.35, are scaled to it. The field's heat is an even glow over the hull in
-  the hull shader, and a star's spectrum cache serves its per-band radiance. A Black field hides the
-  lit windows too. The field's own envelope is still undrawn, so for now the hull carries both terms;
-  R11 moves the heat onto the envelope. Nothing yet draws a distant ship as a point: the metering
-  sums the terms (`hull::Sent`), and R18's point starts from that sum.
-- **Instruments:** the photometry and the detection test are in `lc-world`; no duty yet points a
-  telescope at a craft. H10's stare at a position is the first.
+  textures, which average 0.35, are scaled to it. The field's heat is drawn on its envelope
+  ([32](32-ship-rendering.md#in-the-game)), and on the hull only for a craft with no form, which has
+  no envelope. A star's spectrum cache serves its per-band radiance. A Black field hides the lit
+  windows too. Nothing yet draws a distant ship as a point: the metering sums the terms
+  (`hull::Sent`), and R18's point starts from that sum.
+- **Instruments:** the photometry and the detection test are in `lc-world`. A stare can point at a
+  place or a craft as well as a star, and records the flux arriving in the one resolution element
+  it is aimed at, band by band: every craft's light by this photometry, and every wreck's spike and
+  afterglow, each at its retarded time, with any catalog star in that element. It is measured
+  against the instrument's own glow and every other star's wings, the survey's glare, so an
+  afterglow is caught where it stands clear of its star's wings. Eight resolution elements from a
+  dim star, seen from 3 light-days, it is measured to the calibration floor for all thirty days. A craft is followed
+  by its light, never where it is now, and once its light stops, at where it ended. See
+  [24-standing-instruments.md](24-standing-instruments.md#as-built-a-stare-at-a-place-or-a-craft).
 
 ![Clear ships round a Black one, in V: the Black one is a hole in the stars](../images/h7-v.jpg)
 ![The same, at ten microns: all five at 400 K, and the Black one as plain as the rest](../images/h7-10um.jpg)
@@ -477,7 +531,7 @@ shows its thresholds. What a player can infer from it:
 | setting | first guess | meaning |
 |---|---|---|
 | `field_idle_k` | 400 | the anchor temperature |
-| `field_capacity` | *anchored*: 10 ME on the starting envelope, 4.12 × 10²⁰ | heat per m² of envelope at collapse |
+| `field_capacity` | *anchored*: 10 ME on the starting envelope, 3.24 × 10²⁰ | heat per m² of envelope at collapse |
 | `field_tau_s` | *anchored*: 1.84 × 10⁶ | the time constant |
 | `conversion_efficiency` | 0.7 | of what is converted, the fraction stored |
 | `clear_absorptivity` | 0.3 | what a Clear field absorbs. Black absorbs everything |
@@ -521,11 +575,12 @@ A second bar in the top header, beside the energy bar and built the same way: `H
   A tick below the fill means the field is cooling, and above it, heating. When the equilibrium is past
   `Q_max`, the tick is pinned at the end and the text shows the countdown.
 - **The text beside it**: temperature, net heat flow, and **a countdown whenever a collapse is
-  scheduled** — `3 240 K ↑ 1.2 ME/yr — collapse in 4:10`. That is the one number a player must never
+  scheduled** — `3 240 K +1.2 ME/yr — collapse in 4:10`. That is the one number a player must never
   have to compute.
-- **Three buttons at the bar's left: Black, Clear and Auto.** The chosen one is lit. In Auto, the mode
-  the field is actually in shows as a small `CLEAR` or `BLACK` beside it, and a switch under way reads
-  `→ BLACK`.
+- **Three buttons at the bar's left: Black, Clear and Auto.** The chosen one is lit, and the shade the
+  field is actually in has its button underlined, which in Auto says what the thermostat chose. A
+  switch under way reads `» BLACK` beside them, the underline staying on the old shade until it is
+  done.
 - **In Auto, two markers on the bar** show the thresholds. Dragging one sends a new order.
 - **Color is never the only signal.** The countdown and the numbers say everything the hue does, for
   a player who cannot tell red from orange.
@@ -535,6 +590,34 @@ a hex value. The blackbody color comes from `em_spectra::blackbody`, normalized 
 so it follows the physics rather than a table. `Field` is a pure function of `Session`, as `Energy`
 is, and is tested the same way: a hot ship's bar is past the Draper point, and a scheduled collapse
 puts a countdown in the text.
+
+#### As built
+
+- **The blue is the energy bar's fill**, egui's selection color, so a cold field bar and the energy
+  bar are one pair. `field_bar.rs` reads it and `hud::Field::color` takes it.
+- **The blackbody goes through the band mapping in force**, as the field shader's does: both read
+  `BandMapping::apply_f64` over `blackbody::per_band`. In Natural it is the red-orange-white above.
+- **The countdown is the shard's own answer**, `lc_world::ahead::collapse_by`, which the shard fires
+  from. It looks ninety days ahead, a quarter of an hour at the design rate, and is solved again only
+  when something restates the account, the motive changes, or the clock enters another starlight
+  segment; a refit settling every frame is none of those. On a stopped clock it reads in days.
+- **No arrows.** egui's default fonts have no `→`, `↑` or `↓`; each drew as a box. Net heat flow
+  is signed, `+1.20 ME/yr`, a switch reads `» BLACK`, and flow too small to have a sign reads
+  `steady`.
+- **A dropped marker stays where it was dropped** while the order is in flight, until the account
+  agrees. Five seconds without that, which is how a refusal reads, puts it back.
+- **A switch under way reads `» BLACK` in any setting**, not only Auto: a day is long enough to
+  wonder whether the order took. The shade is an underline rather than a word, which saves the
+  header a word it has no room for.
+- **A marker lands on a hundredth**, held two hundredths from the other marker and from either end,
+  so both gaps stay open and Clear never waits for collapse itself. With no room, a drag moves
+  nothing. `auto_refill_below` is storage, not heat, and is not on the bar; it travels
+  with the order unchanged.
+- **A mode order during a switch is refused before it is sent**, with the shard's own words.
+- **The countdown is never dropped for width.** The narrowest header shows the bar alone, as it
+  does energy, but keeps `collapse in …` beside it.
+
+![The field bar: idle and Black; hot in Auto at 21 solar radii; and at 3, heading past the limit](../images/field-bar.png)
 
 ### Elsewhere
 
@@ -559,6 +642,10 @@ puts a countdown in the text.
 - **Light delay.** A collapse is observed by a distant client no earlier than the light allows,
   and a neighbor's `Q` jumps no earlier. Break the retarded solve on purpose and watch the test
   fail, per [AGENTS.md](../../AGENTS.md).
+- **The afterglow.** It integrates to `(1 − collapse_spike_fraction) E`, starts at the field's limit
+  and cools, and the spike is `collapse_spike_k`. A craft staring at a collapse's place records it
+  from when its light arrives for `collapse_afterglow_s`, and one staring a tenth of a radian off
+  records nothing. Take the light delay out on purpose and watch that test fail.
 - **Burst versus rate.** A beam under the conversion rating with storage empty adds only its
   conversion loss. The same energy as a burst adds all of it.
 - **Modes.** A Clear field takes `clear_absorptivity` of a beam and a Black one all of it. A switch

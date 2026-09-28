@@ -140,7 +140,10 @@ pub fn fit_fixture(dev: Res<crate::dev::DevEntry>, mut game: ResMut<crate::app::
     let Some(form) = dev.form.as_deref().and_then(fixture) else { return };
     if lc_world::form::rules::check(&form, &Balance::DEFAULT).is_ok() {
         let now = game.0.coordinate_time_s();
-        game.0.ship.fit(Some(lc_world::fitting::Fitting::full(form, Balance::DEFAULT, now)));
+        // In Auto and Clear, as a shard starts a new ship.
+        let mut fitting = lc_world::fitting::Fitting::full(form, Balance::DEFAULT, now);
+        fitting.set_posture(lc_world::fitting::Posture::new_ship(&Balance::DEFAULT));
+        game.0.ship.fit(Some(fitting));
     }
 }
 
@@ -274,7 +277,7 @@ pub fn update_parts(
     mut roots: Query<(Entity, &mut Transform, &FormRoot), Without<Painted>>,
     mut pieces: Query<(&MeshMaterial3d<BodySurfaceMaterial>, &Painted, &mut Transform, &mut Visibility)>,
     showing: Res<crate::refit_hull::Showing>,
-    real: Res<crate::ship_hull::RealHulls>,
+    (real, envelopes): (Res<crate::ship_hull::RealHulls>, Res<crate::field::Envelopes>),
 ) {
     if own.0.is_none() && !own.is_changed() {
         return;
@@ -283,6 +286,7 @@ pub fn update_parts(
     let at_ly = session.ship.motion.position_ly;
     let star = lighting(session);
     let glow = crate::hull::own_glow(session);
+    let enveloped = envelopes.drawn(None);
     let placed = ship_frame(session, &eye, &ui);
     // The real hull, or a refit's meshes over it, once either is up.
     let formed = own.0.as_ref().filter(|_| !showing.drawing(None) && !real.drawn(None));
@@ -309,7 +313,7 @@ pub fn update_parts(
             let painted = Painted { color, part: piece.part, side: piece.side, mesh_scale, reach_m: full.shape.reach() };
             commands.spawn((
                 Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(materials.add(surfaces.flat.material(lit(session, star, at_ly, color, glow)))),
+                MeshMaterial3d(materials.add(surfaces.flat.material(lit(session, star, at_ly, color, glow, enveloped)))),
                 sized(piece, &painted),
                 // As for a hull: placed by hand at a scale where a mesh's bounds say nothing.
                 NoFrustumCulling,
@@ -333,7 +337,7 @@ pub fn update_parts(
             None => *visibility = Visibility::Hidden,
         }
         let Some(mut asset) = materials.get_mut(&material.0) else { continue };
-        let next = lit(session, star, at_ly, painted.color, glow);
+        let next = lit(session, star, at_ly, painted.color, glow, enveloped);
         if asset.uniforms != next {
             asset.uniforms = next;
         }

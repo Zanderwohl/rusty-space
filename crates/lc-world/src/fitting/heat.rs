@@ -3,11 +3,13 @@
 //! account.
 //!
 //! What the ship emits is drawn from heat first (`31-directed-energy.md` §The drive is the
-//! radiator), and the commitment runs down by all of it whatever pays.
+//! radiator), and the commitment runs down by all of it whatever pays. A drive below ε = 1 spends
+//! `1 − ε` of what the rocket law prices as waste heat, held apart in `Q` so the exhaust cannot
+//! draw it: re-emitted, it would fly the drive as if ε were 1.
 
 use super::{Balance, Fitting, Hull};
 use crate::cost;
-use crate::field::{Burst, Field, Mode, Segment};
+use crate::field::{Burst, Field, Mode, Segment, Stretch};
 use crate::form::capacity::Capacities;
 use crate::motion::ShipState;
 use crate::refit::rounds::{Phase, Plan, Step};
@@ -21,11 +23,36 @@ pub struct Lit {
     pub power_w: f64,
 }
 
-/// Since the settlement: the heat reached, and storage's net change.
+/// Since the settlement: the heat reached, the drive's waste within it, and storage's net change.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Flow {
     pub heat_j: f64,
+    pub waste_j: f64,
     pub income_j: f64,
+}
+
+/// A stretch of constant inputs as [`Fitting::walk`] offers it, with `Q` split into what the
+/// segment's emission can draw and the drive's waste, which rises at `waste_w`.
+pub(super) struct Part {
+    pub segment: Segment,
+    pub drawable_j: f64,
+    pub waste_j: f64,
+    pub waste_w: f64,
+}
+
+impl Part {
+    /// The stretches of all of `Q`, the waste added to each: it relaxes on the same `τ`, so each
+    /// sum is still one exponential.
+    pub fn stretches(&self, field: &Field, dt_s: f64) -> Vec<Stretch> {
+        let mut waste_j = self.waste_j;
+        let mut stretches = field.stretches(&self.segment, self.drawable_j, dt_s);
+        for s in &mut stretches {
+            s.heat_j += waste_j;
+            s.heat_w += self.waste_w;
+            waste_j = field.heat_after_j(waste_j, self.waste_w, s.dt_s);
+        }
+        stretches
+    }
 }
 
 /// Far from any star, with storage paying the drain.
@@ -46,6 +73,20 @@ impl Fitting {
 
     pub fn temperature_k_at(&self, motion: &ShipState, now_s: f64) -> f64 {
         self.field().temperature_k(self.heat_j_at(motion, now_s))
+    }
+
+    /// `P_in` of `dQ/dt = P_in − Q/τ` at `now_s`, exhaust included: the inputs then in force, so
+    /// `P_in τ` is where heat is heading.
+    pub fn heat_w_at(&self, motion: &ShipState, now_s: f64) -> f64 {
+        let field = self.field();
+        let now_s = now_s.max(self.since_s);
+        let mut heat_w = 0.0;
+        // A second past `now_s`, so the last stretch offered is the one in force from it.
+        self.walk(Some(motion), now_s + 1.0, |_, part, dt_s| {
+            heat_w = part.stretches(&field, dt_s).last().map_or(0.0, |s| s.heat_w);
+            false
+        });
+        heat_w
     }
 
     /// Watts arriving from other craft: a neighbor's glow.
@@ -84,8 +125,19 @@ impl Fitting {
 
     /// Averaged over `[from_s, until_s]`: the drive's exhaust and whatever else is lit.
     fn emitted_w(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
-        let burn_j = self.burn_spent_j(motion, until_s) - self.burn_spent_j(motion, from_s);
-        (burn_j + self.lit_between_j(from_s, until_s)) / (until_s - from_s)
+        let beam = self.balance.drive_efficiency.min(1.0);
+        (beam * self.burn_between_j(motion, from_s, until_s) + self.lit_between_j(from_s, until_s)) / (until_s - from_s)
+    }
+
+    /// Averaged over `[from_s, until_s]`: what the drive spends and does not emit. Zero at ε ≥ 1,
+    /// where the exhaust is all that is spent.
+    fn waste_w(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
+        let waste = (1.0 - self.balance.drive_efficiency).max(0.0);
+        waste * self.burn_between_j(motion, from_s, until_s) / (until_s - from_s)
+    }
+
+    fn burn_between_j(&self, motion: &ShipState, from_s: f64, until_s: f64) -> f64 {
+        self.burn_spent_j(motion, until_s) - self.burn_spent_j(motion, from_s)
     }
 
     /// What the emissions with no net thrust put out over `[from_s, until_s]`, joules.
@@ -104,12 +156,12 @@ impl Fitting {
     /// changes nothing. The burn's commitment and the builds still to run are held out of free
     /// storage, so the drain starves first.
     pub(super) fn flow(&self, motion: Option<&ShipState>, now_s: f64) -> Flow {
-        self.walk(motion, now_s, |_, _, _, _| false)
+        self.walk(motion, now_s, |_, _, _| false)
     }
 
     /// When `Q` first reaches `Q_max` from the settlement to `until_s`, if the inputs in force hold
-    /// and the round runs as planned. A vent that crosses it does so at the end of its step. A burn
-    /// only ever lowers `Q`, so it can only put a collapse off.
+    /// and the round runs as planned. A vent that crosses it does so at the end of its step. The
+    /// burn is read: its exhaust puts a collapse off, and below ε = 1 its waste can bring one on.
     pub fn collapse_s(&self, motion: &ShipState, until_s: f64) -> Option<f64> {
         let field = self.field();
         let max_j = field.heat_max_j();
@@ -118,19 +170,26 @@ impl Fitting {
             return Some(self.since_s);
         }
         let mut found = None;
-        self.walk(Some(motion), until_s, |from_s, segment, heat_j, dt_s| {
-            found = field.segment_time_to_rise_s(segment, heat_j, max_j).filter(|&t| t <= dt_s).map(|t| from_s + t);
+        self.walk(Some(motion), until_s, |from_s, part, dt_s| {
+            let mut at_s = 0.0;
+            for s in part.stretches(&field, f64::INFINITY) {
+                if let Some(t) = field.time_to_rise_s(s.heat_j, max_j, s.heat_w).filter(|&t| t <= s.dt_s) {
+                    found = Some(at_s + t).filter(|&t| t <= dt_s).map(|t| from_s + t);
+                    break;
+                }
+                at_s += s.dt_s;
+            }
             found.is_some()
         });
         found
     }
 
     /// [`Fitting::flow`] to `until_s`, first offering `stop` each stretch of constant inputs as its
-    /// start, inputs, heat and length, and ending early where it says. A vent or spill lands between
+    /// start, inputs and length, and ending early where it says. A vent or spill lands between
     /// stretches, so the next starts from it. A switch completing is a cut, as a step's end is.
-    pub(super) fn walk(&self, motion: Option<&ShipState>, until_s: f64, mut stop: impl FnMut(f64, &Segment, f64, f64) -> bool) -> Flow {
+    pub(super) fn walk(&self, motion: Option<&ShipState>, until_s: f64, mut stop: impl FnMut(f64, &Part, f64) -> bool) -> Flow {
         let field = self.field();
-        let mut flow = Flow { heat_j: self.heat_j, income_j: 0.0 };
+        let mut flow = Flow { heat_j: self.heat_j, waste_j: self.waste_j, income_j: 0.0 };
         if until_s <= self.since_s {
             return flow;
         }
@@ -144,18 +203,21 @@ impl Fitting {
         for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s, &edges) {
             let dt_s = piece.until_s - at_s;
             let emitted_w = motion.map_or(0.0, |m| self.emitted_w(m, at_s, piece.until_s));
+            let waste_w = motion.map_or(0.0, |m| self.waste_w(m, at_s, piece.until_s));
             let room_j = caps.storage_j - (self.stored_j + flow.income_j);
-            let segment = self.intake(&caps, self.shade_at(at_s), piece.losing_w, room_j, piece.moving_w, emitted_w);
-            let held_w = emitted_w + piece.moving_w.max(0.0);
-            let (mut heat_j, mut storage_j) = (flow.heat_j, 0.0);
+            // Waste is drawn from storage like the drain, but its heat is kept out of the segment's.
+            let segment = self.intake(&caps, self.shade_at(at_s), piece.losing_w, room_j, piece.moving_w + waste_w, emitted_w);
+            let held_w = emitted_w + waste_w + piece.moving_w.max(0.0);
+            let (mut heat_j, mut waste_j, mut storage_j) = (flow.heat_j - flow.waste_j, flow.waste_j, 0.0);
             let mut from_s = at_s;
-            for (part, part_s) in split(&field, segment, heat_j, caps.drain_w, held_w, free_j, dt_s) {
-                let part = Segment { room_j: room_j - storage_j, ..part };
-                if stop(from_s, &part, heat_j, part_s) {
+            for (segment, part_s) in split(&field, segment, heat_j, caps.drain_w, held_w, free_j, dt_s) {
+                let part = Part { segment: Segment { room_j: room_j - storage_j, ..segment }, drawable_j: heat_j, waste_j, waste_w };
+                if stop(from_s, &part, part_s) {
                     return flow;
                 }
-                let settled = field.settle(&part, heat_j, part_s);
+                let settled = field.settle(&part.segment, heat_j, part_s);
                 heat_j = settled.heat_j;
+                waste_j = field.heat_after_j(waste_j, waste_w, part_s);
                 storage_j += settled.storage_j;
                 from_s += part_s;
             }
@@ -165,7 +227,8 @@ impl Fitting {
             let spilled_j = (self.stored_j + flow.income_j - caps.storage_j).max(0.0);
             flow.income_j -= spilled_j;
             free_j -= spilled_j;
-            flow.heat_j = heat_j + piece.vent_j + spilled_j;
+            flow.waste_j = waste_j;
+            flow.heat_j = heat_j + waste_j + piece.vent_j + spilled_j;
             at_s = piece.until_s;
         }
         flow
@@ -378,6 +441,30 @@ mod tests {
         assert!(close(steps.heat_j, leap.heat_j, 1e-9), "{} {}", steps.heat_j, leap.heat_j);
         assert!(close(steps.stored_j, leap.stored_j, 1e-12), "{} {}", steps.stored_j, leap.stored_j);
         assert_eq!(leap.stored_j, leap.hull().capacities.storage_j);
+    }
+
+    /// `P_in` is the rate heat moves at plus what it radiates, in the stretch holding the instant:
+    /// before storage fills and after.
+    #[test]
+    fn the_power_in_force_is_where_heat_is_heading() {
+        let b = Balance::DEFAULT;
+        let mut fitting = starting(b, 20.0 * me(&b));
+        fitting.set_starlight_w(starlight_w(&b, 0.05));
+        let room_j = fitting.hull().capacities.storage_j - 20.0 * me(&b);
+        let fill_s = fitting.intake(&fitting.hull().capacities, Mode::Black, 0.0, room_j, 0.0, 0.0).fill_s().unwrap();
+        let tau_s = b.field_tau_s;
+        let mut seen = Vec::new();
+        for t in [0.3 * fill_s, 1.5 * fill_s] {
+            let dt_s = 1.0e-4 * fill_s;
+            let rate_w = (fitting.heat_j_at(&rest(), t + dt_s) - fitting.heat_j_at(&rest(), t - dt_s)) / (2.0 * dt_s);
+            let heat_w = fitting.heat_w_at(&rest(), t);
+            let want_w = rate_w + fitting.heat_j_at(&rest(), t) / tau_s;
+            assert!(close(heat_w, want_w, 1e-5), "at {t}: {heat_w} {want_w}");
+            seen.push(heat_w);
+        }
+        assert!(seen[1] > 1.01 * seen[0], "premise: filling converts what full storage cannot: {seen:?}");
+        let later_s = fill_s + 40.0 * tau_s;
+        assert!(close(fitting.heat_w_at(&rest(), 1.5 * fill_s) * tau_s, fitting.heat_j_at(&rest(), later_s), 1e-9));
     }
 
     /// The drain storage cannot pay makes no heat.
@@ -693,6 +780,7 @@ mod tests {
         let (fitting, committed_j) = hot(b, 20.0 * me(&b), 0.0, &motion);
         let end_s = cruise.duration_s();
         assert_eq!(fitting.heat_j_at(&motion, end_s), 0.0);
+        assert_eq!(fitting.flow(Some(&motion), end_s).waste_j, 0.0, "no waste at ε = 1");
         let cost_j = -fitting.flow(Some(&motion), end_s).income_j;
         let want_j = crate::cost::energy_j(fitting.settled_mass_kg(), crate::cost::planned_rapidity(&motion), 1.0);
         assert!(close(cost_j, want_j, 1e-12) && close(committed_j, want_j, 1e-15), "{cost_j} {want_j}");
@@ -769,6 +857,147 @@ mod tests {
         assert_eq!(burning.collapse_s(&motion, boost_end_s), None);
         assert!(burning.heat_j_at(&motion, boost_end_s) < heat_j);
         assert!(burning.heat_j_at(&rest(), boost_end_s) > heat_max_j);
+    }
+
+    /// A drive at ε = 0.8.
+    fn wasteful(b: Balance) -> Balance {
+        Balance { drive_efficiency: 0.8, ..b }
+    }
+
+    /// With radiation off: heat pays only the beam, the waste stays as heat, and storage pays the
+    /// rest of what the rocket law prices. Re-emitted, the waste would make storage pay the beam
+    /// less it, which is what ε = 1 costs.
+    #[test]
+    fn a_burn_below_one_keeps_its_waste_and_costs_the_rocket_laws_price() {
+        let b = wasteful(quiet());
+        let (motion, cruise) = hop();
+        let end_s = cruise.duration_s();
+        let stored_j = 20.0 * me(&b);
+        let (_, cost_j) = hot(b, stored_j, 0.0, &motion);
+        for share in [0.0, 0.3, 1.5] {
+            let (fitting, committed_j) = hot(b, stored_j, share * cost_j, &motion);
+            let beam_j = b.drive_efficiency * committed_j;
+            let mass_kg = fitting.settled_mass_kg();
+            let flow = fitting.flow(Some(&motion), end_s);
+            let waste_j = (1.0 - b.drive_efficiency) * committed_j;
+            assert!(close(flow.waste_j, waste_j, 1e-9), "{share}: {} {waste_j}", flow.waste_j);
+            let from_heat_j = fitting.heat_j.min(beam_j);
+            let heat_end_j = fitting.heat_j - from_heat_j + waste_j;
+            assert!((flow.heat_j - heat_end_j).abs() <= 1e-9 * committed_j, "{share}: {} {heat_end_j}", flow.heat_j);
+            let paid_j = -flow.income_j;
+            let want_j = committed_j - from_heat_j;
+            assert!((paid_j - want_j).abs() <= 1e-9 * committed_j, "{share}: {paid_j} {want_j}");
+            assert!(fitting.committed_j_at(&motion, end_s) <= 1e-9 * committed_j, "{share}: all of it released");
+            // The rocket law, and the waste still aboard.
+            let lighter_kg = mass_kg * (-crate::cost::planned_rapidity(&motion) / b.drive_efficiency).exp();
+            let mass_end_kg = fitting.mass_kg_at(&motion, end_s);
+            assert!(close(mass_end_kg, lighter_kg + waste_j / crate::fitting::C2, 1e-12), "{share}: {mass_end_kg} {lighter_kg}");
+        }
+        let (cold, committed_j) = hot(b, stored_j, 0.0, &motion);
+        let (at_one, one_j) = hot(Balance { drive_efficiency: 1.0, ..b }, stored_j, 0.0, &motion);
+        let ratio = cold.flow(Some(&motion), end_s).income_j / at_one.flow(Some(&motion), end_s).income_j;
+        assert!(close(ratio, committed_j / one_j, 1e-9) && ratio > 1.2, "ε costs while lit: {ratio}");
+    }
+
+    /// An emission is not the rocket law, so ε takes nothing from it.
+    #[test]
+    fn an_emit_makes_no_waste() {
+        let b = wasteful(quiet());
+        let mut fitting = hot(b, 20.0 * me(&b), 0.0, &rest()).0;
+        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e18 });
+        let flow = fitting.flow(Some(&rest()), 200.0);
+        assert_eq!((flow.heat_j, flow.waste_j), (0.0, 0.0));
+        assert!(close(-flow.income_j, 1.0e20, 1e-12), "{}", flow.income_j);
+    }
+
+    /// Drawable heat floors in the boost while waste keeps rising, and both relax through the
+    /// coast; one leap and every tick agree.
+    #[test]
+    fn a_wasteful_burn_settled_every_tick_agrees_with_one_leap() {
+        let b = wasteful(Balance::DEFAULT);
+        let (motion, cruise) = hop();
+        let end_s = cruise.duration_s();
+        let [_, line_s, boost_end_s, brake_s, _] = cruise.phase_changes_s();
+        let (_, cost_j) = hot(b, 20.0 * me(&b), 0.0, &motion);
+        let (mut leap, _) = hot(b, 20.0 * me(&b), 0.1 * cost_j, &motion);
+        leap.set_starlight_w(starlight_w(&b, 1.0));
+        let floor_s = 0.5 * (line_s + boost_end_s);
+        let at_floor = leap.flow(Some(&motion), floor_s);
+        assert_eq!(at_floor.heat_j, at_floor.waste_j, "premise: drawable heat at the floor partway through the boost");
+        assert!(at_floor.waste_j > 0.0);
+        let coast_s = 0.5 * (boost_end_s + brake_s);
+        let (boosted, coasted) = (leap.flow(Some(&motion), boost_end_s), leap.flow(Some(&motion), coast_s));
+        let relaxed_j = leap.field().heat_after_j(boosted.waste_j, 0.0, coast_s - boost_end_s);
+        assert!(close(coasted.waste_j, relaxed_j, 1e-12), "waste radiates through the coast: {} {relaxed_j}", coasted.waste_j);
+
+        let mut ticks = leap.clone();
+        let n = 997;
+        for k in 1..=n {
+            ticks.settle(&motion, end_s * f64::from(k) / f64::from(n));
+        }
+        let (mass_kg, stored_j, heat_j) = (leap.settled_mass_kg(), leap.stored_j, leap.heat_j);
+        let read = leap.flow(Some(&motion), end_s);
+        leap.settle(&motion, end_s);
+        assert_eq!((leap.heat_j, leap.waste_j), (read.heat_j, read.waste_j), "a read agrees with a settlement");
+        assert!(leap.waste_j > 0.0 && leap.heat_j > leap.waste_j, "premise: waste left, and the brake did not floor");
+        let moved_j = heat_j + leap.heat_j + (leap.stored_j - stored_j).abs();
+        let repriced_j = 2.0 * cost_j * moved_j / (mass_kg * crate::fitting::C2);
+        assert!((ticks.stored_j - leap.stored_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.stored_j, leap.stored_j);
+        assert!((ticks.heat_j - leap.heat_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.heat_j, leap.heat_j);
+        assert!((ticks.waste_j - leap.waste_j).abs() < repriced_j, "{} {} {repriced_j}", ticks.waste_j, leap.waste_j);
+    }
+
+    /// At the floor mid-boost, the power in force is the waste alone: the field bar's heading.
+    #[test]
+    fn a_wasteful_burn_heads_where_its_waste_does() {
+        let b = wasteful(Balance::DEFAULT);
+        let (motion, cruise) = hop();
+        let [_, line_s, boost_end_s, _, _] = cruise.phase_changes_s();
+        let (_, cost_j) = hot(b, 20.0 * me(&b), 0.0, &motion);
+        let (fitting, _) = hot(b, 20.0 * me(&b), 0.1 * cost_j, &motion);
+        let floor_s = 0.5 * (line_s + boost_end_s);
+        let at_floor = fitting.flow(Some(&motion), floor_s);
+        assert_eq!(at_floor.heat_j, at_floor.waste_j, "premise: at the floor");
+        let heat_w = fitting.heat_w_at(&motion, floor_s);
+        // Averaged as the walk to a second past it averages.
+        let waste_w = fitting.waste_w(&motion, line_s, floor_s + 1.0);
+        assert!(heat_w > 0.0 && close(heat_w, waste_w, 1e-9), "{heat_w} {waste_w}");
+    }
+
+    /// Carrying waste near its limit, a ship at rest or burning at ε = 1 cools; at ε = 0.4 the
+    /// burn's waste outruns the rated load and brings a collapse on partway through the boost.
+    #[test]
+    fn a_wasteful_burn_brings_on_a_collapse() {
+        use crate::flight::{Cruise, Drive};
+        let cruise = Cruise::plan(DVec3::ZERO, DVec3::X * 1.0e-3, 0.0, Drive::DEFAULT);
+        let boost_end_s = cruise.phase_changes_s()[2];
+        let mut motion = rest();
+        motion.begin_crossing(cruise, None);
+        let ship = |efficiency: f64| {
+            let b = Balance { drive_efficiency: efficiency, ..Balance::DEFAULT };
+            let full = Fitting::full(Form::starting(), b, 0.0);
+            let max_j = full.field().heat_max_j();
+            let account = Account { heat_j: 0.9 * max_j, waste_j: 0.9 * max_j, ..full.account() };
+            let mut fitting = Fitting::from_account(&account, b);
+            fitting.commit(&motion, 0.0);
+            fitting
+        };
+        let wasteful = ship(0.4);
+        let max_j = wasteful.field().heat_max_j();
+        assert!(wasteful.waste_w(&motion, 0.0, boost_end_s) > wasteful.field().rated_load_w(), "premise");
+        assert_eq!(wasteful.collapse_s(&rest(), boost_end_s), None);
+        assert_eq!(ship(1.0).collapse_s(&motion, boost_end_s), None);
+        assert!(ship(1.0).heat_j_at(&motion, boost_end_s) < 0.9 * max_j);
+
+        let at_s = wasteful.collapse_s(&motion, boost_end_s).expect("the waste brings it on");
+        assert!(at_s > 0.0 && at_s < boost_end_s, "{at_s} {boost_end_s}");
+        // Drawable heat stays at the floor, so `Q` is the waste alone, rising at the boost's average.
+        let field = wasteful.field();
+        let limit_j = field.equilibrium_j(wasteful.waste_w(&motion, 0.0, boost_end_s));
+        let want_s = field.tau_s * ((limit_j - 0.9 * max_j) / (limit_j - max_j)).ln();
+        assert!(close(at_s, want_s, 1e-9), "{at_s} {want_s}");
+        // Read up to it, the average is over less of a throttling burn.
+        assert!(close(wasteful.heat_j_at(&motion, at_s), max_j, 0.02));
     }
 
     #[test]

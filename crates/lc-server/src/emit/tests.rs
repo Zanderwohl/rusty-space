@@ -417,7 +417,7 @@ async fn a_beam_into_room_adds_only_the_conversion_loss_and_a_burst_adds_all_of_
     let lit_t = emissions_of(&server, EMITTER)[0].0;
     let (energy_j, burst_t) = (power_w * duration_s, lit_t + (duration_s * 1.0e6) as i64);
     let pulse = Emitted { burst_j: energy_j, power_w: 0.0, axis: DVec3::Y.to_array(), ..emissions_of(&server, EMITTER)[0].1 };
-    server.emissions.landings.push(Landing { observer: CraftId(3), arrive_t: burst_t + LIGHT_SECOND_US as i64, source: EMITTER, emitted: pulse });
+    server.emissions.landings.push(Landing { observer: CraftId(3), arrive_t: burst_t + LIGHT_SECOND_US as i64, source: EMITTER, emitted: pulse, said_t: burst_t });
     until(&mut server, &mut wire, burst_t as f64 + 2.0 * LIGHT_SECOND_US + 1.0).await;
     assert_eq!(lit_w(&server, 2), 0.0, "premise: it went out");
 
@@ -468,7 +468,7 @@ async fn restart(server: &Server<Memory>, rate: f64, resume: bool) -> Server<Mem
 
 /// Restarted with a collapse's spike and a beam both in flight, the shard lands each at its
 /// arrival: the spike kills a neighbor inside its lethal radius, and the beam feeds its target. A
-/// shard that did not rebuild them from the journal does neither.
+/// shard that did not rebuild landings from the journal loses the spike.
 #[tokio::test]
 async fn a_spike_and_a_beam_in_flight_across_a_restart_still_land() {
     // Ticks of 44 µs, so both lights are still on their way when the first tick ends.
@@ -515,12 +515,13 @@ async fn a_spike_and_a_beam_in_flight_across_a_restart_still_land() {
         let victim_died = restarted.journal().events.iter().find(|e| e.kind == KIND_COLLAPSE && e.source == ShipId(11)).map(|e| e.t);
         if resume {
             assert_eq!(victim_died, Some(spike_t), "the spike landed off its arrival");
-            assert!(matches!(told[..], [(_, w, t)] if w > 0.0 && t == beam_t), "{told:?}");
-            assert!(lit_w(&restarted, 2) > 0.0);
         } else {
             assert_eq!(victim_died, None, "premise: only the journal brings the spike back");
-            assert!(told.is_empty());
         }
+        // A beam near its emitter is followed from what the emitter said, which its checkpoint
+        // keeps, whether or not the journal is read.
+        assert!(matches!(told[..], [(_, w, t)] if w > 0.0 && t == beam_t), "resumed {resume}: {told:?}");
+        assert!(lit_w(&restarted, 2) > 0.0);
     }
 }
 
@@ -550,7 +551,7 @@ async fn a_beam_landing_across_a_restart_stays_on_until_its_end_arrives() {
     let out_t = lit_t + (3.0 * HOUR_S * 1.0e6) as i64;
     until(&mut restarted, &mut wire, out_t as f64 + at.length() + 1.0).await;
     let told = illuminated(&wire.take(ClientId(2)));
-    assert_eq!(told, vec![(lit.beam, 0.0, (out_t as f64 + at.length()).ceil() as i64)]);
+    assert_eq!(told, vec![(lit.beam, 0.0, (out_t as f64 + at.length()).ceil() as i64)], "{told:?}");
     assert_eq!(lit_w(&restarted, 2), 0.0);
 }
 
@@ -649,3 +650,5 @@ async fn nothing_lights_the_drive_while_a_balanced_emit_runs() {
     assert_eq!(craft.fitting().unwrap().lit(), before.fitting().unwrap().lit());
     assert!(server.pursuits.is_empty());
 }
+
+mod drives;

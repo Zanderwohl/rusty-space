@@ -116,12 +116,13 @@ fn steer_floor_us(pursuer: &Craft) -> i64 {
 /// matches its model and is still rate-limited.
 pub const BURN_CHANGE_FRACTION: f64 = 0.25;
 
-/// The quarry's proper acceleration, when its plume was lit at the sighting and two sightings
-/// can measure it.
+/// The quarry's proper acceleration, when it was thrusting at the sighting and two sightings can
+/// measure it.
 pub(crate) fn burn_of(fleet: &Fleet, seen: &pursuit::Sighting, previous: Option<&pursuit::Sighting>) -> Option<glam::DVec3> {
+    let s = seen.emitted_s;
     let lit = fleet
         .get(CraftId(seen.target.0))
-        .is_some_and(|quarry| quarry.jet_power_w(seen.emitted_s) > 0.0);
+        .is_some_and(|quarry| lc_world::motion::thrust_g(quarry.motion_at(s), s) > 0.0);
     lit.then(|| previous.and_then(|p| escort::acceleration_of(p, seen))).flatten()
 }
 
@@ -223,7 +224,7 @@ pub fn contacts(
                     .to_array(),
                 // At the moment the light left, not now. A burn that has since stopped is
                 // still burning as far as this observer is concerned.
-                jet_power_w: craft.jet_power_w(sighted.emitted_s),
+                drive_w: lc_world::emit::drive_w(craft, balance, sighted.emitted_s),
                 emitted_t: (sighted.emitted_s * 1.0e6) as i64,
                 // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by
                 // construction, so this is the light landing at this instant.

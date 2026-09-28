@@ -26,6 +26,7 @@ use crate::input::Requested;
 use crate::panels::{ask, duration, span_m};
 use crate::plume::Drawn;
 use crate::system::M_PER_LY;
+use crate::field::Incoming;
 use crate::uplink::Contact;
 
 /// What the server lights: 1 nm to the comms dish's 3 cm.
@@ -350,18 +351,6 @@ pub fn aimed_back(bearing: DVec3) -> Aimed {
 }
 
 
-/// A beam arriving here, as `Illuminated` last stated it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Incoming {
-    pub beam: i64,
-    /// Unit, world axes, toward the source.
-    pub bearing: DVec3,
-    pub spectrum: Spectrum,
-    /// Before this field's absorptivity.
-    pub power_w: f64,
-    pub since_s: f64,
-}
-
 /// A beam this ship has lit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sent {
@@ -379,7 +368,6 @@ pub struct Sent {
 /// The only beams this ship knows of: those landing on it and those it lit.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Beams {
-    pub incoming: Vec<Incoming>,
     pub sent: Vec<Sent>,
     /// Every craft in sight by its last two statements, which is what a burn is measured from.
     pub watched: HashMap<ShipId, Watch>,
@@ -410,16 +398,13 @@ impl Beams {
                 Order::CutDrive => self.put_out(*at_t as f64 * 1.0e-6),
                 _ => {}
             },
-            Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t } if me == Some(*ship_id) => {
-                self.illuminated(*beam, *bearing, *spectrum, *power_w, *arrive_t as f64 * 1.0e-6)
-            }
             Outbound::Present(seen) => {
                 let mut watched = HashMap::with_capacity(seen.len());
                 for presence in seen.iter().map(|c| c.get()) {
                     let latest = sighting_of(presence);
                     let watch = match self.watched.get(&presence.ship_id) {
                         Some(held) if held.latest.emitted_s >= latest.emitted_s => *held,
-                        held => Watch { latest, previous: held.map(|h| h.latest), lit: presence.jet_power_w > 0.0 },
+                        held => Watch { latest, previous: held.map(|h| h.latest), lit: presence.drive_w > 0.0 },
                     };
                     watched.insert(presence.ship_id, watch);
                 }
@@ -462,22 +447,6 @@ impl Beams {
         }
     }
 
-    /// Fold an `Illuminated`. A restatement replaces the beam's entry, zero power removes it, and
-    /// one older than what is held is dropped.
-    pub fn illuminated(&mut self, beam: i64, bearing: [f64; 3], spectrum: Spectrum, power_w: f64, arrive_s: f64) {
-        let held = self.incoming.iter().position(|i| i.beam == beam);
-        if held.is_some_and(|at| self.incoming[at].since_s > arrive_s) {
-            return;
-        }
-        if let Some(at) = held {
-            self.incoming.remove(at);
-        }
-        if power_w > 0.0 {
-            let bearing = DVec3::from_array(bearing).normalize_or_zero();
-            self.incoming.push(Incoming { beam, bearing, spectrum, power_w, since_s: arrive_s });
-        }
-    }
-
     /// Fold this ship's accepted `Order::Emit`, aimed as this ship sees its target from `here_ly`.
     pub fn lit(&mut self, order: &Order, event_id: i64, at_s: f64, here_ly: DVec3, contacts: &[Contact]) {
         let Order::Emit { aim, apertures, power_w, spread_rad, duration_s, lead, .. } = *order else { return };
@@ -500,11 +469,6 @@ impl Beams {
         for sent in &mut self.sent {
             sent.until_s = sent.until_s.min(at_s);
         }
-    }
-
-    /// W landing now, before absorptivity.
-    pub fn landing_w(&self) -> f64 {
-        self.incoming.iter().map(|i| i.power_w).sum()
     }
 }
 
@@ -533,7 +497,14 @@ pub enum OnMap {
 /// come about and goes out when the burn does, which the acceptance does not say.
 ///
 /// No cooking ring: its share of a cone that grows every frame would be a new mesh every frame.
-pub fn on_map(beams: &Beams, here_ly: DVec3, boost: Option<&Boost>, now_s: f64, reach_m: f64) -> Vec<(OnMap, Drawn)> {
+pub fn on_map(
+    beams: &Beams,
+    incoming: &Incoming,
+    here_ly: DVec3,
+    boost: Option<&Boost>,
+    now_s: f64,
+    reach_m: f64,
+) -> Vec<(OnMap, Drawn)> {
     let cone = |apex_ly: DVec3, axis: DVec3, length_m: f64, half_angle_rad: f64| Drawn {
         craft: None,
         apex_ly,
@@ -563,8 +534,8 @@ pub fn on_map(beams: &Beams, here_ly: DVec3, boost: Option<&Boost>, now_s: f64, 
             drawn.push((OnMap::Sent(sent.event_id, aft), cone(from_ly, axis, length_m, drawn_spread(sent.half_angle_rad))));
         }
     }
-    for landing in &beams.incoming {
-        drawn.push((OnMap::Landing(landing.beam), cone(here_ly, landing.bearing, reach_m, 0.0)));
+    for (id, landing) in incoming.by_id() {
+        drawn.push((OnMap::Landing(id), cone(here_ly, landing.bearing, reach_m, 0.0)));
     }
     drawn
 }
@@ -883,14 +854,14 @@ fn spot(ui: &mut egui::Ui, at: &Landing, receiver: &Receiver) {
 
 fn incoming(ui: &mut egui::Ui, session: &crate::session::Session, uplink: &crate::uplink::Uplink, draft: &mut Draft) {
     ui.label("Incoming");
-    if uplink.beams.incoming.is_empty() {
+    if uplink.incoming.beams().next().is_none() {
         ui.weak("none");
         return;
     }
     let now_s = session.coordinate_time_s();
     let fitting = session.ship.fitting();
     let absorptivity = fitting.map_or(1.0, |f| f.absorptivity_at(now_s));
-    for landing in &uplink.beams.incoming {
+    for landing in uplink.incoming.beams() {
         let back = aimed_back(landing.bearing);
         let Aimed::Bearing { yaw_deg, pitch_deg } = back else { continue };
         let row = format!(
@@ -904,7 +875,7 @@ fn incoming(ui: &mut egui::Ui, session: &crate::session::Session, uplink: &crate
         }
     }
     if let Some(fitting) = fitting {
-        let (stored_w, heat_w) = field_takes(fitting, &session.ship.motion, now_s, uplink.beams.landing_w());
+        let (stored_w, heat_w) = field_takes(fitting, &session.ship.motion, now_s, uplink.incoming.landing_w());
         ui.label(format!("to storage {} · to heat {}", watts(stored_w), watts(heat_w)));
     }
 }
@@ -1032,7 +1003,7 @@ mod tests {
             at_ly: [at_m / M_PER_LY, 0.0, 0.0],
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
-            jet_power_w: 0.0,
+            drive_w: 0.0,
             emitted_t: 0,
             arrive_t: 1_000_000,
             form: (&two_ended()).into(),
@@ -1154,23 +1125,6 @@ mod tests {
     }
 
     #[test]
-    fn an_illuminated_is_restated_and_put_out() {
-        let line = Spectrum::Line { wavelength_m: 1.0e-6 };
-        let mut beams = Beams::default();
-        beams.illuminated(4, [0.0, 2.0, 0.0], line, 1.0e18, 10.0);
-        beams.illuminated(5, [1.0, 0.0, 0.0], line, 3.0e17, 10.0);
-        assert_eq!(beams.incoming[0].bearing, DVec3::Y);
-        beams.illuminated(4, [0.0, 1.0, 0.0], line, 5.0e17, 12.0);
-        beams.illuminated(4, [0.0, 1.0, 0.0], line, 9.0e17, 11.0);
-        assert_eq!(beams.incoming.len(), 2, "one entry a beam");
-        assert_eq!(beams.landing_w(), 8.0e17, "restated, and an older statement dropped");
-        beams.illuminated(4, [0.0, 1.0, 0.0], line, 0.0, 13.0);
-        assert_eq!(beams.incoming.iter().map(|i| i.beam).collect::<Vec<_>>(), vec![5]);
-        beams.illuminated(4, [0.0, 1.0, 0.0], line, 0.0, 14.0);
-        assert_eq!(beams.incoming.len(), 1, "a zero for a beam not held adds nothing");
-    }
-
-    #[test]
     fn beams_are_drawn_as_far_as_their_light() {
         let mut beams = Beams::default();
         beams.sent.push(Sent {
@@ -1183,15 +1137,16 @@ mod tests {
             from_s: 10.0,
             until_s: 100.0,
         });
-        beams.illuminated(4, [0.0, 1.0, 0.0], Spectrum::Line { wavelength_m: 1.0e-6 }, 1.0e18, 10.0);
-        let drawn = on_map(&beams, DVec3::ZERO, None, 12.0, 1.0e12);
+        let mut incoming = Incoming::default();
+        incoming.illuminated(ShipId(7), 4, [0.0, 2.0, 0.0], Spectrum::Line { wavelength_m: 1.0e-6 }, 1.0e18, 10_000_000);
+        let drawn = on_map(&beams, &incoming, DVec3::ZERO, None, 12.0, 1.0e12);
         let keys: Vec<OnMap> = drawn.iter().map(|(k, _)| *k).collect();
         assert_eq!(keys, vec![OnMap::Sent(9, false), OnMap::Sent(9, true), OnMap::Landing(4)]);
         assert_eq!(drawn[0].1.length_m, 2.0 * C_M_S);
         assert_eq!((drawn[0].1.aft, drawn[1].1.aft), (DVec3::X, DVec3::NEG_X), "a balanced emit lights both ways");
         assert_eq!((drawn[2].1.aft, drawn[2].1.half_angle_rad, drawn[2].1.length_m), (DVec3::Y, 0.0, 1.0e12));
         beams.put_out(50.0);
-        assert!(on_map(&beams, DVec3::ZERO, None, 60.0, 1.0e12).iter().all(|(k, _)| matches!(k, OnMap::Landing(_))));
+        assert!(on_map(&beams, &incoming, DVec3::ZERO, None, 60.0, 1.0e12).iter().all(|(k, _)| matches!(k, OnMap::Landing(_))));
     }
 
     /// A source west of +X has a negative `atan2` azimuth, which the window's field, `[0, 360)`,
@@ -1238,7 +1193,7 @@ mod tests {
             from_s: 10.0,
             until_s: 1.0e6,
         });
-        let at = |now_s| on_map(&beams, DVec3::ONE, Some(&boost), now_s, 1.0e15);
+        let at = |now_s| on_map(&beams, &Incoming::default(), DVec3::ONE, Some(&boost), now_s, 1.0e15);
         assert!(at(boost.lights_s() - 0.5).is_empty(), "drawn before it lit");
         let lit = at(boost.lights_s() + 2.0);
         assert!((lit[0].1.length_m - 2.0 * C_M_S).abs() < 1.0e-3 * C_M_S);
@@ -1255,7 +1210,7 @@ mod tests {
         assert!((drawn_spread(0.1) / 0.1 - 1.0).abs() < 0.012);
     }
 
-    fn presence(emitted_s: f64, at_ls: DVec3, beta: DVec3, jet_power_w: f64) -> lc_proto::Presence {
+    fn presence(emitted_s: f64, at_ls: DVec3, beta: DVec3, drive_w: f64) -> lc_proto::Presence {
         lc_proto::Presence {
             ship_id: ShipId(2),
             name: "Vela".into(),
@@ -1263,7 +1218,7 @@ mod tests {
             at_ly: (at_ls / lc_world::flight::JULIAN_YEAR_S).to_array(),
             beta: beta.to_array(),
             facing: [0.0, 1.0, 0.0],
-            jet_power_w,
+            drive_w,
             emitted_t: (emitted_s * 1.0e6) as i64,
             arrive_t: (emitted_s * 1.0e6) as i64,
             form: lc_proto::Form::default(),

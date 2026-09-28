@@ -399,7 +399,7 @@ async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
     let star = a_sky()[0].id;
     sender.send(Inbound::Act(Intent {
         ship_id: mine,
-        order: Order::SetDuty { duty: lc_proto::Duty::Stare { star: star.get() }, integration_s: 1.0 },
+        order: Order::SetDuty { duty: lc_proto::Duty::stare(star.get()), integration_s: 1.0 },
         issued_at_client_t: i64::MAX,
     }));
     let deadline = tokio::time::Instant::now() + PATIENCE;

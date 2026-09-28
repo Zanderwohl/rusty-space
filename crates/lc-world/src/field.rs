@@ -251,8 +251,9 @@ pub struct Segment {
     pub arriving_w: f64,
     /// [`Mode::absorptivity`].
     pub absorptivity: f64,
-    /// Made inside the ship, and all of it heat: the living drain, the drive below ε = 1, what
-    /// dismantling loses. Not conversion's loss, which the segment works out itself.
+    /// Made inside the ship, and all of it heat: the living drain, what dismantling loses. Not
+    /// conversion's loss, which the segment works out itself, nor the drive's waste below ε = 1,
+    /// which [`emitted_w`](Self::emitted_w) cannot draw and so is kept out of the segment.
     pub internal_w: f64,
     /// The most absorbed power conversion can take in.
     pub rating_w: f64,

@@ -59,16 +59,20 @@ pub enum Subject {
     Population { star: StarId, index: u32 },
     /// Another craft, by the id its shard gave it.
     Craft(i64),
+    /// A point a stare was aimed at, light-microseconds in the shard's frame. Last, so it orders
+    /// after everything else.
+    Place([i64; 3]),
 }
 
 impl Subject {
-    /// The star whose system this belongs to. `None` for a craft, which belongs to nothing.
+    /// The star whose system this belongs to. `None` for a craft or a place, which belong to
+    /// nothing.
     pub fn star(self) -> Option<StarId> {
         match self {
             Self::Star(star) | Self::Body { star, .. } | Self::Population { star, .. } => {
                 Some(star)
             }
-            Self::Craft(_) => None,
+            Self::Craft(_) | Self::Place(_) => None,
         }
     }
 
@@ -90,6 +94,7 @@ impl Subject {
             Self::Body { star, body } => rng::hash(&[star.get(), body.get()]),
             Self::Population { star, index } => rng::hash(&[star.get(), index as u64, 0x_b_e_1_7]),
             Self::Craft(id) => rng::hash(&[id as u64, 0x_c_2_a_f_7]),
+            Self::Place([x, y, z]) => rng::hash(&[x as u64, y as u64, z as u64, 0x_9_1_a_c_e]),
         }
     }
 
@@ -114,6 +119,7 @@ impl From<Subject> for lc_proto::Subject {
             Subject::Body { star, body } => Self::Body { star: star.get(), body: body.get() },
             Subject::Population { star, index } => Self::Population { star: star.get(), index },
             Subject::Craft(id) => Self::Craft(id),
+            Subject::Place(at) => Self::Place(at),
         }
     }
 }
@@ -129,6 +135,7 @@ impl From<lc_proto::Subject> for Subject {
                 Self::Population { star: StarId::from_raw(star), index }
             }
             lc_proto::Subject::Craft(id) => Self::Craft(id),
+            lc_proto::Subject::Place(at) => Self::Place(at),
         }
     }
 }

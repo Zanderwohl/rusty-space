@@ -1,6 +1,6 @@
 //! Planck radiation and the quantities derived from it.
 
-use crate::bands::{Band, C};
+use crate::bands::{Band, C, PerBand};
 
 /// Planck constant, J s. Exact since the 2019 SI redefinition.
 pub const H: f64 = 6.626_070_15e-34;
@@ -55,6 +55,11 @@ pub fn luminosity(radius_m: f64, temperature_k: f64) -> f64 {
 pub fn band_radiance(band: Band, temperature_k: f64) -> f64 {
     let (lo, hi) = band.limits_m();
     simpson(lo, hi, 32, |l| spectral_radiance(l, temperature_k))
+}
+
+/// [`band_radiance`] in every band.
+pub fn per_band(temperature_k: f64) -> PerBand<f64> {
+    PerBand::new(std::array::from_fn(|i| band_radiance(Band::ALL[i], temperature_k)))
 }
 
 /// Composite Simpson over an even number of intervals.

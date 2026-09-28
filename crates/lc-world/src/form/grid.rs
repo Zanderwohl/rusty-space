@@ -2,9 +2,8 @@
 //! every direction, broadside, the envelope, the inertia tensor and the extent. See 29 §What the
 //! server computes from a form.
 //!
-//! A cell is filled where [`Sdf::distance`] is not positive. The envelope is sampled at the same
-//! centers from [`Sdf::estimate_each_with`], because an offset of the bound stretches along an
-//! ellipsoid's long axes by its axis ratio.
+//! A cell is filled where [`Sdf::distance`] is not positive. The envelope is not sampled: it is
+//! an ellipsoid, [`Envelope`], and read in closed form.
 //!
 //! Every loop runs in a fixed order over IEEE arithmetic, `sqrt` and `libm`, so the server's
 //! `Fitted` and a client's preview agree to the bit.
@@ -15,29 +14,25 @@ use std::sync::OnceLock;
 use glam::{DMat3, DVec2, DVec3};
 
 use super::capacity::mass_fraction;
-use super::sdf::{smooth_min, Sdf};
-use super::{Form, FormError, Mount};
+use super::sdf::Sdf;
+use super::{Form, FormError};
 use crate::fitting::Balance;
+
+mod envelope;
+pub use envelope::Envelope;
 
 /// Cells along the longest side of the padded box, whatever the ship's size.
 pub const FORM_GRID: usize = 64;
 
-/// The envelope's blend radius over the cube root of hull volume. The quadratic blend adds at most
-/// a quarter of it anywhere, which bounds how far past the offset the envelope can reach.
-pub const ENVELOPE_BLEND: f64 = 0.5;
-
 /// Vertices of a twice-subdivided icosahedron.
 pub const SHADOW_DIRECTIONS: usize = 162;
 
-/// Cells of padding beyond the envelope's reach, so the outermost samples are outside it.
+/// Cells of padding beyond the hull's bounds, so the outermost samples are outside it.
 const EDGE_CELLS: f64 = 2.0;
 
-/// Over the envelope's worst case, since [`Sdf::estimate_each_with`] is not a bound off an
-/// ellipsoid's axes.
-const PAD_SAFETY: f64 = 1.5;
-
-/// Times the pad may double before a form whose envelope still reaches the faces is refused.
-const MAX_PADDINGS: usize = 6;
+/// Room round the hull's bounds, over the cube root of its volume: the box, and so the cell, the
+/// broadside and inertia anchors were solved in.
+const PAD: f64 = 0.2625;
 
 /// Below this the field's slope across a cell is not a surface's: a part thinner than two cells,
 /// or a crease. Well under the bound's least slope off an ellipsoid, its axis ratio.
@@ -60,26 +55,17 @@ const ROLL_STENCIL: usize = 4;
 #[derive(Clone, Debug)]
 pub struct FormGrid {
     sdf: Sdf,
-    /// Pieces the envelope's blend reads: all but one something encloses, which lies inside its
-    /// encloser and would only swell the envelope around it.
-    blended: Vec<usize>,
     /// Center of cell `[0, 0, 0]`, ship frame.
     origin: DVec3,
     cell_m: f64,
     dims: [usize; 3],
     /// [`Sdf::distance`] at each cell center, x fastest, then y, then z.
     hull: Vec<f64>,
-    /// The envelope's field at each cell center, in the same order.
-    envelope: Vec<f64>,
-    offset_m: f64,
-    blend_m: f64,
+    envelope: Envelope,
     shadow: Shadow,
     broadside: DVec3,
     broadside_m2: f64,
     roll_rad: f64,
-    envelope_area_m2: f64,
-    envelope_volume_m3: f64,
-    extent_m: f64,
     inertia: Inertia,
 }
 
@@ -164,64 +150,29 @@ impl Shadow {
 impl FormGrid {
     pub fn new(form: &Form, balance: &Balance) -> Result<FormGrid, FormError> {
         let sdf = Sdf::new(form, balance)?;
-
-        // Closed forms, every copy, overlaps counted twice: the grid's own volume would move the
-        // offset with the resolution, and the box has to be sized before there is a grid.
+        let envelope = Envelope::of(&sdf, balance);
         let volume_m3: f64 = sdf.pieces().iter().map(|p| p.shape.volume()).sum();
-        let root = libm::cbrt(volume_m3);
-        let offset_m = balance.envelope_margin * root;
-        let blend_m = ENVELOPE_BLEND * root;
-
-        let enclosed: Vec<_> = form
-            .parts
-            .iter()
-            .filter_map(|p| p.placement.filter(|pl| matches!(pl.mount, Mount::Enclosing)).map(|pl| pl.parent))
-            .collect();
-        let blended: Vec<usize> = (0..sdf.pieces().len()).filter(|&i| !enclosed.contains(&sdf.pieces()[i].part)).collect();
-
-        // One part blended with nothing reaches no further than its offset.
-        let reach = offset_m + if blended.len() >= 2 { blend_m / 4.0 } else { 0.0 };
         let (lo, hi) = sdf.bounds();
         let center = (lo + hi) / 2.0;
+        let size = hi - lo + 2.0 * PAD * libm::cbrt(volume_m3);
+        let cell_m = size.max_element() / (FORM_GRID as f64 - 2.0 * EDGE_CELLS);
+        let dims = size.to_array().map(|s| ((s / cell_m).ceil() as usize + 2 * EDGE_CELLS as usize).min(FORM_GRID));
         let mut grid = FormGrid {
             sdf,
-            blended,
-            origin: center,
-            cell_m: 0.0,
-            dims: [0; 3],
+            origin: center - DVec3::from_array(dims.map(|n| (n - 1) as f64)) * (cell_m / 2.0),
+            cell_m,
+            dims,
             hull: Vec::new(),
-            envelope: Vec::new(),
-            offset_m,
-            blend_m,
+            envelope,
             shadow: Shadow { m2: [0.0; SHADOW_DIRECTIONS] },
             broadside: DVec3::Z,
             broadside_m2: 0.0,
             roll_rad: 0.0,
-            envelope_area_m2: 0.0,
-            envelope_volume_m3: 0.0,
-            extent_m: 0.0,
             inertia: Inertia { center_of_mass: center, per_kg: DMat3::ZERO, cells_kg: 0.0 },
         };
-        let mut pad = PAD_SAFETY * reach;
-        for attempt in 1.. {
-            let size = hi - lo + 2.0 * pad;
-            grid.cell_m = size.max_element() / (FORM_GRID as f64 - 2.0 * EDGE_CELLS);
-            grid.dims = size.to_array().map(|s| ((s / grid.cell_m).ceil() as usize + 2 * EDGE_CELLS as usize).min(FORM_GRID));
-            grid.origin = center - DVec3::from_array(grid.dims.map(|n| (n - 1) as f64)) * (grid.cell_m / 2.0);
-            grid.sample(balance);
-            // An open surface would report a wrong area, which H2 anchors on. None of the presets
-            // needs a second pass.
-            if grid.envelope_clear_of_faces() {
-                break;
-            }
-            if attempt == MAX_PADDINGS {
-                return Err(FormError::EnvelopeOpen);
-            }
-            pad *= 2.0;
-        }
+        grid.sample(balance);
         let silhouette = grid.silhouette();
         grid.fill_shadow(silhouette);
-        grid.envelope_surface();
         Ok(grid)
     }
 
@@ -255,54 +206,26 @@ impl FormGrid {
         self.hull[self.index(i, j, k)] <= 0.0
     }
 
-    /// The envelope's field at every cell center, in [`FormGrid::hull_samples`]' order. Every
-    /// sample on the grid's faces is positive, so its zero set closes inside the grid: the pad
-    /// doubles until it does.
-    pub fn envelope_samples(&self) -> &[f64] {
+    pub fn envelope(&self) -> &Envelope {
         &self.envelope
     }
 
-    /// The envelope's field at any point, ship frame, meters, negative inside: the union's
-    /// distance offset by [`FormGrid::envelope_offset_m`], and its two nearest parts blended over
-    /// [`FormGrid::envelope_blend_m`].
+    /// The envelope's signed distance at any point, ship frame, meters, negative inside.
     pub fn envelope_at(&self, p: DVec3) -> f64 {
-        self.envelope_with(p, &mut Vec::new(), &mut Vec::new())
-    }
-
-    fn envelope_with(&self, p: DVec3, scratch: &mut Vec<f64>, each: &mut Vec<f64>) -> f64 {
-        let union = self.sdf.estimate_each_with(p, scratch, each);
-        let (mut first, mut second) = (f64::INFINITY, f64::INFINITY);
-        for &i in &self.blended {
-            let d = each[i];
-            if d < first {
-                (first, second) = (d, first);
-            } else if d < second {
-                second = d;
-            }
-        }
-        let blended = if second.is_finite() { smooth_min(first, second, self.blend_m) } else { first };
-        union.min(blended) - self.offset_m
-    }
-
-    pub fn envelope_offset_m(&self) -> f64 {
-        self.offset_m
-    }
-
-    pub fn envelope_blend_m(&self) -> f64 {
-        self.blend_m
+        self.envelope.distance(p)
     }
 
     pub fn envelope_area_m2(&self) -> f64 {
-        self.envelope_area_m2
+        self.envelope.area_m2()
     }
 
     pub fn envelope_volume_m3(&self) -> f64 {
-        self.envelope_volume_m3
+        self.envelope.volume_m3()
     }
 
-    /// The envelope's longest dimension: `length_m`. See [`widest`].
+    /// The envelope's longest dimension: `length_m`.
     pub fn extent_m(&self) -> f64 {
-        self.extent_m
+        self.envelope.extent_m()
     }
 
     pub fn shadow(&self) -> &Shadow {
@@ -345,18 +268,18 @@ impl FormGrid {
             shadow_m2: self.shadow.m2.to_vec(),
             broadside: self.broadside.to_array(),
             broadside_roll_rad: self.roll_rad,
-            envelope_area_m2: self.envelope_area_m2,
-            envelope_volume_m3: self.envelope_volume_m3,
+            envelope_area_m2: self.envelope_area_m2(),
+            envelope_volume_m3: self.envelope_volume_m3(),
             inertia_kg_m2: [t.x_axis.x, t.y_axis.y, t.z_axis.z, t.y_axis.x, t.z_axis.x, t.z_axis.y],
-            extent_m: self.extent_m,
+            extent_m: self.extent_m(),
         }
     }
 
-    /// Both fields at every center, and the moments of the filled cells.
+    /// The hull's field at every center, and the moments of the filled cells.
     fn sample(&mut self, balance: &Balance) {
         let [nx, ny, nz] = self.dims;
         let n = nx * ny * nz;
-        let (mut hull, mut envelope) = (Vec::with_capacity(n), Vec::with_capacity(n));
+        let mut hull = Vec::with_capacity(n);
         let (mut scratch, mut each) = (Vec::new(), Vec::new());
         let density: Vec<f64> = self
             .sdf
@@ -376,10 +299,9 @@ impl FormGrid {
                     let p = self.cell_center(i, j, k);
                     let d = self.sdf.distance_with(p, &mut scratch);
                     hull.push(d);
-                    envelope.push(self.envelope_with(p, &mut scratch, &mut each));
                     if d <= 0.0 {
-                        // The nearest part by the envelope's pass, which is already in hand: the
-                        // same pieces as `Sdf::nearest`, ranked by the truer distance.
+                        // The same pieces as `Sdf::nearest`, ranked by the truer distance.
+                        self.sdf.estimate_each_with(p, &mut scratch, &mut each);
                         let nearest = (0..each.len()).fold(0, |best, i| if each[i] < each[best] { i } else { best });
                         let m = density[nearest] * cell_m3;
                         let r = p - center;
@@ -391,7 +313,6 @@ impl FormGrid {
             }
         }
         self.hull = hull;
-        self.envelope = envelope;
 
         if mass > 0.0 {
             let c = first / mass;
@@ -401,18 +322,6 @@ impl FormGrid {
             let tensor = DMat3::from_diagonal(DVec3::splat(spread.x_axis.x + spread.y_axis.y + spread.z_axis.z + own)) - spread;
             self.inertia = Inertia { center_of_mass: center + c, per_kg: tensor * (1.0 / mass), cells_kg: mass };
         }
-    }
-
-    fn envelope_clear_of_faces(&self) -> bool {
-        let [nx, ny, nz] = self.dims;
-        (0..nz).all(|k| {
-            (0..ny).all(|j| {
-                (0..nx).all(|i| {
-                    let face = i == 0 || j == 0 || k == 0 || i == nx - 1 || j == ny - 1 || k == nz - 1;
-                    !face || self.envelope[self.index(i, j, k)] > 0.0
-                })
-            })
-        })
     }
 
     /// The cells on either side of the surface, each filled cell whole unless its field says
@@ -533,117 +442,6 @@ impl FormGrid {
         self.roll_rad = if roll < -half { roll + pi } else if roll >= half { roll - pi } else { roll };
     }
 
-    /// Marching tetrahedra over the envelope's samples, six to each cube between eight centers:
-    /// the zero set's area and the volume inside it, from the field's linear interpolant. Counting
-    /// cell faces would overstate a sphere's area by half, and H2 anchors the field on this area.
-    fn envelope_surface(&mut self) {
-        // Each is a path from corner 0 to corner 7 along the axes; bits are x, y and z.
-        const TETS: [[usize; 4]; 6] = [[0, 1, 3, 7], [0, 1, 5, 7], [0, 2, 3, 7], [0, 2, 6, 7], [0, 4, 5, 7], [0, 4, 6, 7]];
-        let [nx, ny, nz] = self.dims;
-        let h = self.cell_m;
-        let tet_volume = h * h * h / 6.0;
-        let (mut area, mut volume) = (0.0, 0.0);
-        let mut crossings = Vec::new();
-        let center = self.origin + DVec3::from_array(self.dims.map(|n| (n - 1) as f64)) * (h / 2.0);
-        for k in 0..nz - 1 {
-            for j in 0..ny - 1 {
-                for i in 0..nx - 1 {
-                    let corner = |c: usize| (i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1));
-                    let values: [f64; 8] = std::array::from_fn(|c| {
-                        let (a, b, d) = corner(c);
-                        self.envelope[self.index(a, b, d)]
-                    });
-                    let inside = values.iter().filter(|&&v| v < 0.0).count();
-                    if inside == 0 {
-                        continue;
-                    }
-                    if inside == 8 {
-                        volume += h * h * h;
-                        continue;
-                    }
-                    // Relative to the cube's corner 0, so the arithmetic stays at the cell's scale.
-                    let base = self.cell_center(i, j, k);
-                    let points: [DVec3; 8] =
-                        std::array::from_fn(|c| DVec3::new((c & 1) as f64, ((c >> 1) & 1) as f64, ((c >> 2) & 1) as f64) * h);
-                    // Every tetrahedron's edge is one of the seven leaving some cube's corner 0, so
-                    // each crossing is counted once.
-                    for c in [1, 2, 3, 4, 5, 6, 7] {
-                        if (values[0] < 0.0) != (values[c] < 0.0) {
-                            crossings.push(base - center + points[c] * (values[0] / (values[0] - values[c])));
-                        }
-                    }
-                    for tet in TETS {
-                        let (a, v) = tetrahedron(tet.map(|c| (points[c], values[c])), tet_volume);
-                        area += a;
-                        volume += v;
-                    }
-                }
-            }
-        }
-        self.envelope_area_m2 = area;
-        self.envelope_volume_m3 = volume;
-        self.extent_m = widest(&crossings);
-    }
-}
-
-/// The largest width of `points` along the ship's axes and the 81 antipodal pairs of
-/// [`Shadow::directions`]: within about 1.2% of their diameter, the directions being about 9° from
-/// any other at most, where a box alone reads a diagonal ship √3 short.
-fn widest(points: &[DVec3]) -> f64 {
-    let ico = icosphere();
-    let directions = [DVec3::X, DVec3::Y, DVec3::Z]
-        .into_iter()
-        .chain((0..SHADOW_DIRECTIONS).filter(|&v| ico.antipode[v] > v).map(|v| ico.vertices[v]));
-    directions
-        .map(|d| {
-            let (lo, hi) = points.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p.dot(d)), hi.max(p.dot(d))));
-            if lo <= hi { hi - lo } else { 0.0 }
-        })
-        .fold(0.0, f64::max)
-}
-
-/// The zero set's area in one tetrahedron and the volume where the linear interpolant is negative.
-fn tetrahedron(corners: [(DVec3, f64); 4], whole: f64) -> (f64, f64) {
-    let mut inside = [0usize; 4];
-    let mut outside = [0usize; 4];
-    let (mut ni, mut no) = (0, 0);
-    for (c, &(_, v)) in corners.iter().enumerate() {
-        if v < 0.0 {
-            inside[ni] = c;
-            ni += 1;
-        } else {
-            outside[no] = c;
-            no += 1;
-        }
-    }
-    // Inside is strictly negative and outside not, so the denominator is never zero.
-    let cut = |a: usize, b: usize| {
-        let ((pa, va), (pb, vb)) = (corners[a], corners[b]);
-        pa + (pb - pa) * (va / (va - vb))
-    };
-    let tet = |a: DVec3, b: DVec3, c: DVec3, d: DVec3| (b - a).dot((c - a).cross(d - a)).abs() / 6.0;
-    let triangle = |a: DVec3, b: DVec3, c: DVec3| (b - a).cross(c - a).length() / 2.0;
-    match ni {
-        0 => (0.0, 0.0),
-        4 => (0.0, whole),
-        1 | 3 => {
-            let (apex, others) = if ni == 1 { (inside[0], outside) } else { (outside[0], inside) };
-            // `cut` wants the inside corner first.
-            let p = [0, 1, 2].map(|k| if ni == 1 { cut(apex, others[k]) } else { cut(others[k], apex) });
-            let corner = tet(corners[apex].0, p[0], p[1], p[2]);
-            (triangle(p[0], p[1], p[2]), if ni == 1 { corner } else { whole - corner })
-        }
-        _ => {
-            let [a, b] = [inside[0], inside[1]];
-            let [c, d] = [outside[0], outside[1]];
-            let (ac, ad, bc, bd) = (cut(a, c), cut(a, d), cut(b, c), cut(b, d));
-            let (pa, pb) = (corners[a].0, corners[b].0);
-            // A prism from face (a, ac, ad) to (b, bc, bd), in three.
-            let volume = tet(pa, ac, ad, pb) + tet(ac, ad, pb, bc) + tet(ad, pb, bc, bd);
-            // ac, ad, bd, bc go round the quad.
-            ((bd - ac).cross(bc - ad).length() / 2.0, volume)
-        }
-    }
 }
 
 /// Normal equations, by elimination with partial pivoting. `None` when they are singular.
@@ -876,7 +674,7 @@ mod tests {
 
     use super::*;
     use crate::form::presets::Builtin;
-    use crate::form::{Kind, Part, PartId, Placement, Primitive};
+    use crate::form::{Kind, Mount, Part, PartId, Placement, Primitive};
 
     const B: Balance = Balance::DEFAULT;
 
@@ -961,13 +759,11 @@ mod tests {
         }
     }
 
-    /// One part is blended with nothing, so it pays only its offset in padding and keeps most of
-    /// the grid.
     #[test]
     fn one_part_keeps_most_of_the_grid() {
         let grid = FormGrid::new(&alone(HULL, HULL_M3), &B).unwrap();
         let span = 2.0 * semi_axes(&grid).x / grid.cell_m();
-        assert!(span > 55.0, "{span:.1} cells");
+        assert!(span > 45.0, "{span:.1} cells");
     }
 
     #[test]
@@ -1005,57 +801,65 @@ mod tests {
         assert!(edge > 2.5, "edge on the stack casts {edge:.3} of one plate");
     }
 
-    /// Counting cell faces would give half as much again.
     #[test]
     fn the_envelope_of_a_sphere_is_a_sphere() {
         let volume = 4.0e6;
         let grid = FormGrid::new(&alone(Primitive::Ellipsoid { axes: DVec3::ONE }, volume), &B).unwrap();
-        let r = libm::cbrt(volume * 3.0 / (4.0 * PI)) + grid.envelope_offset_m();
-        let (area, inside) = (4.0 * PI * r * r, 4.0 / 3.0 * PI * r.powi(3));
-        let relative = |got: f64, want: f64| ((got - want) / want).abs();
-        assert!(relative(grid.envelope_area_m2(), area) < 0.01, "{} against {area}", grid.envelope_area_m2());
-        assert!(relative(grid.envelope_volume_m3(), inside) < 0.01, "{} against {inside}", grid.envelope_volume_m3());
-        assert!((grid.extent_m() - 2.0 * r).abs() < grid.cell_m(), "{} against {}", grid.extent_m(), 2.0 * r);
         let expected = B.envelope_margin * libm::cbrt(volume + B.min_part_m3);
-        assert!(relative(grid.envelope_offset_m(), expected) < 1e-12);
+        let envelope = grid.envelope();
+        assert!(relative(envelope.margin_m, expected) < 1e-12);
+        let r = libm::cbrt(volume * 3.0 / (4.0 * PI)) + envelope.margin_m;
+        assert!(((envelope.semi_axes - r) / r).abs().max_element() < 1e-4, "{} against {r}", envelope.semi_axes);
+        assert!(relative(grid.envelope_area_m2(), 4.0 * PI * r * r) < 2e-4);
+        assert!(relative(grid.envelope_volume_m3(), 4.0 / 3.0 * PI * r.powi(3)) < 3e-4);
+        assert!(relative(grid.extent_m(), 2.0 * r) < 1e-4);
     }
 
-    /// Offsetting the ellipsoid's bound would put the tips `margin · a/c` out, five times too far
-    /// on this hull.
+    /// An ellipsoid hull's envelope is itself, each semi-axis the margin longer.
     #[test]
-    fn the_envelope_is_offset_evenly_round_an_ellipsoid() {
+    fn the_envelope_of_an_ellipsoid_is_it_grown_on_each_axis() {
         let grid = FormGrid::new(&alone(HULL, HULL_M3), &B).unwrap();
-        let r = semi_axes(&grid);
-        let want = 2.0 * (r.x + grid.envelope_offset_m());
-        assert!((grid.extent_m() - want).abs() < grid.cell_m(), "{} against {want}", grid.extent_m());
-        let tip = grid.envelope_at(DVec3::X * (r.x + grid.envelope_offset_m()));
-        let side = grid.envelope_at(DVec3::Z * (r.z + grid.envelope_offset_m()));
-        assert!(tip.abs() < 1e-9 && side.abs() < 1e-9, "{tip} {side}");
+        let (r, envelope) = (semi_axes(&grid), grid.envelope());
+        let want = r + envelope.margin_m;
+        assert!(((envelope.semi_axes - want) / want).abs().max_element() < 1e-4, "{} against {want}", envelope.semi_axes);
+        let tip = grid.envelope_at(envelope.center + DVec3::X * envelope.semi_axes.x);
+        assert!(tip.abs() < 1e-9, "{tip}");
+        assert_eq!(grid.extent_m(), 2.0 * envelope.semi_axes.max_element());
     }
 
-    /// The Mind sits inside a plate thinner than twice its own distance to the plate's faces:
-    /// blended with its encloser it would raise a blister over the plate's middle.
+    /// Every preset's field holds every part with the margin to spare, and on each axis nothing
+    /// smaller would: shrunk along any one of them, some part pokes through.
     #[test]
-    fn an_enclosed_part_does_not_swell_the_envelope() {
-        let grid = FormGrid::new(&alone(Primitive::Slab { edges: DVec3::new(9.0, 5.0, 0.5), corner: 0.1 }, HULL_M3), &B).unwrap();
-        let crate::form::primitive::Shape::Slab { edges, .. } = grid.sdf.pieces()[1].shape else { unreachable!() };
-        let face = DVec3::Z * (edges.z / 2.0 + grid.envelope_offset_m());
-        assert!(grid.envelope_at(face).abs() < 1e-9, "{}", grid.envelope_at(face));
+    fn the_envelope_holds_every_part_and_meets_it_on_each_axis() {
+        let mut all = vec![("starting", Form::starting())];
+        all.extend(Builtin::ALL.map(|b| (b.name(), b.form())));
+        let directions = spiral(40_000);
+        for (name, form) in all {
+            let grid = FormGrid::new(&form, &B).unwrap();
+            let envelope = grid.envelope();
+            let inner = envelope.semi_axes - envelope.margin_m;
+            let pokes = |axes: DVec3| directions.iter().any(|d| grid.sdf.distance(envelope.center + *d * axes) <= 0.0);
+            assert!(!pokes(inner * 1.001), "{name}: a part pokes out");
+            for axis in [DVec3::X, DVec3::Y, DVec3::Z] {
+                assert!(pokes(inner * (DVec3::ONE - axis * 0.01)), "{name}: loose along {axis}");
+            }
+        }
     }
 
-    /// A ship laid across the diagonal is as long as it is: a box along the axes would read it
-    /// √2 short.
-    #[test]
-    fn the_extent_is_the_longest_dimension_whichever_way_it_lies() {
-        let mut form = alone(Primitive::Capsule { length: 8.0 }, HULL_M3);
-        form.parts[1].placement.as_mut().unwrap().tilt = DVec2::new(0.0, PI / 4.0);
-        let grid = FormGrid::new(&form, &B).unwrap();
-        let axis = grid.sdf.pieces()[1].pose.rotation.x_axis;
-        assert!(axis.x.abs() > 0.6 && axis.y.abs() > 0.6, "{axis} is not diagonal");
-        let crate::form::primitive::Shape::Capsule { radius, length } = grid.sdf.pieces()[1].shape else { unreachable!() };
-        let want = length + 2.0 * (radius + grid.envelope_offset_m());
-        let got = grid.extent_m();
-        assert!(got <= want + grid.cell_m() && got > 0.988 * want - grid.cell_m(), "{got} against {want}");
+    fn spiral(n: usize) -> Vec<DVec3> {
+        let golden = PI * (3.0 - 5f64.sqrt());
+        (0..n)
+            .map(|i| {
+                let z = 1.0 - (2 * i + 1) as f64 / n as f64;
+                let r = (1.0 - z * z).sqrt();
+                let theta = golden * i as f64;
+                DVec3::new(r * theta.cos(), r * theta.sin(), z)
+            })
+            .collect()
+    }
+
+    fn relative(got: f64, want: f64) -> f64 {
+        ((got - want) / want).abs()
     }
 
     /// A solid ellipsoid's moments are `m (b² + c²)/5` and round; the cells get them to a few
@@ -1114,12 +918,11 @@ mod tests {
     }
 
     #[test]
-    fn every_preset_closes_inside_its_grid() {
+    fn every_preset_fills_its_grid() {
         let mut all = vec![("starting", Form::starting())];
         all.extend(Builtin::ALL.map(|b| (b.name(), b.form())));
         for (name, form) in all {
             let grid = FormGrid::new(&form, &B).unwrap();
-            assert!(grid.envelope_clear_of_faces(), "{name}");
             assert_eq!(grid.dims().into_iter().max(), Some(FORM_GRID), "{name}");
             assert!(grid.envelope_area_m2() > 0.0 && grid.extent_m() > 0.0, "{name}");
             let (lo, hi) = grid.sdf.bounds();
@@ -1143,6 +946,6 @@ mod tests {
         let form = Builtin::Cluster.form();
         let (a, b) = (FormGrid::new(&form, &B).unwrap(), FormGrid::new(&form, &B).unwrap());
         assert_eq!(a.geometry(1e9), b.geometry(1e9));
-        assert_eq!(a.envelope_samples(), b.envelope_samples());
+        assert_eq!(a.envelope(), b.envelope());
     }
 }

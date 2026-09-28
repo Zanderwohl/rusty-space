@@ -85,7 +85,9 @@ no loadout it is `density × volume`, as it is now.
 
 **m_after = m_before · exp(−Δη / ε)**
 
-and the energy spent is `(m_before − m_after) · c²`.
+and the energy spent is `(m_before − m_after) · c²`. That is what a burn is priced and spent at.
+Below ε = 1 only `ε` of it leaves as exhaust, and the rest stays aboard as heat until it radiates,
+so the ship is heavier than this by that much ([30-the-field.md](30-the-field.md#conversion)).
 
 - **Δη = ∫ α dτ** — proper acceleration integrated over the ship's own clock, for as long as
   anything is lit. Rapidity, summed without regard to direction.
@@ -295,8 +297,8 @@ loadout and full storage.
 
 A ship loaded from an old row is 3.8 times heavier than it was, so its acceleration ceiling is
 unchanged — that is how `engine_thrust_n` was chosen — but its plume, which reads mass, gets
-brighter. The plume keeps the exhaust-power formula for now; passing it `mass_kg_at(t)` is one line
-when the visuals should follow.
+brighter. A burn's light is `F c` at `mass_kg_at(t)`, `Drive::exhaust_w`, with no exhaust speed:
+the rocket law above has none, and the drive keeps none (R17).
 
 ## Client
 

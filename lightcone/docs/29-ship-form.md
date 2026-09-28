@@ -213,23 +213,25 @@ complete.
 |---|---|---|
 | **shadow table** | area of the grid's projection along each of the 162 vertices of a twice-subdivided icosahedron, interpolated linearly across the face a direction passes through | starlight and beams arriving, brightness |
 | **broadside** | the direction of largest shadow, and the roll about the nose that carries +z onto the direction across the nose with the largest shadow | the idle attitude of [20-solar-power.md](20-solar-power.md), which turns the broadside itself onto the star and rolls by its azimuth about the nose; the roll is only for a broadside along the nose, which has none |
-| **envelope** | the union's distance field offset by `envelope_margin` and its two nearest parts blended over `ENVELOPE_BLEND = 0.5` of the cube root of hull volume; area and volume by marching tetrahedra | the field's area and volume, [30-the-field.md](30-the-field.md) |
+| **envelope** | the smallest ellipsoid on the ship's axes containing every part, grown by `envelope_margin`; area and volume in closed form. An ovoid rather than the hull's outline, so a Black field hides the design ([30-the-field.md](30-the-field.md#what-the-field-is)) | the field's area and volume, [30-the-field.md](30-the-field.md) |
 | **inertia tensor** | the filled cells, weighted by each part's density, as the full symmetric tensor per kilogram, scaled to the ship's whole mass: a form is symmetric only port to starboard, so the xz product is generally not zero | slew rate |
-| **extent** | the envelope's longest dimension: its widest width along the axes and the table's 81 directions, within about 1.2% of its diameter | `length_m`: the camera, the zoom limits, `Presence` |
+| **extent** | the envelope's longest diameter, twice its longest semi-axis | `length_m`: the camera, the zoom limits, `Presence` |
 
-The grid is `form::grid::FormGrid`. Its box is the field's bounds padded by half as much again as
-the envelope can reach, so the hull spans about 51 of the 64 cells for the starting form and every
-preset, and about 57 for a form of one part, which blends with nothing and reaches only its offset.
-The pad doubles until the envelope closes inside the grid, and a form whose envelope never does is
-refused as `Extent`; no preset needs a second pass. Four choices the table leaves open:
+The grid is `form::grid::FormGrid`. Its box is the field's bounds padded on each side by about a
+quarter of the cube root of hull volume, the box the anchors that read the grid were solved in, so
+the hull spans about 51 of the 64 cells for the starting form and every preset. Three choices the
+table leaves open:
 
-- **The envelope offsets a truer distance than the field.** Off an ellipsoid the field is a bound
-  that falls short by up to the ratio of its axes, so an offset of it would put the starting hull's
-  tips five margins out. The envelope reads `Sdf::estimate_each_with`, which replaces the bound with
-  `k₀(k₀ − 1)/k₁`: exact along the axes and to first order at the surface. Hull volume, for the
-  margin, is the parts' closed forms summed, so the offset does not move with the resolution.
-- **The blend is between the two nearest parts**, and never with a part something encloses, which
-  would raise a blister over its encloser. It adds at most a quarter of its radius anywhere.
+- **The envelope is fitted, not sampled** (`form::grid::Envelope`, which needs no grid). Every
+  primitive is an ellipsoid, or points and circles swept by a ball, and only those can touch an
+  enclosing ellipsoid, so each part is sampled there, in a few thousand directions. The smallest
+  ellipsoid on the ship's axes holding the samples, its center free, is convex in `1/a²` and
+  `c/a²`, and a log barrier solves it over the few samples that touch. The margin, `envelope_margin`
+  of the cube root of hull volume with the parts' closed forms summed, is added to each semi-axis.
+  The area is `3V R_G(a⁻², b⁻², c⁻²)` in Carlson's integrals (DLMF 19.33.1). Being the smallest, it
+  does not grow with a hull in every direction: a fatter storage part makes it fatter and shorter,
+  so a refit can shorten a ship as it grows. Round anything long and thin it reaches well past the
+  ends, as any ellipsoid round a rod must: the Spindle's is 1 462 m around 925 m of parts.
 - **A shadow is cast by the cells either side of the surface**, each cut by the plane its field's
   gradient gives. Whole cubes stand out past the rim by up to half a diagonal, which on a hull a few
   cells thick is a tenth of its shadow. A one-ellipsoid form is within 0.9 of a cell of rim of `A(ŝ)`
@@ -237,10 +239,11 @@ refused as `Extent`; no preset needs a second pass. Four choices the table leave
   parts in a thousand, and the shadow is flatter than that near its peak.
 - **The cells carry contents only.** Structure, stored energy and heat are taken to lie where the
   contents do, so the tensor is kept per kilogram and scaled by whatever the ship weighs. A cell's
-  density is its nearest part's by the envelope's truer distance, which the same pass has computed.
+  density is its nearest part's by the ellipsoid's truer estimate, `k₀(k₀ − 1)/k₁` rather than the
+  bound: exact along its axes and to first order at its surface.
 
-Building one takes about 20 ms for the starting form and 50 ms for the Cluster with `lc-world`
-optimized, and a quarter to three quarters of a second unoptimized in the dev profile.
+Building one takes a tenth to half a second unoptimized in the dev profile, the envelope's fit 20 to
+120 ms of it.
 
 ### What a craft reads
 
@@ -252,7 +255,7 @@ changes and never per tick: at creation and load, and when a refit step finishes
 | capacities | volumes, as above | storage, drain, building, data |
 | dry mass | contents and structure | mass, and so every rating |
 | thrust | the aperture of the engines **firing aft**, over `c`: those whose open face points to −x | the rated acceleration. An engine firing fore pushes the other way, and is a weapon ([31](31-directed-energy.md)) |
-| extent | the grid | `length_m` |
+| extent | the envelope | `length_m` |
 | gyration | the grid's tensor: the square root of the larger eigenvalue of its block across the nose, per kilogram | the slew rate |
 
 **Slew goes as one over the gyration.** Attitude thrust is sized to the ship as its drive is, so
@@ -265,7 +268,7 @@ a flip is about one of them and the nose never turns about itself.
 
 A process builds each form's grid once: every ship today is the starting form, so a shard fitting a
 hundred builds one. A step partway through a round, whose form may not place, keeps the last
-measured extent and gyration until it finishes. The starting form's extent is **571 m**, the
+measured extent and gyration until it finishes. The starting form's extent is **731 m**, the
 envelope around 545 m of parts, where its
 twenty slots made 19's ship 500 m long.
 
@@ -320,7 +323,7 @@ client agree to the bit, and to its resolution, **half a cell's diagonal**:
   the ellipsoid's bound too, so a part that touches its parent always passes. The bound is short
   beside an ellipsoid's long axes, so there a gap up to its axis ratio times the tolerance passes too.
 - **Containing** samples the parent's surface along the shadow table's 162 directions and a cube's 26,
-  which find a slab's corners, and reads the encloser by the envelope's truer estimate, whose sign is
+  which find a slab's corners, and reads the encloser by the ellipsoid's truer estimate, whose sign is
   right everywhere. A part the grid cannot resolve, such as the Mind inside anything a cell across,
   is contained as far as the server can tell.
 
@@ -842,7 +845,7 @@ are quoted per.
 | `spar_thickness` | 2% of the parent's smallest dimension | a strap's depth |
 | `move_work_factor` | 0.25 | a move's time over building what it carries |
 | `hull_areal_density` | *anchored*: 1 215 kg/m² | structure per m² of part surface |
-| `envelope_margin` | 0.05 | the envelope's offset over the cube root of hull volume |
+| `envelope_margin` | 0.05 | what the envelope adds to each semi-axis, over the cube root of hull volume |
 | `engine_clear_half_angle_rad` | 15° | |
 
 Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 64, and on the client

@@ -30,6 +30,8 @@ pub struct Switch {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Field {
     pub heat_j: f64,
+    /// Of `heat_j`, the drive's own waste below ε = 1, which exhaust cannot draw.
+    pub waste_j: f64,
     pub since_s: f64,
     pub mode: FieldMode,
     pub shade: Shade,

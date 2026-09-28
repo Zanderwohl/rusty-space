@@ -56,13 +56,54 @@ pub fn ramp_entry(linear: [f64; 3]) -> Vec4 {
     Vec4::new(log(linear[0]), log(linear[1]), log(linear[2]), 0.0)
 }
 
+/// `field.wgsl`'s `blackbody`: the color [`FieldUniform::spectrum`] gives `kelvin`, linear
+/// display light. For a host to check what it hands over against what it shows elsewhere.
+pub fn ramp_at(spectrum: &[Vec4; RAMP], kelvin: f32) -> Vec3 {
+    let (lo, hi) = (RAMP_MIN_K as f32, RAMP_MAX_K as f32);
+    if kelvin <= lo {
+        return Vec3::ZERO;
+    }
+    let span = (hi / lo).ln();
+    let at = ((kelvin / lo).ln() / span * (RAMP - 1) as f32).clamp(0.0, (RAMP - 1) as f32);
+    let i = (at.floor() as usize).min(RAMP - 2);
+    let (k0, k1) = (ramp_kelvin(i), ramp_kelvin(i + 1));
+    let t = ((1.0 / k0 - 1.0 / kelvin.min(hi)) / (1.0 / k0 - 1.0 / k1)).clamp(0.0, 1.0);
+    let log = spectrum[i].truncate().lerp(spectrum[i + 1].truncate(), t);
+    Vec3::new(log.x.exp2(), log.y.exp2(), log.z.exp2()) * (kelvin / hi).max(1.0)
+}
+
+/// How much of what a Clear wall's absorptivity would take out of the view behind it the shader
+/// does take out, in percent. Below Kirchhoff's hundred, so the ship reads plainly through a hot
+/// Clear field; its own glow is left physical. Black takes out all of it.
+pub const CLEAR_VEIL_PERCENT: u32 = 50;
+
+/// How many times faster than it cools the debris of a collapse spreads: it reaches its full size
+/// this fraction of the way through the afterglow, and cools and thins over all of it.
+pub const DEBRIS_SPREAD: u32 = 2;
+
+/// How far out the debris has got, `[0, 1]`, `cooled` of the way through the afterglow: fast at
+/// first and coasting, as thrown debris does. `field.wgsl` evaluates the same.
+pub fn debris_spread(cooled: f32) -> f32 {
+    1.0 - (1.0 - (DEBRIS_SPREAD as f32 * cooled).clamp(0.0, 1.0)).powi(3)
+}
+
+/// `field.wgsl`'s wall alpha: how much of what is behind it a wall absorbing `absorbs`, `black`
+/// of the way to Black, takes out seen at `mu`, the cosine off its normal. Its emissivity, a thin
+/// shell's path growing as `1 / mu`, veiled for Clear by [`CLEAR_VEIL_PERCENT`].
+pub fn wall_opacity(absorbs: f32, black: f32, mu: f32) -> f32 {
+    let emissivity = 1.0 - (1.0 - absorbs.clamp(0.0, 1.0)).powf(1.0 / mu.clamp(0.15, 1.0));
+    let veil = CLEAR_VEIL_PERCENT as f32 / 100.0;
+    emissivity * (veil + (1.0 - veil) * black.clamp(0.0, 1.0))
+}
+
 #[derive(Clone, Debug, PartialEq, ShaderType)]
 pub struct FieldUniform {
-    /// `(kelvin, fill, clear_absorptivity, clock_s)`.
+    /// `(kelvin, fill, clear_absorptivity, 0)`.
     ///
     /// `fill` is heat as a fraction of the limit, `[0, 1]`; hot spots spread and the surface
     /// flickers as it rises. Black absorbs everything and Clear this fraction; by Kirchhoff that
-    /// is also each mode's emissivity. `clock_s` is real seconds, for the shimmer and flicker.
+    /// is also each mode's emissivity. The shimmer and flicker run on Bevy's `globals.time`, so
+    /// a field whose state holds still needs no new uniforms.
     pub state: Vec4,
     /// `(mode, previous mode, switch progress, reach)`.
     ///
@@ -84,17 +125,19 @@ pub struct FieldUniform {
     /// Toward each beam, world, with `w` its strength: the extra power it lands on the envelope
     /// as a multiple of what the field radiates. Zero strength is no beam.
     pub hot_spots: [Vec4; HOT_SPOTS],
-    /// `(since_s, flash_s, afterglow_s, reach)`. `since_s` negative is a field still standing.
+    /// `(start_s, flash_s, afterglow_s, reach)`. `afterglow_s` zero is a field still standing.
     ///
-    /// **Real seconds**, like `clock_s`: a flash counted in game seconds is over before a frame
-    /// is drawn. The host converts the afterglow's game duration and picks a flash long enough
-    /// to see.
+    /// **Seconds of `globals.time`**, which wraps: `start_s` is that clock when the collapse was
+    /// first drawn, written once, and the shader counts from it. A flash counted in game seconds is
+    /// over before a frame is drawn, so the host converts the afterglow's game duration and picks
+    /// a flash long enough to see.
     ///
     /// The envelope turns into a sphere of debris that grows to `reach` times its size by the
     /// end of the afterglow, and is gone after it.
     pub collapse: Vec4,
-    /// `(spike_k, limit_k, radius, 0)`: the flash's color temperature, the one the afterglow
-    /// cools from, and the sphere the envelope rounds into first, mesh-local.
+    /// `(spike_k, limit_k, radius, wrap_s)`: the flash's color temperature, the one the afterglow
+    /// cools from, the sphere the envelope rounds into first, mesh-local, and the period
+    /// `globals.time` wraps at, `Time::wrap_period`.
     pub collapse_k: Vec4,
     /// A blackbody at each [`ramp_kelvin`], through the host's bands: see [`ramp_entry`].
     pub spectrum: [Vec4; RAMP],
@@ -196,6 +239,8 @@ impl Material for FieldMaterial {
             ShaderDefVal::UInt("RAMP".into(), RAMP as u32),
             ShaderDefVal::UInt("RAMP_MIN_K".into(), RAMP_MIN_K),
             ShaderDefVal::UInt("RAMP_MAX_K".into(), RAMP_MAX_K),
+            ShaderDefVal::UInt("CLEAR_VEIL_PERCENT".into(), CLEAR_VEIL_PERCENT),
+            ShaderDefVal::UInt("DEBRIS_SPREAD".into(), DEBRIS_SPREAD),
         ];
         descriptor.vertex.shader_defs.extend(defs.iter().cloned());
         if let Some(fragment) = descriptor.fragment.as_mut() {
@@ -217,6 +262,15 @@ impl Plugin for FieldMaterialPlugin {
 mod tests {
     use super::*;
 
+    /// The debris is at its full size by `1 / DEBRIS_SPREAD` of the afterglow, and not before.
+    #[test]
+    fn the_debris_spreads_ahead_of_its_cooling() {
+        let full = 1.0 / DEBRIS_SPREAD as f32;
+        assert_eq!(debris_spread(full), 1.0);
+        assert!(debris_spread(0.9 * full) < 1.0);
+        assert!(debris_spread(0.5 * full) > 0.8, "thrown fast at first: {}", debris_spread(0.5 * full));
+    }
+
     #[test]
     fn the_ramp_spans_its_ends() {
         assert!((ramp_kelvin(0) - RAMP_MIN_K as f32).abs() < 1e-3);
@@ -233,7 +287,7 @@ mod tests {
             starlight: Vec4::ZERO,
             exposure: Vec4::ZERO,
             hot_spots: [Vec4::ZERO; HOT_SPOTS],
-            collapse: Vec4::NEG_ONE,
+            collapse: Vec4::ZERO,
             collapse_k: Vec4::ZERO,
             spectrum: [Vec4::ZERO; RAMP],
         };

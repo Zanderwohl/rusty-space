@@ -4,6 +4,10 @@
 //! all times rather than in a panel a player can close.
 
 use em_spectra::presets;
+use lc_world::craft::Craft;
+use lc_world::field::Mode;
+use lc_world::fitting::{Fitting, Setting, Thresholds};
+use lc_world::motion::Motive;
 
 use crate::action::Action;
 use crate::session::Session;
@@ -36,6 +40,7 @@ pub struct Hud {
     pub warning: Option<String>,
     /// Stored energy, for a ship with modules.
     pub energy: Option<Energy>,
+    pub field: Option<Field>,
 }
 
 impl Hud {
@@ -56,6 +61,12 @@ impl Hud {
     /// The numbers beside the energy bar, or `None` where the bar is shown alone.
     pub fn energy_amount(&self, fit: Fit) -> Option<&str> {
         self.energy.as_ref().filter(|_| fit < Fit::Bare).map(|e| e.amount.as_str())
+    }
+
+    /// At [`Fit::Bare`], only a countdown.
+    pub fn field_text(&self, fit: Fit) -> Option<&str> {
+        let field = self.field.as_ref()?;
+        if fit < Fit::Bare { Some(&field.text) } else { field.countdown.as_deref() }
     }
 
     pub fn warning(&self, fit: Fit) -> Option<String> {
@@ -115,7 +126,7 @@ pub enum Fit {
     Codes,
     /// Codes, and each window button as the key that toggles it.
     Keys,
-    /// Keys, the energy bar without its numbers, and the rate and link notes shortened.
+    /// Keys, the energy and field bars without their numbers, and the rate and link notes shortened.
     Bare,
 }
 
@@ -143,6 +154,191 @@ pub struct Energy {
     pub fraction: f32,
     /// `23.4 / 30.0 ME`, and what is spoken for: a plan's commitment or a refit under way.
     pub amount: String,
+}
+
+/// Where hot things start to glow visibly, K.
+pub const DRAPER_K: f64 = 798.0;
+
+/// Past [`DRAPER_K`], over which the bar's blue gives way to the blackbody, K.
+const GLOW_BLEND_K: f64 = 200.0;
+
+/// Of the rated load, net heat flow too small to call a direction.
+const STEADY: f64 = 1.0e-9;
+
+/// Of `Q_max`, past which the bar pulses, as the field shader flickers.
+pub const PULSE_FILL: f64 = 0.8;
+
+/// Coordinate seconds: a quarter of an hour at the design rate.
+const COUNTDOWN_HORIZON_S: f64 = 90.0 * 86_400.0;
+
+/// See `lightcone/docs/30-the-field.md` §The field bar.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Field {
+    /// `Q / Q_max`, `[0, 1]`.
+    pub fraction: f32,
+    /// Where heat is heading, `P_in τ / Q_max`, pinned at 1 past the limit.
+    pub heading: f32,
+    pub kelvin: f64,
+    /// sRGB, at full brightness, through the band mapping in force, as the field shader colors the ship.
+    pub blackbody: [f32; 3],
+    /// How far from [`PULSE_FILL`] to the limit, `[0, 1]`.
+    pub stress: f32,
+    /// `3 240 K +1.20 ME/yr — collapse in 4:10`. No arrows: the default fonts have none.
+    pub text: String,
+    pub countdown: Option<String>,
+    pub setting: Setting,
+    /// What the Auto button asks for: the thresholds in force, or the balance's.
+    pub auto: Thresholds,
+    /// What the field is in, which its button underlines: in Auto, the thermostat's choice.
+    pub shade: Mode,
+    /// `» BLACK` while a switch is under way, which the shard refuses another during.
+    pub switch: Option<String>,
+}
+
+impl Field {
+    /// sRGB in and out.
+    pub fn color(&self, blue: [f32; 3]) -> [f32; 3] {
+        let glow = ((self.kelvin - DRAPER_K) / GLOW_BLEND_K).clamp(0.0, 1.0) as f32;
+        std::array::from_fn(|c| (1.0 - glow) * blue[c] + glow * self.blackbody[c])
+    }
+
+    /// Of full brightness, at `t_s` real seconds.
+    pub fn brightness(&self, t_s: f64) -> f32 {
+        if self.stress <= 0.0 {
+            return 1.0;
+        }
+        let hz = 1.0 + 3.0 * f64::from(self.stress).powi(2);
+        let dip = 0.5 - 0.5 * (std::f64::consts::TAU * hz * t_s).cos();
+        1.0 - 0.45 * self.stress * dip as f32
+    }
+}
+
+/// Auto's thresholds, as markers on the field bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Marker {
+    ClearAbove,
+    BlackBelow,
+}
+
+/// The narrowest gap a drag leaves between Auto's markers, and between a marker and either end.
+const MARKER_GAP: f64 = 0.02;
+
+impl Marker {
+    pub fn of(self, t: &Thresholds) -> f64 {
+        match self {
+            Marker::ClearAbove => t.clear_above,
+            Marker::BlackBelow => t.black_below,
+        }
+    }
+
+    /// To a hundredth, leaving both gaps open. Unchanged where there is no room.
+    pub fn moved(self, t: Thresholds, fraction: f64) -> Thresholds {
+        let (lo, hi) = match self {
+            Marker::ClearAbove => (t.black_below + MARKER_GAP, 1.0 - MARKER_GAP),
+            Marker::BlackBelow => (MARKER_GAP, t.clear_above - MARKER_GAP),
+        };
+        if lo > hi {
+            return t;
+        }
+        // Rounded after the clamp: at most half a hundredth off a bound, so a gap stays open.
+        let at = (fraction.clamp(lo, hi) * 100.0).round() / 100.0;
+        match self {
+            Marker::ClearAbove => Thresholds { clear_above: at, ..t },
+            Marker::BlackBelow => Thresholds { black_below: at, ..t },
+        }
+    }
+}
+
+/// `None` outside Auto, or where the drop changes nothing.
+pub fn drop_marker(field: &Field, marker: Marker, fraction: f64) -> Option<Action> {
+    let Setting::Auto(t) = field.setting else { return None };
+    let moved = marker.moved(t, fraction);
+    (moved != t).then(|| Action::SetField(Setting::Auto(moved).into()))
+}
+
+/// How long a dropped marker waits for the shard's answer before going back, real seconds.
+const AWAITING_S: f64 = 5.0;
+
+/// Ordered and not yet in the account: drawn instead, so the marker does not jump back while the
+/// order is in flight.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dropped {
+    pub thresholds: Thresholds,
+    /// Real seconds.
+    pub at_s: f64,
+}
+
+impl Dropped {
+    /// A refusal shows as an overdue answer, which puts the marker back.
+    pub fn holds(&self, field: &Field, now_s: f64) -> bool {
+        matches!(field.setting, Setting::Auto(t) if t != self.thresholds) && now_s - self.at_s < AWAITING_S
+    }
+}
+
+/// [`lc_world::ahead::collapse_by`], which clones the craft and settles it a day at a time, so it is
+/// solved again only when the account is restated or the clock enters another segment. A refit
+/// settling every frame is neither.
+#[derive(Default)]
+pub struct Collapse {
+    key: Option<Key>,
+    at_s: Option<f64>,
+    solves: u32,
+}
+
+/// Heat and storage are read at the segment's end, where settling along the way does not move them.
+#[derive(Clone, Debug)]
+struct Key {
+    segment_end_s: f64,
+    motive: Motive,
+    form: lc_world::form::Form,
+    posture: lc_world::fitting::Posture,
+    refit: Option<lc_world::refit::rounds::Plan>,
+    lit_w: f64,
+    heat_j: f64,
+    stored_j: f64,
+}
+
+/// Leap and steps agree to about a part in a billion; a restated account differs by far more.
+const SAME_ACCOUNT: f64 = 1.0e-6;
+
+impl Key {
+    fn of(ship: &Craft, fitting: &Fitting, segment_end_s: f64) -> Key {
+        Key {
+            segment_end_s,
+            motive: ship.motion.motive.clone(),
+            form: fitting.form().clone(),
+            posture: *fitting.posture(),
+            refit: fitting.refit().cloned(),
+            lit_w: fitting.lit_w(),
+            heat_j: fitting.heat_j_at(&ship.motion, segment_end_s),
+            stored_j: fitting.stored_j_at(&ship.motion, segment_end_s),
+        }
+    }
+
+    fn holds(&self, ship: &Craft, fitting: &Fitting, segment_end_s: f64) -> bool {
+        let near = |a: f64, b: f64| (a - b).abs() <= SAME_ACCOUNT * a.abs().max(b.abs());
+        self.segment_end_s == segment_end_s
+            && self.motive == ship.motion.motive
+            && &self.form == fitting.form()
+            && &self.posture == fitting.posture()
+            && self.refit.as_ref() == fitting.refit()
+            && self.lit_w == fitting.lit_w()
+            && near(self.heat_j, fitting.heat_j_at(&ship.motion, segment_end_s))
+            && near(self.stored_j, fitting.stored_j_at(&ship.motion, segment_end_s))
+    }
+}
+
+impl Collapse {
+    pub fn of(&mut self, ship: &Craft, now_s: f64) -> Option<f64> {
+        let fitting = ship.fitting()?;
+        let segment_end_s = lc_world::solar::segment_end(now_s);
+        if !self.key.as_ref().is_some_and(|key| key.holds(ship, fitting, segment_end_s)) {
+            self.at_s = lc_world::ahead::collapse_by(ship, segment_end_s + COUNTDOWN_HORIZON_S);
+            self.key = Some(Key::of(ship, fitting, segment_end_s));
+            self.solves += 1;
+        }
+        self.at_s
+    }
 }
 
 /// A button on the right of the top bar: the way to find a window without knowing its key.
@@ -265,7 +461,7 @@ fn near(meters: f64) -> String {
     }
 }
 
-pub fn lines(session: &Session, ui: &UiState) -> Hud {
+pub fn lines(session: &Session, ui: &UiState, collapse: &mut Collapse) -> Hud {
     let name = presets::all().get(ui.preset).map(|(n, _)| *n).unwrap_or("custom");
     Hud {
         clock: format!("T + {:.2} years", session.coordinate_time_s() / YEAR_S),
@@ -302,6 +498,7 @@ pub fn lines(session: &Session, ui: &UiState) -> Hud {
         // running sixty times over is exactly when a readout of how fast earns its place.
         warning: (ui.time_rate != 1.0).then(|| crate::ui::rate_label(ui.time_rate)),
         energy: energy(session),
+        field: field(session, ui.time_rate, collapse.of(&session.ship, session.coordinate_time_s())),
     }
 }
 
@@ -325,6 +522,92 @@ fn energy(session: &Session) -> Option<Energy> {
     }
     let fraction = if capacity > 0.0 { (stored / capacity).clamp(0.0, 1.0) as f32 } else { 0.0 };
     Some(Energy { fraction, amount: line })
+}
+
+/// `rate` is the clock multiplier, for a countdown in real time.
+fn field(session: &Session, rate: f64, collapse_s: Option<f64>) -> Option<Field> {
+    let now = session.coordinate_time_s();
+    let ship = &session.ship;
+    let fitting = ship.fitting()?;
+    let field = fitting.field();
+    let max_j = field.heat_max_j();
+    let heat_j = fitting.heat_j_at(&ship.motion, now);
+    let heat_w = fitting.heat_w_at(&ship.motion, now);
+    let held = session.held_field.map(|h| (h.kelvin, crate::field::fill_at(h.kelvin, fitting.balance())));
+    let (kelvin, fraction) = held.unwrap_or((field.temperature_k(heat_j), heat_j / max_j));
+    let module_j = fitting.balance().module_energy_j();
+    let net_w = heat_w - heat_j / field.tau_s;
+    let flow = match net_w {
+        w if w.abs() < STEADY * field.rated_load_w() => "steady".to_string(),
+        w => crate::refit_panel::me_per_year(w, module_j),
+    };
+    let due = collapse_s.map(|at_s| format!("collapse in {}", countdown(at_s - now, rate)));
+    let mut text = format!("{} K {flow}", grouped(kelvin));
+    if let Some(due) = &due {
+        text += &format!(" — {due}");
+    }
+    let posture = fitting.posture();
+    let switch = posture.switching_at(now);
+    let fraction = fraction.clamp(0.0, 1.0);
+    Some(Field {
+        fraction: fraction as f32,
+        heading: (field.equilibrium_j(heat_w) / max_j).clamp(0.0, 1.0) as f32,
+        kelvin,
+        blackbody: glow(&session.mapping, kelvin),
+        stress: ((fraction - PULSE_FILL) / (1.0 - PULSE_FILL)).clamp(0.0, 1.0) as f32,
+        text,
+        countdown: due,
+        setting: posture.setting,
+        auto: match posture.setting {
+            Setting::Auto(t) => t,
+            _ => Thresholds::of(fitting.balance()),
+        },
+        shade: posture.shade_at(now),
+        switch: switch.map(|s| format!("» {}", shade_name(s.to))),
+    })
+}
+
+fn shade_name(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Clear => "CLEAR",
+        Mode::Black => "BLACK",
+    }
+}
+
+/// sRGB, brightest channel at one. Black where the mapping sees none of it.
+pub(crate) fn glow(mapping: &em_spectra::BandMapping, kelvin: f64) -> [f32; 3] {
+    let linear = crate::field::color_linear(mapping, kelvin);
+    let peak = linear.into_iter().fold(0.0, f64::max);
+    if !(peak > 0.0 && peak.is_finite()) {
+        return [0.0; 3];
+    }
+    let [r, g, b] = linear.map(|c| (c / peak) as f32);
+    let srgb = bevy::color::Color::linear_rgb(r, g, b).to_srgba();
+    [srgb.red, srgb.green, srgb.blue]
+}
+
+/// Thousands set off by a space: `3 240`.
+fn grouped(value: f64) -> String {
+    let digits = format!("{:.0}", value.max(0.0));
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `4:10` of real time, or days on a stopped clock.
+fn countdown(left_s: f64, rate: f64) -> String {
+    let left_s = left_s.max(0.0);
+    if rate <= 0.0 {
+        return format!("{:.1} days", left_s / 86_400.0);
+    }
+    let real = (left_s / (crate::session::TIME_RATE * rate)).ceil() as u64;
+    let (h, m, s) = (real / 3600, real / 60 % 60, real % 60);
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
 }
 
 #[cfg(test)]
@@ -393,12 +676,12 @@ mod tests {
     #[test]
     fn codes_shorten_the_band_and_exposure_but_keep_their_values() {
         let (mut ui, session) = fixture();
-        let hud = lines(&session, &ui);
+        let hud = lines(&session, &ui, &mut Collapse::default());
         assert_eq!(hud.band(Fit::Words), "BAND NATURAL");
         assert_eq!(hud.band(Fit::Codes), "B N");
         assert_eq!(hud.exposure(Fit::Codes), "E auto");
         ui.exposure_offset = 1.5;
-        let hud = lines(&session, &ui);
+        let hud = lines(&session, &ui, &mut Collapse::default());
         assert_eq!(hud.exposure(Fit::Words), "EXPOSURE +1.5 stops");
         assert_eq!(hud.exposure(Fit::Keys), "E +1.5");
     }
@@ -417,7 +700,7 @@ mod tests {
                 at_ly: at_ly.to_array(),
                 beta: [0.0; 3],
                 facing: [1.0, 0.0, 0.0],
-                jet_power_w: 0.0,
+                drive_w: 0.0,
                 emitted_t: 0,
                 arrive_t: 0,
                 form: lc_proto::Form::default(),
@@ -449,9 +732,9 @@ mod tests {
     #[test]
     fn the_clock_is_always_shown() {
         let (ui, mut s) = fixture();
-        assert!(lines(&s, &ui).clock.contains("T + 0.00 years"));
+        assert!(lines(&s, &ui, &mut Collapse::default()).clock.contains("T + 0.00 years"));
         s.advance(3600.0);
-        assert!(lines(&s, &ui).clock.contains("T + 1.00 years"));
+        assert!(lines(&s, &ui, &mut Collapse::default()).clock.contains("T + 1.00 years"));
     }
 
     /// The one thing the readout exists for, and only as far as this ship knows it: the range
@@ -460,9 +743,9 @@ mod tests {
     fn a_selected_target_says_how_far_it_is() {
         let (mut ui, mut s) = fixture();
         let id = s.stars[0].id;
-        assert!(lines(&s, &ui).target.is_none());
+        assert!(lines(&s, &ui, &mut Collapse::default()).target.is_none());
         apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
-        let target = lines(&s, &ui).target.expect("a target line");
+        let target = lines(&s, &ui, &mut Collapse::default()).target.expect("a target line");
         // The sample provider's nearest star is 4.2 light-years out, charted to a percent.
         assert!(target.contains(" ± ") && target.ends_with(" ly"), "{target}");
     }
@@ -471,32 +754,262 @@ mod tests {
     fn a_fitted_ship_shows_its_energy_as_a_bar_and_numbers() {
         use lc_world::fitting::{Balance, Fitting};
         let (ui, mut s) = fixture();
-        assert!(lines(&s, &ui).energy.is_none(), "an unfitted ship has no energy readout");
+        assert!(lines(&s, &ui, &mut Collapse::default()).energy.is_none(), "an unfitted ship has no energy readout");
         s.ship.fit(Some(Fitting::full(lc_world::form::Form::starting(), Balance::DEFAULT, s.coordinate_time_s())));
-        let energy = lines(&s, &ui).energy.expect("an energy readout");
+        let energy = lines(&s, &ui, &mut Collapse::default()).energy.expect("an energy readout");
         assert!((energy.fraction - 1.0).abs() < 1.0e-6, "{}", energy.fraction);
         assert_eq!(energy.amount, "30.0 / 30.0 ME");
+    }
+
+    /// The starting ship with heat at `of_max` of `Q_max`, storage full and `starlight_w` arriving.
+    fn heated(of_max: f64, starlight_w: f64, posture: lc_world::fitting::Posture) -> (UiState, Session) {
+        use lc_world::fitting::{Account, Balance};
+        let (ui, mut s) = fixture();
+        let full = Fitting::full(lc_world::form::Form::starting(), Balance::DEFAULT, s.coordinate_time_s());
+        let heat_j = of_max * full.field().heat_max_j();
+        let account = Account { heat_j, starlight_w, posture, ..full.account() };
+        s.ship.fit(Some(Fitting::from_account(&account, Balance::DEFAULT)));
+        s.ship.set_starlight_w(starlight_w);
+        (ui, s)
+    }
+
+    fn field_of(s: &Session, ui: &UiState) -> Field {
+        lines(s, ui, &mut Collapse::default()).field.expect("a fitted ship has a field bar")
+    }
+
+    const BLUE: [f32; 3] = [0.0, 0.36, 0.5];
+
+    fn rated_w() -> f64 {
+        let b = lc_world::fitting::Balance::DEFAULT;
+        Fitting::full(lc_world::form::Form::starting(), b, 0.0).field().rated_load_w()
+    }
+
+    #[test]
+    fn a_cold_ship_is_the_palette_blue() {
+        let (ui, s) = fixture();
+        assert!(lines(&s, &ui, &mut Collapse::default()).field.is_none(), "an unfitted ship has no field bar");
+        let (ui, mut s) = fixture();
+        let b = lc_world::fitting::Balance::DEFAULT;
+        s.ship.fit(Some(Fitting::full(lc_world::form::Form::starting(), b, s.coordinate_time_s())));
+        let field = field_of(&s, &ui);
+        assert_eq!(field.text, "400 K steady", "idle, and storage paying the drain");
+        assert_eq!(field.color(BLUE), BLUE);
+        assert_eq!(field.brightness(0.37), 1.0);
+    }
+
+    /// The starting ship at 0.3 of `Q_max`, about 3 400 K, is orange.
+    #[test]
+    fn a_hot_ship_is_the_blackbody_past_the_draper_point() {
+        let (ui, s) = heated(0.3, 0.0, lc_world::fitting::Posture::BLACK);
+        let field = field_of(&s, &ui);
+        assert!(field.kelvin > DRAPER_K + GLOW_BLEND_K, "{}", field.kelvin);
+        let [r, g, b] = field.color(BLUE);
+        assert_eq!([r, g, b], field.blackbody, "all blackbody");
+        assert!(r > 0.999 && g < 0.9 && b < g, "orange at {} K: {r} {g} {b}", field.kelvin);
+        assert!(field.text.starts_with(&format!("{} K -", grouped(field.kelvin))), "{}", field.text);
+    }
+
+    #[test]
+    fn the_blue_gives_way_to_the_blackbody_continuously() {
+        let (ui, s) = heated(0.3, 0.0, lc_world::fitting::Posture::BLACK);
+        let at = |kelvin: f64| Field { kelvin, blackbody: glow(&s.mapping, kelvin), ..field_of(&s, &ui) }.color(BLUE);
+        assert_eq!(at(DRAPER_K), BLUE);
+        assert_eq!(at(DRAPER_K + GLOW_BLEND_K), glow(&s.mapping, DRAPER_K + GLOW_BLEND_K));
+        let mut last = at(DRAPER_K - 5.0);
+        for k in (DRAPER_K as i32 - 4)..(DRAPER_K + GLOW_BLEND_K) as i32 + 5 {
+            let now = at(f64::from(k));
+            let step = (0..3).map(|c| (now[c] - last[c]).abs()).fold(0.0, f32::max);
+            assert!(step < 0.02, "a jump of {step} at {k} K");
+            last = now;
+        }
+    }
+
+    fn first_dip_s(field: &Field) -> Option<f64> {
+        let samples: Vec<f32> = (0..2_000).map(|i| field.brightness(f64::from(i) * 1.0e-3)).collect();
+        let dips = samples.windows(3).position(|w| w[1] < 1.0 && w[1] <= w[0] && w[1] <= w[2])?;
+        Some((dips + 1) as f64 * 1.0e-3)
+    }
+
+    #[test]
+    fn the_bar_pulses_past_eighty_percent_and_faster_toward_the_limit() {
+        let bar = |of_max| {
+            let (ui, s) = heated(of_max, 0.0, lc_world::fitting::Posture::BLACK);
+            field_of(&s, &ui)
+        };
+        assert_eq!(first_dip_s(&bar(0.79)), None);
+        assert_eq!(first_dip_s(&bar(PULSE_FILL)), None);
+        let (warm, hot) = (first_dip_s(&bar(0.85)).expect("pulsing"), first_dip_s(&bar(0.98)).expect("pulsing"));
+        assert!(hot < warm, "{hot} {warm}");
+    }
+
+    /// Where heat settles if nothing changes: the account run forty time constants on.
+    #[test]
+    fn the_tick_is_where_heat_is_heading_and_pinned_past_the_limit() {
+        let b = lc_world::fitting::Balance::DEFAULT;
+        let (ui, s) = heated(0.1, 0.5 * rated_w(), lc_world::fitting::Posture::BLACK);
+        let field = field_of(&s, &ui);
+        let fitting = s.ship.fitting().unwrap();
+        let later_s = s.coordinate_time_s() + 40.0 * b.field_tau_s;
+        let settled = fitting.heat_j_at(&s.ship.motion, later_s) / fitting.field().heat_max_j();
+        assert!((f64::from(field.heading) - settled).abs() < 1.0e-6, "{} {settled}", field.heading);
+        assert!(field.heading > field.fraction && field.text.contains(" K +"), "heating");
+
+        let (ui, s) = heated(0.1, 3.0 * rated_w(), lc_world::fitting::Posture::BLACK);
+        assert_eq!(field_of(&s, &ui).heading, 1.0);
+    }
+
+    #[test]
+    fn a_scheduled_collapse_counts_down_in_real_time() {
+        // Full and Black, starlight is all heat: `f` of the rated load heads for `f Q_max`, and
+        // reaches `Q_max` from 0.99 of it in `τ ln((f − 0.99) / (f − 1))`. Half a day out.
+        let tau_s = lc_world::fitting::Balance::DEFAULT.field_tau_s;
+        let (_, s) = fixture();
+        let now = s.coordinate_time_s();
+        let e = (0.5 * (lc_world::solar::segment_end(now) - now) / tau_s).exp();
+        let (mut ui, s) = heated(0.99, (e - 0.99) / (e - 1.0) * rated_w(), lc_world::fitting::Posture::BLACK);
+        let at_s = s.ship.fitting().unwrap().collapse_s(&s.ship.motion, f64::INFINITY).expect("premise: it collapses");
+        assert!(at_s < lc_world::solar::segment_end(now), "premise: within the starlight segment");
+        assert!(at_s - now > 0.4 * (lc_world::solar::segment_end(now) - now), "premise: a countdown worth reading");
+        for rate in [1.0, 0.05] {
+            ui.time_rate = rate;
+            let real = ((at_s - now) / (crate::session::TIME_RATE * rate)).ceil() as u64;
+            let want = format!(" — collapse in {}:{:02}", real / 60, real % 60);
+            let text = field_of(&s, &ui).text;
+            assert!(text.ends_with(&want), "{text} wants {want}");
+            let hud = lines(&s, &ui, &mut Collapse::default());
+            assert_eq!(hud.field_text(Fit::Bare), Some(&want[" — ".len()..]), "never dropped");
+        }
+        let (ui, s) = heated(0.3, 0.0, lc_world::fitting::Posture::BLACK);
+        assert!(!field_of(&s, &ui).text.contains("collapse"));
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).field_text(Fit::Bare), None);
+        assert_eq!(countdown(3_725.0 * crate::session::TIME_RATE, 1.0), "1:02:05");
+        assert_eq!(countdown(86_400.0 * 2.5, 0.0), "2.5 days");
+    }
+
+    #[test]
+    fn auto_shows_the_shade_and_a_switch_under_way() {
+        use lc_world::fitting::{Balance, Posture, Switch};
+        let b = Balance::DEFAULT;
+        let auto = Posture::new_ship(&b);
+        let (ui, s) = heated(0.1, 0.0, auto);
+        let field = field_of(&s, &ui);
+        assert_eq!((field.shade, field.switch), (Mode::Clear, None));
+        assert_eq!(field.setting, Setting::Auto(Thresholds::of(&b)));
+
+        let done_s = s.coordinate_time_s() + 0.5 * b.field_switch_s;
+        let (ui, s) = heated(0.1, 0.0, Posture { switch: Some(Switch { to: Mode::Black, done_s }), ..auto });
+        let field = field_of(&s, &ui);
+        assert_eq!((field.shade, field.switch.as_deref()), (Mode::Clear, Some("» BLACK")), "Clear until done");
+
+        let (ui, s) = heated(0.1, 0.0, Posture::BLACK);
+        let field = field_of(&s, &ui);
+        assert_eq!((field.shade, field.switch, field.auto), (Mode::Black, None, Thresholds::of(&b)));
+    }
+
+    #[test]
+    fn dropping_a_marker_orders_auto_with_both_gaps_open() {
+        use lc_world::fitting::{Balance, Posture, Switch};
+        let b = Balance::DEFAULT;
+        let (mut ui, mut s) = heated(0.1, 0.0, Posture::new_ship(&b));
+        s.remote = true;
+        let field = field_of(&s, &ui);
+        let action = drop_marker(&field, Marker::ClearAbove, 0.623).expect("a new threshold");
+        let want = lc_proto::FieldMode::Auto { clear_above: 0.62, black_below: b.auto_black_below, refill_below: b.auto_refill_below };
+        assert_eq!(action, Action::SetField(want));
+        assert_eq!(apply(action, &mut ui, &mut s), vec![crate::action::Effect::Send(lc_proto::Order::FieldMode { mode: want })]);
+
+        let Some(Action::SetField(below)) = drop_marker(&field, Marker::ClearAbove, 0.1) else { panic!("moved") };
+        let Setting::Auto(below) = Setting::from(below) else { panic!("Auto") };
+        assert!(below.is_valid() && below.clear_above > below.black_below, "{below:?}");
+        let Some(Action::SetField(floor)) = drop_marker(&field, Marker::BlackBelow, 0.0) else { panic!("moved") };
+        let Setting::Auto(floor) = Setting::from(floor) else { panic!("Auto") };
+        assert!(floor.is_valid(), "{floor:?}");
+        assert_eq!(drop_marker(&field, Marker::BlackBelow, b.auto_black_below + 0.001), None, "where it was");
+
+        let (_, black) = heated(0.1, 0.0, Posture::BLACK);
+        assert_eq!(drop_marker(&field_of(&black, &ui), Marker::ClearAbove, 0.6), None, "no markers outside Auto");
+
+        let done_s = s.coordinate_time_s() + b.field_switch_s;
+        let (mut ui, mut s) = heated(0.1, 0.0, Posture { switch: Some(Switch { to: Mode::Black, done_s }), ..Posture::new_ship(&b) });
+        s.remote = true;
+        let refused = apply(Action::SetField(lc_proto::FieldMode::Black), &mut ui, &mut s);
+        assert_eq!(refused, vec![crate::action::Effect::Notify("the field is already switching".into())]);
+    }
+
+    #[test]
+    fn a_marker_with_no_room_stays_put_and_never_reaches_collapse() {
+        let at = |clear_above, black_below| Thresholds { clear_above, black_below, refill_below: 0.95 };
+        let tight = at(0.03, 0.01);
+        assert!(tight.is_valid(), "premise: the shard takes it");
+        assert_eq!(Marker::BlackBelow.moved(tight, 0.5), tight);
+        let high = at(0.99, 0.985);
+        assert!(high.is_valid());
+        assert_eq!(Marker::ClearAbove.moved(high, 0.2), high);
+        let top = Marker::ClearAbove.moved(at(0.5, 0.3), 1.0);
+        assert_eq!(top.clear_above, 0.98, "held off collapse");
+        let floor = Marker::ClearAbove.moved(at(0.5, 0.07), 0.0);
+        assert_eq!(floor.clear_above, 0.09, "on a hundredth");
+    }
+
+    #[test]
+    fn a_dropped_marker_holds_until_the_account_agrees() {
+        use lc_world::fitting::{Balance, Posture};
+        let b = Balance::DEFAULT;
+        let (_, s) = heated(0.1, 0.0, Posture::new_ship(&b));
+        let ui = UiState::default();
+        let field = field_of(&s, &ui);
+        let dropped = Dropped { thresholds: Marker::ClearAbove.moved(Thresholds::of(&b), 0.62), at_s: 10.0 };
+        assert!(dropped.holds(&field, 10.0 + 0.9 * AWAITING_S), "in flight");
+        assert!(!dropped.holds(&field, 10.0 + AWAITING_S), "overdue: refused, or lost");
+        let agreed = Field { setting: Setting::Auto(dropped.thresholds), ..field.clone() };
+        assert!(!dropped.holds(&agreed, 10.5), "accepted");
+        let black = Field { setting: Setting::Black, ..field };
+        assert!(!dropped.holds(&black, 10.5), "no markers outside Auto");
+    }
+
+    /// Settling along the account's own path is not a change; a restated account is.
+    #[test]
+    fn the_countdown_is_solved_again_only_when_the_account_changes() {
+        use lc_world::fitting::{Account, Balance, Posture};
+        let (_, mut s) = heated(0.3, 0.0, Posture::BLACK);
+        let now = s.coordinate_time_s();
+        let mut collapse = Collapse::default();
+        assert_eq!(collapse.of(&s.ship, now), None);
+        for k in 1..=5 {
+            let t = now + f64::from(k) * 100.0;
+            s.ship.settle(t);
+            assert_eq!(collapse.of(&s.ship, t), None);
+        }
+        assert_eq!(collapse.solves, 1, "settling is not a change");
+
+        let t = now + 600.0;
+        let fitting = s.ship.fitting().unwrap();
+        let hot = Account { heat_j: 0.99 * fitting.field().heat_max_j(), starlight_w: 50.0 * rated_w(), ..fitting.account() };
+        s.ship.fit(Some(Fitting::from_account(&hot, Balance::DEFAULT)));
+        s.ship.set_starlight_w(50.0 * rated_w());
+        assert!(collapse.of(&s.ship, t).is_some(), "a restated account counts down");
+        assert_eq!(collapse.solves, 2);
     }
 
     #[test]
     fn the_band_mapping_is_named_not_numbered() {
         let (mut ui, mut s) = fixture();
-        assert_eq!(lines(&s, &ui).mapping, "NATURAL");
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).mapping, "NATURAL");
         apply(Action::SetBandPreset(2), &mut ui, &mut s);
-        assert_eq!(lines(&s, &ui).mapping, "THERMAL");
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).mapping, "THERMAL");
     }
 
     #[test]
     fn exposure_reads_auto_until_it_is_moved() {
         let (mut ui, mut s) = fixture();
-        assert_eq!(lines(&s, &ui).exposure, "auto");
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).exposure, "auto");
         apply(Action::ExposureUp, &mut ui, &mut s);
-        assert_eq!(lines(&s, &ui).exposure, "+0.5 stops");
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).exposure, "+0.5 stops");
         apply(Action::ExposureDown, &mut ui, &mut s);
         apply(Action::ExposureDown, &mut ui, &mut s);
-        assert_eq!(lines(&s, &ui).exposure, "-0.5 stops");
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).exposure, "-0.5 stops");
         apply(Action::ExposureAuto, &mut ui, &mut s);
-        assert_eq!(lines(&s, &ui).exposure, "auto");
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).exposure, "auto");
     }
 
     /// A rate that is not the world's has to say so: a sixty-times clock that looked normal
@@ -507,18 +1020,18 @@ mod tests {
     #[test]
     fn a_non_canonical_clock_rate_is_announced() {
         let (mut ui, mut s) = fixture();
-        assert!(lines(&s, &ui).warning.is_none(), "the default is the world's own rate");
+        assert!(lines(&s, &ui, &mut Collapse::default()).warning.is_none(), "the default is the world's own rate");
         apply(Action::SetTimeRate(60.0), &mut ui, &mut s);
-        assert_eq!(lines(&s, &ui).warning.unwrap(), "1 year / minute", "a fast clock is flagged");
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).warning.unwrap(), "1 year / minute", "a fast clock is flagged");
         apply(Action::SetTimeRate(64.0), &mut ui, &mut s);
-        let off_ladder = lines(&s, &ui).warning.expect("one off the ladder must be flagged");
+        let off_ladder = lines(&s, &ui, &mut Collapse::default()).warning.expect("one off the ladder must be flagged");
         assert_eq!(off_ladder, "1 year / 56 seconds");
         // And a rate *below* the design one is flagged just as loudly. A scene runs slowly so
         // an orbit can be looked at, and a slow clock is no more normal than a fast one.
         apply(Action::SetTimeRate(0.05), &mut ui, &mut s);
-        assert_eq!(lines(&s, &ui).warning.unwrap(), "7 minutes / second");
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).warning.unwrap(), "7 minutes / second");
         apply(Action::SetTimeRate(1.0), &mut ui, &mut s);
-        assert!(lines(&s, &ui).warning.is_none(), "the canonical rate needs no warning");
+        assert!(lines(&s, &ui, &mut Collapse::default()).warning.is_none(), "the canonical rate needs no warning");
     }
 
     /// The narrowest fit keeps the rate on the bar in unit symbols, so a scene's slow clock is
@@ -537,11 +1050,11 @@ mod tests {
 
         let (mut ui, mut s) = fixture();
         apply(Action::SetTimeRate(0.05), &mut ui, &mut s);
-        let hud = lines(&s, &ui);
+        let hud = lines(&s, &ui, &mut Collapse::default());
         assert_eq!(hud.warning(Fit::Keys).unwrap(), "7 minutes / second");
         assert_eq!(hud.warning(Fit::Bare).unwrap(), "7 min/s");
         apply(Action::SetTimeRate(1.0), &mut ui, &mut s);
-        assert_eq!(lines(&s, &ui).warning(Fit::Bare), None);
+        assert_eq!(lines(&s, &ui, &mut Collapse::default()).warning(Fit::Bare), None);
     }
 
     /// Only the bare fit leaves the energy bar without its numbers.
@@ -550,7 +1063,7 @@ mod tests {
         use lc_world::fitting::{Balance, Fitting};
         let (ui, mut s) = fixture();
         s.ship.fit(Some(Fitting::full(lc_world::form::Form::starting(), Balance::DEFAULT, s.coordinate_time_s())));
-        let hud = lines(&s, &ui);
+        let hud = lines(&s, &ui, &mut Collapse::default());
         for fit in [Fit::Words, Fit::Codes, Fit::Keys] {
             assert_eq!(hud.energy_amount(fit), Some("30.0 / 30.0 ME"), "{fit:?}");
         }
@@ -589,10 +1102,10 @@ mod tests {
     fn a_crossing_reports_itself_and_the_ship_clock_falls_behind() {
         let (ui, mut s) = fixture();
         let id = s.stars[0].id;
-        assert!(lines(&s, &ui).flight.is_none());
+        assert!(lines(&s, &ui, &mut Collapse::default()).flight.is_none());
         s.fly_to(id);
         s.advance(3600.0);
-        let l = lines(&s, &ui);
+        let l = lines(&s, &ui, &mut Collapse::default());
         let flight = l.flight.expect("a flight line");
         assert!(flight.contains('c') && flight.contains("to go"), "{flight}");
         let coordinate: f64 = l.clock.trim_start_matches("T + ").trim_end_matches(" years").parse().unwrap();
@@ -611,7 +1124,7 @@ mod tests {
         s.advance(1.0);
         s.tick_instruments(1.0);
         apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
-        let target = lines(&s, &ui).target.unwrap();
+        let target = lines(&s, &ui, &mut Collapse::default()).target.unwrap();
         // A second's stare has detected nothing yet, so there is neither a name nor a range.
         assert!(target.ends_with("not detected"), "{target}");
         assert!(

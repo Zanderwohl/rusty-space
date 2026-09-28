@@ -7,7 +7,7 @@
 
 use em_spectra::{Band, presets};
 use lc_world::knowledge::Subject;
-use lc_world::knowledge::survey::{Duty, Sweep};
+use lc_world::knowledge::survey::{Duty, Gaze, Sweep};
 use lc_world::sky::StarId;
 
 use crate::navigation::{Course, Target};
@@ -175,6 +175,8 @@ pub enum Action {
     Emit(crate::emit_panel::Emission),
     /// Put out whatever this ship has lit.
     PutOut,
+    /// Clear, Black or Auto with its thresholds. The shard refuses it while a switch runs.
+    SetField(lc_proto::FieldMode),
 
     // --- appearance -------------------------------------------------------------------
     /// Replace a starfield pass's drawing parameters. Carries the whole style rather than one
@@ -369,13 +371,18 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             ui.selected_craft = None;
             session.describe(id);
         }
-        Action::StareSelected => match ui.selected {
-            Some(id) => {
+        // A craft picked out is the later pick: choosing a star clears it.
+        Action::StareSelected => match (ui.selected_craft, ui.selected) {
+            (Some(craft), _) => {
+                set_duty(ui, session, Duty::Stare(Gaze::Craft(craft.0)), &mut effects);
+                effects.push(Effect::Notify(format!("staring at ship {}", craft.0)));
+            }
+            (None, Some(id)) => {
                 let name = session.name_of(id);
-                set_duty(ui, session, Duty::Stare(id), &mut effects);
+                set_duty(ui, session, Duty::stare(id), &mut effects);
                 effects.push(Effect::Notify(format!("staring at {name}")));
             }
-            None => effects.push(Effect::Notify("nothing selected to stare at".into())),
+            (None, None) => effects.push(Effect::Notify("nothing selected to stare at".into())),
         },
         Action::SelectNearest => match nearest_interstellar(session) {
             Some(id) => apply_to(ui, session, Action::SelectTarget(Some(id)), &mut effects),
@@ -617,6 +624,17 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::PutOut => {
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::CutDrive));
+            }
+        }
+        Action::SetField(mode) => {
+            let now = session.coordinate_time_s();
+            let switching = session.ship.fitting().is_some_and(|f| f.posture().switching_at(now).is_some());
+            if switching {
+                effects.push(Effect::Notify(crate::uplink::refused(lc_proto::Refusal::Switching)));
+            } else if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::FieldMode { mode }));
+            } else {
+                effects.push(Effect::Notify("no shard to set the field at".into()));
             }
         }
 
@@ -866,7 +884,7 @@ fn set_duty(ui: &UiState, session: &mut Session, duty: Duty, effects: &mut Vec<E
     }
     session.observatory.integration_s = ui.integration_s.max(1.0);
     match duty {
-        Duty::Stare(id) => session.point_at(Some(id)),
+        Duty::Stare(Gaze::Star(id)) => session.point_at(Some(id)),
         duty => session.take_up(duty),
     }
 }
@@ -1395,7 +1413,7 @@ mod tests {
 
         let effects = apply(Action::StareSelected, &mut ui, &mut s);
         assert_eq!(s.pointing, Some(id));
-        assert!(matches!(s.observatory.duty, Duty::Stare(on) if on == id));
+        assert!(matches!(s.observatory.duty, Duty::Stare(Gaze::Star(on)) if on == id));
         assert!(matches!(effects.as_slice(), [Effect::Notify(_)]));
     }
 
@@ -1745,7 +1763,7 @@ mod tests {
         assert!(orders(&apply(Action::SelectTarget(Some(id)), &mut ui, &mut s)).is_empty(), "selecting orders nothing");
         let sent = orders(&apply(Action::StareSelected, &mut ui, &mut s));
         assert!(
-            matches!(sent.as_slice(), [lc_proto::Order::SetDuty { duty: lc_proto::Duty::Stare { star }, .. }] if *star == id.get()),
+            matches!(sent.as_slice(), [lc_proto::Order::SetDuty { duty: lc_proto::Duty::Stare { at: lc_proto::Gaze::Star(star) }, .. }] if *star == id.get()),
             "{sent:?}",
         );
         assert_eq!(s.observatory.duty, Duty::Idle, "and nothing is taken up until the shard says so");

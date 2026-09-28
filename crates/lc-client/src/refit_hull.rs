@@ -160,11 +160,11 @@ pub(crate) fn buildings(
 }
 
 /// A finished hull at `at_ly` with the girders' work lights.
-fn uniforms(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, glow: lc_proto::Glow) -> HullUniform {
+fn uniforms(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, glow: lc_proto::Glow, enveloped: bool) -> HullUniform {
     let work = crate::hull::lamp(session, WORK_LUX / std::f64::consts::PI, WORK_K);
     HullUniform {
         girder: GIRDER_ALBEDO.extend(work.dot(crate::tonemap::LUMA)),
-        ..crate::ship_hull::finished(session, star, at_ly, glow)
+        ..crate::ship_hull::finished(session, star, at_ly, glow, enveloped)
     }
 }
 
@@ -172,7 +172,7 @@ fn uniforms(session: &Session, star: Option<(DVec3, f64, f64)>, at_ly: DVec3, gl
 pub fn draw_refit(
     mut commands: Commands,
     (game, uplink, own, refit): (Res<crate::app::Game>, Res<crate::uplink::Uplink>, Res<crate::parts::OwnForm>, Option<Res<Refit>>),
-    (palette, real, time): (Res<Palette>, Res<RealHulls>, Res<Time<Real>>),
+    (palette, real, time, envelopes): (Res<Palette>, Res<RealHulls>, Res<Time<Real>>, Res<crate::field::Envelopes>),
     mut endings: Local<HashMap<Option<ShipId>, Ending>>,
     mut unready: ResMut<Unready>,
     mut showing: ResMut<Showing>,
@@ -216,7 +216,7 @@ pub fn draw_refit(
             continue;
         }
         let at_ly = uplink.contacts.iter().find(|c| Some(c.ship_id) == craft).map_or(session.ship.motion.position_ly, |c| c.position_ly);
-        let finished = uniforms(session, star, at_ly, crate::hull::glow_of(session, &uplink, craft));
+        let finished = uniforms(session, star, at_ly, crate::hull::glow_of(session, &uplink, craft), envelopes.drawn(craft));
         for (_, generation, _) in generations.iter().filter(|(_, g, _)| g.craft == craft) {
             for state in &generation.copies {
                 if let Some(mut asset) = materials.get_mut(&state.material) {
@@ -243,7 +243,7 @@ pub fn draw_refit(
             unready.0 = true;
             continue;
         };
-        let finished = uniforms(session, star, b.at_ly, crate::hull::glow_of(session, &uplink, b.craft));
+        let finished = uniforms(session, star, b.at_ly, crate::hull::glow_of(session, &uplink, b.craft), envelopes.drawn(b.craft));
         let key = (b.frame.finished, b.frame.working.as_ref().map(|w| w.step));
         let ours = |g: &Generation| g.craft == b.craft;
 
@@ -578,7 +578,7 @@ mod tests {
             at_ly: [0.0; 3],
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
-            jet_power_w: 0.0,
+            drive_w: 0.0,
             emitted_t: (stated_s * 1.0e6) as i64,
             arrive_t: (stated_s * 1.0e6) as i64 + 3_600_000_000,
             form: (&plan.at(stated_s).form).into(),
@@ -602,6 +602,7 @@ mod tests {
             .init_resource::<RealHulls>()
             .init_resource::<Unready>()
             .init_resource::<Showing>()
+            .init_resource::<crate::field::Envelopes>()
             .init_resource::<Assets<HullMaterial>>()
             .init_resource::<Assets<Mesh>>()
             .add_systems(Update, draw_refit);

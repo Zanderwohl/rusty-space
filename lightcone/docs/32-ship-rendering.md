@@ -298,10 +298,13 @@ frame the placeholders come back, and nothing is left over.
   later. Knowing one step, it stands in a missing parent from only the step's two ends, so a part
   hanging from one the round has not built yet is not drawn. `refit_hull` draws that frame over the
   craft's real hull as it draws the player's (R15), under the craft's own root, so it is placed and
-  rolled as its hull is. Its drones are not drawn yet (R16).
-- Drones are placed in the ship's frame directly rather than under the placeholders' root, which is
-  gone while the hull meshes draw; under `--demo refit` since R8 they had not been drawn at all. Their
-  clock is the round's, from its start, in the game as in the demo.
+  rolled as its hull is. Its drones (R16) are drawn from the same frame, under the same root, on a
+  clock that is the time its light left, counted from when its swarm was spawned.
+- The player's drones are placed in the ship's frame directly rather than under the placeholders' root,
+  which is gone while the hull meshes draw; under `--demo refit` since R8 they had not been drawn at
+  all. Their clock is the round's, from its start, in the game as in the demo.
+
+![One client watching another's applied round, and closer: its drones at the frontier of the growing hull](../images/drones-other-craft.jpg)
 
 `--apply` pins the view back to the world once the round is under way, so a real refit can be
 photographed where it is drawn. From R15 it draws another craft's round too, light-delayed:
@@ -339,14 +342,21 @@ without reshuffling the rest. A working drone takes a new target every trip, swi
 docked. Haze is a mote's light spread over a disc about the spacing between drones, and never
 narrower than a few pixels, because a quad under a pixel lands on no pixel center and sparkles. The
 light is conserved, so the haze has the swarm's true brightness per pixel, as the hull does, and a
-sparse swarm makes a faint haze. The clock is seconds since the refit round began (R4's `t`), or
-since the view was spawned when idle. The host takes that difference in `f64` and only then narrows
+sparse swarm makes a faint haze. The player's clock is seconds since the refit round began (R4's
+`t`), or since the view was spawned when idle. Another craft's is the time its light left, counted
+from when its swarm was spawned, so its traffic does not restart with the round: the client never
+learns when that began. The host takes that difference in `f64` and only then narrows
 it to the shader's `f32`, which resolves a clock since J2000 only to seconds.
 `crates/lc-client/examples/drones_void.rs` photographs it.
 
-On the player's ship (`lc_client::drones`), what the material is told is a pure function of R4's
-`Frame`. The count is `PARTICLES_PER_M3` = 10⁻³ per m³ of drone part, 785 on the starting ship,
-capped at `MAX_DRONES` = 8192 quads, since the vertex shader runs over all of them every frame.
+What the material is told (`lc_client::drones`) is a pure function of R4's `Frame`: the player's
+from its `Refit`, another craft's from `refit_hull::buildings`, the step its light shows. Each other
+craft has a swarm of its own, seeded by its id so no two move in step, and none while it has no round.
+Its mesh is the population rounded up to a power of two, shared by crafts of a size, rather than the
+player's full cap, and a craft spanning fewer than 24 pixels draws none: below that its haze, never
+narrower than a few pixels, would be wider than the craft, and no traffic is computed for it.
+
+The count is `PARTICLES_PER_M3` = 10⁻³ per m³ of drone part, 785 on the starting ship, capped at `MAX_DRONES` = 8192 quads, since the vertex shader runs over all of them every frame.
 Past the cap a mote stands for several drones: a fixed share of the width of the cube of drone part
 it stands for, with the rest of their light in its brightness. Widening it enough to carry all the
 light in area drew a GSV's swarm as a few hundred blobs. Docks are points just off the drone parts' surfaces, where no other
@@ -384,7 +394,7 @@ example and 150 km in the client, whose unit is an AU, and turned every mote int
 
 ## The field
 
-The envelope from [29-ship-form.md](29-ship-form.md), meshed coarsely, drawn as **two layers**
+The envelope from [29-ship-form.md](29-ship-form.md), an ellipsoid, drawn as **two layers**
 whatever is decided about air:
 
 - **Inner: clear.** A fresnel rim, faint, with the ship plainly visible through it. If air is ever
@@ -400,7 +410,8 @@ whatever is decided about air:
 alone has alpha and so is the only one that can hide anything. By Kirchhoff each mode's emissivity is
 its absorptivity, and a thin shell's grows toward one along a grazing path, so a Clear field is
 limb-brightened and a Black one glows evenly. The same number is how much of what is behind a wall it
-takes out: Clear shows the ship, Black hides it. The shader takes kelvin and fractions and a table of
+takes out: Clear shows the ship, Black hides it. Clear takes out only half of it
+(`CLEAR_VEIL_PERCENT`), its own glow left physical, so the ship reads plainly through a hot Clear field. The shader takes kelvin and fractions and a table of
 blackbody colors the host has already put through the observer's bands, so nothing in
 `em_render::field_material` knows a `Balance`.
 
@@ -428,12 +439,55 @@ At 4 600 K it is the brightest thing in the frame, and uneven.
 ![A beam's hot spot, and a switch from Clear to Black half swept from the Mind](../images/field-beams-and-switch.png)
 
 **Collapse** is a white flash and a sphere of hot debris expanding and cooling through the colors
-of the afterglow over `collapse_afterglow_s`. Nearby fields brighten when the spike lands on them,
+of the afterglow over `collapse_afterglow_s`, reaching its full size in the first half of it
+(`DEBRIS_SPREAD`) and fading over the whole. Nearby fields brighten when the spike lands on them,
 each at its own retarded time, so a cascade is seen spreading at c. From a distance, a collapse is
 drawn by the photometry: a new point in the sky, as bright as [30-the-field.md](30-the-field.md)
 says.
 
 ![A collapse: the flash, then the debris at 40, 180 and 270 s of a 300 s afterglow](../images/field-collapse.png)
+
+### In the game
+
+`lc_client::field` draws every craft with a form so, under the root its hull hangs from, and every
+collapse whose light has arrived.
+
+- **One mesh per design.** The envelope is fitted from the form's parts without the grid
+  (`form::grid::Envelope`), and a UV sphere scaled to it is the mesh, made again only when a craft's
+  stated form changes. The switch sweeps from the Mind.
+- **Your field is the account's** (`Fitted`): the bar's temperature and fill, the shade, and a switch
+  with its progress. **Anyone else's is `Presence.glow`**, as its light left it: temperature and
+  shade, the fill worked back as `(T/T_limit)⁴`, and no switch, which an observer learns of only once
+  it is done.
+- **The heat is the envelope's, not the hull's.** Once a craft's envelope is drawn its hull carries
+  only what it reflects and its windows (`hull::lit`'s `enveloped`), so the heat is drawn once. The
+  metering is unchanged: `hull::Sent` sums the thermal term once whoever draws it. Nothing draws a
+  distant ship as a point yet; R18's point takes over from the envelope where the hull stops being
+  meshed, and must not draw the heat while the envelope does.
+- **The bar is the envelope's color.** It reads the ramp the shader interpolates
+  (`field::color_linear`), not the exact blackbody, which some mappings put a few percent off the
+  ramp between its entries. A test holds the two together in every mapping.
+- **Hot spots** are the beams on your ship from `Outbound::Illuminated`, by beam, each restatement
+  replacing the last and zero power removing it, as the power landing over what the field radiates,
+  drawn no stronger than twenty times it. Nothing tells an observer about beams on anyone else.
+- **A collapse is drawn from its `kind::COLLAPSE` sighting**, at the place and in the shape its craft
+  was last seen, and the console names it as its presence did. It starts on the frame the sighting
+  is taken, which is when its hull leaves the contacts: the shard sends it once its light has arrived
+  by the shard's clock, and this client's may be behind. Its flash lasts half a real second, and its
+  debris spreads and cools from its arrival in coordinate time or as the afterglow plays at the
+  design rate, whichever is further on, so a clock slowed for watching does not hold it still. A
+  wreck's light still in flight shows it facing as it ended (`Craft::end` keeps the nose), not along
+  its last order's attitude. **The spike lands on each neighbor** as a hot
+  spot toward the wreck when the light of it, off that neighbor, reaches this ship:
+  `arrive + (|w − n| + |n − o| − |w − o|) / c`, from what the client knows of where each was.
+
+![The player's field at 400, 2 400 and 4 600 K, Clear left and Black right: Black hides the design](../images/r11-temperatures.jpg)
+
+![A beam's hot spot from beside the camera, and a switch to Black half swept from the Mind](../images/r11-beam-and-switch.jpg)
+
+![`--demo cascade` partway: Aster's debris, Bramble's flash as its light arrives, and three ships whose ends have not](../images/r11-cascade.jpg)
+
+![Diving at 2 400 K: the field and the bar the same orange](../images/r11-dive.jpg)
 
 ## Beams and plumes
 
@@ -485,10 +539,18 @@ whose open face is 176 m across, 5.3 × 10⁵ K.
 **In the game** ([`plume.rs`](../../crates/lc-client/src/plume.rs)) every aft-firing engine face,
 from `lc_world::form::capacity::aft_apertures`, glows under its craft's hull root, at its share of
 the drive's power by engine volume, as the rating divides. The cone's apex is the faces'
-power-weighted middle, or a formless craft's stern. The power is `F c`, worked from the `½ F v`
-that `Drive` and `Presence` still state, and another craft's from the default drive's exhaust speed,
-which the wire does not carry. Another craft is drawn where its light shows it, and whether you are
-inside its radius is measured to that place.
+power-weighted middle, or a formless craft's stern. The power is `F c`: your own from
+`lc_world::emit::drive_w`, and another craft's as its `Presence` states it, which is that same
+number at the instant its light left. No exhaust speed is assumed for anyone; a photon drive has
+none but `c`. Another craft is drawn where its light shows it, and whether you are inside its
+radius is measured to that place.
+
+`Presence` states the main drive alone, because the cone is the main drive's, at
+`drive_spread_rad`. The thrusters spread wider and draw no cone. An emit flown as a burn is its
+own emission at its own spread, and reaches an observer inside it as `Glare`. Its face should glow
+all the same, since the face's temperature depends only on what leaves through it, and so should
+the bow's when a fore emission lights it. Neither does yet: a face lit by an emit waits on R19,
+which states each end's emission on the wire.
 
 ![your own burn from beside: the bell's face white-hot, the cone running aft](../images/r12-own-beside.jpg)
 ![from behind, just off the axis](../images/r12-own-behind.jpg)
@@ -567,7 +629,7 @@ photographed:
 | `--demo refit` | a staged refit, with `--refit-at <fraction>` to freeze it at a point, or `--refit-from <fraction>` to run it from there. With `--form default*k` every part is `k` times larger |
 | `--demo-cam-at <x:y:z:m>` | orbit a point of the ship's frame from `m` meters, past the boom's stops. Aimed with `--demo-cam`; how the truss's pitch is photographed on a GSV |
 | `--demo collapse` | a ship collapsing beside two others, one close enough to follow it |
-| `--field-k <kelvin>` | the player's field held at a temperature, for the shader |
+| `--field-k <kelvin>` | the player's field held at a temperature, as drawn, metered and on the bar. `--field-mode clear\|black` holds its shade, `--field-switch <progress>` a switch into it, and `--field-beam <watts>` a beam from beside the camera |
 
 Until the player has a field, the shader is photographed in a void: `cargo run -p lc-client
 --example field_void -- --field-k <kelvin> --mode clear|black`, around a stand-in hull, with its

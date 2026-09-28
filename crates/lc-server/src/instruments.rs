@@ -13,7 +13,7 @@ use lc_proto::{Order, Outbound, Refusal, ShipId};
 use lc_world::craft::CraftId;
 use lc_world::fitting::ONBOARD_DATA_BYTES;
 use lc_world::knowledge::observatory::{Observatory, Sky, Station};
-use lc_world::knowledge::survey::Duty;
+use lc_world::knowledge::survey::{Duty, Gaze};
 use lc_world::knowledge::prior::Prior;
 use lc_world::knowledge::{ENTRIES_PER_REPORT, Knowledge, Mark, Report, Reporting, Subject, Witness};
 use lc_world::motion::LIGHT_US_PER_LY;
@@ -225,7 +225,8 @@ impl<J: Journal> Server<J> {
             let instruments = &mut self.instruments;
             let sky = instruments.sky.get_or_insert_with(|| Sky::new(stars));
             let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
-            aboard.observatory.tick(sky, system.as_deref(), &mut aboard.knowledge, at, now_s);
+            let lights = crate::field::Seen { fleet: &self.fleet, afterglows: &self.afterglows, balance: &self.balance, observer: id };
+            aboard.observatory.tick_lit(sky, system.as_deref(), &lights, &mut aboard.knowledge, at, now_s);
         }
         self.stages.mark("observe");
         self.read_logs(now_s);
@@ -477,13 +478,19 @@ impl<J: Journal> Server<J> {
                 // even cache the miss.
                 let named = match lc_world::knowledge::survey::Duty::from(duty) {
                     lc_world::knowledge::survey::Duty::Survey { star, .. } => Some(star),
-                    lc_world::knowledge::survey::Duty::Stare(star) => Some(star),
+                    lc_world::knowledge::survey::Duty::Stare(Gaze::Star(star)) => Some(star),
                     _ => None,
                 };
                 if let Some(star) = named
                     && !self.world.holds(star)
                 {
                     return Err(Refusal::Impossible);
+                }
+                // Only a craft it can see, or the order would say which craft exist.
+                if let lc_proto::Duty::Stare { at: lc_proto::Gaze::Craft(craft) } = duty
+                    && crate::chase::sighting(&self.fleet, id, ShipId(*craft), self.now_t).is_none()
+                {
+                    return Err(Refusal::NotInSight);
                 }
                 let aboard = self.aboard(id);
                 aboard.observatory.integration_s = integration_s.max(1.0);
@@ -653,7 +660,7 @@ mod tests {
         wire.client_says(
             ClientId(1),
             act(ship, Order::SetDuty {
-                duty: lc_proto::Duty::Stare { star: sky()[0].id.get() },
+                duty: lc_proto::Duty::stare(sky()[0].id.get()),
                 integration_s: 1.0,
             }),
         );
@@ -816,7 +823,7 @@ mod tests {
         let nowhere = StarId::synthesize("no-such-catalog", 7);
         for duty in [
             lc_proto::Duty::Survey { star: nowhere.get(), started_s: 0.0 },
-            lc_proto::Duty::Stare { star: nowhere.get() },
+            lc_proto::Duty::stare(nowhere.get()),
         ] {
             let order = Order::SetDuty { duty: duty.clone(), integration_s: 1.0e4 };
             assert!(
@@ -898,7 +905,7 @@ mod tests {
         wire.client_says(
             ClientId(1),
             act(ship, Order::SetDuty {
-                duty: lc_proto::Duty::Stare { star: sky()[0].id.get() },
+                duty: lc_proto::Duty::stare(sky()[0].id.get()),
                 integration_s: 1.0,
             }),
         );
@@ -1320,7 +1327,7 @@ mod tests {
         // Three logs, since a tick reads one and a count that is gone by the end of its tick is
         // never said.
         for star in &sky()[1..] {
-            let stare = lc_proto::Duty::Stare { star: star.id.get() };
+            let stare = lc_proto::Duty::stare(star.id.get());
             wire.client_says(ClientId(1), act(ship, Order::SetDuty { duty: stare, integration_s: 1.0e4 }));
             run(&mut server, &mut wire, 100, &mut heard).await;
         }

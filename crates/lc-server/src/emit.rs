@@ -9,12 +9,16 @@
 //! spike is the isotropic burst, riding the collapse event. What a landing needs is in its event's
 //! payload as [`Emitted`], so the journal holds everything a restart needs.
 //!
-//! Three things come back after a restart: what each craft has lit and what lands on each craft
-//! now, with the craft's checkpoint, and landings still in flight, from the journal's deliveries.
+//! Three things come back after a restart: what each craft has lit, has said of it and what lands
+//! on each craft now, with the craft's checkpoint, and landings still in flight, from the journal's
+//! deliveries.
 //!
-//! A receiver takes its share of a beam as its light lands, from where it is then, and keeps it
-//! until the light of the beam going out lands: a target that maneuvered after the beam left is
-//! missed, and one that flies into a beam after its first light passed is not fed.
+//! **Restated as it goes.** An emission is said again, as an event of the same beam, whenever what
+//! it sends has changed by a step: a lit drive's power as the ship lightens, or its axis as it
+//! turns ([`drives`]). A receiver's share is taken again at every instant it changes by a step,
+//! crosses the cone's edge or meets a statement's light ([`restate`]); each is a landing like any
+//! other, so a craft that flies into a beam whose light is already passing is fed from when it
+//! enters, and one that leaves stops.
 
 use std::collections::HashMap;
 
@@ -22,10 +26,10 @@ use glam::DVec3;
 use lc_proto::{Aim, Apertures, Glare, Lead, Order, Outbound, Refusal, ShipId, Spectrum};
 use lc_spacetime::LIGHT_MICROSECOND_M;
 use lc_world::craft::CraftId;
-use lc_world::emit::Boost;
+use lc_world::emit::{Boost, Jet};
 use lc_world::field::Burst;
 use lc_world::fitting::Lit;
-use lc_world::flight::{C_M_S, G0};
+use lc_world::flight::Drive;
 use lc_world::motion::LIGHT_US_PER_LY;
 use lc_world::signal::{Beam, Transmitter};
 use serde::{Deserialize, Serialize};
@@ -36,7 +40,13 @@ use crate::server::{KIND_COLLAPSE, Server};
 use crate::transport::Transport;
 use crate::world::{Event, Scheduled, schedule};
 
+mod drives;
+mod restate;
+
 pub const KIND_EMIT: i16 = lc_proto::kind::EMIT;
+
+/// Two shares of one statement this close are one, and the second is not news.
+const SAME: f64 = 1.0e-4;
 
 /// The shortest wavelength an emit may ask for, and the longest: 31's 1 nm and the dish's 3 cm.
 const WAVELENGTH_M: (f64, f64) = (1.0e-9, 0.03);
@@ -109,6 +119,8 @@ pub struct Lighting {
     pub power_w: f64,
     /// The event that lit it, once written.
     pub beam: Option<i64>,
+    /// A drive's, stated as it burns; `None` for an emit, lit and put out by its order.
+    pub jet: Option<Jet>,
 }
 
 /// A beam whose light is landing on a craft now.
@@ -123,6 +135,16 @@ pub struct Incoming {
     pub flux_w_m2: f64,
     /// Onto its field, before absorptivity.
     pub arriving_w: f64,
+    /// When the statement this share was taken from was said, coordinate microseconds.
+    pub said_t: i64,
+}
+
+/// One statement of a beam, kept while its light may still reach a candidate receiver.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Said {
+    /// Coordinate microseconds.
+    pub t: i64,
+    pub emitted: Emitted,
 }
 
 /// A craft's light, as its checkpoint carries it.
@@ -130,6 +152,7 @@ pub struct Incoming {
 pub struct Light {
     pub emitting: Vec<Lighting>,
     pub lit_by: Vec<Incoming>,
+    pub said: Vec<Said>,
 }
 
 /// An emitting event's light on its way to one craft.
@@ -140,6 +163,8 @@ pub(crate) struct Landing {
     pub(crate) arrive_t: i64,
     source: ShipId,
     emitted: Emitted,
+    /// When `emitted` was said.
+    said_t: i64,
 }
 
 /// What is emitted and landing, kept on the server.
@@ -148,6 +173,8 @@ pub(crate) struct Emissions {
     pub(crate) emitting: HashMap<CraftId, Vec<Lighting>>,
     pub(crate) lit_by: HashMap<CraftId, Vec<Incoming>>,
     pub(crate) landings: Vec<Landing>,
+    /// By source, oldest first.
+    pub(crate) said: HashMap<CraftId, Vec<Said>>,
 }
 
 impl Emissions {
@@ -168,6 +195,7 @@ impl Emissions {
         Light {
             emitting: self.emitting.get(&id).cloned().unwrap_or_default(),
             lit_by: self.lit_by.get(&id).cloned().unwrap_or_default(),
+            said: self.said.get(&id).cloned().unwrap_or_default(),
         }
     }
 
@@ -178,10 +206,23 @@ impl Emissions {
         if !light.lit_by.is_empty() {
             self.lit_by.insert(id, light.lit_by);
         }
+        if !light.said.is_empty() {
+            self.said.insert(id, light.said);
+        }
     }
 
+    /// Whether an emit is lit, which excludes lighting anything else. A drive's own light is not.
     pub(crate) fn is_emitting(&self, id: CraftId) -> bool {
-        self.emitting.get(&id).is_some_and(|list| !list.is_empty())
+        self.emitting.get(&id).is_some_and(|list| list.iter().any(|l| l.jet.is_none()))
+    }
+
+    /// Whether a later statement of `beam` than the one said at `said_t` has reached `here` by `at`.
+    fn superseded(&self, source: CraftId, beam: i64, said_t: i64, here: DVec3, at: i64) -> bool {
+        self.said.get(&source).is_some_and(|said| {
+            said.iter()
+                .filter(|s| s.emitted.beam == beam && s.t > said_t)
+                .any(|s| s.t as f64 + here.distance(DVec3::from_array(s.emitted.from)) <= at as f64)
+        })
     }
 
     /// Whether `observer` holds `beam`, or has its light on the way.
@@ -248,6 +289,7 @@ impl<J: Journal> Server<J> {
             spectrum,
             power_w,
             beam: None,
+            jet: None,
         };
 
         let lit = match apertures {
@@ -265,7 +307,7 @@ impl<J: Journal> Server<J> {
             Apertures::Fore | Apertures::Aft => {
                 let (from_ly, beta0) = lc_world::motion::state_at(&craft.motion, craft.system.as_deref(), at_s)
                     .unwrap_or((craft.motion.position_ly, craft.motion.beta));
-                let accel_g = power_w / (craft.mass_kg_at(at_s) * C_M_S * G0);
+                let accel_g = Drive::accel_g_at(craft.mass_kg_at(at_s), power_w);
                 let nose = if apertures == Apertures::Fore { axis } else { -axis };
                 let attitude0 = craft.facing_at(at_s).unwrap_or(nose);
                 let boost = Boost::plan(from_ly, beta0, at_s, -axis, nose, accel_g, duration_s, attitude0, craft.slew_rate_rad_s());
@@ -280,7 +322,8 @@ impl<J: Journal> Server<J> {
                 vec![lighting(axis, to_us(boost.lights_s()).max(at), to_us(boost.out_s()))]
             }
         };
-        self.emissions.emitting.insert(id, lit);
+        // Beside a drive whose cut this tick is not stated yet.
+        self.emissions.emitting.entry(id).or_default().extend(lit);
         Ok(Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s, lead })
     }
 
@@ -295,15 +338,40 @@ impl<J: Journal> Server<J> {
         lc_world::emit::lead(from_ly, at as f64 * 1.0e-6, &seen, accel).map(|led| led.axis).ok_or(Refusal::Impossible)
     }
 
-    /// Put out everything `id` has lit, at `at`: its draw stops, and the light of stopping follows
-    /// what is already on its way.
-    pub(crate) fn put_out(&mut self, id: CraftId, at: i64, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
+    /// Put out what `id` has lit, at `at`, its drives too when `drives`: its draw stops, and the
+    /// light of stopping follows what is already on its way. A drive cut by an order is not put out
+    /// here but by the change of motion, which [`drives`] states.
+    pub(crate) fn put_out(&mut self, id: CraftId, at: i64, drives: bool, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
         let Some(lit) = self.emissions.emitting.get_mut(&id) else { return };
-        // A burn still coming about never lit.
-        lit.retain(|lighting| lighting.beam.is_some() || lighting.lights_t < at);
-        for lighting in lit.iter_mut() {
+        let mut withdrawn = Vec::new();
+        lit.retain_mut(|lighting| {
+            if !(drives || lighting.jet.is_none()) {
+                return true;
+            }
+            // A burn still coming about never lit, and nor did a drive stated as lighting after it.
+            let lit_by_then = match lighting.beam {
+                Some(_) => lighting.lights_t <= at,
+                None => lighting.lights_t < at,
+            };
             lighting.out_t = lighting.out_t.min(at);
+            withdrawn.extend(lighting.beam);
+            lit_by_then
+        });
+        // Anything said after the instant it went out was never sent, though this tick said it.
+        let unsaid = |source: ShipId, beam: i64, t: i64| source.0 == id.0 && withdrawn.contains(&beam) && t > at;
+        if let Some(said) = self.emissions.said.get_mut(&id) {
+            said.retain(|s| !unsaid(ShipId(id.0), s.emitted.beam, s.t));
         }
+        self.emissions.landings.retain(|l| !unsaid(l.source, l.emitted.beam, l.said_t));
+        let mut dropped = Vec::new();
+        events.retain(|e| {
+            let drop = e.kind == KIND_EMIT && emitted(&e.payload).is_some_and(|m| unsaid(e.source, m.beam, e.t));
+            if drop {
+                dropped.push(e.id);
+            }
+            !drop
+        });
+        deliveries.retain(|d| !dropped.contains(&d.event));
         if let Some(craft) = self.fleet.get_mut(id) {
             craft.adjust(at as f64 * 1.0e-6, |fitting| fitting.darken());
         }
@@ -332,6 +400,24 @@ impl<J: Journal> Server<J> {
                 self.emissions.emitting.insert(id, lit);
             }
         }
+        self.forget_said();
+    }
+
+    /// Drop each statement whose light has gone past every candidate: one followed by another said
+    /// more than its reach ago, and a going out with nothing left before it.
+    fn forget_said(&mut self) {
+        let (now, balance) = (self.now_t, self.balance);
+        for said in self.emissions.said.values_mut() {
+            let before = said.clone();
+            said.retain(|s| {
+                let mut later = before.iter().filter(|n| n.emitted.beam == s.emitted.beam && n.t > s.t);
+                match later.next() {
+                    Some(next) => next.t as f64 + restate::reach_us(&s.emitted, &balance) >= now as f64,
+                    None => s.emitted.power_w > 0.0 || before.iter().any(|b| b.emitted.beam == s.emitted.beam && b.t < s.t),
+                }
+            });
+        }
+        self.emissions.said.retain(|_, said| !said.is_empty());
     }
 
     /// An event of `lighting` at `at` putting out `power_w` from there on: the lighting itself when
@@ -364,6 +450,9 @@ impl<J: Journal> Server<J> {
         let payload = |event_id: i64| carrying(serde_json::json!({}), &emission(event_id));
         let event_id = self.fan_out(id, from, KIND_EMIT, power_w, payload, at, &cone, &holding, events, deliveries)?;
         self.queue_landings(events.last()?, deliveries);
+        let said = self.emissions.said.entry(id).or_default();
+        said.push(Said { t: at, emitted: emission(event_id) });
+        said.sort_by_key(|s| s.t);
         Some(event_id)
     }
 
@@ -402,7 +491,7 @@ impl<J: Journal> Server<J> {
         let landings = deliveries
             .iter()
             .filter(|d| d.event == event.id && d.observer != event.source)
-            .map(|d| Landing { observer: CraftId(d.observer.0), arrive_t: d.arrive_t, source: event.source, emitted });
+            .map(|d| Landing { observer: CraftId(d.observer.0), arrive_t: d.arrive_t, source: event.source, emitted, said_t: event.t });
         self.emissions.landings.extend(landings);
     }
 
@@ -415,11 +504,15 @@ impl<J: Journal> Server<J> {
         events: &mut Vec<Event>,
         deliveries: &mut Vec<Scheduled>,
     ) -> bool {
-        let Landing { observer, arrive_t, source, emitted } = landing;
+        let Landing { observer, arrive_t, source, emitted, said_t } = landing;
         let at_s = arrive_t as f64 * 1.0e-6;
         let Some(craft) = self.fleet.get(observer).filter(|craft| craft.ended_s().is_none()) else { return false };
         let from = DVec3::from_array(emitted.from);
-        let offset = craft.position_at(arrive_t as f64) - from;
+        let here = craft.position_at(arrive_t as f64);
+        if emitted.burst_j <= 0.0 && self.emissions.superseded(CraftId(source.0), emitted.beam, said_t, here, arrive_t) {
+            return false;
+        }
+        let offset = here - from;
         let distance_m = offset.length() * LIGHT_MICROSECOND_M;
         let shadow_m2 = shadow_toward_m2(craft, -offset, at_s);
         let fraction = emitted.fraction(shadow_m2, distance_m);
@@ -430,16 +523,21 @@ impl<J: Journal> Server<J> {
             return self.after_landing(observer, arrive_t, wire, events, deliveries);
         }
 
-        let covered = emitted.cone().covers(offset);
-        let was = self.emissions.lit_by.get(&observer).and_then(|beams| beams.iter().find(|b| b.beam == emitted.beam));
+        let lit = emitted.cone().covers(offset) && emitted.power_w > 0.0;
+        let was = self.emissions.lit_by.get(&observer).and_then(|beams| beams.iter().find(|b| b.beam == emitted.beam)).copied();
         let was_w = was.map_or(0.0, |b| b.arriving_w);
-        if was.is_none() && !(covered && emitted.power_w > 0.0) {
+        let arriving_w = if lit { emitted.power_w * fraction } else { 0.0 };
+        let unchanged = |b: Incoming| lit && b.said_t == said_t && (arriving_w - b.arriving_w).abs() <= SAME * b.arriving_w;
+        let skip = match was {
+            None => !lit,
+            Some(b) => unchanged(b),
+        };
+        if skip {
             return false;
         }
         let lit_by = self.emissions.lit_by.entry(observer).or_default();
         lit_by.retain(|b| b.beam != emitted.beam);
-        let arriving_w = if covered { emitted.power_w * fraction } else { 0.0 };
-        if covered && emitted.power_w > 0.0 {
+        if lit {
             lit_by.push(Incoming {
                 beam: emitted.beam,
                 source,
@@ -447,6 +545,7 @@ impl<J: Journal> Server<J> {
                 spectrum: emitted.spectrum,
                 flux_w_m2: lc_world::emit::flux_w_m2(emitted.power_w, emitted.half_angle_rad, distance_m),
                 arriving_w,
+                said_t,
             });
         }
         if lit_by.is_empty() {

@@ -120,7 +120,7 @@ pub(crate) fn lay_cones(
         lc_world::motion::Motive::Boosting(boost) => Some(boost),
         _ => None,
     };
-    let beams = crate::emit_panel::on_map(&uplink.beams, here_ly, boost, game.0.coordinate_time_s(), reach_m);
+    let beams = crate::emit_panel::on_map(&uplink.beams, &uplink.incoming, here_ly, boost, game.0.coordinate_time_s(), reach_m);
     let cones: Vec<(Key, &Drawn)> = exhausts
         .cones
         .iter()

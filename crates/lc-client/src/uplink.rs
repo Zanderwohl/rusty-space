@@ -94,8 +94,8 @@ pub struct Contact {
     pub beta: DVec3,
     /// Unit vector the nose pointed along, as last stated.
     pub facing: DVec3,
-    /// What its drive was putting into its exhaust, watts, as last stated. Zero when coasting.
-    pub jet_power_w: f64,
+    /// What its main drive was sending aft, `F c`, watts, as last stated. Zero when coasting.
+    pub drive_w: f64,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
     /// Its form and the refit step it had under way, as the statement's light left it, with when
@@ -141,13 +141,13 @@ impl Contact {
             position_ly,
             beta,
             facing: DVec3::from_array(presence.facing).normalize_or_zero(),
-            jet_power_w: presence.jet_power_w,
+            drive_w: presence.drive_w,
             emitted_s,
             form: presence.form,
             building: presence.building.map(|b| (emitted_s, b)),
             glow: presence.glow.unwrap_or_else(|| lc_world::glow::Glow::unfitted(&lc_world::fitting::Balance::DEFAULT).into()),
             reckoning: Reckoning::new(system, sighting),
-            stated_power_w: presence.jet_power_w,
+            stated_power_w: presence.drive_w,
         }
     }
 
@@ -167,7 +167,7 @@ impl Contact {
         // The latest word on the drive at the instant drawn, statement or event. The statement
         // stands when nothing has been said since, including when this clock is behind it.
         let stated_s = self.reckoning.seen.emitted_s;
-        self.jet_power_w = drives
+        self.drive_w = drives
             .iter()
             .rev()
             .find(|(at_s, _)| *at_s <= seen.emitted_s)
@@ -269,6 +269,7 @@ pub struct Uplink {
     /// Every conversation this ship is in. See [`crate::chat`].
     pub chat: crate::chat::Chat,
     pub console: crate::console::Console,
+    pub incoming: crate::field::Incoming,
     pub beams: crate::emit_panel::Beams,
 }
 
@@ -652,20 +653,16 @@ fn fold(
                 };
                 ui.0.heard(from, notice, arrived_s);
             }
-            // Each end of a jump arrives at its own light delay.
+            // Each end of a jump arrives at its own light delay. A collapse is `crate::field`'s.
             // Not this ship's own: its console already said where it went.
             let me = uplink.joined().map(|joined| joined.ship_id);
-            for sighting in seen.iter().filter(|s| matches!(s.kind, lc_proto::kind::VANISH | lc_proto::kind::APPEAR | lc_proto::kind::COLLAPSE)) {
+            for sighting in seen.iter().filter(|s| matches!(s.kind, lc_proto::kind::VANISH | lc_proto::kind::APPEAR)) {
                 let from = ShipId(sighting.source_id);
                 if Some(from) == me {
                     continue;
                 }
                 let who = uplink.name_of(from);
-                let what = match sighting.kind {
-                    lc_proto::kind::VANISH => "vanished",
-                    lc_proto::kind::APPEAR => "appeared",
-                    _ => "collapsed",
-                };
+                let what = if sighting.kind == lc_proto::kind::VANISH { "vanished" } else { "appeared" };
                 ui.0.heard(from, format!("{who} {what}"), sighting.arrive_t as f64 * 1e-6);
             }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
@@ -917,8 +914,11 @@ fn fold(
         }
         // The welcome to the successor follows.
         Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed", at_t as f64 * 1e-6),
-        // Folded by `Beams::fold`; presets are sent once S2 is built.
-        Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
+        Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t } => {
+            uplink.incoming.illuminated(ship_id, beam, bearing, spectrum, power_w, arrive_t)
+        }
+        // Sent once S2 is built.
+        Outbound::Presets(_) => {}
     }
 }
 
@@ -1049,7 +1049,6 @@ mod tests {
                 drive: lc_proto::Drive {
                     accel_g: 5.0,
                     max_beta: 0.999,
-                    exhaust_v_m_s: 1.5e7,
                     slew_rate_rad_s: 0.05,
                 },
                 motive,
@@ -1156,7 +1155,6 @@ mod tests {
             drive: lc_proto::Drive {
                 accel_g: 5.0,
                 max_beta: 0.999,
-                exhaust_v_m_s: 1.5e7,
                 slew_rate_rad_s: 0.05,
             },
             motive: lc_proto::Motive::Holding(station),
@@ -1375,7 +1373,7 @@ mod tests {
             at_ly: [1.0, 2.0, 3.0],
             beta: [0.0, 0.1, 0.0],
             facing: [0.0, 0.0, 2.0],
-            jet_power_w: 4.2e17,
+            drive_w: 4.2e17,
             emitted_t: 500_000,
             arrive_t: 1_000_000,
             form: lc_proto::Form::default(),
@@ -1393,7 +1391,7 @@ mod tests {
         // Normalized on the way in, so nothing downstream has to wonder.
         assert_eq!(contact.facing, glam::DVec3::Z);
         assert_eq!(contact.emitted_s, 0.5);
-        assert_eq!(contact.jet_power_w, 4.2e17, "it was seen burning");
+        assert_eq!(contact.drive_w, 4.2e17, "it was seen burning");
 
         // Replaced wholesale, not merged: a contact missing from a statement is gone.
         fold(&mut uplink, &mut game, &mut ui, Outbound::Present(Vec::new()));
@@ -1439,7 +1437,7 @@ mod tests {
                 beta: lc_world::coast::beta_of(station.velocity_at(&system, emitted_s).unwrap())
                     .to_array(),
                 facing: [1.0, 0.0, 0.0],
-                jet_power_w: 0.0,
+                drive_w: 0.0,
                 emitted_t: (emitted_s * 1e6) as i64,
                 arrive_t: (emitted_s * 1e6) as i64,
                 form: lc_proto::Form::default(),
@@ -1807,7 +1805,7 @@ mod tests {
             at_ly: [0.0; 3],
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
-            jet_power_w: burning,
+            drive_w: burning,
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),
@@ -1840,14 +1838,14 @@ mod tests {
 
         let power_at = |uplink: &mut Uplink, now_s: f64| {
             uplink.reckon(None, DVec3::X * 1e3 / lc_world::system::M_PER_LY, now_s);
-            uplink.contacts[0].jet_power_w
+            uplink.contacts[0].drive_w
         };
         assert_eq!(power_at(&mut uplink, 50.0), burning, "before the flip");
         assert_eq!(power_at(&mut uplink, 130.0), 0.0, "in the flip");
         assert_eq!(power_at(&mut uplink, 170.0), burning, "after it");
 
         // A statement newer than every event is the latest word, and survives the next one.
-        let later = lc_proto::Presence { jet_power_w: 0.0, emitted_t: 400_000_000, arrive_t: 400_000_000, ..presence };
+        let later = lc_proto::Presence { drive_w: 0.0, emitted_t: 400_000_000, arrive_t: 400_000_000, ..presence };
         fold(&mut uplink, &mut game, &mut ui, present(later));
         assert_eq!(power_at(&mut uplink, 410.0), 0.0, "an older event outranked a newer statement");
     }
@@ -1858,7 +1856,7 @@ mod tests {
     fn only_beams_this_ship_sent_or_is_in_are_drawn() {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
-        let drawn = |uplink: &Uplink| crate::emit_panel::on_map(&uplink.beams, DVec3::ZERO, None, 1.0, 1.0e9).len();
+        let drawn = |uplink: &Uplink| crate::emit_panel::on_map(&uplink.beams, &uplink.incoming, DVec3::ZERO, None, 1.0, 1.0e9).len();
         let emit = |ship_id, event_id| Outbound::Accepted {
             ship_id,
             event_id,
@@ -1922,7 +1920,7 @@ mod tests {
             at_ly: [0.0; 3],
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
-            jet_power_w: 0.0,
+            drive_w: 0.0,
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),

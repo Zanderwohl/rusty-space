@@ -127,6 +127,8 @@ pub struct Session {
     pub telescope: Instrument,
     pub mapping: BandMapping,
     pub tone: ToneMap,
+    /// `--field-k`: the player's field as drawn, metered and on the bar, whatever the account says.
+    pub held_field: Option<crate::field::Held>,
     /// Which band the telescope's curve is read in. Every band the sensor has is recorded
     /// whatever this says; it decides what is *shown*.
     pub curve_band: Band,
@@ -201,6 +203,7 @@ impl Session {
             telescope: SHIP_SENSOR,
             mapping: presets::natural(),
             tone: ToneMap::default(),
+            held_field: None,
             curve_band: Band::V,
             pointing: None,
             described: None,
@@ -537,7 +540,7 @@ impl Session {
     /// should be unable to point it at the thirteenth-nearest.
     pub fn point_at(&mut self, id: Option<StarId>) {
         let duty = match id {
-            Some(id) => Duty::Stare(id),
+            Some(id) => Duty::stare(id),
             None => Duty::Idle,
         };
         self.take_up(duty);

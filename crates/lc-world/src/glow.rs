@@ -76,9 +76,7 @@ pub fn thermal_w(glow: &Glow) -> f64 {
 /// isotropic. The shadow reflects as a Lambertian face.
 pub fn light(glow: &Glow, balance: &Balance, shadow_m2: f64, star: Option<Starlit>, distance_m: f64) -> Light {
     let per_sr_to_flux = 1.0 / (distance_m * distance_m).max(f64::MIN_POSITIVE);
-    let thermal = PerBand::new(std::array::from_fn(|i| {
-        blackbody::band_radiance(Band::ALL[i], glow.temperature_k) * glow.envelope_m2 * 0.25 * per_sr_to_flux
-    }));
+    let thermal = thermal(glow, distance_m);
     let reflected = match star {
         Some(star) if star.distance_m > 0.0 => {
             let dilution = (star.radius_m / star.distance_m).powi(2);
@@ -88,6 +86,14 @@ pub fn light(glow: &Glow, balance: &Balance, shadow_m2: f64, star: Option<Starli
         _ => PerBand::splat(0.0),
     };
     Light { reflected, thermal }
+}
+
+/// The heat term of [`light`] alone: all a field in the dark, or an afterglow, sends.
+pub fn thermal(glow: &Glow, distance_m: f64) -> PerBand<f64> {
+    let per_sr_to_flux = 1.0 / (distance_m * distance_m).max(f64::MIN_POSITIVE);
+    PerBand::new(std::array::from_fn(|i| {
+        blackbody::band_radiance(Band::ALL[i], glow.temperature_k) * glow.envelope_m2 * 0.25 * per_sr_to_flux
+    }))
 }
 
 /// Signal over noise for `flux_w_m2` in `band`, against the instrument's own glow: whether it sees
