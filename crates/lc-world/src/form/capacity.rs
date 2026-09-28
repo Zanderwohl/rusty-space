@@ -84,16 +84,40 @@ pub fn aft_apertures(form: &Form, balance: &Balance) -> Option<Vec<Aperture>> {
 }
 
 fn aft_faces_w(form: &Form, balance: &Balance) -> Option<Vec<(Aperture, f64)>> {
+    Some(faces_w(form, balance)?.into_iter().filter(|(aperture, _)| aperture.out.x < 0.0).collect())
+}
+
+/// Every copy of every engine, with its rating.
+fn faces_w(form: &Form, balance: &Balance) -> Option<Vec<(Aperture, f64)>> {
     let poses = form.place(balance.min_part_m3).ok()?;
-    let aft = poses.iter().filter_map(|(id, _, pose)| {
+    let faces = poses.iter().filter_map(|(id, _, pose)| {
         let part = form.parts.iter().find(|p| p.id == id && p.kind == Kind::Engine)?;
         let (face_x, radius_m) = rules::face(&part.shape(balance.min_part_m3));
         let out = pose.axis() * face_x.signum();
         let center = pose.to_outer(DVec3::X * face_x);
-        let aperture = Aperture { center, out, radius_m, share: 0.0 };
-        (out.x < 0.0).then_some((aperture, part.volume_m3 * balance.engine_density_w))
+        Some((Aperture { center, out, radius_m, share: 0.0 }, part.volume_m3 * balance.engine_density_w))
     });
-    Some(aft.collect())
+    Some(faces.collect())
+}
+
+/// One end's engines as an emitter: what they are rated for together, W, and the widest open face
+/// among them, m, which sets the diffraction floor. See `lightcone/docs/31-directed-energy.md`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct End {
+    pub rating_w: f64,
+    pub diameter_m: f64,
+}
+
+/// The engines firing fore, then aft. An engine firing across the nose is neither. `None` for a
+/// form that does not place.
+pub fn ends(form: &Form, balance: &Balance) -> Option<(End, End)> {
+    let (mut fore, mut aft) = (End::default(), End::default());
+    for (aperture, w) in faces_w(form, balance)? {
+        let end = if aperture.out.x > 0.0 { &mut fore } else if aperture.out.x < 0.0 { &mut aft } else { continue };
+        end.rating_w += w;
+        end.diameter_m = end.diameter_m.max(2.0 * aperture.radius_m);
+    }
+    Some((fore, aft))
 }
 
 /// Of module density.
@@ -456,6 +480,25 @@ mod tests {
         // The starting form's one bell flares aft.
         let start = Form::starting();
         assert!(close(aft_aperture_w(&start, &b).unwrap(), Capacities::of(&start, &b).aperture_w));
+    }
+
+    /// The plate with one of its pair turned is rated alike at both ends, and the starting form
+    /// has nothing fore.
+    #[test]
+    fn each_end_is_rated_for_its_own_engines() {
+        let b = Balance::DEFAULT;
+        let plate = crate::form::presets::Builtin::Plate.form();
+        let mut turned = plate.clone();
+        let engine = turned.parts.iter_mut().find(|p| p.id == PartId(3)).unwrap();
+        let Some(Placement { mount: Mount::Attached { anchor, .. }, .. }) = engine.placement.as_mut() else { panic!() };
+        anchor.x = -anchor.x;
+        let (fore, aft) = ends(&turned, &b).unwrap();
+        assert!(close(fore.rating_w, aft.rating_w) && close(aft.rating_w, aft_aperture_w(&turned, &b).unwrap()));
+        assert!(fore.diameter_m > 0.0 && close(fore.diameter_m, aft.diameter_m), "{fore:?} {aft:?}");
+        let (fore, aft) = ends(&Form::starting(), &b).unwrap();
+        assert_eq!(fore, End::default());
+        let face = aft_apertures(&Form::starting(), &b).unwrap()[0];
+        assert!(close(aft.diameter_m, 2.0 * face.radius_m));
     }
 
     /// Each face sits at its engine's aft end and points aft, and their shares are the rating's.

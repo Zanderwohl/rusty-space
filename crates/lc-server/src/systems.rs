@@ -214,6 +214,7 @@ fn place(ship: &ShipState, labels: &Labels) -> String {
             "closing on another craft".to_owned()
         }
         Motive::Drifting { .. } => "drifting".to_owned(),
+        Motive::Boosting(_) => "emitting".to_owned(),
     }
 }
 

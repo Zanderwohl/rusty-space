@@ -9,8 +9,12 @@
 //! wherever the spot is no larger than the receiver's shadow, so no receiver ever takes more than
 //! was sent. Distances are meters and powers watts; the caller supplies both.
 
+use glam::DVec3;
+
+use crate::boost::gamma_of;
+use crate::escort::Burning;
 use crate::fitting::Balance;
-use crate::flight::C_M_S;
+use crate::flight::{Aim, C_M_S, G0, JULIAN_YEAR_S};
 use crate::signal::cone_solid_angle_sr;
 
 /// What `engine_m3` of engine can send, watts: its exhaust, its deliberate emission and its
@@ -79,6 +83,139 @@ pub fn lead_uncertainty_m(accel_m_s2: f64, blind_s: f64) -> f64 {
 /// flight here plus the beam's flight back, seconds.
 pub fn blind_s(distance_m: f64) -> f64 {
     2.0 * distance_m / C_M_S
+}
+
+/// An emission with net thrust, flown: the nose comes about to `nose` with nothing lit, then the
+/// ship is pushed along `thrust` at a constant proper acceleration for `lit_s` coordinate seconds,
+/// and drifts after. Recoil is `thrust`, against the beam, whichever end the beam leaves from.
+///
+/// The power at a constant acceleration falls as the ship lightens, exactly as the drive throttles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Boost {
+    pub from_ly: DVec3,
+    pub beta0: DVec3,
+    /// Coordinate seconds it was ordered, which is when the turn begins.
+    pub start_s: f64,
+    /// Unit, world axes.
+    pub thrust: DVec3,
+    /// Unit: where the nose points while lit.
+    pub nose: DVec3,
+    pub accel_g: f64,
+    pub lit_s: f64,
+    turn_s: f64,
+}
+
+impl Boost {
+    /// `attitude0` is where the nose was when ordered, and `slew_rate_rad_s` how fast it turns.
+    #[allow(clippy::too_many_arguments)]
+    pub fn plan(
+        from_ly: DVec3,
+        beta0: DVec3,
+        start_s: f64,
+        thrust: DVec3,
+        nose: DVec3,
+        accel_g: f64,
+        lit_s: f64,
+        attitude0: DVec3,
+        slew_rate_rad_s: f64,
+    ) -> Self {
+        let nose = nose.normalize_or(DVec3::X);
+        let turn_s = crate::attitude::turn_time_s(attitude0, nose, slew_rate_rad_s);
+        Self { from_ly, beta0, start_s, thrust: thrust.normalize_or(-nose), nose, accel_g, lit_s: lit_s.max(0.0), turn_s }
+    }
+
+    /// Exactly as planned, the turn included: what a recipe carries.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resume(
+        from_ly: DVec3,
+        beta0: DVec3,
+        start_s: f64,
+        thrust: DVec3,
+        nose: DVec3,
+        accel_g: f64,
+        lit_s: f64,
+        turn_s: f64,
+    ) -> Self {
+        Self { from_ly, beta0, start_s, thrust, nose, accel_g, lit_s, turn_s }
+    }
+
+    pub fn turn_s(&self) -> f64 {
+        self.turn_s
+    }
+
+    pub fn lights_s(&self) -> f64 {
+        self.start_s + self.turn_s
+    }
+
+    pub fn out_s(&self) -> f64 {
+        self.lights_s() + self.lit_s
+    }
+
+    /// Proper acceleration, light-seconds per second squared.
+    fn alpha(&self) -> f64 {
+        self.accel_g * G0 / C_M_S
+    }
+
+    fn burning(&self) -> Burning {
+        Burning {
+            position_ly: self.from_ly + self.beta0 * (self.turn_s / JULIAN_YEAR_S),
+            beta: self.beta0,
+            accel: self.thrust * self.alpha(),
+            since_t: self.lights_s(),
+        }
+    }
+
+    /// Where the ship is and how fast, at a coordinate time.
+    pub fn state_at(&self, now_s: f64) -> (DVec3, DVec3) {
+        if now_s < self.lights_s() {
+            let t = (now_s - self.start_s).max(0.0);
+            return (self.from_ly + self.beta0 * (t / JULIAN_YEAR_S), self.beta0);
+        }
+        let burning = self.burning();
+        let (at, beta) = burning.at(now_s.min(self.out_s()));
+        (at + beta * ((now_s - self.out_s()).max(0.0) / JULIAN_YEAR_S), beta)
+    }
+
+    /// Proper seconds since it was ordered.
+    pub fn proper_s(&self, now_s: f64) -> f64 {
+        let turned = (now_s - self.start_s).clamp(0.0, self.turn_s) / gamma_of(self.beta0);
+        if now_s <= self.lights_s() {
+            return turned;
+        }
+        let tau = self.lit_tau(now_s);
+        let after = (now_s - self.out_s()).max(0.0) / gamma_of(self.state_at(self.out_s()).1);
+        turned + tau + after
+    }
+
+    /// The ship's proper seconds lit by `now_s`.
+    fn lit_tau(&self, now_s: f64) -> f64 {
+        if now_s <= self.lights_s() {
+            return 0.0;
+        }
+        self.burning().tau_at(now_s.min(self.out_s()))
+    }
+
+    /// One order, given when it was: turn to `nose` and light.
+    pub fn aim_at(&self) -> Aim {
+        Aim { to: self.nose, from: None, since_s: self.start_s }
+    }
+
+    /// Zero where nothing is lit.
+    pub fn thrust_at(&self, now_s: f64) -> DVec3 {
+        if now_s >= self.lights_s() && now_s < self.out_s() { self.thrust } else { DVec3::ZERO }
+    }
+
+    pub fn lit_rapidity_at(&self, now_s: f64) -> f64 {
+        self.alpha() * self.lit_tau(now_s)
+    }
+
+    pub fn planned_rapidity(&self) -> f64 {
+        self.lit_rapidity_at(self.out_s())
+    }
+
+    pub fn has_ended(&self, now_s: f64) -> bool {
+        now_s >= self.out_s()
+    }
 }
 
 #[cfg(test)]
@@ -188,6 +325,59 @@ mod tests {
         assert_eq!(received_fraction(0.1, 1.0, 0.0), 1.0);
         assert_eq!(received_fraction(0.1, 0.0, 0.0), 0.0);
         assert_eq!(distance_at_flux_m(0.0, 0.1, 1.0), 0.0);
+    }
+
+    /// Coming about with nothing lit, then pushed along its thrust to `tanh(α τ)`, then drifting
+    /// at that: continuous at both edges, and the rapidity is the proper acceleration times the
+    /// proper time lit.
+    #[test]
+    fn a_boost_turns_then_pushes_along_its_thrust_and_drifts_after() {
+        let thrust = DVec3::new(0.6, -0.8, 0.0);
+        let beta0 = DVec3::new(0.0, 0.0, 1.0e-3);
+        let boost = Boost::plan(DVec3::ZERO, beta0, 100.0, thrust, -thrust, 5.0, 3_600.0, DVec3::X, 0.01);
+        assert!(boost.turn_s() > 0.0 && boost.lights_s() == 100.0 + boost.turn_s());
+        assert_eq!(boost.thrust_at(boost.lights_s() - 1.0e-3), DVec3::ZERO);
+        assert_eq!(boost.thrust_at(boost.lights_s()), thrust);
+        assert_eq!(boost.thrust_at(boost.out_s()), DVec3::ZERO);
+        for edge in [boost.lights_s(), boost.out_s()] {
+            let (before, after) = (boost.state_at(edge - 1.0e-6).0, boost.state_at(edge + 1.0e-6).0);
+            assert!((before - after).length() * JULIAN_YEAR_S < 1.0e-5, "a jump at {edge}");
+        }
+        let (_, end) = boost.state_at(boost.out_s());
+        let (_, later) = boost.state_at(boost.out_s() + 1.0e4);
+        assert_eq!(end, later, "still pushed after it went out");
+        let gained = crate::boost::velocity_to_frame(end, beta0);
+        assert!((gained.normalize() - thrust).length() < 1.0e-9, "{gained}");
+        assert!((gained.length().atanh() - boost.planned_rapidity()).abs() < 1.0e-9 * boost.planned_rapidity());
+        let alpha = 5.0 * G0 / C_M_S;
+        assert!((boost.planned_rapidity() / alpha - boost.proper_s(boost.out_s()) + boost.turn_s() / gamma_of(beta0)).abs() < 1.0e-6);
+    }
+
+    /// Through the wire's recipe and back, it lights and goes out at the same instants and is in
+    /// the same place.
+    #[test]
+    fn a_boost_comes_back_from_its_recipe_unchanged() {
+        let mut state = crate::motion::ShipState::at(DVec3::new(1.0e-6, 0.0, 0.0));
+        state.begin_boosting(Boost::plan(state.position_ly, DVec3::ZERO, 10.0, DVec3::Y, -DVec3::Y, 0.5, 600.0, DVec3::X, 0.01));
+        let wire = lc_proto::Motion::from(&state.snapshot());
+        let back = crate::resume::Snapshot::from(&wire).restore(None, 10.0);
+        assert_eq!(back.motive, state.motive);
+    }
+
+    /// A lit emission commits all it will draw, spends it as it goes, and putting it out early
+    /// releases the rest.
+    #[test]
+    fn a_lit_emission_is_committed_and_released_when_put_out() {
+        use crate::fitting::Lit;
+        let motion = crate::motion::ShipState::at(DVec3::ZERO);
+        let mut fitting = Fitting::full(Form::starting(), Balance::DEFAULT, 0.0);
+        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e19 });
+        assert_eq!(fitting.committed_j_at(&motion, 0.0), 1.0e21);
+        assert!((fitting.committed_j_at(&motion, 40.0) - 6.0e20).abs() < 1.0e6);
+        fitting.settle(&motion, 40.0);
+        fitting.darken();
+        assert_eq!(fitting.committed_j_at(&motion, 40.0), 0.0);
+        assert!(fitting.lit().is_empty());
     }
 
     /// A receiver whose shadow covers the spot takes everything; past that it takes its share.

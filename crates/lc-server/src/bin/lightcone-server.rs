@@ -250,6 +250,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // against it: a shard that read these first would date every message it had ever
             // been told to the instant before it knew what time it was.
             server.resume_conversations().await?;
+            // After the craft, which the landings are for.
+            server.resume_landings().await?;
             Some(client)
         }
         None => {
