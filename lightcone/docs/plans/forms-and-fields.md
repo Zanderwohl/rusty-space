@@ -780,7 +780,7 @@ graph LR
 
 ### C7 · Field bar
 
-- status: active card "C7 · Field bar"
+- status: done #127
 - needs: H6
 - touches: `crates/lc-client/src/hud.rs`, `crates/lc-client/src/panels.rs`, `crates/lc-client/src/field_bar.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/lib.rs`, `crates/lc-client/src/parts.rs`, `crates/lc-client/examples/field_void.rs`, `crates/lc-world/src/ahead.rs`, `crates/lc-world/src/lib.rs`, `crates/lc-world/src/fitting/heat.rs`, `crates/lc-server/src/field.rs`, `crates/lc-server/src/field/mode.rs`, `crates/em-spectra/src/blackbody.rs`, `crates/em-spectra/src/mapping.rs`, `lightcone/docs/30-the-field.md`, `lightcone/images/field-bar.png`
 - read: 30 §The field bar
