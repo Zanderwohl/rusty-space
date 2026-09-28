@@ -28,6 +28,7 @@ pub mod demos;
 pub mod dev;
 pub mod draft;
 pub mod drones;
+pub mod emit_panel;
 pub mod entry;
 pub mod envelope;
 pub mod faces;

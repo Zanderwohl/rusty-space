@@ -1,5 +1,7 @@
 //! The cones [`crate::plume`] draws, on the map as lines in the hazard color: the generators, the
-//! rim at the courtesy radius, and a ring where a Black receiver would cook.
+//! rim at the courtesy radius, and a ring where a Black receiver would cook. This ship's beams are
+//! drawn the same way, and a beam landing on it as a line back along its bearing: see
+//! [`crate::emit_panel::on_map`].
 
 use std::collections::HashMap;
 use std::f32::consts::TAU;
@@ -12,6 +14,7 @@ use em_render::wire_mesh;
 use glam::{DQuat, DVec3};
 use lc_proto::ShipId;
 
+use crate::emit_panel::OnMap;
 use crate::map::{MAP_LAYER, Map};
 use crate::map_line::MapLineMaterial;
 use crate::map_scene::{LINE_COLOR_SCALE, LINE_PX, LINE_TUBE_FRACTION, line_material};
@@ -20,9 +23,17 @@ use crate::system::M_PER_LY;
 
 const GENERATORS: usize = 8;
 const RIM_SEGMENTS: usize = 64;
+/// Under a line's width at any length, and a rim this small is a ring of coincident points in f32.
+const AXIS_RAD: f64 = 1.0e-4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Key {
+    Exhaust(Option<ShipId>),
+    Beam(OnMap),
+}
 
 #[derive(Component)]
-pub struct MapCone(Option<ShipId>);
+pub struct MapCone(Key);
 
 /// One mesh per shape, which a balance fixes.
 #[derive(Default)]
@@ -32,8 +43,12 @@ pub(crate) struct Held {
 }
 
 /// A cone of `half_angle_rad` one unit long down `+Y` from its apex at the origin, as polylines:
-/// the generators, the rim, and a ring `cooking` of the way along when that is inside it.
+/// the generators, the rim, and a ring `cooking` of the way along when that is inside it. A cone
+/// narrower than [`AXIS_RAD`] is its axis.
 pub(crate) fn cone_curves(half_angle_rad: f64, cooking: f64) -> Vec<Vec<Vec3>> {
+    if half_angle_rad < AXIS_RAD {
+        return vec![vec![Vec3::ZERO, Vec3::Y]];
+    }
     let tan = half_angle_rad.tan() as f32;
     let at = |along: f32, turn: f32| Vec3::new(tan * along * turn.cos(), along, tan * along * turn.sin());
     let ring = |along: f32| -> Vec<Vec3> {
@@ -59,11 +74,15 @@ pub(crate) fn cone_transform(cone: &Drawn, eye_ly: DVec3, meters_per_unit: f64) 
     }
 }
 
-/// Bring the map's cones to [`Exhausts`]: after the rest of the layer, from the same frame.
+/// Bring the map's cones to [`Exhausts`] and this ship's beams: after the rest of the layer, from
+/// the same frame.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn lay_cones(
     mut commands: Commands,
     map: Res<Map>,
     exhausts: Res<Exhausts>,
+    game: Res<crate::app::Game>,
+    uplink: Res<crate::uplink::Uplink>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MapLineMaterial>>,
     mut held: Local<Held>,
@@ -94,9 +113,20 @@ pub(crate) fn lay_cones(
             .clone()
     };
 
-    let mut kept = Vec::with_capacity(exhausts.cones.len());
+    let here_ly = game.0.ship.motion.position_ly;
+    // Past the view on any zoom, so a line back along a bearing leaves the picture.
+    let reach_m = 4.0 * frame.eye_ly.distance(here_ly) * M_PER_LY;
+    let beams = crate::emit_panel::on_map(&uplink.beams, here_ly, game.0.coordinate_time_s(), reach_m);
+    let cones: Vec<(Key, &Drawn)> = exhausts
+        .cones
+        .iter()
+        .map(|c| (Key::Exhaust(c.craft), c))
+        .chain(beams.iter().map(|(key, c)| (Key::Beam(*key), c)))
+        .collect();
+
+    let mut kept = Vec::with_capacity(cones.len());
     for (entity, of, mut transform, mut mesh) in drawn.iter_mut() {
-        let Some(cone) = exhausts.cones.iter().find(|c| c.craft == of.0) else {
+        let Some((_, cone)) = cones.iter().find(|(key, _)| *key == of.0) else {
             commands.entity(entity).despawn();
             continue;
         };
@@ -107,14 +137,14 @@ pub(crate) fn lay_cones(
             mesh.0 = wanted;
         }
     }
-    for cone in exhausts.cones.iter().filter(|c| !kept.contains(&c.craft)) {
+    for (key, cone) in cones.iter().filter(|(key, _)| !kept.contains(key)) {
         commands.spawn((
             Mesh3d(mesh_of(cone)),
             MeshMaterial3d(material.clone()),
             cone_transform(cone, frame.eye_ly, frame.meters_per_unit),
             NoFrustumCulling,
             RenderLayers::layer(MAP_LAYER),
-            MapCone(cone.craft),
+            MapCone(*key),
         ));
     }
 }

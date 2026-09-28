@@ -51,6 +51,8 @@ pub enum Panel {
     /// One conversation at a time, chosen from a list. Every ship this one has heard from is
     /// in it, whether or not it is still in sight.
     Chat,
+    /// Light out on purpose, and the beams landing here.
+    Emit,
     /// Something to read: the shelf, or a book off it. Drawn by [`crate::reader`] rather than
     /// with the others, because it is the one surface that is not a readout — it has its own
     /// frame, its own palette and its own keys.
@@ -60,7 +62,7 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 13] = [
+    pub const ALL: [Panel; 14] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -72,6 +74,7 @@ impl Panel {
         Panel::Refit,
         Panel::DevActions,
         Panel::Chat,
+        Panel::Emit,
         Panel::Reader,
         Panel::Console,
     ];
@@ -94,6 +97,7 @@ impl Panel {
             Panel::Refit => "Refit",
             Panel::DevActions => "Dev actions",
             Panel::Chat => "Communications",
+            Panel::Emit => "Emit",
             Panel::Reader => "Reader",
             Panel::Console => "Console",
         }

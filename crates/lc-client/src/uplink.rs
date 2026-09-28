@@ -102,6 +102,7 @@ pub struct Contact {
     /// that was, coordinate seconds.
     pub form: lc_proto::Form,
     pub building: Option<(f64, lc_proto::Building)>,
+    pub glow: Option<lc_proto::Glow>,
     reckoning: Reckoning,
     /// What the statement said the drive was doing, at the statement's own instant.
     stated_power_w: f64,
@@ -143,6 +144,7 @@ impl Contact {
             emitted_s,
             form: presence.form,
             building: presence.building.map(|b| (emitted_s, b)),
+            glow: presence.glow,
             reckoning: Reckoning::new(system, sighting),
             stated_power_w: presence.jet_power_w,
         }
@@ -266,6 +268,7 @@ pub struct Uplink {
     /// Every conversation this ship is in. See [`crate::chat`].
     pub chat: crate::chat::Chat,
     pub console: crate::console::Console,
+    pub beams: crate::emit_panel::Beams,
 }
 
 /// The rate a shard runs at, and what a server that says nothing is taken to mean.
@@ -391,6 +394,7 @@ impl Uplink {
             let drives = self.drives.get(&contact.ship_id).map_or(&[][..], Vec::as_slice);
             contact.reckon(system, observer_ly, now_s, drives);
         }
+        self.beams.prune(now_s);
     }
 
     fn take(&mut self) -> Vec<Outbound> {
@@ -747,6 +751,7 @@ fn fold(
                     }
                 }
                 Order::CutDrive => {
+                    uplink.beams.put_out(at_s);
                     let note = match game.0.cut_drive_at(at_s) {
                         // What it says is where the ship ended up, because cutting does not
                         // stop it: it keeps its velocity and that velocity is now an orbit.
@@ -783,8 +788,22 @@ fn fold(
                 }
                 // What a mode order does to the account arrives straight after, as `Fitted`.
                 Order::FieldMode { .. } => None,
-                // Refused as not built until E3.
-                Order::Emit { .. } => None,
+                Order::Emit { aim, apertures, power_w, spread_rad, duration_s, .. } => {
+                    let here_ly = game.0.ship.motion.position_ly;
+                    let axis = crate::emit_panel::axis_of(aim, here_ly, &uplink.contacts);
+                    if let Some(axis) = axis.filter(|_| uplink.joined().is_some_and(|j| j.ship_id == ship_id)) {
+                        uplink.beams.sent.push(crate::emit_panel::Sent {
+                            event_id,
+                            axis,
+                            apertures: *apertures,
+                            half_angle_rad: *spread_rad,
+                            power_w: *power_w,
+                            from_s: at_s,
+                            until_s: at_s + duration_s,
+                        });
+                    }
+                    None
+                }
                 Order::CancelRefit => Some("refit stopped where it was".into()),
                 // Recorded against the identifier the server minted, which is the only thing
                 // an acknowledgment will ever name it by. Not shown in the events box: that
@@ -910,9 +929,17 @@ fn fold(
             }
         }
         // The welcome to the successor follows.
-        Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed", at_t as f64 * 1e-6),
-        // Sent once E3 and S2 are built.
-        Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
+        Outbound::Collapsed { at_t, .. } => {
+            uplink.beams = Default::default();
+            ui.0.notify("The field collapsed", at_t as f64 * 1e-6)
+        }
+        Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t } => {
+            if uplink.joined().is_some_and(|j| j.ship_id == ship_id) {
+                uplink.beams.illuminated(beam, bearing, spectrum, power_w, arrive_t as f64 * 1e-6);
+            }
+        }
+        // Sent once S2 is built.
+        Outbound::Presets(_) => {}
     }
 }
 
@@ -1844,6 +1871,63 @@ mod tests {
         let later = lc_proto::Presence { jet_power_w: 0.0, emitted_t: 400_000_000, arrive_t: 400_000_000, ..presence };
         fold(&mut uplink, &mut game, &mut ui, present(later));
         assert_eq!(power_at(&mut uplink, 410.0), 0.0, "an older event outranked a newer statement");
+    }
+
+    /// 31 §Client: the map draws this ship's beams and those landing on it, and nothing else. Another
+    /// craft's emission, seen or accepted for someone else, is a beam this ship does not know of.
+    #[test]
+    fn only_beams_this_ship_sent_or_is_in_are_drawn() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let drawn = |uplink: &Uplink| crate::emit_panel::on_map(&uplink.beams, DVec3::ZERO, 1.0, 1.0e9).len();
+        let emit = |ship_id, event_id| Outbound::Accepted {
+            ship_id,
+            event_id,
+            at_t: 0,
+            order: Order::Emit {
+                aim: lc_proto::Aim::Bearing([1.0, 0.0, 0.0]),
+                apertures: lc_proto::Apertures::Aft,
+                power_w: 1.0e18,
+                wavelength_m: 1.0e-6,
+                spread_rad: 1.0e-3,
+                duration_s: 60.0,
+            },
+        };
+        let elsewhere = Sighting {
+            event_id: 30,
+            source_id: 2,
+            arrive_t: 500_000,
+            emitted_t: 0,
+            direction: [1.0, 0.0, 0.0],
+            strength: 1.0,
+            kind: lc_proto::kind::EMIT,
+            payload: "{}".into(),
+        };
+        let elsewhere = Outbound::Sightings(vec![Cleared::<Sighting>::clear(elsewhere, 500_000, 0.0).unwrap()]);
+        fold(&mut uplink, &mut game, &mut ui, elsewhere);
+        fold(&mut uplink, &mut game, &mut ui, emit(ShipId(2), 31));
+        assert_eq!(drawn(&uplink), 0, "a beam somebody else lit");
+
+        fold(&mut uplink, &mut game, &mut ui, emit(ShipId(7), 32));
+        assert_eq!(drawn(&uplink), 1, "this ship's own");
+        let lit = |power_w| Outbound::Illuminated {
+            ship_id: ShipId(7),
+            beam: 40,
+            bearing: [0.0, 1.0, 0.0],
+            spectrum: lc_proto::Spectrum::Line { wavelength_m: 1.0e-6 },
+            power_w,
+            arrive_t: 500_000,
+        };
+        fold(&mut uplink, &mut game, &mut ui, lit(1.0e17));
+        assert_eq!(drawn(&uplink), 2, "one landing here");
+        fold(&mut uplink, &mut game, &mut ui, lit(0.0));
+        assert_eq!(drawn(&uplink), 1, "its light went out");
+        fold(&mut uplink, &mut game, &mut ui, accepted_cut());
+        assert_eq!(drawn(&uplink), 0, "put out");
+    }
+
+    fn accepted_cut() -> Outbound {
+        Outbound::Accepted { ship_id: ShipId(7), event_id: 50, at_t: 500_000, order: Order::CutDrive }
     }
 
     /// Past [`REMEMBERED_DRIVERS`], only the contacts in sight keep their drive histories.

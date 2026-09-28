@@ -172,6 +172,10 @@ pub enum Action {
     /// Give up a standing intercept, with no further corrections: the drive is cut and the ship
     /// keeps whatever velocity it has.
     BreakOff,
+    /// An [`lc_proto::Order::Emit`], as the emit window built it.
+    Emit(lc_proto::Order),
+    /// Put out whatever this ship has lit.
+    PutOut,
 
     // --- appearance -------------------------------------------------------------------
     /// Replace a starfield pass's drawing parameters. Carries the whole style rather than one
@@ -604,6 +608,16 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::BreakOff => {
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::BreakOff));
+            }
+        }
+        Action::Emit(order) => {
+            if session.remote && matches!(order, lc_proto::Order::Emit { .. }) {
+                effects.push(Effect::Send(order));
+            }
+        }
+        Action::PutOut => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::CutDrive));
             }
         }
 
