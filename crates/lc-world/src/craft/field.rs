@@ -4,7 +4,7 @@
 use super::Craft;
 use crate::field::{Field, Mode};
 use crate::fitting::{Setting, Switch, Switching};
-use crate::glow::Glow;
+use crate::glow::{Glow, Starlit};
 use crate::seen::Glowed;
 
 impl Craft {
@@ -37,6 +37,20 @@ impl Craft {
     pub fn glow_at(&self, t: f64) -> Option<Glow> {
         let (heat_j, field, shade) = self.worn_at(t)?;
         Some(Glow { temperature_k: field.temperature_k(heat_j), shade, envelope_m2: field.area_m2 })
+    }
+
+    /// Its star as it lit it at `t`, seen from along `to_observer`. `None` between systems.
+    pub fn starlit_at(&self, t: f64, to_observer: glam::DVec3) -> Option<Starlit> {
+        let system = self.system.as_deref()?;
+        let to_star = self.to_star(self.motion_at(t), t)?;
+        let at = self.position_at(t * 1.0e6) / crate::motion::LIGHT_US_PER_LY;
+        let distance_m = (system.star_position_at(t)? - at).length() * crate::system::M_PER_LY;
+        Some(Starlit {
+            teff_k: system.star_teff_k(),
+            radius_m: system.star_radius_m(),
+            distance_m,
+            cos_phase: to_star.dot(to_observer.normalize_or_zero()),
+        })
     }
 
     /// Its field's heat as its light left it at `t`, J.

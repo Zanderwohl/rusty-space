@@ -7,15 +7,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use em_spectra::Band;
+use em_spectra::{Band, PerBand};
 use glam::DVec3;
 use lc_spacetime::{Coord, Micros, frame::SystemFrame};
 
 use super::follow_up::Following;
-use super::survey::{self, Duty, Optics, Source, Sweep};
+use super::survey::{self, Duty, Gaze, Optics, Source, Sweep};
 use crate::system::LocalSystem;
 use super::{Bearing, Claim, Distance, Hop, Knowledge, NameKind, Naming, Sample, Sighting, Subject, Witness};
-use crate::instrument::Instrument;
+use crate::instrument::{Instrument, PHOTOMETRY_FLOOR};
 use crate::observation::{Target, observe};
 use crate::rng;
 use crate::sky::{CatalogStar, StarId, generate};
@@ -130,6 +130,31 @@ pub fn build_target(star: &CatalogStar) -> Target {
     Target::new(SystemFrame::new(origin), model)
 }
 
+/// Light the catalog does not hold: craft, and what their collapses leave. A shard knows it; a
+/// client with no shard sees none of it.
+pub trait Lights {
+    /// Where craft `id` is seen from `here` at `at_s`, light-microseconds: where its light arriving
+    /// then left from, never where it is now.
+    fn sighted(&self, id: i64, here: DVec3, at_s: f64) -> Option<DVec3>;
+
+    /// Flux in each band, W/m², at `here` from everything within that band's `field_rad` of
+    /// `toward`: a mean over the exposure from `from_s` to `to_s` for what a collapse leaves, and
+    /// a craft as its light arrives at `to_s`.
+    fn arriving(&self, here: DVec3, toward: DVec3, field_rad: &PerBand<f64>, from_s: f64, to_s: f64) -> PerBand<f64>;
+}
+
+pub struct Dark;
+
+impl Lights for Dark {
+    fn sighted(&self, _: i64, _: DVec3, _: f64) -> Option<DVec3> {
+        None
+    }
+
+    fn arriving(&self, _: DVec3, _: DVec3, _: &PerBand<f64>, _: f64, _: f64) -> PerBand<f64> {
+        PerBand::splat(0.0)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Station {
     pub position_ly: DVec3,
@@ -222,15 +247,32 @@ impl Observatory {
         at: Station,
         now_s: f64,
     ) {
+        self.tick_lit(sky, system, &Dark, knowledge, at, now_s);
+    }
+
+    /// [`Observatory::tick`], seeing `lights` as well as the catalog.
+    pub fn tick_lit(
+        &mut self,
+        sky: &mut Sky,
+        system: Option<&LocalSystem>,
+        lights: &dyn Lights,
+        knowledge: &mut Knowledge,
+        at: Station,
+        now_s: f64,
+    ) {
         match self.duty.clone() {
             Duty::Idle => self.observed = None,
-            Duty::Stare(id) => {
-                self.observed = Some(Subject::Star(id));
+            Duty::Stare(gaze) => {
+                self.observed = Some(gaze.subject());
                 let elapsed = now_s - self.sampled_s;
                 if elapsed >= self.integration_s.max(1.0) {
-                    self.pointing = Some(id);
-                    photometry(sky, knowledge, at, id, elapsed, now_s);
-                    fix(sky, knowledge, at, id, elapsed, now_s);
+                    if let Gaze::Star(id) = gaze {
+                        self.pointing = Some(id);
+                        photometry(sky, knowledge, at, id, elapsed, now_s);
+                        fix(sky, knowledge, at, id, elapsed, now_s);
+                    } else {
+                        glow_photometry(sky, lights, knowledge, at, gaze, self.sampled_s, now_s);
+                    }
                     self.sampled_s = now_s;
                 }
             }
@@ -428,6 +470,60 @@ pub fn photometry(
         let Some(m) = obs.band(band) else { continue };
         let sample = Sample { observed_s: now_s, deficit: m.measured_deficit, sigma: m.uncertainty };
         knowledge.measured(id, witness, band, sample);
+    }
+}
+
+/// A stare at a place or a craft: whatever arrives in the one resolution element it is aimed at,
+/// a catalog star there included, against the instrument's own glow and every other star's wings.
+/// A sample is the flux in W/m², not a deficit, and a craft whose light has stopped arriving is not
+/// sampled.
+pub fn glow_photometry(
+    sky: &mut Sky,
+    lights: &dyn Lights,
+    knowledge: &mut Knowledge,
+    at: Station,
+    gaze: Gaze,
+    from_s: f64,
+    to_s: f64,
+) {
+    let here = at.position_ly * crate::motion::LIGHT_US_PER_LY;
+    let aim = match gaze {
+        Gaze::Star(_) => return,
+        Gaze::Place([x, y, z]) => DVec3::new(x as f64, y as f64, z as f64),
+        Gaze::Craft(id) => {
+            let Some(seen) = lights.sighted(id, here, to_s) else { return };
+            seen
+        }
+    };
+    let toward = (aim - here).normalize_or_zero();
+    if toward == DVec3::ZERO {
+        return;
+    }
+    let optics = at.optics();
+    let resolution = PerBand::new(Band::ALL.map(|band| optics.resolution_rad(band)));
+    let arriving = lights.arriving(here, toward, &resolution, from_s, to_s);
+    let (exposure_s, instrument) = (to_s - from_s, at.instrument);
+    let (witness, subject) = (knowledge.owner, gaze.subject());
+    for (k, band) in Band::ALL.into_iter().enumerate().filter(|(_, band)| instrument.sees(*band)) {
+        let per_w_m2 = instrument.counts_from_flux(band, 1.0, exposure_s);
+        if per_w_m2 <= 0.0 {
+            continue;
+        }
+        let (mut flux, mut glare) = (arriving[band], 0.0);
+        for star in sky.sources(band, at.position_ly) {
+            let apart_rad = star.toward.angle_between(toward);
+            if apart_rad < resolution[band] {
+                flux += star.flux_w_m2;
+            } else {
+                glare += optics.halo_counts(band, optics.counts(band, star.flux_w_m2, exposure_s), apart_rad);
+            }
+        }
+        let counts = optics.counts(band, flux, exposure_s) + instrument.self_emission_counts(band, exposure_s) + glare;
+        // At least a count, so an empty patch in a band the optics barely glow in is not a sample
+        // with no error.
+        let sigma = (counts.max(1.0).sqrt() / per_w_m2).max(PHOTOMETRY_FLOOR * flux);
+        let noise = rng::gaussian(rng::hash(&[witness.0, subject.key(), to_s.to_bits(), k as u64]));
+        knowledge.measured(subject, witness, band, Sample { observed_s: to_s, deficit: flux + sigma * noise, sigma });
     }
 }
 
@@ -1001,13 +1097,121 @@ mod tests {
         let id = sky.stars()[0].id;
         let mut k = Knowledge::new(Witness(1));
         let mut o = Observatory { integration_s: 1.0e4, ..Default::default() };
-        o.take_up(Duty::Stare(id), 0.0);
+        o.take_up(Duty::stare(id), 0.0);
         o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), 5.0e3);
         assert!(k.own_series(id, Band::V).is_none(), "half an integration is not a sample");
         o.tick(&mut sky, None, &mut k, at(DVec3::ZERO), 1.0e4);
         assert_eq!(k.own_series(id, Band::V).unwrap().len(), 1);
         assert_eq!(k.belief(id).unwrap().sightings, 1);
         assert_eq!(o.pointing(), Some(id));
+    }
+
+    /// One light, at `source`, of `flux` in every band; and craft 9, which is seen at `seen` and
+    /// is really at `really`.
+    struct Lit {
+        source: DVec3,
+        flux: f64,
+        seen: DVec3,
+    }
+
+    impl Lights for Lit {
+        fn sighted(&self, id: i64, _: DVec3, _: f64) -> Option<DVec3> {
+            (id == 9).then_some(self.seen)
+        }
+
+        fn arriving(&self, here: DVec3, toward: DVec3, field_rad: &PerBand<f64>, _: f64, _: f64) -> PerBand<f64> {
+            let apart_rad = (self.source - here).normalize().angle_between(toward);
+            field_rad.map(|_, field| if apart_rad <= *field { self.flux } else { 0.0 })
+        }
+    }
+
+    const LY_US: f64 = crate::motion::LIGHT_US_PER_LY;
+
+    fn stare(gaze: Gaze, lights: &dyn Lights) -> Knowledge {
+        stare_for(gaze, lights, 4)
+    }
+
+    fn stare_for(gaze: Gaze, lights: &dyn Lights, samples: usize) -> Knowledge {
+        let mut sky = spread();
+        let mut k = Knowledge::new(Witness(1));
+        let mut o = Observatory { integration_s: 1.0e4, ..Default::default() };
+        o.take_up(Duty::Stare(gaze), 0.0);
+        for step in 1..=samples {
+            o.tick_lit(&mut sky, None, lights, &mut k, at(DVec3::ZERO), step as f64 * 1.0e4);
+        }
+        assert_eq!(o.observed(), Some(gaze.subject()));
+        assert_eq!(o.pointing(), None);
+        k
+    }
+
+    /// Filed under the place, as a flux, and a place a field's width away records only noise.
+    #[test]
+    fn a_stare_at_a_place_records_the_flux_arriving_from_there() {
+        let there = DVec3::new(1.0, -0.4, 0.3) * LY_US;
+        let lights = Lit { source: there, flux: 1.0e-12, seen: DVec3::ZERO };
+        let place = Gaze::Place([there.x as i64, there.y as i64, there.z as i64]);
+        let k = stare(place, &lights);
+        let v = k.own_series(place.subject(), Band::V).expect("a curve");
+        assert_eq!(v.len(), 4);
+        for sample in v.samples() {
+            assert!((sample.deficit / 1.0e-12 - 1.0).abs() < 5.0 * sample.sigma / 1.0e-12, "{sample:?}");
+            assert!(sample.sigma < 0.1e-12);
+        }
+
+        let aside = Gaze::Place([there.x as i64, (there.y + 0.05 * LY_US) as i64, there.z as i64]);
+        let k = stare(aside, &lights);
+        for sample in k.own_series(aside.subject(), Band::V).unwrap().samples() {
+            assert!(sample.deficit.abs() < 5.0 * sample.sigma, "{sample:?}");
+        }
+    }
+
+    /// Pointed where its light shows it, not where it is.
+    #[test]
+    fn a_stare_at_a_craft_points_where_its_light_left() {
+        let seen = DVec3::new(1.0, 0.2, 0.0) * LY_US;
+        let k = stare(Gaze::Craft(9), &Lit { source: seen, flux: 1.0e-12, seen });
+        assert!(k.own_series(Subject::Craft(9), Band::V).unwrap().samples().iter().all(|s| s.deficit > 0.5e-12));
+        let really = DVec3::X * LY_US;
+        let k = stare(Gaze::Craft(9), &Lit { source: really, flux: 1.0e-12, seen });
+        assert!(k.own_series(Subject::Craft(9), Band::V).unwrap().samples().iter().all(|s| s.deficit < 0.5e-12));
+        let k = stare(Gaze::Craft(8), &Lit { source: seen, flux: 1.0e-12, seen });
+        assert!(k.own_series(Subject::Craft(8), Band::V).is_none(), "a craft nobody sees is not sampled");
+    }
+
+    /// The one resolution element aimed at: a star in it is measured with the light, and one
+    /// beside it glares. A light that stands clear of the dark is lost beside a star.
+    #[test]
+    fn a_stare_beside_a_star_is_measured_against_its_glare() {
+        let star = spread().stars()[0].position_ly * LY_US;
+        let resolution_rad = Optics::of(Instrument::SHIP).resolution_rad(Band::V);
+        let beside = star + star.any_orthogonal_vector().normalize() * star.length() * 3.0 * resolution_rad;
+        let clear = DVec3::new(-1.0, 0.3, 0.2) * LY_US;
+        let sampled = |place: DVec3, flux: f64| {
+            let gaze = Gaze::Place([place.x as i64, place.y as i64, place.z as i64]);
+            let k = stare(gaze, &Lit { source: place, flux, seen: DVec3::ZERO });
+            k.own_series(gaze.subject(), Band::V).unwrap().samples().to_vec()
+        };
+        let faint = 100.0 * sampled(clear, 0.0)[0].sigma;
+        assert!(sampled(clear, faint).iter().all(|s| s.deficit > 5.0 * s.sigma), "premise: it stands clear of the dark");
+        assert!(sampled(beside, faint).iter().all(|s| s.deficit < 5.0 * s.sigma), "found in its star's glare");
+
+        let on = sampled(star, 0.0);
+        let star_flux = spread().sources(Band::V, DVec3::ZERO)[0].flux_w_m2;
+        assert!(on.iter().all(|s| (s.deficit / star_flux - 1.0).abs() < 5.0 * s.sigma / star_flux), "{on:?}");
+    }
+
+    /// A curve is kept whole until room or an order wants it back, and then gone with no digest.
+    #[test]
+    fn a_curve_of_a_place_is_consumed_only_when_asked() {
+        let there = DVec3::new(1.0, -0.4, 0.3) * LY_US;
+        let place = Gaze::Place([there.x as i64, there.y as i64, there.z as i64]);
+        let mut k = stare_for(place, &Lit { source: there, flux: 1.0e-12, seen: DVec3::ZERO }, 200);
+        assert!(k.next_due().is_none(), "read on count, and a month's stare loses its curve");
+        k.analyze();
+        let (subject, observer) = k.next_due().expect("analyzing reads it");
+        let prior = crate::knowledge::prior::Prior::measure(std::iter::empty());
+        assert!(k.read_log(subject, observer, &prior, 5.0e4).is_none());
+        assert!(k.own_series(place.subject(), Band::V).unwrap().is_empty());
     }
 
     /// One place gives a direction; moving between looks gives a distance.
@@ -1018,7 +1222,7 @@ mod tests {
         let truth = sky.stars()[0].position_ly;
         let mut k = Knowledge::new(Witness(1));
         let mut o = Observatory::default();
-        o.take_up(Duty::Stare(id), 0.0);
+        o.take_up(Duty::stare(id), 0.0);
         for step in 1..=6 {
             let t = step as f64 * 2.0e4;
             o.tick(&mut sky, None, &mut k, at(DVec3::Z * 0.02 * step as f64), t);

@@ -313,10 +313,13 @@ frame the placeholders come back, and nothing is left over.
   later. Knowing one step, it stands in a missing parent from only the step's two ends, so a part
   hanging from one the round has not built yet is not drawn. `refit_hull` draws that frame over the
   craft's real hull as it draws the player's (R15), under the craft's own root, so it is placed and
-  rolled as its hull is. Its drones are not drawn yet (R16).
-- Drones are placed in the ship's frame directly rather than under the placeholders' root, which is
-  gone while the hull meshes draw; under `--demo refit` since R8 they had not been drawn at all. Their
-  clock is the round's, from its start, in the game as in the demo.
+  rolled as its hull is. Its drones (R16) are drawn from the same frame, under the same root, on a
+  clock that is the time its light left, counted from when its swarm was spawned.
+- The player's drones are placed in the ship's frame directly rather than under the placeholders' root,
+  which is gone while the hull meshes draw; under `--demo refit` since R8 they had not been drawn at
+  all. Their clock is the round's, from its start, in the game as in the demo.
+
+![One client watching another's applied round, and closer: its drones at the frontier of the growing hull](../images/drones-other-craft.jpg)
 
 `--apply` pins the view back to the world once the round is under way, so a real refit can be
 photographed where it is drawn. From R15 it draws another craft's round too, light-delayed:
@@ -354,14 +357,21 @@ without reshuffling the rest. A working drone takes a new target every trip, swi
 docked. Haze is a mote's light spread over a disc about the spacing between drones, and never
 narrower than a few pixels, because a quad under a pixel lands on no pixel center and sparkles. The
 light is conserved, so the haze has the swarm's true brightness per pixel, as the hull does, and a
-sparse swarm makes a faint haze. The clock is seconds since the refit round began (R4's `t`), or
-since the view was spawned when idle. The host takes that difference in `f64` and only then narrows
+sparse swarm makes a faint haze. The player's clock is seconds since the refit round began (R4's
+`t`), or since the view was spawned when idle. Another craft's is the time its light left, counted
+from when its swarm was spawned, so its traffic does not restart with the round: the client never
+learns when that began. The host takes that difference in `f64` and only then narrows
 it to the shader's `f32`, which resolves a clock since J2000 only to seconds.
 `crates/lc-client/examples/drones_void.rs` photographs it.
 
-On the player's ship (`lc_client::drones`), what the material is told is a pure function of R4's
-`Frame`. The count is `PARTICLES_PER_M3` = 10⁻³ per m³ of drone part, 785 on the starting ship,
-capped at `MAX_DRONES` = 8192 quads, since the vertex shader runs over all of them every frame.
+What the material is told (`lc_client::drones`) is a pure function of R4's `Frame`: the player's
+from its `Refit`, another craft's from `refit_hull::buildings`, the step its light shows. Each other
+craft has a swarm of its own, seeded by its id so no two move in step, and none while it has no round.
+Its mesh is the population rounded up to a power of two, shared by crafts of a size, rather than the
+player's full cap, and a craft spanning fewer than 24 pixels draws none: below that its haze, never
+narrower than a few pixels, would be wider than the craft, and no traffic is computed for it.
+
+The count is `PARTICLES_PER_M3` = 10⁻³ per m³ of drone part, 785 on the starting ship, capped at `MAX_DRONES` = 8192 quads, since the vertex shader runs over all of them every frame.
 Past the cap a mote stands for several drones: a fixed share of the width of the cube of drone part
 it stands for, with the rest of their light in its brightness. Widening it enough to carry all the
 light in area drew a GSV's swarm as a few hundred blobs. Docks are points just off the drone parts' surfaces, where no other

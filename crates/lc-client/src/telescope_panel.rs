@@ -9,7 +9,7 @@ use bevy_egui::egui;
 use em_spectra::presets;
 use lc_world::knowledge::Distance;
 use lc_world::knowledge::conclusion::Kind;
-use lc_world::knowledge::survey::Duty;
+use lc_world::knowledge::survey::{Duty, Gaze};
 use lc_world::sky::StarId;
 
 use crate::action::Action;
@@ -199,9 +199,15 @@ fn duty(
         Duty::Idle => {
             ui.label("Telescope idle").on_hover_text("Nothing is being learned.");
         }
-        Duty::Stare(id) => {
+        Duty::Stare(Gaze::Star(id)) => {
             ui.label(format!("Observing {}", game.name_of(*id)))
                 .on_hover_text("The whole exposure on one star.");
+        }
+        Duty::Stare(Gaze::Craft(id)) => {
+            ui.label(format!("Observing ship {id}"));
+        }
+        Duty::Stare(Gaze::Place(_)) => {
+            ui.label("Observing a place");
         }
         Duty::Sweep(sweep) => {
             let (passes, fraction) = sweep.progress(now);

@@ -971,7 +971,7 @@ pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lit, Shade, Spectrum, 
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
-pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
+pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, Gaze, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
 
 pub use radio::{
     ACK_DEPTH, Aim, Body, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
@@ -1460,6 +1460,10 @@ mod tests {
         Outbound::Observing { duty: Duty::Survey { star: 11, started_s: 5.0 }, integration_s: 2.0e3 }
     }
 
+    fn staring() -> Outbound {
+        Outbound::Observing { duty: Duty::Stare { at: Gaze::Place([1, -2, 3]) }, integration_s: 2.0e3 }
+    }
+
     fn learned() -> Outbound {
         Outbound::Learned { report: b"{}".to_vec() }
     }
@@ -1568,6 +1572,7 @@ mod tests {
             ("Order::NameIt", encode(&name_it()), golden::NAME_IT),
             ("Outbound::Observing", encode(&observing()), golden::OBSERVING),
             ("Outbound::Observing (survey)", encode(&surveying()), golden::SURVEYING),
+            ("Outbound::Observing (stare at a place)", encode(&staring()), golden::STARING),
             ("Outbound::Learned", encode(&learned()), golden::LEARNED),
             ("Order::Refit", encode(&refit()), golden::REFIT),
             ("Order::FieldMode", encode(&field_mode()), golden::FIELD_MODE),
@@ -1677,7 +1682,9 @@ mod tests {
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NothingNew },
             Outbound::Learned { report: b"{}".to_vec() },
-            Outbound::Observing { duty: Duty::Stare { star: 3 }, integration_s: 1.0e4 },
+            Outbound::Observing { duty: Duty::stare(3), integration_s: 1.0e4 },
+            Outbound::Observing { duty: Duty::Stare { at: Gaze::Place([1, -2, 3]) }, integration_s: 1.0e4 },
+            Outbound::Observing { duty: Duty::Stare { at: Gaze::Craft(7) }, integration_s: 1.0e4 },
             Outbound::Observing { duty: Duty::Idle, integration_s: 0.0 },
             Outbound::AutoAcking { ship_id: ShipId(42), with: vec![ShipId(7), ShipId(9)] },
             Outbound::AutoAcking { ship_id: ShipId(42), with: Vec::new() },
