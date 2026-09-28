@@ -35,7 +35,7 @@ pub enum Key {
 #[derive(Component)]
 pub struct MapCone(Key);
 
-/// One mesh per shape, which a balance fixes.
+/// One mesh per shape: a balance fixes the drive's, and beams' spreads are rounded to a few.
 #[derive(Default)]
 pub(crate) struct Held {
     material: Option<Handle<MapLineMaterial>>,
@@ -116,7 +116,11 @@ pub(crate) fn lay_cones(
     let here_ly = game.0.ship.motion.position_ly;
     // Past the view on any zoom, so a line back along a bearing leaves the picture.
     let reach_m = 4.0 * frame.eye_ly.distance(here_ly) * M_PER_LY;
-    let beams = crate::emit_panel::on_map(&uplink.beams, here_ly, game.0.coordinate_time_s(), reach_m);
+    let boost = match &game.0.ship.motion.motive {
+        lc_world::motion::Motive::Boosting(boost) => Some(boost),
+        _ => None,
+    };
+    let beams = crate::emit_panel::on_map(&uplink.beams, here_ly, boost, game.0.coordinate_time_s(), reach_m);
     let cones: Vec<(Key, &Drawn)> = exhausts
         .cones
         .iter()

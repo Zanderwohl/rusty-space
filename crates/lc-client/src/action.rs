@@ -172,8 +172,7 @@ pub enum Action {
     /// Give up a standing intercept, with no further corrections: the drive is cut and the ship
     /// keeps whatever velocity it has.
     BreakOff,
-    /// An [`lc_proto::Order::Emit`], as the emit window built it.
-    Emit(lc_proto::Order),
+    Emit(crate::emit_panel::Emission),
     /// Put out whatever this ship has lit.
     PutOut,
 
@@ -610,9 +609,9 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Send(lc_proto::Order::BreakOff));
             }
         }
-        Action::Emit(order) => {
-            if session.remote && matches!(order, lc_proto::Order::Emit { .. }) {
-                effects.push(Effect::Send(order));
+        Action::Emit(emission) => {
+            if session.remote {
+                effects.push(Effect::Send(emission.order()));
             }
         }
         Action::PutOut => {

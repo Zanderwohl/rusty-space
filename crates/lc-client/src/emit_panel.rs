@@ -7,9 +7,9 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 use glam::DVec3;
-use lc_proto::{Aim, Apertures, Order, Refusal, ShipId, Shade, Spectrum};
+use lc_proto::{Aim, Apertures, Order, Outbound, Refusal, ShipId, Shade, Spectrum};
 use lc_world::craft::{BEAM_PER_LENGTH, Craft};
-use lc_world::emit::{lead_uncertainty_m, received_fraction};
+use lc_world::emit::{Boost, lead_uncertainty_m, received_fraction};
 use lc_world::field::Segment;
 use lc_world::fitting::{Balance, Lit};
 use lc_world::flight::{C_M_S, G0};
@@ -182,7 +182,7 @@ pub fn preview(draft: &Draft, ship: &Craft, now_s: f64, receiver: Option<&Receiv
     let from_storage_j = source_j(ship, now_s, drawn_w, draft.duration_s).min(cost_j);
     let refusal = if ship.is_refitting(now_s) {
         Some(Refusal::Refitting)
-    } else if ship.motion.is_under_way() {
+    } else if ship.motion.is_under_way() || is_lit(ship, now_s) {
         Some(Refusal::UnderWay)
     } else if chosen.is_empty() || chosen.iter().any(|end| end.rating_w <= 0.0) {
         Some(Refusal::NoAperture)
@@ -221,6 +221,12 @@ fn landing(receiver: &Receiver, power_w: f64, spread_rad: f64) -> Landing {
     }
 }
 
+/// Whether a balanced emit is lit, which moves nothing, or a one-ended one is flying.
+pub fn is_lit(ship: &Craft, now_s: f64) -> bool {
+    let balanced = ship.fitting().is_some_and(|f| f.lit().iter().any(|l| l.from_s <= now_s && now_s < l.until_s));
+    balanced || matches!(ship.motion.motive, lc_world::motion::Motive::Boosting(b) if !b.has_ended(now_s))
+}
+
 /// Of `drawn_w` for `duration_s`, what storage pays, joules: the ship's own account run with and
 /// without it, so heat goes first exactly as the server draws it.
 fn source_j(ship: &Craft, now_s: f64, drawn_w: f64, duration_s: f64) -> f64 {
@@ -233,6 +239,24 @@ fn source_j(ship: &Craft, now_s: f64, drawn_w: f64, duration_s: f64) -> f64 {
     (dark.stored_j_at(&ship.motion, end_s) - lit.stored_j_at(&ship.motion, end_s)).max(0.0)
 }
 
+/// What the window sends: the fields of an `Order::Emit`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Emission {
+    pub aim: Aim,
+    pub apertures: Apertures,
+    pub power_w: f64,
+    pub wavelength_m: f64,
+    pub spread_rad: f64,
+    pub duration_s: f64,
+}
+
+impl Emission {
+    pub fn order(self) -> Order {
+        let Emission { aim, apertures, power_w, wavelength_m, spread_rad, duration_s } = self;
+        Order::Emit { aim, apertures, power_w, wavelength_m, spread_rad, duration_s }
+    }
+}
+
 /// Where a draft points, and what the wire calls it. `look` is the view's axis.
 pub fn aim_of(aimed: Aimed, look: DVec3) -> Aim {
     match aimed {
@@ -243,6 +267,13 @@ pub fn aim_of(aimed: Aimed, look: DVec3) -> Aim {
             Aim::Bearing(look.forward().to_array())
         }
     }
+}
+
+/// Back along `bearing`, in the azimuth range the window's field holds, `[0, 360)`: a negative
+/// azimuth would be clamped to zero there.
+pub fn aimed_back(bearing: DVec3) -> Aimed {
+    let look = crate::ui::Look::aimed_at(bearing).unwrap_or_default();
+    Aimed::Bearing { yaw_deg: look.yaw.to_degrees().rem_euclid(360.0), pitch_deg: look.pitch.to_degrees() }
 }
 
 /// The axis `aim` points along from `here_ly`, as this ship sees it.
@@ -274,6 +305,8 @@ pub struct Sent {
     pub apertures: Apertures,
     pub half_angle_rad: f64,
     pub power_w: f64,
+    /// Where the ship was when it was accepted.
+    pub from_ly: DVec3,
     pub from_s: f64,
     pub until_s: f64,
 }
@@ -286,6 +319,22 @@ pub struct Beams {
 }
 
 impl Beams {
+    /// What `message` says about this ship's beams, `me` being this ship.
+    pub fn fold(&mut self, message: &Outbound, me: Option<ShipId>, here_ly: DVec3, contacts: &[Contact]) {
+        match message {
+            Outbound::Accepted { ship_id, event_id, at_t, order } if me == Some(*ship_id) => match order {
+                Order::Emit { .. } => self.lit(order, *event_id, *at_t as f64 * 1.0e-6, here_ly, contacts),
+                Order::CutDrive => self.put_out(*at_t as f64 * 1.0e-6),
+                _ => {}
+            },
+            Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t } if me == Some(*ship_id) => {
+                self.illuminated(*beam, *bearing, *spectrum, *power_w, *arrive_t as f64 * 1.0e-6)
+            }
+            Outbound::Collapsed { .. } => *self = Beams::default(),
+            _ => {}
+        }
+    }
+
     /// Fold an `Illuminated`. A restatement replaces the beam's entry, zero power removes it, and
     /// one older than what is held is dropped.
     pub fn illuminated(&mut self, beam: i64, bearing: [f64; 3], spectrum: Spectrum, power_w: f64, arrive_s: f64) {
@@ -306,12 +355,14 @@ impl Beams {
     pub fn lit(&mut self, order: &Order, event_id: i64, at_s: f64, here_ly: DVec3, contacts: &[Contact]) {
         let Order::Emit { aim, apertures, power_w, spread_rad, duration_s, .. } = *order else { return };
         let Some(axis) = axis_of(&aim, here_ly, contacts) else { return };
+        self.sent.retain(|s| s.until_s > at_s);
         self.sent.push(Sent {
             event_id,
             axis,
             apertures,
             half_angle_rad: spread_rad,
             power_w,
+            from_ly: here_ly,
             from_s: at_s,
             until_s: at_s + duration_s,
         });
@@ -322,10 +373,6 @@ impl Beams {
         for sent in &mut self.sent {
             sent.until_s = sent.until_s.min(at_s);
         }
-    }
-
-    pub fn prune(&mut self, now_s: f64) {
-        self.sent.retain(|s| s.until_s > now_s);
     }
 
     /// W landing now, before absorptivity.
@@ -342,34 +389,53 @@ pub enum OnMap {
     Landing(i64),
 }
 
-/// This ship's beams as cones from `here_ly`, each as far as its light has got and no further than
-/// `reach_m`, and each beam landing here as a line `reach_m` long back along its bearing.
+/// This ship's beams as cones from where they lit, each as far as its light has got and no further
+/// than `reach_m`, and each beam landing at `here_ly` as a line `reach_m` long back along its bearing.
+///
+/// `boost` is the ship's own burn, if it is flying one: a one-ended emit lights once the nose has
+/// come about and goes out when the burn does, which the acceptance does not say.
 ///
 /// No cooking ring: its share of a cone that grows every frame would be a new mesh every frame.
-pub fn on_map(beams: &Beams, here_ly: DVec3, now_s: f64, reach_m: f64) -> Vec<(OnMap, Drawn)> {
-    let cone = |axis: DVec3, length_m: f64, half_angle_rad: f64| Drawn {
+pub fn on_map(beams: &Beams, here_ly: DVec3, boost: Option<&Boost>, now_s: f64, reach_m: f64) -> Vec<(OnMap, Drawn)> {
+    let cone = |apex_ly: DVec3, axis: DVec3, length_m: f64, half_angle_rad: f64| Drawn {
         craft: None,
-        apex_ly: here_ly,
+        apex_ly,
         aft: axis,
         length_m,
         half_angle_rad,
         cooking_m: 0.0,
     };
     let mut drawn = Vec::new();
-    for sent in beams.sent.iter().filter(|s| s.from_s <= now_s && now_s < s.until_s) {
-        let length_m = (C_M_S * (now_s - sent.from_s)).min(reach_m);
+    for sent in &beams.sent {
+        let (from_ly, from_s, until_s) = match (sent.apertures, boost) {
+            // The same instant, both ends having read it off one microsecond count.
+            (Apertures::Fore | Apertures::Aft, Some(b)) if (b.start_s - sent.from_s).abs() < 1.0e-6 => {
+                (b.state_at(b.lights_s()).0, b.lights_s(), b.out_s().min(sent.until_s))
+            }
+            _ => (sent.from_ly, sent.from_s, sent.until_s),
+        };
+        if now_s < from_s || now_s >= until_s {
+            continue;
+        }
+        let length_m = (C_M_S * (now_s - from_s)).min(reach_m);
         let mut ends = vec![(sent.axis, false)];
         if sent.apertures == Apertures::Both {
             ends.push((-sent.axis, true));
         }
         for (axis, aft) in ends {
-            drawn.push((OnMap::Sent(sent.event_id, aft), cone(axis, length_m, sent.half_angle_rad)));
+            drawn.push((OnMap::Sent(sent.event_id, aft), cone(from_ly, axis, length_m, drawn_spread(sent.half_angle_rad))));
         }
     }
     for landing in &beams.incoming {
-        drawn.push((OnMap::Landing(landing.beam), cone(landing.bearing, reach_m, 0.0)));
+        drawn.push((OnMap::Landing(landing.beam), cone(here_ly, landing.bearing, reach_m, 0.0)));
     }
     drawn
+}
+
+/// To a hundredth of a decade, so the map's meshes, one a shape, stay as few as the spreads it has
+/// drawn rather than one an emit.
+fn drawn_spread(half_angle_rad: f64) -> f64 {
+    10f64.powf((half_angle_rad.log10() * 100.0).round() / 100.0)
 }
 
 pub fn wavelength(m: f64) -> String {
@@ -426,11 +492,6 @@ pub(crate) fn emit(
     {
         draft.followed = Some(id);
         draft.aimed = Aimed::Craft(id);
-    }
-    if let Aimed::Craft(id) = draft.aimed
-        && !uplink.contacts.iter().any(|c| c.ship_id == id)
-    {
-        draft.aimed = Aimed::Reticle;
     }
 
     aim_row(ui, uplink, draft);
@@ -498,7 +559,7 @@ pub(crate) fn emit(
     ui.separator();
     show_preview(ui, &seen, receiver.as_ref(), &balance);
     ui.horizontal(|ui| {
-        let order = Order::Emit {
+        let emission = Emission {
             aim: aim_of(draft.aimed, state.0.look.forward()),
             apertures: draft.apertures,
             power_w: draft.power_w,
@@ -506,17 +567,19 @@ pub(crate) fn emit(
             spread_rad: seen.spread_rad,
             duration_s: draft.duration_s,
         };
-        if ui.add_enabled(seen.refusal.is_none() && session.remote, egui::Button::new("Emit")).clicked() {
-            ask(out, Action::Emit(order));
+        let unseen = matches!(draft.aimed, Aimed::Craft(_)) && receiver.is_none();
+        if ui.add_enabled(seen.refusal.is_none() && !unseen && session.remote, egui::Button::new("Emit")).clicked() {
+            ask(out, Action::Emit(emission));
         }
         match seen.refusal {
+            _ if unseen => ui.colored_label(hazard(), "out of sight"),
             // The shared wording is a refit's.
             Some(Refusal::UnderWay) => ui.colored_label(hazard(), "under way"),
             Some(why) => ui.colored_label(hazard(), crate::uplink::refused(why)),
             None => ui.label(""),
         };
     });
-    if !uplink.beams.sent.is_empty() && ui.button("Put out").clicked() {
+    if is_lit(&session.ship, now_s) && ui.button("Put out").clicked() {
         ask(out, Action::PutOut);
     }
 
@@ -647,17 +710,16 @@ fn incoming(ui: &mut egui::Ui, session: &crate::session::Session, uplink: &crate
     let fitting = session.ship.fitting();
     let absorptivity = fitting.map_or(1.0, |f| f.absorptivity_at(now_s));
     for landing in &uplink.beams.incoming {
-        let look = crate::ui::Look::aimed_at(landing.bearing).unwrap_or_default();
-        let (yaw_deg, pitch_deg) = (look.yaw.to_degrees(), look.pitch.to_degrees());
+        let back = aimed_back(landing.bearing);
+        let Aimed::Bearing { yaw_deg, pitch_deg } = back else { continue };
         let row = format!(
             "{yaw_deg:.1}° {pitch_deg:+.1}° · {} · {} · absorbed {}",
             band(landing.spectrum),
             watts(landing.power_w),
             watts(landing.power_w * absorptivity)
         );
-        let chosen = draft.aimed == Aimed::Bearing { yaw_deg, pitch_deg };
-        if ui.selectable_label(chosen, row).clicked() {
-            draft.aimed = Aimed::Bearing { yaw_deg, pitch_deg };
+        if ui.selectable_label(draft.aimed == back, row).clicked() {
+            draft.aimed = back;
         }
     }
     if let Some(fitting) = fitting {
@@ -731,18 +793,13 @@ mod tests {
         }
     }
 
-    fn widest_face_m(form: &Form) -> f64 {
-        let (fore, aft) = ends(form, &B).unwrap();
-        fore.diameter_m.max(aft.diameter_m)
-    }
-
     #[test]
     fn the_spread_is_never_under_the_diffraction_floor() {
         let craft = ship(two_ended(), None);
         let asked = draft(Apertures::Both, 1.0e15);
-        let floor = Transmitter::new(asked.wavelength_m, widest_face_m(&two_ended())).half_angle_rad();
+        // Each end's floor, the higher of the two: the narrower face's.
         let narrowest = ends(&two_ended(), &B).map(|(f, a)| f.diameter_m.min(a.diameter_m)).unwrap();
-        let floor = floor.max(Transmitter::new(asked.wavelength_m, narrowest).half_angle_rad());
+        let floor = Transmitter::new(asked.wavelength_m, narrowest).half_angle_rad();
         let seen = preview(&asked, &craft, 0.0, None);
         assert_eq!(seen.floor_rad, floor);
         assert_eq!(seen.spread_rad, floor, "asked for none, lit at the floor");
@@ -934,17 +991,79 @@ mod tests {
             apertures: Apertures::Both,
             half_angle_rad: 1.0e-3,
             power_w: 1.0e18,
+            from_ly: DVec3::ZERO,
             from_s: 10.0,
             until_s: 100.0,
         });
         beams.illuminated(4, [0.0, 1.0, 0.0], Spectrum::Line { wavelength_m: 1.0e-6 }, 1.0e18, 10.0);
-        let drawn = on_map(&beams, DVec3::ZERO, 12.0, 1.0e12);
+        let drawn = on_map(&beams, DVec3::ZERO, None, 12.0, 1.0e12);
         let keys: Vec<OnMap> = drawn.iter().map(|(k, _)| *k).collect();
         assert_eq!(keys, vec![OnMap::Sent(9, false), OnMap::Sent(9, true), OnMap::Landing(4)]);
         assert_eq!(drawn[0].1.length_m, 2.0 * C_M_S);
         assert_eq!((drawn[0].1.aft, drawn[1].1.aft), (DVec3::X, DVec3::NEG_X), "a balanced emit lights both ways");
         assert_eq!((drawn[2].1.aft, drawn[2].1.half_angle_rad, drawn[2].1.length_m), (DVec3::Y, 0.0, 1.0e12));
         beams.put_out(50.0);
-        assert!(on_map(&beams, DVec3::ZERO, 60.0, 1.0e12).iter().all(|(k, _)| matches!(k, OnMap::Landing(_))));
+        assert!(on_map(&beams, DVec3::ZERO, None, 60.0, 1.0e12).iter().all(|(k, _)| matches!(k, OnMap::Landing(_))));
+    }
+
+    /// A source west of +X has a negative `atan2` azimuth, which the window's field, `[0, 360)`,
+    /// would clamp to zero: aiming back must survive being shown there.
+    #[test]
+    fn aiming_back_along_a_bearing_points_at_its_source() {
+        for bearing in [DVec3::NEG_Y, DVec3::new(-1.0, -1.0, 0.3).normalize(), DVec3::new(0.2, 0.5, -0.4).normalize()] {
+            let Aimed::Bearing { yaw_deg, pitch_deg } = aimed_back(bearing) else { unreachable!() };
+            assert!((0.0..360.0).contains(&yaw_deg), "{yaw_deg} would be clamped");
+            let Aim::Bearing(sent) = aim_of(Aimed::Bearing { yaw_deg: yaw_deg.clamp(0.0, 360.0), pitch_deg }, DVec3::X) else {
+                unreachable!()
+            };
+            assert!(DVec3::from_array(sent).distance(bearing) < 1.0e-9, "{sent:?} for {bearing}");
+        }
+    }
+
+    /// A balanced emit moves nothing, so only the account says it is lit, and the server refuses a
+    /// second while it is.
+    #[test]
+    fn a_lit_balanced_emit_refuses_another() {
+        let mut craft = ship(two_ended(), None);
+        assert!(!is_lit(&craft, 5.0));
+        let mut fitting = craft.fitting().unwrap().clone();
+        fitting.light(Lit { from_s: 0.0, until_s: 10.0, power_w: 2.0e15 });
+        craft.fit(Some(fitting));
+        assert!(is_lit(&craft, 5.0) && !is_lit(&craft, 10.0));
+        assert_eq!(preview(&draft(Apertures::Both, 1.0e15), &craft, 5.0, None).refusal, Some(Refusal::UnderWay));
+    }
+
+    /// A one-ended emit is a burn: its cone starts where and when the nose has come about, and goes
+    /// out with the burn.
+    #[test]
+    fn a_one_ended_beam_lights_with_its_burn() {
+        let boost = Boost::plan(DVec3::ZERO, DVec3::ZERO, 10.0, DVec3::X, DVec3::NEG_X, 0.05, 50.0, DVec3::Y, 0.05);
+        assert!(boost.turn_s() > 1.0, "premise: the nose has to come about");
+        let mut beams = Beams::default();
+        beams.sent.push(Sent {
+            event_id: 9,
+            axis: DVec3::NEG_X,
+            apertures: Apertures::Fore,
+            half_angle_rad: 1.0e-3,
+            power_w: 1.0e18,
+            from_ly: DVec3::ZERO,
+            from_s: 10.0,
+            until_s: 1.0e6,
+        });
+        let at = |now_s| on_map(&beams, DVec3::ONE, Some(&boost), now_s, 1.0e15);
+        assert!(at(boost.lights_s() - 0.5).is_empty(), "drawn before it lit");
+        let lit = at(boost.lights_s() + 2.0);
+        assert!((lit[0].1.length_m - 2.0 * C_M_S).abs() < 1.0e-3 * C_M_S);
+        assert_eq!(lit[0].1.apex_ly, boost.state_at(boost.lights_s()).0, "from where it lit, not where the ship is");
+        assert!(at(boost.out_s() + 1.0).is_empty(), "drawn after the burn");
+    }
+
+    #[test]
+    fn beam_spreads_come_in_a_few_shapes() {
+        let drawn: std::collections::BTreeSet<u64> =
+            (0..1000).map(|i| drawn_spread(1.0e-3 * (1.0 + i as f64 * 1.0e-4)).to_bits()).collect();
+        // A tenth is 0.041 of a decade: five hundredths at most, for a thousand spreads.
+        assert!(drawn.len() <= 5, "{} meshes for a thousand spreads within 10%", drawn.len());
+        assert!((drawn_spread(0.1) / 0.1 - 1.0).abs() < 0.012);
     }
 }

@@ -395,7 +395,6 @@ impl Uplink {
             let drives = self.drives.get(&contact.ship_id).map_or(&[][..], Vec::as_slice);
             contact.reckon(system, observer_ly, now_s, drives);
         }
-        self.beams.prune(now_s);
     }
 
     fn take(&mut self) -> Vec<Outbound> {
@@ -510,6 +509,8 @@ fn fold(
     ui: &mut crate::app::Ui,
     message: Outbound,
 ) {
+    let me = uplink.joined().map(|j| j.ship_id);
+    uplink.beams.fold(&message, me, game.0.ship.motion.position_ly, &uplink.contacts);
     match message {
         Outbound::Welcome {
             client_id,
@@ -752,7 +753,6 @@ fn fold(
                     }
                 }
                 Order::CutDrive => {
-                    uplink.beams.put_out(at_s);
                     let note = match game.0.cut_drive_at(at_s) {
                         // What it says is where the ship ended up, because cutting does not
                         // stop it: it keeps its velocity and that velocity is now an orbit.
@@ -789,12 +789,8 @@ fn fold(
                 }
                 // What a mode order does to the account arrives straight after, as `Fitted`.
                 Order::FieldMode { .. } => None,
-                Order::Emit { .. } => {
-                    if uplink.joined().is_some_and(|j| j.ship_id == ship_id) {
-                        uplink.beams.lit(&order, event_id, at_s, game.0.ship.motion.position_ly, &uplink.contacts);
-                    }
-                    None
-                }
+                // Folded by `Beams::fold`.
+                Order::Emit { .. } => None,
                 Order::CancelRefit => Some("refit stopped where it was".into()),
                 // Recorded against the identifier the server minted, which is the only thing
                 // an acknowledgment will ever name it by. Not shown in the events box: that
@@ -920,16 +916,8 @@ fn fold(
             }
         }
         // The welcome to the successor follows.
-        Outbound::Collapsed { at_t, .. } => {
-            uplink.beams = Default::default();
-            ui.0.notify("The field collapsed", at_t as f64 * 1e-6)
-        }
-        Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t }
-            if uplink.joined().is_some_and(|j| j.ship_id == ship_id) =>
-        {
-            uplink.beams.illuminated(beam, bearing, spectrum, power_w, arrive_t as f64 * 1e-6)
-        }
-        // Sent once S2 is built.
+        Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed", at_t as f64 * 1e-6),
+        // Folded by `Beams::fold`; presets are sent once S2 is built.
         Outbound::Illuminated { .. } | Outbound::Presets(_) => {}
     }
 }
@@ -1870,7 +1858,7 @@ mod tests {
     fn only_beams_this_ship_sent_or_is_in_are_drawn() {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
-        let drawn = |uplink: &Uplink| crate::emit_panel::on_map(&uplink.beams, DVec3::ZERO, 1.0, 1.0e9).len();
+        let drawn = |uplink: &Uplink| crate::emit_panel::on_map(&uplink.beams, DVec3::ZERO, None, 1.0, 1.0e9).len();
         let emit = |ship_id, event_id| Outbound::Accepted {
             ship_id,
             event_id,

@@ -468,7 +468,7 @@ pub(crate) fn emit_at_selected(
     let Some(id) = ui.selected_craft.filter(|id| uplink.contacts.iter().any(|c| c.ship_id == *id)) else { return };
     *done = true;
     out.write(Requested(Action::OpenPanel(crate::ui::Panel::Emit)));
-    out.write(Requested(Action::Emit(lc_proto::Order::Emit {
+    out.write(Requested(Action::Emit(crate::emit_panel::Emission {
         aim: lc_proto::Aim::Ship(id),
         apertures: lc_proto::Apertures::Aft,
         power_w: 1.0e18,

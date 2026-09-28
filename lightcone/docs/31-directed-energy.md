@@ -450,21 +450,25 @@ What a Dyson swarm re-beaming starlight carries, gained or physical, is deferred
 
 - **The preview is `emit_panel::preview`**, a pure function of the draft, the ship and what is known
   of the receiver. Spread and floor are the server's: each chosen end's `Transmitter`, never under
-  either floor. Heat's share is the ship's own account run with and without the emission, so it
-  splits exactly as the server will draw it.
+  either floor. Heat's share is the ship's own account run with and without the emission: exactly
+  as the server draws a balanced emit, and for a one-ended one at its starting power from the order,
+  where the server lights it after the turn and lets its power fall with the ship's mass.
 - **What is known of a receiver** is what its light carries. Its rating and the acceleration the
   lead uncertainty assumes come from the form it was seen with: the engines' `aperture_w`, and its
   aft rating over its dry mass, the most it could do. Its shade comes from its glow, for a craft
-  seen with a form. Its room is
-  never known, and the window says so. The shadow is broadside, the most it can present, which is
-  the one [What arrives](#what-arrives) is worked for. The lead is counted from the light it was last
-  seen by, so a stale sighting shows a wider circle than a fresh one at the same range.
+  seen with a form. Its room is never known, and the window says so. The shadow is broadside, the
+  most it can present, which is the one [What arrives](#what-arrives) is worked for. The lead is
+  counted from the light it was last seen by, so a stale sighting shows a wider circle than a fresh
+  one at the same range. A craft that drops out of sight stays the aim, and the window will not send
+  at it.
 - **The warning** is what it would absorb past its rating, taking an unknown shade as Black.
 - **The aim** at the reticle is sent as a bearing along the view's axis. A row of the incoming list
   aims back along it.
-- **Put out** is `CutDrive`, which puts out whatever is lit.
-- **On the map** a beam's cone is drawn as far as its light has got, through the drive cones'
-  machinery, without the cooking ring. A beam landing here is a line back along its bearing, past
+- **Put out** is `CutDrive`, which puts out whatever is lit. Whether anything is lit is read from the
+  ship's own account and motive, so it survives a reconnect.
+- **On the map** a beam's cone is drawn from where it lit, as far as its light has got, through the
+  drive cones' machinery, without the cooking ring. A one-ended emit lights when its burn's nose has
+  come about and goes out with the burn. A beam landing here is a line back along its bearing, past
   the edge of the view, since how far away its source is is not known.
 
 ## Where it goes
