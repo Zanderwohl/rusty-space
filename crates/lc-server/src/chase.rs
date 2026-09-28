@@ -19,6 +19,7 @@ use lc_world::consort;
 use lc_world::courtesy::{Arrival, Manners};
 use lc_world::escort;
 use lc_world::fitting::Balance;
+use lc_world::glow::Glow;
 use lc_world::motion::{LIGHT_US_PER_LY, Motive};
 use lc_world::pursuit::{self, Closeness, Refused};
 use lc_world::system::LOCAL_SHELL_LY;
@@ -193,6 +194,7 @@ pub fn sighting(
 pub fn contacts(
     fleet: &Fleet,
     clients: &HashMap<ClientId, Connected>,
+    balance: &Balance,
     now_t: i64,
 ) -> HashMap<ClientId, Vec<Cleared<Presence>>> {
     let mut out = HashMap::new();
@@ -228,7 +230,7 @@ pub fn contacts(
                 // in the shape it had then, and a new one only once that light arrives.
                 form: then.map(|then| (&*then.form).into()).unwrap_or_default(),
                 building: then.and_then(|then| then.underway(sighted.emitted_s)).map(Into::into),
-                glow: None,
+                glow: Some(craft.glow_at(sighted.emitted_s).unwrap_or_else(|| Glow::unfitted(balance)).into()),
                 glare: None,
             };
             match Cleared::<Presence>::clear(presence, now_t) {
@@ -378,4 +380,80 @@ pub fn decide(
         }
     }
     decided
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::DVec3;
+    use lc_proto::{ClientId, Outbound, Shade};
+    use lc_world::field::Burst;
+
+    use super::*;
+    use crate::journal::Memory;
+    use crate::server::Server;
+    use crate::transport::Loopback;
+    use crate::world::still;
+
+    /// Two light-hours, in light-microseconds.
+    const APART_US: f64 = 7_200.0e6;
+
+    fn glows(said: &[Outbound], of: ShipId) -> Vec<lc_proto::Glow> {
+        said.iter()
+            .flat_map(|m| match m {
+                Outbound::Present(list) => list.iter().map(|c| c.get()).filter(|p| p.ship_id == of).filter_map(|p| p.glow).collect(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// **A field is news.** A vent heats the field at once; a watcher two light-hours off is shown the
+    /// old temperature on every tick until the vent's light arrives, and the new one after.
+    #[tokio::test]
+    async fn a_glow_arrives_with_the_light_and_not_before() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        let (owner, watcher) = (ClientId(1), ClientId(2));
+        let mut hot = still(ShipId(1), DVec3::new(APART_US, 0.0, 0.0));
+        server.fit_new(&mut hot);
+        server.admit(owner, hot, 0.0);
+        server.admit(watcher, still(ShipId(2), DVec3::ZERO), 0.0);
+        server.tick(&mut wire).await.unwrap();
+        let [.., before] = glows(&wire.take(watcher), ShipId(1))[..] else { panic!("no glow before the vent") };
+
+        let vent_t = server.now_t();
+        let craft = server.fleet.get_mut(CraftId(1)).unwrap();
+        let vent_j = 0.2 * craft.fitting().unwrap().field().heat_max_j();
+        craft.adjust(vent_t as f64 * 1.0e-6, |fitting| fitting.take_burst(Burst::Vent(vent_j)));
+        assert!(craft.glow_at(vent_t as f64 * 1.0e-6).unwrap().temperature_k > 1.2 * before.temperature_k, "premise: the vent heats it");
+
+        let arrives = vent_t + APART_US as i64;
+        let mut hot_at = None;
+        for _ in 0..200 {
+            let previous_t = server.now_t();
+            server.tick(&mut wire).await.unwrap();
+            let Some(glow) = glows(&wire.take(watcher), ShipId(1)).last().copied() else { continue };
+            assert_eq!(glow.shade, before.shade);
+            if glow.temperature_k > 1.1 * before.temperature_k {
+                hot_at = Some((previous_t, server.now_t()));
+                break;
+            }
+            assert!(server.now_t() < arrives, "still cold at {} after the light landed at {arrives}", server.now_t());
+            assert!((glow.temperature_k / before.temperature_k - 1.0).abs() < 0.01, "{glow:?} against {before:?}");
+        }
+        let (previous_t, hot_at) = hot_at.expect("the vent's light never arrived");
+        assert!(hot_at >= arrives, "hot at {hot_at}, before the light landed at {arrives}");
+        assert!(previous_t < arrives, "and on the tick it landed");
+    }
+
+    #[tokio::test]
+    async fn a_craft_with_no_field_is_shown_the_starting_one_at_rest() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        server.admit(ClientId(1), still(ShipId(1), DVec3::new(1.0e6, 0.0, 0.0)), 0.0);
+        server.admit(ClientId(2), still(ShipId(2), DVec3::ZERO), 0.0);
+        server.fleet.get_mut(CraftId(1)).unwrap().fit(None);
+        server.tick(&mut wire).await.unwrap();
+        let [.., glow] = glows(&wire.take(ClientId(2)), ShipId(1))[..] else { panic!("no glow") };
+        assert_eq!(glow, lc_proto::Glow { temperature_k: Balance::DEFAULT.field_idle_k, shade: Shade::Clear });
+    }
 }

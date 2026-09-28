@@ -1222,7 +1222,7 @@ impl<J: Journal> Server<J> {
     /// there is not one.
     async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
-        let mut contacts = chase::contacts(&self.fleet, &self.clients, now);
+        let mut contacts = chase::contacts(&self.fleet, &self.clients, &self.balance, now);
         let ids: Vec<ClientId> = self.clients.keys().copied().collect();
 
         let mut reading: Vec<(ClientId, ShipId, i64)> = Vec::with_capacity(ids.len());
