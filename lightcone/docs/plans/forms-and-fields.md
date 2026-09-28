@@ -800,9 +800,9 @@ graph LR
 
 ### C8 · Emit window
 
-- status: active card "C8 · Emit window"
+- status: done #131
 - needs: E3
-- touches: `crates/lc-client/src/emit_panel.rs`, `crates/lc-client/src/map.rs`
+- touches: `crates/lc-client/src/emit_panel.rs`, `crates/lc-client/src/map.rs`, `crates/lc-client/src/map_cone.rs`, `crates/lc-client/src/uplink.rs`, `crates/lc-client/src/panels.rs`, `crates/lc-client/src/action.rs`, `crates/lc-client/src/ui.rs`, `crates/lc-client/src/input.rs`, `crates/lc-client/src/hud.rs`, `crates/lc-client/src/dev.rs`, `crates/lc-client/src/entry.rs`, `crates/lc-client/src/app.rs`, `crates/lc-client/src/lib.rs`, `lightcone/docs/31-directed-energy.md`, `AGENTS.md`
 - read: 31 §Client
 - deliver: the emit window on `E` with its preview of spread, spot, lead uncertainty, fraction arriving, recoil and source; the incoming list; beams on the map.
 - done when: the preview is a pure function tested without a window.
