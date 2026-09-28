@@ -44,7 +44,7 @@ pub enum Panel {
     Tuning,
     /// Scenes to stage. Development only, and it does nothing without a shard started for it.
     Scenarios,
-    /// Rebuilding the ship: how many of each module, and the hull.
+    /// The ledger: what the ship holds, and the round under way.
     Refit,
     /// Development only: things no player can do, such as being handed energy.
     DevActions,

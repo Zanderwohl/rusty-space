@@ -1,6 +1,6 @@
 # The field
 
-Every ship is wrapped in a field. It is the collector, the radiator and the shield, and when it
+Every ship sits inside a field. It is the collector, the radiator and the shield, and when it
 fails, the ship is gone and the whole system sees it happen.
 
 **Status: built.** The closed forms are `lc_world::field`, with their anchors derived in
