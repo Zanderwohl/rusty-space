@@ -357,6 +357,16 @@ pub struct SkyCamera;
 /// telescope's shot is taken from the ship, and would otherwise be of its hull.
 pub const SKY_ONLY_LAYER: usize = 3;
 
+/// What a craft's hull, field and exhaust are drawn on, `None` being the player's own. Another
+/// craft's are the telescope's too, so a beauty shot can be of it.
+pub fn craft_layers(craft: Option<lc_proto::ShipId>) -> bevy::camera::visibility::RenderLayers {
+    use bevy::camera::visibility::RenderLayers;
+    match craft {
+        None => RenderLayers::layer(SKY_ONLY_LAYER),
+        Some(_) => RenderLayers::from_layers(&[SKY_ONLY_LAYER, crate::beauty::SHOT_LAYER]),
+    }
+}
+
 /// Camera near plane, in render units of one astronomical unit. Fifteen meters.
 ///
 /// Anything nearer than this is clipped, so it is the closest a ship can come to a surface.

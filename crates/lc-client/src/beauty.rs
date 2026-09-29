@@ -1,9 +1,12 @@
 //! Beauty shots: every [`PERIOD_S`] of real time, a photograph through the ship's own telescope
-//! of something worth looking at, shown in a square beside the map's. Experimental, and off
-//! unless asked for. `lightcone/docs/28-beauty-shots.md` is the design.
+//! of something worth looking at, shown in a square beside the map's, and at once for anything
+//! queued ahead of the rotation. Experimental, and off unless asked for.
+//! `lightcone/docs/28-beauty-shots.md` is the design.
 //!
 //! The camera draws the sky's own scene from the render origin, one frame per shot. The doc
 //! says what the two views cannot share and where each difference is handled.
+
+use std::collections::{HashSet, VecDeque};
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{Exposure, Hdr, RenderTarget};
@@ -14,7 +17,8 @@ use bevy::render::render_resource::{TextureFormat, TextureUsages};
 use bevy_egui::{EguiContexts, EguiUserTextures, egui};
 use em_render::render_space::sim_to_render;
 use glam::DVec3;
-use lc_world::knowledge::survey::Duty;
+use lc_proto::ShipId;
+use lc_world::knowledge::survey::{Duty, FIELD_RAD as PLATE_FIELD_RAD};
 use lc_world::knowledge::{BodyId, Subject as Known};
 use lc_world::motion::Motive;
 use lc_world::sky::StarId;
@@ -22,6 +26,10 @@ use lc_world::sky::StarId;
 use crate::app::{Game, Ui};
 use crate::session::Session;
 use crate::system::{Drawable, M_PER_LY};
+use crate::uplink::Contact;
+
+mod show;
+pub use show::draw;
 
 /// Drawn by the telescope and nothing else: a sphere for a body the sky still shows as a point.
 pub const SHOT_LAYER: usize = 4;
@@ -79,12 +87,18 @@ const MIN_RING_OPACITY: f32 = 0.05;
 const RINGSIDE_RADII: f64 = 6.0;
 /// A star's disc is almost never resolved, so this is the patch of sky around it.
 const STAR_FIELD_RAD: f64 = 0.01;
+/// Another craft this near the eye is in the rotation.
+const NEAR_CRAFT_M: f64 = 1.0e4;
 
 /// Where a shot of the sky puts the star it is metered on, in stops over the top of the window,
 /// so it draws with its glare rather than as a dim dot.
 const POINT_ABOVE: f32 = 8.0;
 /// How far a shot's exposure may move from the view's, in stops.
 const MAX_STOPS: f32 = 24.0;
+/// A survey plate puts the star this far up every star's brightness from here at the top of the
+/// window, whatever the field holds. The brighter few bloom; the rest fall across the
+/// starfield's `POINT_STOPS` below it.
+const PLATE_PERCENTILE: f32 = 0.95;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Subject {
@@ -110,6 +124,10 @@ pub enum Subject {
     Star(StarId),
     /// The sweep's field being exposed now.
     Field { center: DVec3, field_rad: f64, index: u64, of: u64 },
+    /// A collapse whose light has just arrived, in a survey plate's field around it.
+    Collapse(DVec3),
+    /// Another craft within [`NEAR_CRAFT_M`].
+    Craft(ShipId),
 }
 
 impl Subject {
@@ -127,6 +145,8 @@ impl Subject {
             Self::Neighbor(_) => "neighbor",
             Self::Star(_) => "star",
             Self::Field { .. } => "field",
+            Self::Collapse(_) => "collapse",
+            Self::Craft(_) => "craft",
         }
     }
 }
@@ -163,20 +183,28 @@ pub struct BeautyCamera;
 #[derive(Clone, Debug)]
 enum Phase {
     Waiting { at_s: f32 },
-    Aiming { subject: Subject, frames: u32, since_s: f32 },
-    Developing { frames: u32, caption: String, spikes: Option<Vec3>, kind: &'static str },
+    /// `queued` is a subject taken from [`Beauty::queue`], which nothing else interrupts.
+    Aiming { subject: Subject, frames: u32, since_s: f32, queued: bool },
+    Developing { frames: u32, caption: String, spikes: Option<Vec3>, caption_top: bool },
 }
 
 #[derive(Resource)]
 pub struct Beauty {
     phase: Phase,
     taken: u64,
+    /// Which of the rotation's subjects is next.
+    turn: u64,
+    /// Taken ahead of the rotation, as soon as the shutter is free.
+    queue: VecDeque<Subject>,
+    /// Collapses already queued, by event.
+    collapses: HashSet<i64>,
     /// Two, so the one on show is never the one being drawn into.
     images: [Handle<Image>; 2],
     textures: [egui::TextureId; 2],
     /// Which image is on show, and since when (real seconds), for the fade.
     front: Option<(usize, f32)>,
     caption: String,
+    caption_top: bool,
     spikes: Option<Vec3>,
     /// Physical pixels across the square, as the interface last laid it out.
     side_px: u32,
@@ -250,10 +278,14 @@ fn setup(
     commands.insert_resource(Beauty {
         phase: Phase::Waiting { at_s: 0.0 },
         taken: 0,
+        turn: 0,
+        queue: VecDeque::new(),
+        collapses: HashSet::new(),
         images,
         textures,
         front: None,
         caption: String::new(),
+        caption_top: false,
         spikes: None,
         side_px: DEFAULT_SIDE_PX,
         idle: false,
@@ -278,6 +310,8 @@ fn shoot(
     game: Res<Game>,
     bodies: Res<crate::starfield::Bodies>,
     eye: Res<crate::hull::Eye>,
+    uplink: Res<crate::uplink::Uplink>,
+    wrecks: Res<crate::field::Wrecks>,
     dev: Res<crate::dev::DevEntry>,
     mut beauty: ResMut<Beauty>,
     mut shot_body: ResMut<ShotBody>,
@@ -292,42 +326,69 @@ fn shoot(
     let (mut camera, mut transform, mut projection, mut target, mut exposure) =
         camera.into_inner();
     let now = time.elapsed_secs();
+    let held_on = |s: &Subject| dev.beauty_kind.as_deref().is_none_or(|kind| s.kind() == kind);
+    // Noted while the shots are off too, so turning them on does not replay old news.
+    let arrived: Vec<(i64, DVec3)> = wrecks.arrived().collect();
+    beauty.collapses.retain(|id| arrived.iter().any(|(e, _)| e == id));
+    for (event, at_ly) in arrived {
+        if beauty.collapses.insert(event) && held_on(&Subject::Collapse(at_ly)) {
+            beauty.queue.push_back(Subject::Collapse(at_ly));
+        }
+    }
     // From the ship. Watching from another craft, the eye is somewhere the ship is not.
     if !ui.beauty_shots || eye.anchored.is_some() {
         if camera.is_active {
             camera.is_active = false;
         }
         shot_body.name = None;
+        beauty.queue.clear();
         beauty.phase = Phase::Waiting { at_s: now + FIRST_S };
         return;
     }
 
-    if let Phase::Waiting { at_s } = beauty.phase {
+    let interruptible = match beauty.phase {
+        Phase::Waiting { .. } => true,
+        Phase::Aiming { queued, .. } => !queued,
+        Phase::Developing { .. } => false,
+    };
+    if interruptible && let Some(subject) = beauty.queue.pop_front() {
+        beauty.idle = false;
+        beauty.phase = Phase::Aiming { subject, frames: SETTLE_FRAMES, since_s: now, queued: true };
+    } else if let Phase::Waiting { at_s } = beauty.phase {
         if now < at_s {
             return;
         }
         // Seeded from the clock as well, so two sessions do not visit the neighbors in step.
         let seed = beauty.taken ^ time.elapsed().as_nanos() as u64;
-        let mut list = subjects(&game.0, &bodies.drawn, eye.at_ly, seed);
-        if let Some(kind) = dev.beauty_kind.as_deref() {
-            list.retain(|s| s.kind() == kind);
-        }
+        let mut list = subjects(&game.0, &bodies.drawn, &uplink.contacts, eye.at_ly, seed);
+        list.retain(held_on);
         beauty.idle = list.is_empty();
-        let Some(subject) = list.get((beauty.taken % list.len().max(1) as u64) as usize) else {
+        let Some(subject) = list.get((beauty.turn % list.len().max(1) as u64) as usize) else {
             beauty.phase = Phase::Waiting { at_s: now + RETRY_S };
             return;
         };
-        beauty.phase =
-            Phase::Aiming { subject: subject.clone(), frames: SETTLE_FRAMES, since_s: now };
+        beauty.turn += 1;
+        beauty.phase = Phase::Aiming {
+            subject: subject.clone(),
+            frames: SETTLE_FRAMES,
+            since_s: now,
+            queued: false,
+        };
     }
 
     match beauty.phase.clone() {
         Phase::Waiting { .. } => {}
-        Phase::Aiming { subject, frames, since_s } => {
+        Phase::Aiming { subject, frames, since_s, queued } => {
             let resolution = game.optics().band().map_or(0.0, |b| game.optics().resolution_rad(b));
-            let Some(shot) =
-                aim(&subject, &game.0, &bodies.drawn, eye.at_ly, resolution, beauty.side_px)
-            else {
+            let Some(shot) = aim(
+                &subject,
+                &game.0,
+                &bodies.drawn,
+                &uplink.contacts,
+                eye.at_ly,
+                resolution,
+                beauty.side_px,
+            ) else {
                 shot_body.name = None;
                 beauty.phase = Phase::Waiting { at_s: now + RETRY_S };
                 return;
@@ -342,7 +403,7 @@ fn shoot(
                 }
             }
             if frames > 0 {
-                beauty.phase = Phase::Aiming { subject, frames: frames - 1, since_s };
+                beauty.phase = Phase::Aiming { subject, frames: frames - 1, since_s, queued };
                 return;
             }
             let baked = shot.body.as_deref().is_none_or(|name| surfaces.ready(name, &bakes));
@@ -374,20 +435,22 @@ fn shoot(
                 frames: DEVELOP_FRAMES,
                 caption: shot.caption,
                 spikes: shot.spikes,
-                kind: subject.kind(),
+                // The horizon shot has the planet across the bottom of the frame.
+                caption_top: matches!(subject, Subject::Horizon(_)),
             };
         }
-        Phase::Developing { frames, caption, spikes, kind } => {
+        Phase::Developing { frames, caption, spikes, caption_top } => {
             if camera.is_active {
                 camera.is_active = false;
             }
             if frames > 0 {
-                beauty.phase = Phase::Developing { frames: frames - 1, caption, spikes, kind };
+                beauty.phase = Phase::Developing { frames: frames - 1, caption, spikes, caption_top };
                 return;
             }
             let back = beauty.front.map_or(0, |(i, _)| 1 - i);
             beauty.front = Some((back, now));
             beauty.caption = caption;
+            beauty.caption_top = caption_top;
             beauty.spikes = spikes;
             beauty.taken += 1;
             shot_body.name = None;
@@ -401,7 +464,13 @@ fn shoot(
 ///
 /// Anything that would come out mostly hidden or mostly dark is left out; see [`MAX_COVERED`]
 /// and [`MIN_LIT`].
-pub fn subjects(session: &Session, drawn: &[Drawable], eye_ly: DVec3, seed: u64) -> Vec<Subject> {
+pub fn subjects(
+    session: &Session,
+    drawn: &[Drawable],
+    contacts: &[Contact],
+    eye_ly: DVec3,
+    seed: u64,
+) -> Vec<Subject> {
     let now = session.coordinate_time_s();
     let system = session.system.as_deref();
     let mut out = Vec::new();
@@ -484,6 +553,14 @@ pub fn subjects(session: &Session, drawn: &[Drawable], eye_ly: DVec3, seed: u64)
             }
         }
     }
+
+    let mut near: Vec<(ShipId, f64)> = contacts
+        .iter()
+        .map(|c| (c.ship_id, c.position_ly.distance(eye_ly) * M_PER_LY))
+        .filter(|(_, distance)| *distance < NEAR_CRAFT_M)
+        .collect();
+    near.sort_by(|a, b| a.1.total_cmp(&b.1));
+    out.extend(near.into_iter().map(|(id, _)| Subject::Craft(id)));
 
     for body in drawn {
         let Some(rings) = body.rings else { continue };
@@ -602,6 +679,7 @@ pub fn aim(
     subject: &Subject,
     session: &Session,
     drawn: &[Drawable],
+    contacts: &[Contact],
     eye_ly: DVec3,
     resolution_rad: f64,
     max_side_px: u32,
@@ -678,16 +756,27 @@ pub fn aim(
             let caption = format!("field {} of {of}", index + 1);
             (forward, upright(forward, DVec3::Z), *field_rad, None, caption)
         }
+        Subject::Collapse(at_ly) => {
+            let forward = (*at_ly - eye_ly).try_normalize()?;
+            (forward, upright(forward, DVec3::Z), PLATE_FIELD_RAD, None, "collapse".into())
+        }
+        Subject::Craft(id) => {
+            let craft = contacts.iter().find(|c| c.ship_id == *id)?;
+            let (forward, field) = framed(to_m(craft.position_ly), 0.5 * craft.length_m);
+            (forward, upright(forward, DVec3::Z), field, None, craft.name.clone())
+        }
     };
     let (field_rad, side_px) = fidelity(field_rad, resolution_rad, max_side_px);
     let metered = match subject {
         Subject::Star(id) => session.star(*id).and_then(|star| shaded(session, star)),
-        Subject::Destination(_) | Subject::Field { .. } => brightest(session, forward, field_rad),
+        Subject::Destination(_) => brightest(session, forward, field_rad),
         _ => None,
     };
-    let stops = metered
-        .as_ref()
-        .map_or(0.0, |star| (POINT_ABOVE - star.stops).clamp(-MAX_STOPS, MAX_STOPS));
+    let stops = match subject {
+        Subject::Field { .. } | Subject::Collapse(_) => plate(session).map_or(0.0, |top| -top),
+        _ => metered.as_ref().map_or(0.0, |star| POINT_ABOVE - star.stops),
+    }
+    .clamp(-MAX_STOPS, MAX_STOPS);
     let spikes = matches!(subject, Subject::Star(_)).then(|| metered.map(|s| s.chroma)).flatten();
     Some(Shot { forward, up, field_rad, side_px, body: sphere, stops, spikes, caption })
 }
@@ -708,6 +797,19 @@ fn brightest(session: &Session, forward: DVec3, field_rad: f64) -> Option<crate:
         .filter(|s| session.apparent_dir(s).dot(forward) > reach)
         .filter_map(|s| shaded(session, s))
         .max_by(|a, b| a.stops.total_cmp(&b.stops))
+}
+
+/// Where a survey plate's window sits, in stops over the view's: see [`PLATE_PERCENTILE`].
+///
+/// Not metered on the field. A two-degree field holds a star or two, so metering on its brightest
+/// set each plate by that one and left the rest black, and one holding none kept the view's
+/// window, which near a star is twenty stops over everything interstellar.
+fn plate(session: &Session) -> Option<f32> {
+    let mut stops: Vec<f32> =
+        session.stars.iter().filter_map(|s| shaded(session, s)).map(|s| s.stops).collect();
+    stops.sort_by(f32::total_cmp);
+    let at = ((stops.len().checked_sub(1)?) as f32 * PLATE_PERCENTILE).round() as usize;
+    Some(stops[at])
 }
 
 /// The field actually taken, widened to hold [`MIN_SIDE_PX`] resolution elements, and as many
@@ -790,112 +892,6 @@ fn upright(forward: DVec3, pole: DVec3) -> DVec3 {
     (pole - forward * pole.dot(forward))
         .try_normalize()
         .unwrap_or_else(|| forward.any_orthonormal_vector())
-}
-
-/// The square beside the map's, in the same row and the same size.
-fn square(viewport: egui::Rect) -> egui::Rect {
-    let corner = crate::map_panel::corner(viewport);
-    let rect = corner.translate(egui::vec2(corner.width() + crate::map_panel::CORNER_INSET, 0.0));
-    rect.intersect(viewport.shrink(crate::map_panel::CORNER_INSET))
-}
-
-/// Show the latest photograph, faded in over the one before it.
-pub fn draw(
-    mut contexts: EguiContexts,
-    ui_state: Res<Ui>,
-    time: Res<Time<Real>>,
-    mut beauty: ResMut<Beauty>,
-) {
-    if !ui_state.beauty_shots {
-        return;
-    }
-    let Ok(ctx) = contexts.ctx_mut() else { return };
-    let rect = square(ctx.viewport_rect());
-    if !rect.is_positive() {
-        return;
-    }
-    beauty.side_px = (rect.height() * ctx.pixels_per_point()).round().max(1.0) as u32;
-    let now = time.elapsed_secs();
-    let text = crate::map_panel::color_of(em_ui::vfd::TEXT);
-    let dim = crate::map_panel::color_of(em_ui::vfd::TEXT_DIM);
-    let caption = match (&beauty.front, beauty.idle) {
-        (None, true) => "nothing to photograph".to_string(),
-        (None, false) => "focusing".to_string(),
-        (Some(_), _) => beauty.caption.clone(),
-    };
-    egui::Area::new(egui::Id::new("beauty shot"))
-        // Middle, as the map's square is: an open window covers it.
-        .order(egui::Order::Middle)
-        .fixed_pos(rect.min)
-        .show(ctx, |ui| {
-            ui.allocate_rect(rect, egui::Sense::hover());
-            let painter = ui.painter();
-            painter.rect_filled(rect, 0.0, egui::Color32::BLACK);
-            let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-            if let Some((front, since)) = beauty.front {
-                let t = ((now - since) / FADE_S).clamp(0.0, 1.0);
-                if t < 1.0 && beauty.taken > 1 {
-                    painter.image(beauty.textures[1 - front], rect, whole, egui::Color32::WHITE);
-                }
-                painter.image(beauty.textures[front], rect, whole,
-                    egui::Color32::WHITE.gamma_multiply(t));
-                if let Some(chroma) = beauty.spikes {
-                    spikes(painter, rect, chroma, t);
-                }
-            }
-            let font = egui::TextStyle::Small.resolve(ui.style());
-            let galley = painter.layout_no_wrap(caption, font, text);
-            let at = rect.left_bottom() + egui::vec2(4.0, -4.0 - galley.size().y);
-            painter.rect_filled(
-                egui::Rect::from_min_size(at, galley.size()).expand(2.0),
-                0.0,
-                egui::Color32::from_black_alpha(160),
-            );
-            painter.galley(at, galley, text);
-            painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, dim), egui::StrokeKind::Inside);
-        });
-    // Repaint through the fade; nothing else asks for a frame while the ship is still.
-    if beauty.front.is_some_and(|(_, since)| now - since < FADE_S) {
-        ctx.request_repaint();
-    }
-}
-
-/// How far a diffraction spike reaches, as a fraction of the square's side, and how wide it is
-/// at the star, in points. The glow round the star is in points too.
-const SPIKE_REACH: f32 = 0.45;
-const SPIKE_WIDTH: f32 = 1.2;
-const GLOW_RADIUS: f32 = 5.0;
-
-/// Four spikes and a glow at the middle of the frame. Drawn over the photograph because the
-/// starfield's glare is round by design; the spikes belong to this instrument.
-fn spikes(painter: &egui::Painter, rect: egui::Rect, chroma: Vec3, alpha: f32) {
-    let c = chroma.clamp(Vec3::ZERO, Vec3::ONE);
-    let color = |a: f32| {
-        egui::Color32::from_rgb((c.x * 255.0) as u8, (c.y * 255.0) as u8, (c.z * 255.0) as u8)
-            .gamma_multiply(a * alpha)
-    };
-    let middle = rect.center();
-    let reach = rect.width() * SPIKE_REACH;
-    let mut mesh = egui::Mesh::default();
-    for k in 0..4 {
-        let angle = k as f32 * std::f32::consts::FRAC_PI_2;
-        let along = egui::vec2(angle.cos(), angle.sin());
-        let across = egui::vec2(-along.y, along.x) * SPIKE_WIDTH * 0.5;
-        let base = mesh.vertices.len() as u32;
-        mesh.colored_vertex(middle + across, color(0.7));
-        mesh.colored_vertex(middle - across, color(0.7));
-        mesh.colored_vertex(middle + along * reach, color(0.0));
-        mesh.add_triangle(base, base + 1, base + 2);
-    }
-    let center = mesh.vertices.len() as u32;
-    mesh.colored_vertex(middle, color(0.9));
-    const SEGMENTS: u32 = 16;
-    for k in 0..SEGMENTS {
-        let angle = k as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
-        mesh.colored_vertex(middle + egui::vec2(angle.cos(), angle.sin()) * GLOW_RADIUS, color(0.0));
-        mesh.add_triangle(center, center + 1 + k, center + 1 + (k + 1) % SEGMENTS);
-    }
-    painter.add(egui::Shape::mesh(mesh));
 }
 
 #[cfg(test)]

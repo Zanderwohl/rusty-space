@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
@@ -272,7 +272,7 @@ pub fn draw_refit(
                             MeshMaterial3d(state.material.clone()),
                             Transform::IDENTITY,
                             NoFrustumCulling,
-                            RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+                            crate::app::craft_layers(b.craft),
                             Drawn::Working,
                             ChildOf(root),
                         ));
@@ -378,7 +378,7 @@ fn spawn(
             MeshMaterial3d(material),
             at,
             NoFrustumCulling,
-            RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+            crate::app::craft_layers(b.craft),
             drawn,
             ChildOf(root),
         ));

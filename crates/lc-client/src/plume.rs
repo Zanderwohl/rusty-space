@@ -11,7 +11,7 @@
 //! Each proxy is told where the eye is in its own space, worked out in `f64`: a render unit is an
 //! AU, and a cone is thousands of hull lengths.
 
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 use em_render::exhaust_cone_material::{
     ApertureGlowMaterial, ApertureGlowUniform, ExhaustConeMaterial, ExhaustConeUniform,
@@ -305,7 +305,7 @@ pub fn draw_exhaust(
             MeshMaterial3d(glow_materials.add(ApertureGlowMaterial { uniforms })),
             transform,
             NoFrustumCulling,
-            RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+            crate::app::craft_layers(craft),
             Glow { craft, face },
             ChildOf(root),
         ));
@@ -339,7 +339,7 @@ pub fn draw_exhaust(
             MeshMaterial3d(cone_materials.add(ExhaustConeMaterial { uniforms })),
             transform,
             NoFrustumCulling,
-            RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+            crate::app::craft_layers(craft),
             Cone(craft),
         ));
     }

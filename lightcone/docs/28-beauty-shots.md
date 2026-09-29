@@ -2,7 +2,8 @@
 
 Every ten seconds of real time, the client takes a photograph through the ship's own telescope
 of something worth looking at, and shows it in a square beside the map's. Code is
-`lc_client::beauty`.
+`lc_client::beauty`. The caption is along the bottom of the square, except on a horizon shot,
+where the planet is.
 
 Status: **experimental**, off by default. `|` (`Shift`+`\`) toggles it, and so do the
 telescope window's *Beauty shots* box and `--beauty`.
@@ -24,7 +25,15 @@ Everything that applies now, in turn, one per shot:
 | below | the same, over the day side | straight down |
 | rings | any ring system wider than 150 microradians, from far enough out to frame it whole | the rings, framed, lying level |
 | ringside | within six of its outer radii of a ring system | the nearest stretch of it, across its whole width |
+| craft | another craft within 10 km, nearest first | that craft, framed on its length |
 | neighbor | any other body wider than 150 microradians on the sky | one of them at random, framed |
+
+**Some things are queued ahead of the rotation** and taken as soon as the shutter is free, without
+waiting out the ten seconds; the rotation's next shot is ten seconds after the last one of them.
+Today that is a collapse: when its light arrives, the telescope takes a survey plate's field
+(two degrees) around it. A queued shot interrupts one still aiming at a rotation subject, but not
+one already exposed or another queued one. Collapses are noted while the shots are off too, so
+turning them on does not replay old ones.
 
 A body or star is left out when more than 70% of its disc is behind nearer bodies (or the star),
 and a body when less than 30% of its face is lit. A moonrise and a crescent are kept; a moon
@@ -70,14 +79,22 @@ views cannot share is handled where it lives:
 - **So is its exposure.** The window is placed for the whole sky, and near a star everything
   interstellar is twenty stops under it. The shot camera carries a Bevy `Exposure`, which the
   starfield reads as a ratio to the sky's (`drawn_exposure`). A star shot is metered on its star,
-  and a field or the sky ahead on the brightest star in it. Nothing else reads that ratio.
+  and the sky ahead on the brightest star in it. Nothing else reads that ratio.
+- **A survey plate is not metered on its field.** A sweep's field and a collapse's are exposed
+  alike, with the star at the 95th percentile of every star's brightness from here at the top of
+  the window: the brightest few bloom and the rest fall across the fourteen stops a point is
+  drawn over below it. Metering on the field set each plate by its one bright star and left the
+  rest black, and a field holding none kept the view's window. An average over the frame would be
+  worse still, since a plate is almost all black.
 - **A body the sky still draws as a point.** `resolved::update_resolved` spawns a sphere for the
   shot's subject when the *shot* resolves it, on `SHOT_LAYER`, which only the telescope draws.
   That sphere gets a material of its own, metered for itself (`resolved::metered_for`). The
   surface shader's window is logarithmic, so an exposure applied after it cannot bring back a
   disc it has already clipped. A body the sky resolves too keeps the sky's sphere and exposure.
-- **The ship itself.** Hulls, plumes and the haze composite are on `SKY_ONLY_LAYER`, which the
-  sky's camera draws and the telescope does not. The haze is therefore missing from photographs.
+- **The ship itself.** Its hull, parts, drones, field, plume and the haze composite are on
+  `SKY_ONLY_LAYER`, which the sky's camera draws and the telescope does not. Another craft's are on
+  `SHOT_LAYER` as well (`app::craft_layers`), so it can be photographed. The haze is missing from
+  photographs.
 
 ## What distance does to a picture
 
@@ -89,6 +106,11 @@ sharpens as the ship closes. There are no distance bands; this is the telescope'
 framed from inside its own system is sharp and one framed from a light-year away is a blob.
 
 ## What is not done
+
+- A survey plate is mostly empty. The sky draws the nearest 6000 stars (`app::SKY_LIMIT`), about
+  one for every two two-degree fields, so most plates hold nothing whatever their exposure.
+- A craft the sky draws as a point (`distant`) has its hull hidden, and is a point in its
+  photograph too.
 
 - Spikes are drawn by the interface over the photograph, at the middle of the frame, and only
   for a star shot. A field's stars have none.
