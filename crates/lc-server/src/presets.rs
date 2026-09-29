@@ -1,7 +1,8 @@
 //! Presets, as the shard holds them: every account's, in memory, checkpointed beside the bookmarks.
 //!
 //! Not part of the world, so nothing here is cleared. A form is checked only for size; its
-//! geometry is validated when a preset is applied, like any other target. See
+//! geometry is validated when a preset is applied, like any other target. A row holds its form as
+//! CBOR, like every record the shard checkpoints: see [`crate::cbor`]. See
 //! `lightcone/docs/29-ship-form.md` §Your own presets.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -73,10 +74,11 @@ impl Presets {
     }
 
     /// Adopt what was saved, returning a line for each row that would not read.
+    #[cfg(feature = "storage")]
     pub fn adopt(&mut self, rows: Vec<lc_store::presets::Preset>) -> Vec<String> {
         let mut problems = Vec::new();
         for row in rows {
-            match lc_proto::decode::<Form>(&row.form) {
+            match crate::cbor::decode::<Form>(&row.form) {
                 Ok(form) => {
                     self.kept.entry(row.account).or_default().insert(row.name, form);
                 }
@@ -116,6 +118,7 @@ impl<J: Journal> Server<J> {
 }
 
 /// Split changes into the rows to write and the `(account, name)` pairs to delete.
+#[cfg(feature = "storage")]
 pub fn rows(changes: &[Change]) -> (Vec<lc_store::presets::Preset>, Vec<(String, String)>) {
     let mut saved = Vec::new();
     let mut deleted = Vec::new();
@@ -124,7 +127,7 @@ pub fn rows(changes: &[Change]) -> (Vec<lc_store::presets::Preset>, Vec<(String,
             Some(form) => saved.push(lc_store::presets::Preset {
                 account: account.clone(),
                 name: name.clone(),
-                form: lc_proto::encode(form),
+                form: crate::cbor::encode(form),
             }),
             None => deleted.push((account.clone(), name.clone())),
         }
@@ -282,6 +285,7 @@ mod tests {
         assert_eq!(presets(&said).unwrap().len(), MAX_PRESETS, "replacing one when full is not a 65th");
     }
 
+    #[cfg(feature = "storage")]
     #[test]
     fn a_checkpoint_writes_the_last_change_to_each_name_and_reads_back() {
         let mut shard = Presets::default();

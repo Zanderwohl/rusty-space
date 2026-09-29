@@ -2,8 +2,11 @@
 //! [`crate::persist`]; the two are joined only in the binary. See
 //! `lightcone/docs/24-standing-instruments.md`.
 //!
-//! Postcard because it round-trips floats exactly: a bearing that changed in the last digit on
-//! every restart would show as drifting parallax.
+//! A file is CBOR ([`crate::cbor`]): exact, because a bearing that changed in the last digit on
+//! every restart would show as drifting parallax, and named, so a field added to a file reads from
+//! an older row as its default. A subject stays postcard, because it is a key and not a record:
+//! the store matches it byte for byte across files, samples and discards, and it is in every one
+//! of a craft's thousands of samples, where postcard's few bytes are the cheapest.
 
 use std::collections::HashMap;
 
@@ -16,7 +19,7 @@ use crate::instruments::witness;
 use crate::journal::Journal;
 use crate::server::Server;
 
-/// Older formats are read, not refused: see [`lc_world::knowledge::formats`].
+/// Only this one is read: see [`lc_world::knowledge::formats`].
 pub const KNOWLEDGE_FORMAT: i32 = lc_world::knowledge::formats::FILE_FORMAT;
 
 /// One craft's files and log, read back.
@@ -47,7 +50,7 @@ pub fn file_row(ship: CraftId, subject: Subject, file: &File, saved_t: i64) -> F
         ship_id: ship.0,
         subject: lc_proto::encode(&subject),
         format: KNOWLEDGE_FORMAT,
-        file: lc_proto::encode(file),
+        file: crate::cbor::encode(file),
         saved_t,
     }
 }
@@ -79,7 +82,10 @@ pub fn log_row(ship: CraftId, logged: &Logged) -> LogRow {
 /// A file row back into a subject and a file, or why not.
 pub fn read_file(row: &Filed) -> Result<(Subject, File), String> {
     let subject = lc_proto::decode(&row.subject).map_err(|why| why.to_string())?;
-    let file = lc_world::knowledge::formats::decode(row.format, &row.file)?;
+    let file = match row.format {
+        KNOWLEDGE_FORMAT => crate::cbor::decode(&row.file)?,
+        other => return Err(format!("knowledge format {other} is not {KNOWLEDGE_FORMAT}")),
+    };
     Ok((subject, file))
 }
 
@@ -95,15 +101,6 @@ pub fn read_log(row: &LogRow) -> Result<Logged, String> {
 }
 
 impl<J: Journal> Server<J> {
-    /// For the console, and for tests that compare a shard before and after a restart.
-    pub fn knowledge_of(&self, ship: lc_proto::ShipId) -> Option<&Knowledge> {
-        self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.knowledge)
-    }
-
-    pub fn duty_of(&self, ship: lc_proto::ShipId) -> Option<&lc_world::knowledge::survey::Duty> {
-        self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.observatory.duty)
-    }
-
     /// Everything every craft has learned since this was last called.
     pub fn take_knowledge(&mut self) -> Remembered {
         let saved_t = self.now_t;
@@ -442,13 +439,18 @@ mod tests {
         );
     }
 
+    /// A file written today reads back, and a file at any other format is refused rather than
+    /// guessed at.
     #[test]
-    fn a_file_from_the_future_is_refused_rather_than_misread() {
+    fn only_the_current_file_format_is_read() {
         let star = Subject::Star(StarId::synthesize("archive", 1));
-        let mut row = file_row(CraftId(1), star, &File::default(), 0);
-        assert!(read_file(&row).is_ok());
-        row.format = KNOWLEDGE_FORMAT + 1;
-        assert!(read_file(&row).is_err(), "a newer shard's file, which this one cannot know the shape of");
+        let file = File::default();
+        let mut row = file_row(CraftId(1), star, &file, 0);
+        assert_eq!(read_file(&row), Ok((star, file)));
+        for format in [KNOWLEDGE_FORMAT - 1, KNOWLEDGE_FORMAT + 1] {
+            row.format = format;
+            assert!(read_file(&row).is_err(), "format {format} was read");
+        }
     }
 
     #[test]

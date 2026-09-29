@@ -152,6 +152,15 @@ fn page<T>(mut limit: usize, build: impl Fn(usize) -> (Option<Vec<u8>>, Option<T
 }
 
 impl<J: Journal> Server<J> {
+    /// For the console, and for tests that compare a shard before and after a restart.
+    pub fn knowledge_of(&self, ship: ShipId) -> Option<&Knowledge> {
+        self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.knowledge)
+    }
+
+    pub fn duty_of(&self, ship: ShipId) -> Option<&Duty> {
+        self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.observatory.duty)
+    }
+
     fn station(&self, id: CraftId) -> Option<Station> {
         let craft = self.fleet.get(id)?;
         let position_ly = craft.position_at(self.now_t as f64) / LIGHT_US_PER_LY;
@@ -896,6 +905,7 @@ mod tests {
 
     /// Refused until a survey has measured the sun, then flown to within 1% of the true orbit, and
     /// flown back when the orbit held is off.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn a_craft_parks_by_its_sun_once_it_has_measured_it() {
         let broker = Broker::new([1u8; 32]);
@@ -1131,6 +1141,7 @@ mod tests {
     }
 
     /// A report in flight across a restart lands on time, because the journal holds its delivery.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn a_report_in_flight_across_a_restart_still_lands() {
         let mut old = Server::new(Memory::default(), 0, 1);
@@ -1279,6 +1290,7 @@ mod tests {
     /// Ten craft surveying one system for a coordinate week, drifting so they measure parallax
     /// and fit orbits. A timing, not a check: `cargo test -p lc-server --lib a_surveying_shard
     /// -- --ignored --nocapture`. See `lightcone/docs/plans/server-tick-lag.md`.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     #[ignore]
     async fn a_surveying_shard_is_measured() {

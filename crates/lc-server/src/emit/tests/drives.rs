@@ -345,6 +345,7 @@ async fn one_leap_and_every_tick_agree() {
 /// once, and goes on stating the same drive rather than lighting it again. Near the burn the light
 /// is followed from what the drive said; beyond its reach only the journal's deliveries bring it
 /// back, and a shard that did not read them feeds nothing.
+#[cfg(feature = "storage")]
 #[tokio::test]
 async fn a_burn_in_flight_across_a_restart_still_lands() {
     const RATE: f64 = 1.0e-7;

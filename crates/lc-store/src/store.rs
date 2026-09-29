@@ -1,5 +1,6 @@
 //! Writing events and deliveries, and the one read the core loop makes.
 
+#[cfg(feature = "postgres")]
 use tokio_postgres::{Client, Error};
 
 use crate::id::EventId;
@@ -59,6 +60,7 @@ pub fn partition_of(t: i64) -> i64 {
 /// Has to run ahead of any write into the range: a row with no partition is an error, not a
 /// table that grows one. At the design rate a partition is four and a half real days, so this
 /// belongs on a schedule rather than at install.
+#[cfg(feature = "postgres")]
 pub async fn ensure_partitions(client: &Client, from_t: i64, to_t: i64) -> Result<i32, Error> {
     let mut made = 0;
     for table in ["events", "deliveries", "lc_samples"] {
@@ -75,6 +77,7 @@ pub async fn ensure_partitions(client: &Client, from_t: i64, to_t: i64) -> Resul
 /// `unnest` rather than a row at a time: the write path is the one place the store is asked to
 /// keep up with a tick, and a round trip per event would make that the bottleneck instead of
 /// the disk.
+#[cfg(feature = "postgres")]
 pub async fn insert_events(client: &Client, events: &[Event]) -> Result<u64, Error> {
     if events.is_empty() {
         return Ok(0);
@@ -120,12 +123,14 @@ pub async fn insert_events(client: &Client, events: &[Event]) -> Result<u64, Err
 ///
 /// Read once at boot, so a shard resuming a world does not mint identifiers it has already
 /// used. See [`crate::id::Minter::resume_from`].
+#[cfg(feature = "postgres")]
 pub async fn last_event_id(client: &Client) -> Result<Option<EventId>, Error> {
     let row = client.query_one("SELECT max(event_id) FROM events", &[]).await?;
     Ok(row.get::<_, Option<i64>>(0).and_then(EventId::from_raw))
 }
 
 /// Schedule deliveries. Written when the event is written, not worked out when it is read.
+#[cfg(feature = "postgres")]
 pub async fn insert_deliveries(client: &Client, rows: &[Delivery]) -> Result<u64, Error> {
     if rows.is_empty() {
         return Ok(0);
@@ -154,6 +159,7 @@ pub const DELIVERY_QUERY: &str = "SELECT observer_id, arrive_t, event_id, streng
       WHERE observer_id = $1 AND arrive_t > $2 AND arrive_t <= $3
    ORDER BY arrive_t";
 
+#[cfg(feature = "postgres")]
 pub async fn deliveries_for(
     client: &Client,
     observer_id: i64,
@@ -179,6 +185,7 @@ pub async fn deliveries_for(
 /// Public because the claim that the core loop is a range scan is one a test has to be able to
 /// check against the planner rather than against the shape of the SQL. A planner is free to
 /// disagree with an index, and if it ever does that is a fact about this system worth failing on.
+#[cfg(feature = "postgres")]
 pub async fn explain_delivery_query(
     client: &Client,
     observer_id: i64,
@@ -194,7 +201,7 @@ pub async fn explain_delivery_query(
     Ok(rows.iter().map(|row| row.get::<_, &str>(0)).collect::<Vec<_>>().join("\n"))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod tests {
     use super::*;
     use crate::id::Minter;

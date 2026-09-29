@@ -499,7 +499,8 @@ A layout's other rules:
   delete. There is one connection to send it to: signing in displaces the account's earlier one,
   so a player moving from the desktop to a browser gets the current list with the welcome. It keeps the lists in memory, checkpointed
   beside the bookmarks, and reads them at every boot, including a shard starting a new world. A row holds the form in
-  postcard, the wire's encoding, so its shape is pinned by `lc-proto`'s goldens.
+  CBOR, like every record the shard checkpoints, so a field added to a form reads from an older row as
+  its default.
 
 **The presets panel** sits in the editor's left column, between the palette and the history. It lists
 the built-ins and then the account's own, a field and **save** for naming the draft, and for the chosen

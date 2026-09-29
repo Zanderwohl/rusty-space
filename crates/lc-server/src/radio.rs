@@ -1414,6 +1414,7 @@ mod tests {
     }
 
     /// The setting and what is still in flight outlive the process, as a pursuit does.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn auto_ack_outlives_a_restart() {
         let (mut server, mut wire) = two_far_apart();

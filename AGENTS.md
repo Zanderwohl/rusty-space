@@ -20,7 +20,7 @@ touching before changing it, and update it when the answer changes.
 
 ```bash
 cargo tree -p em-foundations | grep -i bevy     # must be empty
-cargo tree -p exotic-matters | grep -E '^\s*lc-' # must be empty
+cargo tree -p exotic-matters --prefix none | grep -E '^lc-' # must be empty
 ```
 
 `em-foundations` is engine-free. Exotic Matters and Lightcone are two products on the same

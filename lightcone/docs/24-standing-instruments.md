@@ -71,15 +71,16 @@ thousand stars, which Postgres holds without noticing. The logs are the only thi
 grow without bound, and the next section is why they do not.
 
 A blob rather than columns because the file is what is read and written, whole, and because its
-shape will keep changing for a while. A format version on the row says which shape wrote it, and
-`knowledge::formats` reads every retired one up to the current shape, with a test each, exactly as
-`lc_ships` does for motion; only a file from a newer shard is refused.
+shape will keep changing for a while. The blob is CBOR, which names its fields: a field added to a
+file with `#[serde(default)]` reads from an older row as its default, so growing a file costs
+nothing. A format version on the row moves only when a field is renamed, removed or changes
+meaning, and a file at any other version is refused rather than read: there are no back-readers.
 
 ### As built
 
 | what | where |
 |---|---|
-| files | `lc_knowledge`, one row per craft per subject, postcard with `archive::KNOWLEDGE_FORMAT` — `sql/0010_knowledge.sql` |
+| files | `lc_knowledge`, one row per craft per subject, CBOR with `archive::KNOWLEDGE_FORMAT` — `sql/0010_knowledge.sql`. CBOR because it is exact for f64, which JSON is not, and names its fields, which postcard does not, so a field added to a file needs no format bump. The subject, a key matched byte for byte across files, samples and discards, stays postcard |
 | samples | `lc_samples`, partitioned by **learned** time, kept ready by the journal beside events and deliveries. Observation time is stored as the exact f64 it was stamped with: a sweep finishes a field at an instant that is not a whole microsecond |
 | duty and report marks | the ship checkpoint, `persist::Saved::instruments`, save format 9 |
 | what is written | only what changed since the last checkpoint: `Knowledge::take_changes` hands over the files touched, without their samples, the samples taken, and the samples consumed to delete. All of it, the ships and the bookmarks go in one transaction, and a failed one hands everything back to be written next time |

@@ -351,7 +351,7 @@ In `lc-world::knowledge`, engine-free and tested:
 | `knowledge::observatory` | `Sky`, `Station`, photometry against a source |
 | `knowledge::moments` | Welford, shared by everything that folds |
 | `knowledge::room` | what a craft has space to keep |
-| `knowledge::formats` | `FILE_FORMAT`, and refusing anything else |
+| `knowledge::formats` | `FILE_FORMAT`; `lc_server::archive` refuses a file at any other |
 
 On the shard, since phase 11b: every craft's `Knowledge` and telescope live in
 `lc-server::instruments` and run whether or not anybody is flying them, and a report lands there.

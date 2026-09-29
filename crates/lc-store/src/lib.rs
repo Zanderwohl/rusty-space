@@ -5,6 +5,10 @@
 //! observer see by now — without scanning them. See `lightcone/docs/02-event-store.md`.
 //!
 //! No engine and no game rules: a schema, the causality predicate, and a cursor over both.
+//!
+//! Everything that talks to Postgres is behind the `postgres` feature, on by default. Without it
+//! what is left is the records and identifiers a shard keeps in memory, for a shard that never
+//! saves: the client's single-player one.
 
 #![forbid(unsafe_code)]
 
@@ -12,11 +16,17 @@ pub mod bvh;
 pub mod chat;
 pub mod cursor;
 pub mod id;
+#[cfg(feature = "postgres")]
 pub mod knowledge;
+#[cfg(feature = "postgres")]
 pub mod migrate;
+#[cfg(feature = "postgres")]
 pub mod presets;
+#[cfg(feature = "postgres")]
 pub mod reading;
+#[cfg(feature = "postgres")]
 pub mod retention;
+#[cfg(feature = "postgres")]
 pub mod ships;
 pub mod store;
 
@@ -24,6 +34,7 @@ pub mod store;
 ///
 /// `LC_STORE_URL` overrides it. The default is a local socket connection to a database called
 /// `lc_store`, which is what a developer gets from `createdb lc_store` and nothing else.
+#[cfg(feature = "postgres")]
 pub fn connection_string() -> String {
     if let Ok(url) = std::env::var("LC_STORE_URL") {
         return url;
@@ -42,6 +53,7 @@ pub fn connection_string() -> String {
 /// `tokio_postgres` hands back a client and a connection future that has to be polled for the
 /// client to do anything; spawning it here is what lets a caller treat the client as a plain
 /// handle.
+#[cfg(feature = "postgres")]
 pub async fn connect() -> Result<tokio_postgres::Client, tokio_postgres::Error> {
     let (client, connection) =
         tokio_postgres::connect(&connection_string(), tokio_postgres::NoTls).await?;

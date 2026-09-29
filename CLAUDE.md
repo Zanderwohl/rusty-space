@@ -151,7 +151,7 @@ service and the config directory. Its code is `crates/lc-*`: `lc-spacetime`, `lc
 `lc-store` and the `lc-client` app. Exotic Matters must never depend on anything from it:
 
 ```bash
-cargo tree -p exotic-matters | grep -E '^\s*lc-'     # must be empty
+cargo tree -p exotic-matters --prefix none | grep -E '^lc-'     # must be empty
 ```
 
 Game-specific crates stay `lc-*`. Shared libraries stay `em-*` and must keep both products

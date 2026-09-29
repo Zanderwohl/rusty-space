@@ -534,7 +534,7 @@ problem again, and that is the point at which a shared origin starts paying for 
 ### The console asks the game one question
 
 A user page shows where the account's ship is and what it is made of. That is game data, in
-the shard's database, as **postcard bytes only a game crate can decode** — and the console may
+the shard's database, as **CBOR whose shapes only a game crate knows** — and the console may
 not depend on a game crate. So the shard answers instead:
 
 ```

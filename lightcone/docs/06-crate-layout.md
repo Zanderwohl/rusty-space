@@ -31,7 +31,8 @@ directory and its own asset path configuration; it cannot inherit the root's.
 existing invariants are checked:
 
 ```bash
-cargo tree -p exotic-matters | grep -i '^\s*lc-'            # must be empty
+cargo tree -p exotic-matters --prefix none | grep -i '^lc-'   # must be empty
+cargo tree -p lc-client -e normal | grep -E 'ciborium|tokio-postgres'  # must be empty: `--local` takes lc-server without `storage`
 cargo tree -p em-foundations | grep -i bevy                 # must be empty
 cargo tree -p em-sim --no-default-features | grep -i bevy   # must be empty
 cargo tree -p em-plot --no-default-features | grep -i bevy  # must be empty

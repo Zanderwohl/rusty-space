@@ -3420,6 +3420,7 @@ mod hello_tests {
     /// The clock is the part that is easy to get wrong. Every motive is stamped in absolute
     /// coordinate time, so a shard that came back at zero would read a crossing that began at
     /// t = 876 as one that has not begun, and fly it again.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn a_ship_survives_the_process_and_its_crossing_goes_on() {
         let Some(star) = a_star() else { return };
@@ -3503,6 +3504,7 @@ mod hello_tests {
     ///
     /// Two rows on one account is a unique-constraint failure on every checkpoint from then on:
     /// the shard stops saving, for everyone, and says nothing.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn an_account_whose_saved_ship_will_not_read_is_refused() {
         let broker = Broker::new([1u8; 32]);
@@ -3513,7 +3515,7 @@ mod hello_tests {
             ship_id: 3,
             account: Some("acct-1".into()),
             saved_t: 0,
-            state: b"not postcard, and too short for this shape".to_vec(),
+            state: b"not CBOR, and not this shape".to_vec(),
             format: crate::persist::SAVE_FORMAT,
         };
         let refused = server.adopt(crate::persist::Checkpoint {
@@ -3536,6 +3538,7 @@ mod hello_tests {
 
     /// The clock comes back with the world. Without it every saved motive, stamped absolutely,
     /// reads as one that has not happened yet.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn adopting_a_checkpoint_restores_the_worlds_clock() {
         let mut server = Server::new(Memory::default(), 0, 1);
@@ -3636,6 +3639,7 @@ mod hello_tests {
     /// rather than it being alone.
     /// **A ship hanging about with another goes on doing so while its pilot is away**, and
     /// across the shard being restarted, and the pilot is told so on coming back.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn a_pursuit_outlives_signing_out_and_a_restart() {
         let broker = Broker::new([1u8; 32]);
