@@ -2,7 +2,7 @@
 //!
 //! Not part of the world, so nothing here is cleared. A form is checked only for size; its
 //! geometry is validated when a preset is applied, like any other target. A row holds its form as
-//! CBOR, like every record the shard stores: see [`crate::cbor`]. See
+//! CBOR, like every record the shard checkpoints: see [`crate::cbor`]. See
 //! `lightcone/docs/29-ship-form.md` §Your own presets.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

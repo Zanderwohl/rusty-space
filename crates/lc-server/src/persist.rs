@@ -39,7 +39,8 @@ use crate::server::{Server, TICK_US};
 
 /// A craft, as CBOR in [`Ship::state`].
 ///
-/// **A field added here takes `#[serde(default)]`**, so rows written before it still read.
+/// **A field added here takes `#[serde(default)]`**, so rows written before it still read. An
+/// `Option` needs none: serde reads a missing one as `None`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Saved {
     pub kind: u8,
@@ -72,7 +73,6 @@ pub struct Saved {
     /// the journal instead: see [`crate::emit`].
     pub light: Light,
     /// A wreck's collapse, whose afterglow outlasts the light of its end.
-    #[serde(default)]
     pub afterglow: Option<Afterglow>,
 }
 
@@ -529,8 +529,9 @@ mod tests {
         assert!(why.contains(&format!("format {}", SAVE_FORMAT - 1)), "{why}");
     }
 
-    /// A row written before a field was added still reads, as the field's default. What the move
-    /// from postcard bought: every such addition used to cost every row there was.
+    /// A row written before a field was added still reads, as the field's default: here an
+    /// `Option`, so `None`. What the move from postcard bought: every such addition used to cost
+    /// every row there was.
     #[test]
     fn a_row_without_an_added_field_reads_as_its_default() {
         use ciborium::Value;

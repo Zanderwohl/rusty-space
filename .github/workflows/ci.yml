@@ -44,9 +44,9 @@ jobs:
       # same shared crates, and Exotic Matters must never reach into it.
       - name: Exotic Matters does not depend on Lightcone
         run: |
-          if cargo tree -p exotic-matters | grep -qE '^[[:space:]]*lc-'; then
+          if cargo tree -p exotic-matters --prefix none | grep -qE '^lc-'; then
             echo "exotic-matters depends on an lc- crate" >&2
-            cargo tree -p exotic-matters | grep -E '^[[:space:]]*lc-' >&2
+            cargo tree -p exotic-matters --prefix none | grep -E '^lc-' >&2
             exit 1
           fi
 
@@ -102,7 +102,7 @@ jobs:
       - name: No CSV reader in the browser build
         run: |
           if cargo tree -p lc-client --no-default-features \
-               --target wasm32-unknown-unknown | grep -qE '^[[:space:]]*csv '; then
+               --target wasm32-unknown-unknown --prefix none | grep -qE '^csv '; then
             echo "the browser build links a CSV reader" >&2
             exit 1
           fi
@@ -111,7 +111,7 @@ jobs:
       - name: No server in the browser build
         run: |
           if cargo tree -p lc-client --no-default-features \
-               --target wasm32-unknown-unknown | grep -qE '^[[:space:]]*lc-server '; then
+               --target wasm32-unknown-unknown --prefix none | grep -qE '^lc-server '; then
             echo "the browser build links lc-server" >&2
             exit 1
           fi

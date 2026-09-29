@@ -499,7 +499,7 @@ A layout's other rules:
   delete. There is one connection to send it to: signing in displaces the account's earlier one,
   so a player moving from the desktop to a browser gets the current list with the welcome. It keeps the lists in memory, checkpointed
   beside the bookmarks, and reads them at every boot, including a shard starting a new world. A row holds the form in
-  CBOR, like every record the shard stores, so a field added to a form reads from an older row as
+  CBOR, like every record the shard checkpoints, so a field added to a form reads from an older row as
   its default.
 
 **The presets panel** sits in the editor's left column, between the palette and the history. It lists

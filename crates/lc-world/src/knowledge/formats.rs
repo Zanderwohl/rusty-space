@@ -6,7 +6,9 @@
 //!
 //! **Bump [`FILE_FORMAT`] when a field of [`File`], or of anything inside it, is renamed or
 //! removed or comes to mean something else.** A field *added* with `#[serde(default)]` does not
-//! bump it: an older file reads without it, as the default. There are no back-readers: the game
+//! bump it: an older file reads without it, as the default. The same types also travel in a
+//! [`super::Report`], which is postcard and journaled, so growing one still bumps
+//! `lc_proto::REPORT_FORMAT`. There are no back-readers: the game
 //! has no players, so a stored file is worth less than the ceremony of keeping it, and the readers
 //! that existed each embedded the records by name — growing `Orbit` would have meant freezing a
 //! copy of the old shape beside every one of them. Refusing an old file loudly is the point;

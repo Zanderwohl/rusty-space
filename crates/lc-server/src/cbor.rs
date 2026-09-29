@@ -1,4 +1,6 @@
-//! The encoding of every record the shard stores: CBOR, where the wire is postcard.
+//! The encoding of every record the shard checkpoints — ships, knowledge files and presets: CBOR,
+//! where the wire is postcard. The journal is not these: its payloads are JSON, and a report in one
+//! is postcard under `lc_proto::REPORT_FORMAT`.
 //!
 //! Stored bytes outlive the process that wrote them, so the format has to name its fields: a
 //! field appended to a record then reads as its `#[serde(default)]` from an older row, where

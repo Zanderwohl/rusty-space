@@ -3515,7 +3515,7 @@ mod hello_tests {
             ship_id: 3,
             account: Some("acct-1".into()),
             saved_t: 0,
-            state: b"not postcard, and too short for this shape".to_vec(),
+            state: b"not CBOR, and not this shape".to_vec(),
             format: crate::persist::SAVE_FORMAT,
         };
         let refused = server.adopt(crate::persist::Checkpoint {
