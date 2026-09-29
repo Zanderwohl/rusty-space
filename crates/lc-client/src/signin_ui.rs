@@ -121,6 +121,7 @@ impl Plugin for SigninPlugin {
                 mint_ticket.in_set(crate::app::Stage::Link).before(crate::uplink::connect),
             )
             .add_systems(OnEnter(AppState::MainMenu), open_dev_form)
+            .add_systems(OnExit(AppState::MainMenu), stand_down)
             .add_systems(
                 Update,
                 (handle, collect, listen, press)
@@ -617,6 +618,17 @@ fn draw(
         }
         return;
     };
+}
+
+/// Take the modal down with the menu. [`draw`] only runs on the menu, so a modal still up when
+/// Observe leaves it would otherwise sit over the game for good.
+fn stand_down(mut commands: Commands, drawn: Query<Entity, With<Modal>>, mut ui: ResMut<Ui>) {
+    for entity in &drawn {
+        commands.entity(entity).despawn();
+    }
+    if ui.menu_page == MenuPage::SignIn {
+        ui.menu_page = MenuPage::Root;
+    }
 }
 
 #[derive(Component)]
